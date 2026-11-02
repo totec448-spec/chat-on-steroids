@@ -3334,16 +3334,21 @@ async function revealChats(ids) {
   for (const raw of ids.slice(0, 5)) {
     const conversationId = cleanConversationId(raw);
     if (!conversationId) continue;
-    const tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
-    const [tab] = tabs.filter(candidate => conversationForTab(candidate) === conversationId).sort((a, b) => a.id - b.id);
-    const shown = tab
-      ? await chrome.tabs.update(tab.id, { active: true })
-      : await createUserWindowTab(`https://chatgpt.com/c/${conversationId}`, true);
-    const windowId = shown?.windowId ?? tab?.windowId;
-    if (!Number.isInteger(windowId)) continue;
-    // A worker tab can sit in the app's minimized background window; the user asked to see it.
-    const window = await chrome.windows.get(windowId).catch(() => null);
-    await chrome.windows.update(windowId, window?.state === 'minimized' ? { state: 'normal', focused: true } : { focused: true });
+    try {
+      const tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
+      const [tab] = tabs.filter(candidate => conversationForTab(candidate) === conversationId).sort((a, b) => a.id - b.id);
+      const shown = tab
+        ? await chrome.tabs.update(tab.id, { active: true })
+        : await createUserWindowTab(`https://chatgpt.com/c/${conversationId}`, true);
+      const windowId = shown?.windowId ?? tab?.windowId;
+      if (!Number.isInteger(windowId)) throw new Error('no window');
+      // A worker tab can sit in the app's minimized background window; the user asked to see it.
+      const window = await chrome.windows.get(windowId).catch(() => null);
+      await chrome.windows.update(windowId, window?.state === 'minimized' ? { state: 'normal', focused: true } : { focused: true });
+    } catch {
+      // Taking the chat is not showing it: say so, so the app does not count it as shown (CodeRabbit on #2027).
+      await call('/reveal/failed', { method: 'POST', body: JSON.stringify({ conversationId }) }).catch(() => undefined);
+    }
   }
 }
 

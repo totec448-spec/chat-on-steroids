@@ -3575,6 +3575,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     return json(res, 200, { sessionId: committed!.sessionId, stored: committed!.stored }, origin);
   }
 
+  if (route === '/reveal/failed' && req.method === 'POST') {
+    let body: Record<string, unknown>;
+    try { body = (await readBody(req)) as Record<string, unknown>; } catch { return json(res, 400, { error: 'bad_request' }, origin); }
+    const id = conversationId(body['conversationId']);
+    if (!id) return json(res, 400, { error: 'bad_conversation_id' }, origin);
+    unclaimedChatShowFailed(id);
+    return json(res, 200, { ok: true }, origin);
+  }
+
   if (route === '/closed' && req.method === 'POST') {
     let body: Record<string, unknown>;
     try {
@@ -8700,6 +8709,17 @@ async function assistantRepairCurrent(conversationId: string, repair: Repair): P
 const UNCLAIMED_REPAIR_OFFERS = 10;
 /** Stuck repairs whose chat was already shown once (session and episode), so it is shown only once. */
 const unclaimedChatShown = new Set<string>();
+/** Which of those a chat's last show belongs to, so a show the browser could not carry out is given back. */
+const unclaimedChatShownFor = new Map<string, string>();
+
+/** The browser took the chat to show it and could not (#2027): it may be shown again when its offers run out. */
+export function unclaimedChatShowFailed(conversationId: string): void {
+  const key = unclaimedChatShownFor.get(conversationId);
+  if (!key) return;
+  unclaimedChatShownFor.delete(conversationId);
+  unclaimedChatShown.delete(key);
+  logWarn(`bridge: the browser could not show ${conversationId}; it is shown again if its recovery stays unclaimed`);
+}
 
 /**
  * Before a Goal or Loop chat is given up as page-less, a browser running the extension shows its tab once
@@ -8714,7 +8734,9 @@ function showUnclaimedChatOnce(conversationId: string, repair: Repair): boolean 
       stopRequestedFor(conversationId) || getConfig().ui.browserOnly === true ||
       !browserWakeConnected() || !revealCapable()) return false;
   unclaimedChatShown.add(key);
+  unclaimedChatShownFor.set(conversationId, key);
   if (unclaimedChatShown.size > 500) unclaimedChatShown.delete(unclaimedChatShown.values().next().value!);
+  if (unclaimedChatShownFor.size > 500) unclaimedChatShownFor.delete(unclaimedChatShownFor.keys().next().value!);
   repair.offers = 1;
   logWarn(`bridge: ${conversationId} never claimed ${UNCLAIMED_REPAIR_OFFERS} ${repair.reason} repair offer(s) — showing its tab once before giving up`);
   void recordNote(repair.sessionId, 'The browser did not pick up this chat\'s recovery, so the app is showing its tab to go on.')

@@ -2230,6 +2230,33 @@ describe('active agent tab discard protection', () => {
     }
   });
 
+  // CodeRabbit on #2027: taking a chat is not showing it. A show that fails is reported, so the app can
+  // show it again instead of counting it as done.
+  it('reports a chat it could not show', async () => {
+    const TARGET = 'dddddddd-eeee-4fff-8aaa-444444444444';
+    const failed: string[] = [];
+    let handed = false;
+    const worker = loadWorker({
+      local: new FakeStorageArea(paired),
+      session: new FakeStorageArea(),
+      fetch: vi.fn(async (input: string, init?: Record<string, unknown>) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/reveal/failed') { failed.push(JSON.parse(String(init?.body)).conversationId); return response(200, { ok: true }); }
+        if (url.pathname === '/status') {
+          const reveals = handed ? [] : [TARGET];
+          handed = true;
+          return response(200, { ok: true, repairs: [], reveals });
+        }
+        return response(404, {});
+      }),
+      tabsQuery: async () => [{ id: 5, windowId: 7, url: `https://chatgpt.com/c/${TARGET}`, status: 'complete' }]
+    });
+    worker.windowsUpdate.mockRejectedValue(new Error('No window with id: 7.'));
+    await worker.fireAlarm();
+    await vi.waitFor(() => expect(failed).toEqual([TARGET]), { timeout: 5_000 });
+  });
+
   it.each([
     ['adopts its mirrored window after an extension reload', true],
     ['refuses a mirrored window that also holds a non-ChatGPT tab', false]
