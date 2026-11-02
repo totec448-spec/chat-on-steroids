@@ -37,6 +37,7 @@
  * wrong.
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmod, copyFile, lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
@@ -164,7 +165,28 @@ export function updateStatus(): UpdateStatus {
   return { ...status };
 }
 
+/**
+ * Which reset an update pass started under. A pass still waiting on the network when the state is
+ * reset (between tests) must not write the next one's status: on Windows a pass left from an earlier
+ * test fetched the installer again, failed, and turned a running download to "failed" (#2008).
+ */
+let generation = 0;
+const passGeneration = new AsyncLocalStorage<number>();
+const stale = (): boolean => { const own = passGeneration.getStore(); return own !== undefined && own !== generation; };
+/** Aborted by the reset: the requests of a pass from before it stop rather than finish. */
+let resetSignal = new AbortController();
+/**
+ * Called after every wait in a pass, before it writes a file or the staged update: a pass that
+ * outlived a reset wrote the installer and staged it for the next state (CodeRabbit on #2018).
+ */
+/** Never shown: the pass that throws it can no longer write the status (`set` and the catch both check). */
+class SupersededPass extends Error {}
+function stillCurrent(): void {
+  if (stale()) throw new SupersededPass('the update state was reset while this pass was waiting');
+}
+
 function set(next: Partial<UpdateStatus>): void {
+  if (stale()) return;
   status = { ...status, ...next };
   for (const listener of listeners) listener();
 }
@@ -205,6 +227,7 @@ export function startUpdateChecks(): void {
 
 /** After a pass: a failure is asked again soon, a success ends the waiting. */
 function scheduleRetry(): void {
+  if (stale()) return;
   if (retry) { clearTimeout(retry); retry = null; }
   if (!recheck) return;
   if (status.stage !== 'failed') { failures = 0; return; }
@@ -233,23 +256,26 @@ export function checkForUpdatesIfStale(now = Date.now()): Promise<void> {
  */
 export function checkForUpdates(): Promise<void> {
   if (pass) return pass;
-  const run = runPass()
+  // The pass, its failure and its retry all belong to the reset they started under.
+  const run = passGeneration.run(generation, () => runPass()
     .then(async () => {
       // All successful staging paths share this publication boundary, including an
       // already-ready candidate. A failed pass never retires another download.
+      stillCurrent();
       if (staged) await pruneUpdateCache(staged.version);
     })
     .catch((err: Error) => {
       // This pass owns GitHub requests; keep its transport failure readable without
       // relabeling HTTP, filesystem or other diagnostics. The log keeps the original.
       const reason = err instanceof TypeError && err.message === 'fetch failed' ? 'GitHub could not be reached' : err.message;
+      if (stale()) return;
       set({ stage: 'failed', error: reason });
       logWarn(`update check failed: ${err.message}`);
     })
     .finally(() => {
       if (pass === run) pass = null;
       scheduleRetry();
-    });
+    }));
   pass = run;
   return run;
 }
@@ -258,7 +284,9 @@ async function runPass(): Promise<void> {
   set({ stage: 'checking', error: null });
   // Installed downloads are obsolete even when the release server is unreachable.
   if (app.isPackaged) await pruneUpdateCache();
+  stillCurrent();
   const release = { version: await latestVersion() };
+  stillCurrent();
   // GitHub answered. From here the UI can tell "current" from "not asked yet", whatever the
   // rest of this pass does with the answer.
   set({ checkedAt: Date.now() });
@@ -287,8 +315,10 @@ async function runPass(): Promise<void> {
   // both the manifest of what the release contains and the proof of what may be executed, so
   // neither adopting a file nor fetching one happens without it.
   const expected = (await releaseDigests(release.version)).get(artifact.name);
+  stillCurrent();
   if (!expected) throw new Error(`release ${release.version} publishes no ${artifact.name}`);
   const carried = await adopt(release.version, artifact.name, expected);
+  stillCurrent();
   if (carried) {
     staged = { version: release.version, file: carried, kind: artifact.kind, target: artifact.target, digest: expected };
     set({ latest: release.version, stage: 'ready' });
@@ -297,6 +327,7 @@ async function runPass(): Promise<void> {
   }
   set({ latest: release.version, stage: 'downloading' });
   const file = await download(release.version, artifact.name, expected);
+  stillCurrent();
   staged = { version: release.version, file, kind: artifact.kind, target: artifact.target, digest: expected };
   set({ stage: 'ready' });
   logInfo(`update: ${release.version} is downloaded and ready to install`);
@@ -309,26 +340,34 @@ function stagingDir(version: string): string {
 
 /** Only version directories owned by this updater, never other app copies or user backups. */
 async function pruneUpdateCache(keepVersion?: string): Promise<void> {
+  stillCurrent();
   const root = path.join(app.getPath('userData'), 'updates');
   try {
     // A linked cache root is not authority to recursively clean somebody else's directory.
     const stat = await lstat(root);
+    stillCurrent();
     if (!stat.isDirectory() || stat.isSymbolicLink()) {
       logWarn('update: cache cleanup skipped because the updates root is not an ordinary directory');
       return;
     }
-    for (const entry of await readdir(root, { withFileTypes: true })) {
+    const entries = await readdir(root, { withFileTypes: true });
+    stillCurrent();
+    for (const entry of entries) {
       if (!entry.isDirectory() || !/^\d+\.\d+\.\d+$/.test(entry.name) || entry.name === keepVersion) continue;
       if (isNewer(entry.name, APP_VERSION) && !keepVersion) continue;
       try {
+        stillCurrent();
         await rm(path.join(root, entry.name), { recursive: true, force: true });
+        stillCurrent();
         logInfo(`update: removed obsolete ${entry.name} download from the update cache`);
-      } catch {
+      } catch (err) {
+        if (err instanceof SupersededPass) throw err;
         // Windows may still have its installer open. Leave it for the next ordinary pass.
         logWarn(`update: obsolete ${entry.name} download is still in use or cannot be removed; cleanup deferred`);
       }
     }
   } catch (err) {
+    if (err instanceof SupersededPass) throw err;
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') logWarn('update: cache could not be read; cleanup deferred');
   }
 }
@@ -456,6 +495,7 @@ async function get(url: string, timeout: number | AbortSignal, headers: Record<s
  * interrupted or is not the right file can never be handed to an installer.
  */
 async function download(version: string, name: string, expected: string): Promise<string> {
+  stillCurrent();
   const dir = stagingDir(version);
   // Removing the whole cache used to unlink these entries before writing. Preserve
   // that destination boundary without following a relocated root/version directory.
@@ -464,6 +504,7 @@ async function download(version: string, name: string, expected: string): Promis
       if (err.code === 'ENOENT') return null;
       throw err;
     });
+    stillCurrent();
     if (entry && (!entry.isDirectory() || entry.isSymbolicLink())) {
       throw new Error('the update staging path must use ordinary directories');
     }
@@ -471,26 +512,31 @@ async function download(version: string, name: string, expected: string): Promis
   // Keep the previous verified download and handoff note until a successor is verified.
   // An interrupted transfer owns only this version's .part file, never the entire cache.
   await mkdir(dir, { recursive: true });
+  stillCurrent();
   const file = path.join(dir, name);
   // Start with a fresh inode: truncating an existing .part could follow a file link.
   // Non-recursive removal never erases an unexpected directory stored at this name.
   await rm(`${file}.part`, { force: true });
+  stillCurrent();
   // Stopped when the connection goes quiet, not when the file is simply large for the line.
   const quiet = new AbortController();
   const stalled = new Error(`downloading ${name} stopped: no data for ${DOWNLOAD_STALL_MS / 1000} seconds`);
   const watch = setTimeout(() => quiet.abort(stalled), DOWNLOAD_STALL_MS);
   const hash = createHash('sha256');
+  const signal = AbortSignal.any([quiet.signal, resetSignal.signal]);
   try {
-    const response = await get(assetUrl(version, name), quiet.signal);
+    const response = await get(assetUrl(version, name), signal);
+    stillCurrent();
     if (!response.body) throw new Error(`downloading ${name} returned no content`);
     const body = Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]);
     body.on('data', (chunk: Buffer) => { hash.update(chunk); watch.refresh(); });
-    await pipeline(body, createWriteStream(`${file}.part`, { flags: 'wx' }), { signal: quiet.signal });
+    await pipeline(body, createWriteStream(`${file}.part`, { flags: 'wx' }), { signal });
   } catch (err) {
     throw quiet.signal.aborted ? stalled : err;
   } finally {
     clearTimeout(watch);
   }
+  stillCurrent();
   const digest = hash.digest('hex');
   if (digest !== expected) {
     await rm(`${file}.part`, { force: true });
@@ -666,6 +712,9 @@ export async function applyStagedUpdate(): Promise<void> {
 
 /** Test seam: forgets the pass, the staged file and everything reported about them. */
 export function resetUpdateForTests(): void {
+  generation += 1;
+  resetSignal.abort();
+  resetSignal = new AbortController();
   installFolderAccess = probeInstallFolder;
   status = CLEAR;
   staged = null;
