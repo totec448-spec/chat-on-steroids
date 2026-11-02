@@ -63,12 +63,15 @@ app.whenReady().then(async () => {
     // A mapped Wayland compositor may ignore programmatic size changes.
     // Each layout viewport gets a fresh window with the requested content size.
     const windowAt = (width, height) => {
-      win?.destroy();
+      const previous = win;
       win = new BrowserWindow({ show:showLinuxFixture, width, height, useContentSize:true,
         webPreferences:{offscreen:!showLinuxFixture,sandbox:true,backgroundThrottling:false}});
       win.webContents.on('console-message', event => {
         if (event.level === 'error' && !event.message.includes('ResizeObserver loop')) errors.push(event.message);
       });
+      // Keep an Electron window alive throughout the swap; closing the last
+      // window can otherwise start the app's automatic quit path on Linux.
+      previous?.destroy();
     };
     windowAt(1100,850);
     const js = expression => win.webContents.executeJavaScript(expression);
