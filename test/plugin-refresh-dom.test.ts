@@ -509,20 +509,22 @@ it('lets the refresh owner inspect the native tunnel despite colliding call-deri
   connector.tunnel_id = null;
   expect(await api.pluginRefreshView(connector.name, [], null, 'plugins')).toBeNull();
 });
-it.each(['foreign-only', 'colliding'])('requires native tunnel evidence before accepting an exact ID learned on another surface (%s)', async aliases => {
-  const { api, connector } = settingsPage(); connector.name = 'Chat On Steroids Plugins';
-  api.setConnectorApps({ core: [{ appId: connector.id, name: 'Chat On Steroids Core' }], desktop: [],
-    plugins: aliases === 'colliding' ? [{ appId: connector.id, name: connector.name }] : [] });
-  connector.tunnel_id = null;
-  expect(await api.pluginRefreshView(connector.name, [tool], connector.id, 'plugins')).toBeNull();
-  // Older optional-argument callers keep their existing contract. Only a surface-qualified
-  // native inspection needs this stronger evidence before main considers a refresh claim.
-  expect(await api.pluginRefreshView(connector.name, [tool], connector.id)).not.toBeNull();
-  connector.tunnel_id = 'tunnel_synthetic01';
-  expect(await api.pluginRefreshView(connector.name, [tool], connector.id, 'plugins')).toMatchObject({
-    appId: connector.id, tunnelId: 'tunnel_synthetic01', tools: [tool]
+it.each([['foreign-only', 'bound'], ['foreign-only', 'unbound'], ['colliding', 'bound'], ['colliding', 'unbound']])(
+  'requires native tunnel evidence before accepting an exact ID learned on another surface (%s, %s)', async (aliases, enrollment) => {
+    const { api, connector } = settingsPage(); connector.name = 'Chat On Steroids Plugins';
+    api.setConnectorApps({ core: [{ appId: connector.id, name: 'Chat On Steroids Core' }], desktop: [],
+      plugins: aliases === 'colliding' ? [{ appId: connector.id, name: connector.name }] : [] });
+    connector.tunnel_id = null;
+    const requestedId = enrollment === 'bound' ? connector.id : null;
+    expect(await api.pluginRefreshView(connector.name, [tool], requestedId, 'plugins')).toBeNull();
+    // Older optional-argument callers keep their existing contract. Only a surface-qualified
+    // native inspection needs this stronger evidence before main considers a refresh claim.
+    expect(await api.pluginRefreshView(connector.name, [tool], connector.id)).not.toBeNull();
+    connector.tunnel_id = 'tunnel_synthetic01';
+    expect(await api.pluginRefreshView(connector.name, [tool], requestedId, 'plugins')).toMatchObject({
+      appId: connector.id, tunnelId: 'tunnel_synthetic01', tools: [tool]
+    });
   });
-});
 it('preserves legacy-route exact-ID observations when the requested surface is supplied', async () => {
   const { api, props } = page(); props.connector.name = 'Chat On Steroids Plugins';
   api.setConnectorApps({ core: [{ appId: props.connector.id, name: 'Chat On Steroids Core' }], desktop: [], plugins: [] });
