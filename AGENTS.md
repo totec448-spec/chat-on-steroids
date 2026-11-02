@@ -5315,6 +5315,8 @@ status cannot refresh ChatGPT's cached declarations.
 
 `plugin-refresh.ts` applies to Core, Desktop and Plugins. Its fingerprint includes names,
 descriptions and input schemas, not app-version/instruction churn. Changes debounce for 20s.
+Initial detail-page hydration waits up to one minute, like post-refresh observation, before
+reporting an unreadable card; a slow load must not exhaust inspection attempts after 12 seconds.
 Refresh targets the exact account-observed installed app id, durably claims before clicking,
 and completes only after observed declarations fully match. Automatic refresh is opt-in;
 unsupported/manual-required stays visible instead of opening more helper tabs.
