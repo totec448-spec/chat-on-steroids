@@ -4935,6 +4935,9 @@ document, including hidden panels and bound text nodes. Never retain or periodic
 an index of every past label: WeakRef sweeps keep detached trees alive during allocation-heavy
 repaints. `scripts/verify-renderer-label-memory.cjs` checks real Chromium collection under repeated
 row replacement; ordinary language tests preserve controls, drafts and authored values.
+Lists that every state push rebuilds in Setup, Settings or a collapsed card go through
+`dom.paintWhenShown`: a hidden list keeps only its newest paint and runs it when it gets a box, before
+that frame is drawn. Rebuilding hidden lists left Blink's heap at 1.1 GB with 180 MB in use (2026-11-01).
 Authored prose uses automatic text direction; shell/code remain LTR with logical layout edges.
 Theme and layout preferences do not change backend authority.
 Settings places ChatGPT model defaults second and Workers & recovery third, after Continuation
