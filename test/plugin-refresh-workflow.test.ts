@@ -252,7 +252,7 @@ it.each(['current', 'manual', 'claim', 'fail', 'complete'] as const)(
 );
 const nativeFixtures: JSDOM[] = [];
 afterEach(() => { for (const dom of nativeFixtures.splice(0)) dom.window.close(); });
-function nativeInstalledWorkflow(appId: string | null = null) {
+function nativeInstalledWorkflow(appId: string | null = null, observeOnly = true) {
   const listed = `https://chatgpt.com/settings/plugins-settings?cos-plugin-refresh=${id}`;
   const dom = new JSDOM('<main><a href="/settings/plugins-settings/plugin_asdk_app_synthetic"><span>Chat On Steroids Core</span></a></main>', { runScripts: 'outside-only', url: listed });
   nativeFixtures.push(dom);
@@ -274,7 +274,7 @@ function nativeInstalledWorkflow(appId: string | null = null) {
     CLF_DOM: { generating: () => false, pluginManagementIdle: () => true, pluginInstalledButtons: installed, pluginRefreshView: view } });
   vm.runInContext(`${section}\nwaitPageView = async (read, current) => current() ? read() : null; globalThis.run = refreshManagedPlugin;`, context);
   return { dom, link, click, installed, view, assign, ask, replace, location,
-    run: () => (context.run as Function)({ id, appId, surface: 'core', connectorName: 'Chat On Steroids Core', tools, observeOnly: true }) as Promise<boolean> };
+    run: () => (context.run as Function)({ id, appId, surface: 'core', connectorName: 'Chat On Steroids Core', tools, observeOnly }) as Promise<boolean> };
 }
 it('navigates the sole reverified native link with custody attached before inspecting its card', async () => {
   const h = nativeInstalledWorkflow();
@@ -285,6 +285,17 @@ it('navigates the sole reverified native link with custody attached before inspe
   expect(h.view).not.toHaveBeenCalled(); // An unreadable/unhydrated card cannot delay route custody.
   expect(h.ask).not.toHaveBeenCalled();
   expect(h.replace).not.toHaveBeenCalled();
+});
+it('keeps unambiguous proven-ID discovery before initial enrollment when the installed name changed', async () => {
+  const h = nativeInstalledWorkflow(null, false);
+  (h.dom.window as any).CLF_DOM.setConnectorApps({ core: [{ appId: 'asdk_app_synthetic', name: 'Chat On Steroids Core' }], desktop: [], plugins: [] });
+  h.link.querySelector('span')!.textContent = 'User renamed it 日本語';
+  expect(await h.run()).toBe(true);
+  expect(h.assign).toHaveBeenCalledExactlyOnceWith(pathRouted);
+  expect(h.installed).toHaveBeenCalledTimes(2);
+  expect(h.click).not.toHaveBeenCalled();
+  expect(h.view).not.toHaveBeenCalled();
+  expect(h.ask).not.toHaveBeenCalled(); // Discovery is not a claim; main still has to validate the card's tunnel.
 });
 it.each(['original', 'renamed'])('rechecks the exact enrolled installed link before an observation with two proven Core IDs (%s)', async name => {
   const h = nativeInstalledWorkflow('asdk_app_synthetic');

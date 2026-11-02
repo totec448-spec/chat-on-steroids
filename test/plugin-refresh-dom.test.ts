@@ -529,6 +529,17 @@ it('keeps the requested Plugins catalog bound when aliases also put its exact ID
   expect((await api.pluginRefreshView(connector.name, [], connector.id, 'plugins')).tools).toHaveLength(80);
   expect(await api.pluginRefreshView(connector.name, [], connector.id, 'core')).toBeNull();
 });
+it('reads a renamed native Plugins catalog by the requested surface and durable ID without learned aliases', async () => {
+  const { api, connector } = settingsPage(); connector.name = 'Renamed external apps 日本語';
+  connector.actions = Array.from({ length: 80 }, (_, i) => ({ name: `tool_${i}`, description: 'External tool', description_model: '', params: tool.inputSchema }));
+  api.setConnectorApps({ core: [], desktop: [], plugins: [] });
+  expect(await api.pluginRefreshView('Chat On Steroids Plugins', [], connector.id)).toBeNull();
+  expect((await api.pluginRefreshView('Chat On Steroids Plugins', [], connector.id, 'plugins'))?.tools).toHaveLength(80);
+  expect(await api.pluginRefreshView('Chat On Steroids Plugins', [], 'asdk_app_foreign', 'plugins')).toBeNull();
+  expect(await api.pluginRefreshView('Chat On Steroids Plugins', [], connector.id, 'core')).toBeNull();
+  connector.actions = Array.from({ length: 258 }, (_, i) => ({ ...connector.actions[0]!, name: `tool_${i}` }));
+  expect(await api.pluginRefreshView('Chat On Steroids Plugins', [], connector.id, 'plugins')).toBeNull();
+});
 it.each([false, true])('retains exact installed-ID navigation after a rename (hidden=%s)', hidden => {
   const { api } = settingsPage('/settings/plugins-settings');
   api.setConnectorApps({ core: [{ appId: 'asdk_app_synthetic', name: 'Stale name' }], desktop: [],
