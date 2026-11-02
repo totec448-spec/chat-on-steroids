@@ -5341,6 +5341,9 @@ The isolated reader passes an optional `refresh: { appId, surface }`
 on `clf-plugin-ask` so the native Fiber reader applies that surface's catalog bound only to the
 exact matching card, even when its learned Plugins alias is missing. Legacy reads keep their
 existing limits. This hint grants only bounded inspection, not ownership or a Refresh click.
+Without a reported native tunnel, a surface-qualified exact-ID observation cannot override a
+learned foreign or colliding surface. Older optional-argument callers and legacy-route reads
+retain their prior contracts, including schema-only observations on non-native-tunnel setups.
 Main checks that tunnel against the requested surface before initial enrollment/Current/Claim;
 navigation and page-reported tunnel IDs alone grant no Refresh authority. Other identity
 consumers and legacy pages retain their existing alias checks.
