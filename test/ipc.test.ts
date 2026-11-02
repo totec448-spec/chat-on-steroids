@@ -3290,5 +3290,7 @@ it('tells a person\'s message from the app\'s own', () => {
   expect(personsMessage(base)).toBe(true);
   expect(personsMessage({ ...base, scheduled: { scheduleId: 'x', dueAt: 1, late: false } } as never)).toBe(true);
   for (const own of [{ opening: true }, { recovery: { questionId: 'q' } }, { continuedFrom: 'recovery' }, { purpose: 'decision' },
-    { purpose: 'rotation' }, { finishOwner: 'f' }, { mode: 'finish' }]) expect(personsMessage({ ...base, ...own } as never)).toBe(false);
+    { purpose: 'rotation' }, { finishOwner: 'f' }, { mode: 'finish', authoredSource: 'none' }, { authoredSource: 'none' }]) expect(personsMessage({ ...base, ...own } as never)).toBe(false);
+  // A message the person wrote and queued for the finish is still theirs (CodeRabbit on #1981).
+  expect(personsMessage({ ...base, mode: 'finish', authoredSource: 'text' } as never)).toBe(true);
 });

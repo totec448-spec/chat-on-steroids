@@ -3669,8 +3669,10 @@ export async function moveSessionProject(id: string, projectId: string | null): 
   const entry = await ensureOpen(id);
   await enqueueSessionOperation(entry, 'project move', async () => {
     const { projectId: _previous, projectNotePending: _note, ...rest } = entry.summary;
-    // Into a project: the person's next message tells ChatGPT the folder, once (#1919).
-    const staged: SessionSummary = { ...rest, ...(projectId ? { projectId, projectNotePending: true as const } : {}), projectChosen: true };
+    // Into a project: the person's next message tells ChatGPT the folder, once (#1919). Not a
+    // sub-agent's: an isolated worker keeps working in its own allocated workspace.
+    const subAgent = rest.origin?.kind === 'worker' || rest.origin?.kind === 'helper';
+    const staged: SessionSummary = { ...rest, ...(projectId ? { projectId, ...(subAgent ? {} : { projectNotePending: true as const }) } : {}), projectChosen: true };
     await writeSummary(staged, entry.historySeq);
     entry.summary = staged;
     publishAttachmentSummary(staged);
