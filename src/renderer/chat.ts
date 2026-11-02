@@ -6882,6 +6882,21 @@ function paintHandoff(): void {
   paintStateLine();
 }
 
+/** What the person's Continue now / Try now did, in their language: fixed texts per outcome. */
+type PickupNowOutcome = { ok: true; did: 'queued' | 'retrying' } | { ok: false; code: 'no-chat' | 'history-limit' | 'nothing-waiting' | 'changed' | 'not-sent' | 'not-started' };
+function pickupNowWords(done: PickupNowOutcome): string {
+  if (done.ok) return done.did === 'queued' ? t('Continue queued. It goes out as soon as ChatGPT takes it.') : t('Trying again now.');
+  switch (done.code) {
+    case 'no-chat': return t('This chat has no ChatGPT conversation yet.');
+    case 'history-limit': return t('ChatGPT limits this chat for a few minutes. The app tries again right after.');
+    case 'nothing-waiting': return t('Nothing is waiting to be picked up in this chat any more.');
+    case 'changed': return t('This step changed meanwhile. Check the chat and try again.');
+    case 'not-sent': return t('Not sent now: something in this chat is still running. The app keeps trying.');
+    case 'not-started': return t('No new try could start now. The app keeps trying on its own.');
+  }
+  return '';
+}
+
 /** The live deadline takes precedence over the existing dismissible repair receipt. */
 function paintRecoveryStatus(): boolean {
   const host = $('recoveryStatus');
@@ -6896,7 +6911,31 @@ function paintRecoveryStatus(): boolean {
       await refreshSessionControls();
     })
     : null;
-  if (renderRecoveryCountdowns(host, countdowns, Date.now(), cancelReload)) return true;
+  // 2026-10-31: a chat whose next step was not picked up gets one click to go on: the waiting
+  // Continue as an ordinary message, or a queued message or Goal/Loop step tried again at once.
+  const pickupNowAction = (countdown: RecoveryCountdown) => {
+    if (countdown.kind !== 'pickup-stopped' || !sessionForCountdown || !countdown.next) return null;
+    const continuing = countdown.next === 'continue';
+    // Tries used up: only a waiting Continue can still go, as an ordinary message (CodeRabbit on #1979).
+    if (countdown.exhausted && !continuing) return null;
+    const shown = { next: countdown.next, stoppedAt: countdown.deadline };
+    const generation = selectionGeneration;
+    const button = el('button', 'dock-action is-labelled') as HTMLButtonElement;
+    button.type = 'button';
+    ui(button, 'title', () => continuing ? t('Send the waiting Continue now, as an ordinary message') : t('Try to send the waiting step now'));
+    button.append(icon(continuing ? 'i-play' : 'i-retry'), el('span', '', () => continuing ? t('Continue now') : t('Try now')));
+    button.onclick = async () => {
+      button.disabled = true;
+      try {
+        const done = await run(api.pickupNow(sessionForCountdown, shown));
+        // Another chat selected meanwhile: its view gets no word about this one (CodeRabbit on #1979).
+        if (done && generation === selectionGeneration) toast(pickupNowWords(done));
+        await refreshSessionControls();
+      } finally { button.disabled = false; }
+    };
+    return button;
+  };
+  if (renderRecoveryCountdowns(host, countdowns, Date.now(), countdown => cancelReload(countdown) ?? pickupNowAction(countdown))) return true;
   const recovery = detailFor === selectedId ? [...events].reverse().find(event => event.source === 'app' && event.kind === 'progress' && event.progressId?.startsWith('browser-repair:')) : undefined;
   const sessionId = selectedId;
   const revision = recovery?.kind === 'progress' ? JSON.stringify([recovery.progressId, recovery.time, recovery.message.text]) : '';
