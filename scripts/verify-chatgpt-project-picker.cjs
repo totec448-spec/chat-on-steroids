@@ -38,7 +38,7 @@ app.whenReady().then(async () => {
   const windows = new Map();
   const windowAt = async (width) => {
     if (windows.has(width)) return windows.get(width);
-    const win = new BrowserWindow({ show: showLinuxFixture, width, height: 760,
+    const win = new BrowserWindow({ show: showLinuxFixture, width, height: 760, useContentSize: true,
       webPreferences: { sandbox: true, offscreen: !showLinuxFixture, backgroundThrottling: false } });
     await win.loadFile(fixtureHtml);
     win.webContents.on('console-message', (_e, _l, message) => { if (/error|Error/.test(message)) console.error('renderer:', message); });
