@@ -3865,5 +3865,7 @@
   "Report a problem. GitHub opens with it filled in.": "Comunique um problema. O GitHub abre com tudo preenchido.",
   "Report a problem.": "Comunicar um problema.",
   "New features come as pull requests, not issues.": "As novas funcionalidades chegam como pull requests, não como issues.",
-  "How to start one": "Como começar um"
+  "How to start one": "Como começar um",
+  "Plugins could not be loaded.": "Não foi possível carregar os plugins.",
+  "Pets could not be loaded.": "Não foi possível carregar os mascotes."
 }

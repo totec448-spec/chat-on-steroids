@@ -3703,5 +3703,7 @@
   "Report a problem. GitHub opens with it filled in.": "Báo cáo sự cố. GitHub mở ra với nội dung đã điền sẵn.",
   "Report a problem.": "Báo cáo sự cố.",
   "New features come as pull requests, not issues.": "Tính năng mới được gửi dưới dạng pull request, không phải issue.",
-  "How to start one": "Cách bắt đầu"
+  "How to start one": "Cách bắt đầu",
+  "Plugins could not be loaded.": "Không thể tải plugin.",
+  "Pets could not be loaded.": "Không thể tải thú cưng."
 }

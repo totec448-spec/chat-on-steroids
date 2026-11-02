@@ -4,6 +4,7 @@
  * a Pro turn and the result of a Goal/Loop hold tool get none.
  */
 import http from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('electron', () => ({
@@ -308,6 +309,29 @@ describe('turn rotation (#1402)', () => {
 
   // 2026-10-20: when ChatGPT shows Stop it offers no Send for the continue; the page says so at
   // once instead of the call's answer waiting out the hold.
+  // #1922: a continue that never reached Send can stay in ChatGPT's composer. The next claim for that chat
+  // names it, so the page can tell the app's own leftover from the person's draft and replace it.
+  it('names the continue that never reached Send when the next message for that chat is claimed', async () => {
+    setRotationHoldForTests(5_000);
+    const { enqueueInput } = await import('../src/main/session/input.js');
+    const chat = 'f0f00003-1111-4111-8111-000000000207';
+    const sessionId = await turnFor(chat, 'g-rot-hold-7', 31);
+    const answer = (await heldCall(chat))();
+    await new Promise(resolve => setTimeout(resolve, 150));
+    const row = (await listInputs()).find(entry => entry.sessionId === sessionId && entry.purpose === 'rotation')!;
+    const page = { id: row.id, owner: 'rotation-page', conversationId: chat };
+    const continued = (await request('POST', '/input/claim', { body: { ...page, requiresAuthorization: true } })).body;
+    // Its own claim lists nothing: a message is never its own leftover.
+    expect(continued.ownUnsent).toBeUndefined();
+    await request('POST', '/input/fail', { body: { ...page, error: 'Fresh-turn continue declined: no Send while ChatGPT works.', detail: 'no-send' } });
+    await answer;
+    await events(chat, [{ kind: 'turn_end', time: Date.now(), turnId: 'g-rot-hold-7', outcome: 'completed' }]);
+    const next = await enqueueInput({ id: randomUUID(), sessionId, text: 'Please also check the logs.', mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null });
+    const claimed = (await request('POST', '/input/claim', { body: { id: next.id, owner: 'next-page', conversationId: chat, requiresAuthorization: true } })).body;
+    expect(claimed.input).toMatchObject({ id: next.id });
+    expect(claimed.ownUnsent).toEqual([continued.input.text]);
+  });
+
   it('answers the call at once when the page declines the continue for want of Send', async () => {
     setRotationHoldForTests(5_000);
     const chat = 'f0f00003-1111-4111-8111-000000000204';
