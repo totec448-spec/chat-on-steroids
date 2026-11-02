@@ -2982,6 +2982,18 @@ function mergeDetailDelta(delta: SessionEvent[]): void {
 
 let controlsGeneration = 0;
 let lastSummaryTimer: ReturnType<typeof setTimeout> | null = null;
+/** The stuck compaction already asked again once after its deadline passed during a controls read. */
+let lastSummaryLateRefresh = '';
+/** The chat whose "Continue from the last summary" request is still running, and in which selection. */
+let summaryAction: { id: string; selection: number } | null = null;
+
+/** Retires the saved-summary offer: the dot, the screen-reader notice and its binding, the action, the timer. */
+function clearSummaryOffer(): void {
+  if (lastSummaryTimer) { clearTimeout(lastSummaryTimer); lastSummaryTimer = null; }
+  ui($('contextMeterNotice'), 'textContent', () => '');
+  $('contextMeter').removeAttribute('data-attention');
+  $('resumeLastSummary').hidden = true;
+}
 let controlledSessionId: string | null = null;
 let controlledTurnId: string | null = null;
 /** A turn the page still holds after the app stopped counting it as work: Stop only, no Working (2.1.47 round). */
@@ -3459,6 +3471,8 @@ async function refreshSessionControls(): Promise<void> {
     // Replace the translation binding too, so a locale refresh cannot revive its status.
     ui($('sessionControlStatus'), 'textContent', () => '');
     for (const action of ['compactSession', 'cancelCompaction', 'resumeLastSummary']) $(action).hidden = true;
+    // The previous chat's offer must not stay on the next one (CodeRabbit on #2019).
+    clearSummaryOffer();
   }
   paintAutomationSwitch();
   if (!id) { controlledSessionId = null; controlledTurnId = null; controlledHeldTurnId = null; controlledPageless = false; paintDeliveryControls(); menu.hidden = false;
@@ -3505,7 +3519,7 @@ async function refreshSessionControls(): Promise<void> {
   repaintHeld();
   menu.hidden = !controls;
   $('compactSession').hidden = !controls;
-  if (!controls) { $('cancelCompaction').hidden = true; $('resumeLastSummary').hidden = true; $('contextMeter').removeAttribute('data-attention'); return; }
+  if (!controls) { $('cancelCompaction').hidden = true; clearSummaryOffer(); return; }
   const objective = $<HTMLTextAreaElement>('sessionObjective');
   if (objective.dataset.sessionId !== id || !objective.dataset.edited) {
     objective.value = controls.objective;
@@ -3533,12 +3547,17 @@ async function refreshSessionControls(): Promise<void> {
   const waitingJob = controls.job;
   if (!lastSummary && !controls.blocked && waitingJob?.stage === 'handoff-pending' && !waitingJob.handoffId) {
     const due = waitingJob.startedAt + STUCK_SUMMARY_MS - Date.now();
-    if (due > 0) lastSummaryTimer = setTimeout(() => { lastSummaryTimer = null; if (selectedId === id) void refreshSessionControls(); }, due + 1_000);
+    // A deadline that passed while this read was on its way is asked about once more, not again and again.
+    const late = `${id}:${waitingJob.startedAt}`;
+    const wait = due > 0 ? due + 1_000 : lastSummaryLateRefresh !== late ? 1_000 : null;
+    if (due <= 0) lastSummaryLateRefresh = late;
+    if (wait !== null) lastSummaryTimer = setTimeout(() => { lastSummaryTimer = null; if (selectedId === id) void refreshSessionControls(); }, wait);
   }
   ui($('contextMeterNotice'), 'textContent', () => lastSummary
     ? t("ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.") : '');
   $('resumeLastSummary').hidden = !lastSummary;
   $('resumeLastSummary').dataset.handoffId = lastSummary?.handoffId ?? '';
+  $<HTMLButtonElement>('resumeLastSummary').disabled = summaryAction?.id === id;
   $('contextMeter').toggleAttribute('data-attention', !!lastSummary);
   ui($('sessionControlStatus'), 'textContent', () => controls.blocked === 'worker' ? t("This sub-agent is managed by its prime.") : controls.blocked === 'blocked' ? t("This chat is blocked.")
     : lastSummary ? t("ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.")
@@ -9531,10 +9550,18 @@ export function initChat(next: Deps): void {
   }
   $('resumeLastSummary').addEventListener('click', async () => {
     const id = selectedId, button = $<HTMLButtonElement>('resumeLastSummary'), handoffId = button.dataset.handoffId;
-    if (!id || !handoffId) return;
+    if (!id || !handoffId || summaryAction?.id === id) return;
+    // The answer belongs to the chat and selection it was asked in (CodeRabbit on #2019).
+    const owner = { id, selection: selectionGeneration };
+    summaryAction = owner;
     button.disabled = true;
-    try { if (await run(api.resumeFromHandoff(id, handoffId))) toast(t("Opening a new chat with the saved summary")); }
-    finally { button.disabled = false; if (selectedId === id) void refreshSessionControls(); }
+    try {
+      const resumed = await run(api.resumeFromHandoff(id, handoffId));
+      if (resumed && selectedId === id && selectionGeneration === owner.selection) toast(t("Opening a new chat with the saved summary"));
+    } finally {
+      if (summaryAction === owner) summaryAction = null;
+      if (selectedId === id) { button.disabled = false; void refreshSessionControls(); }
+    }
   });
   for (const [buttonId, cancel] of [['compactSession', false], ['cancelCompaction', true]] as const) {
     $(buttonId).addEventListener('click', async () => {
