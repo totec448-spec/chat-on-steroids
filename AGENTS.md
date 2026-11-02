@@ -3542,7 +3542,8 @@ Stop, not "browser only") is first shown once per episode by a connected browser
 (`showUnclaimedChatOnce`, the extension's reveal), with a timeline note and a log line, and its offers start
 over (user, 2026-11-02). Without such a browser nothing could be shown, so it gets the verdict as before.
 Taking the chat is not showing it: a browser whose tab or window step fails posts `/reveal/failed`
-(`unclaimedChatShowFailed`), and that chat may be shown again when its offers run out.
+(`unclaimedChatShowFailed`), and that chat may be shown once more when its offers run out. A report
+counts only within 60 s of the show; a second failed show leaves the page-less verdict.
 Only offers no page asked for count toward that budget (#1922): a `/repairs/claim` for the offered token
 that is refused (not current, another chat's events still being saved, replaced) proves a page: for
 2 minutes after it no offer counts (`CLAIM_ASKED_FRESH_MS`, whichever browser polls), nor does any offer to a
