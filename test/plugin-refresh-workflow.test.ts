@@ -297,6 +297,16 @@ it('keeps unambiguous proven-ID discovery before initial enrollment when the ins
   expect(h.view).not.toHaveBeenCalled();
   expect(h.ask).not.toHaveBeenCalled(); // Discovery is not a claim; main still has to validate the card's tunnel.
 });
+it.each(['unbound', 'bound', 'duplicate'])('inspects a recreated configured-name row only without a bound target or duplicate (%s)', async mode => {
+  const h = nativeInstalledWorkflow(mode === 'bound' ? 'asdk_app_previous' : null, mode === 'bound');
+  (h.dom.window as any).CLF_DOM.setConnectorApps({ core: [{ appId: 'asdk_app_previous', name: 'Chat On Steroids Core' }], desktop: [], plugins: [] });
+  if (mode === 'duplicate') h.link.after(h.link.cloneNode(true));
+  expect(await h.run()).toBe(mode === 'unbound');
+  expect(h.assign.mock.calls.map(([url]) => url)).toEqual(mode === 'unbound' ? [pathRouted] : []);
+  expect(h.click).not.toHaveBeenCalled();
+  expect(h.view).not.toHaveBeenCalled();
+  expect(h.ask.mock.calls.map(([message]) => message.action)).toEqual(mode === 'unbound' ? [] : ['fail']);
+});
 it.each(['original', 'renamed'])('rechecks the exact enrolled installed link before an observation with two proven Core IDs (%s)', async name => {
   const h = nativeInstalledWorkflow('asdk_app_synthetic');
   if (name === 'renamed') h.link.querySelector('span')!.textContent = 'User renamed it 日本語';
