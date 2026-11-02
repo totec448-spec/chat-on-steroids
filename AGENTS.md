@@ -5807,8 +5807,22 @@ GNOME screenshot portal request and returns only the PNG byte count; no image is
 to the renderer. Aborted/denied portal prompts are not retried. Saved opt-in changes invalidate
 MCP surface exposure so a removed tool is not retained in model-facing discovery. Tests cover
 the backend command boundary, malformed PNG, opt-in and Screen revocation mid-capture, Settings
-consent and twelve locale catalogs. A future control PR adds accessibility refs and input
-*after* this read-only path, with its own ownership and permission gates.
+consent and twelve locale catalogs.
+
+**Native Linux semantic control (part 3, dependent on part 2).** `linux_observe`
+also admits window/app/display inventories and a semantic accessibility snapshot
+of one identified nonbrowser window. Snapshot references are scoped to a proven
+profile, session and conversation (32 owners maximum, 120-second expiry).
+Unattributed observations may have ephemeral private snapshots but cannot act.
+`linux_act` supports **only** click and set_value of previously observed,
+snapshot-scoped refs: it rejects stale/foreign refs, browsers, changed owners,
+ambiguous process incarnations and revoked Control/Read-only permission.
+It rechecks the exact app identity and grant after any per-chat Desktop Ask
+approval, consumes refs after any attempted action and never falls back to a
+physical pointer, keyboard, coordinate command or automatic action retry.
+The command adapter remains pinned to agent-desktop 1.0.2, never uses a shell,
+and only publishes bounded backend error codes. Tests cover those ownership
+and revocation gates as well as legacy Windows/macOS Desktop Ask behavior.
 
 The permission self-test reports native preflight results, not a completed capture or input.
 An actual screenshot and AX query remain separate evidence; the existing grant-history and

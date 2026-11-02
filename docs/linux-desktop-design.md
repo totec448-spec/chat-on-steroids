@@ -44,6 +44,16 @@ discarding capture bytes. GNOME portal consent must be accepted by a person
 for a true end-to-end screenshot; unit-test data does **not** prove a live grant.
 Linux UI/packaging acceptance must run in an isolated app instance.
 
-Part 3 builds on this reviewed read-only surface and supplies native
-accessibility snapshots and semantic control with additional owner/ref
-checks. Nothing in part 2 confers that future input permission.
+## Part 3 — semantic native control (dependent on part 2)
+
+The follow-on stage adds app/window/display inventory and accessibility
+snapshots. Each snapshot belongs to a proven chat and Setup profile, has a
+bounded lifetime and is restricted to an exact nonbrowser window/process.
+`linux_act` may click or set a value through a fresh semantic ref under
+live Control permission. It revalidates owner, refs, target and permission
+after any approval prompt, then consumes the refs.
+
+Unattributed observations, when separately opted into, have ephemeral
+non-actionable refs. Physical mouse/keyboard events, coordinates, browser
+AT-SPI input and unbounded command execution are never supported.
+No capability from part 2 grants native input by itself.
