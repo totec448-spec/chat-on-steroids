@@ -100,6 +100,16 @@ const entrySchema = inputArgs.extend({
   /** Shared unfinished-response fallback belongs to this question in every mode. */
   /** An automatic Continue the app sent on as an ordinary message (`continueAsOrdinaryMessage`). */
   continuedFrom: z.literal('recovery').optional(),
+  /**
+   * A new chat's tab vanished before anything reached it, and a fresh one was opened this often (max 2).
+   * A damaged count reads as used up: it must never make the outbox unreadable, nor grant more tabs.
+   */
+  openingReopens: z.number().int().min(1).max(2).optional().catch(2),
+  /**
+   * The lost tab the last fresh one was granted for, as `<browser>:<tab>` (tab ids are per browser
+   * session): a repeat report of it gets the same grant.
+   */
+  openingReopenedTab: z.string().min(1).max(220).optional().catch(undefined),
   /** The question that Continue continues, still checked until it is sent (CodeRabbit on #1960). */
   continuesQuestionId: z.string().max(200).optional(),
   recovery: z.object({ questionId: z.string(), episode: z.string().max(200).optional(), pro: z.boolean(), busyUntil: z.number(), phase: z.enum(['ready', 'stopping', 'reloading', 'resumed']), reloadOwner: z.string().optional(),
@@ -1156,7 +1166,11 @@ function samePickupState(a: PickupRecoveryState | undefined, b: PickupRecoverySt
 }
 
 /** Reserve a source-turn reload against all of its queued owners before browser handout. */
-export function recordQueuedPickupAttemptNow(inputId: string, sourceTurnId: string, at: number, nextAt?: number, inherited?: PickupRecoveryState): Promise<PickupRecoveryState | null> {
+/**
+ * `expected`: the attempts the caller read before deciding a retry is due. Another pass that reserved
+ * meanwhile moved the count past it, and this one then reserves nothing (CodeRabbit on #1979).
+ */
+export function recordQueuedPickupAttemptNow(inputId: string, sourceTurnId: string, at: number, nextAt?: number, inherited?: PickupRecoveryState, expected?: number): Promise<PickupRecoveryState | null> {
   return serial(async () => {
     const current = await load();
     const row = current.find(entry => entry.id === inputId);
@@ -1166,6 +1180,7 @@ export function recordQueuedPickupAttemptNow(inputId: string, sourceTurnId: stri
     if (!session || session.conversationId !== row.conversationId || session.browserRecoveryDismissedAt !== undefined) return null;
     const matches = await rowsForPickupSource(current, row.sessionId, sourceTurnId);
     const prior = mergedPickupState(matches, inherited);
+    if (expected !== undefined && prior.attempts > expected) return null;
     // Past the quick burst the chat shows as stopped, and slow retries go on until the hard bound.
     if (prior.attempts >= BROWSER_PICKUP_ATTEMPT_LIMIT) {
       const next = current.map(entry => matches.includes(entry) && !samePickupState(entry.pickupRecovery, prior)
@@ -1370,20 +1385,46 @@ export function setInputAutomation(id: string, automation: NonNullable<InputArgs
     return true;
   });
 }
+/** How often a new chat whose tab vanished before anything reached it gets a fresh tab. */
+export const OPENING_REOPENS = 2;
+
 /** A missing elected tab is not replay authority. End only a never-handed-out opening. */
-export function failUnclaimedBrowserOpening(id: string, currentOwner: () => boolean): Promise<boolean> {
+export function failUnclaimedBrowserOpening(id: string, currentOwner: () => boolean, tab?: string): Promise<boolean> {
+  return lostBrowserOpening(id, currentOwner, tab).then(outcome => outcome === 'failed');
+}
+
+/**
+ * A new chat whose elected tab vanished before anything reached it (#1950 follow-up, 2026-10-31):
+ * nothing was offered, authorized or delivered, so its message was typed nowhere. It gets a fresh
+ * tab, twice at most, rather than "Not sent" at once; after that it fails as before. Anything that
+ * may have reached a page is never reopened.
+ */
+export function lostBrowserOpening(id: string, currentOwner: () => boolean, tab?: string): Promise<'reopen' | 'failed' | 'kept'> {
   return serial(async () => {
     const current = await load();
     const row = current.find(entry => entry.id === id);
     if (!currentOwner() || !row?.opening || row.state !== 'queued' || row.owner !== null || row.offeredAt !== undefined ||
         row.sendAuthorizedAt !== undefined || row.deliveredAt !== undefined || row.conversationId ||
-        !row.sessionId || row.purpose || row.lifetime || row.branch) return false;
+        !row.sessionId || row.purpose || row.lifetime || row.branch) return 'kept';
     const session = await getSession(row.sessionId);
-    if (!currentOwner() || session?.origin?.kind !== 'desktop' || session.conversationId) return false;
+    if (!currentOwner() || session?.origin?.kind !== 'desktop' || session.conversationId) return 'kept';
+    const reopens = row.openingReopens ?? 0;
+    // The extension asks again for the same lost tab when the answer did not reach it: that is the
+    // grant it already has, not another tab spent (CodeRabbit on #1980).
+    if (tab !== undefined && reopens > 0 && row.openingReopenedTab === tab) {
+      logInfo(`input ${id}: the lost tab ${tab} was reported again; the fresh tab already granted for it stands`);
+      return 'reopen';
+    }
+    if (reopens < OPENING_REOPENS) {
+      await commit(current.map(entry => entry === row ? { ...entry, openingReopens: reopens + 1,
+        ...(tab !== undefined ? { openingReopenedTab: tab } : {}) } : entry));
+      logInfo(`input ${id}: its new chat's tab vanished before anything reached it; opening a fresh one (${reopens + 1} of ${OPENING_REOPENS})`);
+      return 'reopen';
+    }
     await commit(current.map(entry => entry === row ? { ...entry, state: 'failed',
       error: 'Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.' } : entry));
-    logWarn(`input ${id}: not sent; its elected opening tab is absent before any browser claim`);
-    return true;
+    logWarn(`input ${id}: not sent; its elected opening tab is absent before any browser claim, after ${OPENING_REOPENS} fresh tab(s)`);
+    return 'failed';
   });
 }
 export function noteInputStartupError(id: string, error: string | null): Promise<InputEntry | null> {
@@ -1874,7 +1915,12 @@ async function notAllowedReason(entry: InputEntry): Promise<string> {
  * the chat's latest question is still the one the Continue answers, no turn runs and no tool call is
  * in flight. Returns the converted row, or null with nothing changed.
  */
-export function continueAsOrdinaryMessage(id: string, why: string, minAgeMs = 0): Promise<{ row: InputEntry } | { refused: string }> {
+/**
+ * `lastGate`: the caller's own final check on the chat, run inside this one serialized step right
+ * before the commit (a history limit can arrive during the reads above; CodeRabbit on #1979). It
+ * returns why the conversion must wait, or null.
+ */
+export function continueAsOrdinaryMessage(id: string, why: string, minAgeMs = 0, lastGate?: (conversationId: string) => string | null): Promise<{ row: InputEntry } | { refused: string }> {
   return serial(async () => {
     const current = await load();
     const row = current.find(entry => entry.id === id);
@@ -1890,6 +1936,8 @@ export function continueAsOrdinaryMessage(id: string, why: string, minAgeMs = 0)
     if (inFlightToolCalls(session.conversationId) > 0) return { refused: 'a tool call of its chat is still running' };
     const question = await readLatestUserMessage(row.sessionId);
     if (question?.messageId !== row.recovery.questionId) return { refused: 'a newer question arrived in its chat' };
+    const gated = lastGate?.(session.conversationId);
+    if (gated) return { refused: gated };
     const { recovery: _recovery, silenceBoundary: _boundary, pickupRecovery: _pickup, requestedMode: _requested, ...rest } = row;
     const ordinary: InputEntry = { ...rest, mode: 'auto', dueAt: Date.now(), continuedFrom: 'recovery', continuesQuestionId: row.recovery.questionId };
     await commit(current.map(entry => entry === row ? ordinary : entry));
@@ -2404,7 +2452,10 @@ export function failBrowserInput(id: string, owner: string, error: string, detai
       logWarn(`input ${entry.id}: the browser could not send it — ${error.slice(0, 200)}${detail ? ` (${detail.slice(0, 80)})` : ''}; ` +
         (entry.companionInputId ? 'cancelled with its companion' : 'reported as not sent'));
     }
-    decisionWaiters.get(id)?.reject(new Error('goal_browser_send_failed: ' + error.slice(0, 200)));
+    // Only the picker failed to confirm the helper's model: nothing was typed, so Goal may ask again
+    // (on ChatGPT's current selection) instead of stopping for a person (2026-11-01, Mac log).
+    const code = detail === 'model-unconfirmed' && entry.purpose === 'decision' ? 'goal_helper_model_unconfirmed' : 'goal_browser_send_failed';
+    decisionWaiters.get(id)?.reject(new Error(code + ': ' + error.slice(0, 200)));
     decisionWaiters.delete(id);
     return true;
   });

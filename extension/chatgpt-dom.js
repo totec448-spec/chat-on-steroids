@@ -2786,13 +2786,17 @@ var CLF_DOM = (() => {
     if (attachmentHost && tileParent && tileParent !== attachmentHost) {
       const actions = [...tileParent.querySelectorAll('button')];
       if (actions.length === 2 && actions[1] === button) {
-        const open = actions[0], name = open.getAttribute('aria-label');
+        const open = actions[0], label = open.getAttribute('aria-label');
         const removal = (button.getAttribute('aria-label') || '').trim();
-        const labelled = [...tileParent.querySelectorAll('span')].some(node =>
-          !node.children.length && node.textContent === name);
+        const shownNames = [...tileParent.querySelectorAll('span')].filter(node => !node.children.length).map(node => node.textContent);
+        // The name the tile shows, which its open button's label must be. On some accounts that label is
+        // the name twice ("a.htmla.html", Spanish ChatGPT, #1986): every file waited out its 10 minutes.
+        // Only that exact doubling is accepted besides the name itself.
+        const name = label && shownNames.includes(label) ? label
+          : label ? shownNames.find(shown => !!shown && label === shown + shown) : undefined;
         // The tile's structure is the proof, not the remove label's wording: "Remove notes.zip" in
         // English, "notes.zip entfernen" in German (#1942), and a label naming no file at all.
-        if (name && removal && removal !== name.trim() && labelled &&
+        if (name && removal && removal !== label.trim() && removal !== name.trim() &&
             open.closest('[data-composer-attachments]') === attachmentHost) return name;
       }
     }
@@ -2899,7 +2903,7 @@ var CLF_DOM = (() => {
       (!location.hash ? /^\/(?:settings\/plugins-settings|plugins)\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.pathname) : null);
     if (!snapshot || snapshot.appId !== route?.[1] || (expectedAppId ? snapshot.appId !== expectedAppId : !ownSnapshot(snapshot, connectorName)) ||
         !Array.isArray(snapshot.tools) || (snapshot.tools.length < 1 && !externalPlugins) || snapshot.tools.length > (externalPlugins ? 257 : 64) || JSON.stringify(snapshot.tools).length > 300000 ||
-        snapshot.tools.some(tool => !tool || typeof tool.name !== 'string' || !/^[a-z][a-z0-9_]{0,79}$/.test(tool.name) || typeof tool.description !== 'string' || tool.inputSchema?.type !== 'object') ||
+        snapshot.tools.some(tool => !tool || typeof tool.name !== 'string' || !(externalPlugins ? /^[a-z0-9_.-]{1,64}$/i : /^[a-z][a-z0-9_]{0,79}$/).test(tool.name) || typeof tool.description !== 'string' || tool.inputSchema?.type !== 'object') ||
         new Set(snapshot.tools.map(tool => tool.name)).size !== snapshot.tools.length) return null;
     const buttons = [...document.querySelectorAll('button[data-clf-plugin-refresh]')].filter(button => button.getAttribute('data-clf-plugin-refresh') === snapshot.appId && button.getClientRects().length > 0);
     return typeof snapshot.refreshAvailable === 'boolean' && buttons.length === (snapshot.refreshAvailable ? 1 : 0) ? { appId: snapshot.appId, connectorName: snapshot.connectorName, versionId: typeof snapshot.versionId === 'string' ? snapshot.versionId.slice(0, 200) : null,
@@ -3476,7 +3480,10 @@ var CLF_DOM = (() => {
       // Exact provider slug is preferred. Existing saved display slugs may resolve
       // only to an actually observed, available pair; never to an account default.
       const name = normalizeModelLabel(model);
-      const modelRank = choice => !model || choice.familyId === model || choice.id === model ? 2
+      // Effort only keeps the current model: its efforts, never another model's (CodeRabbit on #1972).
+      // An unreadable current model offers nothing, so the request stays unconfirmed.
+      const modelRank = choice => !model ? (current?.familyId && choice.familyId === current.familyId ? 2 : 0)
+        : choice.familyId === model || choice.id === model ? 2
         : name && normalizeModelLabel(choice.familyLabel) === name ? 1 : 0;
       // Every available choice of the requested model, read once across versions, so the effort
       // can be resolved against what the account actually offers before anything is moved.

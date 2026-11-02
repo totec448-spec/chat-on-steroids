@@ -1071,6 +1071,28 @@ describe('native image readiness', () => {
     expect(api.hasComposerAttachments()).toBe(true);
     draft.dispose();
   });
+  // #1986 (2026-11-01, Spanish ChatGPT on Windows): the open button's label is the file name twice, and
+  // the remove label repeats it too; the tile was never recognized and the message waited 10 minutes.
+  it('accepts a file tile whose open label repeats the name twice, by the name it shows', async () => {
+    const input = upload(); input.accept = '';
+    const draft = api.captureComposerDraft('Exact app prompt');
+    input.addEventListener('change', () => {
+      const host = document.createElement('div'); host.setAttribute('data-composer-attachments', '');
+      host.innerHTML = '<span><span><span>notes.zip</span><button type="button" aria-label="notes.zipnotes.zip"></button></span><button type="button" aria-label="Quitar notes.zipnotes.zip"></button></span>';
+      document.querySelector('form')!.append(host);
+    });
+    const file = new dom.window.File(['exact bytes'], 'notes.zip', { type: 'application/zip' });
+    expect(await api.uploadImages([], () => true, draft, [file])).toBe(true);
+    expect(api.hasComposerAttachments()).toBe(true);
+    draft.dispose();
+  });
+  it.each([['a different name repeated', 'other.zipother.zip'], ['the name and more', 'notes.zip (copy)'], ['the name three times', 'notes.zipnotes.zipnotes.zip']])(
+    'still refuses an open label that is not the shown name or exactly it twice (%s)', (_case, label) => {
+      const host = document.createElement('div'); host.setAttribute('data-composer-attachments', '');
+      host.innerHTML = `<span><span><span>notes.zip</span><button type="button" aria-label="${label}"></button></span><button type="button" aria-label="Quitar ${label}"></button></span>`;
+      document.querySelector('form')!.append(host);
+      expect(api.hasComposerAttachments()).toBe(false);
+    });
   // CodeRabbit on #1944: a blank label, or the file name with spaces around it, names no remove control.
   it.each(['notes.zip', ' notes.zip ', '   ', ''])('still refuses a tile whose second button is not a remove control (label "%s")', label => {
     const host = document.createElement('div'); host.setAttribute('data-composer-attachments', '');

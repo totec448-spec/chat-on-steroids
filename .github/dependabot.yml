@@ -18,6 +18,10 @@ updates:
       # Electron is pinned exactly: the third-party notices name its source tag and
       # test/packaging.test.ts proves the packaged runners use those bytes. Upgrade it by hand.
       - dependency-name: electron
+      # jsdom 30.1.2 and later changed focus handling: the renderer focus tests fail and a closed
+      # window's code runs on ("CSS is not defined"). Stays at 30.1.1 until the tests are moved over.
+      - dependency-name: jsdom
+        versions: ['>=30.1.2']
     groups:
       minor-and-patch:
         update-types: [minor, patch]

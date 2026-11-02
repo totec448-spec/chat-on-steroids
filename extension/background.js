@@ -373,6 +373,14 @@ async function loadOnce() {
   stored.inputOpenings = { ...(stored.desktopInputTabs || {}), ...(stored.inputOpenings || {}) };
   inputOpenings = stored.inputOpenings && typeof stored.inputOpenings === 'object' && !Array.isArray(stored.inputOpenings)
     ? Object.fromEntries(Object.entries(stored.inputOpenings).filter(([id, row]) => /^[a-f0-9-]{36}$/i.test(id) && row && (row.tab === null || Number.isInteger(row.tab))).slice(-1000)) : {};
+  // Elections saved under the old key move once into `inputOpenings`: left behind, one forgotten
+  // there would come back at the next start (CodeRabbit on #1980).
+  if (stored.desktopInputTabs !== undefined) {
+    try {
+      await chrome.storage.local.set({ inputOpenings });
+      await chrome.storage.local.remove('desktopInputTabs');
+    } catch { /* The next start merges them again; nothing is lost. */ }
+  }
   stopOpenings = stored.stopOpenings && typeof stored.stopOpenings === 'object' && !Array.isArray(stored.stopOpenings)
     ? Object.fromEntries(Object.entries(stored.stopOpenings).filter(([id, row]) => commandMarkerId(id) && row &&
       (row.tab === null || Number.isInteger(row.tab)) && cleanConversationId(row.conversationId) &&
@@ -2265,7 +2273,15 @@ const MAX_OPENING_UNAVAILABLE_REPORTS = 3;
 function reportUnavailableOpening(id, tab, stage) {
   if (openingUnavailableReports.has(id) || openingUnavailableReports.size >= MAX_OPENING_UNAVAILABLE_REPORTS) return;
   const pending = call('/input/opening-unavailable', { method: 'POST',
-    body: JSON.stringify({ id, tab, stage }) });
+    body: JSON.stringify({ id, tab, stage }) }).then(async reply => {
+    // The app proved nothing reached the lost tab and grants a fresh one: forget the old election,
+    // so the next pass opens a new tab for this new chat (#1950 follow-up). Only then.
+    if (reply?.ok && reply.data?.reopen === true && inputOpenings[id]?.tab === tab) {
+      delete inputOpenings[id];
+      await persistLive();
+    }
+    return reply;
+  });
   openingUnavailableReports.set(id, pending);
   void pending.catch(() => undefined).finally(() => {
     if (openingUnavailableReports.get(id) === pending) openingUnavailableReports.delete(id);

@@ -1482,7 +1482,7 @@
                   </div>
                 </details>
                   <details class="composer-menu" id="composerSettings">
-                    <summary aria-label="Chat mode" title="Chat mode"><i id="composerModeIcon" class="ico ph ph-chat-circle" aria-hidden="true"></i><span id="composerModeLabel">Normal</span><svg class="disclosure-chevron dropdown-chevron picker-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg></summary>
+                    <summary title="Chat mode"><i id="composerModeIcon" class="ico ph ph-chat-circle" aria-hidden="true"></i><span id="composerModeLabel">Normal</span><svg class="disclosure-chevron dropdown-chevron picker-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg></summary>
                     <div class="composer-popover">
                       <div class="automation-switch" id="automationSwitch" role="radiogroup" aria-label="Chat mode">
                         <button type="button" role="radio" aria-checked="true" data-mode="off"><i class="ico ph ph-chat-circle" aria-hidden="true"></i><span class="mode-copy"><span>Normal</span><small>One request, without automatic continuation.</small></span><i class="ico ph ph-check mode-check" aria-hidden="true"></i></button>
@@ -1608,7 +1608,7 @@
                 <button class="btn" id="copyLogText" type="button">
                   <i class="ico ph ph-copy" aria-hidden="true"></i>Text
                 </button>
-                <button class="btn" id="sendFeedback" type="button" title="Report a problem or suggest an idea. GitHub opens with it filled in.">
+                <button class="btn" id="sendFeedback" type="button" title="Report a problem. GitHub opens with it filled in.">
                   <i class="ico ph ph-chat-text" aria-hidden="true"></i>Send feedback
                 </button>
                 <button class="btn" id="saveDiagnosticsReport" type="button" title="Save one file with versions, settings, the connection state and the log, with personal details removed, to attach to a bug report.">
@@ -1710,10 +1710,6 @@
       <div class="plugin-dialog-head"><h2 id="feedbackTitle">Send feedback</h2><button class="btn" id="feedbackClose" type="button">Close</button></div>
       <form id="feedbackForm" class="feedback-form" novalidate>
         <div class="plugin-dialog-body feedback-fields">
-        <div class="feedback-kind" role="radiogroup" aria-label="Kind of feedback">
-          <label><input type="radio" name="feedbackKind" value="bug" checked /><span>Report a problem</span></label>
-          <label><input type="radio" name="feedbackKind" value="idea" /><span>Suggest an idea</span></label>
-        </div>
         <div class="feedback-update" id="feedbackUpdate" hidden><span id="feedbackUpdateText"></span><button class="btn" id="feedbackUpdateOpen" type="button">Open Activity</button></div>
         <div id="feedbackBug">
           <label class="plugin-field" for="feedbackWhat"><span>What happened</span><textarea id="feedbackWhat" rows="3" maxlength="4000" placeholder="What you did, what happened, and what you expected instead."></textarea></label>
@@ -1721,11 +1717,8 @@
           <label class="plugin-field" for="feedbackFrequency"><span>How often does it happen?</span><select id="feedbackFrequency"><option value="">Not sure</option><option value="Every time">Every time</option><option value="Sometimes">Sometimes</option><option value="It happened once">It happened once</option></select></label>
           <div class="setting feedback-report"><span class="setting-text"><b>Diagnostics report</b><em id="feedbackReportNote">Needed for a problem report. Read it before you attach it.</em></span><button class="btn" id="feedbackSaveReport" type="button">Save report…</button></div>
         </div>
-        <div id="feedbackIdea" hidden>
-          <label class="plugin-field" for="feedbackProblem"><span>What problem would it solve?</span><textarea id="feedbackProblem" rows="3" maxlength="4000" placeholder="What you are trying to do, and what gets in the way."></textarea></label>
-          <label class="plugin-field" for="feedbackProposal"><span>What should the app do?</span><textarea id="feedbackProposal" rows="3" maxlength="4000" placeholder="How it would work for you."></textarea></label>
-        </div>
         <p class="feedback-note">GitHub opens with this filled in. You submit it there; the app sends nothing.</p>
+        <p class="feedback-note" id="feedbackFeatures">New features come as pull requests, not issues. <a href="https://github.com/totec448-spec/chat-on-steroids/blob/main/CONTRIBUTING.md#new-features" target="_blank" rel="noopener noreferrer">How to start one</a></p>
         <p id="feedbackError" class="plugin-error" role="alert" hidden></p>
         </div>
         <div class="pet-delete-actions"><button class="btn" id="feedbackCancel" type="button">Cancel</button><button class="btn btn-solid" id="feedbackSubmit" type="submit">Continue on GitHub</button></div>

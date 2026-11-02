@@ -1216,5 +1216,8 @@
   },
   "content_task_waiting_app": {
     "message": "Chat On Steroids의 응답을 기다리는 중입니다."
+  },
+  "content_revival_draft_appeared": {
+    "message": "작업자 깨우기를 준비하는 동안 채팅에 무언가가 입력되어, 깨우기가 그것을 바꾸지 않았습니다."
   }
 }
