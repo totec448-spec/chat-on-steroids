@@ -2984,8 +2984,8 @@ let controlsGeneration = 0;
 let lastSummaryTimer: ReturnType<typeof setTimeout> | null = null;
 /** The stuck compaction already asked again once after its deadline passed during a controls read. */
 let lastSummaryLateRefresh = '';
-/** The chat whose "Continue from the last summary" request is still running, and in which selection. */
-let summaryAction: { id: string; selection: number } | null = null;
+/** Chats whose "Continue from the last summary" request is still running, with the selection it was pressed in. */
+const summaryActions = new Map<string, number>();
 
 /** Retires the saved-summary offer: the dot, the screen-reader notice and its binding, the action, the timer. */
 function clearSummaryOffer(): void {
@@ -3557,7 +3557,7 @@ async function refreshSessionControls(): Promise<void> {
     ? t("ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.") : '');
   $('resumeLastSummary').hidden = !lastSummary;
   $('resumeLastSummary').dataset.handoffId = lastSummary?.handoffId ?? '';
-  $<HTMLButtonElement>('resumeLastSummary').disabled = summaryAction?.id === id;
+  $<HTMLButtonElement>('resumeLastSummary').disabled = summaryActions.has(id);
   $('contextMeter').toggleAttribute('data-attention', !!lastSummary);
   ui($('sessionControlStatus'), 'textContent', () => controls.blocked === 'worker' ? t("This sub-agent is managed by its prime.") : controls.blocked === 'blocked' ? t("This chat is blocked.")
     : lastSummary ? t("ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.")
@@ -9550,16 +9550,17 @@ export function initChat(next: Deps): void {
   }
   $('resumeLastSummary').addEventListener('click', async () => {
     const id = selectedId, button = $<HTMLButtonElement>('resumeLastSummary'), handoffId = button.dataset.handoffId;
-    if (!id || !handoffId || summaryAction?.id === id) return;
-    // The answer belongs to the chat and selection it was asked in (CodeRabbit on #2019).
-    const owner = { id, selection: selectionGeneration };
-    summaryAction = owner;
+    // One request per chat at a time, each chat on its own (CodeRabbit on #2019); its answer belongs to the
+    // chat and selection it was asked in.
+    if (!id || !handoffId || summaryActions.has(id)) return;
+    const selection = selectionGeneration;
+    summaryActions.set(id, selection);
     button.disabled = true;
     try {
       const resumed = await run(api.resumeFromHandoff(id, handoffId));
-      if (resumed && selectedId === id && selectionGeneration === owner.selection) toast(t("Opening a new chat with the saved summary"));
+      if (resumed && selectedId === id && selectionGeneration === selection) toast(t("Opening a new chat with the saved summary"));
     } finally {
-      if (summaryAction === owner) summaryAction = null;
+      if (summaryActions.get(id) === selection) summaryActions.delete(id);
       if (selectedId === id) { button.disabled = false; void refreshSessionControls(); }
     }
   });
