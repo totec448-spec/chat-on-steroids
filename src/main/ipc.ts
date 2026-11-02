@@ -122,7 +122,7 @@ import {
   companionDiagnostics,
   sessionInputActivity,
   recoveryHeldByCalls, recoveryInputAllowed,
-  sessionControlsFor, cancelAssistantRecovery, stopSessionTurn, setSessionAutomation, setSessionObjective, compactSession, resumeFromSavedSummary, cancelSessionCompaction,
+  sessionControlsFor, cancelAssistantRecovery, pickupNow, stopSessionTurn, setSessionAutomation, setSessionObjective, compactSession, resumeFromSavedSummary, cancelSessionCompaction,
   cancelWorkerCommands,
   chatUrl,
   revealChatInBrowser,
@@ -1718,12 +1718,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // submits it there; the app sends nothing itself. The diagnostics report is saved separately.
   handle('feedback:openIssue', async (payload) => {
     const text = (max: number) => z.string().max(max);
-    const report = z.discriminatedUnion('kind', [
-      z.object({ kind: z.literal('bug'), what: text(4000).refine(value => value.trim().length > 0), steps: text(4000).optional(),
-        frequency: z.enum(['Every time', 'Sometimes', 'It happened once']).optional() }).strict(),
-      z.object({ kind: z.literal('idea'), problem: text(4000).refine(value => value.trim().length > 0),
-        proposal: text(4000).refine(value => value.trim().length > 0) }).strict()
-    ]).parse(payload);
+    const report = z.object({ kind: z.literal('bug'), what: text(4000).refine(value => value.trim().length > 0), steps: text(4000).optional(),
+      frequency: z.enum(['Every time', 'Sometimes', 'It happened once']).optional() }).strict().parse(payload);
     const bridge = await bridgeStatus();
     const { url, trimmed } = feedbackIssueUrl(report, {
       version: app.getVersion(), os: operatingSystemName(process.platform, systemVersion()), arch: process.arch,
@@ -1988,6 +1984,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('sessions:controls', async (payload) => sessionControlsFor(sessionIdArg.parse(payload).id));
   // #1032: the user keeps this answer from being reloaded; false once the browser claimed it.
   handle('sessions:cancelRecovery', async (payload) => cancelAssistantRecovery(sessionIdArg.parse(payload).id));
+  // A chat whose next step was not picked up: the person's one click (2026-10-31).
+  handle('sessions:pickupNow', async (payload) => {
+    const args = z.object({ id: z.string().min(1).max(200), next: z.enum(['queue', 'goal', 'loop', 'continue']), stoppedAt: z.number().finite() }).parse(payload);
+    return pickupNow(args.id, { next: args.next, stoppedAt: args.stoppedAt });
+  });
   handle('sessions:automation', async (payload) => {
     const { id, automation, afterTurn } = sessionIdArg.extend({ automation: z.enum(['off', 'goal', 'loop']), afterTurn: z.boolean().optional() }).parse(payload);
     return setSessionAutomation(id, automation, afterTurn);
