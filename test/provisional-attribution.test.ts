@@ -499,9 +499,11 @@ it('keeps a provider workflow in its chat after an explicit mid-answer continuat
   await invoke(); await flushRecorder();
   expect((await calls(id))[0]?.call.attributionMethod).toBe('generation');
   const boundary = Date.now();
+  // The continued call can start in this same millisecond, not after a future turn.
+  vi.spyOn(Date, 'now').mockReturnValue(boundary);
   await recordChatObservations('chat-a', [
     { kind: 'turn_end', time: boundary, turnId: 'turn-a', outcome: 'completed', continued: true },
-    { kind: 'turn_start', time: boundary + 1, turnId: 'continued-turn' }
+    { kind: 'turn_start', time: boundary, turnId: 'continued-turn' }
   ]);
   // ChatGPT exposes no new page-request ID, and keeps the CLI workflow ID.
   await invoke(); await flushRecorder();
