@@ -271,7 +271,7 @@ async function moveChatToProject(sessionId: string, projectId: string | null, gr
   if (groupId) collapsedGroups.delete(groupId);
   await loadSessions();
   // Rows the sidebar already shows take the moved chats' new summaries, also from older history.
-  const shown = moved.summaries.filter(summary => sessions.some(row => row.id === summary.id));
+  const shown = (moved.summaries ?? []).filter(summary => sessions.some(row => row.id === summary.id));
   if (shown.length) { mergeSessionRows(shown); paintSessions(); }
   if (undo) { toast(t('Move undone')); return; }
   const project = projectId ? projects.find(row => row.id === projectId) : undefined;
