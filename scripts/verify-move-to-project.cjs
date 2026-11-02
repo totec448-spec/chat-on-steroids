@@ -52,6 +52,8 @@ app.whenReady().then(async () => {
     for (const [i,[title,at]] of [['Plan the trip',Date.now()-2000],['Grocery list',Date.now()-3000],['Fix the printer',daysAgo(1)],['Tax questions',daysAgo(3)],['Recipe ideas',daysAgo(12)],['Old notes',daysAgo(400)]].entries())
       rows.push({...rows[0],id:'loose-'+i,title,projectId:undefined,conversationId:'loose-chat-'+i,chatIds:['loose-chat-'+i],updatedAt:at});
     window.moveCalls = [];
+    // A chat from older history: the newest page the sidebar rereads still carries its old summary.
+    window.fixtureRows = rows; window.staleRows = {};
     // The app's chat groups, with main's own rules: a chat only into its own project's group.
     const groups = {version:1,groups:[{id:'g-spanish',projectId:'demo-project',name:'Spanish',createdAt:1},{id:'g-italian',projectId:'demo-project',name:'Italian',createdAt:2}],members:{'task-0':'g-spanish','task-1':'g-spanish'}};
     const copy = () => JSON.parse(JSON.stringify(groups));
@@ -62,7 +64,7 @@ app.whenReady().then(async () => {
     window.groupCalls = [];
     window.api = new Proxy({ getState:()=>ok(state),getLog:()=>ok([]),
       listProjects:()=>ok(projects),
-      listSessions:options=>ok({sessions:options?.projectId?[]:rows,total:rows.length,nextCursor:null,activeId:null,pressure:[],blocked:[]}),
+      listSessions:options=>ok({sessions:options?.projectId?[]:rows.map(r=>window.staleRows[r.id]??r),total:rows.length,nextCursor:null,activeId:null,pressure:[],blocked:[]}),
       getSwarm:()=>ok({running:false,runId:null,agents:[],maxWorkers:2,pendingReports:0}),
       getChatModels:()=>ok({state:'unknown',models:[]}),
       chatGroups:()=>ok(copy()),
@@ -75,7 +77,7 @@ app.whenReady().then(async () => {
         if(!row) return fail('This chat no longer exists'); const from=row.projectId??null, fromGroup=groups.members[sessionId]??null;
         const group=groupId?groups.groups.find(g=>g.id===groupId):null; if(groupId&&(!group||group.projectId!==projectId)) return fail("This chat is not in that group's project");
         row.projectId=projectId??undefined; if(group) groups.members[sessionId]=groupId; else if(from!==projectId) delete groups.members[sessionId];
-        return ok({from,fromGroup,groups:copy()}); },
+        return ok({from,fromGroup,groups:copy(),summaries:[{...row}]}); },
       assignChatGroup:(sessionId,groupId)=>{ window.groupCalls.push(['assign',sessionId,groupId]); const row=rows.find(r=>r.id===sessionId); const group=groups.groups.find(g=>g.id===groupId);
         if(!row) return fail('This chat no longer exists'); if(groupId===null){delete groups.members[sessionId];return ok(copy());}
         if(!group) return fail('This group no longer exists'); if(group.projectId!==row.projectId) return fail("This chat is not in that group's project");
@@ -249,6 +251,19 @@ app.whenReady().then(async () => {
     await new Promise(r=>setTimeout(r,100));
     assert.equal((await js('window.moveCalls')).length, calls, 'Escape cancels the drop');
     assert.equal(await js(place('other-task')), 'second-project');
+
+    // A chat whose row the newest page does not refresh still shows its new project (CodeRabbit on #1965).
+    await js(`window.staleRows['loose-5'] = {...window.fixtureRows.find(r=>r.id==='loose-5')}`);
+    await js(`document.querySelector('[data-id="loose-5"]').scrollIntoView({block:'center'})`);
+    await js(`document.querySelector('[data-id="loose-5"] .sess-menu').click()`);
+    await until(`!!document.querySelector('.row-menu [data-row-action="move-to-project"]')`, 'old chat menu has Move to project');
+    await js(`document.querySelector('.row-menu [data-row-action="move-to-project"]').focus()`);
+    press('Right');
+    await until(`document.querySelectorAll('.row-menu').length === 2`, 'old chat project submenu');
+    await js(`document.querySelector('[data-row-action="project-second-project"]').click()`);
+    await until(`${place('loose-5')} === 'second-project'`, 'the old chat shows its new project although the page carries its old summary');
+    await js(`document.querySelector('.toast .toast-action')?.click()`);
+    await until(`${place('loose-5')} === 'chats'`, 'its Undo shows it back where it was');
 
     // The + on a project's row is labelled New chat.
     assert.equal(await js(`document.querySelector('[data-project-id="demo-project"] .project-new').getAttribute('aria-label')`), 'New chat in this project');

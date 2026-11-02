@@ -1221,9 +1221,13 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { sessionId, projectId, groupId: target } = z.object({ sessionId: sessionIdArg.shape.id,
       projectId: z.string().min(1).max(160).nullable(), groupId: groupId.nullable().optional() }).strict().parse(payload);
     const fromGroup = (await chatGroupsState()).members[sessionId] ?? null;
-    const { from } = await moveChatToProject(sessionId, projectId);
+    const { from, moved } = await moveChatToProject(sessionId, projectId);
     const groups = await placeMovedChat(sessionId, projectId, movedChatGroup(projectId, target, from, fromGroup));
-    return { from, fromGroup, groups };
+    // The moved chats' own summaries: a row from older history is not on the newest page the
+    // sidebar rereads, and a move does not change its place in the list (CodeRabbit on #1965).
+    const summaries = (await Promise.all([...new Set([sessionId, ...moved])].map(id => getSession(id))))
+      .filter((summary): summary is NonNullable<typeof summary> => !!summary);
+    return { from, fromGroup, groups, summaries };
   });
   handle('pets:list', async () => petLibraryState());
   handle('pets:overlayState', async () => petOverlayControlState());

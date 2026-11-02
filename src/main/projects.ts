@@ -341,7 +341,6 @@ async function moveChatNow(sessionId: string, projectId: string | null): Promise
     if (!project || project.ungrouped) throw new Error('Project not found');
   }
   const from = session.projectId ?? null;
-  if (from === projectId) return { from, moved: [] };
   // Every chat that descends from this one through its sub-agents and helpers, however deep.
   const all = await indexedSessions();
   const family = [session.id];
@@ -350,7 +349,19 @@ async function moveChatNow(sessionId: string, projectId: string | null): Promise
       if ((child.origin?.kind === 'worker' || child.origin?.kind === 'helper') && child.origin.fromSessionId === family[index] && !family.includes(child.id)) family.push(child.id);
     }
   }
-  for (const id of family) await moveSessionProject(id, projectId);
+  const stray = (id: string) => (all.find(entry => entry.id === id)?.projectId ?? null) !== projectId;
+  if (from === projectId) {
+    // Already there: a family move that stopped half way (a failed write, a restart) left
+    // sub-agents behind. Moving the chat there again brings them along (CodeRabbit on #1965).
+    const behind = family.slice(1).filter(stray);
+    for (const id of behind) await moveSessionProject(id, projectId);
+    if (behind.length) logInfo(`projects: chat ${sessionId} was already in ${projectId ? `project ${projectId}` : 'no project'}; ${behind.length} of its sub-agent chat(s) were not, and now follow it`);
+    return { from, moved: behind };
+  }
+  // Sub-agents first, the main chat last: if a write fails, the main chat still shows where it was,
+  // so the person's retry is a real move and finishes the family.
+  for (const id of family.slice(1)) await moveSessionProject(id, projectId);
+  await moveSessionProject(session.id, projectId);
   logInfo(`projects: the person moved chat ${sessionId}${family.length > 1 ? ` and its ${family.length - 1} sub-agent chat(s)` : ''} from ${from ? `project ${from}` : 'no project'} to ${projectId ? `project ${projectId}` : 'no project'}; its commands now run in ${projectId ? "that project's folder" : 'the folder it worked in before'}`);
   return { from, moved: family };
 }

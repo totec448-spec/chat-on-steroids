@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { bindBrowserInputProject, claimBrowserInput, enqueueInput, listInputs, pendingBrowserInputs, resetInputForTests } from '../src/main/session/input.js';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { flushDurable, initDurableStore, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
-import { createSession, getSession, initSessionStore, rebindSession, resetSessionStoreForTests, setSessionOrigin } from '../src/main/session/store.js';
+import { createSession, getSession, initSessionStore, moveSessionProject, rebindSession, resetSessionStoreForTests, setSessionOrigin } from '../src/main/session/store.js';
 import { addProject, armProjectCreate, assignSessionProject, bindChatToLinkedProject, claimProjectCreate, completeProjectCreate, failProjectCreate, getProject, getSessionProject, inheritSessionProject, listProjects, markProjectGone, moveChatToProject, pendingProjectCreates, PROJECT_CREATE_ARMED_MS, PROJECT_CREATE_CLAIM_MS, projectWorkspace, removeProject, retryProjectCreate, sessionSecretsShieldOff, setProjectColor, setProjectSecretsShieldOff } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 import { resetWorkspaces, setWorkspaceFor } from '../src/main/workspace.js';
@@ -332,6 +332,24 @@ it("never moves a worker, or a chat that already works in a folder, into a linke
     expect(await bindChatToLinkedProject(working.id, nativeId)).toBe('kept');
     expect((await getSession(working.id))?.projectId).toBeUndefined();
   } finally { resetWorkspaces(); }
+});
+
+it('finishes a family move that stopped half way when the person moves the chat there again', async () => {
+  // A write that failed, or a restart, between the family's writes left a sub-agent behind. Moving
+  // the chat to the project it already shows must still bring the rest of the family along.
+  const first = await addProject(path.join(approved, 'first'));
+  const second = await addProject(path.join(approved, 'second'));
+  const chat = await createSession({ title: 'Main', conversationId: randomUUID() });
+  await assignSessionProject(chat.id, first.id);
+  const worker = await createSession({ title: 'Worker', conversationId: randomUUID() });
+  await setSessionOrigin(worker.id, { kind: 'worker', fromSessionId: chat.id, agentId: 'worker-1', task: 'Check' }, 'Worker');
+  await moveSessionProject(chat.id, second.id);
+  expect((await getSession(worker.id))?.projectId).toBe(first.id);
+
+  expect(await moveChatToProject(chat.id, second.id)).toEqual({ from: second.id, moved: [worker.id] });
+  expect((await getSession(worker.id))?.projectId).toBe(second.id);
+  // Nothing left to repair: a no-op again.
+  expect(await moveChatToProject(chat.id, second.id)).toEqual({ from: second.id, moved: [] });
 });
 
 it('moves a chat with its sub-agents to another project and out again, and keeps it where the person put it (#1919)', async () => {

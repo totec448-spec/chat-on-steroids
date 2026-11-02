@@ -4690,10 +4690,13 @@ like the project), then the project's ungrouped chats. A group holding the open 
 Project menu: New group; chat menu: Move to group (this project's groups, New group…) and Remove
 from group. Names use the shared in-app dialog `renderer/name-dialog.ts`.
 Move to project (#1919) changes a main chat's project, unlike the one-time binding: IPC
-`sessions:moveProject { sessionId, projectId | null, groupId? }` → `{ from, fromGroup, groups }`. Main
+`sessions:moveProject { sessionId, projectId | null, groupId? }` → `{ from, fromGroup, groups, summaries }`
+(`summaries`: the moved chats' fresh summaries, which the sidebar puts on rows it already shows). Main
 (`moveChatToProject` in `projects.ts`, `moveSessionProject` in the store) refuses a worker or helper
 chat and a missing or removed project, allows a project whose folder is missing, moves every
-descendant sub-agent and helper chat (by `origin.fromSessionId`) with it, never a branch, logs the
+descendant sub-agent and helper chat (by `origin.fromSessionId`) with it, sub-agents first and the
+main chat last, and on a move to the project the chat already has moves only the family members
+left behind by an earlier move that stopped half way; never a branch, logs the
 move, and sets `projectChosen: true` on each summary, which stops `bindChatToLinkedProject` from
 binding it again. Moved into a project, the chat's commands then run in that project's folder (the
 binding is the workspace authority); moved out (\`null\`), they run in the folder the chat worked in
