@@ -45,8 +45,9 @@ export function createActiveTabs(chrome) {
     try { await within(attaching, 'Attach'); }
     catch (error) {
       state.failed = true;
-      // An attach that answers after its time ran out is ours: release it rather than leave the tab held.
-      if (/timed out/.test(error?.message || '')) void attaching.then(() => chrome.debugger.detach({ tabId: state.id })).catch(() => undefined);
+      // An attach that answers after its time ran out is ours: it goes into retiring custody, released by the
+      // bounded detach and kept there until the release is confirmed (CodeRabbit on #2027).
+      if (/timed out/.test(error?.message || '')) void attaching.then(() => { state.attached = true; retiring.add(state); return sync(); }).catch(() => undefined);
       return;
     }
     finally { state.attaching = false; }
