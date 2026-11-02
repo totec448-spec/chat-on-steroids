@@ -25,6 +25,13 @@ localizeDocument();
  * which are the app's default palette, follow the computer's light or dark setting.
  */
 const APP_APPEARANCE_KEY = 'appAppearance';
+// Every color the app sends. A palette missing one keeps the stylesheet's whole set instead: mixing the
+// two can put the app's white text on the stylesheet's light page.
+const APP_TOKENS = ['--page', '--card', '--ink', '--soft', '--faint', '--line', '--edge', '--hover', '--track',
+  '--accent', '--accent-wash', '--accent-fill', '--on-accent', '--knob-off', '--knob-on', '--green', '--green-wash',
+  '--red', '--red-wash'];
+const completePalette = tokens => Boolean(tokens) && typeof tokens === 'object' &&
+  APP_TOKENS.every(name => /^#[0-9a-f]{6}$/i.test(String(tokens[name])));
 const darkScheme = globalThis.matchMedia?.('(prefers-color-scheme: dark)') ?? null;
 let appearance = null;
 
@@ -35,24 +42,27 @@ function paintAppearance() {
   const dark = appearance.theme === 'dark' || (appearance.theme === 'system' && Boolean(darkScheme?.matches));
   root.dataset.theme = dark ? 'dark' : 'light';
   root.style.colorScheme = dark ? 'dark' : 'light';
-  for (const [name, value] of Object.entries(dark ? appearance.dark : appearance.light)) {
-    if (/^--[a-z-]{2,30}$/.test(name) && /^#[0-9a-f]{6}$/i.test(String(value))) root.style.setProperty(name, value);
-  }
+  const palette = dark ? appearance.dark : appearance.light;
+  for (const name of APP_TOKENS) root.style.setProperty(name, palette[name]);
 }
 
 function useAppearance(value) {
   const valid = value && typeof value === 'object' && ['light', 'dark', 'system'].includes(value.theme) &&
-    value.light && typeof value.light === 'object' && value.dark && typeof value.dark === 'object';
+    completePalette(value.light) && completePalette(value.dark);
   appearance = valid ? value : null;
   paintAppearance();
 }
 
 try {
-  void Promise.resolve(chrome.storage.local.get(APP_APPEARANCE_KEY))
-    .then(stored => useAppearance(stored?.[APP_APPEARANCE_KEY])).catch(() => undefined);
+  // A change that arrives while the first read is pending is newer than what that read returns.
+  let changedDuringRead = false;
   chrome.storage.onChanged?.addListener?.((changes, area) => {
-    if (area === 'local' && changes?.[APP_APPEARANCE_KEY]) useAppearance(changes[APP_APPEARANCE_KEY].newValue);
+    if (area !== 'local' || !changes?.[APP_APPEARANCE_KEY]) return;
+    changedDuringRead = true;
+    useAppearance(changes[APP_APPEARANCE_KEY].newValue);
   });
+  void Promise.resolve(chrome.storage.local.get(APP_APPEARANCE_KEY))
+    .then(stored => { if (!changedDuringRead) useAppearance(stored?.[APP_APPEARANCE_KEY]); }).catch(() => undefined);
 } catch {
   // No storage here: the stylesheet's defaults stay.
 }

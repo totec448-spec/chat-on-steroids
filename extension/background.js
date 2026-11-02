@@ -3235,22 +3235,36 @@ async function followAppNow(data) {
  */
 const APP_APPEARANCE_KEY = 'appAppearance';
 const APPEARANCE_THEMES = new Set(['light', 'dark', 'system']);
+// Every color the app sends (main/extension-appearance.ts); a palette missing one is no palette.
+const APPEARANCE_TOKENS = ['--page', '--card', '--ink', '--soft', '--faint', '--line', '--edge', '--hover', '--track',
+  '--accent', '--accent-wash', '--accent-fill', '--on-accent', '--knob-off', '--knob-on', '--green', '--green-wash',
+  '--red', '--red-wash'];
 let appAppearanceApplied = null;
 let appAppearanceWriting = null;
+let appAppearancePending = null;
 function validAppearanceTokens(tokens) {
   if (!tokens || typeof tokens !== 'object' || Array.isArray(tokens)) return false;
   const entries = Object.entries(tokens);
-  return entries.length > 0 && entries.length <= 40 && entries.every(([name, value]) => /^--[a-z-]{2,30}$/.test(name) && /^#[0-9a-f]{6}$/i.test(value));
+  return entries.length > 0 && entries.length <= 40 && entries.every(([name, value]) => /^--[a-z-]{2,30}$/.test(name) && /^#[0-9a-f]{6}$/i.test(value)) &&
+    APPEARANCE_TOKENS.every(name => Object.hasOwn(tokens, name));
 }
 function followAppearance(value) {
   if (!value || !APPEARANCE_THEMES.has(value.theme) || !validAppearanceTokens(value.light) || !validAppearanceTokens(value.dark)) return;
-  const json = JSON.stringify({ theme: value.theme, light: value.light, dark: value.dark });
-  // A write in flight finishes first; a status after it writes the newest colors if they differ.
-  if (json === appAppearanceApplied || appAppearanceWriting) return;
+  writeAppearance(JSON.stringify({ theme: value.theme, light: value.light, dark: value.dark }));
+}
+function writeAppearance(json) {
+  // One write at a time. Colors that arrive meanwhile wait, and only the newest of them is written
+  // after it: a theme changed during a slow write is not lost if no status follows.
+  if (appAppearanceWriting) { appAppearancePending = json; return; }
+  appAppearancePending = null;
+  if (json === appAppearanceApplied) return;
   appAppearanceWriting = boundedStorage(chrome.storage.local.set({ [APP_APPEARANCE_KEY]: JSON.parse(json) }), 'write')
     .then(() => { appAppearanceApplied = json; })
     .catch(() => undefined)
-    .finally(() => { appAppearanceWriting = null; });
+    .finally(() => {
+      appAppearanceWriting = null;
+      if (appAppearancePending) writeAppearance(appAppearancePending);
+    });
 }
 
 /**
