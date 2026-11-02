@@ -4,6 +4,8 @@ import { GOAL_CONTINUATIONS, GOAL_MARKER_INSTRUCTION, templateGoalDecision, tool
 import { promises as fs } from 'node:fs';
 const browser = vi.hoisted(() => ({ request: vi.fn(), authorize: vi.fn(), inputs: [] as Array<{ id: string; sessionId: string; finishOwner?: { turnId: string; periodic: boolean } }> }));
 vi.mock('../src/main/session/input.js', () => ({ requestBrowserDecision: browser.request, authorizeBrowserHelperRetry: browser.authorize, listInputs: async () => browser.inputs }));
+const warnings = vi.hoisted(() => [] as string[]);
+vi.mock('../src/main/logger.js', async original => ({ ...await original<typeof import('../src/main/logger.js')>(), logWarn: (line: string) => { warnings.push(line); } }));
 vi.mock('electron', () => ({
   app: { getPath: () => '', getVersion: () => '0.0.0' },
   safeStorage: {
@@ -331,6 +333,8 @@ describe('Goal decision backends', () => {
       await vi.waitFor(() => expect(browser.request).toHaveBeenCalledTimes(1), { timeout: 15_000 });
       await vi.advanceTimersByTimeAsync(goal.goalRequestTimeoutMs('chatgpt'));
       expect(await settled(id)).toMatchObject({ stage: 'failed' });
+      // The log names the limit that ended it, so a timeout shows which deadline applied.
+      expect(warnings.some(line => line.includes(`goal: draft for ${id} failed — timeout_or_cancelled (the 5-minute limit for the chatgpt helper at high reasoning)`))).toBe(true);
       full = (browser.request.mock.calls[0]?.[0] as string).length;
       expect(full).toBeGreaterThan(60_000);
 
