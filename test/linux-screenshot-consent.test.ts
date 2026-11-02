@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { testLinuxScreenshotConsent } from '../src/main/computer/linux-screenshot-consent.js';
+import { logInfo } from '../src/main/logger.js';
+
+vi.mock('../src/main/logger.js', () => ({ logInfo: vi.fn() }));
 
 const tinyPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 function context() {
@@ -61,6 +64,7 @@ describe.skipIf(process.platform !== 'linux')('manual GNOME screenshot permissio
     expect(deps.run).toHaveBeenCalledExactlyOnceWith({ kind: 'screenshot', display: 0 });
   });
   it('rejects a consent result if Screen or native opt-in was revoked during capture', async () => {
+    vi.mocked(logInfo).mockClear();
     for (const revoke of ['setEnabled', 'setScreen'] as const) {
       const deps = context();
       deps.run.mockImplementationOnce(async () => {
@@ -70,6 +74,11 @@ describe.skipIf(process.platform !== 'linux')('manual GNOME screenshot permissio
       });
       await expect(testLinuxScreenshotConsent(deps)).rejects.toThrow('disabled during the screenshot request');
       expect(deps.run).toHaveBeenCalledTimes(1);
+    }
+    expect(logInfo).toHaveBeenCalledTimes(2);
+    for (const [message] of vi.mocked(logInfo).mock.calls) {
+      expect(message).toContain('discarded the capture');
+      expect(message).not.toContain(tinyPng);
     }
   });
   it('does not retry a portal refusal or return application error details', async () => {
