@@ -24,7 +24,7 @@ function setup(stored: unknown[] = []) {
       sendCommand: vi.fn(async () => ({}))
     }
   };
-  const make = () => vm.runInNewContext(`${source}; createActiveTabs(chrome)`, { chrome });
+  const make = () => vm.runInNewContext(`${source}; createActiveTabs(chrome)`, { chrome, setTimeout, clearTimeout });
   return { chrome, data, tabs, attached, make, control: make() };
 }
 
@@ -154,5 +154,114 @@ describe('active ChatGPT rendering leases', () => {
     await restored.revoke();
     await restored.set('policy', [home]);
     expect(chrome.debugger.attach).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('a renderer that never answers', () => {
+  // 2026-11-01: one debugger command without an answer held every later lease change, and the worker's
+  // status pass with it. A command now gives up after five seconds and releases the tab.
+  it('gives up on a focus command that never answers and releases the tab', async () => {
+    vi.useFakeTimers();
+    try {
+      const { control, chrome, attached } = setup();
+      chrome.debugger.sendCommand.mockImplementation(() => new Promise(() => undefined));
+      let settled = false;
+      const change = control.set('policy', [A]).finally(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(4_900);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(200);
+      await change;
+      expect([...attached]).toEqual([]);
+      // Marked failed, so the next pass does not attach again and wait once more.
+      await control.set('policy', [A]);
+      expect(chrome.debugger.attach).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  // CodeRabbit on #2027: a late attachment whose first release fails is kept and released by a later pass.
+  it('keeps a late attachment in custody until its release goes through', async () => {
+    vi.useFakeTimers();
+    try {
+      const { control, chrome, attached } = setup();
+      let finish: (() => void) | null = null;
+      chrome.debugger.attach.mockImplementation(({ tabId }: { tabId: number }) => new Promise<void>(resolve => {
+        finish = () => { attached.add(tabId); resolve(); };
+      }));
+      chrome.debugger.detach.mockRejectedValueOnce(new Error('transient'));
+      await vi.advanceTimersByTimeAsync(0);
+      const change = control.set('policy', [A]);
+      await vi.advanceTimersByTimeAsync(5_100);
+      await change;
+      finish!();
+      await vi.advanceTimersByTimeAsync(0);
+      expect([...attached]).toEqual([1]);
+      expect(control.owns(1)).toBe(true);
+      await control.revoke().catch(() => undefined);
+      expect([...attached]).toEqual([]);
+      expect(control.owns(1)).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+
+  // CodeRabbit on #2027: a lease whose focus command failed and whose release failed too is released by a
+  // later ordinary policy pass, not only by revoke().
+  it('retries the release of a failed lease on the next policy pass', async () => {
+    const { control, chrome, attached } = setup();
+    chrome.debugger.sendCommand.mockRejectedValueOnce(new Error('renderer gone'));
+    chrome.debugger.detach.mockRejectedValueOnce(new Error('transient'));
+    await control.set('policy', [A]).catch(() => undefined);
+    expect([...attached]).toEqual([1]);
+    await control.set('policy', [A]).catch(() => undefined);
+    expect([...attached]).toEqual([]);
+    // Still failed for this activity: not attached again.
+    expect(chrome.debugger.attach).toHaveBeenCalledTimes(1);
+  });
+
+  // CodeRabbit on #2027: a release that keeps failing does not keep another tab from its lease.
+  it('gives other tabs their leases while one release keeps failing', async () => {
+    const { control, chrome, attached } = setup();
+    await control.set('policy', [A]);
+    chrome.debugger.detach.mockRejectedValue(new Error('still attached'));
+    await expect(control.set('policy', [B])).rejects.toThrow('release remains pending');
+    expect(attached.has(2)).toBe(true);
+    expect(control.owns(1)).toBe(true);
+    chrome.debugger.detach.mockImplementation(async ({ tabId }: { tabId: number }) => { attached.delete(tabId); });
+    await control.set('policy', [B]);
+    expect([...attached]).toEqual([2]);
+  });
+
+  // CodeRabbit on #2027: a tab whose previous lease is still being released is not attached again until
+  // that release goes through, so it does not end up failed for good.
+  it('waits for a pending release of the same tab before attaching it again', async () => {
+    const { control, chrome, attached, tabs } = setup();
+    await control.set('policy', [A]);
+    chrome.debugger.detach.mockRejectedValueOnce(new Error('still attached'));
+    // Same tab, new page: the old lease retires, its release fails once.
+    tabs.set(1, { ...A, url: 'https://chatgpt.com/c/a2' });
+    await control.set('policy', [{ ...A, url: 'https://chatgpt.com/c/a2' }]).catch(() => undefined);
+    expect(chrome.debugger.attach).toHaveBeenCalledTimes(1);
+    // The release goes through on the next pass, and only then is the tab attached for its new page.
+    await control.set('policy', [{ ...A, url: 'https://chatgpt.com/c/a2' }]);
+    expect(chrome.debugger.attach).toHaveBeenCalledTimes(2);
+    expect([...attached]).toEqual([1]);
+    expect(control.owns(1)).toBe(true);
+  });
+
+  it('releases an attachment that answers only after it was given up', async () => {
+    vi.useFakeTimers();
+    try {
+      const { control, chrome, attached } = setup();
+      let finish: (() => void) | null = null;
+      chrome.debugger.attach.mockImplementation(({ tabId }: { tabId: number }) => new Promise<void>(resolve => {
+        finish = () => { attached.add(tabId); resolve(); };
+      }));
+      const change = control.set('policy', [A]);
+      await vi.advanceTimersByTimeAsync(5_100);
+      await change;
+      expect(chrome.debugger.sendCommand).not.toHaveBeenCalled();
+      finish!();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(chrome.debugger.detach).toHaveBeenCalledWith({ tabId: 1 });
+      expect([...attached]).toEqual([]);
+    } finally { vi.useRealTimers(); }
   });
 });

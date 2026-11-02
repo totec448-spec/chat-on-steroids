@@ -89,11 +89,25 @@ app.whenReady().then(async () => {
             .filter(el => el.checkVisibility() && !['auto', 'scroll'].includes(getComputedStyle(el).overflowX) && el.scrollWidth > el.clientWidth + 1)
             .map(el => el.id || el.className);
           const grid = document.querySelector('.heat-grid');
-          return { overflows, pageOverflow: panel.scrollWidth > panel.clientWidth + 1,
+          // Design audit 2026-11-01: a text field beside its explanation squeezed it to a narrow column
+          // (8 lines in German). The explanation keeps at least 20rem, or the field moves under it.
+          const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+          const squeezed = [...panel.querySelectorAll('.setting-text-field, .phone-push-field')].filter(row => row.checkVisibility()).filter(row => {
+            const text = row.querySelector('.setting-text').getBoundingClientRect(), control = row.querySelector('.setting-text-control, .phone-push-control').getBoundingClientRect();
+            return control.top < text.bottom - 1 && text.width < 20 * rem - 1;
+          }).map(row => row.querySelector('input').id);
+          // The update card ends at its padding: an actions row with nothing to show takes no space.
+          let cardTail = 0;
+          if ('${page}' === 'activity') {
+            const card = document.getElementById('updateReadinessCard'), box = card.getBoundingClientRect();
+            const last = Math.max(...[...card.children].filter(child => child.checkVisibility() && child.getBoundingClientRect().height > 0).map(child => child.getBoundingClientRect().bottom));
+            cardTail = Math.round(box.bottom - last - parseFloat(getComputedStyle(card).paddingBottom) - parseFloat(getComputedStyle(card).borderBottomWidth));
+          }
+          return { overflows, squeezed, cardTail, pageOverflow: panel.scrollWidth > panel.clientWidth + 1,
             heatColumns: '${page}' === 'usage' ? getComputedStyle(grid).gridTemplateColumns.split(' ').length : null,
             heatHeight: '${page}' === 'usage' ? grid.getBoundingClientRect().height : null };
         })()`);
-        if (result.pageOverflow || result.overflows.length || (page === 'usage' && (result.heatColumns !== 53 || result.heatHeight < 70))) failures.push({ theme, width, zoom, page, ...result });
+        if (result.pageOverflow || result.overflows.length || result.squeezed.length || Math.abs(result.cardTail) > 1 || (page === 'usage' && (result.heatColumns !== 53 || result.heatHeight < 70))) failures.push({ theme, width, zoom, page, ...result });
         if (page === 'home') {
           const emptySpacing = await js(`(() => {
             const empty = document.getElementById('rootsEmpty'); empty.hidden = false;

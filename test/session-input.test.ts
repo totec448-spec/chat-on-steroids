@@ -9,7 +9,7 @@ import {
   fileSilenceInput, deferSilenceInput, revokeSilenceInputs, pendingQueuedPickups, inputBeforeGoal, inputArgs, acknowledgeBrowserInput, cancelInput, claimBrowserInput, completeBrowserDecision, enqueueInput,
   failBrowserInput, listInputs, offerToolInput as offerToolInputBatch, acknowledgeToolInput, pendingBrowserInputs, requestBrowserDecision, resetInputForTests, configureInputDelivery,
   authorizeBrowserHelperRetry, pausedBrowserHelpers, hasEligibleToolInput, editQueuedInput, reorderQueuedInputs, setInputAutomation, authorizeBrowserInput, sessionInputPolicy, retryUnclaimedInput,
-  noteInputStartupError, fileRotationInput, failBranchInput, BRANCH_ERRORS, holdInputForSendCheck
+  noteInputStartupError, fileRotationInput, failBranchInput, BRANCH_ERRORS, holdInputForSendCheck, ownUnsentTexts
 } from '../src/main/session/input.js';
 import type { InputArgs, InputEntry } from '../src/main/session/input.js';
 import { editReplacement } from '../src/main/session/edits.js';
@@ -1414,6 +1414,17 @@ describe('browser decision lifetime', () => {
     await rejection;
     expect((await listInputs())[0]?.state).toBe('failed');
   });
+  // 2026-11-01: only the picker failed; nothing was typed, so Goal may ask again.
+  it('rejects a helper whose model the page could not confirm with its own retryable code', async () => {
+    const controller = new AbortController();
+    const answer = requestBrowserDecision('Choose one', controller.signal);
+    const rejection = expect(answer).rejects.toThrow('goal_helper_model_unconfirmed: Requested model or reasoning could not be confirmed');
+    const row = (await listInputs())[0]!;
+    await claimBrowserInput(row.id, 'document', null);
+    await failBrowserInput(row.id, 'document', 'Requested model or reasoning could not be confirmed', 'model-unconfirmed');
+    await rejection;
+    expect((await listInputs())[0]?.state).toBe('failed');
+  });
   it('rejects cancellation that races a persisted answer', async () => {
     const controller = new AbortController();
     const answer = requestBrowserDecision('Choose one', controller.signal);
@@ -2394,5 +2405,34 @@ describe('edit and resubmit (#365)', () => {
     const edited = randomUUID();
     expect(await acknowledgeBrowserInput(entry.id, claim!.owner!, 'conversation-a', edited)).toBe(true);
     expect(editReplacement(edited)).toBe(later);
+  });
+});
+
+// #1922: which of the app's own messages a page may replace when it finds one left in the composer.
+describe('own messages that never reached Send', () => {
+  it('lists only claimed, never-authorized, attachment-free messages of that chat from the last day, newest first', async () => {
+    const base = { sessionId, mode: 'auto' as const, dueAt: 0, model: null, reasoningEffort: null, owner: null, conversationId: 'conversation-a', offeredAt: now, requiresAuthorization: true };
+    const row = (text: string, extra: Partial<InputEntry> = {}): InputEntry =>
+      ({ ...base, id: randomUUID(), text, state: 'cancelled', createdAt: now - 1_000, ...extra } as InputEntry);
+    const rows = [
+      row('withdrawn continue'),
+      row('failed with frozen text', { state: 'failed', deliveryText: 'frozen delivery text', createdAt: now - 500 }),
+      row('authorized, then lost', { sendAuthorizedAt: now }),
+      row('delivered', { state: 'sent', deliveredAt: now }),
+      row('never claimed', { offeredAt: undefined }),
+      row('other chat', { conversationId: 'conversation-b' }),
+      row('with an image', { images: [{ name: 'a.webp', dataUrl: 'data:image/webp;base64,AAAA' }] }),
+      row('yesterday', { createdAt: now - 25 * 60 * 60_000 }),
+      // An older saved claim that never needed Send authorization may have been sent.
+      row('old claim without authorization', { requiresAuthorization: undefined }),
+      // A message and its companion went out as one text: neither alone is listed.
+      row('combined root', { companionInputId: '00000000-0000-4000-8000-000000000001' }),
+      row('its companion', { id: '00000000-0000-4000-8000-000000000001' })
+    ];
+    await writeDurableNow('session-input', rows);
+    resetInputForTests();
+    expect(await ownUnsentTexts('conversation-a', 'someone-else', now)).toEqual(['frozen delivery text', 'withdrawn continue']);
+    // A message is never its own leftover.
+    expect(await ownUnsentTexts('conversation-a', rows[0]!.id, now)).toEqual(['frozen delivery text']);
   });
 });
