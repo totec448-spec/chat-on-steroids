@@ -179,8 +179,10 @@ let resetSignal = new AbortController();
  * Called after every wait in a pass, before it writes a file or the staged update: a pass that
  * outlived a reset wrote the installer and staged it for the next state (CodeRabbit on #2018).
  */
+/** Never shown: the pass that throws it can no longer write the status (`set` and the catch both check). */
+class SupersededPass extends Error {}
 function stillCurrent(): void {
-  if (stale()) throw new Error('the update state was reset while this pass was waiting');
+  if (stale()) throw new SupersededPass('the update state was reset while this pass was waiting');
 }
 
 function set(next: Partial<UpdateStatus>): void {
