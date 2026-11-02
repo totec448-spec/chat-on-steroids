@@ -737,7 +737,10 @@ export async function openSessionChat(id: string): Promise<void> {
 
 /** A message the person wrote: not an automatic Continue, a Goal decision, a finish step or an opening. */
 export function personsMessage(entry: InputEntry): boolean {
-  return !entry.opening && !entry.recovery && !entry.continuedFrom && !entry.purpose && !entry.finishOwner && entry.mode !== 'finish';
+  // Who wrote it, not when it goes: a message the person queued for the finish is still theirs,
+  // while the finish's generated checkpoints carry no authored text (CodeRabbit on #1981).
+  return !entry.opening && !entry.recovery && !entry.continuedFrom && !entry.purpose && !entry.finishOwner &&
+    (entry.authoredSource ?? 'text') !== 'none';
 }
 
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {

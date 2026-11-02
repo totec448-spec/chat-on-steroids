@@ -458,7 +458,21 @@ it('names the new folder once in the person\'s next message after a move into a 
   expect(await prepareSkillFollowup('Next step', 'Next step', undefined, { sessionId: chat.id }, false)).toBe('Next step');
   await clearProjectNote(chat.id);
   expect((await getSession(chat.id))?.projectNotePending).toBeUndefined();
-  // Moved in again, then out: out has no folder to name.
+  // Moved in again, then out while that note is pending: out has no folder to name.
+  const other = await addProject(path.join(approved, 'first'));
+  await moveChatToProject(chat.id, other.id);
+  expect((await getSession(chat.id))?.projectNotePending).toBe(true);
   await moveChatToProject(chat.id, null);
   expect((await getSession(chat.id))?.projectNotePending).toBeUndefined();
+});
+
+it('never gives a sub-agent chat the folder note: an isolated worker keeps its own workspace', async () => {
+  const project = await addProject(path.join(approved, 'second'));
+  const chat = await createSession({ title: 'Main', conversationId: randomUUID() });
+  const worker = await createSession({ title: 'Worker', conversationId: randomUUID() });
+  await setSessionOrigin(worker.id, { kind: 'worker', fromSessionId: chat.id, agentId: 'worker-1', task: 'Check' }, 'Worker');
+  await moveChatToProject(chat.id, project.id);
+  expect((await getSession(worker.id))?.projectId).toBe(project.id);
+  expect((await getSession(worker.id))?.projectNotePending).toBeUndefined();
+  expect((await getSession(chat.id))?.projectNotePending).toBe(true);
 });
