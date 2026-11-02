@@ -3015,6 +3015,29 @@ describe('desktop input delivery and helper ownership', () => {
     if (!fresh) expect(composerText(live.document)).toBe('Restored old home draft');
   });
 
+  // CodeRabbit on #2028: ChatGPT can restore the app's own listed leftover only while the model is being
+  // chosen (a slow machine); the empty composer seen at claim time must not decide it.
+  it('replaces its own listed leftover restored during model selection', async () => {
+    const leftover = 'Continue with the next step of the task.';
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize ? { ok: true } : message.ack || message.fail ? { ok: true }
+        : { input: claimed(), ownUnsent: [leftover] } })
+    });
+    (live.window as any).CLF_DOM.selectModelSettings = async () => {
+      live!.document.querySelector('#prompt-textarea')!.textContent = leftover;
+      return true;
+    };
+    let sentText = '';
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      sentText = composerText(live!.document);
+      userTurn(live!.document, 'restored-leftover-question', text);
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+      live!.hook.observe();
+    });
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA })).toEqual({ ok: true });
+    expect(sentText.replace(/\s+/g, ' ').trim()).toBe(text.replace(/\s+/g, ' ').trim());
+  });
+
   it('abandons a claimed existing input after an A-to-B navigation without touching the new draft', async () => {
     let release!: (value: unknown) => void;
     let entered!: () => void;

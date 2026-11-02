@@ -1714,9 +1714,10 @@ rechecks composer and attachment nodes, crosses app authorization, then **rechec
 every await before Send**. Native stable user-message and conversation identity establish
 acceptance. Composer insertion, button disappearance and a local “sent” variable do not.
 An occupied composer blocks delivery unless it holds this message's own text, or exactly one of the
-app's own unsent messages for that chat: `/input/claim` returns `ownUnsent` (`ownUnsentTexts`: claimed,
-then failed or withdrawn before Send authorization, no images or attachments, the last 24 h, at most
-5, newest first; never the claimed message itself). The page compares with whitespace removed, also
+app's own unsent messages for that chat: `/input/claim` returns `ownUnsent` (`ownUnsentTexts`: claimed
+with `requiresAuthorization`, then failed or withdrawn before Send authorization, no images or
+attachments, not part of a combined companion claim, the last 24 h, at most 5, newest first; never the
+claimed message itself). The page re-reads it after model selection, where ChatGPT may restore it. The page compares with whitespace removed, also
 Markdown-unescaped, and replaces that text as a whole; edited or unlisted text stays the person's
 draft (#1922: a rotation continue left in the box refused every later message).
 

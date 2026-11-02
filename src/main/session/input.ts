@@ -1983,9 +1983,16 @@ const OWN_UNSENT_MAX = 5;
  * it were the person's draft. A page that finds exactly one of these in the composer replaces it.
  */
 export async function ownUnsentTexts(conversationId: string, exceptId: string, now = Date.now()): Promise<string[]> {
-  return (await listInputs())
+  const rows = await listInputs();
+  // A claim that combined a message with a queued companion went out as one composer text; neither row
+  // alone is what was inserted, so neither is listed (CodeRabbit on #2028).
+  const companions = new Set(rows.flatMap(row => row.companionInputId ? [row.companionInputId] : []));
+  return rows
     .filter(row => row.id !== exceptId && row.conversationId === conversationId && (row.state === 'failed' || row.state === 'cancelled') &&
-      row.offeredAt !== undefined && row.sendAuthorizedAt === undefined && row.deliveredAt === undefined &&
+      // Only a claim that needed Send authorization proves, by its missing authorization, that Send never ran;
+      // an older saved claim without it may have been sent (CodeRabbit on #2028).
+      row.requiresAuthorization === true && row.offeredAt !== undefined && row.sendAuthorizedAt === undefined && row.deliveredAt === undefined &&
+      !row.companionInputId && !companions.has(row.id) &&
       !row.images?.length && !row.attachments?.length && now - row.createdAt < OWN_UNSENT_MS)
     .sort((a, b) => b.createdAt - a.createdAt)
     .slice(0, OWN_UNSENT_MAX)
