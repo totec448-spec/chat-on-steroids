@@ -3707,5 +3707,17 @@
   "Plugins could not be loaded.": "無法載入外掛。",
   "Pets could not be loaded.": "無法載入寵物。",
   "Continue in a new chat from the last summary": "用最近的摘要在新聊天中繼續",
-  "ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.": "ChatGPT 已有 15 分鐘沒有寫出摘要。可以用最近儲存的摘要在新聊天中繼續工作。"
+  "ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.": "ChatGPT 已有 15 分鐘沒有寫出摘要。可以用最近儲存的摘要在新聊天中繼續工作。",
+  "Drag a chat here, or move it from its menu.": "把對話拖到這裡，或從它的選單中移動。",
+  "Move to project": "移到專案",
+  "Move this chat to a project; its commands then run in that project's folder": "將此對話移到一個專案；之後它的指令會在該專案的資料夾中執行",
+  "Moved to {0}": "已移到 {0}",
+  "Moved out of its project": "已移出所在專案",
+  "ChatGPT keeps it where it was.": "在 ChatGPT 中它仍在原處。",
+  "Undo": "復原",
+  "Move undone": "已復原移動",
+  "Today": "今天",
+  "Yesterday": "昨天",
+  "Previous 7 days": "過去 7 天",
+  "Previous 30 days": "過去 30 天"
 }
