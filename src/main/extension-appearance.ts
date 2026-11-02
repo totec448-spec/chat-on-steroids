@@ -1,4 +1,4 @@
-import { defaultAppearance, paletteTokens } from '../shared/appearance.js';
+import { defaultAppearance, effectivePalette, paletteTokens } from '../shared/appearance.js';
 import { getConfig } from './config.js';
 
 /**
@@ -6,7 +6,7 @@ import { getConfig } from './config.js';
  * like one product (2026-11-01). Sent with every status reply, next to the language: both themes'
  * tokens, and which one the app shows ("system" follows the computer, as in the app).
  */
-const POPUP_TOKENS = [
+export const POPUP_TOKENS = [
   '--page', '--card', '--ink', '--soft', '--faint', '--line', '--edge', '--hover', '--track',
   '--accent', '--accent-wash', '--accent-fill', '--on-accent', '--knob-off', '--knob-on',
   '--green', '--green-wash', '--red', '--red-wash'
@@ -25,11 +25,13 @@ export function extensionAppearance(): ExtensionAppearance {
   const key = JSON.stringify([theme, appearance.light, appearance.dark, high]);
   // Status replies come every second or two; the palette changes only in Settings.
   if (cached?.key === key) return cached.value;
-  const pick = (palette: typeof appearance.light): Record<string, string> => {
+  // The palette the app paints with: under high contrast a black or white page, not the chosen one.
+  const pick = (which: 'light' | 'dark'): Record<string, string> => {
+    const palette = effectivePalette(appearance, which);
     const tokens = paletteTokens(palette.background, palette.accent, palette.contrast, high);
     return Object.fromEntries(POPUP_TOKENS.flatMap(name => tokens[name] ? [[name, tokens[name]]] : []));
   };
-  const value = { theme, light: pick(appearance.light), dark: pick(appearance.dark) };
+  const value = { theme, light: pick('light'), dark: pick('dark') };
   cached = { key, value };
   return value;
 }
