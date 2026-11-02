@@ -5334,7 +5334,9 @@ allows initial enrollment. Tolerant reads for auxiliary state keep their existin
 
 For native tunnel-backed refresh, the helper preserves unambiguous proven-ID discovery through
 renames; when call-derived aliases collide, it visits only the unique configured-name installed
-row or its durable exact App ID. The isolated reader passes an optional `refresh: { appId, surface }`
+row or its durable exact App ID. An unbound request may inspect a unique configured-name row if
+none of its proven-ID rows remains installed; a bound target never borrows that replacement.
+The isolated reader passes an optional `refresh: { appId, surface }`
 on `clf-plugin-ask` so the native Fiber reader applies that surface's catalog bound only to the
 exact matching card, even when its learned Plugins alias is missing. Legacy reads keep their
 existing limits. This hint grants only bounded inspection, not ownership or a Refresh click.

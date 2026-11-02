@@ -2975,15 +2975,30 @@ var CLF_DOM = (() => {
         if (!main || (!nativeInspection && !proven.length && !connectorNames().includes(connectorName))) return null;
         // Measured 2026-10-11: installed rows became links to exact management pages.
         // Catalog and external links cannot identify an installed connector.
-        const rows = [...main.querySelectorAll('button,a[href]')].filter(button => {
-          if (!button.isConnected || button.disabled || button.getClientRects().length === 0 || button.closest(`${OWN_SURFACES}, ${TURN}`) || !composerCssVisible(button)) return false;
+        const visible = [...main.querySelectorAll('button,a[href]')].filter(button => button.isConnected && !button.disabled &&
+          button.getClientRects().length > 0 && !button.closest(`${OWN_SURFACES}, ${TURN}`) && composerCssVisible(button));
+        const installedId = button => {
+          if (button.tagName !== 'A') return null;
+          const url = new URL(button.href, location.href);
+          return url.origin === location.origin && !url.hash
+            ? /^\/settings\/plugins-settings\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(url.pathname)?.[1] ?? null : null;
+        };
+        if (nativeInspection) {
+          const ids = expectedAppId !== null ? [expectedAppId] : namedTargetId !== undefined ? [namedTargetId] : proven.map(app => app.appId);
+          const exact = visible.filter(button => ids.includes(installedId(button)));
+          if (exact.length || expectedAppId !== null) return exact.length ? exact : null;
+          // A recreated connector has a new ID: only an unbound native inspection may
+          // try its configured-name row when none of the proven IDs is still installed.
+          const configured = visible.filter(button => (button.tagName !== 'A' || installedId(button)) &&
+            [...button.querySelectorAll('*')].some(node => !node.children.length && text(node) === connectorName));
+          return configured.length ? configured : null;
+        }
+        const rows = visible.filter(button => {
           if (button.tagName === 'A') {
-            const url = new URL(button.href, location.href);
-            const route = /^\/settings\/plugins-settings\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(url.pathname);
-            if (url.origin !== location.origin || !route || url.hash) return false;
-            if (expectedAppId !== null && route[1] !== expectedAppId) return false;
-            if (namedTargetId !== undefined) return route[1] === namedTargetId;
-            if (proven.length) return proven.some(app => app.appId === route[1]);
+            const appId = installedId(button);
+            if (!appId || (expectedAppId !== null && appId !== expectedAppId)) return false;
+            if (namedTargetId !== undefined) return appId === namedTargetId;
+            if (proven.length) return proven.some(app => app.appId === appId);
             if (expectedAppId !== null) return true;
           }
           if (expectedAppId !== null || namedTargetId !== undefined) return false; // Once an exact ID is known, name-only buttons cannot prove its identity.
