@@ -59,10 +59,18 @@ app.whenReady().then(async () => {
     // A hidden offscreen compositor can lose navigations after repeated
     // resize/capture cycles on native Wayland. Opt in to a mapped test window.
     const showLinuxFixture = process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1';
-    win = new BrowserWindow({show:showLinuxFixture,width:1100,height:850,
-      webPreferences:{offscreen:!showLinuxFixture,sandbox:true,backgroundThrottling:false}});
     const errors = [];
-    win.webContents.on('console-message', event => { if (event.level === 'error' && !event.message.includes('ResizeObserver loop')) errors.push(event.message); });
+    // A mapped Wayland compositor may ignore programmatic size changes.
+    // Each layout viewport gets a fresh window with the requested content size.
+    const windowAt = (width, height) => {
+      win?.destroy();
+      win = new BrowserWindow({ show:showLinuxFixture, width, height, useContentSize:true,
+        webPreferences:{offscreen:!showLinuxFixture,sandbox:true,backgroundThrottling:false}});
+      win.webContents.on('console-message', event => {
+        if (event.level === 'error' && !event.message.includes('ResizeObserver loop')) errors.push(event.message);
+      });
+    };
+    windowAt(1100,850);
     const js = expression => win.webContents.executeJavaScript(expression);
     const pause = ms => new Promise(resolve => setTimeout(resolve,ms));
     const until = async expression => { const end=Date.now()+8000; while(Date.now()<end) { if(await js(expression)) return; await pause(40); } throw new Error('Timeout: '+expression); };
@@ -119,7 +127,7 @@ app.whenReady().then(async () => {
     await js(`(()=>{const next=structuredClone(window.fixtureState);next.connectorRefresh.core={schemaId:'schema-a',state:'unknown',responding:true};window.fixturePush(next)})()`);
     assert.equal(await js(`document.getElementById('updateReadinessDetails').open`),true,'Operational but unverified schemas need attention');
     await pause(600); await shot('schema-unverified-expanded-en.png');
-    win.setContentSize(700,850);
+    windowAt(700,850);
     for (const lang of ['en','ja']) {
       await open('lang='+lang);
       await js(`(()=>{const next=structuredClone(window.fixtureState);next.connectorRefresh.core.state='manual';window.fixturePush(next)})()`);
@@ -129,7 +137,10 @@ app.whenReady().then(async () => {
       await shot('manual-'+lang+'-narrow.png');
     }
     // Activity keeps main's fixed page and lets the event feed use the remaining height.
-    win.setContentSize(700,600); await pause(200);
+    windowAt(700,600);
+    await open('lang=ja');
+    await js(`(()=>{const next=structuredClone(window.fixtureState);next.connectorRefresh.core.state='manual';window.fixturePush(next)})()`);
+    await until(`document.getElementById('updateReadinessDetails').open`);
     assert.equal(await js(`(()=>{const p=document.querySelector('[data-panel="activity"]');return p.scrollHeight<=p.clientHeight+1})()`),true,'Long history does not add page scrolling');
     const expandedFeedHeight = await js(`document.getElementById('fullFeed').clientHeight`);
     await js(`document.querySelector('#updateReadinessDetails > summary').click()`);
@@ -141,7 +152,10 @@ app.whenReady().then(async () => {
     await js(`window.fixturePush(window.fixtureState);document.getElementById('updateAll').scrollIntoView({block:'nearest'})`);
     assert.equal(await js(`(()=>{const b=document.getElementById('updateAll'),r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.left+r.width/2,r.bottom-4))})()`),true,'Compact Update all is not covered by the event card');
     await js(`(()=>{const next=structuredClone(window.fixtureState);next.connectorRefresh.core.state='manual';window.fixturePush(next)})()`);
-    win.setContentSize(700,460);
+    windowAt(700,460);
+    await open('lang=ja');
+    await js(`(()=>{const next=structuredClone(window.fixtureState);next.connectorRefresh.core.state='manual';window.fixturePush(next)})()`);
+    await until(`document.getElementById('updateReadinessDetails').open`);
     await until(`innerWidth===700&&innerHeight===460`);
     const short = await js(`(()=>{const b=document.getElementById('updateReviewSetup');b.scrollIntoView({block:'nearest'});const a=b.getBoundingClientRect();return {top:a.top,bottom:a.bottom,viewport:innerHeight,reachable:b.contains(document.elementFromPoint(a.left+a.width/2,a.top+a.height/2))}})()`);
     assert.ok(short.top>=0 && short.bottom<=short.viewport+1,'Short window action is reachable (subpixel scroll rounding): '+JSON.stringify(short));
@@ -158,7 +172,7 @@ app.whenReady().then(async () => {
     win.webContents.sendInputEvent({type:'char',keyCode:'\r'});
     win.webContents.sendInputEvent({type:'keyUp',keyCode:'Enter'});
     await until(`document.querySelector('[data-panel="setup"]').classList.contains('is-active')`);
-    win.setContentSize(1100,850); await open('lang=en');
+    windowAt(1100,850); await open('lang=en');
     await js(`(()=>{const next=structuredClone(window.fixtureState);next.update.latest='99.0.0';next.update.stage='ready';window.fixturePush(next)})()`);
     // A ready update is asked about in the app's own dialog, Keep working first (2.1.38).
     for (const theme of ['light','dark']) {
@@ -228,7 +242,7 @@ app.whenReady().then(async () => {
     assert.equal(await js(`document.getElementById('updateReadinessSummary').dataset.ready`),'false');
     await pause(600); await shot('macos-manual-permissions-en.png');
     // All locales must keep failures and recovery actions accessible outside closed details.
-    win.setContentSize(700,600);
+    windowAt(700,600);
     for (const lang of ['en','ja','de','es','fr','ko','pt-BR','pt-PT','ru','tr','vi','zh-CN','zh-TW']) {
       await open('lang='+lang);
       await js(`(()=>{const size=document.getElementById('appearanceSize');size.value='18';size.dispatchEvent(new Event('input',{bubbles:true}))})()`);

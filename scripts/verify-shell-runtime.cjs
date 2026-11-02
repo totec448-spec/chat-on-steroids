@@ -58,14 +58,19 @@ const executable = [
     .flatMap(base => [path.join(base, 'Google/Chrome/Application/chrome.exe'), path.join(base, 'Microsoft/Edge/Application/msedge.exe')]),
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   '/Applications/Chromium.app/Contents/MacOS/Chromium',
-  '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser',
+  '/usr/bin/google-chrome', '/usr/bin/chromium',
   // Ubuntu's Chromium package is installed as a snap on supported desktops.
-  '/snap/bin/chromium'
+  '/snap/bin/chromium', '/usr/bin/chromium-browser'
 ].find(candidate => candidate && fs.existsSync(candidate));
 assert(executable, 'No Chromium found; set COS_CHROME to a Chrome or Chromium executable.');
 // Snap Chromium has a private /tmp, so the verifier must share its profile
 // directory with the confined browser in ~/snap/chromium/common.
-const snapChromium = path.resolve(executable) === '/snap/bin/chromium';
+// On Ubuntu /usr/bin/chromium-browser can be a wrapper for the Chromium snap.
+// An explicit COS_CHROME override may still choose that wrapper: it needs the
+// same Snap-accessible profile and independent watchdog as /snap/bin/chromium.
+const selectedChrome = path.resolve(executable);
+const snapChromium = selectedChrome === '/snap/bin/chromium' ||
+  (selectedChrome === '/usr/bin/chromium-browser' && fs.existsSync('/snap/bin/chromium'));
 const snapProfileRoot = path.join(os.homedir(), 'snap/chromium/common');
 if (snapChromium) fs.mkdirSync(snapProfileRoot, { recursive: true });
 const profile = snapChromium ? fs.mkdtempSync(path.join(snapProfileRoot, 'cos-shell-runtime-')) : path.join(output, 'profile');
