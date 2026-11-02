@@ -517,3 +517,31 @@ it('reports a missing Refresh control only after it stayed absent', async () => 
   expect(ask.mock.calls.map(([message]) => message.action)).toEqual(['manual']);
   expect(reads).toBeGreaterThanOrEqual(1 + 4000 / 250);
 });
+
+it('waits for slow provider settings hydration without consuming inspection failures', async () => {
+  vi.useFakeTimers();
+  const dom = new JSDOM('<html><body></body></html>');
+  const ask = vi.fn(async () => ({ data: { ok: true } }));
+  let ready = false;
+  const context = vm.createContext({ URL, Date, setTimeout, clearTimeout, setInterval, clearInterval,
+    pageViewChecks: new Set(), MutationObserver: dom.window.MutationObserver,
+    t: (_key: string, fallback: string) => fallback,
+    document: dom.window.document, alive: true, generating: false, epoch: 1, ask,
+    location: { pathname: '/settings/plugins-settings/plugin_asdk_app_synthetic',
+      href: `https://chatgpt.com/settings/plugins-settings/plugin_asdk_app_synthetic?cos-plugin-refresh=${id}` },
+    CLF_DOM: { generating: () => false, pluginManagementIdle: () => true,
+      pluginRefreshView: () => ready ? { appId: 'asdk_app_synthetic', refresh: null, tools, settled: true } : null }
+  });
+  try {
+    vm.runInContext(`${section}\nglobalThis.run = refreshManagedPlugin;`, context);
+    const pending = (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat On Steroids Core', tools });
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(ask).not.toHaveBeenCalled();
+    ready = true;
+    dom.window.document.body.setAttribute('data-hydrated', 'true');
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(await pending).toBe(true);
+    expect(ask.mock.calls.map(([message]: any) => message.action)).toEqual(['current']);
+    expect(context.pageViewChecks.size).toBe(0);
+  } finally { dom.window.close(); vi.useRealTimers(); }
+});
