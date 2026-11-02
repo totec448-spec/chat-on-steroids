@@ -1042,7 +1042,8 @@ it('offers to ask before using the mouse and keyboard, off by default, under the
   linux.platform = { ...(linux.platform ?? {}), family: 'linux', name: 'Linux', desktopAutomation: false };
   mounted.push(linux);
   await settle();
-  expect(row.hidden).toBe(true);
+  expect(row.hidden).toBe(false); // Stage 3 permits optional, chat-scoped native approval.
+  expect(w.document.getElementById('desktopUnattributed')?.closest<HTMLElement>('.desktop-unattributed-row')?.hidden).toBe(false);
   const native = w.document.getElementById('linuxDesktopEnabled') as HTMLInputElement;
   expect(native.closest<HTMLElement>('.linux-desktop-row')?.hidden).toBe(false);
   expect(native.checked).toBe(false);
