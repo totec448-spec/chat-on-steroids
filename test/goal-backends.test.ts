@@ -663,6 +663,7 @@ describe('Goal decision backends', () => {
     browser.request.mockResolvedValueOnce(JSON.stringify({ action: 'continue', reply: 'x'.repeat(12_500) }));
     goal.startGoalDraft({ conversationId: id, sessionId, turnId: 't-long' });
     expect(await settled(id)).toMatchObject({ stage: 'failed', error: 'reply_too_long' });
+    expect(warnings.some(line => line.includes(`goal: draft for ${id} failed — reply_too_long; the next draft for this chat asks for a shorter message`))).toBe(true);
     expect(prompt(0)).toContain('Keep reply under 10,000 characters');
     expect(prompt(0)).not.toContain('previous message for this chat was too long');
 
