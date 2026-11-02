@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { expect, it } from 'vitest';
@@ -36,6 +36,23 @@ it.runIf(process.platform === 'linux')('recognizes direct and chained aliases of
     expect(isSnapChromiumLauncher(alias, () => false)).toBe(true);
     expect(isSnapChromiumLauncher(chained, () => false)).toBe(true);
     expect(isSnapChromiumLauncher(unrelated, () => true)).toBe(false);
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+it.runIf(process.platform === 'linux')('canonicalizes symlinked parent directories without resolving the Snap launcher itself', () => {
+  const temporary = mkdtempSync(path.join(tmpdir(), 'cos-snap-parent-test-'));
+  try {
+    const alias = path.join(temporary, 'bin');
+    symlinkSync('/usr/bin', alias, 'dir');
+    const browser = path.join(alias, 'chromium-browser');
+    expect(isSnapChromiumLauncher(browser, candidate => candidate === '/snap/bin/chromium')).toBe(true);
+    expect(isSnapChromiumLauncher(browser, () => false)).toBe(false);
+    // On merged-usr Ubuntu, /bin itself aliases /usr/bin in exactly the same way.
+    if (realpathSync('/bin') === '/usr/bin') {
+      expect(isSnapChromiumLauncher('/bin/chromium-browser', candidate => candidate === '/snap/bin/chromium')).toBe(true);
+    }
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }
