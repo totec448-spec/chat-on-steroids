@@ -1536,7 +1536,7 @@ describe('rendered temporary-chat state independent of language', () => {
     for (const use of control.querySelectorAll('use')) use.setAttribute('href', use.getAttribute('href')!.replace('#chat-temp', '#codex-icon-chat-temp'));
     expect(api.temporaryChatReady()).toBe(active);
   });
-  it('does not take a checked glyph whose own <use> is hidden (CodeRabbit)', () => {
+  it('does not take a checked glyph whose own <use> is hidden', () => {
     const control = toggle('beliebig', false);
     // The visible svg holds the checked glyph, but the <use> element itself is hidden.
     const svg = control.querySelector('svg')!;
