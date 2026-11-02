@@ -26,12 +26,23 @@ const elevation: { exitCode: number | 'held'; finish: ((code: number) => void) |
 /** What icacls answers when the app repeats the installer's access grant: an exit code, or a spawn error. */
 const icacls: { calls: Array<{ file: string; args: string[] }>; result: number | string | null } = { calls: [], result: null };
 const cleanupFault = vi.hoisted(() => ({ file: '' }));
+const cacheBoundary = vi.hoisted(() => ({ after: async (_operation: string, _file: string): Promise<void> => undefined }));
 vi.mock('node:fs/promises', async importOriginal => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
-  return { ...actual, rm: async (file: Parameters<typeof actual.rm>[0], options?: Parameters<typeof actual.rm>[1]) => {
-    if (String(file) === cleanupFault.file) throw Object.assign(new Error('installer still open'), { code: 'EACCES' });
-    return actual.rm(file, options);
-  } };
+  const after = async <T>(operation: string, file: unknown, result: Promise<T>): Promise<T> => {
+    const value = await result;
+    await cacheBoundary.after(operation, String(file));
+    return value;
+  };
+  return { ...actual,
+    lstat: (...args: Parameters<typeof actual.lstat>) => after('lstat', args[0], actual.lstat(...args)),
+    readdir: (...args: Parameters<typeof actual.readdir>) => after('readdir', args[0], actual.readdir(...args)),
+    mkdir: (...args: Parameters<typeof actual.mkdir>) => after('mkdir', args[0], actual.mkdir(...args)),
+    rm: async (file: Parameters<typeof actual.rm>[0], options?: Parameters<typeof actual.rm>[1]) => {
+      if (String(file) === cleanupFault.file) throw Object.assign(new Error('installer still open'), { code: 'EACCES' });
+      return after('rm', file, actual.rm(file, options));
+    }
+  };
 });
 vi.mock('node:child_process', () => ({
   spawn: (file: string, args: string[], options?: Record<string, unknown>) => {
@@ -166,6 +177,7 @@ beforeEach(() => {
   relaunched.length = 0;
   warnings.length = 0;
   cleanupFault.file = '';
+  cacheBoundary.after = async () => undefined;
   resetUpdateForTests();
 });
 
@@ -194,12 +206,104 @@ describe('the file Get update opens for an installation that cannot update itsel
 });
 
 describe('cleanup of updater-owned downloads', () => {
+  /** Hold an actual filesystem result, so a reset can revoke the pass before its next write. */
+  function pauseAfter(operation: string, file: string, occurrence = 1) {
+    let resume!: () => void;
+    let reached!: () => void;
+    const held = new Promise<void>(resolve => { resume = resolve; });
+    const paused = new Promise<void>(resolve => { reached = resolve; });
+    cacheBoundary.after = async (seenOperation, seenFile) => {
+      if (seenOperation === operation && seenFile === file && --occurrence === 0) {
+        reached();
+        await held;
+      }
+    };
+    return { paused, resume };
+  }
   function cached(version: string, body = 'previous download'): string {
     const dir = path.join(userData, 'updates', version);
     mkdirSync(dir, { recursive: true });
     writeFileSync(path.join(dir, 'download.part'), body);
     return dir;
   }
+  it.each(['lstat', 'readdir'])('does not prune or contact GitHub after a reset during cache %s', async operation => {
+    const previous = cached('0.0.1');
+    const { asked } = github();
+    const boundary = pauseAfter(operation, path.join(userData, 'updates'));
+    const old = checkForUpdates();
+    await boundary.paused;
+    resetUpdateForTests();
+    boundary.resume();
+    await old;
+    expect(existsSync(previous)).toBe(true);
+    expect(asked).toEqual([]);
+    expect(updateStatus().stage).toBe('idle');
+  });
+  it('stops cleanup between entries when the pass is reset', async () => {
+    const first = cached('0.0.1');
+    const second = cached('0.0.2');
+    const { asked } = github();
+    const boundary = pauseAfter('rm', first);
+    const old = checkForUpdates();
+    await boundary.paused;
+    resetUpdateForTests();
+    boundary.resume();
+    await old;
+    expect(existsSync(first)).toBe(false);
+    expect(existsSync(second)).toBe(true);
+    expect(asked).toEqual([]);
+    expect(updateStatus().stage).toBe('idle');
+  });
+  it('does not retire other candidates after a reset during successful adoption cleanup', async () => {
+    const previous = cached('98.0.0');
+    const dir = cached(NEXT);
+    writeFileSync(path.join(dir, WINDOWS_ASSET), 'installer bytes');
+    const { asked } = github();
+    // The first root inspection is the offline cleanup; the second retires other candidates.
+    const boundary = pauseAfter('lstat', path.join(userData, 'updates'), 2);
+    const old = asPlatform('win32', undefined, () => checkForUpdates());
+    await boundary.paused;
+    resetUpdateForTests();
+    boundary.resume();
+    await old;
+    expect(existsSync(previous)).toBe(true);
+    expect(asked).toEqual(['latest', 'SHA256SUMS.txt']);
+    expect(updateStatus().stage).toBe('idle');
+    expect(markInstallOnQuit()).toBe(false);
+  });
+  it.each(['lstat', 'mkdir'])('does not remove a partial file after a reset during directory %s', async operation => {
+    const dir = cached(NEXT);
+    const partial = path.join(dir, `${WINDOWS_ASSET}.part`);
+    writeFileSync(partial, 'keep this partial');
+    const { asked } = github();
+    const boundary = pauseAfter(operation, dir);
+    const old = asPlatform('win32', undefined, () => checkForUpdates());
+    await boundary.paused;
+    resetUpdateForTests();
+    boundary.resume();
+    await old;
+    expect(readFileSync(partial, 'utf8')).toBe('keep this partial');
+    expect(asked).toEqual(['latest', 'SHA256SUMS.txt']);
+    expect(updateStatus().stage).toBe('idle');
+    expect(markInstallOnQuit()).toBe(false);
+  });
+  it('preserves a newer pass\'s ready installer when obsolete cleanup resumes after a reset', async () => {
+    const dir = cached(NEXT);
+    writeFileSync(path.join(dir, WINDOWS_ASSET), 'installer bytes');
+    github();
+    const boundary = pauseAfter('lstat', path.join(userData, 'updates'), 2);
+    const old = asPlatform('win32', undefined, () => checkForUpdates());
+    await boundary.paused;
+    resetUpdateForTests();
+    const newer = '100.0.0';
+    github({ version: newer });
+    await checkForUpdates();
+    boundary.resume();
+    await old;
+    expect(readFileSync(path.join(userData, 'updates', newer, WINDOWS_ASSET), 'utf8')).toBe('installer bytes');
+    expect(updateStatus()).toMatchObject({ stage: 'ready', latest: newer, error: null });
+    expect(markInstallOnQuit(newer)).toBe(true);
+  });
   it('removes installed versions even offline, preserving future candidates and unknown contents', async () => {
     const old = cached('0.0.1');
     const current = cached(APP_VERSION);
@@ -994,6 +1098,36 @@ describe('a check or download that goes wrong on a bad connection', () => {
     expect(online.asked).toHaveLength(calls);
   });
 
+  /**
+   * A pass still waiting for the installer when the state is reset belongs to the reset before it.
+   * It used to finish anyway: it wrote the installer into the staging folder and set it as staged,
+   * so the next check announced "ready" without downloading anything (CodeRabbit on #2018).
+   */
+  it('leaves no file and no staged update behind from a pass that outlived a reset', async () => {
+    const { fetch } = github();
+    const answer = fetch.getMockImplementation()!;
+    let release: (() => void) | null = null;
+    fetch.mockImplementation(async (input: string | URL) => {
+      if (!String(input).endsWith(WINDOWS_ASSET)) return answer(input);
+      // Answers only when the test says so, and as the real fetch would even if the pass was told to stop.
+      await new Promise<void>(resolve => { release = resolve; });
+      return answer(input);
+    });
+    const old = asPlatform('win32', undefined, () => checkForUpdates());
+    await vi.waitFor(() => expect(release).not.toBeNull(), { timeout: 10_000 });
+    resetUpdateForTests();
+    release!();
+    await old;
+    expect(updateStatus().stage).toBe('idle');
+    expect(existsSync(path.join(userData, 'updates', NEXT))
+      ? readdirSync(path.join(userData, 'updates', NEXT)) : []).toEqual([]);
+    // The next check has nothing staged to fall back on: it fetches the installer itself.
+    const next = github({ fail: 'asset' });
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(next.asked).toContain(WINDOWS_ASSET);
+    expect(updateStatus().stage).toBe('failed');
+  });
+
   it('gives up on a download only when no data arrives for a minute, however long the whole file takes', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
     const body = 'installer bytes';
@@ -1002,13 +1136,16 @@ describe('a check or download that goes wrong on a bad connection', () => {
     // moves only after that: on a slow runner the chunk used to arrive after the jump, the watch
     // restarted there, and the test waited out its timeout (14 retries in 15 CI runs, 2026-11-01).
     let taken = false;
-    const stalled = new ReadableStream<Uint8Array>({
+    // A fresh stream per request: a pass left over from an earlier test can still reach this fake and
+    // took the one shared stream first, so this test's own download found it used ("Response body object
+    // should not be disturbed or locked") and failed — every other run on Windows (#2008).
+    const stalled = () => new ReadableStream<Uint8Array>({
       start(controller) { controller.enqueue(new TextEncoder().encode(body.slice(0, 5))); },
       pull() { taken = true; return new Promise<void>(() => undefined); }
     });
     const { fetch } = github({ body });
     const answer = fetch.getMockImplementation()!;
-    fetch.mockImplementation(async (input: string | URL) => String(input).endsWith(WINDOWS_ASSET) ? new Response(stalled, { status: 200 }) : answer(input));
+    fetch.mockImplementation(async (input: string | URL) => String(input).endsWith(WINDOWS_ASSET) ? new Response(stalled(), { status: 200 }) : answer(input));
     let done = false;
     const pass = asPlatform('win32', undefined, () => checkForUpdates()).then(() => { done = true; });
     await vi.waitFor(() => expect(taken).toBe(true), { timeout: 10_000, interval: 5 });
