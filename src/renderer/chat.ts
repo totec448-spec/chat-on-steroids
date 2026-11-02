@@ -95,6 +95,7 @@ import {
   DEFAULT_RECORDING_STORAGE_GIB,
   isUnattributedSession,
   RECORDING_STORAGE_LIMITS_GIB,
+  STUCK_SUMMARY_MS,
   TURN_OUTCOME_LABELS,
   foldProgress,
   toolCallSummary
@@ -3039,6 +3040,19 @@ function mergeDetailDelta(delta: SessionEvent[]): void {
 }
 
 let controlsGeneration = 0;
+let lastSummaryTimer: ReturnType<typeof setTimeout> | null = null;
+/** The stuck compaction already asked again once after its deadline passed during a controls read. */
+let lastSummaryLateRefresh = '';
+/** Chats whose "Continue from the last summary" request is still running, with the selection it was pressed in. */
+const summaryActions = new Map<string, number>();
+
+/** Retires the saved-summary offer: the dot, the screen-reader notice and its binding, the action, the timer. */
+function clearSummaryOffer(): void {
+  if (lastSummaryTimer) { clearTimeout(lastSummaryTimer); lastSummaryTimer = null; }
+  ui($('contextMeterNotice'), 'textContent', () => '');
+  $('contextMeter').removeAttribute('data-attention');
+  $('resumeLastSummary').hidden = true;
+}
 let controlledSessionId: string | null = null;
 let controlledTurnId: string | null = null;
 /** A turn the page still holds after the app stopped counting it as work: Stop only, no Working (2.1.47 round). */
@@ -3515,13 +3529,15 @@ async function refreshSessionControls(): Promise<void> {
     // Retire the previous selection's projection before awaiting the new owner's IPC.
     // Replace the translation binding too, so a locale refresh cannot revive its status.
     ui($('sessionControlStatus'), 'textContent', () => '');
-    for (const action of ['compactSession', 'cancelCompaction']) $(action).hidden = true;
+    for (const action of ['compactSession', 'cancelCompaction', 'resumeLastSummary']) $(action).hidden = true;
+    // The previous chat's offer must not stay on the next one (CodeRabbit on #2019).
+    clearSummaryOffer();
   }
   paintAutomationSwitch();
   if (!id) { controlledSessionId = null; controlledTurnId = null; controlledHeldTurnId = null; controlledPageless = false; paintDeliveryControls(); menu.hidden = false;
     $<HTMLTextAreaElement>('sessionObjective').disabled = false;
     paintTaskActions();
-    for (const action of ['compactSession', 'cancelCompaction']) $(action).hidden = true;
+    for (const action of ['compactSession', 'cancelCompaction', 'resumeLastSummary']) $(action).hidden = true;
     return; }
   const opening = pendingComposerInputs.find(row => row.opening && row.sessionId === id && ['queued', 'browser'].includes(row.state));
   if (!sessions.find(row => row.id === id)?.conversationId) {
@@ -3536,7 +3552,7 @@ async function refreshSessionControls(): Promise<void> {
     const objective = $<HTMLTextAreaElement>('sessionObjective');
     objective.value = opening?.objective ?? ''; objective.disabled = true;
     objective.dataset.sessionId = id;
-    for (const action of ['compactSession', 'cancelCompaction']) $(action).hidden = true;
+    for (const action of ['compactSession', 'cancelCompaction', 'resumeLastSummary']) $(action).hidden = true;
     paintAutomationSwitch(); paintDeliveryControls(); repaintHeld();
     return;
   }
@@ -3562,7 +3578,7 @@ async function refreshSessionControls(): Promise<void> {
   repaintHeld();
   menu.hidden = !controls;
   $('compactSession').hidden = !controls;
-  if (!controls) { $('cancelCompaction').hidden = true; return; }
+  if (!controls) { $('cancelCompaction').hidden = true; clearSummaryOffer(); return; }
   const objective = $<HTMLTextAreaElement>('sessionObjective');
   if (objective.dataset.sessionId !== id || !objective.dataset.edited) {
     objective.value = controls.objective;
@@ -3581,7 +3597,33 @@ async function refreshSessionControls(): Promise<void> {
   paintAutomationSwitch();
   $<HTMLButtonElement>('compactSession').disabled = !!controls.blocked || !!controls.job?.busy;
   $('cancelCompaction').hidden = !controls.job?.busy;
-  ui($('sessionControlStatus'), 'textContent', () => controls.blocked === 'worker' ? t("This sub-agent is managed by its prime.") : controls.blocked === 'blocked' ? t("This chat is blocked.") : controls.job?.busy ? t("Compaction is running in ChatGPT.") : '');
+  // A Compact & Resume that ChatGPT never wrote a summary for (it may no longer serve the chat at all)
+  // can go on from the last saved one; the context meter carries a dot until then (2026-11-01).
+  const lastSummary = controls.blocked ? null : controls.lastSummary ?? null;
+  // The offer appears on its own once the 15 minutes pass, also in a quiet chat nothing else repaints
+  // (CodeRabbit on #2019), and is said to screen readers, since the dot and the popover are not.
+  if (lastSummaryTimer) { clearTimeout(lastSummaryTimer); lastSummaryTimer = null; }
+  const waitingJob = controls.job;
+  if (!lastSummary && !controls.blocked && waitingJob?.stage === 'handoff-pending' && !waitingJob.handoffId) {
+    const due = waitingJob.startedAt + STUCK_SUMMARY_MS - Date.now();
+    // A deadline that passed while this read was on its way is asked about once more, not again and again.
+    const late = `${id}:${waitingJob.startedAt}`;
+    const wait = due > 0 ? due + 1_000 : lastSummaryLateRefresh !== late ? 1_000 : null;
+    if (due <= 0) lastSummaryLateRefresh = late;
+    if (wait !== null) lastSummaryTimer = setTimeout(() => { lastSummaryTimer = null; if (selectedId === id) void refreshSessionControls(); }, wait);
+  }
+  ui($('contextMeterNotice'), 'textContent', () => lastSummary
+    ? t("ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.") : '');
+  $('resumeLastSummary').hidden = !lastSummary;
+  $('resumeLastSummary').dataset.handoffId = lastSummary?.handoffId ?? '';
+  $<HTMLButtonElement>('resumeLastSummary').disabled = summaryActions.has(id);
+  $('contextMeter').toggleAttribute('data-attention', !!lastSummary);
+  // The saved-summary offer is announced once, by the notice: the popover's status line shows the same words
+  // without announcing them again (CodeRabbit on #2019).
+  $('sessionControlStatus').setAttribute('aria-live', lastSummary ? 'off' : 'polite');
+  ui($('sessionControlStatus'), 'textContent', () => controls.blocked === 'worker' ? t("This sub-agent is managed by its prime.") : controls.blocked === 'blocked' ? t("This chat is blocked.")
+    : lastSummary ? t("ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.")
+    : controls.job?.busy ? t("Compaction is running in ChatGPT.") : '');
 }
 
 async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: number): Promise<boolean> {
@@ -6941,6 +6983,21 @@ function paintHandoff(): void {
   paintStateLine();
 }
 
+/** What the person's Continue now / Try now did, in their language: fixed texts per outcome. */
+type PickupNowOutcome = { ok: true; did: 'queued' | 'retrying' } | { ok: false; code: 'no-chat' | 'history-limit' | 'nothing-waiting' | 'changed' | 'not-sent' | 'not-started' };
+function pickupNowWords(done: PickupNowOutcome): string {
+  if (done.ok) return done.did === 'queued' ? t('Continue queued. It goes out as soon as ChatGPT takes it.') : t('Trying again now.');
+  switch (done.code) {
+    case 'no-chat': return t('This chat has no ChatGPT conversation yet.');
+    case 'history-limit': return t('ChatGPT limits this chat for a few minutes. The app tries again right after.');
+    case 'nothing-waiting': return t('Nothing is waiting to be picked up in this chat any more.');
+    case 'changed': return t('This step changed meanwhile. Check the chat and try again.');
+    case 'not-sent': return t('Not sent now: something in this chat is still running. The app keeps trying.');
+    case 'not-started': return t('No new try could start now. The app keeps trying on its own.');
+  }
+  return '';
+}
+
 /** The live deadline takes precedence over the existing dismissible repair receipt. */
 function paintRecoveryStatus(): boolean {
   const host = $('recoveryStatus');
@@ -6955,7 +7012,31 @@ function paintRecoveryStatus(): boolean {
       await refreshSessionControls();
     })
     : null;
-  if (renderRecoveryCountdowns(host, countdowns, Date.now(), cancelReload)) return true;
+  // 2026-10-31: a chat whose next step was not picked up gets one click to go on: the waiting
+  // Continue as an ordinary message, or a queued message or Goal/Loop step tried again at once.
+  const pickupNowAction = (countdown: RecoveryCountdown) => {
+    if (countdown.kind !== 'pickup-stopped' || !sessionForCountdown || !countdown.next) return null;
+    const continuing = countdown.next === 'continue';
+    // Tries used up: only a waiting Continue can still go, as an ordinary message (CodeRabbit on #1979).
+    if (countdown.exhausted && !continuing) return null;
+    const shown = { next: countdown.next, stoppedAt: countdown.deadline };
+    const generation = selectionGeneration;
+    const button = el('button', 'dock-action is-labelled') as HTMLButtonElement;
+    button.type = 'button';
+    ui(button, 'title', () => continuing ? t('Send the waiting Continue now, as an ordinary message') : t('Try to send the waiting step now'));
+    button.append(icon(continuing ? 'i-play' : 'i-retry'), el('span', '', () => continuing ? t('Continue now') : t('Try now')));
+    button.onclick = async () => {
+      button.disabled = true;
+      try {
+        const done = await run(api.pickupNow(sessionForCountdown, shown));
+        // Another chat selected meanwhile: its view gets no word about this one (CodeRabbit on #1979).
+        if (done && generation === selectionGeneration) toast(pickupNowWords(done));
+        await refreshSessionControls();
+      } finally { button.disabled = false; }
+    };
+    return button;
+  };
+  if (renderRecoveryCountdowns(host, countdowns, Date.now(), countdown => cancelReload(countdown) ?? pickupNowAction(countdown))) return true;
   const recovery = detailFor === selectedId ? [...events].reverse().find(event => event.source === 'app' && event.kind === 'progress' && event.progressId?.startsWith('browser-repair:')) : undefined;
   const sessionId = selectedId;
   const revision = recovery?.kind === 'progress' ? JSON.stringify([recovery.progressId, recovery.time, recovery.message.text]) : '';
@@ -9550,6 +9631,22 @@ export function initChat(next: Deps): void {
       }
     });
   }
+  $('resumeLastSummary').addEventListener('click', async () => {
+    const id = selectedId, button = $<HTMLButtonElement>('resumeLastSummary'), handoffId = button.dataset.handoffId;
+    // One request per chat at a time, each chat on its own (CodeRabbit on #2019); its answer belongs to the
+    // chat and selection it was asked in.
+    if (!id || !handoffId || summaryActions.has(id)) return;
+    const selection = selectionGeneration;
+    summaryActions.set(id, selection);
+    button.disabled = true;
+    try {
+      const resumed = await run(api.resumeFromHandoff(id, handoffId));
+      if (resumed && selectedId === id && selectionGeneration === selection) toast(t("Opening a new chat with the saved summary"));
+    } finally {
+      if (summaryActions.get(id) === selection) summaryActions.delete(id);
+      if (selectedId === id) { button.disabled = false; void refreshSessionControls(); }
+    }
+  });
   for (const [buttonId, cancel] of [['compactSession', false], ['cancelCompaction', true]] as const) {
     $(buttonId).addEventListener('click', async () => {
       const id = selectedId; if (!id) return;

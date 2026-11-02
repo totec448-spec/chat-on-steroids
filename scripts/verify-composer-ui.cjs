@@ -119,6 +119,40 @@ app.whenReady().then(async () => {
     if (zoom===1&&width===1440&&language==='en') await capture('effort-'+theme);
     if (zoom===1.25&&width===900&&theme==='dark'&&language==='pt-BR') await capture('effort-narrow-pt-BR');
   }
+  // Design audit 2026-11-01: the + menu had a fixed width, and "Fotos & Dateien hinzufügen" took two lines.
+  // Every language at the narrow width and the larger zoom: each item on one line, the menu inside the window.
+  const modelMenuWasOpen = await js(`document.getElementById('modelMenu').open`);
+  if (modelMenuWasOpen) await click('#modelMenu > summary');
+  win.setContentSize(900, 960); win.webContents.setZoomFactor(1.25);
+  for (const language of ['en', 'de', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'zh-CN', 'zh-TW']) {
+    const appearance = await win.webContents.debugger.sendCommand('Runtime.callFunctionOn', {
+      objectId: appearanceWindow.objectId, arguments: [{ value: language }], awaitPromise: true,
+      functionDeclaration: `async function(language) {
+        const select = document.getElementById('uiLanguage'); select.value = language;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        const { data } = await window.api.getState();
+        await window.api.saveSettings({ patch: { ui: { ...data.config.ui, theme: 'dark', language } } });
+      }`
+    });
+    assert(!appearance.exceptionDetails, 'Language fixture update succeeded');
+    await pause(100);
+    await click('#attachmentMenu > summary'); await pause(200);
+    await check('Add menu items on one line '+language, `(()=>{const p=document.querySelector('#attachmentMenu > .composer-popover'),r=p.getBoundingClientRect();
+      const lines=[...p.querySelectorAll('button')].filter(b=>b.textContent.trim()).map(b=>{const range=document.createRange();range.selectNodeContents(b);const tops=[...range.getClientRects()].filter(x=>x.width>0).map(x=>x.top).sort((x,y)=>x-y);return 1+tops.filter((top,i)=>i&&top-tops[i-1]>8).length});
+      return lines.length===3&&lines.every(n=>n===1)&&r.left>=0&&r.right<=innerWidth+.5&&p.scrollWidth<=p.clientWidth+1})()`);
+    if (language === 'de') await capture('add-de');
+    await click('#attachmentMenu > summary'); await pause(150);
+  }
+  // CodeRabbit on #2006: at 200% zoom in a 900 px window little room is left beside the sidebar. The menu
+  // stays inside the composer and a label too long for it wraps instead of overflowing.
+  win.webContents.setZoomFactor(2); await pause(300);
+  await click('#attachmentMenu > summary'); await pause(250);
+  await check('Add menu fits the composer at 200% zoom', `(()=>{const p=document.querySelector('#attachmentMenu > .composer-popover').getBoundingClientRect(),c=document.querySelector('.composer').getBoundingClientRect();
+    return p.left>=c.left-1&&p.right<=c.right+1&&[...document.querySelectorAll('#attachmentMenu > .composer-popover button')].every(b=>b.scrollWidth<=b.clientWidth+1)})()`);
+  await capture('add-zoom-200');
+  await click('#attachmentMenu > summary'); await pause(150);
+  win.setContentSize(1440, 960); win.webContents.setZoomFactor(1);
+  if (modelMenuWasOpen) await click('#modelMenu > summary');
   await win.webContents.debugger.sendCommand('Runtime.releaseObject', { objectId: appearanceWindow.objectId });
   win.webContents.debugger.detach();
   win.setContentSize(1440, 960); win.webContents.setZoomFactor(1);
@@ -158,6 +192,22 @@ app.whenReady().then(async () => {
   await check('Compact reaches native controller', `composerFixture.controls.job?.phase==='requesting'`);
   await click('#contextMeterButton'); await click('#cancelCompaction'); await pause(300);
   await check('Cancel reaches native controller', `composerFixture.controls.job===null`);
+  // 2026-11-01: a Compact & Resume waiting too long for ChatGPT's summary offers the last saved one,
+  // and the context meter carries a dot until the person acts on it.
+  // Nothing else repaints this quiet chat: the controls are asked again when the 15 minutes run out (CodeRabbit on #2019).
+  await js(`window.offerAt=Date.now()+1500;composerFixture.controls.job={busy:true,phase:'requesting',stage:'handoff-pending',handoffId:null,startedAt:Date.now()-15*60000+1500};composerFixture.notify()`);
+  await pause(400);
+  await check('No offer before the deadline', `!document.getElementById('contextMeter').hasAttribute('data-attention')&&document.getElementById('resumeLastSummary').hidden`);
+  await until(`document.getElementById('contextMeter').hasAttribute('data-attention')`, 8000);
+  await check('The offer is said to screen readers', `/15 minutes/.test(document.getElementById('contextMeterNotice').textContent)&&document.getElementById('contextMeterButton').getAttribute('aria-describedby')==='contextMeterNotice'`);
+  await click('#contextMeterButton'); await pause(200);
+  await check('The popover\'s status line does not announce the offer a second time', `document.getElementById('sessionControlStatus').getAttribute('aria-live')==='off'`);
+  await check('A stuck Compact & Resume offers the last summary', `!document.getElementById('resumeLastSummary').hidden&&getComputedStyle(document.getElementById('resumeLastSummary')).display!=='none'&&/15 minutes/.test(document.getElementById('sessionControlStatus').textContent)`);
+  await capture('context-last-summary');
+  await click('#resumeLastSummary'); await pause(300);
+  await check('Continuing from the last summary reaches the native controller', `window.resumedFrom==='2026-11-01-36ad1800'&&document.getElementById('resumeLastSummary').hidden&&!document.getElementById('contextMeter').hasAttribute('data-attention')&&document.getElementById('contextMeterNotice').textContent===''`);
+  await js(`window.offerAt=0`);
+  await js(`composerFixture.controls.job=null;composerFixture.notify()`); await pause(200);
   await click('#attachmentMenu > summary'); await capture('add');
   await click('#composerSkills');
   await check('Slash commands and skills use original picker', `!document.getElementById('skillPicker').hidden&&document.querySelectorAll('.slash-menu-option').length>=7`);
@@ -197,6 +247,14 @@ app.whenReady().then(async () => {
   await check('Narrow work-dock column compacts labels by column width', `getComputedStyle(document.getElementById('composerModeLabel')).display==='none'&&getComputedStyle(document.querySelector('#createPlan > span')).display==='none'&&getComputedStyle(document.getElementById('contextMeterCompact')).display==='none'`);
   await capture('dock-900');
   await click('#rightDockToggle');
+  // The offer belongs to its chat: New chat must not keep the dot or the screen-reader notice (CodeRabbit on #2019).
+  await js(`window.offerAt=Date.now()-1;composerFixture.controls.job={busy:true,phase:'requesting',stage:'handoff-pending',handoffId:null,startedAt:Date.now()-16*60000};composerFixture.notify()`);
+  await until(`document.getElementById('contextMeter').hasAttribute('data-attention')`, 8000);
+  // \`until\` gives up quietly: say it here, so the step below cannot pass without an offer to remove.
+  await check('The offer shows before New chat', `document.getElementById('contextMeter').hasAttribute('data-attention')&&/15 minutes/.test(document.getElementById('contextMeterNotice').textContent)`);
+  await click('#newChat'); await pause(300);
+  await check('New chat drops the previous chat\'s summary offer', `!document.getElementById('contextMeter').hasAttribute('data-attention')&&document.getElementById('contextMeterNotice').textContent===''&&document.getElementById('resumeLastSummary').hidden`);
+  await js(`window.offerAt=0;composerFixture.controls.job=null;composerFixture.controls.lastSummary=null`);
   for (const width of [1440, 900, 700, 640]) {
     win.setContentSize(width, 960); await pause(250);
     await click('#newChat'); await type('');

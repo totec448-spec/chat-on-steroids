@@ -1576,7 +1576,8 @@ describe('in-app feedback', () => {
 
   it.each([
     { kind: 'bug', what: '   ' },
-    { kind: 'idea', problem: 'p', proposal: '' },
+    // New features come as pull requests: the app opens no idea form (2026-11-01).
+    { kind: 'idea', problem: 'p', proposal: 'q' },
     { kind: 'bug', what: 'x', template: 'blank.yml' },
     { kind: 'bug', what: 'x', frequency: 'Always' },
     { kind: 'bug', what: 'x'.repeat(4001) },

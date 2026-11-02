@@ -86,7 +86,7 @@ export function initContextMeter(): void {
   button.addEventListener('click', () => { const open = root.classList.toggle('pinned'); button.setAttribute('aria-expanded', String(open)); });
   document.addEventListener('click', event => { if (event.target instanceof Node && !root.contains(event.target)) close(); });
   root.addEventListener('keydown', event => { if (event.key === 'Escape') { close(); button.focus(); event.stopPropagation(); } });
-  for (const id of ['compactSession', 'cancelCompaction']) {
+  for (const id of ['compactSession', 'cancelCompaction', 'resumeLastSummary']) {
     document.getElementById(id)?.addEventListener('click', () => { close(); button.focus(); });
   }
 }
