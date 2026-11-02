@@ -3867,5 +3867,7 @@
   "New features come as pull requests, not issues.": "Les nouvelles fonctionnalités arrivent sous forme de pull requests, pas d’issues.",
   "How to start one": "Comment en commencer une",
   "Plugins could not be loaded.": "Les plugins n'ont pas pu être chargés.",
-  "Pets could not be loaded.": "Les mascottes n'ont pas pu être chargées."
+  "Pets could not be loaded.": "Les mascottes n'ont pas pu être chargées.",
+  "Continue in a new chat from the last summary": "Continuer dans un nouveau chat avec le dernier résumé",
+  "ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.": "ChatGPT n'a pas écrit le résumé depuis 15 minutes. Le dernier résumé enregistré peut poursuivre le travail dans un nouveau chat."
 }

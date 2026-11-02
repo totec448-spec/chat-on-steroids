@@ -4996,6 +4996,9 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 
 .context-meter { position: relative; flex: 0 0 auto; }
 #contextMeterButton { display: flex; align-items: center; gap: 5px; height: 32px; padding: 0 5px; border: 0; border-radius: 8px; background: transparent; color: var(--soft); cursor: pointer; }
+/* A Compact & Resume waiting too long for its summary: a dot says the popover has a way on (2026-11-01). */
+#contextMeter[data-attention] #contextMeterButton { position: relative; }
+#contextMeter[data-attention] #contextMeterButton::after { content: ''; position: absolute; top: 4px; right: 3px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent-fill, var(--accent)); box-shadow: 0 0 0 2px var(--card); }
 /* A toolbar label like Mode, Plan and Model: same face and size, with tabular digits so the value
    does not shift as it changes. The 10px monospace of the old token chip broke the row's line. */
 #contextMeterButton { font: inherit; }
