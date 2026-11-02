@@ -2678,6 +2678,37 @@ describe('native progress silence authority', () => {
     } finally { clock.mockRestore(); }
   });
 
+  // 2026-10-31: the person's one click sends a waiting automatic Continue now, as an ordinary message.
+  it('sends a waiting automatic Continue now when the person asks, without waiting ten minutes', async () => {
+    let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const source = await open('gpt-5.6-sol');
+      expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true)).toBe(true);
+      const ticket = (await input.listInputs()).find(row => row.recovery && row.state === 'queued')!;
+      await post('/events', { conversationId: source.conversationId, events: [
+        { kind: 'turn_end', turnId: source.turnId, outcome: 'stalled', time: now }
+      ] });
+      now += 3 * 60_000;
+      // Its quick tries ran out: the chat shows the stopped Continue, with its button.
+      const stoppedAt = now;
+      await writeDurableNow('session-input', (await input.listInputs()).map(entry => entry.id === ticket.id
+        ? { ...entry, pickupRecovery: { attempts: 3, stoppedAt } } : entry));
+      input.resetInputForTests();
+      const bridgeModule = await bridge();
+      expect((await bridgeModule.sessionControlsFor(source.session.id)).recovery).toContainEqual(expect.objectContaining({ kind: 'pickup-stopped', next: 'continue', deadline: stoppedAt }));
+      // The caller's last gate runs inside the conversion: refusing it leaves the automatic Continue as it was.
+      expect(await input.continueAsOrdinaryMessage(ticket.id, 'gate test', 0, () => 'ChatGPT limits its chat\'s history'))
+        .toEqual({ refused: 'ChatGPT limits its chat\'s history' });
+      expect((await input.listInputs()).find(entry => entry.id === ticket.id)).toMatchObject({ state: 'queued', recovery: expect.anything() });
+      // Queued as an ordinary message: that is no delivery yet, and the answer says so (CodeRabbit on #1979).
+      expect(await bridgeModule.pickupNow(source.session.id, { next: 'continue', stoppedAt }, now)).toEqual({ ok: true, did: 'queued' });
+      const row = (await input.listInputs()).find(entry => entry.id === ticket.id)!;
+      expect(row).toMatchObject({ state: 'queued', mode: 'auto', text: ticket.text, continuedFrom: 'recovery' });
+      expect(row.recovery).toBeUndefined();
+      expect(logger.getLog().some(entry => entry.message.includes(`the person queued the automatic Continue in ${source.conversationId} now`))).toBe(true);
+    } finally { clock.mockRestore(); }
+  });
+
   it('says once why an automatic Continue is not sent as an ordinary message yet (CodeRabbit on #1960)', async () => {
     let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
     try {

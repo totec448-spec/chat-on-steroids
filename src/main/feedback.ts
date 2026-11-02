@@ -11,9 +11,8 @@ const REPOSITORY = 'https://github.com/totec448-spec/chat-on-steroids';
 /** GitHub refuses longer addresses; a little room is kept below its limit. */
 export const MAX_ISSUE_URL = 7800;
 
-export type FeedbackReport =
-  | { kind: 'bug'; what: string; steps?: string; frequency?: 'Every time' | 'Sometimes' | 'It happened once' }
-  | { kind: 'idea'; problem: string; proposal: string };
+/** A problem report. New features come as pull requests, so there is no idea form (2026-11-01). */
+export type FeedbackReport = { kind: 'bug'; what: string; steps?: string; frequency?: 'Every time' | 'Sometimes' | 'It happened once' };
 
 export type FeedbackEnvironment = {
   version: string;
@@ -95,14 +94,10 @@ function address(fields: ReadonlyArray<readonly [string, string | undefined]>): 
  * first, by whole characters, and ends with "…"; `trimmed` says so, so the person can paste the rest.
  */
 export function feedbackIssueUrl(report: FeedbackReport, env: FeedbackEnvironment): { url: string; trimmed: boolean } {
-  const text: Array<[string, string]> = report.kind === 'bug'
-    ? [['what', report.what.trim()], ['repro', report.steps?.trim() ?? '']]
-    : [['problem', report.problem.trim()], ['proposal', report.proposal.trim()]];
-  const fixed: Array<[string, string | undefined]> = report.kind === 'bug'
-    ? [['template', 'bug_report.yml'], ['title', titleOf(report.what)], ['version', env.version], ['operating_system', env.os],
-      ['architecture', architecture(env.arch)], ['extension', extensionAnswer(env.extension, env.version)]]
-    : [['template', 'feature_request.yml'], ['title', titleOf(report.problem)]];
-  const tail: Array<[string, string | undefined]> = report.kind === 'bug' ? [['frequency', report.frequency]] : [];
+  const text: Array<[string, string]> = [['what', report.what.trim()], ['repro', report.steps?.trim() ?? '']];
+  const fixed: Array<[string, string | undefined]> = [['template', 'bug_report.yml'], ['title', titleOf(report.what)], ['version', env.version],
+    ['operating_system', env.os], ['architecture', architecture(env.arch)], ['extension', extensionAnswer(env.extension, env.version)]];
+  const tail: Array<[string, string | undefined]> = [['frequency', report.frequency]];
   const build = () => address([...fixed, ...text, ...tail]);
   let url = build();
   let trimmed = false;

@@ -1,8 +1,11 @@
 import { defineConfig } from 'vitest/config';
+import WeightedSequencer from './test/weighted-sequencer.js';
 
 export default defineConfig({
   test: {
     include: ['test/**/*.test.ts'],
+    // Longest files first, and CI shards balanced by measured seconds (test/weighted-sequencer.ts).
+    sequence: { sequencer: WeightedSequencer },
     environment: 'node',
     // Real filesystem, real child processes and a real HTTP server, so the
     // defaults are too tight.
