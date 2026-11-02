@@ -2991,9 +2991,10 @@ var CLF_DOM = (() => {
           if (installed.some(button => ids.includes(installedId(button)))) return null;
           // A recreated connector has a new ID: only an unbound native inspection may
           // try its configured-name row when none of the proven IDs is still installed.
-          const configured = visible.filter(button => (button.tagName !== 'A' || installedId(button)) &&
+          const configured = installed.filter(button => (button.tagName !== 'A' || installedId(button)) &&
             [...button.querySelectorAll('*')].some(node => !node.children.length && text(node) === connectorName));
-          return configured.length ? configured : null;
+          const visibleConfigured = configured.filter(button => visible.includes(button));
+          return configured.length > 0 && configured.length === visibleConfigured.length ? visibleConfigured : null;
         }
         const rows = visible.filter(button => {
           if (button.tagName === 'A') {
