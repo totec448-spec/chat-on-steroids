@@ -249,6 +249,8 @@ app.whenReady().then(async () => {
   // The offer belongs to its chat: New chat must not keep the dot or the screen-reader notice (CodeRabbit on #2019).
   await js(`window.offerAt=Date.now()-1;composerFixture.controls.job={busy:true,phase:'requesting',stage:'handoff-pending',handoffId:null,startedAt:Date.now()-16*60000};composerFixture.notify()`);
   await until(`document.getElementById('contextMeter').hasAttribute('data-attention')`, 8000);
+  // \`until\` gives up quietly: say it here, so the step below cannot pass without an offer to remove.
+  await check('The offer shows before New chat', `document.getElementById('contextMeter').hasAttribute('data-attention')&&/15 minutes/.test(document.getElementById('contextMeterNotice').textContent)`);
   await click('#newChat'); await pause(300);
   await check('New chat drops the previous chat\'s summary offer', `!document.getElementById('contextMeter').hasAttribute('data-attention')&&document.getElementById('contextMeterNotice').textContent===''&&document.getElementById('resumeLastSummary').hidden`);
   await js(`window.offerAt=0;composerFixture.controls.job=null;composerFixture.controls.lastSummary=null`);
