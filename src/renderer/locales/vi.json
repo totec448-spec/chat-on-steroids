@@ -3705,5 +3705,7 @@
   "New features come as pull requests, not issues.": "Tính năng mới được gửi dưới dạng pull request, không phải issue.",
   "How to start one": "Cách bắt đầu",
   "Plugins could not be loaded.": "Không thể tải plugin.",
-  "Pets could not be loaded.": "Không thể tải thú cưng."
+  "Pets could not be loaded.": "Không thể tải thú cưng.",
+  "Continue in a new chat from the last summary": "Tiếp tục trong cuộc trò chuyện mới với bản tóm tắt gần nhất",
+  "ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.": "ChatGPT đã không viết bản tóm tắt trong 15 phút. Bản tóm tắt đã lưu gần nhất có thể tiếp tục công việc trong cuộc trò chuyện mới."
 }
