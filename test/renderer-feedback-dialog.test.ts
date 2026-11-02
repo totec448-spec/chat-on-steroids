@@ -3,8 +3,7 @@ import { JSDOM } from 'jsdom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 /**
- * Send feedback: a problem report needs what happened and the diagnostics report; an idea needs
- * both of its fields. GitHub opens filled in; the draft survives closing until it got there.
+ * Send feedback: a problem report needs what happened and the diagnostics report. GitHub opens filled in; the draft survives closing until it got there.
  */
 let dom: JSDOM;
 beforeEach(() => {
@@ -64,20 +63,16 @@ it('sends a problem report only with what happened and a saved diagnostics repor
   expect($('feedbackForm').hidden).toBe(false);
 });
 
-it('sends an idea with both of its fields, and needs no diagnostics report', async () => {
-  const { api, dialog } = await setup();
-  dialog.open('idea');
-  expect($('feedbackBug').hidden).toBe(true);
-  expect($('feedbackIdea').hidden).toBe(false);
-  expect(document.activeElement).toBe($('feedbackProblem'));
-  type('feedbackProblem', 'I lose track of long runs');
-  await submit();
-  expect($('feedbackError').textContent).toBe('Write what the app should do.');
-  type('feedbackProposal', 'A summary when a run ends');
-  await submit();
-  expect(api.openFeedbackIssue).toHaveBeenCalledWith({ kind: 'idea', problem: 'I lose track of long runs', proposal: 'A summary when a run ends' });
-  expect(api.saveDiagnosticsReport).not.toHaveBeenCalled();
-  expect($('feedbackDoneText').textContent).toBe('GitHub is open in your browser. Read the form there, then submit it.');
+// 2026-11-01: new features come as pull requests, so the dialog has no idea form.
+it('takes only problem reports, and points new features to pull requests', async () => {
+  const { dialog } = await setup();
+  dialog.open();
+  expect(document.querySelector('input[name="feedbackKind"]')).toBeNull();
+  expect($('feedbackIdea')).toBeNull();
+  const link = $('feedbackFeatures').querySelector('a')!;
+  expect(link.getAttribute('href')).toBe('https://github.com/totec448-spec/chat-on-steroids/blob/main/CONTRIBUTING.md#new-features');
+  expect(link.getAttribute('target')).toBe('_blank');
+  expect(link.getAttribute('rel')).toContain('noopener');
 });
 
 it('keeps the draft when the dialog is closed before it reached GitHub', async () => {
@@ -123,16 +118,11 @@ it('keeps the whole draft when GitHub got a shortened text and copying the rest 
   }
 });
 
-it('points out a newer release for a problem report, not for an idea', async () => {
+it('points out a newer release for a problem report', async () => {
   const { dialog, openActivity } = await setup({}, { ...update, latest: '2.1.47' });
   dialog.open();
   expect($('feedbackUpdate').hidden).toBe(false);
   expect($('feedbackUpdateText').textContent).toBe('Version 2.1.47 is out and may already fix this. Update first.');
-  const idea = document.querySelector<HTMLInputElement>('input[name="feedbackKind"][value="idea"]')!;
-  idea.checked = true;
-  idea.dispatchEvent(new dom.window.Event('change'));
-  expect($('feedbackUpdate').hidden).toBe(true);
-  dialog.open('bug');
   $('feedbackUpdateOpen').click();
   expect($<HTMLDialogElement>('feedbackDialog').open).toBe(false);
   expect(openActivity).toHaveBeenCalledTimes(1);
