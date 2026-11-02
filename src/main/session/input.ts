@@ -2349,6 +2349,24 @@ export function endRecoveryInput(id: string, conversationId: string): Promise<bo
   });
 }
 
+/**
+ * An automatic Continue whose chat pages kept showing another last question, without a break, for half an
+ * hour (see the bridge's `/page-note`): it would answer the wrong question, so it ends unsent with that
+ * reason. On 2026-11-02 one stayed queued for eleven hours, refused on every offer.
+ */
+export function retireMismatchedRecoveryInput(id: string, conversationId: string): Promise<boolean> {
+  return serial(async () => {
+    const current = await load();
+    const row = current.find(entry => entry.id === id && entry.recovery && entry.state === 'queued' && entry.sendAuthorizedAt === undefined);
+    if (!row?.sessionId || !row.recovery || (await getSession(row.sessionId))?.conversationId !== conversationId) return false;
+    const error = 'Automatic Continue was not sent: the chat\'s last question is no longer the one it answers.';
+    logWarn(`input ${row.id}: ${error}`);
+    await commit(current.map(entry => entry === row
+      ? { ...entry, state: 'cancelled', owner: null, error, recovery: { ...row.recovery!, ended: 'page-final' } } : entry));
+    return true;
+  });
+}
+
 /** Why a page could not make a branch, as the chat shows it; the page sends only the code. */
 export const BRANCH_ERRORS = {
   branch_unavailable: 'ChatGPT did not offer Branch in new chat for that reply. Open the original chat, then try again.',
