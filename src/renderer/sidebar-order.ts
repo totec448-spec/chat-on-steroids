@@ -110,8 +110,15 @@ export function createSidebarOrder(list: HTMLElement, entries: () => Entry[], re
     clearMarkers();
     // Over a place that takes the row (a project or a group for a chat): that, not a new position.
     // The topmost element of the sidebar list under the pointer: a tooltip or a menu over the row is skipped.
-    const under = !place ? null : typeof document.elementsFromPoint === 'function'
-      ? document.elementsFromPoint(event.clientX, event.clientY).find(element => list.contains(element)) ?? null
+    const stack = typeof document.elementsFromPoint === 'function' ? document.elementsFromPoint(event.clientX, event.clientY) : null;
+    // An open dialog or menu outside the list on top (the connection popover) is not the list: a drop there
+    // goes nowhere, neither to the row hidden under it nor to a new position (CodeRabbit on #1965).
+    if (stack?.[0] && !list.contains(stack[0]) && stack[0].closest('dialog, [role="dialog"], [role="menu"], [popover]')) {
+      drag.onto = undefined; drag.target = undefined;
+      return;
+    }
+    const under = !place ? null : stack
+      ? stack.find(element => list.contains(element)) ?? null
       : typeof document.elementFromPoint === 'function' ? document.elementFromPoint(event.clientX, event.clientY) : null;
     const onto = place?.target(drag.id, under) ?? undefined;
     drag.onto = onto && list.contains(onto) ? onto : undefined;
