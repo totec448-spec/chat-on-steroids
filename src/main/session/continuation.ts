@@ -1130,6 +1130,13 @@ export async function attachSummary(token: string, text: string): Promise<Handof
   );
 }
 
+/** Leads a summary written in an earlier chat of the session, so the new chat checks what changed since. */
+export function earlierSummaryNote(createdAt: number): string {
+  return `This summary was written in an earlier chat of this conversation (${new Date(createdAt).toISOString().slice(0, 16).replace('T', ' ')} UTC). ` +
+    'Work may have continued after it in later chats. Before redoing anything, check the current state of the files, the version ' +
+    'history, deployments and running services, and continue from what is actually there.';
+}
+
 /** The plan notice prepareHandoff appends; a reused brief gets the current one instead. */
 const PLAN_NOTICE_HEAD = '\n\nSaved task plan at handoff (reported progress, not verification evidence):\n';
 
@@ -1143,16 +1150,40 @@ const PLAN_NOTICE_HEAD = '\n\nSaved task plan at handoff (reported progress, not
  * the replacement chat is claimed and committed exactly as after any capture. Refused (null)
  * unless it is the session's latest handoff, written in its current chat, with nothing open.
  */
+/**
+ * The session's latest saved summary when a new chat can start from it: still the latest, readable, written
+ * in this session's current chat or an earlier one of its chats, with a brief left after the plan notice.
+ * The summary of an earlier chat is accepted too: the current chat may never have written one, because
+ * ChatGPT stopped serving it (2026-11-01: "temporarily limited access to this conversation history" for
+ * hours, at about 400k tokens). Its brief then says that work went on after it.
+ */
+async function usableSummary(sessionId: string, handoffId: string): Promise<{ saved: Handoff; brief: string } | null> {
+  const session = await getSession(sessionId);
+  if (!session?.conversationId || session.lastHandoffId !== handoffId) return null;
+  const saved = await readHandoff(sessionId, handoffId).catch(() => null);
+  if (!saved || saved.id !== handoffId) return null;
+  const source = saved.provenance?.sourceConversationId;
+  const earlier = !!source && source !== session.conversationId;
+  if (earlier && !session.chatIds.includes(source)) return null;
+  const cut = saved.text.lastIndexOf(PLAN_NOTICE_HEAD);
+  const written = (cut >= 0 ? saved.text.slice(0, cut) : saved.text).trim();
+  if (!written) return null;
+  return { saved, brief: earlier ? `${earlierSummaryNote(saved.createdAt)}\n\n${written}` : written };
+}
+
+/** Whether a new chat could start from this saved summary now, open continuations aside. */
+export async function savedSummaryUsable(sessionId: string, handoffId: string): Promise<boolean> {
+  return (await usableSummary(sessionId, handoffId)) !== null;
+}
+
 export async function reopenWithHandoffNow(sessionId: string, handoffId: string): Promise<ContinuationView | null> {
   sweep();
   const session = await getSession(sessionId);
-  if (!session?.conversationId || session.lastHandoffId !== handoffId) return null;
+  if (!session?.conversationId) return null;
   if ([...byToken.values()].some((entry) => entry.sessionId === sessionId && isOpen(entry))) return null;
-  const saved = await readHandoff(sessionId, handoffId);
-  if (!saved || (saved.provenance && saved.provenance.sourceConversationId !== session.conversationId)) return null;
-  const cut = saved.text.lastIndexOf(PLAN_NOTICE_HEAD);
-  const brief = (cut >= 0 ? saved.text.slice(0, cut) : saved.text).trim();
-  if (!brief) return null;
+  const usable = await usableSummary(sessionId, handoffId);
+  if (!usable) return null;
+  const { saved, brief } = usable;
   // Chat B belongs beside chat A: reuse the Project the abandoned run carried, when it is still known.
   const prior = saved.provenance?.continuationId
     ? [...byToken.values()].find((entry) => handoffContinuationId(entry.token) === saved.provenance?.continuationId)
