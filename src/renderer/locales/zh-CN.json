@@ -3705,5 +3705,7 @@
   "New features come as pull requests, not issues.": "新功能请以 Pull Request 提交，而不是 Issue。",
   "How to start one": "如何开始",
   "Plugins could not be loaded.": "无法加载插件。",
-  "Pets could not be loaded.": "无法加载宠物。"
+  "Pets could not be loaded.": "无法加载宠物。",
+  "Continue in a new chat from the last summary": "用最近的摘要在新聊天中继续",
+  "ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.": "ChatGPT 已有 15 分钟没有写出摘要。可以用最近保存的摘要在新聊天中继续工作。"
 }

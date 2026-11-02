@@ -3786,5 +3786,7 @@
   "New features come as pull requests, not issues.": "Yeni özellikler issue olarak değil, pull request olarak gelir.",
   "How to start one": "Nasıl başlatılır",
   "Plugins could not be loaded.": "Eklentiler yüklenemedi.",
-  "Pets could not be loaded.": "Maskotlar yüklenemedi."
+  "Pets could not be loaded.": "Maskotlar yüklenemedi.",
+  "Continue in a new chat from the last summary": "Son özetle yeni bir sohbette devam et",
+  "ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.": "ChatGPT 15 dakikadır özeti yazmadı. Son kaydedilen özet, işi yeni bir sohbette sürdürebilir."
 }
