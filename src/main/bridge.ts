@@ -39,7 +39,7 @@ export { setBrowserWorkArea } from './browser-window-layout.js';
 import { pendingBrowserPreferenceRequest, acknowledgeBrowserPreferences } from './browser-preferences.js';
 import { sessionFinishHeld, releaseSessionFinish, getSessionFinishDraft, sessionFinishWaiting } from './session/finish.js';
 import { observeUsage } from './session/usage.js';
-import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, lostBrowserOpening, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, queuedInputOfferBlocker, continueAsOrdinaryMessage, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation } from './session/input.js';
+import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, lostBrowserOpening, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, queuedInputOfferBlocker, continueAsOrdinaryMessage, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation, ownUnsentTexts } from './session/input.js';
 /**
  * The local bridge between the Chrome extension and this app.
  *
@@ -3332,7 +3332,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       const input = await claimBrowserInput(body.id, body.owner, target, body.requiresAuthorization === true);
       // The first message for an existing chat after a new tunnel-client is what the hold learns from.
       if (input && target) noteRouteExistingChatSend(target);
-      return json(res, 200, { input }, origin);
+      // The app's own unsent messages for this chat, so the page can replace one left in the composer (#1922).
+      const ownUnsent = input && target ? await ownUnsentTexts(target, input.id) : [];
+      return json(res, 200, { input, ...(ownUnsent.length ? { ownUnsent } : {}) }, origin);
     } finally {
       claimsInProgress--;
     }
@@ -3634,6 +3636,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     if (committed?.wake) wakeBrowserWork();
     return json(res, 200, { sessionId: committed!.sessionId, stored: committed!.stored }, origin);
+  }
+
+  if (route === '/reveal/failed' && req.method === 'POST') {
+    let body: Record<string, unknown>;
+    try { body = (await readBody(req)) as Record<string, unknown>; } catch { return json(res, 400, { error: 'bad_request' }, origin); }
+    const id = conversationId(body['conversationId']);
+    if (!id) return json(res, 400, { error: 'bad_conversation_id' }, origin);
+    unclaimedChatShowFailed(id);
+    return json(res, 200, { ok: true }, origin);
   }
 
   if (route === '/closed' && req.method === 'POST') {
@@ -8759,6 +8770,62 @@ async function assistantRepairCurrent(conversationId: string, repair: Repair): P
  * is to offer again; this only ends the case where nothing is listening at all.
  */
 const UNCLAIMED_REPAIR_OFFERS = 10;
+/** Stuck repairs whose chat was already shown once (session and episode), so it is shown only once. */
+const unclaimedChatShown = new Set<string>();
+/** Which of those a chat's last show belongs to, and when it went out, so a failed show is given back. */
+const unclaimedChatShownFor = new Map<string, { key: string; at: number }>();
+/** Shows of one stuck repair the browser could not carry out: one more try, then the page-less verdict. */
+const unclaimedChatShowFailures = new Map<string, number>();
+/** A browser that cannot show a chat says so within seconds; a report later than this is not about that show. */
+const SHOW_FAILURE_REPORT_MS = 60_000;
+const SHOW_RETRIES_PER_REPAIR = 1;
+
+/**
+ * The browser took the chat to show it and could not (#2027): it may be shown once more when its offers run
+ * out. Only a report soon after the show counts, so an older show's late failure cannot release a newer
+ * episode's (a newer episode's show comes at least ten offers later), and repeated failures end in the
+ * page-less verdict instead of showing and offering forever (CodeRabbit on #2027).
+ */
+export function unclaimedChatShowFailed(conversationId: string, now = Date.now()): void {
+  const shown = unclaimedChatShownFor.get(conversationId);
+  if (!shown || now - shown.at > SHOW_FAILURE_REPORT_MS) return;
+  unclaimedChatShownFor.delete(conversationId);
+  const failures = (unclaimedChatShowFailures.get(shown.key) ?? 0) + 1;
+  unclaimedChatShowFailures.set(shown.key, failures);
+  if (unclaimedChatShowFailures.size > 500) unclaimedChatShowFailures.delete(unclaimedChatShowFailures.keys().next().value!);
+  if (failures > SHOW_RETRIES_PER_REPAIR) {
+    logWarn(`bridge: the browser could not show ${conversationId} again; its recovery stops when its offers run out`);
+    return;
+  }
+  unclaimedChatShown.delete(shown.key);
+  logWarn(`bridge: the browser could not show ${conversationId}; it is shown again if its recovery stays unclaimed`);
+}
+
+/**
+ * Before a Goal or Loop chat is given up as page-less, a browser running the extension shows its tab once
+ * and the offers start over (user, 2026-11-02). Twice on 2026-11-01 a Loop chat's repairs went unclaimed
+ * until the app stopped, and showing the chat by hand brought it back at once. Only a browser that can
+ * show chats counts: without one nothing would be shown, so the chat gets the page-less notice as before
+ * (CodeRabbit on #2027). Worker chats and chats nobody automates are never brought forward.
+ */
+function showUnclaimedChatOnce(conversationId: string, repair: Repair): boolean {
+  const key = `${repair.sessionId}:${repair.episode}`;
+  if (unclaimedChatShown.has(key) || !goalActiveFor(conversationId) || isChatBlocked(conversationId) ||
+      stopRequestedFor(conversationId) || getConfig().ui.browserOnly === true ||
+      !browserWakeConnected() || !revealCapable()) return false;
+  unclaimedChatShown.add(key);
+  unclaimedChatShownFor.set(conversationId, { key, at: Date.now() });
+  if (unclaimedChatShown.size > 500) unclaimedChatShown.delete(unclaimedChatShown.values().next().value!);
+  if (unclaimedChatShownFor.size > 500) unclaimedChatShownFor.delete(unclaimedChatShownFor.keys().next().value!);
+  repair.offers = 1;
+  logWarn(`bridge: ${conversationId} never claimed ${UNCLAIMED_REPAIR_OFFERS} ${repair.reason} repair offer(s) — showing its tab once before giving up`);
+  void recordNote(repair.sessionId, 'The browser did not pick up this chat\'s recovery, so the app is showing its tab to go on.')
+    .catch(() => undefined);
+  void revealChatInBrowser(conversationId).then(shown => {
+    if (!shown) logWarn(`bridge: no browser took ${conversationId} to show it; its recovery is offered ${UNCLAIMED_REPAIR_OFFERS} more times`);
+  });
+  return true;
+}
 /** How long a page's refused claim keeps a repair's offers from counting as unclaimed (#1922). */
 const CLAIM_ASKED_FRESH_MS = 2 * 60_000;
 const unclaimedRepairTold = new Set<string>();
@@ -10908,6 +10975,7 @@ async function takePendingRepairs(
       // its polls would use up the budget while the chosen page keeps asking (CodeRabbit on #1953).
       const askedRecently = repair.claimAskedAt !== undefined && now - repair.claimAskedAt < CLAIM_ASKED_FRESH_MS;
       repair.offers = (repair.offers ?? 1) + (canClaim && !askedRecently ? 1 : 0);
+      if (repair.offers > UNCLAIMED_REPAIR_OFFERS && showUnclaimedChatOnce(conversationId, repair)) continue;
       if (repair.offers > UNCLAIMED_REPAIR_OFFERS) {
         // Nothing is listening. Say that, rather than go on offering into an empty room until
         // some other subsystem happens to clear the entry — and say it as what it is: the

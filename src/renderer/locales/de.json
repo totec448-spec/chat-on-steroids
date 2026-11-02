@@ -3785,6 +3785,8 @@
   "Report a problem.": "Ein Problem melden.",
   "New features come as pull requests, not issues.": "Neue Funktionen kommen als Pull Requests, nicht als Issues.",
   "How to start one": "So startest du einen",
+  "Plugins could not be loaded.": "Plugins konnten nicht geladen werden.",
+  "Pets could not be loaded.": "Haustiere konnten nicht geladen werden.",
   "Continue in a new chat from the last summary": "In einem neuen Chat mit der letzten Zusammenfassung weitermachen",
   "ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.": "ChatGPT hat die Zusammenfassung seit 15 Minuten nicht geschrieben. Die letzte gespeicherte Zusammenfassung kann die Arbeit in einem neuen Chat fortsetzen."
 }

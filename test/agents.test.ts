@@ -3803,6 +3803,13 @@ describe('through the MCP endpoint', () => {
       expect(offerMessagesForConversation('mcp-original-worker')?.messages).toEqual([]);
       expect(offerMessagesForConversation('mcp-recovered-worker')?.messages[0]?.text).toBe('Only recovered worker');
       await asChat('mcp-recovered-worker', 'finish', { result: 'Done with first task' });
+      // As a prime does: it hears the finish (its status call delivers the report), and the family is parked
+      // before it is woken. Under CI load the wake used to race the parking and found the run still active,
+      // so it came back with the same incarnation (Windows, 2026-11-02, both attempts).
+      await vi.waitFor(async () => {
+        const families = (await replyWithRequestId('wfr_mcp_recovered_fleet', 'status', {})).result.structuredContent.available_runs as Array<{ run_id: string; running: boolean }>;
+        expect(families.find(family => family.run_id === recoveredRun)?.running).toBe(false);
+      }, { timeout: 15_000 });
       const wake = await replyWithRequestId('wfr_mcp_recovered_fleet', 'message', { run_id: recoveredRun, to: 'worker-1', text: 'Follow-up task' });
       expect(wake.result?.isError, textOfReply(wake)).not.toBe(true);
       const newRun = wake.result.structuredContent.run_id;
