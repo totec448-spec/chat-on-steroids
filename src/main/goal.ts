@@ -369,6 +369,8 @@ interface GoalDraft extends Omit<GoalDraftView, 'retryable'> {
   objectiveSystemPrompt: string;
   /** The loop instruction, frozen for the same reason. Used only when `mode` is `loop`. */
   loopSystemPrompt: string;
+  /** The ChatGPT helper's model and effort, frozen for the same reason: they set the request and its deadline. */
+  helper: HelperSelection | null;
   /**
    * Which mode this draft was started in, frozen with its prompts.
    *
@@ -1678,6 +1680,7 @@ export function startGoalDraft(input: StartGoalDraftInput): GoalDraftView {
   }
   const settings = getConfig().goal;
   const backend = goalBackendFor(goalDrivingMode(input.conversationId));
+  const helper = backend === 'chatgpt' ? goalHelperSelection() : null;
   const draft: GoalDraft = {
     token: `goal-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
     conversationId: input.conversationId,
@@ -1688,12 +1691,13 @@ export function startGoalDraft(input: StartGoalDraftInput): GoalDraftView {
     systemPrompt: settings.prompt,
     objectiveSystemPrompt: settings.objectivePrompt,
     loopSystemPrompt: settings.loopPrompt,
+    helper,
     mode: goalDrivingMode(input.conversationId),
     objective: goalObjectiveFor(input.conversationId),
     clientId,
     turnId: input.turnId,
     stage: 'sending',
-    model: backend === 'chatgpt' ? helperModelLabel() : settings.model,
+    model: helper ? helperModelLabel(helper) : settings.model,
     text: '',
     reply: '',
     error: null,
@@ -1809,6 +1813,8 @@ interface GoalRequest {
    */
   trailer: string;
   signal: AbortSignal;
+  /** The ChatGPT helper captured with the request's deadline; read fresh only when absent. */
+  helper?: HelperSelection | null;
   /** Called as legacy SSE text arrives, so a streaming panel can show it being written. */
   publish?: (text: string) => void;
 }
@@ -1893,7 +1899,7 @@ async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision |
       publish: request.publish,
       // Only a timeout teaches the size: a newer turn or Goal switched off also cancels a prompt.
       onSentUnanswered: () => { if (request.signal.reason?.name === 'TimeoutError') noteGoalHelperUnanswered(prompt.length); },
-      ...goalHelperSelection()
+      ...(request.helper ?? goalHelperSelection())
     }).catch((error: unknown) => {
       if (error instanceof Error && error.message.startsWith('goal_helper_model_unconfirmed')) noteHelperModelUnconfirmed();
       throw error;
@@ -2009,7 +2015,7 @@ let helperFallbackLogged = '';
  * current selection instead (null), the same rule that keeps worker spawns working (#499).
  */
 /** The helper model as it will actually run, for progress and logs; never a model it will not use. */
-function helperModelLabel(): string { return goalHelperSelection().model ?? "ChatGPT's current selection"; }
+function helperModelLabel(helper: HelperSelection = goalHelperSelection()): string { return helper.model ?? "ChatGPT's current selection"; }
 
 /**
  * The picker could not confirm the helper's model (2026-11-01: four times a day on the maintainer's
@@ -2030,16 +2036,18 @@ export function resetHelperModelFallbackForTests(): void { helperModelUnconfirme
  * (2026-11-01). API backends keep three minutes. The effort is the one actually used (an effort the
  * account does not offer falls back to ChatGPT's selection, and then three minutes apply).
  */
-export function goalRequestTimeoutMs(backend: string): number {
+export function goalRequestTimeoutMs(backend: string, helper: HelperSelection = goalHelperSelection()): number {
   if (backend !== 'chatgpt') return REQUEST_TIMEOUT_MS;
-  const effort = goalHelperSelection().reasoningEffort;
+  const effort = helper.reasoningEffort;
   if (effort === 'pro') return 20 * 60_000;
   if (effort === 'xhigh' || effort === 'max' || effort === 'ultra') return 12 * 60_000;
   if (effort === 'high') return 5 * 60_000;
   return REQUEST_TIMEOUT_MS;
 }
 
-export function goalHelperSelection(): { model: string | null; reasoningEffort: ReasoningEffort | null } {
+type HelperSelection = { model: string | null; reasoningEffort: ReasoningEffort | null };
+
+export function goalHelperSelection(): HelperSelection {
   const settings = getConfig().goal;
   let model: string | null = settings.helperModel ?? DEFAULT_HELPER_CHAT_MODEL;
   let reasoningEffort: ReasoningEffort | null = settings.helperReasoning ?? 'high';
@@ -2139,8 +2147,8 @@ async function run(draft: GoalDraft): Promise<void> {
 
   const abort = new AbortController();
   draft.abort = abort;
-  const limitMs = goalRequestTimeoutMs(draft.backend);
-  const effort = draft.backend === 'chatgpt' ? goalHelperSelection().reasoningEffort : null;
+  const limitMs = goalRequestTimeoutMs(draft.backend, draft.helper ?? undefined);
+  const effort = draft.helper?.reasoningEffort ?? null;
   const timer = setTimeout(() => abort.abort(new DOMException('Goal request timed out', 'TimeoutError')), limitMs);
   try {
     const decision = draft.backend === 'templates' ? templateGoalDecision(templateDecisionText(messages), Math.floor(Math.random() * 200), Math.floor(Math.random() * 200)) : await requestDrivingDecision({
@@ -2151,6 +2159,7 @@ async function run(draft: GoalDraft): Promise<void> {
       key: key ?? '',
       model: draft.model,
       mode: draft.mode,
+      helper: draft.helper,
       // Loop replaces the instruction, not the goal: a chat that carries one still hands it
       // over verbatim, which is what "here is the task" in that prompt refers to. Without one
       // the loop reads the job out of the conversation, exactly as the gate does.
@@ -2332,9 +2341,10 @@ export async function draftTaskPlan(prompt: string, backend: 'api' | 'chatgpt', 
   // Custom endpoints may be keyless; only OpenRouter fails here without one.
   if (backend === 'api' && !key && endpoint.kind === 'openrouter') throw new Error('Configure a Goal API key or choose ChatGPT');
   onProgress?.({ phase: 'generating', text: '' });
+  const helper = backend === 'chatgpt' ? goalHelperSelection() : null;
   const result = await requestGoalDecision({ backend, endpoint, reasoning: settings.reasoning, lifetime: 'temporary-planner', key: key ?? '', model: settings.model, mode: 'goal', publish: text => onProgress?.({ phase: 'generating', text: planProgressText(text) }),
     system: ['You are a task planner, not the executor. Produce 2 to 12 substantial workflow stages; prefer a complete implementation stage followed by a few meaningful verification passes. The executor receives the original user request and the ENTIRE workflow in its first message. Stage 1 must state the complete objective, all implementation requirements and constraints, and the end-to-end execution approach. Never restrict Stage 1 to discovery, planning, a skeleton, or a fraction of the product. If the user requests subagents, include their concrete assignments and early delegation in Stage 1 so they can work in parallel immediately. Later stages are verification and improvement checkpoints, not withheld implementation requirements: where relevant, exercise the actual app with computer use, inspect failures, repair underlying causes, rebuild or reinstall when authorized, and repeat the failed workflows. Include independent subagent code review when requested and a final check of the whole original request. Preserve the user\'s scope, authorization limits, platform, constraints and required evidence; do not invent unrelated work or claim installation/browser checks were performed. Return action continue; its reply must be a JSON string encoding {"stages":["complete implementation workflow", "verification workflow"]}. Keep the entire plan below 12000 characters. Later checkpoints are queued to the same conversation at Session finish, or after a completed turn when the user enables that delivery.'],
-    messages: [{ role: 'user', content: prompt.trim() }], trailer: 'Produce the staged plan now. Do not execute the task.', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(goalRequestTimeoutMs(backend))]) : AbortSignal.timeout(goalRequestTimeoutMs(backend)) })
+    messages: [{ role: 'user', content: prompt.trim() }], trailer: 'Produce the staged plan now. Do not execute the task.', helper, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(goalRequestTimeoutMs(backend, helper ?? undefined))]) : AbortSignal.timeout(goalRequestTimeoutMs(backend, helper ?? undefined)) })
     .catch(error => { throw nativeGoalFailure(`request_failed: ${error instanceof Error ? error.message : error}`, backend); });
   signal?.throwIfAborted();
   if (result.action !== 'continue') throw nativeGoalFailure('error' in result ? result.error : 'No plan was generated', backend, 'retryAfterMs' in result ? result.retryAfterMs : undefined);
@@ -2365,9 +2375,10 @@ export async function draftOpeningMessage(
   const key = backend === 'api' ? await goalProviderKey(endpoint.kind) : null;
   // Custom endpoints may be keyless; only OpenRouter fails here without one.
   if (backend === 'api' && !key && endpoint.kind === 'openrouter') return { error: 'no_api_key' };
-  const model = backend === 'chatgpt' ? helperModelLabel() : settings.model;
+  const helper = backend === 'chatgpt' ? goalHelperSelection() : null;
+  const model = helper ? helperModelLabel(helper) : settings.model;
   const abort = new AbortController();
-  const timer = setTimeout(() => abort.abort(), Math.min(goalRequestTimeoutMs(backend), maxMs));
+  const timer = setTimeout(() => abort.abort(), Math.min(goalRequestTimeoutMs(backend, helper ?? undefined), maxMs));
   try {
     const mode = named ?? goalDrivingMode();
     const decision = await requestDrivingDecision({
@@ -2377,6 +2388,7 @@ export async function draftOpeningMessage(
       key: key ?? '',
       model,
       mode,
+      helper,
       system: [
         mode === 'loop' ? settings.loopPrompt : settings.objectivePrompt,
         goalObjectiveMessage(goal)
