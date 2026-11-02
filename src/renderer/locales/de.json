@@ -3800,5 +3800,17 @@
   "Screenshot permission can be requested only from the Chat On Steroids main window.": "Die Screenshotberechtigung kann nur im Hauptfenster von Chat On Steroids angefordert werden.",
   "Click while the Chat On Steroids window is active. If GNOME asks, choose Allow. The screenshot is discarded.": "Klicke bei aktivem Chat-On-Steroids-Fenster. Falls GNOME nachfragt, wähle Zulassen. Der Screenshot wird verworfen.",
   "Request screenshot permission": "Screenshotberechtigung anfordern",
-  "GNOME screenshot permission could not be confirmed.": "Die GNOME-Screenshotberechtigung konnte nicht bestätigt werden."
+  "GNOME screenshot permission could not be confirmed.": "Die GNOME-Screenshotberechtigung konnte nicht bestätigt werden.",
+  "Drag a chat here, or move it from its menu.": "Zieh einen Chat hierher oder verschieb ihn über sein Menü.",
+  "Move to project": "In Projekt verschieben",
+  "Move this chat to a project; its commands then run in that project's folder": "Diesen Chat in ein Projekt verschieben; seine Befehle laufen dann im Ordner dieses Projekts",
+  "Moved to {0}": "Nach {0} verschoben",
+  "Moved out of its project": "Aus seinem Projekt genommen",
+  "ChatGPT keeps it where it was.": "ChatGPT lässt ihn, wo er war.",
+  "Undo": "Rückgängig",
+  "Move undone": "Verschieben rückgängig gemacht",
+  "Today": "Heute",
+  "Yesterday": "Gestern",
+  "Previous 7 days": "Letzte 7 Tage",
+  "Previous 30 days": "Letzte 30 Tage"
 }
