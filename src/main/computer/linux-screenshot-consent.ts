@@ -19,15 +19,31 @@ export interface LinuxScreenshotConsentDependencies {
 }
 
 export async function testLinuxScreenshotConsent(deps: LinuxScreenshotConsentDependencies): Promise<{ pngBytes: number }> {
-  if (process.platform !== 'linux') throw new Error('Native Linux screenshot consent is available only on Linux.');
-  if (!deps.enabled() || !deps.screenAllowed()) throw new Error('Enable native Linux Desktop and Screen access first.');
-  if (!deps.focused()) throw new Error('Activate the Chat On Steroids window before requesting screenshot permission.');
+  if (process.platform !== 'linux') {
+    logInfo('linux screenshot consent: refused because the platform is not Linux');
+    throw new Error('Native Linux screenshot consent is available only on Linux.');
+  }
+  if (!deps.enabled() || !deps.screenAllowed()) {
+    logInfo('linux screenshot consent: refused because native Linux Desktop or Screen access is disabled');
+    throw new Error('Enable native Linux Desktop and Screen access first.');
+  }
+  if (!deps.focused()) {
+    logInfo('linux screenshot consent: refused because the main window is not focused');
+    throw new Error('Activate the Chat On Steroids window before requesting screenshot permission.');
+  }
   await (deps.checkVersion ?? checkLinuxScreenshotVersion)();
   // User focus and live settings can change while checking the backend version.
-  if (!deps.enabled() || !deps.screenAllowed()) throw new Error('Screen access was disabled before the screenshot request.');
-  if (!deps.focused()) throw new Error('The Chat On Steroids window lost focus; no screenshot was requested.');
+  if (!deps.enabled() || !deps.screenAllowed()) {
+    logInfo('linux screenshot consent: refused because native Linux Desktop or Screen access was disabled before the screenshot request');
+    throw new Error('Screen access was disabled before the screenshot request.');
+  }
+  if (!deps.focused()) {
+    logInfo('linux screenshot consent: refused because the main window lost focus during the version check');
+    throw new Error('The Chat On Steroids window lost focus; no screenshot was requested.');
+  }
   const result = await (deps.run ?? runLinuxScreenshot)({ kind: 'screenshot', display: 0 });
   if (!result.ok) {
+    logInfo('linux screenshot consent: refused because the GNOME screenshot portal did not grant a screenshot');
     const error = result.error as { code?: unknown } | null;
     const code = typeof error?.code === 'string' ? error.code : 'UNKNOWN';
     // Only report the backend error code. Backend details could contain arbitrary
