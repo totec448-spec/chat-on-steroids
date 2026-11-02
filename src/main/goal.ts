@@ -163,7 +163,7 @@ const MAX_USER_MESSAGE_CHARS = 48_000;
 /** Repeated on every decision: bound the supplemental copy independently of history. */
 const MAX_ORIGINAL_REQUEST_CHARS = 20_000;
 /** How long one draft may take before it is abandoned as failed. */
-const REQUEST_TIMEOUT_MS = 180_000;
+export const REQUEST_TIMEOUT_MS = 180_000;
 
 /**
  * Failures that asking again cannot answer, whoever asks and however long they wait.
@@ -2344,7 +2344,9 @@ export async function draftOpeningMessage(
   objective: string,
   named: GoalMode | null = null,
   onProgress?: (progress: TaskProgressUpdate) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  // A caller that itself gives up sooner (the page's request) caps the helper's own deadline.
+  maxMs = Infinity
 ): Promise<{ reply: string; model: string } | { error: string; retryable?: boolean; retryAfterMs?: number }> {
   const goal = objective.trim();
   signal?.throwIfAborted();
@@ -2359,7 +2361,7 @@ export async function draftOpeningMessage(
   if (backend === 'api' && !key && endpoint.kind === 'openrouter') return { error: 'no_api_key' };
   const model = backend === 'chatgpt' ? helperModelLabel() : settings.model;
   const abort = new AbortController();
-  const timer = setTimeout(() => abort.abort(), goalRequestTimeoutMs(backend));
+  const timer = setTimeout(() => abort.abort(), Math.min(goalRequestTimeoutMs(backend), maxMs));
   try {
     const mode = named ?? goalDrivingMode();
     const decision = await requestDrivingDecision({
