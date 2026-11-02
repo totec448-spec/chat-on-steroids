@@ -1395,6 +1395,46 @@ describe('desktop input delivery and helper ownership', () => {
   });
 
   /**
+   * #1922: a fresh-turn rotation inserted its generic Continue, the composer changed before Send, and the
+   * draft was kept. Every later message (other text) was then refused: "ChatGPT already contains an unsent
+   * draft". The app lists the texts it put into this chat that never reached Send; exactly one of those is
+   * its own leftover and is replaced. Edited, or not listed, it is still the person's draft.
+   */
+  it.each(['listed', 'listed, kept escaped', 'not listed', 'edited'] as const)('replaces an earlier unsent message of its own only when it is %s', async kind => {
+    const leftover = 'Continue with the next step of the task (step 2).';
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack || message.fail || message.response
+        ? { ok: true } : { input: claimed(), ...(kind === 'not listed' ? {} : { ownUnsent: [leftover] }) } })
+    }, () => undefined, false, true);
+    live.document.querySelector('#prompt-textarea')!.textContent = kind === 'edited' ? `${leftover} And also this.`
+      : kind === 'listed, kept escaped' ? String.raw`Continue with the next step of the task \(step 2\).` : leftover;
+    await settle();
+    const sends = watchSend(live.document);
+    let sentText = '';
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      sentText = live!.document.querySelector('#prompt-textarea')!.textContent ?? '';
+      userTurn(live!.document, 'leftover-question', text, { sent: false });
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+    });
+
+    const result = await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA });
+    await settle();
+
+    const refused = live.sent.filter(message => message.type === 'desktop_input' && message.fail)
+      .map(message => String(message.error));
+    if (kind.startsWith('listed')) {
+      expect(refused.filter(error => /unsent draft|composer changed/.test(error))).toEqual([]);
+      expect(sends()).toBe(1);
+      // Replaced, never appended to: only the new message goes out.
+      expect(sentText.replace(/\s+/g, ' ').trim()).toBe(text.replace(/\s+/g, ' ').trim());
+      expect(result).toEqual({ ok: true });
+    } else {
+      expect(refused.some(error => /unsent draft/.test(error))).toBe(true);
+      expect(sends()).toBe(0);
+    }
+  });
+
+  /**
    * #744: after a reload, React replaced the composer between insertion and Send and kept the
    * recovery's exact text. The lease was tied to the old node, Send was never pressed, and the
    * message sat in ChatGPT until the user sent it by hand. One rebind is allowed before anything
@@ -2973,6 +3013,29 @@ describe('desktop input delivery and helper ownership', () => {
     expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: fresh ? null : chatA })).toEqual({ ok: fresh });
     expect(sent).toHaveBeenCalledTimes(fresh ? 1 : 0);
     if (!fresh) expect(composerText(live.document)).toBe('Restored old home draft');
+  });
+
+  // CodeRabbit on #2028: ChatGPT can restore the app's own listed leftover only while the model is being
+  // chosen (a slow machine); the empty composer seen at claim time must not decide it.
+  it('replaces its own listed leftover restored during model selection', async () => {
+    const leftover = 'Continue with the next step of the task.';
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize ? { ok: true } : message.ack || message.fail ? { ok: true }
+        : { input: claimed(), ownUnsent: [leftover] } })
+    });
+    (live.window as any).CLF_DOM.selectModelSettings = async () => {
+      live!.document.querySelector('#prompt-textarea')!.textContent = leftover;
+      return true;
+    };
+    let sentText = '';
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      sentText = composerText(live!.document);
+      userTurn(live!.document, 'restored-leftover-question', text);
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+      live!.hook.observe();
+    });
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA })).toEqual({ ok: true });
+    expect(sentText.replace(/\s+/g, ' ').trim()).toBe(text.replace(/\s+/g, ' ').trim());
   });
 
   it('abandons a claimed existing input after an A-to-B navigation without touching the new draft', async () => {

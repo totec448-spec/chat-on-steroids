@@ -3866,5 +3866,9 @@
   "Report a problem. GitHub opens with it filled in.": "Informa de un problema. GitHub se abre con todo rellenado.",
   "Report a problem.": "Informar de un problema.",
   "New features come as pull requests, not issues.": "Las funciones nuevas llegan como pull requests, no como issues.",
-  "How to start one": "Cómo empezar uno"
+  "How to start one": "Cómo empezar uno",
+  "Plugins could not be loaded.": "No se pudieron cargar los complementos.",
+  "Pets could not be loaded.": "No se pudieron cargar las mascotas.",
+  "Continue in a new chat from the last summary": "Continuar en un chat nuevo con el último resumen",
+  "ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.": "ChatGPT lleva 15 minutos sin escribir el resumen. El último resumen guardado puede continuar el trabajo en un chat nuevo."
 }
