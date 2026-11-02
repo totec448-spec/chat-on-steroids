@@ -3946,5 +3946,7 @@
   "Report a problem. GitHub opens with it filled in.": "Сообщите о проблеме. GitHub откроется с заполненной формой.",
   "Report a problem.": "Сообщить о проблеме.",
   "New features come as pull requests, not issues.": "Новые функции принимаются как pull request, а не как issue.",
-  "How to start one": "Как его начать"
+  "How to start one": "Как его начать",
+  "Plugins could not be loaded.": "Не удалось загрузить плагины.",
+  "Pets could not be loaded.": "Не удалось загрузить питомцев."
 }

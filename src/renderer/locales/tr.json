@@ -3784,5 +3784,7 @@
   "Report a problem. GitHub opens with it filled in.": "Bir sorun bildirin. GitHub her şey doldurulmuş olarak açılır.",
   "Report a problem.": "Bir sorun bildirin.",
   "New features come as pull requests, not issues.": "Yeni özellikler issue olarak değil, pull request olarak gelir.",
-  "How to start one": "Nasıl başlatılır"
+  "How to start one": "Nasıl başlatılır",
+  "Plugins could not be loaded.": "Eklentiler yüklenemedi.",
+  "Pets could not be loaded.": "Maskotlar yüklenemedi."
 }
