@@ -1,2 +1,12 @@
 #!/bin/sh
-exec node scripts/verify-public-history.mjs
+node scripts/verify-public-history.mjs || exit 1
+# The typecheck CI would otherwise fail minutes later (vitest does not typecheck, #1286). About two
+# seconds with TypeScript 7; a checkout without node_modules skips it and says so.
+if [ -x node_modules/.bin/tsc ]; then
+  node_modules/.bin/tsc --noEmit -p tsconfig.json || {
+    echo "pre-push: the typecheck failed; fix it before pushing (npm run typecheck)." >&2
+    exit 1
+  }
+else
+  echo "pre-push: no node_modules here, so the typecheck was skipped (npm ci installs it)." >&2
+fi
