@@ -202,6 +202,20 @@ describe('a renderer that never answers', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  // CodeRabbit on #2027: a lease whose focus command failed and whose release failed too is released by a
+  // later ordinary policy pass, not only by revoke().
+  it('retries the release of a failed lease on the next policy pass', async () => {
+    const { control, chrome, attached } = setup();
+    chrome.debugger.sendCommand.mockRejectedValueOnce(new Error('renderer gone'));
+    chrome.debugger.detach.mockRejectedValueOnce(new Error('transient'));
+    await control.set('policy', [A]).catch(() => undefined);
+    expect([...attached]).toEqual([1]);
+    await control.set('policy', [A]).catch(() => undefined);
+    expect([...attached]).toEqual([]);
+    // Still failed for this activity: not attached again.
+    expect(chrome.debugger.attach).toHaveBeenCalledTimes(1);
+  });
+
   it('releases an attachment that answers only after it was given up', async () => {
     vi.useFakeTimers();
     try {

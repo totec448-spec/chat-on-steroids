@@ -2666,7 +2666,8 @@ ordinary idle/reuse/close policy remains unchanged. Session storage retains atta
 custody and cancellation, never activity authority. Chrome/user debugger cancellation is not
 retried until that activity scope ends. Browser tools cannot borrow these attachments.
 Lease changes never hold the worker's status pass: each debugger call gives up after 5 s (an attach
-that answers later goes into retiring custody until its release is confirmed), and the worker waits at most 3 s for a lease change
+that answers later, and a failed lease whose release fails, go into retiring custody until the release
+is confirmed), and the worker waits at most 3 s for a lease change
 (`renderingLeases`) and ignores its failure. A lease that never answered, or could not be released,
 kept every later pass from reaching its repairs (2026-11-01).
 `test/active-tabs.test.ts` and `test/desktop-input-maintenance.test.ts` cover custody, election,
@@ -3540,6 +3541,8 @@ its chat again lifts the verdict. A Goal or Loop chat (`goalActiveFor`, so never
 Stop, not "browser only") is first shown once per episode by a connected browser that can show chats
 (`showUnclaimedChatOnce`, the extension's reveal), with a timeline note and a log line, and its offers start
 over (user, 2026-11-02). Without such a browser nothing could be shown, so it gets the verdict as before.
+Taking the chat is not showing it: a browser whose tab or window step fails posts `/reveal/failed`
+(`unclaimedChatShowFailed`), and that chat may be shown again when its offers run out.
 Only offers no page asked for count toward that budget (#1922): a `/repairs/claim` for the offered token
 that is refused (not current, another chat's events still being saved, replaced) proves a page: for
 2 minutes after it no offer counts (`CLAIM_ASKED_FRESH_MS`, whichever browser polls), nor does any offer to a
