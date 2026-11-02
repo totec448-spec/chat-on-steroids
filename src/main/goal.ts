@@ -2284,7 +2284,8 @@ async function run(draft: GoalDraft): Promise<void> {
     const limit = abort.signal.reason?.name === 'TimeoutError'
       ? ` (the ${limitMs / 60_000}-minute limit for the ${draft.backend} helper${effort ? ` at ${effort} reasoning` : ''})`
       : '';
-    logWarn(`goal: draft for ${draft.conversationId} failed — ${failure}${limit}`);
+    const shorter = failure === 'reply_too_long' ? '; the next draft for this chat asks for a shorter message' : '';
+    logWarn(`goal: draft for ${draft.conversationId} failed — ${failure}${limit}${shorter}`);
     settle(draft, 'failed', failure);
   } finally {
     clearTimeout(timer);
