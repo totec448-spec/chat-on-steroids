@@ -24,7 +24,7 @@ function setup(stored: unknown[] = []) {
       sendCommand: vi.fn(async () => ({}))
     }
   };
-  const make = () => vm.runInNewContext(`${source}; createActiveTabs(chrome)`, { chrome });
+  const make = () => vm.runInNewContext(`${source}; createActiveTabs(chrome)`, { chrome, setTimeout, clearTimeout });
   return { chrome, data, tabs, attached, make, control: make() };
 }
 
@@ -154,5 +154,46 @@ describe('active ChatGPT rendering leases', () => {
     await restored.revoke();
     await restored.set('policy', [home]);
     expect(chrome.debugger.attach).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('a renderer that never answers', () => {
+  // 2026-11-01: one debugger command without an answer held every later lease change, and the worker's
+  // status pass with it. A command now gives up after five seconds and releases the tab.
+  it('gives up on a focus command that never answers and releases the tab', async () => {
+    vi.useFakeTimers();
+    try {
+      const { control, chrome, attached } = setup();
+      chrome.debugger.sendCommand.mockImplementation(() => new Promise(() => undefined));
+      let settled = false;
+      const change = control.set('policy', [A]).finally(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(4_900);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(200);
+      await change;
+      expect([...attached]).toEqual([]);
+      // Marked failed, so the next pass does not attach again and wait once more.
+      await control.set('policy', [A]);
+      expect(chrome.debugger.attach).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('releases an attachment that answers only after it was given up', async () => {
+    vi.useFakeTimers();
+    try {
+      const { control, chrome, attached } = setup();
+      let finish: (() => void) | null = null;
+      chrome.debugger.attach.mockImplementation(({ tabId }: { tabId: number }) => new Promise<void>(resolve => {
+        finish = () => { attached.add(tabId); resolve(); };
+      }));
+      const change = control.set('policy', [A]);
+      await vi.advanceTimersByTimeAsync(5_100);
+      await change;
+      expect(chrome.debugger.sendCommand).not.toHaveBeenCalled();
+      finish!();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(chrome.debugger.detach).toHaveBeenCalledWith({ tabId: 1 });
+      expect([...attached]).toEqual([]);
+    } finally { vi.useRealTimers(); }
   });
 });

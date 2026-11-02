@@ -1,6 +1,14 @@
 /** Lightweight rendering leases. The bridge/operation owns activity, never this module. */
 export function createActiveTabs(chrome) {
   const KEY = 'cosActiveTabs';
+  // A debugger command to a renderer that never answers (a huge or hung chat page) must not hold every
+  // later lease change, and with it the status pass, forever (2026-11-01).
+  const COMMAND_MS = 5000;
+  const within = (work, label) => {
+    let timer;
+    return Promise.race([work, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} timed out`)), COMMAND_MS); })])
+      .finally(() => clearTimeout(timer));
+  };
   const scopes = new Map(), states = new Map(), retiring = new Set(), cancelled = new Map();
   let syncing = null, again = false;
   const valid = tab => Number.isInteger(tab?.id) && tab.id > 0 && typeof tab.url === 'string' &&
@@ -18,9 +26,9 @@ export function createActiveTabs(chrome) {
   })();
   async function detach(state) {
     if (!state.attached) return;
-    try { await chrome.debugger.detach({ tabId: state.id }); }
+    try { await within(chrome.debugger.detach({ tabId: state.id }), 'Detach'); }
     catch {
-      const targets = await chrome.debugger.getTargets();
+      const targets = await within(chrome.debugger.getTargets(), 'Target list');
       if (targets.some(t => t.tabId === state.id && t.attached)) throw new Error('Active tab release remains pending');
     }
     state.attached = false;
@@ -33,15 +41,21 @@ export function createActiveTabs(chrome) {
     if (!current(state) || !valid(tab) || tab.url !== state.url) return;
     // A foreign debugger (including the browser tools) keeps its own session. Never steal it.
     state.attaching = true;
-    try { await chrome.debugger.attach({ tabId: state.id }, '1.3'); }
-    catch { state.failed = true; return; }
+    const attaching = chrome.debugger.attach({ tabId: state.id }, '1.3');
+    try { await within(attaching, 'Attach'); }
+    catch (error) {
+      state.failed = true;
+      // An attach that answers after its time ran out is ours: release it rather than leave the tab held.
+      if (/timed out/.test(error?.message || '')) void attaching.then(() => chrome.debugger.detach({ tabId: state.id })).catch(() => undefined);
+      return;
+    }
     finally { state.attaching = false; }
     state.attached = true;
     try {
       await save();
       const latest = await chrome.tabs.get(state.id);
       if (!current(state) || !valid(latest) || latest.url !== state.url) throw new Error('Tab changed');
-      await chrome.debugger.sendCommand({ tabId: state.id }, 'Emulation.setFocusEmulationEnabled', { enabled: true });
+      await within(chrome.debugger.sendCommand({ tabId: state.id }, 'Emulation.setFocusEmulationEnabled', { enabled: true }), 'Focus emulation');
       if (!current(state)) throw new Error('Activity ended');
     } catch {
       state.failed = true;
