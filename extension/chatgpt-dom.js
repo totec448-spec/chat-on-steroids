@@ -2888,8 +2888,8 @@ var CLF_DOM = (() => {
     const identified = expectedAppId ? ownApps.filter(app => app.appId === expectedAppId) : [];
     const proven = identified.length ? identified : provenAppsFor(connectorName);
     const surfaceAt = ['core', 'desktop', 'plugins'].indexOf(expectedSurface);
-    const nativeInspection = surfaceAt >= 0 && !location.hash &&
-      /^\/settings\/plugins-settings\/plugin_asdk_app_[a-zA-Z0-9_-]+$/.test(location.pathname) &&
+    const nativeRoute = !location.hash && /^\/settings\/plugins-settings\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.pathname);
+    const nativeInspection = surfaceAt >= 0 && !!nativeRoute &&
       (expectedAppId !== null || connectorNames()[surfaceAt] === connectorName);
     if (proven === null && !expectedAppId && !nativeInspection) return null;
     const snapshot = await new Promise(resolve => {
@@ -2900,7 +2900,8 @@ var CLF_DOM = (() => {
         if (event.source === window && event.origin === location.origin && data?.source === 'clf-plugin-reply' && data.nonce === nonce && data.v === 1) finish(data.plugin);
       };
       const timer = setTimeout(() => finish(null), 1500);
-      window.addEventListener('message', receive); window.postMessage({ source: 'clf-plugin-ask', nonce, apps: connectorNames(), appIds: connectorApps() }, location.origin);
+      window.addEventListener('message', receive); window.postMessage({ source: 'clf-plugin-ask', nonce, apps: connectorNames(), appIds: connectorApps(),
+        refresh: nativeInspection ? { appId: expectedAppId ?? nativeRoute[1], surface: expectedSurface } : null }, location.origin);
     });
     const route = /^#settings\/Plugins\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.hash) ||
       (!location.hash ? /^\/(?:settings\/plugins-settings|plugins)\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.pathname) : null);
@@ -2942,9 +2943,10 @@ var CLF_DOM = (() => {
     const nativeInspection = inspectTunnel && ['core', 'desktop', 'plugins'].includes(expectedSurface) &&
       location.pathname === '/settings/plugins-settings' && !location.hash &&
       (expectedAppId !== null || connectorNames()[['core', 'desktop', 'plugins'].indexOf(expectedSurface)] === connectorName);
-    // Navigate only to the unique configured-name row or the durable exact ID. The destination
-    // must expose a native tunnel for main to verify; navigating grants no Refresh authority.
-    if (nativeInspection) proven = [];
+    // Keep unambiguous proven-ID discovery through a provider rename. When aliases collide,
+    // inspect only the configured-name row or durable exact ID instead. The destination's
+    // tunnel still needs main's validation; none of these navigation choices grants Refresh.
+    if (nativeInspection && (expectedAppId !== null || proven === null || firstEnrollmentAppId(proven, connectorName) === null)) proven = [];
     if (!nativeInspection && expectedAppId !== null && expectedSurface !== null) {
       const surfaceAt = ['core', 'desktop', 'plugins'].indexOf(expectedSurface);
       if (surfaceAt < 0) return null;
