@@ -50,7 +50,7 @@ import { resetWorkspaces, setWorkspaceFor } from '../src/main/workspace.js';
 import { DEFAULT_CAPABILITIES, type Capabilities, type Root } from '../src/shared/types.js';
 import { foldProgress, type ToolOutcome } from '../src/shared/session.js';
 import { emptyEvidence, noteExec, noteOutcome, runInCallContext, type CallContext } from '../src/main/mcp/call-context.js';
-import { observeRequestCorrelation } from '../src/main/session/correlation.js';
+import { observeRequestCorrelation, requestCorrelation } from '../src/main/session/correlation.js';
 import { WINDOWS_COMPUTER_METHODS, WINDOWS_COMPUTER_READ_METHODS } from '../src/shared/windows-computer.js';
 import { BROWSER_TOOLS, BROWSER_READ_TOOLS } from '../src/shared/browser-control.js';
 import { resetBlockedChatsForTests, setChatBlocked } from '../src/main/session/blocked-chats.js';
@@ -641,6 +641,43 @@ describe('endpoint hardening', () => {
 // ---------------------------------------------------------------------------
 
 describe('surface boundaries', () => {
+  it('drains an accepted request while its provider-session admission is waiting on storage', async () => {
+    const correlation = await import('../src/main/session/correlation.js');
+    const { getLog } = await import('../src/main/logger.js');
+    let entered!: () => void, release!: () => void;
+    const paused = new Promise<void>(resolve => { entered = resolve; });
+    const resume = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(correlation, 'observeProviderSessionRequest').mockImplementationOnce(async () => {
+      entered(); await resume; return 'unbound';
+    });
+    const request = rawPost(endpoint.urls.core, JSON.stringify({ jsonrpc: '2.0', id: nextId++, method: 'tools/call',
+      params: { name: 'missing_diagnostic_tool', arguments: {}, _meta: {
+        'openai/session': 'drain-provider', 'openai/subject': 'drain-subject'
+      } } }), { 'x-request-id': 'drain-provider-request' }).catch(() => ({ status: 0, headers: {}, text: '' }));
+    await paused;
+    const before = getLog().length;
+    const stopped = endpoint.stop();
+    try {
+      expect(getLog().slice(before).some(row => row.message === 'server stopping: draining 1 accepted response(s)')).toBe(true);
+    } finally { release(); await stopped; }
+    expect((await request).status).toBe(200);
+  });
+
+  it.each(['core', 'desktop', 'plugins'] as const)('resolves a hidden %s request through its independently proven provider session', async surface => {
+    const source = await createSession({ conversationId: `provider-${surface}` });
+    const anchor = `native-provider-${surface}`, hidden = `hidden-provider-${surface}`;
+    observeRequestCorrelation({ requestId: anchor, conversationId: `provider-${surface}`, sessionId: source.id,
+      messageId: `native-message-${surface}`, tool: '', observedAt: Date.now() });
+    const send = (requestId: string) => rawPost(endpoint.urls[surface], JSON.stringify({ jsonrpc: '2.0', id: nextId++, method: 'tools/call',
+      params: { name: 'missing_diagnostic_tool', arguments: {}, _meta: {
+        'openai/session': `provider-token-${surface}`, 'openai/subject': 'provider-user'
+      } } }), { 'x-request-id': requestId });
+    await send(anchor);
+    await send(hidden);
+    expect(requestCorrelation(hidden)).toMatchObject({ conversationId: `provider-${surface}`, sessionId: source.id,
+      providerSessionAnchor: anchor });
+  });
+
   /** Turns everything on, so each surface advertises the most it ever can. */
   const everything = (): void => {
     ctx.caps = allCaps();
@@ -3474,6 +3511,42 @@ describe('exec_command and write_stdin', () => {
 });
 
 describe('agent-maintained plans over MCP', () => {
+  it('preserves Block enforcement after provider-session identity is recovered', async () => {
+    ctx.sessionTools = true;
+    const source = await createSession({ conversationId: 'blocked-provider-plan' });
+    const anchor = 'blocked-provider-anchor';
+    observeRequestCorrelation({ requestId: anchor, conversationId: 'blocked-provider-plan', sessionId: source.id,
+      messageId: 'blocked-provider-message', tool: '', observedAt: Date.now() });
+    const send = (requestId: string) => rawPost(endpoint.urls.core, JSON.stringify({ jsonrpc: '2.0', id: nextId++, method: 'tools/call', params: {
+      name: 'update_plan', arguments: { plan: [] }, _meta: { 'openai/session': 'blocked-provider-token', 'openai/subject': 'provider-user' }
+    } }), { 'x-request-id': requestId });
+    await send(anchor);
+    await setChatBlocked('blocked-provider-plan', true);
+    try {
+      const refused = decode(await send('blocked-provider-hidden'));
+      expect(refused.result.isError).toBe(true);
+      expect(requestCorrelation('blocked-provider-hidden')?.conversationId).toBe('blocked-provider-plan');
+      expect(refused.result.content.map((part: { text?: string }) => part.text ?? '').join('\n')).toMatch(/blocked/i);
+    } finally { await setChatBlocked('blocked-provider-plan', false); }
+  });
+
+  it('completes the visible plan when a later request carries the same proven provider conversation', async () => {
+    ctx.sessionTools = true;
+    const source = await createSession({ conversationId: 'provider-plan-http' });
+    observeRequestCorrelation({ requestId: 'provider-plan-anchor', conversationId: 'provider-plan-http',
+      sessionId: source.id, messageId: 'provider-plan-message', tool: '', observedAt: Date.now() });
+    const send = (requestId: string, status: 'in_progress' | 'completed') => rawPost(endpoint.urls.core,
+      JSON.stringify({ jsonrpc: '2.0', id: nextId++, method: 'tools/call', params: {
+        name: 'update_plan', arguments: { plan: [{ step: 'Check provider identity', status }] },
+        _meta: { 'openai/session': 'opaque-provider-conversation', 'openai/subject': 'opaque-provider-user' }
+      } }), { 'x-request-id': requestId });
+    expect(decode(await send('provider-plan-anchor', 'in_progress')).result.isError).not.toBe(true);
+    const completed = decode(await send('provider-plan-hidden', 'completed'));
+    expect(completed.result.isError).not.toBe(true);
+    expect((await readSessionPlan(source.id))?.plan[0]?.status).toBe('completed');
+    expect(completed.result.content.map((part: { text?: string }) => part.text ?? '').join('\n')).not.toContain('Exact caller identity is not available');
+  });
+
   it('uses exact request proof without workers, refuses foreign targets and retired chats', async () => {
     ctx.sessionTools = true;
     ctx.agentTools = false;
