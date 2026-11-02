@@ -1961,12 +1961,23 @@ type UserMessageEvent = Extract<SessionEvent, { kind: 'user_message' }>;
  */
 const latestQuestionCache = new Map<string, { revision: number; turns: unknown; message: UserMessageEvent | undefined }>();
 
+/** A scan already running for a revision; callers at that revision share it (CodeRabbit on #2030). */
+const latestQuestionScans = new Map<string, { revision: number; turns: unknown; scan: Promise<SessionEvent[]> }>();
+
 async function latestAuthoredQuestion(sessionId: string, turns: TimelineTurns | undefined): Promise<UserMessageEvent | undefined> {
   const revision = open.get(sessionId)?.nextSeq;
   const cached = latestQuestionCache.get(sessionId);
   if (revision !== undefined && cached && cached.revision === revision && cached.turns === turns) return cached.message;
-  const [found] = await readRecentEventsFromDisk(sessionId, 1, { kinds: ['user_message'], orderByOrigin: true,
+  const running = latestQuestionScans.get(sessionId);
+  const shared = revision !== undefined && running && running.revision === revision && running.turns === turns ? running.scan : null;
+  const scan = shared ?? readRecentEventsFromDisk(sessionId, 1, { kinds: ['user_message'], orderByOrigin: true,
     before: Number.POSITIVE_INFINITY, acceptEvent: (event: SessionEvent) => !injectedUserMessage(event, turns) });
+  if (!shared && revision !== undefined) {
+    const entry = { revision, turns, scan };
+    latestQuestionScans.set(sessionId, entry);
+    void scan.finally(() => { if (latestQuestionScans.get(sessionId) === entry) latestQuestionScans.delete(sessionId); }).catch(() => undefined);
+  }
+  const [found] = await scan;
   const message = found?.kind === 'user_message' ? found : undefined;
   // Only a read no write overtook may be kept.
   if (revision !== undefined && open.get(sessionId)?.nextSeq === revision) {
@@ -4501,6 +4512,7 @@ export async function deleteSession(id: string): Promise<void> {
 export function resetSessionStoreForTests(): void {
   recentUnreadableWarned.clear();
   latestQuestionCache.clear();
+  latestQuestionScans.clear();
   for (const entry of open.values()) if (entry.metaTimer) clearTimeout(entry.metaTimer);
   open.clear();
   opening.clear();
