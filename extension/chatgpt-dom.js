@@ -2988,13 +2988,13 @@ var CLF_DOM = (() => {
           const ids = expectedAppId !== null ? [expectedAppId] : namedTargetId !== undefined ? [namedTargetId] : proven.map(app => app.appId);
           const exact = visible.filter(button => ids.includes(installedId(button)));
           if (exact.length || expectedAppId !== null) return exact.length ? exact : null;
-          if (installed.some(button => ids.includes(installedId(button)))) return null;
+          if (installed.some(button => ids.includes(installedId(button)))) return [];
           // A recreated connector has a new ID: only an unbound native inspection may
           // try its configured-name row when none of the proven IDs is still installed.
           const configured = installed.filter(button => (button.tagName !== 'A' || installedId(button)) &&
             [...button.querySelectorAll('*')].some(node => !node.children.length && text(node) === connectorName));
           const visibleConfigured = configured.filter(button => visible.includes(button));
-          return configured.length > 0 && configured.length === visibleConfigured.length ? visibleConfigured : null;
+          return !configured.length ? null : configured.length === visibleConfigured.length ? visibleConfigured : [];
         }
         const rows = visible.filter(button => {
           if (button.tagName === 'A') {

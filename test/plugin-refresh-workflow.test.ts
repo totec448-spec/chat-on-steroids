@@ -108,6 +108,18 @@ it('records an already current schema without clicking Refresh and invalidating 
   expect(h.click).not.toHaveBeenCalled();
   expect(h.ask.mock.calls.map(([message]) => message.action)).toEqual(['current']);
 });
+it('keeps a legacy known-absent row on its existing failure path', async () => {
+  const ask = vi.fn(), assign = vi.fn();
+  const href = `https://chatgpt.com/?cos-plugin-refresh=${id}#settings/Plugins`;
+  const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1, ask,
+    location: { pathname: '/', href, assign },
+    t: (_key: string, fallback: string) => fallback,
+    CLF_DOM: { generating: () => false, pluginManagementIdle: () => true, pluginInstalledButtons: () => [] } });
+  vm.runInContext(`${section}\nwaitPageView = async (read, current) => current() ? read() : null; globalThis.run = refreshManagedPlugin;`, context);
+  expect(await (context.run as Function)({ id, appId: null, surface: 'core', connectorName: 'Chat On Steroids Core', tools })).toBe(false);
+  expect(ask.mock.calls.map(([message]) => message.action)).toEqual(['fail']);
+  expect(assign).not.toHaveBeenCalled();
+});
 it('records an already current schema when the workspace exposes no Refresh control', async () => {
   const h = workflow({ unchanged: true, refreshAvailable: false });
   expect(await h.run()).toBe(true);
@@ -252,7 +264,7 @@ it.each(['current', 'manual', 'claim', 'fail', 'complete'] as const)(
 );
 const nativeFixtures: JSDOM[] = [];
 afterEach(() => { for (const dom of nativeFixtures.splice(0)) dom.window.close(); });
-function nativeInstalledWorkflow(appId: string | null = null, observeOnly = true) {
+function nativeInstalledWorkflow(appId: string | null = null, observeOnly = true, realWait = false) {
   const listed = `https://chatgpt.com/settings/plugins-settings?cos-plugin-refresh=${id}`;
   const dom = new JSDOM('<main><a href="/settings/plugins-settings/plugin_asdk_app_synthetic"><span>Chat On Steroids Core</span></a></main>', { runScripts: 'outside-only', url: listed });
   nativeFixtures.push(dom);
@@ -269,11 +281,14 @@ function nativeInstalledWorkflow(appId: string | null = null, observeOnly = true
   const installed = vi.fn(api.pluginInstalledButtons), view = vi.fn(() => null);
   const assign = vi.fn(), ask = vi.fn(), replace = vi.fn();
   const location = { pathname: '/settings/plugins-settings', href: listed, assign };
-  const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1, ask, location, history: { replaceState: replace },
+  const checks = new Set();
+  const context = vm.createContext({ URL, setTimeout, clearTimeout, setInterval, clearInterval, pageViewChecks: checks,
+    MutationObserver: dom.window.MutationObserver, document: dom.window.document,
+    alive: true, generating: false, epoch: 1, ask, location, history: { replaceState: replace },
     t: (_key: string, fallback: string) => fallback,
     CLF_DOM: { generating: () => false, pluginManagementIdle: () => true, pluginInstalledButtons: installed, pluginRefreshView: view } });
-  vm.runInContext(`${section}\nwaitPageView = async (read, current) => current() ? read() : null; globalThis.run = refreshManagedPlugin;`, context);
-  return { dom, link, click, installed, view, assign, ask, replace, location,
+  vm.runInContext(`${section}\n${realWait ? '' : 'waitPageView = async (read, current) => current() ? read() : null;'} globalThis.run = refreshManagedPlugin;`, context);
+  return { dom, link, click, installed, view, assign, ask, replace, location, checks,
     run: () => (context.run as Function)({ id, appId, surface: 'core', connectorName: 'Chat On Steroids Core', tools, observeOnly }) as Promise<boolean> };
 }
 it('navigates the sole reverified native link with custody attached before inspecting its card', async () => {
@@ -319,7 +334,7 @@ it.each(['hidden', 'disabled'])('does not replace a proven-ID row that is still 
   expect(await h.run()).toBe(false);
   expect(h.assign).not.toHaveBeenCalled();
   expect(h.click).not.toHaveBeenCalled();
-  expect(h.ask).not.toHaveBeenCalled();
+  expect(h.ask.mock.calls.map(([message]) => message.action)).toEqual(['fail']);
 });
 it.each(['hidden', 'disabled'])('does not treat a visible configured-name row as unique while another match is unavailable (%s)', async mode => {
   const h = nativeInstalledWorkflow(null, false);
@@ -331,7 +346,55 @@ it.each(['hidden', 'disabled'])('does not treat a visible configured-name row as
   expect(await h.run()).toBe(false);
   expect(h.assign).not.toHaveBeenCalled();
   expect(h.click).not.toHaveBeenCalled();
-  expect(h.ask).not.toHaveBeenCalled();
+  expect(h.ask.mock.calls.map(([message]) => message.action)).toEqual(['fail']);
+});
+it.each(['configured-hidden', 'configured-disabled', 'proven-hidden', 'proven-disabled'])(
+  'reports a known unavailable native target once after the existing eight-second wait (%s)', async mode => {
+    vi.useFakeTimers();
+    try {
+      const h = nativeInstalledWorkflow(null, false, true);
+      const other = h.link.cloneNode(true) as HTMLAnchorElement;
+      other.href = '/settings/plugins-settings/plugin_asdk_app_other';
+      if (mode.startsWith('proven')) {
+        (h.dom.window as any).CLF_DOM.setConnectorApps({ core: [{ appId: 'asdk_app_other', name: 'Chat On Steroids Core' }], desktop: [], plugins: [] });
+        other.innerHTML = '<span>Previously renamed 日本語</span>';
+      }
+      if (mode.endsWith('hidden')) other.hidden = true;
+      else Object.defineProperty(other, 'disabled', { value: true });
+      h.link.after(other);
+      const pending = h.run();
+      await vi.advanceTimersByTimeAsync(7999);
+      expect(h.ask).not.toHaveBeenCalled(); expect(h.assign).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await pending).toBe(false);
+      expect(h.ask).toHaveBeenCalledExactlyOnceWith({ type: 'plugin_refresh', action: 'fail', id,
+        error: 'Installed plugin identity is unavailable or ambiguous' }, expect.any(Function));
+      expect(h.click).not.toHaveBeenCalled(); expect(h.checks.size).toBe(0);
+    } finally { vi.useRealTimers(); }
+  }
+);
+it.each(['resolved', 'absent', 'navigated'])('reobserves native ambiguity during hydration without stale failure attribution (%s)', async outcome => {
+  vi.useFakeTimers();
+  try {
+    const h = nativeInstalledWorkflow(null, false, true);
+    const duplicate = h.link.cloneNode(true) as HTMLAnchorElement;
+    duplicate.href = '/settings/plugins-settings/plugin_asdk_app_other'; duplicate.hidden = true;
+    h.link.after(duplicate);
+    const pending = h.run();
+    await vi.advanceTimersByTimeAsync(4000);
+    if (outcome === 'navigated') {
+      h.location.href = pathRouted; h.location.pathname = new URL(pathRouted).pathname;
+      h.dom.window.document.body.setAttribute('data-navigation', 'changed');
+    } else {
+      duplicate.remove();
+      if (outcome === 'absent') h.link.remove();
+    }
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(await pending).toBe(outcome === 'resolved');
+    expect(h.ask).not.toHaveBeenCalled(); expect(h.click).not.toHaveBeenCalled();
+    expect(h.assign.mock.calls.map(([url]) => url)).toEqual(outcome === 'resolved' ? [pathRouted] : []);
+    expect(h.checks.size).toBe(0);
+  } finally { vi.useRealTimers(); }
 });
 it.each(['original', 'renamed'])('rechecks the exact enrolled installed link before an observation with two proven Core IDs (%s)', async name => {
   const h = nativeInstalledWorkflow('asdk_app_synthetic');

@@ -5339,6 +5339,10 @@ none of its proven-ID rows remains installed, including hidden or unavailable ro
 target never borrows that replacement.
 Hidden or unavailable configured-name matches also preserve ambiguity; multiple visible matches
 remain separate rows for the caller to reject, not a single selected target.
+Unbound native discovery returns `null` for an unobserved/absent target and an empty array for a
+known installed but unavailable/ambiguous target. The caller keeps the existing eight-second
+hydration wait, then reports the latter through the existing inspection-failure path while it
+still owns the page. A vanished target keeps discovery retry behavior; legacy reads are unchanged.
 The isolated reader passes an optional `refresh: { appId, surface }`
 on `clf-plugin-ask` so the native Fiber reader applies that surface's catalog bound only to the
 exact matching card, even when its learned Plugins alias is missing. Legacy reads keep their

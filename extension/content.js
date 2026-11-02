@@ -14109,14 +14109,18 @@
           if (!current()) return false;
           location.assign(url.href); return true;
         }
-        let linkHref = null;
+        let linkHref = null, unavailableInstalled = false;
         const buttons = await waitPageView(() => {
           const found = CLF_DOM.pluginInstalledButtons(request.connectorName, installedAppId, installedSurface, true);
+          // Native discovery distinguishes no observed row from an installed target that
+          // cannot be used. Let hydration resolve it within the existing wait, then report
+          // the known failure rather than leaving the request silently pending forever.
+          unavailableInstalled = pathList && Array.isArray(found) && found.length === 0;
           linkHref = found?.length === 1 && found[0].tagName === 'A' ? found[0].href : null;
-          return found;
+          return unavailableInstalled ? null : found;
         }, current, 8000);
         if (!current()) return false;
-        if (!buttons && !installedAppId) return false;
+        if (!buttons && !installedAppId && !unavailableInstalled) return false;
         if (!buttons || buttons.length !== 1 || (installedAppId && buttons[0].tagName !== 'A')) {
           await fail(t(
             'content_connector_identity_ambiguous',
