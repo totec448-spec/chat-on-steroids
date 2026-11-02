@@ -329,7 +329,7 @@ describe('Goal decision backends', () => {
       // Fake timers do not speed up the real file work before the request: on the release runner
       // (8 s per neighboring test on Windows x64) it took longer than waitFor's default second.
       await vi.waitFor(() => expect(browser.request).toHaveBeenCalledTimes(1), { timeout: 15_000 });
-      await vi.advanceTimersByTimeAsync(180_000);
+      await vi.advanceTimersByTimeAsync(goal.goalRequestTimeoutMs('chatgpt'));
       expect(await settled(id)).toMatchObject({ stage: 'failed' });
       full = (browser.request.mock.calls[0]?.[0] as string).length;
       expect(full).toBeGreaterThan(60_000);
@@ -338,7 +338,7 @@ describe('Goal decision backends', () => {
       goal.startGoalDraft({ conversationId: id, sessionId: session.id, turnId: 'refused' });
       await vi.waitFor(() => expect(browser.request).toHaveBeenCalledTimes(2), { timeout: 15_000 });
       expect((browser.request.mock.calls[1]?.[0] as string).length).toBe(full);
-      await vi.advanceTimersByTimeAsync(180_000);
+      await vi.advanceTimersByTimeAsync(goal.goalRequestTimeoutMs('chatgpt'));
       expect(await settled(id)).toMatchObject({ stage: 'failed' });
     } finally { vi.useRealTimers(); }
 
@@ -611,6 +611,24 @@ describe('Goal decision backends', () => {
     browser.request.mockResolvedValueOnce('You should continue');
     expect(await goal.draftOpeningMessage('Finish this', 'goal')).toMatchObject({ error: expect.any(String) });
     expect(fetch).not.toHaveBeenCalled();
+  });
+  // The page's own request for an opening message gives up after 190 s (MODEL_REQUEST_TIMEOUT_MS in
+  // the extension), so a longer helper deadline (#2033) must not apply there: the page would show
+  // its own timeout while the app kept waiting on an answer nobody could receive.
+  it('ends an opening message for the page within the deadline it is given, whatever the helper effort', async () => {
+    const config = (await import('../src/main/config.js')).getConfig();
+    await saveConfig({ ...config, goal: { ...config.goal, backend: 'chatgpt', helperReasoning: 'xhigh' } });
+    expect(goal.goalRequestTimeoutMs('chatgpt')).toBe(12 * 60_000);
+    browser.request.mockImplementationOnce((_text: string, signal: AbortSignal) =>
+      new Promise<string>((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('goal_browser_cancelled')), { once: true })));
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
+    try {
+      let result: unknown = null;
+      void goal.draftOpeningMessage('Finish this', 'goal', undefined, undefined, 180_000).then(value => { result = value; });
+      await vi.waitFor(() => expect(browser.request).toHaveBeenCalledTimes(1), { timeout: 15_000 });
+      await vi.advanceTimersByTimeAsync(180_000);
+      await vi.waitFor(() => expect(result).toMatchObject({ error: 'timeout_or_cancelled' }));
+    } finally { vi.useRealTimers(); await saveConfig(config); }
   });
   it('does not let a stale browser answer replace a newer source-chat draft', async () => {
     await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: true, backend: 'chatgpt' } });
