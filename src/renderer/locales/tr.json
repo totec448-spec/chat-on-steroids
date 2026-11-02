@@ -3786,5 +3786,16 @@
   "New features come as pull requests, not issues.": "Yeni özellikler issue olarak değil, pull request olarak gelir.",
   "How to start one": "Nasıl başlatılır",
   "Plugins could not be loaded.": "Eklentiler yüklenemedi.",
-  "Pets could not be loaded.": "Maskotlar yüklenemedi."
+  "Pets could not be loaded.": "Maskotlar yüklenemedi.",
+  "Allow native Linux Desktop access": "Yerel Linux masaüstü erişimine izin ver",
+  "Off by default. Allows read-only GNOME display screenshots only with Screen permission and operating-system consent. No native input or accessibility control is available.": "Varsayılan olarak kapalıdır. Yalnızca Ekran izni ve işletim sistemi onayıyla GNOME ekranının salt okunur görüntülerini almaya izin verir. Yerel giriş veya erişilebilirlik denetimi yoktur.",
+  "Test GNOME screenshot permission": "GNOME ekran görüntüsü iznini test et",
+  "Click while the Chat On Steroids window is active. If GNOME asks, choose Allow. The screenshot is discarded.": "Chat On Steroids penceresi etkinken tıklayın. GNOME sorarsa İzin Ver seçeneğini seçin. Görüntü saklanmaz.",
+  "Request screenshot permission": "Ekran görüntüsü izni iste",
+  "Waiting for GNOME screenshot permission…": "GNOME ekran görüntüsü izni bekleniyor…",
+  "Screenshot permission confirmed. No image was saved.": "Ekran görüntüsü izni doğrulandı. Görüntü kaydedilmedi.",
+  "Screenshot permission request failed: {0}": "Ekran görüntüsü izni isteği başarısız: {0}",
+  "A screenshot permission request is already running.": "Bir ekran görüntüsü izni isteği zaten sürüyor.",
+  "Screenshot permission can be requested only from the Chat On Steroids main window.": "Ekran görüntüsü izni yalnızca Chat On Steroids ana penceresinden istenebilir.",
+  "Native Linux Desktop access on": "Yerel Linux masaüstü erişimi açık"
 }

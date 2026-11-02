@@ -13,15 +13,15 @@ composes that connector's own tools.
 | Connector | Purpose | Possible tools |
 | --- | --- | --- |
 | **Chat On Steroids Core** | Approved files, patches, terminal, generated images, task plans, workers | `read`, `view_image`, `find`, `apply_patch`, `save_image`, `exec_command`, `write_stdin`, `update_plan`, `agents`, `session_finish`, `exec` |
-| **Chat On Steroids Desktop** | Browser tabs through the companion (all platforms); screen, windows, mouse/keyboard and clipboard (Windows/macOS) | `browser_tabs`, `browser_snapshot`, `browser_screenshot`, `browser_navigate`, `browser_action`, `browser_evaluate`, `browser_console`, `browser_network`; Windows: `list_windows`, `get_window`, `list_apps`, `get_window_state`, `launch_app`, `click`, `press_key`, `type_text`, `scroll`, `set_value`, `drag`, `perform_secondary_action`, `activate_window`, `read_clipboard`, `write_clipboard`; macOS: `observe`, `computer`; `exec` |
+| **Chat On Steroids Desktop** | Browser tabs through the companion (all platforms); screen, windows, mouse/keyboard and clipboard (Windows/macOS); opt-in GNOME Wayland read-only display screenshots (Linux) | `browser_tabs`, `browser_snapshot`, `browser_screenshot`, `browser_navigate`, `browser_action`, `browser_evaluate`, `browser_console`, `browser_network`; Windows: `list_windows`, `get_window`, `list_apps`, `get_window_state`, `launch_app`, `click`, `press_key`, `type_text`, `scroll`, `set_value`, `drag`, `perform_secondary_action`, `activate_window`, `read_clipboard`, `write_clipboard`; macOS: `observe`, `computer`; Linux opt-in: `linux_observe` (screenshot only); `exec` |
 | **Chat On Steroids Plugins** | External MCP tools the user enabled in Settings | Each enabled tool under its own schema, plus `exec` |
 
 Core is the main connector everywhere; Desktop and Plugins are optional.
 
 On a fresh current config, Core permissions are enabled, along with
 session recording and multi-agent mode; read-only mode is off. Windows also enables Desktop permissions; macOS starts them off and the user switches them on. Linux masks
-Desktop permissions off at runtime while preserving stored choices for a config later reopened on
-Windows or macOS. Existing configs keep explicit choices during upgrades; missing legacy permissions are
+native Desktop input permissions off at runtime while preserving stored choices for a config later reopened on
+Windows or macOS. Linux GNOME screenshots require an independent default-off opt-in and explicit Screen permission. Existing configs keep explicit choices during upgrades; missing legacy permissions are
 not silently widened.
 
 With fresh defaults, Core advertises `read`, `view_image`, `apply_patch`, `save_image`,
@@ -211,6 +211,20 @@ Linux does not advertise or execute these schemas. Windows publishes one tool pe
 `press_key`, `type_text`, `scroll`, `set_value`, `drag`, `perform_secondary_action` and
 `activate_window` act; `read_clipboard` and `write_clipboard` follow the clipboard permissions.
 macOS publishes `observe` and `computer`, described below.
+
+### `linux_observe` (read-only display screenshot, Linux)
+
+This first Linux stage publishes `linux_observe` only when a person enables
+`ui.linuxDesktopEnabled` and grants Screen permission. Its input schema allows
+only `{ what: 'screenshot', display: 0 }` (optional display index 0–32).
+The bounded output is an MCP PNG image plus text metadata labeled `scope: 'display'`.
+GNOME's operating-system portal can ask for consent and can be cancelled; do not retry
+automatically. The separate Settings test requests one portal screenshot but discards it
+without returning pixels to the renderer. Unknown caller identity requires the existing,
+separately chosen `desktopUnattributed` setting; the default is to refuse.
+
+Linux has **no `linux_act`, window inventory, accessibility snapshot, text entry, click,
+or coordinate input** in this PR. Those belong to the later control PR.
 
 ### `observe`
 

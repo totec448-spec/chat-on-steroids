@@ -3786,5 +3786,16 @@
   "New features come as pull requests, not issues.": "Neue Funktionen kommen als Pull Requests, nicht als Issues.",
   "How to start one": "So startest du einen",
   "Plugins could not be loaded.": "Plugins konnten nicht geladen werden.",
-  "Pets could not be loaded.": "Haustiere konnten nicht geladen werden."
+  "Pets could not be loaded.": "Haustiere konnten nicht geladen werden.",
+  "Allow native Linux Desktop access": "Nativer Linux-Desktopzugriff erlauben",
+  "Off by default. Allows read-only GNOME display screenshots only with Screen permission and operating-system consent. No native input or accessibility control is available.": "Standardmäßig aus. Erlaubt nur lesende GNOME-Display-Screenshots mit Bildschirmberechtigung und Zustimmung des Betriebssystems. Keine native Eingabe oder Bedienung von Barrierefreiheitselementen.",
+  "Test GNOME screenshot permission": "GNOME-Screenshotberechtigung testen",
+  "Click while the Chat On Steroids window is active. If GNOME asks, choose Allow. The screenshot is discarded.": "Klicke bei aktivem Chat-On-Steroids-Fenster. Falls GNOME nachfragt, wähle Zulassen. Der Screenshot wird verworfen.",
+  "Request screenshot permission": "Screenshotberechtigung anfordern",
+  "Waiting for GNOME screenshot permission…": "Warte auf GNOME-Screenshotberechtigung…",
+  "Screenshot permission confirmed. No image was saved.": "Screenshotberechtigung bestätigt. Kein Bild wurde gespeichert.",
+  "Screenshot permission request failed: {0}": "Screenshotberechtigung fehlgeschlagen: {0}",
+  "A screenshot permission request is already running.": "Eine Anfrage zur Screenshotberechtigung läuft bereits.",
+  "Screenshot permission can be requested only from the Chat On Steroids main window.": "Die Screenshotberechtigung kann nur im Hauptfenster von Chat On Steroids angefordert werden.",
+  "Native Linux Desktop access on": "Nativer Linux-Desktopzugriff aktiviert"
 }
