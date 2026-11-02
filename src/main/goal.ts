@@ -2036,9 +2036,10 @@ export function resetHelperModelFallbackForTests(): void { helperModelUnconfirme
  * (2026-11-01). API backends keep three minutes. The effort is the one actually used (an effort the
  * account does not offer falls back to ChatGPT's selection, and then three minutes apply).
  */
-export function goalRequestTimeoutMs(backend: string, helper: HelperSelection = goalHelperSelection()): number {
+export function goalRequestTimeoutMs(backend: string, helper?: HelperSelection): number {
   if (backend !== 'chatgpt') return REQUEST_TIMEOUT_MS;
-  const effort = helper.reasoningEffort;
+  // Read only for a ChatGPT draft: resolving the helper can ask an open ChatGPT tab for its models.
+  const effort = (helper ?? goalHelperSelection()).reasoningEffort;
   if (effort === 'pro') return 20 * 60_000;
   if (effort === 'xhigh' || effort === 'max' || effort === 'ultra') return 12 * 60_000;
   if (effort === 'high') return 5 * 60_000;
