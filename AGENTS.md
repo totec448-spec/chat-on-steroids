@@ -5471,6 +5471,13 @@ tunnel state or recovery. No raw tunnel detail or secret identifier enters the n
 `test/connection.test.ts` and `test/connection-notice.test.ts` cover grace/recovery, sleep,
 intentional retirement and notification presentation.
 
+`tunnel/workdir.ts` creates each OpenAI client's private temporary directory. On macOS only,
+an inherited directory missing with `ENOENT` is resolved once through the bounded system
+`getconf DARWIN_USER_TEMP_DIR` lookup; other filesystem failures propagate. The client receives
+its live work directory as `TMPDIR`, without changing the app's environment or recreating an
+installer's deleted directory. Stop still terminates the client before removing its directory.
+`tunnel-workdir.test.ts` and `tunnel-lifecycle.test.ts` cover recovery, refusal and child ownership.
+
 tunnel-client reads proxies only from its environment (Go: `HTTPS_PROXY`, `NO_PROXY`). On every
 launch `tunnel/proxy.ts` derives them (#1255): an existing `HTTPS_PROXY` is left alone; otherwise
 `ALL_PROXY` is passed on when Go can use it; otherwise the system's proxy for the control plane
