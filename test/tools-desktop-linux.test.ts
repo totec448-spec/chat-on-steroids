@@ -29,12 +29,16 @@ const window = { id: 'w-1.3-test', app_name: 'test-gtk', pid: 304, process_insta
 const browser = { ...window, id: 'w-browser', app_name: 'chrome' };
 function handlers() {
   const entries = new Map<string, (args: any) => Promise<any>>();
+  const declarations = new Map<string, any>();
   registerLinuxDesktopTools({
     ctx: { exposedLinuxDesktop: true }, exposedCaps: { screen: true, control: true },
-    register: (name: string, _config: unknown, handler: (args: any) => Promise<any>) => { entries.set(name, handler); },
+    register: (name: string, config: unknown, handler: (args: any) => Promise<any>) => {
+      entries.set(name, handler);
+      declarations.set(name, config);
+    },
     guarded: async (_cap: string, _name: string, fn: () => Promise<any>) => fn()
   } as never);
-  return { observe: entries.get('linux_observe')!, act: entries.get('linux_act')! };
+  return { observe: entries.get('linux_observe')!, act: entries.get('linux_act')!, declarations };
 }
 const good = (command: string, data: unknown) => ({ ok: true, command, data });
 function mockSnapshot() {
@@ -55,6 +59,22 @@ beforeEach(() => {
 // The production registrar deliberately does not expose Linux tools on
 // Windows/macOS. Exercise the Linux authorization logic only where registered.
 describe.runIf(process.platform === 'linux')('native Linux connector authorization', () => {
+  it('keeps the screenshot schema restricted to display 0 after adding semantic control', () => {
+    const { declarations } = handlers();
+    const schema = declarations.get('linux_observe').inputSchema;
+    expect(schema.safeParse({ what: 'screenshot', display: 0 }).success).toBe(true);
+    expect(schema.safeParse({ what: 'screenshot', display: 1 }).success).toBe(false);
+    expect(schema.safeParse({ what: 'screenshot', display: 32 }).success).toBe(false);
+    expect(schema.safeParse({ what: 'windows' }).success).toBe(true);
+  });
+  it('rejects an unvalidated screenshot display without calling the desktop backend', async () => {
+    const { observe } = handlers();
+    const result = await observe({ what: 'screenshot', display: 1 });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('DISPLAY_UNSUPPORTED');
+    expect(testState.version).not.toHaveBeenCalled();
+    expect(testState.backend).not.toHaveBeenCalled();
+  });
   it('requires separate opt-in even when browser screen/control are enabled', async () => {
     const {observe,act} = handlers(); testState.enabled = false;
     expect((await observe({what:'windows'})).content[0].text).toContain('LINUX_DESKTOP_DISABLED');

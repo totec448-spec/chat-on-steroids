@@ -104,7 +104,7 @@ const observeSchema = z.discriminatedUnion('what', [
   z.object({ what: z.literal('apps') }).strict(),
   z.object({ what: z.literal('displays') }).strict(),
   z.object({ what: z.literal('snapshot'), window_id: z.string().min(1).max(128) }).strict(),
-  z.object({ what: z.literal('screenshot'), display: z.number().int().min(0).max(32).default(0) }).strict()
+  z.object({ what: z.literal('screenshot'), display: z.literal(0).default(0) }).strict()
 ]);
 const actSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('click'), ref: z.string().regex(refPattern) }).strict(),
@@ -119,6 +119,8 @@ export function registerLinuxDesktopTools(reg: SurfaceRegistrar): void {
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
   }), 'linux'), async input => reg.guarded('screen', 'linux_observe', async () => {
     const denied = refusal(false); if (denied) return denied;
+    if (input.what === 'screenshot' && input.display !== 0)
+      return fail('LINUX_SCREENSHOT_DISPLAY_UNSUPPORTED: only display 0 is available.');
     await checkLinuxDesktopVersion();
     const again = refusal(false); if (again) return again;
     if (input.what === 'windows' || input.what === 'displays' || input.what === 'apps') {
