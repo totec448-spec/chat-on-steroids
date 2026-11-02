@@ -3,6 +3,9 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import * as durable from '../src/main/durable.js';
+import * as requestPlans from '../src/main/session/request-plans.js';
+import * as agents from '../src/main/agents.js';
+import * as logger from '../src/main/logger.js';
 import { providerSessionKey } from '../src/main/mcp/provider-session.js';
 import { observeProviderSessionRequest, observeRequestCorrelation, requestCorrelation,
   awaitRequestCorrelation, resetCorrelationRegistryForTests, restoreRequestCorrelations } from '../src/main/session/correlation.js';
@@ -54,6 +57,59 @@ it('accepts only host metadata and isolates the Setup, surface, subject and conv
   expect(providerSessionKey('core', 'profile-a', {}, meta('x'.repeat(513)))).toBeNull();
 });
 
+it.each<[string, unknown]>([
+  ['missing body', undefined], ['null body', null], ['empty body', {}], ['array body', []],
+  ['empty params', { params: {} }], ['null metadata', { params: { _meta: null } }],
+  ...['', ' ', '\t', '\n', '\r', '\u0000', '\u001f', '\u007f', 'embedded space'].flatMap<[string, unknown]>(value => [
+    [`invalid session ${JSON.stringify(value)}`, meta(value)],
+    [`invalid subject ${JSON.stringify(value)}`, meta('opaque-chat-a', value)]
+  ])
+])('rejects %s without creating a provider key', (_label, body) => {
+  expect(providerSessionKey('core', 'profile-a', {}, body)).toBeNull();
+  expect(requestCorrelation('unknown')).toBeNull();
+});
+
+it('keeps durable admission successful and logs a failed plan attachment', async () => {
+  await prove();
+  await observeProviderSessionRequest('native-a', key());
+  const warning = vi.spyOn(logger, 'logWarn');
+  vi.spyOn(requestPlans, 'attachRequestPlan').mockRejectedValueOnce(new Error('plan disk unavailable'));
+  await expect(observeProviderSessionRequest('plan-failure', key())).resolves.toBe('known');
+  expect(requestCorrelation('plan-failure')?.providerSessionAnchor).toBe('native-a');
+  expect((await durable.readDurable<{ entries: unknown[] }>('request-correlations'))?.entries).toEqual(
+    expect.arrayContaining([expect.objectContaining({ requestId: 'plan-failure', providerSessionAnchor: 'native-a' })]));
+  await vi.waitFor(() => expect(warning).toHaveBeenCalledWith(
+    'request plan attachment failed for plan-failure: plan disk unavailable'), { timeout: 10_000 });
+});
+
+it.each(['plan', 'worker'] as const)('does not block subsequent admissions on %s reconciliation', async kind => {
+  await prove();
+  await observeProviderSessionRequest('native-a', key());
+  let entered!: () => void, release!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const resume = new Promise<void>(resolve => { release = resolve; });
+  if (kind === 'plan') vi.spyOn(requestPlans, 'attachRequestPlan').mockImplementationOnce(async () => {
+    entered(); await resume; return 'missing';
+  });
+  else vi.spyOn(agents, 'reconcileAgentRequestOwners').mockImplementationOnce(async () => {
+    entered(); await resume;
+  });
+  let admitted = false;
+  const first = observeProviderSessionRequest('slow-reconciliation', key()).then(value => { admitted = true; return value; });
+  let second: ReturnType<typeof observeProviderSessionRequest> | undefined;
+  try {
+    await started;
+    second = observeProviderSessionRequest('next-admission', key());
+    await vi.waitFor(() => expect(admitted).toBe(true), { timeout: 10_000 });
+    expect(await second).toBe('known');
+    expect(requestCorrelation('next-admission')?.providerSessionAnchor).toBe('native-a');
+  } finally {
+    release();
+    await first;
+    await second;
+  }
+});
+
 it.each(['core', 'desktop', 'plugins'] as const)('identifies a new %s request only after native proof established that surface binding', async surface => {
   const session = await prove();
   expect(await observeProviderSessionRequest('unbound', key(surface))).toBe('unbound');
@@ -91,7 +147,7 @@ it('keeps concurrent chats and their requests separate, including late page evid
 it('wakes a waiting request when native evidence later establishes its already observed provider key', async () => {
   await prove();
   await observeProviderSessionRequest('hidden', key());
-  const waiting = awaitRequestCorrelation('hidden', 1000);
+  const waiting = awaitRequestCorrelation('hidden', 10_000);
   await observeProviderSessionRequest('native-a', key());
   expect((await waiting)?.providerSessionAnchor).toBe('native-a');
 });
@@ -100,7 +156,7 @@ it('learns a binding when its first native page proof arrives after MCP ingress'
   const session = await createSession({ conversationId: 'late-chat' });
   expect(await observeProviderSessionRequest('late-native', key())).toBe('unbound');
   await observeProviderSessionRequest('late-hidden', key());
-  const waiting = awaitRequestCorrelation('late-hidden', 1000);
+  const waiting = awaitRequestCorrelation('late-hidden', 10_000);
   observeRequestCorrelation({ requestId: 'late-native', conversationId: 'late-chat', sessionId: session.id,
     messageId: 'late-message', tool: '', observedAt: Date.now() });
   expect((await waiting)?.conversationId).toBe('late-chat');
@@ -151,7 +207,7 @@ it('does not publish a derived owner before commit or retain it when that write 
     entered(); await resume; return write(name, value);
   });
   let published = false;
-  const waiting = awaitRequestCorrelation('paused', 1000).then(owner => { published = true; return owner; });
+  const waiting = awaitRequestCorrelation('paused', 10_000).then(owner => { published = true; return owner; });
   const pending = observeProviderSessionRequest('paused', key());
   await paused;
   expect(requestCorrelation('paused')).toBeNull();

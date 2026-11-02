@@ -532,8 +532,10 @@ async function observeProviderSessionRequestNow(requestId: string, providerKey: 
     if (current !== installed) { wake(key); return current?.sessionId === anchor.sessionId && current?.conversationId === anchor.conversationId ? 'known' : 'refused'; }
     wake(key);
     publishCorrelation(derived);
-    await attachRequestPlan(derived);
-    await reconcileAgentRequestOwners().catch(error => {
+    void attachRequestPlan(derived).catch(error => {
+      logWarn(`request plan attachment failed for ${requestId}: ${error instanceof Error ? error.message : String(error)}`);
+    });
+    void reconcileAgentRequestOwners().catch(error => {
       logWarn(`request worker ownership reconciliation failed: ${error instanceof Error ? error.message : String(error)}`);
     });
     logInfo(`request attribution: ${requestId} -> conversation ${derived.conversationId}; verified provider session anchored by ${anchor.requestId}`);
