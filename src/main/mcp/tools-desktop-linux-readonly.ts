@@ -10,7 +10,7 @@ import { toolDeclaration } from './tool-declarations.js';
 
 const inputSchema = z.object({
   what: z.literal('screenshot'),
-  display: z.number().int().min(0).max(32).default(0)
+  display: z.literal(0).default(0)
 }).strict();
 
 function refused(): ToolResult | null {
@@ -30,6 +30,9 @@ export function registerLinuxScreenshotTool(reg: SurfaceRegistrar): void {
   }), 'linux-screenshot-only'), async input => reg.guarded('screen', 'linux_observe', async () => {
     const denied = refused();
     if (denied) return denied;
+    // Do not rely on the advertised Zod schema alone: internal callers can
+    // invoke a handler directly, and a granted Screen is not an all-display grant.
+    if (input.display !== 0) return fail('LINUX_SCREENSHOT_DISPLAY_UNSUPPORTED: only display 0 is available.');
     await checkLinuxScreenshotVersion();
     const afterVersion = refused();
     if (afterVersion) return afterVersion;

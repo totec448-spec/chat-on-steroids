@@ -34,5 +34,10 @@ export async function testLinuxScreenshotConsent(deps: LinuxScreenshotConsentDep
     throw new Error(`GNOME screenshot portal returned ${code}. No image was saved.`);
   }
   const screenshot = await parseLinuxScreenshot(result);
+  // Consent is not a durable grant: Screen permission or native opt-in may
+  // have been revoked while GNOME displayed the portal or decoded the image.
+  if (!deps.enabled() || !deps.screenAllowed()) {
+    throw new Error('Native Linux Desktop or Screen access was disabled during the screenshot request.');
+  }
   return { pngBytes: screenshot.png.byteLength };
 }

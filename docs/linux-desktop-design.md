@@ -12,7 +12,9 @@ split requested by the upstream maintainer on #2022.
    GNOME Wayland may present a portal confirmation. The diagnostic returns
    only success/failure and PNG byte length; screen pixels are discarded.
 3. When authorized, the Desktop connector exposes `linux_observe` with only
-   `{what:'screenshot',display:0}`. Its answer uses MCP image content and
+   `{what:'screenshot',display:0}`. The MCP tool admits only display 0;
+   other display indexes are rejected even though the standalone backend can
+   address them. Its answer uses MCP image content and
    explicit **display**, not window, metadata. No click, type, control or
    accessibility snapshot is present in this PR.
 

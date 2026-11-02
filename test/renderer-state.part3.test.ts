@@ -1081,6 +1081,48 @@ it('requests Linux screenshot consent only after the user clicks, and shows a re
   expect(button.disabled).toBe(false);
 });
 
+it('localizes unknown GNOME backend failures without displaying private text and restores keyboard focus', async () => {
+  const request = vi.fn(async () => ({ ok: false as const, error: 'PRIVATE_APP_TITLE: payroll' }));
+  const mounted = await mountChat({}, [], { linuxScreenshotConsent: request });
+  const doc = mounted.window.document;
+  const button = doc.getElementById('linuxScreenshotConsent') as HTMLButtonElement;
+  const linux = structuredClone(mounted.state);
+  linux.platform = { family: 'linux', name: 'Linux', desktopAutomation: false };
+  linux.config.ui.linuxDesktopEnabled = true;
+  mounted.push(linux);
+  await settle();
+  button.focus();
+  expect(doc.activeElement).toBe(button);
+  button.click();
+  await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+  const status = doc.getElementById('linuxScreenshotConsentResult')!;
+  await waitFor(() => expect(status.textContent).toContain('GNOME screenshot permission could not be confirmed.'));
+  expect(status.textContent).not.toContain('PRIVATE_APP_TITLE');
+  expect(button.disabled).toBe(false);
+  expect(doc.activeElement).toBe(button);
+});
+
+it('does not steal focus if the user switches controls while the GNOME request is pending', async () => {
+  let finish!: (value: { ok: true; data: { pngBytes: number } }) => void;
+  const request = vi.fn(() => new Promise<{ ok: true; data: { pngBytes: number } }>(resolve => { finish = resolve; }));
+  const mounted = await mountChat({}, [], { linuxScreenshotConsent: request });
+  const doc = mounted.window.document;
+  const button = doc.getElementById('linuxScreenshotConsent') as HTMLButtonElement;
+  const linux = structuredClone(mounted.state);
+  linux.platform = { family: 'linux', name: 'Linux', desktopAutomation: false };
+  linux.config.ui.linuxDesktopEnabled = true;
+  mounted.push(linux);
+  await settle();
+  button.focus();
+  button.click();
+  await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+  const other = doc.getElementById('chatInput') as HTMLTextAreaElement;
+  other.focus();
+  finish({ ok: true, data: { pngBytes: 10 } });
+  await waitFor(() => expect(doc.getElementById('linuxScreenshotConsentResult')?.textContent).toContain('No image was saved'));
+  expect(doc.activeElement).toBe(other);
+});
+
 // CodeRabbit on #1864 (Haz's keyboard condition): the question waits in the app's window too, reachable by keyboard.
 it('shows a waiting desktop question in the app without taking the focus, and answers it from there', async () => {
   let listener: ((pending: unknown) => void) | null = null;
