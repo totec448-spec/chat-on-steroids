@@ -6,6 +6,7 @@ const { spawn } = require('node:child_process');
 const { WebSocket } = require('ws');
 const { transformSync, buildSync } = require('esbuild');
 const { startSnapProfileWatchdog } = require('./fixtures/snap-chromium-watchdog.cjs');
+const { snapChromiumPaths, isSnapChromiumLauncher } = require('./fixtures/snap-chromium-launchers.cjs');
 
 const root = path.resolve(__dirname, '..');
 const reactRuntime = process.argv.find(value => value.startsWith('--react-runtime='))?.slice('--react-runtime='.length);
@@ -60,17 +61,15 @@ const executable = [
   '/Applications/Chromium.app/Contents/MacOS/Chromium',
   '/usr/bin/google-chrome', '/usr/bin/chromium',
   // Ubuntu's Chromium package is installed as a snap on supported desktops.
-  '/snap/bin/chromium', '/usr/bin/chromium-browser'
+  ...snapChromiumPaths, '/usr/bin/chromium-browser'
 ].find(candidate => candidate && fs.existsSync(candidate));
 assert(executable, 'No Chromium found; set COS_CHROME to a Chrome or Chromium executable.');
 // Snap Chromium has a private /tmp, so the verifier must share its profile
 // directory with the confined browser in ~/snap/chromium/common.
 // On Ubuntu /usr/bin/chromium-browser can be a wrapper for the Chromium snap.
-// An explicit COS_CHROME override may still choose that wrapper: it needs the
-// same Snap-accessible profile and independent watchdog as /snap/bin/chromium.
-const selectedChrome = path.resolve(executable);
-const snapChromium = selectedChrome === '/snap/bin/chromium' ||
-  (selectedChrome === '/usr/bin/chromium-browser' && fs.existsSync('/snap/bin/chromium'));
+// An explicit COS_CHROME override may still choose that wrapper or an alternate
+// snapd launcher; both need the Snap-accessible profile and watchdog.
+const snapChromium = isSnapChromiumLauncher(executable);
 const snapProfileRoot = path.join(os.homedir(), 'snap/chromium/common');
 if (snapChromium) fs.mkdirSync(snapProfileRoot, { recursive: true });
 const profile = snapChromium ? fs.mkdtempSync(path.join(snapProfileRoot, 'cos-shell-runtime-')) : path.join(output, 'profile');
