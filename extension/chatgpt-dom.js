@@ -54,6 +54,16 @@ var CLF_DOM = (() => {
     'button[data-testid="composer-speech-button"], button[data-testid="composer-dictate-button"], ' +
     'button[aria-label^="Dictate" i], button[aria-label^="Voice" i], ' +
     'button[aria-label="Start dictation" i], button[aria-label="Start Voice" i]';
+  /**
+   * The provider's name for a sprite glyph, from a `<use>` reference: the part after `#`, without
+   * the `codex-icon-` prefix the ids gained on 2026-11-02 (`#codex-icon-microphone-light-20`). Read
+   * both ways, so neither the old nor the new sprite sheet loses the anchors built on them.
+   */
+  const spriteName = use => {
+    const href = use.getAttribute('href') || use.getAttribute('xlink:href') || '';
+    const hash = href.lastIndexOf('#');
+    return hash < 0 ? '' : href.slice(hash + 1).replace(/^codex-icon-/, '');
+  };
   const safe = (fn, fallback) => {
     try {
       const value = fn();
@@ -2053,10 +2063,8 @@ var CLF_DOM = (() => {
       // and the app's composer control never appeared.
       const anchor = sendButton() || stopButton() || nativeComposerControls(SPEECH)[0] ||
         nativeComposerControls('button')
-        .find(button => !button.closest(OWN_SURFACES) && [...button.querySelectorAll('svg use')].some(use => {
-          const href = use.getAttribute('href') || use.getAttribute('xlink:href') || '';
-          return href.slice(href.lastIndexOf('#')).startsWith('#microphone-');
-        }));
+        .find(button => !button.closest(OWN_SURFACES) &&
+          [...button.querySelectorAll('svg use')].some(use => spriteName(use).startsWith('microphone-')));
       const explicit = anchor ? anchor.closest(TRAILING) : [...(composerBox() || document).querySelectorAll(TRAILING)].find(renderedComposerNode);
       if (!anchor) return explicit ? { host: explicit, before: null } : null;
 
@@ -3897,8 +3905,7 @@ var CLF_DOM = (() => {
         // The provider renders both icons at once. Only the visible checked glyph proves
         // the mode; translated labels and the requested URL are not activation receipts.
         return [...button.querySelectorAll('svg use')].some(use => {
-          const href = use.getAttribute('href') || use.getAttribute('xlink:href') || '';
-          if (href.slice(href.lastIndexOf('#')) !== '#chat-temp-checked') return false;
+          if (spriteName(use) !== 'chat-temp-checked') return false;
           for (let node = use.parentElement; node; node = node.parentElement) {
             const style = getComputedStyle(node);
             if (node.hidden || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || style.opacity === '0') return false;
