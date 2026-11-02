@@ -3478,3 +3478,18 @@ describe('the original request reaches the helper verbatim', () => {
     expect(box.system.some(content => content.includes('[… cut …]'))).toBe(false);
   });
 });
+
+// 2026-11-01, the maintainer's Mac: a Loop drafted by a ChatGPT helper on GPT-6 at extra-high reasoning timed
+// out at three minutes five times in a row over a long transcript. A helper that thinks longer gets longer.
+describe('how long a Goal or Loop draft may take', () => {
+  it('follows the ChatGPT helper reasoning and keeps three minutes for API backends', async () => {
+    const config = getConfig();
+    try {
+      for (const [effort, minutes] of [['low', 3], ['medium', 3], ['high', 5], ['xhigh', 12], ['max', 12], ['pro', 20]] as const) {
+        await saveConfig({ ...config, goal: { ...config.goal, helperReasoning: effort } });
+        expect(goal.goalRequestTimeoutMs('chatgpt'), effort).toBe(minutes * 60_000);
+        expect(goal.goalRequestTimeoutMs('api'), effort).toBe(3 * 60_000);
+      }
+    } finally { await saveConfig(config); }
+  });
+});
