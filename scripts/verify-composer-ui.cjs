@@ -246,6 +246,12 @@ app.whenReady().then(async () => {
   await check('Narrow work-dock column compacts labels by column width', `getComputedStyle(document.getElementById('composerModeLabel')).display==='none'&&getComputedStyle(document.querySelector('#createPlan > span')).display==='none'&&getComputedStyle(document.getElementById('contextMeterCompact')).display==='none'`);
   await capture('dock-900');
   await click('#rightDockToggle');
+  // The offer belongs to its chat: New chat must not keep the dot or the screen-reader notice (CodeRabbit on #2019).
+  await js(`window.offerAt=Date.now()-1;composerFixture.controls.job={busy:true,phase:'requesting',stage:'handoff-pending',handoffId:null,startedAt:Date.now()-16*60000};composerFixture.notify()`);
+  await until(`document.getElementById('contextMeter').hasAttribute('data-attention')`, 8000);
+  await click('#newChat'); await pause(300);
+  await check('New chat drops the previous chat\'s summary offer', `!document.getElementById('contextMeter').hasAttribute('data-attention')&&document.getElementById('contextMeterNotice').textContent===''&&document.getElementById('resumeLastSummary').hidden`);
+  await js(`window.offerAt=0;composerFixture.controls.job=null;composerFixture.controls.lastSummary=null`);
   for (const width of [1440, 900, 700, 640]) {
     win.setContentSize(width, 960); await pause(250);
     await click('#newChat'); await type('');

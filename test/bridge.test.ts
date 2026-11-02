@@ -3049,10 +3049,13 @@ describe('automatic compaction', () => {
       expect(await commitContinuation(first.token, chatB)).toBe(true);
       const saved = (await findSessionByConversation(chatB))!.lastHandoffId!;
       if (automation !== 'off') await setSessionAutomation(session.id, 'loop');
-      // A block keeps the switch's state, but a blocked chat is never moved (CodeRabbit on #2019).
-      if (automation === 'blocked') setChatBlocked(chatB, true);
       const filed = await request('POST', '/compact', { body: { conversationId: chatB, ticket: true, automatic: true } });
       const ticket = filed.body.token as string;
+      // A refused filing would make every case below pass for the wrong reason.
+      expect(ticket, JSON.stringify(filed.body)).toEqual(expect.any(String));
+      // A block keeps the switch's state, but a blocked chat is never moved. Blocked after filing, so the
+      // ticket reaches the saved-summary gate itself (CodeRabbit on #2019).
+      if (automation === 'blocked') setChatBlocked(chatB, true);
       let continued = false;
       for (let pass = 0; pass < 30 && !continued; pass++) {
         await vi.advanceTimersByTimeAsync(2 * 60_000);
@@ -3072,6 +3075,11 @@ describe('automatic compaction', () => {
         // and the controls offer the saved summary instead.
         expect(continued).toBe(false);
         expect(getLog().some(entry => entry.message.includes(`continues in a new chat from saved summary ${saved}`))).toBe(false);
+        // Without Goal or Loop the gate says why it did not move the chat. A blocked chat is held before it:
+        // no compaction repair is offered for it at all, so its ticket only waits.
+        if (automation === 'off') expect(getLog().some(entry =>
+          entry.message.includes(`${ticket.slice(0, 8)} does not continue from the saved summary: Goal and Loop are off for this chat`))).toBe(true);
+        else expect(continuationForSession(session.id)?.token).toBe(ticket);
         return;
       }
       expect(continued).toBe(true);

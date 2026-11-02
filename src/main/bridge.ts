@@ -2293,11 +2293,21 @@ async function continueStuckFromSavedSummary(entry: { token: string; sessionId: 
   watch.continuedFromSaved = true;
   // Unattended means Goal or Loop on and the chat not blocked (a block keeps the switch's state; CodeRabbit on #2019).
   const unattended = (): boolean => !goalBlockReason(entry.from) && goalArmedFor(entry.from) && goalSwitchFor(entry.from).enabled;
-  if (!unattended()) return false;
+  // Each refusal says why, once per ticket (this runs once per ticket; CodeRabbit on #2019).
+  const skip = (why: string): false => {
+    logInfo(`bridge: compaction ticket ${entry.token.slice(0, 8)} does not continue from the saved summary: ${why}`);
+    return false;
+  };
+  const attended = (): string => goalBlockReason(entry.from) ? 'the chat is blocked' : 'Goal and Loop are off for this chat';
+  if (!unattended()) return skip(attended());
   const session = await getSession(entry.sessionId).catch(() => null);
-  if (!session?.lastHandoffId || session.conversationId !== entry.from) return false;
+  if (!session) return skip('its session could not be read');
+  if (session.conversationId !== entry.from) return skip('the session has moved to another chat');
+  if (!session.lastHandoffId) return skip('the session has no saved summary');
   // Checked again after the reads: the person may have blocked the chat or turned the switch off meanwhile.
-  if (!unattended() || !await savedSummaryUsable(entry.sessionId, session.lastHandoffId) || !unattended()) return false;
+  if (!unattended()) return skip(attended());
+  if (!await savedSummaryUsable(entry.sessionId, session.lastHandoffId)) return skip(`saved summary ${session.lastHandoffId} is empty or unusable`);
+  if (!unattended()) return skip(attended());
   try {
     await resumeFromSavedSummary(entry.sessionId, session.lastHandoffId);
     logWarn(`bridge: compaction ticket ${entry.token.slice(0, 8)} for ${entry.from} never reached ChatGPT; ` +
