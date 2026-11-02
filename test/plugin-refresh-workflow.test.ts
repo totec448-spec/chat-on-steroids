@@ -307,6 +307,20 @@ it.each(['unbound', 'bound', 'duplicate'])('inspects a recreated configured-name
   expect(h.view).not.toHaveBeenCalled();
   expect(h.ask.mock.calls.map(([message]) => message.action)).toEqual(mode === 'unbound' ? [] : ['fail']);
 });
+it.each(['hidden', 'disabled'])('does not replace a proven-ID row that is still installed but unavailable (%s)', async mode => {
+  const h = nativeInstalledWorkflow(null, false);
+  (h.dom.window as any).CLF_DOM.setConnectorApps({ core: [{ appId: 'asdk_app_previous', name: 'Chat On Steroids Core' }], desktop: [], plugins: [] });
+  const previous = h.dom.window.document.createElement('a');
+  previous.href = '/settings/plugins-settings/plugin_asdk_app_previous';
+  previous.innerHTML = '<span>Previously renamed 日本語</span>';
+  if (mode === 'hidden') previous.hidden = true;
+  else Object.defineProperty(previous, 'disabled', { value: true });
+  h.link.after(previous);
+  expect(await h.run()).toBe(false);
+  expect(h.assign).not.toHaveBeenCalled();
+  expect(h.click).not.toHaveBeenCalled();
+  expect(h.ask).not.toHaveBeenCalled();
+});
 it.each(['original', 'renamed'])('rechecks the exact enrolled installed link before an observation with two proven Core IDs (%s)', async name => {
   const h = nativeInstalledWorkflow('asdk_app_synthetic');
   if (name === 'renamed') h.link.querySelector('span')!.textContent = 'User renamed it 日本語';

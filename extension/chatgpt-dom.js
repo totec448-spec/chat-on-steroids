@@ -2975,8 +2975,8 @@ var CLF_DOM = (() => {
         if (!main || (!nativeInspection && !proven.length && !connectorNames().includes(connectorName))) return null;
         // Measured 2026-10-11: installed rows became links to exact management pages.
         // Catalog and external links cannot identify an installed connector.
-        const visible = [...main.querySelectorAll('button,a[href]')].filter(button => button.isConnected && !button.disabled &&
-          button.getClientRects().length > 0 && !button.closest(`${OWN_SURFACES}, ${TURN}`) && composerCssVisible(button));
+        const installed = [...main.querySelectorAll('button,a[href]')].filter(button => button.isConnected && !button.closest(`${OWN_SURFACES}, ${TURN}`));
+        const visible = installed.filter(button => !button.disabled && button.getClientRects().length > 0 && composerCssVisible(button));
         const installedId = button => {
           if (button.tagName !== 'A') return null;
           const url = new URL(button.href, location.href);
@@ -2987,6 +2987,7 @@ var CLF_DOM = (() => {
           const ids = expectedAppId !== null ? [expectedAppId] : namedTargetId !== undefined ? [namedTargetId] : proven.map(app => app.appId);
           const exact = visible.filter(button => ids.includes(installedId(button)));
           if (exact.length || expectedAppId !== null) return exact.length ? exact : null;
+          if (installed.some(button => ids.includes(installedId(button)))) return null;
           // A recreated connector has a new ID: only an unbound native inspection may
           // try its configured-name row when none of the proven IDs is still installed.
           const configured = visible.filter(button => (button.tagName !== 'A' || installedId(button)) &&
