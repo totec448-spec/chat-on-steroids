@@ -1,4 +1,7 @@
 import { createRequire } from 'node:module';
+import { mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { expect, it } from 'vitest';
 
 const require = createRequire(import.meta.url);
@@ -19,4 +22,21 @@ it.runIf(process.platform === 'linux')('recognizes the Ubuntu Chromium wrapper w
   expect(isSnapChromiumLauncher('/usr/bin/chromium-browser', candidate => candidate === '/var/lib/snapd/snap/bin/chromium')).toBe(true);
   expect(isSnapChromiumLauncher('/usr/bin/chromium-browser', () => false)).toBe(false);
   expect(isSnapChromiumLauncher('/usr/bin/google-chrome', () => true)).toBe(false);
+});
+
+it.runIf(process.platform === 'linux')('recognizes direct and chained aliases of the Snap Chromium launcher only', () => {
+  const temporary = mkdtempSync(path.join(tmpdir(), 'cos-snap-launcher-test-'));
+  try {
+    const alias = path.join(temporary, 'alias-chromium');
+    const chained = path.join(temporary, 'chained-chromium');
+    const unrelated = path.join(temporary, 'unrelated-snap');
+    symlinkSync('/snap/bin/chromium', alias);
+    symlinkSync('alias-chromium', chained);
+    symlinkSync('/snap/bin/firefox', unrelated);
+    expect(isSnapChromiumLauncher(alias, () => false)).toBe(true);
+    expect(isSnapChromiumLauncher(chained, () => false)).toBe(true);
+    expect(isSnapChromiumLauncher(unrelated, () => true)).toBe(false);
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
 });
