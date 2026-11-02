@@ -416,3 +416,47 @@ it('asks before uninstalling like removing a skill: Cancel first and focused, th
   [...document.querySelectorAll<HTMLButtonElement>('#pluginDialog .pet-delete-actions button')].find(node => node.textContent === 'Uninstall plugin')!.click(); await tick();
   expect(api.pluginsUninstall).toHaveBeenCalledExactlyOnceWith('one');
 });
+
+// Design audit 2026-11-01: a failed first load kept saying "Loading…" for good.
+it('says the plugins could not be loaded when the first load fails, and lists them once a retry works', async () => {
+  vi.resetModules();
+  const fresh = await import('../src/renderer/plugins.js');
+  api.pluginsSnapshot!.mockImplementationOnce(async () => ({ ok: false, error: 'Plugin store unavailable' }));
+  // The page's own start, so its search box is wired as in the app.
+  fresh.initPlugins(); await tick(); await tick();
+  expect(document.getElementById('pluginsCount')!.textContent).toBe('');
+  expect(document.getElementById('pluginsInstalled')!.textContent).toBe('Plugins could not be loaded.');
+  // Typing in the search repaints the list, and the failure stays (CodeRabbit on #2002).
+  const search = document.getElementById('pluginsSearch') as HTMLInputElement;
+  search.value = 'mem'; search.dispatchEvent(new (window as any).Event('input'));
+  expect(document.getElementById('pluginsInstalled')!.textContent).toBe('Plugins could not be loaded.');
+  expect(document.getElementById('pluginsCount')!.textContent).toBe('');
+  search.value = ''; search.dispatchEvent(new (window as any).Event('input'));
+  await fresh.refreshPlugins();
+  expect(document.querySelectorAll('#pluginsInstalled .plugin-card')).toHaveLength(1);
+  // Once a list has shown, a later failed refresh keeps it and only says so in the toast.
+  api.pluginsSnapshot!.mockImplementationOnce(async () => ({ ok: false, error: 'Plugin store unavailable' }));
+  await fresh.refreshPlugins();
+  expect(document.querySelectorAll('#pluginsInstalled .plugin-card')).toHaveLength(1);
+});
+
+// CodeRabbit on #2002: a refresh that a newer one replaced says nothing while the newer one is on its way.
+// Either order: the older failure arriving first, or only after the newer list is already shown (CodeRabbit on #2002).
+it.each(['before', 'after'] as const)('shows no load error for a plugin refresh that a newer one replaced (failure %s the list)', async order => {
+  vi.resetModules();
+  const fresh = await import('../src/renderer/plugins.js');
+  const replies: Array<(reply: unknown) => void> = [];
+  api.pluginsSnapshot!.mockImplementation(() => new Promise(resolve => replies.push(resolve)));
+  const first = fresh.refreshPlugins();
+  const second = fresh.refreshPlugins();
+  const fail = async () => {
+    replies[0]!({ ok: false, error: 'Plugin store unavailable' });
+    await first;
+    expect(document.getElementById('pluginsInstalled')!.textContent).not.toBe('Plugins could not be loaded.');
+  };
+  if (order === 'before') await fail();
+  replies[1]!({ ok: true, data: state });
+  await second;
+  if (order === 'after') await fail();
+  expect(document.querySelectorAll('#pluginsInstalled .plugin-card')).toHaveLength(1);
+});

@@ -3704,5 +3704,9 @@
   "Report a problem. GitHub opens with it filled in.": "問題を報告します。GitHub が入力済みの状態で開きます。",
   "Report a problem.": "問題を報告します。",
   "New features come as pull requests, not issues.": "新しい機能は Issue ではなく Pull Request で受け付けています。",
-  "How to start one": "始め方"
+  "How to start one": "始め方",
+  "Plugins could not be loaded.": "プラグインを読み込めませんでした。",
+  "Pets could not be loaded.": "ペットを読み込めませんでした。",
+  "Continue in a new chat from the last summary": "最新の要約で新しいチャットを続ける",
+  "ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.": "ChatGPT が 15 分間要約を書いていません。保存済みの最新の要約で、新しいチャットで作業を続けられます。"
 }
