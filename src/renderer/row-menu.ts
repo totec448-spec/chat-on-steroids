@@ -315,6 +315,8 @@ function keyboard(event: KeyboardEvent, menu: HTMLElement, depth: number): void 
   }
 }
 
+export { placeBeside as placeRowMenuBesideForTests };
+
 /** At a point (a right click), kept inside the window. */
 function placeAt(menu: HTMLElement, x: number, y: number): void {
   // Its layout size: the opening animation must not make it look smaller than it is.
@@ -333,11 +335,15 @@ function placeBeside(menu: HTMLElement, box: DOMRect, side: 'below' | 'right'): 
     left = box.left;
     top = box.bottom + 4;
     const below = window.innerHeight - EDGE - top, above = box.top - 4 - EDGE;
-    if (height > below && height > above) {
-      // Too long for either side: it scrolls in the larger one, still next to its button.
+    if (height > below && height > above && height > window.innerHeight - 2 * EDGE) {
+      // Taller than the window: it scrolls in the larger side, still next to its button.
       height = Math.max(below, above);
       menu.style.maxHeight = `${height}px`;
       if (above > below) top = box.top - 4 - height;
+    } else if (height > below && height > above) {
+      // Neither side has room, but the window does: shown whole, as far down as it fits, rather
+      // than as a scroll box missing a few pixels (it may cover part of its own button).
+      top = window.innerHeight - EDGE - height;
     } else if (height > below) top = box.top - height - 4;
   } else {
     left = box.right + 2;
