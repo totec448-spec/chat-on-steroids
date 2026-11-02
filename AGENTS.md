@@ -4078,7 +4078,10 @@ unfinished turn is not proved yet (`recovery-not-ready`), or the visible-compose
 usable box (`page-moved` for a reload or navigation, `chat-moved-on` for a new message, turn or progress on the same chat, `question-gone` when the question captured before is no longer on the page, `no-composer`, `composer-hidden`). `/page-note` logs `bridge: the page of
 <chat> held queued message <id> back: <why>` once a minute per chat (a new chat: per message) and
 reason. The page says nothing once the tab shows another chat or the person stopped the automatic
-Continue, and `inputId` must be a UUID. Internal busy states
+Continue, and `inputId` must be a UUID. An automatic Continue held for `recovery-question-changed`
+without a break of more than 5 minutes for 30 minutes is retired (`retireMismatchedRecoveryInput`:
+cancelled with its reason, `recovery.ended: 'page-final'`); it would only answer the wrong question
+(2026-11-02: one sat queued for eleven hours). Internal busy states
 (another delivery, a model read, a Goal draft) stay unlogged. A dialog with a field
 (Settings, Rename, a form) is left alone and keeps holding input as before.
 A worker given up for time after a page claimed it (no page-reported failure) is a late-start
