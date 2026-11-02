@@ -60,7 +60,9 @@ export function createActiveTabs(chrome) {
       if (!current(state)) throw new Error('Activity ended');
     } catch {
       state.failed = true;
-      await detach(state);
+      // A release that cannot be confirmed stays in retiring custody, retried on every later pass, so a
+      // failed lease is never left attached (CodeRabbit on #2027).
+      try { await detach(state); } catch { retiring.add(state); }
     }
   }
   function sync() {
