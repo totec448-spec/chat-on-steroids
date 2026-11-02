@@ -2139,7 +2139,9 @@ async function run(draft: GoalDraft): Promise<void> {
 
   const abort = new AbortController();
   draft.abort = abort;
-  const timer = setTimeout(() => abort.abort(new DOMException('Goal request timed out', 'TimeoutError')), goalRequestTimeoutMs(draft.backend));
+  const limitMs = goalRequestTimeoutMs(draft.backend);
+  const effort = draft.backend === 'chatgpt' ? goalHelperSelection().reasoningEffort : null;
+  const timer = setTimeout(() => abort.abort(new DOMException('Goal request timed out', 'TimeoutError')), limitMs);
   try {
     const decision = draft.backend === 'templates' ? templateGoalDecision(templateDecisionText(messages), Math.floor(Math.random() * 200), Math.floor(Math.random() * 200)) : await requestDrivingDecision({
       backend: draft.backend,
@@ -2244,7 +2246,11 @@ async function run(draft: GoalDraft): Promise<void> {
       : detail === 'reply_too_long' || detail === 'stream_record_too_long' || detail.startsWith('goal_browser_')
         ? detail
         : `request_failed: ${detail}`;
-    logWarn(`goal: draft for ${draft.conversationId} failed — ${failure}`);
+    // A timeout names the limit that ended it: it differs by helper and reasoning effort (#2033).
+    const limit = abort.signal.reason?.name === 'TimeoutError'
+      ? ` (the ${limitMs / 60_000}-minute limit for the ${draft.backend} helper${effort ? ` at ${effort} reasoning` : ''})`
+      : '';
+    logWarn(`goal: draft for ${draft.conversationId} failed — ${failure}${limit}`);
     settle(draft, 'failed', failure);
   } finally {
     clearTimeout(timer);
