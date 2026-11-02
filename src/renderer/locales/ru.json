@@ -3947,6 +3947,8 @@
   "Report a problem.": "Сообщить о проблеме.",
   "New features come as pull requests, not issues.": "Новые функции принимаются как pull request, а не как issue.",
   "How to start one": "Как его начать",
+  "Plugins could not be loaded.": "Не удалось загрузить плагины.",
+  "Pets could not be loaded.": "Не удалось загрузить питомцев.",
   "Continue in a new chat from the last summary": "Продолжить в новом чате с последней сводкой",
   "ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.": "ChatGPT уже 15 минут не пишет сводку. Последняя сохранённая сводка может продолжить работу в новом чате."
 }
