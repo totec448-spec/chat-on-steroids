@@ -1166,7 +1166,11 @@ function samePickupState(a: PickupRecoveryState | undefined, b: PickupRecoverySt
 }
 
 /** Reserve a source-turn reload against all of its queued owners before browser handout. */
-export function recordQueuedPickupAttemptNow(inputId: string, sourceTurnId: string, at: number, nextAt?: number, inherited?: PickupRecoveryState): Promise<PickupRecoveryState | null> {
+/**
+ * `expected`: the attempts the caller read before deciding a retry is due. Another pass that reserved
+ * meanwhile moved the count past it, and this one then reserves nothing (CodeRabbit on #1979).
+ */
+export function recordQueuedPickupAttemptNow(inputId: string, sourceTurnId: string, at: number, nextAt?: number, inherited?: PickupRecoveryState, expected?: number): Promise<PickupRecoveryState | null> {
   return serial(async () => {
     const current = await load();
     const row = current.find(entry => entry.id === inputId);
@@ -1176,6 +1180,7 @@ export function recordQueuedPickupAttemptNow(inputId: string, sourceTurnId: stri
     if (!session || session.conversationId !== row.conversationId || session.browserRecoveryDismissedAt !== undefined) return null;
     const matches = await rowsForPickupSource(current, row.sessionId, sourceTurnId);
     const prior = mergedPickupState(matches, inherited);
+    if (expected !== undefined && prior.attempts > expected) return null;
     // Past the quick burst the chat shows as stopped, and slow retries go on until the hard bound.
     if (prior.attempts >= BROWSER_PICKUP_ATTEMPT_LIMIT) {
       const next = current.map(entry => matches.includes(entry) && !samePickupState(entry.pickupRecovery, prior)
@@ -1910,7 +1915,12 @@ async function notAllowedReason(entry: InputEntry): Promise<string> {
  * the chat's latest question is still the one the Continue answers, no turn runs and no tool call is
  * in flight. Returns the converted row, or null with nothing changed.
  */
-export function continueAsOrdinaryMessage(id: string, why: string, minAgeMs = 0): Promise<{ row: InputEntry } | { refused: string }> {
+/**
+ * `lastGate`: the caller's own final check on the chat, run inside this one serialized step right
+ * before the commit (a history limit can arrive during the reads above; CodeRabbit on #1979). It
+ * returns why the conversion must wait, or null.
+ */
+export function continueAsOrdinaryMessage(id: string, why: string, minAgeMs = 0, lastGate?: (conversationId: string) => string | null): Promise<{ row: InputEntry } | { refused: string }> {
   return serial(async () => {
     const current = await load();
     const row = current.find(entry => entry.id === id);
@@ -1926,6 +1936,8 @@ export function continueAsOrdinaryMessage(id: string, why: string, minAgeMs = 0)
     if (inFlightToolCalls(session.conversationId) > 0) return { refused: 'a tool call of its chat is still running' };
     const question = await readLatestUserMessage(row.sessionId);
     if (question?.messageId !== row.recovery.questionId) return { refused: 'a newer question arrived in its chat' };
+    const gated = lastGate?.(session.conversationId);
+    if (gated) return { refused: gated };
     const { recovery: _recovery, silenceBoundary: _boundary, pickupRecovery: _pickup, requestedMode: _requested, ...rest } = row;
     const ordinary: InputEntry = { ...rest, mode: 'auto', dueAt: Date.now(), continuedFrom: 'recovery', continuesQuestionId: row.recovery.questionId };
     await commit(current.map(entry => entry === row ? ordinary : entry));
