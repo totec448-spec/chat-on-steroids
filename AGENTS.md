@@ -5963,8 +5963,9 @@ choice/focus; meaningful owner changes reopen attention. A keyboard button contr
 details and a separate polite live region announces changed status. The card keeps the event
 feed's remaining height and internal scrolling in short windows. Diagnostics uses the existing
 save owner with both buttons disabled during saving, and does not retry updates. The report
-action follows the effective operation/update error, including automatic staging failures
-before the person presses Update all. Disclosure and
+action is available when either the retained operation error or the latest updater error
+needs diagnostics, including automatic staging failures before Update all. Long translated
+failure text may scroll inside the bounded card so recovery controls are not clipped. Disclosure and
 action regressions stay with the view; real-Electron cross-feature acceptance is added separately.
 
 ## 19. Debugging, tests and working here

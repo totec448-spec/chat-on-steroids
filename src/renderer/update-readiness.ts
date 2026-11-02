@@ -58,7 +58,7 @@ export function paintUpdateReadiness(next: AppState, operationError: string | nu
   summary.classList.toggle('is-ok', ready);
   const error = $('updateAllError');
   error.hidden = !operationError;
-  $('updateDiagnosticsReport').hidden = !updateErrorNeedsDiagnostics(operationError || next.update.error);
+  $('updateDiagnosticsReport').hidden = !(updateErrorNeedsDiagnostics(operationError) || updateErrorNeedsDiagnostics(next.update.error));
   ui(error, 'textContent', () => operationError ? t('Update all could not finish: {0}', [updateErrorText(operationError)]) + '\n' + updateErrorNextStep(operationError) : '');
   paintWhenShown($('updateReadinessRows'), () => $('updateReadinessRows').replaceChildren(...rows.map(row => {
     const item = el('li', row.status === 'pass' ? 'check is-ok' : row.status === 'fail' ? 'check is-bad' : `check is-${row.status}`);
