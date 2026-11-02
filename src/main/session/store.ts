@@ -3698,14 +3698,30 @@ export async function clearProjectNote(id: string): Promise<void> {
  * name contradicts.
  */
 export async function setSessionOrigin(id: string, origin: SessionOrigin, title: string): Promise<void> {
-  const inheritedProject = origin.fromSessionId ? (await getSession(origin.fromSessionId))?.projectId : undefined;
+  const parentProject = async () => origin.fromSessionId ? (await getSession(origin.fromSessionId))?.projectId : undefined;
   const entry = await ensureOpen(id);
+  let written: string | undefined;
   await enqueueSessionOperation(entry, 'origin write', async () => {
+    // Read when the write happens, not before it waited its turn: the main chat may have moved.
+    const inheritedProject = await parentProject();
+    written = inheritedProject;
     if (inheritedProject && entry.summary.projectId && entry.summary.projectId !== inheritedProject) throw new Error('Session origin belongs to another project');
     // A name the user gave the chat stays; the origin's title becomes the one clearing it restores.
     const named = entry.summary.titleSource === 'manual';
     const staged = { ...entry.summary, origin, ...(named ? { autoTitle: { title: title.slice(0, 120), source: 'fallback' as const } } : { title: title.slice(0, 120) }),
       ...(inheritedProject ? { projectId: inheritedProject } : {}) };
+    await writeSummary(staged, entry.historySeq);
+    entry.summary = staged;
+    publishAttachmentSummary(staged);
+  });
+  // A worker or helper follows its main chat: if that chat moved to another project while this was
+  // written, follow it (#1919). The move itself also looks for such stragglers once it is done.
+  const now = await parentProject();
+  if (!origin.fromSessionId || (origin.kind !== 'worker' && origin.kind !== 'helper') || now === written) return;
+  await enqueueSessionOperation(entry, 'origin project follow', async () => {
+    if ((entry.summary.projectId ?? undefined) !== written) return;
+    const { projectId: _previous, ...rest } = entry.summary;
+    const staged: SessionSummary = { ...rest, ...(now ? { projectId: now } : {}) };
     await writeSummary(staged, entry.historySeq);
     entry.summary = staged;
     publishAttachmentSummary(staged);
