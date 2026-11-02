@@ -2877,6 +2877,115 @@ describe('automatic compaction', () => {
     info.mockRestore();
   });
 
+  // 2026-11-01, the maintainer's Mac: a Loop chat stopped twice this way, and showing its tab by hand brought it
+  // back at once. A Goal or Loop chat is shown once per stuck repair, by a browser that can show chats, before
+  // the app gives up (user, 2026-11-02). Without such a browser nothing could be shown: it stops as before.
+  it.each([true, false])('shows a Loop chat once before it stops offering a repair nobody claims (browser can show chats: %s)', async canShow => {
+    const { setSessionAutomation } = await import('../src/main/bridge.js');
+    await pair();
+    const browser = 'cccccccccccccccc3333';
+    let socket: WebSocket | null = null;
+    if (canShow) {
+      socket = new WebSocket(base.replace('http:', 'ws:') + '/wake', { origin: EXTENSION_ORIGIN });
+      await once(socket, 'open');
+      const authenticated = once(socket, 'message'); socket.send(token!); await authenticated;
+    }
+    try {
+      const conversationId = randomUUID();
+      await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'user_message', time: Date.now(), text: 'Continue this task', messageId: 'loop-never-claimed' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'loop-never-claimed-turn' }
+      ] } });
+      const session = (await findSessionByConversation(conversationId))!;
+      await setSessionAutomation(session.id, 'loop');
+      await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'chat_error', time: Date.now(), turnId: 'loop-never-claimed-turn', recoverable: true,
+          text: 'Connection interrupted. Waiting for the complete answer' }
+      ] } });
+      await settled();
+      const reveals: string[] = [];
+      const offered = async (): Promise<boolean> => {
+        const body = (await request('POST', '/status', { browser, body: { openConversations: [], canReveal: true } })).body;
+        reveals.push(...(body.reveals ?? []));
+        return (body.repairs as Array<{ conversationId: string }>).some(row => row.conversationId === conversationId);
+      };
+      const notes = async () => (await readEvents(session.id, { kinds: ['note'] }))
+        .map(event => (event as { message: { text: string } }).message.text);
+
+      // The reply that hands over the chat to show skips the repair once; it stops for good only after that.
+      let seen = 0, absent = 0;
+      for (let pass = 0; pass < 60 && absent < 3; pass++) {
+        if (await offered()) { seen += 1; absent = 0; } else absent += 1;
+      }
+      expect(absent, 'the repair was still being offered after sixty reads').toBe(3);
+      expect((await sessionControlsFor(session.id)).pageless).toBe(true);
+      expect((await notes()).some(text => text.includes('has no page to reload'))).toBe(true);
+      if (canShow) {
+        // Shown once (the next status after the ten offers carries it), then nine more offers, then the stop.
+        await vi.waitFor(() => expect(reveals).toEqual([conversationId]), { timeout: 5_000 });
+        expect(seen).toBeGreaterThanOrEqual(19);
+        await vi.waitFor(async () => expect((await notes()).some(text => text.includes('showing its tab'))).toBe(true), { timeout: 5_000 });
+      } else {
+        expect(reveals).toEqual([]);
+        expect(seen).toBeLessThan(19);
+        expect((await notes()).some(text => text.includes('showing its tab'))).toBe(false);
+      }
+      expect(recoveryBrowserWake).not.toHaveBeenCalled();
+    } finally {
+      if (socket) { const closed = once(socket, 'close'); socket.close(); await closed; }
+    }
+  });
+
+  // CodeRabbit on #2027: a show the browser reports it could not carry out is not used up.
+  it.each(['soon', 'late'] as const)('shows a Loop chat again when the browser reports, %s, that it could not show it', async report => {
+    const { setSessionAutomation, unclaimedChatShowFailed } = await import('../src/main/bridge.js');
+    await pair();
+    const browser = 'dddddddddddddddd4444';
+    const socket = new WebSocket(base.replace('http:', 'ws:') + '/wake', { origin: EXTENSION_ORIGIN });
+    await once(socket, 'open');
+    const authenticated = once(socket, 'message'); socket.send(token!); await authenticated;
+    try {
+      const conversationId = randomUUID();
+      await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'user_message', time: Date.now(), text: 'Continue this task', messageId: 'show-again' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'show-again-turn' }
+      ] } });
+      const session = (await findSessionByConversation(conversationId))!;
+      await setSessionAutomation(session.id, 'loop');
+      await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'chat_error', time: Date.now(), turnId: 'show-again-turn', recoverable: true,
+          text: 'Connection interrupted. Waiting for the complete answer' }
+      ] } });
+      await settled();
+      const reveals: string[] = [];
+      const poll = async (): Promise<boolean> => {
+        const body = (await request('POST', '/status', { browser, body: { openConversations: [], canReveal: true } })).body;
+        reveals.push(...(body.reveals ?? []));
+        return (body.repairs as Array<{ conversationId: string }>).some(row => row.conversationId === conversationId);
+      };
+      for (let pass = 0; pass < 30 && !reveals.length; pass++) await poll();
+      expect(reveals).toEqual([conversationId]);
+      if (report === 'late') {
+        // A report long after the show is not about it: the show stays used, and the chat ends page-less.
+        unclaimedChatShowFailed(conversationId, Date.now() + 61_000);
+        let still = true;
+        for (let pass = 0; pass < 40 && still; pass++) still = await poll() || (await poll());
+        expect(reveals).toEqual([conversationId]);
+        expect((await sessionControlsFor(session.id)).pageless).toBe(true);
+        return;
+      }
+      expect((await request('POST', '/reveal/failed', { body: { conversationId } })).body).toEqual({ ok: true });
+      for (let pass = 0; pass < 30 && reveals.length < 2; pass++) await poll();
+      expect(reveals).toEqual([conversationId, conversationId]);
+      // Failed again: no third show, and the chat ends page-less as before (CodeRabbit on #2027).
+      expect((await request('POST', '/reveal/failed', { body: { conversationId } })).body).toEqual({ ok: true });
+      let offered = true;
+      for (let pass = 0; pass < 40 && offered; pass++) offered = await poll() || (await poll());
+      expect(reveals).toHaveLength(2);
+      expect((await sessionControlsFor(session.id)).pageless).toBe(true);
+    } finally { const closed = once(socket, 'close'); socket.close(); await closed; }
+  });
+
   it('stops offering a repair the browser never claims, and says the chat has no page', async () => {
     await pair();
     const conversationId = randomUUID();
