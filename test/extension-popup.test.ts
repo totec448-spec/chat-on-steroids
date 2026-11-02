@@ -221,3 +221,55 @@ it('marks the recording, chat, request and app rows as not applicable on a Dot p
   expect(start.req).toEqual(['row wait', 'none yet']);
   expect(start.why).toContain('Waiting for the first message');
 });
+
+// 2026-11-01: a pairing call that fails left Try again / Connect disabled until the popup was reopened.
+it('enables Try again again when the pairing call fails', async () => {
+  const document = openPopup();
+  (popup!.window as any).paintHeader({ connected: false, paired: false });
+  const retry = document.getElementById('retryBtn') as HTMLButtonElement;
+  expect(retry.hidden).toBe(false);
+  (popup!.window as any).chrome.runtime.sendMessage = async (message: { type: string }) => {
+    if (message.type === 'pair') throw new Error('Could not establish connection. Receiving end does not exist.');
+    return null;
+  };
+  retry.click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(retry.disabled).toBe(false);
+});
+
+// 2026-11-01: the fallback names were read once at load, before the app's language arrived.
+it('names a fallback attribution in the language current when it is painted', () => {
+  const messages: Record<string, string> = {};
+  const document = openPopup(messages, 'de');
+  messages.popup_attribution_only_chat_generating = 'der einzige Chat, der gerade antwortet';
+  messages.popup_pipeline_call_fallback_one = 'Ausweichlösung: $1.';
+  const state = (popup!.window as any).pipeline({ isChat: true, url: 'https://chatgpt.com/c/x', recorder: true, conversationId: 'c',
+    page: { events: 3, session: 's', trace: [{ requestId: 'r', read: true, sent: true, app: 'generation' }] }, pending: 0 }, true);
+  expect(state.why[1]).toBe('Ausweichlösung: der einzige Chat, der gerade antwortet.');
+  expect(document).toBeTruthy();
+});
+
+// 2026-11-01: a page without send counts showed "undefined · undefined failed" under Advanced.
+it('shows a dash for page sends the page did not report', () => {
+  const document = openPopup();
+  (document.getElementById('more') as HTMLDetailsElement).open = true;
+  (popup!.window as any).paintDetails({ connected: true, paired: true, compatible: true, port: 8765 },
+    { isChat: true, tab: 7, page: { events: 3, calls: 1 } });
+  const cells = [...document.querySelectorAll('#grid dd')].map(node => node.textContent);
+  expect(cells.join(' ')).not.toContain('undefined');
+  (popup!.window as any).paintDetails({ connected: true, paired: true, compatible: true, port: 8765 },
+    { isChat: true, tab: 7, page: { events: 3, calls: 1, sends: 4, failures: 1 } });
+  expect([...document.querySelectorAll('#grid dd')].map(node => node.textContent)).toContain('4 · 1 failed');
+});
+
+// CodeRabbit on #2012: a failed tabStatus answers with an error and no counts; "0 held · 0 total" claimed a journal nobody read.
+it('shows a dash for queue counts the worker could not read', () => {
+  const document = openPopup();
+  (document.getElementById('more') as HTMLDetailsElement).open = true;
+  const row = () => [...document.querySelectorAll('#grid dt')].find(node => node.textContent === 'in this browser')?.nextElementSibling?.textContent;
+  (popup!.window as any).paintDetails({ connected: true, paired: true, compatible: true, port: 8765 }, { isChat: true, tab: 7, error: 'journal unavailable' });
+  expect(row()).not.toMatch(/\d/);
+  (popup!.window as any).paintDetails({ connected: true, paired: true, compatible: true, port: 8765 }, { isChat: true, tab: 7, pending: 0, pendingAll: 2 });
+  expect(row()).toBe('0 held · 2 total');
+});
