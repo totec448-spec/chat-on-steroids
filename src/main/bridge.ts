@@ -8647,25 +8647,26 @@ const UNCLAIMED_REPAIR_OFFERS = 10;
 const unclaimedChatShown = new Set<string>();
 
 /**
- * Before a Goal or Loop chat is given up as page-less, its tab is shown once and the offers start over
- * (user, 2026-11-02). Twice on 2026-11-01 a Loop chat's repairs went unclaimed until the app stopped,
- * and showing the chat by hand brought it back at once. A chat nobody automates still gets the notice.
+ * Before a Goal or Loop chat is given up as page-less, a browser running the extension shows its tab once
+ * and the offers start over (user, 2026-11-02). Twice on 2026-11-01 a Loop chat's repairs went unclaimed
+ * until the app stopped, and showing the chat by hand brought it back at once. Only a browser that can
+ * show chats counts: without one nothing would be shown, so the chat gets the page-less notice as before
+ * (CodeRabbit on #2027). Worker chats and chats nobody automates are never brought forward.
  */
 function showUnclaimedChatOnce(conversationId: string, repair: Repair): boolean {
   const key = `${repair.sessionId}:${repair.episode}`;
-  if (unclaimedChatShown.has(key) || !goalArmedFor(conversationId) || isChatBlocked(conversationId) ||
-      stopRequestedFor(conversationId) || getConfig().ui.browserOnly === true) return false;
+  if (unclaimedChatShown.has(key) || !goalActiveFor(conversationId) || isChatBlocked(conversationId) ||
+      stopRequestedFor(conversationId) || getConfig().ui.browserOnly === true ||
+      !browserWakeConnected() || !revealCapable()) return false;
   unclaimedChatShown.add(key);
   if (unclaimedChatShown.size > 500) unclaimedChatShown.delete(unclaimedChatShown.values().next().value!);
   repair.offers = 1;
   logWarn(`bridge: ${conversationId} never claimed ${UNCLAIMED_REPAIR_OFFERS} ${repair.reason} repair offer(s) — showing its tab once before giving up`);
   void recordNote(repair.sessionId, 'The browser did not pick up this chat\'s recovery, so the app is showing its tab to go on.')
     .catch(() => undefined);
-  const current = () => repairsInFlight.get(conversationId) === repair && !isChatBlocked(conversationId) && !stopRequestedFor(conversationId);
-  // A browser running the extension shows its tab, or opens it there; without one the chat opens through the OS.
-  void revealChatInBrowser(conversationId)
-    .then(shown => shown ? undefined : wakeBrowserUrl(chatUrl(conversationId), true, false, { current }))
-    .catch((error: Error) => logWarn(`bridge: could not show ${conversationId} for its recovery: ${error.message}`));
+  void revealChatInBrowser(conversationId).then(shown => {
+    if (!shown) logWarn(`bridge: no browser took ${conversationId} to show it; its recovery is offered ${UNCLAIMED_REPAIR_OFFERS} more times`);
+  });
   return true;
 }
 /** How long a page's refused claim keeps a repair's offers from counting as unclaimed (#1922). */
