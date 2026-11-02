@@ -192,6 +192,22 @@ app.whenReady().then(async () => {
   await check('Compact reaches native controller', `composerFixture.controls.job?.phase==='requesting'`);
   await click('#contextMeterButton'); await click('#cancelCompaction'); await pause(300);
   await check('Cancel reaches native controller', `composerFixture.controls.job===null`);
+  // 2026-11-01: a Compact & Resume waiting too long for ChatGPT's summary offers the last saved one,
+  // and the context meter carries a dot until the person acts on it.
+  // Nothing else repaints this quiet chat: the controls are asked again when the 15 minutes run out (CodeRabbit on #2019).
+  await js(`window.offerAt=Date.now()+1500;composerFixture.controls.job={busy:true,phase:'requesting',stage:'handoff-pending',handoffId:null,startedAt:Date.now()-15*60000+1500};composerFixture.notify()`);
+  await pause(400);
+  await check('No offer before the deadline', `!document.getElementById('contextMeter').hasAttribute('data-attention')&&document.getElementById('resumeLastSummary').hidden`);
+  await until(`document.getElementById('contextMeter').hasAttribute('data-attention')`, 8000);
+  await check('The offer is said to screen readers', `/15 minutes/.test(document.getElementById('contextMeterNotice').textContent)&&document.getElementById('contextMeterButton').getAttribute('aria-describedby')==='contextMeterNotice'`);
+  await click('#contextMeterButton'); await pause(200);
+  await check('The popover\'s status line does not announce the offer a second time', `document.getElementById('sessionControlStatus').getAttribute('aria-live')==='off'`);
+  await check('A stuck Compact & Resume offers the last summary', `!document.getElementById('resumeLastSummary').hidden&&getComputedStyle(document.getElementById('resumeLastSummary')).display!=='none'&&/15 minutes/.test(document.getElementById('sessionControlStatus').textContent)`);
+  await capture('context-last-summary');
+  await click('#resumeLastSummary'); await pause(300);
+  await check('Continuing from the last summary reaches the native controller', `window.resumedFrom==='2026-11-01-36ad1800'&&document.getElementById('resumeLastSummary').hidden&&!document.getElementById('contextMeter').hasAttribute('data-attention')&&document.getElementById('contextMeterNotice').textContent===''`);
+  await js(`window.offerAt=0`);
+  await js(`composerFixture.controls.job=null;composerFixture.notify()`); await pause(200);
   await click('#attachmentMenu > summary'); await capture('add');
   await click('#composerSkills');
   await check('Slash commands and skills use original picker', `!document.getElementById('skillPicker').hidden&&document.querySelectorAll('.slash-menu-option').length>=7`);
@@ -231,6 +247,14 @@ app.whenReady().then(async () => {
   await check('Narrow work-dock column compacts labels by column width', `getComputedStyle(document.getElementById('composerModeLabel')).display==='none'&&getComputedStyle(document.querySelector('#createPlan > span')).display==='none'&&getComputedStyle(document.getElementById('contextMeterCompact')).display==='none'`);
   await capture('dock-900');
   await click('#rightDockToggle');
+  // The offer belongs to its chat: New chat must not keep the dot or the screen-reader notice (CodeRabbit on #2019).
+  await js(`window.offerAt=Date.now()-1;composerFixture.controls.job={busy:true,phase:'requesting',stage:'handoff-pending',handoffId:null,startedAt:Date.now()-16*60000};composerFixture.notify()`);
+  await until(`document.getElementById('contextMeter').hasAttribute('data-attention')`, 8000);
+  // \`until\` gives up quietly: say it here, so the step below cannot pass without an offer to remove.
+  await check('The offer shows before New chat', `document.getElementById('contextMeter').hasAttribute('data-attention')&&/15 minutes/.test(document.getElementById('contextMeterNotice').textContent)`);
+  await click('#newChat'); await pause(300);
+  await check('New chat drops the previous chat\'s summary offer', `!document.getElementById('contextMeter').hasAttribute('data-attention')&&document.getElementById('contextMeterNotice').textContent===''&&document.getElementById('resumeLastSummary').hidden`);
+  await js(`window.offerAt=0;composerFixture.controls.job=null;composerFixture.controls.lastSummary=null`);
   for (const width of [1440, 900, 700, 640]) {
     win.setContentSize(width, 960); await pause(250);
     await click('#newChat'); await type('');
