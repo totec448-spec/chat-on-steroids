@@ -10,7 +10,12 @@ const version = require('../package.json').version;
 const built = path.join(root, 'out/renderer');
 const output = path.join(root, 'outputs/update-readiness');
 const before = process.argv.includes('--before');
-app.setPath('userData', path.join(output, 'runtime'));
+// A preceding failed run can leave Chromium caches and session storage in this
+// synthetic profile. Keep every run independent; never touch real userData.
+fs.mkdirSync(output, { recursive: true });
+const runtime = path.join(output, 'runtime');
+fs.rmSync(runtime, { recursive: true, force: true });
+app.setPath('userData', runtime);
 app.whenReady().then(async () => {
   const fixture = `${fixtureConfigSource()}
     const p = new URLSearchParams(location.search);
@@ -51,14 +56,28 @@ app.whenReady().then(async () => {
   let win;
   try {
     await new Promise(resolve => server.listen(0,'127.0.0.1',resolve)); fs.mkdirSync(output,{recursive:true});
-    win = new BrowserWindow({show:false,width:1100,height:850,webPreferences:{offscreen:true,sandbox:true}});
+    // A hidden offscreen compositor can lose navigations after repeated
+    // resize/capture cycles on native Wayland. Opt in to a mapped test window.
+    const showLinuxFixture = process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1';
+    win = new BrowserWindow({show:showLinuxFixture,width:1100,height:850,
+      webPreferences:{offscreen:!showLinuxFixture,sandbox:true,backgroundThrottling:false}});
     const errors = [];
     win.webContents.on('console-message', event => { if (event.level === 'error' && !event.message.includes('ResizeObserver loop')) errors.push(event.message); });
     const js = expression => win.webContents.executeJavaScript(expression);
     const pause = ms => new Promise(resolve => setTimeout(resolve,ms));
     const until = async expression => { const end=Date.now()+8000; while(Date.now()<end) { if(await js(expression)) return; await pause(40); } throw new Error('Timeout: '+expression); };
     const open = async query => {
-      await win.loadURL('http://127.0.0.1:'+server.address().port+'/?'+query);
+      const url = 'http://127.0.0.1:'+server.address().port+'/?'+query;
+      try { await win.loadURL(url); }
+      catch (error) {
+        // Electron occasionally returns ERR_FAILED while reloading the local
+        // synthetic HTTP page through dozens of language/resize transitions.
+        // Retry only that transport error, once; all page assertions still run.
+        if (!/ERR_FAILED \(-2\)/.test(String(error)) || win.isDestroyed()) throw error;
+        console.warn('Synthetic UI navigation retried once after ERR_FAILED:', query);
+        await pause(200);
+        await win.loadURL(url);
+      }
       await until(`document.getElementById('versionLine').textContent.length>0`);
       await js(`document.querySelector('#tabs [data-tab="activity"]').click()`); await pause(400);
       await until(`!document.querySelector('.toast')`);
