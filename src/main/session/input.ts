@@ -1166,7 +1166,11 @@ function samePickupState(a: PickupRecoveryState | undefined, b: PickupRecoverySt
 }
 
 /** Reserve a source-turn reload against all of its queued owners before browser handout. */
-export function recordQueuedPickupAttemptNow(inputId: string, sourceTurnId: string, at: number, nextAt?: number, inherited?: PickupRecoveryState): Promise<PickupRecoveryState | null> {
+/**
+ * `expected`: the attempts the caller read before deciding a retry is due. Another pass that reserved
+ * meanwhile moved the count past it, and this one then reserves nothing (CodeRabbit on #1979).
+ */
+export function recordQueuedPickupAttemptNow(inputId: string, sourceTurnId: string, at: number, nextAt?: number, inherited?: PickupRecoveryState, expected?: number): Promise<PickupRecoveryState | null> {
   return serial(async () => {
     const current = await load();
     const row = current.find(entry => entry.id === inputId);
@@ -1176,6 +1180,7 @@ export function recordQueuedPickupAttemptNow(inputId: string, sourceTurnId: stri
     if (!session || session.conversationId !== row.conversationId || session.browserRecoveryDismissedAt !== undefined) return null;
     const matches = await rowsForPickupSource(current, row.sessionId, sourceTurnId);
     const prior = mergedPickupState(matches, inherited);
+    if (expected !== undefined && prior.attempts > expected) return null;
     // Past the quick burst the chat shows as stopped, and slow retries go on until the hard bound.
     if (prior.attempts >= BROWSER_PICKUP_ATTEMPT_LIMIT) {
       const next = current.map(entry => matches.includes(entry) && !samePickupState(entry.pickupRecovery, prior)
@@ -1910,7 +1915,12 @@ async function notAllowedReason(entry: InputEntry): Promise<string> {
  * the chat's latest question is still the one the Continue answers, no turn runs and no tool call is
  * in flight. Returns the converted row, or null with nothing changed.
  */
-export function continueAsOrdinaryMessage(id: string, why: string, minAgeMs = 0): Promise<{ row: InputEntry } | { refused: string }> {
+/**
+ * `lastGate`: the caller's own final check on the chat, run inside this one serialized step right
+ * before the commit (a history limit can arrive during the reads above; CodeRabbit on #1979). It
+ * returns why the conversion must wait, or null.
+ */
+export function continueAsOrdinaryMessage(id: string, why: string, minAgeMs = 0, lastGate?: (conversationId: string) => string | null): Promise<{ row: InputEntry } | { refused: string }> {
   return serial(async () => {
     const current = await load();
     const row = current.find(entry => entry.id === id);
@@ -1926,6 +1936,8 @@ export function continueAsOrdinaryMessage(id: string, why: string, minAgeMs = 0)
     if (inFlightToolCalls(session.conversationId) > 0) return { refused: 'a tool call of its chat is still running' };
     const question = await readLatestUserMessage(row.sessionId);
     if (question?.messageId !== row.recovery.questionId) return { refused: 'a newer question arrived in its chat' };
+    const gated = lastGate?.(session.conversationId);
+    if (gated) return { refused: gated };
     const { recovery: _recovery, silenceBoundary: _boundary, pickupRecovery: _pickup, requestedMode: _requested, ...rest } = row;
     const ordinary: InputEntry = { ...rest, mode: 'auto', dueAt: Date.now(), continuedFrom: 'recovery', continuesQuestionId: row.recovery.questionId };
     await commit(current.map(entry => entry === row ? ordinary : entry));
@@ -1958,6 +1970,33 @@ export function holdInputForSendCheck(id: string, attempt: number, reason: strin
       ? { ...entry, sendCheck: { attempt, nextAt: Date.now() + SEND_CHECK_RETRY_MS, reason, answered } } : entry));
     return true;
   });
+}
+
+/** How long, and how many, of a chat's own unsent messages a page may recognise as the app's leftover. */
+const OWN_UNSENT_MS = 24 * 60 * 60_000;
+const OWN_UNSENT_MAX = 5;
+
+/**
+ * The exact texts this app put into a chat's composer that never reached Send (#1922): claimed by a page,
+ * then failed or withdrawn before any Send was authorized, with nothing attached. ChatGPT can keep such a
+ * text after the composer changes under it, and every later message for that chat was then refused as if
+ * it were the person's draft. A page that finds exactly one of these in the composer replaces it.
+ */
+export async function ownUnsentTexts(conversationId: string, exceptId: string, now = Date.now()): Promise<string[]> {
+  const rows = await listInputs();
+  // A claim that combined a message with a queued companion went out as one composer text; neither row
+  // alone is what was inserted, so neither is listed (CodeRabbit on #2028).
+  const companions = new Set(rows.flatMap(row => row.companionInputId ? [row.companionInputId] : []));
+  return rows
+    .filter(row => row.id !== exceptId && row.conversationId === conversationId && (row.state === 'failed' || row.state === 'cancelled') &&
+      // Only a claim that needed Send authorization proves, by its missing authorization, that Send never ran;
+      // an older saved claim without it may have been sent (CodeRabbit on #2028).
+      row.requiresAuthorization === true && row.offeredAt !== undefined && row.sendAuthorizedAt === undefined && row.deliveredAt === undefined &&
+      !row.companionInputId && !companions.has(row.id) &&
+      !row.images?.length && !row.attachments?.length && now - row.createdAt < OWN_UNSENT_MS)
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, OWN_UNSENT_MAX)
+    .map(row => row.deliveryText ?? row.text);
 }
 
 export function claimBrowserInput(id: string, owner: string, conversationId: string | null, requiresAuthorization = false): Promise<InputEntry | null> {
@@ -2303,6 +2342,24 @@ export function endRecoveryInput(id: string, conversationId: string): Promise<bo
       entry.offeredAt === undefined && entry.sendAuthorizedAt === undefined);
     if (!row?.sessionId || !row.recovery || (await getSession(row.sessionId))?.conversationId !== conversationId) return false;
     const error = 'Automatic Continue was not needed: the page shows a finished answer.';
+    logWarn(`input ${row.id}: ${error}`);
+    await commit(current.map(entry => entry === row
+      ? { ...entry, state: 'cancelled', owner: null, error, recovery: { ...row.recovery!, ended: 'page-final' } } : entry));
+    return true;
+  });
+}
+
+/**
+ * An automatic Continue whose chat pages kept showing another last question, without a break, for half an
+ * hour (see the bridge's `/page-note`): it would answer the wrong question, so it ends unsent with that
+ * reason. On 2026-11-02 one stayed queued for eleven hours, refused on every offer.
+ */
+export function retireMismatchedRecoveryInput(id: string, conversationId: string): Promise<boolean> {
+  return serial(async () => {
+    const current = await load();
+    const row = current.find(entry => entry.id === id && entry.recovery && entry.state === 'queued' && entry.sendAuthorizedAt === undefined);
+    if (!row?.sessionId || !row.recovery || (await getSession(row.sessionId))?.conversationId !== conversationId) return false;
+    const error = 'Automatic Continue was not sent: the chat\'s last question is no longer the one it answers.';
     logWarn(`input ${row.id}: ${error}`);
     await commit(current.map(entry => entry === row
       ? { ...entry, state: 'cancelled', owner: null, error, recovery: { ...row.recovery!, ended: 'page-final' } } : entry));

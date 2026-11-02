@@ -561,7 +561,9 @@ it('keeps a provider workflow in its chat after an explicit mid-answer continuat
   }), undefined, undefined, true);
   await invoke(); await flushRecorder();
   expect((await calls(id))[0]?.call.attributionMethod).toBe('generation');
-  const boundary = Date.now();
+  // The continued turn starts strictly before the next call. At `Date.now() + 1` a call made within
+  // the same millisecond came before the turn it belongs to, and was not placed in it (1 run in 5).
+  const boundary = Date.now() - 20;
   await recordChatObservations('chat-a', [
     { kind: 'turn_end', time: boundary, turnId: 'turn-a', outcome: 'completed', continued: true },
     { kind: 'turn_start', time: boundary + 1, turnId: 'continued-turn' }
