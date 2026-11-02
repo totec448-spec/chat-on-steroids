@@ -1972,6 +1972,26 @@ export function holdInputForSendCheck(id: string, attempt: number, reason: strin
   });
 }
 
+/** How long, and how many, of a chat's own unsent messages a page may recognise as the app's leftover. */
+const OWN_UNSENT_MS = 24 * 60 * 60_000;
+const OWN_UNSENT_MAX = 5;
+
+/**
+ * The exact texts this app put into a chat's composer that never reached Send (#1922): claimed by a page,
+ * then failed or withdrawn before any Send was authorized, with nothing attached. ChatGPT can keep such a
+ * text after the composer changes under it, and every later message for that chat was then refused as if
+ * it were the person's draft. A page that finds exactly one of these in the composer replaces it.
+ */
+export async function ownUnsentTexts(conversationId: string, exceptId: string, now = Date.now()): Promise<string[]> {
+  return (await listInputs())
+    .filter(row => row.id !== exceptId && row.conversationId === conversationId && (row.state === 'failed' || row.state === 'cancelled') &&
+      row.offeredAt !== undefined && row.sendAuthorizedAt === undefined && row.deliveredAt === undefined &&
+      !row.images?.length && !row.attachments?.length && now - row.createdAt < OWN_UNSENT_MS)
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, OWN_UNSENT_MAX)
+    .map(row => row.deliveryText ?? row.text);
+}
+
 export function claimBrowserInput(id: string, owner: string, conversationId: string | null, requiresAuthorization = false): Promise<InputEntry | null> {
   return serial(async () => {
     const current = await load();
