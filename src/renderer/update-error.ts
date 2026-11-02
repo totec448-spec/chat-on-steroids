@@ -10,7 +10,7 @@ export function updateErrorText(source: string): string {
     case 'Could not read plugin-refresh state':
       return t('The saved plugin update state could not be read.');
     case 'the update staging path must use ordinary directories':
-      return t('The update cache must be a folder, not a link.');
+      return t('The update cache and its version folders must be ordinary folders, not files or links.');
     case 'the latest release has no usable version tag':
     case 'the release page named no usable version tag':
       return t('The release information has no valid version number.');
