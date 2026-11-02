@@ -1407,7 +1407,7 @@ describe('desktop input delivery and helper ownership', () => {
         ? { ok: true } : { input: claimed(), ...(kind === 'not listed' ? {} : { ownUnsent: [leftover] }) } })
     }, () => undefined, false, true);
     live.document.querySelector('#prompt-textarea')!.textContent = kind === 'edited' ? `${leftover} And also this.`
-      : kind === 'listed, kept escaped' ? leftover.replace(/([()])/g, '\\$1') : leftover;
+      : kind === 'listed, kept escaped' ? String.raw`Continue with the next step of the task \(step 2\).` : leftover;
     await settle();
     const sends = watchSend(live.document);
     let sentText = '';
