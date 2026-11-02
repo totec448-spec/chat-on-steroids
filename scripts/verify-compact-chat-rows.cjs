@@ -165,14 +165,42 @@ app.whenReady().then(async () => {
   console.log(`PASS narrow 820px: sidebar ${sidebarWidth}px, no row overflow`);
 
   // Real Chromium pointer drag at the compact row pitch: move the first unfiled chat after the second.
-  const initialChatOrder=await js(`([...document.querySelectorAll('#chatList > .sess[data-id]')]).map(row=>row.dataset.id)`);
+  // macOS hosted Chromium can miss a single synthetic pointer event. Hover the source first,
+  // cross the 5px activation threshold in a separate move, and wait for repaint/animation settle.
+  const chatOrderExpression=`([...document.querySelectorAll('#chatList > .sess[data-id]')]).map(row=>row.dataset.id)`;
+  const initialChatOrder=await js(chatOrderExpression);
   assert.deepEqual(initialChatOrder,['compact-row-3','compact-row-4','compact-row-5'],'The isolated fixture starts with the expected unfiled chat order before dragging');
   const dragPoints=await js(`(()=>{const from=document.querySelector('#chatList .sess[data-id="compact-row-3"] .sess-top').getBoundingClientRect(),to=document.querySelector('#chatList .sess[data-id="compact-row-5"]').getBoundingClientRect();return {fromX:from.left+from.width/2,fromY:from.top+from.height/2,toX:to.left+to.width/2,toY:to.top+2}})()`);
-  win.webContents.sendInputEvent({type:'mouseDown',x:dragPoints.fromX,y:dragPoints.fromY,button:'left',clickCount:1});
-  win.webContents.sendInputEvent({type:'mouseMove',x:dragPoints.toX,y:dragPoints.toY,movementX:0,movementY:dragPoints.toY-dragPoints.fromY});
-  await pause(60);
-  win.webContents.sendInputEvent({type:'mouseUp',x:dragPoints.toX,y:dragPoints.toY,button:'left',clickCount:1});
-  await until(`(()=>[...document.querySelectorAll('#chatList > .sess[data-id]')].map(row=>row.dataset.id).join(',')==='compact-row-4,compact-row-3,compact-row-5')()`);
+  const expectedChatOrder=['compact-row-4','compact-row-3','compact-row-5'];
+  let reordered=false;
+  for(let attempt=1;attempt<=2&&!reordered;attempt++){
+    assert.deepEqual(await js(chatOrderExpression),initialChatOrder,'A retry must begin from the untouched initial chat order');
+    await settle();win.focus();win.webContents.focus();
+    win.webContents.sendInputEvent({type:'mouseMove',x:dragPoints.fromX,y:dragPoints.fromY});
+    await pause(100);
+    win.webContents.sendInputEvent({type:'mouseDown',x:dragPoints.fromX,y:dragPoints.fromY,button:'left',clickCount:1});
+    await pause(70);
+    win.webContents.sendInputEvent({type:'mouseMove',x:dragPoints.fromX,y:dragPoints.fromY+12,movementX:0,movementY:12});
+    await pause(90);
+    win.webContents.sendInputEvent({type:'mouseMove',x:dragPoints.toX,y:dragPoints.toY,movementX:dragPoints.toX-dragPoints.fromX,movementY:dragPoints.toY-dragPoints.fromY-12});
+    await pause(110);
+    const gesture=await js(`(()=>({active:document.querySelector('#chatList')?.classList.contains('is-sorting'),before:document.querySelector('#chatList .sess[data-id="compact-row-5"]')?.classList.contains('sort-before')}))()`);
+    win.webContents.sendInputEvent({type:'mouseUp',x:dragPoints.toX,y:dragPoints.toY,button:'left',clickCount:1});
+    await settle();
+    for(const deadline=Date.now()+2500;Date.now()<deadline;){
+      const order=await js(chatOrderExpression);
+      if(order.join(',')===expectedChatOrder.join(',')){reordered=true;break;}
+      await pause(50);
+    }
+    if(!reordered){
+      const after=await js(chatOrderExpression);
+      // Only retry a gesture that the hosted input layer dropped. A wrong new order is a real failure.
+      assert.deepEqual(after,initialChatOrder,'Pointer drag changed chat order incorrectly: '+JSON.stringify({attempt,gesture,after}));
+      if(attempt===1){console.warn('Hosted pointer drag did not activate; retrying one fresh gesture: '+JSON.stringify(gesture));await pointerAway();}
+      else assert.fail('Two real pointer drags left the original chat order unchanged: '+JSON.stringify({gesture,after}));
+    }
+  }
+  assert.deepEqual(await js(chatOrderExpression),expectedChatOrder,'Pointer reorder must persist after the gesture has settled');
   await pointerAway();
   await assertRows({narrow:true});await capture('dark-narrow-reordered.png');
   console.log('PASS actual pointer reorder at compact 32px row height');
