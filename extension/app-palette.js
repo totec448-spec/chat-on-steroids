@@ -10,14 +10,16 @@
 (() => {
   const KEY = 'appAppearance';
   const ID = 'clf-app-palette';
-  // Only `--name: #rrggbb` pairs reach the page; anything else in storage is dropped.
-  const declarations = tokens => Object.entries(tokens)
-    .filter(([name, value]) => /^--[a-z-]{2,30}$/.test(name) && /^#[0-9a-f]{6}$/i.test(String(value)))
-    .map(([name, value]) => `--clf-app-${name.slice(2)}: ${value};`)
-    .join(' ');
+  // Every color the app sends, as in popup.js. A palette missing one, or holding anything but
+  // `#rrggbb`, keeps the stylesheet's defaults whole; nothing else from storage reaches the page.
+  const APP_TOKENS = ['--page', '--card', '--ink', '--soft', '--faint', '--line', '--edge', '--hover', '--track',
+    '--accent', '--accent-wash', '--accent-fill', '--on-accent', '--knob-off', '--knob-on', '--green', '--green-wash',
+    '--red', '--red-wash'];
+  const complete = tokens => Boolean(tokens) && typeof tokens === 'object' &&
+    APP_TOKENS.every(name => /^#[0-9a-f]{6}$/i.test(String(tokens[name])));
+  const declarations = tokens => APP_TOKENS.map(name => `--clf-app-${name.slice(2)}: ${tokens[name]};`).join(' ');
   function paint(value) {
-    const valid = value && typeof value === 'object' && value.light && typeof value.light === 'object' &&
-      value.dark && typeof value.dark === 'object';
+    const valid = value && typeof value === 'object' && complete(value.light) && complete(value.dark);
     let node = document.getElementById(ID);
     if (!valid) {
       node?.remove();
@@ -34,10 +36,15 @@
     if (node.textContent !== css) node.textContent = css;
   }
   try {
-    void Promise.resolve(chrome.storage.local.get(KEY)).then(stored => paint(stored?.[KEY])).catch(() => undefined);
+    // A change that arrives while the first read is pending is newer than what that read returns.
+    let changedDuringRead = false;
     chrome.storage.onChanged.addListener((changes, area) => {
-      if (area === 'local' && changes?.[KEY]) paint(changes[KEY].newValue);
+      if (area !== 'local' || !changes?.[KEY]) return;
+      changedDuringRead = true;
+      paint(changes[KEY].newValue);
     });
+    void Promise.resolve(chrome.storage.local.get(KEY))
+      .then(stored => { if (!changedDuringRead) paint(stored?.[KEY]); }).catch(() => undefined);
   } catch {
     // No storage here (an invalidated context after an update): the stylesheet's defaults stay.
   }
