@@ -6,6 +6,9 @@ import { $, disclosureChevron, el, run, toast } from './dom.js';
 import { paintSharedTunnel } from './tunnel-warning.js';
 
 let snapshot: PluginSnapshot = { plugins: [], catalog: [], schemaRevision: 0 };
+let pluginsLoaded = false;
+/** The first snapshot failed and none arrived since: the list says so, also when the search repaints it. */
+let pluginsLoadFailed = false;
 let epoch = 0;
 let appState: AppState | null = null;
 let applyAppState: (next: AppState) => void = () => {};
@@ -47,10 +50,18 @@ function dialog(title: string | (() => string)): { box: HTMLDialogElement; body:
   const body = el('div', 'plugin-dialog-body'); box.append(head, body);
   box.addEventListener('close', () => box.remove()); document.body.append(box); box.showModal(); return { box, body };
 }
-async function mutate(work: ReturnType<typeof window.api.pluginsSnapshot>, notify = true): Promise<boolean> {
+/**
+ * While no snapshot has arrived yet, the newest request ending without one decides what the page shows: a
+ * failed load says so, and a change that failed loads again rather than leaving "Loading…" for good. An older
+ * request says nothing (CodeRabbit on #2002).
+ */
+async function mutate(work: ReturnType<typeof window.api.pluginsSnapshot>, notify = true, load = false): Promise<boolean> {
   const own = ++epoch; const result = await run(work);
-  if (!result) return false;
-  if (own === epoch) { snapshot = result; renderInstalled(); }
+  if (!result) {
+    if (own === epoch && !pluginsLoaded) { if (load) { pluginsLoadFailed = true; renderInstalled(); } else void refreshPlugins(); }
+    return false;
+  }
+  if (own === epoch) { snapshot = result; pluginsLoaded = true; pluginsLoadFailed = false; renderInstalled(); }
   if (notify) toast(t("Plugin settings saved. Refresh {0} in ChatGPT to update its tools.", [pluginsConnectorName()]));
   return true;
 }
@@ -58,7 +69,10 @@ async function mutate(work: ReturnType<typeof window.api.pluginsSnapshot>, notif
 function pluginsConnectorName(): string {
   return appState?.status.surfaces.find(item => item.id === 'plugins')?.connectorName ?? 'Chat On Steroids Plugins';
 }
-export async function refreshPlugins(): Promise<void> { await mutate(window.api.pluginsSnapshot(), false); }
+export async function refreshPlugins(): Promise<void> {
+  // A failed first load says so, not Loading… for good; Check local status tries again.
+  await mutate(window.api.pluginsSnapshot(), false, true);
+}
 export function applyPluginsState(next: AppState): void {
   appState = next;
   const surface = next.status.surfaces.find((item) => item.id === 'plugins');
@@ -148,6 +162,11 @@ function showConnection(): void {
 }
 function renderInstalled(): void {
   const list = $('pluginsInstalled');
+  if (pluginsLoadFailed) {
+    ui($('pluginsCount'), 'textContent', () => '');
+    list.replaceChildren(el('p', 'plugin-no-results muted', () => t("Plugins could not be loaded.")));
+    return;
+  }
   list.replaceChildren(); ui($('pluginsCount'), 'textContent', () => tn("{0} installed", "{0} installed", snapshot.plugins.length));
   const query = $<HTMLInputElement>('pluginsSearch').value.trim().toLowerCase();
   const matches = (name: string, description = '') => `${name} ${description}`.toLowerCase().includes(query);
