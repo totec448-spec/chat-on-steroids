@@ -65,6 +65,10 @@ Release CI builds and smoke-tests every platform/architecture on a native runner
 
 The `canary` prerelease is a test build of `main`, rebuilt automatically after every change to `main` that can affect the app (documentation and test-only changes are skipped). A newer build replaces the previous one. It has no release notes and no support. Issues and pull requests are accepted only for problems that also happen on the latest stable release.
 
+## New features
+
+New features and changes of behavior come as pull requests, not as issues. Open a draft PR early with a short description of the problem and the behavior you propose, and agree on it there before building it out. Feature requests opened as issues are closed with a pointer here.
+
 ## Issues
 
 A bug report needs the exact app version, for example `2.1.32` (Settings → Activity in the app). "latest" is not enough: it changes with every release. A report without a version number is closed with the `needs-version` label and reopens by itself when the number is edited in.
