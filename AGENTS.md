@@ -805,13 +805,50 @@ observed request ids. `recordRequestEvidence()` writes each newly stored owner w
 marked `complete`. Startup restores a complete, fully readable ledger without reading session
 history. An older, unmarked or partly unreadable one is reconciled once from the newest recorded
 exact calls and rewritten complete before browser/MCP traffic is admitted. Late proof can repair
-Unattributed history only to the proved historical owner.
+Unattributed or provisional history only to the proved historical owner.
 
 Unresolved requests with an id get the recorder's 20-second production evidence grace. A
 headerless call has no exact proof to await and lands Unattributed immediately. Evidence waits
 open at admission; calls sharing a request serialize in admission order and each resolved
 session serializes its writes. Different chats must not wait behind one global grace timer.
 Already-proven calls await their own recording; unresolved recordings may settle after response.
+
+For a provider call whose request id never appears on the page (#1752), the recorder may
+provisionally place history in the only observed running turn. `kernel.ts` captures this
+recording context before the handler; `recorder.ts` requires fresh exact page-request proof
+within the response's original turn and rechecks the conversation/session and every observed turn incarnation at
+the session writer. A normal completion of the captured turn is allowed during the grace.
+An explicit `turn_end` with `continued: true` followed by its next committed start preserves
+the recording lineage. Capture its page-proven anchor before closing the original turn, even
+if no tool has run yet. Continued calls may carry new provider request ids: the original
+single-chat cohort and explicit response lineage, not an earlier tool invocation, govern their
+provisional placement. In-flight results retain their admission turn, while later calls use the
+continued turn. Each process-local lineage retains one anchor and never restores ownership
+from history; there is no per-request cache, eviction threshold or history scan on admission.
+Stop, an ordinary later question, an overlapping turn, rebind or changed cohort invalidates it. Local or
+headerless callers, strict chat allowlisting and blocked chats do not qualify. The existing
+Allow unattributed calls preference must remain enabled.
+
+This is presentation, labelled `attribution/attributionMethod: generation`, never an exact
+request correlation. It cannot choose filesystem workspace, terminal custody, agents, inboxes,
+Trust or turn recovery. Canonical tool-call shards preserve call UUIDs; the summary's derived
+`provisionalToolCalls` count identifies history needing reconciliation. Exact late proof upgrades
+or moves those calls with their assets through `reviseProvisionalCall`, preserving unrelated
+messages and sequence anchors. Startup never restores exact ownership from provisional rows.
+Storage failures during attribution repair use the existing repair timer for one delayed
+in-process retry (one second) per page-evidence/startup trigger. The retry rereads durable
+history and the exact correlation registry; it cannot promote calls without proof. A repeated
+failure exhausts the automatic budget until new evidence or startup, with a diagnostic line.
+Provisional background commands retain canonical process-call shards and bind their exact
+process-lifetime completion promise. Attribution repair and these completions share the
+recorder's serialized attribution queue: an exit before relocation is copied with the call;
+an exit after relocation revises its UUID in the proven destination. If source removal failed,
+completion revises both retained copies so a later repair cannot lose the exit. This changes
+history only, never process custody or output receipts.
+The model-facing Recording context notice replaces the allow-unattributed Identity notice
+for these calls, preserving its request-owned process/run-id and later-exact-proof guidance.
+It omits the recovery-check ETA because provisional placement cannot promise an identity
+recovery time. The strict/refused identity notice and its recovery instructions are unchanged.
 
 After a local identity refusal, `kernel.ts` appends one **Identity recovered** notice to an
 eligible outer tool result once exact request/conversation/session proof is available. Refusal
@@ -5269,6 +5306,8 @@ descriptions and input schemas, not app-version/instruction churn. Changes debou
 Refresh targets the exact account-observed installed app id, durably claims before clicking,
 and completes only after observed declarations fully match. Automatic refresh is opt-in;
 unsupported/manual-required stays visible instead of opening more helper tabs.
+Plugins inspection preserves external MCP tool names verbatim, including hyphens, periods
+and uppercase characters within MAIN's 64-character name bound; Core/Desktop keep their own naming contract.
 
 Refresh custody uses strict durable reads. Malformed JSON, JSON null, invalid rows,
 duplicate surfaces and I/O failures leave the ledger intact and reject new work with
@@ -5966,6 +6005,18 @@ with other suites' native windows or input; its assertions remain unchanged. `vi
 forces Node, bounded hooks/tests, `CLF_BRIDGE_PORTS=0`
 and test-only `CLF_EVIDENCE_MS=1500`; never let tests contact the installed production bridge.
 Opt-in live plugin/macOS probes are separate evidence, not implied by the ordinary suite.
+Pull-request CI (`ci.yml`, since 2026-10-31) runs the same checks in parallel jobs rather than
+`verify:ci` per OS (release builds still run `verify:ci`): one Linux job for privacy and the
+typecheck; the notices check (it reads each OS's own optional native packages) in each OS's first shard; the unit tests in shards (`vitest run --shard=i/n`: Windows 3, macOS 2, Linux 2; macOS
+stays at two because the account runs at most five macOS jobs at once); `computer`/`mcp-shutdown`
+and the live plugin suites only in each OS's first shard; the UI checks in two shards on macOS (four
+macOS jobs per pull request in all) and three on Windows
+(`VERIFY_UI_SHARD=i/n` in `verify-ui.mjs`). Shards are balanced by measured seconds, not file count:
+`test/weighted-sequencer.ts` (Vitest's sequencer; it also runs the longest files first) and
+`verify-ui.mjs` share `scripts/shard-plan.mjs`, reading `test/test-weights.json` and
+`scripts/ui-check-weights.json`. A file or check missing from them weighs the median, so new files
+run normally; refresh both with `node scripts/update-ci-weights.mjs [run id]` when the suite's shape
+changes a lot. The pre-push hook typechecks (about two seconds) after the privacy check.
 The fail-first workflow selects Windows for changed `test/windows-*` and `test/computer*`
 suites through `scripts/pr-fail-first.mjs`; other changes keep the Linux runner. The selected
 job still runs changed tests against base code: platform-skipped native tests are not proof.
