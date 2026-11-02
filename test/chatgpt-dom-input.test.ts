@@ -1536,6 +1536,13 @@ describe('rendered temporary-chat state independent of language', () => {
     for (const use of control.querySelectorAll('use')) use.setAttribute('href', use.getAttribute('href')!.replace('#chat-temp', '#codex-icon-chat-temp'));
     expect(api.temporaryChatReady()).toBe(active);
   });
+  it('does not take a checked glyph whose own <use> is hidden (CodeRabbit)', () => {
+    const control = toggle('beliebig', false);
+    // The visible svg holds the checked glyph, but the <use> element itself is hidden.
+    const svg = control.querySelector('svg')!;
+    svg.innerHTML = '<use href="/cdn/assets/icons-anyhash.svg#codex-icon-chat-temp-checked" style="display:none"></use>';
+    expect(api.temporaryChatReady()).toBe(false);
+  });
   it('does not mistake the current three-path inactive temporary-chat icon for active mode', () => {
     currentToggle('Temporary chat', false);
     expect(api.temporaryChatReady()).toBe(false);

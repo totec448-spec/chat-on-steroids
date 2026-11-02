@@ -3906,7 +3906,7 @@ var CLF_DOM = (() => {
         // the mode; translated labels and the requested URL are not activation receipts.
         return [...button.querySelectorAll('svg use')].some(use => {
           if (spriteName(use) !== 'chat-temp-checked') return false;
-          for (let node = use.parentElement; node; node = node.parentElement) {
+          for (let node = use; node; node = node.parentElement) {
             const style = getComputedStyle(node);
             if (node.hidden || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || style.opacity === '0') return false;
           }
