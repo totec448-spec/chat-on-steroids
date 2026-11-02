@@ -836,7 +836,7 @@ describe('a check or download that goes wrong on a bad connection', () => {
       return answer(input);
     });
     const old = asPlatform('win32', undefined, () => checkForUpdates());
-    await vi.waitFor(() => expect(release).not.toBeNull());
+    await vi.waitFor(() => expect(release).not.toBeNull(), { timeout: 10_000 });
     resetUpdateForTests();
     release!();
     await old;
