@@ -144,3 +144,52 @@ it('has a translation of every bundled pet description in every language', async
   }
 });
 
+
+// Design audit 2026-11-01: a failed first load kept saying "Loading…" for good.
+it('says the pets could not be loaded when the library cannot be read', async () => {
+  dom = new JSDOM(`<!doctype html><body>
+    <input id="petsSearch"><button id="petsImport"></button><button id="petsFormatGuide"></button>
+    <dialog id="petFormatDialog"><button id="petsFormatClose"></button><button id="petsCopyInstructions"></button><pre id="petsFormatInstructions"></pre></dialog>
+    <span id="petsCount">Loading…</span>
+    <section id="petsFavoritesSection" hidden><span id="petsFavoritesCount"></span><div id="petsFavorites"></div></section>
+    <div id="petsInstalled"></div>
+  </body>`, { url: 'https://pets.test/' });
+  const w = dom.window;
+  for (const [key, value] of Object.entries({ window: w, document: w.document, HTMLElement: w.HTMLElement, HTMLButtonElement: w.HTMLButtonElement, HTMLDialogElement: w.HTMLDialogElement })) vi.stubGlobal(key, value);
+  const api: any = { petsList: () => Promise.resolve({ ok: false as const, error: 'Pet library unavailable' }) };
+  const { initPets } = await import('../src/renderer/pets.js'); initPets(api, { applyLibraryState: vi.fn() } as any);
+  await vi.waitFor(() => expect(w.document.getElementById('petsInstalled')!.textContent).toBe('Pets could not be loaded.'), { timeout: 10_000 });
+  expect(w.document.getElementById('petsCount')!.textContent).toBe('');
+  // Typing in the search repaints the list, and the failure stays (CodeRabbit on #2002).
+  const search = w.document.getElementById('petsSearch') as HTMLInputElement;
+  search.value = 'wil'; search.dispatchEvent(new w.Event('input'));
+  expect(w.document.getElementById('petsInstalled')!.textContent).toBe('Pets could not be loaded.');
+  expect(w.document.getElementById('petsCount')!.textContent).toBe('');
+});
+
+// CodeRabbit on #2002: an import that finishes while the first read is still on its way shows its library;
+// the older read arriving later does not replace it.
+it('keeps the library an import showed when the first read arrives later', async () => {
+  dom = new JSDOM(`<!doctype html><body>
+    <input id="petsSearch"><button id="petsImport"></button><button id="petsFormatGuide"></button>
+    <dialog id="petFormatDialog"><button id="petsFormatClose"></button><button id="petsCopyInstructions"></button><pre id="petsFormatInstructions"></pre></dialog>
+    <span id="petsCount">Loading…</span>
+    <section id="petsFavoritesSection" hidden><span id="petsFavoritesCount"></span><div id="petsFavorites"></div></section>
+    <div id="petsInstalled"></div>
+  </body>`, { url: 'https://pets.test/' });
+  const w = dom.window;
+  for (const [key, value] of Object.entries({ window: w, document: w.document, HTMLElement: w.HTMLElement, HTMLButtonElement: w.HTMLButtonElement, HTMLDialogElement: w.HTMLDialogElement })) vi.stubGlobal(key, value);
+  let firstRead: (reply: unknown) => void = () => undefined;
+  const withImport = { pets: [...initial.pets, { id: 'fresh', displayName: 'Fresh', description: 'Just imported', kind: 'cos' as const, enabled: true, favorite: false }] };
+  const api: any = {
+    petsList: () => new Promise(resolve => { firstRead = resolve; }),
+    petsImport: async () => ({ ok: true as const, data: withImport }),
+    petsAsset: async (id: string) => ({ ok: true as const, data: { id, kind: 'cos' as const, atlasDataUrl: 'data:image/png;base64,YXRsYXM=', manifest: authoredManifest } })
+  };
+  const { initPets } = await import('../src/renderer/pets.js'); initPets(api, { applyLibraryState: vi.fn() } as any);
+  (w.document.getElementById('petsImport') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(w.document.querySelectorAll('.pet-library-card')).toHaveLength(3), { timeout: 10_000 });
+  firstRead({ ok: true, data: initial });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  expect(w.document.querySelectorAll('.pet-library-card')).toHaveLength(3);
+});
