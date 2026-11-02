@@ -17,6 +17,7 @@ const explanations: Readonly<Record<string, string>> = {
   goal_browser_busy: 'A helper request is already pending. Let it finish or cancel that request before starting another.',
   goal_browser_cancelled: 'The helper request was cancelled. Start it again when you want to continue.',
   goal_browser_send_failed: 'The helper prompt could not be delivered to ChatGPT. Open the helper chat and check its composer or visible error before trying again.',
+  goal_helper_model_unconfirmed: "ChatGPT's picker did not confirm the helper's model. Goal asks again on ChatGPT's current selection.",
   goal_browser_send_unconfirmed: 'The app could not confirm whether ChatGPT received the helper prompt. Check the helper chat before retrying to avoid sending it twice.',
   goal_owned_elsewhere: 'Another browser tab is handling this continuation. Check that tab for progress.',
   goal_final_not_confirmed: 'The app has not confirmed a final answer eligible for automatic continuation. Check the source chat for ongoing work or an error.',

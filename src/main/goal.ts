@@ -607,13 +607,15 @@ export function pendingGoalReplies(
 }
 
 /** Durably reserves one reload for this exact Goal reply before the browser can act. */
-export async function recordGoalPickupAttemptNow(conversationId: string, replyId: string, at: number, nextAt?: number): Promise<{
+/** `expected`: as for queued inputs, a count another pass moved past means this pass reserves nothing. */
+export async function recordGoalPickupAttemptNow(conversationId: string, replyId: string, at: number, nextAt?: number, expected?: number): Promise<{
   attempts: number; nextAt?: number; stoppedAt?: number
 } | null> {
   const reply = goalReplies.get(conversationId);
   // Past the quick burst the reply shows as stopped, and slow retries go on until the hard bound.
   if (!reply || reply.state !== 'pending' || reply.replyId !== replyId ||
-      (reply.pickupAttempts ?? 0) >= BROWSER_PICKUP_ATTEMPT_LIMIT) return null;
+      (reply.pickupAttempts ?? 0) >= BROWSER_PICKUP_ATTEMPT_LIMIT ||
+      (expected !== undefined && (reply.pickupAttempts ?? 0) > expected)) return null;
   const previous = { ...reply };
   reply.pickupAttempts = (reply.pickupAttempts ?? 0) + 1;
   if (reply.pickupAttempts >= BROWSER_PICKUP_MAX_ATTEMPTS) reply.pickupStoppedAt ??= at;
@@ -1892,6 +1894,9 @@ async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision |
       // Only a timeout teaches the size: a newer turn or Goal switched off also cancels a prompt.
       onSentUnanswered: () => { if (request.signal.reason?.name === 'TimeoutError') noteGoalHelperUnanswered(prompt.length); },
       ...goalHelperSelection()
+    }).catch((error: unknown) => {
+      if (error instanceof Error && error.message.startsWith('goal_helper_model_unconfirmed')) noteHelperModelUnconfirmed();
+      throw error;
     }), false);
     request.signal.throwIfAborted();
     return decision;
@@ -2006,10 +2011,24 @@ let helperFallbackLogged = '';
 /** The helper model as it will actually run, for progress and logs; never a model it will not use. */
 function helperModelLabel(): string { return goalHelperSelection().model ?? "ChatGPT's current selection"; }
 
+/**
+ * The picker could not confirm the helper's model (2026-11-01: four times a day on the maintainer's
+ * Mac, each one a Goal that then waited for a person). For a while the helper runs on ChatGPT's
+ * current selection, as it does for a model the account does not offer, so the next ask goes out.
+ */
+const HELPER_MODEL_FALLBACK_MS = 30 * 60_000;
+let helperModelUnconfirmedUntil = 0;
+function noteHelperModelUnconfirmed(now = Date.now()): void {
+  helperModelUnconfirmedUntil = now + HELPER_MODEL_FALLBACK_MS;
+  logWarn(`goal: ChatGPT's picker did not confirm the helper's model; the helper uses ChatGPT's current selection for ${HELPER_MODEL_FALLBACK_MS / 60_000} minutes`);
+}
+export function resetHelperModelFallbackForTests(): void { helperModelUnconfirmedUntil = 0; }
+
 export function goalHelperSelection(): { model: string | null; reasoningEffort: ReasoningEffort | null } {
   const settings = getConfig().goal;
   let model: string | null = settings.helperModel ?? DEFAULT_HELPER_CHAT_MODEL;
   let reasoningEffort: ReasoningEffort | null = settings.helperReasoning ?? 'high';
+  if (Date.now() < helperModelUnconfirmedUntil) return { model: null, reasoningEffort: null };
   const catalog = getChatModels();
   const models = catalog.models;
   // No readable picker at all (seen on Free plans, #1282): no model can ever be confirmed, so an
@@ -2734,9 +2753,32 @@ async function pauseRepeatingGoal(draft: GoalDraft, answer: string): Promise<voi
 const answerBeforeNote = new WeakMap<ChatMessage, string>();
 
 /** What the Offline marker check reads: the newest answer as written, without the app's own note. */
+/** Assistant messages ChatGPT marked final, as opposed to its commentary (#2007). */
+const finalAnswers = new WeakSet<ChatMessage>();
+/** The turn each recorded assistant message belongs to, where the recording names one. */
+const turnOfMessage = new WeakMap<ChatMessage, string>();
+/**
+ * The marker text read from the whole projection before the context cut. The cut keeps user
+ * corrections ahead of the final answer, so the answer the marker sits in may not be among the
+ * messages sent (CodeRabbit on #2014).
+ */
+const decisionTextOf = new WeakMap<readonly ChatMessage[], string>();
+
 export function templateDecisionText(messages: readonly ChatMessage[]): string {
-  const last = messages.filter(message => message.role === 'assistant').at(-1);
-  return last ? answerBeforeNote.get(last) ?? last.content : '';
+  const known = decisionTextOf.get(messages);
+  if (known !== undefined) return known;
+  const lastAt = messages.findLastIndex(message => message.role === 'assistant');
+  if (lastAt < 0) return '';
+  // Commentary ChatGPT writes after its final answer in the same turn is not the answer: the marker is
+  // in the final one (#2007). Walk back to it, never past the user message that opened the turn, and
+  // never into another turn: a Retry keeps the earlier generation's answers before the new one's.
+  let chosen = messages[lastAt]!;
+  const turn = turnOfMessage.get(chosen);
+  for (let at = lastAt; at >= 0 && messages[at]!.role === 'assistant'; at--) {
+    if (turnOfMessage.get(messages[at]!) !== turn) break;
+    if (finalAnswers.has(messages[at]!)) { chosen = messages[at]!; break; }
+  }
+  return answerBeforeNote.get(chosen) ?? chosen.content;
 }
 
 interface ChatMessage {
@@ -2895,6 +2937,8 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
     } else if ((event.kind === 'assistant_message' && (event.final || event.messageId)) || (event.kind === 'progress' && event.source === 'extension')) {
       const content = clip(event.kind === 'assistant_message' ? modelFacingText(event.message.text, event.renderedHtml) : event.message.text);
       if (content) next = { role: 'assistant', content };
+      if (next && event.kind === 'assistant_message' && event.final) finalAnswers.add(next);
+      if (next && typeof event.turnId === 'string' && event.turnId) turnOfMessage.set(next, event.turnId);
     }
     if (!next) continue;
 
@@ -2942,6 +2986,9 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
     const answer = ordered[at]!;
     const noted = { ...answer, content: `${answer.content}\n\n${toolCallFootnote(count, before)}` };
     answerBeforeNote.set(noted, answerBeforeNote.get(answer) ?? answer.content);
+    if (finalAnswers.has(answer)) finalAnswers.add(noted);
+    const answerTurn = turnOfMessage.get(answer);
+    if (answerTurn) turnOfMessage.set(noted, answerTurn);
     ordered[at] = noted;
   }
   for (const text of deliveredInput.slice(-5)) {
@@ -3029,9 +3076,12 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
     chars += message.content.length;
     selected.push({ at, message });
   }
-  return [...anchors, ...selected]
+  const result = [...anchors, ...selected]
     .sort((left, right) => left.at - right.at)
     .map((entry) => entry.message);
+  // The Offline marker is read from everything recorded, whatever the cut left out.
+  decisionTextOf.set(result, templateDecisionText(ordered));
+  return result;
 }
 
 /*
