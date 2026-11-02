@@ -8709,15 +8709,32 @@ async function assistantRepairCurrent(conversationId: string, repair: Repair): P
 const UNCLAIMED_REPAIR_OFFERS = 10;
 /** Stuck repairs whose chat was already shown once (session and episode), so it is shown only once. */
 const unclaimedChatShown = new Set<string>();
-/** Which of those a chat's last show belongs to, so a show the browser could not carry out is given back. */
-const unclaimedChatShownFor = new Map<string, string>();
+/** Which of those a chat's last show belongs to, and when it went out, so a failed show is given back. */
+const unclaimedChatShownFor = new Map<string, { key: string; at: number }>();
+/** Shows of one stuck repair the browser could not carry out: one more try, then the page-less verdict. */
+const unclaimedChatShowFailures = new Map<string, number>();
+/** A browser that cannot show a chat says so within seconds; a report later than this is not about that show. */
+const SHOW_FAILURE_REPORT_MS = 60_000;
+const SHOW_RETRIES_PER_REPAIR = 1;
 
-/** The browser took the chat to show it and could not (#2027): it may be shown again when its offers run out. */
-export function unclaimedChatShowFailed(conversationId: string): void {
-  const key = unclaimedChatShownFor.get(conversationId);
-  if (!key) return;
+/**
+ * The browser took the chat to show it and could not (#2027): it may be shown once more when its offers run
+ * out. Only a report soon after the show counts, so an older show's late failure cannot release a newer
+ * episode's (a newer episode's show comes at least ten offers later), and repeated failures end in the
+ * page-less verdict instead of showing and offering forever (CodeRabbit on #2027).
+ */
+export function unclaimedChatShowFailed(conversationId: string, now = Date.now()): void {
+  const shown = unclaimedChatShownFor.get(conversationId);
+  if (!shown || now - shown.at > SHOW_FAILURE_REPORT_MS) return;
   unclaimedChatShownFor.delete(conversationId);
-  unclaimedChatShown.delete(key);
+  const failures = (unclaimedChatShowFailures.get(shown.key) ?? 0) + 1;
+  unclaimedChatShowFailures.set(shown.key, failures);
+  if (unclaimedChatShowFailures.size > 500) unclaimedChatShowFailures.delete(unclaimedChatShowFailures.keys().next().value!);
+  if (failures > SHOW_RETRIES_PER_REPAIR) {
+    logWarn(`bridge: the browser could not show ${conversationId} again; its recovery stops when its offers run out`);
+    return;
+  }
+  unclaimedChatShown.delete(shown.key);
   logWarn(`bridge: the browser could not show ${conversationId}; it is shown again if its recovery stays unclaimed`);
 }
 
@@ -8734,7 +8751,7 @@ function showUnclaimedChatOnce(conversationId: string, repair: Repair): boolean 
       stopRequestedFor(conversationId) || getConfig().ui.browserOnly === true ||
       !browserWakeConnected() || !revealCapable()) return false;
   unclaimedChatShown.add(key);
-  unclaimedChatShownFor.set(conversationId, key);
+  unclaimedChatShownFor.set(conversationId, { key, at: Date.now() });
   if (unclaimedChatShown.size > 500) unclaimedChatShown.delete(unclaimedChatShown.values().next().value!);
   if (unclaimedChatShownFor.size > 500) unclaimedChatShownFor.delete(unclaimedChatShownFor.keys().next().value!);
   repair.offers = 1;
