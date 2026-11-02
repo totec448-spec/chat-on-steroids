@@ -231,10 +231,10 @@ export interface ToolCallRecord {
   attribution: CallAttribution;
   /** Normalized inbound HTTP x-request-id, retained for forensic correlation. */
   requestId: string | null;
-  /** Conversation proven by that request id, or null when ownership was unresolved. */
+  /** Recorded conversation; generation placement is provisional and never caller proof. */
   conversationId: string | null;
-  /** Deterministic placement outcome for current, unresolved, or deliberately retired callers. */
-  attributionMethod: 'request_id' | 'unattributed' | 'superseded';
+  /** Exact, provisional, unresolved or deliberately retired recording placement. */
+  attributionMethod: 'request_id' | 'unattributed' | 'superseded' | 'generation';
   /** Exact arguments as JSON. Cut inline past the cap, with the whole text in an asset. */
   args: StoredText;
   result: StoredText;
@@ -702,6 +702,8 @@ export interface SessionSummary {
   events: number;
   userMessages: number;
   toolCalls: number;
+  /** Calls provisionally placed by the only observed running turn; never caller proof. */
+  provisionalToolCalls?: number;
   /** Start time of the newest exact attributed tool call, independent of later page noise. */
   lastToolCallAt: number | null;
   /**

@@ -14150,6 +14150,47 @@ describe('evidence from the page context', () => {
     );
   });
 
+  it('splits tool_evidence into batches of at most 200 calls', async () => {
+    live = await harness();
+    startGenerating(live.document);
+    assistantTurn(live.document, 'batch-live-turn', []);
+    live.hook.observe();
+    await settle();
+
+    const calls = Array.from({ length: 200 }, (_, i) => ({
+      messageId: `call-batch-${i}`,
+      tool: 'read',
+      order: i,
+      answered: false,
+      requestId: `wfr_call_${i}`
+    }));
+    const requests = Array.from({ length: 5 }, (_, i) => ({
+      requestId: `wfr_bare_req_${i}`,
+      createTime: 1_700_000_000 + i
+    }));
+
+    await replyFiber([], [{
+      turnId: 'batch-live-turn',
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      calls,
+      requests,
+      messages: []
+    }]);
+    await settle();
+    await live.hook.flush();
+
+    const batches = emitted(live.sent, 'tool_evidence').map((entry) => entry.event);
+    expect(batches).toHaveLength(2);
+    expect(batches[0].calls).toHaveLength(200);
+    expect(batches[1].calls).toHaveLength(5);
+    expect(batches[0].calls[0].requestId).toBe('wfr_call_0');
+    expect(batches[0].calls[199].requestId).toBe('wfr_call_199');
+    expect(batches[1].calls[0].requestId).toBe('wfr_bare_req_0');
+    expect(batches[1].calls[4].requestId).toBe('wfr_bare_req_4');
+    expect(batches[0].turnId).toBeTruthy();
+    expect(batches[1].turnId).toBe(batches[0].turnId);
+  });
+
   it('says nothing about a row the helper did not stamp', async () => {
     live = await harness();
     const section = assistantTurn(live.document, 'turn-1', ['Called tool!']);
