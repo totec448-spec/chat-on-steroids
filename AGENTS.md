@@ -6185,10 +6185,13 @@ partial file, verify SHA-256 before staging/adoption, and rehash at ordinary qui
 off. Windows NSIS/Linux AppImage can apply automatically; macOS/DEB present the supported manual
 path, development does not stage. Explicit install may relaunch; ordinary quit does not force
 relaunch. Failed checks never replace a verified staged candidate with unverified bytes.
-Each packaged check removes installed-or-older version directories from `userData/updates`,
-even offline. Superseded candidates are removed only after their replacement is verified or
-adopted. Cleanup never removes `handoff.json`, unrecognized entries, linked directories, other
-app copies or user backups; a linked cache root is skipped. Locked files defer to the next
+`userData/updates` is reserved exclusively for updater staging, not backup storage. Ordinary
+direct-child directories named `major.minor.patch` are cache entries; their contents may be
+removed recursively, even if manually placed there. Each packaged check removes installed-or-older
+cache versions even offline. Superseded candidates are removed only after their replacement is
+verified or adopted. Cleanup never scans outside this root, so app copies and backups kept
+elsewhere are untouched. At the root it preserves `handoff.json`, non-version entries and linked
+directories; a linked root is skipped. Locked files defer to the next
 ordinary check without failing an update. `update.test.ts` covers previous-version cache and
 handoff records, failed transfers, restart adoption and directory links.
 Cache cleanup and download preparation retain the update pass's reset generation. After each
