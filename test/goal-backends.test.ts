@@ -631,8 +631,26 @@ describe('Goal decision backends', () => {
       void goal.draftOpeningMessage('Finish this', 'goal', undefined, undefined, 180_000).then(value => { result = value; });
       await vi.waitFor(() => expect(browser.request).toHaveBeenCalledTimes(1), { timeout: 15_000 });
       await vi.advanceTimersByTimeAsync(180_000);
-      await vi.waitFor(() => expect(result).toMatchObject({ error: 'timeout_or_cancelled' }));
+      await vi.waitFor(() => expect(result).toMatchObject({ error: 'timeout_or_cancelled' }), { timeout: 15_000 });
     } finally { vi.useRealTimers(); await saveConfig(config); }
+  });
+  // CodeRabbit on #2033: the deadline and the request must come from one helper setting. A save
+  // between the draft's start and its request (low to Pro) used Pro with a three-minute deadline.
+  it('keeps the helper setting a draft started with for both its request and its deadline', async () => {
+    const config = (await import('../src/main/config.js')).getConfig();
+    await saveConfig({ ...config, goal: { ...config.goal, enabled: true, backend: 'chatgpt', helperReasoning: 'low' } });
+    try {
+      const id = 'helper-frozen';
+      const session = await createSession({ title: 'frozen', conversationId: id });
+      await appendEvent(session.id, { source: 'extension', kind: 'user_message', time: 1000, message: { text: 'Build it', chars: 8, truncated: false } });
+      await appendEvent(session.id, { source: 'extension', kind: 'assistant_message', final: true, time: 2000, message: { text: 'Built.', chars: 6, truncated: false } });
+      browser.request.mockResolvedValueOnce('{"action":"continue","reply":"Next step"}');
+      goal.startGoalDraft({ conversationId: id, sessionId: session.id, turnId: 'frozen-turn', deferStart: true });
+      await saveConfig({ ...config, goal: { ...config.goal, enabled: true, backend: 'chatgpt', helperReasoning: 'pro' } });
+      goal.beginGoalDraft(id, goal.goalViewFor(id)!.token);
+      await vi.waitFor(() => expect(browser.request).toHaveBeenCalledTimes(1), { timeout: 15_000 });
+      expect(browser.request.mock.calls[0]?.[2]).toMatchObject({ reasoningEffort: 'low' });
+    } finally { await saveConfig(config); }
   });
   it('does not let a stale browser answer replace a newer source-chat draft', async () => {
     await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: true, backend: 'chatgpt' } });
