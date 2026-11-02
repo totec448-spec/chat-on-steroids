@@ -3703,5 +3703,7 @@
   "Report a problem. GitHub opens with it filled in.": "問題を報告します。GitHub が入力済みの状態で開きます。",
   "Report a problem.": "問題を報告します。",
   "New features come as pull requests, not issues.": "新しい機能は Issue ではなく Pull Request で受け付けています。",
-  "How to start one": "始め方"
+  "How to start one": "始め方",
+  "Plugins could not be loaded.": "プラグインを読み込めませんでした。",
+  "Pets could not be loaded.": "ペットを読み込めませんでした。"
 }

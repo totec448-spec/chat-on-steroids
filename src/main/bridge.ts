@@ -38,7 +38,7 @@ export { setBrowserWorkArea } from './browser-window-layout.js';
 import { pendingBrowserPreferenceRequest, acknowledgeBrowserPreferences } from './browser-preferences.js';
 import { sessionFinishHeld, releaseSessionFinish, getSessionFinishDraft, sessionFinishWaiting } from './session/finish.js';
 import { observeUsage } from './session/usage.js';
-import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, lostBrowserOpening, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, queuedInputOfferBlocker, continueAsOrdinaryMessage, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation, retireMismatchedRecoveryInput } from './session/input.js';
+import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, lostBrowserOpening, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, queuedInputOfferBlocker, continueAsOrdinaryMessage, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation, ownUnsentTexts, retireMismatchedRecoveryInput } from './session/input.js';
 /**
  * The local bridge between the Chrome extension and this app.
  *
@@ -3285,7 +3285,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       const input = await claimBrowserInput(body.id, body.owner, target, body.requiresAuthorization === true);
       // The first message for an existing chat after a new tunnel-client is what the hold learns from.
       if (input && target) noteRouteExistingChatSend(target);
-      return json(res, 200, { input }, origin);
+      // The app's own unsent messages for this chat, so the page can replace one left in the composer (#1922).
+      const ownUnsent = input && target ? await ownUnsentTexts(target, input.id) : [];
+      return json(res, 200, { input, ...(ownUnsent.length ? { ownUnsent } : {}) }, origin);
     } finally {
       claimsInProgress--;
     }
