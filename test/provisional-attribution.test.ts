@@ -8,7 +8,7 @@ import { getLog } from '../src/main/logger.js';
 import { positionOf } from '../src/shared/chronology.js';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { flushDurable, initDurableStore, resetDurableForTests } from '../src/main/durable.js';
-import { requestCorrelation, restoreRequestCorrelations, resetCorrelationRegistryForTests } from '../src/main/session/correlation.js';
+import { observeProviderSessionRequest, requestCorrelation, restoreRequestCorrelations, resetCorrelationRegistryForTests } from '../src/main/session/correlation.js';
 import { captureRecordingContext, flushRecorder, freshCallOrigin, onSessionChange, recordChatObservations,
   recordRequestEvidence, recordToolCall, recordingContextCurrent, repairDeterministicAttribution,
   resetRecorderForTests, sessionForConversation } from '../src/main/session/recorder.js';
@@ -17,6 +17,7 @@ import { flushSessions, getSession, indexedSessions, initSessionStore, readAsset
 import { dispatch, ok } from '../src/main/mcp/kernel.js';
 import { withInboundRequestId } from '../src/main/mcp/inbound.js';
 import { currentCaller, emptyEvidence } from '../src/main/mcp/call-context.js';
+import { noteRequestTraces, resetRequestTracesForTests } from '../src/main/session/request-trace.js';
 import type { ProcessCompletion } from '../src/main/codex/unified-exec.js';
 import type { RecordingContext } from '../src/main/session/recorder.js';
 
@@ -36,6 +37,7 @@ const record = (requestId = 'hidden-workflow', recordingContext: RecordingContex
 const calls = async (id: string) => (await readEvents(id, { kinds: ['tool_call'] })).filter(row => row.kind === 'tool_call');
 
 beforeEach(async () => {
+  resetRequestTracesForTests();
   directory = await mkdtemp(path.join(tmpdir(), 'cos-provisional-'));
   initConfigPath(directory); initDurableStore(directory); initSessionStore(directory);
   await saveConfig(defaultConfig());
@@ -59,6 +61,30 @@ it('records the unexposed second id in the sole evidenced turn without granting 
   expect(requestCorrelation('hidden-workflow')).toBeNull();
   expect(freshCallOrigin('read', Date.now(), 'hidden-workflow')).toBeNull();
 });
+
+it.each(['before recording', 'after recording', 'not observed'] as const)(
+  'preserves diagnostic stream traces for provisional calls: %s', async timing => {
+    await begin();
+    const requestId = `diagnostic-${timing.replaceAll(' ', '-')}`;
+    // A trace may name another chat or an untrusted field. It is diagnostic evidence only.
+    const trace = () => noteRequestTraces('chat-b', [{ requestId, path: '/message:v.metadata.workflow_id' }]);
+    if (timing === 'before recording') trace();
+    expect(await record(requestId)).toMatchObject({ attributionMethod: 'generation', conversationId: 'chat-a' });
+    const placement = getLog().find(row => row.message.includes(`${requestId} provisionally recorded`))?.message;
+    if (timing === 'before recording') {
+      expect(placement).toContain('; the stream of chat-b named it at /message:v.metadata.workflow_id');
+    } else {
+      expect(placement).toContain('; no matching stream trace observed');
+      if (timing === 'after recording') {
+        trace();
+        expect(getLog().some(row => row.message.includes(`${requestId} had no page evidence in time; ` +
+          'the stream of chat-b names it at /message:v.metadata.workflow_id'))).toBe(true);
+      }
+    }
+    expect(requestCorrelation(requestId)).toBeNull();
+    expect(freshCallOrigin('read', Date.now(), requestId)).toBeNull();
+  }
+);
 
 it.each(['before relocation', 'after relocation', 'during relocation', 'without relocation',
   'with source read failure', 'with source write failure'] as const)(
@@ -216,6 +242,43 @@ it('upgrades late same-chat proof without duplicating the call or losing turn bo
   expect((await calls(id))[0]?.origin).toBe(previousOrigin);
   expect((await readEvents(id, { kinds: ['turn_start'] }))).toHaveLength(1);
   expect((await getSession(id))?.provisionalToolCalls).toBe(0);
+});
+
+it('upgrades or relocates provider-session provenance when native request evidence arrives', async () => {
+  const source = await begin();
+  const providerKey = 'a'.repeat(64);
+  await observeProviderSessionRequest('page-chat-a-turn-a', providerKey);
+  await observeProviderSessionRequest('provider-derived', providerKey);
+  const original = await record('provider-derived', null);
+  expect(original?.providerSessionAnchor).toBe('page-chat-a-turn-a');
+  expect((await getSession(source))?.providerSessionToolCalls).toBe(1);
+  await prove('chat-b', 'provider-derived');
+  await flushRecorder();
+  const target = (await sessionForConversation('chat-b'))!;
+  expect(await calls(source)).toHaveLength(0);
+  expect(await calls(target)).toHaveLength(1);
+  expect((await calls(target))[0]?.call).toMatchObject({ callId: original!.callId,
+    conversationId: 'chat-b', attributionMethod: 'request_id' });
+  expect((await calls(target))[0]?.call.providerSessionAnchor).toBeUndefined();
+  expect((await getSession(source))?.providerSessionToolCalls).toBe(0);
+  expect((await getSession(target))?.providerSessionToolCalls ?? 0).toBe(0);
+});
+
+it('withholds a result when native evidence contradicts provider identity during the handler', async () => {
+  await begin();
+  const providerKey = 'b'.repeat(64);
+  await observeProviderSessionRequest('page-chat-a-turn-a', providerKey);
+  await observeProviderSessionRequest('changing-provider', providerKey);
+  const result = await withInboundRequestId('changing-provider', () => dispatch('read', {}, null,
+    'changing-provider', 'core', async () => {
+      expect(currentCaller().conversationId).toBe('chat-a');
+      await prove('chat-b', 'changing-provider');
+      return ok('private-source-result');
+    }), undefined, undefined, true);
+  expect(result.isError).toBe(true);
+  expect(JSON.stringify(result)).not.toContain('private-source-result');
+  expect(JSON.stringify(result)).toContain('CALLER_IDENTITY_CHANGED');
+  await flushRecorder();
 });
 
 it('moves late conflicting proof with overflow assets and preserves unrelated transcript rows', async () => {
