@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import path from 'node:path';
 
 const fixture = vi.hoisted(() => {
   type Listener = (...args: any[]) => void;
   const children: any[] = [];
+  const removedDirectories: string[] = [];
 
   const emitter = () => {
     const listeners = new Map<string, Listener[]>();
@@ -55,7 +57,7 @@ const fixture = vi.hoisted(() => {
     child.emit('close', 0);
   });
 
-  return { children, spawn, health, termination, terminate };
+  return { children, spawn, health, termination, terminate, removedDirectories };
 });
 
 vi.mock('node:child_process', () => ({ spawn: fixture.spawn }));
@@ -73,6 +75,7 @@ vi.mock('node:fs', async (importOriginal) => {
       ...actual.promises,
       mkdtemp: async (prefix: string) => `${prefix}fixture`,
       rm: async (_path: string, options?: { recursive?: boolean }) => {
+        if (options?.recursive) fixture.removedDirectories.push(_path);
         if (!options?.recursive) fixture.health.url = null;
       },
       readFile: async () => {
@@ -95,6 +98,7 @@ const settings = {
 
 beforeEach(() => {
   fixture.children.length = 0;
+  fixture.removedDirectories.length = 0;
   fixture.spawn.mockClear();
   fixture.terminate.mockClear();
   fixture.health.url = null;
@@ -106,6 +110,29 @@ beforeEach(() => {
 });
 
 describe('OpenAI tunnel process ownership', () => {
+  it('gives the macOS client its live private temporary directory, and stops it before cleanup', async () => {
+    const platform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('missing', { status: 404 })));
+    try {
+      const handle = await startTunnel({ localUrl: 'http://127.0.0.1:1234/mcp/core/token', settings, apiKey: 'test', report: () => {} });
+      await vi.waitFor(() => expect(fixture.spawn).toHaveBeenCalledOnce(), { timeout: 5_000 });
+      const call = fixture.spawn.mock.calls[0] as unknown as [string, string[], { env: Record<string, string> }];
+      const healthFile = call[1][call[1].indexOf('--health.url-file') + 1]!;
+      expect(call[2].env.TMPDIR).toBeTypeOf('string');
+      expect(healthFile).toBe(path.join(call[2].env.TMPDIR!, 'health.url'));
+      fixture.termination.held = true;
+      const stopping = handle.stop();
+      await vi.waitFor(() => expect(fixture.termination.release).toBeTypeOf('function'), { timeout: 5_000 });
+      expect(fixture.removedDirectories).toEqual([]);
+      fixture.termination.release!();
+      await stopping;
+      expect(fixture.terminate).toHaveBeenCalledOnce();
+      expect(fixture.removedDirectories).toEqual([call[2].env.TMPDIR]);
+    } finally {
+      Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+    }
+  });
   // #1255: without this, a computer that reaches the internet through a system proxy could not
   // connect the tunnel unless the person set HTTPS_PROXY before starting the app.
   it('starts the tunnel program with the system proxy, and without one when there is none or the lookup fails', async () => {

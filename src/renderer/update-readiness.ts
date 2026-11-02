@@ -1,5 +1,5 @@
 import type { AppState } from '../shared/types.js';
-import { $, el } from './dom.js';
+import { $, el, paintWhenShown } from './dom.js';
 import { t, ui } from './i18n.js';
 import { updateErrorNextStep, updateErrorText } from './update-error.js';
 import { updateReadiness } from './update-readiness-state.js';
@@ -60,7 +60,7 @@ export function paintUpdateReadiness(next: AppState, operationError: string | nu
   error.hidden = !operationError;
   $('updateDiagnosticsReport').hidden = operationError !== 'Could not read plugin-refresh state';
   ui(error, 'textContent', () => operationError ? t('Update all could not finish: {0}', [updateErrorText(operationError)]) + '\n' + updateErrorNextStep(operationError) : '');
-  $('updateReadinessRows').replaceChildren(...rows.map(row => {
+  paintWhenShown($('updateReadinessRows'), () => $('updateReadinessRows').replaceChildren(...rows.map(row => {
     const item = el('li', row.status === 'pass' ? 'check is-ok' : row.status === 'fail' ? 'check is-bad' : `check is-${row.status}`);
     item.dataset.updatePart = row.id;
     const mark = el('span', 'check-mark', row.status === 'pass' ? '✓' : row.status === 'fail' ? '!' : row.status === 'skipped' ? '–' : '…');
@@ -73,5 +73,5 @@ export function paintUpdateReadiness(next: AppState, operationError: string | nu
     if (row.nextStep) body.append(el('p', 'muted', () => updateReadiness(next).find(current => current.id === row.id)?.nextStep ?? ''));
     item.append(mark, body);
     return item;
-  }));
+  })));
 }

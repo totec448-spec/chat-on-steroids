@@ -1641,3 +1641,30 @@ it('reports a staged update in the Activity line and the header bar', async () =
   expect(doc.getElementById('updateNotice')!.hidden).toBe(true);
   expect((doc.getElementById('installUpdate') as HTMLButtonElement).hidden).toBe(true);
 });
+
+// 2026-11-01: every state push rebuilt the hidden Setup lists (about 1,000 nodes a minute of garbage,
+// Blink's heap at 1.1 GB with 180 MB in use). Hidden Setup waits and paints the newest state when shown.
+it('leaves hidden Setup lists alone on state pushes and paints the newest state when Setup is shown', async () => {
+  const mounted = await mountChat();
+  const w = mounted.window;
+  const doc = w.document;
+  let setupShown = false;
+  let notify: (() => void) | null = null;
+  (w.Element.prototype as any).checkVisibility = function (this: Element) { return setupShown || !this.closest('#wizard'); };
+  (globalThis as any).ResizeObserver = class { constructor(callback: () => void) { notify = callback; } observe() {} unobserve() {} disconnect() {} };
+  try {
+    const surface = (connectorName: string) => ({ id: 'desktop', connectorName, description: 'Desktop control', cardSummary: '', optional: true,
+      available: true, localUrl: null, publicUrl: null, tools: ['observe'], state: 'off', detail: '', lastRequestAt: null, lastToolCallAt: null });
+    const before = doc.getElementById('connectorCards')!.innerHTML;
+    mounted.push({ ...mounted.state, status: { ...mounted.state.status, surfaces: [surface('First name')] } });
+    mounted.push({ ...mounted.state, status: { ...mounted.state.status, surfaces: [surface('Newest name')] } });
+    expect(doc.getElementById('connectorCards')!.innerHTML).toBe(before);
+    setupShown = true;
+    notify!();
+    expect(doc.getElementById('connectorCards')!.textContent).toContain('Newest name');
+    expect(doc.getElementById('connectorCards')!.textContent).not.toContain('First name');
+  } finally {
+    delete (w.Element.prototype as any).checkVisibility;
+    delete (globalThis as any).ResizeObserver;
+  }
+});
