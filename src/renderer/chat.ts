@@ -3559,6 +3559,9 @@ async function refreshSessionControls(): Promise<void> {
   $('resumeLastSummary').dataset.handoffId = lastSummary?.handoffId ?? '';
   $<HTMLButtonElement>('resumeLastSummary').disabled = summaryActions.has(id);
   $('contextMeter').toggleAttribute('data-attention', !!lastSummary);
+  // The saved-summary offer is announced once, by the notice: the popover's status line shows the same words
+  // without announcing them again (CodeRabbit on #2019).
+  $('sessionControlStatus').setAttribute('aria-live', lastSummary ? 'off' : 'polite');
   ui($('sessionControlStatus'), 'textContent', () => controls.blocked === 'worker' ? t("This sub-agent is managed by its prime.") : controls.blocked === 'blocked' ? t("This chat is blocked.")
     : lastSummary ? t("ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.")
     : controls.job?.busy ? t("Compaction is running in ChatGPT.") : '');
