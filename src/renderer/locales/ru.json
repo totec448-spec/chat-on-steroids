@@ -3971,5 +3971,16 @@
   "Today": "Сегодня",
   "Yesterday": "Вчера",
   "Previous 7 days": "Последние 7 дней",
-  "Previous 30 days": "Последние 30 дней"
+  "Previous 30 days": "Последние 30 дней",
+  "Agent": "Агент",
+  "Output": "Вывод",
+  "Show this command's output, read-only": "Показать вывод этой команды, только для чтения",
+  "Show the output of {0}, read-only": "Показать вывод {0}, только для чтения",
+  "Close output": "Закрыть вывод",
+  "Read-only: the agent's command. Typing here does nothing.": "Только чтение: команда агента. Ввод здесь ничего не делает.",
+  "Exited with {0} after {1}": "Завершено с кодом {0} через {1}",
+  "Ended after {0}": "Завершено через {0}",
+  "This command is no longer running": "Эта команда больше не выполняется",
+  "Close an agent output tab first": "Сначала закройте вкладку вывода агента",
+  "The window is unavailable": "Окно недоступно"
 }

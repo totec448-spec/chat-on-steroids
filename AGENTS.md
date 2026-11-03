@@ -1471,6 +1471,16 @@ Ctrl+backtick toggle its dock; its first opening shows Terminal and starts a she
 project is selected, main chooses the OS user's home directory as the initial cwd; the renderer
 does not supply a path. Selecting a project later does not retarget that shell. The bottom
 header's X hides the dock but preserves its shells.
+**Agent command output, read-only (#1920).** Each running-command row has **Output**: the bottom
+Terminal dock opens an "Agent" tab (`openAgentOutput`) after the person's own tabs, with xterm
+`disableStdin` and a placeholder line saying typing does nothing, plus Stop and close in the tab.
+`agent-output-ipc.ts` (`agentOutput:request` open/close, `agentOutput:event` data/exit) opens only a
+process `runningExecProcesses(sessionId)` lists for that session, at most eight views, and closes
+them on window reload. `UnifiedExecProcessManager.watchOutput` gives the retained history, then each
+chunk, then the exit; it never consumes the agent's unread buffer. `AgentOutputStream` decodes UTF-8
+across chunks, masks with `redactSecretText` (the secrets shield's setting and project switch) per
+whole line, shows a partial line after 1 s or 4 KB, and batches every 250 ms. Closing a tab only
+stops watching; agent tabs are not remembered across restarts.
 The bottom `+` menu opens another bottom shell. On the right, each shell is one dock tab
 alongside Files, Review and Sub-agents; there is no nested Terminal tab bar. The right
 `+` menu creates a new shell tab, while the Terminal quick action/shortcut selects an

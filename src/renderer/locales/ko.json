@@ -3728,5 +3728,16 @@
   "Today": "오늘",
   "Yesterday": "어제",
   "Previous 7 days": "지난 7일",
-  "Previous 30 days": "지난 30일"
+  "Previous 30 days": "지난 30일",
+  "Agent": "에이전트",
+  "Output": "출력",
+  "Show this command's output, read-only": "이 명령의 출력 보기(읽기 전용)",
+  "Show the output of {0}, read-only": "{0}의 출력 보기(읽기 전용)",
+  "Close output": "출력 닫기",
+  "Read-only: the agent's command. Typing here does nothing.": "읽기 전용: 에이전트의 명령입니다. 여기에 입력해도 아무 일도 일어나지 않습니다.",
+  "Exited with {0} after {1}": "{1} 후 {0}(으)로 종료",
+  "Ended after {0}": "{0} 후 종료",
+  "This command is no longer running": "이 명령은 더 이상 실행 중이 아닙니다",
+  "Close an agent output tab first": "먼저 에이전트 출력 탭을 닫으세요",
+  "The window is unavailable": "창을 사용할 수 없습니다"
 }

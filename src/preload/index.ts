@@ -19,7 +19,7 @@ import type { PetLibraryState, PetOverlayControlState, PetRuntimeAsset } from '.
 import type { SkillSummary, ManagedSkill, GitHubSkillUpdateCheck, SkillLibrary, SkillsDraftScope } from '../shared/skills.js';
 import type { RunningToolActivity, SessionChange, SessionSearchReply, SessionSearchLocation, SessionBookmark, ToolEditReview } from '../shared/session.js';
 import type { TurnTrace } from '../shared/turn-trace.js';
-import type { RunningExecProcess } from '../shared/background-exec.js';
+import type { AgentOutputEvent, RunningExecProcess } from '../shared/background-exec.js';
 import type { PluginSnapshot, PluginInstallRequest, PluginConfigPatch } from '../shared/plugins.js';
 /**
  * The entire renderer-facing API.
@@ -131,6 +131,14 @@ const api = {
   terminalResize: (id: string, cols: number, rows: number) => call<void>('workspaceTerminal:request', { action: 'resize', id, cols, rows }),
   terminalAck: (id: string, count: number) => call<void>('workspaceTerminal:request', { action: 'ack', id, count }),
   terminalClose: (id: string) => call<void>('workspaceTerminal:request', { action: 'close', id }),
+  agentOutputOpen: (id: string, sessionId: string, processId: number, incarnation: number) =>
+    ipcRenderer.invoke('agentOutput:request', { action: 'open', id, sessionId, processId, incarnation }) as Promise<{ ok: true; data: true } | { ok: false; error: string }>,
+  agentOutputClose: (id: string) => ipcRenderer.invoke('agentOutput:request', { action: 'close', id }) as Promise<{ ok: true; data: true } | { ok: false; error: string }>,
+  onAgentOutput: (listener: (event: AgentOutputEvent) => void): (() => void) => {
+    const wrapped = (_event: unknown, value: AgentOutputEvent): void => listener(value);
+    ipcRenderer.on('agentOutput:event', wrapped);
+    return () => ipcRenderer.removeListener('agentOutput:event', wrapped);
+  },
   onTerminalEvent: (listener: (event: WorkspaceTerminalEvent) => void): (() => void) => {
     const wrapped = (_event: unknown, value: WorkspaceTerminalEvent): void => listener(value);
     ipcRenderer.on('workspaceTerminal:event', wrapped);

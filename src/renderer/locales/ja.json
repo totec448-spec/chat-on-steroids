@@ -3728,5 +3728,16 @@
   "Today": "今日",
   "Yesterday": "昨日",
   "Previous 7 days": "過去 7 日間",
-  "Previous 30 days": "過去 30 日間"
+  "Previous 30 days": "過去 30 日間",
+  "Agent": "エージェント",
+  "Output": "出力",
+  "Show this command's output, read-only": "このコマンドの出力を表示（読み取り専用）",
+  "Show the output of {0}, read-only": "{0} の出力を表示（読み取り専用）",
+  "Close output": "出力を閉じる",
+  "Read-only: the agent's command. Typing here does nothing.": "読み取り専用：エージェントのコマンドです。ここで入力しても何も起きません。",
+  "Exited with {0} after {1}": "{1} 後に終了コード {0} で終了",
+  "Ended after {0}": "{0} 後に終了",
+  "This command is no longer running": "このコマンドはもう実行されていません",
+  "Close an agent output tab first": "先にエージェントの出力タブを閉じてください",
+  "The window is unavailable": "ウィンドウを使用できません"
 }

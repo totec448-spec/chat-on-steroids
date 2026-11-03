@@ -521,6 +521,8 @@ function projectColorName(color: ProjectColor): string {
   return { blue: t('Blue'), green: t('Green'), amber: t('Amber'), purple: t('Purple'), rose: t('Rose'), teal: t('Teal') }[color];
 }
 let workspaceTerminal: ReturnType<typeof createWorkspaceTerminal> | null = null;
+/** Opens the bottom Terminal dock without starting a shell; set once the docks exist. */
+let openBottomTerminalWithoutNewShell = (): void => undefined;
 let rightWorkspaceTerminal: ReturnType<typeof createWorkspaceTerminal> | null = null;
 let workspaceDocks: ReturnType<typeof createWorkspaceDocks> | null = null;
 
@@ -7227,6 +7229,24 @@ function configureBackgroundProcessStop(stop: HTMLButtonElement, row: RunningExe
   };
 }
 
+/** Output: the command's output, read-only, in a Terminal dock tab (#1920). */
+function backgroundProcessOutputButton(row: RunningExecProcess): HTMLButtonElement {
+  const button = el('button', 'background-exec-output') as HTMLButtonElement;
+  button.type = 'button';
+  button.append(icon('i-terminal'), el('span', '', () => t('Output')));
+  ui(button, 'title', () => t('Show this command\'s output, read-only'));
+  ui(button, 'aria-label', () => t('Show the output of {0}, read-only', [backgroundCommand(row.command) || '#' + row.processId]));
+  button.onclick = event => {
+    event.stopPropagation();
+    const sessionId = selectedId;
+    if (!sessionId || !workspaceTerminal) return;
+    if (workspaceTerminal.openAgentOutput({ sessionId, processId: row.processId, incarnation: row.incarnation, command: row.command })) {
+      openBottomTerminalWithoutNewShell();
+    }
+  };
+  return button;
+}
+
 function paintBackgroundProcessStops(): void {
   const disabled = backgroundProcessStopping !== null;
   $('backgroundExecStatus').querySelectorAll<HTMLButtonElement>('.background-exec-stop').forEach(stop => { stop.disabled = disabled; });
@@ -7272,6 +7292,8 @@ function paintBackgroundProcesses(): void {
   const stop = host.querySelector<HTMLButtonElement>('.background-exec-stop')!;
   stop.hidden = multiple;
   configureBackgroundProcessStop(stop, first);
+  host.querySelector('.background-exec-output')?.remove();
+  if (!multiple) stop.before(backgroundProcessOutputButton(first));
   const chevron = host.querySelector<HTMLElement>('.background-exec-chevron')!;
   chevron.hidden = !multiple;
   host.classList.toggle('is-expandable', multiple);
@@ -7323,7 +7345,7 @@ function paintBackgroundProcesses(): void {
       stopIcon.setAttribute('aria-hidden', 'true');
       itemStop.append(stopIcon, el('span'));
       configureBackgroundProcessStop(itemStop, row);
-      item.append(itemCommand, itemTime, itemStop);
+      item.append(itemCommand, itemTime, backgroundProcessOutputButton(row), itemStop);
       list.append(item);
     }
   }
@@ -9701,6 +9723,7 @@ export function initChat(next: Deps): void {
   workspaceTerminal = createWorkspaceTerminal(() => docks.toggleBottomTerminal(), docks.bottomBody,
     { onEmpty: () => docks.setBottomOpen(false), onClosePanel: () => docks.setBottomOpen(false), onSendSelection });
   workspaceTerminal.update(selectedLocalProject());
+  openBottomTerminalWithoutNewShell = () => docks.setBottomOpen(true, false);
   rightWorkspaceTerminal = createWorkspaceTerminal(() => docks.toggleBottomTerminal(), docks.body,
     { id: 'workspaceTerminalRight', dockedTabs: true, onTabsChanged: () => docks.sync(), onSendSelection });
   rightWorkspaceTerminal.update(selectedLocalProject());
