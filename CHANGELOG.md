@@ -32,6 +32,7 @@ You can now move a chat into another project by dragging it or from its menu, wi
 - **Big chats stay fast.** In very long chats, the app no longer reads the whole history again and again. An automatic Continue that no longer fits the chat's last question is withdrawn instead of being offered for hours.
 - **Thorough Goal helpers get time.** A Goal or Loop helper set to extra-high or Pro reasoning now gets up to 12 or 20 minutes for its next message instead of timing out after three.
 - **Workers in the right mode.** A worker chat picks its own model before its wake-up message is typed.
+- **Compact chat lists.** Rows in Projects and Chats are tighter, so more chats fit on screen, and the keyboard focus outline is fully visible again. Inbox cards stay as they were.
 - **Chat menus on short windows.** A chat's menu that fit on neither side of its button showed a scrollbar for a few pixels. It now opens whole beside the button.
 - **Plugins, Skills and Pets** say when their list could not be loaded, instead of "Loading…" for good.
 - **Layout polish:** the + menu, text fields in Settings and the update card in every language.
