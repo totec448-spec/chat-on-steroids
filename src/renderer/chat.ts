@@ -123,6 +123,7 @@ import { firstTurnStart, renderTurnChanges, turnEditCount, turnFinished, turnFro
 import { initSharePage } from './share-page.js';
 import { initFeedbackDialog } from './feedback-dialog.js';
 import { createChatgptProjectPicker } from './chatgpt-project-picker.js';
+import { openRelatedFolders } from './related-folders-dialog.js';
 import { initScheduleDialog } from './schedule-dialog.js';
 import { nextRunAfter, sameLocalDay, type ScheduleRepeat } from '../shared/schedule.js';
 import { localToolDetail, localToolMetric, localToolTitle } from './tool-titles.js';
@@ -388,6 +389,12 @@ function projectMenuItems(id: string): RowMenuItem[] {
         action: `color-${choice ?? 'none'}`, swatch: choice ?? '', checked: color === choice, disabled: savingProjectColor.has(id),
         label: () => choice ? projectColorName(choice) : t('None'), run: () => void saveProjectColor(id, choice)
       }))
+    },
+    // #1689: context for this project's chats only; a link, not the groups' folder, so the two never look alike.
+    {
+      action: 'related-folders', icon: 'i-related', label: () => t('Related folders…'),
+      title: () => t('Other approved folders this work also uses'),
+      run: () => { const project = projects.find(row => row.id === id); if (project) void openRelatedFolders(api, project, message => toast(t(message))); }
     },
     // #1797: on unless this project or Settings turned it off; Settings wins, so the switch waits there.
     {
@@ -2176,6 +2183,12 @@ function projectSortEntries(groupOf: typeof projectGroup = projectGroup): Array<
   return [...ids].map(id => ({ id, scope: SIDEBAR_PROJECT_SCOPE }));
 }
 
+/** The project row's hover text: its folder and, when it has some, its related folders (#1689). */
+function projectTooltip(project: LocalProject): string {
+  const related = (project.relatedFolders ?? []).map(folder => folder.split(/[\\/]/).filter(Boolean).pop() ?? folder);
+  return related.length ? `${project.path}\n${t('Related folders: {0}', [related.join(', ')])}` : project.path;
+}
+
 /**
  * The project's "⋯" button and the menu it opens (also at a right click): Color, Remove and, for a
  * native ChatGPT Project that could not be created, Retry. The project tree and the inbox share it.
@@ -2453,7 +2466,7 @@ function paintSessions(): void {
     heading.dataset.sortHandle = '';
     heading.setAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown');
     const label = el('span', 'project-name', () => project?.name ?? t("Unavailable project"));
-    ui(heading, 'title', () => project?.path ?? t("Unavailable project"));
+    ui(heading, 'title', () => project ? projectTooltip(project) : t("Unavailable project"));
     heading.append(icon('i-folder'), label);
     if (project?.remote) {
       // A folder on a server (#1469): the address is the hover text, the badge says how it is reached.
