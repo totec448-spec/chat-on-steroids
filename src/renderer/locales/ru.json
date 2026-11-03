@@ -2081,6 +2081,7 @@
   "The saved plugin update state could not be read.": "Не удалось прочитать сохранённое состояние обновления плагинов.",
   "The release information has no valid version number.": "В информации о выпуске нет допустимого номера версии.",
   "The downloaded update did not match the published checksum.": "Контрольная сумма загруженного обновления не совпадает с опубликованной.",
+  "The update cache and its version folders must be ordinary folders, not files or links.": "Кэш обновлений и его папки версий должны быть обычными папками, а не файлами или ссылками.",
   "GitHub could not be reached. Check your connection": "Не удалось подключиться к GitHub. Проверьте подключение к сети",
   "Could not check for updates: HTTP {0}.": "Не удалось проверить обновления: HTTP {0}.",
   "Could not download {0}: HTTP {1}.": "Не удалось скачать {0}: HTTP {1}.",
