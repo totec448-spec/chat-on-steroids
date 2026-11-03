@@ -121,7 +121,8 @@ export function freeFormVersion(issue) {
  * report on the newest release says so by its version number, an older one still has to be retried.
  */
 function freeFormDecision(issue, { latest, opened }) {
-  if (!freeFormBug(issue) || !(Date.parse(issue.created_at) >= Date.parse(INTAKE_SINCE))) return { decision: 'none', missing: [] };
+  if (!freeFormBug(issue)) return featureDecision(issue, { opened });
+  if (!(Date.parse(issue.created_at) >= Date.parse(INTAKE_SINCE))) return { decision: 'none', missing: [] };
   const labeled = (issue.labels ?? []).some(label => (typeof label === 'string' ? label : label.name) === INTAKE_LABEL);
   const held = labeled && issue.state === 'closed';
   const version = freeFormVersion(issue);
@@ -133,6 +134,24 @@ function freeFormDecision(issue, { latest, opened }) {
   if (missing.length) return { decision: issue.state === 'open' && !labeled ? 'close' : 'none', missing, freeForm: true };
   return { decision: held ? 'reopen' : 'none', missing, freeForm: true };
 }
+
+/**
+ * Feature requests still arrived as issues (#1811, #2055): GitHub's API and the gh CLI skip the issue
+ * forms. New features come as pull requests, so from here on (user, 2026-11-03) a new issue that is
+ * neither the bug form nor a bug report written freely gets one friendly note and is closed. Only when
+ * it is opened: an edit, a maintainer's or a bot's issue (the weekly digest), and one a person
+ * reopened are left alone.
+ */
+export const FEATURE_SINCE = '2026-11-03T21:00:00Z';
+function featureDecision(issue, { opened }) {
+  const none = { decision: 'none', missing: [] };
+  if (!opened || issue.state !== 'open' || issue.user?.type === 'Bot' || MAINTAINERS.has(issue.author_association)) return none;
+  return Date.parse(issue.created_at) >= Date.parse(FEATURE_SINCE) ? { decision: 'feature', missing: [] } : none;
+}
+
+export const FEATURE_COMMENT = `Thanks for the idea! New features come to this project as **pull requests**, not issues: [CONTRIBUTING.md](https://github.com/totec448-spec/chat-on-steroids/blob/main/CONTRIBUTING.md#new-features) explains how to start one, and the issue form only offers bug reports for that reason. Ideas are kept on the [roadmap](https://github.com/totec448-spec/chat-on-steroids/issues/482); a maintainer may add this one there.
+
+If this is a bug in something the app already does, please open it with the **Bug report** form (Issues → New issue) instead. This issue is closed.`;
 
 const MISSING_TEXT = {
   version: '**App version**: the exact number, for example `2.1.38`. It is in the app under **Settings → Activity**, or in the browser extension\'s popup.',
@@ -180,7 +199,10 @@ async function main() {
   const fresh = Date.parse(issue.created_at) >= Date.parse(INTAKE_SINCE);
   const label = fresh ? INTAKE_LABEL : LABEL;
   const post = (body) => github(`${path}/comments`, token, { method: 'POST', body: JSON.stringify({ body }) });
-  if (decision === 'close') {
+  if (decision === 'feature') {
+    await post(FEATURE_COMMENT);
+    await github(path, token, { method: 'PATCH', body: JSON.stringify({ state: 'closed', state_reason: 'not_planned' }) });
+  } else if (decision === 'close') {
     await post(fresh ? missingComment(missing, { freeForm }) : CLOSE_COMMENT);
     await github(`${path}/labels`, token, { method: 'POST', body: JSON.stringify({ labels: [label] }) });
     await github(path, token, { method: 'PATCH', body: JSON.stringify({ state: 'closed', state_reason: 'not_planned' }) });

@@ -167,3 +167,36 @@ it('tells a free-form reporter to add the missing parts to the text', () => {
   expect(text).toMatch(/to the issue text/);
   expect(text).not.toMatch(/into that field|tick/);
 });
+
+// 2026-11-03 (#1811, #2055): feature requests still arrived as issues, through GitHub's API or the gh
+// CLI, which skip the issue forms. New features come as pull requests (CONTRIBUTING.md), so a new
+// non-bug issue written without the form gets one friendly note and is closed (user, 2026-11-03).
+import { FEATURE_COMMENT, FEATURE_SINCE } from '../scripts/issue-version.mjs';
+const featureRequest = (extra: Partial<Intake> & { title?: string; user?: { type: string } } = {}) => ({
+  ...fresh('## Feature request\n\nAllow approving several folders at once.\n\n## Use case\n\nTwenty work folders.', { labels: [] }),
+  title: 'Feature request: approve several folders at once', created_at: '2026-11-04T09:00:00Z', user: { type: 'User' }, ...extra });
+
+it('closes a new non-bug issue written without the form, once, with a pointer to pull requests', () => {
+  expect(intakeDecision(featureRequest(), current)).toEqual({ decision: 'feature', missing: [] });
+  expect(Date.parse(FEATURE_SINCE)).toBeLessThan(Date.parse('2026-11-04T09:00:00Z'));
+  expect(FEATURE_COMMENT).toContain('CONTRIBUTING.md#new-features');
+  expect(FEATURE_COMMENT).toContain('/issues/482');
+  expect(FEATURE_COMMENT).toMatch(/Bug report/);
+});
+
+it('never closes a feature issue on an edit, from a maintainer or a bot, or one opened before the rule', () => {
+  expect(intakeDecision(featureRequest(), { latest: 'v2.1.40', opened: false }).decision).toBe('none');
+  expect(intakeDecision(featureRequest({ author_association: 'MEMBER' }), current).decision).toBe('none');
+  expect(intakeDecision(featureRequest({ author_association: 'COLLABORATOR' }), current).decision).toBe('none');
+  // The weekly maintainer digest is opened by GitHub Actions.
+  expect(intakeDecision(featureRequest({ user: { type: 'Bot' }, title: 'Maintainer digest: week of 2026-11-09' }), current).decision).toBe('none');
+  expect(intakeDecision(featureRequest({ created_at: '2026-11-01T09:00:00Z' }), current).decision).toBe('none');
+  // A closed one (a maintainer closed or reopened it by hand) is left alone.
+  expect(intakeDecision(featureRequest({ state: 'closed' }), current).decision).toBe('none');
+});
+
+it('still treats a free-form bug report as a bug report, and the bug form as the bug form', () => {
+  expect(intakeDecision(featureRequest({ title: '[Bug] 2.1.40: it broke', body: freeForm(attached) }), current).decision).toBe('none');
+  expect(intakeDecision(featureRequest({ title: 'It broke', labels: [{ name: 'bug' }], body: freeForm() }), current).decision).toBe('close');
+  expect(intakeDecision({ ...fresh(fullReport()), created_at: '2026-11-04T09:00:00Z' } as Intake, opened).decision).toBe('none');
+});
