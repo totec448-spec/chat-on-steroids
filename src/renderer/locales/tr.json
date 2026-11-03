@@ -3809,5 +3809,14 @@
   "Today": "Bugün",
   "Yesterday": "Dün",
   "Previous 7 days": "Son 7 gün",
-  "Previous 30 days": "Son 30 gün"
+  "Previous 30 days": "Son 30 gün",
+  "Chats working at once": "Aynı anda çalışan sohbetler",
+  "At most this many chats work at the same time, sub-agents included. Messages the app sends by itself wait their turn; a message you send always goes out.": "Aynı anda en fazla bu kadar sohbet çalışır, yardımcı ajanlar dahil. Uygulamanın kendiliğinden gönderdiği mesajlar sırasını bekler; sizin gönderdiğiniz mesaj her zaman gider.",
+  "Resume now": "Şimdi sürdür",
+  "Send automatic messages again now. ChatGPT may slow them down again.": "Otomatik mesajları şimdi yeniden gönder. ChatGPT onları yine yavaşlatabilir.",
+  "ChatGPT asked to slow down. Automatic messages resume at {0}.": "ChatGPT yavaşlamayı istedi. Otomatik mesajlar {0} saatinde sürer.",
+  "Waiting for a free slot (Chats working at once)": "Boş yer bekleniyor (Aynı anda çalışan sohbetler)",
+  "ChatGPT asked to slow down · waits until it says": "ChatGPT yavaşlamayı istedi · belirttiği saate kadar bekler",
+  "ChatGPT asked to slow down": "ChatGPT yavaşlamayı istedi",
+  "Resumes in {0}": "{0} sonra sürer"
 }
