@@ -5707,6 +5707,23 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           error: null,
           completedAt: Date.now()
         };
+      } else if (projectEntryDetail && /^(source-ready-timeout|transition-timeout)\b/.test(projectEntryDetail) &&
+          continuationByToken(command.spec.token)?.automatic === true &&
+          continuationByToken(command.spec.token)?.destinationSend.state === 'not-attempted' &&
+          await releaseContinuationDestinationSendNow(command.spec.token, command.id)) {
+        // #1882: ChatGPT did not open the source Project in time (its history limited, a VPN switching
+        // regions). Nothing was sent and the brief is fine: an automatic Compact & Resume keeps it, and
+        // the next opening pickup opens the replacement chat again, instead of writing a new brief later.
+        logInfo(`bridge: ${specKey(command.spec)} — ChatGPT did not open the source Project in time (${projectEntryDetail}); the brief is kept and the new chat is opened again at the next pickup`);
+        receipt = {
+          id,
+          client: client || command.owner,
+          conversationId: conversation,
+          outcome: 'terminal-failure',
+          committed: false,
+          error: 'ChatGPT did not open the source Project in time; the brief is kept and the new chat is opened again later',
+          completedAt: Date.now()
+        };
       } else {
         const why = error ? `the browser could not start the chat — ${error}` : 'the browser could not start the chat';
         try {
@@ -9902,6 +9919,8 @@ const compactionWatch = new Map<string, { token: string; phase: CompactionPhase;
  */
 const compactionDeferrals = new Map<string, string>();
 const AUTOMATIC_ASKING_RETRY_PAUSE_MS = 10 * 60_000;
+/** How often an automatic ticket with a written brief tries again to open its new chat after the quick tries (#1882). */
+const AUTOMATIC_OPENING_SLOW_MS = 60 * 60_000;
 /**
  * How many slowed extra bursts an automatic pre-Send ticket gets before it is abandoned like a
  * manual one. Each pickup reloads the source page, so an unbounded retry turns a chat that can
@@ -10296,6 +10315,17 @@ async function inspectOwedCompactions(now: number): Promise<boolean> {
           `Compact & Resume is still waiting for this chat's handoff: ${schedule.attempts} reloads did not collect it. ` +
             'The request was already sent, so it is not sent again. Open the chat to let it finish, or cancel compaction to return to it.'
         ).catch(() => undefined);
+      }
+      // An automatic ticket whose brief is written keeps opening its new chat, once an hour after the
+      // quick tries: while it is open it owns the chat's recovery, so stopping here stopped the chat (#1882).
+      if (phase === 'opening' && entry.automatic) {
+        if (!watch.told) {
+          watch.told = true;
+          logWarn(`bridge: compaction ticket ${entry.token.slice(0, 8)} for ${entry.from} could not open its new chat after ${schedule.attempts} pickups — trying once an hour`);
+        }
+        watch.attempts = schedule.attempts - 1;
+        watch.nextAt = now + AUTOMATIC_OPENING_SLOW_MS - schedule.every;
+        continue;
       }
       if (phase !== 'asking') continue;
       // A Goal or Loop chat runs unattended: when a slowed burst too could not ask ChatGPT for a summary
