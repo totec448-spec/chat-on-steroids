@@ -2206,6 +2206,12 @@ UUID plus sediment asset id. They are neither assistant prose nor local tool cal
 establish turn completion, Goal eligibility or activity. Typed public tool/assistant image
 outputs supply metadata first; final provider status and a complete, exactly owned native IMG
 permit optional preview capture. Main/thumbnail/mask clones of the same asset share that identity.
+A gallery (several images in one answer) mounts one large preview plus a thumbnail strip
+(`div[role=group] > button[aria-pressed] > img`, part of `GENERATED_IMAGE`). Its blob pixels belong to
+an asset only through `galleryImageAsset` (#2005): the image's own id (the preview's `imageId`, which
+must say `isComplete` and not `isPreview`, or a thumbnail's `image.id`) must match exactly one typed
+`generated-image` of this turn, with the same message and source, and that one completed. The gallery's
+shell `item` is only its first image, so matching against it alone recorded one picture per gallery.
 The extension captures already-loaded pixels without fetching signed URLs; route, document epoch,
 owner, node and source revision must survive each await. At most two captures run concurrently.
 Previews are WebP, at most 384,000 encoded bytes, 1,600 pixels per edge and 2.56 million decoded
@@ -3958,6 +3964,13 @@ idle and attachment-free before the one click. Source readiness has a bounded 60
 the native transition then gets its own bounded 12-second phase. Destination proof requires the
 exact Project home, a connected ready editor and no displayed source turns. User interaction,
 cancellation or a foreign route revokes the attempt; no extra tab compensates for a missing result.
+When an automatic Compact & Resume's page acks `project-entry:source-ready-timeout…` or
+`…transition-timeout…` (nothing sent), the bridge releases that attempt's destination claim
+(`releaseContinuationDestinationSendNow`) instead of aborting, logs it, and the next opening pickup
+offers the same brief again (#1882: ChatGPT limiting history or a region change made the Project open
+late, and the written brief was thrown away). A manual press, a user interruption or any other
+failure still aborts. After its three quick opening pickups an automatic ticket tries once an hour
+(`AUTOMATIC_OPENING_SLOW_MS`, logged once): while open it owns the chat's recovery, so it must not stop.
 One exception, measured: a replacement tab opens the source at `/c/<id>` and ChatGPT rewrites that
 route twice (`/g/<project>/c/<id>`, then with the Project's name). A click between the two is
 taken and then dropped by the second rewrite (8 of 14 handoffs in a Project timed out on
