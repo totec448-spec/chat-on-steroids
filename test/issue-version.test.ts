@@ -171,6 +171,7 @@ it('tells a free-form reporter to add the missing parts to the text', () => {
 // 2026-11-03 (#1811, #2055): feature requests still arrived as issues, through GitHub's API or the gh
 // CLI, which skip the issue forms. New features come as pull requests (CONTRIBUTING.md), so a new
 // non-bug issue written without the form gets one friendly note and is closed (user, 2026-11-03).
+// @ts-expect-error The check is a plain Node script without type declarations.
 import { FEATURE_COMMENT, FEATURE_SINCE } from '../scripts/issue-version.mjs';
 const featureRequest = (extra: Partial<Intake> & { title?: string; user?: { type: string } } = {}) => ({
   ...fresh('## Feature request\n\nAllow approving several folders at once.\n\n## Use case\n\nTwenty work folders.', { labels: [] }),
