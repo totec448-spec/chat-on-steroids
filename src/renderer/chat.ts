@@ -27,6 +27,8 @@ import { KIND_ICON } from './agent-activity.js';
 import { createFilePanel } from './file-panel.js';
 import { initCommitDialog } from './commit-dialog.js';
 import { renderAgentPlan } from './agent-plan.js';
+import { renderUserRequestsDock, userRequestCard, type UserRequestActions } from './user-requests.js';
+import { USER_REQUEST_ID, type UserRequestView } from '../shared/user-requests.js';
 import { userPromptText } from '../shared/user-prompt.js';
 import { messageReaction, withoutMessageReaction } from '../shared/message-reaction.js';
 import { goalErrorMessage } from '../shared/goal-errors.js';
@@ -3514,6 +3516,45 @@ function paintAutomationSwitch(): void {
   ui($<HTMLTextAreaElement>('sessionObjective'), 'placeholder', () => loop ? t("What should each continuation focus on?") : t("Optional. Leave empty to work toward what you asked in this chat."));
   paintTaskActions();
 }
+/** The selected chat's steps for the person (#1695), from its controls; cards and the dock line read them. */
+let userRequestsFor: { sessionId: string; requests: UserRequestView[]; readAt: number } | null = null;
+let userRequestsRefresh: number | undefined;
+const userRequestActions: UserRequestActions = {
+  async answer(request, answer) {
+    const id = selectedId;
+    if (!id) return;
+    // A sub-agent's step is answered in its own chat; this chat's list then reads it again.
+    const owner = request.from?.sessionId ?? id;
+    const answered = await run(api.answerUserRequest(owner, request.id, answer));
+    if (answered && id === selectedId) await refreshSessionControls();
+  },
+  readOnly: () => deps.state()?.config.readOnly === true
+};
+
+function paintUserRequestSlot(slot: HTMLElement): void {
+  slot.dataset.seenAt ??= String(Date.now());
+  const known = userRequestsFor && userRequestsFor.sessionId === selectedId ? userRequestsFor : null;
+  const request = known?.requests.find(row => row.id === slot.dataset.requestId && !row.from);
+  // A step's row can arrive before the steps were read again: read them once more before saying
+  // it is gone. Older answered steps do make room for new ones (60 kept per chat).
+  const gone = !request && !!known && known.readAt > Number(slot.dataset.seenAt);
+  if (!request && known && !gone && userRequestsRefresh === undefined) {
+    userRequestsRefresh = window.setTimeout(() => { userRequestsRefresh = undefined; void refreshSessionControls(); }, 300);
+  }
+  const signature = request ? JSON.stringify([request, userRequestActions.readOnly()]) : gone ? 'gone' : 'waiting';
+  if (slot.dataset.signature === signature) return;
+  slot.dataset.signature = signature;
+  if (request) slot.replaceChildren(userRequestCard(request, userRequestActions));
+  else slot.replaceChildren(...(gone ? [el('p', 'user-request-note', () => t('This step is no longer kept.'))] : []));
+}
+
+/** Null requests: not read yet for this chat (cards wait instead of saying a step is gone). */
+function applyUserRequests(sessionId: string | null, requests: UserRequestView[] | null, readAt = Date.now()): void {
+  userRequestsFor = sessionId && requests ? { sessionId, requests, readAt } : null;
+  renderUserRequestsDock($('userRequests'), sessionId, requests ?? [], userRequestActions);
+  for (const slot of document.querySelectorAll<HTMLElement>('#timelineContent .user-request-slot')) paintUserRequestSlot(slot);
+}
+
 /**
  * When the selected chat's controls were last asked for (#1787). A running turn's clock is the app's
  * word that work goes on, and that word can lapse with nothing new written to the chat: a page that
@@ -3524,9 +3565,10 @@ let controlsAskedAt = 0;
 const RUNNING_CONTROLS_RECHECK_MS = 20_000;
 async function refreshSessionControls(): Promise<void> {
   const id = selectedId, generation = ++controlsGeneration;
-  controlsAskedAt = Date.now();
+  const askedAt = controlsAskedAt = Date.now();
   const planHost = $('agentPlan');
   if (planHost.dataset.sessionId !== (id ?? '')) renderAgentPlan(planHost, id, null);
+  if ((userRequestsFor?.sessionId ?? null) !== id) applyUserRequests(id, null);
   const menu = $('sessionControls');
   if (controlledSessionId !== id || controlledSelection !== selectionGeneration) {
     // Retire the previous selection's projection before awaiting the new owner's IPC.
@@ -3562,6 +3604,7 @@ async function refreshSessionControls(): Promise<void> {
   const controls = await run(api.getSessionControls(id));
   if (generation !== controlsGeneration || id !== selectedId) return;
   renderAgentPlan(planHost, id, controls?.plan ?? null);
+  applyUserRequests(id, controls?.userRequests ?? [], askedAt);
   controlledSessionId = id;
   controlledSelection = selectionGeneration;
   controlledTurnId = controls?.activeTurnId ?? null;
@@ -5358,6 +5401,19 @@ function toolBody(event: Extract<SessionEvent, { kind: 'tool_call' }>, context?:
     head.append(review);
   }
   box.append(head);
+
+  // A step handed to the person (#1695): the card is the row's content, always shown. Its state
+  // comes from the chat's steps (controls), so it updates in place when the person answers.
+  const requestId = call.tool === 'ask_user_to_run' && call.outcome === 'ok' ? USER_REQUEST_ID.exec(call.result.text)?.[0] : undefined;
+  if (requestId) {
+    box.classList.add('is-user-request');
+    box.open = true;
+    const slot = el('div', 'user-request-slot');
+    slot.dataset.requestId = requestId;
+    box.append(slot);
+    paintUserRequestSlot(slot);
+    return box;
+  }
 
   // Collapsed calls only need their headline. Large recorded results must not
   // consume layout/DOM work, or evict surrounding prose, before they are opened.
