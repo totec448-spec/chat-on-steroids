@@ -4942,6 +4942,9 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .agent-plan-step[data-status='completed'] .agent-plan-marker { color: var(--soft); border-color: transparent; }
 .agent-plan-details { padding: 0 14px 10px 32px; color: var(--faint); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 /* A step handed to the person (#1695): one card in the timeline and in the list above the composer. */
+/* The card is the row: it lines up with the messages and carries its own surface, so the open
+   call's sunk background and its outdent (.ev-tool_call .tool) do not apply. */
+.ev-tool_call .tool.is-user-request { margin: 4px 0 14px; background: transparent; }
 .tool.is-user-request > summary { display: none; }
 .user-request { display: grid; gap: 10px; min-width: 0; padding: 12px 14px; border: 1px solid var(--edge); border-radius: 12px; background: var(--card); color: var(--ink); font-size: calc(13px * var(--text-scale, 1)); }
 .user-request-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -4951,9 +4954,11 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .user-request[data-state='open'] .user-request-state { color: var(--ink); font-weight: 550; }
 .user-request-from { margin: 0; color: var(--faint); font-size: calc(12px * var(--text-scale, 1)); overflow-wrap: anywhere; }
 .user-request-purpose { margin: 0; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
-.user-request-command { background: var(--page); }
+/* One look wherever the card stands (inside a call row the well styles differ). */
+.user-request .user-request-command { border: 0; border-radius: var(--r-sm); background: var(--page); }
+.user-request .user-request-command > .tool-output-header { min-height: 24px; padding: 4px 8px 0; border-bottom: 0; background: transparent; }
 .user-request .tool-copy { opacity: 1; }
-.user-request-command > .pre { margin: 0; border-radius: 0; background: transparent; color: var(--ink); max-height: 220px; }
+.user-request .user-request-command > .pre { margin: 0; padding: 4px 10px 9px; border-radius: 0; background: transparent; color: var(--ink); max-height: 220px; }
 .user-request-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; margin: 0; }
 .user-request-facts dt { color: var(--faint); }
 .user-request-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
