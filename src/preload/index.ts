@@ -116,6 +116,8 @@ export interface SessionDetail {
 }
 
 const api = {
+  /** Opens a one-time, loopback-only read-only browser view; no token is returned. */
+  openWebLocal: () => call<boolean>('webLocal:open'),
   /** System.Speech is available only through Windows PowerShell. */
   dictationSupported: process.platform === 'win32',
   /** Start microphone access only on explicit user action; audio stays in Windows recognizer. */

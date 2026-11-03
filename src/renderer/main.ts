@@ -362,6 +362,25 @@ window.addEventListener('resize', () => positionConnectionPopover());
 
 $('backToChat').addEventListener('click', () => showTab('chat'));
 $('workspaceSettings').addEventListener('click', () => showTab('home'));
+$('webLocalOpen').addEventListener('click', async () => {
+  const trigger = $<HTMLButtonElement>('webLocalOpen');
+  const result = $('webLocalResult');
+  if (trigger.disabled) return;
+  trigger.disabled = true;
+  result.hidden = true;
+  try {
+    const response = await api.openWebLocal();
+    if (!response.ok) {
+      result.textContent = t(response.error);
+      result.hidden = false;
+    }
+  } catch {
+    result.textContent = t('Could not open Web Local');
+    result.hidden = false;
+  } finally {
+    trigger.disabled = false;
+  }
+});
 $('sidebarConnection').addEventListener('click', () => void connectionCapsuleAction());
 // The details stay one right click away in every state, the disconnected one included.
 $('sidebarConnection').addEventListener('contextmenu', event => {

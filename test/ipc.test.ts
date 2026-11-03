@@ -840,6 +840,35 @@ beforeEach(async () => {
   });
 });
 
+it('only the owning Desktop main frame may activate Web Local over named IPC', async () => {
+  const { getLog } = await import('../src/main/logger.js');
+  const loggedBefore = getLog().length;
+  const mainFrame = {};
+  const webContents = { send: vi.fn(), isDestroyed: () => false, mainFrame };
+  currentWindow = {
+    setBackgroundColor: vi.fn(),
+    setTitleBarOverlay: vi.fn(),
+    isDestroyed: () => false,
+    webContents
+  } as unknown as typeof currentWindow;
+  const invoke = handlers.get('webLocal:open')!;
+  expect(await invoke({ sender: {}, senderFrame: mainFrame }, undefined)).toMatchObject({ ok: false });
+  expect(await invoke({ sender: webContents, senderFrame: {} }, undefined)).toMatchObject({ ok: false });
+  expect(await invoke({ sender: webContents, senderFrame: mainFrame }, { text: 'synthetic-private-input' })).toMatchObject({ ok: false });
+  currentWindow = { ...currentWindow!, isDestroyed: () => true };
+  expect(await invoke({ sender: webContents, senderFrame: mainFrame }, undefined)).toMatchObject({ ok: false });
+  currentWindow = { ...currentWindow!, isDestroyed: () => false };
+  expect(vi.mocked(shell.openExternal)).not.toHaveBeenCalled();
+
+  expect(await invoke({ sender: webContents, senderFrame: mainFrame }, undefined)).toMatchObject({ ok: true, data: true });
+  expect(vi.mocked(shell.openExternal).mock.calls.at(-1)?.[0]).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/activate\//);
+  const decisions = getLog().slice(loggedBefore).map(entry => entry.message).filter(message => message.startsWith('web local:'));
+  expect(decisions).toContain('web local: desktop owner admitted open');
+  expect(decisions.join('\n')).not.toMatch(/synthetic-private-input|127\.0\.0\.1:\d+|\/activate\/|\/web\/|cos_local_/);
+  const { shutdownWebLocal } = await import('../src/main/web-local/index.js');
+  await shutdownWebLocal();
+});
+
 it('keeps origin history navigation separate from live revision cursors over IPC', async () => {
   const session = await createSession({ title: 'History cursors' });
   const message = { kind: 'assistant_message' as const, source: 'extension' as const, time: 10,
