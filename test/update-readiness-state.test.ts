@@ -153,3 +153,44 @@ it('uses the Korean setup action exactly once in the connection recovery guidanc
   const row = updateReadiness(next).find(row => row.id === 'core')!;
   expect(row.nextStep).toBe('연결 설정 확인에서 연결을 확인한 후 모두 업데이트를 선택하여 다시 시도하세요.');
 });
+
+it('keeps blocked cache failures explicit and directs recovery instead of an unchanged retry', async () => {
+  const { updateReadiness } = await import('../src/renderer/update-readiness-state.js');
+  const next = state();
+  next.update.stage = 'failed'; next.update.error = 'the update staging path must use ordinary directories';
+  expect(updateReadiness(next).find(row => row.id === 'app')).toMatchObject({
+    status: 'fail', reason: 'The update cache and its version folders must be ordinary folders, not files or links.',
+    nextStep: 'Save a Diagnostics report from Activity for help with recovery. The saved state has been kept.'
+  });
+});
+
+it('shows the Diagnostics action for an automatic staging failure and clears it after recovery', async () => {
+  const { paintUpdateReadiness } = await import('../src/renderer/update-readiness.js');
+  const next = state();
+  next.update.stage = 'failed'; next.update.error = 'the update staging path must use ordinary directories';
+  paintUpdateReadiness(next);
+  const report = dom.window.document.getElementById('updateDiagnosticsReport')!;
+  expect(report.hidden).toBe(false);
+  expect(dom.window.document.querySelector('[data-update-part="app"]')!.textContent).toContain('Save a Diagnostics report');
+  expect(dom.window.document.getElementById('updateAllError')!.hidden).toBe(true);
+
+  paintUpdateReadiness(state());
+  expect(report.hidden).toBe(true);
+  paintUpdateReadiness(state(), 'Could not read plugin-refresh state');
+  expect(report.hidden).toBe(false);
+  next.update.error = 'GitHub could not be reached';
+  paintUpdateReadiness(next);
+  expect(report.hidden).toBe(true);
+});
+
+it.each([
+  ['GitHub could not be reached', 'the update staging path must use ordinary directories', true],
+  ['Could not read plugin-refresh state', 'GitHub could not be reached', true],
+  ['Could not read plugin-refresh state', 'the update staging path must use ordinary directories', true],
+  ['GitHub could not be reached', 'latest answered 503', false]
+] as const)('checks retained operation %s and automatic update %s independently', async (operationError, updateError, needsDiagnostics) => {
+  const { paintUpdateReadiness } = await import('../src/renderer/update-readiness.js');
+  const next = state(); next.update.stage = 'failed'; next.update.error = updateError;
+  paintUpdateReadiness(next, operationError);
+  expect(dom.window.document.getElementById('updateDiagnosticsReport')!.hidden).toBe(!needsDiagnostics);
+});
