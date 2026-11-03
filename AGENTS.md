@@ -6068,7 +6068,10 @@ Failure and recovery stay visible outside native details. Identical pushes prese
 choice/focus; meaningful owner changes reopen attention. A keyboard button controls native
 details and a separate polite live region announces changed status. The card keeps the event
 feed's remaining height and internal scrolling in short windows. Diagnostics uses the existing
-save owner with both buttons disabled during saving, and does not retry updates. Disclosure and
+save owner with both buttons disabled during saving, and does not retry updates. The report
+action is available when either the retained operation error or the latest updater error
+needs diagnostics, including automatic staging failures before Update all. Long translated
+failure text may scroll inside the bounded card so recovery controls are not clipped. Disclosure and
 action regressions stay with the view; real-Electron cross-feature acceptance is added separately.
 
 ## 19. Debugging, tests and working here
@@ -6255,9 +6258,27 @@ partial file, verify SHA-256 before staging/adoption, and rehash at ordinary qui
 off. Windows NSIS/Linux AppImage can apply automatically; macOS/DEB present the supported manual
 path, development does not stage. Explicit install may relaunch; ordinary quit does not force
 relaunch. Failed checks never replace a verified staged candidate with unverified bytes.
+`userData/updates` is reserved exclusively for updater staging, not backup storage. Ordinary
+direct-child directories named `major.minor.patch` are cache entries; their contents may be
+removed recursively, even if manually placed there. Each packaged check removes installed-or-older
+cache versions even offline. Superseded candidates are removed only after their replacement is
+verified or adopted. Cleanup never scans outside this root, so app copies and backups kept
+elsewhere are untouched. At the root it preserves `handoff.json`, non-version entries and linked
+directories; a linked root is skipped. Locked files defer to the next
+ordinary check without failing an update. `update.test.ts` covers previous-version cache and
+handoff records, failed transfers, restart adoption and directory links.
+Cache cleanup and download preparation retain the update pass's reset generation. After each
+filesystem wait they recheck that owner before removing entries, creating files or retiring
+other candidates; a superseded pass stops rather than being treated as deferred cleanup.
+New download writes reject linked cache roots/version directories. They unlink only the
+selected stale partial-file entry (never recursively) and create its replacement exclusively,
+so a partial-file link cannot truncate another file. Existing checksum-verified adoption is
+still read-only and retains its prior linked-path behavior.
 The updater classifies its own `TypeError('fetch failed')` as `GitHub could not be reached`,
 retaining the original diagnostic in its warning log. The card, update banners and retained
 Update all error share the renderer's update-error formatter; unknown errors remain literal.
+Linked staging paths use a translated cache-folder error and the existing diagnostics-report
+recovery guidance, rather than suggesting an unchanged retry of the same blocked path.
 On Windows the handoff first repeats the installer's own `icacls` sandbox grant on the app folder;
 an exit code there means the folder needs an administrator, so the installer is started through
 `Start-Process -Verb RunAs` (#1490). That PowerShell stays attached (detached it has no console and
