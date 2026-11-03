@@ -1111,6 +1111,13 @@ function diagnosticEnvironment(value: unknown): CompanionEnvironment | null {
 const extensionLanguageLogged = new Map<string, string>();
 /** Per browser: the last error-page reload the app has logged (the extension's clock) and its count. */
 const errorPageReloadsLogged = new Map<string, { at: number; count: number; skippedAt?: number }>();
+/** Per browser, the last extension close-outbox decision already written to the app log. */
+const closeOutboxDecisionsLogged = new Map<string, number>();
+const CLOSE_OUTBOX_REASONS: Record<string, string> = {
+  deferred_chrome_tab_open: 'deferred /closed: Chrome still has the conversation tab',
+  deferred_chrome_inventory_unavailable: 'deferred /closed: Chrome tab inventory was unavailable',
+  discarded_conversation_binding_open: 'discarded stale /closed: the conversation was rebound'
+};
 const ERROR_PAGE_SKIPS: Record<string, (nextIn: number) => string> = {
   offline: () => 'not reloaded while the browser is offline',
   backoff: nextIn => `the next reload is in ${nextIn} s (it backs off after each reload)`,
@@ -1119,6 +1126,14 @@ const ERROR_PAGE_SKIPS: Record<string, (nextIn: number) => string> = {
 function recordCompanionDiagnostics(value: unknown, browser = ''): void {
   const next = sanitiseCompanionDiagnostics(value);
   if (!next) return;
+  const decision = diagnosticObject(diagnosticObject(value)?.closeOutboxDecision);
+  const decisionAt = diagnosticNumber(decision?.at);
+  const key = `${String(decision?.action ?? '')}_${String(decision?.reason ?? '')}`;
+  if (Object.hasOwn(CLOSE_OUTBOX_REASONS, key) && decisionAt > (closeOutboxDecisionsLogged.get(browser) ?? 0)) {
+    logInfo(`browser: ${CLOSE_OUTBOX_REASONS[key]}`);
+    closeOutboxDecisionsLogged.set(browser, decisionAt);
+    if (closeOutboxDecisionsLogged.size > 16) closeOutboxDecisionsLogged.delete(closeOutboxDecisionsLogged.keys().next().value!);
+  }
   // A chat tab that loaded offline and sat on Chrome's error page was reloaded by the extension.
   const reloads = diagnosticObject(diagnosticObject(value)?.errorPageReloads);
   const reloadedAt = diagnosticNumber(reloads?.lastAt), reloadCount = Math.round(diagnosticNumber(reloads?.count, 100_000));
