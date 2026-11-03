@@ -21,6 +21,10 @@ const MAX_JSON = 900_000;
 /** A ref is not evidence that the same UI still exists indefinitely. */
 const MAX_REF_AGE_MS = 120_000;
 const refPattern = /^@s[A-Za-z0-9]+:e\d+$/;
+// An error `code` comes from the native backend too; length limiting alone
+// cannot prevent it from carrying private application/window text. Forward
+// only exact stable codes whose meaning is known, never arbitrary strings.
+const SAFE_BACKEND_ERRORS = new Set(['DENIED', 'PERM_DENIED', 'STALE_REF']);
 
 function provenPrincipal(): { key: string; sessionId: string | null; conversationId: string | null } | null {
   const caller = currentCaller();
@@ -56,7 +60,7 @@ function successful(envelope: LinuxDesktopEnvelope): ToolResult {
     // The backend's error message may include an application title or sensitive
     // accessibility text. Emit a stable bounded code only, not its raw payload.
     const code = (envelope.error as { code?: unknown } | null)?.code;
-    return fail('LINUX_DESKTOP_BACKEND: ' + (typeof code === 'string' ? code.slice(0, 60) : 'UNKNOWN'));
+    return fail('LINUX_DESKTOP_BACKEND: ' + (typeof code === 'string' && SAFE_BACKEND_ERRORS.has(code) ? code : 'UNKNOWN'));
   }
   const data = envelope.data ?? null;
   const json = JSON.stringify(data);
