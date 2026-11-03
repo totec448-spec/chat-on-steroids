@@ -4330,6 +4330,45 @@ describe('automatic compaction', () => {
     }
   });
 
+  // 2026-11-03 (Mac, 2 days): ChatGPT limited the chat's history, so its page never showed the latest
+  // tool results answered; every automatic attempt ended at that receipt, or a recovery reload cut the
+  // wait short, while the chat grew past its limit. The app now lets a later attempt ask without it.
+  it.each([
+    ['one attempt that waited the receipt out', ['results-unconfirmed'], true],
+    ['two attempts cut short', ['results-wait-changed', 'results-wait-changed'], false],
+    ['three attempts cut short', ['results-wait-changed', 'results-wait-changed', 'results-wait-changed'], true],
+    ['deferrals for other reasons', [null, null, null, null], false]
+  ] as const)('asks for the handoff without the tool-result receipt after %s', async (_case, codes, waived) => {
+    await pair();
+    const conversationId = `a1a1a1a1-0000-4000-8000-00000000${String(codes.length)}${waived ? 'b' : 'c'}${codes[0] === null ? 'd' : 'e'}0`;
+    await request('POST', '/events', {
+      body: { conversationId, events: [{ kind: 'user_message', time: Date.now(), text: 'a long chat whose results ChatGPT never confirms', messageId: `m-${conversationId}` }] }
+    });
+    const first = await request('POST', '/compact', { body: { conversationId, ticket: true, automatic: true } });
+    expect(first.body.waiveReceipt).toBeUndefined();
+    const token = first.body.token as string;
+    for (const code of codes) {
+      expect((await request('POST', '/compact', { body: { conversationId, token, sourceDeferred: true,
+        sourceError: 'ChatGPT has not confirmed receiving the latest tool results. Nothing was compacted.', ...(code ? { sourceErrorCode: code } : {}) } })).status).toBe(200);
+    }
+    const again = await request('POST', '/compact', { body: { conversationId, ticket: true, automatic: true } });
+    expect(again.body.token).toBe(token);
+    expect(again.body.waiveReceipt === true).toBe(waived);
+    const lines = getLog().map(entry => entry.message).filter(line => line.includes(`compaction ticket ${token.slice(0, 8)}`) && line.includes('without ChatGPT\'s receipt'));
+    expect(lines).toHaveLength(waived ? 1 : 0);
+  });
+
+  it('never waives the receipt for a manual Compact & Resume', async () => {
+    await pair();
+    const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac1f';
+    await request('POST', '/events', {
+      body: { conversationId, events: [{ kind: 'user_message', time: Date.now(), text: 'a manual press', messageId: 'm-manual-waive' }] }
+    });
+    const filed = await request('POST', '/compact', { body: { conversationId, ticket: true } });
+    await request('POST', '/compact', { body: { conversationId, token: filed.body.token, sourceDeferred: true, sourceError: 'x', sourceErrorCode: 'results-unconfirmed' } });
+    expect((await request('POST', '/compact', { body: { conversationId, ticket: true } })).body.waiveReceipt).toBeUndefined();
+  });
+
   it('takes no deferral reason for a manual Compact & Resume', async () => {
     await pair();
     const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac0f';
