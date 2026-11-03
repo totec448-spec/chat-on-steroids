@@ -1,4 +1,13 @@
 {
+  "Move chats between projects, chats that keep going, and an extension that updates during long runs.": "在專案之間移動對話、持續進行的對話，以及在長時間執行時也會更新的擴充功能。",
+  "Move chats between projects": "在專案之間移動對話",
+  "Drag a chat onto a project, or use Move to project in its menu. Undo puts it back.": "把對話拖到專案上，或使用其選單中的「移到專案」。復原可將它放回原處。",
+  "Chats keep going": "對話持續進行",
+  "When a chat's next step is not picked up, the app keeps trying, tells you, and offers Continue now.": "當對話的下一步沒有被接手時，應用程式會繼續嘗試、通知你，並提供「立即繼續」。",
+  "The extension updates itself": "擴充功能會自動更新",
+  "It no longer waits for every long-running chat to finish first.": "它不再等待每個長時間執行的對話結束。",
+  "Big chats stay fast": "大型對話依然流暢",
+  "Very long chats no longer slow the app down.": "很長的對話不再拖慢應用程式。",
   "Long chats that get through ChatGPT's limits, pop-ups out of the way, and message times.": "長對話能撐過 ChatGPT 的限制，彈出視窗不再擋路，還有訊息時間。",
   "Long chats keep going": "長對話持續進行",
   "When ChatGPT limits a long chat's history, the app waits instead of reloading it.": "ChatGPT 限制長對話的歷史記錄時，應用程式會等待，而不是重新載入。",
