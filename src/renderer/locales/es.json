@@ -3903,5 +3903,14 @@
   "Today": "Hoy",
   "Yesterday": "Ayer",
   "Previous 7 days": "Últimos 7 días",
-  "Previous 30 days": "Últimos 30 días"
+  "Previous 30 days": "Últimos 30 días",
+  "Fresh turn started": "Se inició un turno nuevo",
+  "Automatic Continue sent": "Continuar automático enviado",
+  "The turn failed": "El turno falló",
+  "Since {0} · {1}": "Desde las {0} · {1}",
+  "{0} tries": "{0} intentos",
+  "{0} tries|one": "{0} intento",
+  "Show what was tried": "Mostrar lo que se intentó",
+  "Hide what was tried": "Ocultar lo que se intentó",
+  "{0} tries|many": "{0} de intentos"
 }

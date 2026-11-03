@@ -349,6 +349,11 @@
   --red-wash: #fbf0f0;
   --red-line: #eccdcd;
 
+  /* A chat the app genuinely stopped recovering (#1883): amber, with words, never color alone. */
+  --warn-ink: #8a5300;
+  --warn-wash: #fdf5e7;
+  --warn-line: #efdcb5;
+
   /* Card lift. Barely there on paper, absent in the dark theme below. */
   --lift: 0 1px 1px rgb(12 12 14 / 3%), 0 10px 26px -18px rgb(12 12 14 / 22%);
   /* The switch knob has to read against its own track in both states, and the track
@@ -403,6 +408,10 @@
   --red: #ef8a8a;
   --red-wash: #241416;
   --red-line: #4a262a;
+
+  --warn-ink: #e8b866;
+  --warn-wash: #241c0f;
+  --warn-line: #4a3a1c;
 
   /* No drop shadow in the dark: the hairline is the edge, and a black shadow on a
      black page is only mud. */
@@ -4993,6 +5002,24 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
   .background-exec-process { padding-left: 28px; }
 }
 .recovery-countdown { flex-shrink: 0; font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap; }
+/* A recovery episode (#1883): since when and how many tries, and the tries themselves on demand. */
+/* One line only beside the episode control, whose list holds every step in full. */
+.recovery-notice:has(.recovery-episode-meta) .queue-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recovery-episode-meta { flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px; border: 0; border-radius: 6px; padding: 4px 6px; background: transparent; color: var(--faint); font: inherit; font-size: calc(12px * var(--text-scale, 1)); white-space: nowrap; cursor: pointer; }
+.recovery-episode-meta:hover { color: var(--ink); background: var(--hover); }
+.recovery-episode-meta:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+.recovery-episode-meta .disclosure-chevron { width: 14px; height: 14px; transition: transform 120ms ease; }
+.recovery-episode-meta[aria-expanded="true"] .disclosure-chevron { transform: rotate(90deg); }
+.recovery-episode-list[hidden] { display: none; }
+.recovery-episode-item { display: flex; align-items: baseline; gap: 10px; padding: 5px 12px 5px 37px; border-bottom: 1px solid var(--edge); color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); }
+.recovery-episode-item time { flex-shrink: 0; color: var(--faint); font-variant-numeric: tabular-nums; }
+.recovery-episode-item span { min-width: 0; overflow-wrap: anywhere; }
+.recovery-notice.is-stopped { color: var(--warn-ink); background: var(--warn-wash); border-bottom-color: var(--warn-line); }
+.recovery-notice.is-stopped > .ico, .recovery-notice.is-stopped .recovery-episode-meta { color: var(--warn-ink); }
+@media (max-width: 480px) {
+  .recovery-episode-meta > span { display: none; }
+  .recovery-episode-item { padding-left: 28px; }
+}
 .composer-dock-body > :nth-last-child(1 of :not([hidden])) { border-bottom: 0; }
 .composer-dock-body > :nth-last-child(1 of :not([hidden])) > .queued-input:last-child { border-bottom: 0; }
 .composer-dock:not([hidden]):has(> .composer-dock-body > :not([hidden])) + .composer { border-top-left-radius: 12px; border-top-right-radius: 12px; }

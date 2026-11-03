@@ -3822,5 +3822,13 @@
   "Today": "Bugün",
   "Yesterday": "Dün",
   "Previous 7 days": "Son 7 gün",
-  "Previous 30 days": "Son 30 gün"
+  "Previous 30 days": "Son 30 gün",
+  "Fresh turn started": "Yeni tur başlatıldı",
+  "Automatic Continue sent": "Otomatik Devam gönderildi",
+  "The turn failed": "Tur başarısız oldu",
+  "Since {0} · {1}": "{0} itibarıyla · {1}",
+  "{0} tries": "{0} deneme",
+  "{0} tries|one": "{0} deneme",
+  "Show what was tried": "Denenenleri göster",
+  "Hide what was tried": "Denenenleri gizle"
 }

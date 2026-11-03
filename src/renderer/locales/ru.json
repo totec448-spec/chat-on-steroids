@@ -3984,5 +3984,15 @@
   "Today": "Сегодня",
   "Yesterday": "Вчера",
   "Previous 7 days": "Последние 7 дней",
-  "Previous 30 days": "Последние 30 дней"
+  "Previous 30 days": "Последние 30 дней",
+  "Fresh turn started": "Начат новый ход",
+  "Automatic Continue sent": "Отправлено автоматическое «Продолжить»",
+  "The turn failed": "Ход завершился ошибкой",
+  "Since {0} · {1}": "С {0} · {1}",
+  "{0} tries": "{0} попыток",
+  "{0} tries|one": "{0} попытка",
+  "{0} tries|few": "{0} попытки",
+  "{0} tries|many": "{0} попыток",
+  "Show what was tried": "Показать, что было сделано",
+  "Hide what was tried": "Скрыть, что было сделано"
 }
