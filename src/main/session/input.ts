@@ -163,7 +163,13 @@ const entrySchema = inputArgs.extend({
   completedTurnId: z.string().max(256).optional(),
   queueOrder: z.number().int().nonnegative().optional(),
   /** #1794: the send check held this automatic send; it is asked again from `nextAt`. */
-  sendCheck: z.object({ attempt: z.number().int().positive(), nextAt: z.number(), reason: z.string().max(200), answered: z.boolean() }).optional()
+  sendCheck: z.object({ attempt: z.number().int().positive(), nextAt: z.number(), reason: z.string().max(200), answered: z.boolean() }).optional(),
+  /**
+   * A page has this message and holds it back until its own turn ends (2026-11-03): ChatGPT still
+   * answering, a turn the page still holds, or a running tool call. The browser did pick it up, so
+   * the one-minute pickup deadline counts from the last such hold, and the queue says why it waits.
+   */
+  pageHold: z.object({ reason: z.enum(['still-answering', 'turn-held', 'tool-running']), at: z.number() }).optional()
 });
 export type InputEntry = z.infer<typeof entrySchema>;
 
@@ -612,7 +618,8 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
         (row.transportIntent === 'browser' || (!row.transportIntent && !row.sessionId)) &&
         !row.error?.startsWith('Message queued. ') &&
         // Time the person's send check held it is not the browser's: its minute starts when the hold ends (#1794).
-        Date.now() - Math.max(row.createdAt, row.dueAt, row.sendCheck?.nextAt ?? 0) >= 60_000)
+        // Nor is time a page held it until its own turn ended: that page has it (2026-11-03).
+        Date.now() - Math.max(row.createdAt, row.dueAt, row.sendCheck?.nextAt ?? 0, row.pageHold?.at ?? 0) >= 60_000)
       return { ...row, state: 'failed', pickupFailedAt: Date.now(), error: 'Not sent: the browser did not pick up this message within 60 seconds.' };
     // Preparation can expire before Send. Once authorized, this exact claim owns
     // the uncertain outcome until receipt or explicit cancellation, regardless of
@@ -1969,6 +1976,29 @@ export function holdInputForSendCheck(id: string, attempt: number, reason: strin
     await commit(current.map(entry => entry === row
       ? { ...entry, sendCheck: { attempt, nextAt: Date.now() + SEND_CHECK_RETRY_MS, reason, answered } } : entry));
     return true;
+  });
+}
+
+const PAGE_HOLD_REASONS = new Set(['still-answering', 'turn-held', 'tool-running']);
+/** A page holding a hold note this recent is not rewritten: pages repeat it every few seconds. */
+const PAGE_HOLD_REFRESH_MS = 15_000;
+/**
+ * A page reported it holds this queued message until its own turn ends (2026-11-03). Only those
+ * reasons keep it: a page with no message box, or one that moved on, will not send it by waiting.
+ * `new` when the queue's wording changes (a first hold, or another reason), `held` when it stays
+ * held, null when this hold does not keep it.
+ */
+export function noteInputHeld(id: string, reason: string): Promise<'new' | 'held' | null> {
+  return serial(async () => {
+    if (!PAGE_HOLD_REASONS.has(reason)) return null;
+    const current = await load();
+    const row = current.find(entry => entry.id === id);
+    if (!row || row.state !== 'queued' || row.sendAuthorizedAt !== undefined) return null;
+    const now = Date.now();
+    if (row.pageHold?.reason === reason && now - row.pageHold.at < PAGE_HOLD_REFRESH_MS) return 'held';
+    await commit(current.map(entry => entry === row
+      ? { ...entry, pageHold: { reason: reason as NonNullable<InputEntry['pageHold']>['reason'], at: now } } : entry));
+    return row.pageHold?.reason === reason ? 'held' : 'new';
   });
 }
 
