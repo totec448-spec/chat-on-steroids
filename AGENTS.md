@@ -279,7 +279,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Permissions and settings | `config.ts` / `config.json` | Validate every load/save; enforce effective current capabilities at use. |
 | Credentials | `secrets.ts` / encrypted `secrets.bin`; plugin OAuth's encrypted installation store | Main process only; publish updated cache after the encrypted write. |
 | Session/current chat/project | `store.ts` / `sessions/<id>/meta.json` | Rebind is the semantic A→B commit. |
-| Exact request ownership | `correlation.ts` / `state/request-correlations.json` plus recorded proof | First exact proof wins; retain local session epoch; new owners are written before browser ACK. Startup trusts a complete ledger and scans history only to migrate an older one. |
+| Exact request ownership | `correlation.ts` / `state/request-correlations.json` plus recorded proof | Native request proof establishes the session epoch and scoped provider-session bindings. Derived owners commit before publication; native request proof supersedes a derivation. Startup trusts a complete ledger and scans history only to migrate an older one. |
 | Running exec process | `UnifiedExecProcessManager` process memory plus `codex/ownership.ts` custody | The manager is the only live-process authority. A yielded child may start under temporary request custody; exact correlation promotes it to the durable session. IPC/preload/renderer only project that owner-scoped state and may request an ownership- and incarnation-checked stop. |
 | Authored message | `store.ts` / canonical message shard | Replace by stable identity, preserving origin chronology. |
 | Turn round outline | `recorder.ts` `turn_trace` → `store.ts::writeTurnTrace` / `sessions/<id>/traces/<turnId>.json` | Validated by `shared/turn-trace.ts`; the newest outline replaces the turn's; never an event or evidence. |
@@ -708,6 +708,38 @@ reads them back before returning `confirmed[]`. `/events` may publish the same e
 For a reserved New Chat opening, the shared `/input/bind` route commits its exact claim first;
 only that claim retires, and its promoted conversation/document epoch precedes correlation or event publication.
 Ownership acknowledgement is separate from slow transcript/image writes.
+All three surfaces also read the host's documented `params._meta["openai/session"]` and
+`openai/subject` at validated `tools/call` ingress (`mcp/provider-session.ts`). Matching headers,
+when supplied, must agree. Hash the Setup profile, surface, subject and anonymized conversation
+as one scoped key; raw metadata and credentials are never recorded. This is distinct from the
+SDK transport session id and the undocumented generic `_meta.sessionId`.
+A key acquires an owner only through native request proof. Once bound, it can identify a new
+workflow request even when that request id is absent from the page. Provider-derived requests
+cannot seed other bindings. Unknown/missing metadata remains unidentified; contradictory native
+owners disable that provider key. A conflicting binding logs once and supplies no provider
+identity; it does not reject the tool call. Independent native request proof remains authoritative,
+and dispatch continues through the existing attribution and permission paths. Existing Block,
+Trust, retired-frontend and workspace guards still run. Old keys retain the old frontend/epoch
+after compaction, never the successor.
+The version-7 correlation ledger retains scoped hashes and each derived request's native anchor.
+Derived ownership becomes readable and wakes waiters only after its durable commit. A failed
+commit leaves that derivation unpublished, logs the fallback and continues ordinary tool
+dispatch with any independently proven native owner. Provider bookkeeping cannot introduce an
+HTTP failure for a call the existing paths would accept. Complete version-6 ledgers still load
+without scanning history. Damaged auxiliary keys cannot erase valid
+native ownership; malformed/orphaned derivations cannot become native proof. Native evidence for
+the derived request upgrades or replaces it and disables a contradictory key. Recorded calls
+retain `providerSessionAnchor`; these canonical call shards use the existing repair path to
+upgrade or relocate provenance and assets. The derived `providerSessionToolCalls` count bounds
+which sessions need that repair. History migration never promotes these calls to native proof.
+Known native requests reusing an already learned key skip the provider-admission queue without
+new writes. New bindings and derived owners stay serialized behind their durable commit;
+another chat's slow write cannot delay the known native path. Provider-session admission is
+accepted HTTP work, so ordinary disconnect drains its durable write before tool dispatch.
+If native proof changes the owner during a handler, the kernel
+withholds its result and scoped deliveries with `CALLER_IDENTITY_CHANGED`; it never replays
+the operation or transfers the original owner's resources to the new caller.
+Reference: https://developers.openai.com/plugins/reference#meta-fields-the-client-provides
 
 `usage.js` can also project an exact conversation/request pair from a complete live POST
 conversation SSE event before Fiber exposes it. Reads are bounded to 4 MiB / 15 minutes,
@@ -842,6 +874,9 @@ Trust or turn recovery. Canonical tool-call shards preserve call UUIDs; the summ
 `provisionalToolCalls` count identifies history needing reconciliation. Exact late proof upgrades
 or moves those calls with their assets through `reviseProvisionalCall`, preserving unrelated
 messages and sequence anchors. Startup never restores exact ownership from provisional rows.
+Provisional placement retains the same request-id stream diagnostics as Unattributed activity:
+its log names an observed stream path, or says no matching trace was observed. A later trace
+is also logged through `request-trace.ts`; trace paths never establish caller ownership.
 Storage failures during attribution repair use the existing repair timer for one delayed
 in-process retry (one second) per page-evidence/startup trigger. The retry rereads durable
 history and the exact correlation registry; it cannot promote calls without proof. A repeated

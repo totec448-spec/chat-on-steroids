@@ -44,6 +44,8 @@ export interface CallEvidence {
  * recorder writes down on purpose.
  */
 export interface CallCaller {
+  /** Native request anchoring a host conversation-metadata proof, when used. */
+  providerSessionAnchor?: string;
   transportKey: string | null;
   /**
    * Local Setup profile that owns the MCP endpoint generation which accepted this call.
