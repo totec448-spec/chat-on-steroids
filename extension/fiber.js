@@ -86,7 +86,10 @@
   /** ChatGPT-rendered authored prose. Tool rows and this extension's own surfaces are excluded. */
   const MARKDOWN = '.markdown, [data-markdown-text-style="assistant-message"]';
   const TOOL = 'span[class*="tool-message"], div.pointer-events-none.contents, div:has(> [data-testid="cot-v5-tool-icon-pile"])';
-  const GENERATED_IMAGE = '[class~="group/imagegen-image"] img, [class~="group/generated-image-preview"] img';
+  // A gallery's thumbnails sit beside its large preview, outside both groups (#2005, seen 2026-11-02/03):
+  // `div[role=group] > button[aria-pressed] > img`. Being matched here is not ownership: each node still
+  // needs its exact typed image below.
+  const GENERATED_IMAGE = '[class~="group/imagegen-image"] img, [class~="group/generated-image-preview"] img, [role="group"] > button[aria-pressed] > img';
   const OWN_SURFACES = '.clf-stream, .clf-stage, .clf-composer, .clf-boot';
   const MAX_RENDERED_HTML = 120_000;
   // An exact, stable assistant final can have far more than 120k of decorative
@@ -791,6 +794,27 @@
    * uploads and every other role/channel is private or unknown. Only the provider message UUID,
    * sediment file id and bounded geometry cross worlds; no signed URL or arbitrary metadata does.
    */
+  /**
+   * The sediment file one mounted gallery image shows, or null. The gallery's own shell item is only its
+   * first image, so each image is found by its id among this turn's typed images (#2005: the large
+   * preview showing another image, and every thumbnail, were all "Image preview unavailable"). The large
+   * preview names its image (`imageId`) and says it is complete and not a preview; a thumbnail names its
+   * image object. Exactly one typed image of this turn must have that id, the same message and the
+   * same source, and be completed.
+   */
+  function galleryImageAsset(control, shown, shellImages) {
+    if (control && (control.isComplete !== true || control.isPreview !== false)) return null;
+    const wanted = control ? control.imageId : shown?.id;
+    if (typeof wanted !== 'string' || !wanted) return null;
+    if (control && shown && shown.id !== wanted) return null;
+    const matches = [...shellImages.keys()].filter(item => item?.id === wanted);
+    if (matches.length !== 1) return null;
+    const item = matches[0];
+    if (item.status !== 'completed' || item.isPreview === true) return null;
+    if (shown && (shown.chatGptMessageId !== item.chatGptMessageId || (typeof shown.src === 'string' && shown.src !== item.src))) return null;
+    return shellImages.get(item);
+  }
+
   function generatedImagesOf(sections, messages, exactImageNodes, shellImages = new Map()) {
     const out = [];
     const seen = new Set();
@@ -854,13 +878,13 @@
             // Current image previews use blob pixels. Only the mounted typed item
             // and its exact per-image control can identify those pixels; a blob URL
             // or a nearby gallery alone is not an asset identity.
-            let control = null;
+            let control = null, shown = null;
             for (let at = fiberOf(node), up = 0; at && up < MAX_CLIMB; up++, at = at.return) {
               const props = at.memoizedProps;
               if (props?.imageId && !control) control = props;
+              if (props?.image && typeof props.image === 'object' && !shown) shown = props.image;
               if (shellImages.has(props?.item)) {
-                if (control?.imageId === props.item.id && control.isComplete === true && control.isPreview === false)
-                  assetId = shellImages.get(props.item);
+                assetId = galleryImageAsset(control, shown, shellImages);
                 break;
               }
               if (props?.entry) break;
