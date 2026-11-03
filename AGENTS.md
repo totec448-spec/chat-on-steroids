@@ -5862,8 +5862,10 @@ Neither browser permission nor native Control permission enables it. `linux_obse
 on an internal direct call. It has no window inventory, accessibility refs, clicks, typing
 or coordinates. Its registrar requires live `screen` capability and the Linux opt-in before
 and after backend waits, image decoding and portal consent; a revoked grant emits no image.
-The checked `agent-desktop` 1.0.2 subprocess adapter admits only `version` and `screenshot`,
-never uses a shell, bounds output and validates decoded PNG/dimensions before MCP image output.
+The checked `agent-desktop` 1.0.2 subprocess adapter (`linux-screenshot-backend.ts`)
+admits only `version` and `screenshot`, never uses a shell, bounds output and validates
+the outer response envelope. `linux-screenshot.ts` validates decoded PNG structure and
+dimensions before MCP image output.
 A full-display capture is never a per-window screenshot.
 
 The Settings button calls `linuxScreenshotConsent` via preload →
