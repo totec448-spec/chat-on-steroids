@@ -672,6 +672,13 @@ export interface SessionSummary {
   selectedModel?: { conversationId: string; model: string; observedAt: number; reasoningEffort?: ReasoningEffort };
   /** Explicit local project; durable across frontend conversation replacement. */
   projectId?: string;
+  /**
+   * The person moved this chat to its project, or out of one (#1919). The app then never binds it
+   * to a project by itself again, as it does for a chat started in a linked ChatGPT Project.
+   */
+  projectChosen?: true;
+  /** Moved into its project since the person's last message: the next one names the folder once. */
+  projectNotePending?: true;
   id: string;
   title: string;
   /**
@@ -1358,3 +1365,6 @@ export const UNATTRIBUTED_SESSION_TITLE = 'Unattributed activity';
 export function isUnattributedSession(summary: { conversationId: string | null; title: string; origin?: SessionOrigin | null }): boolean {
   return summary.conversationId === null && !summary.origin && summary.title === UNATTRIBUTED_SESSION_TITLE;
 }
+
+/** How long a Compact & Resume may wait for ChatGPT's summary before the last saved one is offered (2026-11-01). */
+export const STUCK_SUMMARY_MS = 15 * 60_000;
