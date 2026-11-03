@@ -280,7 +280,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Permissions and settings | `config.ts` / `config.json` | Validate every load/save; enforce effective current capabilities at use. |
 | Credentials | `secrets.ts` / encrypted `secrets.bin`; plugin OAuth's encrypted installation store | Main process only; publish updated cache after the encrypted write. |
 | Session/current chat/project | `store.ts` / `sessions/<id>/meta.json` | Rebind is the semantic A→B commit. |
-| Exact request ownership | `correlation.ts` / `state/request-correlations.json` plus recorded proof | First exact proof wins; retain local session epoch; new owners are written before browser ACK. Startup trusts a complete ledger and scans history only to migrate an older one. |
+| Exact request ownership | `correlation.ts` / `state/request-correlations.json` plus recorded proof | Native request proof establishes the session epoch and scoped provider-session bindings. Derived owners commit before publication; native request proof supersedes a derivation. Startup trusts a complete ledger and scans history only to migrate an older one. |
 | Running exec process | `UnifiedExecProcessManager` process memory plus `codex/ownership.ts` custody | The manager is the only live-process authority. A yielded child may start under temporary request custody; exact correlation promotes it to the durable session. IPC/preload/renderer only project that owner-scoped state and may request an ownership- and incarnation-checked stop. |
 | Authored message | `store.ts` / canonical message shard | Replace by stable identity, preserving origin chronology. |
 | Turn round outline | `recorder.ts` `turn_trace` → `store.ts::writeTurnTrace` / `sessions/<id>/traces/<turnId>.json` | Validated by `shared/turn-trace.ts`; the newest outline replaces the turn's; never an event or evidence. |
@@ -710,6 +710,38 @@ reads them back before returning `confirmed[]`. `/events` may publish the same e
 For a reserved New Chat opening, the shared `/input/bind` route commits its exact claim first;
 only that claim retires, and its promoted conversation/document epoch precedes correlation or event publication.
 Ownership acknowledgement is separate from slow transcript/image writes.
+All three surfaces also read the host's documented `params._meta["openai/session"]` and
+`openai/subject` at validated `tools/call` ingress (`mcp/provider-session.ts`). Matching headers,
+when supplied, must agree. Hash the Setup profile, surface, subject and anonymized conversation
+as one scoped key; raw metadata and credentials are never recorded. This is distinct from the
+SDK transport session id and the undocumented generic `_meta.sessionId`.
+A key acquires an owner only through native request proof. Once bound, it can identify a new
+workflow request even when that request id is absent from the page. Provider-derived requests
+cannot seed other bindings. Unknown/missing metadata remains unidentified; contradictory native
+owners disable that provider key. A conflicting binding logs once and supplies no provider
+identity; it does not reject the tool call. Independent native request proof remains authoritative,
+and dispatch continues through the existing attribution and permission paths. Existing Block,
+Trust, retired-frontend and workspace guards still run. Old keys retain the old frontend/epoch
+after compaction, never the successor.
+The version-7 correlation ledger retains scoped hashes and each derived request's native anchor.
+Derived ownership becomes readable and wakes waiters only after its durable commit. A failed
+commit leaves that derivation unpublished, logs the fallback and continues ordinary tool
+dispatch with any independently proven native owner. Provider bookkeeping cannot introduce an
+HTTP failure for a call the existing paths would accept. Complete version-6 ledgers still load
+without scanning history. Damaged auxiliary keys cannot erase valid
+native ownership; malformed/orphaned derivations cannot become native proof. Native evidence for
+the derived request upgrades or replaces it and disables a contradictory key. Recorded calls
+retain `providerSessionAnchor`; these canonical call shards use the existing repair path to
+upgrade or relocate provenance and assets. The derived `providerSessionToolCalls` count bounds
+which sessions need that repair. History migration never promotes these calls to native proof.
+Known native requests reusing an already learned key skip the provider-admission queue without
+new writes. New bindings and derived owners stay serialized behind their durable commit;
+another chat's slow write cannot delay the known native path. Provider-session admission is
+accepted HTTP work, so ordinary disconnect drains its durable write before tool dispatch.
+If native proof changes the owner during a handler, the kernel
+withholds its result and scoped deliveries with `CALLER_IDENTITY_CHANGED`; it never replays
+the operation or transfers the original owner's resources to the new caller.
+Reference: https://developers.openai.com/plugins/reference#meta-fields-the-client-provides
 
 `usage.js` can also project an exact conversation/request pair from a complete live POST
 conversation SSE event before Fiber exposes it. Reads are bounded to 4 MiB / 15 minutes,
@@ -837,6 +869,9 @@ Trust or turn recovery. Canonical tool-call shards preserve call UUIDs; the summ
 `provisionalToolCalls` count identifies history needing reconciliation. Exact late proof upgrades
 or moves those calls with their assets through `reviseProvisionalCall`, preserving unrelated
 messages and sequence anchors. Startup never restores exact ownership from provisional rows.
+Provisional placement retains the same request-id stream diagnostics as Unattributed activity:
+its log names an observed stream path, or says no matching trace was observed. A later trace
+is also logged through `request-trace.ts`; trace paths never establish caller ownership.
 Storage failures during attribution repair use the existing repair timer for one delayed
 in-process retry (one second) per page-evidence/startup trigger. The retry rereads durable
 history and the exact correlation registry; it cannot promote calls without proof. A repeated
@@ -2188,6 +2223,12 @@ UUID plus sediment asset id. They are neither assistant prose nor local tool cal
 establish turn completion, Goal eligibility or activity. Typed public tool/assistant image
 outputs supply metadata first; final provider status and a complete, exactly owned native IMG
 permit optional preview capture. Main/thumbnail/mask clones of the same asset share that identity.
+A gallery (several images in one answer) mounts one large preview plus a thumbnail strip
+(`div[role=group] > button[aria-pressed] > img`, part of `GENERATED_IMAGE`). Its blob pixels belong to
+an asset only through `galleryImageAsset` (#2005): the image's own id (the preview's `imageId`, which
+must say `isComplete` and not `isPreview`, or a thumbnail's `image.id`) must match exactly one typed
+`generated-image` of this turn, with the same message and source, and that one completed. The gallery's
+shell `item` is only its first image, so matching against it alone recorded one picture per gallery.
 The extension captures already-loaded pixels without fetching signed URLs; route, document epoch,
 owner, node and source revision must survive each await. At most two captures run concurrently.
 Previews are WebP, at most 384,000 encoded bytes, 1,600 pixels per edge and 2.56 million decoded
@@ -3940,6 +3981,13 @@ idle and attachment-free before the one click. Source readiness has a bounded 60
 the native transition then gets its own bounded 12-second phase. Destination proof requires the
 exact Project home, a connected ready editor and no displayed source turns. User interaction,
 cancellation or a foreign route revokes the attempt; no extra tab compensates for a missing result.
+When an automatic Compact & Resume's page acks `project-entry:source-ready-timeout…` or
+`…transition-timeout…` (nothing sent), the bridge releases that attempt's destination claim
+(`releaseContinuationDestinationSendNow`) instead of aborting, logs it, and the next opening pickup
+offers the same brief again (#1882: ChatGPT limiting history or a region change made the Project open
+late, and the written brief was thrown away). A manual press, a user interruption or any other
+failure still aborts. After its three quick opening pickups an automatic ticket tries once an hour
+(`AUTOMATIC_OPENING_SLOW_MS`, logged once): while open it owns the chat's recovery, so it must not stop.
 One exception, measured: a replacement tab opens the source at `/c/<id>` and ChatGPT rewrites that
 route twice (`/g/<project>/c/<id>`, then with the Project's name). A click between the two is
 taken and then dropped by the second rewrite (8 of 14 handoffs in a Project timed out on
@@ -5864,11 +5912,35 @@ process once and retains an explicit access error; ordinary network retry remain
 
 ### Native Desktop
 
-Desktop is available only on Windows and supported macOS. Linux removes it from live discovery
-and enforcement while preserving stored preferences. Windows uses the bounded PowerShell/Win32/
+Native mouse/keyboard Desktop control is available only on Windows and supported macOS.
+Linux preserves those stored preferences but exposes no native input tool at this stage.
+Windows uses the bounded PowerShell/Win32/
 UIA helper; macOS uses Swift ScreenCaptureKit/AX/CGEvent through an architecture-matched N-API
 addon on an Electron worker. The packaged Electron app is the macOS permission subject; a
 standalone CLI probe does not prove Screen Recording/Accessibility permission for the app.
+
+**GNOME Wayland read-only display screenshots (Linux staged integration, part 2).** A separate,
+default-off `ui.linuxDesktopEnabled` setting is saved by `config.ts`, projected through
+`shared/types.ts`, edited through Settings/IPC and treated as wider access in settings imports.
+Neither browser permission nor native Control permission enables it. `linux_observe` has only
+`what:'screenshot',display:0` in this stage; a nonzero display is rejected even
+on an internal direct call. It has no window inventory, accessibility refs, clicks, typing
+or coordinates. Its registrar requires live `screen` capability and the Linux opt-in before
+and after backend waits, image decoding and portal consent; a revoked grant emits no image.
+The checked `agent-desktop` 1.0.2 subprocess adapter (`linux-screenshot-backend.ts`)
+admits only `version` and `screenshot`, never uses a shell, bounds output and validates
+the outer response envelope. `linux-screenshot.ts` validates decoded PNG structure and
+dimensions before MCP image output.
+A full-display capture is never a per-window screenshot.
+
+The Settings button calls `linuxScreenshotConsent` via preload →
+`desktop:linuxScreenshotConsent` only from the focused CoS main window. It triggers one
+GNOME screenshot portal request and returns only the PNG byte count; no image is saved or sent
+to the renderer. Aborted/denied portal prompts are not retried. Saved opt-in changes invalidate
+MCP surface exposure so a removed tool is not retained in model-facing discovery. Tests cover
+the backend command boundary, malformed PNG, opt-in and Screen revocation mid-capture, Settings
+consent and twelve locale catalogs. A future control PR adds accessibility refs and input
+*after* this read-only path, with its own ownership and permission gates.
 
 The permission self-test reports native preflight results, not a completed capture or input.
 An actual screenshot and AX query remain separate evidence; the existing grant-history and
@@ -6061,7 +6133,10 @@ Failure and recovery stay visible outside native details. Identical pushes prese
 choice/focus; meaningful owner changes reopen attention. A keyboard button controls native
 details and a separate polite live region announces changed status. The card keeps the event
 feed's remaining height and internal scrolling in short windows. Diagnostics uses the existing
-save owner with both buttons disabled during saving, and does not retry updates. Disclosure and
+save owner with both buttons disabled during saving, and does not retry updates. The report
+action is available when either the retained operation error or the latest updater error
+needs diagnostics, including automatic staging failures before Update all. Long translated
+failure text may scroll inside the bounded card so recovery controls are not clipped. Disclosure and
 action regressions stay with the view; real-Electron cross-feature acceptance is added separately.
 
 ## 19. Debugging, tests and working here
@@ -6248,9 +6323,27 @@ partial file, verify SHA-256 before staging/adoption, and rehash at ordinary qui
 off. Windows NSIS/Linux AppImage can apply automatically; macOS/DEB present the supported manual
 path, development does not stage. Explicit install may relaunch; ordinary quit does not force
 relaunch. Failed checks never replace a verified staged candidate with unverified bytes.
+`userData/updates` is reserved exclusively for updater staging, not backup storage. Ordinary
+direct-child directories named `major.minor.patch` are cache entries; their contents may be
+removed recursively, even if manually placed there. Each packaged check removes installed-or-older
+cache versions even offline. Superseded candidates are removed only after their replacement is
+verified or adopted. Cleanup never scans outside this root, so app copies and backups kept
+elsewhere are untouched. At the root it preserves `handoff.json`, non-version entries and linked
+directories; a linked root is skipped. Locked files defer to the next
+ordinary check without failing an update. `update.test.ts` covers previous-version cache and
+handoff records, failed transfers, restart adoption and directory links.
+Cache cleanup and download preparation retain the update pass's reset generation. After each
+filesystem wait they recheck that owner before removing entries, creating files or retiring
+other candidates; a superseded pass stops rather than being treated as deferred cleanup.
+New download writes reject linked cache roots/version directories. They unlink only the
+selected stale partial-file entry (never recursively) and create its replacement exclusively,
+so a partial-file link cannot truncate another file. Existing checksum-verified adoption is
+still read-only and retains its prior linked-path behavior.
 The updater classifies its own `TypeError('fetch failed')` as `GitHub could not be reached`,
 retaining the original diagnostic in its warning log. The card, update banners and retained
 Update all error share the renderer's update-error formatter; unknown errors remain literal.
+Linked staging paths use a translated cache-folder error and the existing diagnostics-report
+recovery guidance, rather than suggesting an unchanged retry of the same blocked path.
 On Windows the handoff first repeats the installer's own `icacls` sandbox grant on the app folder;
 an exit code there means the folder needs an administrator, so the installer is started through
 `Start-Process -Verb RunAs` (#1490). That PowerShell stays attached (detached it has no console and
