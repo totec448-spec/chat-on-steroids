@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomFillSync } from 'node:crypto';
 import sharp from 'sharp';
 import { MAX_VIEW_IMAGE_BYTES } from '../src/main/codex/view-image.js';
+import { MAX_LINUX_DESKTOP_REF_LENGTH } from '../src/main/computer/linux-desktop-ref.js';
 
 const testState = vi.hoisted(() => ({
   enabled: true, screen: true, control: true, readOnly: false, allowedUnknown: false,
@@ -66,6 +67,24 @@ describe.runIf(process.platform === 'linux')('native Linux connector authorizati
     expect(schema.safeParse({ what: 'screenshot', display: 1 }).success).toBe(false);
     expect(schema.safeParse({ what: 'screenshot', display: 32 }).success).toBe(false);
     expect(schema.safeParse({ what: 'windows' }).success).toBe(true);
+  });
+  it('does not store or act on overlong backend accessibility refs', async () => {
+    const { observe, act, declarations } = handlers();
+    const maxRef = `@s${'a'.repeat(MAX_LINUX_DESKTOP_REF_LENGTH - 5)}:e1`;
+    const tooLongRef = `${maxRef}0`;
+    const actSchema = declarations.get('linux_act').inputSchema;
+    expect(actSchema.safeParse({ action: 'click', ref: maxRef }).success).toBe(true);
+    expect(actSchema.safeParse({ action: 'click', ref: tooLongRef }).success).toBe(false);
+    expect(actSchema.safeParse({ action: 'set_value', ref: tooLongRef, value: 'x' }).success).toBe(false);
+    testState.backend.mockImplementation(async ({ kind }: { kind: string }) => kind === 'windows'
+      ? good('list-windows', [window]) : kind === 'snapshot'
+        ? good('snapshot', { snapshot_id: 's123', complete: true, window: { id: window.id },
+          tree: { children: [{ ref_id: tooLongRef }] } }) : good(kind, {}));
+    expect((await observe({ what: 'snapshot', window_id: window.id })).isError).toBeUndefined();
+    const result = await act({ action: 'click', ref: tooLongRef });
+    expect(result.content[0].text).toContain('STALE_OR_FOREIGN_REF');
+    expect(testState.ask).not.toHaveBeenCalled();
+    expect(testState.backend.mock.calls.filter(([arg]) => arg.kind === 'click')).toHaveLength(0);
   });
   it('rejects an unvalidated screenshot display without calling the desktop backend', async () => {
     const { observe } = handlers();

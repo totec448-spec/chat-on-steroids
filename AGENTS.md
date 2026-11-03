@@ -5938,6 +5938,10 @@ physical pointer, keyboard, coordinate command or automatic action retry.
 The command adapter remains pinned to agent-desktop 1.0.2, never uses a shell,
 and only publishes bounded backend error codes. Tests cover those ownership
 and revocation gates as well as legacy Windows/macOS Desktop Ask behavior.
+The version preflight requires the backend response command to be `version`,
+the OS to be Linux and the version to be 1.0.2. Accessibility refs must match
+`@s<snapshot>:e<element>` and be at most 128 characters: collection, MCP
+action schemas and native subprocess arguments enforce the same bound.
 
 The permission self-test reports native preflight results, not a completed capture or input.
 An actual screenshot and AX query remain separate evidence; the existing grant-history and
