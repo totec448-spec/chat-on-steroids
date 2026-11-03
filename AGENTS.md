@@ -2206,6 +2206,12 @@ UUID plus sediment asset id. They are neither assistant prose nor local tool cal
 establish turn completion, Goal eligibility or activity. Typed public tool/assistant image
 outputs supply metadata first; final provider status and a complete, exactly owned native IMG
 permit optional preview capture. Main/thumbnail/mask clones of the same asset share that identity.
+A gallery (several images in one answer) mounts one large preview plus a thumbnail strip
+(`div[role=group] > button[aria-pressed] > img`, part of `GENERATED_IMAGE`). Its blob pixels belong to
+an asset only through `galleryImageAsset` (#2005): the image's own id (the preview's `imageId`, which
+must say `isComplete` and not `isPreview`, or a thumbnail's `image.id`) must match exactly one typed
+`generated-image` of this turn, with the same message and source, and that one completed. The gallery's
+shell `item` is only its first image, so matching against it alone recorded one picture per gallery.
 The extension captures already-loaded pixels without fetching signed URLs; route, document epoch,
 owner, node and source revision must survive each await. At most two captures run concurrently.
 Previews are WebP, at most 384,000 encoded bytes, 1,600 pixels per edge and 2.56 million decoded
