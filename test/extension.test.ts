@@ -2678,7 +2678,7 @@ describe('app-owned retained tab pool', () => {
     const code = closeQueueCode();
     const outbox = vm.runInNewContext(`${code}\n({enqueueClose, drainCloses})`, {
       cleanConversationId: (id: string) => id, recoveryMonitoring: false,
-      closeOutbox: [], closing: false, token: 'paired',
+      closeOutbox: [], closeOutboxDecision: null, closing: false, token: 'paired',
       load: async () => undefined, persistLive: async () => undefined,
       scheduleRetry: () => undefined, clearRetryIfIdle: () => undefined,
       conversationStillOpen: () => false,
@@ -2703,39 +2703,50 @@ describe('app-owned retained tab pool', () => {
   it('does not report a deliberate close when Chrome still has the chat after the worker cache loses its binding', async () => {
     const chat = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000072';
     const closed = vi.fn(async () => ({ ok: true }));
+    const info = vi.fn();
+    let tabOpen = true;
     const code = closeQueueCode();
     const api = vm.runInNewContext(`${code}\n({enqueueClose, drainCloses, queued: () => closeOutbox})`, {
-      closeOutbox: [], closing: false, token: 'paired', recoveryMonitoring: false,
+      closeOutbox: [], closeOutboxDecision: null, closing: false, token: 'paired', recoveryMonitoring: false,
       cleanConversationId: (id: string) => id, load: async () => undefined,
       persistLive: async () => undefined, scheduleRetry: () => undefined,
       clearRetryIfIdle: () => undefined, conversationStillOpen: () => false,
       CHATGPT_TAB_URLS: ['https://chatgpt.com/*'],
-      chrome: { tabs: { query: async () => [{ id: 2, url: `https://chatgpt.com/c/${chat}` }] } },
-      conversationFromUrl: (url: string) => new URL(url).pathname.split('/c/')[1], call: closed
-    });
-    await api.enqueueClose(chat);
-    expect(await api.drainCloses()).toMatchObject({ pending: 0 });
-    expect(api.queued()).toHaveLength(0);
-    expect(closed).not.toHaveBeenCalled();
-  });
-
-  it('keeps the close queued if Chrome cannot provide the tab list', async () => {
-    const chat = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000073';
-    const closed = vi.fn(async () => ({ ok: true }));
-    const code = closeQueueCode();
-    const api = vm.runInNewContext(`${code}\n({enqueueClose, drainCloses, queued: () => closeOutbox})`, {
-      closeOutbox: [], closing: false, token: 'paired', recoveryMonitoring: false,
-      cleanConversationId: (id: string) => id, load: async () => undefined,
-      persistLive: async () => undefined, scheduleRetry: () => undefined,
-      clearRetryIfIdle: () => undefined, conversationStillOpen: () => false,
-      CHATGPT_TAB_URLS: ['https://chatgpt.com/*'],
-      chrome: { tabs: { query: async () => { throw new Error('Chrome restarting'); } } },
-      conversationFromUrl: () => null, call: closed
+      chrome: { tabs: { query: async () => tabOpen ? [{ id: 2, url: `https://chatgpt.com/c/${chat}` }] : [] } },
+      conversationFromUrl: (url: string) => new URL(url).pathname.split('/c/')[1], call: closed,
+      console: { info }
     });
     await api.enqueueClose(chat);
     expect(await api.drainCloses()).toMatchObject({ pending: 1 });
     expect(api.queued()).toHaveLength(1);
     expect(closed).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith('close outbox: deferred close; chrome_tab_open');
+    // A late true departure must still be reported: the close was deferred,
+    // not dropped just because the tab was visible before navigation.
+    tabOpen = false;
+    expect(await api.drainCloses()).toMatchObject({ pending: 0 });
+    expect(closed).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the close queued if Chrome cannot provide the tab list', async () => {
+    const chat = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000073';
+    const closed = vi.fn(async () => ({ ok: true }));
+    const info = vi.fn();
+    const code = closeQueueCode();
+    const api = vm.runInNewContext(`${code}\n({enqueueClose, drainCloses, queued: () => closeOutbox})`, {
+      closeOutbox: [], closeOutboxDecision: null, closing: false, token: 'paired', recoveryMonitoring: false,
+      cleanConversationId: (id: string) => id, load: async () => undefined,
+      persistLive: async () => undefined, scheduleRetry: () => undefined,
+      clearRetryIfIdle: () => undefined, conversationStillOpen: () => false,
+      CHATGPT_TAB_URLS: ['https://chatgpt.com/*'],
+      chrome: { tabs: { query: async () => { throw new Error('Chrome restarting'); } } },
+      conversationFromUrl: () => null, call: closed, console: { info }
+    });
+    await api.enqueueClose(chat);
+    expect(await api.drainCloses()).toMatchObject({ pending: 1 });
+    expect(api.queued()).toHaveLength(1);
+    expect(closed).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith('close outbox: deferred close; chrome_inventory_unavailable');
   });
 
   const id = (n: number) => `aaaaaaaa-bbbb-4ccc-8ddd-${String(n).padStart(12, '0')}`;

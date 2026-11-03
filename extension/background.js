@@ -187,6 +187,8 @@ const journalPreferences = new Set();
 let delivery = { at: 0, ok: null, events: 0, total: 0, conversationId: null, status: 0, error: null };
 /** Idempotent conversation-close deliveries awaiting an app ACK. */
 let closeOutbox = [];
+/** Last autonomous close decision, without chat IDs, for the existing /diagnostics report. */
+let closeOutboxDecision = null;
 /** Successful managed removals awaiting onRemoved; exact document receipts survive MV3 sleep. */
 let tabRemovals = {};
 /**
@@ -3894,6 +3896,14 @@ async function verifiedConversationGone(conversationId) {
   return conversationStillOpen(conversationId) ? 'present' : 'gone';
 }
 
+function noteCloseDecision(action, reason) {
+  // Keep the reason finite and data-free. The app's existing diagnostics report
+  // logs one actionable line; the worker console also shows it immediately.
+  closeOutboxDecision = { at: Math.max(Date.now(), (closeOutboxDecision?.at || 0) + 1), action, reason };
+  console.info(`close outbox: ${action} close; ${reason}`);
+  if (typeof publishCompanionDiagnostics === 'function') void publishCompanionDiagnostics(true);
+}
+
 async function enqueueClose(conversationId, byExtension = false) {
   const id = cleanConversationId(conversationId);
   if (!id) return false;
@@ -3926,15 +3936,28 @@ async function drainCloses() {
         changed = true;
         continue;
       }
-      const presence = await verifiedConversationGone(conversationId);
-      if (presence !== 'gone') {
-        // A real open tab supersedes an unacknowledged close, whereas an unavailable
-        // browser inventory must keep the pending close for a later reliable pass.
+      // An extension-owned navigation already has exact authority for this
+      // departure. Its old tab URL may still be visible while Chrome navigates;
+      // checking it would incorrectly suppress the close (#1086).
+      if (entry.byExtension !== true) {
+        const presence = await verifiedConversationGone(conversationId);
         if (presence === 'present') {
-          closeOutbox = closeOutbox.filter((candidate) => candidate !== entry);
-          changed = true;
+          if (conversationStillOpen(conversationId)) {
+            // A new binding proves this queued close was superseded.
+            noteCloseDecision('discarded', 'conversation_binding_open');
+            closeOutbox = closeOutbox.filter((candidate) => candidate !== entry);
+            changed = true;
+          } else {
+            // A close can be queued before Chrome finishes the navigation.
+            // Keep it for the next pass rather than discard the only departure.
+            noteCloseDecision('deferred', 'chrome_tab_open');
+          }
+          continue;
         }
-        continue;
+        if (presence === 'unknown') {
+          noteCloseDecision('deferred', 'chrome_inventory_unavailable');
+          continue;
+        }
       }
       const result = await call('/closed', {
         method: 'POST',
@@ -5206,6 +5229,7 @@ async function companionDiagnosticSnapshot(found) {
   const languageState = appLanguageState();
   return {
     capturedAt: Date.now(),
+    ...(closeOutboxDecision ? { closeOutboxDecision } : {}),
     language: { ...languageState, error: languageState.error ?? readFailed,
       stored: typeof preferences[APP_LANGUAGE_KEY] === 'string' ? preferences[APP_LANGUAGE_KEY] : null },
     status: {
