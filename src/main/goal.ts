@@ -229,10 +229,19 @@ const UNSAFE_REASONING_TAG = /<\/?(?:think|analysis|reasoning)\b[^>]*>/iu;
  */
 const LOOP_ATTEMPTS = 3;
 
+/**
+ * The length the helper is asked to stay under, with room below the hard cap (MAX_MESSAGE_CHARS).
+ * Unstated, Loop messages grew past the cap and every retry failed the same way (2026-11-02).
+ */
+const REPLY_LENGTH_RULE = 'Keep reply under 10,000 characters.';
+/** Added for a chat whose previous helper message was over the cap, until one fits again. */
+const REPLY_SHORTER_RULE = 'Your previous message for this chat was too long to send: keep this reply under 6,000 characters, and name the most important work first.';
+
 /** App-owned transport contract. The editable prompt decides policy, never wire syntax. */
 const GOAL_OUTPUT_PROTOCOL =
   'Return only the app decision described by the response schema. Use action "stop" when the editable instruction would say NO_REPLY. ' +
-  'Use action "continue" only with the exact next user message in reply. Put no reasoning, counting, labels, tokenizer markers, or protocol words in reply.';
+  'Use action "continue" only with the exact next user message in reply. Put no reasoning, counting, labels, tokenizer markers, or protocol words in reply. ' +
+  REPLY_LENGTH_RULE;
 
 const GOAL_RESPONSE_FORMAT = {
   type: 'json_schema',
@@ -269,7 +278,8 @@ const GOAL_RESPONSE_FORMAT = {
  */
 const LOOP_OUTPUT_PROTOCOL =
   'Return only the app decision described by the response schema. Action is always "continue" — there is no stop, and no message may be skipped. ' +
-  'Put the exact next user message in reply, and put no reasoning, counting, labels, tokenizer markers, or protocol words in it.';
+  'Put the exact next user message in reply, and put no reasoning, counting, labels, tokenizer markers, or protocol words in it. ' +
+  REPLY_LENGTH_RULE;
 
 const LOOP_RESPONSE_FORMAT = {
   type: 'json_schema',
@@ -397,6 +407,13 @@ interface GoalDraft extends Omit<GoalDraftView, 'retryable'> {
 }
 
 /** At most one draft per conversation. A new turn replaces the old chat's finished draft. */
+function protocolFor(request: Pick<GoalRequest, 'mode' | 'shorter'>): string {
+  const protocol = request.mode === 'loop' ? LOOP_OUTPUT_PROTOCOL : GOAL_OUTPUT_PROTOCOL;
+  return request.shorter ? `${protocol} ${REPLY_SHORTER_RULE}` : protocol;
+}
+/** Chats whose last helper message failed as reply_too_long; cleared by the next one that fits. */
+const tooLongReplies = new Set<string>();
+
 const drafts = new Map<string, GoalDraft>();
 const goalListeners = new Set<() => void>();
 export function onGoalChange(listener: () => void): () => void {
@@ -1614,6 +1631,7 @@ export async function claimGoalRecoveryStopNow(conversationId: string, replyId: 
 
 export function resetGoalStateForTests(): void {
   customResponseFormats.clear();
+  tooLongReplies.clear();
   for (const draft of drafts.values()) draft.abort?.abort();
   goalOutcomes.clear();
   resetGoalHelperSizeForTests();
@@ -1815,6 +1833,8 @@ interface GoalRequest {
   signal: AbortSignal;
   /** The ChatGPT helper captured with the request's deadline; read fresh only when absent. */
   helper?: HelperSelection | null;
+  /** The chat's previous helper message was over the cap: ask for a clearly shorter one. */
+  shorter?: boolean;
   /** Called as legacy SSE text arrives, so a streaming panel can show it being written. */
   publish?: (text: string) => void;
 }
@@ -1852,7 +1872,7 @@ async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision |
     ? 'The separately marked Original request contains the first user message as best-effort reference material. It may be shortened or recorder-truncated; omissions do not prove completion. Consider its requirements alongside the conversation and saved objective.'
     : '';
   if (request.backend === 'chatgpt') {
-    const protocol = request.mode === 'loop' ? LOOP_OUTPUT_PROTOCOL : GOAL_OUTPUT_PROTOCOL;
+    const protocol = protocolFor(request);
     // ChatGPT offers connected apps, this one included, in every chat, the helper's too. A helper that
     // called a tool ran it on this machine without any chat to answer for it (2026-10-02, live).
     // The JSON goes in a code block: GPT-6's page renderer reads a reply that opens with `{` as its own
@@ -1925,7 +1945,7 @@ async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision |
     stream: Boolean(request.publish),
     messages: [
       ...request.system.map((content) => ({ role: 'system', content })),
-      { role: 'system', content: request.mode === 'loop' ? LOOP_OUTPUT_PROTOCOL : GOAL_OUTPUT_PROTOCOL },
+      { role: 'system', content: protocolFor(request) },
       ...(request.original ? [{ role: 'system', content: originalReferenceContract }] : []),
       ...(request.original ? [{ role: 'user', content: request.original }] : []),
       // Supplemental history comes first; later human corrections in the transcript remain newer.
@@ -2161,6 +2181,7 @@ async function run(draft: GoalDraft): Promise<void> {
       model: draft.model,
       mode: draft.mode,
       helper: draft.helper,
+      shorter: tooLongReplies.has(draft.conversationId),
       // Loop replaces the instruction, not the goal: a chat that carries one still hands it
       // over verbatim, which is what "here is the task" in that prompt refers to. Without one
       // the loop reads the job out of the conversation, exactly as the gate does.
@@ -2191,9 +2212,11 @@ async function run(draft: GoalDraft): Promise<void> {
     // Logged like the exception path below. Ten rate limits in a row on 2026-09-02 left no
     // trace in app.log because a provider's refusal is an answer, not an exception.
     if (decision.action === 'http' || decision.action === 'invalid') {
-      logWarn(`goal: draft for ${draft.conversationId} failed — ${decision.error}`);
+      if (decision.error === 'reply_too_long') tooLongReplies.add(draft.conversationId);
+      logWarn(`goal: draft for ${draft.conversationId} failed — ${decision.error}${decision.error === 'reply_too_long' ? '; the next draft for this chat asks for a shorter message' : ''}`);
       return settle(draft, 'failed', decision.error);
     }
+    tooLongReplies.delete(draft.conversationId);
     if (decision.action === 'stop') {
       // Loop has already been asked again for exactly this, up to its limit. Reaching here
       // means the model kept refusing to write, which is a failure to produce an answer and
@@ -2256,11 +2279,13 @@ async function run(draft: GoalDraft): Promise<void> {
       : detail === 'reply_too_long' || detail === 'stream_record_too_long' || detail.startsWith('goal_browser_')
         ? detail
         : `request_failed: ${detail}`;
+    if (failure === 'reply_too_long') tooLongReplies.add(draft.conversationId);
     // A timeout names the limit that ended it: it differs by helper and reasoning effort (#2033).
     const limit = abort.signal.reason?.name === 'TimeoutError'
       ? ` (the ${limitMs / 60_000}-minute limit for the ${draft.backend} helper${effort ? ` at ${effort} reasoning` : ''})`
       : '';
-    logWarn(`goal: draft for ${draft.conversationId} failed — ${failure}${limit}`);
+    const shorter = failure === 'reply_too_long' ? '; the next draft for this chat asks for a shorter message' : '';
+    logWarn(`goal: draft for ${draft.conversationId} failed — ${failure}${limit}${shorter}`);
     settle(draft, 'failed', failure);
   } finally {
     clearTimeout(timer);
