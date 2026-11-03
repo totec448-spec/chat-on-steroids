@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
+  - name: Suggest a feature
+    url: https://github.com/totec448-spec/chat-on-steroids/blob/main/CONTRIBUTING.md#new-features
+    about: New features come as pull requests, not issues. The guide says how to start one.
   - name: Security vulnerability
     url: https://github.com/totec448-spec/chat-on-steroids/security/advisories/new
     about: Report privately. Please do not open a public issue for a security problem.

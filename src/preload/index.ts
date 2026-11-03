@@ -159,6 +159,8 @@ const api = {
   renameChatGroup: (id: string, name: string) => call<ChatGroupsState>('chatGroups:rename', { id, name }),
   deleteChatGroup: (id: string) => call<ChatGroupsState>('chatGroups:delete', { id }),
   assignChatGroup: (sessionId: string, groupId: string | null) => call<ChatGroupsState>('chatGroups:assign', { sessionId, groupId }),
+  moveChatProject: (sessionId: string, projectId: string | null, groupId?: string | null) =>
+    call<{ from: string | null; fromGroup: string | null; groups: ChatGroupsState; summaries: SessionSummary[] }>('sessions:moveProject', { sessionId, projectId, ...(groupId !== undefined ? { groupId } : {}) }),
   petsList: () => call<PetLibraryState>('pets:list'),
   petsOverlayState: () => call<PetOverlayControlState>('pets:overlayState'),
   petsSetOverlayVisible: (visible: boolean) => call<PetOverlayControlState>('pets:overlayVisible', { visible }),
@@ -295,8 +297,8 @@ const api = {
     call<{ url: string; via: 'gh' | 'existing' | 'browser' }>('projectCommit:pullRequest', { projectId, title, body }),
   setCommitFlow: (flow: CommitFlow) => call<boolean>('projectCommit:flow', { flow }),
   saveDiagnosticsReport: () => call<{ saved: false } | { saved: true; name: string }>('diagnostics:saveReport'),
-  openFeedbackIssue: (report: { kind: 'bug'; what: string; steps?: string; frequency?: 'Every time' | 'Sometimes' | 'It happened once' }
-    | { kind: 'idea'; problem: string; proposal: string }) => call<{ trimmed: boolean }>('feedback:openIssue', report),
+  openFeedbackIssue: (report: { kind: 'bug'; what: string; steps?: string; frequency?: 'Every time' | 'Sometimes' | 'It happened once' }) =>
+    call<{ trimmed: boolean }>('feedback:openIssue', report),
   requestDesktopAccessibility: () => call<AppState>('desktop:requestAccessibility'),
   repairDesktopAccess: () => call<AppState>('desktop:repairPermissions'),
   getLog: () => call<LogEntry[]>('log:get'),
@@ -402,6 +404,8 @@ const api = {
   },
   getSessionControls: (id: string) => call<SessionControlsView>('sessions:controls', { id }),
   cancelRecovery: (id: string) => call<boolean>('sessions:cancelRecovery', { id }),
+  pickupNow: (id: string, shown: { next: 'queue' | 'goal' | 'loop' | 'continue'; stoppedAt: number }) =>
+    call<{ ok: true; did: 'queued' | 'retrying' } | { ok: false; code: 'no-chat' | 'history-limit' | 'nothing-waiting' | 'changed' | 'not-sent' | 'not-started' }>('sessions:pickupNow', { id, ...shown }),
   setSessionAutomation: (id: string, automation: SessionControlsView['automation'], afterTurn?: boolean) => call<SessionControlsView>('sessions:automation', { id, automation, afterTurn }),
   setSessionObjective: (id: string, text: string, mode: 'goal' | 'loop') => call<SessionControlsView>('sessions:objective', { id, text, mode }),
   compactSession: (id: string) => call<SessionControlsView>('sessions:compact', { id }),

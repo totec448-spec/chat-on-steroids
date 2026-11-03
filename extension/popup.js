@@ -62,15 +62,21 @@ function stage(name, state, meta) {
 
 // -------------------------------------------------------------------- pipeline
 
-/** How the app describes what it placed a call on, in its own words. */
-const ATTRIBUTION = {
-  request_id: t('popup_attribution_exact_request_id', 'exact request id'),
-  unattributed: t('popup_attribution_request_id_not_resolved', 'request id not resolved'),
-  agent: t('popup_attribution_agent_key', 'agent key'),
-  turn: t('popup_attribution_tool_block_on_page', 'tool block on the page'),
-  generation: t('popup_attribution_only_chat_generating', 'the only chat generating'),
-  inferred: t('popup_attribution_not_placed_in_chat', 'not placed in a chat')
-};
+/**
+ * How the app describes what it placed a call on, in its own words. Read when painted: the app's
+ * language arrives after the popup opened, and names read at load stayed in Chrome's (2026-11-01).
+ */
+function attribution(app) {
+  switch (app) {
+    case 'request_id': return t('popup_attribution_exact_request_id', 'exact request id');
+    case 'unattributed': return t('popup_attribution_request_id_not_resolved', 'request id not resolved');
+    case 'agent': return t('popup_attribution_agent_key', 'agent key');
+    case 'turn': return t('popup_attribution_tool_block_on_page', 'tool block on the page');
+    case 'generation': return t('popup_attribution_only_chat_generating', 'the only chat generating');
+    case 'inferred': return t('popup_attribution_not_placed_in_chat', 'not placed in a chat');
+    default: return null;
+  }
+}
 
 /**
  * Whether a ChatGPT URL is a route a chat lives on or starts from: the start page, a chat, or a
@@ -193,14 +199,14 @@ function pipeline(info, ready) {
           ? t(
             'popup_pipeline_call_fallback_one',
             'The app could not place a call by request id — it fell back to $1.',
-            ATTRIBUTION[missed[0].app] || missed[0].app
+            attribution(missed[0].app) || missed[0].app
           )
           : tn(
             'popup_pipeline_call_fallback_many',
             missed.length,
             'The app could not place $1 call by request id — it fell back to $2.',
             'The app could not place $1 calls by request id — it fell back to $2.',
-            [missed.length, ATTRIBUTION[missed[0].app] || missed[0].app]
+            [missed.length, attribution(missed[0].app) || missed[0].app]
           )
       ]
     };
@@ -252,7 +258,7 @@ function paintCalls(page) {
         entry.read ? t('popup_yes', 'yes') : t('popup_no', 'no'),
         entry.sent || entry.app === 'request_id' ? t('popup_confirmed', 'confirmed') : t('popup_pending', 'pending'),
         entry.confirmed ? t('popup_confirmed', 'confirmed') : t('popup_pending', 'pending'),
-        ATTRIBUTION[entry.app] || t('popup_no_record', 'no record')
+        attribution(entry.app) || t('popup_no_record', 'no record')
       ]
     );
     line.append(pips, tool, id);
@@ -344,7 +350,7 @@ function paintDetails(status, info) {
   detail(
     grid,
     t('popup_detail_extension', 'extension'),
-    status ? t('popup_detail_extension_value', 'v$1 · protocol $2', [status.extensionVersion, status.extensionProtocol]) : null,
+    status ? t('popup_detail_extension_value', 'v$1 · protocol $2', [status.extensionVersion || '?', status.extensionProtocol ?? '?']) : null,
     status && status.compatible === false
   );
   detail(grid, t('popup_detail_chat_id', 'chat id'), (info && info.conversationId) || null);
@@ -368,7 +374,7 @@ function paintDetails(status, info) {
     grid,
     t('popup_detail_recorder', 'recorder'),
     page
-      ? t('popup_detail_recorder_value', 'fiber v$1 · run $2', [page.recorderVersion, page.runId])
+      ? t('popup_detail_recorder_value', 'fiber v$1 · run $2', [page.recorderVersion ?? '?', page.runId || '?'])
       : t('popup_status_not_attached', 'not attached'),
     !page
   );
@@ -382,12 +388,14 @@ function paintDetails(status, info) {
   detail(
     grid,
     t('popup_detail_observed', 'observed'),
-    page ? `${tn('popup_detail_events', page.events, '$1 event', '$1 events')} · ${tn('popup_detail_calls', page.calls, '$1 call', '$1 calls')}` : null
+    page ? `${tn('popup_detail_events', Number(page.events) || 0, '$1 event', '$1 events')} · ${tn('popup_detail_calls', Number(page.calls) || 0, '$1 call', '$1 calls')}` : null
   );
   detail(
     grid,
     t('popup_detail_in_this_browser', 'in this browser'),
-    info ? `${tn('popup_count_held', info.pending, '$1 held', '$1 held')} · ${t('popup_detail_total', '$1 total', info.pendingAll)}` : null,
+    // A failed tabStatus answers with an error and no counts: a dash, not "0 held · 0 total".
+    info && Number.isFinite(info.pending) && Number.isFinite(info.pendingAll)
+      ? `${tn('popup_count_held', info.pending, '$1 held', '$1 held')} · ${t('popup_detail_total', '$1 total', info.pendingAll)}` : null,
     Boolean(info && info.pendingAll)
   );
   const deliveryState = sent ? (sent.ok ? t('popup_status_ok', 'ok') : sent.error || t('popup_status_failed', 'failed')) : '';
@@ -403,7 +411,9 @@ function paintDetails(status, info) {
   detail(
     grid,
     t('popup_detail_page_sends', 'page sends'),
-    page ? `${page.sends} · ${tn('popup_detail_failed', page.failures, '$1 failed', '$1 failed')}` : null,
+    // A page that reports no send counts (an older recorder) shows a dash, not "undefined · undefined failed".
+    page && Number.isFinite(page.sends)
+      ? `${page.sends} · ${tn('popup_detail_failed', Number(page.failures) || 0, '$1 failed', '$1 failed')}` : null,
     Boolean(page && page.failures)
   );
 }
@@ -561,9 +571,10 @@ $('more').addEventListener('toggle', () => paintDetails(latest.status, latest.ta
 
 $('retryBtn').addEventListener('click', async () => {
   $('retryBtn').disabled = true;
-  await chrome.runtime.sendMessage({ type: 'pair' });
-  $('retryBtn').disabled = false;
-  await refresh();
+  // A failed pairing call must not leave the button disabled until the popup is reopened (2026-11-01).
+  try { await chrome.runtime.sendMessage({ type: 'pair' }); } catch { /* The next status says what happened. */ }
+  finally { $('retryBtn').disabled = false; }
+  await refresh().catch(() => undefined);
 });
 
 $('overwriteToggle').addEventListener('change', async () => {
@@ -585,6 +596,16 @@ $('timeToggle').addEventListener('change', async () => {
   showTimes = $('timeToggle').checked === true;
   await chrome.storage.local.set({ [SHOW_TIMES_KEY]: showTimes });
 });
+
+// Chrome sizes the popup to the page's height rounded down: a page 566.56 px tall got a 566 px
+// window that scrolled by a pixel. Keep the page a whole number of pixels tall, also after the
+// Advanced drawer or a status line changes it. The shell is measured, not the page, so the page
+// shrinks again with it.
+const shell = document.querySelector('.shell');
+const wholePixels = () => {
+  document.documentElement.style.minHeight = `${Math.ceil(shell.getBoundingClientRect().height)}px`;
+};
+if (shell && globalThis.ResizeObserver) new ResizeObserver(wholePixels).observe(shell);
 
 // A popup is open for seconds at a time and the three stages move within those seconds.
 void loadPreferences().catch(() => undefined);

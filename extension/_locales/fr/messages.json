@@ -1318,5 +1318,8 @@
   },
   "content_task_waiting_app": {
     "message": "En attente de la réponse de Chat On Steroids."
+  },
+  "content_revival_draft_appeared": {
+    "message": "Quelque chose a été saisi dans la conversation pendant la préparation du réveil du worker, donc le réveil ne l’a pas remplacé."
   }
 }
