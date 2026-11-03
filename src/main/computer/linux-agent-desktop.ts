@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { validLinuxDesktopRef } from './linux-desktop-ref.js';
 
 /** The adapter is deliberately separate from authorization and MCP registration. */
 export type LinuxDesktopCommand =
@@ -28,7 +29,6 @@ const NORMAL_TIMEOUT_MS = 15_000;
 // The Wayland screenshot portal itself can wait at least 30 seconds for consent.
 const SCREENSHOT_TIMEOUT_MS = 45_000;
 const IDENTIFIER = /^[A-Za-z0-9_.:-]{1,128}$/;
-const REF = /^@s[A-Za-z0-9]+:e[0-9]+$/;
 
 function identifier(value: string): string {
   if (!IDENTIFIER.test(value)) throw new LinuxDesktopError('Invalid desktop identifier');
@@ -49,7 +49,7 @@ export function linuxDesktopArgs(command: LinuxDesktopCommand): string[] {
       return ['screenshot', '--screen', String(command.display)];
     case 'click':
     case 'setValue': {
-      if (!REF.test(command.ref)) throw new LinuxDesktopError('Invalid accessibility reference');
+      if (!validLinuxDesktopRef(command.ref)) throw new LinuxDesktopError('Invalid accessibility reference');
       const args = [command.kind === 'click' ? 'click' : 'set-value', '--session', identifier(command.session), '--', command.ref];
       if (command.kind === 'setValue') {
         if (command.value.length > 4000 || command.value.includes('\0')) throw new LinuxDesktopError('Invalid text value');
@@ -99,7 +99,7 @@ export function runLinuxDesktop(command: LinuxDesktopCommand, binary = join(home
 export async function checkLinuxDesktopVersion(binary?: string): Promise<void> {
   const result = await runLinuxDesktop({ kind: 'version' }, binary);
   const data = result.data as { os?: unknown; version?: unknown } | undefined;
-  if (!result.ok || data?.os !== 'linux' || data.version !== '1.0.2') {
+  if (!result.ok || result.command !== 'version' || data?.os !== 'linux' || data.version !== '1.0.2') {
     throw new LinuxDesktopError('Unsupported agent-desktop version or operating system; this adapter requires Linux version 1.0.2');
   }
 }

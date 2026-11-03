@@ -237,6 +237,10 @@ an owned, unexpired `linux_observe` snapshot. Supports only semantic
 The target process incarnation, ref, owner and grants are rechecked
 after any approval wait; every action consumes its refs. It cannot
 target browser windows or fall back to physical pointer/keyboard input.
+The backend version probe accepts only a `version` command response for Linux
+agent-desktop 1.0.2. Ref tokens (`@s<snapshot>:e<element>`) are capped at
+128 characters by observation collection, the action schema and the native
+subprocess adapter, so oversized backend refs never become actionable.
 Desktop Ask (if configured) grants permission only to the exact proven
 Linux profile/session/conversation, not a shared transport connection.
 
