@@ -966,6 +966,36 @@ it('says when the send check holds an automatic message, with its reason', async
   expect(w.document.querySelector('#inputQueue .pending-message')?.textContent ?? '').not.toContain('Held');
 });
 
+// 2026-11-03 (Mac): the chat's page had the person's Continue and held it while ChatGPT still answered.
+it('says a queued message waits for ChatGPT\'s answer while the chat\'s page holds it, and stops saying so once that is old', async () => {
+  const asked = Date.now() - 12_000;
+  const { w, live, append } = await boot([
+    { seq: 1, time: asked - 100, source: 'extension', kind: 'turn_start', turnId: 'held-turn' },
+    { kind: 'user_message', seq: 2, origin: 2, time: asked, source: 'extension', turnId: 'held-turn', messageId: 'q-now', message: text('Run the tests') }
+  ]);
+  const api = (w as any).api;
+  const chat = await import('../src/renderer/chat.js');
+  const state = (await api.getState()).data;
+  chat.chatApply({ ...state, bridge: { ...state.bridge, present: true } });
+  const queued: InputEntry = { id: 'held-one', sessionId: summary(live.events).id, state: 'queued', owner: null, text: 'Continue',
+    mode: 'auto', model: null, reasoningEffort: null, dueAt: T0, createdAt: T0, conversationId: 'chat-a',
+    pageHold: { reason: 'still-answering', at: Date.now() - 2_000 } };
+  const status = () => w.document.querySelector('#inputQueue .pending-message')!.textContent ?? '';
+  live.inputs.push(queued);
+  await append([]); await append([]);
+  expect(status()).toContain('Waiting for ChatGPT to finish its answer');
+  live.inputs[0] = { ...queued, pageHold: { reason: 'turn-held', at: Date.now() - 2_000 } };
+  await append([]); await append([]);
+  expect(status()).toContain("Waiting for ChatGPT's page to end its turn");
+  live.inputs[0] = { ...queued, pageHold: { reason: 'tool-running', at: Date.now() - 2_000 } };
+  await append([]); await append([]);
+  expect(status()).toContain('Waiting for the running tool call to finish');
+  // A hold no page has repeated for over a minute no longer says why it waits.
+  live.inputs[0] = { ...queued, pageHold: { reason: 'still-answering', at: Date.now() - 80_000 } };
+  await append([]); await append([]);
+  expect(status()).not.toContain('Waiting for ChatGPT');
+});
+
 it('says why a queued message waits: no extension, or a running tool call', async () => {
   const asked = Date.now() - 12_000;
   const { w, live, append } = await boot([

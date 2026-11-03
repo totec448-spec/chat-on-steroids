@@ -3809,5 +3809,7 @@
   "Today": "Heute",
   "Yesterday": "Gestern",
   "Previous 7 days": "Letzte 7 Tage",
-  "Previous 30 days": "Letzte 30 Tage"
+  "Previous 30 days": "Letzte 30 Tage",
+  "Waiting for ChatGPT to finish its answer": "Wartet, bis ChatGPT seine Antwort beendet hat",
+  "Waiting for ChatGPT's page to end its turn": "Wartet, bis die ChatGPT-Seite ihren Durchgang beendet"
 }

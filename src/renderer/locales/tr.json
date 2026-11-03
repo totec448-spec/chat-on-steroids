@@ -3809,5 +3809,7 @@
   "Today": "Bugün",
   "Yesterday": "Dün",
   "Previous 7 days": "Son 7 gün",
-  "Previous 30 days": "Son 30 gün"
+  "Previous 30 days": "Son 30 gün",
+  "Waiting for ChatGPT to finish its answer": "ChatGPT'nin yanıtını bitirmesi bekleniyor",
+  "Waiting for ChatGPT's page to end its turn": "ChatGPT sayfasının turunu bitirmesi bekleniyor"
 }

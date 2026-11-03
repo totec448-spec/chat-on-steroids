@@ -9,7 +9,7 @@ import {
   fileSilenceInput, deferSilenceInput, revokeSilenceInputs, pendingQueuedPickups, inputBeforeGoal, inputArgs, acknowledgeBrowserInput, cancelInput, claimBrowserInput, completeBrowserDecision, enqueueInput,
   failBrowserInput, listInputs, offerToolInput as offerToolInputBatch, acknowledgeToolInput, pendingBrowserInputs, requestBrowserDecision, resetInputForTests, configureInputDelivery,
   authorizeBrowserHelperRetry, pausedBrowserHelpers, hasEligibleToolInput, editQueuedInput, reorderQueuedInputs, setInputAutomation, authorizeBrowserInput, sessionInputPolicy, retryUnclaimedInput,
-  noteInputStartupError, fileRotationInput, failBranchInput, BRANCH_ERRORS, holdInputForSendCheck, ownUnsentTexts
+  noteInputStartupError, fileRotationInput, failBranchInput, BRANCH_ERRORS, holdInputForSendCheck, ownUnsentTexts, noteInputHeld
 } from '../src/main/session/input.js';
 import type { InputArgs, InputEntry } from '../src/main/session/input.js';
 import { editReplacement } from '../src/main/session/edits.js';
@@ -111,6 +111,38 @@ describe('durable user input ownership', () => {
     expect(after?.state).toBe(state);
     if (held) expect(after?.error).toBe(held);
     else expect(after?.error).toContain('did not pick up this message');
+  });
+  // 2026-11-03 (Mac): the person's Continue reached the page, which held it back because ChatGPT was
+  // still answering; a minute later it failed as "the browser did not pick up this message".
+  it('keeps a message a page holds back while ChatGPT is still answering, and says so, instead of failing it', async () => {
+    binding.finishEnabled = false;
+    const row = await enqueueInput(input());
+    // Five minutes of a page reporting the hold every 45 seconds: far past the one-minute deadline.
+    for (let step = 0; step < 7; step++) {
+      now += 45_000;
+      expect(await noteInputHeld(row.id, 'still-answering')).toBe(step === 0 ? 'new' : 'held');
+      expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'queued',
+        pageHold: { reason: 'still-answering', at: now } });
+    }
+    // Once no page has held it for a minute, the browser really did not take it.
+    now += 60_001;
+    expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'failed',
+      error: 'Not sent: the browser did not pick up this message within 60 seconds.' });
+    // A finished row is never marked held again.
+    expect(await noteInputHeld(row.id, 'still-answering')).toBeNull();
+  });
+  it.each([
+    ['turn-held', 'new', 'queued'], ['tool-running', 'new', 'queued'],
+    // A page with no usable message box, or one that moved on, will not send it by waiting: the minute still applies.
+    ['no-composer', null, 'failed'], ['page-moved', null, 'failed']
+  ] as const)('keeps it only for a page waiting on its own turn (%s)', async (reason, kept, state) => {
+    binding.finishEnabled = false;
+    const row = await enqueueInput(input());
+    now += 50_000;
+    expect(await noteInputHeld(row.id, reason)).toBe(kept);
+    // 80 seconds after it was queued, 30 after the hold.
+    now += 30_000;
+    expect((await listInputs()).find(entry => entry.id === row.id)?.state).toBe(state);
   });
   it('requeues one proven pre-Send browser pickup timeout on the same row, then stops retrying', async () => {
     binding.model = 'gpt-5.6-sol'; binding.finishEnabled = false;

@@ -3728,5 +3728,7 @@
   "Today": "Hôm nay",
   "Yesterday": "Hôm qua",
   "Previous 7 days": "7 ngày qua",
-  "Previous 30 days": "30 ngày qua"
+  "Previous 30 days": "30 ngày qua",
+  "Waiting for ChatGPT to finish its answer": "Đang chờ ChatGPT trả lời xong",
+  "Waiting for ChatGPT's page to end its turn": "Đang chờ trang ChatGPT kết thúc lượt"
 }
