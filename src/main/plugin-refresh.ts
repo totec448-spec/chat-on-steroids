@@ -448,9 +448,15 @@ type Identity = { id: string; appId: string };
  * by the caller against this app's own configuration, never taken from the page alone.
  */
 type Enrollment = { connectorName: string; tools: unknown; tunnelId?: string; ownsTunnel?: (surface: PluginSurface, tunnelId: string) => boolean };
+function acceptsReportedTunnel(surface: PluginSurface, input: Enrollment): boolean {
+  if (input.tunnelId && input.ownsTunnel && !input.ownsTunnel(surface, input.tunnelId)) {
+    logWarn(`plugin refresh refused surface=${surface}: reported tunnel does not belong to this surface`);
+    return false;
+  }
+  return true;
+}
 function enrolls(row: Row, publication: PluginPublication, input: Enrollment): boolean {
   if (input.connectorName !== publication.connectorName) return false;
-  if (input.tunnelId && input.ownsTunnel && !input.ownsTunnel(row.surface, input.tunnelId)) return false;
   if (enrollable(input.tools, publication)) return true;
   return typeof input.tunnelId === 'string' && input.tunnelId.length > 0 && input.ownsTunnel?.(row.surface, input.tunnelId) === true;
 }
@@ -470,6 +476,7 @@ export function claimPluginRefresh(input: Identity & Enrollment & { alreadyCurre
   return serial(async () => {
     const current = await rows(); const row = exact(current, input, true);
     if (!row || (!automatic && !requestedHere(row)) || !recognizable(input.tools, row.surface)) return false;
+    if (!acceptsReportedTunnel(row.surface, input)) return false;
     const publication = publications.get(row.surface)!;
     const legacy = legacyIdentity(row), migrationClick = legacy && refreshableLegacy(row, publication);
     const observation = (row.observe || legacy) && !migrationClick;
@@ -505,6 +512,7 @@ export function requireManualPluginRefresh(input: Identity & Enrollment & { erro
   return serial(async () => {
     const current = await rows(); const row = exact(current, input, true);
     if (!row || !recognizable(input.tools, row.surface)) return false;
+    if (!acceptsReportedTunnel(row.surface, input)) return false;
     const publication = publications.get(row.surface)!;
     const legacy = legacyIdentity(row);
     if (legacy ? !refreshableLegacy(row, publication) || !provesLegacyTunnel(row, input) || !enrolls(row, publication, input)
