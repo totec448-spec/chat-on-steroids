@@ -460,16 +460,11 @@ export async function startMcpServer(
         const providerKey = providerSessionKey(route.id, providerProfileId, req.headers, body);
         if (requestId && providerKey) {
           try {
-            const status = await observeProviderSessionRequest(requestId, providerKey);
-            if (status === 'refused') {
-              logWarn(`MCP provider session identity refused surface=${route.id} request=${requestId}; conflicting proof`);
-              jsonError(res, 403, 'provider_session_identity_conflict');
-              return;
-            }
+            // A conflicting provider key supplies no identity. The registry logs the
+            // conflict once; ordinary dispatch still uses any native request proof.
+            await observeProviderSessionRequest(requestId, providerKey);
           } catch {
-            logWarn(`MCP provider session identity deferred surface=${route.id} request=${requestId}; durable correlation unavailable`);
-            jsonError(res, 503, 'provider_session_identity_unavailable');
-            return;
+            logWarn(`MCP provider session binding ignored surface=${route.id} request=${requestId}; durable correlation unavailable; dispatch uses existing request identity`);
           }
         }
       }

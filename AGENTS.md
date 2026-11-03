@@ -716,18 +716,27 @@ SDK transport session id and the undocumented generic `_meta.sessionId`.
 A key acquires an owner only through native request proof. Once bound, it can identify a new
 workflow request even when that request id is absent from the page. Provider-derived requests
 cannot seed other bindings. Unknown/missing metadata remains unidentified; contradictory native
-owners disable that provider key. Existing Block, Trust, retired-frontend and workspace guards
-still run. Old keys retain the old frontend/epoch after compaction, never the successor.
+owners disable that provider key. A conflicting binding logs once and supplies no provider
+identity; it does not reject the tool call. Independent native request proof remains authoritative,
+and dispatch continues through the existing attribution and permission paths. Existing Block,
+Trust, retired-frontend and workspace guards still run. Old keys retain the old frontend/epoch
+after compaction, never the successor.
 The version-7 correlation ledger retains scoped hashes and each derived request's native anchor.
-Derived ownership becomes readable and wakes waiters only after its durable commit. Complete
-version-6 ledgers still load without scanning history. Damaged auxiliary keys cannot erase valid
+Derived ownership becomes readable and wakes waiters only after its durable commit. A failed
+commit leaves that derivation unpublished, logs the fallback and continues ordinary tool
+dispatch with any independently proven native owner. Provider bookkeeping cannot introduce an
+HTTP failure for a call the existing paths would accept. Complete version-6 ledgers still load
+without scanning history. Damaged auxiliary keys cannot erase valid
 native ownership; malformed/orphaned derivations cannot become native proof. Native evidence for
 the derived request upgrades or replaces it and disables a contradictory key. Recorded calls
 retain `providerSessionAnchor`; these canonical call shards use the existing repair path to
 upgrade or relocate provenance and assets. The derived `providerSessionToolCalls` count bounds
 which sessions need that repair. History migration never promotes these calls to native proof.
-Provider-session admission is accepted HTTP work, so ordinary disconnect drains its durable
-write before tool dispatch. If native proof changes the owner during a handler, the kernel
+Known native requests reusing an already learned key skip the provider-admission queue without
+new writes. New bindings and derived owners stay serialized behind their durable commit;
+another chat's slow write cannot delay the known native path. Provider-session admission is
+accepted HTTP work, so ordinary disconnect drains its durable write before tool dispatch.
+If native proof changes the owner during a handler, the kernel
 withholds its result and scoped deliveries with `CALLER_IDENTITY_CHANGED`; it never replays
 the operation or transfers the original owner's resources to the new caller.
 Reference: https://developers.openai.com/plugins/reference#meta-fields-the-client-provides

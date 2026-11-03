@@ -110,6 +110,52 @@ it.each(['plan', 'worker'] as const)('does not block subsequent admissions on %s
   }
 });
 
+it.each(['core', 'desktop', 'plugins'] as const)('lets a known native %s request bypass a slow commit while new bindings and derivations stay queued', async surface => {
+  await prove();
+  const b = await prove('fast-native-b', 'fast-chat-b');
+  const firstKey = key(surface), secondKey = key(surface, 'fast-provider-b');
+  const newKey = key(surface, 'fast-provider-new');
+  await observeProviderSessionRequest('native-a', firstKey);
+  await observeProviderSessionRequest('fast-native-b', secondKey);
+  await observeProviderSessionRequest('known-derived-b', secondKey);
+  const write = durable.writeDurableNow;
+  let entered!: () => void, release!: () => void;
+  const paused = new Promise<void>(resolve => { entered = resolve; });
+  const resume = new Promise<void>(resolve => { release = resolve; });
+  const commit = vi.spyOn(durable, 'writeDurableNow').mockImplementationOnce(async (name, value) => {
+    entered(); await resume; return write(name, value);
+  });
+  const slow = observeProviderSessionRequest('slow-derived-a', firstKey);
+  let fast: ReturnType<typeof observeProviderSessionRequest> | undefined;
+  let binding: ReturnType<typeof observeProviderSessionRequest> | undefined;
+  let derived: ReturnType<typeof observeProviderSessionRequest> | undefined;
+  let knownDerived: ReturnType<typeof observeProviderSessionRequest> | undefined;
+  try {
+    await paused;
+    // Put mutating admissions ahead of the known request to prove it skips the whole queue.
+    binding = observeProviderSessionRequest('fast-native-b', newKey);
+    derived = observeProviderSessionRequest('queued-derived-b', secondKey);
+    let derivedCompleted = false;
+    knownDerived = observeProviderSessionRequest('known-derived-b', secondKey).then(status => { derivedCompleted = true; return status; });
+    let completed = false;
+    fast = observeProviderSessionRequest('fast-native-b', secondKey).then(status => { completed = true; return status; });
+    await vi.waitFor(() => expect(completed).toBe(true), { timeout: 10_000 });
+    expect(await fast).toBe('known');
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(requestCorrelation('fast-native-b')).toMatchObject({ conversationId: 'fast-chat-b', sessionId: b.id });
+    expect(requestCorrelation('fast-native-b')?.providerSessionKeys).not.toContain(newKey);
+    expect(requestCorrelation('slow-derived-a')).toBeNull();
+    expect(requestCorrelation('queued-derived-b')).toBeNull();
+    expect(derivedCompleted).toBe(false);
+  } finally {
+    release();
+    await Promise.all([slow, fast, binding, derived, knownDerived]);
+  }
+  expect(requestCorrelation('queued-derived-b')).toMatchObject({ sessionId: b.id, providerSessionAnchor: 'fast-native-b' });
+  expect(requestCorrelation('fast-native-b')?.providerSessionKeys).toContain(newKey);
+  expect(commit).toHaveBeenCalledTimes(3);
+});
+
 it.each(['core', 'desktop', 'plugins'] as const)('identifies a new %s request only after native proof established that surface binding', async surface => {
   const session = await prove();
   expect(await observeProviderSessionRequest('unbound', key(surface))).toBe('unbound');
@@ -140,8 +186,13 @@ it('keeps concurrent chats and their requests separate, including late page evid
     observeProviderSessionRequest('hidden-b', key('core', 'opaque-chat-b'))]);
   expect(requestCorrelation('hidden-a')?.sessionId).toBe(a.id);
   expect(requestCorrelation('hidden-b')?.sessionId).toBe(b.id);
+  const warning = vi.spyOn(logger, 'logWarn');
   expect(await observeProviderSessionRequest('hidden-a', key('core', 'opaque-chat-b'))).toBe('refused');
+  expect(await observeProviderSessionRequest('hidden-a', key('core', 'opaque-chat-b'))).toBe('refused');
+  expect(warning).toHaveBeenCalledExactlyOnceWith(
+    'provider session binding ignored for request hidden-a; existing request owner disagrees with native anchor; dispatch uses existing request identity');
   expect(requestCorrelation('hidden-a')?.sessionId).toBe(a.id);
+  expect(requestCorrelation('hidden-b')?.sessionId).toBe(b.id);
 });
 
 it('wakes a waiting request when native evidence later establishes its already observed provider key', async () => {

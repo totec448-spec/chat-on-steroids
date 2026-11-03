@@ -458,7 +458,7 @@ function indexProviderOwner(owner: RequestCorrelation): void {
     if (previousKey === null) continue;
     if (previous && (previous.conversationId !== owner.conversationId || previous.sessionId !== owner.sessionId)) {
       byProviderSession.set(key, null);
-      logWarn(`provider session correlation refused: conflicting native owners for ${key.slice(0, 16)}`);
+      logWarn(`provider session binding ignored: conflicting native owners for ${key.slice(0, 16)}; dispatch uses existing request identity`);
     } else {
       byProviderSession.set(key, joinKey(owner.requestId));
       if (previousKey === undefined) logInfo(`provider session correlation established ${key.slice(0, 16)} -> conversation ${owner.conversationId}; native request ${owner.requestId}`);
@@ -479,17 +479,23 @@ function learnProviderKeys(owner: RequestCorrelation): boolean {
 }
 
 /** Register one validated host conversation reference before dispatch. New aliases are
- * learned only from native request proof; an unknown request cannot teach another alias. */
+ * learned only from native request proof; an unknown request cannot teach another alias.
+ * 'refused' rejects only this binding, never tool dispatch or independent native proof. */
 export function observeProviderSessionRequest(requestId: string, providerKey: string): Promise<'known' | 'unbound' | 'refused'> {
+  if (!requestId || requestId.length > 200 || !PROVIDER_KEY.test(providerKey)) return Promise.resolve('unbound');
+  const direct = byRequest.get(joinKey(requestId));
+  // Native ownership is independent of provider storage. Reusing an already learned
+  // key changes no bookkeeping and must not wait for another chat's durable commit.
+  if (direct && !direct.providerSessionAnchor && direct.providerSessionKeys?.includes(providerKey)) return Promise.resolve('known');
   const work = providerAdmission.then(() => observeProviderSessionRequestNow(requestId, providerKey));
   providerAdmission = work.catch(() => undefined);
   return work;
 }
 
 async function observeProviderSessionRequestNow(requestId: string, providerKey: string): Promise<'known' | 'unbound' | 'refused'> {
-  if (!requestId || requestId.length > 200 || !PROVIDER_KEY.test(providerKey)) return 'unbound';
   const key = joinKey(requestId);
   const candidates = pendingProviderSessions.get(key) ?? { requestId, keys: new Set<string>() };
+  const alreadyObserved = candidates.keys.has(providerKey);
   if (candidates.keys.size < MAX_PROVIDER_KEYS_PER_REQUEST) candidates.keys.add(providerKey);
   pendingProviderSessions.delete(key);
   pendingProviderSessions.set(key, candidates);
@@ -506,7 +512,10 @@ async function observeProviderSessionRequestNow(requestId: string, providerKey: 
   const anchorKey = byProviderSession.get(providerKey);
   const anchor = anchorKey ? byRequest.get(anchorKey) : undefined;
   if (!anchor || anchor.providerSessionAnchor) return anchorKey === null ? 'refused' : 'unbound';
-  if (direct && (direct.sessionId !== anchor.sessionId || direct.conversationId !== anchor.conversationId)) return 'refused';
+  if (direct && (direct.sessionId !== anchor.sessionId || direct.conversationId !== anchor.conversationId)) {
+    if (!alreadyObserved) logWarn(`provider session binding ignored for request ${requestId}; existing request owner disagrees with native anchor; dispatch uses existing request identity`);
+    return 'refused';
+  }
   if (!direct) {
     const { providerSessionKeys: _keys, ...proof } = anchor;
     const derived = { ...proof, requestId, observedAt: Date.now(),
