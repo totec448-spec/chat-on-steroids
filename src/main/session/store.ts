@@ -1952,15 +1952,48 @@ export async function readRecentEvents(
   return readRecentEventsFromDisk(sessionId, limit, options);
 }
 
+type UserMessageEvent = Extract<SessionEvent, { kind: 'user_message' }>;
+/**
+ * The latest authored question of a chat, per revision. Finding it scans the journal without a read budget,
+ * and questions live outside it, so the scan reaches the start every time: on 2026-11-02 a Continue offered
+ * several times a minute rescanned a 16 MB journal on each offer, and tool calls took up to 86 s. The answer
+ * changes only when the chat records something (`nextSeq`) or its turn map is replaced, so it is kept until then.
+ */
+const latestQuestionCache = new Map<string, { revision: number; turns: unknown; message: UserMessageEvent | undefined }>();
+
+/** A scan already running for a revision; callers at that revision share it (CodeRabbit on #2030). */
+const latestQuestionScans = new Map<string, { revision: number; turns: unknown; scan: Promise<SessionEvent[]> }>();
+
+async function latestAuthoredQuestion(sessionId: string, turns: TimelineTurns | undefined): Promise<UserMessageEvent | undefined> {
+  const revision = open.get(sessionId)?.nextSeq;
+  const cached = latestQuestionCache.get(sessionId);
+  if (revision !== undefined && cached && cached.revision === revision && cached.turns === turns) return cached.message;
+  const running = latestQuestionScans.get(sessionId);
+  const shared = revision !== undefined && running && running.revision === revision && running.turns === turns ? running.scan : null;
+  const scan = shared ?? readRecentEventsFromDisk(sessionId, 1, { kinds: ['user_message'], orderByOrigin: true,
+    before: Number.POSITIVE_INFINITY, acceptEvent: (event: SessionEvent) => !injectedUserMessage(event, turns) });
+  if (!shared && revision !== undefined) {
+    const entry = { revision, turns, scan };
+    latestQuestionScans.set(sessionId, entry);
+    void scan.finally(() => { if (latestQuestionScans.get(sessionId) === entry) latestQuestionScans.delete(sessionId); }).catch(() => undefined);
+  }
+  const [found] = await scan;
+  const message = found?.kind === 'user_message' ? found : undefined;
+  // Only a read no write overtook may be kept.
+  if (revision !== undefined && open.get(sessionId)?.nextSeq === revision) {
+    latestQuestionCache.set(sessionId, { revision, turns, message });
+    if (latestQuestionCache.size > 200) latestQuestionCache.delete(latestQuestionCache.keys().next().value!);
+  }
+  return message;
+}
+
 /** The latest authored question. A recovery source excludes its injected corrections,
  * which have no native user bubble and cannot grant another error reload. */
-export async function readLatestUserMessage(sessionId: string, _turnId?: string | null): Promise<Extract<SessionEvent, { kind: 'user_message' }> | undefined> {
+export async function readLatestUserMessage(sessionId: string, _turnId?: string | null): Promise<UserMessageEvent | undefined> {
   assertSessionId(sessionId);
   await settleSessionWrites(sessionId);
   const summary = await readAuthoritativeSummary(sessionId);
-  const [message] = await readRecentEventsFromDisk(sessionId, 1, { kinds: ['user_message'], orderByOrigin: true,
-    before: Number.POSITIVE_INFINITY, acceptEvent: (event: SessionEvent) => !injectedUserMessage(event, summary?.timelineTurns) });
-  return message?.kind === 'user_message' ? message : undefined;
+  return latestAuthoredQuestion(sessionId, summary?.timelineTurns);
 }
 
 /** An injected instruction belongs to its existing generation, even after native reconciliation. */
@@ -1998,11 +2031,11 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
   await settleSessionWrites(sessionId);
   const revision = entry.nextSeq;
   if (entry.summary.conversationId !== conversationId) return null;
-  const [recent, questions] = await Promise.all([
+  const [recent, latestQuestion] = await Promise.all([
     readRecentEventsFromDisk(sessionId, 256, { kinds: ['turn_start', 'turn_end', 'user_message', 'assistant_message', 'native_image', 'tool_call', 'page_tool'] }),
-    readRecentEventsFromDisk(sessionId, 1, { kinds: ['user_message'], orderByOrigin: true,
-      before: Infinity, acceptEvent: event => !injectedUserMessage(event, entry.summary.timelineTurns) })
+    latestAuthoredQuestion(sessionId, entry.summary.timelineTurns)
   ]);
+  const questions = latestQuestion ? [latestQuestion] : [];
   if (entry.nextSeq !== revision || entry.summary.conversationId !== conversationId) return null;
   const sameTurn = (left: string | null | undefined, right: string | null | undefined) => !!left && !!right &&
     responseTurnId(entry.summary.timelineTurns, left) === responseTurnId(entry.summary.timelineTurns, right);
@@ -2657,6 +2690,8 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
         : {};
     }
     if (publicSummary.titleSource !== undefined && !['fallback', 'provider', 'manual'].includes(publicSummary.titleSource)) delete publicSummary.titleSource;
+    if (publicSummary.projectChosen !== undefined && publicSummary.projectChosen !== true) delete publicSummary.projectChosen;
+    if (publicSummary.projectNotePending !== undefined && publicSummary.projectNotePending !== true) delete publicSummary.projectNotePending;
     const auto = publicSummary.autoTitle;
     if (auto !== undefined && (publicSummary.titleSource !== 'manual' || !auto || typeof auto !== 'object' ||
         typeof auto.title !== 'string' || !['fallback', 'provider'].includes(auto.source))) delete publicSummary.autoTitle;
@@ -3626,6 +3661,37 @@ export async function bindSessionProject(id: string, projectId: string): Promise
 }
 
 /**
+ * The person moves a chat to another project, or out of one (#1919): unlike the one-time binding
+ * above, this replaces a project. Its commands then run in the new project's folder.
+ */
+export async function moveSessionProject(id: string, projectId: string | null): Promise<void> {
+  if (projectId !== null && !/^[a-f0-9-]{36}$/i.test(projectId)) throw new Error('Invalid project id');
+  const entry = await ensureOpen(id);
+  await enqueueSessionOperation(entry, 'project move', async () => {
+    const { projectId: _previous, projectNotePending: _note, ...rest } = entry.summary;
+    // Into a project: the person's next message tells ChatGPT the folder, once (#1919). Not a
+    // sub-agent's: an isolated worker keeps working in its own allocated workspace.
+    const subAgent = rest.origin?.kind === 'worker' || rest.origin?.kind === 'helper';
+    const staged: SessionSummary = { ...rest, ...(projectId ? { projectId, ...(subAgent ? {} : { projectNotePending: true as const }) } : {}), projectChosen: true };
+    await writeSummary(staged, entry.historySeq);
+    entry.summary = staged;
+    publishAttachmentSummary(staged);
+  });
+}
+
+/** The person's message that told ChatGPT a moved chat's folder was delivered. */
+export async function clearProjectNote(id: string): Promise<void> {
+  const entry = await ensureOpen(id);
+  await enqueueSessionOperation(entry, 'project note', async () => {
+    if (!entry.summary.projectNotePending) return;
+    const { projectNotePending: _done, ...staged } = entry.summary;
+    await writeSummary(staged, entry.historySeq);
+    entry.summary = staged;
+    publishAttachmentSummary(staged);
+  });
+}
+
+/**
  * Records that this app opened the chat, and names the session accordingly.
  *
  * One write rather than a rename followed by a stamp, because the two are the same
@@ -3634,14 +3700,30 @@ export async function bindSessionProject(id: string, projectId: string): Promise
  * name contradicts.
  */
 export async function setSessionOrigin(id: string, origin: SessionOrigin, title: string): Promise<void> {
-  const inheritedProject = origin.fromSessionId ? (await getSession(origin.fromSessionId))?.projectId : undefined;
+  const parentProject = async () => origin.fromSessionId ? (await getSession(origin.fromSessionId))?.projectId : undefined;
   const entry = await ensureOpen(id);
+  let written: string | undefined;
   await enqueueSessionOperation(entry, 'origin write', async () => {
+    // Read when the write happens, not before it waited its turn: the main chat may have moved.
+    const inheritedProject = await parentProject();
+    written = inheritedProject;
     if (inheritedProject && entry.summary.projectId && entry.summary.projectId !== inheritedProject) throw new Error('Session origin belongs to another project');
     // A name the user gave the chat stays; the origin's title becomes the one clearing it restores.
     const named = entry.summary.titleSource === 'manual';
     const staged = { ...entry.summary, origin, ...(named ? { autoTitle: { title: title.slice(0, 120), source: 'fallback' as const } } : { title: title.slice(0, 120) }),
       ...(inheritedProject ? { projectId: inheritedProject } : {}) };
+    await writeSummary(staged, entry.historySeq);
+    entry.summary = staged;
+    publishAttachmentSummary(staged);
+  });
+  // A worker or helper follows its main chat: if that chat moved to another project while this was
+  // written, follow it (#1919). The move itself also looks for such stragglers once it is done.
+  const now = await parentProject();
+  if (!origin.fromSessionId || (origin.kind !== 'worker' && origin.kind !== 'helper') || now === written) return;
+  await enqueueSessionOperation(entry, 'origin project follow', async () => {
+    if ((entry.summary.projectId ?? undefined) !== written) return;
+    const { projectId: _previous, ...rest } = entry.summary;
+    const staged: SessionSummary = { ...rest, ...(now ? { projectId: now } : {}) };
     await writeSummary(staged, entry.historySeq);
     entry.summary = staged;
     publishAttachmentSummary(staged);
@@ -4478,6 +4560,8 @@ export async function deleteSession(id: string): Promise<void> {
 /** Test seam: forgets in-memory state without touching the files. */
 export function resetSessionStoreForTests(): void {
   recentUnreadableWarned.clear();
+  latestQuestionCache.clear();
+  latestQuestionScans.clear();
   for (const entry of open.values()) if (entry.metaTimer) clearTimeout(entry.metaTimer);
   open.clear();
   opening.clear();

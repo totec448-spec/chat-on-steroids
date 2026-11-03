@@ -3818,13 +3818,25 @@ awaiting-summary -> awaiting-chat -> claimed -> committing -> committed
 disk. `sessions:resumeFromHandoff` (preload `resumeFromHandoff(id, handoffId)`, bridge
 `resumeFromSavedSummary`) starts a new run from it through `reopenWithHandoffNow`: only when that
 handoff is still the session's `lastHandoffId`, no continuation is open, and its provenance
-source is the session's current chat. The new run is an ordinary transaction: it reserves A
+source is the session's current chat or an earlier one in its `chatIds` (2026-11-01: ChatGPT can stop
+serving a chat, "temporarily limited access to this conversation history", before it writes a summary
+of its own). A summary from an earlier chat is sent behind `earlierSummaryNote()`, which says work
+may have continued after it and asks to check the current state first. The new run is an ordinary transaction: it reserves A
 again with the abandoned run's project, records the source request as already sent (nothing is
 asked of ChatGPT), and `attachSummary` writes a fresh handoff with the same text bound to the
 new token. Claim, commit, restart recovery and provenance then work unchanged; a failed attach
 aborts the new run. Timeline `handoff` events carry an optional `continuation` token so the
 reopened run's row owns its handoff; the reuse button is shown only on the newest Compact &
 Resume row.
+
+**A Compact & Resume ChatGPT never answers.** `SessionControlsView.lastSummary` (`{ handoffId,
+createdAt, earlierChat }`) is set once a continuation has waited in `awaiting-summary` without a
+handoff for `STUCK_SUMMARY_MS` (15 minutes) and the session has a usable `lastHandoffId`; the context
+meter shows a dot and its popover the button "Continue in a new chat from the last summary". Using
+it, `resumeFromSavedSummary` first cancels that waiting continuation. A chat with Goal or Loop on
+does this by itself (`continueStuckFromSavedSummary`), once per ticket, when an automatic ticket's
+first slowed burst of pickups could not ask either; a chat without them is never moved by itself.
+The new ChatGPT chat joins the same session, as after any Compact & Resume.
 
 Restart restoration must converge on that same committed projection. A persisted send attempt
 can outlive a transport command; expiration releases transport, not permission for another
@@ -4096,7 +4108,10 @@ unfinished turn is not proved yet (`recovery-not-ready`), or the visible-compose
 usable box (`page-moved` for a reload or navigation, `chat-moved-on` for a new message, turn or progress on the same chat, `question-gone` when the question captured before is no longer on the page, `no-composer`, `composer-hidden`). `/page-note` logs `bridge: the page of
 <chat> held queued message <id> back: <why>` once a minute per chat (a new chat: per message) and
 reason. The page says nothing once the tab shows another chat or the person stopped the automatic
-Continue, and `inputId` must be a UUID. Internal busy states
+Continue, and `inputId` must be a UUID. An automatic Continue held for `recovery-question-changed`
+without a break of more than 5 minutes, and with no other hold reason in between, for 30 minutes is retired (`retireMismatchedRecoveryInput`:
+cancelled with its reason, `recovery.ended: 'page-final'`); it would only answer the wrong question
+(2026-11-02: one sat queued for eleven hours). Internal busy states
 (another delivery, a model read, a Goal draft) stay unlogged. A dialog with a field
 (Settings, Rename, a form) is left alone and keeps holding input as before.
 A worker given up for time after a page claimed it (no page-reported failure) is a late-start
@@ -4341,7 +4356,7 @@ server obligation once safe; do not acknowledge it as handled or require a reloa
 
 | Backend/role | Behavior |
 | --- | --- |
-| ChatGPT decision helper | Default driver backend. Each Goal/Loop decision uses a Temporary Chat with bounded reference history; outputs a decision, never executes that history. A helper whose model the page could not confirm (`detail: 'model-unconfirmed'`, nothing typed) fails with the retryable `goal_helper_model_unconfirmed`, and `goalHelperSelection` then uses ChatGPT's current selection for 30 minutes (`HELPER_MODEL_FALLBACK_MS`, logged), as for a model the account does not offer; every other helper send failure stays settled. |
+| ChatGPT decision helper | Default driver backend. Each Goal/Loop decision uses a Temporary Chat with bounded reference history; outputs a decision, never executes that history. A helper whose model the page could not confirm (`detail: 'model-unconfirmed'`, nothing typed) fails with the retryable `goal_helper_model_unconfirmed`, and `goalHelperSelection` then uses ChatGPT's current selection for 30 minutes (`HELPER_MODEL_FALLBACK_MS`, logged), as for a model the account does not offer; every other helper send failure stays settled. One draft may take `goalRequestTimeoutMs`: 3 min for API backends and a ChatGPT helper at low or medium effort, 5 min at high, 12 min at xhigh/max/ultra, 20 min at Pro (the effort actually used; 2026-11-01: xhigh timed out at 3 min five times in a row). |
 | API driver | OpenRouter-compatible default or explicit compatible endpoint/model/key. Supports bounded streamed progress and validated final decision. |
 | Goal templates | Offline explicit terminal-marker policy; only Goal supports this backend. Missing/ambiguous expected markers pause rather than infer completion from prose. |
 | Temporary planner | Captures a new workflow for the user in Temporary Chat. Shares temporary transport with decision helpers while retaining its staged-workflow role. |
@@ -4674,6 +4689,32 @@ drag scope `groups:<projectId>`, each with its chats in scope `group:<groupId>` 
 like the project), then the project's ungrouped chats. A group holding the open chat shows open.
 Project menu: New group; chat menu: Move to group (this project's groups, New group…) and Remove
 from group. Names use the shared in-app dialog `renderer/name-dialog.ts`.
+Move to project (#1919) changes a main chat's project, unlike the one-time binding: IPC
+`sessions:moveProject { sessionId, projectId | null, groupId? }` → `{ from, fromGroup, groups, summaries }`
+(`summaries`: the moved chats' fresh summaries, which the sidebar puts on rows it already shows). Main
+(`moveChatToProject` in `projects.ts`, `moveSessionProject` in the store) refuses a worker or helper
+chat and a missing or removed project, allows a project whose folder is missing, moves every
+descendant sub-agent and helper chat (by `origin.fromSessionId`) with it, sub-agents first and the
+main chat last, and on a move to the project the chat already has moves only the family members
+left behind by an earlier move that stopped half way; never a branch, logs the
+move, and sets `projectChosen: true` on each summary, which stops `bindChatToLinkedProject` from
+binding it again. Moved into a project, the chat's commands then run in that project's folder (the
+binding is the workspace authority); moved out (\`null\`), they run in the folder the chat worked in
+before. Moves of one chat run one at a time, so each reports the project it replaced (for Undo);
+moved into a project, the summary gets `projectNotePending`, and the person's next message there
+(`personsMessage` in ipc.ts: not an opening, automatic Continue, decision, finish or rotation step)
+carries the project's folder line once (`prepareSkillFollowup(..., projectNote)`, the same line a new
+chat there starts with); the flag clears when that message is delivered (`clearProjectNote`), so a
+failed send carries it again. Moving out clears it; nothing is sent to ChatGPT and a linked ChatGPT Project keeps the conversation.
+`placeMovedChat` drops the old group membership or joins `groupId` of the new project. The renderer
+offers it in the chat menu (projects, then No project) and by dragging a chat row onto a project or
+group (`SidebarDrop` in `sidebar-order.ts`, highlight `.is-drop-target`; Escape cancels), then shows
+a toast with Undo (`toast(message, action)`, 6 s, kept while pointed at), which moves it back to
+`from` and `fromGroup`. A project's row has a + New chat button, and New chat leads its menu.
+Date headings (#1919, `renderer/date-sections.ts`): the chats list and each project's ungrouped list
+show Today, Yesterday, Previous 7 days, Previous 30 days, this year's months, then years, by
+`updatedAt`; pinned chats come first without one; a heading appears only when a chat is older than
+every section shown so far, so a chat dragged above older ones never repeats a heading.
 The worker drawer is a read-only split view of the selected worker's own recorded conversation;
 opening it never switches the prime composer. Its cards show the scoped worker id, task, observed
 current-conversation model and broker status when known, falling back to recorded session activity.

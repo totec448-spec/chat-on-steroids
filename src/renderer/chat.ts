@@ -36,6 +36,7 @@ import { MAX_TASK_REQUEST_CHARS, taskRequestProblem } from '../shared/task-progr
 import { shownSessionTitle } from './session-title.js';
 import { preserveTimelineViewport, ROUNDING_PX } from './timeline-scroll.js';
 import { createSidebarOrder, SIDEBAR_PROJECT_SCOPE } from './sidebar-order.js';
+import { dateSections, type DateSection } from './date-sections.js';
 import { createSidebarPins, pinnedSortScope } from './sidebar-pins.js';
 import { createComposerDrafts } from './composer-drafts.js';
 import { createSidebarCompletionState } from './sidebar-completion.js';
@@ -94,6 +95,7 @@ import {
   DEFAULT_RECORDING_STORAGE_GIB,
   isUnattributedSession,
   RECORDING_STORAGE_LIMITS_GIB,
+  STUCK_SUMMARY_MS,
   TURN_OUTCOME_LABELS,
   foldProgress,
   toolCallSummary
@@ -257,6 +259,51 @@ async function deleteChatGroup(group: ChatGroup): Promise<void> {
   if (await applyChatGroups(api.deleteChatGroup(group.id))) toast(t('Group deleted. Its chats stay in the project.'));
 }
 
+/**
+ * Moves a main chat, with its sub-agents, to a project or out of one (#1919), and offers Undo. Only
+ * in this app: a linked ChatGPT Project keeps the conversation where it was, and the toast says so.
+ */
+async function moveChatToProject(sessionId: string, projectId: string | null, groupId?: string | null, undo = false): Promise<void> {
+  const moved = await run(api.moveChatProject(sessionId, projectId, groupId));
+  if (!moved) return;
+  chatGroups = moved.groups;
+  if (projectId) expandedProjects.add(projectId);
+  if (groupId) collapsedGroups.delete(groupId);
+  await loadSessions();
+  // Rows the sidebar already shows take the moved chats' new summaries, also from older history.
+  const shown = (moved.summaries ?? []).filter(summary => sessions.some(row => row.id === summary.id));
+  if (shown.length) { mergeSessionRows(shown); paintSessions(); }
+  if (undo) { toast(t('Move undone')); return; }
+  const project = projectId ? projects.find(row => row.id === projectId) : undefined;
+  const linked = [moved.from, projectId].some(id => id && projects.find(row => row.id === id)?.chatgpt?.state === 'linked');
+  const message = project ? t('Moved to {0}', [project.name]) : t('Moved out of its project');
+  toast(linked ? `${message}. ${t('ChatGPT keeps it where it was.')}` : message,
+    { label: t('Undo'), run: () => void moveChatToProject(sessionId, moved.from, moved.fromGroup, true) });
+}
+
+/** The chat menu's Move to project (#1919): any main chat, into a listed project or out of one. */
+function moveToProjectMenuItems(summary: SessionSummary): RowMenuItem[] {
+  if (summary.origin?.kind === 'worker' || summary.origin?.kind === 'helper' || isUnattributedSession(summary)) return [];
+  // Rows build their menus on every paint: the project lookups wait until the submenu opens.
+  if (!summary.projectId && !projects.some(project => !project.ungrouped)) return [];
+  return [{
+    action: 'move-to-project', icon: 'i-folder', label: () => t('Move to project'),
+    title: () => t("Move this chat to a project; its commands then run in that project's folder"),
+    submenu: () => {
+      const current = projectGroup(summary.projectId);
+      const listed = projects.filter(project => !project.ungrouped);
+      return [
+      ...listed.map(project => ({
+        action: `project-${project.id}`, checked: current === project.id, label: () => project.name,
+        run: () => { if (current !== project.id) void moveChatToProject(summary.id, project.id); }
+      } satisfies RowMenuItem)),
+      { action: 'project-none', separated: listed.length > 0, checked: !current, label: () => t('No project'),
+        run: () => { if (summary.projectId) void moveChatToProject(summary.id, null); } }
+      ];
+    }
+  }];
+}
+
 /** The chat menu's group items, for a main chat of a project. */
 function chatGroupMenuItems(summary: SessionSummary): RowMenuItem[] {
   const projectId = projectGroup(summary.projectId);
@@ -298,6 +345,8 @@ function projectMenuItems(id: string): RowMenuItem[] {
   const shieldOff = projects.find(row => row.id === id)?.secretsShieldOff === true;
   const shieldEverywhere = deps.state()?.config.ui.secretsShield !== false;
   return [
+    // The row's + button, here too, as a context menu holds every action (#1919).
+    { action: 'chat-new', icon: 'i-plus', label: () => t('New chat'), title: () => t('New chat in this project'), run: () => selectNewChat(id) },
     { action: 'group-new', icon: 'i-group', label: () => t('New group'), title: () => t('Add a group to sort this project\'s chats'),
       run: () => void newChatGroup(id) },
     // A project without a ChatGPT Project, or whose creation failed, can take a new or an existing one (#1756).
@@ -1237,7 +1286,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   } else if (summary.conversationId === null) {
     // A new chat whose first message has not gone out yet (#1759): no ChatGPT link to open, copy or block.
     items.push({ action: 'rename', icon: 'i-pencil', label: () => t('Rename'), title: () => t("Rename this chat in the app. Its title in ChatGPT stays the same."), run: () => startRename(summary) });
-    items.push(...chatGroupMenuItems(summary));
+    items.push(...moveToProjectMenuItems(summary), ...chatGroupMenuItems(summary));
   } else {
     const policyLineage = [
       summary.conversationId,
@@ -1273,7 +1322,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
       items.push({ action: 'schedule', icon: 'i-clock', label: () => t('Schedule…'), title: () => t('Send a message into this chat at set times'),
         run: () => void scheduleDialog?.open(summary.id, summary.id === selectedId ? $<HTMLTextAreaElement>('chatInput').value : '') });
     }
-    items.push(...chatGroupMenuItems(summary));
+    items.push(...moveToProjectMenuItems(summary), ...chatGroupMenuItems(summary));
     // The stop this app can actually make. It does not touch the running ChatGPT turn — nothing
     // here can — it takes this chat's tools away, and a model whose every call is refused with
     // an instruction to stop finishes its turn on its own.
@@ -2238,7 +2287,7 @@ function chatGroupSection(group: ChatGroup, tasks: ProjectTask[]): HTMLElement {
     if (task.workers) workerGroup(task.entry.id, task.workers, row, rows);
   }
   section.append(...rows);
-  if (!tasks.length) section.append(el('p', 'chat-group-empty', () => t("Move a chat here from its menu.")));
+  if (!tasks.length) section.append(el('p', 'chat-group-empty', () => t("Drag a chat here, or move it from its menu.")));
   if (shown.length < ordered.length) {
     const showMore = el('button', 'btn project-show-more chat-group-show-more', () => t("Show more")) as HTMLButtonElement;
     showMore.type = 'button'; ui(showMore, 'aria-label', () => t("Show more chats in {0}", [group.name]));
@@ -2302,6 +2351,13 @@ function unattributedActivity(entries: SessionSummary[]): HTMLElement | null {
   return disclosure;
 }
 
+/** A date heading in a chat list (#1919): quiet text, no count or icon. */
+function dateHeading(section: DateSection): HTMLElement {
+  const heading = el('div', 'chat-date-section', section.label);
+  heading.setAttribute('role', 'heading'); heading.setAttribute('aria-level', '3');
+  return heading;
+}
+
 function paintSessions(): void {
   // Keep the pointer's elected rows alive while asynchronous activity snapshots arrive.
   if (sidebarOrder?.interacting) return;
@@ -2342,6 +2398,8 @@ function paintSessions(): void {
   // even though those nodes are immediately discarded by the project page limit.
   const projectRows = new Map<string, ProjectTask[]>();
   const diagnostics: SessionSummary[] = [];
+  // Date headings (#1919) for the chats list; each project's list has its own.
+  const chatSection = dateSections();
   // Pinned chats lead their own list (#1133). Resolve project membership once for
   // this paint: scanning all sessions for each project and then searching the project
   // catalog for every comparison used to multiply work on frequent activity pushes.
@@ -2373,6 +2431,8 @@ function paintSessions(): void {
       tasks.push({ entry, workers, selected: entry.id === selectedId || workers?.some(worker => worker.id === selectedId) === true });
       projectRows.set(projectId, tasks);
     } else {
+      const heading = pinnedChat(entry) ? null : chatSection(entry.updatedAt);
+      if (heading) rows.push(dateHeading(heading));
       const row = sessionRow(entry); rows.push(row);
       row.dataset.sortScope = pinnedSortScope('', pinnedChat(entry));
       if (workers) workerGroup(entry.id, workers, row, rows);
@@ -2418,7 +2478,7 @@ function paintSessions(): void {
       heading.addEventListener('contextmenu', event => { event.preventDefault(); openRowMenu(menu({ x: event.clientX, y: event.clientY })); });
       // The project's primary action, beside its menu rather than inside it: one click, as in ChatGPT.
       const create = el('button', 'btn row-menu-button project-new') as HTMLButtonElement;
-      create.type = 'button'; create.dataset.newProject = id; create.append(icon('i-pencil'));
+      create.type = 'button'; create.dataset.newProject = id; create.append(icon('i-plus'));
       ui(create, 'title', () => t('New chat in this project'));
       ui(create, 'aria-label', () => t('New chat in this project'));
       create.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); selectNewChat(id); });
@@ -2437,7 +2497,10 @@ function paintSessions(): void {
     const count = projectVisibleCounts.get(id) ?? PROJECT_TASK_PAGE_SIZE;
     const shown = tasks.filter((task, index) => index < count || task.selected);
     const shownRows: HTMLElement[] = [];
+    const projectSection = dateSections();
     for (const task of shown) {
+      const heading = pinnedChat(task.entry) ? null : projectSection(task.entry.updatedAt);
+      if (heading) shownRows.push(dateHeading(heading));
       const row = sessionRow(task.entry);
       row.dataset.sortScope = pinnedSortScope(id, pinnedChat(task.entry));
       shownRows.push(row);
@@ -2980,6 +3043,19 @@ function mergeDetailDelta(delta: SessionEvent[]): void {
 }
 
 let controlsGeneration = 0;
+let lastSummaryTimer: ReturnType<typeof setTimeout> | null = null;
+/** The stuck compaction already asked again once after its deadline passed during a controls read. */
+let lastSummaryLateRefresh = '';
+/** Chats whose "Continue from the last summary" request is still running, with the selection it was pressed in. */
+const summaryActions = new Map<string, number>();
+
+/** Retires the saved-summary offer: the dot, the screen-reader notice and its binding, the action, the timer. */
+function clearSummaryOffer(): void {
+  if (lastSummaryTimer) { clearTimeout(lastSummaryTimer); lastSummaryTimer = null; }
+  ui($('contextMeterNotice'), 'textContent', () => '');
+  $('contextMeter').removeAttribute('data-attention');
+  $('resumeLastSummary').hidden = true;
+}
 let controlledSessionId: string | null = null;
 let controlledTurnId: string | null = null;
 /** A turn the page still holds after the app stopped counting it as work: Stop only, no Working (2.1.47 round). */
@@ -3456,13 +3532,15 @@ async function refreshSessionControls(): Promise<void> {
     // Retire the previous selection's projection before awaiting the new owner's IPC.
     // Replace the translation binding too, so a locale refresh cannot revive its status.
     ui($('sessionControlStatus'), 'textContent', () => '');
-    for (const action of ['compactSession', 'cancelCompaction']) $(action).hidden = true;
+    for (const action of ['compactSession', 'cancelCompaction', 'resumeLastSummary']) $(action).hidden = true;
+    // The previous chat's offer must not stay on the next one (CodeRabbit on #2019).
+    clearSummaryOffer();
   }
   paintAutomationSwitch();
   if (!id) { controlledSessionId = null; controlledTurnId = null; controlledHeldTurnId = null; controlledPageless = false; paintDeliveryControls(); menu.hidden = false;
     $<HTMLTextAreaElement>('sessionObjective').disabled = false;
     paintTaskActions();
-    for (const action of ['compactSession', 'cancelCompaction']) $(action).hidden = true;
+    for (const action of ['compactSession', 'cancelCompaction', 'resumeLastSummary']) $(action).hidden = true;
     return; }
   const opening = pendingComposerInputs.find(row => row.opening && row.sessionId === id && ['queued', 'browser'].includes(row.state));
   if (!sessions.find(row => row.id === id)?.conversationId) {
@@ -3477,7 +3555,7 @@ async function refreshSessionControls(): Promise<void> {
     const objective = $<HTMLTextAreaElement>('sessionObjective');
     objective.value = opening?.objective ?? ''; objective.disabled = true;
     objective.dataset.sessionId = id;
-    for (const action of ['compactSession', 'cancelCompaction']) $(action).hidden = true;
+    for (const action of ['compactSession', 'cancelCompaction', 'resumeLastSummary']) $(action).hidden = true;
     paintAutomationSwitch(); paintDeliveryControls(); repaintHeld();
     return;
   }
@@ -3503,7 +3581,7 @@ async function refreshSessionControls(): Promise<void> {
   repaintHeld();
   menu.hidden = !controls;
   $('compactSession').hidden = !controls;
-  if (!controls) { $('cancelCompaction').hidden = true; return; }
+  if (!controls) { $('cancelCompaction').hidden = true; clearSummaryOffer(); return; }
   const objective = $<HTMLTextAreaElement>('sessionObjective');
   if (objective.dataset.sessionId !== id || !objective.dataset.edited) {
     objective.value = controls.objective;
@@ -3522,7 +3600,33 @@ async function refreshSessionControls(): Promise<void> {
   paintAutomationSwitch();
   $<HTMLButtonElement>('compactSession').disabled = !!controls.blocked || !!controls.job?.busy;
   $('cancelCompaction').hidden = !controls.job?.busy;
-  ui($('sessionControlStatus'), 'textContent', () => controls.blocked === 'worker' ? t("This sub-agent is managed by its prime.") : controls.blocked === 'blocked' ? t("This chat is blocked.") : controls.job?.busy ? t("Compaction is running in ChatGPT.") : '');
+  // A Compact & Resume that ChatGPT never wrote a summary for (it may no longer serve the chat at all)
+  // can go on from the last saved one; the context meter carries a dot until then (2026-11-01).
+  const lastSummary = controls.blocked ? null : controls.lastSummary ?? null;
+  // The offer appears on its own once the 15 minutes pass, also in a quiet chat nothing else repaints
+  // (CodeRabbit on #2019), and is said to screen readers, since the dot and the popover are not.
+  if (lastSummaryTimer) { clearTimeout(lastSummaryTimer); lastSummaryTimer = null; }
+  const waitingJob = controls.job;
+  if (!lastSummary && !controls.blocked && waitingJob?.stage === 'handoff-pending' && !waitingJob.handoffId) {
+    const due = waitingJob.startedAt + STUCK_SUMMARY_MS - Date.now();
+    // A deadline that passed while this read was on its way is asked about once more, not again and again.
+    const late = `${id}:${waitingJob.startedAt}`;
+    const wait = due > 0 ? due + 1_000 : lastSummaryLateRefresh !== late ? 1_000 : null;
+    if (due <= 0) lastSummaryLateRefresh = late;
+    if (wait !== null) lastSummaryTimer = setTimeout(() => { lastSummaryTimer = null; if (selectedId === id) void refreshSessionControls(); }, wait);
+  }
+  ui($('contextMeterNotice'), 'textContent', () => lastSummary
+    ? t("ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.") : '');
+  $('resumeLastSummary').hidden = !lastSummary;
+  $('resumeLastSummary').dataset.handoffId = lastSummary?.handoffId ?? '';
+  $<HTMLButtonElement>('resumeLastSummary').disabled = summaryActions.has(id);
+  $('contextMeter').toggleAttribute('data-attention', !!lastSummary);
+  // The saved-summary offer is announced once, by the notice: the popover's status line shows the same words
+  // without announcing them again (CodeRabbit on #2019).
+  $('sessionControlStatus').setAttribute('aria-live', lastSummary ? 'off' : 'polite');
+  ui($('sessionControlStatus'), 'textContent', () => controls.blocked === 'worker' ? t("This sub-agent is managed by its prime.") : controls.blocked === 'blocked' ? t("This chat is blocked.")
+    : lastSummary ? t("ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.")
+    : controls.job?.busy ? t("Compaction is running in ChatGPT.") : '');
 }
 
 async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: number): Promise<boolean> {
@@ -9311,7 +9415,28 @@ export function initChat(next: Deps): void {
     ...chatGroups.groups.map(group => ({ id: group.id, scope: chatGroupsScope(group.projectId) })),
     ...sessions.filter(entry => !isUnattributedSession(entry) && entry.origin?.kind !== 'worker')
       .map(entry => ({ id: entry.id, scope: pinnedSortScope(chatSortList(entry), pinnedChat(entry)) }))
-  ], paintSessions, removeSessionTooltip);
+  ], paintSessions, removeSessionTooltip, {
+    // A main chat dragged onto a project or one of its groups (its row or its chats) moves there
+    // (#1919); the heading of that place lights up.
+    target: (id, at) => {
+      const summary = sessions.find(entry => entry.id === id);
+      const heading = at?.closest<HTMLElement>('.chat-group, .project-group')?.querySelector<HTMLElement>(':scope > .project-heading, :scope > .chat-group-heading');
+      const projectId = heading?.closest<HTMLElement>('.project-group')?.dataset.projectId;
+      if (!summary || !heading || !projectId || summary.origin?.kind === 'worker' || summary.origin?.kind === 'helper' || isUnattributedSession(summary)) return null;
+      const groupId = heading.classList.contains('chat-group-heading') ? heading.closest<HTMLElement>('.chat-group')?.dataset.groupId : undefined;
+      const here = projectGroup(summary.projectId) === projectId;
+      if (here && (!groupId || chatGroupOf(chatGroups, summary)?.id === groupId)) return null;
+      return heading;
+    },
+    drop: (id, heading) => {
+      const projectId = heading.closest<HTMLElement>('.project-group')?.dataset.projectId;
+      const groupId = heading.classList.contains('chat-group-heading') ? heading.closest<HTMLElement>('.chat-group')?.dataset.groupId ?? null : null;
+      const summary = sessions.find(entry => entry.id === id);
+      if (!projectId || !summary) return;
+      if (projectGroup(summary.projectId) === projectId) { if (groupId) void applyChatGroups(api.assignChatGroup(id, groupId)); return; }
+      void moveChatToProject(id, projectId, groupId);
+    }
+  });
   void run(api.chatGroups()).then(state => { if (state) { chatGroups = state; paintSessions(); } });
   deps = next;
   initComposerDictation();
@@ -9509,6 +9634,22 @@ export function initChat(next: Deps): void {
       }
     });
   }
+  $('resumeLastSummary').addEventListener('click', async () => {
+    const id = selectedId, button = $<HTMLButtonElement>('resumeLastSummary'), handoffId = button.dataset.handoffId;
+    // One request per chat at a time, each chat on its own (CodeRabbit on #2019); its answer belongs to the
+    // chat and selection it was asked in.
+    if (!id || !handoffId || summaryActions.has(id)) return;
+    const selection = selectionGeneration;
+    summaryActions.set(id, selection);
+    button.disabled = true;
+    try {
+      const resumed = await run(api.resumeFromHandoff(id, handoffId));
+      if (resumed && selectedId === id && selectionGeneration === selection) toast(t("Opening a new chat with the saved summary"));
+    } finally {
+      if (summaryActions.get(id) === selection) summaryActions.delete(id);
+      if (selectedId === id) { button.disabled = false; void refreshSessionControls(); }
+    }
+  });
   for (const [buttonId, cancel] of [['compactSession', false], ['cancelCompaction', true]] as const) {
     $(buttonId).addEventListener('click', async () => {
       const id = selectedId; if (!id) return;
