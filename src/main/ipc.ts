@@ -37,7 +37,7 @@ import { paintWindowTheme } from './theme.js';
 import { usageOverview } from './session/usage.js';
 import { exportUsageCsv } from './session/usage-export.js';
 import { readProviderUsage } from './provider-usage.js';
-import { inputArgs, listInputs, editQueuedInput, sendQueuedInputNow, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs } from './session/input.js';
+import { inputArgs, listInputs, editQueuedInput, sendQueuedInputNow, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs, type InputEntry } from './session/input.js';
 import { draftOpeningMessage, onGoalChange, nativeGoalFailure } from './goal.js';
 import { cancelTaskRequest, runTaskRequest } from './task-request.js';
 import { randomUUID } from 'node:crypto';
@@ -97,7 +97,7 @@ import { onBackgroundExecChange, runningExecProcesses, stopExecProcess } from '.
 import { keychainNoticeReady } from './keychain-notice.js';
 import { runDiagnostics } from './diagnostics.js';
 import { collectReportFacts, readRecentLog, renderDiagnosticsReport, saveDiagnosticsReport, systemFacts, memoryFacts } from './diagnostics-report.js';
-import { listSessions, readTurnTraces } from './session/store.js';
+import { clearProjectNote, listSessions, readTurnTraces } from './session/store.js';
 import { deleteSchedule, listSchedules, saveSchedule, scheduleRepeatSchema, setSchedulePaused } from './scheduled-runs.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, logWarn, onLog } from './logger.js';
 import { markStartup } from './startup-timing.js';
@@ -737,6 +737,14 @@ export async function openSessionChat(id: string): Promise<void> {
   // For an explicitly selected external browser, reveal its existing chat first; otherwise open
   // the conversation in that same preferred browser (never the system default by accident).
   if (!(await revealChatInBrowser(conversationId))) await openInPreferredBrowser(chatUrl(conversationId), { reveal: true });
+}
+
+/** A message the person wrote: not an automatic Continue, a Goal decision, a finish step or an opening. */
+export function personsMessage(entry: InputEntry): boolean {
+  // Who wrote it, not when it goes: a message the person queued for the finish is still theirs,
+  // while the finish's generated checkpoints carry no authored text (CodeRabbit on #1981).
+  return !entry.opening && !entry.recovery && !entry.continuedFrom && !entry.purpose && !entry.finishOwner &&
+    (entry.authoredSource ?? 'text') !== 'none';
 }
 
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
@@ -2599,7 +2607,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       });
     },
     changed: () => push('session:changed'),
-    recordDelivered: (entry, anchorCommitted) => getConfig().sessions.record ? recordDeliveredInput(entry, anchorCommitted) : Promise.resolve(true),
+    recordDelivered: async (entry, anchorCommitted) => {
+      // The message that named a moved chat's folder went out: no other one repeats it (#1919).
+      if (entry.sessionId && personsMessage(entry) && (await getSession(entry.sessionId))?.projectNotePending)
+        await clearProjectNote(entry.sessionId).catch(error => logWarn(`projects: could not mark the folder note sent for ${entry.sessionId}: ${String(error)}`));
+      return getConfig().sessions.record ? recordDeliveredInput(entry, anchorCommitted) : true;
+    },
     prepareText: async (entry, limits, authored) => {
       const control = entry.conversationId ? goalSwitchFor(entry.conversationId) : getConfig().goal;
       const mode = entry.automation ?? (control.enabled ? control.mode : 'off');
@@ -2610,7 +2623,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       // An edit of a chat's first question (#365) replaces the message that carried its setup.
       return ((entry.opening || !entry.sessionId) && !entry.conversationId && !entry.finishOwner && entry.mode !== 'finish') || entry.editFramed
         ? prepareSessionPrompt(text, entry, limits, authored)
-        : !entry.finishOwner && entry.purpose !== 'decision' ? prepareSkillFollowup(text, authored, limits, entry) : text;
+        : !entry.finishOwner && entry.purpose !== 'decision'
+          ? prepareSkillFollowup(text, authored, limits, entry, personsMessage(entry) && !!entry.sessionId && (await getSession(entry.sessionId))?.projectNotePending === true)
+          : text;
     },
     applyAutomation: async (conversationId, automation, phase, objective, loopAfterTurn) => {
       // This message supersedes the old final; never pick that old final up merely
