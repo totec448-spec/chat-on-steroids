@@ -1106,7 +1106,7 @@
                   <label class="setting"><span class="setting-text"><b>Review Goal completion</b><em>When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you. Off by default.</em></span><input id="finishHoldOnStop" type="checkbox" /></label>
                   <div class="setting"><label class="setting-text" for="goalReviewer"><b>Review each Goal step's changes</b><em>A reviewer worker checks each Goal step's edits; its findings go into the next step. Uses more of your ChatGPT usage and covers only edits made with the edit tools.</em></label><select id="goalReviewer"></select></div>
                   <div class="setting" id="goalReviewerWorkersRow" hidden><span class="setting-text"><b>Sub-agents are off</b><em>The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.</em></span><button class="btn" id="goalReviewerWorkers" type="button">Turn on Sub-agents</button></div>
-                  <label class="setting"><span class="setting-text"><b>Stop and continue when ChatGPT offers no Send</b><em>Some chats show only Stop at a tool result, so the fresh turn's Continue can't be sent there. After that happens twice in a turn, the app stops the turn right after a result and sends the Continue once the stop shows. Goal and Loop stay on, and a step that arrives meanwhile is not run. Experimental.</em></span><input id="rotateStopFallback" type="checkbox" /></label>
+                  <label class="setting"><span class="setting-text"><b>Stop and continue when ChatGPT offers no Send</b><em>Some chats show only Stop at a tool result, so the fresh turn's Continue can't be sent there. After that happens twice in a turn, the app stops the turn right after a result and sends the Continue once the stop shows. Goal and Loop stay on, and a step that arrives meanwhile is not run.</em></span><input id="rotateStopFallback" type="checkbox" /></label>
                   <div class="setting"><span class="setting-text"><b id="goalBackendTitle">Goal response source</b><em>Where Goal's next message comes from: a separate ChatGPT chat in your account, your API key (most reliable), or Offline (prepared messages, no API cost).</em></span><select id="goalBackend" aria-labelledby="goalBackendTitle"><option value="chatgpt">Separate ChatGPT chat</option><option value="api">API key · Most reliable</option><option value="templates">Offline · No API cost</option></select></div>
                   <div class="setting"><span class="setting-text"><b id="loopBackendTitle">Loop response source</b><em>Where Loop's next message comes from: your API key (most reliable) or a separate ChatGPT chat in your account. Loop keeps going until you turn it off.</em></span><select id="loopBackend" aria-labelledby="loopBackendTitle"><option value="api">API key · Most reliable</option><option value="chatgpt">Separate ChatGPT chat</option></select></div>
                   <div class="setting"><span class="setting-text"><b>Goal, Loop and Plan model</b><em>Model for ChatGPT-generated messages and plans.</em></span><select id="helperModel" aria-label="Goal, Loop and Plan model"></select></div>
@@ -1491,7 +1491,7 @@
                   </div>
                 </details>
                   <details class="composer-menu" id="composerSettings">
-                    <summary aria-label="Chat mode" title="Chat mode"><i id="composerModeIcon" class="ico ph ph-chat-circle" aria-hidden="true"></i><span id="composerModeLabel">Normal</span><svg class="disclosure-chevron dropdown-chevron picker-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg></summary>
+                    <summary title="Chat mode"><i id="composerModeIcon" class="ico ph ph-chat-circle" aria-hidden="true"></i><span id="composerModeLabel">Normal</span><svg class="disclosure-chevron dropdown-chevron picker-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg></summary>
                     <div class="composer-popover">
                       <div class="automation-switch" id="automationSwitch" role="radiogroup" aria-label="Chat mode">
                         <button type="button" role="radio" aria-checked="true" data-mode="off"><i class="ico ph ph-chat-circle" aria-hidden="true"></i><span class="mode-copy"><span>Normal</span><small>One request, without automatic continuation.</small></span><i class="ico ph ph-check mode-check" aria-hidden="true"></i></button>
@@ -1514,7 +1514,8 @@
                   <button class="composer-dictation-button" id="dictationButton" type="button" aria-label="Start dictation" aria-pressed="false" aria-describedby="dictationStatus" data-state="idle" title="Start dictation" hidden disabled><i class="ico ph ph-microphone" aria-hidden="true"></i><span class="dictation-recording-dot" aria-hidden="true"></span></button>
                 </div>
                 <div class="context-meter" id="contextMeter">
-                  <button type="button" id="contextMeterButton" aria-label="Estimated session context" aria-expanded="false" aria-controls="contextMeterInfo">
+                  <span id="contextMeterNotice" class="sr-only" role="status" aria-live="polite"></span>
+                  <button type="button" id="contextMeterButton" aria-label="Estimated session context" aria-describedby="contextMeterNotice" aria-expanded="false" aria-controls="contextMeterInfo">
                     <svg viewBox="0 0 16 16" aria-hidden="true"><circle class="context-track" cx="8" cy="8" r="6"/><circle id="contextMeterArc" cx="8" cy="8" r="6" stroke-dasharray="0 37.7"/></svg><span id="contextMeterCompact" aria-hidden="true"></span>
                   </button>
                   <div id="contextMeterInfo" role="dialog" aria-label="Session context · estimated">
@@ -1523,6 +1524,7 @@
                     <button type="button" class="context-action" id="contextDisplay"><i class="ico ph ph-arrows-clockwise" aria-hidden="true"></i><span>Show token values</span></button>
                     <button id="compactSession" class="context-action" type="button" hidden><i class="ico ph ph-copy" aria-hidden="true"></i><span>Compact &amp; resume</span></button>
                     <button id="cancelCompaction" class="context-action" type="button" hidden><i class="ico ph ph-x" aria-hidden="true"></i><span>Cancel compaction</span></button>
+                    <button id="resumeLastSummary" class="context-action" type="button" hidden><i class="ico ph ph-arrow-right" aria-hidden="true"></i><span>Continue in a new chat from the last summary</span></button>
                     <p id="sessionControlStatus" role="status"></p>
                   </div>
                 </div>
@@ -1617,7 +1619,7 @@
                 <button class="btn" id="copyLogText" type="button">
                   <i class="ico ph ph-copy" aria-hidden="true"></i>Text
                 </button>
-                <button class="btn" id="sendFeedback" type="button" title="Report a problem or suggest an idea. GitHub opens with it filled in.">
+                <button class="btn" id="sendFeedback" type="button" title="Report a problem. GitHub opens with it filled in.">
                   <i class="ico ph ph-chat-text" aria-hidden="true"></i>Send feedback
                 </button>
                 <button class="btn" id="saveDiagnosticsReport" type="button" title="Save one file with versions, settings, the connection state and the log, with personal details removed, to attach to a bug report.">
@@ -1719,10 +1721,6 @@
       <div class="plugin-dialog-head"><h2 id="feedbackTitle">Send feedback</h2><button class="btn" id="feedbackClose" type="button">Close</button></div>
       <form id="feedbackForm" class="feedback-form" novalidate>
         <div class="plugin-dialog-body feedback-fields">
-        <div class="feedback-kind" role="radiogroup" aria-label="Kind of feedback">
-          <label><input type="radio" name="feedbackKind" value="bug" checked /><span>Report a problem</span></label>
-          <label><input type="radio" name="feedbackKind" value="idea" /><span>Suggest an idea</span></label>
-        </div>
         <div class="feedback-update" id="feedbackUpdate" hidden><span id="feedbackUpdateText"></span><button class="btn" id="feedbackUpdateOpen" type="button">Open Activity</button></div>
         <div id="feedbackBug">
           <label class="plugin-field" for="feedbackWhat"><span>What happened</span><textarea id="feedbackWhat" rows="3" maxlength="4000" placeholder="What you did, what happened, and what you expected instead."></textarea></label>
@@ -1730,11 +1728,8 @@
           <label class="plugin-field" for="feedbackFrequency"><span>How often does it happen?</span><select id="feedbackFrequency"><option value="">Not sure</option><option value="Every time">Every time</option><option value="Sometimes">Sometimes</option><option value="It happened once">It happened once</option></select></label>
           <div class="setting feedback-report"><span class="setting-text"><b>Diagnostics report</b><em id="feedbackReportNote">Needed for a problem report. Read it before you attach it.</em></span><button class="btn" id="feedbackSaveReport" type="button">Save report…</button></div>
         </div>
-        <div id="feedbackIdea" hidden>
-          <label class="plugin-field" for="feedbackProblem"><span>What problem would it solve?</span><textarea id="feedbackProblem" rows="3" maxlength="4000" placeholder="What you are trying to do, and what gets in the way."></textarea></label>
-          <label class="plugin-field" for="feedbackProposal"><span>What should the app do?</span><textarea id="feedbackProposal" rows="3" maxlength="4000" placeholder="How it would work for you."></textarea></label>
-        </div>
         <p class="feedback-note">GitHub opens with this filled in. You submit it there; the app sends nothing.</p>
+        <p class="feedback-note" id="feedbackFeatures">New features come as pull requests, not issues. <a href="https://github.com/totec448-spec/chat-on-steroids/blob/main/CONTRIBUTING.md#new-features" target="_blank" rel="noopener noreferrer">How to start one</a></p>
         <p id="feedbackError" class="plugin-error" role="alert" hidden></p>
         </div>
         <div class="pet-delete-actions"><button class="btn" id="feedbackCancel" type="button">Cancel</button><button class="btn btn-solid" id="feedbackSubmit" type="submit">Continue on GitHub</button></div>

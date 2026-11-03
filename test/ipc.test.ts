@@ -66,7 +66,7 @@ const {
   spawn,
   swarmStateForCaller
 } = await import('../src/main/agents.js');
-const { registerIpc, cleanSessionName } = await import('../src/main/ipc.js');
+const { registerIpc, cleanSessionName, personsMessage } = await import('../src/main/ipc.js');
 const { openInPreferredBrowser } = await import('../src/main/browser.js');
 const bridgeModule = await import('../src/main/bridge.js');
 const { app, nativeTheme, safeStorage, shell, dialog } = await import('electron');
@@ -1576,7 +1576,8 @@ describe('in-app feedback', () => {
 
   it.each([
     { kind: 'bug', what: '   ' },
-    { kind: 'idea', problem: 'p', proposal: '' },
+    // New features come as pull requests: the app opens no idea form (2026-11-01).
+    { kind: 'idea', problem: 'p', proposal: 'q' },
     { kind: 'bug', what: 'x', template: 'blank.yml' },
     { kind: 'bug', what: 'x', frequency: 'Always' },
     { kind: 'bug', what: 'x'.repeat(4001) },
@@ -3297,4 +3298,15 @@ describe('phone notifications over IPC', () => {
     expect(await handlers.get('phonePush:token')!(null, { token: '' })).toMatchObject({ ok: true, data: { hasPhonePushToken: false } });
     expect(await getSecret('ntfyToken')).toBeNull();
   });
+});
+
+// #1919: only a message the person wrote carries a moved chat's folder line.
+it('tells a person\'s message from the app\'s own', () => {
+  const base = { id: 'i1', sessionId: 's1', text: 'Next step', mode: 'auto', state: 'queued' } as never as Parameters<typeof personsMessage>[0];
+  expect(personsMessage(base)).toBe(true);
+  expect(personsMessage({ ...base, scheduled: { scheduleId: 'x', dueAt: 1, late: false } } as never)).toBe(true);
+  for (const own of [{ opening: true }, { recovery: { questionId: 'q' } }, { continuedFrom: 'recovery' }, { purpose: 'decision' },
+    { purpose: 'rotation' }, { finishOwner: 'f' }, { mode: 'finish', authoredSource: 'none' }, { authoredSource: 'none' }]) expect(personsMessage({ ...base, ...own } as never)).toBe(false);
+  // A message the person wrote and queued for the finish is still theirs (CodeRabbit on #1981).
+  expect(personsMessage({ ...base, mode: 'finish', authoredSource: 'text' } as never)).toBe(true);
 });

@@ -54,6 +54,16 @@ var CLF_DOM = (() => {
     'button[data-testid="composer-speech-button"], button[data-testid="composer-dictate-button"], ' +
     'button[aria-label^="Dictate" i], button[aria-label^="Voice" i], ' +
     'button[aria-label="Start dictation" i], button[aria-label="Start Voice" i]';
+  /**
+   * The provider's name for a sprite glyph, from a `<use>` reference: the part after `#`, without
+   * the `codex-icon-` prefix the ids gained on 2026-11-02 (`#codex-icon-microphone-light-20`). Read
+   * both ways, so neither the old nor the new sprite sheet loses the anchors built on them.
+   */
+  const spriteName = use => {
+    const href = use.getAttribute('href') || use.getAttribute('xlink:href') || '';
+    const hash = href.lastIndexOf('#');
+    return hash < 0 ? '' : href.slice(hash + 1).replace(/^codex-icon-/, '');
+  };
   const safe = (fn, fallback) => {
     try {
       const value = fn();
@@ -2053,10 +2063,8 @@ var CLF_DOM = (() => {
       // and the app's composer control never appeared.
       const anchor = sendButton() || stopButton() || nativeComposerControls(SPEECH)[0] ||
         nativeComposerControls('button')
-        .find(button => !button.closest(OWN_SURFACES) && [...button.querySelectorAll('svg use')].some(use => {
-          const href = use.getAttribute('href') || use.getAttribute('xlink:href') || '';
-          return href.slice(href.lastIndexOf('#')).startsWith('#microphone-');
-        }));
+        .find(button => !button.closest(OWN_SURFACES) &&
+          [...button.querySelectorAll('svg use')].some(use => spriteName(use).startsWith('microphone-')));
       const explicit = anchor ? anchor.closest(TRAILING) : [...(composerBox() || document).querySelectorAll(TRAILING)].find(renderedComposerNode);
       if (!anchor) return explicit ? { host: explicit, before: null } : null;
 
@@ -2786,13 +2794,17 @@ var CLF_DOM = (() => {
     if (attachmentHost && tileParent && tileParent !== attachmentHost) {
       const actions = [...tileParent.querySelectorAll('button')];
       if (actions.length === 2 && actions[1] === button) {
-        const open = actions[0], name = open.getAttribute('aria-label');
+        const open = actions[0], label = open.getAttribute('aria-label');
         const removal = (button.getAttribute('aria-label') || '').trim();
-        const labelled = [...tileParent.querySelectorAll('span')].some(node =>
-          !node.children.length && node.textContent === name);
+        const shownNames = [...tileParent.querySelectorAll('span')].filter(node => !node.children.length).map(node => node.textContent);
+        // The name the tile shows, which its open button's label must be. On some accounts that label is
+        // the name twice ("a.htmla.html", Spanish ChatGPT, #1986): every file waited out its 10 minutes.
+        // Only that exact doubling is accepted besides the name itself.
+        const name = label && shownNames.includes(label) ? label
+          : label ? shownNames.find(shown => !!shown && label === shown + shown) : undefined;
         // The tile's structure is the proof, not the remove label's wording: "Remove notes.zip" in
         // English, "notes.zip entfernen" in German (#1942), and a label naming no file at all.
-        if (name && removal && removal !== name.trim() && labelled &&
+        if (name && removal && removal !== label.trim() && removal !== name.trim() &&
             open.closest('[data-composer-attachments]') === attachmentHost) return name;
       }
     }
@@ -2878,13 +2890,16 @@ var CLF_DOM = (() => {
   }
 
   /** Observed ChatGPT Plugins settings surface. Missing/ambiguous structure is not proof. */
-  async function pluginRefreshView(connectorName, expectedTools = [], expectedAppId = null) {
+  async function pluginRefreshView(connectorName, expectedTools = [], expectedAppId = null, expectedSurface = null) {
     // A durable exact-ID request already identifies its connector even when names collide.
     // Use that ID's proven surface for limits too, rather than borrowing another surface's name.
     const identified = expectedAppId ? ownApps.filter(app => app.appId === expectedAppId) : [];
     const proven = identified.length ? identified : provenAppsFor(connectorName);
-    if (proven === null && !expectedAppId) return null;
-    const externalPlugins = proven?.length ? proven.every(app => app.surface === 'plugins') : pluginsConnectorName(connectorName);
+    const surfaceAt = ['core', 'desktop', 'plugins'].indexOf(expectedSurface);
+    const nativeRoute = !location.hash && /^\/settings\/plugins-settings\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.pathname);
+    const nativeInspection = surfaceAt >= 0 && !!nativeRoute &&
+      (expectedAppId !== null || connectorNames()[surfaceAt] === connectorName);
+    if (proven === null && !expectedAppId && !nativeInspection) return null;
     const snapshot = await new Promise(resolve => {
       const nonce = crypto.randomUUID();
       const finish = value => { clearTimeout(timer); window.removeEventListener('message', receive); resolve(value); };
@@ -2893,13 +2908,22 @@ var CLF_DOM = (() => {
         if (event.source === window && event.origin === location.origin && data?.source === 'clf-plugin-reply' && data.nonce === nonce && data.v === 1) finish(data.plugin);
       };
       const timer = setTimeout(() => finish(null), 1500);
-      window.addEventListener('message', receive); window.postMessage({ source: 'clf-plugin-ask', nonce, apps: connectorNames(), appIds: connectorApps() }, location.origin);
+      window.addEventListener('message', receive); window.postMessage({ source: 'clf-plugin-ask', nonce, apps: connectorNames(), appIds: connectorApps(),
+        refresh: nativeInspection ? { appId: expectedAppId ?? nativeRoute[1], surface: expectedSurface } : null }, location.origin);
     });
     const route = /^#settings\/Plugins\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.hash) ||
       (!location.hash ? /^\/(?:settings\/plugins-settings|plugins)\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.pathname) : null);
-    if (!snapshot || snapshot.appId !== route?.[1] || (expectedAppId ? snapshot.appId !== expectedAppId : !ownSnapshot(snapshot, connectorName)) ||
+    // The helper may inspect the native tunnel even when older call-derived aliases collide.
+    // This only reads a card: main verifies this tunnel against the requested surface before
+    // granting Current/Claim. Never substitute these aliases for that stronger proof.
+    const tunnelInspection = nativeInspection && /^tunnel_[a-zA-Z0-9]{8,80}$/.test(snapshot?.tunnelId || '') &&
+      (expectedAppId ? snapshot?.appId === expectedAppId : snapshot?.connectorName === connectorName);
+    const conflictingNativeIdentity = nativeInspection && ownApps.some(app => app.appId === snapshot?.appId && app.surface !== expectedSurface);
+    const externalPlugins = tunnelInspection ? expectedSurface === 'plugins'
+      : proven?.length ? proven.every(app => app.surface === 'plugins') : pluginsConnectorName(connectorName);
+    if (!snapshot || snapshot.appId !== route?.[1] || (!tunnelInspection && (conflictingNativeIdentity || (expectedAppId ? snapshot.appId !== expectedAppId : !ownSnapshot(snapshot, connectorName)))) ||
         !Array.isArray(snapshot.tools) || (snapshot.tools.length < 1 && !externalPlugins) || snapshot.tools.length > (externalPlugins ? 257 : 64) || JSON.stringify(snapshot.tools).length > 300000 ||
-        snapshot.tools.some(tool => !tool || typeof tool.name !== 'string' || !/^[a-z][a-z0-9_]{0,79}$/.test(tool.name) || typeof tool.description !== 'string' || tool.inputSchema?.type !== 'object') ||
+        snapshot.tools.some(tool => !tool || typeof tool.name !== 'string' || !(externalPlugins ? /^[a-z0-9_.-]{1,64}$/i : /^[a-z][a-z0-9_]{0,79}$/).test(tool.name) || typeof tool.description !== 'string' || tool.inputSchema?.type !== 'object') ||
         new Set(snapshot.tools.map(tool => tool.name)).size !== snapshot.tools.length) return null;
     const buttons = [...document.querySelectorAll('button[data-clf-plugin-refresh]')].filter(button => button.getAttribute('data-clf-plugin-refresh') === snapshot.appId && button.getClientRects().length > 0);
     return typeof snapshot.refreshAvailable === 'boolean' && buttons.length === (snapshot.refreshAvailable ? 1 : 0) ? { appId: snapshot.appId, connectorName: snapshot.connectorName, versionId: typeof snapshot.versionId === 'string' ? snapshot.versionId.slice(0, 200) : null,
@@ -2919,13 +2943,20 @@ var CLF_DOM = (() => {
     return target !== null && (target ? snapshot.appId === target : proven.length
       ? proven.some(app => app.appId === snapshot.appId) : snapshot.connectorName === connectorName);
   }
-  function pluginInstalledButtons(connectorName, expectedAppId = null, expectedSurface = null) {
+  function pluginInstalledButtons(connectorName, expectedAppId = null, expectedSurface = null, inspectTunnel = false) {
     // Native links name their exact App Id, even when a fresh provider rename has not reached
     // the learned name yet. Legacy buttons still need names; the destination proves identity.
     // A scoped enrolled observation keeps its App Id; other proven aliases cannot replace it.
     if (expectedAppId !== null && (typeof expectedAppId !== 'string' || !/^asdk_app_[A-Za-z0-9_-]{1,160}$/.test(expectedAppId))) return null;
     let proven = provenAppsFor(connectorName);
-    if (expectedAppId !== null && expectedSurface !== null) {
+    const nativeInspection = inspectTunnel && ['core', 'desktop', 'plugins'].includes(expectedSurface) &&
+      location.pathname === '/settings/plugins-settings' && !location.hash &&
+      (expectedAppId !== null || connectorNames()[['core', 'desktop', 'plugins'].indexOf(expectedSurface)] === connectorName);
+    // Keep unambiguous proven-ID discovery through a provider rename. When aliases collide,
+    // inspect only the configured-name row or durable exact ID instead. The destination's
+    // tunnel still needs main's validation; none of these navigation choices grants Refresh.
+    if (nativeInspection && (expectedAppId !== null || proven === null || firstEnrollmentAppId(proven, connectorName) === null)) proven = [];
+    if (!nativeInspection && expectedAppId !== null && expectedSurface !== null) {
       const surfaceAt = ['core', 'desktop', 'plugins'].indexOf(expectedSurface);
       if (surfaceAt < 0) return null;
       const identified = ownApps.filter(app => app.appId === expectedAppId);
@@ -2950,18 +2981,35 @@ var CLF_DOM = (() => {
       // The newer shell lists installed plugins on the /settings/plugins-settings page itself.
       if (location.pathname === '/settings/plugins-settings' && !location.hash) {
         const main = document.querySelector('main');
-        if (!main || (!proven.length && !connectorNames().includes(connectorName))) return null;
+        if (!main || (!nativeInspection && !proven.length && !connectorNames().includes(connectorName))) return null;
         // Measured 2026-10-11: installed rows became links to exact management pages.
         // Catalog and external links cannot identify an installed connector.
-        const rows = [...main.querySelectorAll('button,a[href]')].filter(button => {
-          if (!button.isConnected || button.disabled || button.getClientRects().length === 0 || button.closest(`${OWN_SURFACES}, ${TURN}`) || !composerCssVisible(button)) return false;
+        const installed = [...main.querySelectorAll('button,a[href]')].filter(button => button.isConnected && !button.closest(`${OWN_SURFACES}, ${TURN}`));
+        const visible = installed.filter(button => !button.disabled && button.getClientRects().length > 0 && composerCssVisible(button));
+        const installedId = button => {
+          if (button.tagName !== 'A') return null;
+          const url = new URL(button.href, location.href);
+          return url.origin === location.origin && !url.hash
+            ? /^\/settings\/plugins-settings\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(url.pathname)?.[1] ?? null : null;
+        };
+        if (nativeInspection) {
+          const ids = expectedAppId !== null ? [expectedAppId] : namedTargetId !== undefined ? [namedTargetId] : proven.map(app => app.appId);
+          const exact = visible.filter(button => ids.includes(installedId(button)));
+          if (exact.length || expectedAppId !== null) return exact.length ? exact : null;
+          if (installed.some(button => ids.includes(installedId(button)))) return [];
+          // A recreated connector has a new ID: only an unbound native inspection may
+          // try its configured-name row when none of the proven IDs is still installed.
+          const configured = installed.filter(button => (button.tagName !== 'A' || installedId(button)) &&
+            [...button.querySelectorAll('*')].some(node => !node.children.length && text(node) === connectorName));
+          const visibleConfigured = configured.filter(button => visible.includes(button));
+          return !configured.length ? null : configured.length === visibleConfigured.length ? visibleConfigured : [];
+        }
+        const rows = visible.filter(button => {
           if (button.tagName === 'A') {
-            const url = new URL(button.href, location.href);
-            const route = /^\/settings\/plugins-settings\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(url.pathname);
-            if (url.origin !== location.origin || !route || url.hash) return false;
-            if (expectedAppId !== null && route[1] !== expectedAppId) return false;
-            if (namedTargetId !== undefined) return route[1] === namedTargetId;
-            if (proven.length) return proven.some(app => app.appId === route[1]);
+            const appId = installedId(button);
+            if (!appId || (expectedAppId !== null && appId !== expectedAppId)) return false;
+            if (namedTargetId !== undefined) return appId === namedTargetId;
+            if (proven.length) return proven.some(app => app.appId === appId);
             if (expectedAppId !== null) return true;
           }
           if (expectedAppId !== null || namedTargetId !== undefined) return false; // Once an exact ID is known, name-only buttons cannot prove its identity.
@@ -3476,7 +3524,10 @@ var CLF_DOM = (() => {
       // Exact provider slug is preferred. Existing saved display slugs may resolve
       // only to an actually observed, available pair; never to an account default.
       const name = normalizeModelLabel(model);
-      const modelRank = choice => !model || choice.familyId === model || choice.id === model ? 2
+      // Effort only keeps the current model: its efforts, never another model's (CodeRabbit on #1972).
+      // An unreadable current model offers nothing, so the request stays unconfirmed.
+      const modelRank = choice => !model ? (current?.familyId && choice.familyId === current.familyId ? 2 : 0)
+        : choice.familyId === model || choice.id === model ? 2
         : name && normalizeModelLabel(choice.familyLabel) === name ? 1 : 0;
       // Every available choice of the requested model, read once across versions, so the effort
       // can be resolved against what the account actually offers before anything is moved.
@@ -3890,9 +3941,8 @@ var CLF_DOM = (() => {
         // The provider renders both icons at once. Only the visible checked glyph proves
         // the mode; translated labels and the requested URL are not activation receipts.
         return [...button.querySelectorAll('svg use')].some(use => {
-          const href = use.getAttribute('href') || use.getAttribute('xlink:href') || '';
-          if (href.slice(href.lastIndexOf('#')) !== '#chat-temp-checked') return false;
-          for (let node = use.parentElement; node; node = node.parentElement) {
+          if (spriteName(use) !== 'chat-temp-checked') return false;
+          for (let node = use; node; node = node.parentElement) {
             const style = getComputedStyle(node);
             if (node.hidden || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || style.opacity === '0') return false;
           }

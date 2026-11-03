@@ -11,6 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { buildProblem, needsBuild } from './ui-build-state.mjs';
+import { parseShard, readWeights, shardChecks } from './shard-plan.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const electron = createRequire(import.meta.url)('electron');
@@ -26,8 +27,18 @@ const special = {
   'verify-pet-performance.cjs': { command: process.execPath, args: ['current', '--check'] }
 };
 
-const scripts = readdirSync(path.join(root, 'scripts'))
+const found = readdirSync(path.join(root, 'scripts'))
   .filter(name => /^verify-.*\.cjs$/.test(name) && name.includes(filter)).sort();
+// CI runs the checks in parallel jobs: VERIFY_UI_SHARD=2/3 runs this job's third, balanced by the
+// seconds in ui-check-weights.json (a check not listed weighs the median), longest first.
+const shard = parseShard(process.env.VERIFY_UI_SHARD);
+if (process.env.VERIFY_UI_SHARD && !shard) { console.error(`VERIFY_UI_SHARD must look like 1/3, not "${process.env.VERIFY_UI_SHARD}"`); process.exit(2); }
+let weights = new Map();
+try { weights = readWeights(readFileSync(path.join(root, 'scripts', 'ui-check-weights.json'), 'utf8')); } catch { /* every check weighs the same */ }
+// Only the checks that run are planned: a skipped one would take a share of a shard's time while
+// running nowhere. The first shard names the skipped ones, once (CodeRabbit on #1983).
+const scripts = shardChecks(found, skip, weights, shard);
+if (shard) console.log(`UI checks shard ${shard.index} of ${shard.count}: ${scripts.length} of ${found.length} checks`);
 // CI runners are shared and uneven: a different check timed out on each run while all of them
 // passed on a real machine. With VERIFY_UI_RETRY a failed check runs once more; a pass on retry
 // counts, and is named as a flake (a GitHub warning in CI) so it stays visible.
