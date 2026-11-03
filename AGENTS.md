@@ -5391,6 +5391,29 @@ duplicate surfaces and I/O failures leave the ledger intact and reject new work 
 allows initial enrollment. Tolerant reads for auxiliary state keep their existing behavior.
 
 
+For native tunnel-backed refresh, the helper preserves unambiguous proven-ID discovery through
+renames; when call-derived aliases collide, it visits only the unique configured-name installed
+row or its durable exact App ID. An unbound request may inspect a unique configured-name row if
+none of its proven-ID rows remains installed, including hidden or unavailable rows; a bound
+target never borrows that replacement.
+Hidden or unavailable configured-name matches also preserve ambiguity; multiple visible matches
+remain separate rows for the caller to reject, not a single selected target.
+Unbound native discovery returns `null` for an unobserved/absent target and an empty array for a
+known installed but unavailable/ambiguous target. The caller keeps the existing eight-second
+hydration wait, then reports the latter through the existing inspection-failure path while it
+still owns the page. A vanished target keeps discovery retry behavior; legacy reads are unchanged.
+The isolated reader passes an optional `refresh: { appId, surface }`
+on `clf-plugin-ask` so the native Fiber reader applies that surface's catalog bound only to the
+exact matching card, even when its learned Plugins alias is missing. Legacy reads keep their
+existing limits. This hint grants only bounded inspection, not ownership or a Refresh click.
+Without a reported native tunnel, a surface-qualified exact-ID observation cannot override a
+learned foreign or colliding surface, whether the refresh row is bound or the card ID was just
+discovered. Older optional-argument callers and legacy-route reads
+retain their prior contracts, including schema-only observations on non-native-tunnel setups.
+Main checks that tunnel against the requested surface before initial enrollment/Current/Claim;
+navigation and page-reported tunnel IDs alone grant no Refresh authority. Other identity
+consumers and legacy pages retain their existing alias checks.
+
 **Scoped refresh receipts.** Each published surface captures its configured tunnel/profile.
 New ledger rows carry `tunnelKey`; old rows with a concrete App ID require that same App ID
 to prove the configured OpenAI tunnel. A completed, unambiguous receipt may then bind a changed
