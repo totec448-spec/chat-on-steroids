@@ -283,6 +283,18 @@ describe.runIf(process.platform === 'linux')('native Linux connector authorizati
     expect(JSON.stringify(result)).not.toContain('PRIVATE_WINDOW_TITLE');
     expect(testState.backend).toHaveBeenCalledTimes(1);
   });
+  it('never exposes private application text hidden inside a backend error code', async () => {
+    const { observe } = handlers();
+    testState.backend.mockResolvedValue({
+      ok: false, command: 'list-windows', error: { code: 'PRIVATE_WINDOW_TITLE: internal payroll' }
+    });
+    const result = await observe({ what: 'windows' });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('LINUX_DESKTOP_BACKEND: UNKNOWN');
+    expect(JSON.stringify(result)).not.toContain('PRIVATE_WINDOW_TITLE');
+    expect(JSON.stringify(result)).not.toContain('internal payroll');
+    expect(testState.backend).toHaveBeenCalledTimes(1);
+  });
   it('fails closed on read-only even with native opt-in and control permission selected', async () => {
     const {act} = handlers(); testState.readOnly = true;
     expect((await act({action:'click',ref:'@s123:e1'})).content[0].text).toContain('Read-only');
