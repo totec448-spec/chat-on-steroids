@@ -183,6 +183,8 @@ const api = {
   markTourDone: () => call<void>('ui:tourDone'),
   /** #1864: the desktop question waiting now, its answer from the app's window, and when it changes. */
   desktopAskPending: () => call<DesktopAskPending | null>('desktopAsk:pending'),
+  /** Explicit one-time GNOME screenshot consent check, never returns the screenshot itself. */
+  linuxScreenshotConsent: () => call<{ pngBytes: number }>('desktop:linuxScreenshotConsent'),
   answerDesktopAsk: (id: string, choice: 'go' | 'not-now') => call<boolean>('desktopAsk:answer', { id, choice }),
   onDesktopAskPending: (listener: (pending: DesktopAskPending | null) => void): (() => void) => {
     const wrapped = (_event: unknown, pending: DesktopAskPending | null): void => listener(pending);

@@ -250,6 +250,8 @@ export interface ToolContext {
    * ever added to. Defaults to the live answer when the caller does not track it.
    */
   exposedFind?: boolean;
+  /** Monotone native Linux tool exposure for one MCP endpoint; execution uses the live opt-in. */
+  exposedLinuxDesktop?: boolean;
 }
 
 export type ToolContent =

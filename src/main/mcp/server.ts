@@ -219,6 +219,7 @@ interface SurfaceExposure {
   sessionTools: boolean;
   agentTools: boolean;
   find: boolean | null;
+  linuxDesktop: boolean;
 }
 
 /**
@@ -235,7 +236,7 @@ const surfaceExposure = new Map<SurfaceId, SurfaceExposure>();
 function exposureFor(surface: SurfaceId): SurfaceExposure {
   let state = surfaceExposure.get(surface);
   if (!state) {
-    state = { finishTool: false, caps: null, sessionTools: false, agentTools: false, find: null };
+    state = { finishTool: false, caps: null, sessionTools: false, agentTools: false, find: null, linuxDesktop: false };
     surfaceExposure.set(surface, state);
   }
   return state;
@@ -310,6 +311,7 @@ export async function startMcpServer(
     exposed.finishTool = exposed.finishTool || config.ui.finishTool === true;
     exposed.sessionTools = exposed.sessionTools || sessionTools;
     exposed.agentTools = exposed.agentTools || agentTools;
+    if (surface === 'desktop') exposed.linuxDesktop ||= config.ui.linuxDesktopEnabled === true;
     return {
       ...live,
       sessionTools,
@@ -318,6 +320,7 @@ export async function startMcpServer(
       exposedSessionTools: exposed.sessionTools,
       exposedFinishTool: exposed.finishTool,
       exposedAgentTools: exposed.agentTools,
+      exposedLinuxDesktop: exposed.linuxDesktop,
       exposedFind: exposed.find
     };
   };
