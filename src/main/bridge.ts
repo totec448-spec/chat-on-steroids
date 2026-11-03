@@ -39,7 +39,7 @@ export { setBrowserWorkArea } from './browser-window-layout.js';
 import { pendingBrowserPreferenceRequest, acknowledgeBrowserPreferences } from './browser-preferences.js';
 import { sessionFinishHeld, releaseSessionFinish, getSessionFinishDraft, sessionFinishWaiting } from './session/finish.js';
 import { observeUsage } from './session/usage.js';
-import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, lostBrowserOpening, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, queuedInputOfferBlocker, continueAsOrdinaryMessage, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation, ownUnsentTexts, retireMismatchedRecoveryInput } from './session/input.js';
+import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, lostBrowserOpening, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, queuedInputOfferBlocker, continueAsOrdinaryMessage, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation, ownUnsentTexts, retireMismatchedRecoveryInput, noteInputHeld } from './session/input.js';
 /**
  * The local bridge between the Chrome extension and this app.
  *
@@ -5361,6 +5361,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       // A page that keeps showing another last question will not stop: after half an hour of it without a
       // break, the automatic Continue would only answer the wrong question, so it ends (2026-11-02).
       // Any other reason in between means the page saw something else: the run starts over (CodeRabbit on #2030).
+      // A page holding it until its own turn ends has it: the queue says so, and it is not failed as
+      // never picked up a minute later (2026-11-03: the person's Continue, while ChatGPT still answered).
+      if (await noteInputHeld(inputId, reason).catch(() => null) === 'new') changed();
       if (reason !== 'recovery-question-changed') recoveryQuestionChanged.delete(inputId);
       if (reason === 'recovery-question-changed' && chat) {
         const run = recoveryQuestionChanged.get(inputId);
