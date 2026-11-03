@@ -14,6 +14,15 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.50': {
+    lead: () => t("Move chats between projects, chats that keep going, and an extension that updates during long runs."),
+    highlights: [
+      { icon: 'i-folder', title: () => t("Move chats between projects"), text: () => t("Drag a chat onto a project, or use Move to project in its menu. Undo puts it back.") },
+      { icon: 'i-retry', title: () => t("Chats keep going"), text: () => t("When a chat's next step is not picked up, the app keeps trying, tells you, and offers Continue now.") },
+      { icon: 'i-plug', title: () => t("The extension updates itself"), text: () => t("It no longer waits for every long-running chat to finish first.") },
+      { icon: 'i-bolt', title: () => t("Big chats stay fast"), text: () => t("Very long chats no longer slow the app down.") }
+    ]
+  },
   '2.1.49': {
     lead: () => t("Long chats that get through ChatGPT's limits, pop-ups out of the way, and message times."),
     highlights: [
