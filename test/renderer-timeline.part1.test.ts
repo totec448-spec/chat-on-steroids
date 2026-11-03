@@ -980,20 +980,24 @@ it('says a queued message waits for ChatGPT\'s answer while the chat\'s page hol
   const queued: InputEntry = { id: 'held-one', sessionId: summary(live.events).id, state: 'queued', owner: null, text: 'Continue',
     mode: 'auto', model: null, reasoningEffort: null, dueAt: T0, createdAt: T0, conversationId: 'chat-a',
     pageHold: { reason: 'still-answering', at: Date.now() - 2_000 } };
-  const status = () => w.document.querySelector('#inputQueue .pending-message')!.textContent ?? '';
+  const status = () => w.document.querySelector('#inputQueue .pending-message')?.textContent ?? '';
+  // Each change is announced the way main does, then the queue's own refresh is waited for (CodeRabbit on #2054).
+  const shows = async (expected: string | null, absent?: string) => {
+    await append([]);
+    await vi.waitFor(() => {
+      if (expected) expect(status()).toContain(expected);
+      if (absent) expect(status()).not.toContain(absent);
+    });
+  };
   live.inputs.push(queued);
-  await append([]); await append([]);
-  expect(status()).toContain('Waiting for ChatGPT to finish its answer');
+  await shows('Waiting for ChatGPT to finish its answer');
   live.inputs[0] = { ...queued, pageHold: { reason: 'turn-held', at: Date.now() - 2_000 } };
-  await append([]); await append([]);
-  expect(status()).toContain("Waiting for ChatGPT's page to end its turn");
+  await shows("Waiting for ChatGPT's page to end its turn");
   live.inputs[0] = { ...queued, pageHold: { reason: 'tool-running', at: Date.now() - 2_000 } };
-  await append([]); await append([]);
-  expect(status()).toContain('Waiting for the running tool call to finish');
+  await shows('Waiting for the running tool call to finish');
   // A hold no page has repeated for over a minute no longer says why it waits.
   live.inputs[0] = { ...queued, pageHold: { reason: 'still-answering', at: Date.now() - 80_000 } };
-  await append([]); await append([]);
-  expect(status()).not.toContain('Waiting for ChatGPT');
+  await shows(null, 'Waiting for ChatGPT');
 });
 
 it('says why a queued message waits: no extension, or a running tool call', async () => {
