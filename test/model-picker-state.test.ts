@@ -177,6 +177,14 @@ it.each([['xhigh', 11], ['medium', 10]] as const)('selects the nearest offered e
   expect(await f.api.selectModelSettings('future-model', effort), `${effort} refused instead of rounded`).toBe(true);
   expect(f.state.currentBucket).toBe(bucket);
 });
+// CodeRabbit on #1972: an effort-only request (a wake keeps the chat's model) never moves to another
+// model that happens to offer that effort; it rounds within the current model.
+it('keeps an effort-only request on the current model', async () => {
+  const f = fixture('', 0);
+  expect(await f.api.selectModelSettings(null, 'ultra')).toBe(true);
+  expect(f.state.selectedVersionEntry.id).toBe('latest');
+  expect(f.state.currentSelection.modelSlug).toBe('gpt-5-6-thinking');
+});
 it('still refuses a model the account does not offer, whatever the effort', async () => {
   const f = fixture('', 0);
   expect(await f.api.selectModelSettings('no-such-model', 'high')).toBe(false);

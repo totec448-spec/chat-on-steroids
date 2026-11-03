@@ -12,7 +12,7 @@ vi.mock('../src/main/config.js', async original => {
   return { ...real, getConfig: () => ({ ...real.defaultConfig(), goal: { ...real.defaultConfig().goal, ...state.goal } }) };
 });
 
-const { goalHelperSelection, goalProgressFor } = await import('../src/main/goal.js');
+const { goalHelperSelection, goalProgressFor, goalRequestTimeoutMs } = await import('../src/main/goal.js');
 
 beforeEach(() => {
   state.models = [
@@ -107,4 +107,15 @@ it('logs a fallback from the untouched default helper as info, and from a chosen
   state.goal = { helperModel: 'gpt-5-4-thinking', helperReasoning: 'high' };
   goalHelperSelection();
   expect(level('gpt-5-4-thinking')).toBe('warn');
+});
+
+it('reads the ChatGPT helper only for a ChatGPT draft deadline (CodeRabbit on #2033)', () => {
+  // An API draft's deadline never depends on the helper, so it must not ask an idle ChatGPT tab
+  // for a fresh model catalog because the saved helper model is missing from it.
+  state.goal = { helperModel: 'gpt-9-missing', helperReasoning: 'high' };
+  expect(goalRequestTimeoutMs('api')).toBe(3 * 60_000);
+  expect(goalRequestTimeoutMs('templates')).toBe(3 * 60_000);
+  expect(refreshForUnoffered).not.toHaveBeenCalled();
+  goalRequestTimeoutMs('chatgpt');
+  expect(refreshForUnoffered).toHaveBeenCalled();
 });

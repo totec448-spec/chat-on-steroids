@@ -158,6 +158,7 @@ interface Hook {
   streamRootKeys(): string[];
   /** How long the stop button must stay gone before content.js calls a turn finished. */
   TURN_SETTLE_MS: number;
+  APPROVAL_SETTLE_MS: number;
   /** How long an app-owned Send waits for its exact user row after the click. */
   DESKTOP_RECEIPT_MS: number;
   /** Test seam for the no-visible-progress fallback. */
@@ -1390,6 +1391,46 @@ describe('desktop input delivery and helper ownership', () => {
         "somebody else's draft was overwritten").toBe(true);
       expect(sends(), 'a real draft was sent over').toBe(0);
       expect(live.document.querySelector('#prompt-textarea')!.textContent).toBe('A sentence I was still writing');
+    }
+  });
+
+  /**
+   * #1922: a fresh-turn rotation inserted its generic Continue, the composer changed before Send, and the
+   * draft was kept. Every later message (other text) was then refused: "ChatGPT already contains an unsent
+   * draft". The app lists the texts it put into this chat that never reached Send; exactly one of those is
+   * its own leftover and is replaced. Edited, or not listed, it is still the person's draft.
+   */
+  it.each(['listed', 'listed, kept escaped', 'not listed', 'edited'] as const)('replaces an earlier unsent message of its own only when it is %s', async kind => {
+    const leftover = 'Continue with the next step of the task (step 2).';
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack || message.fail || message.response
+        ? { ok: true } : { input: claimed(), ...(kind === 'not listed' ? {} : { ownUnsent: [leftover] }) } })
+    }, () => undefined, false, true);
+    live.document.querySelector('#prompt-textarea')!.textContent = kind === 'edited' ? `${leftover} And also this.`
+      : kind === 'listed, kept escaped' ? String.raw`Continue with the next step of the task \(step 2\).` : leftover;
+    await settle();
+    const sends = watchSend(live.document);
+    let sentText = '';
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      sentText = live!.document.querySelector('#prompt-textarea')!.textContent ?? '';
+      userTurn(live!.document, 'leftover-question', text, { sent: false });
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+    });
+
+    const result = await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA });
+    await settle();
+
+    const refused = live.sent.filter(message => message.type === 'desktop_input' && message.fail)
+      .map(message => String(message.error));
+    if (kind.startsWith('listed')) {
+      expect(refused.filter(error => /unsent draft|composer changed/.test(error))).toEqual([]);
+      expect(sends()).toBe(1);
+      // Replaced, never appended to: only the new message goes out.
+      expect(sentText.replace(/\s+/g, ' ').trim()).toBe(text.replace(/\s+/g, ' ').trim());
+      expect(result).toEqual({ ok: true });
+    } else {
+      expect(refused.some(error => /unsent draft/.test(error))).toBe(true);
+      expect(sends()).toBe(0);
     }
   });
 
@@ -2974,6 +3015,29 @@ describe('desktop input delivery and helper ownership', () => {
     if (!fresh) expect(composerText(live.document)).toBe('Restored old home draft');
   });
 
+  // CodeRabbit on #2028: ChatGPT can restore the app's own listed leftover only while the model is being
+  // chosen (a slow machine); the empty composer seen at claim time must not decide it.
+  it('replaces its own listed leftover restored during model selection', async () => {
+    const leftover = 'Continue with the next step of the task.';
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize ? { ok: true } : message.ack || message.fail ? { ok: true }
+        : { input: claimed(), ownUnsent: [leftover] } })
+    });
+    (live.window as any).CLF_DOM.selectModelSettings = async () => {
+      live!.document.querySelector('#prompt-textarea')!.textContent = leftover;
+      return true;
+    };
+    let sentText = '';
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      sentText = composerText(live!.document);
+      userTurn(live!.document, 'restored-leftover-question', text);
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+      live!.hook.observe();
+    });
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA })).toEqual({ ok: true });
+    expect(sentText.replace(/\s+/g, ' ').trim()).toBe(text.replace(/\s+/g, ' ').trim());
+  });
+
   it('abandons a claimed existing input after an A-to-B navigation without touching the new draft', async () => {
     let release!: (value: unknown) => void;
     let entered!: () => void;
@@ -3135,6 +3199,66 @@ describe('desktop input delivery and helper ownership', () => {
     expect(composerText(live.document)).toBe('Keep this authored draft');
     expect(live.sent.filter(message => message.type === 'desktop_input' && message.fail)).toHaveLength(1);
     expect(live.sent.some(message => message.type === 'desktop_input' && message.ack)).toBe(false);
+  });
+
+  // #1952: a wake asks for its worker's model. When the picker cannot confirm it, the wake still goes
+  // out (a worker that never wakes stops its run) and the page says so; a new worker's chat still refuses.
+  // 2026-11-01 (Mac): a Compact & Resume whose model the picker could not confirm was abandoned, and the
+  // chat stopped for good. A resume goes on like a wake.
+  it.each(['revive', 'resume', 'worker'] as const)('types a %s only when its model is confirmed, except a wake or a resume', async type => {
+    const commandId = `cmd-wake-model-${type}`;
+    const selection = vi.fn(async () => false);
+    live = await harness(type === 'revive' ? `https://chatgpt.com/c/${chatA}?clf=${commandId}` : `https://chatgpt.com/?clf=${commandId}`, {
+      redeem: () => ({ ok: true, command: { id: commandId, type, text: 'Now do the second half.', agent: 'worker-1',
+        model: 'gpt-5.6-sol', reasoningEffort: 'high', ...(type === 'revive' ? { conversationId: chatA } : {}) } })
+    }, (document) => {
+      // The page's picker is replaced before content.js starts and redeems its command.
+      let dom: any;
+      Object.defineProperty(document.defaultView!, 'CLF_DOM', { configurable: true,
+        get: () => dom, set: value => { dom = value; dom.selectModelSettings = selection; } });
+    });
+    await settle();
+    await new Promise(resolve => globalThis.setTimeout(resolve, 300));
+    await settle();
+    expect(selection).toHaveBeenCalledWith('gpt-5.6-sol', 'high', expect.any(Function));
+    const steps = live.sent.filter(message => message.type === 'command_step').map(message => message.step);
+    const modelFailure = (message: Record<string, any>) => message.type === 'ack' && String(message.error ?? '').includes('model or reasoning');
+    if (type !== 'worker') {
+      // On past the model, typed, not refused for it (this fixture page never shows the reply).
+      expect(steps.slice(0, 5)).toEqual(['composer', 'model', 'model-unconfirmed', 'composer-after-model', 'inserting']);
+      expect(live.sent.some(modelFailure)).toBe(false);
+    } else {
+      expect(steps).toEqual(['composer', 'model']);
+      expect(live.sent.some(modelFailure)).toBe(true);
+    }
+  });
+
+  // CodeRabbit on #1972: text the person typed while a wake's model was being chosen stays theirs.
+  it('leaves a draft typed while a wake chose its model, and tries the wake again later', async () => {
+    const commandId = 'cmd-wake-draft';
+    let page!: Document;
+    const selection = vi.fn(async () => {
+      const box = page.querySelector('#prompt-textarea')!;
+      box.textContent = 'my own words';
+      return false;
+    });
+    live = await harness(`https://chatgpt.com/c/${chatA}?clf=${commandId}`, {
+      redeem: () => ({ ok: true, command: { id: commandId, type: 'revive', text: 'Now do the second half.', agent: 'worker-1',
+        model: 'gpt-5.6-sol', reasoningEffort: 'high', conversationId: chatA } })
+    }, (document) => {
+      page = document;
+      let dom: any;
+      Object.defineProperty(document.defaultView!, 'CLF_DOM', { configurable: true,
+        get: () => dom, set: value => { dom = value; dom.selectModelSettings = selection; } });
+    });
+    await settle();
+    await new Promise(resolve => globalThis.setTimeout(resolve, 300));
+    await settle();
+    expect(selection).toHaveBeenCalled();
+    expect(composerText(live.document)).toBe('my own words');
+    const steps = live.sent.filter(message => message.type === 'command_step').map(message => message.step);
+    expect(steps).not.toContain('inserting');
+    expect(live.sent.find(message => message.type === 'ack' && message.status === 'failed')?.error).toContain('did not replace it');
   });
 
   it.each(['worker', 'resume', 'revive', 'trusted-edit', 'new-user', 'foreign-route', 'rejected-ack'])('retires only an owned late bootstrap draft (%s)', async kind => {
@@ -14089,6 +14213,47 @@ describe('evidence from the page context', () => {
     );
   });
 
+  it('splits tool_evidence into batches of at most 200 calls', async () => {
+    live = await harness();
+    startGenerating(live.document);
+    assistantTurn(live.document, 'batch-live-turn', []);
+    live.hook.observe();
+    await settle();
+
+    const calls = Array.from({ length: 200 }, (_, i) => ({
+      messageId: `call-batch-${i}`,
+      tool: 'read',
+      order: i,
+      answered: false,
+      requestId: `wfr_call_${i}`
+    }));
+    const requests = Array.from({ length: 5 }, (_, i) => ({
+      requestId: `wfr_bare_req_${i}`,
+      createTime: 1_700_000_000 + i
+    }));
+
+    await replyFiber([], [{
+      turnId: 'batch-live-turn',
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      calls,
+      requests,
+      messages: []
+    }]);
+    await settle();
+    await live.hook.flush();
+
+    const batches = emitted(live.sent, 'tool_evidence').map((entry) => entry.event);
+    expect(batches).toHaveLength(2);
+    expect(batches[0].calls).toHaveLength(200);
+    expect(batches[1].calls).toHaveLength(5);
+    expect(batches[0].calls[0].requestId).toBe('wfr_call_0');
+    expect(batches[0].calls[199].requestId).toBe('wfr_call_199');
+    expect(batches[1].calls[0].requestId).toBe('wfr_bare_req_0');
+    expect(batches[1].calls[4].requestId).toBe('wfr_bare_req_4');
+    expect(batches[0].turnId).toBeTruthy();
+    expect(batches[1].turnId).toBe(batches[0].turnId);
+  });
+
   it('says nothing about a row the helper did not stamp', async () => {
     live = await harness();
     const section = assistantTurn(live.document, 'turn-1', ['Called tool!']);
@@ -17605,6 +17770,8 @@ describe('the fresh chat the app opened', () => {
     }
   });
 
+  // Unconfirmed: the resume still goes out (2026-11-01: an abandoned resume stopped its chat), the new chat
+  // tries the model once more, and no model is journaled as evidence it does not have.
   it.each([true, false])('confirms resume selection before Send and journals it only for B (%s)', async confirmed => {
     let release!: (value: unknown) => void;
     const redeemed = new Promise(resolve => { release = resolve; });
@@ -17644,8 +17811,8 @@ describe('the fresh chat the app opened', () => {
       model: 'gpt-5.6-sol', reasoningEffort: 'high' } });
     await settle(800); await live.hook.pullActivity(); await live.hook.flush();
     expect(picker).toHaveBeenCalledWith('gpt-5.6-sol', 'high', expect.any(Function));
-    expect(picker).toHaveBeenCalledTimes(confirmed ? 2 : 1);
-    expect(sends).toBe(confirmed ? 1 : 0);
+    expect(picker).toHaveBeenCalledTimes(2);
+    expect(sends).toBe(1);
     const selections = live.sent.filter(message => message.type === 'events').flatMap(message => message.entries)
       .filter(entry => entry.event.kind === 'model_selection');
     if (confirmed) {
@@ -17653,7 +17820,9 @@ describe('the fresh chat the app opened', () => {
       expect(selections.at(-1)).toEqual(expect.objectContaining({ conversationId: destination,
         event: expect.objectContaining({ model: 'gpt-5-6-thinking', reasoningEffort: 'high' }) }));
     } else {
-      expect(selections).toEqual([]);
+      // Only what the page shows (ChatGPT's current model), never the requested pair it could not confirm.
+      expect(selections.map(entry => entry.event)).not.toContainEqual(expect.objectContaining({ reasoningEffort: 'high' }));
+      expect(selections.every(entry => entry.event.model === 'gpt-5-6' && entry.event.reasoningEffort === 'none')).toBe(true);
     }
   });
 
@@ -19951,6 +20120,73 @@ describe('one live isolated-world recorder per document', () => {
     card.remove();
     expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({ streaming: false, approval: false });
     expect(await live.runtimeMessage({ type: 'clf-recorder-ping' })).toMatchObject({ busy: false });
+  });
+
+  // #1977: ChatGPT's tool approval card hides Stop while the turn waits for a person. Twelve seconds
+  // of it closed the turn as completed; the answer sections after the person answered were lost.
+  const approvalCard = (document: Document) => {
+    const card = document.createElement('div');
+    card.setAttribute('data-codex-approval-surface', 'true');
+    card.append(document.createElement('button'), document.createElement('button'));
+    card.getClientRects = () => [{ width: 600, height: 200 }] as unknown as DOMRectList;
+    document.body.append(card);
+    return card;
+  };
+
+  it('keeps a turn open while an approval card waits, however long, and ends it once after (#1977)', async () => {
+    live = await nonProHarness();
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'approval-turn', []);
+    prose(live.document, section, 'approval-progress', 'Checking the window first.');
+    live.hook.observe(); await settle();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
+    const card = approvalCard(live.document);
+    stopGenerating(live.document);
+    for (let pass = 0; pass < 8; pass++) {
+      live.hook.observe(); await settle();
+      live.advance(live.hook.TURN_SETTLE_MS);
+    }
+    live.hook.observe(); await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end')).toEqual([]);
+    // Answered: the turn goes on, then really ends.
+    card.remove();
+    startGenerating(live.document, { send: false });
+    prose(live.document, section, 'approval-result', 'Done: the window is set.');
+    live.hook.observe(); await settle();
+    await settleTurn(live); await live.hook.flush();
+    const ends = emitted(live.sent, 'turn_end');
+    expect(ends).toHaveLength(1);
+    expect(ends[0]!.event).toMatchObject({ outcome: 'completed' });
+  });
+
+  it('does not take a native final as the end while an approval card waits (#1977)', async () => {
+    live = await harness();
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'approval-native', []);
+    prose(live.document, section, 'approval-native-message', 'Checking.');
+    live.hook.observe(); await settle();
+    const card = approvalCard(live.document);
+    stopGenerating(live.document);
+    await bindFiberTurns([{ section, turn: { turnId: 'approval-native', endMessageId: 'approval-native-message',
+      messages: [{ role: 'assistant', messageId: 'approval-native-message', rawMessageId: 'approval-native-message', rawText: 'Checking.' }] } }]);
+    live.hook.observe(); await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end')).toEqual([]);
+    // Nor is its last message published as final: the recorder would close the turn on it (CodeRabbit on #1992).
+    expect(emitted(live.sent, 'assistant_message').some(row => row.event.final === true)).toBe(false);
+    card.remove();
+    const nativeFinal = () => bindFiberTurns([{ section, turn: { turnId: 'approval-native', endMessageId: 'approval-native-message',
+      messages: [{ role: 'assistant', messageId: 'approval-native-message', rawMessageId: 'approval-native-message', rawText: 'Checking.' }] } }]);
+    // Right after the person answered, the old final is still on the page while the turn goes on
+    // (CodeRabbit on #1992): neither a final message nor the end yet.
+    await nativeFinal();
+    live.hook.observe(); await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end')).toEqual([]);
+    expect(emitted(live.sent, 'assistant_message').some(row => row.event.final === true)).toBe(false);
+    live.advance(live.hook.APPROVAL_SETTLE_MS);
+    await nativeFinal();
+    await settleTurn(live); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(1);
+    expect(emitted(live.sent, 'assistant_message').some(row => row.event.final === true)).toBe(true);
   });
 
   it('reports the recorder protocol version rather than the unrelated Fiber protocol version', async () => {
@@ -23766,6 +24002,27 @@ describe('app Stop command uses current native turn proof', () => {
     expect(await live!.runtimeMessage(h.request)).toEqual({ ok: true });
     live!.hook.observe(); await settle(); await live!.hook.flush();
     expect(h.clicks()).toBe(0);
+    expect(emitted(live!.sent, 'turn_end').map(row => row.event)).toEqual([
+      expect.objectContaining({ turnId: h.request.turnId, outcome: 'stopped' })
+    ]);
+  });
+
+  // CodeRabbit on #1992: an approval card holds the turn open (#1977), but the app's Stop still ends it.
+  it('ends a turn held by an approval card when the app asks to stop it', async () => {
+    const h = await setup();
+    stopGenerating(live!.document);
+    const card = live!.document.createElement('div');
+    card.setAttribute('data-codex-approval-surface', 'true');
+    card.append(live!.document.createElement('button'), live!.document.createElement('button'));
+    card.getClientRects = () => [{ width: 600, height: 200 }] as unknown as DOMRectList;
+    live!.document.body.append(card);
+    live!.advance(30_000);
+    live!.hook.observe(); await settle(); await live!.hook.flush();
+    expect(emitted(live!.sent, 'turn_end')).toEqual([]);
+    expect(await live!.runtimeMessage(h.request)).toEqual({ ok: true });
+    live!.hook.observe(); await settle();
+    live!.advance(live!.hook.TURN_SETTLE_MS);
+    live!.hook.observe(); await settle(); await live!.hook.flush();
     expect(emitted(live!.sent, 'turn_end').map(row => row.event)).toEqual([
       expect.objectContaining({ turnId: h.request.turnId, outcome: 'stopped' })
     ]);
