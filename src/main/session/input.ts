@@ -169,7 +169,9 @@ const entrySchema = inputArgs.extend({
    * answering, a turn the page still holds, or a running tool call. The browser did pick it up, so
    * the one-minute pickup deadline counts from the last such hold, and the queue says why it waits.
    */
-  pageHold: z.object({ reason: z.enum(['still-answering', 'turn-held', 'tool-running']), at: z.number() }).optional()
+  pageHold: z.object({ reason: z.enum(['still-answering', 'turn-held', 'tool-running']), at: z.number(),
+    /** When the window was last told, so its wording is refreshed before it lapses (CodeRabbit on #2054). */
+    toldAt: z.number().optional() }).optional()
 });
 export type InputEntry = z.infer<typeof entrySchema>;
 
@@ -1982,23 +1984,30 @@ export function holdInputForSendCheck(id: string, attempt: number, reason: strin
 const PAGE_HOLD_REASONS = new Set(['still-answering', 'turn-held', 'tool-running']);
 /** A page holding a hold note this recent is not rewritten: pages repeat it every few seconds. */
 const PAGE_HOLD_REFRESH_MS = 15_000;
+/** How often a still-held message's window is told again; with the refresh above, always under 75 s. */
+const PAGE_HOLD_TELL_MS = 45_000;
 /**
  * A page reported it holds this queued message until its own turn ends (2026-11-03). Only those
  * reasons keep it: a page with no message box, or one that moved on, will not send it by waiting.
  * `new` when the queue's wording changes (a first hold, or another reason), `held` when it stays
  * held, null when this hold does not keep it.
  */
-export function noteInputHeld(id: string, reason: string): Promise<'new' | 'held' | null> {
+export function noteInputHeld(id: string, reason: string, conversationId: string | null = null): Promise<'new' | 'held' | null> {
   return serial(async () => {
     if (!PAGE_HOLD_REASONS.has(reason)) return null;
     const current = await load();
     const row = current.find(entry => entry.id === id);
     if (!row || row.state !== 'queued' || row.sendAuthorizedAt !== undefined) return null;
+    // Only the page of the message's own chat holds it; a new chat has none yet (CodeRabbit on #2054).
+    if ((row.conversationId ?? null) !== conversationId) return null;
     const now = Date.now();
     if (row.pageHold?.reason === reason && now - row.pageHold.at < PAGE_HOLD_REFRESH_MS) return 'held';
+    // The window shows the reason for 75 s after the hold it last heard of: tell it again well before.
+    const tell = row.pageHold?.reason !== reason || now - (row.pageHold.toldAt ?? row.pageHold.at) >= PAGE_HOLD_TELL_MS;
+    const toldAt = tell ? now : row.pageHold?.toldAt ?? row.pageHold?.at ?? now;
     await commit(current.map(entry => entry === row
-      ? { ...entry, pageHold: { reason: reason as NonNullable<InputEntry['pageHold']>['reason'], at: now } } : entry));
-    return row.pageHold?.reason === reason ? 'held' : 'new';
+      ? { ...entry, pageHold: { reason: reason as NonNullable<InputEntry['pageHold']>['reason'], at: now, toldAt } } : entry));
+    return tell ? 'new' : 'held';
   });
 }
 

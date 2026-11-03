@@ -120,7 +120,8 @@ describe('durable user input ownership', () => {
     // Five minutes of a page reporting the hold every 45 seconds: far past the one-minute deadline.
     for (let step = 0; step < 7; step++) {
       now += 45_000;
-      expect(await noteInputHeld(row.id, 'still-answering')).toBe(step === 0 ? 'new' : 'held');
+      // Every 45 s the window is told again, so its wording never lapses while the page holds it.
+      expect(await noteInputHeld(row.id, 'still-answering', 'conversation-a')).toBe('new');
       expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'queued',
         pageHold: { reason: 'still-answering', at: now } });
     }
@@ -129,7 +130,21 @@ describe('durable user input ownership', () => {
     expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'failed',
       error: 'Not sent: the browser did not pick up this message within 60 seconds.' });
     // A finished row is never marked held again.
-    expect(await noteInputHeld(row.id, 'still-answering')).toBeNull();
+    expect(await noteInputHeld(row.id, 'still-answering', 'conversation-a')).toBeNull();
+  });
+  it('tells the window again only every 45 seconds, and takes a hold only from the message\'s own chat (CodeRabbit on #2054)', async () => {
+    binding.finishEnabled = false;
+    const row = await enqueueInput(input());
+    expect(await noteInputHeld(row.id, 'still-answering', 'conversation-b')).toBeNull();
+    expect(await noteInputHeld(row.id, 'still-answering', null)).toBeNull();
+    const told: string[] = [];
+    for (let step = 0; step < 5; step++) {
+      told.push(String(await noteInputHeld(row.id, 'still-answering', 'conversation-a')));
+      now += 15_000;
+    }
+    expect(told).toEqual(['new', 'held', 'held', 'new', 'held']);
+    // Another reason is news at once.
+    expect(await noteInputHeld(row.id, 'tool-running', 'conversation-a')).toBe('new');
   });
   it.each([
     ['turn-held', 'new', 'queued'], ['tool-running', 'new', 'queued'],
@@ -139,7 +154,7 @@ describe('durable user input ownership', () => {
     binding.finishEnabled = false;
     const row = await enqueueInput(input());
     now += 50_000;
-    expect(await noteInputHeld(row.id, reason)).toBe(kept);
+    expect(await noteInputHeld(row.id, reason, 'conversation-a')).toBe(kept);
     // 80 seconds after it was queued, 30 after the hold.
     now += 30_000;
     expect((await listInputs()).find(entry => entry.id === row.id)?.state).toBe(state);
