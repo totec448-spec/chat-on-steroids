@@ -3741,5 +3741,12 @@
   "Today": "今天",
   "Yesterday": "昨天",
   "Previous 7 days": "過去 7 天",
-  "Previous 30 days": "過去 30 天"
+  "Previous 30 days": "過去 30 天",
+  "Fresh turn started": "已開始新一輪",
+  "Automatic Continue sent": "已傳送自動繼續",
+  "The turn failed": "這一輪失敗",
+  "Since {0} · {1}": "自 {0} · {1}",
+  "{0} tries": "{0} 次嘗試",
+  "Show what was tried": "顯示已嘗試的操作",
+  "Hide what was tried": "隱藏已嘗試的操作"
 }

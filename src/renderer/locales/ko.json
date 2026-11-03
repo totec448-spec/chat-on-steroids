@@ -3741,5 +3741,12 @@
   "Today": "오늘",
   "Yesterday": "어제",
   "Previous 7 days": "지난 7일",
-  "Previous 30 days": "지난 30일"
+  "Previous 30 days": "지난 30일",
+  "Fresh turn started": "새 턴 시작",
+  "Automatic Continue sent": "자동 계속하기 보냄",
+  "The turn failed": "턴이 실패했습니다",
+  "Since {0} · {1}": "{0}부터 · {1}",
+  "{0} tries": "{0}번 시도",
+  "Show what was tried": "시도한 내용 보기",
+  "Hide what was tried": "시도한 내용 숨기기"
 }

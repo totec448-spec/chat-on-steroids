@@ -3741,5 +3741,12 @@
   "Today": "今日",
   "Yesterday": "昨日",
   "Previous 7 days": "過去 7 日間",
-  "Previous 30 days": "過去 30 日間"
+  "Previous 30 days": "過去 30 日間",
+  "Fresh turn started": "新しいターンを開始",
+  "Automatic Continue sent": "自動の続行を送信",
+  "The turn failed": "ターンが失敗しました",
+  "Since {0} · {1}": "{0} から · {1}",
+  "{0} tries": "{0} 回の試行",
+  "Show what was tried": "試したことを表示",
+  "Hide what was tried": "試したことを隠す"
 }

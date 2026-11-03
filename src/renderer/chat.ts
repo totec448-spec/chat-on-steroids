@@ -44,6 +44,7 @@ import { toolResultText } from './tool-result.js';
 import { renderEditCards } from './tool-artifacts.js';
 import { chatErrorPresentation, duplicateChatErrors } from './chat-error.js';
 import { renderRecoveryCountdowns } from './recovery.js';
+import { recoveryEpisode, type EpisodeItem, type RecoveryEpisode } from './recovery-episode.js';
 import { CUSTOM_CONTINUE_MAX_CHARS, type RecoveryCountdown } from '../shared/recovery.js';
 import { communicationTitle, foldAgentCommunication, participatingWorkers, workerAvatar } from './agent-communication.js';
 import { structureTimeline, type RoundPart } from './timeline-rounds.js';
@@ -7001,8 +7002,109 @@ function pickupNowWords(done: PickupNowOutcome): string {
   return '';
 }
 
+/** Chats whose recovery episode list is open; per chat, until the episode ends. */
+const expandedRecoveryEpisodes = new Set<string>();
+
+function episodeItemText(item: EpisodeItem): string {
+  if (item.kind === 'continue') return item.text === 'fresh-turn' ? t('Fresh turn started') : t('Automatic Continue sent');
+  if (item.kind === 'turn') return t('The turn failed');
+  return item.kind === 'reload' ? repairRowText(t(item.text)) : t(item.text);
+}
+
+/**
+ * #1883: the recovery row shown says since when the chat has been in trouble and how often the app
+ * tried, and opens to every step; amber when the app stopped trying. Repaints only on a change, so
+ * the countdown's tick never rebuilds the control under the pointer or the keyboard focus.
+ */
+function decorateRecoveryEpisode(host: HTMLElement, episode: RecoveryEpisode | null, sessionId: string | null, stopped: boolean): void {
+  const row = host.querySelector<HTMLElement>('.recovery-notice');
+  for (const notice of host.querySelectorAll<HTMLElement>('.recovery-notice')) notice.classList.toggle('is-stopped', notice === row && stopped);
+  const old = host.querySelector<HTMLElement>('.recovery-episode-meta');
+  const list = host.querySelector<HTMLElement>('.recovery-episode-list');
+  if (!row || !episode || !sessionId) { old?.remove(); list?.remove(); return; }
+  const expanded = expandedRecoveryEpisodes.has(sessionId);
+  const signature = JSON.stringify([sessionId, episode.since, episode.items.length, episode.items.at(-1)?.text, episode.tries, expanded, currentLanguage()]);
+  if (old?.dataset.episode === signature && old.parentElement === row) return;
+  old?.remove(); list?.remove();
+  const since = new Date(episode.since).toLocaleTimeString(currentLanguage(), { hour: 'numeric', minute: '2-digit' });
+  const summary = episode.tries ? t('Since {0} · {1}', [since, tn('{0} try', '{0} tries', episode.tries)]) : t('Since {0}', [since]);
+  const meta = el('button', 'recovery-episode-meta') as HTMLButtonElement;
+  meta.type = 'button';
+  meta.dataset.episode = signature;
+  meta.setAttribute('aria-expanded', String(expanded));
+  meta.setAttribute('aria-controls', 'recoveryEpisodeList');
+  meta.title = expanded ? t('Hide what was tried') : t('Show what was tried');
+  meta.setAttribute('aria-label', `${summary}. ${meta.title}`);
+  meta.append(el('span', '', summary), disclosureChevron());
+  meta.onclick = () => {
+    if (expandedRecoveryEpisodes.has(sessionId)) expandedRecoveryEpisodes.delete(sessionId);
+    else expandedRecoveryEpisodes.add(sessionId);
+    paintRecoveryStatus();
+    host.querySelector<HTMLElement>('.recovery-episode-meta')?.focus();
+  };
+  // Before the countdown and the row's own actions, after what is happening now, which shows on one
+  // line here: its full words are the label's tooltip and the first line of the list.
+  const label = row.querySelector<HTMLElement>('.queue-label');
+  if (label) label.title = label.textContent ?? '';
+  label?.after(meta);
+  if (!expanded) return;
+  const items = el('div', 'recovery-episode-list background-exec-list');
+  items.id = 'recoveryEpisodeList';
+  items.setAttribute('role', 'list');
+  for (const item of [...episode.items].reverse()) {
+    const line = el('div', 'recovery-episode-item');
+    line.setAttribute('role', 'listitem');
+    const time = document.createElement('time');
+    time.dateTime = new Date(item.time).toISOString();
+    time.textContent = new Date(item.time).toLocaleTimeString(currentLanguage(), { hour: 'numeric', minute: '2-digit' });
+    line.append(time, el('span', '', episodeItemText(item)));
+    items.append(line);
+  }
+  row.after(items);
+}
+
 /** The live deadline takes precedence over the existing dismissible repair receipt. */
 function paintRecoveryStatus(): boolean {
+  // The rows below are redrawn while a turn ticks; keyboard focus on the episode control stays put.
+  const focusedMeta = document.activeElement instanceof HTMLElement && document.activeElement.matches('#recoveryStatus .recovery-episode-meta');
+  const shown = paintRecoveryRows();
+  const host = $('recoveryStatus');
+  const sessionId = selectedId;
+  const episode = detailFor === selectedId ? recoveryEpisode(events) : null;
+  const countdowns = selectedId && controlledSessionId === selectedId && controlledSelection === selectionGeneration ? controlledRecovery : [];
+  const live = episode && (episode.current || countdowns.length) ? episode : null;
+  if (sessionId && !live) expandedRecoveryEpisodes.delete(sessionId);
+  // Nothing scheduled and no receipt or note shown, but the chat is still where ChatGPT's error or a
+  // failed turn left it: that stays in view until the chat works again or the person dismisses it. A
+  // reload keeps its own short receipt, and the app's notes their own row.
+  const lastItem = live?.items.at(-1);
+  if (host.hidden && live && sessionId && lastItem && (lastItem.kind === 'error' || lastItem.kind === 'turn')) {
+    const last = lastItem;
+    const revision = JSON.stringify(['episode', live.since, last.time, last.text]);
+    if (dismissedRecoveryNotices.get(sessionId) !== revision) {
+      const row = el('div', 'recovery-notice');
+      row.append(icon(live.stopped ? 'i-warning' : 'i-pulse'), el('span', 'queue-label', episodeItemText(last)),
+        dockAction(() => t('Dismiss recovery notice'), 'i-x', () => {
+          dismissedRecoveryNotices.set(sessionId, revision);
+          host.hidden = true; host.replaceChildren();
+        }));
+      host.replaceChildren(row);
+      host.hidden = false;
+    }
+  }
+  if (!host.hidden) {
+    const stopped = !!live && (live.stopped || countdowns.some(countdown => countdown.kind === 'pickup-stopped' && countdown.exhausted === true));
+    decorateRecoveryEpisode(host, live, sessionId, stopped);
+    const row = host.querySelector<HTMLElement>('.recovery-notice');
+    const glyph = row?.querySelector(':scope > .ico');
+    if (glyph) setIcon(glyph, stopped ? 'i-warning' : 'i-pulse');
+    const meta = host.querySelector<HTMLElement>('.recovery-episode-meta');
+    if (focusedMeta && meta && document.activeElement !== meta) meta.focus({ preventScroll: true });
+  }
+  return shown;
+}
+
+function paintRecoveryRows(): boolean {
   const host = $('recoveryStatus');
   const countdowns = selectedId && controlledSessionId === selectedId && controlledSelection === selectionGeneration ? controlledRecovery : [];
   const sessionForCountdown = controlledSessionId;
