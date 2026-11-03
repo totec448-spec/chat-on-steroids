@@ -155,7 +155,8 @@ import {
   turnEndedDurably,
   requestTurnOwnershipCutoff
 } from './session/store.js';
-import { inFlightMcpRequests, inFlightToolCalls, runningToolCalls, runningToolProgress, sentResults, settlingToolCalls } from './mcp/call-context.js';
+import { inFlightMcpRequests, inFlightToolCalls, runningToolCalls, runningToolConversations, runningToolProgress, sentResults, settlingToolCalls } from './mcp/call-context.js';
+import { automaticSendRefusal, chatsAtOnceStatus, noteChatLimit, restoreChatsAtOnce, setWorkingChatsSource } from './chats-at-once.js';
 import { nativeHandoffPrompt } from './session/handoff-prompt.js';
 import { DEFAULT_HANDOFF_PROMPT } from '../shared/handoff.js';
 import { briefShortfall, resumeBootstrapText } from './session/handoff.js';
@@ -1229,7 +1230,8 @@ export async function bridgeStatus(): Promise<BridgeStatus> {
     lastSeenAt,
     ...versionStatus(),
     externalExtension: externalExtensionStatus(),
-    cosExtension: { present: cosExtensionPresent() }
+    cosExtension: { present: cosExtensionPresent() },
+    automaticPauseUntil: chatsAtOnceStatus().pauseUntil
   };
 }
 
@@ -2660,6 +2662,23 @@ function liveTurnIsCurrent(conversationId: string, now = Date.now()): boolean {
 function chatIsWorkingNow(conversationId: string, now = Date.now()): boolean {
   return liveTurnIsCurrent(conversationId, now) || (activeUntil.get(conversationId)?.until ?? 0) > now;
 }
+
+/**
+ * The chats working right now, for "Chats working at once" (#1694): a turn the page reports or the
+ * silence window holds, or a running tool call, by exact ownership. A chat leaves only by the
+ * recovery system's own states: its page detached (it leaves the live set), or recovery found no
+ * page for it. A long-thinking turn the page still reports keeps its slot however long it takes.
+ */
+function workingChatsNow(now = Date.now()): Set<string> {
+  const working = new Set<string>();
+  for (const entry of liveConversations()) if (chatIsWorkingNow(entry.conversationId, now)) working.add(entry.conversationId);
+  for (const conversationId of runningToolConversations()) working.add(conversationId);
+  for (const conversationId of pagelessChats) working.delete(conversationId);
+  return working;
+}
+setWorkingChatsSource(() => workingChatsNow());
+/** The last time each chat's Goal/Loop step was held for a slot, and why (#1694), for its wait caption. */
+const goalSlotWaits = new Map<string, { at: number; paused: boolean }>();
 
 async function handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   const receivedAt = Date.now();
@@ -4692,6 +4711,17 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     if (await goalInputPriority(id, sessionId, turnId))
       return goalJson(res, 409, { error: 'user_input_pending', retryable: true }, origin);
+    // Chats working at once (#1694): the next automatic step waits its turn; the page keeps the
+    // turn and asks again, and the helper is not asked meanwhile. The chat's own running turn takes no new slot.
+    const slot = automaticSendRefusal(`goal:${id}`, id);
+    if (slot) {
+      const paused = slot.startsWith('ChatGPT asked to slow down');
+      const before = goalSlotWaits.get(id);
+      if (!before || before.paused !== paused) logInfo(`goal: ${id}'s next step waits: ${slot}`);
+      goalSlotWaits.set(id, { at: Date.now(), paused });
+      return goalJson(res, 409, { error: 'chats_at_once', retryable: true, message: slot }, origin);
+    }
+    if (goalSlotWaits.delete(id)) logInfo(`goal: ${id}'s next step has a free slot`);
     if (body['nativeBusy'] === true) {
       const pro = await extendedSilenceWindowFor(id, sessionId);
       const pending = goalPendingReplyFor(id);
@@ -6297,6 +6327,7 @@ async function startBridgeOnce(epoch: number, prepared?: PreparedBridge): Promis
   // any worker chat the broker is still owed — a run restored from disk at startup
   // has nobody to ask until this moment — and queue() folds a replayed worker into
   // the restored command for the same worker rather than opening a second tab.
+  await restoreChatsAtOnce().catch(() => undefined);
   try {
     await restoreCommands();
   } catch (err) {
@@ -7856,6 +7887,12 @@ async function goalWaitFor(conversationId: string, sessionId: string, now = Date
     return visible ? { reason: 'silence', until: visible.deadline } : null;
   }
   if (runningToolCalls(conversationId) > 0) return { reason: 'tools' };
+  // Held for a slot within the last page ask (#1694); ChatGPT's pause shows when it ends.
+  const slotWait = goalSlotWaits.get(conversationId);
+  if (slotWait && now - slotWait.at < 60_000) {
+    const pause = chatsAtOnceStatus(now).pauseUntil;
+    return slotWait.paused && pause !== null ? { reason: 'paused', until: pause } : { reason: 'slots' };
+  }
   // The Goal step reviewer's hold has a known end (#1832), so its wait shows a countdown.
   const reviewUntil = reviewerHoldUntil(conversationId) ?? reviewWaitUntil(conversationId);
   if (reviewUntil !== null) return { reason: 'reviewer', until: reviewUntil };
@@ -8495,6 +8532,8 @@ function noteProviderHistoryBackoff(conversationId: string, observations: readon
         `holding automatic recovery ${Math.ceil((until - item.time) / 60_000)} minutes`);
     }
     providerHistoryStreaks.set(conversationId, { strikes, until: Math.max(streak && strikes ? streak.until : 0, until) });
+    // A second chat limited within ten minutes makes the pause every chat's (#1694, only while that setting is on).
+    noteChatLimit(conversationId, item.retryAt!, now);
   }
   if (!until) return;
   providerHistoryBackoffUntil.set(conversationId, until);

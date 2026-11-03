@@ -1,0 +1,165 @@
+import { getConfig } from './config.js';
+import { readDurable, writeDurableNow } from './durable.js';
+import { logInfo, logWarn } from './logger.js';
+
+/**
+ * "Chats working at once" (#1694, design reviewed by Haz): at most this many chats work at the
+ * same time, counting workers. Only messages the app sends by itself wait their turn: Goal and Loop
+ * steps, automatic Continue, the fresh turn, scheduled runs and a finish's own checkpoints. A
+ * message the person sends, Stop and approvals never wait.
+ *
+ * This is one gate inside the existing send paths, not a scheduler: each path keeps its own queue,
+ * order and no-duplicate safeguards and asks here whether it may go now. What counts as working is
+ * the app's own record (bridge.ts installs it): a turn the page reports, or a running tool call.
+ * Nothing here releases a running turn on a timer; only the recovery system's own states do.
+ */
+let workingChats: () => ReadonlySet<string> = () => new Set();
+export function setWorkingChatsSource(source: () => ReadonlySet<string>): void { workingChats = source; }
+export function workingChatsSourceForTests(): () => ReadonlySet<string> { return workingChats; }
+
+/** A waiter that stopped asking this long ago has left the line (its send went another way or was cancelled). */
+const WAITER_GONE_MS = 2 * 60_000;
+/** An admitted send holds its slot until its chat is seen working, at most this long. */
+const ADMISSION_HOLD_MS = 2 * 60_000;
+/** Two chats showing ChatGPT's limit within this window make the pause account-wide. */
+const SHARED_LIMIT_WINDOW_MS = 10 * 60_000;
+/** The pause when ChatGPT names no time. */
+const DEFAULT_PAUSE_MS = 15 * 60_000;
+const STATE = 'chats-at-once';
+
+const waiting = new Map<string, { since: number; asked: number }>();
+const admitted = new Map<string, { conversationId: string | null; at: number; seen: boolean }>();
+const limitSeen = new Map<string, { at: number; retryAt: number | null }>();
+let pauseUntil: number | null = null;
+const listeners = new Set<() => void>();
+export function onChatsAtOnceChange(listener: () => void): () => void { listeners.add(listener); return () => listeners.delete(listener); }
+function changed(): void { for (const listener of listeners) listener(); }
+
+export function chatsAtOnceLimit(): number {
+  const limit = getConfig().multiAgent.chatsAtOnce ?? 0;
+  return Number.isInteger(limit) && limit > 0 ? limit : 0;
+}
+
+function activePause(now: number): number | null {
+  if (pauseUntil !== null && pauseUntil <= now) {
+    pauseUntil = null;
+    logInfo('chats at once: the pause ChatGPT asked for is over; automatic messages go out again');
+    void writeDurableNow(STATE, { version: 1, pauseUntil: null }).catch(() => undefined);
+    changed();
+  }
+  return chatsAtOnceLimit() ? pauseUntil : null;
+}
+
+/** The slots taken: working chats, plus admitted sends whose chat has not shown up as working yet. */
+function occupied(now: number): Set<string> {
+  const working = new Set(workingChats());
+  const taken = new Set<string>(working);
+  for (const [key, entry] of admitted) {
+    const isWorking = entry.conversationId !== null && working.has(entry.conversationId);
+    if (isWorking) { entry.seen = true; continue; }
+    if (entry.seen || now - entry.at > ADMISSION_HOLD_MS) { admitted.delete(key); continue; }
+    taken.add(`admitted:${key}`);
+  }
+  return taken;
+}
+
+/**
+ * Null when this automatic send may go now; otherwise why it waits, in words for the log and the
+ * chat. `key` names the waiting send (its input id, a Goal turn, a worker); `conversationId` the
+ * chat it goes to, null for a chat not opened yet.
+ */
+export function automaticSendRefusal(key: string, conversationId: string | null, now = Date.now()): string | null {
+  const limit = chatsAtOnceLimit();
+  if (!limit) { waiting.clear(); admitted.clear(); return null; }
+  const pause = activePause(now);
+  if (pause !== null) {
+    note(key, now);
+    return `ChatGPT asked to slow down; automatic messages resume at ${new Date(pause).toISOString()}`;
+  }
+  const taken = occupied(now);
+  // Already admitted and not yet seen working: its slot is its own (the page asks again on every poll).
+  if (admitted.has(key)) return null;
+  // A chat already working takes no new slot: this is its own next step.
+  if (conversationId !== null && workingChats().has(conversationId)) { waiting.delete(key); return null; }
+  for (const [other, entry] of waiting) if (now - entry.asked > WAITER_GONE_MS) waiting.delete(other);
+  note(key, now);
+  const free = limit - taken.size;
+  if (free <= 0) return `${taken.size} chats are working (limit ${limit})`;
+  const line = [...waiting].sort((a, b) => a[1].since - b[1].since).map(([waiter]) => waiter);
+  const place = line.indexOf(key);
+  if (place >= free) return `waiting for a free slot (${place + 1} in line, limit ${limit})`;
+  waiting.delete(key);
+  admitted.set(key, { conversationId, at: now, seen: false });
+  return null;
+}
+
+function note(key: string, now: number): void {
+  const entry = waiting.get(key);
+  if (entry) entry.asked = now;
+  else waiting.set(key, { since: now, asked: now });
+}
+
+/**
+ * Room for workers a prime starts or wakes (#1694): null when all fit, else why not. The calling
+ * prime's own slot passes to its workers, since it delegates and then ends its turn; the others'
+ * slots stay theirs. On success each worker holds a slot until its own chat shows as working.
+ * Refused rather than queued, like the other worker limits: no second scheduler (Haz on #1694).
+ */
+export function workerSlotsRefusal(callerConversationId: string | null, keys: readonly string[], now = Date.now()): string | null {
+  const limit = chatsAtOnceLimit();
+  if (!limit || !keys.length) return null;
+  const pause = activePause(now);
+  if (pause !== null) return `ChatGPT asked to slow down; automatic work resumes at ${new Date(pause).toISOString()}`;
+  const taken = occupied(now);
+  if (callerConversationId) taken.delete(callerConversationId);
+  const fresh = keys.filter(key => !admitted.has(key));
+  if (taken.size + fresh.length > limit) return `${taken.size} other chats are working and the limit is ${limit}`;
+  for (const key of fresh) admitted.set(key, { conversationId: null, at: now, seen: false });
+  return null;
+}
+
+/**
+ * ChatGPT showed its limit message in a chat (a blocking error with a retry time). One chat is that
+ * chat's limit, already held there. A second chat within ten minutes is evidence the limit is the
+ * account's, and then every chat's automatic sends wait until the time ChatGPT named.
+ */
+export function noteChatLimit(conversationId: string, retryAt: number | null, now = Date.now()): void {
+  if (!chatsAtOnceLimit()) return;
+  limitSeen.set(conversationId, { at: now, retryAt: retryAt !== null && retryAt > now ? retryAt : null });
+  for (const [id, seen] of limitSeen) if (now - seen.at > SHARED_LIMIT_WINDOW_MS) limitSeen.delete(id);
+  if (limitSeen.size < 2) return;
+  const until = Math.max(...[...limitSeen.values()].map(seen => seen.retryAt ?? seen.at + DEFAULT_PAUSE_MS));
+  if (pauseUntil !== null && pauseUntil >= until) return;
+  pauseUntil = until;
+  logWarn(`chats at once: ChatGPT showed its limit in ${limitSeen.size} chats within 10 minutes; automatic messages in every chat wait until ${new Date(until).toISOString()}`);
+  void writeDurableNow(STATE, { version: 1, pauseUntil }).catch(error =>
+    logWarn(`chats at once: the pause could not be saved: ${error instanceof Error ? error.message : String(error)}`));
+  changed();
+}
+
+/** The person's Resume now: automatic messages go out again at once, at the risk of the limit returning. */
+export function resumeAutomaticSends(now = Date.now()): boolean {
+  if (pauseUntil === null || pauseUntil <= now) return false;
+  pauseUntil = null;
+  limitSeen.clear();
+  logInfo('chats at once: the person resumed automatic messages before ChatGPT\'s time');
+  void writeDurableNow(STATE, { version: 1, pauseUntil: null }).catch(() => undefined);
+  changed();
+  return true;
+}
+
+export function chatsAtOnceStatus(now = Date.now()): { limit: number; working: number; pauseUntil: number | null; waiting: number } {
+  const limit = chatsAtOnceLimit();
+  return { limit, working: limit ? workingChats().size : 0, pauseUntil: activePause(now), waiting: limit ? waiting.size : 0 };
+}
+
+export async function restoreChatsAtOnce(now = Date.now()): Promise<void> {
+  const saved = await readDurable<{ version?: number; pauseUntil?: unknown }>(STATE).catch(() => null);
+  const until = saved?.version === 1 && typeof saved.pauseUntil === 'number' && Number.isFinite(saved.pauseUntil) ? saved.pauseUntil : null;
+  // A damaged or far-off value is not ChatGPT's: at most a day ahead is kept.
+  pauseUntil = until !== null && until > now && until - now <= 24 * 60 * 60_000 ? until : null;
+}
+
+export function resetChatsAtOnceForTests(): void {
+  waiting.clear(); admitted.clear(); limitSeen.clear(); pauseUntil = null; workingChats = () => new Set();
+}

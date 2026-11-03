@@ -23,6 +23,7 @@ import { noteChatOrigin } from './recorder.js';
 import { seedBranchHistory } from './branch-history.js';
 import { DEFAULT_HELPER_CHAT_MODEL, isAstraModel, isProModel } from '../../shared/chat-models.js';
 import { inFlightToolCalls } from '../mcp/call-context.js';
+import { automaticSendRefusal } from '../chats-at-once.js';
 import { automaticFinishEnabled, goalDrivingMode, consumeGoalReplyForInputNow } from '../goal.js';
 import { finishInstruction } from '../../shared/finish.js';
 import { CONVERSATION_DELETED } from '../../shared/chat-error.js';
@@ -163,7 +164,9 @@ const entrySchema = inputArgs.extend({
   completedTurnId: z.string().max(256).optional(),
   queueOrder: z.number().int().nonnegative().optional(),
   /** #1794: the send check held this automatic send; it is asked again from `nextAt`. */
-  sendCheck: z.object({ attempt: z.number().int().positive(), nextAt: z.number(), reason: z.string().max(200), answered: z.boolean() }).optional()
+  sendCheck: z.object({ attempt: z.number().int().positive(), nextAt: z.number(), reason: z.string().max(200), answered: z.boolean() }).optional(),
+  /** Shown, never saved: this automatic send waits for a free slot or ChatGPT's pause (#1694). */
+  slotWait: z.enum(['slots', 'paused']).optional()
 });
 export type InputEntry = z.infer<typeof entrySchema>;
 
@@ -178,6 +181,30 @@ export function automaticSendKind(row: Pick<InputEntry, 'recovery' | 'purpose' |
   if (row.purpose === 'rotation' || row.afterStop) return 'fresh-turn';
   if (row.scheduled) return 'scheduled';
   return null;
+}
+
+/**
+ * Whether "Chats working at once" (#1694) applies: only the app's own sends wait. A message the
+ * person sent, and a finish step they asked for, never do. The Goal helper's own question belongs
+ * to a Goal step that was already admitted at /goal/draft.
+ */
+function slotGated(row: InputEntry): boolean {
+  return automaticSendKind(row) !== null || (!!row.finishOwner && row.finishOwner.userRequested !== true);
+}
+/** Why each automatic send waits for a slot now, for its row and the offer log; never saved. */
+const slotWaits = new Map<string, string>();
+function noteSlotWait(id: string, reason: string | null): void {
+  const before = slotWaits.get(id);
+  if (reason === null) {
+    if (before !== undefined) { slotWaits.delete(id); logInfo(`input ${id}: a slot is free; the automatic send goes out`); deliveryHooks?.changed(); }
+    return;
+  }
+  if (before === reason) return;
+  slotWaits.set(id, reason);
+  // Once per kind of wait (a slot, or ChatGPT's pause), not per poll or per count.
+  const kind = (text: string) => text.startsWith('ChatGPT asked to slow down') ? 'paused' : 'slots';
+  if (before === undefined || kind(before) !== kind(reason)) logInfo(`input ${id} waits: ${reason}`);
+  deliveryHooks?.changed();
 }
 
 /** Held by the send check until its next ask; clearing the check's address releases it at once. */
@@ -1121,7 +1148,10 @@ export function listInputs(): Promise<InputEntry[]> {
     }
     if (next.length !== current.length || next.some((entry, index) => entry !== current[index])) await commit(next);
     await publishHistory();
-    return ordered(await load()).map((entry) => ({ ...entry }));
+    return ordered(await load()).map((entry) => {
+      const slot = entry.state === 'queued' ? slotWaits.get(entry.id) : undefined;
+      return slot ? { ...entry, slotWait: slot.startsWith('ChatGPT asked to slow down') ? 'paused' as const : 'slots' as const } : { ...entry };
+    });
   });
 }
 export interface PickupRecoveryState { attempts: number; nextAt?: number; stoppedAt?: number }
@@ -1822,6 +1852,12 @@ export function pendingBrowserInputs(): Promise<Array<{ id: string; conversation
         const conversationId = await target(entry);
         // A worker chat this app archived in ChatGPT has no message box until it is restored (#1701).
         if (conversationId && !readyForWake(conversationId)) continue;
+        // Chats working at once (#1694): the app's own send waits its turn; the line is kept by first wait.
+        if (entry.state === 'queued' && slotGated(entry)) {
+          const refusal = automaticSendRefusal(`input:${entry.id}`, conversationId);
+          noteSlotWait(entry.id, refusal);
+          if (refusal) continue;
+        }
         // A new chat of a project with a native ChatGPT Project opens in that Project and nowhere
         // else: it waits while the Project is being created or could not be, never the root.
         // A branch is made where its source chat lives in ChatGPT, never on a Project's page.
@@ -1887,6 +1923,8 @@ export function queuedInputOfferBlocker(id: string): Promise<string | null> {
       const conversationId = await target(entry);
       if (conversationId && !readyForWake(conversationId)) return 'its chat is being restored from ChatGPT\'s archive';
     } catch { return 'its chat cannot be resolved'; }
+    const slot = slotGated(entry) ? slotWaits.get(entry.id) : undefined;
+    if (slot) return `it waits for a free slot: ${slot}`;
     return null;
   });
 }

@@ -3896,3 +3896,76 @@ it.each(['GPT-5.6 Sol', 'gpt-6-pro'])('sends a message typed after Stop once Cha
   expect((await input.pendingBrowserInputs()).some(item => item.id === queued.id)).toBe(false);
 });
 
+
+// "Chats working at once" (#1694): the app's own sends wait for a slot; the person's never do.
+it("holds a scheduled run while other chats fill every slot, never the person's own message, and goes when one frees", async () => {
+  const slots = await import('../src/main/chats-at-once.js');
+  const bridgeSource = slots.workingChatsSourceForTests();
+  let working = new Set<string>(['another-chat']);
+  slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(() => working);
+  try {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false },
+      multiAgent: { ...defaultConfig().multiAgent, chatsAtOnce: 1 } });
+    const conversationId = randomUUID();
+    const session = await createSession({ title: 'Scheduled run waits for a slot', conversationId });
+    const scheduled = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Check the issues',
+      scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+    expect((await input.pendingBrowserInputs()).some(item => item.id === scheduled.id)).toBe(false);
+    expect((await input.listInputs()).find(item => item.id === scheduled.id)?.slotWait).toBe('slots');
+    expect(await input.queuedInputOfferBlocker(scheduled.id)).toMatch(/free slot: 1 chats are working \(limit 1\)/);
+    // The person's own message goes out with every slot taken, also in a chat that is not working.
+    const mine = await createSession({ title: 'My own chat', conversationId: randomUUID() });
+    const typed = await input.enqueueInput({ ...message(mine.id, 'off'), mode: 'auto', text: 'My own question' });
+    expect((await input.pendingBrowserInputs()).some(item => item.id === typed.id)).toBe(true);
+    await input.cancelInput(typed.id);
+    // The other chat finishes: the scheduled run is offered, and its row no longer says it waits.
+    working = new Set();
+    expect((await input.pendingBrowserInputs()).some(item => item.id === scheduled.id)).toBe(true);
+    expect((await input.listInputs()).find(item => item.id === scheduled.id)?.slotWait).toBeUndefined();
+    // Offered again on the next poll before its chat shows as working: its slot is its own.
+    working = new Set(['a-third-chat']);
+    expect((await input.pendingBrowserInputs()).some(item => item.id === scheduled.id)).toBe(true);
+    await input.cancelInput(scheduled.id);
+  } finally {
+    slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(bridgeSource);
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  }
+});
+
+it("holds a Loop step at /goal/draft while other chats fill every slot, says so in the chat, and lets it ask once one frees", async () => {
+  const bridge = await import('../src/main/bridge.js');
+  const slots = await import('../src/main/chats-at-once.js');
+  const bridgeSource = slots.workingChatsSourceForTests();
+  let working = new Set<string>(['another-chat']);
+  slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(() => working);
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Loop step waits for a slot', conversationId });
+  let now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    await saveConfig({ ...defaultConfig(), multiAgent: { ...defaultConfig().multiAgent, chatsAtOnce: 1 } });
+    await post('/events', { conversationId, events: [
+      { kind: 'model_selection', model: 'gpt-6-pro', time: now },
+      { kind: 'user_message', messageId: 'request', text: 'Build all stage layers', time: now },
+      { kind: 'turn_start', turnId: 'slot-source', time: now },
+      { kind: 'turn_end', turnId: 'slot-source', outcome: 'failed', reason: 'thinking_failed', time: now + 1 }
+    ] });
+    await goal.setGoalSwitchNow(conversationId, 'loop', false, true);
+    now += 300001;
+    await bridge.setSessionAutomation(session.id, 'loop');
+    const pending = goal.goalPendingReplyFor(conversationId)!;
+    expect(pending).toBeTruthy();
+    const draft = { conversationId, turnId: pending.turnId, clientId: 'slot-page', terminalRequired: true };
+    const held = await post('/goal/draft', draft);
+    expect(held.status).toBe(409);
+    expect(held.body).toMatchObject({ error: 'chats_at_once', retryable: true });
+    expect((await bridge.sessionControlsFor(session.id)).goalWait).toEqual({ reason: 'slots' });
+    working = new Set();
+    expect((await post('/goal/draft', draft)).status).toBe(200);
+    await bridge.setSessionAutomation(session.id, 'off');
+  } finally {
+    clock.mockRestore();
+    slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(bridgeSource);
+    await saveConfig(defaultConfig());
+  }
+});

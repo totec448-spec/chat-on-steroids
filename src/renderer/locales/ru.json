@@ -3971,5 +3971,14 @@
   "Today": "Сегодня",
   "Yesterday": "Вчера",
   "Previous 7 days": "Последние 7 дней",
-  "Previous 30 days": "Последние 30 дней"
+  "Previous 30 days": "Последние 30 дней",
+  "Chats working at once": "Чатов, работающих одновременно",
+  "At most this many chats work at the same time, sub-agents included. Messages the app sends by itself wait their turn; a message you send always goes out.": "Одновременно работает не больше стольких чатов, включая субагентов. Сообщения, которые приложение отправляет само, ждут своей очереди; ваше собственное сообщение уходит всегда.",
+  "Resume now": "Возобновить сейчас",
+  "Send automatic messages again now. ChatGPT may slow them down again.": "Снова отправлять автоматические сообщения сейчас. ChatGPT может снова их притормозить.",
+  "ChatGPT asked to slow down. Automatic messages resume at {0}.": "ChatGPT попросил притормозить. Автоматические сообщения возобновятся в {0}.",
+  "Waiting for a free slot (Chats working at once)": "Ждёт свободного места (Чатов, работающих одновременно)",
+  "ChatGPT asked to slow down · waits until it says": "ChatGPT попросил притормозить · ждёт до указанного времени",
+  "ChatGPT asked to slow down": "ChatGPT попросил притормозить",
+  "Resumes in {0}": "Возобновится через {0}"
 }

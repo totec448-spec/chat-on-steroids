@@ -180,6 +180,8 @@ const DEFAULT_MULTI_AGENT: MultiAgentSettings = {
   // Preserve the historical behavior unless the user explicitly opts into a cap shared by
   // independent prime families. Existing per-family maxWorkers remains authoritative too.
   globalMaxWorkers: 0,
+  // Off: automatic sends go out as soon as their chat is ready, however many chats work (#1694).
+  chatsAtOnce: 0,
   allowUnattributedCalls: false,
   strictChatAllowlist: false,
   // Off: Goal/Loop chats are always recovered, and reopening anything else — a worker, a prime,
@@ -525,6 +527,7 @@ const configSchema = z.object({
     defaultReasoning: z.enum(['', ...REASONING_EFFORTS]).optional(),
       maxWorkers: z.number().int().min(1).max(8).optional().default(DEFAULT_MULTI_AGENT.maxWorkers),
       globalMaxWorkers: z.number().int().min(0).max(64).optional().default(DEFAULT_MULTI_AGENT.globalMaxWorkers ?? 0),
+      chatsAtOnce: z.number().int().min(0).max(10).optional().catch(0).default(DEFAULT_MULTI_AGENT.chatsAtOnce ?? 0),
       allowUnattributedCalls: z.boolean().optional().default(DEFAULT_MULTI_AGENT.allowUnattributedCalls),
       strictChatAllowlist: z.boolean().optional().default(DEFAULT_MULTI_AGENT.strictChatAllowlist ?? false),
       recoverAgentTabs: z.boolean().optional().default(DEFAULT_MULTI_AGENT.recoverAgentTabs),
@@ -538,6 +541,7 @@ const configSchema = z.object({
       enabled: DEFAULT_MULTI_AGENT.enabled,
       maxWorkers: DEFAULT_MULTI_AGENT.maxWorkers,
       globalMaxWorkers: DEFAULT_MULTI_AGENT.globalMaxWorkers ?? 0,
+      chatsAtOnce: DEFAULT_MULTI_AGENT.chatsAtOnce ?? 0,
       allowUnattributedCalls: DEFAULT_MULTI_AGENT.allowUnattributedCalls,
       strictChatAllowlist: DEFAULT_MULTI_AGENT.strictChatAllowlist ?? false,
       recoverAgentTabs: DEFAULT_MULTI_AGENT.recoverAgentTabs,

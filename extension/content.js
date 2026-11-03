@@ -11196,6 +11196,13 @@
         void retryGoalDraft(forTurn, true);
         return;
       }
+      // "Chats working at once" (#1694): other chats hold every slot, or ChatGPT asked the app to
+      // slow down. The same as above: keep the turn, show the settling step, ask again shortly.
+      if (failure.error === 'chats_at_once') {
+        setGoalPhase('settling');
+        void retryGoalDraft(forTurn, true);
+        return;
+      }
       // The phase is kept rather than collapsed into `failed`: it names the step that
       // stopped, so the bar draws the run where it ended instead of back at the beginning.
       setGoalPhase('requesting', replyError(reply) || t('content_app_did_not_answer_lower', 'the app did not answer'));

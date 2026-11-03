@@ -760,6 +760,24 @@ describe('shipped defaults', () => {
     }
   );
 
+  it('starts "Chats working at once" off for an older config, keeps a saved limit, and reads a damaged one as off (#1694)', async () => {
+    const saved = JSON.parse(JSON.stringify(defaultConfig())) as Record<string, any>;
+    delete saved.multiAgent.chatsAtOnce;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(saved), 'utf8');
+    expect((await loadConfig()).multiAgent.chatsAtOnce).toBe(0);
+    saved.multiAgent.chatsAtOnce = 3;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(saved), 'utf8');
+    expect((await loadConfig()).multiAgent.chatsAtOnce).toBe(3);
+    for (const damaged of [99, -1, 2.5, 'three']) {
+      saved.multiAgent.chatsAtOnce = damaged;
+      await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(saved), 'utf8');
+      const loaded = await loadConfig();
+      expect(loaded.multiAgent.chatsAtOnce, String(damaged)).toBe(0);
+      // The rest of the settings are kept, not reset to recovery defaults.
+      expect(loaded.multiAgent.maxWorkers).toBe(saved.multiAgent.maxWorkers);
+    }
+  });
+
   it('does not widen omitted permissions or agents exposure in an existing legacy config', async () => {
     const legacy = {
       roots: [],
