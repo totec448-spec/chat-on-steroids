@@ -3903,5 +3903,14 @@
   "Today": "Aujourd’hui",
   "Yesterday": "Hier",
   "Previous 7 days": "7 derniers jours",
-  "Previous 30 days": "30 derniers jours"
+  "Previous 30 days": "30 derniers jours",
+  "Fresh turn started": "Nouveau tour lancé",
+  "Automatic Continue sent": "Continuer automatique envoyé",
+  "The turn failed": "Le tour a échoué",
+  "Since {0} · {1}": "Depuis {0} · {1}",
+  "{0} tries": "{0} tentatives",
+  "{0} tries|one": "{0} tentative",
+  "Show what was tried": "Afficher ce qui a été tenté",
+  "Hide what was tried": "Masquer ce qui a été tenté",
+  "{0} tries|many": "{0} de tentatives"
 }
