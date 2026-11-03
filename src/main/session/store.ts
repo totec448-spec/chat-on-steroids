@@ -2690,6 +2690,8 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
         : {};
     }
     if (publicSummary.titleSource !== undefined && !['fallback', 'provider', 'manual'].includes(publicSummary.titleSource)) delete publicSummary.titleSource;
+    if (publicSummary.projectChosen !== undefined && publicSummary.projectChosen !== true) delete publicSummary.projectChosen;
+    if (publicSummary.projectNotePending !== undefined && publicSummary.projectNotePending !== true) delete publicSummary.projectNotePending;
     const auto = publicSummary.autoTitle;
     if (auto !== undefined && (publicSummary.titleSource !== 'manual' || !auto || typeof auto !== 'object' ||
         typeof auto.title !== 'string' || !['fallback', 'provider'].includes(auto.source))) delete publicSummary.autoTitle;
@@ -3659,6 +3661,37 @@ export async function bindSessionProject(id: string, projectId: string): Promise
 }
 
 /**
+ * The person moves a chat to another project, or out of one (#1919): unlike the one-time binding
+ * above, this replaces a project. Its commands then run in the new project's folder.
+ */
+export async function moveSessionProject(id: string, projectId: string | null): Promise<void> {
+  if (projectId !== null && !/^[a-f0-9-]{36}$/i.test(projectId)) throw new Error('Invalid project id');
+  const entry = await ensureOpen(id);
+  await enqueueSessionOperation(entry, 'project move', async () => {
+    const { projectId: _previous, projectNotePending: _note, ...rest } = entry.summary;
+    // Into a project: the person's next message tells ChatGPT the folder, once (#1919). Not a
+    // sub-agent's: an isolated worker keeps working in its own allocated workspace.
+    const subAgent = rest.origin?.kind === 'worker' || rest.origin?.kind === 'helper';
+    const staged: SessionSummary = { ...rest, ...(projectId ? { projectId, ...(subAgent ? {} : { projectNotePending: true as const }) } : {}), projectChosen: true };
+    await writeSummary(staged, entry.historySeq);
+    entry.summary = staged;
+    publishAttachmentSummary(staged);
+  });
+}
+
+/** The person's message that told ChatGPT a moved chat's folder was delivered. */
+export async function clearProjectNote(id: string): Promise<void> {
+  const entry = await ensureOpen(id);
+  await enqueueSessionOperation(entry, 'project note', async () => {
+    if (!entry.summary.projectNotePending) return;
+    const { projectNotePending: _done, ...staged } = entry.summary;
+    await writeSummary(staged, entry.historySeq);
+    entry.summary = staged;
+    publishAttachmentSummary(staged);
+  });
+}
+
+/**
  * Records that this app opened the chat, and names the session accordingly.
  *
  * One write rather than a rename followed by a stamp, because the two are the same
@@ -3667,14 +3700,30 @@ export async function bindSessionProject(id: string, projectId: string): Promise
  * name contradicts.
  */
 export async function setSessionOrigin(id: string, origin: SessionOrigin, title: string): Promise<void> {
-  const inheritedProject = origin.fromSessionId ? (await getSession(origin.fromSessionId))?.projectId : undefined;
+  const parentProject = async () => origin.fromSessionId ? (await getSession(origin.fromSessionId))?.projectId : undefined;
   const entry = await ensureOpen(id);
+  let written: string | undefined;
   await enqueueSessionOperation(entry, 'origin write', async () => {
+    // Read when the write happens, not before it waited its turn: the main chat may have moved.
+    const inheritedProject = await parentProject();
+    written = inheritedProject;
     if (inheritedProject && entry.summary.projectId && entry.summary.projectId !== inheritedProject) throw new Error('Session origin belongs to another project');
     // A name the user gave the chat stays; the origin's title becomes the one clearing it restores.
     const named = entry.summary.titleSource === 'manual';
     const staged = { ...entry.summary, origin, ...(named ? { autoTitle: { title: title.slice(0, 120), source: 'fallback' as const } } : { title: title.slice(0, 120) }),
       ...(inheritedProject ? { projectId: inheritedProject } : {}) };
+    await writeSummary(staged, entry.historySeq);
+    entry.summary = staged;
+    publishAttachmentSummary(staged);
+  });
+  // A worker or helper follows its main chat: if that chat moved to another project while this was
+  // written, follow it (#1919). The move itself also looks for such stragglers once it is done.
+  const now = await parentProject();
+  if (!origin.fromSessionId || (origin.kind !== 'worker' && origin.kind !== 'helper') || now === written) return;
+  await enqueueSessionOperation(entry, 'origin project follow', async () => {
+    if ((entry.summary.projectId ?? undefined) !== written) return;
+    const { projectId: _previous, ...rest } = entry.summary;
+    const staged: SessionSummary = { ...rest, ...(now ? { projectId: now } : {}) };
     await writeSummary(staged, entry.historySeq);
     entry.summary = staged;
     publishAttachmentSummary(staged);

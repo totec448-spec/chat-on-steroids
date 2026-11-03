@@ -1,4 +1,13 @@
 {
+  "Move chats between projects, chats that keep going, and an extension that updates during long runs.": "Перенос чатов между проектами, чаты, которые не останавливаются, и расширение, которое обновляется во время долгих запусков.",
+  "Move chats between projects": "Перенос чатов между проектами",
+  "Drag a chat onto a project, or use Move to project in its menu. Undo puts it back.": "Перетащите чат на проект или выберите «Переместить в проект» в его меню. «Отменить» вернёт его обратно.",
+  "Chats keep going": "Чаты продолжаются",
+  "When a chat's next step is not picked up, the app keeps trying, tells you, and offers Continue now.": "Если следующий шаг чата никто не подхватил, приложение продолжает попытки, сообщает об этом и предлагает «Продолжить сейчас».",
+  "The extension updates itself": "Расширение обновляется само",
+  "It no longer waits for every long-running chat to finish first.": "Оно больше не ждёт, пока завершится каждый долгий чат.",
+  "Big chats stay fast": "Большие чаты остаются быстрыми",
+  "Very long chats no longer slow the app down.": "Очень длинные чаты больше не замедляют приложение.",
   "Long chats that get through ChatGPT's limits, pop-ups out of the way, and message times.": "Длинные чаты, которые переживают ограничения ChatGPT, всплывающие окна не мешают, и время сообщений.",
   "Long chats keep going": "Длинные чаты продолжаются",
   "When ChatGPT limits a long chat's history, the app waits instead of reloading it.": "Когда ChatGPT ограничивает историю длинного чата, приложение ждёт, а не перезагружает его.",
@@ -3951,5 +3960,17 @@
   "Plugins could not be loaded.": "Не удалось загрузить плагины.",
   "Pets could not be loaded.": "Не удалось загрузить питомцев.",
   "Continue in a new chat from the last summary": "Продолжить в новом чате с последней сводкой",
-  "ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.": "ChatGPT уже 15 минут не пишет сводку. Последняя сохранённая сводка может продолжить работу в новом чате."
+  "ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.": "ChatGPT уже 15 минут не пишет сводку. Последняя сохранённая сводка может продолжить работу в новом чате.",
+  "Drag a chat here, or move it from its menu.": "Перетащите сюда чат или переместите его через меню чата.",
+  "Move to project": "Переместить в проект",
+  "Move this chat to a project; its commands then run in that project's folder": "Переместить этот чат в проект; его команды будут выполняться в папке этого проекта",
+  "Moved to {0}": "Перемещено в {0}",
+  "Moved out of its project": "Убрано из проекта",
+  "ChatGPT keeps it where it was.": "В ChatGPT чат остаётся там, где был.",
+  "Undo": "Отменить",
+  "Move undone": "Перемещение отменено",
+  "Today": "Сегодня",
+  "Yesterday": "Вчера",
+  "Previous 7 days": "Последние 7 дней",
+  "Previous 30 days": "Последние 30 дней"
 }
