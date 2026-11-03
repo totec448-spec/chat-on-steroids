@@ -253,7 +253,8 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
     });
     return id;
   };
-  const stopAgentEvents = window.api.onAgentOutput(event => {
+  // An older preload, or a fixture, may not offer agent output: the person's own shells still work.
+  const stopAgentEvents = window.api.onAgentOutput?.(event => {
     const tab = tabs.get(event.id); if (!tab?.agent) return;
     if ('data' in event) { tab.term.write(event.data.replace(/\r?\n/g, '\r\n')); return; }
     tab.exited = true;
@@ -261,7 +262,7 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
     const after = minutes ? `${t('{0}m', [minutes])} ${t('{0}s', [seconds])}` : t('{0}s', [seconds]);
     tab.term.write(`\r\n\x1b[2m${event.exit.exitCode === null ? t('Ended after {0}', [after]) : t('Exited with {0} after {1}', [event.exit.exitCode, after])}\x1b[0m\r\n`);
     paint(); options.onTabsChanged?.();
-  });
+  }) ?? (() => undefined);
   const stopEvents = window.api.onTerminalEvent(event => {
     const tab = tabs.get(event.id); if (!tab) return;
     if ('data' in event) tab.term.write(event.data, () => { void window.api.terminalAck(event.id, event.data.length); });
