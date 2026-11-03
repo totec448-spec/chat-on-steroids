@@ -437,8 +437,15 @@ class UnifiedExecProcess {
     }
   }
 
+  /** Read-only viewers of this output (#1920); they see each chunk and take nothing from the agent's reads. */
+  private readonly watchers = new Set<(chunk: Buffer) => void>();
+  watch(listener: (chunk: Buffer) => void): () => void { this.watchers.add(listener); return () => { this.watchers.delete(listener); }; }
+  /** The output so far, as retained for completed results (head and tail, with a marker where bytes were left out). */
+  historyBytes(): Buffer { return this.history.toBytesWithOmissionMarker(); }
+
   private pushChunk(chunk: Buffer): void {
     if (chunk.length === 0) return;
+    for (const watcher of this.watchers) { try { watcher(chunk); } catch { /* a viewer never breaks the command */ } }
     this.history.pushChunk(chunk);
     this.buffer.pushChunk(chunk);
     if (this.batchDisplay) this.displayBuffer!.pushChunk(this.batchDisplay.push(chunk));
@@ -1043,6 +1050,21 @@ export class UnifiedExecProcessManager {
   }
 
   /** Live sessions, oldest id first. */
+  /**
+   * A live, read-only view of a running command's output for the person (#1920): the output so far,
+   * then each new chunk, then its exit. Nothing is consumed, so the agent's own polls read exactly
+   * what they would have. Null when that exact process (id and incarnation) is not running.
+   */
+  watchOutput(processId: number, incarnation: number, onChunk: (chunk: Buffer) => void,
+    onExit: (completion: ProcessCompletion) => void): { history: Buffer; startedAt: number; unsubscribe: () => void } | null {
+    const entry = this.processes.get(processId);
+    if (!entry || entry.incarnation !== incarnation) return null;
+    let watching = true;
+    const stop = entry.process.watch(onChunk);
+    void entry.process.completion.then(completion => { if (watching) onExit(completion); });
+    return { history: entry.process.historyBytes(), startedAt: entry.startedAt, unsubscribe: () => { watching = false; stop(); } };
+  }
+
   listProcesses(): BackgroundTerminalInfo[] {
     return [...this.processes.values()]
       .filter((entry) => !entry.process.hasExited())

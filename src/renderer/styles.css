@@ -4961,14 +4961,14 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .background-exec-process { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 6px 12px 6px 37px; border-bottom: 1px solid var(--edge); color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); }
 .background-exec-process-command { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
 .background-exec-time { flex-shrink: 0; color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.background-exec-stop { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 6px; padding: 5px 7px; background: transparent; color: var(--soft); font: inherit; cursor: pointer; }
-.background-exec-stop:hover { color: var(--ink); background: var(--hover); }
+.background-exec-stop, .background-exec-output { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 6px; padding: 5px 7px; background: transparent; color: var(--soft); font: inherit; cursor: pointer; }
+.background-exec-stop:hover, .background-exec-output:hover { color: var(--ink); background: var(--hover); }
 .background-exec-stop:disabled { cursor: default; opacity: .55; }
 @media (max-width: 480px) {
   /* Preserve the actionable process row at laptop zoom / phone-width windows. The row tooltip
      still carries elapsed time and full commands; the Stop control keeps its accessible label. */
-  .background-exec-time, .background-exec-stop > span { display: none; }
-  .background-exec-stop { padding-inline: 5px; }
+  .background-exec-time, .background-exec-stop > span, .background-exec-output > span { display: none; }
+  .background-exec-stop, .background-exec-output { padding-inline: 5px; }
   .background-exec-process { padding-left: 28px; }
 }
 .recovery-countdown { flex-shrink: 0; font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap; }
@@ -5124,6 +5124,8 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 :is(.work-dock-tab, .terminal-tab) > .btn.btn-icon .ico { --ico: 12px; }
 .work-dock-bar .work-dock-tab > .btn.btn-icon:hover:not(:disabled), .terminal-tab > .btn.btn-icon:hover:not(:disabled) { color: var(--ink); background: color-mix(in srgb, var(--ink) 9%, transparent); }
 .terminal-tab > .btn:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
+/* An agent's command, read-only (#1920): a quiet badge before its command, and Stop beside the close button. */
+.terminal-agent-badge { flex: none; padding: 0 5px; border: 1px solid var(--edge); border-radius: 4px; color: var(--soft); font-size: calc(10.5px * var(--text-scale, 1)); line-height: 16px; }
 /* Reordering: the dragged pill rides above its neighbours, which slide aside (tab-reorder.ts). */
 :is(.work-dock-tabs, .terminal-tabs).is-reordering { cursor: grabbing; }
 :is(.work-dock-tab, .terminal-tab).is-dragging { position: relative; z-index: 1; background: color-mix(in srgb, var(--page) 84%, var(--ink)); pointer-events: none; }
