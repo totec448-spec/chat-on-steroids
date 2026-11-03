@@ -22,7 +22,7 @@
  */
 
 import { modelFacingText } from '../../shared/content-reference.js';
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { isProModel } from '../../shared/chat-models.js';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -3497,7 +3497,8 @@ async function writeUserRequestsFile(id: string, requests: UserRequest[]): Promi
 
 function newUserRequestId(): string {
   const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
-  return `ur_${[...randomBytes(12)].map(byte => alphabet[byte % alphabet.length]).join('')}`;
+  // randomInt draws without the bias a byte modulo 36 would have (CodeQL on #2049).
+  return `ur_${Array.from({ length: 12 }, () => alphabet[randomInt(alphabet.length)]).join('')}`;
 }
 
 export type FileUserRequestResult =
