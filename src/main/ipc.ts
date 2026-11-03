@@ -96,7 +96,7 @@ import { onBackgroundExecChange, runningExecProcesses, stopExecProcess } from '.
 import { keychainNoticeReady } from './keychain-notice.js';
 import { runDiagnostics } from './diagnostics.js';
 import { collectReportFacts, readRecentLog, renderDiagnosticsReport, saveDiagnosticsReport, systemFacts, memoryFacts } from './diagnostics-report.js';
-import { clearProjectNote, listSessions, readTurnTraces } from './session/store.js';
+import { answerUserRequest, clearProjectNote, listSessions, readTurnTraces } from './session/store.js';
 import { deleteSchedule, listSchedules, saveSchedule, scheduleRepeatSchema, setSchedulePaused } from './scheduled-runs.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, logWarn, onLog } from './logger.js';
 import { markStartup } from './startup-timing.js';
@@ -122,7 +122,7 @@ import {
   companionDiagnostics,
   sessionInputActivity,
   recoveryHeldByCalls, recoveryInputAllowed,
-  sessionControlsFor, cancelAssistantRecovery, pickupNow, stopSessionTurn, setSessionAutomation, setSessionObjective, compactSession, resumeFromSavedSummary, cancelSessionCompaction,
+  sessionControlsFor, userRequestViews, cancelAssistantRecovery, pickupNow, stopSessionTurn, setSessionAutomation, setSessionObjective, compactSession, resumeFromSavedSummary, cancelSessionCompaction,
   cancelWorkerCommands,
   chatUrl,
   revealChatInBrowser,
@@ -2001,6 +2001,17 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('browser:preferences', async (payload) => requestBrowserPreferences(payload));
   handle('chatModels:request', async () => startChatModelDiscovery());
   handle('sessions:controls', async (payload) => sessionControlsFor(sessionIdArg.parse(payload).id));
+  // A step handed to the person (#1695): only their click answers it, and the app runs nothing.
+  handle('sessions:answerUserRequest', async (payload) => {
+    const { id, requestId, answer } = sessionIdArg.extend({
+      requestId: z.string().regex(/^ur_[a-z0-9]{12}$/),
+      answer: z.enum(['done', 'skipped'])
+    }).parse(payload);
+    const answered = await answerUserRequest(id, requestId, answer);
+    if (answered?.changed) logInfo(`user request ${requestId} marked ${answer} by the person in session ${id}`);
+    else logInfo(`user request ${requestId} not changed: ${answered ? `already ${answered.request.state}` : 'not found'} (session ${id})`);
+    return userRequestViews(id);
+  });
   // #1032: the user keeps this answer from being reloaded; false once the browser claimed it.
   handle('sessions:cancelRecovery', async (payload) => cancelAssistantRecovery(sessionIdArg.parse(payload).id));
   // A chat whose next step was not picked up: the person's one click (2026-10-31).

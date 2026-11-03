@@ -2166,6 +2166,12 @@ async function run(draft: GoalDraft): Promise<void> {
     ? [`A reviewer read the files the last step changed. This line is added after your message exactly as it is, so do not repeat it; act on it if it matters:\n${reviewLine}`]
     : [];
 
+  // Steps the chat handed to the person (#1695) and the person has not answered: the next
+  // message must not treat them as done or ask the chat to run them instead.
+  const { goalUserRequestsContext } = await import('./goal-user-requests.js');
+  const stepsContext = await goalUserRequestsContext(draft.sessionId);
+  if (draft.acknowledged || drafts.get(draft.conversationId) !== draft) return;
+
   const abort = new AbortController();
   draft.abort = abort;
   const limitMs = goalRequestTimeoutMs(draft.backend, draft.helper ?? undefined);
@@ -2188,11 +2194,11 @@ async function run(draft: GoalDraft): Promise<void> {
       system:
         draft.mode === 'loop'
           ? draft.objective
-            ? [draft.loopSystemPrompt, goalObjectiveMessage(draft.objective)]
-            : [draft.loopSystemPrompt]
+            ? [draft.loopSystemPrompt, goalObjectiveMessage(draft.objective), ...stepsContext]
+            : [draft.loopSystemPrompt, ...stepsContext]
           : draft.objective
-            ? [draft.objectiveSystemPrompt, goalObjectiveMessage(draft.objective), ...reviewContext]
-            : [draft.systemPrompt, ...reviewContext],
+            ? [draft.objectiveSystemPrompt, goalObjectiveMessage(draft.objective), ...reviewContext, ...stepsContext]
+            : [draft.systemPrompt, ...reviewContext, ...stepsContext],
       messages: messages.length > 0 ? messages : [{ role: 'user', content: GOAL_OBJECTIVE_OPENING_TURN }],
       original: await originalRequestBlock(draft.sessionId, messages),
       trailer:

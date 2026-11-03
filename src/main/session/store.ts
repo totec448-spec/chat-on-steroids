@@ -22,7 +22,7 @@
  */
 
 import { modelFacingText } from '../../shared/content-reference.js';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { isProModel } from '../../shared/chat-models.js';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -48,6 +48,7 @@ import { applyTurnIdentity, authoredTimeOf, chronological, injectedUserMessage, 
 import { automaticTitle, firstTitleMessage, legacyContextTitle, legacyLabelPending, projectPageTitle, providerTitleIgnored, refreshUserTitle, userTitle } from './title.js';
 import { agentPlanSchema, agentPlanUpdateSchema, MAX_AGENT_PLAN_BYTES, type AgentPlan, type AgentPlanUpdate } from '../../shared/agent-plan.js';
 import { turnTrace, type TurnTrace } from '../../shared/turn-trace.js';
+import { sameUserRequest, USER_REQUEST_LIMITS, userRequestSchema, userRequestsFileSchema, type UserRequest } from '../../shared/user-requests.js';
 import { getConfig } from '../config.js';
 import { logError, logInfo, logWarn } from '../logger.js';
 
@@ -3452,6 +3453,104 @@ export async function updateSessionPlan(
     }
     return true;
   });
+}
+
+/**
+ * Steps handed to the person (#1695): one small `requests.json` per session, like the plan. Keyed
+ * by session, not by ChatGPT chat, so a chat continued by Compact & Resume can still check them.
+ */
+const MAX_USER_REQUESTS_BYTES = 1024 * 1024;
+
+async function readUserRequestsFile(id: string): Promise<UserRequest[]> {
+  const target = path.join(sessionDir(id), 'requests.json');
+  let text: string;
+  try {
+    const stat = await fs.stat(target);
+    if (stat.size > MAX_USER_REQUESTS_BYTES) throw new SyntaxError('too large');
+    text = await fs.readFile(target, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    if (!(error instanceof SyntaxError)) throw error;
+    text = '';
+  }
+  try {
+    const parsed = userRequestsFileSchema.safeParse(JSON.parse(text));
+    if (parsed.success) return parsed.data.requests;
+  } catch { /* unreadable: kept aside below */ }
+  // Kept aside rather than overwritten, so a damaged file can still be looked at.
+  const aside = `${target}.unreadable-${Date.now()}`;
+  await fs.rename(target, aside).catch(() => undefined);
+  logWarn(`session ${id}: steps for the person were unreadable; kept as ${path.basename(aside)} and started empty`);
+  return [];
+}
+
+async function writeUserRequestsFile(id: string, requests: UserRequest[]): Promise<void> {
+  const target = path.join(sessionDir(id), 'requests.json');
+  const temporary = `${target}.${randomUUID()}.tmp`;
+  try {
+    await fs.writeFile(temporary, JSON.stringify({ version: 1, requests }), 'utf8');
+    await fs.rename(temporary, target);
+  } finally {
+    await fs.rm(temporary, { force: true }).catch(() => undefined);
+  }
+}
+
+function newUserRequestId(): string {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  return `ur_${[...randomBytes(12)].map(byte => alphabet[byte % alphabet.length]).join('')}`;
+}
+
+export type FileUserRequestResult =
+  | { request: UserRequest; existing: boolean }
+  | { refused: 'open-limit' };
+
+/** Records a step for the person; the same open step asked again returns the first one. */
+export async function fileUserRequest(
+  id: string,
+  input: Omit<UserRequest, 'id' | 'state' | 'createdAt' | 'answeredAt'>,
+  now = Date.now()
+): Promise<FileUserRequestResult> {
+  const entry = await ensureOpen(id);
+  return enqueueSessionOperation(entry, 'user-request', async () => {
+    const requests = await readUserRequestsFile(id);
+    const existing = requests.find(request => request.state === 'open' && sameUserRequest(request, input));
+    if (existing) return { request: existing, existing: true };
+    if (requests.filter(request => request.state === 'open').length >= USER_REQUEST_LIMITS.open) return { refused: 'open-limit' };
+    const request = userRequestSchema.parse({ ...input, id: newUserRequestId(), state: 'open', createdAt: now });
+    const kept = [...requests, request];
+    // Answered steps make room, oldest first; open ones are never dropped (20 open < 60 kept).
+    while (kept.length > USER_REQUEST_LIMITS.kept) {
+      const oldest = kept.findIndex(row => row.state !== 'open');
+      if (oldest < 0) break;
+      kept.splice(oldest, 1);
+    }
+    await writeUserRequestsFile(id, kept);
+    return { request, existing: false };
+  });
+}
+
+/** The person's answer. Null when the step is unknown; an answered step keeps its first answer. */
+export async function answerUserRequest(
+  id: string, requestId: string, answer: 'done' | 'skipped', now = Date.now()
+): Promise<{ request: UserRequest; changed: boolean } | null> {
+  const entry = await ensureOpen(id);
+  return enqueueSessionOperation(entry, 'user-request', async () => {
+    const requests = await readUserRequestsFile(id);
+    const index = requests.findIndex(request => request.id === requestId);
+    const current = requests[index];
+    if (!current) return null;
+    if (current.state !== 'open') return { request: current, changed: false };
+    const request: UserRequest = { ...current, state: answer, answeredAt: now };
+    requests[index] = request;
+    await writeUserRequestsFile(id, requests);
+    return { request, changed: true };
+  });
+}
+
+export async function readSessionUserRequests(id: string): Promise<UserRequest[]> {
+  assertSessionId(id);
+  await open.get(id)?.queue;
+  return readUserRequestsFile(id);
 }
 
 /**
