@@ -5,6 +5,7 @@
  */
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
+import { webLocalMessagesFor } from './messages.mjs';
 
 const TOKEN_BYTES = 32;
 const TICKET_LIFE = 90_000;
@@ -37,7 +38,7 @@ function cookieFrom(header, name) {
   return values.length === 1 ? values[0].slice(name.length + 1) : null;
 }
 
-function page(data, path) {
+function page(data, path, { language, strings: copy }) {
   if (!data || !Array.isArray(data.projects) ||
       data.projects.some(project => typeof project?.name !== 'string')) {
     throw new TypeError('invalid_owner_snapshot');
@@ -47,21 +48,23 @@ function page(data, path) {
   const projects = data.projects.slice(0, 50);
   const rows = projects.map(project =>
     '<li>' + escapeHtml(project.name).slice(0, 320) + '</li>').join('');
-  return '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
+  return '<!doctype html><html lang="' + language + '"><head><meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width, initial-scale=1">' +
-    '<title>CoS Web Local · Read only</title></head><body>' +
+    '<title>' + escapeHtml(copy.title) + '</title></head><body>' +
     '<main><h1>Chat On Steroids · Web Local</h1>' +
-    '<p><strong>READ ONLY</strong> — This is a local browser view, not full Desktop parity.</p>' +
-    '<h2>Projects</h2>' + (rows ? '<ul>' + rows + '</ul>' : '<p>No local projects recorded.</p>') +
-    (data.projects.length > 50 ? '<p>Showing the first 50 projects only.</p>' : '') +
-    '<p><a href="' + path + '">Refresh current data</a></p>' +
-    '<p>Send, Stop, Workers, files, terminal and remote access are unavailable here.</p>' +
+    '<p><strong>' + escapeHtml(copy.readonly) + '</strong> — ' + escapeHtml(copy.intro) + '</p>' +
+    '<h2>' + escapeHtml(copy.projects) + '</h2>' +
+    (rows ? '<ul>' + rows + '</ul>' : '<p>' + escapeHtml(copy.empty) + '</p>') +
+    (data.projects.length > 50 ? '<p>' + escapeHtml(copy.limited) + '</p>' : '') +
+    '<p><a href="' + path + '">' + escapeHtml(copy.refresh) + '</a></p>' +
+    '<p>' + escapeHtml(copy.unavailable) + '</p>' +
     '</main></body></html>';
 }
 
 export function createWebLocalServer({ read, now = Date.now, readDeadlineMs = 3000, drainMs = 2000,
-  onDecision = () => {} }) {
+  onDecision = () => {}, language = 'en' }) {
   if (typeof read !== 'function' || typeof now !== 'function' || typeof onDecision !== 'function' ||
+      (typeof language !== 'string' && typeof language !== 'function') ||
       !Number.isSafeInteger(readDeadlineMs) || readDeadlineMs < 1 || readDeadlineMs > 10000 ||
       !Number.isSafeInteger(drainMs) || drainMs < 1 || drainMs > 5000) {
     throw new TypeError('invalid_web_local_options');
@@ -155,7 +158,10 @@ export function createWebLocalServer({ read, now = Date.now, readDeadlineMs = 30
         })
       ]);
       if (stopped || active !== admittedSession || now() >= expires) return jsonError(res, 503, 'unavailable');
-      const body = page(result, scope);
+      let requested = 'en';
+      try { requested = typeof language === 'function' ? language() : language; }
+      catch { /* Locale availability must not block a valid read. */ }
+      const body = page(result, scope, webLocalMessagesFor(requested));
       if (Buffer.byteLength(body) > MAX_REPLY_BYTES) {
         noteOwnerReadFailure();
         return jsonError(res, 503, 'read_unavailable');

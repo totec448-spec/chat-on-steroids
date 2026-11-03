@@ -1,5 +1,7 @@
 import { afterAll, expect, test, vi } from 'vitest';
 
+vi.mock('electron', () => ({ app: { getLocale: () => 'en-US' } }));
+vi.mock('../src/main/config.js', () => ({ getConfig: () => ({ ui: { language: 'vi' } }) }));
 vi.mock('../src/main/projects.js', () => ({
   listProjects: async () => [
     { id: 'visible-id', name: '<Local & Project>', ungrouped: false },
@@ -23,6 +25,7 @@ test('native-open reaches the real owner projection without exposing paths or ac
   expect(page.status).toBe(200);
   const html = await page.text();
   expect(html).toContain('&lt;Local &amp; Project&gt;');
+  expect(html).toContain('CHỈ ĐỌC');
   expect(html).not.toContain('Hidden workspace');
   expect(html).not.toContain('visible-id');
   expect(html).not.toContain('Send prompt');

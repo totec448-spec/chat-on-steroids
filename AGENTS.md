@@ -5485,6 +5485,10 @@ intentionally **not** written to Activity one request at a time: an untrusted
 local client could otherwise flood the persisted log and expose credential
 material. Neither activation URLs, scope paths, cookies, project names nor raw
 browser/owner error messages enter Web Local diagnostics.
+The browser page uses a small dedicated copy catalog for English and the 12
+Desktop languages. It reads the selected UI language on each authenticated
+refresh (or Electron's system locale when unset), uses only shipped locale
+codes in HTML and falls back to English for unknown or invalid language tags.
 
 The read routes (`control-reads.ts`) are `GET /v1/sessions`, `/v1/sessions/{id}`,
 `/v1/sessions/{id}/events`, `/v1/inputs`, `/v1/agents`, `/v1/log` and `/v1/models` (the saved

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { after, test } from 'node:test';
 import { createWebLocalServer } from '../src/main/web-local/http.mjs';
+import { WEB_LOCAL_MESSAGES, webLocalMessagesFor } from '../src/main/web-local/messages.mjs';
 
 const services = [];
 after(async () => { await Promise.all(services.map(service => service.stop())); });
@@ -222,4 +223,46 @@ test('repeated owner-read failures report one fixed reason without logging sensi
   }
   assert.deepEqual(decisions, ['activation_accepted', 'owner_read_unavailable']);
   assert.equal(JSON.stringify(decisions).includes('synthetic-private-owner-error'), false);
+});
+
+test('browser text follows the app language on refresh, with safe English fallback', async () => {
+  let language = 'vi-VN';
+  const owner = await start(async () => ({ projects: [{ name: 'Example project' }] }), {
+    language: () => language
+  });
+  const { cookie, scope } = await activate(owner);
+  const render = async () => {
+    const response = await fetch(owner.origin + scope, { headers: { cookie } });
+    assert.equal(response.status, 200);
+    return response.text();
+  };
+  const vi = await render();
+  assert.match(vi, /<html lang="vi">/);
+  assert.match(vi, /CHỈ ĐỌC/);
+  assert.match(vi, /Dự án/);
+  language = 'ja-JP';
+  const ja = await render();
+  assert.match(ja, /<html lang="ja">/);
+  assert.match(ja, /閲覧専用/);
+  language = 'pt-BR';
+  assert.match(await render(), /SOMENTE LEITURA/);
+  language = '"><script>alert(1)</script>';
+  const fallback = await render();
+  assert.match(fallback, /<html lang="en">/);
+  assert.match(fallback, /READ ONLY/);
+  assert.equal(fallback.includes('<script>alert(1)</script>'), false);
+});
+
+test('browser read-only copy covers all twelve Desktop languages and a safe default', () => {
+  const fields = ['title', 'readonly', 'intro', 'projects', 'empty', 'limited', 'refresh', 'unavailable'];
+  const locales = ['en', 'de', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'zh-CN', 'zh-TW'];
+  assert.deepEqual(Object.keys(WEB_LOCAL_MESSAGES).sort(), locales.sort());
+  for (const [language, copy] of Object.entries(WEB_LOCAL_MESSAGES)) {
+    assert.deepEqual(Object.keys(copy).sort(), [...fields].sort(), language);
+    for (const field of fields) assert.ok(typeof copy[field] === 'string' && copy[field].length > 0,
+      `${language}.${field} has visible copy`);
+  }
+  assert.equal(webLocalMessagesFor('zh-Hant-TW').language, 'zh-TW');
+  assert.equal(webLocalMessagesFor('de-DE').language, 'de');
+  assert.equal(webLocalMessagesFor('<script>').language, 'en');
 });

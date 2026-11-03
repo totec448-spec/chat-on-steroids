@@ -1,6 +1,8 @@
 import type { AddressInfo } from 'node:net';
+import { app } from 'electron';
 import { createWebLocalServer, type WebLocalService } from './http.mjs';
 import { listProjects } from '../projects.js';
+import { getConfig } from '../config.js';
 import { logInfo, logWarn } from '../logger.js';
 
 let current: WebLocalService | null = null;
@@ -20,6 +22,7 @@ async function startOnce(): Promise<WebLocalService> {
   if (shuttingDown) throw new Error('local_web_shutting_down');
   const service = createWebLocalServer({
     read: readLocalView,
+    language: () => getConfig().ui.language ?? app.getLocale(),
     onDecision: kind => {
       if (kind === 'activation_accepted') logInfo('web local: browser activation accepted');
       else if (kind === 'projects_view_served') logInfo('web local: Projects view served (HTTP 200)');
