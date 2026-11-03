@@ -37,6 +37,8 @@ it('shows the exact command, folder, purpose and expected files, with no verdict
   const files = [...card.querySelectorAll('.user-request-files li')].map(item => item.textContent);
   expect(files[0]).toMatch(/^build\/flash\.logfound, 2 kB, /);
   expect(files[1]).toBe('../secretnot checked');
+  const small = userRequestCard(request({ found: [{ path: 'build/flash.log', state: 'found', size: 9, modifiedAt: 1 }, { path: '../secret', state: 'unchecked' }] }), { answer, readOnly: () => false });
+  expect(small.querySelector('.user-request-file-state')!.textContent).toMatch(/^found, 9 bytes, /);
   // It says the app neither runs nor checks it, and nothing reads as "safe".
   expect(card.textContent).toContain('does not run or check this command');
   expect(card.textContent?.toLowerCase()).not.toMatch(/\bsafe\b|verified|harmless/);
