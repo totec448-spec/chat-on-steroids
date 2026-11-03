@@ -871,3 +871,24 @@ it.each(['copyFile', 'writeFile', 'rename'] as const)('retains the unreadable le
   await resetPluginRefreshLedger();
   expect(await pluginRefreshUnreadable()).toBe(false);
 });
+
+it.each(['claim', 'manual', 'current'] as const)('checks a reported native tunnel again for a scoped enrolled %s', async action => {
+  const original = configOwner.getConfig(), tunnelId = 'tunnel_enrolled00001';
+  vi.spyOn(configOwner, 'getConfig').mockReturnValue({ ...original, tunnel: { ...original.tunnel, kind: 'openai', tunnelId } });
+  publish(); const first = (await pendingPluginRefreshes())[0]!;
+  expect(await claimPluginRefresh({ ...first, appId, connectorName: first.connectorName,
+    tools, alreadyCurrent: true, tunnelId, ownsTunnel: () => true })).toBe(true);
+  const changed = [{ ...tools[0]!, description: 'Changed publication' }];
+  publish('2', changed);
+  const next = (await pendingPluginRefreshes())[0]!;
+  expect(next.appId).toBe(appId);
+  const input = { ...next, appId, connectorName: next.connectorName, tools: action === 'current' ? changed : tools,
+    tunnelId: 'tunnel_other0000001', ownsTunnel: (surface: string, id: string) => surface === 'core' && id === tunnelId };
+  const saved = await readDurable('plugin-refresh');
+  const perform = (value: typeof input) => action === 'manual'
+    ? requireManualPluginRefresh({ ...value, error: 'No native Refresh control' })
+    : claimPluginRefresh({ ...value, alreadyCurrent: action === 'current' });
+  expect(await perform(input)).toBe(false);
+  expect(await readDurable('plugin-refresh')).toEqual(saved);
+  expect(await perform({ ...input, tunnelId })).toBe(true);
+});

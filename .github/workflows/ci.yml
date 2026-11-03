@@ -14,23 +14,57 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  checks:
+    # Checks that read the source, not the OS: once, on Linux, beside the test shards (CI speed-up
+    # 2026-10-31; they used to run before the tests on every OS). The notices check reads each OS's own
+    # optional native packages, so it stays on every OS, in its first test shard.
+    name: Typecheck and privacy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Dependency install scripts run in this job; it never pushes.
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Privacy
+        run: npm run verify:privacy
+
+      - name: Typecheck
+        run: npm run typecheck
+
   verify:
-    name: Verify ${{ matrix.name }}
+    # The unit tests in parallel shards, balanced by measured seconds (test/weighted-sequencer.ts,
+    # test/test-weights.json). Three shards on Windows, its slowest runner; two elsewhere. macOS keeps
+    # to two because the account runs at most five macOS jobs at once, and its UI checks take two more.
+    name: Verify ${{ matrix.name }} (${{ matrix.shard }})
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: Windows x64
-            runner: windows-2025
-          - name: macOS arm64
-            runner: macos-15
-          - name: Linux x64
-            runner: ubuntu-24.04
+          - { name: Windows x64, runner: windows-2025, shard: '1/3', first: true }
+          - { name: Windows x64, runner: windows-2025, shard: '2/3', first: false }
+          - { name: Windows x64, runner: windows-2025, shard: '3/3', first: false }
+          - { name: macOS arm64, runner: macos-15, shard: '1/2', first: true }
+          - { name: macOS arm64, runner: macos-15, shard: '2/2', first: false }
+          - { name: Linux x64, runner: ubuntu-24.04, shard: '1/2', first: true }
+          - { name: Linux x64, runner: ubuntu-24.04, shard: '2/2', first: false }
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Dependency install scripts run in this job; it never pushes.
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -40,20 +74,39 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Verify
+      - name: Fetch ripgrep and check Electron loads
+        run: |
+          npm run rg
+          node -e "require('electron')"
+
+      - name: Third-party notices and native sources of this OS
+        # Each OS installs only its own optional native packages; their licences are checked where they exist.
+        if: matrix.first
+        run: npm run verify:notices
+
+      - name: Unit tests
         env:
           # One retry per failed test; scripts/flaky-reporter.mjs lists every test that needed it.
           COS_TEST_RETRY: '1'
-        run: npm run verify:ci
+        run: npx vitest run --shard=${{ matrix.shard }} --exclude test/mcp-shutdown.test.ts --exclude test/computer.test.ts
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - name: Tests that need the machine to themselves
+        if: matrix.first
+        env:
+          COS_TEST_RETRY: '1'
+        run: npx vitest run --maxWorkers=1 test/computer.test.ts test/mcp-shutdown.test.ts
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        if: matrix.first
         with:
           python-version: '3.12'
 
       - name: Install plugin Python runtime
+        if: matrix.first
         run: python -m pip install uv==0.12.5
 
       - name: Exercise published plugins on this OS
+        if: matrix.first
         env:
           COS_PLUGIN_LIVE_TEST: '1'
         # These suites install full npm/Python environments and immediately start
@@ -63,13 +116,24 @@ jobs:
   ui:
     # The real-Electron UI checks (scripts/verify-*.cjs) catch layout and interaction bugs the unit
     # tests cannot see. They take several minutes, so they run only when the interface can change.
-    name: UI checks (macOS)
+    name: UI checks (macOS ${{ matrix.shard }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Balanced by scripts/ui-check-weights.json. Two, not three: with the two macOS test shards a
+        # pull request then holds four of the five macOS jobs the account may run at once (#1983's
+        # first run waited 23–28 minutes for a third).
+        shard: ['1/2', '2/2']
     runs-on: macos-15
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Dependency install scripts run in this job; it never pushes.
+          persist-credentials: false
+          # The interface decision needs the history, not old file contents.
           fetch-depth: 0
+          filter: blob:none
 
       - name: Decide whether the interface can change
         id: scope
@@ -84,7 +148,7 @@ jobs:
             echo "No interface files changed; the UI checks are skipped." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: steps.scope.outputs.run == 'true'
         with:
           node-version: 22
@@ -99,34 +163,35 @@ jobs:
         run: npm run build
 
       - name: Verify recovery capture on the hosted compositor
-        if: steps.scope.outputs.run == 'true'
+        if: steps.scope.outputs.run == 'true' && matrix.shard == '1/2'
         # These two focused gates run exactly once: no UI skip list, retry loop or timeout wrapper.
         # Recovery uses the offscreen paint frame directly; Plan owns its media preference through
         # CDP, so both can be validated on the hosted macOS renderer before the broader UI suite.
         run: env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron scripts/verify-recovery-layout.cjs
 
       - name: Verify Plan motion matrix on hosted macOS
-        if: steps.scope.outputs.run == 'true'
+        if: steps.scope.outputs.run == 'true' && matrix.shard == '1/2'
         run: env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron scripts/verify-plan-collapse.cjs
 
       - name: Run the UI checks
         if: steps.scope.outputs.run == 'true'
         env:
-          # The Plan motion matrix ran in its own step above. The focus-ring pixel comparison and the
+          # The recovery capture and the Plan motion matrix ran in their own steps above. The focus-ring pixel comparison and the
           # transparent pet overlay need a real GPU; the hosted runner has none. They run with npm run
           # verify:ui on a real machine. The built-in browser's sign-in check (local TLS sites behind a
           # proxied session) exits within seconds on the hosted macOS runner, before its first step; it
           # passes on Windows and locally.
-          VERIFY_UI_SKIP: verify-plan-collapse.cjs,verify-settings-focus.cjs,verify-pet-overlay-electron.cjs,verify-cos-sign-in.cjs
+          VERIFY_UI_SKIP: verify-recovery-layout.cjs,verify-plan-collapse.cjs,verify-settings-focus.cjs,verify-pet-overlay-electron.cjs,verify-cos-sign-in.cjs
           # The shared runner times out a different check now and then; one retry each, named as flaky.
           VERIFY_UI_RETRY: '1'
+          VERIFY_UI_SHARD: ${{ matrix.shard }}
         run: npm run verify:ui
 
       - name: Keep the UI check screenshots when a check fails
         if: failure() && steps.scope.outputs.run == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: ui-check-screenshots-${{ github.run_id }}
+          name: ui-check-screenshots-${{ github.run_id }}-${{ strategy.job-index }}
           path: outputs/
           if-no-files-found: ignore
           retention-days: 7
@@ -134,7 +199,11 @@ jobs:
   ui-windows:
     # The same real-Electron UI checks on Windows, where hidden windows animate nothing and the
     # runner's screen is small by default: both broke checks that pass on macOS (VM 141, 2026-10-06).
-    name: UI checks (Windows)
+    name: UI checks (Windows ${{ matrix.shard }})
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ['1/3', '2/3', '3/3']
     runs-on: windows-2025
     timeout-minutes: 40
     defaults:
@@ -143,7 +212,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Dependency install scripts run in this job; it never pushes.
+          persist-credentials: false
+          # The interface decision needs the history, not old file contents.
           fetch-depth: 0
+          filter: blob:none
 
       - name: Decide whether the interface can change
         id: scope
@@ -165,7 +238,7 @@ jobs:
         shell: pwsh
         run: Set-DisplayResolution -Width 1920 -Height 1080 -Force
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: steps.scope.outputs.run == 'true'
         with:
           node-version: 22
@@ -186,13 +259,14 @@ jobs:
           # here in the suite (both passed repeatedly on a GPU-less Windows VM).
           VERIFY_UI_SKIP: verify-settings-focus.cjs,verify-pet-overlay-electron.cjs
           VERIFY_UI_RETRY: '1'
+          VERIFY_UI_SHARD: ${{ matrix.shard }}
         run: npm run verify:ui
 
       - name: Keep the UI check screenshots when a check fails
         if: failure() && steps.scope.outputs.run == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: ui-check-screenshots-windows-${{ github.run_id }}
+          name: ui-check-screenshots-windows-${{ github.run_id }}-${{ strategy.job-index }}
           path: outputs/
           if-no-files-found: ignore
           retention-days: 7

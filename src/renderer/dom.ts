@@ -140,21 +140,114 @@ export function el(tag: string, className = '', text: string | (() => string) = 
 
 export const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
+/**
+ * Paints a panel now when it is on screen, and otherwise once it is shown, with the newest paint
+ * only. Every state push used to rebuild Setup and Settings lists nobody could see: about 1,000
+ * nodes a minute of garbage, which left Blink's heap at 1.1 GB with 180 MB of it in use
+ * (2026-11-01, 80–92% fragmented pages that a collection never hands back).
+ */
+const pendingPaints = new Map<Element, () => void>();
+/** Elements the observer watches. Observing an element again, or inside the observer's own callback, makes
+ * Chromium report it once more in the same frame: "ResizeObserver loop completed with undelivered notifications". */
+const watched = new Set<Element>();
+let shownWatch: ResizeObserver | undefined;
+let rewatch = 0;
+
+/** The outermost hidden element around `node`: the one whose box appears when the panel is shown. */
+function hiddenRoot(node: Element): Element {
+  let root = node;
+  while (root.parentElement && !root.parentElement.checkVisibility()) root = root.parentElement;
+  return root;
+}
+
+function watch(node: Element): void {
+  shownWatch ??= new ResizeObserver(flushShownPaints);
+  for (const target of [hiddenRoot(node), node]) {
+    if (watched.has(target)) continue;
+    watched.add(target);
+    shownWatch.observe(target);
+  }
+}
+
+function flushShownPaints(): void {
+  for (const [node, paint] of [...pendingPaints]) {
+    if (!node.isConnected) { pendingPaints.delete(node); continue; }
+    if (!node.checkVisibility()) continue;
+    pendingPaints.delete(node);
+    paint();
+  }
+  // Keep watching what still waits; stop watching the rest. A hidden root that changed is watched
+  // after this frame, never from inside this callback.
+  const needed = new Set<Element>();
+  for (const node of pendingPaints.keys()) { needed.add(node); needed.add(hiddenRoot(node)); }
+  for (const target of [...watched]) {
+    if (needed.has(target)) continue;
+    watched.delete(target);
+    shownWatch!.unobserve(target);
+  }
+  if ([...needed].some(target => !watched.has(target)) && !rewatch) {
+    rewatch = window.setTimeout(() => {
+      rewatch = 0;
+      for (const node of pendingPaints.keys()) if (node.isConnected && !node.checkVisibility()) watch(node);
+    }, 0);
+  }
+}
+
+export function paintWhenShown(node: Element, paint: () => void): void {
+  // Without the two browser features (tests in jsdom), paint as before.
+  if (typeof node.checkVisibility !== 'function' || typeof ResizeObserver !== 'function' || node.checkVisibility()) {
+    pendingPaints.delete(node);
+    paint();
+    return;
+  }
+  pendingPaints.set(node, paint);
+  // A shown panel gets a box before the frame is painted, so it never shows the older list.
+  watch(node);
+}
+
 let toastTimer: number | undefined;
 let toastWatch: ResizeObserver | undefined;
 
-export function toast(message: string): void {
+/** How long a toast with an action (Undo) stays: long enough to read it and reach the button. */
+export const ACTION_TOAST_MS = 6000;
+
+/**
+ * A short notice. With `action`, it carries one button (Undo after a move, #1919) and stays
+ * `ACTION_TOAST_MS`; the pointer resting on it keeps it until the pointer leaves.
+ */
+export function toast(message: string, action?: { label: string; run: () => void }): void {
   document.querySelector('.toast')?.remove();
   toastWatch?.disconnect();
   const node = el('div', 'toast', message);
   node.setAttribute('role', 'status');
+  // Focus that was in the toast goes back to where it came from, never to the page body.
+  const before = document.activeElement as HTMLElement | null;
+  const close = () => {
+    const hadFocus = node.contains(document.activeElement);
+    node.remove(); toastWatch?.disconnect();
+    if (hadFocus && before?.isConnected && typeof before.focus === 'function') before.focus({ preventScroll: true });
+  };
+  if (action) {
+    node.classList.add('has-action');
+    const button = el('button', 'toast-action', action.label) as HTMLButtonElement;
+    button.type = 'button';
+    button.addEventListener('click', () => { window.clearTimeout(toastTimer); close(); action.run(); });
+    node.append(button);
+    // A pointer resting on it, or the keyboard on its button, keeps it until they leave.
+    const hold = () => window.clearTimeout(toastTimer);
+    const release = () => { window.clearTimeout(toastTimer); toastTimer = window.setTimeout(close, 2000); };
+    node.addEventListener('pointerenter', hold);
+    node.addEventListener('pointerleave', () => { if (!node.contains(document.activeElement)) release(); });
+    node.addEventListener('focusin', hold);
+    node.addEventListener('focusout', event => { if (!node.contains(event.relatedTarget as Node | null) && !node.matches(':hover')) release(); });
+  }
   document.body.append(node);
   placeToast(node);
   // The composer and its dock can grow or the window resize while the toast shows: it follows.
   toastWatch = typeof ResizeObserver === 'function' ? new ResizeObserver(() => { if (node.isConnected) placeToast(node); }) : undefined;
   for (const target of document.querySelectorAll('main, .card.is-session > .composer, .card.is-session > .composer-dock')) toastWatch?.observe(target);
   window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => { node.remove(); toastWatch?.disconnect(); }, 3200);
+  toastTimer = window.setTimeout(close, action ? ACTION_TOAST_MS : 3200);
 }
 
 /** Shown over the content it is about: centred on the open chat's composer and just above it and

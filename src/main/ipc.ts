@@ -37,7 +37,7 @@ import { paintWindowTheme } from './theme.js';
 import { usageOverview } from './session/usage.js';
 import { exportUsageCsv } from './session/usage-export.js';
 import { readProviderUsage } from './provider-usage.js';
-import { inputArgs, listInputs, editQueuedInput, sendQueuedInputNow, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs } from './session/input.js';
+import { inputArgs, listInputs, editQueuedInput, sendQueuedInputNow, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs, type InputEntry } from './session/input.js';
 import { draftOpeningMessage, onGoalChange, nativeGoalFailure } from './goal.js';
 import { cancelTaskRequest, runTaskRequest } from './task-request.js';
 import { randomUUID } from 'node:crypto';
@@ -97,7 +97,7 @@ import { onBackgroundExecChange, runningExecProcesses, stopExecProcess } from '.
 import { keychainNoticeReady } from './keychain-notice.js';
 import { runDiagnostics } from './diagnostics.js';
 import { collectReportFacts, readRecentLog, renderDiagnosticsReport, saveDiagnosticsReport, systemFacts, memoryFacts } from './diagnostics-report.js';
-import { listSessions, readTurnTraces } from './session/store.js';
+import { clearProjectNote, listSessions, readTurnTraces } from './session/store.js';
 import { deleteSchedule, listSchedules, saveSchedule, scheduleRepeatSchema, setSchedulePaused } from './scheduled-runs.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, logWarn, onLog } from './logger.js';
 import { markStartup } from './startup-timing.js';
@@ -107,7 +107,7 @@ import type { WorkerWorktreeCleanupOffer } from '../shared/session.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { inFlightToolCalls } from './mcp/call-context.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
-import { addProject, addRemoteProject, createChatgptProjectFor, linkChatgptProject, unlinkChatgptProject, expireArmedProjectCreates, getSessionProject, listProjects, localProjectPath, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor, setProjectSecretsShieldOff } from './projects.js';
+import { addProject, addRemoteProject, createChatgptProjectFor, linkChatgptProject, unlinkChatgptProject, expireArmedProjectCreates, getSessionProject, listProjects, localProjectPath, moveChatWithGroup, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor, setProjectSecretsShieldOff } from './projects.js';
 import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile, serverFileSnapshot } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
@@ -123,7 +123,7 @@ import {
   companionDiagnostics,
   sessionInputActivity,
   recoveryHeldByCalls, recoveryInputAllowed,
-  sessionControlsFor, cancelAssistantRecovery, stopSessionTurn, setSessionAutomation, setSessionObjective, compactSession, resumeFromSavedSummary, cancelSessionCompaction,
+  sessionControlsFor, cancelAssistantRecovery, pickupNow, stopSessionTurn, setSessionAutomation, setSessionObjective, compactSession, resumeFromSavedSummary, cancelSessionCompaction,
   cancelWorkerCommands,
   chatUrl,
   revealChatInBrowser,
@@ -536,7 +536,8 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       turnNotifications: pick(current.ui.turnNotifications, base.ui.turnNotifications, wanted.ui.turnNotifications),
       sounds: pick(current.ui.sounds === true, base.ui.sounds === true, wanted.ui.sounds ?? current.ui.sounds === true),
       rotateTurnMinutes: pick(current.ui.rotateTurnMinutes, base.ui.rotateTurnMinutes, wanted.ui.rotateTurnMinutes),
-      rotateStopFallback: pick(current.ui.rotateStopFallback === true, base.ui.rotateStopFallback === true, wanted.ui.rotateStopFallback ?? current.ui.rotateStopFallback === true),
+      // On unless false (2.1.49): a missing value is the default, on.
+      rotateStopFallback: pick(current.ui.rotateStopFallback !== false, base.ui.rotateStopFallback !== false, wanted.ui.rotateStopFallback ?? current.ui.rotateStopFallback !== false),
       localAppUsage: pick(current.ui.localAppUsage, base.ui.localAppUsage, wanted.ui.localAppUsage),
       keepAwake: pick(current.ui.keepAwake, base.ui.keepAwake, wanted.ui.keepAwake),
       keepScreenAwake: pick(current.ui.keepScreenAwake, base.ui.keepScreenAwake, wanted.ui.keepScreenAwake),
@@ -743,6 +744,14 @@ export async function openSessionChat(id: string): Promise<void> {
 
 /** The Telegram bot's change listener of the current registration; a second registration replaces it. */
 let dropTelegramListener: (() => void) | null = null;
+
+/** A message the person wrote: not an automatic Continue, a Goal decision, a finish step or an opening. */
+export function personsMessage(entry: InputEntry): boolean {
+  // Who wrote it, not when it goes: a message the person queued for the finish is still theirs,
+  // while the finish's generated checkpoints carry no authored text (CodeRabbit on #1981).
+  return !entry.opening && !entry.recovery && !entry.continuedFrom && !entry.purpose && !entry.finishOwner &&
+    (entry.authoredSource ?? 'text') !== 'none';
+}
 
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
   registerWorkspaceTerminalIpc(getWindow);
@@ -1234,6 +1243,17 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { sessionId, groupId: target } = z.object({ sessionId: sessionIdArg.shape.id, groupId: groupId.nullable() }).strict().parse(payload);
     const session = await getSession(sessionId);
     return assignChatGroup(session ? { id: session.id, projectId: session.projectId ?? null, origin: session.origin ?? null } : null, target);
+  });
+  // Move to project (#1919): the chat, its sub-agents and its group place change; nothing it does.
+  handle('sessions:moveProject', async payload => {
+    const { sessionId, projectId, groupId: target } = z.object({ sessionId: sessionIdArg.shape.id,
+      projectId: z.string().min(1).max(160).nullable(), groupId: groupId.nullable().optional() }).strict().parse(payload);
+    const { from, fromGroup, moved, groups } = await moveChatWithGroup(sessionId, projectId, target);
+    // The moved chats' own summaries: a row from older history is not on the newest page the
+    // sidebar rereads, and a move does not change its place in the list (CodeRabbit on #1965).
+    const summaries = (await Promise.all([...new Set([sessionId, ...moved])].map(id => getSession(id))))
+      .filter((summary): summary is NonNullable<typeof summary> => !!summary);
+    return { from, fromGroup, groups, summaries };
   });
   handle('pets:list', async () => petLibraryState());
   handle('pets:overlayState', async () => petOverlayControlState());
@@ -1737,12 +1757,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // submits it there; the app sends nothing itself. The diagnostics report is saved separately.
   handle('feedback:openIssue', async (payload) => {
     const text = (max: number) => z.string().max(max);
-    const report = z.discriminatedUnion('kind', [
-      z.object({ kind: z.literal('bug'), what: text(4000).refine(value => value.trim().length > 0), steps: text(4000).optional(),
-        frequency: z.enum(['Every time', 'Sometimes', 'It happened once']).optional() }).strict(),
-      z.object({ kind: z.literal('idea'), problem: text(4000).refine(value => value.trim().length > 0),
-        proposal: text(4000).refine(value => value.trim().length > 0) }).strict()
-    ]).parse(payload);
+    const report = z.object({ kind: z.literal('bug'), what: text(4000).refine(value => value.trim().length > 0), steps: text(4000).optional(),
+      frequency: z.enum(['Every time', 'Sometimes', 'It happened once']).optional() }).strict().parse(payload);
     const bridge = await bridgeStatus();
     const { url, trimmed } = feedbackIssueUrl(report, {
       version: app.getVersion(), os: operatingSystemName(process.platform, systemVersion()), arch: process.arch,
@@ -2007,6 +2023,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('sessions:controls', async (payload) => sessionControlsFor(sessionIdArg.parse(payload).id));
   // #1032: the user keeps this answer from being reloaded; false once the browser claimed it.
   handle('sessions:cancelRecovery', async (payload) => cancelAssistantRecovery(sessionIdArg.parse(payload).id));
+  // A chat whose next step was not picked up: the person's one click (2026-10-31).
+  handle('sessions:pickupNow', async (payload) => {
+    const args = z.object({ id: z.string().min(1).max(200), next: z.enum(['queue', 'goal', 'loop', 'continue']), stoppedAt: z.number().finite() }).parse(payload);
+    return pickupNow(args.id, { next: args.next, stoppedAt: args.stoppedAt });
+  });
   handle('sessions:automation', async (payload) => {
     const { id, automation, afterTurn } = sessionIdArg.extend({ automation: z.enum(['off', 'goal', 'loop']), afterTurn: z.boolean().optional() }).parse(payload);
     return setSessionAutomation(id, automation, afterTurn);
@@ -2571,7 +2592,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       });
     },
     changed: () => push('session:changed'),
-    recordDelivered: (entry, anchorCommitted) => getConfig().sessions.record ? recordDeliveredInput(entry, anchorCommitted) : Promise.resolve(true),
+    recordDelivered: async (entry, anchorCommitted) => {
+      // The message that named a moved chat's folder went out: no other one repeats it (#1919).
+      if (entry.sessionId && personsMessage(entry) && (await getSession(entry.sessionId))?.projectNotePending)
+        await clearProjectNote(entry.sessionId).catch(error => logWarn(`projects: could not mark the folder note sent for ${entry.sessionId}: ${String(error)}`));
+      return getConfig().sessions.record ? recordDeliveredInput(entry, anchorCommitted) : true;
+    },
     prepareText: async (entry, limits, authored) => {
       const control = entry.conversationId ? goalSwitchFor(entry.conversationId) : getConfig().goal;
       const mode = entry.automation ?? (control.enabled ? control.mode : 'off');
@@ -2582,7 +2608,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       // An edit of a chat's first question (#365) replaces the message that carried its setup.
       return ((entry.opening || !entry.sessionId) && !entry.conversationId && !entry.finishOwner && entry.mode !== 'finish') || entry.editFramed
         ? prepareSessionPrompt(text, entry, limits, authored)
-        : !entry.finishOwner && entry.purpose !== 'decision' ? prepareSkillFollowup(text, authored, limits, entry) : text;
+        : !entry.finishOwner && entry.purpose !== 'decision'
+          ? prepareSkillFollowup(text, authored, limits, entry, personsMessage(entry) && !!entry.sessionId && (await getSession(entry.sessionId))?.projectNotePending === true)
+          : text;
     },
     applyAutomation: async (conversationId, automation, phase, objective, loopAfterTurn) => {
       // This message supersedes the old final; never pick that old final up merely
