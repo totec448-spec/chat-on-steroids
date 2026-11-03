@@ -2704,6 +2704,7 @@ describe('app-owned retained tab pool', () => {
     const chat = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000072';
     const closed = vi.fn(async () => ({ ok: true }));
     const info = vi.fn();
+    const report = vi.fn();
     let tabOpen = true;
     const code = closeQueueCode();
     const api = vm.runInNewContext(`${code}\n({enqueueClose, drainCloses, queued: () => closeOutbox})`, {
@@ -2714,13 +2715,19 @@ describe('app-owned retained tab pool', () => {
       CHATGPT_TAB_URLS: ['https://chatgpt.com/*'],
       chrome: { tabs: { query: async () => tabOpen ? [{ id: 2, url: `https://chatgpt.com/c/${chat}` }] : [] } },
       conversationFromUrl: (url: string) => new URL(url).pathname.split('/c/')[1], call: closed,
-      console: { info }
+      console: { info }, publishCompanionDiagnostics: report
     });
     await api.enqueueClose(chat);
     expect(await api.drainCloses()).toMatchObject({ pending: 1 });
     expect(api.queued()).toHaveLength(1);
     expect(closed).not.toHaveBeenCalled();
     expect(info).toHaveBeenCalledWith('close outbox: deferred close; chrome_tab_open');
+    expect(report).toHaveBeenCalledTimes(1);
+    // A streaming answer can drain the close outbox after every event batch.
+    // Rechecking an unchanged open tab must not spam diagnostics or the app log.
+    expect(await api.drainCloses()).toMatchObject({ pending: 1 });
+    expect(info).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledTimes(1);
     // A late true departure must still be reported: the close was deferred,
     // not dropped just because the tab was visible before navigation.
     tabOpen = false;
@@ -2747,6 +2754,46 @@ describe('app-owned retained tab pool', () => {
     expect(api.queued()).toHaveLength(1);
     expect(closed).not.toHaveBeenCalled();
     expect(info).toHaveBeenCalledWith('close outbox: deferred close; chrome_inventory_unavailable');
+  });
+
+  it('reports one diagnostic per changed reason for the same pending close', async () => {
+    const chat = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000074';
+    const info = vi.fn(), report = vi.fn(), close = vi.fn(async () => ({ ok: true }));
+    let browser = 'open';
+    const api = vm.runInNewContext(`${closeQueueCode()}\n({enqueueClose, drainCloses})`, {
+      closeOutbox: [], closeOutboxDecision: null, closing: false, token: 'paired', recoveryMonitoring: false,
+      cleanConversationId: (id: string) => id, load: async () => undefined,
+      persistLive: async () => undefined, scheduleRetry: () => undefined,
+      clearRetryIfIdle: () => undefined, conversationStillOpen: () => false,
+      CHATGPT_TAB_URLS: ['https://chatgpt.com/*'],
+      chrome: { tabs: { query: async () => {
+        if (browser === 'error') throw Error('Chrome restarting');
+        return browser === 'open' ? [{ url: `https://chatgpt.com/c/${chat}` }] : [];
+      } } },
+      conversationFromUrl: (url: string) => new URL(url).pathname.split('/c/')[1],
+      call: close, console: { info }, publishCompanionDiagnostics: report
+    });
+    await api.enqueueClose(chat);
+    await api.drainCloses();
+    await api.drainCloses();
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(info).toHaveBeenCalledTimes(1);
+
+    browser = 'error';
+    await api.drainCloses();
+    await api.drainCloses();
+    expect(report).toHaveBeenCalledTimes(2);
+    expect(info).toHaveBeenNthCalledWith(2, 'close outbox: deferred close; chrome_inventory_unavailable');
+
+    browser = 'open';
+    await api.drainCloses();
+    await api.drainCloses();
+    expect(report).toHaveBeenCalledTimes(3);
+    expect(info).toHaveBeenNthCalledWith(3, 'close outbox: deferred close; chrome_tab_open');
+
+    browser = 'gone';
+    expect(await api.drainCloses()).toMatchObject({ pending: 0 });
+    expect(close).toHaveBeenCalledTimes(1);
   });
 
   const id = (n: number) => `aaaaaaaa-bbbb-4ccc-8ddd-${String(n).padStart(12, '0')}`;

@@ -3896,7 +3896,15 @@ async function verifiedConversationGone(conversationId) {
   return conversationStillOpen(conversationId) ? 'present' : 'gone';
 }
 
-function noteCloseDecision(action, reason) {
+// Each pending close is a distinct attempt. Repeated drains may see the same
+// reason hundreds of times while a tab stays open; the activity log only needs
+// the transition. Weak keys disappear with completed/replaced outbox entries and
+// add no fields to persisted closeOutbox records.
+const closeDecisionByEntry = new WeakMap();
+function noteCloseDecision(entry, action, reason) {
+  const previous = closeDecisionByEntry.get(entry);
+  if (previous?.action === action && previous?.reason === reason) return;
+  closeDecisionByEntry.set(entry, { action, reason });
   // Keep the reason finite and data-free. The app's existing diagnostics report
   // logs one actionable line; the worker console also shows it immediately.
   closeOutboxDecision = { at: Math.max(Date.now(), (closeOutboxDecision?.at || 0) + 1), action, reason };
@@ -3944,18 +3952,18 @@ async function drainCloses() {
         if (presence === 'present') {
           if (conversationStillOpen(conversationId)) {
             // A new binding proves this queued close was superseded.
-            noteCloseDecision('discarded', 'conversation_binding_open');
+            noteCloseDecision(entry, 'discarded', 'conversation_binding_open');
             closeOutbox = closeOutbox.filter((candidate) => candidate !== entry);
             changed = true;
           } else {
             // A close can be queued before Chrome finishes the navigation.
             // Keep it for the next pass rather than discard the only departure.
-            noteCloseDecision('deferred', 'chrome_tab_open');
+            noteCloseDecision(entry, 'deferred', 'chrome_tab_open');
           }
           continue;
         }
         if (presence === 'unknown') {
-          noteCloseDecision('deferred', 'chrome_inventory_unavailable');
+          noteCloseDecision(entry, 'deferred', 'chrome_inventory_unavailable');
           continue;
         }
       }
