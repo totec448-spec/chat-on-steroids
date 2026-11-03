@@ -641,6 +641,218 @@ describe('endpoint hardening', () => {
 // ---------------------------------------------------------------------------
 
 describe('surface boundaries', () => {
+  it('dispatches a known native request while another chat waits for its provider commit', async () => {
+    const durable = await import('../src/main/durable.js');
+    durable.initDurableStore(path.join(base, 'fast-native-admission'));
+    const send = (requestId: string, provider: string) => rawPost(endpoint.urls.core, JSON.stringify({
+      jsonrpc: '2.0', id: nextId++, method: 'tools/call', params: {
+        name: 'read', arguments: { paths: ['/workspace/notes.txt'] }, _meta: {
+          'openai/session': provider, 'openai/subject': 'provider-user'
+        }
+      }
+    }), { 'x-request-id': requestId });
+    for (const suffix of ['a', 'b']) {
+      const session = await createSession({ conversationId: `fast-http-${suffix}` });
+      observeRequestCorrelation({ requestId: `fast-http-native-${suffix}`, conversationId: `fast-http-${suffix}`, sessionId: session.id,
+        messageId: `fast-http-message-${suffix}`, tool: '', observedAt: Date.now() });
+      expect((await send(`fast-http-native-${suffix}`, `fast-http-provider-${suffix}`)).status).toBe(200);
+    }
+    const write = durable.writeDurableNow;
+    let entered!: () => void, release!: () => void;
+    const paused = new Promise<void>(resolve => { entered = resolve; });
+    const resume = new Promise<void>(resolve => { release = resolve; });
+    const commit = vi.spyOn(durable, 'writeDurableNow').mockImplementationOnce(async (name, value) => {
+      entered(); await resume; return write(name, value);
+    });
+    const slow = send('fast-http-derived-a', 'fast-http-provider-a');
+    let fast: Promise<RawResponse> | undefined;
+    try {
+      await paused;
+      let response: RawResponse | undefined;
+      fast = send('fast-http-native-b', 'fast-http-provider-b').then(value => { response = value; return value; });
+      await vi.waitFor(() => expect(response).toBeDefined(), { timeout: 10_000 });
+      expect(response!.status).toBe(200);
+      const reply = { body: decode(response!) };
+      expect(failed(reply)).toBe(false);
+      expect(textOf(reply)).toContain('note line 1');
+      expect(commit).toHaveBeenCalledTimes(1);
+      expect(requestCorrelation('fast-http-derived-a')).toBeNull();
+      expect(requestCorrelation('fast-http-native-b')?.conversationId).toBe('fast-http-b');
+    } finally {
+      release();
+      await Promise.all([slow, fast]);
+      commit.mockRestore();
+      await durable.flushDurable();
+      durable.resetDurableForTests();
+    }
+    expect(requestCorrelation('fast-http-derived-a')?.providerSessionAnchor).toBe('fast-http-native-a');
+  });
+
+  it.each(['unbound', 'native', 'late-native'] as const)(
+    'dispatches a %s request when the provider-session commit fails without publishing derived ownership', async identity => {
+      const durable = await import('../src/main/durable.js');
+      const logger = await import('../src/main/logger.js');
+      const prefix = `provider-commit-failure-${identity}`;
+      const requestId = `${prefix}-request`;
+      const source = await createSession({ conversationId: `${prefix}-source` });
+      const native = identity === 'late-native'
+        ? await createSession({ conversationId: `${prefix}-native` }) : source;
+      durable.initDurableStore(path.join(base, prefix));
+      const prove = (id: string, session = source) => observeRequestCorrelation({
+        requestId: id, conversationId: session.conversationId!, sessionId: session.id,
+        messageId: `message-${id}`, tool: '', observedAt: Date.now()
+      });
+      const send = (id: string) => rawPost(endpoint.urls.core, JSON.stringify({
+        jsonrpc: '2.0', id: nextId++, method: 'tools/call', params: {
+          name: 'read', arguments: { paths: ['/workspace/notes.txt'] }, _meta: {
+            'openai/session': prefix, 'openai/subject': 'provider-user'
+          }
+        }
+      }), { 'x-request-id': id });
+      let commit: ReturnType<typeof vi.spyOn> | undefined;
+      const warning = vi.spyOn(logger, 'logWarn');
+      try {
+        prove(`${prefix}-anchor`);
+        expect((await send(`${prefix}-anchor`)).status).toBe(200);
+        if (identity === 'native') prove(requestId);
+        commit = vi.spyOn(durable, 'writeDurableNow').mockImplementationOnce(async () => {
+          if (identity === 'late-native') prove(requestId, native);
+          throw Object.assign(new Error('disk full'), { code: 'ENOSPC' });
+        });
+        const response = await send(requestId);
+        expect(commit).toHaveBeenCalledWith('request-correlations', expect.anything());
+        expect(response.status).toBe(200);
+        const reply = { body: decode(response) };
+        expect(failed(reply)).toBe(false);
+        expect(textOf(reply)).toContain('note line 1');
+        expect(warning).toHaveBeenCalledWith(
+          `MCP provider session binding ignored surface=core request=${requestId}; durable correlation unavailable; dispatch uses existing request identity`);
+        if (identity === 'unbound') expect(requestCorrelation(requestId)).toBeNull();
+        else expect(requestCorrelation(requestId)).toMatchObject({
+          conversationId: native.conversationId, sessionId: native.id
+        });
+        expect(requestCorrelation(requestId)?.providerSessionAnchor).toBeUndefined();
+        await durable.flushDurable();
+        const saved = await durable.readDurable<{ entries: Array<{ requestId: string; providerSessionAnchor?: string }> }>('request-correlations');
+        expect(saved?.entries.some(row => row.requestId === requestId && row.providerSessionAnchor)).toBe(false);
+      } finally {
+        commit?.mockRestore();
+        warning.mockRestore();
+        await durable.flushDurable();
+        durable.resetDurableForTests();
+      }
+    }
+  );
+
+  it('dispatches calls with a conflicting provider key without deriving ownership, including after restart', async () => {
+    const correlation = await import('../src/main/session/correlation.js');
+    const durable = await import('../src/main/durable.js');
+    const { getLog } = await import('../src/main/logger.js');
+    durable.initDurableStore(path.join(base, 'conflicting-provider'));
+    const chats = ['conflicting-provider-a', 'conflicting-provider-b'];
+    const anchors = ['conflicting-native-a', 'conflicting-native-b'];
+    const sessions = await Promise.all(chats.map(conversationId => createSession({ conversationId })));
+    const send = (requestId: string) => rawPost(endpoint.urls.core, JSON.stringify({
+      jsonrpc: '2.0', id: nextId++, method: 'tools/call', params: {
+        name: 'read', arguments: { paths: ['/workspace/notes.txt'] }, _meta: {
+          'openai/session': 'shared-conflicting-provider', 'openai/subject': 'provider-user'
+        }
+      }
+    }), { 'x-request-id': requestId });
+    const expectRead = async (requestId: string) => {
+      const response = await send(requestId);
+      expect(response.status).toBe(200);
+      const reply = { body: decode(response) };
+      expect(failed(reply)).toBe(false);
+      expect(textOf(reply)).toContain('note line 1');
+    };
+    try {
+      for (const [index, requestId] of anchors.entries()) {
+        observeRequestCorrelation({ requestId, conversationId: chats[index]!, sessionId: sessions[index]!.id,
+          messageId: `message-${requestId}`, tool: '', observedAt: Date.now() });
+      }
+      await expectRead(anchors[0]!);
+      await expectRead('conflicting-derived-before');
+      expect(requestCorrelation('conflicting-derived-before')?.providerSessionAnchor).toBe(anchors[0]);
+      const before = getLog().length;
+      await expectRead(anchors[1]!);
+      for (const requestId of ['conflicting-derived-before', 'conflicting-unknown', 'conflicting-unknown-again']) {
+        await expectRead(requestId);
+        expect(requestCorrelation(requestId)).toBeNull();
+      }
+      const warnings = getLog().slice(before).filter(row => /provider session.*conflict/i.test(row.message));
+      expect(warnings).toHaveLength(1);
+
+      await durable.flushDurable();
+      correlation.resetCorrelationRegistryForTests();
+      await correlation.restoreRequestCorrelations();
+      await expectRead('conflicting-after-restart');
+      expect(requestCorrelation('conflicting-after-restart')).toBeNull();
+      for (const [index, requestId] of anchors.entries()) {
+        await expectRead(requestId);
+        expect(requestCorrelation(requestId)).toMatchObject({ conversationId: chats[index], sessionId: sessions[index]!.id });
+        expect(requestCorrelation(requestId)?.providerSessionAnchor).toBeUndefined();
+      }
+      // Ignoring provider metadata must not bypass the native owner's ordinary guards.
+      setChatBlocked(chats[1]!, true);
+      try {
+        const blocked = { body: decode(await send(anchors[1]!)) };
+        expect(failed(blocked)).toBe(true);
+        expect(textOf(blocked)).toMatch(/blocked/i);
+        expect(textOf(blocked)).not.toContain('note line 1');
+      } finally { setChatBlocked(chats[1]!, false); }
+    } finally {
+      await durable.flushDurable();
+      durable.resetDurableForTests();
+    }
+  });
+
+  it('dispatches with native ownership when it contradicts the provider anchor during admission', async () => {
+    const durable = await import('../src/main/durable.js');
+    const source = await createSession({ conversationId: 'provider-race-a' });
+    const native = await createSession({ conversationId: 'provider-race-b' });
+    const send = (requestId: string) => rawPost(endpoint.urls.core, JSON.stringify({
+      jsonrpc: '2.0', id: nextId++, method: 'tools/call', params: {
+        name: 'read', arguments: { paths: ['/workspace/notes.txt'] }, _meta: {
+          'openai/session': 'provider-race', 'openai/subject': 'provider-user'
+        }
+      }
+    }), { 'x-request-id': requestId });
+    observeRequestCorrelation({ requestId: 'provider-race-anchor', conversationId: 'provider-race-a', sessionId: source.id,
+      messageId: 'provider-race-message-a', tool: '', observedAt: Date.now() });
+    await send('provider-race-anchor');
+    let entered!: () => void, release!: () => void;
+    const paused = new Promise<void>(resolve => { entered = resolve; });
+    const resume = new Promise<void>(resolve => { release = resolve; });
+    const write = durable.writeDurableNow;
+    const commit = vi.spyOn(durable, 'writeDurableNow').mockImplementationOnce(async (name, value) => {
+      entered(); await resume; return write(name, value);
+    });
+    const pending = send('provider-race-request');
+    try {
+      await paused;
+      expect(requestCorrelation('provider-race-request')).toBeNull();
+      observeRequestCorrelation({ requestId: 'provider-race-request', conversationId: 'provider-race-b', sessionId: native.id,
+        messageId: 'provider-race-message-b', tool: '', observedAt: Date.now() });
+      release();
+      const response = await pending;
+      expect(response.status).toBe(200);
+      const reply = { body: decode(response) };
+      expect(failed(reply)).toBe(false);
+      expect(textOf(reply)).toContain('note line 1');
+      expect(requestCorrelation('provider-race-request')).toMatchObject({ conversationId: 'provider-race-b', sessionId: native.id });
+      expect(requestCorrelation('provider-race-request')?.providerSessionAnchor).toBeUndefined();
+      expect((await readRecentEvents(native.id, 20)).some(event => event.kind === 'tool_call' &&
+        event.call.requestId === 'provider-race-request')).toBe(true);
+      expect((await readRecentEvents(source.id, 20)).some(event => event.kind === 'tool_call' &&
+        event.call.requestId === 'provider-race-request')).toBe(false);
+    } finally {
+      release();
+      await pending;
+      commit.mockRestore();
+    }
+  });
+
   it('drains an accepted request while its provider-session admission is waiting on storage', async () => {
     const correlation = await import('../src/main/session/correlation.js');
     const { getLog } = await import('../src/main/logger.js');
