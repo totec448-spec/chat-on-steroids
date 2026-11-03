@@ -214,18 +214,19 @@ macOS publishes `observe` and `computer`, described below.
 
 ### `linux_observe` (read-only screenshots and semantic observation, Linux)
 
-This first Linux stage publishes `linux_observe` only when a person enables
-`ui.linuxDesktopEnabled` and grants Screen permission. Its input schema allows
-only `{ what: 'screenshot', display: 0 }` (display 0 is the only allowed value).
-The bounded output is an MCP PNG image plus text metadata labeled `scope: 'display'`.
+The screenshot-only part 2 first published `linux_observe` after a person enabled
+`ui.linuxDesktopEnabled` and granted Screen permission. Part 3 extends the
+read-only input schema to `windows`, `apps`, `displays`, `snapshot` with a
+`window_id`, and `screenshot` with `display: 0` (the only permitted screenshot
+display). Inventory and snapshots return bounded structured data; screenshot
+output is an MCP PNG image plus text metadata labeled `scope: 'display'`.
 GNOME's operating-system portal can ask for consent and can be cancelled; do not retry
 automatically. The separate Settings test requests one portal screenshot but discards it
 without returning pixels to the renderer. Unknown caller identity requires the existing,
 separately chosen `desktopUnattributed` setting; the default is to refuse.
 
-The dependent native control stage extends the read-only tool with app, window
-and display inventory and an accessibility snapshot of a proven nonbrowser
-window. Refs are kept only for the proven Setup profile, session and
+The semantic snapshot mode requires a proven nonbrowser window. Refs are kept
+only for the proven Setup profile, session and
 conversation; an unattributed observation gets ephemeral non-actionable refs.
 
 ### `linux_act` (semantic accessibility refs only, Linux)
