@@ -315,6 +315,8 @@ function keyboard(event: KeyboardEvent, menu: HTMLElement, depth: number): void 
   }
 }
 
+export { placeBeside as placeRowMenuBesideForTests };
+
 /** At a point (a right click), kept inside the window. */
 function placeAt(menu: HTMLElement, x: number, y: number): void {
   // Its layout size: the opening animation must not make it look smaller than it is.
@@ -333,11 +335,22 @@ function placeBeside(menu: HTMLElement, box: DOMRect, side: 'below' | 'right'): 
     left = box.left;
     top = box.bottom + 4;
     const below = window.innerHeight - EDGE - top, above = box.top - 4 - EDGE;
-    if (height > below && height > above) {
-      // Too long for either side: it scrolls in the larger one, still next to its button.
+    // The stylesheet caps a menu at the window's height, so its offsetHeight never says it is taller
+    // than the window: its own overflow does (CodeRabbit on #2044).
+    const tallerThanWindow = height >= window.innerHeight - 2 * EDGE && menu.scrollHeight > menu.clientHeight;
+    const besideFits = box.right + 4 + width <= window.innerWidth - EDGE || box.left - width - 4 >= EDGE;
+    if (height > below && height > above && (tallerThanWindow || height > window.innerHeight - 2 * EDGE || !besideFits)) {
+      // Taller than the window, or no room beside its button either: it scrolls in the larger side,
+      // still next to its button.
       height = Math.max(below, above);
       menu.style.maxHeight = `${height}px`;
       if (above > below) top = box.top - 4 - height;
+    } else if (height > below && height > above) {
+      // Neither side has room, but the window does: shown whole beside its button, never over it.
+      // A menu over its own button would take the click meant to close it and run the item there.
+      left = box.right + 4;
+      if (left + width > window.innerWidth - EDGE) left = box.left - width - 4;
+      top = box.top - 5;
     } else if (height > below) top = box.top - height - 4;
   } else {
     left = box.right + 2;
