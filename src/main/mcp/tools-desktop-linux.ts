@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { getConfig, effectiveCapabilities } from '../config.js';
 import { isBrowserProcess } from '../computer/browser-chords.js';
 import { checkLinuxDesktopVersion, runLinuxDesktop, type LinuxDesktopEnvelope } from '../computer/linux-agent-desktop.js';
+import { LINUX_DESKTOP_REF_PATTERN, MAX_LINUX_DESKTOP_REF_LENGTH, validLinuxDesktopRef } from '../computer/linux-desktop-ref.js';
 import { parseLinuxScreenshot, LinuxScreenshotError } from '../computer/linux-screenshot.js';
 import { MAX_VIEW_IMAGE_BYTES, validateImageBytes } from '../codex/view-image.js';
 import sharp from 'sharp';
@@ -20,7 +21,6 @@ const MAX_OWNERS = 32;
 const MAX_JSON = 900_000;
 /** A ref is not evidence that the same UI still exists indefinitely. */
 const MAX_REF_AGE_MS = 120_000;
-const refPattern = /^@s[A-Za-z0-9]+:e\d+$/;
 // An error `code` comes from the native backend too; length limiting alone
 // cannot prevent it from carrying private application/window text. Forward
 // only exact stable codes whose meaning is known, never arbitrary strings.
@@ -96,7 +96,7 @@ function collectRefs(tree: unknown, snapshot: string): Set<string> {
   const walk = (node: unknown, depth: number): void => {
     if (!node || typeof node !== 'object' || depth > 24 || refs.size > 512) return;
     const entry = node as { ref_id?: unknown; children?: unknown };
-    if (typeof entry.ref_id === 'string' && refPattern.test(entry.ref_id) && entry.ref_id.startsWith(`@${snapshot}:`)) refs.add(entry.ref_id);
+    if (typeof entry.ref_id === 'string' && validLinuxDesktopRef(entry.ref_id) && entry.ref_id.startsWith(`@${snapshot}:`)) refs.add(entry.ref_id);
     if (Array.isArray(entry.children)) for (const child of entry.children.slice(0, 200)) walk(child, depth + 1);
   };
   walk(tree, 0);
@@ -111,8 +111,8 @@ const observeSchema = z.discriminatedUnion('what', [
   z.object({ what: z.literal('screenshot'), display: z.literal(0).default(0) }).strict()
 ]);
 const actSchema = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('click'), ref: z.string().regex(refPattern) }).strict(),
-  z.object({ action: z.literal('set_value'), ref: z.string().regex(refPattern), value: z.string().max(4000) }).strict()
+  z.object({ action: z.literal('click'), ref: z.string().max(MAX_LINUX_DESKTOP_REF_LENGTH).regex(LINUX_DESKTOP_REF_PATTERN) }).strict(),
+  z.object({ action: z.literal('set_value'), ref: z.string().max(MAX_LINUX_DESKTOP_REF_LENGTH).regex(LINUX_DESKTOP_REF_PATTERN), value: z.string().max(4000) }).strict()
 ]);
 
 export function registerLinuxDesktopTools(reg: SurfaceRegistrar): void {
