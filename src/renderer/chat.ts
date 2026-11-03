@@ -8811,7 +8811,20 @@ async function adoptAcceptedOpening(entry: InputEntry): Promise<boolean> {
   inputDrafts.delete(from); imageDrafts.delete(from); newChatTasks.delete(from);
   return true;
 }
+/** A repaint for when the oldest shown page hold lapses, so a reason no page repeats goes away. */
+let pageHoldLapseTimer: number | undefined;
+function schedulePageHoldLapse(): void {
+  if (pageHoldLapseTimer !== undefined) window.clearTimeout(pageHoldLapseTimer);
+  pageHoldLapseTimer = undefined;
+  const now = Date.now();
+  const due = pendingComposerInputs.flatMap(entry => entry.state === 'queued' && entry.pageHold && now - entry.pageHold.at < 75_000
+    ? [entry.pageHold.at + 75_000] : []);
+  if (!due.length) return;
+  pageHoldLapseTimer = window.setTimeout(() => { pageHoldLapseTimer = undefined; paintPendingInputs(); }, Math.max(0, Math.min(...due) - now) + 50);
+}
+
 function paintPendingInputs(): void {
+  schedulePageHoldLapse();
   const all = pendingComposerInputs;
   const belongsToSelection = (entry: InputEntry): boolean => selectedId === null
     ? pendingNewInput?.generation === selectionGeneration && entry.id === pendingNewInput.id

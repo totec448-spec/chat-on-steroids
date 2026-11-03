@@ -5363,7 +5363,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       // Any other reason in between means the page saw something else: the run starts over (CodeRabbit on #2030).
       // A page holding it until its own turn ends has it: the queue says so, and it is not failed as
       // never picked up a minute later (2026-11-03: the person's Continue, while ChatGPT still answered).
-      if (await noteInputHeld(inputId, reason).catch(() => null) === 'new') changed();
+      if (await noteInputHeld(inputId, reason, chat).catch(() => null) === 'new') changed();
       if (reason !== 'recovery-question-changed') recoveryQuestionChanged.delete(inputId);
       if (reason === 'recovery-question-changed' && chat) {
         const run = recoveryQuestionChanged.get(inputId);
