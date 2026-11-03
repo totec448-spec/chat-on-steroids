@@ -273,3 +273,35 @@ it('shows a dash for queue counts the worker could not read', () => {
   (popup!.window as any).paintDetails({ connected: true, paired: true, compatible: true, port: 8765 }, { isChat: true, tab: 7, pending: 0, pendingAll: 2 });
   expect(row()).toBe('0 held · 2 total');
 });
+
+it('rounds the page up to a whole pixel, so Chrome does not size the popup a fraction short and scroll it', () => {
+  // Chrome sizes a popup to the page's height rounded down: a page 566.56 px tall got a 566 px
+  // window and could be scrolled by a pixel (2026-11-03, measured in the real popup).
+  let height = 566.56;
+  let resized: (() => void) | undefined;
+  popup = new JSDOM(html, { url: 'https://extension-popup.test/', runScripts: 'outside-only' });
+  const unavailable = () => new Promise(() => undefined);
+  Object.assign(popup.window, {
+    chrome: {
+      i18n: { getMessage: () => '', getUILanguage: () => 'en' },
+      runtime: { sendMessage: unavailable },
+      storage: { local: { get: unavailable } }
+    },
+    setInterval: () => 0,
+    ResizeObserver: class { constructor(callback: () => void) { resized = callback; } observe() { resized?.(); } }
+  });
+  popup.window.HTMLElement.prototype.getBoundingClientRect = function () { return { height } as DOMRect; };
+  popup.window.eval(i18nScript);
+  popup.window.eval(script);
+  const root = popup.window.document.documentElement;
+  expect(root.style.minHeight).toBe('567px');
+
+  // The Advanced drawer opens and closes: the page follows, still in whole pixels.
+  height = 897.3; resized!();
+  expect(root.style.minHeight).toBe('898px');
+  height = 566.56; resized!();
+  expect(root.style.minHeight).toBe('567px');
+  // Already whole: no extra pixel.
+  height = 540; resized!();
+  expect(root.style.minHeight).toBe('540px');
+});

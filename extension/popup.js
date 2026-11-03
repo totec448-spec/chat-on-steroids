@@ -597,6 +597,16 @@ $('timeToggle').addEventListener('change', async () => {
   await chrome.storage.local.set({ [SHOW_TIMES_KEY]: showTimes });
 });
 
+// Chrome sizes the popup to the page's height rounded down: a page 566.56 px tall got a 566 px
+// window that scrolled by a pixel. Keep the page a whole number of pixels tall, also after the
+// Advanced drawer or a status line changes it. The shell is measured, not the page, so the page
+// shrinks again with it.
+const shell = document.querySelector('.shell');
+const wholePixels = () => {
+  document.documentElement.style.minHeight = `${Math.ceil(shell.getBoundingClientRect().height)}px`;
+};
+if (shell && globalThis.ResizeObserver) new ResizeObserver(wholePixels).observe(shell);
+
 // A popup is open for seconds at a time and the three stages move within those seconds.
 void loadPreferences().catch(() => undefined);
 void refresh().catch(() => undefined);
