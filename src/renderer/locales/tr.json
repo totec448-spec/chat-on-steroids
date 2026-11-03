@@ -3811,6 +3811,8 @@
   "Click while the Chat On Steroids window is active. If GNOME asks, choose Allow. The screenshot is discarded.": "Chat On Steroids penceresi etkinken tıklayın. GNOME sorarsa İzin Ver seçeneğini seçin. Görüntü saklanmaz.",
   "Request screenshot permission": "Ekran görüntüsü izni iste",
   "GNOME screenshot permission could not be confirmed.": "GNOME ekran görüntüsü izni doğrulanamadı.",
+  "Activate the Chat On Steroids window, then try again.": "Chat On Steroids penceresini etkinleştirip yeniden deneyin.",
+  "Enable native Linux Desktop access and Screen permission, then try again.": "Yerel Linux masaüstü erişimini ve Ekran iznini etkinleştirip yeniden deneyin.",
   "Drag a chat here, or move it from its menu.": "Bir sohbeti buraya sürükleyin ya da menüsünden taşıyın.",
   "Move to project": "Projeye taşı",
   "Move this chat to a project; its commands then run in that project's folder": "Bu sohbeti bir projeye taşı; komutları artık o projenin klasöründe çalışır",
