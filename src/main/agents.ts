@@ -17,6 +17,7 @@ import { randomUUID } from 'node:crypto';
 import type { AgentInfo, AgentMessage, AgentState, ReasoningEffort, SwarmState } from '../shared/session.js';
 import { REASONING_EFFORTS, isReasoningEffort } from '../shared/session.js';
 import { getConfig } from './config.js';
+import { workerSlotsRefusal } from './chats-at-once.js';
 import { liveConnectorName } from './mcp/surfaces.js';
 import { workerBrief, workerOwnTask } from '../shared/worker-brief.js';
 import { getChatModels, refreshForUnoffered } from './chat-models.js';
@@ -2298,6 +2299,18 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
     );
   }
 
+  // Chats working at once (#1694): workers are chats too. The prime's own slot passes to them.
+  const chatsAtOnce = workerSlotsRefusal(conversationId, planned.map((_, index) => `spawn:${run!.runId}:${Date.now()}:${index}`));
+  if (chatsAtOnce) {
+    if (resumedDormant) parkRun(run, 'a new spawn was refused by the chats-at-once limit');
+    else if (createdFreshRun) runs.delete(run.runId);
+    logInfo(`agents: spawn of ${planned.length} worker(s) refused: ${chatsAtOnce}`);
+    throw new AgentError(
+      `CHATS_AT_ONCE: ${chatsAtOnce} ("Chats working at once" in the app). No workers were created. ` +
+        'Continue the work yourself, or end this turn and spawn when another chat has finished; do not retry right away.'
+    );
+  }
+
   const ids: string[] = [];
   // Historical rows are intentionally never reused or deleted merely because the worker is
   // asleep/terminal. The old fixed 64-id scan therefore became a lifetime cap on one prime,
@@ -2768,6 +2781,15 @@ function stageMessagesActive(
           throw new AgentError(
             `GLOBAL_WORKER_LIMIT: ${toId} is asleep and all ${globalMax} globally admitted worker slots are busy, so it ` +
               `cannot be woken right now${where}. Nothing was sent. Wait for a worker to stop and try again.`
+          );
+        }
+        // Chats working at once (#1694): a woken worker is a working chat again.
+        const chatsAtOnce = workerSlotsRefusal(caller.conversationId ?? null, [`wake:${run?.runId ?? ''}:${to.info.id}:${Date.now()}`]);
+        if (chatsAtOnce) {
+          logInfo(`agents: waking ${toId} refused: ${chatsAtOnce}`);
+          throw new AgentError(
+            `CHATS_AT_ONCE: ${toId} is asleep and ${chatsAtOnce} ("Chats working at once" in the app), so it cannot be ` +
+              `woken right now${where}. Nothing was sent. Continue yourself, or end this turn and try when another chat has finished.`
           );
         }
       }

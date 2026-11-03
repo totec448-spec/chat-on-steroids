@@ -5214,6 +5214,30 @@ describe('simultaneous independent prime families', () => {
     }
   });
 
+  it('refuses workers past "Chats working at once", passing the calling prime\'s own slot to them (#1694)', async () => {
+    const slots = await import('../src/main/chats-at-once.js');
+    const before = slots.workingChatsSourceForTests();
+    slots.resetChatsAtOnceForTests();
+    slots.setWorkingChatsSource(() => new Set([PRIME_CHAT, 'someone-elses-chat']));
+    await setEnabled(true, 4);
+    getConfig().multiAgent.chatsAtOnce = 2;
+    try {
+      // The prime delegates and ends its turn: its slot is the worker's. Two workers would make three.
+      expect(() => recruit(prime, 2)).toThrow(/CHATS_AT_ONCE: 1 other chats are working and the limit is 2/);
+      const a = recruit(prime, 1);
+      // That worker holds its slot until its own chat shows as working: a second one does not fit.
+      expect(() => spawn({ caller: prime, workers: [{ task: 'one too many' }] })).toThrow(/CHATS_AT_ONCE/);
+      expect(a.created).toHaveLength(1);
+      // Off again: no limit.
+      getConfig().multiAgent.chatsAtOnce = 0;
+      expect(spawn({ caller: prime, workers: [{ task: 'no limit' }] }).created).toHaveLength(1);
+    } finally {
+      getConfig().multiAgent.chatsAtOnce = 0;
+      slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(before);
+      await setEnabled(true);
+    }
+  });
+
   it('counts an unpublished staged spawn as a global admission reservation', async () => {
     await setEnabled(true, 2, false, 1);
     try {
