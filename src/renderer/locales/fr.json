@@ -3890,5 +3890,17 @@
   "Today": "Aujourd’hui",
   "Yesterday": "Hier",
   "Previous 7 days": "7 derniers jours",
-  "Previous 30 days": "30 derniers jours"
+  "Previous 30 days": "30 derniers jours",
+  "Related folders": "Dossiers associés",
+  "Related folders…": "Dossiers associés…",
+  "Related folders: {0}": "Dossiers associés : {0}",
+  "Other approved folders this work also uses": "Autres dossiers autorisés que ce travail utilise aussi",
+  "Adds context for ChatGPT; does not change the working directory or grant access.": "Donne du contexte à ChatGPT ; ne change pas le dossier de travail et n’accorde aucun accès.",
+  "No related folders yet.": "Aucun dossier associé pour l’instant.",
+  "Approved folder to add": "Dossier autorisé à ajouter",
+  "Every approved folder is already here. Approve another folder in Settings to add it.": "Tous les dossiers autorisés sont déjà là. Autorisez un autre dossier dans les Réglages pour l’ajouter.",
+  "Unavailable": "Indisponible",
+  "No longer approved or no longer there; ChatGPT is not told about it.": "N’est plus autorisé ou n’existe plus ; ChatGPT n’en est pas informé.",
+  "Choose a related folder from your approved folders": "Choisissez un dossier associé parmi vos dossiers autorisés",
+  "A project can have at most 10 related folders": "Un projet peut avoir au plus 10 dossiers associés"
 }

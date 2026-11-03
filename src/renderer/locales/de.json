@@ -3809,5 +3809,17 @@
   "Today": "Heute",
   "Yesterday": "Gestern",
   "Previous 7 days": "Letzte 7 Tage",
-  "Previous 30 days": "Letzte 30 Tage"
+  "Previous 30 days": "Letzte 30 Tage",
+  "Related folders": "Verwandte Ordner",
+  "Related folders…": "Verwandte Ordner…",
+  "Related folders: {0}": "Verwandte Ordner: {0}",
+  "Other approved folders this work also uses": "Weitere freigegebene Ordner, die diese Arbeit auch nutzt",
+  "Adds context for ChatGPT; does not change the working directory or grant access.": "Gibt ChatGPT Kontext; ändert weder das Arbeitsverzeichnis noch gewährt es Zugriff.",
+  "No related folders yet.": "Noch keine verwandten Ordner.",
+  "Approved folder to add": "Freigegebener Ordner zum Hinzufügen",
+  "Every approved folder is already here. Approve another folder in Settings to add it.": "Alle freigegebenen Ordner sind schon hier. Gib in den Einstellungen einen weiteren Ordner frei, um ihn hinzuzufügen.",
+  "Unavailable": "Nicht verfügbar",
+  "No longer approved or no longer there; ChatGPT is not told about it.": "Nicht mehr freigegeben oder nicht mehr vorhanden; ChatGPT erfährt nichts davon.",
+  "Choose a related folder from your approved folders": "Wähle einen verwandten Ordner aus deinen freigegebenen Ordnern",
+  "A project can have at most 10 related folders": "Ein Projekt kann höchstens 10 verwandte Ordner haben"
 }
