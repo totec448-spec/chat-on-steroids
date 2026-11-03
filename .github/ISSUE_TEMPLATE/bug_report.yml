@@ -11,6 +11,15 @@ body:
         **If this is a security problem, stop here.** Use the repository's
         Security → Report a vulnerability flow instead of a public issue.
 
+  - type: checkboxes
+    id: kind
+    attributes:
+      label: A bug, not a feature
+      description: Issues are for bugs in what the app already does. New features and changes of behavior come as pull requests (see CONTRIBUTING.md, "New features"); feature requests opened as issues are closed.
+      options:
+        - label: This is a bug in something the app already does
+          required: true
+
   - type: input
     id: version
     attributes:

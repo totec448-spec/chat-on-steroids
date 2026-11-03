@@ -69,7 +69,7 @@ import {
   WRITE_CAPABILITIES
 } from '../shared/types.js';
 import type { SwarmState } from '../shared/session.js';
-import { $, ago, disclosureChevron, el, elapsedDurationText, icon, run, shortAgo, toast } from './dom.js';
+import { $, ago, disclosureChevron, el, elapsedDurationText, icon, paintWhenShown, run, shortAgo, toast } from './dom.js';
 import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatSearch, openChatView, openFeedback } from './chat.js';
 import { publishStopNoticeTexts } from './stop-notices.js';
 import { publishMainTexts } from './main-texts.js';
@@ -1718,7 +1718,7 @@ function apply(next: AppState): void {
 
   // ---- health numbers and facts
   paintClock();
-  $('facts').replaceChildren(...facts(next));
+  paintWhenShown($('facts'), () => $('facts').replaceChildren(...facts(next)));
 
   // ---- permissions
   $('readOnlyBtn').classList.toggle('is-on', config.readOnly);
@@ -1805,7 +1805,7 @@ function apply(next: AppState): void {
     rotate.add(option);
   }
   applyValue(rotate, rotateMinutes, previousState ? String(previousState.config.ui.rotateTurnMinutes ?? 30) : undefined);
-  applyChecked($<HTMLInputElement>('rotateStopFallback'), config.ui.rotateStopFallback === true, previousState?.config.ui.rotateStopFallback);
+  applyChecked($<HTMLInputElement>('rotateStopFallback'), config.ui.rotateStopFallback !== false, previousState?.config.ui.rotateStopFallback);
   $<HTMLInputElement>('rotateStopFallback').disabled = (config.ui.rotateTurnMinutes ?? 30) === 0;
   applyChecked($<HTMLInputElement>('backgroundChats'), config.ui.backgroundChats === true, previousState?.config.ui.backgroundChats);
   applyValue($<HTMLSelectElement>('backgroundPlacement'), config.ui.backgroundPlacement ?? 'window', previousState?.config.ui.backgroundPlacement ?? 'window');
@@ -1919,7 +1919,7 @@ function apply(next: AppState): void {
   // The add button is the call to action until a folder is shared, then it quiets to done.
   $('wizAddFolder').dataset.tone = config.roots.length > 0 ? 'ok' : 'off';
   // One folder per line: they are paths, and a row of them wraps mid-name.
-  $('wizFolders').replaceChildren(...(config.roots.length === 0
+  paintWhenShown($('wizFolders'), () => $('wizFolders').replaceChildren(...(config.roots.length === 0
     ? [(() => {
       // Empty is an invitation, not a hole: the whole area chooses a folder, like the button.
       const row = el('li', 'is-empty');
@@ -1930,7 +1930,7 @@ function apply(next: AppState): void {
       row.append(pick);
       return row;
     })()]
-    : config.roots.map((root) => { const row = el('li'); row.append(icon('i-folder'), el('span', '', `/${root.name}`)); return row; })));
+    : config.roots.map((root) => { const row = el('li'); row.append(icon('i-folder'), el('span', '', `/${root.name}`)); return row; }))));
   const secureStorageAvailable = next.secureStorage?.available ?? true;
   const apiKey = $<HTMLInputElement>('apiKey');
   ui(apiKey, 'placeholder', () => next.hasApiKey ? t("•••••••• stored") : 'sk-…');
@@ -2002,7 +2002,7 @@ function apply(next: AppState): void {
           : t("ChatGPT ran a tool {0} — the whole chain works.", [ago(ranAt)]));
 
   const cards = $('connectorCards');
-  cards.replaceChildren(...connectorCards(next));
+  paintWhenShown(cards, () => cards.replaceChildren(...connectorCards(next)));
 
   // Step marks: everything before the first unfinished step counts as done.
   const order = ['browser', 'folder', 'access', 'tunnel', 'key', 'connect', 'chatgpt'];
@@ -2352,7 +2352,7 @@ function paintReady(shown: string[], done: Set<string>, cosBrowser: boolean, all
   $('readyStart').hidden = !allSet;
   step('ready').classList.toggle('is-all-set', allSet);
   const list = $('readyChecks');
-  const rows = shown.map(name => {
+  paintWhenShown(list, () => list.replaceChildren(...shown.map(name => {
     const check = READY_CHECKS[name]!;
     const passed = done.has(name);
     const narrowed = name === 'access' && limited;
@@ -2371,8 +2371,7 @@ function paintReady(shown: string[], done: Set<string>, cosBrowser: boolean, all
       row.append(go);
     }
     return row;
-  });
-  list.replaceChildren(...rows);
+  })));
 }
 
 /** A connector's newest evidence that ChatGPT uses it: this run's, else what earlier runs proved. */
@@ -3025,6 +3024,17 @@ $('soundCues').addEventListener('change', event => {
 });
 api.onSoundCue?.(playSoundCue);
 
+/**
+ * A plain web link outside the chat (the Usage price links, Send feedback's guide link): the window
+ * denies new windows, so without this it did nothing (design audit 2026-11-01). Chat links route
+ * themselves and mark the click handled; the main process validates the address again.
+ */
+function openPlainWebLink(event: MouseEvent): void {
+  const anchor = (event.target as Element | null)?.closest?.<HTMLAnchorElement>('a[href]');
+  if (!anchor || event.defaultPrevented || !/^https?:\/\//i.test(anchor.href)) return;
+  event.preventDefault();
+  void run(api.openLink(anchor.href, { external: true }));
+}
 document.addEventListener('click', (event) => {
   const target = event.target as HTMLElement;
   if (!target.closest('.connection-anchor') && !$('connectionPopover').contains(target) && !$('connectionPopover').hidden) setConnectionPopover(false);
@@ -3032,7 +3042,11 @@ document.addEventListener('click', (event) => {
   if (external?.dataset.linkExternal) void run(api.openLink(external.dataset.linkExternal, { external: true }));
   const link = target.closest<HTMLElement>('[data-link]');
   if (link?.dataset.link) void run(api.openLink(link.dataset.link));
+  openPlainWebLink(event);
 });
+// A middle-click on the same links (auxclick), so it opens in the browser instead of being denied
+// (CodeRabbit on #2011). Chat links handle their own middle-click and mark it handled.
+document.addEventListener('auxclick', event => { if (event.button === 1) openPlainWebLink(event); });
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape' || $('connectionPopover').hidden) return;
   setConnectionPopover(false);

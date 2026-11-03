@@ -163,7 +163,7 @@ const MAX_USER_MESSAGE_CHARS = 48_000;
 /** Repeated on every decision: bound the supplemental copy independently of history. */
 const MAX_ORIGINAL_REQUEST_CHARS = 20_000;
 /** How long one draft may take before it is abandoned as failed. */
-const REQUEST_TIMEOUT_MS = 180_000;
+export const REQUEST_TIMEOUT_MS = 180_000;
 
 /**
  * Failures that asking again cannot answer, whoever asks and however long they wait.
@@ -229,10 +229,19 @@ const UNSAFE_REASONING_TAG = /<\/?(?:think|analysis|reasoning)\b[^>]*>/iu;
  */
 const LOOP_ATTEMPTS = 3;
 
+/**
+ * The length the helper is asked to stay under, with room below the hard cap (MAX_MESSAGE_CHARS).
+ * Unstated, Loop messages grew past the cap and every retry failed the same way (2026-11-02).
+ */
+const REPLY_LENGTH_RULE = 'Keep reply under 10,000 characters.';
+/** Added for a chat whose previous helper message was over the cap, until one fits again. */
+const REPLY_SHORTER_RULE = 'Your previous message for this chat was too long to send: keep this reply under 6,000 characters, and name the most important work first.';
+
 /** App-owned transport contract. The editable prompt decides policy, never wire syntax. */
 const GOAL_OUTPUT_PROTOCOL =
   'Return only the app decision described by the response schema. Use action "stop" when the editable instruction would say NO_REPLY. ' +
-  'Use action "continue" only with the exact next user message in reply. Put no reasoning, counting, labels, tokenizer markers, or protocol words in reply.';
+  'Use action "continue" only with the exact next user message in reply. Put no reasoning, counting, labels, tokenizer markers, or protocol words in reply. ' +
+  REPLY_LENGTH_RULE;
 
 const GOAL_RESPONSE_FORMAT = {
   type: 'json_schema',
@@ -269,7 +278,8 @@ const GOAL_RESPONSE_FORMAT = {
  */
 const LOOP_OUTPUT_PROTOCOL =
   'Return only the app decision described by the response schema. Action is always "continue" — there is no stop, and no message may be skipped. ' +
-  'Put the exact next user message in reply, and put no reasoning, counting, labels, tokenizer markers, or protocol words in it.';
+  'Put the exact next user message in reply, and put no reasoning, counting, labels, tokenizer markers, or protocol words in it. ' +
+  REPLY_LENGTH_RULE;
 
 const LOOP_RESPONSE_FORMAT = {
   type: 'json_schema',
@@ -369,6 +379,8 @@ interface GoalDraft extends Omit<GoalDraftView, 'retryable'> {
   objectiveSystemPrompt: string;
   /** The loop instruction, frozen for the same reason. Used only when `mode` is `loop`. */
   loopSystemPrompt: string;
+  /** The ChatGPT helper's model and effort, frozen for the same reason: they set the request and its deadline. */
+  helper: HelperSelection | null;
   /**
    * Which mode this draft was started in, frozen with its prompts.
    *
@@ -395,6 +407,13 @@ interface GoalDraft extends Omit<GoalDraftView, 'retryable'> {
 }
 
 /** At most one draft per conversation. A new turn replaces the old chat's finished draft. */
+function protocolFor(request: Pick<GoalRequest, 'mode' | 'shorter'>): string {
+  const protocol = request.mode === 'loop' ? LOOP_OUTPUT_PROTOCOL : GOAL_OUTPUT_PROTOCOL;
+  return request.shorter ? `${protocol} ${REPLY_SHORTER_RULE}` : protocol;
+}
+/** Chats whose last helper message failed as reply_too_long; cleared by the next one that fits. */
+const tooLongReplies = new Set<string>();
+
 const drafts = new Map<string, GoalDraft>();
 const goalListeners = new Set<() => void>();
 export function onGoalChange(listener: () => void): () => void {
@@ -607,13 +626,15 @@ export function pendingGoalReplies(
 }
 
 /** Durably reserves one reload for this exact Goal reply before the browser can act. */
-export async function recordGoalPickupAttemptNow(conversationId: string, replyId: string, at: number, nextAt?: number): Promise<{
+/** `expected`: as for queued inputs, a count another pass moved past means this pass reserves nothing. */
+export async function recordGoalPickupAttemptNow(conversationId: string, replyId: string, at: number, nextAt?: number, expected?: number): Promise<{
   attempts: number; nextAt?: number; stoppedAt?: number
 } | null> {
   const reply = goalReplies.get(conversationId);
   // Past the quick burst the reply shows as stopped, and slow retries go on until the hard bound.
   if (!reply || reply.state !== 'pending' || reply.replyId !== replyId ||
-      (reply.pickupAttempts ?? 0) >= BROWSER_PICKUP_ATTEMPT_LIMIT) return null;
+      (reply.pickupAttempts ?? 0) >= BROWSER_PICKUP_ATTEMPT_LIMIT ||
+      (expected !== undefined && (reply.pickupAttempts ?? 0) > expected)) return null;
   const previous = { ...reply };
   reply.pickupAttempts = (reply.pickupAttempts ?? 0) + 1;
   if (reply.pickupAttempts >= BROWSER_PICKUP_MAX_ATTEMPTS) reply.pickupStoppedAt ??= at;
@@ -1270,6 +1291,8 @@ export function moveGoalSwitch(fromConversationId: string, toConversationId: str
   goalSwitches.delete(fromConversationId);
   goalSwitches.set(toConversationId, row);
   persistGoalSwitches();
+  // #1882: which mode the replacement chat took over, so a page that later shows another can be compared.
+  logInfo(`goal: ${fromConversationId}'s own ${row.enabled ? row.mode : 'Normal'} switch moved to ${toConversationId} (Compact & Resume)`);
   return true;
 }
 
@@ -1608,6 +1631,7 @@ export async function claimGoalRecoveryStopNow(conversationId: string, replyId: 
 
 export function resetGoalStateForTests(): void {
   customResponseFormats.clear();
+  tooLongReplies.clear();
   for (const draft of drafts.values()) draft.abort?.abort();
   goalOutcomes.clear();
   resetGoalHelperSizeForTests();
@@ -1674,6 +1698,7 @@ export function startGoalDraft(input: StartGoalDraftInput): GoalDraftView {
   }
   const settings = getConfig().goal;
   const backend = goalBackendFor(goalDrivingMode(input.conversationId));
+  const helper = backend === 'chatgpt' ? goalHelperSelection() : null;
   const draft: GoalDraft = {
     token: `goal-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
     conversationId: input.conversationId,
@@ -1684,12 +1709,13 @@ export function startGoalDraft(input: StartGoalDraftInput): GoalDraftView {
     systemPrompt: settings.prompt,
     objectiveSystemPrompt: settings.objectivePrompt,
     loopSystemPrompt: settings.loopPrompt,
+    helper,
     mode: goalDrivingMode(input.conversationId),
     objective: goalObjectiveFor(input.conversationId),
     clientId,
     turnId: input.turnId,
     stage: 'sending',
-    model: backend === 'chatgpt' ? helperModelLabel() : settings.model,
+    model: helper ? helperModelLabel(helper) : settings.model,
     text: '',
     reply: '',
     error: null,
@@ -1805,6 +1831,10 @@ interface GoalRequest {
    */
   trailer: string;
   signal: AbortSignal;
+  /** The ChatGPT helper captured with the request's deadline; read fresh only when absent. */
+  helper?: HelperSelection | null;
+  /** The chat's previous helper message was over the cap: ask for a clearly shorter one. */
+  shorter?: boolean;
   /** Called as legacy SSE text arrives, so a streaming panel can show it being written. */
   publish?: (text: string) => void;
 }
@@ -1842,7 +1872,7 @@ async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision |
     ? 'The separately marked Original request contains the first user message as best-effort reference material. It may be shortened or recorder-truncated; omissions do not prove completion. Consider its requirements alongside the conversation and saved objective.'
     : '';
   if (request.backend === 'chatgpt') {
-    const protocol = request.mode === 'loop' ? LOOP_OUTPUT_PROTOCOL : GOAL_OUTPUT_PROTOCOL;
+    const protocol = protocolFor(request);
     // ChatGPT offers connected apps, this one included, in every chat, the helper's too. A helper that
     // called a tool ran it on this machine without any chat to answer for it (2026-10-02, live).
     // The JSON goes in a code block: GPT-6's page renderer reads a reply that opens with `{` as its own
@@ -1889,7 +1919,10 @@ async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision |
       publish: request.publish,
       // Only a timeout teaches the size: a newer turn or Goal switched off also cancels a prompt.
       onSentUnanswered: () => { if (request.signal.reason?.name === 'TimeoutError') noteGoalHelperUnanswered(prompt.length); },
-      ...goalHelperSelection()
+      ...(request.helper ?? goalHelperSelection())
+    }).catch((error: unknown) => {
+      if (error instanceof Error && error.message.startsWith('goal_helper_model_unconfirmed')) noteHelperModelUnconfirmed();
+      throw error;
     }), false);
     request.signal.throwIfAborted();
     return decision;
@@ -1912,7 +1945,7 @@ async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision |
     stream: Boolean(request.publish),
     messages: [
       ...request.system.map((content) => ({ role: 'system', content })),
-      { role: 'system', content: request.mode === 'loop' ? LOOP_OUTPUT_PROTOCOL : GOAL_OUTPUT_PROTOCOL },
+      { role: 'system', content: protocolFor(request) },
       ...(request.original ? [{ role: 'system', content: originalReferenceContract }] : []),
       ...(request.original ? [{ role: 'user', content: request.original }] : []),
       // Supplemental history comes first; later human corrections in the transcript remain newer.
@@ -2002,12 +2035,44 @@ let helperFallbackLogged = '';
  * current selection instead (null), the same rule that keeps worker spawns working (#499).
  */
 /** The helper model as it will actually run, for progress and logs; never a model it will not use. */
-function helperModelLabel(): string { return goalHelperSelection().model ?? "ChatGPT's current selection"; }
+function helperModelLabel(helper: HelperSelection = goalHelperSelection()): string { return helper.model ?? "ChatGPT's current selection"; }
 
-export function goalHelperSelection(): { model: string | null; reasoningEffort: ReasoningEffort | null } {
+/**
+ * The picker could not confirm the helper's model (2026-11-01: four times a day on the maintainer's
+ * Mac, each one a Goal that then waited for a person). For a while the helper runs on ChatGPT's
+ * current selection, as it does for a model the account does not offer, so the next ask goes out.
+ */
+const HELPER_MODEL_FALLBACK_MS = 30 * 60_000;
+let helperModelUnconfirmedUntil = 0;
+function noteHelperModelUnconfirmed(now = Date.now()): void {
+  helperModelUnconfirmedUntil = now + HELPER_MODEL_FALLBACK_MS;
+  logWarn(`goal: ChatGPT's picker did not confirm the helper's model; the helper uses ChatGPT's current selection for ${HELPER_MODEL_FALLBACK_MS / 60_000} minutes`);
+}
+export function resetHelperModelFallbackForTests(): void { helperModelUnconfirmedUntil = 0; }
+
+/**
+ * How long one Goal or Loop draft may take. A ChatGPT helper that thinks longer needs longer: GPT-6 at
+ * extra-high reasoning over a long transcript timed out at three minutes five times in a row
+ * (2026-11-01). API backends keep three minutes. The effort is the one actually used (an effort the
+ * account does not offer falls back to ChatGPT's selection, and then three minutes apply).
+ */
+export function goalRequestTimeoutMs(backend: string, helper?: HelperSelection): number {
+  if (backend !== 'chatgpt') return REQUEST_TIMEOUT_MS;
+  // Read only for a ChatGPT draft: resolving the helper can ask an open ChatGPT tab for its models.
+  const effort = (helper ?? goalHelperSelection()).reasoningEffort;
+  if (effort === 'pro') return 20 * 60_000;
+  if (effort === 'xhigh' || effort === 'max' || effort === 'ultra') return 12 * 60_000;
+  if (effort === 'high') return 5 * 60_000;
+  return REQUEST_TIMEOUT_MS;
+}
+
+type HelperSelection = { model: string | null; reasoningEffort: ReasoningEffort | null };
+
+export function goalHelperSelection(): HelperSelection {
   const settings = getConfig().goal;
   let model: string | null = settings.helperModel ?? DEFAULT_HELPER_CHAT_MODEL;
   let reasoningEffort: ReasoningEffort | null = settings.helperReasoning ?? 'high';
+  if (Date.now() < helperModelUnconfirmedUntil) return { model: null, reasoningEffort: null };
   const catalog = getChatModels();
   const models = catalog.models;
   // No readable picker at all (seen on Free plans, #1282): no model can ever be confirmed, so an
@@ -2103,7 +2168,9 @@ async function run(draft: GoalDraft): Promise<void> {
 
   const abort = new AbortController();
   draft.abort = abort;
-  const timer = setTimeout(() => abort.abort(new DOMException('Goal request timed out', 'TimeoutError')), REQUEST_TIMEOUT_MS);
+  const limitMs = goalRequestTimeoutMs(draft.backend, draft.helper ?? undefined);
+  const effort = draft.helper?.reasoningEffort ?? null;
+  const timer = setTimeout(() => abort.abort(new DOMException('Goal request timed out', 'TimeoutError')), limitMs);
   try {
     const decision = draft.backend === 'templates' ? templateGoalDecision(templateDecisionText(messages), Math.floor(Math.random() * 200), Math.floor(Math.random() * 200)) : await requestDrivingDecision({
       backend: draft.backend,
@@ -2113,6 +2180,8 @@ async function run(draft: GoalDraft): Promise<void> {
       key: key ?? '',
       model: draft.model,
       mode: draft.mode,
+      helper: draft.helper,
+      shorter: tooLongReplies.has(draft.conversationId),
       // Loop replaces the instruction, not the goal: a chat that carries one still hands it
       // over verbatim, which is what "here is the task" in that prompt refers to. Without one
       // the loop reads the job out of the conversation, exactly as the gate does.
@@ -2143,9 +2212,11 @@ async function run(draft: GoalDraft): Promise<void> {
     // Logged like the exception path below. Ten rate limits in a row on 2026-09-02 left no
     // trace in app.log because a provider's refusal is an answer, not an exception.
     if (decision.action === 'http' || decision.action === 'invalid') {
-      logWarn(`goal: draft for ${draft.conversationId} failed — ${decision.error}`);
+      if (decision.error === 'reply_too_long') tooLongReplies.add(draft.conversationId);
+      logWarn(`goal: draft for ${draft.conversationId} failed — ${decision.error}${decision.error === 'reply_too_long' ? '; the next draft for this chat asks for a shorter message' : ''}`);
       return settle(draft, 'failed', decision.error);
     }
+    tooLongReplies.delete(draft.conversationId);
     if (decision.action === 'stop') {
       // Loop has already been asked again for exactly this, up to its limit. Reaching here
       // means the model kept refusing to write, which is a failure to produce an answer and
@@ -2208,7 +2279,13 @@ async function run(draft: GoalDraft): Promise<void> {
       : detail === 'reply_too_long' || detail === 'stream_record_too_long' || detail.startsWith('goal_browser_')
         ? detail
         : `request_failed: ${detail}`;
-    logWarn(`goal: draft for ${draft.conversationId} failed — ${failure}`);
+    if (failure === 'reply_too_long') tooLongReplies.add(draft.conversationId);
+    // A timeout names the limit that ended it: it differs by helper and reasoning effort (#2033).
+    const limit = abort.signal.reason?.name === 'TimeoutError'
+      ? ` (the ${limitMs / 60_000}-minute limit for the ${draft.backend} helper${effort ? ` at ${effort} reasoning` : ''})`
+      : '';
+    const shorter = failure === 'reply_too_long' ? '; the next draft for this chat asks for a shorter message' : '';
+    logWarn(`goal: draft for ${draft.conversationId} failed — ${failure}${limit}${shorter}`);
     settle(draft, 'failed', failure);
   } finally {
     clearTimeout(timer);
@@ -2290,9 +2367,10 @@ export async function draftTaskPlan(prompt: string, backend: 'api' | 'chatgpt', 
   // Custom endpoints may be keyless; only OpenRouter fails here without one.
   if (backend === 'api' && !key && endpoint.kind === 'openrouter') throw new Error('Configure a Goal API key or choose ChatGPT');
   onProgress?.({ phase: 'generating', text: '' });
+  const helper = backend === 'chatgpt' ? goalHelperSelection() : null;
   const result = await requestGoalDecision({ backend, endpoint, reasoning: settings.reasoning, lifetime: 'temporary-planner', key: key ?? '', model: settings.model, mode: 'goal', publish: text => onProgress?.({ phase: 'generating', text: planProgressText(text) }),
     system: ['You are a task planner, not the executor. Produce 2 to 12 substantial workflow stages; prefer a complete implementation stage followed by a few meaningful verification passes. The executor receives the original user request and the ENTIRE workflow in its first message. Stage 1 must state the complete objective, all implementation requirements and constraints, and the end-to-end execution approach. Never restrict Stage 1 to discovery, planning, a skeleton, or a fraction of the product. If the user requests subagents, include their concrete assignments and early delegation in Stage 1 so they can work in parallel immediately. Later stages are verification and improvement checkpoints, not withheld implementation requirements: where relevant, exercise the actual app with computer use, inspect failures, repair underlying causes, rebuild or reinstall when authorized, and repeat the failed workflows. Include independent subagent code review when requested and a final check of the whole original request. Preserve the user\'s scope, authorization limits, platform, constraints and required evidence; do not invent unrelated work or claim installation/browser checks were performed. Return action continue; its reply must be a JSON string encoding {"stages":["complete implementation workflow", "verification workflow"]}. Keep the entire plan below 12000 characters. Later checkpoints are queued to the same conversation at Session finish, or after a completed turn when the user enables that delivery.'],
-    messages: [{ role: 'user', content: prompt.trim() }], trailer: 'Produce the staged plan now. Do not execute the task.', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]) : AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
+    messages: [{ role: 'user', content: prompt.trim() }], trailer: 'Produce the staged plan now. Do not execute the task.', helper, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(goalRequestTimeoutMs(backend, helper ?? undefined))]) : AbortSignal.timeout(goalRequestTimeoutMs(backend, helper ?? undefined)) })
     .catch(error => { throw nativeGoalFailure(`request_failed: ${error instanceof Error ? error.message : error}`, backend); });
   signal?.throwIfAborted();
   if (result.action !== 'continue') throw nativeGoalFailure('error' in result ? result.error : 'No plan was generated', backend, 'retryAfterMs' in result ? result.retryAfterMs : undefined);
@@ -2308,7 +2386,9 @@ export async function draftOpeningMessage(
   objective: string,
   named: GoalMode | null = null,
   onProgress?: (progress: TaskProgressUpdate) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  // A caller that itself gives up sooner (the page's request) caps the helper's own deadline.
+  maxMs = Infinity
 ): Promise<{ reply: string; model: string } | { error: string; retryable?: boolean; retryAfterMs?: number }> {
   const goal = objective.trim();
   signal?.throwIfAborted();
@@ -2321,9 +2401,10 @@ export async function draftOpeningMessage(
   const key = backend === 'api' ? await goalProviderKey(endpoint.kind) : null;
   // Custom endpoints may be keyless; only OpenRouter fails here without one.
   if (backend === 'api' && !key && endpoint.kind === 'openrouter') return { error: 'no_api_key' };
-  const model = backend === 'chatgpt' ? helperModelLabel() : settings.model;
+  const helper = backend === 'chatgpt' ? goalHelperSelection() : null;
+  const model = helper ? helperModelLabel(helper) : settings.model;
   const abort = new AbortController();
-  const timer = setTimeout(() => abort.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => abort.abort(), Math.min(goalRequestTimeoutMs(backend, helper ?? undefined), maxMs));
   try {
     const mode = named ?? goalDrivingMode();
     const decision = await requestDrivingDecision({
@@ -2333,6 +2414,7 @@ export async function draftOpeningMessage(
       key: key ?? '',
       model,
       mode,
+      helper,
       system: [
         mode === 'loop' ? settings.loopPrompt : settings.objectivePrompt,
         goalObjectiveMessage(goal)
@@ -2732,9 +2814,32 @@ async function pauseRepeatingGoal(draft: GoalDraft, answer: string): Promise<voi
 const answerBeforeNote = new WeakMap<ChatMessage, string>();
 
 /** What the Offline marker check reads: the newest answer as written, without the app's own note. */
+/** Assistant messages ChatGPT marked final, as opposed to its commentary (#2007). */
+const finalAnswers = new WeakSet<ChatMessage>();
+/** The turn each recorded assistant message belongs to, where the recording names one. */
+const turnOfMessage = new WeakMap<ChatMessage, string>();
+/**
+ * The marker text read from the whole projection before the context cut. The cut keeps user
+ * corrections ahead of the final answer, so the answer the marker sits in may not be among the
+ * messages sent (CodeRabbit on #2014).
+ */
+const decisionTextOf = new WeakMap<readonly ChatMessage[], string>();
+
 export function templateDecisionText(messages: readonly ChatMessage[]): string {
-  const last = messages.filter(message => message.role === 'assistant').at(-1);
-  return last ? answerBeforeNote.get(last) ?? last.content : '';
+  const known = decisionTextOf.get(messages);
+  if (known !== undefined) return known;
+  const lastAt = messages.findLastIndex(message => message.role === 'assistant');
+  if (lastAt < 0) return '';
+  // Commentary ChatGPT writes after its final answer in the same turn is not the answer: the marker is
+  // in the final one (#2007). Walk back to it, never past the user message that opened the turn, and
+  // never into another turn: a Retry keeps the earlier generation's answers before the new one's.
+  let chosen = messages[lastAt]!;
+  const turn = turnOfMessage.get(chosen);
+  for (let at = lastAt; at >= 0 && messages[at]!.role === 'assistant'; at--) {
+    if (turnOfMessage.get(messages[at]!) !== turn) break;
+    if (finalAnswers.has(messages[at]!)) { chosen = messages[at]!; break; }
+  }
+  return answerBeforeNote.get(chosen) ?? chosen.content;
 }
 
 interface ChatMessage {
@@ -2893,6 +2998,8 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
     } else if ((event.kind === 'assistant_message' && (event.final || event.messageId)) || (event.kind === 'progress' && event.source === 'extension')) {
       const content = clip(event.kind === 'assistant_message' ? modelFacingText(event.message.text, event.renderedHtml) : event.message.text);
       if (content) next = { role: 'assistant', content };
+      if (next && event.kind === 'assistant_message' && event.final) finalAnswers.add(next);
+      if (next && typeof event.turnId === 'string' && event.turnId) turnOfMessage.set(next, event.turnId);
     }
     if (!next) continue;
 
@@ -2940,6 +3047,9 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
     const answer = ordered[at]!;
     const noted = { ...answer, content: `${answer.content}\n\n${toolCallFootnote(count, before)}` };
     answerBeforeNote.set(noted, answerBeforeNote.get(answer) ?? answer.content);
+    if (finalAnswers.has(answer)) finalAnswers.add(noted);
+    const answerTurn = turnOfMessage.get(answer);
+    if (answerTurn) turnOfMessage.set(noted, answerTurn);
     ordered[at] = noted;
   }
   for (const text of deliveredInput.slice(-5)) {
@@ -3027,9 +3137,12 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
     chars += message.content.length;
     selected.push({ at, message });
   }
-  return [...anchors, ...selected]
+  const result = [...anchors, ...selected]
     .sort((left, right) => left.at - right.at)
     .map((entry) => entry.message);
+  // The Offline marker is read from everything recorded, whatever the cut left out.
+  decisionTextOf.set(result, templateDecisionText(ordered));
+  return result;
 }
 
 /*

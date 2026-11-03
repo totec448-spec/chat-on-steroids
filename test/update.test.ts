@@ -820,17 +820,60 @@ describe('a check or download that goes wrong on a bad connection', () => {
     expect(online.asked).toHaveLength(calls);
   });
 
+  /**
+   * A pass still waiting for the installer when the state is reset belongs to the reset before it.
+   * It used to finish anyway: it wrote the installer into the staging folder and set it as staged,
+   * so the next check announced "ready" without downloading anything (CodeRabbit on #2018).
+   */
+  it('leaves no file and no staged update behind from a pass that outlived a reset', async () => {
+    const { fetch } = github();
+    const answer = fetch.getMockImplementation()!;
+    let release: (() => void) | null = null;
+    fetch.mockImplementation(async (input: string | URL) => {
+      if (!String(input).endsWith(WINDOWS_ASSET)) return answer(input);
+      // Answers only when the test says so, and as the real fetch would even if the pass was told to stop.
+      await new Promise<void>(resolve => { release = resolve; });
+      return answer(input);
+    });
+    const old = asPlatform('win32', undefined, () => checkForUpdates());
+    await vi.waitFor(() => expect(release).not.toBeNull(), { timeout: 10_000 });
+    resetUpdateForTests();
+    release!();
+    await old;
+    expect(updateStatus().stage).toBe('idle');
+    expect(existsSync(path.join(userData, 'updates', NEXT))
+      ? readdirSync(path.join(userData, 'updates', NEXT)) : []).toEqual([]);
+    // The next check has nothing staged to fall back on: it fetches the installer itself.
+    const next = github({ fail: 'asset' });
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(next.asked).toContain(WINDOWS_ASSET);
+    expect(updateStatus().stage).toBe('failed');
+  });
+
   it('gives up on a download only when no data arrives for a minute, however long the whole file takes', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
     const body = 'installer bytes';
-    // One chunk, then silence: the connection is still open but nothing comes.
-    const stalled = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new TextEncoder().encode(body.slice(0, 5))); } });
+    // One chunk, then silence: the connection is still open but nothing comes. `pull` runs once the
+    // chunk has been taken, and the download restarts its 60-second watch on each chunk, so the clock
+    // moves only after that: on a slow runner the chunk used to arrive after the jump, the watch
+    // restarted there, and the test waited out its timeout (14 retries in 15 CI runs, 2026-11-01).
+    let taken = false;
+    // A fresh stream per request: a pass left over from an earlier test can still reach this fake and
+    // took the one shared stream first, so this test's own download found it used ("Response body object
+    // should not be disturbed or locked") and failed — every other run on Windows (#2008).
+    const stalled = () => new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new TextEncoder().encode(body.slice(0, 5))); },
+      pull() { taken = true; return new Promise<void>(() => undefined); }
+    });
     const { fetch } = github({ body });
     const answer = fetch.getMockImplementation()!;
-    fetch.mockImplementation(async (input: string | URL) => String(input).endsWith(WINDOWS_ASSET) ? new Response(stalled, { status: 200 }) : answer(input));
+    fetch.mockImplementation(async (input: string | URL) => String(input).endsWith(WINDOWS_ASSET) ? new Response(stalled(), { status: 200 }) : answer(input));
     let done = false;
     const pass = asPlatform('win32', undefined, () => checkForUpdates()).then(() => { done = true; });
-    await vi.waitFor(() => expect(updateStatus().stage).toBe('downloading'));
+    await vi.waitFor(() => expect(taken).toBe(true), { timeout: 10_000, interval: 5 });
+    expect(updateStatus().stage).toBe('downloading');
+    // The chunk's 'data' event (which restarts the watch) runs on Node's own queue, not the faked timers.
+    await new Promise(resolve => setImmediate(resolve));
     await vi.advanceTimersByTimeAsync(59_000);
     expect(done).toBe(false);
     await vi.advanceTimersByTimeAsync(2_000);

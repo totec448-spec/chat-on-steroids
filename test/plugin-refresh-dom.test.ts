@@ -54,6 +54,28 @@ it.each([118, 257])('accepts %s declarations for the Plugins connector including
   const view = await api.pluginRefreshView('Chat On Steroids Plugins');
   expect(view?.tools).toHaveLength(count);
 });
+it.each(['legacy', 'native'])('reads unchanged MCP tool names from external Plugins (%s)', async route => {
+  const fixture = route === 'native' ? settingsPage() : page();
+  const connector = 'connector' in fixture ? fixture.connector : fixture.props.connector;
+  connector.name = 'Chat On Steroids Plugins';
+  const actions = ['resolve-library-id', 'translate-text', 'vendor.Tool', '1_tool'].map(name =>
+    ({ name, description: tool.description, description_model: null, params: tool.inputSchema }));
+  if ('connector' in fixture) fixture.connector.actions = actions as any;
+  else fixture.props.actions = actions;
+  const view = await fixture.api.pluginRefreshView(connector.name);
+  expect(view?.tools.map((item: any) => item.name)).toEqual(actions.map(item => item.name));
+  expect(view?.refresh.id).toBe('refresh');
+});
+it.each(['bad name', 'bad/name', 'bad:name', 'x'.repeat(65)])('rejects invalid external MCP name %s', async name => {
+  const { api, connector } = settingsPage(); connector.name = 'Chat On Steroids Plugins';
+  connector.actions[0]!.name = name;
+  expect(await api.pluginRefreshView(connector.name)).toBeNull();
+});
+it('does not broaden the app-owned tool-name contract', async () => {
+  const { api, connector } = settingsPage(); connector.actions[0]!.name = 'resolve-library-id';
+  expect(await api.pluginRefreshView(connector.name)).toBeNull();
+});
+
 it('reads the Windows Desktop connector with all of its tools (#1763)', async () => {
   // Windows Desktop with every permission declared 24 tools in 2.1.44; the card was refused at 16,
   // so its automatic refresh could never be confirmed.
@@ -474,4 +496,87 @@ it('keeps the Plugins connector\'s larger catalog limit after a rename, by its p
     params: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } }));
   api.setConnectorApps({ core: [], desktop: [], plugins: [{ appId: 'asdk_app_synthetic', linkId: null, name: 'My external apps' }] });
   expect((await api.pluginRefreshView('Chat On Steroids Plugins'))?.tools).toHaveLength(118);
+});
+
+it('lets the refresh owner inspect the native tunnel despite colliding call-derived aliases', async () => {
+  const { api, connector } = settingsPage(); connector.name = 'Chat On Steroids Plugins';
+  api.setConnectorApps({ core: [{ appId: connector.id, name: connector.name }], desktop: [],
+    plugins: [{ appId: connector.id, name: connector.name }, { appId: 'asdk_app_foreign', name: 'Other app' }] });
+  expect(await api.pluginRefreshView(connector.name)).toBeNull();
+  expect(await api.pluginRefreshView(connector.name, [], null, 'plugins')).toMatchObject({
+    appId: connector.id, tunnelId: 'tunnel_synthetic01', tools: [tool]
+  });
+  connector.tunnel_id = null;
+  expect(await api.pluginRefreshView(connector.name, [], null, 'plugins')).toBeNull();
+});
+it.each([['foreign-only', 'bound'], ['foreign-only', 'unbound'], ['colliding', 'bound'], ['colliding', 'unbound']])(
+  'requires native tunnel evidence before accepting an exact ID learned on another surface (%s, %s)', async (aliases, enrollment) => {
+    const { api, connector } = settingsPage(); connector.name = 'Chat On Steroids Plugins';
+    api.setConnectorApps({ core: [{ appId: connector.id, name: 'Chat On Steroids Core' }], desktop: [],
+      plugins: aliases === 'colliding' ? [{ appId: connector.id, name: connector.name }] : [] });
+    connector.tunnel_id = null;
+    const requestedId = enrollment === 'bound' ? connector.id : null;
+    expect(await api.pluginRefreshView(connector.name, [tool], requestedId, 'plugins')).toBeNull();
+    // Older optional-argument callers keep their existing contract. Only a surface-qualified
+    // native inspection needs this stronger evidence before main considers a refresh claim.
+    expect(await api.pluginRefreshView(connector.name, [tool], connector.id)).not.toBeNull();
+    connector.tunnel_id = 'tunnel_synthetic01';
+    expect(await api.pluginRefreshView(connector.name, [tool], requestedId, 'plugins')).toMatchObject({
+      appId: connector.id, tunnelId: 'tunnel_synthetic01', tools: [tool]
+    });
+  });
+it('preserves legacy-route exact-ID observations when the requested surface is supplied', async () => {
+  const { api, props } = page(); props.connector.name = 'Chat On Steroids Plugins';
+  api.setConnectorApps({ core: [{ appId: props.connector.id, name: 'Chat On Steroids Core' }], desktop: [], plugins: [] });
+  expect(await api.pluginRefreshView(props.connector.name, [tool], props.connector.id, 'plugins')).toMatchObject({
+    appId: props.connector.id, tools: [tool]
+  });
+});
+it('preserves schema-only native observations when the exact ID is learned on the requested surface', async () => {
+  const { api, connector } = settingsPage(); connector.name = 'Chat On Steroids Plugins'; connector.tunnel_id = null;
+  api.setConnectorApps({ core: [], desktop: [], plugins: [{ appId: connector.id, name: connector.name }] });
+  expect(await api.pluginRefreshView(connector.name, [tool], connector.id, 'plugins')).toMatchObject({
+    appId: connector.id, tools: [tool], tunnelId: null
+  });
+});
+it('navigates a unique configured-name row for tunnel inspection, never an ambiguous row', () => {
+  const { api } = settingsPage('/settings/plugins-settings');
+  api.setConnectorApps({ core: [{ appId: 'asdk_app_synthetic', name: 'Chat On Steroids Plugins' }], desktop: [],
+    plugins: [{ appId: 'asdk_app_synthetic', name: 'Chat On Steroids Plugins' }] });
+  const main = dom.window.document.querySelector('main')!;
+  main.innerHTML = '<a href="/settings/plugins-settings/plugin_asdk_app_synthetic"><div>Chat On Steroids Plugins</div></a>';
+  expect(api.pluginInstalledButtons('Chat On Steroids Plugins')).toBeNull();
+  expect(api.pluginInstalledButtons('Chat On Steroids Plugins', null, 'plugins', true)).toEqual([main.querySelector('a')]);
+  main.insertAdjacentHTML('beforeend', '<a href="/settings/plugins-settings/plugin_asdk_app_other"><div>Chat On Steroids Plugins</div></a>');
+  expect(api.pluginInstalledButtons('Chat On Steroids Plugins', null, 'plugins', true)).toHaveLength(2);
+});
+it('keeps the requested Plugins catalog bound when aliases also put its exact ID on Core', async () => {
+  const { api, connector } = settingsPage(); connector.name = 'Chat On Steroids Plugins';
+  connector.actions = Array.from({ length: 80 }, (_, i) => ({ name: `tool_${i}`, description: 'External tool', description_model: '', params: tool.inputSchema }));
+  api.setConnectorApps({ core: [{ appId: connector.id, name: connector.name }], desktop: [],
+    plugins: [{ appId: connector.id, name: connector.name }] });
+  expect(await api.pluginRefreshView(connector.name, [], connector.id)).toBeNull();
+  expect((await api.pluginRefreshView(connector.name, [], connector.id, 'plugins')).tools).toHaveLength(80);
+  expect(await api.pluginRefreshView(connector.name, [], connector.id, 'core')).toBeNull();
+});
+it('reads a renamed native Plugins catalog by the requested surface and durable ID without learned aliases', async () => {
+  const { api, connector } = settingsPage(); connector.name = 'Renamed external apps 日本語';
+  connector.actions = Array.from({ length: 80 }, (_, i) => ({ name: `tool_${i}`, description: 'External tool', description_model: '', params: tool.inputSchema }));
+  api.setConnectorApps({ core: [], desktop: [], plugins: [] });
+  expect(await api.pluginRefreshView('Chat On Steroids Plugins', [], connector.id)).toBeNull();
+  expect((await api.pluginRefreshView('Chat On Steroids Plugins', [], connector.id, 'plugins'))?.tools).toHaveLength(80);
+  expect(await api.pluginRefreshView('Chat On Steroids Plugins', [], 'asdk_app_foreign', 'plugins')).toBeNull();
+  expect(await api.pluginRefreshView('Chat On Steroids Plugins', [], connector.id, 'core')).toBeNull();
+  connector.actions = Array.from({ length: 258 }, (_, i) => ({ ...connector.actions[0]!, name: `tool_${i}` }));
+  expect(await api.pluginRefreshView('Chat On Steroids Plugins', [], connector.id, 'plugins')).toBeNull();
+});
+it.each([false, true])('retains exact installed-ID navigation after a rename (hidden=%s)', hidden => {
+  const { api } = settingsPage('/settings/plugins-settings');
+  api.setConnectorApps({ core: [{ appId: 'asdk_app_synthetic', name: 'Stale name' }], desktop: [],
+    plugins: [{ appId: 'asdk_app_synthetic', name: 'Stale name' }] });
+  const main = dom.window.document.querySelector('main')!;
+  main.innerHTML = `<a ${hidden ? 'hidden' : ''} href="/settings/plugins-settings/plugin_asdk_app_synthetic"><span>Renamed</span></a>` +
+    '<a href="/settings/plugins-settings/plugin_asdk_app_foreign"><span>Chat On Steroids Plugins</span></a>';
+  const result = api.pluginInstalledButtons('Renamed', 'asdk_app_synthetic', 'plugins', true);
+  expect(result).toEqual(hidden ? null : [main.querySelector('a')]);
 });

@@ -137,10 +137,15 @@ export async function prepareSessionPrompt(text: string, scope: PromptScope = {}
   return fitSessionPrompt(text, core, agents, budget, skills, scope.workingDirectory);
 }
 
-/** Explicit follow-up selection adds Skills only, never repeats opening setup. */
-export async function prepareSkillFollowup(text: string, authored: string, budget = limits, scope: PromptScope = {}): Promise<string> {
+/**
+ * Explicit follow-up selection adds Skills only, never repeats opening setup. `projectNote` (#1919):
+ * the chat was moved into a project since its last message from the person, so this one carries the
+ * project's folder line once, the same line a new chat there starts with.
+ */
+export async function prepareSkillFollowup(text: string, authored: string, budget = limits, scope: PromptScope = {}, projectNote = false): Promise<string> {
   const folder = await promptFolder(scope);
   const skills = await selectedSkillInstructions(authored, { projectPath: localProjectPath(folder) }, undefined, scope.autoSkills);
   if ((await promptFolder(scope))?.real !== folder?.real) throw new Error('The selected project changed during Skill preparation');
-  return skills.length ? fitSessionPrompt(text, '', null, budget, skills) : text;
+  const note = projectNote && folder ? { directory: folder.virtual, text: '', truncated: false } : null;
+  return skills.length || note ? fitSessionPrompt(text, '', note, budget, skills) : text;
 }

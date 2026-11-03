@@ -1267,5 +1267,8 @@
   },
   "content_task_waiting_app": {
     "message": "Chat On Steroids yanıtı bekleniyor."
+  },
+  "content_revival_draft_appeared": {
+    "message": "Çalışanın uyandırması hazırlanırken sohbete bir şey yazıldı, bu yüzden uyandırma onun yerine geçmedi."
   }
 }

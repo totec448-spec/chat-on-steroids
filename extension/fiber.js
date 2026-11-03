@@ -2948,7 +2948,7 @@
    * `danger*` coloured; either marker disqualifies a control in any language. Every CoS connector refresh on the new layout failed with "the connector settings
    * card could not be read", so ChatGPT kept whatever tool list it had before an update.
    */
-  function pagePluginSnapshot(appId) {
+  function pagePluginSnapshot(appId, refresh) {
     const buttons = [...document.querySelectorAll('main button')].slice(0, 200);
     let connector = null, control = null;
     for (const button of buttons) {
@@ -2973,7 +2973,10 @@
       }
     }
     if (!connector || !Array.isArray(connector.actions) || typeof connector.name !== 'string') return null;
-    const externalPlugins = pluginsConnectorApp(connector.name, connector.id);
+    // A surface-qualified native refresh may know the durable App ID before the learned
+    // aliases catch up with a rename. This sets only the read bound, never refresh authority.
+    const surface = refresh?.appId === appId && SURFACES.includes(refresh.surface) ? refresh.surface : null;
+    const externalPlugins = surface ? surface === 'plugins' : pluginsConnectorApp(connector.name, connector.id);
     // A sanity bound, not a catalog: the app's own Core and Desktop declare a few dozen tools at most
     // (Windows Desktop 24 in 2.1.44, which the old bound of 16 refused, #1763); Plugins holds every
     // enabled external plugin's tools. A test keeps 64 above what Core and Desktop declare.
@@ -2991,9 +2994,9 @@
     return { appId, connectorName: connector.name.slice(0, 100), versionId: str(connector.app_metadata?.version_id), tools, refreshAvailable: !!control, tunnelId, settled: true };
   }
 
-  function pluginSnapshot() {
+  function pluginSnapshot(refresh) {
     const pageRoute = /^\/(?:settings\/plugins-settings|plugins)\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.pathname);
-    if (pageRoute && !location.hash) return pagePluginSnapshot(pageRoute[1]);
+    if (pageRoute && !location.hash) return pagePluginSnapshot(pageRoute[1], refresh);
     const route = /^#settings\/Plugins\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.hash);
     if (!route) return null;
     // The hash already names one exact installed connector settings route. Provider tab labels
@@ -3127,7 +3130,7 @@
     }
     if (data.source === 'clf-plugin-ask') {
       let plugin = null;
-      try { plugin = pluginSnapshot(); } catch { /* Unrecognized installed settings. */ }
+      try { plugin = pluginSnapshot(data.refresh); } catch { /* Unrecognized installed settings. */ }
       post({ source: 'clf-plugin-reply', nonce, v: 1, plugin }, location.origin);
       return;
     }
