@@ -3809,5 +3809,16 @@
   "Today": "Bugün",
   "Yesterday": "Dün",
   "Previous 7 days": "Son 7 gün",
-  "Previous 30 days": "Son 30 gün"
+  "Previous 30 days": "Son 30 gün",
+  "Agent": "Ajan",
+  "Output": "Çıktı",
+  "Show this command's output, read-only": "Bu komutun çıktısını göster, salt okunur",
+  "Show the output of {0}, read-only": "{0} çıktısını göster, salt okunur",
+  "Close output": "Çıktıyı kapat",
+  "Read-only: the agent's command. Typing here does nothing.": "Salt okunur: ajanın komutu. Buraya yazmak bir şey yapmaz.",
+  "Exited with {0} after {1}": "{1} sonra {0} ile çıktı",
+  "Ended after {0}": "{0} sonra sona erdi",
+  "This command is no longer running": "Bu komut artık çalışmıyor",
+  "Close an agent output tab first": "Önce bir ajan çıktı sekmesini kapatın",
+  "The window is unavailable": "Pencere kullanılamıyor"
 }

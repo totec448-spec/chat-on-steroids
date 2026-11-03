@@ -3890,5 +3890,16 @@
   "Today": "Hoy",
   "Yesterday": "Ayer",
   "Previous 7 days": "Últimos 7 días",
-  "Previous 30 days": "Últimos 30 días"
+  "Previous 30 days": "Últimos 30 días",
+  "Agent": "Agente",
+  "Output": "Salida",
+  "Show this command's output, read-only": "Mostrar la salida de este comando, solo lectura",
+  "Show the output of {0}, read-only": "Mostrar la salida de {0}, solo lectura",
+  "Close output": "Cerrar salida",
+  "Read-only: the agent's command. Typing here does nothing.": "Solo lectura: el comando del agente. Escribir aquí no hace nada.",
+  "Exited with {0} after {1}": "Terminó con {0} tras {1}",
+  "Ended after {0}": "Terminó tras {0}",
+  "This command is no longer running": "Este comando ya no se está ejecutando",
+  "Close an agent output tab first": "Cierra primero una pestaña de salida de un agente",
+  "The window is unavailable": "La ventana no está disponible"
 }

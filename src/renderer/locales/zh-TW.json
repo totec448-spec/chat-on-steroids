@@ -3728,5 +3728,16 @@
   "Today": "今天",
   "Yesterday": "昨天",
   "Previous 7 days": "過去 7 天",
-  "Previous 30 days": "過去 30 天"
+  "Previous 30 days": "過去 30 天",
+  "Agent": "代理",
+  "Output": "輸出",
+  "Show this command's output, read-only": "顯示此指令的輸出（唯讀）",
+  "Show the output of {0}, read-only": "顯示 {0} 的輸出（唯讀）",
+  "Close output": "關閉輸出",
+  "Read-only: the agent's command. Typing here does nothing.": "唯讀：代理的指令。在此輸入不會有任何作用。",
+  "Exited with {0} after {1}": "{1} 後以 {0} 結束",
+  "Ended after {0}": "{0} 後結束",
+  "This command is no longer running": "此指令已不再執行",
+  "Close an agent output tab first": "請先關閉一個代理輸出分頁",
+  "The window is unavailable": "視窗無法使用"
 }
