@@ -778,7 +778,10 @@ and stopped before asking); the dock shows it without a clock. An automatic atte
 before asking keeps its ticket and posts `/compact` `sourceDeferred` with `sourceError`, its reason:
 the app logs it and shows `held` until its next pickup. Only the chat's open, still unsent automatic
 ticket accepts it. A deferral at the tool-result receipt also carries `sourceErrorCode`
-(`results-unconfirmed` after the whole wait, `results-wait-changed` when the chat changed during it);
+(`results-unconfirmed` after the whole wait with nothing running here, `results-wait-changed` when
+the chat changed during it, also when it moved to another route, `local-tools-running` when this
+machine's own calls or a missing activity answer kept the receipt from being checked, never counted;
+the code lives with its attempt, never shared);
 the bridge counts them per ticket (`compactionReceiptMisses`, in memory). After one
 `results-unconfirmed`, or three such deferrals in all, the next automatic `ticket` answer carries
 `waiveReceipt: true` and logs why: the page then still waits for this machine's running calls

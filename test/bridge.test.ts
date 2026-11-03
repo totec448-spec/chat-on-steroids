@@ -4337,10 +4337,12 @@ describe('automatic compaction', () => {
     ['one attempt that waited the receipt out', ['results-unconfirmed'], true],
     ['two attempts cut short', ['results-wait-changed', 'results-wait-changed'], false],
     ['three attempts cut short', ['results-wait-changed', 'results-wait-changed', 'results-wait-changed'], true],
-    ['deferrals for other reasons', [null, null, null, null], false]
+    ['deferrals for other reasons', [null, null, null, null], false],
+    // This machine's own call kept the receipt from being checked: not a receipt miss (CodeRabbit on #2056).
+    ['attempts whose local call kept running', ['local-tools-running', 'local-tools-running', 'local-tools-running'], false]
   ] as const)('asks for the handoff without the tool-result receipt after %s', async (_case, codes, waived) => {
     await pair();
-    const conversationId = `a1a1a1a1-0000-4000-8000-00000000${String(codes.length)}${waived ? 'b' : 'c'}${codes[0] === null ? 'd' : 'e'}0`;
+    const conversationId = `a1a1a1a1-0000-4000-8000-0000000${String(codes.length)}${waived ? 'b' : 'c'}${codes[0] === null ? 'd' : codes[0] === 'local-tools-running' ? 'f' : 'e'}00`;
     await request('POST', '/events', {
       body: { conversationId, events: [{ kind: 'user_message', time: Date.now(), text: 'a long chat whose results ChatGPT never confirms', messageId: `m-${conversationId}` }] }
     });

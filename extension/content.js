@@ -9951,19 +9951,29 @@
     // summary of a machine state that had already moved on.
     // Automatic runs stop the turn exactly like a press does. They are *started* by a turn
     // being in flight, so refusing to interrupt one would refuse every automatic run.
-    const barrier = await stopAndSettle(forId, forEpoch, forRun, sameTurn, automatic, automatic && filed.data.waiveReceipt === true);
+    // Why this attempt stopped at the receipt, kept with this attempt only (CodeRabbit on #2056).
+    const receipt = { code: null };
+    const barrier = await stopAndSettle(forId, forEpoch, forRun, sameTurn, automatic, automatic && filed.data.waiveReceipt === true, receipt);
     // Every await above can span an SPA navigation. `conversationId` is mutable global
     // state, so continuing after A -> B would otherwise post B to /compact and type A's
     // handoff instruction into B's composer. The new chat's reset already owns its UI state;
     // a stale continuation must not repaint or cancel anything there.
-    if (!current()) return;
+    if (!current()) {
+      // The chat moved on while this attempt waited for the receipt: the app still hears why, so it
+      // counts the attempt, but nothing here touches the page that is shown now (CodeRabbit on #2056).
+      if (barrier && automatic && receipt.code === 'results-wait-changed' && filed.data.token) {
+        void ask({ type: 'compact', conversationId: forId, token: String(filed.data.token), sourceDeferred: true,
+          sourceError: barrier, sourceErrorCode: receipt.code }).catch(() => undefined);
+      }
+      return;
+    }
     if (barrier) {
       pressedAt = 0;
       nativeBusy = false;
       nativePhase = '';
       localError = barrier;
       if (!automatic) await retireUnsentCompaction(forId, String(filed.data.token || ''), barrier, current);
-      else reportDeferredCompaction(forId, String(filed.data.token || ''), barrier, receiptBarrierCode);
+      else reportDeferredCompaction(forId, String(filed.data.token || ''), barrier, receipt.code);
       if (!current()) return;
       renderControl();
       void pullActivity();
@@ -10145,12 +10155,14 @@
    * the time the fresh chat reads it.
    */
   /**
-   * Why the last automatic attempt stopped at the tool-result receipt, for the app's count (2026-11-03):
-   * 'results-unconfirmed' after the whole wait, 'results-wait-changed' when the chat changed during it.
+   * `receipt.code` says why an automatic attempt stopped at the tool-result receipt, for the app's count
+   * (2026-11-03): 'results-unconfirmed' after the whole wait with nothing running here,
+   * 'results-wait-changed' when the chat changed during it, and 'local-tools-running' when this
+   * machine's own calls (or the app's activity answer) kept the receipt from being checked at all,
+   * which the app does not count.
    */
-  let receiptBarrierCode = null;
-  async function stopAndSettle(forId, forEpoch, forRun, sameTurn, automatic, waiveReceipt = false) {
-    receiptBarrierCode = null;
+  async function stopAndSettle(forId, forEpoch, forRun, sameTurn, automatic, waiveReceipt = false, receipt = { code: null }) {
+    receipt.code = null;
     const current = () =>
       alive &&
       nativeRun === forRun &&
@@ -10222,12 +10234,16 @@
       renderControl();
       let endedPolls = 0;
       let sent = null;
+      // Whether the last check found this machine's own calls still running (or no answer from the
+      // app at all): then the receipt was never the thing waited for.
+      let localBusy = true;
       const ready = await waitUntil(async () => {
         if (!current()) return true;
         const peek = await peekCompactionActivity(forId);
         const count = peek ? peek.pendingTools : null;
         sent = peek ? peek.sentResults : null;
         if (!current()) return true;
+        localBusy = count !== 0;
         if (count !== 0) {
           endedPolls = 0;
           return false;
@@ -10254,14 +10270,14 @@
           sent?.settled === true && Number.isInteger(sent.count) && sent.count >= seen.calls;
       }, AUTO_RECEIPT_SETTLE_MS, AUTO_RECEIPT_QUICK_MS);
       if (!current()) {
-        receiptBarrierCode = 'results-wait-changed';
+        receipt.code = 'results-wait-changed';
         return t(
           'content_compact_chat_changed_waiting_results',
           'This chat changed while compaction was waiting for tool results.'
         );
       }
       if (!ready) {
-        receiptBarrierCode = 'results-unconfirmed';
+        receipt.code = localBusy ? 'local-tools-running' : 'results-unconfirmed';
         return t(
           'content_compact_results_unconfirmed',
           'ChatGPT has not confirmed receiving the latest tool results. Nothing was compacted.'
