@@ -14,8 +14,8 @@ async function run(script: string): Promise<string> {
     const file = path.join(directory, 'test.ps1');
     await writeFile(file, `$ErrorActionPreference='Stop'\nfunction Get-WindowRows { return @() }\n${WINDOWS_APPS_SCRIPT}\n${script}`, 'utf8');
     const { stdout } = await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', file], {
-      // A ceiling, not an expectation: a cold PowerShell on a loaded CI runner took longer than 15 s
-      // (2026-11-02, Windows x64 shard, run and retry). The app runs this script in its warm helper.
+      // A ceiling, not an expectation: a cold PowerShell start can exceed 15 s on a loaded CI runner.
+      // The app runs this script in its already-running helper.
       windowsHide: true, timeout: 60_000, maxBuffer: 32_768
     });
     return stdout.trim();
