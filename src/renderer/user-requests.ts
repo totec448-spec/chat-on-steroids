@@ -15,7 +15,8 @@ export interface UserRequestActions {
 /** In the app's language, with its own unit names. */
 function size(bytes: number): string {
   const [value, unit] = bytes < 1024 ? [bytes, 'byte'] : bytes < 1024 * 1024 ? [bytes / 1024, 'kilobyte'] : [bytes / (1024 * 1024), 'megabyte'];
-  return new Intl.NumberFormat(currentLanguage(), { style: 'unit', unit, maximumFractionDigits: 1 }).format(value);
+  // Bytes in full words ("9 bytes"; the short form reads "9 byte"), larger sizes as kB and MB.
+  return new Intl.NumberFormat(currentLanguage(), { style: 'unit', unit, unitDisplay: unit === 'byte' ? 'long' : 'short', maximumFractionDigits: 1 }).format(value);
 }
 
 function clock(at: number): string {
