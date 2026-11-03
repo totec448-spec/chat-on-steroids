@@ -29,6 +29,7 @@ const STATE = 'chats-at-once';
 
 const waiting = new Map<string, { since: number; asked: number }>();
 const admitted = new Map<string, { conversationId: string | null; at: number; seen: boolean }>();
+let workerReservations = 0;
 const limitSeen = new Map<string, { at: number; retryAt: number | null }>();
 let pauseUntil: number | null = null;
 const listeners = new Set<() => void>();
@@ -105,16 +106,16 @@ function note(key: string, now: number): void {
  * slots stay theirs. On success each worker holds a slot until its own chat shows as working.
  * Refused rather than queued, like the other worker limits: no second scheduler (Haz on #1694).
  */
-export function workerSlotsRefusal(callerConversationId: string | null, keys: readonly string[], now = Date.now()): string | null {
+export function workerSlotsRefusal(callerConversationId: string | null, count: number, now = Date.now()): string | null {
   const limit = chatsAtOnceLimit();
-  if (!limit || !keys.length) return null;
+  if (!limit || count <= 0) return null;
   const pause = activePause(now);
   if (pause !== null) return `ChatGPT asked to slow down; automatic work resumes at ${new Date(pause).toISOString()}`;
   const taken = occupied(now);
   if (callerConversationId) taken.delete(callerConversationId);
-  const fresh = keys.filter(key => !admitted.has(key));
-  if (taken.size + fresh.length > limit) return `${taken.size} other chats are working and the limit is ${limit}`;
-  for (const key of fresh) admitted.set(key, { conversationId: null, at: now, seen: false });
+  if (taken.size + count > limit) return `${taken.size} other chats are working and the limit is ${limit}`;
+  // Each worker its own reservation: two spawns in the same millisecond must not share one.
+  for (let index = 0; index < count; index++) admitted.set(`worker:${++workerReservations}`, { conversationId: null, at: now, seen: false });
   return null;
 }
 

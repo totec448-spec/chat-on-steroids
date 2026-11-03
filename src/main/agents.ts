@@ -2300,7 +2300,7 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
   }
 
   // Chats working at once (#1694): workers are chats too. The prime's own slot passes to them.
-  const chatsAtOnce = workerSlotsRefusal(conversationId, planned.map((_, index) => `spawn:${run!.runId}:${Date.now()}:${index}`));
+  const chatsAtOnce = workerSlotsRefusal(conversationId, planned.length);
   if (chatsAtOnce) {
     if (resumedDormant) parkRun(run, 'a new spawn was refused by the chats-at-once limit');
     else if (createdFreshRun) runs.delete(run.runId);
@@ -2784,7 +2784,7 @@ function stageMessagesActive(
           );
         }
         // Chats working at once (#1694): a woken worker is a working chat again.
-        const chatsAtOnce = workerSlotsRefusal(caller.conversationId ?? null, [`wake:${run?.runId ?? ''}:${to.info.id}:${Date.now()}`]);
+        const chatsAtOnce = workerSlotsRefusal(caller.conversationId ?? null, 1);
         if (chatsAtOnce) {
           logInfo(`agents: waking ${toId} refused: ${chatsAtOnce}`);
           throw new AgentError(
