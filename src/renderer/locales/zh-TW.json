@@ -1,4 +1,13 @@
 {
+  "Move chats between projects, chats that keep going, and an extension that updates during long runs.": "在專案之間移動對話、持續進行的對話，以及在長時間執行時也會更新的擴充功能。",
+  "Move chats between projects": "在專案之間移動對話",
+  "Drag a chat onto a project, or use Move to project in its menu. Undo puts it back.": "把對話拖到專案上，或使用其選單中的「移到專案」。復原可將它放回原處。",
+  "Chats keep going": "對話持續進行",
+  "When a chat's next step is not picked up, the app keeps trying, tells you, and offers Continue now.": "當對話的下一步沒有被接手時，應用程式會繼續嘗試、通知你，並提供「立即繼續」。",
+  "The extension updates itself": "擴充功能會自動更新",
+  "It no longer waits for every long-running chat to finish first.": "它不再等待每個長時間執行的對話結束。",
+  "Big chats stay fast": "大型對話依然流暢",
+  "Very long chats no longer slow the app down.": "很長的對話不再拖慢應用程式。",
   "Long chats that get through ChatGPT's limits, pop-ups out of the way, and message times.": "長對話能撐過 ChatGPT 的限制，彈出視窗不再擋路，還有訊息時間。",
   "Long chats keep going": "長對話持續進行",
   "When ChatGPT limits a long chat's history, the app waits instead of reloading it.": "ChatGPT 限制長對話的歷史記錄時，應用程式會等待，而不是重新載入。",
@@ -3708,5 +3717,17 @@
   "Plugins could not be loaded.": "無法載入外掛。",
   "Pets could not be loaded.": "無法載入寵物。",
   "Continue in a new chat from the last summary": "用最近的摘要在新聊天中繼續",
-  "ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.": "ChatGPT 已有 15 分鐘沒有寫出摘要。可以用最近儲存的摘要在新聊天中繼續工作。"
+  "ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.": "ChatGPT 已有 15 分鐘沒有寫出摘要。可以用最近儲存的摘要在新聊天中繼續工作。",
+  "Drag a chat here, or move it from its menu.": "把對話拖到這裡，或從它的選單中移動。",
+  "Move to project": "移到專案",
+  "Move this chat to a project; its commands then run in that project's folder": "將此對話移到一個專案；之後它的指令會在該專案的資料夾中執行",
+  "Moved to {0}": "已移到 {0}",
+  "Moved out of its project": "已移出所在專案",
+  "ChatGPT keeps it where it was.": "在 ChatGPT 中它仍在原處。",
+  "Undo": "復原",
+  "Move undone": "已復原移動",
+  "Today": "今天",
+  "Yesterday": "昨天",
+  "Previous 7 days": "過去 7 天",
+  "Previous 30 days": "過去 30 天"
 }

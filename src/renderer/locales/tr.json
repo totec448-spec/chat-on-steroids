@@ -1,4 +1,13 @@
 {
+  "Move chats between projects, chats that keep going, and an extension that updates during long runs.": "Sohbetleri projeler arasında taşıma, durmadan devam eden sohbetler ve uzun çalışmalarda da güncellenen bir eklenti.",
+  "Move chats between projects": "Sohbetleri projeler arasında taşıyın",
+  "Drag a chat onto a project, or use Move to project in its menu. Undo puts it back.": "Bir sohbeti bir projenin üzerine sürükleyin veya menüsündeki Projeye taşı'yı kullanın. Geri al onu geri koyar.",
+  "Chats keep going": "Sohbetler devam eder",
+  "When a chat's next step is not picked up, the app keeps trying, tells you, and offers Continue now.": "Bir sohbetin sonraki adımı alınmadığında uygulama denemeye devam eder, size söyler ve Şimdi devam et'i sunar.",
+  "The extension updates itself": "Eklenti kendini günceller",
+  "It no longer waits for every long-running chat to finish first.": "Artık uzun süredir çalışan her sohbetin bitmesini beklemiyor.",
+  "Big chats stay fast": "Büyük sohbetler hızlı kalır",
+  "Very long chats no longer slow the app down.": "Çok uzun sohbetler artık uygulamayı yavaşlatmıyor.",
   "Long chats that get through ChatGPT's limits, pop-ups out of the way, and message times.": "ChatGPT'nin sınırlarını aşan uzun sohbetler, yoldan çekilen açılır pencereler ve mesaj saatleri.",
   "Long chats keep going": "Uzun sohbetler devam eder",
   "When ChatGPT limits a long chat's history, the app waits instead of reloading it.": "ChatGPT uzun bir sohbetin geçmişini sınırladığında uygulama yeniden yüklemek yerine bekler.",
@@ -3789,5 +3798,17 @@
   "Plugins could not be loaded.": "Eklentiler yüklenemedi.",
   "Pets could not be loaded.": "Maskotlar yüklenemedi.",
   "Continue in a new chat from the last summary": "Son özetle yeni bir sohbette devam et",
-  "ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.": "ChatGPT 15 dakikadır özeti yazmadı. Son kaydedilen özet, işi yeni bir sohbette sürdürebilir."
+  "ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.": "ChatGPT 15 dakikadır özeti yazmadı. Son kaydedilen özet, işi yeni bir sohbette sürdürebilir.",
+  "Drag a chat here, or move it from its menu.": "Bir sohbeti buraya sürükleyin ya da menüsünden taşıyın.",
+  "Move to project": "Projeye taşı",
+  "Move this chat to a project; its commands then run in that project's folder": "Bu sohbeti bir projeye taşı; komutları artık o projenin klasöründe çalışır",
+  "Moved to {0}": "{0} projesine taşındı",
+  "Moved out of its project": "Projesinden çıkarıldı",
+  "ChatGPT keeps it where it was.": "ChatGPT onu olduğu yerde bırakır.",
+  "Undo": "Geri al",
+  "Move undone": "Taşıma geri alındı",
+  "Today": "Bugün",
+  "Yesterday": "Dün",
+  "Previous 7 days": "Son 7 gün",
+  "Previous 30 days": "Son 30 gün"
 }

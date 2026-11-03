@@ -9,6 +9,52 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.50] — Move chats between projects, and chats that keep going
+
+You can now move a chat into another project by dragging it or from its menu, with Undo. Long chats keep going in more situations: when a step is not picked up, the app keeps trying, tells you, and lets you continue with one click. The browser extension now updates itself even while long chats run, and very long chats no longer slow the app down.
+
+### 👉 After updating
+
+- Nothing to do. The browser extension updates itself. A chat that is still answering delays that by at most 30 minutes; a tool call or a message being sent still finishes first.
+
+### ✨ New
+
+- **Move chats between projects.** Drag a chat onto a project, or onto one of its groups, or use **Move to project** in the chat's menu. A notice says where it went and offers **Undo**. Chat lists also show **Today**, **Yesterday** and earlier date headings. The move happens only in the app; a chat linked to a ChatGPT Project stays where it is in ChatGPT.
+- **The new project's folder, said once.** After you move a chat into a project, your next message there tells ChatGPT the project's folder once, so it works in the right place.
+- **Continue now and Try now.** When a chat's quick tries run out, the app tells you, also on your phone if you set that up, and the chat's notice has **Continue now** or **Try now** to go on at once.
+- **Continue from the last summary.** When ChatGPT stops serving a chat for good, the app can continue it in a new ChatGPT chat from its last summary, still as one chat in the app.
+
+### 💪 Better
+
+- **Chats keep going.** After its quick tries, the app no longer gives up on a step that nobody picked up. It keeps trying every 15 to 60 minutes and says why a step waits. An automatic Continue that waited too long is sent as an ordinary message.
+- **Fresh turns by default.** When ChatGPT shows only Stop for a long time, the app stops and continues in a fresh turn. This was an experimental option and is now on for everyone; you can still turn it off in Settings.
+- **The extension updates during long runs.** It used to wait until no chat was answering, which in busy setups could mean never.
+- **Big chats stay fast.** In very long chats, the app no longer reads the whole history again and again. An automatic Continue that no longer fits the chat's last question is withdrawn instead of being offered for hours.
+- **Thorough Goal helpers get time.** A Goal or Loop helper set to extra-high or Pro reasoning now gets up to 12 or 20 minutes for its next message instead of timing out after three.
+- **Workers in the right mode.** A worker chat picks its own model before its wake-up message is typed.
+- **Compact chat lists.** Rows in Projects and Chats are tighter, so more chats fit on screen, and the keyboard focus outline is fully visible again. Inbox cards stay as they were.
+- **Chat menus on short windows.** A chat's menu that fit on neither side of its button showed a scrollbar for a few pixels. It now opens whole beside the button.
+- **Plugins, Skills and Pets** say when their list could not be loaded, instead of "Loading…" for good.
+- **Layout polish:** the + menu, text fields in Settings and the update card in every language.
+
+### 🛠 Fixed
+
+- **Loop chats that stopped when the helper's message got too long.** The helper was never told the length limit, so in long Loop chats its messages grew until one no longer fit, and every retry failed the same way. It is now told the limit, and after a message that was too long it is asked for a shorter one.
+- **The composer gear was missing on an empty message box.** After a change on ChatGPT's side, the Chat On Steroids gear only appeared once you typed something. It is back on every composer.
+- **Recovery that stopped while a tab was stuck.** A tab stuck in rendering mode could stop the app from recovering any chat. Recovery now goes on, and a chat that needs its tab shown gets it shown once.
+- **The app's own leftover text blocking messages.** When an automatic message could not be sent and stayed in ChatGPT's message box, every later message waited behind it. The app now replaces its own leftover.
+- **Tool activity in the right chat** across continued ChatGPT answers, and follow-up questions shown in the right order during a running answer.
+- **A turn waiting on ChatGPT's approval card** stays open instead of being counted as finished.
+- **New chats whose tab disappeared** get a fresh tab instead of waiting for ever.
+- **Offline Goal** reads its decision from the final answer, not from commentary after it.
+- **Files** whose tile repeats the file name are recognized as attached.
+- **Plugins refresh** checks work with all valid tool names and wait for slow settings pages.
+- **macOS:** the tunnel client recovers when the installer's temporary folder was deleted.
+
+### Thank you
+
+To **@Neinndall** for the attribution fix for continued answers and the ordering fix for follow-up questions, **@atsu6** for the Plugins refresh and macOS tunnel fixes, and **@lavalava45** for recovering lost new-chat tabs. And to **@scuan2**, **@ColinKiiim**, **@diegogarciarojo**, **@Minayuki523**, **@tngcphng** and **@Kdevaulo** for their reports.
+
 ## [2.1.49] — Long chats that get through ChatGPT's limits, and message times
 
 Long chats no longer stop when ChatGPT briefly limits a chat's history or the app is busy with other chats, and ChatGPT's own pop-ups no longer block your messages. You can also show the time of each message.
