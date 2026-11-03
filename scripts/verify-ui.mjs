@@ -16,10 +16,23 @@ import { parseShard, readWeights, shardChecks } from './shard-plan.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const electron = createRequire(import.meta.url)('electron');
 const filter = process.argv[2] ?? '';
+// Some developer Linux checkouts cannot run Chromium's SUID sandbox helper: it
+// needs root ownership/mode 4755, which must not be applied to the npm cache as
+// an incidental UI test setup. Explicitly opt into unsandboxed, isolated test
+// Electron windows instead; this never changes the actual packaged app's flags.
+const linuxTestDisplay = process.platform !== 'linux' ? null
+  : process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1' ? 'wayland'
+    : process.env.COS_VERIFY_UI_LINUX_X11 === '1' ? 'x11' : null;
+const linuxTestFlags = linuxTestDisplay
+  ? ['--no-sandbox', `--ozone-platform=${linuxTestDisplay}`, ...(process.env.COS_VERIFY_UI_RENDER_NODE
+    ? [`--render-node-override=${process.env.COS_VERIFY_UI_RENDER_NODE}`] : [])]
+  : [];
 // CI runners have no real GPU and slower timers, so checks that compare pixels or watch an animation
 // fail there although they pass on a real machine. CI names them here; they still run locally.
 const skip = new Set((process.env.VERIFY_UI_SKIP ?? '').split(',').map(name => name.trim()).filter(Boolean));
-const TIMEOUT_MS = 6 * 60_000;
+const requestedTimeout = Number(process.env.COS_VERIFY_UI_TIMEOUT_MS);
+const TIMEOUT_MS = Number.isFinite(requestedTimeout) && requestedTimeout >= 15_000 && requestedTimeout <= 6 * 60_000
+  ? requestedTimeout : 6 * 60_000;
 
 // How each check has to be started, where that differs from `electron <script>`.
 const special = {
@@ -78,7 +91,7 @@ for (const name of scripts) {
   const started = Date.now();
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
   const run = () => new Promise(resolve => {
-    const child = spawn(how.command, [path.join('scripts', name), ...how.args], { cwd: root, env, windowsHide: true });
+    const child = spawn(how.command, [...(how.command === electron ? linuxTestFlags : []), path.join('scripts', name), ...how.args], { cwd: root, env, windowsHide: true });
     let output = '';
     // A check that throws inside its async body and then quits in a finally block exits 0: its
     // failure only shows as an unhandled rejection. Two checks passed that way for weeks (#1144).
