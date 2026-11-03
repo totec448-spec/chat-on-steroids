@@ -746,6 +746,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         event.senderFrame !== owner.webContents.mainFrame) {
       return { ok: false as const, error: 'Could not open Web Local' };
     }
+    // This is an admitted Desktop-owner request, not a request-supplied URL.
+    // Never log activation URLs or arbitrary IPC payloads.
+    logInfo('web local: desktop owner admitted open');
     try {
       return { ok: true as const, data: await openWebLocal(url => shell.openExternal(url)) };
     } catch {

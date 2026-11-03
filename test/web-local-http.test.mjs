@@ -184,3 +184,42 @@ test('large valid catalogs stay bounded and explicitly disclose pagination', asy
   assert.match(html, /000/);
   assert.doesNotMatch(html, /199/);
 });
+
+test('only actual browser activation emits a credential-free decision, not probing or refreshing', async () => {
+  const decisions = [];
+  const owner = await start(async () => ({ projects: [{ name: 'Synthetic private project' }] }), {
+    onDecision: decision => decisions.push(decision)
+  });
+  const ticket = owner.service.issueActivation();
+  assert.equal((await fetch(owner.origin + '/')).status, 401);
+  assert.equal(await rawStatus(owner, '/', { host: 'localhost:' + owner.port }), 403);
+  assert.deepEqual(decisions, []);
+
+  const { answer, cookie, scope } = await activate(owner, ticket);
+  assert.equal(answer.status, 303);
+  assert.equal((await fetch(owner.origin + ticket)).status, 404);
+  assert.equal((await fetch(owner.origin + scope)).status, 401);
+  for (let i = 0; i < 3; i++) {
+    assert.equal((await fetch(owner.origin + scope, { headers: { cookie } })).status, 200);
+  }
+  assert.deepEqual(decisions, ['activation_accepted', 'projects_view_served']);
+  assert.equal(JSON.stringify(decisions).includes(ticket), false);
+  assert.equal(JSON.stringify(decisions).includes(scope), false);
+  assert.equal(JSON.stringify(decisions).includes(cookie), false);
+  assert.equal(JSON.stringify(decisions).includes('Synthetic private project'), false);
+});
+
+test('repeated owner-read failures report one fixed reason without logging sensitive errors', async () => {
+  const decisions = [];
+  const owner = await start(async () => { throw new Error('synthetic-private-owner-error'); }, {
+    onDecision: decision => decisions.push(decision)
+  });
+  const { cookie, scope } = await activate(owner);
+  for (let i = 0; i < 3; i++) {
+    const response = await fetch(owner.origin + scope, { headers: { cookie } });
+    assert.equal(response.status, 503);
+    assert.equal((await response.json()).error, 'read_unavailable');
+  }
+  assert.deepEqual(decisions, ['activation_accepted', 'owner_read_unavailable']);
+  assert.equal(JSON.stringify(decisions).includes('synthetic-private-owner-error'), false);
+});

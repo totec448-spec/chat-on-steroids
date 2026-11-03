@@ -29,10 +29,15 @@ test('native-open reaches the real owner projection without exposing paths or ac
 });
 
 test('failed native handoff revokes its disclosed one-use ticket', async () => {
+  const { getLog } = await import('../src/main/logger.js');
+  const loggedBefore = getLog().length;
   let failedTicket = '';
   await expect(openWebLocal(async url => {
     failedTicket = url;
-    throw new Error('No native browser');
+    throw new Error('No native browser (synthetic-private-data) ' + url);
   })).rejects.toThrow('No native browser');
   expect((await fetch(failedTicket)).status).toBe(404);
+  const entries = getLog().slice(loggedBefore).map(entry => entry.message).filter(message => message.startsWith('web local:'));
+  expect(entries).toContain('web local: native browser handoff failed; activation revoked');
+  expect(entries.join('\n')).not.toMatch(/synthetic-private-data|127\.0\.0\.1:\d+|\/activate\/|\/web\/|cos_local_/);
 });

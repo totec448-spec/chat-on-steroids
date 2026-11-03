@@ -1,6 +1,7 @@
 import type { AddressInfo } from 'node:net';
 import { createWebLocalServer, type WebLocalService } from './http.mjs';
 import { listProjects } from '../projects.js';
+import { logInfo, logWarn } from '../logger.js';
 
 let current: WebLocalService | null = null;
 let opening: Promise<WebLocalService> | null = null;
@@ -17,7 +18,14 @@ async function readLocalView() {
 
 async function startOnce(): Promise<WebLocalService> {
   if (shuttingDown) throw new Error('local_web_shutting_down');
-  const service = createWebLocalServer({ read: readLocalView });
+  const service = createWebLocalServer({
+    read: readLocalView,
+    onDecision: kind => {
+      if (kind === 'activation_accepted') logInfo('web local: browser activation accepted');
+      else if (kind === 'projects_view_served') logInfo('web local: Projects view served (HTTP 200)');
+      else if (kind === 'owner_read_unavailable') logWarn('web local: projects read unavailable; HTTP 503');
+    }
+  });
   try {
     await new Promise<void>((resolve, reject) => {
       service.server.once('error', reject);
@@ -31,9 +39,11 @@ async function startOnce(): Promise<WebLocalService> {
       throw new Error('local_web_shutting_down');
     }
     current = service;
+    logInfo('web local: loopback listener ready (read-only)');
     return service;
   } catch (error) {
     await service.stop().catch(() => undefined);
+    logWarn('web local: listener start failed; no browser activation issued');
     throw error;
   }
 }
@@ -57,6 +67,8 @@ export async function openWebLocal(openExternal: (url: string) => Promise<unknow
       await openExternal('http://127.0.0.1:' + address.port + activation);
     } catch (error) {
       service.revokeActivation(activation);
+      // Native shell errors may contain the activation URL. Never log the error itself.
+      logWarn('web local: native browser handoff failed; activation revoked');
       throw error;
     }
     if (shuttingDown || service !== current) throw new Error('local_web_shutting_down');
@@ -72,5 +84,8 @@ export async function shutdownWebLocal(): Promise<void> {
   if (opening) await opening.catch(() => undefined);
   const service = current;
   current = null;
-  if (service) await service.stop();
+  if (service) {
+    await service.stop();
+    logInfo('web local: listener stopped; browser session revoked');
+  }
 }

@@ -841,6 +841,8 @@ beforeEach(async () => {
 });
 
 it('only the owning Desktop main frame may activate Web Local over named IPC', async () => {
+  const { getLog } = await import('../src/main/logger.js');
+  const loggedBefore = getLog().length;
   const mainFrame = {};
   const webContents = { send: vi.fn(), isDestroyed: () => false, mainFrame };
   currentWindow = {
@@ -852,7 +854,7 @@ it('only the owning Desktop main frame may activate Web Local over named IPC', a
   const invoke = handlers.get('webLocal:open')!;
   expect(await invoke({ sender: {}, senderFrame: mainFrame }, undefined)).toMatchObject({ ok: false });
   expect(await invoke({ sender: webContents, senderFrame: {} }, undefined)).toMatchObject({ ok: false });
-  expect(await invoke({ sender: webContents, senderFrame: mainFrame }, {})).toMatchObject({ ok: false });
+  expect(await invoke({ sender: webContents, senderFrame: mainFrame }, { text: 'synthetic-private-input' })).toMatchObject({ ok: false });
   currentWindow = { ...currentWindow!, isDestroyed: () => true };
   expect(await invoke({ sender: webContents, senderFrame: mainFrame }, undefined)).toMatchObject({ ok: false });
   currentWindow = { ...currentWindow!, isDestroyed: () => false };
@@ -860,6 +862,9 @@ it('only the owning Desktop main frame may activate Web Local over named IPC', a
 
   expect(await invoke({ sender: webContents, senderFrame: mainFrame }, undefined)).toMatchObject({ ok: true, data: true });
   expect(vi.mocked(shell.openExternal).mock.calls.at(-1)?.[0]).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/activate\//);
+  const decisions = getLog().slice(loggedBefore).map(entry => entry.message).filter(message => message.startsWith('web local:'));
+  expect(decisions).toContain('web local: desktop owner admitted open');
+  expect(decisions.join('\n')).not.toMatch(/synthetic-private-input|127\.0\.0\.1:\d+|\/activate\/|\/web\/|cos_local_/);
   const { shutdownWebLocal } = await import('../src/main/web-local/index.js');
   await shutdownWebLocal();
 });

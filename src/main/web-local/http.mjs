@@ -59,8 +59,9 @@ function page(data, path) {
     '</main></body></html>';
 }
 
-export function createWebLocalServer({ read, now = Date.now, readDeadlineMs = 3000, drainMs = 2000 }) {
-  if (typeof read !== 'function' || typeof now !== 'function' ||
+export function createWebLocalServer({ read, now = Date.now, readDeadlineMs = 3000, drainMs = 2000,
+  onDecision = () => {} }) {
+  if (typeof read !== 'function' || typeof now !== 'function' || typeof onDecision !== 'function' ||
       !Number.isSafeInteger(readDeadlineMs) || readDeadlineMs < 1 || readDeadlineMs > 10000 ||
       !Number.isSafeInteger(drainMs) || drainMs < 1 || drainMs > 5000) {
     throw new TypeError('invalid_web_local_options');
@@ -75,6 +76,18 @@ export function createWebLocalServer({ read, now = Date.now, readDeadlineMs = 30
   let stopped = false;
   let stopPromise = null;
   let unfinishedReads = 0;
+  let ownerReadFailureReported = false;
+  let projectsViewReported = false;
+
+  // Only fixed, low-volume outcomes can reach the Desktop diagnostics owner.
+  // Never forward request targets, headers, ticket values, cookies or owner errors.
+  const decide = kind => { try { onDecision(kind); } catch { /* Diagnostics must not affect HTTP. */ } };
+  const noteOwnerReadFailure = () => {
+    if (!ownerReadFailureReported) {
+      ownerReadFailureReported = true;
+      decide('owner_read_unavailable');
+    }
+  };
 
   const server = http.createServer(async (req, res) => {
     res.setHeader('cache-control', 'no-store');
@@ -117,6 +130,7 @@ export function createWebLocalServer({ read, now = Date.now, readDeadlineMs = 30
       tickets.delete(claim[1]); // spend before publishing a browser session
       active = token();
       expires = now() + SESSION_LIFE;
+      decide('activation_accepted');
       return reply(res, 303, '', 'text/plain; charset=utf-8', {
         location: scope,
         'set-cookie': name + '=' + active + '; HttpOnly; SameSite=Strict; Path=' + scope + '; Max-Age=1800'
@@ -142,9 +156,17 @@ export function createWebLocalServer({ read, now = Date.now, readDeadlineMs = 30
       ]);
       if (stopped || active !== admittedSession || now() >= expires) return jsonError(res, 503, 'unavailable');
       const body = page(result, scope);
-      if (Buffer.byteLength(body) > MAX_REPLY_BYTES) return jsonError(res, 503, 'read_unavailable');
+      if (Buffer.byteLength(body) > MAX_REPLY_BYTES) {
+        noteOwnerReadFailure();
+        return jsonError(res, 503, 'read_unavailable');
+      }
       reply(res, 200, body, 'text/html; charset=utf-8');
+      if (!projectsViewReported && res.headersSent && !res.destroyed) {
+        projectsViewReported = true;
+        decide('projects_view_served');
+      }
     } catch {
+      noteOwnerReadFailure();
       jsonError(res, 503, 'read_unavailable');
     } finally {
       if (timer) clearTimeout(timer);

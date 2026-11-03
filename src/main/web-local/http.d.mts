@@ -13,4 +13,6 @@ export function createWebLocalServer(options: {
   now?: () => number;
   readDeadlineMs?: number;
   drainMs?: number;
+  /** Fixed, bounded diagnostics only; never receives request or credential values. */
+  onDecision?: (kind: 'activation_accepted' | 'projects_view_served' | 'owner_read_unavailable') => void;
 }): WebLocalService;

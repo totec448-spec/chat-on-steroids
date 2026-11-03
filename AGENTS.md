@@ -5475,6 +5475,17 @@ listener-bound credentials and real browser acceptance are gates before any
 sensitive Web data or commands. Unlike the Control API, this UI never enables
 the Control API's action switch.
 
+Web Local diagnostics use fixed, credential-free Activity messages for an
+admitted Desktop open, listener startup/shutdown, successful one-time browser
+activation, the first successful Projects page response, a failed native
+browser handoff (whose ticket is revoked) and the first unavailable Projects
+read per listener. Expected HTTP Host, Origin,
+method, cookie and ticket refusals return their bounded HTTP errors but are
+intentionally **not** written to Activity one request at a time: an untrusted
+local client could otherwise flood the persisted log and expose credential
+material. Neither activation URLs, scope paths, cookies, project names nor raw
+browser/owner error messages enter Web Local diagnostics.
+
 The read routes (`control-reads.ts`) are `GET /v1/sessions`, `/v1/sessions/{id}`,
 `/v1/sessions/{id}/events`, `/v1/inputs`, `/v1/agents`, `/v1/log` and `/v1/models` (the saved
 model catalog; reading it never starts discovery). Each asks the owner that
