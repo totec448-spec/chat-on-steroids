@@ -14,13 +14,16 @@ async function run(script: string): Promise<string> {
     const file = path.join(directory, 'test.ps1');
     await writeFile(file, `$ErrorActionPreference='Stop'\nfunction Get-WindowRows { return @() }\n${WINDOWS_APPS_SCRIPT}\n${script}`, 'utf8');
     const { stdout } = await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', file], {
-      windowsHide: true, timeout: 15_000, maxBuffer: 32_768
+      // A ceiling, not an expectation: a cold PowerShell start can exceed 15 s on a loaded CI runner.
+      // The app runs this script in its already-running helper.
+      windowsHide: true, timeout: 60_000, maxBuffer: 32_768
     });
     return stdout.trim();
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
 
-describe.runIf(process.platform === 'win32')('Windows installed apps', () => {
+// Each test starts PowerShell once or twice with a 60 s ceiling; the default 30 s test limit is too short.
+describe.runIf(process.platform === 'win32')('Windows installed apps', { timeout: 150_000 }, () => {
   it('returns a bounded real catalog and includes empty windows when none were observed', async () => {
     const result = JSON.parse(await run(`
 $result=Get-WindowsApps @{limit=2}

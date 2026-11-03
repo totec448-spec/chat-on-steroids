@@ -4,6 +4,8 @@ import { GOAL_CONTINUATIONS, GOAL_MARKER_INSTRUCTION, templateGoalDecision, tool
 import { promises as fs } from 'node:fs';
 const browser = vi.hoisted(() => ({ request: vi.fn(), authorize: vi.fn(), inputs: [] as Array<{ id: string; sessionId: string; finishOwner?: { turnId: string; periodic: boolean } }> }));
 vi.mock('../src/main/session/input.js', () => ({ requestBrowserDecision: browser.request, authorizeBrowserHelperRetry: browser.authorize, listInputs: async () => browser.inputs }));
+const warnings = vi.hoisted(() => [] as string[]);
+vi.mock('../src/main/logger.js', async original => ({ ...await original<typeof import('../src/main/logger.js')>(), logWarn: (line: string) => { warnings.push(line); } }));
 vi.mock('electron', () => ({
   app: { getPath: () => '', getVersion: () => '0.0.0' },
   safeStorage: {
@@ -329,8 +331,10 @@ describe('Goal decision backends', () => {
       // Fake timers do not speed up the real file work before the request: on the release runner
       // (8 s per neighboring test on Windows x64) it took longer than waitFor's default second.
       await vi.waitFor(() => expect(browser.request).toHaveBeenCalledTimes(1), { timeout: 15_000 });
-      await vi.advanceTimersByTimeAsync(180_000);
+      await vi.advanceTimersByTimeAsync(goal.goalRequestTimeoutMs('chatgpt'));
       expect(await settled(id)).toMatchObject({ stage: 'failed' });
+      // The log names the limit that ended it, so a timeout shows which deadline applied.
+      expect(warnings.some(line => line.includes(`goal: draft for ${id} failed — timeout_or_cancelled (the 5-minute limit for the chatgpt helper at high reasoning)`))).toBe(true);
       full = (browser.request.mock.calls[0]?.[0] as string).length;
       expect(full).toBeGreaterThan(60_000);
 
@@ -338,7 +342,7 @@ describe('Goal decision backends', () => {
       goal.startGoalDraft({ conversationId: id, sessionId: session.id, turnId: 'refused' });
       await vi.waitFor(() => expect(browser.request).toHaveBeenCalledTimes(2), { timeout: 15_000 });
       expect((browser.request.mock.calls[1]?.[0] as string).length).toBe(full);
-      await vi.advanceTimersByTimeAsync(180_000);
+      await vi.advanceTimersByTimeAsync(goal.goalRequestTimeoutMs('chatgpt'));
       expect(await settled(id)).toMatchObject({ stage: 'failed' });
     } finally { vi.useRealTimers(); }
 
@@ -612,6 +616,82 @@ describe('Goal decision backends', () => {
     expect(await goal.draftOpeningMessage('Finish this', 'goal')).toMatchObject({ error: expect.any(String) });
     expect(fetch).not.toHaveBeenCalled();
   });
+  // The page's own request for an opening message gives up after 190 s (MODEL_REQUEST_TIMEOUT_MS in
+  // the extension), so a longer helper deadline (#2033) must not apply there: the page would show
+  // its own timeout while the app kept waiting on an answer nobody could receive.
+  it('ends an opening message for the page within the deadline it is given, whatever the helper effort', async () => {
+    const config = (await import('../src/main/config.js')).getConfig();
+    await saveConfig({ ...config, goal: { ...config.goal, backend: 'chatgpt', helperReasoning: 'xhigh' } });
+    expect(goal.goalRequestTimeoutMs('chatgpt')).toBe(12 * 60_000);
+    browser.request.mockImplementationOnce((_text: string, signal: AbortSignal) =>
+      new Promise<string>((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('goal_browser_cancelled')), { once: true })));
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
+    try {
+      let result: unknown = null;
+      void goal.draftOpeningMessage('Finish this', 'goal', undefined, undefined, 180_000).then(value => { result = value; });
+      await vi.waitFor(() => expect(browser.request).toHaveBeenCalledTimes(1), { timeout: 15_000 });
+      await vi.advanceTimersByTimeAsync(180_000);
+      await vi.waitFor(() => expect(result).toMatchObject({ error: 'timeout_or_cancelled' }), { timeout: 15_000 });
+    } finally { vi.useRealTimers(); await saveConfig(config); }
+  });
+  // CodeRabbit on #2033: the deadline and the request must come from one helper setting. A save
+  // between the draft's start and its request (low to Pro) used Pro with a three-minute deadline.
+  it('keeps the helper setting a draft started with for both its request and its deadline', async () => {
+    const config = (await import('../src/main/config.js')).getConfig();
+    await saveConfig({ ...config, goal: { ...config.goal, enabled: true, backend: 'chatgpt', helperReasoning: 'low' } });
+    try {
+      const id = 'helper-frozen';
+      const session = await createSession({ title: 'frozen', conversationId: id });
+      await appendEvent(session.id, { source: 'extension', kind: 'user_message', time: 1000, message: { text: 'Build it', chars: 8, truncated: false } });
+      await appendEvent(session.id, { source: 'extension', kind: 'assistant_message', final: true, time: 2000, message: { text: 'Built.', chars: 6, truncated: false } });
+      browser.request.mockResolvedValueOnce('{"action":"continue","reply":"Next step"}');
+      goal.startGoalDraft({ conversationId: id, sessionId: session.id, turnId: 'frozen-turn', deferStart: true });
+      await saveConfig({ ...config, goal: { ...config.goal, enabled: true, backend: 'chatgpt', helperReasoning: 'pro' } });
+      goal.beginGoalDraft(id, goal.goalViewFor(id)!.token);
+      await vi.waitFor(() => expect(browser.request).toHaveBeenCalledTimes(1), { timeout: 15_000 });
+      expect(browser.request.mock.calls[0]?.[2]).toMatchObject({ reasoningEffort: 'low' });
+    } finally { await saveConfig(config); }
+  });
+  // 2026-11-02, the maintainer's Loop chat: the helper was never told the 12,000-character cap, its
+  // messages grew from 8,500 to 11,500 characters, the next one failed as reply_too_long, and the
+  // retry asked for the same thing again.
+  it('tells the helper the reply limit, and asks for a shorter message after one that was too long', async () => {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: true, backend: 'chatgpt' } });
+    const id = 'goal-too-long';
+    const sessionId = await recording(id, 'Done with part one');
+    const prompt = (call: number) => browser.request.mock.calls[call]?.[0] as string;
+    browser.request.mockResolvedValueOnce(JSON.stringify({ action: 'continue', reply: 'x'.repeat(12_500) }));
+    goal.startGoalDraft({ conversationId: id, sessionId, turnId: 't-long' });
+    expect(await settled(id)).toMatchObject({ stage: 'failed', error: 'reply_too_long' });
+    expect(warnings.some(line => line.includes(`goal: draft for ${id} failed — reply_too_long; the next draft for this chat asks for a shorter message`))).toBe(true);
+    expect(prompt(0)).toContain('Keep reply under 10,000 characters');
+    expect(prompt(0)).not.toContain('previous message for this chat was too long');
+
+    browser.request.mockResolvedValueOnce('{"action":"continue","reply":"Shorter next step"}');
+    goal.startGoalDraft({ conversationId: id, sessionId, turnId: 't-short' });
+    expect(await settled(id)).toMatchObject({ stage: 'ready' });
+    expect(prompt(1)).toContain('previous message for this chat was too long');
+
+    // Once a message fitted, the extra request is gone again.
+    browser.request.mockResolvedValueOnce('{"action":"continue","reply":"Next step"}');
+    goal.startGoalDraft({ conversationId: id, sessionId, turnId: 't-next' });
+    await settled(id);
+    expect(prompt(2)).not.toContain('previous message for this chat was too long');
+  });
+  it('marks the chat and says so when the stream itself ends as too long', async () => {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: true, backend: 'chatgpt' } });
+    const id = 'goal-stream-too-long';
+    const sessionId = await recording(id, 'Done with part one');
+    browser.request.mockRejectedValueOnce(new Error('reply_too_long'));
+    goal.startGoalDraft({ conversationId: id, sessionId, turnId: 't-stream' });
+    expect(await settled(id)).toMatchObject({ stage: 'failed', error: 'reply_too_long' });
+    expect(warnings.some(line => line.includes(`goal: draft for ${id} failed — reply_too_long; the next draft for this chat asks for a shorter message`))).toBe(true);
+    browser.request.mockResolvedValueOnce('{"action":"continue","reply":"Shorter next step"}');
+    goal.startGoalDraft({ conversationId: id, sessionId, turnId: 't-after' });
+    await settled(id);
+    expect(browser.request.mock.calls.at(-1)?.[0]).toContain('previous message for this chat was too long');
+  });
+
   it('does not let a stale browser answer replace a newer source-chat draft', async () => {
     await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: true, backend: 'chatgpt' } });
     const id = 'goal-browser-stale';
@@ -629,6 +709,25 @@ describe('Goal decision backends', () => {
     expect(view.turnId).toBe('new');
     expect(view.reply).toBe(goal.humanReply('newest work'));
   });
+});
+
+// 2026-11-01 (maintainer's Mac log, four times a day): ChatGPT's picker failed to confirm the helper's
+// model, nothing was typed, and each Goal then waited for a person. That failure is retryable, and the
+// helper runs on ChatGPT's current selection for a while so the next ask goes out.
+it('asks again on ChatGPT\'s current selection when the picker did not confirm the helper\'s model', async () => {
+  await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: true, backend: 'chatgpt' } });
+  goal.resetHelperModelFallbackForTests();
+  const id = 'helper-model-unconfirmed';
+  await goal.setGoalSwitchNow(id, 'goal', true);
+  const sessionId = await recording(id, 'Next task');
+  await goal.acceptGoalReplyNow({ conversationId: id, sessionId, replyId: 'reply-one', turnId: 'turn-one', eventSeq: 10, blocked: false });
+  expect(goal.goalHelperSelection().model).not.toBeNull();
+  browser.request.mockRejectedValueOnce(new Error('goal_helper_model_unconfirmed: Requested model or reasoning could not be confirmed'));
+  goal.startGoalDraft({ conversationId: id, sessionId, turnId: 'turn-one' });
+  expect(await settled(id)).toMatchObject({ stage: 'failed', retryable: true });
+  expect(goal.goalDraftNeedsIntervention(id)).toBe(false);
+  expect(goal.goalHelperSelection()).toEqual({ model: null, reasoningEffort: null });
+  goal.resetHelperModelFallbackForTests();
 });
 
 it.each(['goal_browser_send_failed', 'goal_browser_send_unconfirmed'])('preserves source debt after %s without automatic transport retry', async failure => {

@@ -258,14 +258,15 @@
 .feedback-form[hidden] { display: none; }
 .feedback-fields { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .feedback-form > .pet-delete-actions { flex-shrink: 0; margin: 0; }
-.feedback-kind { display: flex; flex-wrap: wrap; gap: 4px; width: fit-content; max-width: 100%; padding: 4px; border: 1px solid var(--edge); border-radius: 12px; background: var(--sunk); }
-.feedback-kind label { position: relative; display: flex; align-items: center; min-height: 34px; padding: 6px 14px; border-radius: 9px; color: var(--soft); font-size: calc(13px * var(--text-scale, 1)); cursor: pointer; }
-.feedback-kind label:hover { color: var(--ink); }
-.feedback-kind input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
-.feedback-kind label:has(input:checked) { background: var(--accent-wash); box-shadow: inset 0 0 0 1px var(--accent-edge); color: var(--ink); }
-.feedback-kind label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 .feedback-update { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin: 16px 0 0; padding: 10px 12px; border-radius: var(--r-sm); background: var(--accent-wash); }
 .feedback-update[hidden] { display: none; }
+/* The form opens with the update notice or, without one, the first field: no extra space above either
+   (the kind switch that used to come first went with the idea form, 2026-11-01). */
+.feedback-fields > .feedback-update:first-child { margin-top: 0; }
+/* Scrolled into view in a short window, the error keeps some room below it instead of ending flush
+   against the scroll area's edge (a fraction of a pixel past it on CI's small screen). */
+#feedbackError { scroll-margin-bottom: 12px; }
+.feedback-fields > .feedback-update[hidden]:first-child + #feedbackBug > .plugin-field:first-child { margin-top: 0; }
 .feedback-update span { flex: 1 1 16rem; min-width: 0; }
 .feedback-dialog .plugin-field small { color: var(--faint); font-size: inherit; font-weight: 400; }
 .feedback-dialog .plugin-field textarea, .feedback-dialog .plugin-field select { width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid var(--edge); border-radius: var(--r-sm); background: var(--sunk); color: var(--ink); font: inherit; font-weight: 400; line-height: 1.5; }
@@ -275,8 +276,10 @@
 .feedback-report .btn { flex-shrink: 0; }
 .feedback-report.is-saved .setting-text em { color: var(--green); }
 .feedback-note { margin: 10px 0 0; color: var(--faint); font-size: calc(12px * var(--text-scale, 1)); }
+/* Same quiet inline link as the Usage formula's sources. */
+.feedback-note a { color: var(--ink); text-decoration-color: var(--edge); text-underline-offset: 3px; }
+.feedback-note a:hover { text-decoration-color: currentColor; }
 .feedback-dialog .plugin-error { margin: 12px 0 0; }
-.feedback-fields > .feedback-kind { margin-top: 0; }
 .feedback-dialog .plugin-field { margin: 14px 0; }
 .feedback-done > p:first-child { margin-top: 0; }
 .plugin-card-error { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--red); font-size: calc(11px * var(--text-scale, 1)); }
@@ -2686,8 +2689,21 @@ input[readonly] {
 
 .sess { position: relative; display: flex; align-items: center; min-height: 36px; padding: 7px 10px; margin: 2px 0; border-radius: 8px; cursor: pointer; }
 .sess:hover, .sess.is-pointed, .sess.is-sel { background: var(--hover); }
+/* Date headings in a chat list (#1919): quiet text on the rows' text edge, no count or icon. The
+   first one sits close under its list's heading; later ones keep a little air above. */
+.chat-date-section { padding: 10px 10px 3px; color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); font-weight: 600; line-height: 1.4; user-select: none; }
+.chat-date-section:first-child { padding-top: 4px; }
 .sess-top { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
 .sess-top b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(14px * var(--text-scale, 1)); font-weight: 400; line-height: 22px; }
+/* Compact the existing Projects/Chats tree without changing the separate multi-line Inbox cards.
+   Keep the focusable row control at least 24px high and the overlaid menu at 26px; larger text grows naturally. */
+#sessionList:not(.is-inbox) .sess:not(.sess-card) { min-height: 32px; margin-block: 1px; padding-block: 4px; }
+#sessionList:not(.is-inbox) .sess:not(.sess-card) .sess-top { min-height: 24px; }
+#sessionList:not(.is-inbox) .sess:not(.sess-card) .sess-top > b { line-height: 1.4; }
+/* The title mask used to reserve the menu column also masked the keyboard outline. Paint focus on
+   the unmasked row instead, without changing the hover fade or the row's measured size. */
+#sessionList:not(.is-inbox) .sess:has(> .sess-top:focus-visible) { outline: 2px solid var(--blue); outline-offset: -2px; }
+#sessionList:not(.is-inbox) .sess:has(> .sess-top:focus-visible) > .sess-top { outline: none; }
 .sess-top .sess-rename { flex: 1; min-width: 0; margin: -1px 0; padding: 0 6px; height: 24px; border: 1px solid var(--accent); border-radius: 6px;
   background: var(--card); color: var(--ink); font: inherit; font-size: calc(14px * var(--text-scale, 1)); line-height: 22px; outline: none;
   cursor: text; user-select: text; }
@@ -3767,6 +3783,8 @@ input.num:disabled { opacity: .5; cursor: default; }
 .phone-push-options > .setting:first-child { border-top: 1px solid var(--line); }
 .phone-push-field .phone-push-control, .setting-text-field .setting-text-control { display: flex; flex: 1 1 280px; gap: 8px; min-width: 0; }
 .phone-push-control input, .setting-text-control input { flex: 1 1 auto; min-width: 0; }
+/* The explanation keeps a readable width; below that the field moves under it (design audit 2026-11-01). */
+.setting.phone-push-field > .setting-text, .setting.setting-text-field > .setting-text { flex-basis: 20rem; }
 .phone-push-control .btn { flex: 0 0 auto; justify-content: flex-end; text-align: end; }
 .phone-push-advanced { border-top: 1px solid var(--line); }
 .phone-push-advanced > summary { display: flex; align-items: center; gap: 6px; width: fit-content; padding: 12px 2px; cursor: pointer; color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); list-style: none; }
@@ -3995,6 +4013,21 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
   box-shadow: 0 8px 24px -8px rgb(0 0 0 / 45%);
   z-index: 10;
 }
+/* One action (Undo) after the message, on the same line while it fits. */
+.toast.has-action { display: flex; align-items: center; gap: 12px; text-align: start; padding-inline-end: 8px; }
+.toast-action {
+  flex: none;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  background: color-mix(in srgb, var(--page) 16%, transparent);
+  border: 0;
+  border-radius: 8px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.toast-action:hover { background: color-mix(in srgb, var(--page) 26%, transparent); }
+.toast-action:focus-visible { outline: 2px solid var(--page); outline-offset: 1px; }
 
 /* ------------------------------------------------------------- the goal loop */
 
@@ -4258,6 +4291,13 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 #attachmentMenu > summary .ico { display: block; --ico: 17px; --glyph: 17px; transform: scale(calc(20 / 17)); }
 .composer-menu > summary:hover, .composer-menu[open] > summary { color: var(--ink); background: var(--hover); }
 .composer-popover { position: absolute; z-index: 30; bottom: calc(100% + 12px); left: 0; width: 224px; padding: 7px; background: var(--popover, var(--card)); border: 1px solid var(--edge); border-radius: 14px; box-shadow: 0 8px 30px #0005; }
+/* The + menu fits its longest item, so no language wraps a label onto two lines (design audit 2026-11-01). */
+/* The composer is the space the menu opens into: it starts at the composer's left edge, so it is
+   capped to the composer's width (a narrow window at high zoom leaves little beside the sidebar). A label
+   longer than the cap wraps, and a single long word breaks (CodeRabbit on #2006). */
+.composer { container-type: inline-size; }
+#attachmentMenu > .composer-popover { width: max-content; min-width: min(224px, calc(100cqi - 24px)); max-width: min(360px, calc(100cqi - 24px)); }
+#attachmentMenu > .composer-popover button { overflow-wrap: anywhere; }
 .model-menu .composer-popover { left: auto; right: 0; width: 300px; max-width: calc(100vw - 32px); max-height: 70vh; overflow-y: auto; padding: 8px; }
 .model-menu { width: max-content; max-width: 100%; min-width: 0; }
 .model-menu > summary { width: 100%; min-width: 0; justify-content: center; }
@@ -4507,7 +4547,7 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 /* Its center 27px from the menu's, where a chat row's sub-agent arrow sits beside its "⋯" on hover. */
 .project-heading > .project-new { width: 24px; margin-inline-end: -7px; }
 /* Heading: 8px padding + 17px folder + 9px gap. Rows already supply 10px padding. */
-.project-group > .sess, .project-group > .worker-group { margin-inline-start: 24px; }
+.project-group > .sess, .project-group > .worker-group, .project-group > .chat-date-section { margin-inline-start: 24px; }
 .project-show-more { margin-inline-start: 34px; color: var(--faint); font-size: calc(14px * var(--text-scale, 1)); padding: 6px 0; border: 0; background: transparent; }
 /* Chat groups inside a project (#1038): one step in, a heading like the project's, its chats one more step in. */
 .project-group > .chat-group { position: relative; margin: 2px 0 2px 24px; }
@@ -4532,6 +4572,8 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 :is(.sess, .project-group, .chat-group).is-sorting { opacity: .45; }
 :is(.sess, .project-group, .chat-group).sort-before::before, :is(.sess, .project-group, .chat-group).sort-after::after { content: ''; position: absolute; inset-inline: 0; height: 2px; border-radius: 2px; background: var(--blue); pointer-events: none; }
 :is(.sess, .project-group, .chat-group).sort-before::before { top: -2px; }
+/* A project or group a dragged chat would move into (#1919): the row's own hover shape, in the accent. */
+:is(.project-heading, .chat-group-heading).is-drop-target { background: color-mix(in srgb, var(--blue) 16%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue) 55%, transparent); }
 :is(.sess, .project-group, .chat-group).sort-after::after { bottom: -2px; }
 
 /* Right-side work panes. Files and Sub-agents are mutually exclusive projections of the
@@ -4953,6 +4995,9 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .composer-dock button { flex-shrink: 0; }
 .composer-dock .dock-action { border: 0; border-radius: 5px; background: transparent; color: var(--soft); padding: 4px; display: inline-flex; align-items: center; cursor: pointer; }
 .composer-dock .dock-action:hover { color: var(--ink); background: var(--hover); }
+/* A dock action with its words (Continue now): the one thing to do about the row, so it is said. */
+.composer-dock .dock-action.is-labelled { gap: 5px; padding: 3px 8px; color: var(--ink); font: inherit; font-size: calc(12px * var(--text-scale, 1)); font-weight: 550; white-space: nowrap; }
+.composer-dock .dock-action.is-labelled:disabled { opacity: .55; cursor: default; }
 .composer-dock .queued-input.is-editing { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; }
 .composer-dock .queued-input.is-editing textarea { grid-row: 1 / span 2; min-width: 0; width: 100%; }
 .composer-dock .queued-input.is-editing > button { grid-column: 2; justify-self: center; }
@@ -4986,6 +5031,9 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 
 .context-meter { position: relative; flex: 0 0 auto; }
 #contextMeterButton { display: flex; align-items: center; gap: 5px; height: 32px; padding: 0 5px; border: 0; border-radius: 8px; background: transparent; color: var(--soft); cursor: pointer; }
+/* A Compact & Resume waiting too long for its summary: a dot says the popover has a way on (2026-11-01). */
+#contextMeter[data-attention] #contextMeterButton { position: relative; }
+#contextMeter[data-attention] #contextMeterButton::after { content: ''; position: absolute; top: 4px; right: 3px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent-fill, var(--accent)); box-shadow: 0 0 0 2px var(--card); }
 /* A toolbar label like Mode, Plan and Model: same face and size, with tabular digits so the value
    does not shift as it changes. The 10px monospace of the old token chip broke the row's line. */
 #contextMeterButton { font: inherit; }
