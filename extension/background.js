@@ -3874,6 +3874,26 @@ function conversationStillOpen(conversationId) {
   return Object.values(tabConversations).some((value) => value === conversationId);
 }
 
+/**
+ * The persisted tab-to-chat cache is an optimization, not proof that a user closed a tab.
+ * After a worker restart or a document reload, the cache can be temporarily empty even
+ * while Chrome still has the conversation open. Never file a deliberate close from that
+ * absence alone. A failed tab query must defer the close rather than assert departure.
+ */
+async function verifiedConversationGone(conversationId) {
+  if (conversationStillOpen(conversationId)) return 'present';
+  let tabs;
+  try { tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS }); }
+  catch { return 'unknown'; }
+  if (!Array.isArray(tabs)) return 'unknown';
+  // A navigation in progress still carries its *old* committed tab.url. The
+  // pending URL is authoritative for departure so we do not keep a chat open
+  // merely because the tab is on its way to a different page.
+  if (tabs.some(tab => conversationFromUrl(tab.pendingUrl || tab.url) === conversationId)) return 'present';
+  // A fresh content-script bind may have arrived while tabs.query was pending.
+  return conversationStillOpen(conversationId) ? 'present' : 'gone';
+}
+
 async function enqueueClose(conversationId, byExtension = false) {
   const id = cleanConversationId(conversationId);
   if (!id) return false;
@@ -3906,7 +3926,16 @@ async function drainCloses() {
         changed = true;
         continue;
       }
-      if (conversationStillOpen(conversationId)) continue;
+      const presence = await verifiedConversationGone(conversationId);
+      if (presence !== 'gone') {
+        // A real open tab supersedes an unacknowledged close, whereas an unavailable
+        // browser inventory must keep the pending close for a later reliable pass.
+        if (presence === 'present') {
+          closeOutbox = closeOutbox.filter((candidate) => candidate !== entry);
+          changed = true;
+        }
+        continue;
+      }
       const result = await call('/closed', {
         method: 'POST',
         // Only a proven managed removal is non-manual; legacy/unknown departures stay conservative.
