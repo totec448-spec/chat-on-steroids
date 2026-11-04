@@ -47,13 +47,14 @@ describe('the colors the app sends', () => {
 const background = readFileSync(path.join(process.cwd(), 'extension/background.js'), 'utf8');
 const followCode = background.slice(background.indexOf('const APP_LANGUAGE_KEY'), background.indexOf('let extensionReloadPending = false;'));
 
-function appearanceFollower({ slow = false } = {}) {
+function appearanceFollower({ slow = false, failAt = -1 } = {}) {
   const writes: Array<Record<string, unknown>> = [];
   const held: Array<() => void> = [];
   const context = vm.createContext({
     RENDER_STREAM_KEY: 'renderStreamEnabled', SHOW_TIMES_KEY: 'showStreamTimes', setTimeout, clearTimeout,
     chrome: { storage: { local: { get: async () => ({}), set: (value: Record<string, unknown>) => {
       writes.push(value);
+      if (writes.length - 1 === failAt) return Promise.reject(new Error('storage write timed out'));
       return slow && held.length === 0 ? new Promise<void>(resolve => held.push(resolve)) : Promise.resolve();
     } } } }
   });
@@ -85,6 +86,16 @@ describe('the worker stores them', () => {
     const light = { ...valid, theme: 'light' };
     await follow(light);
     expect(follow.writes).toEqual([{ appAppearance: valid }, { appAppearance: light }]);
+  });
+
+  it('writes the same colors again after a write that failed or timed out, which may still land late (CodeRabbit on #2013)', async () => {
+    const follow = appearanceFollower({ failAt: 1 });
+    const light = { ...valid, theme: 'light' };
+    await follow(valid);
+    await follow(light);
+    // The light write failed and may land later; the dark colors are written again rather than skipped.
+    await follow(valid);
+    expect(follow.writes).toEqual([{ appAppearance: valid }, { appAppearance: light }, { appAppearance: valid }]);
   });
 
   it('stores nothing that is not a theme and colors', async () => {
