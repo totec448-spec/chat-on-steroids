@@ -39,7 +39,7 @@ export { setBrowserWorkArea } from './browser-window-layout.js';
 import { pendingBrowserPreferenceRequest, acknowledgeBrowserPreferences } from './browser-preferences.js';
 import { sessionFinishHeld, releaseSessionFinish, getSessionFinishDraft, sessionFinishWaiting } from './session/finish.js';
 import { observeUsage } from './session/usage.js';
-import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, lostBrowserOpening, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, queuedInputOfferBlocker, continueAsOrdinaryMessage, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation, ownUnsentTexts, retireMismatchedRecoveryInput, noteInputHeld } from './session/input.js';
+import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, lostBrowserOpening, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, queuedInputOfferBlocker, continueAsOrdinaryMessage, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, withdrawOwnContinuesAfterStop, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation, ownUnsentTexts, retireMismatchedRecoveryInput, noteInputHeld } from './session/input.js';
 /**
  * The local bridge between the Chrome extension and this app.
  *
@@ -2393,11 +2393,13 @@ export async function endOwnWorkAfterStop(sessionId: string, expectedTurnId: str
   const repair = repairsInFlight.get(id);
   const silenced = repair?.reason === 'silence' && repair.silenceGrant?.turnId === expectedTurnId;
   if (silenced) repairsInFlight.delete(id);
-  if (activeUntil.get(id)?.turnId === expectedTurnId) endActivity(id);
-  // Counted as revokeSilenceInputs withdraws them: waiting, or claimed by a browser but not yet sent.
-  const withdrawn = (await listInputs()).filter(row => row.sessionId === sessionId && (row.silenceBoundary || row.completedTurnId) &&
-    (row.state === 'queued' || (row.state === 'browser' && row.sendAuthorizedAt === undefined))).length;
-  await revokeSilenceInputs(sessionId);
+  if (activeUntil.get(id)?.turnId === expectedTurnId) { endActivity(id); ended.push('the silence watch of that answer'); }
+  // A fresh turn the app was starting after that answer is cancelled, as a Stop of it cancels it.
+  if (rotationFenceTurn(id) === expectedTurnId) {
+    if (!await clearRotationFence(id)) logWarn(`turn rotation: ${id} — the cancelled fresh turn could not be saved; a restart within ${Math.round(FENCE_MS / 1000)} s could still continue after the person's Stop`);
+    ended.push('a fresh turn');
+  }
+  const withdrawn = await withdrawOwnContinuesAfterStop(sessionId, expectedTurnId);
   if (withdrawn || silenced) ended.push('an automatic Continue');
   logInfo(`bridge: Stop for turn ${expectedTurnId} in ${id} found that turn no longer running; ChatGPT was not asked to stop. ` +
     (ended.length ? `The app's own work ended: ${ended.join(', ')}` : 'The app had nothing of its own going on'));

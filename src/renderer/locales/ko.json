@@ -3745,5 +3745,6 @@
   "Waiting for ChatGPT to finish its answer": "ChatGPT가 답변을 마칠 때까지 기다리는 중",
   "Waiting for ChatGPT's page to end its turn": "ChatGPT 페이지가 턴을 마칠 때까지 기다리는 중",
   "That answer had already ended, so ChatGPT was not asked to stop. This chat's automatic work is stopped.": "그 답변은 이미 끝나서 ChatGPT에 중지를 요청하지 않았습니다. 이 채팅의 자동 작업은 중지되었습니다.",
-  "That answer had already ended; there was nothing to stop.": "그 답변은 이미 끝나서 중지할 것이 없었습니다."
+  "That answer had already ended; there was nothing to stop.": "그 답변은 이미 끝나서 중지할 것이 없었습니다.",
+  "Automatic Continue cancelled: you pressed Stop.": "중지를 눌러 자동 계속을 취소했습니다."
 }

@@ -3745,5 +3745,6 @@
   "Waiting for ChatGPT to finish its answer": "Đang chờ ChatGPT trả lời xong",
   "Waiting for ChatGPT's page to end its turn": "Đang chờ trang ChatGPT kết thúc lượt",
   "That answer had already ended, so ChatGPT was not asked to stop. This chat's automatic work is stopped.": "Câu trả lời đó đã kết thúc, nên ChatGPT không được yêu cầu dừng. Công việc tự động của cuộc trò chuyện này đã dừng.",
-  "That answer had already ended; there was nothing to stop.": "Câu trả lời đó đã kết thúc; không có gì để dừng."
+  "That answer had already ended; there was nothing to stop.": "Câu trả lời đó đã kết thúc; không có gì để dừng.",
+  "Automatic Continue cancelled: you pressed Stop.": "Đã hủy tự động tiếp tục: bạn đã nhấn Dừng."
 }

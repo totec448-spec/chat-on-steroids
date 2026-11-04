@@ -3907,5 +3907,6 @@
   "Waiting for ChatGPT to finish its answer": "En attente de la fin de la réponse de ChatGPT",
   "Waiting for ChatGPT's page to end its turn": "En attente de la fin du tour sur la page ChatGPT",
   "That answer had already ended, so ChatGPT was not asked to stop. This chat's automatic work is stopped.": "Cette réponse était déjà terminée, donc ChatGPT n’a pas été invité à s’arrêter. Le travail automatique de ce chat est arrêté.",
-  "That answer had already ended; there was nothing to stop.": "Cette réponse était déjà terminée ; il n’y avait rien à arrêter."
+  "That answer had already ended; there was nothing to stop.": "Cette réponse était déjà terminée ; il n’y avait rien à arrêter.",
+  "Automatic Continue cancelled: you pressed Stop.": "Reprise automatique annulée : vous avez appuyé sur Arrêter."
 }

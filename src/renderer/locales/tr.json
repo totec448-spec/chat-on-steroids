@@ -3826,5 +3826,6 @@
   "Waiting for ChatGPT to finish its answer": "ChatGPT'nin yanıtını bitirmesi bekleniyor",
   "Waiting for ChatGPT's page to end its turn": "ChatGPT sayfasının turunu bitirmesi bekleniyor",
   "That answer had already ended, so ChatGPT was not asked to stop. This chat's automatic work is stopped.": "Bu yanıt zaten bitmişti, bu yüzden ChatGPT’den durması istenmedi. Bu sohbetin otomatik çalışması durduruldu.",
-  "That answer had already ended; there was nothing to stop.": "Bu yanıt zaten bitmişti; durdurulacak bir şey yoktu."
+  "That answer had already ended; there was nothing to stop.": "Bu yanıt zaten bitmişti; durdurulacak bir şey yoktu.",
+  "Automatic Continue cancelled: you pressed Stop.": "Otomatik devam iptal edildi: Durdur’a bastınız."
 }
