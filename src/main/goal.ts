@@ -1220,7 +1220,9 @@ export async function setGoalSwitchNow(
   conversationId: string,
   which: 'goal' | 'loop',
   on: boolean,
-  afterTurn?: boolean
+  afterTurn?: boolean,
+  /** Who changed it, for the log line an accepted change writes (#1882). */
+  from?: string
 ): Promise<{ enabled: boolean; mode: GoalMode }> {
   if (!on && goalSwitchFor(conversationId).mode === which) {
     invalidateGoalControlWrites(pendingGoalSwitches, [conversationId]);
@@ -1247,7 +1249,11 @@ export async function setGoalSwitchNow(
         publish: () => {
           publishGoalSwitches(staged);
           // Only an accepted change ends the kept "goal is met"; saving it as it was does not (CodeRabbit).
-          if (was.enabled !== next.enabled || was.mode !== next.mode) forgetGoalOutcome(targetConversationId);
+          if (was.enabled !== next.enabled || was.mode !== next.mode) {
+            forgetGoalOutcome(targetConversationId);
+            // #1882: a mode that later reads differently can be traced to the change that set it.
+            logInfo(`goal: ${targetConversationId} switched to ${next.enabled ? next.mode : 'Normal'}${from ? ` by ${from}` : ''}`);
+          }
           notifyGoalChange();
           // Goal stopped here, or turned to Loop: a step review in progress is cancelled (#1832).
           if (!next.enabled || next.mode !== 'goal') void import('./goal-reviewer.js')
@@ -1269,8 +1275,11 @@ export async function setGoalSwitchNow(
 export function clearAllGoalSwitches(): void {
   invalidateGoalControlWrites(pendingGoalSwitches);
   if (goalSwitches.size === 0) return;
-  for (const [id, row] of goalSwitches) if (row.role !== 'decision') goalSwitches.delete(id);
+  let cleared = 0;
+  for (const [id, row] of goalSwitches) if (row.role !== 'decision' && goalSwitches.delete(id)) cleared++;
   persistGoalSwitches();
+  // #1882: a chat whose Loop later reads Normal can be traced to this master stop.
+  if (cleared) logInfo(`goal: the app's own switch was turned off; ${cleared} chat(s) went back to the app-wide setting`);
 }
 
 /** Drops one chat's override, putting it back under the app-wide setting. */
@@ -2782,7 +2791,7 @@ export function goalRepeatsItself(messages: readonly ChatMessage[], rounds = REP
 /** The step reviewer found a problem Goal cannot safely go past (#1832): pause, and tell the person. */
 async function pauseForReview(draft: GoalDraft, finding: string): Promise<void> {
   logInfo(`goal: the reviewer found a problem Goal cannot safely go past in ${draft.conversationId}; pausing Goal`);
-  await setGoalSwitchNow(draft.conversationId, 'goal', false).catch(() => undefined);
+  await setGoalSwitchNow(draft.conversationId, 'goal', false, undefined, 'the step reviewer').catch(() => undefined);
   const plain = finding.replace(/^BLOCKING:\s*/i, '');
   const shown = plain.length > 300 ? `${plain.slice(0, 297)}...` : plain;
   const { recordNote } = await import('./session/recorder.js');
@@ -2796,7 +2805,7 @@ async function pauseForReview(draft: GoalDraft, finding: string): Promise<void> 
 
 async function pauseRepeatingGoal(draft: GoalDraft, answer: string): Promise<void> {
   logInfo(`goal: ${draft.conversationId} gave the same answer ${REPEAT_ROUNDS} times in a row; pausing Goal instead of asking again`);
-  await setGoalSwitchNow(draft.conversationId, 'goal', false).catch(() => undefined);
+  await setGoalSwitchNow(draft.conversationId, 'goal', false, undefined, 'Goal itself (the same answer repeated)').catch(() => undefined);
   const shown = answer.length > 80 ? `${answer.slice(0, 77)}...` : answer;
   const { recordNote } = await import('./session/recorder.js');
   await recordNote(draft.sessionId, `Goal paused: ChatGPT gave the same answer three times in a row ("${shown}"). ` +
