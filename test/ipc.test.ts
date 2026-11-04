@@ -2549,9 +2549,21 @@ describe('Stop IPC exact session and turn authority', () => {
     const session = await createSession({ title: 'Stop IPC', conversationId });
     await appendEvent(session.id, { time: Date.now(), source: 'app', kind: 'turn_start', turnId: 'ipc-stop-one' });
     expect((await invoke({ id: session.id })).ok).toBe(false);
-    expect(await invoke({ id: session.id, expectedTurnId: 'other-turn' })).toMatchObject({ ok: false, error: 'active_turn_changed' });
+    // The person reads what happened, never an error code (Haz on #1883).
+    const nothing = 'That answer had already ended; there was nothing to stop.';
+    expect(await invoke({ id: session.id, expectedTurnId: 'other-turn' })).toMatchObject({ ok: false, error: nothing });
     // A stored historical start alone cannot authorize stopping a browser turn.
-    expect(await invoke({ id: session.id, expectedTurnId: 'ipc-stop-one' })).toMatchObject({ ok: false, error: 'active_turn_changed' });
+    expect(await invoke({ id: session.id, expectedTurnId: 'ipc-stop-one' })).toMatchObject({ ok: false, error: nothing });
+    // Stop shown for another chat than the session's now (a Compact & Resume moved it): nothing here changes.
+    expect(await invoke({ id: session.id, expectedTurnId: 'ipc-stop-one', expectedConversationId: 'f3333333-aaaa-4bbb-8ccc-111111111111' })).toMatchObject({
+      ok: false, error: 'That answer had already ended, so ChatGPT was not asked to stop. Compact & Resume was already moving this chat and goes on.' });
+    // Main's own read of the controls fails meanwhile: the named chat still binds, nothing else is touched.
+    const bridge = await import('../src/main/bridge.js');
+    const read = vi.spyOn(bridge, 'sessionControlsFor').mockRejectedValueOnce(new Error('conversation_changed'));
+    expect(await invoke({ id: session.id, expectedTurnId: 'ipc-stop-one', expectedConversationId: 'f3333333-aaaa-4bbb-8ccc-111111111111' })).toMatchObject({
+      ok: false, error: 'That answer had already ended, so ChatGPT was not asked to stop. Compact & Resume was already moving this chat and goes on.' });
+    expect(read).toHaveBeenCalled();
+    read.mockRestore();
     await rebindSession(session.id, conversationId, 'f2222222-aaaa-4bbb-8ccc-111111111111');
     expect((await invoke({ id: session.id, expectedTurnId: 'ipc-stop-one' })).ok).toBe(false);
     const missing = await createSession({ title: 'No browser ownership', conversationId: null });
