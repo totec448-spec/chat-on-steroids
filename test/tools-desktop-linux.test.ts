@@ -227,6 +227,23 @@ describe.runIf(process.platform === 'linux')('native Linux connector authorizati
     expect((await act({ action: 'click', ref: '@s123:e1' })).content[0].text).toContain('STALE_OR_FOREIGN_REF');
     expect(testState.backend.mock.calls.filter(([input]) => input.kind === 'click')).toHaveLength(0);
   });
+  it('does not read a private accessibility tree if Screen access is revoked while inventory waits', async () => {
+    const { observe } = handlers();
+    let releaseInventory!: (result: unknown) => void;
+    testState.backend.mockImplementation(({ kind }: { kind: string }) => kind === 'windows'
+      ? new Promise(resolve => { releaseInventory = resolve; })
+      : good(kind, { snapshot_id: 's123', complete: true, tree: { ref_id: '@s123:e1' } }));
+    const pending = observe({ what: 'snapshot', window_id: window.id });
+    await vi.waitFor(() => expect(testState.backend).toHaveBeenCalledWith({ kind: 'windows' }), { timeout: 10_000 });
+    testState.screen = false;
+    releaseInventory(good('list-windows', [window]));
+    const denied = await pending;
+    expect(denied.isError).toBe(true);
+    expect(denied.content[0].text).toContain('TOOL_DISABLED');
+    expect(testState.backend).toHaveBeenCalledTimes(1);
+    expect(testState.backend.mock.calls.filter(([input]) => input.kind === 'snapshot')).toHaveLength(0);
+    expect(JSON.stringify(denied)).not.toContain('@s123:e1');
+  });
   it('expires refs that were not acted on within two minutes', async () => {
     const { observe, act } = handlers(); mockSnapshot();
     await observe({ what: 'snapshot', window_id: window.id });
