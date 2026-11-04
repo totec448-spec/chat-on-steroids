@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
 import { getConfig } from '../src/main/config.js';
 import {
   automaticSendRefusal, chatsAtOnceStatus, noteChatLimit, resetChatsAtOnceForTests, restoreChatsAtOnce,
-  resumeAutomaticSends, setWorkingChatsSource
+  resumeAutomaticSends, setWorkerSlotSource, setWorkingChatsSource, workerSlotsRefusal, type WorkerSlotState
 } from '../src/main/chats-at-once.js';
 import { flushDurable, initDurableStore, resetDurableForTests } from '../src/main/durable.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
@@ -109,4 +109,22 @@ it('never pauses while the setting is off', () => {
   noteChatLimit('b', 9e12, 2_000);
   expect(chatsAtOnceStatus(2_000).pauseUntil).toBeNull();
   expect(automaticSendRefusal('input:c', 'c', 3_000)).toBeNull();
+});
+
+// Haz on #2051: a worker's reservation follows the worker, never a timer.
+it('counts a running worker once and gives back the slot of a worker that ended, at once', () => {
+  getConfig().multiAgent.chatsAtOnce = 3;
+  const workers = new Map<string, WorkerSlotState>();
+  setWorkerSlotSource(worker => workers.get(worker) ?? { kind: 'pending' });
+  working = new Set(['prime']);
+  expect(workerSlotsRefusal('prime', ['run/worker-1', 'run/worker-2'], 0)).toBeNull();
+  // The prime still shows as working; both workers starting: three slots.
+  expect(automaticSendRefusal('input:x', 'x', 1)).toMatch(/3 chats are working/);
+  workers.set('run/worker-1', { kind: 'chat', conversationId: 'w1' });
+  working = new Set(['prime', 'w1']);
+  expect(automaticSendRefusal('input:x', 'x', 2)).toMatch(/3 chats are working/);
+  workers.set('run/worker-2', { kind: 'over' });
+  expect(automaticSendRefusal('input:x', 'x', 3)).toBeNull();
+  // Two workers named the same never share one slot, and a refused spawn reserves nothing.
+  expect(workerSlotsRefusal('prime', ['run/worker-3', 'run/worker-4'], 4)).toMatch(/limit is 3/);
 });
