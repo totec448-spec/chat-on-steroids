@@ -597,6 +597,24 @@ function linuxDesktopRow(): HTMLElement {
 }
 
 let linuxScreenshotConsentBusy = false;
+/** Only translate known, fixed main-process errors; never display arbitrary backend text. */
+function linuxScreenshotConsentErrorText(error: unknown): string {
+  switch (error) {
+    case 'Activate the Chat On Steroids window before requesting screenshot permission.':
+    case 'The Chat On Steroids window lost focus; no screenshot was requested.':
+      return t('Activate the Chat On Steroids window, then try again.');
+    case 'Enable native Linux Desktop and Screen access first.':
+    case 'Screen access was disabled before the screenshot request.':
+    case 'Native Linux Desktop or Screen access was disabled during the screenshot request.':
+      return t('Enable native Linux Desktop access and Screen permission, then try again.');
+    case 'Screenshot permission can be requested only from the Chat On Steroids main window.':
+      return t('Screenshot permission can be requested only from the Chat On Steroids main window.');
+    case 'A screenshot permission request is already running.':
+      return t('A screenshot permission request is already running.');
+    default:
+      return t('GNOME screenshot permission could not be confirmed.');
+  }
+}
 function linuxScreenshotConsentRow(): HTMLElement {
   const row = el('div', 'tool is-static linux-consent-row');
   const body = el('span');
@@ -624,9 +642,7 @@ function linuxScreenshotConsentRow(): HTMLElement {
       status.textContent = reply.ok
         ? t('Screenshot permission confirmed. No image was saved.')
         : t('Screenshot permission request failed: {0}', [
-          reply.error === 'Screenshot permission can be requested only from the Chat On Steroids main window.' ||
-          reply.error === 'A screenshot permission request is already running.'
-            ? t(reply.error) : t('GNOME screenshot permission could not be confirmed.')
+          linuxScreenshotConsentErrorText(reply.error)
         ]);
     } catch {
       status.textContent = t('Screenshot permission request failed: {0}', [
