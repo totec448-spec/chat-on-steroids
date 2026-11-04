@@ -9958,15 +9958,9 @@
     // state, so continuing after A -> B would otherwise post B to /compact and type A's
     // handoff instruction into B's composer. The new chat's reset already owns its UI state;
     // a stale continuation must not repaint or cancel anything there.
-    if (!current()) {
-      // The chat moved on while this attempt waited for the receipt: the app still hears why, so it
-      // counts the attempt, but nothing here touches the page that is shown now (CodeRabbit on #2056).
-      if (barrier && automatic && receipt.code === 'results-wait-changed' && filed.data.token) {
-        void ask({ type: 'compact', conversationId: forId, token: String(filed.data.token), sourceDeferred: true,
-          sourceError: barrier, sourceErrorCode: receipt.code }).catch(() => undefined);
-      }
-      return;
-    }
+    // The tab moved to another chat meanwhile: nothing is reported for the old one, because a report
+    // naming it would bind this tab to it again in the relay (CodeRabbit on #2056). Its next attempt counts.
+    if (!current()) return;
     if (barrier) {
       pressedAt = 0;
       nativeBusy = false;
