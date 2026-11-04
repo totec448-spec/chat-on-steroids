@@ -3986,5 +3986,17 @@
   "Previous 7 days": "Последние 7 дней",
   "Previous 30 days": "Последние 30 дней",
   "Waiting for ChatGPT to finish its answer": "Ждём, пока ChatGPT закончит ответ",
-  "Waiting for ChatGPT's page to end its turn": "Ждём, пока страница ChatGPT завершит ход"
+  "Waiting for ChatGPT's page to end its turn": "Ждём, пока страница ChatGPT завершит ход",
+  "Related folders": "Связанные папки",
+  "Related folders…": "Связанные папки…",
+  "Related folders: {0}": "Связанные папки: {0}",
+  "Other approved folders this work also uses": "Другие разрешённые папки, которые тоже нужны для этой работы",
+  "Adds context for ChatGPT; does not change the working directory or grant access.": "Даёт ChatGPT контекст; не меняет рабочую папку и не даёт доступа.",
+  "No related folders yet.": "Связанных папок пока нет.",
+  "Approved folder to add": "Разрешённая папка для добавления",
+  "Every approved folder is already here. Approve another folder in Settings to add it.": "Все разрешённые папки уже здесь. Чтобы добавить ещё, разрешите другую папку в настройках.",
+  "Unavailable": "Недоступна",
+  "No longer approved or no longer there; ChatGPT is not told about it.": "Больше не разрешена или больше не существует; ChatGPT о ней не сообщается.",
+  "Choose a related folder from your approved folders": "Выберите связанную папку из разрешённых папок",
+  "A project can have at most 10 related folders": "У проекта может быть не больше 10 связанных папок"
 }

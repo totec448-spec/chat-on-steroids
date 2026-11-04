@@ -3743,5 +3743,17 @@
   "Previous 7 days": "過去 7 日間",
   "Previous 30 days": "過去 30 日間",
   "Waiting for ChatGPT to finish its answer": "ChatGPT の回答が終わるのを待っています",
-  "Waiting for ChatGPT's page to end its turn": "ChatGPT のページがターンを終えるのを待っています"
+  "Waiting for ChatGPT's page to end its turn": "ChatGPT のページがターンを終えるのを待っています",
+  "Related folders": "関連フォルダー",
+  "Related folders…": "関連フォルダー…",
+  "Related folders: {0}": "関連フォルダー: {0}",
+  "Other approved folders this work also uses": "この作業で使う、ほかの許可済みフォルダー",
+  "Adds context for ChatGPT; does not change the working directory or grant access.": "ChatGPT に文脈を伝えるだけです。作業ディレクトリは変わらず、アクセス権も与えません。",
+  "No related folders yet.": "関連フォルダーはまだありません。",
+  "Approved folder to add": "追加する許可済みフォルダー",
+  "Every approved folder is already here. Approve another folder in Settings to add it.": "許可済みのフォルダーはすべて追加済みです。追加するには、設定で別のフォルダーを許可してください。",
+  "Unavailable": "利用できません",
+  "No longer approved or no longer there; ChatGPT is not told about it.": "許可が外れたか、存在しなくなりました。ChatGPT には伝えません。",
+  "Choose a related folder from your approved folders": "関連フォルダーは許可済みフォルダーから選んでください",
+  "A project can have at most 10 related folders": "1 つのプロジェクトに設定できる関連フォルダーは 10 個までです"
 }
