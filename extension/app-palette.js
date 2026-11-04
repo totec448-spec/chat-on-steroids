@@ -8,6 +8,10 @@
  * stylesheet's defaults, the app's default palette, apply.
  */
 (() => {
+  // Once per page: the manifest, a recovered tab and a recorder repair may all load this script, and
+  // each run would add one more storage listener (CodeRabbit on #2038).
+  if (globalThis.__clfAppPaletteLoaded) return;
+  globalThis.__clfAppPaletteLoaded = true;
   const KEY = 'appAppearance';
   const ID = 'clf-app-palette';
   // Every color the app sends, as in popup.js. A palette missing one, or holding anything but
