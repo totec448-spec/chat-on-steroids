@@ -3811,6 +3811,7 @@
   "Click while the Chat On Steroids window is active. If GNOME asks, choose Allow. The screenshot is discarded.": "Klicke bei aktivem Chat-On-Steroids-Fenster. Falls GNOME nachfragt, wähle Zulassen. Der Screenshot wird verworfen.",
   "Request screenshot permission": "Screenshotberechtigung anfordern",
   "GNOME screenshot permission could not be confirmed.": "Die GNOME-Screenshotberechtigung konnte nicht bestätigt werden.",
+  "Off by default. GNOME display screenshots require Screen permission and OS consent. Semantic accessibility actions require Control permission, a proven chat, and explicit approval when configured. No physical-input fallback.": "Standardmäßig aus. GNOME-Display-Screenshots benötigen Bildschirmberechtigung und Betriebssystem-Zustimmung. Semantische Aktionen benötigen Steuerungsberechtigung, einen nachgewiesenen Chat und gegebenenfalls eine ausdrückliche Zustimmung. Kein physischer Eingabe-Fallback.",
   "Activate the Chat On Steroids window, then try again.": "Aktiviere das Chat-On-Steroids-Fenster und versuche es erneut.",
   "Enable native Linux Desktop access and Screen permission, then try again.": "Aktiviere den nativen Linux-Desktopzugriff und die Bildschirmberechtigung und versuche es erneut.",
   "Drag a chat here, or move it from its menu.": "Zieh einen Chat hierher oder verschieb ihn über sein Menü.",

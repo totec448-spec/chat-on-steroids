@@ -591,7 +591,7 @@ function linuxDesktopRow(): HTMLElement {
   input.addEventListener('change', () => void save());
   const body = el('span');
   body.append(el('strong', '', () => t('Allow native Linux Desktop access')),
-    el('em', '', () => t('Off by default. Allows read-only GNOME display screenshots only with Screen permission and operating-system consent. No native input or accessibility control is available.')));
+    el('em', '', () => t('Off by default. GNOME display screenshots require Screen permission and OS consent. Semantic accessibility actions require Control permission, a proven chat, and explicit approval when configured. No physical-input fallback.')));
   row.append(input, body);
   return row;
 }
@@ -1871,9 +1871,10 @@ function apply(next: AppState): void {
   applyValue($<HTMLSelectElement>('desktopAsk'), config.ui.desktopAsk ?? 'off', previousState?.config.ui.desktopAsk ?? 'off');
   applyChecked($<HTMLInputElement>('desktopUnattributed'), config.ui.desktopUnattributed === true, previousState?.config.ui.desktopUnattributed === true);
   applyChecked($<HTMLInputElement>('linuxDesktopEnabled'), config.ui.linuxDesktopEnabled === true, previousState?.config.ui.linuxDesktopEnabled === true);
-  // The system says when it was last used only on macOS and Windows; elsewhere nothing would ask.
-  ($('desktopAsk').closest('.desktop-ask-row') as HTMLElement).hidden = !['macos', 'windows'].includes(next.platform?.family ?? 'macos');
-  ($('desktopUnattributed').closest('.desktop-unattributed-row') as HTMLElement).hidden = !['macos', 'windows'].includes(next.platform?.family ?? 'macos');
+  // The optional native approval row is available on Linux too; the gate
+  // stays disabled by default and conservatively asks when idle proof is absent.
+  ($('desktopAsk').closest('.desktop-ask-row') as HTMLElement).hidden = !['macos', 'windows', 'linux'].includes(next.platform?.family ?? 'macos');
+  ($('desktopUnattributed').closest('.desktop-unattributed-row') as HTMLElement).hidden = !['macos', 'windows', 'linux'].includes(next.platform?.family ?? 'macos');
   ($('linuxDesktopEnabled').closest('.linux-desktop-row') as HTMLElement).hidden = next.platform?.family !== 'linux';
   ($('linuxScreenshotConsent').closest('.linux-consent-row') as HTMLElement).hidden = next.platform?.family !== 'linux';
   $<HTMLButtonElement>('linuxScreenshotConsent').disabled = linuxScreenshotConsentBusy ||

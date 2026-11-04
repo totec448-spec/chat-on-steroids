@@ -212,19 +212,40 @@ Linux does not advertise or execute these schemas. Windows publishes one tool pe
 `activate_window` act; `read_clipboard` and `write_clipboard` follow the clipboard permissions.
 macOS publishes `observe` and `computer`, described below.
 
-### `linux_observe` (read-only display screenshot, Linux)
+### `linux_observe` (read-only screenshots and semantic observation, Linux)
 
-This first Linux stage publishes `linux_observe` only when a person enables
-`ui.linuxDesktopEnabled` and grants Screen permission. Its input schema allows
-only `{ what: 'screenshot', display: 0 }` (display 0 is the only allowed value).
-The bounded output is an MCP PNG image plus text metadata labeled `scope: 'display'`.
+The screenshot-only part 2 first published `linux_observe` after a person enabled
+`ui.linuxDesktopEnabled` and granted Screen permission. Part 3 extends the
+read-only input schema to `windows`, `apps`, `displays`, `snapshot` with a
+`window_id`, and `screenshot` with `display: 0` (the only permitted screenshot
+display). Inventory and snapshots return bounded structured data; screenshot
+output is an MCP PNG image plus text metadata labeled `scope: 'display'`.
 GNOME's operating-system portal can ask for consent and can be cancelled; do not retry
 automatically. The separate Settings test requests one portal screenshot but discards it
 without returning pixels to the renderer. Unknown caller identity requires the existing,
 separately chosen `desktopUnattributed` setting; the default is to refuse.
 
-Linux has **no `linux_act`, window inventory, accessibility snapshot, text entry, click,
-or coordinate input** in this PR. Those belong to the later control PR.
+The semantic snapshot mode requires a proven nonbrowser window. Refs are kept
+only for the proven Setup profile, session and
+conversation; an unattributed observation gets ephemeral non-actionable refs.
+
+### `linux_act` (semantic accessibility refs only, Linux)
+
+Requires the native opt-in, live Control permission, Read-only mode off and
+an owned, unexpired `linux_observe` snapshot. Supports only semantic
+`click` and `set_value` on the exact window's snapshot-scoped refs.
+The target process incarnation, ref, owner and grants are rechecked
+after any approval wait; every action consumes its refs. It cannot
+target browser windows or fall back to physical pointer/keyboard input.
+The backend version probe accepts only a `version` command response for Linux
+agent-desktop 1.0.2. Ref tokens (`@s<snapshot>:e<element>`) are capped at
+128 characters by observation collection, the action schema and the native
+subprocess adapter, so oversized backend refs never become actionable.
+An invalid ref or a tree that would be truncated by the 24-depth, 200-children
+or 512-ref bounds causes the whole snapshot to be refused before publication.
+Only a static diagnostic is logged; no backend ref or private UI text leaks.
+Desktop Ask (if configured) grants permission only to the exact proven
+Linux profile/session/conversation, not a shared transport connection.
 
 ### `observe`
 
