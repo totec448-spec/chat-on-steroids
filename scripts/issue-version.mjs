@@ -75,9 +75,9 @@ function olderThan(value, latest) {
  * coming out never closes an open report on a later edit, but a report this check holds closed
  * reopens only once it was retried on the newest one.
  */
-export function intakeDecision(issue, { latest, opened }) {
+export function intakeDecision(issue, { latest, opened, reopened = false }) {
   if (MAINTAINERS.has(issue.author_association)) return { decision: 'none', missing: [] };
-  if (appVersionField(issue.body) === null) return freeFormDecision(issue, { latest, opened });
+  if (appVersionField(issue.body) === null) return freeFormDecision(issue, { latest, opened, reopened });
   const version = appVersionField(issue.body);
   if (!(Date.parse(issue.created_at) >= Date.parse(INTAKE_SINCE))) {
     const decision = versionDecision(issue);
@@ -100,7 +100,7 @@ export function intakeDecision(issue, { latest, opened }) {
  * form. Ideas and questions written freely are left alone.
  */
 export function freeFormBug(issue) {
-  if (/^###\s+(?:Problem or workflow|Proposed change)\s*$/m.test(String(issue.body ?? ''))) return false;
+  if (/^###\s+(?:Problem or workflow|Proposed change)\s*$/m.test(ownText(issue.body ?? ''))) return false;
   const labeled = (issue.labels ?? []).some(label => (typeof label === 'string' ? label : label.name) === 'bug');
   return labeled || /^\s*\[?bug\b/i.test(String(issue.title ?? ''));
 }
@@ -120,8 +120,9 @@ export function freeFormVersion(issue) {
  * The same three requirements, read from the whole text. Without the form there is no checkbox: a
  * report on the newest release says so by its version number, an older one still has to be retried.
  */
-function freeFormDecision(issue, { latest, opened }) {
-  if (!freeFormBug(issue) || !(Date.parse(issue.created_at) >= Date.parse(INTAKE_SINCE))) return { decision: 'none', missing: [] };
+function freeFormDecision(issue, { latest, opened, reopened }) {
+  if (!freeFormBug(issue)) return featureDecision(issue, { opened, reopened });
+  if (!(Date.parse(issue.created_at) >= Date.parse(INTAKE_SINCE))) return { decision: 'none', missing: [] };
   const labeled = (issue.labels ?? []).some(label => (typeof label === 'string' ? label : label.name) === INTAKE_LABEL);
   const held = labeled && issue.state === 'closed';
   const version = freeFormVersion(issue);
@@ -133,6 +134,80 @@ function freeFormDecision(issue, { latest, opened }) {
   if (missing.length) return { decision: issue.state === 'open' && !labeled ? 'close' : 'none', missing, freeForm: true };
   return { decision: held ? 'reopen' : 'none', missing, freeForm: true };
 }
+
+/**
+ * Feature requests still arrived as issues (#1811, #2055): GitHub's API and the gh CLI skip the issue
+ * forms. New features come as pull requests, so from here on (user, 2026-11-03) a new issue that is
+ * neither the bug form nor a bug report written freely gets one friendly note and is closed. Only when
+ * it is opened: an edit, a maintainer's or a bot's issue (the weekly digest), and one a person
+ * reopened are left alone.
+ */
+export const FEATURE_SINCE = '2026-11-03T21:00:00Z';
+/**
+ * A feature request says so: the old feature form's headings, the enhancement label, a title such as
+ * "Feature request: …", "[Feature] …", "Idea: …", "Proposal: …", or a "## Feature request" heading.
+ */
+/**
+ * The issue's own words: without HTML comments (a copied template's hidden lines) and without fenced
+ * code blocks, read as CommonMark does: a fence closes only on a line of the same marker, at least as
+ * long, with nothing after it; one that never closes runs to the end (CodeRabbit on #2060).
+ */
+export function ownText(body) {
+  const out = [];
+  let fence = null, comment = false;
+  // Issue bodies from the web form come with CRLF line ends (CodeRabbit on #2060).
+  for (const line of String(body).split(/\r\n?|\n/)) {
+    // Fences first, on the raw lines: a comment marker inside a code block hides nothing (CodeRabbit on #2060).
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence) {
+      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && /^[ \t]*$/.test(marker[2])) fence = null;
+      continue;
+    }
+    if (!comment && marker && !(marker[1][0] === '`' && marker[2].includes('`'))) { fence = marker[1]; continue; }
+    // Outside code, HTML comments go, also across lines.
+    let rest = line, kept = '';
+    while (rest) {
+      if (comment) {
+        const end = rest.indexOf('-->');
+        if (end < 0) { rest = ''; break; }
+        comment = false; rest = rest.slice(end + 3);
+      } else {
+        const start = rest.indexOf('<!--');
+        if (start < 0) { kept += rest; break; }
+        kept += rest.slice(0, start); comment = true; rest = rest.slice(start + 4);
+      }
+    }
+    out.push(kept);
+  }
+  return out.join('\n');
+}
+
+export function featureSignal(issue) {
+  const body = String(issue.body ?? ''), title = String(issue.title ?? '');
+  if ((issue.labels ?? []).some(label => /^(?:enhancement|feature(?: request)?)$/i.test(typeof label === 'string' ? label : label.name))) return true;
+  // The word must be marked as a label ("[Idea] …", "Idea: …"): "Feature X is broken" is a bug report.
+  const kind = '(?:feature(?:\\s+request)?|feat|idea|proposal|suggestion|enhancement)';
+  if (new RegExp(`^\\s*(?:\\[${kind}\\]|${kind}\\s*[:-]|feature\\s+request\\b)`, 'i').test(title)) return true;
+  // Headings in a quoted example (a fenced block) are not the issue's own; a bare "Feature" heading
+  // names the feature a bug is in, not a request (CodeRabbit on #2060).
+  const own = ownText(body);
+  return /^#{2,3}\s+(?:Problem or workflow|Proposed change|Feature request|Proposed feature)\s*$/im.test(own);
+}
+function featureDecision(issue, { opened, reopened = false }) {
+  const none = { decision: 'none', missing: [] };
+  if (!opened || reopened || issue.state !== 'open' || issue.user?.type === 'Bot' || MAINTAINERS.has(issue.author_association)) return none;
+  // Said to be a bug, by its label or title, is never handled as a feature, whatever its headings (CodeRabbit on #2060).
+  const labeled = (issue.labels ?? []).some(label => (typeof label === 'string' ? label : label.name) === 'bug');
+  if (labeled || /^\s*\[?bug\b/i.test(String(issue.title ?? ''))) return none;
+  // Only an issue that says it is a feature request is closed as one; anything unclear ("Cannot connect
+  // on Linux") is left to a maintainer (CodeRabbit on #2060).
+  if (!featureSignal(issue)) return none;
+  return Date.parse(issue.created_at) >= Date.parse(FEATURE_SINCE) ? { decision: 'feature', missing: [] } : none;
+}
+
+export const FEATURE_COMMENT = `Thanks for the idea! New features come to this project as **pull requests**, not issues: [CONTRIBUTING.md](https://github.com/totec448-spec/chat-on-steroids/blob/main/CONTRIBUTING.md#new-features) explains how to start one, and the issue form only offers bug reports for that reason. Ideas are kept on the [roadmap](https://github.com/totec448-spec/chat-on-steroids/issues/482); a maintainer may add this one there.
+
+If this is a bug in something the app already does, please open it with the **Bug report** form (Issues → New issue) instead. This issue is closed.`;
 
 const MISSING_TEXT = {
   version: '**App version**: the exact number, for example `2.1.38`. It is in the app under **Settings → Activity**, or in the browser extension\'s popup.',
@@ -180,7 +255,22 @@ async function main() {
   const fresh = Date.parse(issue.created_at) >= Date.parse(INTAKE_SINCE);
   const label = fresh ? INTAKE_LABEL : LABEL;
   const post = (body) => github(`${path}/comments`, token, { method: 'POST', body: JSON.stringify({ body }) });
-  if (decision === 'close') {
+  if (decision === 'feature') {
+    // Never close what a person reopened (an opened run can be late or rerun), and decide again on the
+    // issue as it is now: it may have been edited into a bug report meanwhile (CodeRabbit on #2060).
+    const events = await github(`${path}/events?per_page=100`, token).catch(() => null);
+    const reopened = !Array.isArray(events) || events.some(event => event?.event === 'reopened');
+    const now = await github(path, token);
+    if (!reopened && intakeDecision(now, { latest, opened: true, reopened }).decision === 'feature') {
+      await post(FEATURE_COMMENT);
+      await github(path, token, { method: 'PATCH', body: JSON.stringify({ state: 'closed', state_reason: 'not_planned' }) });
+      // An edit that landed while this closed it is honoured: no longer a feature request, it opens again.
+      const after = await github(path, token);
+      if (intakeDecision({ ...after, state: 'open' }, { latest, opened: true }).decision !== 'feature') {
+        await github(path, token, { method: 'PATCH', body: JSON.stringify({ state: 'open' }) });
+      }
+    }
+  } else if (decision === 'close') {
     await post(fresh ? missingComment(missing, { freeForm }) : CLOSE_COMMENT);
     await github(`${path}/labels`, token, { method: 'POST', body: JSON.stringify({ labels: [label] }) });
     await github(path, token, { method: 'PATCH', body: JSON.stringify({ state: 'closed', state_reason: 'not_planned' }) });

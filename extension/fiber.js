@@ -86,7 +86,10 @@
   /** ChatGPT-rendered authored prose. Tool rows and this extension's own surfaces are excluded. */
   const MARKDOWN = '.markdown, [data-markdown-text-style="assistant-message"]';
   const TOOL = 'span[class*="tool-message"], div.pointer-events-none.contents, div:has(> [data-testid="cot-v5-tool-icon-pile"])';
-  const GENERATED_IMAGE = '[class~="group/imagegen-image"] img, [class~="group/generated-image-preview"] img';
+  // A gallery's thumbnails sit beside its large preview, outside both groups (#2005, seen 2026-11-02/03):
+  // `div[role=group] > button[aria-pressed] > img`. Being matched here is not ownership: each node still
+  // needs its exact typed image below.
+  const GENERATED_IMAGE = '[class~="group/imagegen-image"] img, [class~="group/generated-image-preview"] img, [role="group"] > button[aria-pressed] > img';
   const OWN_SURFACES = '.clf-stream, .clf-stage, .clf-composer, .clf-boot';
   const MAX_RENDERED_HTML = 120_000;
   // An exact, stable assistant final can have far more than 120k of decorative
@@ -791,6 +794,27 @@
    * uploads and every other role/channel is private or unknown. Only the provider message UUID,
    * sediment file id and bounded geometry cross worlds; no signed URL or arbitrary metadata does.
    */
+  /**
+   * The sediment file one mounted gallery image shows, or null. The gallery's own shell item is only its
+   * first image, so each image is found by its id among this turn's typed images (#2005: the large
+   * preview showing another image, and every thumbnail, were all "Image preview unavailable"). The large
+   * preview names its image (`imageId`) and says it is complete and not a preview; a thumbnail names its
+   * image object. Exactly one typed image of this turn must have that id, the same message and the
+   * same source, and be completed.
+   */
+  function galleryImageAsset(control, shown, shellImages) {
+    if (control && (control.isComplete !== true || control.isPreview !== false)) return null;
+    const wanted = control ? control.imageId : shown?.id;
+    if (typeof wanted !== 'string' || !wanted) return null;
+    if (control && shown && shown.id !== wanted) return null;
+    const matches = [...shellImages.keys()].filter(item => item?.id === wanted);
+    if (matches.length !== 1) return null;
+    const item = matches[0];
+    if (item.status !== 'completed' || item.isPreview === true) return null;
+    if (shown && (shown.chatGptMessageId !== item.chatGptMessageId || (typeof shown.src === 'string' && shown.src !== item.src))) return null;
+    return shellImages.get(item);
+  }
+
   function generatedImagesOf(sections, messages, exactImageNodes, shellImages = new Map()) {
     const out = [];
     const seen = new Set();
@@ -854,13 +878,13 @@
             // Current image previews use blob pixels. Only the mounted typed item
             // and its exact per-image control can identify those pixels; a blob URL
             // or a nearby gallery alone is not an asset identity.
-            let control = null;
+            let control = null, shown = null;
             for (let at = fiberOf(node), up = 0; at && up < MAX_CLIMB; up++, at = at.return) {
               const props = at.memoizedProps;
               if (props?.imageId && !control) control = props;
+              if (props?.image && typeof props.image === 'object' && !shown) shown = props.image;
               if (shellImages.has(props?.item)) {
-                if (control?.imageId === props.item.id && control.isComplete === true && control.isPreview === false)
-                  assetId = shellImages.get(props.item);
+                assetId = galleryImageAsset(control, shown, shellImages);
                 break;
               }
               if (props?.entry) break;
@@ -2262,6 +2286,16 @@
     // group while the turn runs. A top-level item owns its id; a nested copy of it is not read twice.
     const topLevel = new Set(entry.turn.items.filter(item => item?.type === 'assistant-message').map(item => str(item.messageId)).filter(Boolean));
     let work = 0;
+    // ChatGPT's own times for this turn (#2005): a question found in older history was recorded at the
+    // moment it was read, hours or months late. The question was sent when the turn's work started
+    // (its own `sentAtMs` once ChatGPT keeps it), and a finished answer was written when it completed.
+    // Only a plausible ChatGPT time counts: after 2020 and not later than a day from now (CodeRabbit on #2064).
+    const at = value => Number.isFinite(value) && value >= 1577836800000 && value <= Date.now() + 86_400_000 ? value : undefined;
+    const startedAt = at(entry.turn.workStartedAtMs), completedAt = at(entry.turn.workCompletedAtMs);
+    // The turn's start is its opening question's; its end is its last answer's. A follow-up sent into the
+    // running answer, or an answer a retry replaced, keeps only a time of its own.
+    const opening = entry.turn.items.findIndex(item => item?.type === 'user-message');
+    const closing = entry.turn.items.findLastIndex(item => item?.type === 'assistant-message' && item.phase === 'final_answer');
     for (const [index, item] of entry.turn.items.entries()) {
       if (++work > MAX_ROWS) return null;
       if (item?.type === 'user-message' || item?.type === 'assistant-message') {
@@ -2272,7 +2306,10 @@
         const final = !user && item.phase === 'final_answer';
         if (final) lastAnswer = item;
         const completed = final && item.completed === true && entry.turn.status === 'complete';
+        const written = user ? at(item.sentAtMs) ?? (index === opening ? startedAt : undefined)
+          : completed && index === closing ? completedAt : undefined;
         messages.push({ id, author: { role }, content: { content_type: 'text', parts: [typeof text === 'string' ? text : ''] },
+          ...(written !== undefined ? { create_time: written } : {}),
           channel: user ? null : final ? 'final' : 'commentary', end_turn: completed,
           status: completed ? 'finished_successfully' : 'in_progress',
           // The turn's place belongs to its first message. A message sent into the running answer
@@ -2293,7 +2330,9 @@
         images.set(item, asset);
         // Typed generated outputs are public tool media, never assistant prose.
         // Multiple assets may share their owning provider message.
+        const made = item.status === 'completed' && item.isPreview !== true && entry.turn.status === 'complete' ? completedAt : undefined;
         messages.push({ id, author: { role: 'tool' }, recipient: 'all', channel: 'final',
+          ...(made !== undefined ? { create_time: made } : {}),
           status: item.status === 'completed' && item.isPreview !== true ? 'finished_successfully' : 'in_progress',
           content: { content_type: 'multimodal_text', parts: [{ content_type: 'image_asset_pointer',
             asset_pointer: item.src, width: item.width, height: item.height }] } });
