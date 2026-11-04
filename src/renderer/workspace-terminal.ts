@@ -234,6 +234,8 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
     const tab: Tab = { id, projectId: null, cwd: '', title: label.length > 48 ? `${label.slice(0, 47)}…` : label, node, term, fit: addon,
       ready: true, exited: false, previous: false, queued: 0, writes: Promise.resolve(), agent };
     tabs.set(id, tab); selected = id; agentsLast();
+    // No cursor: nothing can be typed here, and a blinking block said otherwise (polish pass, 2.1.51).
+    term.write('\x1b[?25l');
     term.writeln(`\x1b[2m${t("Read-only: the agent's command. Typing here does nothing.")}\x1b[0m`);
     term.onSelectionChange(() => { if (selected === id) paintSend(); });
     term.attachCustomKeyEventHandler(event => {
