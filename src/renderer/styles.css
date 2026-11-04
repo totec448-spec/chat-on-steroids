@@ -5125,6 +5125,9 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .work-dock-bar .work-dock-tab > .btn.btn-icon:hover:not(:disabled), .terminal-tab > .btn.btn-icon:hover:not(:disabled) { color: var(--ink); background: color-mix(in srgb, var(--ink) 9%, transparent); }
 .terminal-tab > .btn:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
 /* An agent's command, read-only (#1920): a quiet badge before its command, and Stop beside the close button. */
+/* The command's own output may show the cursor again (Windows consoles often do): never in a read-only tab. */
+#workspaceTerminal .terminal-screen.is-agent .xterm-rows .xterm-cursor, #workspaceTerminal .terminal-screen.is-agent .xterm-rows .xterm-cursor.xterm-cursor-block,
+#workspaceTerminal .terminal-screen.is-agent .xterm-rows.xterm-focus .xterm-cursor.xterm-cursor-block { background-color: transparent !important; color: inherit !important; outline: none !important; box-shadow: none !important; }
 .terminal-agent-badge { flex: none; padding: 0 5px; border: 1px solid var(--edge); border-radius: 4px; color: var(--soft); font-size: calc(10.5px * var(--text-scale, 1)); line-height: 16px; }
 /* Reordering: the dragged pill rides above its neighbours, which slide aside (tab-reorder.ts). */
 :is(.work-dock-tabs, .terminal-tabs).is-reordering { cursor: grabbing; }

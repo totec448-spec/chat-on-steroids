@@ -62,6 +62,11 @@ app.whenReady().then(async () => {
   await until(`${screen}.includes('Read-only: the agent')`);
   await js(`emitOutput({id:window.opened[0].id,data:'Running 48 tests using 2 workers\\n  ✓ settings › saves the theme (1.2s)\\n  ✘ devices › waits for the gateway (30.0s)\\n'})`);
   await until(`${screen}.includes('waits for the gateway')`);
+  // Nothing can be typed, so no cursor shows, even when the command's output asks for one again.
+  await js(`emitOutput({id:window.opened[0].id,data:'\\x1b[?25h'})`); await pause(400);
+  // Offscreen xterm draws no cursor element, so the rule is checked on one styled as xterm styles it.
+  const cursor = await js(`(() => { const host = document.querySelector('#workspaceTerminal .terminal-screen.is-agent .xterm-rows'); const c = document.createElement('span'); c.className = 'xterm-cursor xterm-cursor-block'; c.style.backgroundColor = 'rgb(255, 255, 255)'; c.style.outline = '1px solid red'; c.textContent = ' '; host.append(c); const s = getComputedStyle(c); const r = { bg: s.backgroundColor, outline: s.outlineStyle }; c.remove(); return r; })()`);
+  assert.deepEqual(cursor, { bg: 'rgba(0, 0, 0, 0)', outline: 'none' });
   // Typing does nothing: no write reaches anything.
   await js(`document.querySelector('#workspaceTerminal .terminal-screen.is-agent textarea')?.focus()`);
   await js(`document.querySelector('#workspaceTerminal .terminal-screen.is-agent textarea')?.dispatchEvent(new KeyboardEvent('keydown',{key:'a',bubbles:true}))`);
