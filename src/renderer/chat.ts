@@ -7175,16 +7175,25 @@ function paintRecoveryRows(): boolean {
  * with every reason written somewhere nobody was looking. The newest app note (never a handoff
  * note) stays here until a newer question or turn supersedes it, or it is dismissed.
  */
+/** Per shown stop note: how long the chat's newest answer was when the note first showed. */
+const verdictAnswerChars = new Map<string, number>();
 function paintRecoveryVerdict(host: HTMLElement, sessionId: string | null): boolean {
   const verdict = detailFor === selectedId ? [...events].reverse().find(event => event.source === 'app' && event.kind === 'note' && !event.continuation) : undefined;
   if (verdict?.kind !== 'note') return false;
   const revision = JSON.stringify(['note', verdict.time, verdict.message.text]);
+  // An answer begun before the note that keeps growing is the chat working (CodeRabbit on #2062): its
+  // length when the note was first shown is the baseline; only more text counts, not a markup revision.
+  const answer = [...events].reverse().find(event => event.kind === 'assistant_message' && event.source === 'extension');
+  const answerChars = answer?.kind === 'assistant_message' ? answer.message.chars ?? answer.message.text.length : 0;
+  const key = `${sessionId ?? ''}\u0000${revision}`;
+  if (!verdictAnswerChars.has(key)) verdictAnswerChars.set(key, answerChars);
+  const grew = answerChars > verdictAnswerChars.get(key)!;
   // The chat moved on after the note the way the episode counts it (#1883): a new turn or message, an
   // answer from the page, or a tool call (CodeRabbit on #2062).
   const superseded = events.some(event => positionOf(event) > positionOf(verdict) &&
     (event.kind === 'turn_start' || event.kind === 'tool_call' || (event.kind === 'user_message' && event.source === 'extension') ||
       (event.kind === 'assistant_message' && event.source === 'extension')));
-  if (superseded || (!!sessionId && dismissedRecoveryNotices.get(sessionId) === revision)) return false;
+  if (superseded || grew || (!!sessionId && dismissedRecoveryNotices.get(sessionId) === revision)) return false;
   const row = el('div', 'recovery-notice');
   row.append(icon('i-pulse'), el('span', 'queue-label', verdict.message.text),
     dockAction(() => t('Dismiss recovery notice'), 'i-x', () => {
