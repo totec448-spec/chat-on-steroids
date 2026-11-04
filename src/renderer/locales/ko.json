@@ -3741,5 +3741,7 @@
   "Today": "오늘",
   "Yesterday": "어제",
   "Previous 7 days": "지난 7일",
-  "Previous 30 days": "지난 30일"
+  "Previous 30 days": "지난 30일",
+  "Waiting for ChatGPT to finish its answer": "ChatGPT가 답변을 마칠 때까지 기다리는 중",
+  "Waiting for ChatGPT's page to end its turn": "ChatGPT 페이지가 턴을 마칠 때까지 기다리는 중"
 }

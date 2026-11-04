@@ -3741,5 +3741,7 @@
   "Today": "今日",
   "Yesterday": "昨日",
   "Previous 7 days": "過去 7 日間",
-  "Previous 30 days": "過去 30 日間"
+  "Previous 30 days": "過去 30 日間",
+  "Waiting for ChatGPT to finish its answer": "ChatGPT の回答が終わるのを待っています",
+  "Waiting for ChatGPT's page to end its turn": "ChatGPT のページがターンを終えるのを待っています"
 }
