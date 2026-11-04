@@ -3914,7 +3914,6 @@
   "found, {0}, {1}": "encontrado, {0}, {1}",
   "not there yet": "ainda não existe",
   "not checked": "não verificado",
-  "Chat On Steroids does not run or check this command. Read it, then run it yourself in your own terminal, on your own responsibility.": "O Chat On Steroids não executa nem verifica este comando. Leia-o e depois execute-o no seu próprio terminal, sob a sua responsabilidade.",
   "Read-only is on in the app. This step runs in your own terminal, outside it.": "Só de leitura está ativado na aplicação. Este passo é executado no seu próprio terminal, fora dela.",
   "Mark as done": "Marcar como feito",
   "Skip": "Ignorar",
@@ -3932,5 +3931,9 @@
   "Refused to ask you to run a step": "Recusado pedir-lhe que executasse um passo",
   "Could not check a step for you": "Não foi possível verificar um passo para si",
   "Refused to check a step for you": "Recusado verificar um passo para si",
-  "From the sub-agent “{0}”": "Do subagente «{0}»"
+  "From the sub-agent “{0}”": "Do subagente «{0}»",
+  "Run it yourself, in your own terminal: Chat On Steroids does not run or check it.": "Execute-o você mesmo, no seu próprio terminal: o Chat On Steroids não o executa nem o verifica.",
+  "{0} expected files": "{0} ficheiros esperados",
+  "{0} expected files|one": "{0} ficheiro esperado",
+  "{0} expected files|many": "{0} de ficheiros esperados"
 }

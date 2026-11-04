@@ -3752,7 +3752,6 @@
   "found, {0}, {1}": "찾음, {0}, {1}",
   "not there yet": "아직 없음",
   "not checked": "확인 안 됨",
-  "Chat On Steroids does not run or check this command. Read it, then run it yourself in your own terminal, on your own responsibility.": "Chat On Steroids는 이 명령을 실행하거나 확인하지 않습니다. 내용을 읽은 다음 본인의 책임하에 직접 사용하는 터미널에서 실행하세요.",
   "Read-only is on in the app. This step runs in your own terminal, outside it.": "앱에서 읽기 전용이 켜져 있습니다. 이 단계는 앱 밖, 직접 사용하는 터미널에서 실행됩니다.",
   "Mark as done": "완료로 표시",
   "Skip": "건너뛰기",
@@ -3768,5 +3767,7 @@
   "Refused to ask you to run a step": "단계 실행 요청이 거부됨",
   "Could not check a step for you": "직접 하실 단계를 확인하지 못함",
   "Refused to check a step for you": "직접 하실 단계 확인이 거부됨",
-  "From the sub-agent “{0}”": "서브에이전트 \"{0}\"에서"
+  "From the sub-agent “{0}”": "서브에이전트 \"{0}\"에서",
+  "Run it yourself, in your own terminal: Chat On Steroids does not run or check it.": "직접 자신의 터미널에서 실행하세요. Chat On Steroids는 이 명령을 실행하거나 확인하지 않습니다.",
+  "{0} expected files": "예상 파일 {0}개"
 }

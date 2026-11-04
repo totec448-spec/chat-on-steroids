@@ -3752,7 +3752,6 @@
   "found, {0}, {1}": "đã tìm thấy, {0}, {1}",
   "not there yet": "chưa có",
   "not checked": "chưa kiểm tra",
-  "Chat On Steroids does not run or check this command. Read it, then run it yourself in your own terminal, on your own responsibility.": "Chat On Steroids không chạy và không kiểm tra lệnh này. Hãy đọc kỹ, rồi tự chạy nó trong terminal của bạn, theo trách nhiệm của chính bạn.",
   "Read-only is on in the app. This step runs in your own terminal, outside it.": "Chỉ đọc đang bật trong ứng dụng. Bước này chạy trong terminal của bạn, bên ngoài ứng dụng.",
   "Mark as done": "Đánh dấu là xong",
   "Skip": "Bỏ qua",
@@ -3768,5 +3767,7 @@
   "Refused to ask you to run a step": "Đã từ chối nhờ bạn chạy một bước",
   "Could not check a step for you": "Không thể kiểm tra một bước dành cho bạn",
   "Refused to check a step for you": "Đã từ chối kiểm tra một bước dành cho bạn",
-  "From the sub-agent “{0}”": "Từ tác nhân phụ “{0}”"
+  "From the sub-agent “{0}”": "Từ tác nhân phụ “{0}”",
+  "Run it yourself, in your own terminal: Chat On Steroids does not run or check it.": "Hãy tự chạy lệnh này trong terminal của bạn: Chat On Steroids không chạy hay kiểm tra nó.",
+  "{0} expected files": "{0} tệp dự kiến"
 }
