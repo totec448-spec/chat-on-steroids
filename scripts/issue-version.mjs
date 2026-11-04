@@ -153,18 +153,30 @@ export const FEATURE_SINCE = '2026-11-03T21:00:00Z';
  * long, with nothing after it; one that never closes runs to the end (CodeRabbit on #2060).
  */
 export function ownText(body) {
-  const lines = String(body).replace(/<!--[\s\S]*?(?:-->|$)/g, '').split('\n');
   const out = [];
-  let fence = null;
-  for (const line of lines) {
+  let fence = null, comment = false;
+  for (const line of String(body).split('\n')) {
+    // Fences first, on the raw lines: a comment marker inside a code block hides nothing (CodeRabbit on #2060).
     const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
     if (fence) {
-      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && !marker[2].trim()) fence = null;
+      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && /^[ \t]*$/.test(marker[2])) fence = null;
       continue;
     }
-    // A backtick fence's info string has no backtick; such a line is inline code, not a fence.
-    if (marker && !(marker[1][0] === '`' && marker[2].includes('`'))) { fence = marker[1]; continue; }
-    out.push(line);
+    if (!comment && marker && !(marker[1][0] === '`' && marker[2].includes('`'))) { fence = marker[1]; continue; }
+    // Outside code, HTML comments go, also across lines.
+    let rest = line, kept = '';
+    while (rest) {
+      if (comment) {
+        const end = rest.indexOf('-->');
+        if (end < 0) { rest = ''; break; }
+        comment = false; rest = rest.slice(end + 3);
+      } else {
+        const start = rest.indexOf('<!--');
+        if (start < 0) { kept += rest; break; }
+        kept += rest.slice(0, start); comment = true; rest = rest.slice(start + 4);
+      }
+    }
+    out.push(kept);
   }
   return out.join('\n');
 }
