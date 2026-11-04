@@ -8864,7 +8864,9 @@ function paintPendingInputs(): void {
   reconcileChildren(host, [...next, ...host.querySelectorAll<HTMLElement>(':scope > .queued-input')]);
   if (focused?.id && active && !active.isConnected) {
     const row = [...host.querySelectorAll<HTMLElement>(':scope > .pending-message')].find(candidate => candidate.dataset.inputId === focused.id);
-    [...row?.querySelectorAll<HTMLElement>('button') ?? []].find(button => button.className === focused.cls && button.getAttribute('aria-label') === focused.label)?.focus({ preventScroll: true });
+    const buttons = [...row?.querySelectorAll<HTMLElement>('button') ?? []];
+    // The same control if the rebuilt row still has it, else the row's first one (a failed row shows Retry and Dismiss instead).
+    (buttons.find(button => button.className === focused.cls && button.getAttribute('aria-label') === focused.label) ?? buttons[0])?.focus({ preventScroll: true });
   }
   holdSentMessage();
 }

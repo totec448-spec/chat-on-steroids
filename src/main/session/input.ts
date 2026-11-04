@@ -170,6 +170,8 @@ const entrySchema = inputArgs.extend({
    * the one-minute pickup deadline counts from the last such hold, and the queue says why it waits.
    */
   pageHold: z.object({ reason: z.enum(['still-answering', 'turn-held', 'tool-running']), at: z.number(),
+    /** The chat whose page holds it; a hold counts only while the message still goes there (CodeRabbit on #2054). */
+    conversationId: z.string().nullable().optional(),
     /** When the window was last told, so its wording is refreshed before it lapses (CodeRabbit on #2054). */
     toldAt: z.number().optional() }).optional()
 });
@@ -572,6 +574,15 @@ async function retireRemovedSessionReceipts(current: InputEntry[], pendingOnly =
   await commit(next);
   return next;
 }
+/** When a page last held this message, counted only while the message still goes to that page's chat. */
+async function heldUntil(row: InputEntry): Promise<number> {
+  const hold = row.pageHold;
+  if (!hold) return 0;
+  if (hold.conversationId === undefined) return hold.at;
+  const goesTo = await target(row).catch(() => undefined);
+  return goesTo !== undefined && (goesTo ?? null) === hold.conversationId ? hold.at : 0;
+}
+
 async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
   const next = await Promise.all(current.map(async (row): Promise<InputEntry> => {
     if (companionOf(current, row)) return row;
@@ -621,7 +632,7 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
         !row.error?.startsWith('Message queued. ') &&
         // Time the person's send check held it is not the browser's: its minute starts when the hold ends (#1794).
         // Nor is time a page held it until its own turn ended: that page has it (2026-11-03).
-        Date.now() - Math.max(row.createdAt, row.dueAt, row.sendCheck?.nextAt ?? 0, row.pageHold?.at ?? 0) >= 60_000)
+        Date.now() - Math.max(row.createdAt, row.dueAt, row.sendCheck?.nextAt ?? 0, await heldUntil(row)) >= 60_000)
       return { ...row, state: 'failed', pickupFailedAt: Date.now(), error: 'Not sent: the browser did not pick up this message within 60 seconds.' };
     // Preparation can expire before Send. Once authorized, this exact claim owns
     // the uncertain outcome until receipt or explicit cancellation, regardless of
@@ -1982,6 +1993,7 @@ export function holdInputForSendCheck(id: string, attempt: number, reason: strin
 }
 
 const PAGE_HOLD_REASONS = new Set(['still-answering', 'turn-held', 'tool-running']);
+const discardedHoldLogged = new Map<string, number>();
 /** A page holding a hold note this recent is not rewritten: pages repeat it every few seconds. */
 const PAGE_HOLD_REFRESH_MS = 15_000;
 /** How often a still-held message's window is told again; with the refresh above, always under 75 s. */
@@ -2001,14 +2013,27 @@ export function noteInputHeld(id: string, reason: string, conversationId: string
     // Only the page of the chat the message goes to now holds it: after a Compact & Resume that is the
     // new chat, not the one the row was queued for; a new chat has none yet (CodeRabbit on #2054).
     const goesTo = await target(row).catch(() => undefined);
-    if (goesTo === undefined || (goesTo ?? null) !== conversationId) return null;
     const now = Date.now();
-    if (row.pageHold?.reason === reason && now - row.pageHold.at < PAGE_HOLD_REFRESH_MS) return 'held';
+    if (goesTo === undefined || (goesTo ?? null) !== conversationId) {
+      // Pages repeat their note every few seconds: say once a minute per chat that it does not count.
+      const said = `${id}:${conversationId ?? ''}`;
+      const last = discardedHoldLogged.get(said);
+      if (last === undefined || now - last >= 60_000) {
+        for (const [key, at] of discardedHoldLogged) if (now - at >= 60_000) discardedHoldLogged.delete(key);
+        discardedHoldLogged.set(said, now);
+        logInfo(`input ${id}: a hold from ${conversationId ?? 'a page with no chat'} does not keep it: ` +
+          (goesTo === undefined ? 'its chat could not be looked up' : `it goes to ${goesTo ?? 'a new chat'}`));
+      }
+      return null;
+    }
+    // Another chat's hold (before a Compact & Resume moved the message) is not this one's (CodeRabbit on #2054).
+    const same = row.pageHold?.reason === reason && (row.pageHold.conversationId ?? conversationId) === conversationId;
+    if (same && now - row.pageHold!.at < PAGE_HOLD_REFRESH_MS) return 'held';
     // The window shows the reason for 75 s after the hold it last heard of: tell it again well before.
-    const tell = row.pageHold?.reason !== reason || now - (row.pageHold.toldAt ?? row.pageHold.at) >= PAGE_HOLD_TELL_MS;
+    const tell = !same || now - (row.pageHold!.toldAt ?? row.pageHold!.at) >= PAGE_HOLD_TELL_MS;
     const toldAt = tell ? now : row.pageHold?.toldAt ?? row.pageHold?.at ?? now;
     await commit(current.map(entry => entry === row
-      ? { ...entry, pageHold: { reason: reason as NonNullable<InputEntry['pageHold']>['reason'], at: now, toldAt } } : entry));
+      ? { ...entry, pageHold: { reason: reason as NonNullable<InputEntry['pageHold']>['reason'], at: now, toldAt, conversationId } } : entry));
     return tell ? 'new' : 'held';
   });
 }
