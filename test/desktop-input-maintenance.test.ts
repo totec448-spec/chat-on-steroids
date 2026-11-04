@@ -644,7 +644,7 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
   it.each(['owned-home', 'foreign-chat', 'replacement-document', 'extra-navigation'])('keeps a reused conversation rendering only through its authorized transition (%s)', async transition => {
     const rendered = new Set<number>();
     const h = await worker([{ id: firstId, conversationId: null }], undefined, {}, {}, rendered);
-    const tab = { id: 7, url: `https://chatgpt.com/c/${secondId}`, active: false };
+    const tab: Tab = { id: 7, url: `https://chatgpt.com/c/${secondId}`, active: false };
     h.tabs.push(tab);
     const sender = { tab, documentId: 'reused-document', frameId: 0, url: tab.url };
     await h.authorizeDocument(sender, { navigationEpoch: 1 });
@@ -689,7 +689,7 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     // #1086: a new chat took an idle app-owned chat's tab. The page then reported that chat as
     // closed, the app read it as the user closing it on purpose, and paused its recovery for good.
     const h = await worker([{ id: firstId, conversationId: null }]);
-    const tab = { id: 7, url: `https://chatgpt.com/c/${secondId}`, active: false };
+    const tab: Tab = { id: 7, url: `https://chatgpt.com/c/${secondId}`, active: false };
     h.tabs.push(tab);
     const sender = { tab, documentId: 'reused-document', frameId: 0, url: tab.url };
     const source = await h.authorizeDocument(sender, { navigationEpoch: 1 });
@@ -717,6 +717,7 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
       // The record is spent: a later departure of the same chat is the user's again.
       tab.url = `https://chatgpt.com/c/${secondId}`;
       const back = await h.authorizeDocument({ ...sender, url: tab.url, documentId: 'reused-document' }, { navigationEpoch: 3 });
+      tab.pendingUrl = 'https://chatgpt.com/';
       await h.closed({ conversationId: secondId }, { ...sender, url: tab.url }, back);
       expect(closes().at(-1)).toEqual({ conversationId: secondId, manual: true });
     }
@@ -726,12 +727,15 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     // #1086: Retry on ChatGPT's load-failure surface (pressed by the page's own recovery or by the
     // user) took the tab to the home page, and the app paused the chat's recovery as if closed.
     const h = await worker([]);
-    const tab = { id: 7, url: `https://chatgpt.com/c/${secondId}`, active: false };
+    const tab: Tab = { id: 7, url: `https://chatgpt.com/c/${secondId}`, active: false };
     h.tabs.push(tab);
     const sender = { tab, documentId: 'failed-document', frameId: 0, url: tab.url };
     const source = await h.authorizeDocument(sender, { navigationEpoch: 1 });
     await h.noteTabConversation(source, secondId);
     if (reported) expect(await h.loadFailure({ conversationId: secondId }, sender, source)).toEqual({ ok: true });
+    // The page reported departure while Chrome is navigating to home; its
+    // committed tab.url still names the now-left conversation.
+    tab.pendingUrl = 'https://chatgpt.com/';
     await h.closed({ conversationId: secondId }, sender, source);
     const closes = h.fetch.mock.calls.filter(([url]) => new URL(url).pathname === '/closed')
       .map(([, init]) => JSON.parse(String(init!.body)));

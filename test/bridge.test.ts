@@ -616,6 +616,32 @@ describe('direct browser control over the paired bridge', () => {
 });
 
 describe('who is allowed to talk to it', () => {
+  it('logs only bounded close-outbox decision codes and only once per extension report', async () => {
+    await pair();
+    const logger = await import('../src/main/logger.js');
+    const info = vi.spyOn(logger, 'logInfo');
+    const report = (action: string, reason: string, at: number) => request('POST', '/diagnostics', {
+      browser: 'aaaaaaaaaaaaaaaa',
+      body: { capturedAt: Date.now(), status: { connected: true, paired: true },
+        preferences: { overwrite: true, durations: false },
+        closeOutboxDecision: { at, action, reason } }
+    });
+    const lines = () => info.mock.calls.map(([line]) => String(line)).filter(line => line.startsWith('browser: deferred /closed:') ||
+      line.startsWith('browser: discarded stale /closed:'));
+    await report('deferred', 'chrome_tab_open', 10_000);
+    await report('deferred', 'chrome_tab_open', 10_000);
+    await report('deferred', 'chrome_inventory_unavailable', 10_001);
+    await report('discarded', 'conversation_binding_open', 10_002);
+    await report('deferred', 'user chat title; forged status', 10_003);
+    await report('constructor', 'chrome_tab_open', 10_004);
+    expect(lines()).toEqual([
+      'browser: deferred /closed: Chrome still has the conversation tab',
+      'browser: deferred /closed: Chrome tab inventory was unavailable',
+      'browser: discarded stale /closed: the conversation was rebound'
+    ]);
+    info.mockRestore();
+  });
+
   // 2026-10-30: an extension that kept Chrome's language for weeks said nothing anywhere.
   it('logs once when the extension\'s stored language is not the app\'s, with its last error', async () => {
     await pair();
