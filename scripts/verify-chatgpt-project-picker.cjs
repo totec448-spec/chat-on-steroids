@@ -27,12 +27,27 @@ app.whenReady().then(async () => {
   const css = icons + fs.readFileSync(path.join(root, 'src/renderer/styles.css'), 'utf8');
   const html = withoutScripts(fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')).replace(/<link\b[^>]*>/g, '')
     .replace('</head>', `<style>${css}</style></head>`);
-  const win = new BrowserWindow({ show: false, width: 1100, height: 760, webPreferences: { sandbox: true, offscreen: true, backgroundThrottling: false } });
-  await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
-  win.webContents.on('console-message', (_e, _l, message) => { if (/error|Error/.test(message)) console.error('renderer:', message); });
-  await win.webContents.executeJavaScript(code);
-  await win.webContents.executeJavaScript('picker.initLanguage(); true');
-  const open = async (language) => win.webContents.executeJavaScript(`(async()=>{
+  // Embedded icon fonts make the percent-encoded data: URL enormous and some
+  // Chromium runs reject it before the renderer even starts. Load the exact
+  // synthetic HTML from an isolated local file instead, with no network.
+  const fixtureHtml = path.join(output, 'fixture.html');
+  fs.writeFileSync(fixtureHtml, html);
+  const showLinuxFixture = process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1';
+  // Wayland compositors can ignore a resize of an already-mapped window.
+  // Create one window per requested content width so narrow tests really run narrow.
+  const windows = new Map();
+  const windowAt = async (width) => {
+    if (windows.has(width)) return windows.get(width);
+    const win = new BrowserWindow({ show: showLinuxFixture, width, height: 760, useContentSize: true,
+      webPreferences: { sandbox: true, offscreen: !showLinuxFixture, backgroundThrottling: false } });
+    await win.loadFile(fixtureHtml);
+    win.webContents.on('console-message', (_e, _l, message) => { if (/error|Error/.test(message)) console.error('renderer:', message); });
+    await win.webContents.executeJavaScript(code);
+    await win.webContents.executeJavaScript('picker.initLanguage(); true');
+    windows.set(width, win);
+    return win;
+  };
+  const open = async (win, language) => win.webContents.executeJavaScript(`(async()=>{
     document.querySelectorAll('.file-branch-menu').forEach(n => n.remove());
     picker.setLanguage(${JSON.stringify(language)});
     let anchor = document.getElementById('fixture-anchor');
@@ -58,6 +73,7 @@ app.whenReady().then(async () => {
     const textLeft = node => { const r = document.createRange(); r.selectNodeContents(node); return r.getBoundingClientRect().left; };
     const label = o => o.querySelector('.ico') || o.querySelector('span');
     return {
+      viewportWidth: innerWidth,
       inside: m.left >= 0 && m.right <= innerWidth && m.bottom <= innerHeight,
       headingLeft: heading ? textLeft(heading) : null, searchLeft: search.getBoundingClientRect().left + parseFloat(getComputedStyle(search).paddingLeft),
       optionLeft: label(options[0]).getBoundingClientRect().left,
@@ -83,12 +99,14 @@ app.whenReady().then(async () => {
   for (const language of languages) {
     // Every language at the default size; the two longest-running catalogs also narrow and zoomed.
     for (const [width, zoom] of language === 'en' || language === 'de' ? [[1100, 1], [720, 1], [1100, 1.5]] : [[1100, 1]]) {
-      // A resize closes the popover (as in the app), so it opens again at each size.
-      win.setContentSize(width, 760); win.webContents.setZoomFactor(zoom);
+      const win = await windowAt(width);
+      win.webContents.setZoomFactor(zoom);
       await new Promise(r => setTimeout(r, 120));
-      await open(language);
+      await open(win, language);
       const result = await win.webContents.executeJavaScript(measure);
       results.push({ language, width, zoom, ...result });
+      assert.ok(Math.abs(result.viewportWidth * zoom - width) <= 3,
+        'the actual viewport must match the requested width and zoom: ' + JSON.stringify({ language, width, zoom, viewportWidth: result.viewportWidth }));
       if (width === 1100 && zoom === 1) fs.writeFileSync(path.join(output, `picker-${language}.png`), (await win.webContents.capturePage({ x: 0, y: 80, width: 380, height: 360 })).toPNG());
       if (width === 1100 && zoom === 1) {
         const state = await win.webContents.executeJavaScript(empty);
@@ -104,9 +122,9 @@ app.whenReady().then(async () => {
       }
       assert.ok(result.noteLines.every(lines => lines <= 1) && !result.noteCut, 'the note is one short, whole line: ' + JSON.stringify({ language, width, zoom, note: result.noteText }));
     }
-    win.setContentSize(1100, 760); win.webContents.setZoomFactor(1);
   }
   fs.writeFileSync(path.join(output, 'measurements.json'), JSON.stringify(results, null, 2));
   console.log('Passed: the ChatGPT Project picker keeps one left edge, one row height and a whole one-line note in all 13 languages (English and German also narrow and zoomed), and the empty Projects line is whole.');
-  win.destroy(); app.exit(0);
+  for (const win of windows.values()) win.destroy();
+  app.exit(0);
 }).catch(error => { console.error(error); app.exit(1); });

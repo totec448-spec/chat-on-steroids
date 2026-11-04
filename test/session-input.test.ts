@@ -9,7 +9,7 @@ import {
   fileSilenceInput, deferSilenceInput, revokeSilenceInputs, pendingQueuedPickups, inputBeforeGoal, inputArgs, acknowledgeBrowserInput, cancelInput, claimBrowserInput, completeBrowserDecision, enqueueInput,
   failBrowserInput, listInputs, offerToolInput as offerToolInputBatch, acknowledgeToolInput, pendingBrowserInputs, requestBrowserDecision, resetInputForTests, configureInputDelivery,
   authorizeBrowserHelperRetry, pausedBrowserHelpers, hasEligibleToolInput, editQueuedInput, reorderQueuedInputs, setInputAutomation, authorizeBrowserInput, sessionInputPolicy, retryUnclaimedInput,
-  noteInputStartupError, fileRotationInput, failBranchInput, BRANCH_ERRORS, holdInputForSendCheck, ownUnsentTexts
+  noteInputStartupError, fileRotationInput, failBranchInput, BRANCH_ERRORS, holdInputForSendCheck, ownUnsentTexts, noteInputHeld
 } from '../src/main/session/input.js';
 import type { InputArgs, InputEntry } from '../src/main/session/input.js';
 import { editReplacement } from '../src/main/session/edits.js';
@@ -111,6 +111,81 @@ describe('durable user input ownership', () => {
     expect(after?.state).toBe(state);
     if (held) expect(after?.error).toBe(held);
     else expect(after?.error).toContain('did not pick up this message');
+  });
+  // 2026-11-03 (Mac): the person's Continue reached the page, which held it back because ChatGPT was
+  // still answering; a minute later it failed as "the browser did not pick up this message".
+  it('keeps a message a page holds back while ChatGPT is still answering, and says so, instead of failing it', async () => {
+    binding.finishEnabled = false;
+    const row = await enqueueInput(input());
+    // Five minutes of a page reporting the hold every 45 seconds: far past the one-minute deadline.
+    for (let step = 0; step < 7; step++) {
+      now += 45_000;
+      // Every 45 s the window is told again, so its wording never lapses while the page holds it.
+      expect(await noteInputHeld(row.id, 'still-answering', 'conversation-a')).toBe('new');
+      expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'queued',
+        pageHold: { reason: 'still-answering', at: now } });
+    }
+    // Once no page has held it for a minute, the browser really did not take it.
+    now += 60_001;
+    expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'failed',
+      error: 'Not sent: the browser did not pick up this message within 60 seconds.' });
+    // A finished row is never marked held again.
+    expect(await noteInputHeld(row.id, 'still-answering', 'conversation-a')).toBeNull();
+  });
+  it('tells the window again only every 45 seconds, and takes a hold only from the message\'s own chat (CodeRabbit on #2054)', async () => {
+    binding.finishEnabled = false;
+    const row = await enqueueInput(input());
+    expect(await noteInputHeld(row.id, 'still-answering', 'conversation-b')).toBeNull();
+    expect(await noteInputHeld(row.id, 'still-answering', null)).toBeNull();
+    const told: string[] = [];
+    for (let step = 0; step < 5; step++) {
+      told.push(String(await noteInputHeld(row.id, 'still-answering', 'conversation-a')));
+      now += 15_000;
+    }
+    expect(told).toEqual(['new', 'held', 'held', 'new', 'held']);
+    // Another reason is news at once.
+    expect(await noteInputHeld(row.id, 'tool-running', 'conversation-a')).toBe('new');
+  });
+  it('takes a hold only from the chat the message goes to now, after the session moved on (CodeRabbit on #2054)', async () => {
+    binding.finishEnabled = false;
+    const info = vi.spyOn(logger, 'logInfo');
+    const row = await enqueueInput(input());
+    expect(await noteInputHeld(row.id, 'still-answering', 'conversation-a')).toBe('new');
+    // A Compact & Resume moved the session to a new chat: the old chat's page no longer keeps it.
+    binding.conversationId = 'conversation-moved';
+    expect(await noteInputHeld(row.id, 'still-answering', 'conversation-a')).toBeNull();
+    // The new chat's first hold is news, not a repeat of the old chat's.
+    expect(await noteInputHeld(row.id, 'still-answering', 'conversation-moved')).toBe('new');
+    expect(await noteInputHeld(row.id, 'still-answering', 'conversation-moved')).toBe('held');
+    expect(info).toHaveBeenCalledWith(`input ${row.id}: a hold from conversation-a does not keep it: it goes to conversation-moved`);
+    info.mockRestore();
+  });
+
+  it('counts an old chat\'s hold for nothing once the message goes to another chat (CodeRabbit on #2054)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      binding.finishEnabled = false;
+      const row = await enqueueInput(input());
+      vi.setSystemTime(Date.now() + 50_000);
+      expect(await noteInputHeld(row.id, 'still-answering', 'conversation-a')).toBe('new');
+      binding.conversationId = 'conversation-moved';
+      // 61 s after it was queued, 11 s after A's hold: A's hold no longer keeps it.
+      vi.setSystemTime(Date.now() + 11_000);
+      expect((await listInputs()).find(entry => entry.id === row.id)?.state).toBe('failed');
+    } finally { vi.useRealTimers(); }
+  });
+  it.each([
+    ['turn-held', 'new', 'queued'], ['tool-running', 'new', 'queued'],
+    // A page with no usable message box, or one that moved on, will not send it by waiting: the minute still applies.
+    ['no-composer', null, 'failed'], ['page-moved', null, 'failed']
+  ] as const)('keeps it only for a page waiting on its own turn (%s)', async (reason, kept, state) => {
+    binding.finishEnabled = false;
+    const row = await enqueueInput(input());
+    now += 50_000;
+    expect(await noteInputHeld(row.id, reason, 'conversation-a')).toBe(kept);
+    // 80 seconds after it was queued, 30 after the hold.
+    now += 30_000;
+    expect((await listInputs()).find(entry => entry.id === row.id)?.state).toBe(state);
   });
   it('requeues one proven pre-Send browser pickup timeout on the same row, then stops retrying', async () => {
     binding.model = 'gpt-5.6-sol'; binding.finishEnabled = false;

@@ -453,7 +453,7 @@ it('offers a new chat beside a project\'s menu, and its color as a submenu and r
   expect(button.getAttribute('aria-expanded')).toBe('true');
   const menu = w.document.querySelector<HTMLElement>('.row-menu')!;
   expect(menu.getAttribute('role')).toBe('menu');
-  expect([...menu.querySelectorAll<HTMLElement>('.row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['chat-new', 'group-new', 'chatgpt-change', 'chatgpt-unlink', 'color', 'secrets-shield', 'remove']);
+  expect([...menu.querySelectorAll<HTMLElement>('.row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['chat-new', 'group-new', 'chatgpt-change', 'chatgpt-unlink', 'color', 'related-folders', 'secrets-shield', 'remove']);
   expect(menuItem(w, 'remove').classList.contains('is-danger')).toBe(true);
   expect(w.document.activeElement).toBe(menuItem(w, 'chat-new'));
   // Keyboard: Down and Up move, Right opens the color submenu on the current choice, Left comes back.
@@ -466,9 +466,12 @@ it('offers a new chat beside a project\'s menu, and its color as a submenu and r
   menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
   expect(w.document.activeElement).toBe(menuItem(w, 'color'));
   menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+  expect(w.document.activeElement).toBe(menuItem(w, 'related-folders'));
+  menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
   expect(w.document.activeElement).toBe(menuItem(w, 'secrets-shield'));
   menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
   expect(w.document.activeElement).toBe(menuItem(w, 'remove'));
+  menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
   menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
   menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
   expect(w.document.activeElement).toBe(menuItem(w, 'color'));
@@ -963,7 +966,7 @@ it("marks every New response seen from the header, or one project's from its men
   const refresh = async () => { (w.document.getElementById('chatRefresh') as HTMLButtonElement).click(); await settle(); };
   expect(header().hidden).toBe(true);
   projectMenu(w, project.id);
-  expect(actions()).toEqual(['chat-new', 'group-new', 'chatgpt-change', 'chatgpt-unlink', 'color', 'secrets-shield', 'remove']);
+  expect(actions()).toEqual(['chat-new', 'group-new', 'chatgpt-change', 'chatgpt-unlink', 'color', 'related-folders', 'secrets-shield', 'remove']);
   w.document.querySelector<HTMLElement>('.row-menu')!.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 
   // p1, p2 and u1 finish in the background; p3 is still running.
@@ -977,13 +980,13 @@ it("marks every New response seen from the header, or one project's from its men
   expect(header().hidden).toBe(false);
 
   projectMenu(w, project.id);
-  expect(actions()).toEqual(['chat-new', 'group-new', 'chatgpt-change', 'chatgpt-unlink', 'mark-seen', 'color', 'secrets-shield', 'remove']);
+  expect(actions()).toEqual(['chat-new', 'group-new', 'chatgpt-change', 'chatgpt-unlink', 'mark-seen', 'color', 'related-folders', 'secrets-shield', 'remove']);
   menuItem(w, 'mark-seen').click();
   await settle();
   expect(unseen()).toEqual(['u1']);
   expect(row('p3').querySelector('.session-status.is-active')).not.toBeNull();
   projectMenu(w, project.id);
-  expect(actions()).toEqual(['chat-new', 'group-new', 'chatgpt-change', 'chatgpt-unlink', 'color', 'secrets-shield', 'remove']);
+  expect(actions()).toEqual(['chat-new', 'group-new', 'chatgpt-change', 'chatgpt-unlink', 'color', 'related-folders', 'secrets-shield', 'remove']);
   w.document.querySelector<HTMLElement>('.row-menu')!.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 
   header().focus();
