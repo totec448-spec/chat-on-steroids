@@ -167,3 +167,77 @@ it('tells a free-form reporter to add the missing parts to the text', () => {
   expect(text).toMatch(/to the issue text/);
   expect(text).not.toMatch(/into that field|tick/);
 });
+
+// 2026-11-03 (#1811, #2055): feature requests still arrived as issues, through GitHub's API or the gh
+// CLI, which skip the issue forms. New features come as pull requests (CONTRIBUTING.md), so a new
+// non-bug issue written without the form gets one friendly note and is closed (user, 2026-11-03).
+// @ts-expect-error The check is a plain Node script without type declarations.
+import { FEATURE_COMMENT, FEATURE_SINCE } from '../scripts/issue-version.mjs';
+const featureRequest = (extra: Partial<Intake> & { title?: string; user?: { type: string } } = {}) => ({
+  ...fresh('## Feature request\n\nAllow approving several folders at once.\n\n## Use case\n\nTwenty work folders.', { labels: [] }),
+  title: 'Feature request: approve several folders at once', created_at: '2026-11-04T09:00:00Z', user: { type: 'User' }, ...extra });
+
+it('closes only an issue that says it is a feature request; an unclear one is left to a maintainer (CodeRabbit on #2060)', () => {
+  const unclear = featureRequest({ title: 'Cannot connect on Linux', body: 'It never connects. Logs attached later.' });
+  expect(intakeDecision(unclear, current).decision).toBe('none');
+  expect(intakeDecision(featureRequest({ title: 'Question about projects', body: 'How do folders work?' }), current).decision).toBe('none');
+  for (const title of ['[Feature] Dark tabs', 'Feature: dark tabs', 'Idea - dark tabs', 'Proposal: dark tabs'])
+    expect(intakeDecision(featureRequest({ title, body: 'Please.' }), current).decision).toBe('feature');
+  expect(intakeDecision(featureRequest({ title: 'Dark tabs', body: 'x', labels: [{ name: 'enhancement' }] }), current).decision).toBe('feature');
+  expect(intakeDecision(featureRequest({ title: 'Dark tabs', body: '### Proposed change\n\nDark tabs.' }), current).decision).toBe('feature');
+  // "Idealistic" is not "Idea", nor is "Requesting help" a request for a feature by its first word alone.
+  expect(intakeDecision(featureRequest({ title: 'Idealistic sync breaks', body: 'x' }), current).decision).toBe('none');
+  // A quoted example's headings and a heading naming the affected feature are not requests.
+  expect(intakeDecision(featureRequest({ title: 'Markdown headings render wrong', body: 'Pasting this:\n\n```md\n## Feature request\n```\n\nshows raw hashes.' }), current).decision).toBe('none');
+  expect(intakeDecision(featureRequest({ title: 'Markdown headings render wrong', body: '~~~\n### Proposed change\n~~~' }), current).decision).toBe('none');
+  expect(intakeDecision(featureRequest({ title: 'Folder approval crashes', body: '## Feature\n\nFolder approval\n\n## What happened\n\nIt crashed.' }), current).decision).toBe('none');
+  // A line with text after its marker does not close a fence, so the example after it is still code.
+  expect(intakeDecision(featureRequest({ title: 'Nested fences render wrong', body: '````\n```md\n## Feature request\n```\n````' }), current).decision).toBe('none');
+  expect(intakeDecision(featureRequest({ title: 'Code blocks break', body: '```\nx\n```md\n## Feature request' }), current).decision).toBe('none');
+  // CRLF line ends, as the web form sends them, do not hide a fence.
+  expect(intakeDecision(featureRequest({ title: 'Paste breaks', body: '```\r\n## Feature request\r\n```\r\nIt breaks.' }), current).decision).toBe('none');
+  expect(intakeDecision(featureRequest({ title: 'Dark tabs', body: '## Feature request\r\n\r\nDark tabs please.' }), current).decision).toBe('feature');
+  // A comment marker inside a code block hides nothing, so the fence still ends where it ends.
+  expect(intakeDecision(featureRequest({ title: 'Comments in code break', body: '```\n<!--\n```\n## Feature request\n```\n-->' }), current).decision).toBe('feature');
+  expect(intakeDecision(featureRequest({ title: 'Comments in code break', body: '```\n<!--\n```  \n-->\n```\n## Feature request' }), current).decision).toBe('none');
+  // Hidden template lines are not the issue's own.
+  expect(intakeDecision(featureRequest({ title: 'Sync stops', body: '<!--\n## Feature request\n-->\nIt stops after an hour.' }), current).decision).toBe('none');
+  // After a fence that does close, the issue's own heading counts again.
+  expect(intakeDecision(featureRequest({ title: 'Dark tabs', body: '```\ncode\n```\n\n## Feature request\n\nDark tabs please.' }), current).decision).toBe('feature');
+  for (const title of ['Feature X is broken', 'Request timed out on login', 'Feature request approve folders'])
+    expect(intakeDecision(featureRequest({ title, body: 'x' }), current).decision).toBe(title.startsWith('Feature request') ? 'feature' : 'none');
+});
+
+it('closes a new non-bug issue written without the form, once, with a pointer to pull requests', () => {
+  expect(intakeDecision(featureRequest(), current)).toEqual({ decision: 'feature', missing: [] });
+  expect(Date.parse(FEATURE_SINCE)).toBeLessThan(Date.parse('2026-11-04T09:00:00Z'));
+  expect(FEATURE_COMMENT).toContain('CONTRIBUTING.md#new-features');
+  expect(FEATURE_COMMENT).toContain('/issues/482');
+  expect(FEATURE_COMMENT).toMatch(/Bug report/);
+});
+
+it('never closes a feature issue on an edit, from a maintainer or a bot, or one opened before the rule', () => {
+  expect(intakeDecision(featureRequest(), { latest: 'v2.1.40', opened: false }).decision).toBe('none');
+  expect(intakeDecision(featureRequest({ author_association: 'MEMBER' }), current).decision).toBe('none');
+  expect(intakeDecision(featureRequest({ author_association: 'COLLABORATOR' }), current).decision).toBe('none');
+  // The weekly maintainer digest is opened by GitHub Actions.
+  expect(intakeDecision(featureRequest({ user: { type: 'Bot' }, title: 'Maintainer digest: week of 2026-11-09' }), current).decision).toBe('none');
+  expect(intakeDecision(featureRequest({ created_at: '2026-11-01T09:00:00Z' }), current).decision).toBe('none');
+  // A closed one (a maintainer closed or reopened it by hand) is left alone.
+  expect(intakeDecision(featureRequest({ state: 'closed' }), current).decision).toBe('none');
+});
+
+it('never treats an issue said to be a bug as a feature, whatever its headings, nor one a person reopened (CodeRabbit on #2060)', () => {
+  const featureShaped = '### Problem or workflow\n\nIt crashes.\n\n### Proposed change\n\nDon\'t.';
+  expect(intakeDecision(featureRequest({ body: featureShaped }), current).decision).toBe('feature');
+  expect(intakeDecision(featureRequest({ body: featureShaped, title: 'Bug: it crashes' }), current).decision).toBe('none');
+  expect(intakeDecision(featureRequest({ body: featureShaped, labels: [{ name: 'bug' }] }), current).decision).toBe('none');
+  const decide = intake as (issue: Intake, context: { latest: string | null; opened: boolean; reopened?: boolean }) => { decision: string };
+  expect(decide(featureRequest(), { ...current, reopened: true }).decision).toBe('none');
+});
+
+it('still treats a free-form bug report as a bug report, and the bug form as the bug form', () => {
+  expect(intakeDecision(featureRequest({ title: '[Bug] 2.1.40: it broke', body: freeForm(attached) }), current).decision).toBe('none');
+  expect(intakeDecision(featureRequest({ title: 'It broke', labels: [{ name: 'bug' }], body: freeForm() }), current).decision).toBe('close');
+  expect(intakeDecision({ ...fresh(fullReport()), created_at: '2026-11-04T09:00:00Z' } as Intake, opened).decision).toBe('none');
+});
