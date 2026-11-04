@@ -8848,6 +8848,9 @@ function paintPendingInputs(): void {
     (notice(entry) || !['sent', 'cancelled'].includes(entry.state) || (entry.state === 'sent' && entry.messageId && !anchored(entry))));
   for (const entry of startingInputs.values()) if (belongsToSelection(entry) && !all.some(row => row.id === entry.id)) rows.push(entry);
   const host = $('inputQueue');
+  // A row whose status changed is rebuilt; a control of it that had keyboard focus keeps it (CodeRabbit on #2054).
+  const active = document.activeElement instanceof HTMLElement && host.contains(document.activeElement) ? document.activeElement : null;
+  const focused = active ? { id: active.closest<HTMLElement>('.pending-message')?.dataset.inputId, label: active.getAttribute('aria-label'), cls: active.className } : null;
   const previous = new Map([...host.querySelectorAll<HTMLElement>(':scope > .pending-message')].map(row => [row.dataset.inputId, row]));
   const next = rows.filter(entry => !historicalAutomaticInput(entry)).map(entry => {
     const sig = JSON.stringify([entry.text, entry.state, entry.error, entry.dueAt, entry.scheduled, notice(entry), routeHeld(entry), queuedWaitReason(entry), entry.sendCheck, entry.stagesApplied,
@@ -8859,6 +8862,10 @@ function paintPendingInputs(): void {
   });
   // Helper controls have their own owner and are refreshed by the queue read below.
   reconcileChildren(host, [...next, ...host.querySelectorAll<HTMLElement>(':scope > .queued-input')]);
+  if (focused?.id && active && !active.isConnected) {
+    const row = [...host.querySelectorAll<HTMLElement>(':scope > .pending-message')].find(candidate => candidate.dataset.inputId === focused.id);
+    [...row?.querySelectorAll<HTMLElement>('button') ?? []].find(button => button.className === focused.cls && button.getAttribute('aria-label') === focused.label)?.focus({ preventScroll: true });
+  }
   holdSentMessage();
 }
 /** How a schedule repeats, in the chosen language: "every weekday at 09:00". */

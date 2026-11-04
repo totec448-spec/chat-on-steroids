@@ -146,6 +146,15 @@ describe('durable user input ownership', () => {
     // Another reason is news at once.
     expect(await noteInputHeld(row.id, 'tool-running', 'conversation-a')).toBe('new');
   });
+  it('takes a hold only from the chat the message goes to now, after the session moved on (CodeRabbit on #2054)', async () => {
+    binding.finishEnabled = false;
+    const row = await enqueueInput(input());
+    expect(await noteInputHeld(row.id, 'still-answering', 'conversation-a')).toBe('new');
+    // A Compact & Resume moved the session to a new chat: the old chat's page no longer keeps it.
+    binding.conversationId = 'conversation-moved';
+    expect(await noteInputHeld(row.id, 'still-answering', 'conversation-a')).toBeNull();
+    expect(await noteInputHeld(row.id, 'still-answering', 'conversation-moved')).toBe('held');
+  });
   it.each([
     ['turn-held', 'new', 'queued'], ['tool-running', 'new', 'queued'],
     // A page with no usable message box, or one that moved on, will not send it by waiting: the minute still applies.
