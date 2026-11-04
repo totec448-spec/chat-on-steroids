@@ -66,8 +66,9 @@ import { confirmedPluginSchemas, pluginRefreshPublications, pluginRefreshStatuse
  */
 
 import { answerDesktopAsk, currentDesktopAsk, mirrorDesktopAsk } from './desktop-ask-window.js';
-import { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, nativeTheme, shell } from 'electron';
+import { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, nativeTheme, shell, type IpcMainInvokeEvent } from 'electron';
 import { repairMacOSPermissions, resetMacOSPermissions } from './computer/macos-grants.js';
+import { testLinuxScreenshotConsent } from './computer/linux-screenshot-consent.js';
 import { z } from 'zod';
 import {
   CAPABILITIES,
@@ -256,6 +257,7 @@ const settingsPatch = z.object({
     cosBrowserMinimize: z.enum(['taskbar', 'tray']).optional(),
     desktopAsk: z.enum(['off', 'active', 'always']).optional(),
     desktopUnattributed: z.boolean().optional(),
+    linuxDesktopEnabled: z.boolean().optional(),
     developerMode: z.boolean().optional(),
     playfulStatus: z.boolean().optional(),
     playfulContinue: z.boolean().optional(),
@@ -485,6 +487,8 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       // None saved is off, as in desktopAsk: a stale snapshot without the field changes nothing.
       desktopUnattributed: (base.ui.desktopUnattributed === true) === (wanted.ui.desktopUnattributed === true)
         ? current.ui.desktopUnattributed : wanted.ui.desktopUnattributed,
+      linuxDesktopEnabled: (base.ui.linuxDesktopEnabled === true) === (wanted.ui.linuxDesktopEnabled === true)
+        ? current.ui.linuxDesktopEnabled : wanted.ui.linuxDesktopEnabled,
       developerMode: pick(current.ui.developerMode, base.ui.developerMode, wanted.ui.developerMode),
       playfulStatus: pick(current.ui.playfulStatus, base.ui.playfulStatus, wanted.ui.playfulStatus),
       playfulContinue: pick(current.ui.playfulContinue, base.ui.playfulContinue, wanted.ui.playfulContinue),
@@ -699,10 +703,10 @@ async function buildState(): Promise<AppState> {
 }
 
 /** Wraps a handler so a thrown error becomes a message the UI can show. */
-function handle<T>(channel: string, fn: (payload: unknown) => Promise<T>): void {
-  ipcMain.handle(channel, async (_event, payload: unknown) => {
+function handle<T>(channel: string, fn: (payload: unknown, event: IpcMainInvokeEvent) => Promise<T>): void {
+  ipcMain.handle(channel, async (event, payload: unknown) => {
     try {
-      return { ok: true as const, data: await fn(payload) };
+      return { ok: true as const, data: await fn(payload, event) };
     } catch (err) {
       const message =
         err instanceof SandboxError || err instanceof z.ZodError
@@ -905,6 +909,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // reaches automatic plugin refresh. Cosmetic saves must not invalidate discovery.
     if (before.multiAgent.enabled !== next.multiAgent.enabled || before.sessions.record !== next.sessions.record ||
         before.ui.finishTool !== next.ui.finishTool ||
+        (before.ui.linuxDesktopEnabled === true) !== (next.ui.linuxDesktopEnabled === true) ||
         JSON.stringify(effectiveCapabilities(before)) !== JSON.stringify(effectiveCapabilities(next))) forgetExposedSurface();
     // Order matters, and it used to be wrong. Pausing the run and withdrawing worker browser
     // commands has to happen while the bridge can still cancel those transports; stopping the
@@ -1792,6 +1797,36 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('desktop:requestAccessibility', async () => {
     await refreshMacOSDesktopAccess({ promptAccessibility: true });
     return buildState();
+  });
+  // A user action inside the focused main window is necessary for GNOME's Screenshot
+  // portal to display its consent dialog. Never synthesize a grant or send image bytes
+  // to the renderer. This is a diagnostic probe, not a general-purpose screen IPC.
+  let linuxScreenshotConsentPending = false;
+  handle('desktop:linuxScreenshotConsent', async (_payload, event) => {
+    // A different renderer must not borrow the main window's foreground state
+    // to trigger an operating-system access dialog.
+    const window = getWindow();
+    if (!window || window.isDestroyed() || event.sender !== window.webContents) {
+      logInfo('linux screenshot consent: refused because the request was not from the main window');
+      throw new Error('Screenshot permission can be requested only from the Chat On Steroids main window.');
+    }
+    if (linuxScreenshotConsentPending) {
+      logInfo('linux screenshot consent: refused because another request is already running');
+      throw new Error('A screenshot permission request is already running.');
+    }
+    linuxScreenshotConsentPending = true;
+    try {
+      return await testLinuxScreenshotConsent({
+        focused: () => {
+          const window = getWindow();
+          return !!window && !window.isDestroyed() && window.isFocused();
+        },
+        enabled: () => getConfig().ui.linuxDesktopEnabled === true,
+        screenAllowed: () => effectiveCapabilities(getConfig()).screen === true
+      });
+    } finally {
+      linuxScreenshotConsentPending = false;
+    }
   });
   // A grant from an earlier build no longer applies, yet System Settings shows it on: reset this
   // app's own entries and ask again, so macOS files the grant under the build running now.
