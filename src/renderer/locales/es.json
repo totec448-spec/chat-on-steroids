@@ -3905,5 +3905,17 @@
   "Previous 7 days": "Últimos 7 días",
   "Previous 30 days": "Últimos 30 días",
   "Waiting for ChatGPT to finish its answer": "Esperando a que ChatGPT termine su respuesta",
-  "Waiting for ChatGPT's page to end its turn": "Esperando a que la página de ChatGPT termine su turno"
+  "Waiting for ChatGPT's page to end its turn": "Esperando a que la página de ChatGPT termine su turno",
+  "Related folders": "Carpetas relacionadas",
+  "Related folders…": "Carpetas relacionadas…",
+  "Related folders: {0}": "Carpetas relacionadas: {0}",
+  "Other approved folders this work also uses": "Otras carpetas aprobadas que también usa este trabajo",
+  "Adds context for ChatGPT; does not change the working directory or grant access.": "Da contexto a ChatGPT; no cambia el directorio de trabajo ni concede acceso.",
+  "No related folders yet.": "Aún no hay carpetas relacionadas.",
+  "Approved folder to add": "Carpeta aprobada para añadir",
+  "Every approved folder is already here. Approve another folder in Settings to add it.": "Todas las carpetas aprobadas ya están aquí. Aprueba otra carpeta en Ajustes para añadirla.",
+  "Unavailable": "No disponible",
+  "No longer approved or no longer there; ChatGPT is not told about it.": "Ya no está aprobada o ya no existe; no se le menciona a ChatGPT.",
+  "Choose a related folder from your approved folders": "Elige una carpeta relacionada entre tus carpetas aprobadas",
+  "A project can have at most 10 related folders": "Un proyecto puede tener como máximo 10 carpetas relacionadas"
 }
