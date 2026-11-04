@@ -1397,6 +1397,25 @@ it('keeps the latest recovery verdict in view until the chat works again', async
   expect(host.hidden).toBe(true);
 });
 
+it('clears a stop note once an answer begun before it grows, but not on a revision that adds no text (CodeRabbit on #2062)', async () => {
+  const verdict = 'Stopped trying to recover this chat: 10 attempts were offered to the browser and none was picked up.';
+  const answer = (seq: number, value: string) => ({ seq, origin: 2, time: T0 + 2000, source: 'extension', kind: 'assistant_message', turnId: 'long',
+    messageId: 'a-long', state: 'streaming', message: text(value) }) as SessionEvent;
+  const app = await boot([
+    { seq: 1, time: T0 + 1000, source: 'extension', kind: 'turn_start', turnId: 'long' },
+    answer(2, 'Working through the list'),
+    { seq: 3, time: T0 + 3000, source: 'app', kind: 'note', message: text(verdict) }
+  ] as SessionEvent[]);
+  const host = app.w.document.getElementById('recoveryStatus')!;
+  expect(host.textContent).toContain('Stopped trying to recover this chat');
+  // The same words again (a markup-only revision): still stopped.
+  await app.append([answer(4, 'Working through the list')]);
+  expect(host.textContent).toContain('Stopped trying to recover this chat');
+  // More words: the chat is working, the note goes.
+  await app.append([answer(5, 'Working through the list. Item 1 is done; item 2 next.')]);
+  expect(host.hidden || !host.textContent?.includes('Stopped trying to recover')).toBe(true);
+});
+
 it('does not show a handoff note as a recovery verdict', async () => {
   const app = await boot([{ seq: 1, time: T0 + 1000, source: 'app', kind: 'note', continuation: TOKEN, message: text('Compact & Resume abandoned') }] as SessionEvent[]);
   expect(app.w.document.getElementById('recoveryStatus')!.hidden).toBe(true);
