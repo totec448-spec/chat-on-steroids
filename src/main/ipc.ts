@@ -124,7 +124,7 @@ import {
   companionDiagnostics,
   sessionInputActivity,
   recoveryHeldByCalls, recoveryInputAllowed,
-  sessionControlsFor, cancelAssistantRecovery, pickupNow, stopSessionTurn, setSessionAutomation, setSessionObjective, compactSession, resumeFromSavedSummary, cancelSessionCompaction,
+  sessionControlsFor, cancelAssistantRecovery, pickupNow, stopSessionTurn, endOwnWorkAfterStop, setSessionAutomation, setSessionObjective, compactSession, resumeFromSavedSummary, cancelSessionCompaction,
   cancelWorkerCommands,
   chatUrl,
   revealChatInBrowser,
@@ -2035,8 +2035,28 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return (await stageFiles([{ text }]))[0]!;
   });
   handle('sessions:stopTurn', async payload => {
-    const { id, expectedTurnId } = sessionIdArg.extend({ expectedTurnId: z.string().min(1).max(256) }).parse(payload);
-    return stopSessionTurn(id, expectedTurnId);
+    const { id, expectedTurnId, expectedConversationId } = sessionIdArg.extend({ expectedTurnId: z.string().min(1).max(256),
+      expectedConversationId: z.string().min(1).max(256).optional() }).parse(payload);
+    // The chat and its Goal or Loop as Stop found them, before any of it changes. The window names the
+    // chat it showed Stop for: a Compact & Resume that moved the session since is not that chat (CodeRabbit on #2066).
+    const found = await sessionControlsFor(id).catch(() => null);
+    // A failed read is no licence to act on whatever chat the session shows now: the named chat still binds,
+    // and Goal or Loop that could not be read is not counted as stopped (CodeRabbit on #2066).
+    const before = found ? { ...found, conversationId: expectedConversationId ?? found.conversationId }
+      : expectedConversationId ? { conversationId: expectedConversationId, automation: 'off' as const } : null;
+    try {
+      return await stopSessionTurn(id, expectedTurnId);
+    } catch (error) {
+      if (!(error instanceof Error) || error.message !== 'active_turn_changed') throw error;
+      // The answer Stop showed for is no longer running: the app's own work still stops (Haz on #1883),
+      // and the person reads what happened, not an error code.
+      const outcome = await endOwnWorkAfterStop(id, expectedTurnId, before);
+      throw new Error(outcome.resumeGoesOn
+        ? 'That answer had already ended, so ChatGPT was not asked to stop. Compact & Resume was already moving this chat and goes on.'
+        : outcome.ended
+          ? "That answer had already ended, so ChatGPT was not asked to stop. This chat's automatic work is stopped."
+          : 'That answer had already ended; there was nothing to stop.');
+    }
   });
   handle('sessions:releaseFinish', async (payload) => {
     const { id, expectedTurnId } = sessionIdArg.extend({ expectedTurnId: z.string().min(1).max(256) }).parse(payload);
