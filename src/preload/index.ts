@@ -12,7 +12,7 @@ import type { InputAttachment } from '../shared/input.js';
 import type { UsageOverview } from '../shared/usage.js';
 import type { ProviderUsage } from '../shared/provider-usage.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
-import type { ChatgptProjectChoice, LocalProject, ProjectColor } from '../shared/projects.js';
+import type { ChatgptProjectChoice, LocalProject, ProjectColor, RelatedFolderView } from '../shared/projects.js';
 import type { ProjectDirectoryListing, ProjectFileMutationResult, ProjectFilePreview, ProjectFileSaveResult, ProjectFilesChanged } from '../shared/project-files.js';
 import type { CheckpointRestoreResult, ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot } from '../shared/project-git.js';
 import type { PetLibraryState, PetOverlayControlState, PetRuntimeAsset } from '../shared/pets.js';
@@ -342,6 +342,9 @@ const api = {
   removeProject: (id: string) => call<LocalProject>('projects:remove', { id }),
   setProjectColor: (id: string, color: ProjectColor | null) => call<LocalProject>('projects:color', { id, color }),
   setProjectSecretsShieldOff: (id: string, off: boolean) => call<LocalProject>('projects:secrets-shield', { id, off }),
+  /** #1689: a project's related folders, each available or not. */
+  relatedFolders: (id: string) => call<RelatedFolderView[]>('projects:related', { id }),
+  setRelatedFolders: (id: string, folders: string[]) => call<RelatedFolderView[]>('projects:related-set', { id, folders }),
   /** #1826: a chat's schedule (one per chat), or null. */
   getSchedule: (sessionId: string) => call<ScheduledRun | null>('schedules:get', { sessionId }),
   saveSchedule: (request: { sessionId: string; text: string; repeat: ScheduleRepeat; until: number | null; catchUp?: boolean }) => call<ScheduledRun>('schedules:save', request),
@@ -384,7 +387,8 @@ const api = {
   clearImageStorage: (mode: ImageStorageClearMode) => call<ImageStorageClearResult>('sessions:clearImageStorage', { mode }),
     getSession: (id: string, options?: { from?: number; before?: number; after?: number; limit?: number; actions?: boolean }) =>
     call<SessionDetail>('sessions:events', { id, ...options }),
-  stopSessionTurn: (id: string, expectedTurnId: string) => call<SessionControlsView>('sessions:stopTurn', { id, expectedTurnId }),
+  stopSessionTurn: (id: string, expectedTurnId: string, expectedConversationId?: string | null) =>
+    call<SessionControlsView>('sessions:stopTurn', { id, expectedTurnId, ...(expectedConversationId ? { expectedConversationId } : {}) }),
   releaseSessionFinish: (id: string, expectedTurnId: string) => call<SessionControlsView>('sessions:releaseFinish', { id, expectedTurnId }),
   generateFinishGoal: (id: string, expectedTurnId: string) => call<string>('sessions:generateFinishGoal', { id, expectedTurnId }),
   getChatModels: () => call<ChatModelCatalog>('chatModels:get'),

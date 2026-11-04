@@ -7,6 +7,28 @@
  * without the extension having to know which one is on.
  */
 
+/*
+ * The app's palette, for the parts that are the app's own: the settings sheet, its switches and
+ * the stage card's progress (2026-11-02). app-palette.js replaces these defaults (the app's default
+ * palette, as paletteTokens() computes it) with the person's own colors for the theme ChatGPT shows.
+ */
+:root {
+  --clf-app-page: #181818; --clf-app-card: #262626; --clf-app-ink: #ffffff; --clf-app-soft: #aeaeae;
+  --clf-app-line: #3f3f3f; --clf-app-hover: #2e2e2e; --clf-app-track: #555555; --clf-app-accent: #b0cbed;
+  --clf-app-accent-fill: #b0cbed; --clf-app-on-accent: #000000; --clf-app-knob-off: #ffffff;
+  --clf-app-green: #519d75; --clf-app-red: #dd6a6a;
+  /* A sheet is the raised surface: the card on a dark page, the page color on a light one. */
+  --clf-app-sheet: var(--clf-app-card);
+}
+
+:root[data-clf-theme='light'] {
+  --clf-app-page: #f4f4f5; --clf-app-card: #e7e7e8; --clf-app-ink: #000000; --clf-app-soft: #5d5d5d;
+  --clf-app-line: #d0d0d1; --clf-app-hover: #dfdfe0; --clf-app-track: #b9b9b9; --clf-app-accent: #486f9d;
+  --clf-app-accent-fill: #486f9d; --clf-app-on-accent: #ffffff; --clf-app-knob-off: #000000;
+  --clf-app-green: #1f7146; --clf-app-red: #b43b3b;
+  --clf-app-sheet: var(--clf-app-page);
+}
+
 .clf-metric {
   margin-left: 0.4em;
   font-variant-numeric: tabular-nums;
@@ -309,9 +331,9 @@
  * ones: the stages take wildly different times and a bar drawn to those times would be a
  * lie in the other direction, since none of them can be predicted.
  *
- * Sized like ChatGPT's own quiet furniture — a 3px track on the surface tint, its accent the
- * same #10a37f as the switch in the settings menu, labels at 11px and low contrast until
- * they are the one being worked on.
+ * Sized like ChatGPT's own quiet furniture — a 3px track on the surface tint, labels at 11px and
+ * low contrast until they are the one being worked on — in the app's colors: its green for a
+ * finished stage, its accent for the one running, its red for one that stopped.
  */
 .clf-stage-steps {
   display: grid;
@@ -337,11 +359,11 @@
 }
 
 .clf-stage-step[data-clf-step='done'] .clf-stage-track {
-  background: #10a37f;
+  background: var(--clf-app-green);
 }
 
 .clf-stage-step[data-clf-step='stopped'] .clf-stage-track {
-  background: color-mix(in srgb, currentColor 40%, #dc2626);
+  background: var(--clf-app-red);
 }
 
 /* The one segment that moves. Indeterminate on purpose: nothing here knows how long any of
@@ -351,7 +373,7 @@
   width: 40%;
   height: 100%;
   border-radius: 9999px;
-  background: #10a37f;
+  background: var(--clf-app-accent-fill);
   content: '';
   animation: clf-stage-run 1.15s cubic-bezier(0.45, 0, 0.55, 1) infinite;
 }
@@ -589,7 +611,7 @@
 }
 
 .clf-meter[data-clf-level='full'] .clf-meter-fill {
-  background: #dc2626;
+  background: var(--clf-app-red);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -621,8 +643,8 @@
   align-items: center;
   padding: 0.15rem 0.5rem;
   border-radius: 9999px;
-  background: color-mix(in srgb, #dc2626 18%, transparent);
-  color: #f87171;
+  background: color-mix(in srgb, var(--clf-app-red) 18%, transparent);
+  color: var(--clf-app-red);
   font-size: 0.78rem;
   line-height: 1.5;
   white-space: nowrap;
@@ -640,11 +662,11 @@
 }
 
 .clf-composer[data-clf-mode='error'] .clf-pill {
-  background: color-mix(in srgb, #dc2626 18%, transparent);
+  background: color-mix(in srgb, var(--clf-app-red) 18%, transparent);
 }
 
 .clf-composer[data-clf-mode='done'] .clf-pill {
-  background: color-mix(in srgb, #17a34a 18%, transparent);
+  background: color-mix(in srgb, var(--clf-app-green) 18%, transparent);
 }
 
 .clf-cancel {
@@ -1084,17 +1106,15 @@
  * whose two settings disagree.
  */
 .clf-menu {
-  --clf-menu-bg: #2f2f2f;
-  --clf-menu-ink: #ececec;
-  --clf-menu-line: rgb(255 255 255 / 11%);
-  --clf-menu-hover: rgb(255 255 255 / 7%);
+  --clf-menu-bg: var(--clf-app-sheet);
+  --clf-menu-ink: var(--clf-app-ink);
+  --clf-menu-line: var(--clf-app-line);
+  --clf-menu-hover: var(--clf-app-hover);
+  --clf-menu-shadow: 0 16px 40px -12px rgb(0 0 0 / 55%);
 }
 
 [data-clf-theme='light'] .clf-menu {
-  --clf-menu-bg: #fff;
-  --clf-menu-ink: #0d0d0d;
-  --clf-menu-line: rgb(0 0 0 / 10%);
-  --clf-menu-hover: rgb(0 0 0 / 5%);
+  --clf-menu-shadow: 0 1px 1px rgb(12 12 14 / 3%), 0 10px 26px -18px rgb(12 12 14 / 22%);
 }
 
 .clf-menu {
@@ -1108,12 +1128,15 @@
   max-width: 22rem;
   padding: 6px;
   border: 1px solid var(--clf-menu-line);
-  border-radius: 16px;
+  border-radius: 14px;
   background: var(--clf-menu-bg);
-  box-shadow: 0 10px 32px rgb(0 0 0 / 22%), 0 2px 6px rgb(0 0 0 / 12%);
+  box-shadow: var(--clf-menu-shadow);
   color: var(--clf-menu-ink);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI',
+    'PingFang SC', 'Noto Sans CJK SC', system-ui, sans-serif;
   font-size: 14px;
   line-height: 1.35;
+  letter-spacing: -0.004em;
   animation: clf-pop-in 0.15s cubic-bezier(0.23, 1, 0.32, 1);
 }
 
@@ -1133,7 +1156,7 @@
   width: 100%;
   padding: 8px 10px;
   border: 0;
-  border-radius: 11px;
+  border-radius: 10px;
   background: transparent;
   color: inherit;
   font: inherit;
@@ -1169,9 +1192,9 @@
 /* The line under each name is the answer to "on until what?" and "with what?", so it is
    allowed to wrap — the missing-key notice is a sentence and must not be ellipsed away. */
 .clf-menu-note {
+  color: var(--clf-app-soft);
   font-size: 12px;
   line-height: 1.35;
-  opacity: 0.62;
   overflow-wrap: anywhere;
 }
 
@@ -1188,12 +1211,13 @@
   width: 34px;
   height: 20px;
   border-radius: 9999px;
-  background: color-mix(in srgb, currentColor 26%, transparent);
+  background: var(--clf-app-track);
   transition: background-color 0.15s ease;
 }
 
+/* The app's switch: its track off, its accent fill on, the knob in the color drawn on that fill. */
 .clf-switch[data-clf-on='1'] {
-  background: #10a37f;
+  background: var(--clf-app-accent-fill);
 }
 
 .clf-switch-knob {
@@ -1203,13 +1227,14 @@
   width: 16px;
   height: 16px;
   border-radius: 9999px;
-  background: #fff;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 25%);
-  transition: transform 0.15s cubic-bezier(0.23, 1, 0.32, 1);
+  background: var(--clf-app-knob-off);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 22%);
+  transition: transform 0.15s cubic-bezier(0.23, 1, 0.32, 1), background-color 0.15s ease;
 }
 
 .clf-switch[data-clf-on='1'] .clf-switch-knob {
   transform: translateX(14px);
+  background: var(--clf-app-on-accent);
 }
 
 /* Off | Goal | Loop — the switch above, stretched to three stops.
@@ -1232,7 +1257,7 @@
   width: 100%;
   padding: 3px;
   border-radius: 9999px;
-  background: color-mix(in srgb, currentColor 14%, transparent);
+  background: var(--clf-app-track);
 }
 
 /* The one moving part. Its stop is the value, so nothing has to be kept in step with it. */
@@ -1243,14 +1268,14 @@
   left: 3px;
   width: calc((100% - 6px) / 3);
   border-radius: 9999px;
-  background: color-mix(in srgb, currentColor 26%, transparent);
+  background: var(--clf-app-card);
   box-shadow: 0 1px 2px rgb(0 0 0 / 22%);
   transition: transform 0.18s cubic-bezier(0.23, 1, 0.32, 1), background-color 0.15s ease;
 }
 
 .clf-menu-mode-track[data-clf-value='goal'] .clf-menu-mode-fill,
 .clf-menu-mode-track[data-clf-value='loop'] .clf-menu-mode-fill {
-  background: #10a37f;
+  background: var(--clf-app-accent-fill);
 }
 
 /* Before the app has answered no stop is the value, so no handle is drawn (#1787). */
@@ -1293,11 +1318,11 @@
   opacity: 1;
 }
 
-/* Only the two green stops recolour their word: the neutral Off handle keeps the sheet's ink,
+/* Only the two accent stops recolour their word: the neutral Off handle keeps the sheet's ink,
    which is the same reason the switch above is neutral when it is off rather than red. */
 .clf-menu-mode-track[data-clf-value='goal'] .clf-menu-mode-option[aria-checked='true'],
 .clf-menu-mode-track[data-clf-value='loop'] .clf-menu-mode-option[aria-checked='true'] {
-  color: #fff;
+  color: var(--clf-app-on-accent);
 }
 
 .clf-menu-mode-option:focus-visible {
@@ -1323,7 +1348,7 @@
   line-height: 1.35;
   white-space: nowrap;
   text-overflow: ellipsis;
-  opacity: 0.62;
+  color: var(--clf-app-soft);
 }
 
 .clf-menu-mode-note[data-clf-warn='1'] {
@@ -1333,9 +1358,8 @@
 
 /* The specific goal, sitting under the Goal switch it belongs to.
    Indented to the switch's own text column and set in the note's size, so it reads as part
-   of that row rather than as a second setting. The accent is this app's amber — the same
-   colour the sheet already uses to say "this needs you" — because until a goal is written
-   there is nothing here to be on or off. */
+   of that row rather than as a second setting. The links take the app's accent, as links do in
+   the app: until a goal is written there is nothing here to be on or off. */
 .clf-menu-goal {
   display: flex;
   flex-direction: column;
@@ -1372,7 +1396,7 @@
   border: 0;
   border-radius: 7px;
   background: transparent;
-  color: color-mix(in srgb, currentColor 30%, #f59e0b);
+  color: var(--clf-app-accent);
   font: inherit;
   font-size: 12px;
   font-weight: 550;
@@ -1405,7 +1429,7 @@
   padding: 7px 9px;
   border: 1px solid var(--clf-menu-line);
   border-radius: 10px;
-  background: color-mix(in srgb, currentColor 6%, transparent);
+  background: var(--clf-app-page);
   color: inherit;
   font: inherit;
   font-size: 13px;
@@ -1417,7 +1441,7 @@
 }
 
 .clf-menu-goal-input:focus-visible {
-  outline: 2px solid color-mix(in srgb, currentColor 35%, #f59e0b);
+  outline: 2px solid var(--clf-app-accent);
   outline-offset: -1px;
 }
 
@@ -1447,27 +1471,28 @@
   opacity: 0.45;
 }
 
-.clf-menu-goal-save {
+/* Doubled with the button rule above so these colors win over its generic button color (CodeRabbit on #2038). */
+.clf-menu-goal-buttons button.clf-menu-goal-save {
   border-color: transparent !important;
-  background: #10a37f !important;
-  color: #fff;
+  background: var(--clf-app-accent-fill) !important;
+  color: var(--clf-app-on-accent);
 }
 
 .clf-menu-goal-save:hover:not(:disabled) {
-  background: #0e8f6f !important;
+  background: color-mix(in srgb, var(--clf-app-accent-fill) 88%, var(--clf-app-ink)) !important;
 }
 
 /* Clearing a goal ends a loop somebody set up deliberately, so it is set apart from Cancel
    rather than sitting beside it as a third equal button. */
-.clf-menu-goal-clear {
+.clf-menu-goal-buttons button.clf-menu-goal-clear {
   margin-left: auto;
-  color: color-mix(in srgb, currentColor 45%, #dc2626);
+  color: var(--clf-app-red);
 }
 
 .clf-menu-goal-note {
+  color: var(--clf-app-soft);
   font-size: 12px;
   line-height: 1.35;
-  opacity: 0.62;
   overflow-wrap: anywhere;
 }
 
@@ -1512,11 +1537,11 @@
    ordinary prose — it is about to be one of their own messages — so it is not set apart the
    way the model's reasoning is; only the two terminal states carry a colour. */
 .clf-stage[data-clf-stage-kind='goal-error'] .clf-stage-title {
-  color: color-mix(in srgb, currentColor 40%, #dc2626);
+  color: var(--clf-app-red);
 }
 
 .clf-stage[data-clf-stage-kind='goal-done'] .clf-stage-title {
-  color: color-mix(in srgb, currentColor 35%, #10a37f);
+  color: var(--clf-app-green);
 }
 /* Presentation only: native message bytes remain available to recorder and send receipts. */
 [data-clf-prompt-hidden] { display: none !important; }
