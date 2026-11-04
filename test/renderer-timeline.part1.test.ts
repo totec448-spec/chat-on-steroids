@@ -984,7 +984,7 @@ it('says a queued message waits for ChatGPT\'s answer while the chat\'s page hol
   // Each change is announced the way main does, then the queue's own refresh is waited for (CodeRabbit on #2054).
   const shows = async (expected: string | null, absent?: string) => {
     await append([]);
-    await vi.waitFor(() => {
+    await waitFor(() => {
       if (expected) expect(status()).toContain(expected);
       if (absent) expect(status()).not.toContain(absent);
     });
@@ -995,9 +995,17 @@ it('says a queued message waits for ChatGPT\'s answer while the chat\'s page hol
   await shows("Waiting for ChatGPT's page to end its turn");
   live.inputs[0] = { ...queued, pageHold: { reason: 'tool-running', at: Date.now() - 2_000 } };
   await shows('Waiting for the running tool call to finish');
-  // A hold no page has repeated for over a minute no longer says why it waits.
-  live.inputs[0] = { ...queued, pageHold: { reason: 'still-answering', at: Date.now() - 80_000 } };
-  await shows(null, 'Waiting for ChatGPT');
+  // A hold no page repeats lapses after 75 s by itself, with no queue refresh to repaint it (CodeRabbit on #2054).
+  live.inputs[0] = { ...queued, pageHold: { reason: 'still-answering', at: Date.now() - 73_500 } };
+  await shows('Waiting for ChatGPT to finish its answer');
+  const button = w.document.querySelector<HTMLButtonElement>('#inputQueue .pending-message button')!;
+  const control = [button.className, button.getAttribute('aria-label')];
+  button.focus();
+  await waitFor(() => expect(status()).not.toContain('Waiting for ChatGPT'), { timeout: 5_000 });
+  // The rebuilt row's same control keeps the keyboard focus.
+  const focused = w.document.activeElement as HTMLElement;
+  expect(focused.closest('.pending-message')).not.toBeNull();
+  expect([focused.className, focused.getAttribute('aria-label')]).toEqual(control);
 });
 
 it('says why a queued message waits: no extension, or a running tool call', async () => {
