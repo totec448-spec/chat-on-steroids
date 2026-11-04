@@ -59,3 +59,86 @@ it('shows the key as it is when the shield is off', () => {
   stream.start(Buffer.from(`${key}\n`));
   expect(shown).toEqual([`${key}\n`]);
 });
+
+// Haz on #2052: a line shown before its end must never split a secret into pieces that each pass.
+const github = 'ghp_' + 'Z9y8X7w6V5u4T3s2R1q0P9o8N7m6L5k4J3i2';
+const shownText = (shown: string[]) => shown.join('');
+
+it('never shows a key split across a timed flush of a line without its end', () => {
+  const { shown, stream } = collect(true);
+  stream.push(Buffer.from(`step 1 of 9 uploading with ${github.slice(0, 10)}`));
+  stream.flush(0); stream.flush(1_000);
+  stream.push(Buffer.from(`${github.slice(10)} and more words after it\n`));
+  stream.flush(1_100);
+  expect(shownText(shown)).not.toContain(github.slice(0, 10));
+  expect(shownText(shown)).toContain('[redacted]');
+  expect(shownText(shown)).toContain('step 1 of 9');
+});
+
+it('keeps a header and its token together across a timed flush', () => {
+  const { shown, stream } = collect(true);
+  const token = 'abcDEF123ghiJKL456mnoPQR789';
+  stream.push(Buffer.from('curl -s -H Authorization: Bearer'));
+  stream.flush(0); stream.flush(1_000);
+  stream.push(Buffer.from(` ${token} https://example.test/api and then it waited\n`));
+  stream.flush(1_100);
+  expect(shownText(shown)).not.toContain(token);
+});
+
+it('still moves a long line with spaces, holding back only its newest words', () => {
+  const { shown, stream } = collect(true);
+  const words = Array.from({ length: 900 }, (_, index) => `w${index}`).join(' ');
+  stream.push(Buffer.from(`${words} `));
+  stream.flush(0); stream.flush(1_000);
+  expect(shownText(shown).length).toBeGreaterThan(3_000);
+  expect(shownText(shown)).not.toContain('w899');
+  stream.push(Buffer.from(`${key} end\n`));
+  stream.flush(1_100);
+  expect(shownText(shown)).toContain('w899 [redacted] end\n');
+  expect(shownText(shown)).not.toContain(key.slice(0, 12));
+});
+
+it('never shows a private key whose lines arrive over several flushes', () => {
+  const { shown, stream } = collect(true);
+  stream.push(Buffer.from('before\n-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ\n'));
+  stream.flush(0);
+  stream.push(Buffer.from('AAAAAAABAAAAMwAAAAtzc2gtZWQyNTUxOQAAACBSECRETBODY\n'));
+  stream.flush(300);
+  stream.push(Buffer.from('-----END OPENSSH PRIVATE KEY-----\nafter\n'));
+  stream.flush(600);
+  const all = shownText(shown);
+  expect(all).toContain('before\n');
+  expect(all).toContain('after\n');
+  expect(all).not.toContain('b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ');
+  expect(all).not.toContain('SECRETBODY');
+  expect(all).not.toContain('END OPENSSH PRIVATE KEY');
+});
+
+it('shows the output so far with the same care: a key cut by the start is completed by what follows', () => {
+  const { shown, stream } = collect(true);
+  stream.start(Buffer.from(`ready\nusing ${github.slice(0, 12)}`));
+  stream.push(Buffer.from(`${github.slice(12)} now\n`));
+  stream.flush(2_000);
+  expect(shownText(shown)).toContain('ready\n');
+  expect(shownText(shown)).not.toContain(github.slice(0, 12));
+});
+
+it('drops the cut lines beside the gap of a long command\'s kept output', () => {
+  const { shown, stream } = collect(true);
+  // The kept head ends inside a key and the kept tail starts inside another: neither piece can be recognised.
+  stream.start(Buffer.from(`first line\nhead ends ${github.slice(0, 15)}\n... 5000 bytes omitted ...\n${github.slice(15)} tail line\nlast line\n`));
+  const all = shownText(shown);
+  expect(all).toContain('first line\n');
+  expect(all).toContain('... 5000 bytes omitted ...\n');
+  expect(all).toContain('last line\n');
+  expect(all).not.toContain(github.slice(0, 15));
+  expect(all).not.toContain(github.slice(15));
+});
+
+it('bounds a huge line without spaces: it shows, minus a held end, and memory stays bounded', () => {
+  const { shown, stream } = collect(true);
+  stream.push(Buffer.from('y'.repeat(200_000)));
+  stream.flush(0); stream.flush(1_000);
+  expect(shownText(shown).length).toBeGreaterThan(150_000);
+  expect((stream as unknown as { pending: string }).pending.length).toBeLessThanOrEqual(70_000);
+});
