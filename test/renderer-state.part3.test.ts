@@ -1101,6 +1101,50 @@ it('localizes unknown GNOME backend failures without displaying private text and
   expect(doc.activeElement).toBe(button);
 });
 
+it('shows actionable localized hints only for exact known GNOME consent errors', async () => {
+  const request = vi.fn();
+  const mounted = await mountChat({}, [], { linuxScreenshotConsent: request });
+  const doc = mounted.window.document;
+  const button = doc.getElementById('linuxScreenshotConsent') as HTMLButtonElement;
+  const status = doc.getElementById('linuxScreenshotConsentResult')!;
+  const linux = structuredClone(mounted.state);
+  linux.platform = { family: 'linux', name: 'Linux', desktopAutomation: false };
+  linux.config.ui.linuxDesktopEnabled = true;
+  mounted.push(linux);
+  await settle();
+  expect(button.disabled).toBe(false);
+
+  const cases = [
+    ['Activate the Chat On Steroids window before requesting screenshot permission.', 'Activate the Chat On Steroids window, then try again.'],
+    ['The Chat On Steroids window lost focus; no screenshot was requested.', 'Activate the Chat On Steroids window, then try again.'],
+    ['Enable native Linux Desktop and Screen access first.', 'Enable native Linux Desktop access and Screen permission, then try again.'],
+    ['Screen access was disabled before the screenshot request.', 'Enable native Linux Desktop access and Screen permission, then try again.'],
+    ['Native Linux Desktop or Screen access was disabled during the screenshot request.', 'Enable native Linux Desktop access and Screen permission, then try again.'],
+    ['Screenshot permission can be requested only from the Chat On Steroids main window.', 'Screenshot permission can be requested only from the Chat On Steroids main window.'],
+    ['A screenshot permission request is already running.', 'A screenshot permission request is already running.']
+  ] as const;
+  for (const [error, expected] of cases) {
+    request.mockResolvedValueOnce({ ok: false, error });
+    button.click();
+    await waitFor(() => expect(status.textContent).toContain(expected));
+    expect(button.disabled).toBe(false);
+  }
+
+  // A near-miss and an arbitrary backend detail must never reach the UI.
+  for (const error of [
+    'Activate the Chat On Steroids window before requesting screenshot permission. PRIVATE_TITLE',
+    'Native Linux Desktop or Screen access was disabled during the request.',
+    'SECRET_SCREEN_CONTENT'
+  ]) {
+    request.mockResolvedValueOnce({ ok: false, error });
+    button.click();
+    await waitFor(() => expect(status.textContent).toContain('GNOME screenshot permission could not be confirmed.'));
+    expect(status.textContent).not.toContain(error);
+    expect(button.disabled).toBe(false);
+  }
+  expect(request).toHaveBeenCalledTimes(cases.length + 3);
+});
+
 it('does not steal focus if the user switches controls while the GNOME request is pending', async () => {
   let finish!: (value: { ok: true; data: { pngBytes: number } }) => void;
   const request = vi.fn(() => new Promise<{ ok: true; data: { pngBytes: number } }>(resolve => { finish = resolve; }));

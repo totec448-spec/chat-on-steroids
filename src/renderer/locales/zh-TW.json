@@ -3730,6 +3730,8 @@
   "Click while the Chat On Steroids window is active. If GNOME asks, choose Allow. The screenshot is discarded.": "請在 Chat On Steroids 視窗處於作用中時點擊。如果 GNOME 詢問，請選擇「允許」。截圖會被捨棄。",
   "Request screenshot permission": "要求螢幕截圖權限",
   "GNOME screenshot permission could not be confirmed.": "無法確認 GNOME 螢幕截圖權限。",
+  "Activate the Chat On Steroids window, then try again.": "啟用 Chat On Steroids 視窗，然後再試一次。",
+  "Enable native Linux Desktop access and Screen permission, then try again.": "啟用原生 Linux 桌面存取和螢幕權限，然後再試一次。",
   "Drag a chat here, or move it from its menu.": "把對話拖到這裡，或從它的選單中移動。",
   "Move to project": "移到專案",
   "Move this chat to a project; its commands then run in that project's folder": "將此對話移到一個專案；之後它的指令會在該專案的資料夾中執行",
