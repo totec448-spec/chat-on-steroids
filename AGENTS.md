@@ -5943,8 +5943,10 @@ process once and retains an explicit access error; ordinary network retry remain
 
 ### Native Desktop
 
-Native mouse/keyboard Desktop control is available only on Windows and supported macOS.
-Linux preserves those stored preferences but exposes no native input tool at this stage.
+Native physical mouse/keyboard Desktop control is available only on Windows and supported macOS.
+Linux instead offers separately opted-in, semantic AT-SPI `linux_act` input:
+`click` and `set_value` of fresh, chat-owned accessibility refs only, never
+unrestricted pointer/keyboard input or a physical-input fallback.
 Windows uses the bounded PowerShell/Win32/
 UIA helper; macOS uses Swift ScreenCaptureKit/AX/CGEvent through an architecture-matched N-API
 addon on an Electron worker. The packaged Electron app is the macOS permission subject; a
