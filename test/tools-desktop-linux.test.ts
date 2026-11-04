@@ -3,6 +3,7 @@ import { randomFillSync } from 'node:crypto';
 import sharp from 'sharp';
 import { MAX_VIEW_IMAGE_BYTES } from '../src/main/codex/view-image.js';
 import { MAX_LINUX_DESKTOP_REF_LENGTH } from '../src/main/computer/linux-desktop-ref.js';
+import { logInfo } from '../src/main/logger.js';
 
 const testState = vi.hoisted(() => ({
   enabled: true, screen: true, control: true, readOnly: false, allowedUnknown: false,
@@ -151,6 +152,27 @@ describe.runIf(process.platform === 'linux')('native Linux connector authorizati
     }
     expect(testState.backend).toHaveBeenCalledTimes(2);
   });
+  it('refuses an exact window owned by the running CoS process before taking an accessibility snapshot', async () => {
+    const { observe, act } = handlers();
+    testState.backend.mockResolvedValue(good('list-windows', [{ ...window, pid: process.pid }]));
+    const denied = await observe({ what: 'snapshot', window_id: window.id });
+    expect(denied.isError).toBe(true);
+    expect(denied.content[0].text).toContain('DESKTOP_TARGET_UNPROVEN');
+    expect(testState.backend.mock.calls.filter(([cmd]) => cmd.kind === 'snapshot')).toHaveLength(0);
+    expect((await act({ action: 'click', ref: '@s123:e1' })).content[0].text).toContain('STALE_OR_FOREIGN_REF');
+    expect(testState.backend.mock.calls.filter(([cmd]) => cmd.kind === 'click')).toHaveLength(0);
+  });
+  it('refuses other CoS instances by executable, display name or packaged Linux desktop ID', async () => {
+    const { observe } = handlers();
+    for (const app_name of ['chat-on-steroids', 'Chat On Steroids', 'com.chatonsteroids.app', 'com.chatonsteroids.app.desktop']) {
+      testState.backend.mockReset();
+      testState.backend.mockResolvedValue(good('list-windows', [{ ...window, app_name }]));
+      const denied = await observe({ what: 'snapshot', window_id: window.id });
+      expect(denied.isError, app_name).toBe(true);
+      expect(denied.content[0].text, app_name).toContain('DESKTOP_TARGET_UNPROVEN');
+      expect(testState.backend.mock.calls.filter(([cmd]) => cmd.kind === 'snapshot')).toHaveLength(0);
+    }
+  });
   it('never acts without proven identity, even when unattributed observation is enabled', async () => {
     const {observe,act} = handlers(); testState.allowedUnknown = true;
     mockSnapshot(); testState.caller = {sessionId: null,conversationId: null,requestId:'uncorrelated',setupProfileId:null};
@@ -227,6 +249,27 @@ describe.runIf(process.platform === 'linux')('native Linux connector authorizati
     expect((await act({ action: 'click', ref: '@s123:e1' })).content[0].text).toContain('STALE_OR_FOREIGN_REF');
     expect(testState.backend.mock.calls.filter(([input]) => input.kind === 'click')).toHaveLength(0);
   });
+  it('refuses the old ref if its GTK window becomes owned by CoS while Desktop Ask waits', async () => {
+    const { observe, act } = handlers();
+    let ownerChanged = false;
+    let answer!: (response: string | null) => void;
+    testState.backend.mockImplementation(async ({ kind }: { kind: string }) => kind === 'windows'
+      ? good('list-windows', [{ ...window, pid: ownerChanged ? process.pid : window.pid }])
+      : kind === 'snapshot'
+        ? good('snapshot', { snapshot_id: 's123', complete: true, window: { id: window.id },
+            tree: { children: [{ ref_id: '@s123:e1' }] } })
+        : good(kind, {}));
+    testState.ask.mockImplementationOnce(() => new Promise(resolve => { answer = resolve; }));
+    expect((await observe({ what: 'snapshot', window_id: window.id })).isError).not.toBe(true);
+    const pending = act({ action: 'click', ref: '@s123:e1' });
+    await vi.waitFor(() => expect(testState.ask).toHaveBeenCalledTimes(1), { timeout: 10_000 });
+    ownerChanged = true;
+    answer(null); // Approval is not authority to act on CoS's own window.
+    const denied = await pending;
+    expect(denied.isError).toBe(true);
+    expect(denied.content[0].text).toContain('DESKTOP_TARGET_UNPROVEN');
+    expect(testState.backend.mock.calls.filter(([cmd]) => cmd.kind === 'click')).toHaveLength(0);
+  });
   it('does not read a private accessibility tree if Screen access is revoked while inventory waits', async () => {
     const { observe } = handlers();
     let releaseInventory!: (result: unknown) => void;
@@ -243,6 +286,7 @@ describe.runIf(process.platform === 'linux')('native Linux connector authorizati
     expect(testState.backend).toHaveBeenCalledTimes(1);
     expect(testState.backend.mock.calls.filter(([input]) => input.kind === 'snapshot')).toHaveLength(0);
     expect(JSON.stringify(denied)).not.toContain('@s123:e1');
+    expect(logInfo).toHaveBeenCalledWith('linux desktop snapshot: refused because Screen permission changed during window inventory');
   });
   it('expires refs that were not acted on within two minutes', async () => {
     const { observe, act } = handlers(); mockSnapshot();
