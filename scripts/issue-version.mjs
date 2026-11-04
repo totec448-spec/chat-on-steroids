@@ -143,12 +143,27 @@ function freeFormDecision(issue, { latest, opened, reopened }) {
  * reopened are left alone.
  */
 export const FEATURE_SINCE = '2026-11-03T21:00:00Z';
+/**
+ * A feature request says so: the old feature form's headings, the enhancement label, a title such as
+ * "Feature request: …", "[Feature] …", "Idea: …", "Proposal: …", or a "## Feature request" heading.
+ */
+export function featureSignal(issue) {
+  const body = String(issue.body ?? ''), title = String(issue.title ?? '');
+  if ((issue.labels ?? []).some(label => /^(?:enhancement|feature(?: request)?)$/i.test(typeof label === 'string' ? label : label.name))) return true;
+  // The word must be marked as a label ("[Idea] …", "Idea: …"): "Feature X is broken" is a bug report.
+  const kind = '(?:feature(?:\\s+request)?|feat|idea|proposal|suggestion|enhancement)';
+  if (new RegExp(`^\\s*(?:\\[${kind}\\]|${kind}\\s*[:-]|feature\\s+request\\b)`, 'i').test(title)) return true;
+  return /^#{2,3}\s+(?:Problem or workflow|Proposed change|Feature request|Proposed feature|Feature)\s*$/im.test(body);
+}
 function featureDecision(issue, { opened, reopened = false }) {
   const none = { decision: 'none', missing: [] };
   if (!opened || reopened || issue.state !== 'open' || issue.user?.type === 'Bot' || MAINTAINERS.has(issue.author_association)) return none;
   // Said to be a bug, by its label or title, is never handled as a feature, whatever its headings (CodeRabbit on #2060).
   const labeled = (issue.labels ?? []).some(label => (typeof label === 'string' ? label : label.name) === 'bug');
   if (labeled || /^\s*\[?bug\b/i.test(String(issue.title ?? ''))) return none;
+  // Only an issue that says it is a feature request is closed as one; anything unclear ("Cannot connect
+  // on Linux") is left to a maintainer (CodeRabbit on #2060).
+  if (!featureSignal(issue)) return none;
   return Date.parse(issue.created_at) >= Date.parse(FEATURE_SINCE) ? { decision: 'feature', missing: [] } : none;
 }
 
