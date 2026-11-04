@@ -9198,9 +9198,13 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
     if (nowTurn && (!shownTurn || nowTurn === shownTurn)) {
       await stopCurrentTurn(); return;
     }
-    // The turn it showed Stop for ended or changed meanwhile (or the read failed): stop nothing
-    // else, and cancel nothing either.
-    if (shownTurn) return;
+    // The turn it showed Stop for ended or changed meanwhile (or the read failed): ChatGPT is asked to
+    // stop nothing else and no message is cancelled, but main still ends the app's own work for this
+    // chat and says what happened (Haz on #1883).
+    if (shownTurn) {
+      if (target) { await run(api.stopSessionTurn(target, shownTurn)); if (sameSelection()) void refreshSessionControls(); }
+      return;
+    }
     const pending = pendingComposerInput();
     if (pending && ['queued', 'browser'].includes(pending.state)) {
       const wasStarting = startingInputs.has(pending.id);
