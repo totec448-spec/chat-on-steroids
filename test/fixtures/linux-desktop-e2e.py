@@ -1,10 +1,11 @@
 """Manual Linux Desktop acceptance fixture: only this window may receive test input."""
+import os
 import gi
 
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk
 
-WINDOW_TITLE = 'CoS Linux Desktop E2E Fixture'
+WINDOW_TITLE = os.environ.get('COS_LINUX_E2E_TITLE', 'CoS Linux Desktop E2E Fixture')
 
 window = Gtk.Window(title=WINDOW_TITLE)
 window.set_default_size(430, 230)
