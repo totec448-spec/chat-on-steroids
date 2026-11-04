@@ -78,7 +78,16 @@ function safeWindow(row: WindowRow): boolean {
   // Linux may report reverse-DNS application IDs (org.mozilla.firefox) rather than
   // executable names; treating dots as ordinary letters would permit browser refs.
   const appId = row.app_name.replace(/[./\\]/g, ' ');
+  // Never let a chat inspect or control CoS itself: it could read other chats
+  // or click the app's own Desktop Ask / Settings controls to grant permission.
+  // Other running CoS copies have different PIDs, so also reject the packaged
+  // desktop ID and the app's common executable/display-name variants.
+  const normalizedAppId = row.app_name.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const isOwnApp = normalizedAppId === 'chatonsteroids' ||
+    normalizedAppId === 'comchatonsteroidsapp' ||
+    normalizedAppId === 'comchatonsteroidsappdesktop';
   return row.id.length > 0 && row.app_name.length > 0 && row.process_instance.length > 0 && row.pid > 0 &&
+    row.pid !== process.pid && !isOwnApp &&
     !isBrowserProcess(appId) && !/(^|[\s_-])(epiphany|qutebrowser|librewolf|waterfox|torbrowser|falkon|midori)([\s_-]|$)/i.test(appId);
 }
 async function inventory(): Promise<WindowRow[] | ToolResult> {
@@ -186,7 +195,11 @@ export function registerLinuxDesktopTools(reg: SurfaceRegistrar): void {
     const windows = await inventory(); if (!Array.isArray(windows)) return windows;
     // The inventory subprocess may outlive a Screen-permission grant. Refuse
     // before starting an accessibility-tree read, not just before publishing it.
-    const revokedBeforeSnapshot = refusal(false); if (revokedBeforeSnapshot) return revokedBeforeSnapshot;
+    const revokedBeforeSnapshot = refusal(false);
+    if (revokedBeforeSnapshot) {
+      logInfo('linux desktop snapshot: refused because Screen permission changed during window inventory');
+      return revokedBeforeSnapshot;
+    }
     const matches = windows.filter(row => row.id === input.window_id);
     if (matches.length !== 1 || !safeWindow(matches[0]!)) return fail('DESKTOP_TARGET_UNPROVEN: browser, missing or ambiguous windows cannot be targeted with native Linux tools.');
     const owner = principal();

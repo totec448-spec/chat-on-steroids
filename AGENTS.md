@@ -5982,6 +5982,9 @@ Unattributed observations may have ephemeral private snapshots but cannot act.
 `linux_act` supports **only** click and set_value of previously observed,
 snapshot-scoped refs: it rejects stale/foreign refs, browsers, changed owners,
 ambiguous process incarnations and revoked Control/Read-only permission.
+CoS's own windows are excluded by its main process PID and recognized app IDs
+(including the packaged `com.chatonsteroids.app.desktop`), even in other app
+instances, to prevent a chat from clicking its own Desktop Ask or Settings.
 It rechecks the exact app identity and grant after any per-chat Desktop Ask
 approval, consumes refs after any attempted action and never falls back to a
 physical pointer, keyboard, coordinate command or automatic action retry.
