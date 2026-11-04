@@ -20,7 +20,16 @@ export interface LocalProject {
    * this existed have one; it grants no filesystem permission.
    */
   chatgpt?: ChatgptProjectLink;
+  /**
+   * Related folders (#1689): other approved folders this work also uses, by their approved folder's
+   * path. Context for ChatGPT only: they never change the working directory and grant no access.
+   */
+  relatedFolders?: string[];
 }
+
+/** A related folder as the dialog shows it; unavailable ones are left out of what ChatGPT is told. */
+export interface RelatedFolderView { path: string; name: string | null; virtual: string | null; available: boolean }
+export const MAX_RELATED_FOLDERS = 10;
 
 /**
  * One CoS project's native ChatGPT Project, from request to verified identity.

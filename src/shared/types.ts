@@ -258,6 +258,8 @@ export interface UiPrefs {
   desktopAsk?: 'off' | 'active' | 'always';
   /** Desktop control for a call the app cannot tie to a chat. Off unless chosen. */
   desktopUnattributed?: boolean;
+  /** Separately authorize native Linux accessibility/screenshot access. Missing means off. */
+  linuxDesktopEnabled?: boolean;
   /** Light or Dark stays as chosen; System follows the operating system (#1914). */
   theme: import('./appearance.js').ThemeChoice;
   appearance?: import('./appearance.js').AppearanceSettings;

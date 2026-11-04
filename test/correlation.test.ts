@@ -483,7 +483,7 @@ describe('request correlation ownership', () => {
       // The migration scan publishes its result as the committed ledger before returning, so
       // the next launch starts from it instead of scanning the same history again.
       const migrated = await readDurable<{ version: number; complete?: boolean; entries: Array<{ requestId: string }> }>('request-correlations');
-      expect(migrated?.version).toBe(6);
+      expect(migrated?.version).toBe(7);
       expect(migrated?.complete).toBe(true);
       expect(migrated?.entries.map((entry) => entry.requestId).sort()).toEqual(['wfr_new_history', 'wfr_old_snapshot']);
     } finally {

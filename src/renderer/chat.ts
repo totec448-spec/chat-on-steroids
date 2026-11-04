@@ -44,6 +44,7 @@ import { toolResultText } from './tool-result.js';
 import { renderEditCards } from './tool-artifacts.js';
 import { chatErrorPresentation, duplicateChatErrors } from './chat-error.js';
 import { renderRecoveryCountdowns } from './recovery.js';
+import { recoveryEpisode, type EpisodeItem, type RecoveryEpisode } from './recovery-episode.js';
 import { CUSTOM_CONTINUE_MAX_CHARS, type RecoveryCountdown } from '../shared/recovery.js';
 import { communicationTitle, foldAgentCommunication, participatingWorkers, workerAvatar } from './agent-communication.js';
 import { structureTimeline, type RoundPart } from './timeline-rounds.js';
@@ -123,6 +124,7 @@ import { firstTurnStart, renderTurnChanges, turnEditCount, turnFinished, turnFro
 import { initSharePage } from './share-page.js';
 import { initFeedbackDialog } from './feedback-dialog.js';
 import { createChatgptProjectPicker } from './chatgpt-project-picker.js';
+import { openRelatedFolders } from './related-folders-dialog.js';
 import { initScheduleDialog } from './schedule-dialog.js';
 import { nextRunAfter, sameLocalDay, type ScheduleRepeat } from '../shared/schedule.js';
 import { localToolDetail, localToolMetric, localToolTitle } from './tool-titles.js';
@@ -388,6 +390,12 @@ function projectMenuItems(id: string): RowMenuItem[] {
         action: `color-${choice ?? 'none'}`, swatch: choice ?? '', checked: color === choice, disabled: savingProjectColor.has(id),
         label: () => choice ? projectColorName(choice) : t('None'), run: () => void saveProjectColor(id, choice)
       }))
+    },
+    // #1689: context for this project's chats only; a link, not the groups' folder, so the two never look alike.
+    {
+      action: 'related-folders', icon: 'i-related', label: () => t('Related folders…'),
+      title: () => t('Other approved folders this work also uses'),
+      run: () => { const project = projects.find(row => row.id === id); if (project) void openRelatedFolders(api, project, message => toast(t(message))); }
     },
     // #1797: on unless this project or Settings turned it off; Settings wins, so the switch waits there.
     {
@@ -2176,6 +2184,12 @@ function projectSortEntries(groupOf: typeof projectGroup = projectGroup): Array<
   return [...ids].map(id => ({ id, scope: SIDEBAR_PROJECT_SCOPE }));
 }
 
+/** The project row's hover text: its folder and, when it has some, its related folders (#1689). */
+function projectTooltip(project: LocalProject): string {
+  const related = (project.relatedFolders ?? []).map(folder => folder.split(/[\\/]/).filter(Boolean).pop() ?? folder);
+  return related.length ? `${project.path}\n${t('Related folders: {0}', [related.join(', ')])}` : project.path;
+}
+
 /**
  * The project's "⋯" button and the menu it opens (also at a right click): Color, Remove and, for a
  * native ChatGPT Project that could not be created, Retry. The project tree and the inbox share it.
@@ -2453,7 +2467,7 @@ function paintSessions(): void {
     heading.dataset.sortHandle = '';
     heading.setAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown');
     const label = el('span', 'project-name', () => project?.name ?? t("Unavailable project"));
-    ui(heading, 'title', () => project?.path ?? t("Unavailable project"));
+    ui(heading, 'title', () => project ? projectTooltip(project) : t("Unavailable project"));
     heading.append(icon('i-folder'), label);
     if (project?.remote) {
       // A folder on a server (#1469): the address is the hover text, the badge says how it is reached.
@@ -7002,8 +7016,110 @@ function pickupNowWords(done: PickupNowOutcome): string {
   return '';
 }
 
+/** Chats whose recovery episode list is open; per chat, until the episode ends. */
+const expandedRecoveryEpisodes = new Set<string>();
+
+function episodeItemText(item: EpisodeItem): string {
+  if (item.kind === 'continue') return item.text === 'fresh-turn' ? t('Fresh turn started') : t('Automatic Continue sent');
+  if (item.kind === 'turn') return t('The turn failed');
+  return item.kind === 'reload' ? repairRowText(t(item.text)) : t(item.text);
+}
+
+/**
+ * #1883: the recovery row shown says since when the chat has been in trouble and how often the app
+ * tried, and opens to every step; amber when the app stopped trying. Repaints only on a change, so
+ * the countdown's tick never rebuilds the control under the pointer or the keyboard focus.
+ */
+function decorateRecoveryEpisode(host: HTMLElement, episode: RecoveryEpisode | null, sessionId: string | null, stopped: boolean): void {
+  const row = host.querySelector<HTMLElement>('.recovery-notice');
+  for (const notice of host.querySelectorAll<HTMLElement>('.recovery-notice')) notice.classList.toggle('is-stopped', notice === row && stopped);
+  const old = host.querySelector<HTMLElement>('.recovery-episode-meta');
+  const list = host.querySelector<HTMLElement>('.recovery-episode-list');
+  if (!row || !episode || !sessionId) { old?.remove(); list?.remove(); return; }
+  const expanded = expandedRecoveryEpisodes.has(sessionId);
+  // Every shown step, so a reload that ended after a later step still updates an open list (CodeRabbit on #2062).
+  const signature = JSON.stringify([sessionId, episode.since, episode.items.map(item => [item.kind, item.time, item.text]), episode.tries, expanded, currentLanguage()]);
+  if (old?.dataset.episode === signature && old.parentElement === row) return;
+  old?.remove(); list?.remove();
+  const since = new Date(episode.since).toLocaleTimeString(currentLanguage(), { hour: 'numeric', minute: '2-digit' });
+  const summary = episode.tries ? t('Since {0} · {1}', [since, tn('{0} try', '{0} tries', episode.tries)]) : t('Since {0}', [since]);
+  const meta = el('button', 'recovery-episode-meta') as HTMLButtonElement;
+  meta.type = 'button';
+  meta.dataset.episode = signature;
+  meta.setAttribute('aria-expanded', String(expanded));
+  meta.setAttribute('aria-controls', 'recoveryEpisodeList');
+  meta.title = expanded ? t('Hide what was tried') : t('Show what was tried');
+  meta.setAttribute('aria-label', `${summary}. ${meta.title}`);
+  meta.append(el('span', '', summary), disclosureChevron());
+  meta.onclick = () => {
+    if (expandedRecoveryEpisodes.has(sessionId)) expandedRecoveryEpisodes.delete(sessionId);
+    else expandedRecoveryEpisodes.add(sessionId);
+    paintRecoveryStatus();
+    host.querySelector<HTMLElement>('.recovery-episode-meta')?.focus();
+  };
+  // Before the countdown and the row's own actions, after what is happening now, which shows on one
+  // line here: its full words are the label's tooltip and the first line of the list.
+  const label = row.querySelector<HTMLElement>('.queue-label');
+  if (label) label.title = label.textContent ?? '';
+  label?.after(meta);
+  if (!expanded) return;
+  const items = el('div', 'recovery-episode-list background-exec-list');
+  items.id = 'recoveryEpisodeList';
+  items.setAttribute('role', 'list');
+  for (const item of [...episode.items].reverse()) {
+    const line = el('div', 'recovery-episode-item');
+    line.setAttribute('role', 'listitem');
+    const time = document.createElement('time');
+    time.dateTime = new Date(item.time).toISOString();
+    time.textContent = new Date(item.time).toLocaleTimeString(currentLanguage(), { hour: 'numeric', minute: '2-digit' });
+    line.append(time, el('span', '', episodeItemText(item)));
+    items.append(line);
+  }
+  row.after(items);
+}
+
 /** The live deadline takes precedence over the existing dismissible repair receipt. */
 function paintRecoveryStatus(): boolean {
+  // The rows below are redrawn while a turn ticks; keyboard focus on the episode control stays put.
+  const focusedMeta = document.activeElement instanceof HTMLElement && document.activeElement.matches('#recoveryStatus .recovery-episode-meta');
+  const shown = paintRecoveryRows();
+  const host = $('recoveryStatus');
+  const sessionId = selectedId;
+  const episode = detailFor === selectedId ? recoveryEpisode(events) : null;
+  const countdowns = selectedId && controlledSessionId === selectedId && controlledSelection === selectionGeneration ? controlledRecovery : [];
+  const live = episode && (episode.current || countdowns.length) ? episode : null;
+  if (sessionId && !live) expandedRecoveryEpisodes.delete(sessionId);
+  // Nothing scheduled and no receipt or note shown, but the chat is still where ChatGPT's error or a
+  // failed turn left it: that stays in view until the chat works again or the person dismisses it. A
+  // reload keeps its own short receipt, and the app's notes their own row.
+  const lastItem = live?.items.at(-1);
+  if (host.hidden && live && sessionId && lastItem && (lastItem.kind === 'error' || lastItem.kind === 'turn')) {
+    const last = lastItem;
+    const revision = JSON.stringify(['episode', live.since, last.time, last.text]);
+    if (dismissedRecoveryNotices.get(sessionId) !== revision) {
+      const row = el('div', 'recovery-notice');
+      row.append(icon(live.stopped ? 'i-warning' : 'i-pulse'), el('span', 'queue-label', episodeItemText(last)),
+        dockAction(() => t('Dismiss recovery notice'), 'i-x', () => {
+          dismissedRecoveryNotices.set(sessionId, revision);
+          host.hidden = true; host.replaceChildren();
+        }));
+      host.replaceChildren(row);
+      host.hidden = false;
+    }
+  }
+  if (!host.hidden) {
+    const stopped = !!live && (live.stopped || countdowns.some(countdown => countdown.kind === 'pickup-stopped' && countdown.exhausted === true));
+    decorateRecoveryEpisode(host, live, sessionId, stopped);
+    const row = host.querySelector<HTMLElement>('.recovery-notice');
+    const glyph = row?.querySelector(':scope > .ico');
+    if (glyph) setIcon(glyph, stopped ? 'i-warning' : 'i-pulse');
+    const meta = host.querySelector<HTMLElement>('.recovery-episode-meta');
+    if (focusedMeta && meta && document.activeElement !== meta) meta.focus({ preventScroll: true });
+  }
+  return shown;
+}
+
+function paintRecoveryRows(): boolean {
   const host = $('recoveryStatus');
   const countdowns = selectedId && controlledSessionId === selectedId && controlledSelection === selectionGeneration ? controlledRecovery : [];
   const sessionForCountdown = controlledSessionId;
@@ -7049,7 +7165,11 @@ function paintRecoveryStatus(): boolean {
   const advanced = recovery && events.some(event => positionOf(event) > positionOf(recovery) &&
     ((event.kind === 'turn_start' && event.turnId !== recovery.turnId) ||
       (event.kind === 'user_message' && event.source === 'extension')));
-  host.hidden = !recovery || !!advanced || Date.now() - recovery.time > 120000 || (!!sessionId && dismissedRecoveryNotices.get(sessionId) === revision);
+  // A later step of the same episode (ChatGPT's error, a stop note) is what is happening now: the
+  // reload's receipt gives way to it (CodeRabbit on #2062).
+  const newest = recovery?.kind === 'progress' ? recoveryEpisode(events)?.items.at(-1) : undefined;
+  const superseded = !!newest && recovery?.kind === 'progress' && newest.time > (recovery.updatedAt ?? recovery.time);
+  host.hidden = !recovery || !!advanced || superseded || Date.now() - recovery.time > 120000 || (!!sessionId && dismissedRecoveryNotices.get(sessionId) === revision);
   host.replaceChildren();
   if (host.hidden) return paintRecoveryVerdict(host, sessionId);
   if (!host.hidden && recovery?.kind === 'progress') {
@@ -7073,13 +7193,25 @@ function paintRecoveryStatus(): boolean {
  * with every reason written somewhere nobody was looking. The newest app note (never a handoff
  * note) stays here until a newer question or turn supersedes it, or it is dismissed.
  */
+/** Per shown stop note: how long the chat's newest answer was when the note first showed. */
+const verdictAnswerChars = new Map<string, number>();
 function paintRecoveryVerdict(host: HTMLElement, sessionId: string | null): boolean {
   const verdict = detailFor === selectedId ? [...events].reverse().find(event => event.source === 'app' && event.kind === 'note' && !event.continuation) : undefined;
   if (verdict?.kind !== 'note') return false;
   const revision = JSON.stringify(['note', verdict.time, verdict.message.text]);
+  // An answer begun before the note that keeps growing is the chat working (CodeRabbit on #2062): its
+  // length when the note was first shown is the baseline; only more text counts, not a markup revision.
+  const answer = [...events].reverse().find(event => event.kind === 'assistant_message' && event.source === 'extension');
+  const answerChars = answer?.kind === 'assistant_message' ? answer.message.chars ?? answer.message.text.length : 0;
+  const key = `${sessionId ?? ''}\u0000${revision}`;
+  if (!verdictAnswerChars.has(key)) verdictAnswerChars.set(key, answerChars);
+  const grew = answerChars > verdictAnswerChars.get(key)!;
+  // The chat moved on after the note the way the episode counts it (#1883): a new turn or message, an
+  // answer from the page, or a tool call (CodeRabbit on #2062).
   const superseded = events.some(event => positionOf(event) > positionOf(verdict) &&
-    (event.kind === 'turn_start' || (event.kind === 'user_message' && event.source === 'extension')));
-  if (superseded || (!!sessionId && dismissedRecoveryNotices.get(sessionId) === revision)) return false;
+    (event.kind === 'turn_start' || event.kind === 'tool_call' || (event.kind === 'user_message' && event.source === 'extension') ||
+      (event.kind === 'assistant_message' && event.source === 'extension')));
+  if (superseded || grew || (!!sessionId && dismissedRecoveryNotices.get(sessionId) === revision)) return false;
   const row = el('div', 'recovery-notice');
   row.append(icon('i-pulse'), el('span', 'queue-label', verdict.message.text),
     dockAction(() => t('Dismiss recovery notice'), 'i-x', () => {
@@ -8520,12 +8652,16 @@ function heldBySendCheck(entry: InputEntry): boolean {
   return entry.state === 'queued' && !!entry.sendCheck && sendCheckConfigured && entry.sendCheck.nextAt > Date.now();
 }
 
-function queuedWaitReason(entry: InputEntry): 'send-check' | 'extension' | 'tool-call' | 'chatgpt-project' | 'chatgpt-project-failed' | 'project-removed' | 'slots' | 'paused' | null {
+function queuedWaitReason(entry: InputEntry): 'send-check' | 'extension' | 'tool-call' | 'chatgpt-answering' | 'chatgpt-turn' | 'chatgpt-project' | 'chatgpt-project-failed' | 'project-removed' | 'slots' | 'paused' | null {
   if (entry.state !== 'queued' || entry.error || entry.dueAt > Date.now() || entry.delivery === 'tool') return null;
   if (heldBySendCheck(entry)) return 'send-check';
   // Chats working at once (#1694): main says which automatic sends wait, and for what.
   if (entry.slotWait) return entry.slotWait;
   if (!bridgePresent) return 'extension';
+  // The chat's page has it and sends it when its own turn ends (2026-11-03); pages repeat the hold
+  // every few seconds, so an older one no longer says why.
+  if (entry.pageHold && Date.now() - entry.pageHold.at < 75_000)
+    return entry.pageHold.reason === 'tool-running' ? 'tool-call' : entry.pageHold.reason === 'still-answering' ? 'chatgpt-answering' : 'chatgpt-turn';
   const project = chatgptProjectWait(entry);
   if (project) return project;
   if (entry.mode === 'auto' && entry.sessionId && entry.sessionId === runningToolsFor && runningTools.length > 0 && !entry.directTurn) return 'tool-call';
@@ -8713,7 +8849,7 @@ function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
   if (!visibleInputIds.has(entry.id)) row.classList.add('is-entering');
   visibleInputIds.add(entry.id);
   if (visibleInputIds.size > 100) visibleInputIds.delete(visibleInputIds.values().next().value!);
-  const status = () => entry.error ? t(entry.error) : held ? t("Sending in a moment…") : waiting === 'send-check' ? sendCheckHold(entry)! : waiting === 'slots' ? t("Waiting for a free slot (Chats working at once)") : waiting === 'paused' ? t("ChatGPT asked to slow down · waits until it says") : waiting === 'extension' ? t("Waiting for the browser extension to connect") : waiting === 'tool-call' ? t("Waiting for the running tool call to finish") : waiting === 'chatgpt-project' ? t("Creating this project in ChatGPT…") : waiting === 'chatgpt-project-failed' ? t("This project's ChatGPT Project isn't available. Retry it from the project's menu.") : waiting === 'project-removed' ? t("This chat's project was removed from the sidebar. Add its folder again to send this message, or cancel it.") : (entry.state === 'failed' ? t("Delivery not confirmed") : entry.state === 'decision' ? t("Preparing follow-up") : entry.state === 'browser' ? t("Delivery confirmation pending") : entry.state === 'tool' ? t("Sent to the active turn · awaiting receipt") : entry.dueAt > Date.now() ? t("Scheduled {0}", [new Date(entry.dueAt).toLocaleString(currentLanguage())]) : entry.delivery === 'tool' ? t("Waiting for the next tool call") : t("Queued"));
+  const status = () => entry.error ? t(entry.error) : held ? t("Sending in a moment…") : waiting === 'send-check' ? sendCheckHold(entry)! : waiting === 'slots' ? t("Waiting for a free slot (Chats working at once)") : waiting === 'paused' ? t("ChatGPT asked to slow down · waits until it says") : waiting === 'extension' ? t("Waiting for the browser extension to connect") : waiting === 'tool-call' ? t("Waiting for the running tool call to finish") : waiting === 'chatgpt-answering' ? t("Waiting for ChatGPT to finish its answer") : waiting === 'chatgpt-turn' ? t("Waiting for ChatGPT's page to end its turn") : waiting === 'chatgpt-project' ? t("Creating this project in ChatGPT…") : waiting === 'chatgpt-project-failed' ? t("This project's ChatGPT Project isn't available. Retry it from the project's menu.") : waiting === 'project-removed' ? t("This chat's project was removed from the sidebar. Add its folder again to send this message, or cancel it.") : (entry.state === 'failed' ? t("Delivery not confirmed") : entry.state === 'decision' ? t("Preparing follow-up") : entry.state === 'browser' ? t("Delivery confirmation pending") : entry.state === 'tool' ? t("Sent to the active turn · awaiting receipt") : entry.dueAt > Date.now() ? t("Scheduled {0}", [new Date(entry.dueAt).toLocaleString(currentLanguage())]) : entry.delivery === 'tool' ? t("Waiting for the next tool call") : t("Queued"));
   const files = el('div', 'message-attachments');
   if (entry.attachments?.length) files.append(...entry.attachments.map(file => attachmentCard(file)));
   for (const image of entry.images ?? []) { const preview = document.createElement('img'); preview.src = image.dataUrl; preview.alt = image.name; files.append(preview); }
@@ -8812,7 +8948,20 @@ async function adoptAcceptedOpening(entry: InputEntry): Promise<boolean> {
   inputDrafts.delete(from); imageDrafts.delete(from); newChatTasks.delete(from);
   return true;
 }
+/** A repaint for when the oldest shown page hold lapses, so a reason no page repeats goes away. */
+let pageHoldLapseTimer: number | undefined;
+function schedulePageHoldLapse(): void {
+  if (pageHoldLapseTimer !== undefined) window.clearTimeout(pageHoldLapseTimer);
+  pageHoldLapseTimer = undefined;
+  const now = Date.now();
+  const due = pendingComposerInputs.flatMap(entry => entry.state === 'queued' && entry.pageHold && now - entry.pageHold.at < 75_000
+    ? [entry.pageHold.at + 75_000] : []);
+  if (!due.length) return;
+  pageHoldLapseTimer = window.setTimeout(() => { pageHoldLapseTimer = undefined; paintPendingInputs(); }, Math.max(0, Math.min(...due) - now) + 50);
+}
+
 function paintPendingInputs(): void {
+  schedulePageHoldLapse();
   const all = pendingComposerInputs;
   const belongsToSelection = (entry: InputEntry): boolean => selectedId === null
     ? pendingNewInput?.generation === selectionGeneration && entry.id === pendingNewInput.id
@@ -8836,6 +8985,9 @@ function paintPendingInputs(): void {
     (notice(entry) || !['sent', 'cancelled'].includes(entry.state) || (entry.state === 'sent' && entry.messageId && !anchored(entry))));
   for (const entry of startingInputs.values()) if (belongsToSelection(entry) && !all.some(row => row.id === entry.id)) rows.push(entry);
   const host = $('inputQueue');
+  // A row whose status changed is rebuilt; a control of it that had keyboard focus keeps it (CodeRabbit on #2054).
+  const active = document.activeElement instanceof HTMLElement && host.contains(document.activeElement) ? document.activeElement : null;
+  const focused = active ? { id: active.closest<HTMLElement>('.pending-message')?.dataset.inputId, label: active.getAttribute('aria-label'), cls: active.className } : null;
   const previous = new Map([...host.querySelectorAll<HTMLElement>(':scope > .pending-message')].map(row => [row.dataset.inputId, row]));
   const next = rows.filter(entry => !historicalAutomaticInput(entry)).map(entry => {
     const sig = JSON.stringify([entry.text, entry.state, entry.error, entry.dueAt, entry.scheduled, notice(entry), routeHeld(entry), queuedWaitReason(entry), entry.sendCheck, entry.stagesApplied,
@@ -8847,6 +8999,12 @@ function paintPendingInputs(): void {
   });
   // Helper controls have their own owner and are refreshed by the queue read below.
   reconcileChildren(host, [...next, ...host.querySelectorAll<HTMLElement>(':scope > .queued-input')]);
+  if (focused?.id && active && !active.isConnected) {
+    const row = [...host.querySelectorAll<HTMLElement>(':scope > .pending-message')].find(candidate => candidate.dataset.inputId === focused.id);
+    const buttons = [...row?.querySelectorAll<HTMLElement>('button') ?? []];
+    // The same control if the rebuilt row still has it, else the row's first one (a failed row shows Retry and Dismiss instead).
+    (buttons.find(button => button.className === focused.cls && button.getAttribute('aria-label') === focused.label) ?? buttons[0])?.focus({ preventScroll: true });
+  }
   holdSentMessage();
 }
 /** How a schedule repeats, in the chosen language: "every weekday at 09:00". */
