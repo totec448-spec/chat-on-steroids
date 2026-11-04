@@ -779,7 +779,8 @@ before asking keeps its ticket and posts `/compact` `sourceDeferred` with `sourc
 the app logs it and shows `held` until its next pickup. Only the chat's open, still unsent automatic
 ticket accepts it. A deferral at the tool-result receipt also carries `sourceErrorCode`
 (`results-unconfirmed` after the whole wait with nothing running here, `results-wait-changed` when
-the chat changed during it, also when it moved to another route, `local-tools-running` when this
+the chat changed during it on the same route (a tab that moved to another chat reports nothing, so
+the relay never rebinds it), `local-tools-running` when this
 machine's own calls or a missing activity answer kept the receipt from being checked, never counted;
 the code lives with its attempt, never shared);
 the bridge counts them per ticket (`compactionReceiptMisses`, in memory). After one

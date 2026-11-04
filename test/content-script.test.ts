@@ -19027,29 +19027,6 @@ describe('the context meter and automatic compaction', () => {
       .toEqual(compacts ? [] : [expect.objectContaining({ token: 'waived-token', sourceErrorCode: pendingTools ? 'local-tools-running' : 'results-unconfirmed' })]);
   });
 
-  // CodeRabbit on #2056: an attempt whose chat moved on during the receipt wait returned before telling
-  // the app why, so that kind of stop was never counted toward the waiver.
-  it('tells the app an attempt stopped because the chat moved on during the receipt wait', async () => {
-    let calls = 0, armed = false;
-    live = await harness(undefined, {
-      activity: () => {
-        // Once the receipt wait is polling, ChatGPT navigates this tab to another chat.
-        if (armed && ++calls === 2) live!.window.history.pushState({}, '', '/c/ffffffff-0000-4000-8000-000000000001');
-        return withContext(205_000, settings({ auto: true }), { pendingTools: 0, sentResults: { count: 0, settled: true } });
-      },
-      compact: () => ({ ok: true, data: { token: 'moved-token', prompt: 'Write the brief.', ...automaticTicket('not-attempted') } })
-    });
-    startGenerating(live.document);
-    const section = assistantTurn(live.document, 'moved-source', []);
-    compactionFiber(section, () => [compactionCall(false)], () => []);
-    const sends = watchSend(live.document);
-    armed = true;
-    await live.hook.startCompact(true);
-    expect(sends()).toBe(0);
-    expect(live.sent.filter((message) => message.type === 'compact' && message.sourceDeferred === true))
-      .toEqual([expect.objectContaining({ token: 'moved-token', sourceErrorCode: 'results-wait-changed' })]);
-  });
-
   it('a manual press never skips the receipt, even if the app answered with a waiver', async () => {
     live = await harness(undefined, {
       activity: () => withContext(205_000, settings({ auto: true }), { pendingTools: 0, sentResults: { count: 1, settled: true } }),
