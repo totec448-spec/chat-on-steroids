@@ -459,6 +459,51 @@ it('does not take a large preview that ChatGPT marks incomplete or a preview', a
   }
 });
 
+// #2005 part B: history found later was recorded at the moment it was read ("new 12:55 timestamps").
+// ChatGPT's own turn says when its work started and ended (live, a 16-turn chat from 2026-10-28: each
+// question's recorded time equals its turn's workStartedAtMs to the minute; sentAtMs was null).
+it('gives a question its turn\'s start and a finished answer its end, as ChatGPT records them', async () => {
+  const f = fixture();
+  const started = Date.parse('2026-09-18T08:30:00Z'), finished = Date.parse('2026-09-18T08:34:00Z');
+  Object.assign(f.entry.turn, { workStartedAtMs: started, workCompletedAtMs: finished });
+  const times = async () => Object.fromEntries((await f.ask()).turns[0].messages.map((m: any) => [m.role, m.createTime ?? null]));
+  // While the answer is running it has no time of its own yet.
+  expect(await times()).toEqual({ user: started, assistant: null });
+  f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
+  expect(await times()).toEqual({ user: started, assistant: finished });
+  // ChatGPT's own send time, once it keeps one, wins over the turn's start.
+  f.entry.turn.items[0].sentAtMs = started - 2_000;
+  expect((await times()).user).toBe(started - 2_000);
+  // No usable time: nothing is invented.
+  Object.assign(f.entry.turn, { workStartedAtMs: null, workCompletedAtMs: 'soon' });
+  f.entry.turn.items[0].sentAtMs = null;
+  expect(await times()).toEqual({ user: null, assistant: null });
+});
+
+// CodeRabbit on #2064: the turn's start belongs to its opening question, its end to its last answer,
+// and a value that cannot be a ChatGPT time is no time.
+it('gives the turn\'s start only to its opening question, its end only to its last answer, and takes only plausible times', async () => {
+  const f = fixture();
+  const started = Date.parse('2026-09-18T08:30:00Z'), finished = Date.parse('2026-09-18T08:34:00Z');
+  Object.assign(f.entry.turn, { workStartedAtMs: started, workCompletedAtMs: finished, status: 'complete' });
+  f.entry.turn.items[2].completed = true;
+  // A retry left an earlier finished answer, and a follow-up was sent into the running answer.
+  f.entry.turn.items.push(
+    { type: 'user-message', messageId: OTHER, message: 'One more thing' },
+    { type: 'assistant-message', messageId: 'answer-after-retry', content: 'Retried', phase: 'final_answer', completed: true });
+  f.entry.turn.messageIds.push(OTHER, 'answer-after-retry');
+  const times = async () => Object.fromEntries((await f.ask()).turns[0].messages.map((m: any) => [m.messageId, m.createTime ?? null]));
+  expect(await times()).toEqual({ [USER]: started, [ANSWER]: null, [OTHER]: null, 'answer-after-retry': finished });
+  // A follow-up's own send time is still its time.
+  f.entry.turn.items[3].sentAtMs = started + 60_000;
+  expect((await times())[OTHER]).toBe(started + 60_000);
+  for (const odd of [1, 9.9e13, Date.now() + 7 * 86_400_000]) {
+    Object.assign(f.entry.turn, { workStartedAtMs: odd, workCompletedAtMs: odd });
+    f.entry.turn.items[3].sentAtMs = odd;
+    expect(await times()).toEqual({ [USER]: null, [ANSWER]: null, [OTHER]: null, 'answer-after-retry': null });
+  }
+});
+
 it('rejects an image borrowing the authored user message identity', async () => {
   const f = fixture(); const { image } = generatedAnswer(f);
   image.chatGptMessageId = USER;
