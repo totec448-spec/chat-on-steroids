@@ -51,7 +51,7 @@ function page(data, path, { language, strings: copy }) {
   return '<!doctype html><html lang="' + language + '"><head><meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width, initial-scale=1">' +
     '<title>' + escapeHtml(copy.title) + '</title></head><body>' +
-    '<main><h1>Chat On Steroids · Web Local</h1>' +
+    '<main><h1>' + escapeHtml(copy.title) + '</h1>' +
     '<p><strong>' + escapeHtml(copy.readonly) + '</strong> — ' + escapeHtml(copy.intro) + '</p>' +
     '<h2>' + escapeHtml(copy.projects) + '</h2>' +
     (rows ? '<ul>' + rows + '</ul>' : '<p>' + escapeHtml(copy.empty) + '</p>') +

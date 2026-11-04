@@ -62,6 +62,7 @@ test('one-time native activation protects a real owner read; dynamic names are H
   assert.match(response.headers.get('content-security-policy'), /default-src 'none'/);
   assert.match(response.headers.get('referrer-policy'), /no-referrer/);
   const body = await response.text();
+  assert.match(body, /<h1>CoS Web Local preview · Read only<\/h1>/);
   assert.match(body, /&lt;script&gt;untrusted&lt;\/script&gt;/);
   assert.ok(body.includes('&lt;SCRIPT&gt;uppercase&lt;/SCRIPT&gt;'));
   assert.match(body, /Alpha &amp; Beta/);

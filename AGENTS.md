@@ -5627,6 +5627,10 @@ scope path is defense in depth, not device/process authentication. Stronger
 listener-bound credentials and real browser acceptance are gates before any
 sensitive Web data or commands. Unlike the Control API, this UI never enables
 the Control API's action switch.
+The single Settings → For developers row is explicitly labeled **Web Local
+preview (read-only)** with one **Open preview** button. It promises only the
+bounded Project-name preview; it adds no settings dashboard, icon or other
+control, and the listener remains off until this native gesture.
 
 Web Local diagnostics use fixed, credential-free Activity messages for an
 admitted Desktop open, listener startup/shutdown, successful one-time browser
