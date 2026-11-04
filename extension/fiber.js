@@ -2289,8 +2289,13 @@
     // ChatGPT's own times for this turn (#2005): a question found in older history was recorded at the
     // moment it was read, hours or months late. The question was sent when the turn's work started
     // (its own `sentAtMs` once ChatGPT keeps it), and a finished answer was written when it completed.
-    const at = value => Number.isFinite(value) && value > 0 && value < 1e14 ? value : undefined;
+    // Only a plausible ChatGPT time counts: after 2020 and not later than a day from now (CodeRabbit on #2064).
+    const at = value => Number.isFinite(value) && value >= 1577836800000 && value <= Date.now() + 86_400_000 ? value : undefined;
     const startedAt = at(entry.turn.workStartedAtMs), completedAt = at(entry.turn.workCompletedAtMs);
+    // The turn's start is its opening question's; its end is its last answer's. A follow-up sent into the
+    // running answer, or an answer a retry replaced, keeps only a time of its own.
+    const opening = entry.turn.items.findIndex(item => item?.type === 'user-message');
+    const closing = entry.turn.items.findLastIndex(item => item?.type === 'assistant-message' && item.phase === 'final_answer');
     for (const [index, item] of entry.turn.items.entries()) {
       if (++work > MAX_ROWS) return null;
       if (item?.type === 'user-message' || item?.type === 'assistant-message') {
@@ -2301,7 +2306,8 @@
         const final = !user && item.phase === 'final_answer';
         if (final) lastAnswer = item;
         const completed = final && item.completed === true && entry.turn.status === 'complete';
-        const written = user ? at(item.sentAtMs) ?? startedAt : completed ? completedAt : undefined;
+        const written = user ? at(item.sentAtMs) ?? (index === opening ? startedAt : undefined)
+          : completed && index === closing ? completedAt : undefined;
         messages.push({ id, author: { role }, content: { content_type: 'text', parts: [typeof text === 'string' ? text : ''] },
           ...(written !== undefined ? { create_time: written } : {}),
           channel: user ? null : final ? 'final' : 'commentary', end_turn: completed,
