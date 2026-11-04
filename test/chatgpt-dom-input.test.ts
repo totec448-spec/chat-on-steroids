@@ -480,6 +480,53 @@ describe('native Project entry readiness', () => {
     expect(failure).toHaveBeenCalledWith('transition-timeout:last=composer-not-ready');
   });
 
+  // #2068: within one tab ChatGPT keeps the Project home's text after it was sent, so the next resume
+  // found its predecessor's brief there and gave up. Only a brief this page typed itself, unchanged, is
+  // cleared (CodeRabbit on #2069); anything else stays and the entry fails as before.
+  it.each([
+    ['a brief this page typed', 'own', true],
+    ['the same brief with a hard line break ChatGPT escaped', 'escaped', true],
+    ['that brief with a person\'s note added', 'edited', false],
+    ['a brief this page never typed', 'foreign', false],
+    ['a person\'s own words', 'person', false]
+  ] as const)('on the Project home, clears %s only when it is the app\'s own', async (_name, kind, cleared) => {
+    const { resumeBootstrapText } = await import('../src/main/session/handoff.js');
+    const brief = resumeBootstrapText('# TASK — the original goal\n\nShip the mail service.', 'pTYR0VjLJ5Xtz2FHFqajqA');
+    document.execCommand = (command: string, _ui?: boolean, value?: string) => {
+      const selection = document.getSelection();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+      if (!range) return false;
+      if (command === 'delete') { range.deleteContents(); return true; }
+      if (command !== 'insertHTML') return false;
+      range.deleteContents();
+      const template = document.createElement('template');
+      template.innerHTML = value || '';
+      range.insertNode(template.content);
+      return true;
+    };
+    const link = sourceLink();
+    box.textContent = '';
+    // The previous resume, typed and sent from this page.
+    if (kind !== 'foreign') { expect(api.insertPrompt(brief, true)).toBe(true); box.textContent = ''; }
+    // A hard line break inside one paragraph: ChatGPT stores it as a backslash before the line feed.
+    const left = kind === 'escaped' ? brief.replace(']]\n\n', ']]\\\n') : kind === 'edited' ? `${brief}\n\nAlso check the SMTP port.`
+      : kind === 'person' ? 'Remember to ask about the SMTP port' : brief;
+    link.addEventListener('click', event => {
+      event.preventDefault();
+      dom.reconfigure({ url: projectUrl });
+      box.replaceChildren(...left.split(/\n\n/).map(part => { const p = document.createElement('p'); p.textContent = part; return p; }));
+    });
+    const failure = vi.fn();
+    const entered = api.enterProject(entry, undefined, failure);
+    await vi.advanceTimersByTimeAsync(12_500);
+    expect(await entered).toBe(cleared);
+    if (cleared) expect(box.textContent).toBe('');
+    else {
+      expect(failure).toHaveBeenCalledWith('transition-timeout:last=composer-not-ready');
+      expect(box.textContent?.length).toBeGreaterThan(0);
+    }
+  });
+
   it('reports visible source turns as the last observation when the Project transition times out', async () => {
     const link = sourceLink();
     box.textContent = '';
