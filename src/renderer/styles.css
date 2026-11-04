@@ -4923,6 +4923,24 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .file-entry-dialog-input:focus { outline: 2px solid var(--ink); outline-offset: 2px; }
 .file-entry-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .file-entry-dialog-actions .btn { padding: 8px 12px; }
+/* Related folders (#1689): the file panel's dialog, with a list, an approved-folder picker and an Unavailable state in words. */
+.related-folders-dialog { width: min(460px, calc(100vw - 32px)); }
+.related-folders-intro, .related-folders-empty, .related-folders-hint { margin: -6px 0 0; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.45; }
+.related-folders-empty, .related-folders-hint { margin: 0; }
+.related-folders-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; max-height: 260px; overflow-y: auto; }
+.related-folders-list:empty { display: none; }
+.related-folders-item { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 6px 4px 6px 8px; border-radius: 8px; }
+.related-folders-item:hover { background: var(--hover); }
+.related-folders-item > .ico { flex: none; color: var(--soft); }
+.related-folders-text { display: grid; flex: 1; min-width: 0; }
+.related-folders-name, .related-folders-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.related-folders-path { color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); }
+.related-folders-item.is-unavailable .related-folders-name { color: var(--soft); }
+.related-folders-state { flex: none; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); }
+.related-folders-remove { flex: none; }
+.related-folders-add { display: flex; gap: 8px; }
+.related-folders-add .related-folders-select { flex: 1; }
+.related-folders-add .btn { flex: none; padding: 8px 12px; }
 .file-confirm-dialog-body { display: grid; gap: 12px; padding: 20px; }
 .file-confirm-dialog-body h2 { margin: 0; font-size: calc(16px * var(--text-scale, 1)); font-weight: 650; }
 .file-confirm-dialog-message { margin: 0; color: var(--ink); font-size: calc(13px * var(--text-scale, 1)); line-height: 1.5; overflow-wrap: anywhere; }

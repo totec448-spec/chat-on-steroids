@@ -4765,6 +4765,22 @@ moved into a project, the summary gets `projectNotePending`, and the person's ne
 carries the project's folder line once (`prepareSkillFollowup(..., projectNote)`, the same line a new
 chat there starts with); the flag clears when that message is delivered (`clearProjectNote`), so a
 failed send carries it again. Moving out clears it; nothing is sent to ChatGPT and a linked ChatGPT Project keeps the conversation.
+**Related folders (#1689)** are context for a project's chats, never extra project roots.
+`LocalProject.relatedFolders` holds approved folders' own paths (`Root.path`), at most ten, set
+only through `setRelatedFolders` (IPC `projects:related-set`; `projects:related` returns
+`RelatedFolderView`s): each must be an approved folder, the project's own is skipped, the same
+folder is kept once (compared as paths, not text), and a damaged list reads as none. Nothing else
+changes: the working directory, AGENTS.md (only the project's), Files, the terminal, Git, Review,
+worktrees and permissions stay with the project's folder. The opening message's project header,
+and the once-only project note, add one line after the project directory naming the *available*
+ones by their virtual names (`relatedFoldersLine`, read when the message is prepared, so never
+stale); one no longer approved or no longer there is Unavailable in the dialog and left out. A
+worker in its own worktree gets no such line. A change marks `projectNotePending` on the project's
+main chats used in the last 30 days; a committed Compact & Resume (`rebindSession` with a handoff
+id) marks it too, so the new chat hears the project folder and the current list with the person's
+next message. Old messages are never rewritten. The renderer offers it as the project menu's
+"Related folders…" (`i-related`, a link, unlike the groups' folder) and a dialog
+(`related-folders-dialog.ts`); the project row's hover text lists them; there are no extra sidebar rows.
 `placeMovedChat` drops the old group membership or joins `groupId` of the new project. The renderer
 offers it in the chat menu (projects, then No project) and by dragging a chat row onto a project or
 group (`SidebarDrop` in `sidebar-order.ts`, highlight `.is-drop-target`; Escape cancels), then shows
