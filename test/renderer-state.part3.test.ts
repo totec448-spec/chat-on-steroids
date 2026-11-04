@@ -1101,6 +1101,38 @@ it('localizes unknown GNOME backend failures without displaying private text and
   expect(doc.activeElement).toBe(button);
 });
 
+it('says why a GNOME screenshot permission request was refused, for every reason main gives', async () => {
+  const reasons: [string, string][] = [
+    ['Enable native Linux Desktop and Screen access first.', 'Enable native Linux Desktop and Screen access first.'],
+    ['Activate the Chat On Steroids window before requesting screenshot permission.', 'Activate the Chat On Steroids window before requesting screenshot permission.'],
+    ['Screen access was disabled before the screenshot request.', 'Screen access was disabled before the screenshot request.'],
+    ['The Chat On Steroids window lost focus; no screenshot was requested.', 'The Chat On Steroids window lost focus; no screenshot was requested.'],
+    ['Native Linux Desktop or Screen access was disabled during the screenshot request.', 'Native Linux Desktop or Screen access was disabled during the screenshot request.'],
+    // The portal's code is the backend's, so only a fixed sentence is shown.
+    ['GNOME screenshot portal returned PORTAL_DENIED. No image was saved.', 'GNOME did not grant the screenshot. No image was saved.']
+  ];
+  let next = '';
+  const request = vi.fn(async () => ({ ok: false as const, error: next }));
+  const mounted = await mountChat({}, [], { linuxScreenshotConsent: request });
+  const doc = mounted.window.document;
+  const button = doc.getElementById('linuxScreenshotConsent') as HTMLButtonElement;
+  const linux = structuredClone(mounted.state);
+  linux.platform = { family: 'linux', name: 'Linux', desktopAutomation: false };
+  linux.config.ui.linuxDesktopEnabled = true;
+  mounted.push(linux);
+  await settle();
+  const status = doc.getElementById('linuxScreenshotConsentResult')!;
+  for (const [error, shown] of reasons) {
+    next = error;
+    const calls = request.mock.calls.length;
+    button.click();
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(calls + 1));
+    await waitFor(() => expect(status.textContent).toBe(`Screenshot permission request failed: ${shown}`));
+    expect(status.textContent).not.toContain('PORTAL_DENIED');
+    await waitFor(() => expect(button.disabled).toBe(false));
+  }
+});
+
 it('does not steal focus if the user switches controls while the GNOME request is pending', async () => {
   let finish!: (value: { ok: true; data: { pngBytes: number } }) => void;
   const request = vi.fn(() => new Promise<{ ok: true; data: { pngBytes: number } }>(resolve => { finish = resolve; }));

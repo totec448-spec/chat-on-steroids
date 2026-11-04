@@ -3741,5 +3741,12 @@
   "Today": "今天",
   "Yesterday": "昨天",
   "Previous 7 days": "过去 7 天",
-  "Previous 30 days": "过去 30 天"
+  "Previous 30 days": "过去 30 天",
+  "Native Linux screenshot consent is available only on Linux.": "原生 Linux 截图授权仅在 Linux 上可用。",
+  "Enable native Linux Desktop and Screen access first.": "请先启用原生 Linux 桌面和屏幕访问。",
+  "Activate the Chat On Steroids window before requesting screenshot permission.": "请求截图权限前，请先激活 Chat On Steroids 窗口。",
+  "Screen access was disabled before the screenshot request.": "截图请求之前，屏幕访问已被关闭。",
+  "The Chat On Steroids window lost focus; no screenshot was requested.": "Chat On Steroids 窗口失去了焦点，未请求截图。",
+  "Native Linux Desktop or Screen access was disabled during the screenshot request.": "截图请求期间，原生 Linux 桌面或屏幕访问被关闭。",
+  "GNOME did not grant the screenshot. No image was saved.": "GNOME 未允许截图。未保存任何图像。"
 }

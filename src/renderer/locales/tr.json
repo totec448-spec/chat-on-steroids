@@ -3822,5 +3822,12 @@
   "Today": "Bugün",
   "Yesterday": "Dün",
   "Previous 7 days": "Son 7 gün",
-  "Previous 30 days": "Son 30 gün"
+  "Previous 30 days": "Son 30 gün",
+  "Native Linux screenshot consent is available only on Linux.": "Yerel Linux ekran görüntüsü izni yalnızca Linux’ta kullanılabilir.",
+  "Enable native Linux Desktop and Screen access first.": "Önce yerel Linux masaüstünü ve ekran erişimini açın.",
+  "Activate the Chat On Steroids window before requesting screenshot permission.": "Ekran görüntüsü izni istemeden önce Chat On Steroids penceresini etkinleştirin.",
+  "Screen access was disabled before the screenshot request.": "Ekran erişimi, ekran görüntüsü isteğinden önce kapatıldı.",
+  "The Chat On Steroids window lost focus; no screenshot was requested.": "Chat On Steroids penceresi odağı kaybetti; ekran görüntüsü istenmedi.",
+  "Native Linux Desktop or Screen access was disabled during the screenshot request.": "Ekran görüntüsü isteği sırasında yerel Linux masaüstü veya ekran erişimi kapatıldı.",
+  "GNOME did not grant the screenshot. No image was saved.": "GNOME ekran görüntüsüne izin vermedi. Hiçbir görüntü kaydedilmedi."
 }

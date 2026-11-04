@@ -596,6 +596,19 @@ function linuxDesktopRow(): HTMLElement {
   return row;
 }
 
+/** Main's fixed refusal sentences, shown translated; anything else stays a fixed sentence, never backend text. */
+const LINUX_CONSENT_REASONS = new Set(['Screenshot permission can be requested only from the Chat On Steroids main window.',
+  'A screenshot permission request is already running.', 'Native Linux screenshot consent is available only on Linux.',
+  'Enable native Linux Desktop and Screen access first.', 'Activate the Chat On Steroids window before requesting screenshot permission.',
+  'Screen access was disabled before the screenshot request.', 'The Chat On Steroids window lost focus; no screenshot was requested.',
+  'Native Linux Desktop or Screen access was disabled during the screenshot request.']);
+function linuxConsentReason(error: string): string {
+  if (LINUX_CONSENT_REASONS.has(error)) return t(error);
+  // The portal's own code comes from the backend: the person reads what happened, the log keeps the code.
+  if (error.startsWith('GNOME screenshot portal returned ')) return t('GNOME did not grant the screenshot. No image was saved.');
+  return t('GNOME screenshot permission could not be confirmed.');
+}
+
 let linuxScreenshotConsentBusy = false;
 function linuxScreenshotConsentRow(): HTMLElement {
   const row = el('div', 'tool is-static linux-consent-row');
@@ -623,11 +636,7 @@ function linuxScreenshotConsentRow(): HTMLElement {
       const reply = await api.linuxScreenshotConsent();
       status.textContent = reply.ok
         ? t('Screenshot permission confirmed. No image was saved.')
-        : t('Screenshot permission request failed: {0}', [
-          reply.error === 'Screenshot permission can be requested only from the Chat On Steroids main window.' ||
-          reply.error === 'A screenshot permission request is already running.'
-            ? t(reply.error) : t('GNOME screenshot permission could not be confirmed.')
-        ]);
+        : t('Screenshot permission request failed: {0}', [linuxConsentReason(reply.error)]);
     } catch {
       status.textContent = t('Screenshot permission request failed: {0}', [
         t('GNOME screenshot permission could not be confirmed.')

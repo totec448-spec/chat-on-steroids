@@ -3822,5 +3822,12 @@
   "Today": "Heute",
   "Yesterday": "Gestern",
   "Previous 7 days": "Letzte 7 Tage",
-  "Previous 30 days": "Letzte 30 Tage"
+  "Previous 30 days": "Letzte 30 Tage",
+  "Native Linux screenshot consent is available only on Linux.": "Die native Linux-Screenshot-Freigabe gibt es nur unter Linux.",
+  "Enable native Linux Desktop and Screen access first.": "Aktiviere zuerst den nativen Linux-Desktop und den Bildschirmzugriff.",
+  "Activate the Chat On Steroids window before requesting screenshot permission.": "Bring das Chat-On-Steroids-Fenster in den Vordergrund, bevor du die Screenshot-Berechtigung anforderst.",
+  "Screen access was disabled before the screenshot request.": "Der Bildschirmzugriff wurde vor der Screenshot-Anfrage ausgeschaltet.",
+  "The Chat On Steroids window lost focus; no screenshot was requested.": "Das Chat-On-Steroids-Fenster hat den Fokus verloren; es wurde kein Screenshot angefordert.",
+  "Native Linux Desktop or Screen access was disabled during the screenshot request.": "Der native Linux-Desktop oder der Bildschirmzugriff wurde während der Screenshot-Anfrage ausgeschaltet.",
+  "GNOME did not grant the screenshot. No image was saved.": "GNOME hat den Screenshot nicht erlaubt. Es wurde kein Bild gespeichert."
 }
