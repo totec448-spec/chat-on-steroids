@@ -9766,10 +9766,11 @@
     }, 0);
   }
 
-  function reportDeferredCompaction(forId, token, why) {
+  function reportDeferredCompaction(forId, token, why, code = null) {
     if (!token || !why) return;
     helperDeferral = fiberPresent === true ? null : { forId, forEpoch: epoch, why };
-    void ask({ type: 'compact', conversationId: forId, token, sourceDeferred: true, sourceError: why }).catch(() => undefined);
+    void ask({ type: 'compact', conversationId: forId, token, sourceDeferred: true, sourceError: why,
+      ...(code ? { sourceErrorCode: code } : {}) }).catch(() => undefined);
   }
 
   async function startCompact(automatic = false) {
@@ -9950,11 +9951,15 @@
     // summary of a machine state that had already moved on.
     // Automatic runs stop the turn exactly like a press does. They are *started* by a turn
     // being in flight, so refusing to interrupt one would refuse every automatic run.
-    const barrier = await stopAndSettle(forId, forEpoch, forRun, sameTurn, automatic);
+    // Why this attempt stopped at the receipt, kept with this attempt only (CodeRabbit on #2056).
+    const receipt = { code: null };
+    const barrier = await stopAndSettle(forId, forEpoch, forRun, sameTurn, automatic, automatic && filed.data.waiveReceipt === true, receipt);
     // Every await above can span an SPA navigation. `conversationId` is mutable global
     // state, so continuing after A -> B would otherwise post B to /compact and type A's
     // handoff instruction into B's composer. The new chat's reset already owns its UI state;
     // a stale continuation must not repaint or cancel anything there.
+    // The tab moved to another chat meanwhile: nothing is reported for the old one, because a report
+    // naming it would bind this tab to it again in the relay (CodeRabbit on #2056). Its next attempt counts.
     if (!current()) return;
     if (barrier) {
       pressedAt = 0;
@@ -9962,7 +9967,7 @@
       nativePhase = '';
       localError = barrier;
       if (!automatic) await retireUnsentCompaction(forId, String(filed.data.token || ''), barrier, current);
-      else reportDeferredCompaction(forId, String(filed.data.token || ''), barrier);
+      else reportDeferredCompaction(forId, String(filed.data.token || ''), barrier, receipt.code);
       if (!current()) return;
       renderControl();
       void pullActivity();
@@ -10143,7 +10148,15 @@
    * not hear about it, and the handoff would describe a machine that no longer exists by
    * the time the fresh chat reads it.
    */
-  async function stopAndSettle(forId, forEpoch, forRun, sameTurn, automatic) {
+  /**
+   * `receipt.code` says why an automatic attempt stopped at the tool-result receipt, for the app's count
+   * (2026-11-03): 'results-unconfirmed' after the whole wait with nothing running here,
+   * 'results-wait-changed' when the chat changed during it, and 'local-tools-running' when this
+   * machine's own calls (or the app's activity answer) kept the receipt from being checked at all,
+   * which the app does not count.
+   */
+  async function stopAndSettle(forId, forEpoch, forRun, sameTurn, automatic, waiveReceipt = false, receipt = { code: null }) {
+    receipt.code = null;
     const current = () =>
       alive &&
       nativeRun === forRun &&
@@ -10154,6 +10167,11 @@
       'content_compact_chat_changed_before_start',
       'This chat changed before compaction could start.'
     );
+    // The app waives the receipt once earlier attempts of this ticket could not get it (2026-11-03: a
+    // chat whose history ChatGPT limited never showed its results answered, and every attempt for two
+    // days ended here while the chat grew past its limit). Stopping now may cost the brief the very
+    // last result; never compacting cost the whole chat. The app logs that it waived it. Local calls
+    // still running on this machine are still waited for (#825): only ChatGPT's receipt is waived.
     if (automatic && CLF_DOM.generating()) {
       // A local result can file the ticket before ChatGPT receives that result. Stopping
       // here used to lose completed work from the brief. Require native receipt first;
@@ -10210,16 +10228,21 @@
       renderControl();
       let endedPolls = 0;
       let sent = null;
+      // Whether the last check found this machine's own calls still running (or no answer from the
+      // app at all): then the receipt was never the thing waited for.
+      let localBusy = true;
       const ready = await waitUntil(async () => {
         if (!current()) return true;
         const peek = await peekCompactionActivity(forId);
         const count = peek ? peek.pendingTools : null;
         sent = peek ? peek.sentResults : null;
         if (!current()) return true;
+        localBusy = count !== 0;
         if (count !== 0) {
           endedPolls = 0;
           return false;
         }
+        if (waiveReceipt) return true;
         // ChatGPT ending the turn by itself is its own receipt: it answered after the last
         // result and there is nothing left to stop. A retry started now skips this wait for
         // the same reason, yet the first attempt waited out the whole budget on a row it
@@ -10240,14 +10263,20 @@
         return !!fresh && seen.calls > 0 && !seen.answered && awaitingRequests.size === 0 &&
           sent?.settled === true && Number.isInteger(sent.count) && sent.count >= seen.calls;
       }, AUTO_RECEIPT_SETTLE_MS, AUTO_RECEIPT_QUICK_MS);
-      if (!current()) return t(
-        'content_compact_chat_changed_waiting_results',
-        'This chat changed while compaction was waiting for tool results.'
-      );
-      if (!ready) return t(
-        'content_compact_results_unconfirmed',
-        'ChatGPT has not confirmed receiving the latest tool results. Nothing was compacted.'
-      );
+      if (!current()) {
+        receipt.code = 'results-wait-changed';
+        return t(
+          'content_compact_chat_changed_waiting_results',
+          'This chat changed while compaction was waiting for tool results.'
+        );
+      }
+      if (!ready) {
+        receipt.code = localBusy ? 'local-tools-running' : 'results-unconfirmed';
+        return t(
+          'content_compact_results_unconfirmed',
+          'ChatGPT has not confirmed receiving the latest tool results. Nothing was compacted.'
+        );
+      }
     }
     // INTERRUPTING — stop the turn rather than wait it out. That is the whole request, by
     // hand or automatically: this happens because the turn is long, not because it is
@@ -14113,7 +14142,7 @@
       const pathList = listUrl.pathname === '/settings/plugins-settings' && !listUrl.hash;
       if (pathList || (listUrl.pathname === '/' && listUrl.hash === '#settings/Plugins')) {
         const installedAppId = request.observeOnly === true ? request.appId ?? null : null;
-        const installedSurface = installedAppId ? request.surface ?? null : null;
+        const installedSurface = request.surface ?? null;
         if (request.appId && !installedAppId) {
           const url = new URL(location.href);
           if (pathList) url.pathname = `/settings/plugins-settings/plugin_${request.appId}`;
@@ -14121,14 +14150,18 @@
           if (!current()) return false;
           location.assign(url.href); return true;
         }
-        let linkHref = null;
+        let linkHref = null, unavailableInstalled = false;
         const buttons = await waitPageView(() => {
-          const found = CLF_DOM.pluginInstalledButtons(request.connectorName, installedAppId, installedSurface);
+          const found = CLF_DOM.pluginInstalledButtons(request.connectorName, installedAppId, installedSurface, true);
+          // Native discovery distinguishes no observed row from an installed target that
+          // cannot be used. Let hydration resolve it within the existing wait, then report
+          // the known failure rather than leaving the request silently pending forever.
+          unavailableInstalled = pathList && Array.isArray(found) && found.length === 0;
           linkHref = found?.length === 1 && found[0].tagName === 'A' ? found[0].href : null;
-          return found;
+          return unavailableInstalled ? null : found;
         }, current, 8000);
         if (!current()) return false;
-        if (!buttons && !installedAppId) return false;
+        if (!buttons && !installedAppId && !unavailableInstalled) return false;
         if (!buttons || buttons.length !== 1 || (installedAppId && buttons[0].tagName !== 'A')) {
           await fail(t(
             'content_connector_identity_ambiguous',
@@ -14141,7 +14174,7 @@
           // The native installed link already names an exact management route. Recheck
           // the same visible owner across the await and carry custody into navigation;
           // reading the destination's schema is a later step, not a prerequisite here.
-          const found = CLF_DOM.pluginInstalledButtons(request.connectorName, installedAppId, installedSurface);
+          const found = CLF_DOM.pluginInstalledButtons(request.connectorName, installedAppId, installedSurface, true);
           if (!current() || !button.isConnected || found?.length !== 1 || found[0] !== button || button.href !== linkHref) return false;
           const url = new URL(linkHref, requestHref);
           const route = /^\/settings\/plugins-settings\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(url.pathname);
@@ -14155,7 +14188,7 @@
         // claim Refresh until the management document has its marker again.
         const discovered = await waitPageView(async () => {
           const href = location.href, appId = pluginViewAppId(href);
-          const next = await CLF_DOM.pluginRefreshView(request.connectorName, request.tools);
+          const next = await CLF_DOM.pluginRefreshView(request.connectorName, request.tools, null, request.surface);
           return appId && next?.appId === appId ? href : null;
         }, () => alive && epoch === requestEpoch && !generating && !CLF_DOM.generating() &&
           new URL(location.href).origin === 'https://chatgpt.com' && CLF_DOM.pluginManagementIdle(), 8000);
@@ -14169,7 +14202,7 @@
       // Slow native settings hydration can exceed 12 seconds; no click is claimed yet.
       const settle = settledPluginView();
       const view = await waitPageView(async () => {
-        const next = await CLF_DOM.pluginRefreshView(request.connectorName, request.tools, request.appId);
+        const next = await CLF_DOM.pluginRefreshView(request.connectorName, request.tools, request.appId, request.surface);
         const appId = pluginViewAppId(location.href);
         return settle(appId && next?.appId === appId && Array.isArray(next.tools) && (next.tools.length > 0 || next.settled === true) ? next : null);
       }, current, 60000, 250);
@@ -14232,7 +14265,7 @@
       // a refresh that had worked as failed in 2 of 3 runs. Look every half second, for up to a
       // minute (the worker leaves a busy tab open); the one click stays one click.
       const after = await waitPageView(async () => {
-        const next = await CLF_DOM.pluginRefreshView(request.connectorName, request.tools, appId);
+        const next = await CLF_DOM.pluginRefreshView(request.connectorName, request.tools, appId, request.surface);
         return next && before !== expected && schemaKey(next.tools) === expected ? next : null;
       }, stillCurrent, 60000, 500);
       if (!after) {

@@ -29,7 +29,13 @@ export function serverInstructions(
   skills = skillCatalogInstructions()
 ): string {
   if (surface === 'plugins') return 'External MCP tools enabled by the user in Chat On Steroids. Each tool retains its upstream schema and annotations. External servers run with their own operating-system or service permissions; CoS approved folders do not sandbox them. Use only for the user\'s requested task. A failed or disconnected call may already have taken effect: never automatically retry a mutation after an ambiguous failure. Disabled tools require the user to re-enable them in Settings. Core and Desktop are separate connectors.' + (canAddCodeMode(pluginManager.tools()) ? '\n\n' + CODE_MODE_INSTRUCTIONS : '');
-  return surface === 'desktop' ? [browserInstructions(), ...(platform === 'win32' || platform === 'darwin' ? [desktopInstructions(ctx, platform)] : [`Files, patches and shell commands live in the separate "${surfaceDefinition('core').connectorName}" connector.`, CODE_MODE_INSTRUCTIONS, ...userInstructions()])].join('\n\n') : coreInstructions(ctx, platform, skills);
+  return surface === 'desktop' ? [browserInstructions(), ...(platform === 'win32' || platform === 'darwin' ? [desktopInstructions(ctx, platform)] : [
+    ...(platform === 'linux' ? [
+      'Native linux_observe supports only read-only GNOME Wayland DISPLAY screenshots at this stage. It requires a separate Linux Desktop opt-in, live Screen permission and GNOME portal consent. The portal may wait for the person; never retry a denied or timed-out capture automatically. It cannot enumerate accessibility refs or click or type in native applications. Use browser_* for browser actions.'
+    ] : []),
+    `Files, patches and shell commands live in the separate "${surfaceDefinition('core').connectorName}" connector.`,
+    CODE_MODE_INSTRUCTIONS, ...userInstructions()
+  ])].join('\n\n') : coreInstructions(ctx, platform, skills);
 }
 
 function browserInstructions(): string {
