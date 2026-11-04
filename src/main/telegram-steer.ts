@@ -28,7 +28,8 @@ export async function steerFromTelegram(deps: SteerDeps, sessionId: string, text
   if (!trimmed || !session?.conversationId || session.origin?.kind === 'worker' || session.origin?.kind === 'helper') return 'refused';
   const mode = session.activeTurnId && deps.followUpQueues() ? 'after-turn' as const : 'auto' as const;
   try {
-    const row = await deps.send({ id: randomUUID(), sessionId, text: trimmed, mode, dueAt: Date.now(), model: null, reasoningEffort: null, authoredSource: 'text' });
+    // Marked so the chat shows it came from Telegram, where the person can check what happened remotely (Haz on #1990).
+    const row = await deps.send({ id: randomUUID(), sessionId, text: trimmed, mode, dueAt: Date.now(), model: null, reasoningEffort: null, authoredSource: 'text', via: 'telegram' });
     deps.log(`telegram: a reply became message ${row.id} for session ${sessionId} (${mode})`);
     return row.state === 'failed' ? 'failed' : mode === 'after-turn' ? 'queued' : 'sent';
   } catch (error) {

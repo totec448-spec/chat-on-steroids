@@ -26,7 +26,8 @@ describe('a reply from Telegram as a message for a chat', () => {
   it('sends through the composer path as the person\'s words, trimmed', async () => {
     const { deps: d, send, log } = deps();
     expect(await steerFromTelegram(d, 's1', '  run the tests  ')).toBe('sent');
-    expect(send).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 's1', text: 'run the tests', mode: 'auto', authoredSource: 'text', model: null }));
+    // Marked as from Telegram, so the chat shows where it came from (Haz on #1990).
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 's1', text: 'run the tests', mode: 'auto', authoredSource: 'text', model: null, via: 'telegram' }));
     expect(log.mock.calls.join('\n')).not.toContain('run the tests');
   });
 

@@ -3797,5 +3797,6 @@
   "That chat cannot take messages from here.": "這個對話無法從這裡接收訊息。",
   "That notification is too old to answer. Send /status to see your chats.": "這則通知太舊，無法回覆。傳送 /status 查看你的對話。",
   "Let replies send messages to chats": "允許回覆以訊息傳送到對話",
-  "A reply to a notification goes to that chat as your message, and ChatGPT may then run tools on this computer. Anyone who can use your Telegram account could do the same.": "回覆通知會以你的訊息傳送到該對話，ChatGPT 之後可能在這台電腦上執行工具。任何能使用你的 Telegram 帳號的人都能這麼做。"
+  "A reply to a notification goes to that chat as your message, and ChatGPT may then run tools on this computer. Anyone who can use your Telegram account could do the same.": "回覆通知會以你的訊息傳送到該對話，ChatGPT 之後可能在這台電腦上執行工具。任何能使用你的 Telegram 帳號的人都能這麼做。",
+  "From Telegram": "來自 Telegram"
 }

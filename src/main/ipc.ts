@@ -2086,7 +2086,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return runTaskRequest(requestId ?? randomUUID(), JSON.stringify(['plan', text, backend]), signal => draftTaskPlan(text, backend, publish, signal), publish);
   });
   handle('sessions:send', async (payload) => {
-    const input = inputArgs.parse(payload);
+    // Where a message came from is main's to say: the window never marks one as from Telegram.
+    const { via: _via, ...input } = inputArgs.parse(payload);
     await validateInputImages(input.images ?? []);
     return sendDesktopInput(input);
   });

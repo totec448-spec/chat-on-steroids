@@ -3797,5 +3797,6 @@
   "That chat cannot take messages from here.": "Cuộc trò chuyện này không thể nhận tin nhắn từ đây.",
   "That notification is too old to answer. Send /status to see your chats.": "Thông báo này quá cũ để trả lời. Gửi /status để xem các cuộc trò chuyện của bạn.",
   "Let replies send messages to chats": "Cho phép câu trả lời gửi tin nhắn đến các cuộc trò chuyện",
-  "A reply to a notification goes to that chat as your message, and ChatGPT may then run tools on this computer. Anyone who can use your Telegram account could do the same.": "Câu trả lời cho một thông báo sẽ đến cuộc trò chuyện đó dưới dạng tin nhắn của bạn, và ChatGPT khi đó có thể chạy công cụ trên máy tính này. Bất kỳ ai dùng được tài khoản Telegram của bạn cũng có thể làm như vậy."
+  "A reply to a notification goes to that chat as your message, and ChatGPT may then run tools on this computer. Anyone who can use your Telegram account could do the same.": "Câu trả lời cho một thông báo sẽ đến cuộc trò chuyện đó dưới dạng tin nhắn của bạn, và ChatGPT khi đó có thể chạy công cụ trên máy tính này. Bất kỳ ai dùng được tài khoản Telegram của bạn cũng có thể làm như vậy.",
+  "From Telegram": "Từ Telegram"
 }
