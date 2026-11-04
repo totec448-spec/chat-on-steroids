@@ -20,7 +20,9 @@ type PromptScope = { sessionId?: string | null; projectId?: string | null; autoS
 export type PromptLimits = { maxChars: number; maxBytes: number };
 type ProjectInstructions = { directory: string; text: string; truncated: boolean;
   /** Related folders (#1689): available ones only, by their approved names. Context, not a working directory. */
-  related?: string[] };
+  related?: string[];
+  /** A next-turn project note (#1919): an empty list is said, so a folder named earlier no longer applies. */
+  relatedNote?: boolean };
 const limits: PromptLimits = { maxChars: MAX_CHATGPT_MESSAGE_CHARS, maxBytes: Infinity };
 const cutNotice = '\n\n[Cut off because of the message limit. Read AGENTS.md yourself for the remaining instructions.]';
 
@@ -94,7 +96,8 @@ export function fitSessionPrompt(text: string, core: string, agents: ProjectInst
     Buffer.byteLength(value, 'utf8') <= budget.maxBytes;
   const projectHeader = workingDirectory
     ? `Worker working directory (allocated Git worktree): ${workingDirectory}\nUse this directory as your default working directory and keep worker task changes in this allocated worktree. The source project's AGENTS.md supplies instructions only; never use the source project as your working directory. This worktree grants no additional filesystem permissions.`
-    : agents ? `Selected project directory: ${agents.directory}\nUse this directory as your default working directory and keep task work there unless the user or task requires another approved location. This project association grants no additional filesystem permissions.${relatedFoldersLine(agents.related ?? [])}` : '';
+    : agents ? `Selected project directory: ${agents.directory}\nUse this directory as your default working directory and keep task work there unless the user or task requires another approved location. This project association grants no additional filesystem permissions.${agents.relatedNote && !agents.related?.length
+      ? '\nRelated folders: none. A related folder named earlier in this chat no longer applies.' : relatedFoldersLine(agents.related ?? [])}` : '';
   const mandatory = [core, projectHeader].filter(Boolean).join('\n\n');
   const base = prependUserPrompt(text, mandatory);
   if (!fits(base)) throw new Error('The message and main instructions exceed the delivery limit (maximum 96,000 characters). Shorten the message or standing instructions.');
@@ -167,7 +170,7 @@ export async function prepareSessionPrompt(text: string, scope: PromptScope = {}
 export async function prepareSkillFollowup(text: string, authored: string, budget = limits, scope: PromptScope = {}, projectNote = false): Promise<string> {
   const folder = await promptFolder(scope);
   const skills = await selectedSkillInstructions(authored, { projectPath: localProjectPath(folder) }, undefined, scope.autoSkills);
-  const note = projectNote && folder ? { directory: folder.virtual, text: '', truncated: false, related: await relatedFolders(scope) } : null;
+  const note = projectNote && folder ? { directory: folder.virtual, text: '', truncated: false, related: await relatedFolders(scope), relatedNote: true } : null;
   if ((await promptFolder(scope))?.real !== folder?.real) throw new Error('The selected project changed during Skill preparation');
   return skills.length || note ? fitSessionPrompt(text, '', note, budget, skills) : text;
 }

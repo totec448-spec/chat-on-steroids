@@ -117,6 +117,12 @@ it('carries the project folder and its related folders as they are now in the no
   expect(text).not.toContain(api);
   // Without a note the message goes as written.
   expect(await prepareSkillFollowup('Next step', 'Next step', undefined, { sessionId: chat.id }, false)).toBe('Next step');
+  // The last one removed: the note says none apply now, as earlier messages still name one (CodeRabbit on #2053).
+  await setRelatedFolders(project.id, []);
+  const none = await prepareSkillFollowup('Go on', 'Go on', undefined, { sessionId: chat.id }, true);
+  expect(none).toContain('Related folders: none. A related folder named earlier in this chat no longer applies.');
+  // A new chat's opening without related folders says nothing about them.
+  expect(fitSessionPrompt('Task', 'CORE', { directory: '/work/app', text: '', truncated: false, related: [] })).not.toContain('Related folders');
 });
 
 it('puts the related folders right after the project directory, and nothing for a project without them', () => {
