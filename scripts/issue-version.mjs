@@ -100,7 +100,7 @@ export function intakeDecision(issue, { latest, opened, reopened = false }) {
  * form. Ideas and questions written freely are left alone.
  */
 export function freeFormBug(issue) {
-  if (/^###\s+(?:Problem or workflow|Proposed change)\s*$/m.test(String(issue.body ?? ''))) return false;
+  if (/^###\s+(?:Problem or workflow|Proposed change)\s*$/m.test(ownText(issue.body ?? ''))) return false;
   const labeled = (issue.labels ?? []).some(label => (typeof label === 'string' ? label : label.name) === 'bug');
   return labeled || /^\s*\[?bug\b/i.test(String(issue.title ?? ''));
 }
@@ -147,6 +147,28 @@ export const FEATURE_SINCE = '2026-11-03T21:00:00Z';
  * A feature request says so: the old feature form's headings, the enhancement label, a title such as
  * "Feature request: …", "[Feature] …", "Idea: …", "Proposal: …", or a "## Feature request" heading.
  */
+/**
+ * The issue's own words: without HTML comments (a copied template's hidden lines) and without fenced
+ * code blocks, read as CommonMark does: a fence closes only on a line of the same marker, at least as
+ * long, with nothing after it; one that never closes runs to the end (CodeRabbit on #2060).
+ */
+export function ownText(body) {
+  const lines = String(body).replace(/<!--[\s\S]*?(?:-->|$)/g, '').split('\n');
+  const out = [];
+  let fence = null;
+  for (const line of lines) {
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence) {
+      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && !marker[2].trim()) fence = null;
+      continue;
+    }
+    // A backtick fence's info string has no backtick; such a line is inline code, not a fence.
+    if (marker && !(marker[1][0] === '`' && marker[2].includes('`'))) { fence = marker[1]; continue; }
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
 export function featureSignal(issue) {
   const body = String(issue.body ?? ''), title = String(issue.title ?? '');
   if ((issue.labels ?? []).some(label => /^(?:enhancement|feature(?: request)?)$/i.test(typeof label === 'string' ? label : label.name))) return true;
@@ -155,7 +177,7 @@ export function featureSignal(issue) {
   if (new RegExp(`^\\s*(?:\\[${kind}\\]|${kind}\\s*[:-]|feature\\s+request\\b)`, 'i').test(title)) return true;
   // Headings in a quoted example (a fenced block) are not the issue's own; a bare "Feature" heading
   // names the feature a bug is in, not a request (CodeRabbit on #2060).
-  const own = body.replace(/^(\s*)(`{3,}|~{3,})[^\n]*\n[\s\S]*?^\1\2[^\n]*$/gm, '');
+  const own = ownText(body);
   return /^#{2,3}\s+(?:Problem or workflow|Proposed change|Feature request|Proposed feature)\s*$/im.test(own);
 }
 function featureDecision(issue, { opened, reopened = false }) {
