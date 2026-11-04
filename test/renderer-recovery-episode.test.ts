@@ -85,3 +85,12 @@ it('keeps a reload that ended after another step in time order, as one item (Cod
   expect(episode.items.map(item => [item.kind, item.time])).toEqual([['error', at(2)], ['reload', at(3)]]);
   expect(episode.since).toBe(at(2));
 });
+
+it('reads a reload the window already folded into one row at the time it ended (CodeRabbit on #2062)', () => {
+  const folded = ev({ kind: 'progress', time: at(1), updatedAt: at(3), source: 'app', progressId: 'browser-repair:a', message: text('Reloaded chat.') });
+  const episode = recoveryEpisode([asked(0), folded, error(2)])!;
+  expect(episode.items.map(item => [item.kind, item.time])).toEqual([['error', at(2)], ['reload', at(3)]]);
+  expect(episode.since).toBe(at(2));
+  // A tool call after the error but before the reload ended does not make it over.
+  expect(recoveryEpisode([asked(0), folded, error(2), tool(2.5)])!.current).toBe(true);
+});

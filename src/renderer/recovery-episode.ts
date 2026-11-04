@@ -35,14 +35,16 @@ const EPISODE_LIMIT = 50;
 export function recoveryEpisode(events: readonly SessionEvent[]): RecoveryEpisode | null {
   let items: EpisodeItem[] = [];
   const reloads = new Map<string, EpisodeItem>();
-  let healthyAfter = false;
-  const reset = (): void => { items = []; reloads.clear(); healthyAfter = false; };
+  // When the chat last did something healthy; the episode is current while nothing healthy came after
+  // its newest step. Times, not positions: a folded reload keeps its first place but its last time.
+  let healthyAt = -Infinity;
+  const reset = (): void => { items = []; reloads.clear(); healthyAt = -Infinity; };
   for (const event of events) {
     if (event.kind === 'turn_end' && event.outcome === 'completed') { reset(); continue; }
     if (event.kind === 'user_message' && !event.automatic && event.source !== 'app') { reset(); continue; }
     // A tool call, an answer or a new turn: the chat moved on.
     if (event.kind === 'tool_call' || event.kind === 'turn_start' || (event.kind === 'assistant_message' && event.source === 'extension')) {
-      if (items.length) healthyAfter = true;
+      if (items.length) healthyAt = Math.max(healthyAt, event.time);
       continue;
     }
     let item: EpisodeItem | null = null;
@@ -53,11 +55,11 @@ export function recoveryEpisode(events: readonly SessionEvent[]): RecoveryEpisod
       const known = reloads.get(event.progressId);
       // Moved to where it ended, so the list stays in time order and its newest step is the newest (CodeRabbit on #2062).
       if (known) {
-        known.text = event.message.text; known.time = event.time; healthyAfter = false;
-        items.splice(items.indexOf(known), 1); items.push(known);
+        known.text = event.message.text; known.time = event.updatedAt ?? event.time;
         continue;
       }
-      item = { time: event.time, kind: 'reload', text: event.message.text };
+      // Already folded (the window keeps one row per reload): its newest update says when it ended.
+      item = { time: event.updatedAt ?? event.time, kind: 'reload', text: event.message.text };
       reloads.set(event.progressId, item);
     } else if (event.kind === 'user_message' && event.automatic) {
       // A fresh turn mid-work is routine; it belongs to an episode only once one has started.
@@ -72,15 +74,16 @@ export function recoveryEpisode(events: readonly SessionEvent[]): RecoveryEpisod
     if (!item) continue;
     items.push(item);
     if (items.length > EPISODE_LIMIT) items.shift();
-    healthyAfter = false;
   }
   if (!items.length) return null;
+  // In time order, so the newest step is the newest and a reload sits where it ended (CodeRabbit on #2062).
+  items.sort((a, b) => a.time - b.time);
   const last = items.at(-1)!;
   return {
     since: items[0]!.time,
     items,
     tries: items.filter(item => item.kind === 'reload' || (item.kind === 'continue' && item.text === 'continue')).length,
     stopped: last.kind === 'note' && isStoppedNote(last.text),
-    current: !healthyAfter
+    current: !(healthyAt > items.at(-1)!.time)
   };
 }
