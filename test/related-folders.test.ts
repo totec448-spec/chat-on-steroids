@@ -6,7 +6,7 @@ import { defaultConfig, getConfig, initConfigPath, saveConfig } from '../src/mai
 import { initDurableStore, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
 import { clearProjectNote, createSession, getSession, initSessionStore, rebindSession, resetSessionStoreForTests, setSessionOrigin } from '../src/main/session/store.js';
 import { addProject, assignSessionProject, listProjects, relatedFolderContext, relatedFolderViews, setRelatedFolders } from '../src/main/projects.js';
-import { fitSessionPrompt, prepareSkillFollowup, relatedFoldersLine } from '../src/main/session/prompt.js';
+import { fitSessionPrompt, prepareSessionPrompt, prepareSkillFollowup, relatedFoldersLine } from '../src/main/session/prompt.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 
 let directory: string, work: string, api: string, lib: string;
@@ -51,6 +51,28 @@ it('shows a folder whose approval was removed, or that is gone, as unavailable a
   expect(await relatedFolderContext(project.id)).toEqual([]);
   // The project itself is untouched: its own folder and chats work as before.
   expect((await listProjects()).find(row => row.id === project.id)?.path).toBe(project.path);
+});
+
+it('lets the person remove one of two unavailable folders, keeping the other, but never add an unapproved one (CodeRabbit on #2053)', async () => {
+  const project = await addProject(path.join(work, 'app'));
+  await setRelatedFolders(project.id, [api, lib]);
+  await saveConfig({ ...getConfig(), roots: getConfig().roots.filter(root => root.name === 'work') });
+  // Both lost their approval; removing one sends the other back as it was saved.
+  expect((await setRelatedFolders(project.id, [lib])).relatedFolders).toEqual([lib]);
+  // Still never a folder that was not already there.
+  await expect(setRelatedFolders(project.id, [lib, api])).rejects.toThrow('Choose a related folder from your approved folders');
+  expect((await setRelatedFolders(project.id, [])).relatedFolders).toBeUndefined();
+});
+
+it('opens a project chat with its related folders, and a sub-agent of it without them, worktree or not (CodeRabbit on #2053)', async () => {
+  const project = await addProject(path.join(work, 'app'));
+  await setRelatedFolders(project.id, [api]);
+  const chat = await createSession({ title: 'Chat', conversationId: 'opening-conversation' });
+  await assignSessionProject(chat.id, project.id);
+  expect(await prepareSessionPrompt('Task', { sessionId: chat.id })).toContain('Related folders (other approved folders this work also uses): /api.');
+  const worker = await prepareSessionPrompt('Task', { sessionId: chat.id, subAgent: true });
+  expect(worker).toContain('Selected project directory: /work/app');
+  expect(worker).not.toContain('Related folders');
 });
 
 it('reads a damaged related-folder list as none instead of failing the project catalog', async () => {
