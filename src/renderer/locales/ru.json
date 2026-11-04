@@ -4001,5 +4001,6 @@
   "A project can have at most 10 related folders": "У проекта может быть не больше 10 связанных папок",
   "That answer had already ended, so ChatGPT was not asked to stop. This chat's automatic work is stopped.": "Этот ответ уже завершился, поэтому ChatGPT не просили остановиться. Автоматическая работа этого чата остановлена.",
   "That answer had already ended; there was nothing to stop.": "Этот ответ уже завершился; останавливать было нечего.",
-  "Automatic Continue cancelled: you pressed Stop.": "Автоматическое продолжение отменено: вы нажали «Остановить»."
+  "Automatic Continue cancelled: you pressed Stop.": "Автоматическое продолжение отменено: вы нажали «Остановить».",
+  "That answer had already ended, so ChatGPT was not asked to stop. Compact & Resume was already moving this chat and goes on.": "Этот ответ уже завершился, поэтому ChatGPT не просили остановиться. «Сжать и продолжить» уже переносило этот чат и продолжается."
 }

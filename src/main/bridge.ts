@@ -2378,16 +2378,18 @@ async function stoppableTurn(sessionId: string): Promise<string | null> {
  * app's own work for this chat ends as a Stop ends it: Goal or Loop off, a pending Compact & Resume
  * cancelled, a silence Continue withdrawn. Says whether any of that was going on.
  */
-export async function endOwnWorkAfterStop(sessionId: string, expectedTurnId: string): Promise<boolean> {
+export async function endOwnWorkAfterStop(sessionId: string, expectedTurnId: string): Promise<{ ended: boolean; resumeGoesOn: boolean }> {
   const id = await controlledConversation(sessionId);
   const ended: string[] = [];
+  // A Compact & Resume already committing cannot be stopped; the person is told so (CodeRabbit on #2066).
+  let resumeGoesOn = false;
   // Off is saved as this chat's own choice, as a Stop saves it: a Goal armed only by its objective too (CodeRabbit on #2066).
   const armed = goalArmedFor(id);
   await setSessionAutomation(sessionId, 'off');
   if (armed) ended.push('Goal or Loop');
   if (continuationForSession(sessionId)) {
     if (await cancelResumeNow(sessionId)) ended.push('a pending Compact & Resume');
-    else logInfo(`bridge: Stop in ${id} came too late for its Compact & Resume, which was already moving the chat; it goes on`);
+    else { resumeGoesOn = true; logInfo(`bridge: Stop in ${id} came too late for its Compact & Resume, which was already moving the chat; it goes on`); }
   }
   // The named turn's silence recovery ends with it, so no new Continue is filed for that turn; another
   // turn's activity is left alone (CodeRabbit on #2066).
@@ -2405,7 +2407,7 @@ export async function endOwnWorkAfterStop(sessionId: string, expectedTurnId: str
   logInfo(`bridge: Stop for turn ${expectedTurnId} in ${id} found that turn no longer running; ChatGPT was not asked to stop. ` +
     (ended.length ? `The app's own work ended: ${ended.join(', ')}` : 'The app had nothing of its own going on'));
   changed();
-  return ended.length > 0;
+  return { ended: ended.length > 0, resumeGoesOn };
 }
 export async function stopSessionTurn(sessionId: string, expectedTurnId: string, options: { rotation?: boolean } = {}): Promise<SessionControlsView> {
   const id = await controlledConversation(sessionId);
