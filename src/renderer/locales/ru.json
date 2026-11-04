@@ -3973,6 +3973,7 @@
   "Click while the Chat On Steroids window is active. If GNOME asks, choose Allow. The screenshot is discarded.": "Нажмите при активном окне Chat On Steroids. Если GNOME спросит, выберите «Разрешить». Снимок не сохраняется.",
   "Request screenshot permission": "Запросить разрешение на снимок",
   "GNOME screenshot permission could not be confirmed.": "Не удалось подтвердить разрешение на снимок экрана GNOME.",
+  "Off by default. GNOME display screenshots require Screen permission and OS consent. Semantic accessibility actions require Control permission, a proven chat, and explicit approval when configured. No physical-input fallback.": "По умолчанию выключено. Снимки экрана GNOME требуют разрешения на экран и согласия ОС. Семантические действия доступности требуют разрешения на управление, подтверждённого чата и явного одобрения, если оно включено. Подмена физическим вводом запрещена.",
   "Activate the Chat On Steroids window, then try again.": "Активируйте окно Chat On Steroids и повторите попытку.",
   "Enable native Linux Desktop access and Screen permission, then try again.": "Включите нативный доступ к рабочему столу Linux и разрешение на экран, затем повторите попытку.",
   "Drag a chat here, or move it from its menu.": "Перетащите сюда чат или переместите его через меню чата.",

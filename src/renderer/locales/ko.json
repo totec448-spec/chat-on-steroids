@@ -3730,6 +3730,7 @@
   "Click while the Chat On Steroids window is active. If GNOME asks, choose Allow. The screenshot is discarded.": "Chat On Steroids 창이 활성화된 상태에서 클릭하세요. GNOME이 요청하면 허용을 선택하세요. 스크린샷은 삭제됩니다.",
   "Request screenshot permission": "스크린샷 권한 요청",
   "GNOME screenshot permission could not be confirmed.": "GNOME 화면 캡처 권한을 확인하지 못했습니다.",
+  "Off by default. GNOME display screenshots require Screen permission and OS consent. Semantic accessibility actions require Control permission, a proven chat, and explicit approval when configured. No physical-input fallback.": "기본적으로 꺼져 있습니다. GNOME 화면 캡처에는 화면 권한과 OS 동의가 필요합니다. 의미 기반 접근성 작업에는 제어 권한, 확인된 채팅, 설정된 경우 명시적 승인이 필요합니다. 물리적 입력으로 대체하지 않습니다.",
   "Activate the Chat On Steroids window, then try again.": "Chat On Steroids 창을 활성화한 다음 다시 시도하세요.",
   "Enable native Linux Desktop access and Screen permission, then try again.": "Linux 데스크톱 기본 접근과 화면 권한을 활성화한 다음 다시 시도하세요.",
   "Drag a chat here, or move it from its menu.": "채팅을 여기로 끌어오거나 메뉴에서 이동하세요.",
