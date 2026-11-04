@@ -1654,6 +1654,7 @@ async function loadSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
   const generation = ++sessionsLoadGeneration;
   const [list, catalog] = await Promise.all([run(api.listSessions({ limit: SESSION_PAGE_SIZE })), run(api.listProjects())]);
   if (!list || generation !== sessionsLoadGeneration) return;
+  const selectedBefore = selectedId === null ? null : sessions.find(entry => entry.id === selectedId);
   const changed = changedTranscripts;
   changedTranscripts = { all: false, ids: new Set() };
   if (catalog) projects = catalog;
@@ -1695,6 +1696,12 @@ async function loadSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
   paintSessions();
   chatSearch?.refresh();
   const row = selectedId === null ? undefined : sessions.find(entry => entry.id === selectedId);
+  // New Chat selects its reserved local session before ChatGPT assigns a conversation id.
+  // Follow that first binding once it exists, provided the person still has this chat selected.
+  if (selectedBefore?.origin?.kind === 'desktop' && selectedBefore.conversationId === null &&
+      row?.id === selectedBefore.id && row.conversationId) {
+    void api.followSessionTab?.(row.id)?.catch(() => undefined);
+  }
   if (detail === 'reread' || selectedId === null || detailFor !== selectedId || changed.all || changed.ids.has(selectedId) ||
       row?.updatedAt !== detailStamp?.updatedAt || row?.events !== detailStamp?.events) await loadDetail();
   else void refreshSessionControls();
