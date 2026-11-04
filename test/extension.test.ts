@@ -3529,10 +3529,14 @@ describe('extension command delivery', () => {
     expect(worker.scriptingExecuteScript.mock.calls).toEqual([
       [{ target: { tabId: 41 }, files: ['i18n.js'] }],
       [{ target: { tabId: 41 }, files: ['chatgpt-dom.js'] }],
+      // The app's colors before content.js, as the manifest loads them (CodeRabbit on #2038).
+      [{ target: { tabId: 41 }, files: ['app-palette.js'] }],
       [{ target: { tabId: 41 }, world: 'MAIN', files: ['usage.js', 'fiber.js'] }],
       [{ target: { tabId: 41 }, files: ['content.js'] }],
       [{ target: { tabId: 42 }, files: ['i18n.js'] }],
       [{ target: { tabId: 42 }, files: ['chatgpt-dom.js'] }],
+      // The app's colors before content.js, as the manifest loads them (CodeRabbit on #2038).
+      [{ target: { tabId: 42 }, files: ['app-palette.js'] }],
       [{ target: { tabId: 42 }, world: 'MAIN', files: ['usage.js', 'fiber.js'] }],
       [{ target: { tabId: 42 }, files: ['content.js'] }]
     ]);
@@ -3634,6 +3638,7 @@ describe('extension command delivery', () => {
     expect(worker.scriptingExecuteScript.mock.calls).toEqual([
       [{ target, files: ['i18n.js'] }],
       [{ target, files: ['chatgpt-dom.js'] }],
+      [{ target, files: ['app-palette.js'] }],
       [{ target, world: 'MAIN', files: ['usage.js', 'fiber.js'] }],
       [{ target, files: ['content.js'] }]
     ]);

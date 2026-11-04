@@ -627,7 +627,7 @@ it('stops directly from the empty composer without a second Stop menu action', a
   expect(w.document.getElementById('sendOptions')!.hidden).toBe(false);
   send.click();
   await settle();
-  expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'held-turn');
+  expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'held-turn', 'chat-a');
   expect(input.value).toBe('');
 });
 
@@ -645,7 +645,7 @@ it('offers Stop for a turn the page still holds after the app stopped counting i
   expect(w.document.getElementById('chatState')!.classList.contains('is-working')).toBe(false);
   send.click();
   await settle();
-  expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'page-held-turn');
+  expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'page-held-turn', 'chat-a');
   // Nothing held: the ordinary Send.
   api.getSessionControls = async (id: string) => ({ ok: true, data: { sessionId: id, conversationId: 'chat-a', automation: 'off', objective: '',
     activeTurnId: null, heldTurnId: null, finishHeld: false, blocked: '', job: null } });
@@ -668,13 +668,38 @@ it('stops a held turn from the button with Plan armed, and stops nothing else wh
   const send = w.document.getElementById('chatSend') as HTMLButtonElement;
   expect(send.dataset.action).toBe('stop');
   send.click(); await settle();
-  expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'page-held-turn');
+  expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'page-held-turn', 'chat-a');
   expect(plan).not.toHaveBeenCalled();
-  // Shown for the held turn, but by the time it is read again a different turn runs: that one is not stopped.
+  // Shown for the held turn, but by the time it is read again a different turn runs: that one is never
+  // named. Stop still goes to main for the turn it showed, which stops the app's own work and says the
+  // answer had ended (Haz on #1883).
   stop.mockClear();
   api.getSessionControls = controls({ activeTurnId: 'replacement-turn', heldTurnId: null });
   send.click(); await settle();
-  expect(stop).not.toHaveBeenCalled();
+  expect(stop).toHaveBeenCalledTimes(1);
+  expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'page-held-turn', 'chat-a');
+  // And when no turn is left at all.
+  stop.mockClear();
+  api.getSessionControls = controls({ activeTurnId: null, heldTurnId: 'page-held-turn' });
+  await append([]); await append([]);
+  api.getSessionControls = controls({ activeTurnId: null, heldTurnId: null });
+  send.click(); await settle();
+  expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'page-held-turn', 'chat-a');
+  expect(plan).not.toHaveBeenCalled();
+});
+
+it('says what came of a Stop only while that chat is still in view (CodeRabbit on #2066)', async () => {
+  const { w } = await boot([]);
+  const api = (w as any).api;
+  let answer!: (value: unknown) => void;
+  api.stopSessionTurn = vi.fn(() => new Promise(resolve => { answer = resolve; }));
+  const send = w.document.getElementById('chatSend') as HTMLButtonElement;
+  send.click(); await settle();
+  expect(api.stopSessionTurn).toHaveBeenCalledWith('2026-09-02-test0001', 'held-turn', 'chat-a');
+  // The person moves to a new chat before the answer comes.
+  w.document.getElementById('newChat')!.click(); await settle();
+  answer({ ok: false, error: 'That answer had already ended; there was nothing to stop.' }); await settle();
+  expect(w.document.querySelector('.toast')).toBeNull();
 });
 
 describe('Esc in the empty composer during a turn', () => {
@@ -695,7 +720,7 @@ describe('Esc in the empty composer during a turn', () => {
     expect(status(w)).toBe('Press Esc again to stop the turn');
     expect(esc(w)).toBe(true);
     await settle();
-    expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'held-turn');
+    expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'held-turn', 'chat-a');
     expect(status(w)).toBe('');
   });
 
@@ -714,7 +739,7 @@ describe('Esc in the empty composer during a turn', () => {
     api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await controls(id)).data, activeTurnId: 'unseen-turn' } });
     esc(w); esc(w);
     await settle();
-    expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'held-turn');
+    expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'held-turn', 'chat-a');
     expect(stop).toHaveBeenCalledTimes(1);
     expect(plan).not.toHaveBeenCalled();
     expect(live.sent).toEqual([]);
@@ -759,7 +784,7 @@ describe('Esc in the empty composer during a turn', () => {
     expect(status(w)).toBe('Press Esc again to stop the turn');
     esc(w);
     await settle();
-    expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'next-turn');
+    expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'next-turn', 'chat-a');
     expect(stop).toHaveBeenCalledTimes(1);
   });
 
