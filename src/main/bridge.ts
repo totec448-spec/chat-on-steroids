@@ -4351,6 +4351,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       }
       const reason = typeof body['sourceError'] === 'string' ? body['sourceError'].trim().slice(0, 500) : '';
       compactionDeferrals.set(entry.token, reason);
+      const code = body['sourceErrorCode'];
+      if (code === 'results-unconfirmed' || code === 'results-wait-changed') {
+        const misses = compactionReceiptMisses.get(entry.token) ?? { unconfirmed: 0, changed: 0 };
+        compactionReceiptMisses.set(entry.token, code === 'results-unconfirmed'
+          ? { ...misses, unconfirmed: misses.unconfirmed + 1 } : { ...misses, changed: misses.changed + 1 });
+        if (compactionReceiptMisses.size > 200) compactionReceiptMisses.delete(compactionReceiptMisses.keys().next().value!);
+      }
       logInfo(`bridge: compaction ticket ${entry.token.slice(0, 8)} for ${id} — the page could not ask for the handoff yet: ${reason || 'no reason given'}`);
       changed();
       return json(res, 200, { deferred: true, job: resumeJobFor(entry.sessionId) }, origin);
@@ -4527,6 +4534,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       const { opened, started } = ticket;
       // A new attempt on the open ticket: the page is asking again, so its last reason is gone (#1643).
       if (compactionDeferrals.delete(opened.token)) changed();
+      const misses = compactionReceiptMisses.get(opened.token);
+      const waiveReceipt = body['automatic'] === true && opened.automatic && compactionReceiptWaived(misses);
+      if (waiveReceipt) logInfo(`bridge: compaction ticket ${opened.token.slice(0, 8)} for ${id} — asking for the handoff without ChatGPT's receipt for the latest tool results: ${misses!.unconfirmed} earlier attempt(s) waited it out and ${misses!.changed} were cut short`);
       return json(
         res,
         202,
@@ -4537,6 +4547,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           token: opened.token,
           sourceSend: opened.sourceSend,
           prompt: null,
+          ...(waiveReceipt ? { waiveReceipt: true } : {}),
           job: resumeJobFor(sessionId)
         },
         origin
@@ -9921,6 +9932,16 @@ const compactionWatch = new Map<string, { token: string; phase: CompactionPhase;
  * Kept until the next pickup lets the page try again, so the chat says it is held, not asking.
  */
 const compactionDeferrals = new Map<string, string>();
+/**
+ * Attempts of an automatic ticket that stopped at the tool-result receipt, by token (2026-11-03): a
+ * chat whose history ChatGPT limited never showed its latest results answered, and every attempt for
+ * two days ended there or was cut short by a recovery reload while the chat grew past its limit.
+ */
+const compactionReceiptMisses = new Map<string, { unconfirmed: number; changed: number }>();
+/** After one full wait without the receipt, or three attempts cut short, the next one asks without it. */
+export function compactionReceiptWaived(misses: { unconfirmed: number; changed: number } | undefined): boolean {
+  return !!misses && (misses.unconfirmed >= 1 || misses.unconfirmed + misses.changed >= 3);
+}
 const AUTOMATIC_ASKING_RETRY_PAUSE_MS = 10 * 60_000;
 /** How often an automatic ticket with a written brief tries again to open its new chat after the quick tries (#1882). */
 const AUTOMATIC_OPENING_SLOW_MS = 60 * 60_000;
@@ -10259,6 +10280,9 @@ async function inspectOwedPickups(now: number, focus?: PickupFocus): Promise<boo
 async function inspectOwedCompactions(now: number): Promise<boolean> {
   if (compactionWatchFloor === null) return false;
   const owed = new Map(pendingContinuations().map((entry) => [entry.from, entry]));
+  for (const token of compactionReceiptMisses.keys()) {
+    if (![...owed.values()].some((entry) => entry.token === token)) compactionReceiptMisses.delete(token);
+  }
   for (const token of compactionDeferrals.keys()) {
     if (![...owed.values()].some((entry) => entry.token === token)) compactionDeferrals.delete(token);
   }
