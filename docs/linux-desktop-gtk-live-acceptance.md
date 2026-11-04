@@ -64,6 +64,22 @@ portal prompt was not exercised and is out of scope for PR #2061.
 
 The test never installs/restarts production CoS, changes its persistent
 configuration, or targets the person's other running application windows.
+
+## Maintainer-review security follow-up
+
+The stage-3 own-window exclusion (added after this manual GTK fixture session)
+rejects native semantic snapshots of Chat On Steroids's own Electron windows
+using the main process PID and the application's recognized IDs, including
+`com.chatonsteroids.app.desktop`. Unit tests assert that no native snapshot
+is invoked for either kind of own window and that post-Ask owner changes to
+the CoS process never deliver input. These are **unit regression tests**,
+not additional live observations of the person's own CoS window.
+
+Unknown Linux/Wayland system-idle data already resolves to
+`{ lastInputAt: null, locked: false }`. In `active` Desktop Ask mode,
+`desktopAskDecision` treats this as `ask: true, why: 'unknown'` even when
+a previous per-chat grant exists; the shared decision tests verify both cases.
+This deliberately does not convert unknown idle state to implicit approval.
 Reviewers can decide whether the outstanding real-dialog exercise is required
 before merge; this document must not be represented as a blanket security
 sign-off for UI consent.
