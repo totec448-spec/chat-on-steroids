@@ -51,7 +51,12 @@ export function recoveryEpisode(events: readonly SessionEvent[]): RecoveryEpisod
     } else if (event.kind === 'progress' && event.source === 'app' && event.progressId?.startsWith('browser-repair:')) {
       // One reload is one row: its "Trying…" line is replaced by how it ended.
       const known = reloads.get(event.progressId);
-      if (known) { known.text = event.message.text; known.time = event.time; healthyAfter = false; continue; }
+      // Moved to where it ended, so the list stays in time order and its newest step is the newest (CodeRabbit on #2062).
+      if (known) {
+        known.text = event.message.text; known.time = event.time; healthyAfter = false;
+        items.splice(items.indexOf(known), 1); items.push(known);
+        continue;
+      }
       item = { time: event.time, kind: 'reload', text: event.message.text };
       reloads.set(event.progressId, item);
     } else if (event.kind === 'user_message' && event.automatic) {

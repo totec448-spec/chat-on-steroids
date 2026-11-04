@@ -5005,7 +5005,14 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 /* A recovery episode (#1883): since when and how many tries, and the tries themselves on demand. */
 /* One line only beside the episode control, whose list holds every step in full. */
 .recovery-notice:has(.recovery-episode-meta) .queue-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.recovery-episode-meta { flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px; border: 0; border-radius: 6px; padding: 4px 6px; background: transparent; color: var(--faint); font: inherit; font-size: calc(12px * var(--text-scale, 1)); white-space: nowrap; cursor: pointer; }
+/* In a narrow pane the summary takes its own line under the reason, so neither is cut (Haz and CodeRabbit on #2062). */
+#recoveryStatus { container-type: inline-size; }
+@container (max-width: 560px) {
+  .recovery-notice:has(.recovery-episode-meta) { flex-wrap: wrap; row-gap: 0; }
+  .recovery-notice .recovery-episode-meta { order: 10; flex-basis: 100%; justify-content: flex-start; margin: -4px 0 0 18px; }
+}
+.recovery-episode-meta > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.recovery-episode-meta { flex-shrink: 0; min-width: 0; display: inline-flex; align-items: center; gap: 4px; border: 0; border-radius: 6px; padding: 4px 6px; background: transparent; color: var(--faint); font: inherit; font-size: calc(12px * var(--text-scale, 1)); white-space: nowrap; cursor: pointer; }
 .recovery-episode-meta:hover { color: var(--ink); background: var(--hover); }
 .recovery-episode-meta:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
 .recovery-episode-meta .disclosure-chevron { width: 14px; height: 14px; transition: transform 120ms ease; }
@@ -5017,7 +5024,6 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .recovery-notice.is-stopped { color: var(--warn-ink); background: var(--warn-wash); border-bottom-color: var(--warn-line); }
 .recovery-notice.is-stopped > .ico, .recovery-notice.is-stopped .recovery-episode-meta { color: var(--warn-ink); }
 @media (max-width: 480px) {
-  .recovery-episode-meta > span { display: none; }
   .recovery-episode-item { padding-left: 28px; }
 }
 .composer-dock-body > :nth-last-child(1 of :not([hidden])) { border-bottom: 0; }
