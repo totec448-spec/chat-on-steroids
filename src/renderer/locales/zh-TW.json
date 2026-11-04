@@ -3758,5 +3758,6 @@
   "A project can have at most 10 related folders": "一個專案最多可有 10 個相關資料夾",
   "That answer had already ended, so ChatGPT was not asked to stop. This chat's automatic work is stopped.": "該回答已經結束，因此沒有要求 ChatGPT 停止。此聊天的自動工作已停止。",
   "That answer had already ended; there was nothing to stop.": "該回答已經結束，沒有需要停止的內容。",
-  "Automatic Continue cancelled: you pressed Stop.": "你按下了停止，已取消自動繼續。"
+  "Automatic Continue cancelled: you pressed Stop.": "你按下了停止，已取消自動繼續。",
+  "That answer had already ended, so ChatGPT was not asked to stop. Compact & Resume was already moving this chat and goes on.": "該回答已經結束，因此沒有要求 ChatGPT 停止。「壓縮並繼續」已在移轉此聊天，會繼續進行。"
 }

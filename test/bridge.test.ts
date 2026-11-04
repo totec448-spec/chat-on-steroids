@@ -18290,11 +18290,11 @@ describe('app requests to stop one exact active turn', () => {
     const sessionId = await active(randomUUID());
     await setSessionAutomation(sessionId, 'loop');
     await expect(stopSessionTurn(sessionId, 'gone-turn')).rejects.toThrow('active_turn_changed');
-    expect(await endOwnWorkAfterStop(sessionId, 'gone-turn')).toBe(true);
+    expect(await endOwnWorkAfterStop(sessionId, 'gone-turn')).toEqual({ ended: true, resumeGoesOn: false });
     expect((await sessionControlsFor(sessionId)).automation).toBe('off');
     expect((await request('GET', '/status')).body.stopTurns).toEqual([]);
     // Nothing of the app's own left: it says so.
-    expect(await endOwnWorkAfterStop(sessionId, 'gone-turn')).toBe(false);
+    expect(await endOwnWorkAfterStop(sessionId, 'gone-turn')).toEqual({ ended: false, resumeGoesOn: false });
   });
   it('turns off a Goal armed only by its objective when Stop names a turn no longer running (CodeRabbit on #2066)', async () => {
     const { endOwnWorkAfterStop, sessionControlsFor } = await import('../src/main/bridge.js');
@@ -18305,7 +18305,7 @@ describe('app requests to stop one exact active turn', () => {
     await setGoalObjectiveNow(conversationId, 'Finish the quarterly report');
     expect(goalSwitchFor(conversationId).enabled).toBe(false);
     expect((await sessionControlsFor(sessionId)).automation).not.toBe('off');
-    expect(await endOwnWorkAfterStop(sessionId, 'gone-turn')).toBe(true);
+    expect(await endOwnWorkAfterStop(sessionId, 'gone-turn')).toEqual({ ended: true, resumeGoesOn: false });
     expect((await sessionControlsFor(sessionId)).automation).toBe('off');
   });
   it('offers Stop for a turn the page still holds after the app stopped counting it as work (2.1.47 round)', async () => {
