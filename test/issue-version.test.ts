@@ -177,6 +177,20 @@ const featureRequest = (extra: Partial<Intake> & { title?: string; user?: { type
   ...fresh('## Feature request\n\nAllow approving several folders at once.\n\n## Use case\n\nTwenty work folders.', { labels: [] }),
   title: 'Feature request: approve several folders at once', created_at: '2026-11-04T09:00:00Z', user: { type: 'User' }, ...extra });
 
+it('closes only an issue that says it is a feature request; an unclear one is left to a maintainer (CodeRabbit on #2060)', () => {
+  const unclear = featureRequest({ title: 'Cannot connect on Linux', body: 'It never connects. Logs attached later.' });
+  expect(intakeDecision(unclear, current).decision).toBe('none');
+  expect(intakeDecision(featureRequest({ title: 'Question about projects', body: 'How do folders work?' }), current).decision).toBe('none');
+  for (const title of ['[Feature] Dark tabs', 'Feature: dark tabs', 'Idea - dark tabs', 'Proposal: dark tabs'])
+    expect(intakeDecision(featureRequest({ title, body: 'Please.' }), current).decision).toBe('feature');
+  expect(intakeDecision(featureRequest({ title: 'Dark tabs', body: 'x', labels: [{ name: 'enhancement' }] }), current).decision).toBe('feature');
+  expect(intakeDecision(featureRequest({ title: 'Dark tabs', body: '### Proposed change\n\nDark tabs.' }), current).decision).toBe('feature');
+  // "Idealistic" is not "Idea", nor is "Requesting help" a request for a feature by its first word alone.
+  expect(intakeDecision(featureRequest({ title: 'Idealistic sync breaks', body: 'x' }), current).decision).toBe('none');
+  for (const title of ['Feature X is broken', 'Request timed out on login', 'Feature request approve folders'])
+    expect(intakeDecision(featureRequest({ title, body: 'x' }), current).decision).toBe(title.startsWith('Feature request') ? 'feature' : 'none');
+});
+
 it('closes a new non-bug issue written without the form, once, with a pointer to pull requests', () => {
   expect(intakeDecision(featureRequest(), current)).toEqual({ decision: 'feature', missing: [] });
   expect(Date.parse(FEATURE_SINCE)).toBeLessThan(Date.parse('2026-11-04T09:00:00Z'));
