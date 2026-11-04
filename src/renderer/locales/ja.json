@@ -3797,5 +3797,6 @@
   "That chat cannot take messages from here.": "このチャットはここからメッセージを受け取れません。",
   "That notification is too old to answer. Send /status to see your chats.": "この通知は古すぎて返信できません。/status を送ってチャットを確認してください。",
   "Let replies send messages to chats": "返信をチャットへのメッセージとして送る",
-  "A reply to a notification goes to that chat as your message, and ChatGPT may then run tools on this computer. Anyone who can use your Telegram account could do the same.": "通知への返信はあなたのメッセージとしてそのチャットに送られ、ChatGPT がこのコンピューターでツールを実行することがあります。あなたの Telegram アカウントを使える人なら誰でも同じことができます。"
+  "A reply to a notification goes to that chat as your message, and ChatGPT may then run tools on this computer. Anyone who can use your Telegram account could do the same.": "通知への返信はあなたのメッセージとしてそのチャットに送られ、ChatGPT がこのコンピューターでツールを実行することがあります。あなたの Telegram アカウントを使える人なら誰でも同じことができます。",
+  "From Telegram": "Telegram から"
 }
