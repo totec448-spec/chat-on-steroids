@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
@@ -192,5 +193,13 @@ describe('what an import would open up', () => {
     const { secretsShield: _, ...ui } = base.ui;
     expect(widerAccess(base, { ...base, ui })).toEqual([]);
     expect(widerAccess({ ...base, ui }, after(copy => { copy.ui.secretsShield = false; }))).toEqual(['ui.secretsShield']);
+  });
+  it('translates the native Linux Desktop access warning in every settings catalog', () => {
+    const key = 'Native Linux Desktop access on';
+    for (const locale of ['de', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'zh-CN', 'zh-TW']) {
+      const catalog = JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8')) as Record<string, string>;
+      expect(catalog[key], locale).toBeTruthy();
+      expect(catalog[key], locale).not.toBe(key);
+    }
   });
 });

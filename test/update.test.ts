@@ -14,7 +14,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, symlinkSync, linkSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -25,6 +25,25 @@ const spawnOptions: Array<Record<string, unknown> | undefined> = [];
 const elevation: { exitCode: number | 'held'; finish: ((code: number) => void) | null } = { exitCode: 0, finish: null };
 /** What icacls answers when the app repeats the installer's access grant: an exit code, or a spawn error. */
 const icacls: { calls: Array<{ file: string; args: string[] }>; result: number | string | null } = { calls: [], result: null };
+const cleanupFault = vi.hoisted(() => ({ file: '' }));
+const cacheBoundary = vi.hoisted(() => ({ after: async (_operation: string, _file: string): Promise<void> => undefined }));
+vi.mock('node:fs/promises', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  const after = async <T>(operation: string, file: unknown, result: Promise<T>): Promise<T> => {
+    const value = await result;
+    await cacheBoundary.after(operation, String(file));
+    return value;
+  };
+  return { ...actual,
+    lstat: (...args: Parameters<typeof actual.lstat>) => after('lstat', args[0], actual.lstat(...args)),
+    readdir: (...args: Parameters<typeof actual.readdir>) => after('readdir', args[0], actual.readdir(...args)),
+    mkdir: (...args: Parameters<typeof actual.mkdir>) => after('mkdir', args[0], actual.mkdir(...args)),
+    rm: async (file: Parameters<typeof actual.rm>[0], options?: Parameters<typeof actual.rm>[1]) => {
+      if (String(file) === cleanupFault.file) throw Object.assign(new Error('installer still open'), { code: 'EACCES' });
+      return after('rm', file, actual.rm(file, options));
+    }
+  };
+});
 vi.mock('node:child_process', () => ({
   spawn: (file: string, args: string[], options?: Record<string, unknown>) => {
     spawned.push({ file, args });
@@ -157,11 +176,14 @@ beforeEach(() => {
   elevation.finish = null;
   relaunched.length = 0;
   warnings.length = 0;
+  cleanupFault.file = '';
+  cacheBoundary.after = async () => undefined;
   resetUpdateForTests();
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  rmSync(userData, { recursive: true, force: true });
 });
 
 describe('the file Get update opens for an installation that cannot update itself', () => {
@@ -181,6 +203,314 @@ describe('the file Get update opens for an installation that cannot update itsel
     expect(manualDownloadUrl(null, 'Chat-On-Steroids-macOS-arm64.dmg')).toBe('https://github.com/totec448-spec/chat-on-steroids/releases/latest');
     expect(manualDownloadUrl('2.1.17', null)).toBe('https://github.com/totec448-spec/chat-on-steroids/releases/latest');
     expect(manualDownloadUrl('../evil', 'x.dmg')).toBe('https://github.com/totec448-spec/chat-on-steroids/releases/latest');
+  });
+});
+
+describe('cleanup of updater-owned downloads', () => {
+  /** Hold an actual filesystem result, so a reset can revoke the pass before its next write. */
+  function pauseAfter(operation: string, file: string, occurrence = 1) {
+    let resume!: () => void;
+    let reached!: () => void;
+    const held = new Promise<void>(resolve => { resume = resolve; });
+    const paused = new Promise<void>(resolve => { reached = resolve; });
+    cacheBoundary.after = async (seenOperation, seenFile) => {
+      if (seenOperation === operation && seenFile === file && --occurrence === 0) {
+        reached();
+        await held;
+      }
+    };
+    return { paused, resume };
+  }
+  function cached(version: string, body = 'previous download'): string {
+    const dir = path.join(userData, 'updates', version);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'download.part'), body);
+    return dir;
+  }
+  it('checks the release normally when the existing update cache is empty', async () => {
+    const root = path.join(userData, 'updates');
+    mkdirSync(root);
+    const { asked } = github({ fail: 'release' });
+    await checkForUpdates();
+    expect(readdirSync(root)).toEqual([]);
+    expect(asked).toEqual(['latest']);
+    expect(updateStatus().stage).toBe('failed');
+  });
+  it('handles a 1024-directory mixed cache while preserving reset custody and retained entries', async () => {
+    const obsolete = Array.from({ length: 128 }, (_, i) => cached(`0.0.${i}`));
+    const future = Array.from({ length: 128 }, (_, i) => cached(`99.0.${i}`, 'future candidate'));
+    const root = path.join(userData, 'updates');
+    const unknown = Array.from({ length: 384 }, (_, i) => path.join(root, `saved-${i}`));
+    const damaged = Array.from({ length: 384 }, (_, i) => path.join(root, `2.1.${i}-damaged`));
+    for (const dir of [...unknown, ...damaged]) mkdirSync(dir);
+    const keep = path.join(unknown[0]!, 'keep');
+    writeFileSync(keep, 'unrecognized root entry');
+    const note = path.join(root, 'handoff.json'), receipt = JSON.stringify({ version: '98.0.0', at: 1 });
+    writeFileSync(note, receipt);
+    const { asked } = github({ fail: 'release' });
+    const boundary = pauseAfter('readdir', root);
+    const old = checkForUpdates();
+    await boundary.paused;
+    resetUpdateForTests(); boundary.resume();
+    await old;
+    expect(obsolete.every(existsSync)).toBe(true);
+    expect(asked).toEqual([]);
+    expect(updateStatus().stage).toBe('idle');
+
+    await checkForUpdates();
+    expect(obsolete.some(existsSync)).toBe(false);
+    expect([...future, ...unknown, ...damaged].every(existsSync)).toBe(true);
+    expect(readFileSync(path.join(future[0]!, 'download.part'), 'utf8')).toBe('future candidate');
+    expect(readFileSync(keep, 'utf8')).toBe('unrecognized root entry');
+    expect(readFileSync(note, 'utf8')).toBe(receipt);
+    expect(asked).toEqual(['latest']);
+    expect(updateStatus().stage).toBe('failed');
+  });
+  it.each(['lstat', 'readdir'])('does not prune or contact GitHub after a reset during cache %s', async operation => {
+    const previous = cached('0.0.1');
+    const { asked } = github();
+    const boundary = pauseAfter(operation, path.join(userData, 'updates'));
+    const old = checkForUpdates();
+    await boundary.paused;
+    resetUpdateForTests();
+    boundary.resume();
+    await old;
+    expect(existsSync(previous)).toBe(true);
+    expect(asked).toEqual([]);
+    expect(updateStatus().stage).toBe('idle');
+  });
+  it('stops cleanup between entries when the pass is reset', async () => {
+    const first = cached('0.0.1');
+    const second = cached('0.0.2');
+    const { asked } = github();
+    const boundary = pauseAfter('rm', first);
+    const old = checkForUpdates();
+    await boundary.paused;
+    resetUpdateForTests();
+    boundary.resume();
+    await old;
+    expect(existsSync(first)).toBe(false);
+    expect(existsSync(second)).toBe(true);
+    expect(asked).toEqual([]);
+    expect(updateStatus().stage).toBe('idle');
+  });
+  it('does not retire other candidates after a reset during successful adoption cleanup', async () => {
+    const previous = cached('98.0.0');
+    const dir = cached(NEXT);
+    writeFileSync(path.join(dir, WINDOWS_ASSET), 'installer bytes');
+    const { asked } = github();
+    // The first root inspection is the offline cleanup; the second retires other candidates.
+    const boundary = pauseAfter('lstat', path.join(userData, 'updates'), 2);
+    const old = asPlatform('win32', undefined, () => checkForUpdates());
+    await boundary.paused;
+    resetUpdateForTests();
+    boundary.resume();
+    await old;
+    expect(existsSync(previous)).toBe(true);
+    expect(asked).toEqual(['latest', 'SHA256SUMS.txt']);
+    expect(updateStatus().stage).toBe('idle');
+    expect(markInstallOnQuit()).toBe(false);
+  });
+  it.each(['lstat', 'mkdir'])('does not remove a partial file after a reset during directory %s', async operation => {
+    const dir = cached(NEXT);
+    const partial = path.join(dir, `${WINDOWS_ASSET}.part`);
+    writeFileSync(partial, 'keep this partial');
+    const { asked } = github();
+    const boundary = pauseAfter(operation, dir);
+    const old = asPlatform('win32', undefined, () => checkForUpdates());
+    await boundary.paused;
+    resetUpdateForTests();
+    boundary.resume();
+    await old;
+    expect(readFileSync(partial, 'utf8')).toBe('keep this partial');
+    expect(asked).toEqual(['latest', 'SHA256SUMS.txt']);
+    expect(updateStatus().stage).toBe('idle');
+    expect(markInstallOnQuit()).toBe(false);
+  });
+  it('preserves a newer pass\'s ready installer when obsolete cleanup resumes after a reset', async () => {
+    const dir = cached(NEXT);
+    writeFileSync(path.join(dir, WINDOWS_ASSET), 'installer bytes');
+    github();
+    const boundary = pauseAfter('lstat', path.join(userData, 'updates'), 2);
+    const old = asPlatform('win32', undefined, () => checkForUpdates());
+    await boundary.paused;
+    resetUpdateForTests();
+    const newer = '100.0.0';
+    github({ version: newer });
+    await checkForUpdates();
+    boundary.resume();
+    await old;
+    expect(readFileSync(path.join(userData, 'updates', newer, WINDOWS_ASSET), 'utf8')).toBe('installer bytes');
+    expect(updateStatus()).toMatchObject({ stage: 'ready', latest: newer, error: null });
+    expect(markInstallOnQuit(newer)).toBe(true);
+  });
+  it('removes installed versions even offline, preserving future candidates and unknown contents', async () => {
+    const old = cached('0.0.1');
+    const current = cached(APP_VERSION);
+    const future = cached(NEXT);
+    const backup = cached('backup');
+    const damaged = cached('2.1.49-damaged');
+    github({ fail: 'release' });
+    await checkForUpdates();
+    expect(existsSync(old)).toBe(false);
+    expect(existsSync(current)).toBe(false);
+    expect([future, backup, damaged].every(existsSync)).toBe(true);
+    expect(updateStatus().stage).toBe('failed');
+  });
+  it('preserves a legacy flat installer while removing an obsolete version offline', async () => {
+    const old = cached('0.0.1');
+    const legacy = path.join(userData, 'updates', WINDOWS_ASSET);
+    writeFileSync(legacy, 'legacy installer bytes');
+    github({ fail: 'release' });
+    await checkForUpdates();
+    expect(existsSync(old)).toBe(false);
+    expect(readFileSync(legacy, 'utf8')).toBe('legacy installer bytes');
+    expect(updateStatus().stage).toBe('failed');
+  });
+  it('never scans a version-shaped backup outside the updater-exclusive cache', async () => {
+    const old = cached('0.0.1');
+    const backup = path.join(userData, 'backups', '0.0.1');
+    mkdirSync(backup, { recursive: true });
+    const installer = path.join(backup, WINDOWS_ASSET);
+    writeFileSync(installer, 'manually saved installer');
+    github({ fail: 'release' });
+    await checkForUpdates();
+    expect(existsSync(old)).toBe(false);
+    expect(readFileSync(installer, 'utf8')).toBe('manually saved installer');
+    expect(updateStatus().stage).toBe('failed');
+  });
+  it('keeps the previous candidate and the handoff note when a newer download fails', async () => {
+    const previous = cached('98.0.0');
+    const note = path.join(userData, 'updates', 'handoff.json');
+    writeFileSync(note, JSON.stringify({ version: '98.0.0', at: 1 }));
+    github({ fail: 'asset' });
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(updateStatus().stage).toBe('failed');
+    expect(existsSync(previous)).toBe(true);
+    expect(JSON.parse(readFileSync(note, 'utf8')).version).toBe('98.0.0');
+  });
+  it('does not discard a previous candidate when the replacement fails its checksum', async () => {
+    const previous = cached('98.0.0');
+    github({ checksums: `${'a'.repeat(64)}  ${WINDOWS_ASSET}\n` });
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(updateStatus().stage).toBe('failed');
+    expect(existsSync(previous)).toBe(true);
+  });
+  it('defers a locked obsolete installer without failing the update or touching another file', async () => {
+    cleanupFault.file = cached('0.0.1');
+    const removable = cached('0.0.2');
+    github({ version: APP_VERSION });
+    await checkForUpdates();
+    expect(updateStatus().stage).toBe('idle');
+    expect(existsSync(cleanupFault.file)).toBe(true);
+    expect(existsSync(removable)).toBe(false);
+    expect(warnings).toContain('update: obsolete 0.0.1 download is still in use or cannot be removed; cleanup deferred');
+  });
+  it('retires superseded candidates only after verifying the replacement, keeping the handoff receipt', async () => {
+    const previous = cached('98.0.0');
+    const note = path.join(userData, 'updates', 'handoff.json');
+    writeFileSync(note, JSON.stringify({ version: '98.0.0', at: 1 }));
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(updateStatus().stage).toBe('ready');
+    expect(existsSync(previous)).toBe(false);
+    expect(existsSync(path.join(userData, 'updates', NEXT, WINDOWS_ASSET))).toBe(true);
+    expect(JSON.parse(readFileSync(note, 'utf8')).version).toBe('98.0.0');
+    await restoreUpdateHandoff();
+    expect(updateStatus().notInstalled).toBe('98.0.0');
+  });
+  it('cleans obsolete files when adopting an already verified download after restart', async () => {
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    resetUpdateForTests();
+    const previous = cached('98.0.0');
+    const { asked } = github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(updateStatus().stage).toBe('ready');
+    expect(existsSync(previous)).toBe(false);
+    expect(asked).toEqual(['latest', 'SHA256SUMS.txt']);
+  });
+  it('does not follow a version-directory link into a backup', async () => {
+    const backup = path.join(userData, 'saved-app');
+    mkdirSync(backup);
+    writeFileSync(path.join(backup, 'keep'), 'backup');
+    mkdirSync(path.join(userData, 'updates'));
+    symlinkSync(backup, path.join(userData, 'updates', '0.0.1'), 'junction');
+    github({ version: APP_VERSION });
+    await checkForUpdates();
+    expect(readFileSync(path.join(backup, 'keep'), 'utf8')).toBe('backup');
+    expect(existsSync(path.join(userData, 'updates', '0.0.1'))).toBe(true);
+  });
+  it('skips a linked cache root, logging why without failing the release check', async () => {
+    const backup = path.join(userData, 'saved-updates');
+    mkdirSync(path.join(backup, '0.0.1'), { recursive: true });
+    symlinkSync(backup, path.join(userData, 'updates'), 'junction');
+    github({ version: APP_VERSION });
+    await checkForUpdates();
+    expect(existsSync(path.join(backup, '0.0.1'))).toBe(true);
+    expect(updateStatus().stage).toBe('idle');
+    expect(warnings).toContain('update: cache cleanup skipped because the updates root is not an ordinary directory');
+  });
+  it.each(['root', 'version'])('refuses a new download through a linked %s without overwriting its target', async linked => {
+    const target = path.join(userData, 'outside-cache');
+    const dir = linked === 'root' ? path.join(target, NEXT) : target;
+    mkdirSync(dir, { recursive: true });
+    const outside = path.join(dir, WINDOWS_ASSET);
+    writeFileSync(outside, 'keep this file');
+    const updates = path.join(userData, 'updates');
+    if (linked === 'version') mkdirSync(updates);
+    symlinkSync(target, linked === 'root' ? updates : path.join(updates, NEXT), 'junction');
+    const { asked } = github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(readFileSync(outside, 'utf8')).toBe('keep this file');
+    expect(updateStatus()).toMatchObject({ stage: 'failed', error: 'the update staging path must use ordinary directories' });
+    expect(markInstallOnQuit()).toBe(false);
+    expect(existsSync(`${outside}.part`)).toBe(false);
+    expect(asked).toEqual(['latest', 'SHA256SUMS.txt']);
+  });
+  it.each(['root', 'version'])('preserves legacy checksum-verified adoption through a linked %s without new writes', async linked => {
+    const target = path.join(userData, 'existing-downloads');
+    const dir = linked === 'root' ? path.join(target, NEXT) : target;
+    mkdirSync(dir, { recursive: true });
+    const outside = path.join(dir, WINDOWS_ASSET);
+    writeFileSync(outside, 'installer bytes');
+    const updates = path.join(userData, 'updates');
+    if (linked === 'version') mkdirSync(updates);
+    symlinkSync(target, linked === 'root' ? updates : path.join(updates, NEXT), 'junction');
+    const { asked } = github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(updateStatus().stage).toBe('ready');
+    expect(readFileSync(outside, 'utf8')).toBe('installer bytes');
+    expect(asked).toEqual(['latest', 'SHA256SUMS.txt']);
+    expect(spawned).toEqual([]);
+  });
+  it('restarts a linked partial file with a fresh inode instead of truncating its other name', async () => {
+    const outside = path.join(userData, 'keep.txt');
+    writeFileSync(outside, 'keep this file');
+    const dir = path.join(userData, 'updates', NEXT);
+    mkdirSync(dir, { recursive: true });
+    linkSync(outside, path.join(dir, `${WINDOWS_ASSET}.part`));
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(updateStatus().stage).toBe('ready');
+    expect(readFileSync(outside, 'utf8')).toBe('keep this file');
+    expect(readFileSync(path.join(dir, WINDOWS_ASSET), 'utf8')).toBe('installer bytes');
+  });
+  it('does not recursively erase an unexpected directory at the selected partial-file name', async () => {
+    const dir = path.join(userData, 'updates', NEXT, `${WINDOWS_ASSET}.part`);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'keep'), 'keep this file');
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(updateStatus().stage).toBe('failed');
+    expect(readFileSync(path.join(dir, 'keep'), 'utf8')).toBe('keep this file');
+  });
+  it('does not clean an installed app cache from an unpackaged developer run', async () => {
+    const old = cached('0.0.1');
+    packaged = false;
+    github();
+    await checkForUpdates();
+    expect(existsSync(old)).toBe(true);
   });
 });
 

@@ -2895,14 +2895,15 @@ describe('worker settings authority', () => {
     const sourceError = 'The browser could not insert the handoff request (native_edit_rejected).';
     await worker.send({ type: 'compact', conversationId: CHAT, token, sourceLost: true, sourceError }, 44);
     const deferredError = 'ChatGPT has not confirmed receiving the latest tool results. Nothing was compacted.';
-    await worker.send({ type: 'compact', conversationId: CHAT, token, sourceDeferred: true, sourceError: deferredError }, 44);
+    await worker.send({ type: 'compact', conversationId: CHAT, token, sourceDeferred: true, sourceError: deferredError, sourceErrorCode: 'results-unconfirmed' }, 44);
     await worker.send({ type: 'compact', conversationId: CHAT, token, sourceDispatch: true }, 44);
     await worker.send({ type: 'compact', conversationId: CHAT, token, destinationDispatch: true }, 44);
 
     expect(posted).toEqual([
       expect.objectContaining({ conversationId: CHAT, ticket: true, automatic: true }),
       expect.objectContaining({ conversationId: CHAT, token, sourceLost: true, sourceError }),
-      expect.objectContaining({ conversationId: CHAT, token, sourceDeferred: true, sourceError: deferredError }),
+      // Why it stopped, as a code the app counts (2026-11-03), not only the translated sentence.
+      expect.objectContaining({ conversationId: CHAT, token, sourceDeferred: true, sourceError: deferredError, sourceErrorCode: 'results-unconfirmed' }),
       expect.objectContaining({ conversationId: CHAT, token, sourceDispatch: true }),
       expect.objectContaining({ conversationId: CHAT, token, destinationDispatch: true })
     ]);
@@ -6053,6 +6054,9 @@ describe('the goal opening, which waits on a model', () => {
     expect(workerMs).toBeGreaterThan(appMs);
     // And it is the goal opening that spends it. Nothing else here waits on a model.
     expect(backgroundSource).toContain("await call('/goal/open', {\n      method: 'POST',\n      timeoutMs: MODEL_REQUEST_TIMEOUT_MS,");
+    // A ChatGPT helper may take longer than that (#2033); the page's opening message stays capped.
+    const bridgeSource = await fs.readFile(path.join(process.cwd(), 'src', 'main', 'bridge.ts'), 'utf8');
+    expect(bridgeSource).toContain('await draftOpeningMessage(text, opening, undefined, undefined, REQUEST_TIMEOUT_MS)');
   });
 });
 
