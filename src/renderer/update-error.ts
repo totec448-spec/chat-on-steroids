@@ -9,6 +9,8 @@ export function updateErrorText(source: string): string {
       return t('The downloaded update could not be confirmed for installation.');
     case 'Could not read plugin-refresh state':
       return t('The saved plugin update state could not be read.');
+    case 'the update staging path must use ordinary directories':
+      return t('The update cache and its version folders must be ordinary folders, not files or links.');
     case 'the latest release has no usable version tag':
     case 'the release page named no usable version tag':
       return t('The release information has no valid version number.');
@@ -29,8 +31,12 @@ export function updateErrorText(source: string): string {
   return t(source);
 }
 
+export function updateErrorNeedsDiagnostics(source: string | null): boolean {
+  return source === 'Could not read plugin-refresh state' || source === 'the update staging path must use ordinary directories';
+}
+
 export function updateErrorNextStep(source: string): string {
-  return source === 'Could not read plugin-refresh state'
+  return updateErrorNeedsDiagnostics(source)
     ? t('Save a Diagnostics report from Activity for help with recovery. The saved state has been kept.')
     : t('Choose Update all to retry.');
 }
