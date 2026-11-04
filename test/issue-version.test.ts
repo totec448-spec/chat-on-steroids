@@ -194,6 +194,9 @@ it('closes only an issue that says it is a feature request; an unclear one is le
   // A line with text after its marker does not close a fence, so the example after it is still code.
   expect(intakeDecision(featureRequest({ title: 'Nested fences render wrong', body: '````\n```md\n## Feature request\n```\n````' }), current).decision).toBe('none');
   expect(intakeDecision(featureRequest({ title: 'Code blocks break', body: '```\nx\n```md\n## Feature request' }), current).decision).toBe('none');
+  // A comment marker inside a code block hides nothing, so the fence still ends where it ends.
+  expect(intakeDecision(featureRequest({ title: 'Comments in code break', body: '```\n<!--\n```\n## Feature request\n```\n-->' }), current).decision).toBe('feature');
+  expect(intakeDecision(featureRequest({ title: 'Comments in code break', body: '```\n<!--\n```  \n-->\n```\n## Feature request' }), current).decision).toBe('none');
   // Hidden template lines are not the issue's own.
   expect(intakeDecision(featureRequest({ title: 'Sync stops', body: '<!--\n## Feature request\n-->\nIt stops after an hour.' }), current).decision).toBe('none');
   // After a fence that does close, the issue's own heading counts again.
