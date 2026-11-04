@@ -480,6 +480,38 @@ describe('native Project entry readiness', () => {
     expect(failure).toHaveBeenCalledWith('transition-timeout:last=composer-not-ready');
   });
 
+  // #2068: within one tab ChatGPT keeps the Project home's text after it was sent, so the next resume
+  // found its predecessor's brief there and gave up. The app's own brief is cleared; a person's text is not.
+  it.each([
+    ['an earlier brief of the app\'s own', true],
+    ['a person\'s own words', false]
+  ] as const)('clears %s from the Project home editor only when it is the app\'s', async (_name, own) => {
+    const { resumeBootstrapText } = await import('../src/main/session/handoff.js');
+    const brief = resumeBootstrapText('# TASK — the original goal\n\nShip the mail service.', 'pTYR0VjLJ5Xtz2FHFqajqA');
+    const link = sourceLink();
+    box.textContent = '';
+    document.execCommand = (command: string) => {
+      const range = document.getSelection()?.rangeCount ? document.getSelection()!.getRangeAt(0) : null;
+      if (command !== 'delete' || !range) return false;
+      range.deleteContents(); return true;
+    };
+    link.addEventListener('click', event => {
+      event.preventDefault();
+      dom.reconfigure({ url: projectUrl });
+      const text = own ? brief : 'Remember to ask about the SMTP port';
+      box.replaceChildren(...text.split(/\n\n/).map(part => { const p = document.createElement('p'); p.textContent = part; return p; }));
+    });
+    const failure = vi.fn();
+    const entered = api.enterProject(entry, undefined, failure);
+    await vi.advanceTimersByTimeAsync(12_500);
+    expect(await entered).toBe(own);
+    if (own) expect(box.textContent).toBe('');
+    else {
+      expect(failure).toHaveBeenCalledWith('transition-timeout:last=composer-not-ready');
+      expect(box.textContent).toContain('Remember to ask about the SMTP port');
+    }
+  });
+
   it('reports visible source turns as the last observation when the Project transition times out', async () => {
     const link = sourceLink();
     box.textContent = '';
