@@ -3755,5 +3755,12 @@
   "Unavailable": "利用できません",
   "No longer approved or no longer there; ChatGPT is not told about it.": "許可が外れたか、存在しなくなりました。ChatGPT には伝えません。",
   "Choose a related folder from your approved folders": "関連フォルダーは許可済みフォルダーから選んでください",
-  "A project can have at most 10 related folders": "1 つのプロジェクトに設定できる関連フォルダーは 10 個までです"
+  "A project can have at most 10 related folders": "1 つのプロジェクトに設定できる関連フォルダーは 10 個までです",
+  "Fresh turn started": "新しいターンを開始",
+  "Automatic Continue sent": "自動の続行を送信",
+  "The turn failed": "ターンが失敗しました",
+  "Since {0} · {1}": "{0} から · {1}",
+  "{0} tries": "{0} 回の試行",
+  "Show what was tried": "試したことを表示",
+  "Hide what was tried": "試したことを隠す"
 }
