@@ -2557,6 +2557,13 @@ describe('Stop IPC exact session and turn authority', () => {
     // Stop shown for another chat than the session's now (a Compact & Resume moved it): nothing here changes.
     expect(await invoke({ id: session.id, expectedTurnId: 'ipc-stop-one', expectedConversationId: 'f3333333-aaaa-4bbb-8ccc-111111111111' })).toMatchObject({
       ok: false, error: 'That answer had already ended, so ChatGPT was not asked to stop. Compact & Resume was already moving this chat and goes on.' });
+    // Main's own read of the controls fails meanwhile: the named chat still binds, nothing else is touched.
+    const bridge = await import('../src/main/bridge.js');
+    const read = vi.spyOn(bridge, 'sessionControlsFor').mockRejectedValueOnce(new Error('conversation_changed'));
+    expect(await invoke({ id: session.id, expectedTurnId: 'ipc-stop-one', expectedConversationId: 'f3333333-aaaa-4bbb-8ccc-111111111111' })).toMatchObject({
+      ok: false, error: 'That answer had already ended, so ChatGPT was not asked to stop. Compact & Resume was already moving this chat and goes on.' });
+    expect(read).toHaveBeenCalled();
+    read.mockRestore();
     await rebindSession(session.id, conversationId, 'f2222222-aaaa-4bbb-8ccc-111111111111');
     expect((await invoke({ id: session.id, expectedTurnId: 'ipc-stop-one' })).ok).toBe(false);
     const missing = await createSession({ title: 'No browser ownership', conversationId: null });
