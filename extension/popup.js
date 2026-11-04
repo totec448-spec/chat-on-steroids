@@ -17,6 +17,57 @@ const POLL_MS = 1500;
 
 localizeDocument();
 
+// ------------------------------------------------------------------ appearance
+
+/**
+ * The app's colors and theme, which its service worker stores from every status (`appAppearance`): the
+ * popup looks like the app it belongs to. Without them (never paired yet) the stylesheet's own defaults,
+ * which are the app's default palette, follow the computer's light or dark setting.
+ */
+const APP_APPEARANCE_KEY = 'appAppearance';
+// Every color the app sends. A palette missing one keeps the stylesheet's whole set instead: mixing the
+// two can put the app's white text on the stylesheet's light page.
+const APP_TOKENS = ['--page', '--card', '--ink', '--soft', '--faint', '--line', '--edge', '--hover', '--track',
+  '--accent', '--accent-wash', '--accent-fill', '--on-accent', '--knob-off', '--knob-on', '--green', '--green-wash',
+  '--red', '--red-wash'];
+const completePalette = tokens => Boolean(tokens) && typeof tokens === 'object' &&
+  APP_TOKENS.every(name => /^#[0-9a-f]{6}$/i.test(String(tokens[name])));
+const darkScheme = globalThis.matchMedia?.('(prefers-color-scheme: dark)') ?? null;
+let appearance = null;
+
+function paintAppearance() {
+  const root = document.documentElement;
+  for (const name of [...root.style]) if (name.startsWith('--')) root.style.removeProperty(name);
+  if (!appearance) { delete root.dataset.theme; root.style.removeProperty('color-scheme'); return; }
+  const dark = appearance.theme === 'dark' || (appearance.theme === 'system' && Boolean(darkScheme?.matches));
+  root.dataset.theme = dark ? 'dark' : 'light';
+  root.style.colorScheme = dark ? 'dark' : 'light';
+  const palette = dark ? appearance.dark : appearance.light;
+  for (const name of APP_TOKENS) root.style.setProperty(name, palette[name]);
+}
+
+function useAppearance(value) {
+  const valid = value && typeof value === 'object' && ['light', 'dark', 'system'].includes(value.theme) &&
+    completePalette(value.light) && completePalette(value.dark);
+  appearance = valid ? value : null;
+  paintAppearance();
+}
+
+try {
+  // A change that arrives while the first read is pending is newer than what that read returns.
+  let changedDuringRead = false;
+  chrome.storage.onChanged?.addListener?.((changes, area) => {
+    if (area !== 'local' || !changes?.[APP_APPEARANCE_KEY]) return;
+    changedDuringRead = true;
+    useAppearance(changes[APP_APPEARANCE_KEY].newValue);
+  });
+  void Promise.resolve(chrome.storage.local.get(APP_APPEARANCE_KEY))
+    .then(stored => { if (!changedDuringRead) useAppearance(stored?.[APP_APPEARANCE_KEY]); }).catch(() => undefined);
+} catch {
+  // No storage here: the stylesheet's defaults stay.
+}
+darkScheme?.addEventListener?.('change', () => { if (appearance?.theme === 'system') paintAppearance(); });
+
 let overwriteEnabled = true;
 let showTimes = false;
 let latest = { status: null, tab: null };

@@ -2,8 +2,9 @@ name: Issue version
 
 # Bug reports need the exact app version ("latest" changes with every release). A report without a
 # version number is closed once with a note on where to find it, and reopens by itself when the
-# reporter edits the number in. Maintainers' issues, feature requests and reports a maintainer
-# reopened are left alone.
+# reporter edits the number in. Maintainers' issues and reports a maintainer reopened are left
+# alone. A new issue that is no bug report at all (a feature request sent through the API or the gh
+# CLI, which skip the forms) gets one note that features come as pull requests, and is closed.
 on:
   issues:
     types: [opened, edited]

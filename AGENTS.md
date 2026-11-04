@@ -779,7 +779,18 @@ source turn still works), `asking` (the request is being sent) or `held` (the so
 and stopped before asking); the dock shows it without a clock. An automatic attempt the page stops
 before asking keeps its ticket and posts `/compact` `sourceDeferred` with `sourceError`, its reason:
 the app logs it and shows `held` until its next pickup. Only the chat's open, still unsent automatic
-ticket accepts it. From the request on, the chat's Compact & Resume timeline row reports progress
+ticket accepts it. A deferral at the tool-result receipt also carries `sourceErrorCode`
+(`results-unconfirmed` after the whole wait with nothing running here, `results-wait-changed` when
+the chat changed during it on the same route (a tab that moved to another chat reports nothing, so
+the relay never rebinds it), `local-tools-running` when this
+machine's own calls or a missing activity answer kept the receipt from being checked, never counted;
+the code lives with its attempt, never shared);
+the bridge counts them per ticket (`compactionReceiptMisses`, in memory). After one
+`results-unconfirmed`, or three such deferrals in all, the next automatic `ticket` answer carries
+`waiveReceipt: true` and logs why: the page then still waits for this machine's running calls
+(#825) but no longer for ChatGPT to show the latest results answered, and stops the turn and asks.
+2026-11-03: a chat whose history ChatGPT limited never showed them answered, so every attempt ended
+there for two days while the chat grew past its limit. A manual press never takes the waiver. From the request on, the chat's Compact & Resume timeline row reports progress
 and the projection is empty. The countdown authorizes nothing.
 Once a chat's history has been limited, the page's Retry presses after Retry-After back off to
 0 s, 2, 4, 8, then 15 minutes (`LOAD_FAILURE_LIMITED_BACKOFF_MS`), instead of the once-a-minute
@@ -4771,6 +4782,22 @@ moved into a project, the summary gets `projectNotePending`, and the person's ne
 carries the project's folder line once (`prepareSkillFollowup(..., projectNote)`, the same line a new
 chat there starts with); the flag clears when that message is delivered (`clearProjectNote`), so a
 failed send carries it again. Moving out clears it; nothing is sent to ChatGPT and a linked ChatGPT Project keeps the conversation.
+**Related folders (#1689)** are context for a project's chats, never extra project roots.
+`LocalProject.relatedFolders` holds approved folders' own paths (`Root.path`), at most ten, set
+only through `setRelatedFolders` (IPC `projects:related-set`; `projects:related` returns
+`RelatedFolderView`s): each must be an approved folder, the project's own is skipped, the same
+folder is kept once (compared as paths, not text), and a damaged list reads as none. Nothing else
+changes: the working directory, AGENTS.md (only the project's), Files, the terminal, Git, Review,
+worktrees and permissions stay with the project's folder. The opening message's project header,
+and the once-only project note, add one line after the project directory naming the *available*
+ones by their virtual names (`relatedFoldersLine`, read when the message is prepared, so never
+stale); one no longer approved or no longer there is Unavailable in the dialog and left out. A
+worker in its own worktree gets no such line. A change marks `projectNotePending` on the project's
+main chats used in the last 30 days; a committed Compact & Resume (`rebindSession` with a handoff
+id) marks it too, so the new chat hears the project folder and the current list with the person's
+next message. Old messages are never rewritten. The renderer offers it as the project menu's
+"Related folders…" (`i-related`, a link, unlike the groups' folder) and a dialog
+(`related-folders-dialog.ts`); the project row's hover text lists them; there are no extra sidebar rows.
 `placeMovedChat` drops the old group membership or joins `groupId` of the new project. The renderer
 offers it in the chat menu (projects, then No project) and by dragging a chat row onto a project or
 group (`SidebarDrop` in `sidebar-order.ts`, highlight `.is-drop-target`; Escape cancels), then shows
@@ -4920,6 +4947,20 @@ The plan heading is a native disclosure with a visible open/closed chevron. A ne
 chat starts with its plan collapsed. Collapsing it returns height to the conversation;
 status updates preserve the user's current disclosure state.
 
+**Recovery episode (#1883).** `renderer/recovery-episode.ts::recoveryEpisode` reads the chat's own
+events since its last completed turn or the person's own message (`automatic` user messages do not
+count): ChatGPT errors, `browser-repair:` reloads (one item per progress id, showing how it ended),
+failed turns, automatic Continues (a routine fresh turn only once an episode has started) and app
+notes, at most 50. A tool call, an answer or a new turn after the newest item means the chat moved
+on (`current: false`). Whichever recovery row shows (countdown, recent reload receipt or the app's
+latest note) gets "Since 14:47 · 3 tries" beside its text (reloads and automatic Continues count as
+tries), which opens the episode, newest first; the row's text then keeps to one line with the full
+words as its tooltip. The row is amber with a warning icon (`is-stopped`, `--warn-*` tokens) only when
+the app's last word is that it stopped (`isStoppedNote`: "This chat stopped", "Stopped trying to
+recover", "The browser did not pick up this chat", "Goal paused", "Compact & Resume is still
+waiting") or a pickup is exhausted. When nothing else shows and the episode ends on ChatGPT's error
+or a failed turn, that step stays as the row until the chat moves on or is dismissed. Stop notices
+already reach the phone as "needs you".
 The recovery row above Goal/Loop shows read-only countdowns from `bridge.ts::sessionControlsFor`:
 activity-based silence and confirmed reload listening, an outbox/Goal native-busy deferral, and each unresolved
 attribution incident's exact candidate deadline. A live conversation-history 429 cooldown projects
@@ -5037,6 +5078,13 @@ the language (2026-10-30: one Chrome kept the browser's language for weeks with 
 outcome, with the stored value, goes into `/diagnostics` as `language: { applied, stored, error }`;
 the app logs one `browser: the extension's stored language is …` line per distinct mismatch or error,
 and the diagnostics report's browser section has an `Extension language:` line.
+The same reply carries `appearance: { theme: 'light' | 'dark' | 'system', light, dark }`
+(`main/extension-appearance.ts`, 2026-11-01): the popup's 19 color tokens for each theme, picked from
+`paletteTokens()` for the person's own palette and high contrast, as `#rrggbb` under the app's token names
+(`--page`, `--card`, `--ink` …). `followAppearance` stores it as `appAppearance` when it changes (only a
+known theme and at most 40 `--name: #rrggbb` entries per theme); `popup.js` puts the chosen theme's tokens
+on `:root` and sets `data-theme`, following the computer when the app says `system`. Without a stored
+value the stylesheet's defaults (the app's default palette) follow the computer's light or dark setting.
 Setup uses SVG flags only, with native language names in tooltips and
 accessible labels; Appearance retains the named language dropdown. Both controls share the
 same persisted preference. `translate="no"` protects text and attributes, including native

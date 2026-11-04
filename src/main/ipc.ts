@@ -107,7 +107,7 @@ import type { WorkerWorktreeCleanupOffer } from '../shared/session.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { inFlightToolCalls } from './mcp/call-context.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
-import { addProject, addRemoteProject, createChatgptProjectFor, linkChatgptProject, unlinkChatgptProject, expireArmedProjectCreates, getSessionProject, listProjects, localProjectPath, moveChatWithGroup, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor, setProjectSecretsShieldOff } from './projects.js';
+import { addProject, addRemoteProject, createChatgptProjectFor, linkChatgptProject, unlinkChatgptProject, expireArmedProjectCreates, getSessionProject, listProjects, localProjectPath, moveChatWithGroup, onProjectLinkChange, projectWorkspace, relatedFolderViews, removeProject, retryProjectCreate, setProjectColor, setProjectSecretsShieldOff, setRelatedFolders } from './projects.js';
 import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile, serverFileSnapshot } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
@@ -1424,6 +1424,19 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     logInfo(`secrets shield: turned ${off ? 'off' : 'back on'} for a project's chats`);
     push('session:changed');
     return project;
+  });
+  // Related folders (#1689): context for a project's chats, chosen from approved folders only.
+  handle('projects:related', async payload => {
+    const { id } = z.object({ id: z.string().uuid() }).strict().parse(payload);
+    const project = (await listProjects()).find(row => row.id === id);
+    if (!project) throw new Error('Project not found');
+    return relatedFolderViews(project);
+  });
+  handle('projects:related-set', async payload => {
+    const { id, folders } = z.object({ id: z.string().uuid(), folders: z.array(z.string().min(1).max(32768)).max(40) }).strict().parse(payload);
+    const project = await setRelatedFolders(id, folders);
+    push('session:changed');
+    return relatedFolderViews(project);
   });
   handle('projects:color', async payload => {
     const { id, color } = z.object({ id: z.string().uuid(), color: z.enum(PROJECT_COLORS).nullable() }).strict().parse(payload);
