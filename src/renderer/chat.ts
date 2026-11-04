@@ -3074,6 +3074,8 @@ let controlledSessionId: string | null = null;
 let controlledTurnId: string | null = null;
 /** A turn the page still holds after the app stopped counting it as work: Stop only, no Working (2.1.47 round). */
 let controlledHeldTurnId: string | null = null;
+/** The ChatGPT chat the controls were read for: Stop names it, so it never acts on a chat the session moved to. */
+let controlledConversationId: string | null = null;
 let controlledSelection = -1;
 let controlledStopPending = false;
 let controlledFinishWaiting = false;
@@ -3581,6 +3583,7 @@ async function refreshSessionControls(): Promise<void> {
   controlledSelection = selectionGeneration;
   controlledTurnId = controls?.activeTurnId ?? null;
   controlledHeldTurnId = controls?.heldTurnId ?? null;
+  controlledConversationId = controls?.conversationId ?? null;
   goalDraftView = controls?.goalDraft ?? null;
   goalWaitView = controls?.goalWait ?? null;
   finishGoalDraftView = controls?.finishGoalDraft ?? null;
@@ -9301,11 +9304,19 @@ async function retryPlannedInput(entry: InputEntry): Promise<void> {
 function showAutoSkillReceipt(entry: Pick<InputEntry, 'autoSkills'>): void {
   if (entry.autoSkills?.length) toast(t('Auto-selected Skill: /{0}', [entry.autoSkills[0]!.id]));
 }
+/**
+ * Stop for the turn and chat the window showed. What came of it is said only while that chat is still
+ * the one in view: a reply that arrives after the person moved on belongs to the other chat (CodeRabbit on #2066).
+ */
+async function stopShownTurn(sessionId: string, turnId: string, conversationId: string | null, stillShown: () => boolean): Promise<void> {
+  const reply = await api.stopSessionTurn(sessionId, turnId, conversationId);
+  if (!reply.ok && stillShown()) toast(t(reply.error));
+}
 async function stopCurrentTurn(): Promise<void> {
   const id = selectedId, turnId = controlledTurnId ?? controlledHeldTurnId, generation = selectionGeneration;
   if (!id || controlledSessionId !== id || controlledSelection !== generation || !turnId || controlledStopPending) return;
   controlledStopPending = true; paintDeliveryControls();
-  try { await run(api.stopSessionTurn(id, turnId)); }
+  try { await stopShownTurn(id, turnId, controlledConversationId, () => selectedId === id && selectionGeneration === generation); }
   finally { if (selectedId === id && selectionGeneration === generation) { controlledStopPending = false; void refreshSessionControls(); } }
 }
 let composerDiscoveryGeneration = 0;
@@ -9327,6 +9338,7 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
     const sameSelection = () => selectedId === target && selectionGeneration === selection;
     // The turn the button showed Stop for, before the refresh can change it (CodeRabbit).
     const shownTurn = controlledSessionId === target && controlledSelection === selection ? controlledTurnId ?? controlledHeldTurnId : null;
+    const shownConversation = shownTurn ? controlledConversationId : null;
     await refreshSessionControls();
     if (!sameSelection()) return;
     // An actual turn takes precedence over queued follow-ups. Stop never silently
@@ -9335,9 +9347,13 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
     if (nowTurn && (!shownTurn || nowTurn === shownTurn)) {
       await stopCurrentTurn(); return;
     }
-    // The turn it showed Stop for ended or changed meanwhile (or the read failed): stop nothing
-    // else, and cancel nothing either.
-    if (shownTurn) return;
+    // The turn it showed Stop for ended or changed meanwhile (or the read failed): ChatGPT is asked to
+    // stop nothing else and no message is cancelled, but main still ends the app's own work for this
+    // chat and says what happened (Haz on #1883).
+    if (shownTurn) {
+      if (target) { await stopShownTurn(target, shownTurn, shownConversation, sameSelection); if (sameSelection()) void refreshSessionControls(); }
+      return;
+    }
     const pending = pendingComposerInput();
     if (pending && ['queued', 'browser'].includes(pending.state)) {
       const wasStarting = startingInputs.has(pending.id);
