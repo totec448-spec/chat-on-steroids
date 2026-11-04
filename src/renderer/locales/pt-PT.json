@@ -3909,6 +3909,5 @@
   "Activate the Chat On Steroids window before requesting screenshot permission.": "Ative a janela do Chat On Steroids antes de pedir a permissão de captura.",
   "Screen access was disabled before the screenshot request.": "O acesso ao ecrã foi desativado antes do pedido de captura.",
   "The Chat On Steroids window lost focus; no screenshot was requested.": "A janela do Chat On Steroids perdeu o foco; nenhuma captura foi pedida.",
-  "Native Linux Desktop or Screen access was disabled during the screenshot request.": "O ambiente de trabalho nativo do Linux ou o acesso ao ecrã foi desativado durante o pedido de captura.",
-  "GNOME did not grant the screenshot. No image was saved.": "O GNOME não permitiu a captura. Nenhuma imagem foi guardada."
+  "Native Linux Desktop or Screen access was disabled during the screenshot request.": "O ambiente de trabalho nativo do Linux ou o acesso ao ecrã foi desativado durante o pedido de captura."
 }

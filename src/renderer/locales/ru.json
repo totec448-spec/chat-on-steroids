@@ -3990,6 +3990,5 @@
   "Activate the Chat On Steroids window before requesting screenshot permission.": "Сделайте окно Chat On Steroids активным, прежде чем запрашивать разрешение на снимок экрана.",
   "Screen access was disabled before the screenshot request.": "Доступ к экрану был отключён до запроса снимка.",
   "The Chat On Steroids window lost focus; no screenshot was requested.": "Окно Chat On Steroids потеряло фокус; снимок не запрашивался.",
-  "Native Linux Desktop or Screen access was disabled during the screenshot request.": "Нативный рабочий стол Linux или доступ к экрану был отключён во время запроса снимка.",
-  "GNOME did not grant the screenshot. No image was saved.": "GNOME не разрешил снимок экрана. Изображение не сохранено."
+  "Native Linux Desktop or Screen access was disabled during the screenshot request.": "Нативный рабочий стол Linux или доступ к экрану был отключён во время запроса снимка."
 }

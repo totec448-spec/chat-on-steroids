@@ -604,8 +604,7 @@ const LINUX_CONSENT_REASONS = new Set(['Screenshot permission can be requested o
   'Native Linux Desktop or Screen access was disabled during the screenshot request.']);
 function linuxConsentReason(error: string): string {
   if (LINUX_CONSENT_REASONS.has(error)) return t(error);
-  // The portal's own code comes from the backend: the person reads what happened, the log keeps the code.
-  if (error.startsWith('GNOME screenshot portal returned ')) return t('GNOME did not grant the screenshot. No image was saved.');
+  // Anything else, the backend's failures included (they do not say whether GNOME refused): the log has the code.
   return t('GNOME screenshot permission could not be confirmed.');
 }
 

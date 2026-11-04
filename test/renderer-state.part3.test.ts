@@ -1108,8 +1108,8 @@ it('says why a GNOME screenshot permission request was refused, for every reason
     ['Screen access was disabled before the screenshot request.', 'Screen access was disabled before the screenshot request.'],
     ['The Chat On Steroids window lost focus; no screenshot was requested.', 'The Chat On Steroids window lost focus; no screenshot was requested.'],
     ['Native Linux Desktop or Screen access was disabled during the screenshot request.', 'Native Linux Desktop or Screen access was disabled during the screenshot request.'],
-    // The portal's code is the backend's, so only a fixed sentence is shown.
-    ['GNOME screenshot portal returned PORTAL_DENIED. No image was saved.', 'GNOME did not grant the screenshot. No image was saved.']
+    // The backend's code does not say whether GNOME refused: the generic sentence, never the code.
+    ['GNOME screenshot portal returned PORTAL_DENIED. No image was saved.', 'GNOME screenshot permission could not be confirmed.']
   ];
   let next = '';
   const request = vi.fn(async () => ({ ok: false as const, error: next }));

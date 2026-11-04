@@ -3747,6 +3747,5 @@
   "Activate the Chat On Steroids window before requesting screenshot permission.": "스크린샷 권한을 요청하기 전에 Chat On Steroids 창을 활성화하세요.",
   "Screen access was disabled before the screenshot request.": "스크린샷 요청 전에 화면 접근이 꺼졌습니다.",
   "The Chat On Steroids window lost focus; no screenshot was requested.": "Chat On Steroids 창의 포커스가 사라져 스크린샷을 요청하지 않았습니다.",
-  "Native Linux Desktop or Screen access was disabled during the screenshot request.": "스크린샷 요청 중에 Linux 기본 데스크톱 또는 화면 접근이 꺼졌습니다.",
-  "GNOME did not grant the screenshot. No image was saved.": "GNOME이 스크린샷을 허용하지 않았습니다. 이미지는 저장되지 않았습니다."
+  "Native Linux Desktop or Screen access was disabled during the screenshot request.": "스크린샷 요청 중에 Linux 기본 데스크톱 또는 화면 접근이 꺼졌습니다."
 }
