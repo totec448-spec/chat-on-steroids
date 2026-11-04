@@ -3892,6 +3892,7 @@
   "Click while the Chat On Steroids window is active. If GNOME asks, choose Allow. The screenshot is discarded.": "Clique com a janela do Chat On Steroids ativa. Se o GNOME perguntar, escolha Permitir. A captura será descartada.",
   "Request screenshot permission": "Pedir permissão de captura",
   "GNOME screenshot permission could not be confirmed.": "Não foi possível confirmar a permissão de captura de ecrã do GNOME.",
+  "Off by default. GNOME display screenshots require Screen permission and OS consent. Semantic accessibility actions require Control permission, a proven chat, and explicit approval when configured. No physical-input fallback.": "Desativado por predefinição. Capturas de ecrã do GNOME exigem permissão de Ecrã e consentimento do sistema. Ações semânticas de acessibilidade exigem permissão de Controlo, conversa comprovada e aprovação explícita quando configurada. Sem alternativa de entrada física.",
   "Activate the Chat On Steroids window, then try again.": "Ative a janela do Chat On Steroids e tente novamente.",
   "Enable native Linux Desktop access and Screen permission, then try again.": "Ative o acesso nativo ao ambiente de trabalho Linux e a permissão de Ecrã e tente novamente.",
   "Drag a chat here, or move it from its menu.": "Arraste um chat para aqui ou mova-o pelo menu dele.",
