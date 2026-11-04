@@ -92,6 +92,11 @@ app.whenReady().then(async () => {
   win.setContentSize(760, 900); await until('innerWidth===760'); await pause(200);
   const fits = await js(`(() => { const r=${row}.getBoundingClientRect(); return r.right <= innerWidth + 1; })()`);
   assert.ok(fits, 'the row fits a narrow window');
+  // Narrow, the reason keeps its room and its full words (tooltip and accessible text); the try count gives way (Haz on #2062).
+  const reason = await js(`(() => { const l=${row}.querySelector('.queue-label'); return { width: l.getBoundingClientRect().width, title: l.title, text: l.textContent, meta: getComputedStyle(${row}.querySelector('.recovery-episode-meta > span')).display }; })()`);
+  assert.ok(reason.width >= 200, `the reason keeps room to read: ${reason.width}px`);
+  assert.equal(reason.title, reason.text);
+  assert.match(reason.text, /^Stopped trying to recover this chat/);
   await shot('stopped-narrow.png');
   win.setContentSize(1280, 900); await until('innerWidth===1280');
   // The light theme, as the app applies it from its settings.
