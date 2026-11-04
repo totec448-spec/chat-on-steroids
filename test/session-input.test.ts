@@ -9,7 +9,7 @@ import {
   fileSilenceInput, deferSilenceInput, revokeSilenceInputs, pendingQueuedPickups, inputBeforeGoal, inputArgs, acknowledgeBrowserInput, cancelInput, claimBrowserInput, completeBrowserDecision, enqueueInput,
   failBrowserInput, listInputs, offerToolInput as offerToolInputBatch, acknowledgeToolInput, pendingBrowserInputs, requestBrowserDecision, resetInputForTests, configureInputDelivery,
   authorizeBrowserHelperRetry, pausedBrowserHelpers, hasEligibleToolInput, editQueuedInput, reorderQueuedInputs, setInputAutomation, authorizeBrowserInput, sessionInputPolicy, retryUnclaimedInput,
-  noteInputStartupError, fileRotationInput, failBranchInput, BRANCH_ERRORS, holdInputForSendCheck, ownUnsentTexts, noteInputHeld
+  noteInputStartupError, fileRotationInput, failBranchInput, BRANCH_ERRORS, holdInputForSendCheck, ownUnsentTexts, noteInputHeld, withdrawOwnContinuesAfterStop
 } from '../src/main/session/input.js';
 import type { InputArgs, InputEntry } from '../src/main/session/input.js';
 import { editReplacement } from '../src/main/session/edits.js';
@@ -2509,5 +2509,33 @@ describe('own messages that never reached Send', () => {
     expect(await ownUnsentTexts('conversation-a', 'someone-else', now)).toEqual(['frozen delivery text', 'withdrawn continue']);
     // A message is never its own leftover.
     expect(await ownUnsentTexts('conversation-a', rows[0]!.id, now)).toEqual(['frozen delivery text']);
+  });
+});
+
+// CodeRabbit on #2066: Stop for an answer that already ended withdraws the app's own unsent Continues,
+// counted in the step that withdraws them; the person's own messages and authorized sends stay.
+describe('withdrawing the app\'s own Continues after a Stop', () => {
+  it('cancels a converted Continue and the named turn\'s fresh-turn Continue, and counts only those', async () => {
+    const mine = await seedLegacyInput(input({ text: 'My own next step' }));
+    const converted = await seedLegacyInput(input({ text: 'Continue until you are fully finished.' }));
+    const rotation = await seedLegacyInput(input({ text: 'Continue the task from where you are.' }));
+    const otherTurn = await seedLegacyInput(input({ text: 'Continue the task from where you are.' }));
+    const authorized = await seedLegacyInput(input({ text: 'Continue until you are fully finished.' }));
+    const rows = await listInputs();
+    await writeDurableNow('session-input', rows.map(row =>
+      row.id === converted.id ? { ...row, continuedFrom: 'recovery' as const }
+      : row.id === rotation.id ? { ...row, purpose: 'rotation' as const, queuedTurn: { conversationId: binding.conversationId, turnId: 'ended-turn' } }
+      : row.id === otherTurn.id ? { ...row, purpose: 'rotation' as const, queuedTurn: { conversationId: binding.conversationId, turnId: 'next-turn' } }
+      : row.id === authorized.id ? { ...row, continuedFrom: 'recovery' as const, state: 'browser' as const, owner: 'page', sendAuthorizedAt: now }
+      : row));
+    resetInputForTests();
+    expect(await withdrawOwnContinuesAfterStop(sessionId, 'ended-turn')).toBe(2);
+    const after = new Map((await listInputs()).map(row => [row.id, row]));
+    expect(after.get(converted.id)).toMatchObject({ state: 'cancelled', error: 'Automatic Continue cancelled: you pressed Stop.' });
+    expect(after.get(rotation.id)?.state).toBe('cancelled');
+    expect(after.get(otherTurn.id)?.state).toBe('queued');
+    expect(after.get(mine.id)?.state).toBe('queued');
+    expect(after.get(authorized.id)?.state).toBe('browser');
+    expect(await withdrawOwnContinuesAfterStop(sessionId, 'ended-turn')).toBe(0);
   });
 });
