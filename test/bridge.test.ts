@@ -18236,6 +18236,11 @@ describe('app requests to stop one exact active turn', () => {
     expect(lines).toContain(`goal: ${conversationId} switched to loop by the app`);
     expect(lines).toContain(`goal: ${conversationId} switched to Normal by a Stop sent by the control API`);
     expect(lines.some(line => line.startsWith(`bridge: desktop (sent by the control API) Stop requested for session ${sessionId}`))).toBe(true);
+    // A second Stop of the same answer joins the queued one, and still says who sent it.
+    info.mockClear();
+    await stopSessionTurn(sessionId, 'sent-turn');
+    expect(info.mock.calls.map(([line]) => String(line))
+      .some(line => line.startsWith(`bridge: desktop (sent by the app) Stop for session ${sessionId}`) && line.includes('joins the Stop already requested'))).toBe(true);
     info.mockRestore();
   });
   it('hands a new Stop to the shared absent-browser startup owner once and revokes it for a newer turn', async () => {
