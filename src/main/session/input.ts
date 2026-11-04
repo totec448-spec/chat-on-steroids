@@ -1998,8 +1998,10 @@ export function noteInputHeld(id: string, reason: string, conversationId: string
     const current = await load();
     const row = current.find(entry => entry.id === id);
     if (!row || row.state !== 'queued' || row.sendAuthorizedAt !== undefined) return null;
-    // Only the page of the message's own chat holds it; a new chat has none yet (CodeRabbit on #2054).
-    if ((row.conversationId ?? null) !== conversationId) return null;
+    // Only the page of the chat the message goes to now holds it: after a Compact & Resume that is the
+    // new chat, not the one the row was queued for; a new chat has none yet (CodeRabbit on #2054).
+    const goesTo = await target(row).catch(() => undefined);
+    if (goesTo === undefined || (goesTo ?? null) !== conversationId) return null;
     const now = Date.now();
     if (row.pageHold?.reason === reason && now - row.pageHold.at < PAGE_HOLD_REFRESH_MS) return 'held';
     // The window shows the reason for 75 s after the hold it last heard of: tell it again well before.
