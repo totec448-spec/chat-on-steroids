@@ -153,7 +153,10 @@ export function featureSignal(issue) {
   // The word must be marked as a label ("[Idea] …", "Idea: …"): "Feature X is broken" is a bug report.
   const kind = '(?:feature(?:\\s+request)?|feat|idea|proposal|suggestion|enhancement)';
   if (new RegExp(`^\\s*(?:\\[${kind}\\]|${kind}\\s*[:-]|feature\\s+request\\b)`, 'i').test(title)) return true;
-  return /^#{2,3}\s+(?:Problem or workflow|Proposed change|Feature request|Proposed feature|Feature)\s*$/im.test(body);
+  // Headings in a quoted example (a fenced block) are not the issue's own; a bare "Feature" heading
+  // names the feature a bug is in, not a request (CodeRabbit on #2060).
+  const own = body.replace(/^(\s*)(`{3,}|~{3,})[^\n]*\n[\s\S]*?^\1\2[^\n]*$/gm, '');
+  return /^#{2,3}\s+(?:Problem or workflow|Proposed change|Feature request|Proposed feature)\s*$/im.test(own);
 }
 function featureDecision(issue, { opened, reopened = false }) {
   const none = { decision: 'none', missing: [] };
