@@ -18296,6 +18296,18 @@ describe('app requests to stop one exact active turn', () => {
     // Nothing of the app's own left: it says so.
     expect(await endOwnWorkAfterStop(sessionId, 'gone-turn')).toEqual({ ended: false, resumeGoesOn: false });
   });
+  it('changes nothing in a chat the session moved to, and counts a Loop the Stop path already turned off (CodeRabbit on #2066)', async () => {
+    const { endOwnWorkAfterStop, sessionControlsFor } = await import('../src/main/bridge.js');
+    const conversationId = randomUUID();
+    const sessionId = await active(conversationId);
+    await setSessionAutomation(sessionId, 'loop');
+    // Stop was pressed for another chat than the session's current one: nothing here changes.
+    expect(await endOwnWorkAfterStop(sessionId, 'gone-turn', { conversationId: randomUUID(), automation: 'loop' })).toEqual({ ended: false, resumeGoesOn: true });
+    expect((await sessionControlsFor(sessionId)).automation).toBe('loop');
+    // Stop found Loop on, and its own path turned it off before finding the turn gone: that still counts.
+    await setSessionAutomation(sessionId, 'off');
+    expect(await endOwnWorkAfterStop(sessionId, 'gone-turn', { conversationId, automation: 'loop' })).toEqual({ ended: true, resumeGoesOn: false });
+  });
   it('turns off a Goal armed only by its objective when Stop names a turn no longer running (CodeRabbit on #2066)', async () => {
     const { endOwnWorkAfterStop, sessionControlsFor } = await import('../src/main/bridge.js');
     const { setGoalObjectiveNow, goalSwitchFor } = await import('../src/main/goal.js');
