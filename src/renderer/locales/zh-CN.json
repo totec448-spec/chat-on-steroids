@@ -3762,5 +3762,9 @@
   "Since {0} · {1}": "自 {0} · {1}",
   "{0} tries": "{0} 次尝试",
   "Show what was tried": "显示已尝试的操作",
-  "Hide what was tried": "隐藏已尝试的操作"
+  "Hide what was tried": "隐藏已尝试的操作",
+  "That answer had already ended, so ChatGPT was not asked to stop. This chat's automatic work is stopped.": "该回答已经结束，因此没有要求 ChatGPT 停止。此聊天的自动工作已停止。",
+  "That answer had already ended; there was nothing to stop.": "该回答已经结束，没有需要停止的内容。",
+  "Automatic Continue cancelled: you pressed Stop.": "你按下了停止，已取消自动继续。",
+  "That answer had already ended, so ChatGPT was not asked to stop. Compact & Resume was already moving this chat and goes on.": "该回答已经结束，因此没有要求 ChatGPT 停止。“压缩并继续”已在迁移此聊天，会继续进行。"
 }
