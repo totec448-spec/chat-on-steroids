@@ -2554,6 +2554,9 @@ describe('Stop IPC exact session and turn authority', () => {
     expect(await invoke({ id: session.id, expectedTurnId: 'other-turn' })).toMatchObject({ ok: false, error: nothing });
     // A stored historical start alone cannot authorize stopping a browser turn.
     expect(await invoke({ id: session.id, expectedTurnId: 'ipc-stop-one' })).toMatchObject({ ok: false, error: nothing });
+    // Stop shown for another chat than the session's now (a Compact & Resume moved it): nothing here changes.
+    expect(await invoke({ id: session.id, expectedTurnId: 'ipc-stop-one', expectedConversationId: 'f3333333-aaaa-4bbb-8ccc-111111111111' })).toMatchObject({
+      ok: false, error: 'That answer had already ended, so ChatGPT was not asked to stop. Compact & Resume was already moving this chat and goes on.' });
     await rebindSession(session.id, conversationId, 'f2222222-aaaa-4bbb-8ccc-111111111111');
     expect((await invoke({ id: session.id, expectedTurnId: 'ipc-stop-one' })).ok).toBe(false);
     const missing = await createSession({ title: 'No browser ownership', conversationId: null });
