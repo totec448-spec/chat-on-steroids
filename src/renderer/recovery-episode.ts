@@ -73,11 +73,12 @@ export function recoveryEpisode(events: readonly SessionEvent[]): RecoveryEpisod
     }
     if (!item) continue;
     items.push(item);
-    if (items.length > EPISODE_LIMIT) items.shift();
   }
   if (!items.length) return null;
-  // In time order, so the newest step is the newest and a reload sits where it ended (CodeRabbit on #2062).
+  // In time order, so the newest step is the newest and a reload sits where it ended; only then the
+  // newest 50 are kept, so a reload that ended late is never the one dropped (CodeRabbit on #2062).
   items.sort((a, b) => a.time - b.time);
+  if (items.length > EPISODE_LIMIT) items = items.slice(-EPISODE_LIMIT);
   const last = items.at(-1)!;
   return {
     since: items[0]!.time,

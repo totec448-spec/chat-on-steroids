@@ -911,6 +911,19 @@ it.each([false, true])('does not redisplay the old reload receipt after Continue
   expect(host.hidden).toBe(false);
 });
 
+it('lets a later error replace a reload\'s receipt, so the row says what is happening now (CodeRabbit on #2062)', async () => {
+  const reloadedAt = Date.now() - 60_000;
+  const { w, append } = await boot([
+    { seq: 1, time: reloadedAt - 1000, source: 'extension', kind: 'user_message', messageId: 'q-1', message: text('Do the work') },
+    { seq: 2, time: reloadedAt, source: 'app', kind: 'progress', progressId: 'browser-repair:fixture', message: text('Reloaded chat to recover an interrupted response.') }
+  ] as SessionEvent[]);
+  const host = w.document.getElementById('recoveryStatus')!;
+  expect(host.querySelector('.queue-label')?.textContent).toContain('Reloaded chat');
+  await append([{ seq: 3, time: Date.now() - 1000, source: 'extension', kind: 'chat_error', message: text('Message delivery timed out. Please try again. Retry') } as SessionEvent]);
+  expect(host.hidden).toBe(false);
+  expect(host.querySelector('.queue-label')?.textContent).toBe('Message delivery timed out. Please try again. Retry');
+});
+
 it('reuses the Goal animation for a session-finish draft while ordinary automation is off', async () => {
   const { w, append } = await boot([]);
   const api = (w as any).api, original = api.getSessionControls;
