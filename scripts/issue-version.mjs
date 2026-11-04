@@ -75,9 +75,9 @@ function olderThan(value, latest) {
  * coming out never closes an open report on a later edit, but a report this check holds closed
  * reopens only once it was retried on the newest one.
  */
-export function intakeDecision(issue, { latest, opened }) {
+export function intakeDecision(issue, { latest, opened, reopened = false }) {
   if (MAINTAINERS.has(issue.author_association)) return { decision: 'none', missing: [] };
-  if (appVersionField(issue.body) === null) return freeFormDecision(issue, { latest, opened });
+  if (appVersionField(issue.body) === null) return freeFormDecision(issue, { latest, opened, reopened });
   const version = appVersionField(issue.body);
   if (!(Date.parse(issue.created_at) >= Date.parse(INTAKE_SINCE))) {
     const decision = versionDecision(issue);
@@ -120,8 +120,8 @@ export function freeFormVersion(issue) {
  * The same three requirements, read from the whole text. Without the form there is no checkbox: a
  * report on the newest release says so by its version number, an older one still has to be retried.
  */
-function freeFormDecision(issue, { latest, opened }) {
-  if (!freeFormBug(issue)) return featureDecision(issue, { opened });
+function freeFormDecision(issue, { latest, opened, reopened }) {
+  if (!freeFormBug(issue)) return featureDecision(issue, { opened, reopened });
   if (!(Date.parse(issue.created_at) >= Date.parse(INTAKE_SINCE))) return { decision: 'none', missing: [] };
   const labeled = (issue.labels ?? []).some(label => (typeof label === 'string' ? label : label.name) === INTAKE_LABEL);
   const held = labeled && issue.state === 'closed';
@@ -143,9 +143,12 @@ function freeFormDecision(issue, { latest, opened }) {
  * reopened are left alone.
  */
 export const FEATURE_SINCE = '2026-11-03T21:00:00Z';
-function featureDecision(issue, { opened }) {
+function featureDecision(issue, { opened, reopened = false }) {
   const none = { decision: 'none', missing: [] };
-  if (!opened || issue.state !== 'open' || issue.user?.type === 'Bot' || MAINTAINERS.has(issue.author_association)) return none;
+  if (!opened || reopened || issue.state !== 'open' || issue.user?.type === 'Bot' || MAINTAINERS.has(issue.author_association)) return none;
+  // Said to be a bug, by its label or title, is never handled as a feature, whatever its headings (CodeRabbit on #2060).
+  const labeled = (issue.labels ?? []).some(label => (typeof label === 'string' ? label : label.name) === 'bug');
+  if (labeled || /^\s*\[?bug\b/i.test(String(issue.title ?? ''))) return none;
   return Date.parse(issue.created_at) >= Date.parse(FEATURE_SINCE) ? { decision: 'feature', missing: [] } : none;
 }
 
@@ -200,8 +203,20 @@ async function main() {
   const label = fresh ? INTAKE_LABEL : LABEL;
   const post = (body) => github(`${path}/comments`, token, { method: 'POST', body: JSON.stringify({ body }) });
   if (decision === 'feature') {
-    await post(FEATURE_COMMENT);
-    await github(path, token, { method: 'PATCH', body: JSON.stringify({ state: 'closed', state_reason: 'not_planned' }) });
+    // Never close what a person reopened (an opened run can be late or rerun), and decide again on the
+    // issue as it is now: it may have been edited into a bug report meanwhile (CodeRabbit on #2060).
+    const events = await github(`${path}/events?per_page=100`, token).catch(() => null);
+    const reopened = !Array.isArray(events) || events.some(event => event?.event === 'reopened');
+    const now = await github(path, token);
+    if (!reopened && intakeDecision(now, { latest, opened: true, reopened }).decision === 'feature') {
+      await post(FEATURE_COMMENT);
+      await github(path, token, { method: 'PATCH', body: JSON.stringify({ state: 'closed', state_reason: 'not_planned' }) });
+      // An edit that landed while this closed it is honoured: no longer a feature request, it opens again.
+      const after = await github(path, token);
+      if (intakeDecision({ ...after, state: 'open' }, { latest, opened: true }).decision !== 'feature') {
+        await github(path, token, { method: 'PATCH', body: JSON.stringify({ state: 'open' }) });
+      }
+    }
   } else if (decision === 'close') {
     await post(fresh ? missingComment(missing, { freeForm }) : CLOSE_COMMENT);
     await github(`${path}/labels`, token, { method: 'POST', body: JSON.stringify({ labels: [label] }) });

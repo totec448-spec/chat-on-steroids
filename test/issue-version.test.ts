@@ -196,6 +196,15 @@ it('never closes a feature issue on an edit, from a maintainer or a bot, or one 
   expect(intakeDecision(featureRequest({ state: 'closed' }), current).decision).toBe('none');
 });
 
+it('never treats an issue said to be a bug as a feature, whatever its headings, nor one a person reopened (CodeRabbit on #2060)', () => {
+  const featureShaped = '### Problem or workflow\n\nIt crashes.\n\n### Proposed change\n\nDon\'t.';
+  expect(intakeDecision(featureRequest({ body: featureShaped }), current).decision).toBe('feature');
+  expect(intakeDecision(featureRequest({ body: featureShaped, title: 'Bug: it crashes' }), current).decision).toBe('none');
+  expect(intakeDecision(featureRequest({ body: featureShaped, labels: [{ name: 'bug' }] }), current).decision).toBe('none');
+  const decide = intake as (issue: Intake, context: { latest: string | null; opened: boolean; reopened?: boolean }) => { decision: string };
+  expect(decide(featureRequest(), { ...current, reopened: true }).decision).toBe('none');
+});
+
 it('still treats a free-form bug report as a bug report, and the bug form as the bug form', () => {
   expect(intakeDecision(featureRequest({ title: '[Bug] 2.1.40: it broke', body: freeForm(attached) }), current).decision).toBe('none');
   expect(intakeDecision(featureRequest({ title: 'It broke', labels: [{ name: 'bug' }], body: freeForm() }), current).decision).toBe('close');
