@@ -2037,7 +2037,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // The chat and its Goal or Loop as Stop found them, before any of it changes. The window names the
     // chat it showed Stop for: a Compact & Resume that moved the session since is not that chat (CodeRabbit on #2066).
     const found = await sessionControlsFor(id).catch(() => null);
-    const before = found ? { ...found, conversationId: expectedConversationId ?? found.conversationId } : null;
+    // A failed read is no licence to act on whatever chat the session shows now: the named chat still binds,
+    // and Goal or Loop that could not be read is not counted as stopped (CodeRabbit on #2066).
+    const before = found ? { ...found, conversationId: expectedConversationId ?? found.conversationId }
+      : expectedConversationId ? { conversationId: expectedConversationId, automation: 'off' as const } : null;
     try {
       return await stopSessionTurn(id, expectedTurnId);
     } catch (error) {
