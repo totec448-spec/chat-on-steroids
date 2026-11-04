@@ -93,10 +93,19 @@ app.whenReady().then(async () => {
   const fits = await js(`(() => { const r=${row}.getBoundingClientRect(); return r.right <= innerWidth + 1; })()`);
   assert.ok(fits, 'the row fits a narrow window');
   // Narrow, the reason keeps its room and its full words (tooltip and accessible text); the try count gives way (Haz on #2062).
-  const reason = await js(`(() => { const l=${row}.querySelector('.queue-label'); return { width: l.getBoundingClientRect().width, title: l.title, text: l.textContent, meta: getComputedStyle(${row}.querySelector('.recovery-episode-meta > span')).display }; })()`);
+  const reason = await js(`(() => { const l=${row}.querySelector('.queue-label'); return { width: l.getBoundingClientRect().width, title: l.title, text: l.textContent }; })()`);
   assert.ok(reason.width >= 200, `the reason keeps room to read: ${reason.width}px`);
   assert.equal(reason.title, reason.text);
   assert.match(reason.text, /^Stopped trying to recover this chat/);
+  // The narrowest window the app allows, with the sidebar open: the summary takes its own line under the
+  // reason, so the reason keeps the row and the summary shows whole.
+  win.setContentSize(640, 900); await until('innerWidth===640'); await pause(300);
+  const tiny = await js(`(() => { const r=${row}, l=r.querySelector('.queue-label'), s=r.querySelector('.recovery-episode-meta > span'); const lb=l.getBoundingClientRect(), sb=s.getBoundingClientRect(); return { below: sb.top >= lb.bottom - 1, whole: s.scrollWidth <= s.clientWidth + 1, label: lb.width, fits: r.getBoundingClientRect().right <= innerWidth + 1, text: s.textContent }; })()`);
+  assert.ok(tiny.below, 'the summary sits under the reason');
+  assert.ok(tiny.whole, `the summary shows whole: ${tiny.text}`);
+  assert.ok(tiny.label >= 200, `the reason keeps the row: ${tiny.label}px`);
+  assert.ok(tiny.fits, 'the row fits');
+  await shot('stopped-640.png');
   await shot('stopped-narrow.png');
   win.setContentSize(1280, 900); await until('innerWidth===1280');
   // The light theme, as the app applies it from its settings.
@@ -107,9 +116,10 @@ app.whenReady().then(async () => {
   await shot('stopped-light.png');
 
   // The chat works again: the episode is no longer shown.
-  await js(`window.timeline=[...window.base, {seq:999,time:Date.now(),source:'extension',kind:'assistant_message',messageId:'a-9',turnId:'t-2',message:{text:'Picking up from the last step.',truncated:false,chars:29},state:'streaming'}]`);
+  // The chat works again after the app's stop note: neither the episode nor that old note shows (CodeRabbit on #2062).
+  await js(`window.timeline=[...window.base, window.stoppedNote, {seq:999,time:Date.now(),source:'extension',kind:'assistant_message',messageId:'a-9',turnId:'t-2',message:{text:'Picking up from the last step.',truncated:false,chars:29},state:'streaming'}]`);
   await reopen();
-  await until(`document.getElementById('recoveryStatus').hidden || !document.querySelector('#recoveryStatus .recovery-episode-meta')`);
+  await until(`document.getElementById('recoveryStatus').hidden && !document.querySelector('#recoveryStatus .recovery-notice')`);
   // A completed turn ends it for good.
   await js(`window.timeline=[...window.base, window.stoppedNote, {seq:1000,time:Date.now(),source:'extension',kind:'turn_end',turnId:'t-2',outcome:'completed'}]`);
   await reopen();

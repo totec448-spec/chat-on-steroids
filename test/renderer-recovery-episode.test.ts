@@ -79,3 +79,9 @@ it('treats a new turn as the chat moving on', () => {
   const turnStart = ev({ kind: 'turn_start', time: at(9), source: 'extension', turnId: 'next' });
   expect(recoveryEpisode([asked(0), error(1), note(2, 'This chat stopped: nothing followed it.'), turnStart])!.current).toBe(false);
 });
+
+it('keeps a reload that ended after another step in time order, as one item (CodeRabbit on #2062)', () => {
+  const episode = recoveryEpisode([asked(0), reload(1, 'a', 'Trying to reload chat…'), error(2), reload(3, 'a', 'Reloaded chat.')])!;
+  expect(episode.items.map(item => [item.kind, item.time])).toEqual([['error', at(2)], ['reload', at(3)]]);
+  expect(episode.since).toBe(at(2));
+});
