@@ -3917,5 +3917,14 @@
   "Unavailable": "No disponible",
   "No longer approved or no longer there; ChatGPT is not told about it.": "Ya no está aprobada o ya no existe; no se le menciona a ChatGPT.",
   "Choose a related folder from your approved folders": "Elige una carpeta relacionada entre tus carpetas aprobadas",
-  "A project can have at most 10 related folders": "Un proyecto puede tener como máximo 10 carpetas relacionadas"
+  "A project can have at most 10 related folders": "Un proyecto puede tener como máximo 10 carpetas relacionadas",
+  "Fresh turn started": "Se inició un turno nuevo",
+  "Automatic Continue sent": "Continuar automático enviado",
+  "The turn failed": "El turno falló",
+  "Since {0} · {1}": "Desde las {0} · {1}",
+  "{0} tries": "{0} intentos",
+  "{0} tries|one": "{0} intento",
+  "Show what was tried": "Mostrar lo que se intentó",
+  "Hide what was tried": "Ocultar lo que se intentó",
+  "{0} tries|many": "{0} de intentos"
 }

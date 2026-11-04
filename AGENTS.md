@@ -4930,6 +4930,20 @@ The plan heading is a native disclosure with a visible open/closed chevron. A ne
 chat starts with its plan collapsed. Collapsing it returns height to the conversation;
 status updates preserve the user's current disclosure state.
 
+**Recovery episode (#1883).** `renderer/recovery-episode.ts::recoveryEpisode` reads the chat's own
+events since its last completed turn or the person's own message (`automatic` user messages do not
+count): ChatGPT errors, `browser-repair:` reloads (one item per progress id, showing how it ended),
+failed turns, automatic Continues (a routine fresh turn only once an episode has started) and app
+notes, at most 50. A tool call, an answer or a new turn after the newest item means the chat moved
+on (`current: false`). Whichever recovery row shows (countdown, recent reload receipt or the app's
+latest note) gets "Since 14:47 · 3 tries" beside its text (reloads and automatic Continues count as
+tries), which opens the episode, newest first; the row's text then keeps to one line with the full
+words as its tooltip. The row is amber with a warning icon (`is-stopped`, `--warn-*` tokens) only when
+the app's last word is that it stopped (`isStoppedNote`: "This chat stopped", "Stopped trying to
+recover", "The browser did not pick up this chat", "Goal paused", "Compact & Resume is still
+waiting") or a pickup is exhausted. When nothing else shows and the episode ends on ChatGPT's error
+or a failed turn, that step stays as the row until the chat moves on or is dismissed. Stop notices
+already reach the phone as "needs you".
 The recovery row above Goal/Loop shows read-only countdowns from `bridge.ts::sessionControlsFor`:
 activity-based silence and confirmed reload listening, an outbox/Goal native-busy deferral, and each unresolved
 attribution incident's exact candidate deadline. A live conversation-history 429 cooldown projects

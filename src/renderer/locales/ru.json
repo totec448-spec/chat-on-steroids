@@ -3998,5 +3998,15 @@
   "Unavailable": "Недоступна",
   "No longer approved or no longer there; ChatGPT is not told about it.": "Больше не разрешена или больше не существует; ChatGPT о ней не сообщается.",
   "Choose a related folder from your approved folders": "Выберите связанную папку из разрешённых папок",
-  "A project can have at most 10 related folders": "У проекта может быть не больше 10 связанных папок"
+  "A project can have at most 10 related folders": "У проекта может быть не больше 10 связанных папок",
+  "Fresh turn started": "Начат новый ход",
+  "Automatic Continue sent": "Отправлено автоматическое «Продолжить»",
+  "The turn failed": "Ход завершился ошибкой",
+  "Since {0} · {1}": "С {0} · {1}",
+  "{0} tries": "{0} попыток",
+  "{0} tries|one": "{0} попытка",
+  "{0} tries|few": "{0} попытки",
+  "{0} tries|many": "{0} попыток",
+  "Show what was tried": "Показать, что было сделано",
+  "Hide what was tried": "Скрыть, что было сделано"
 }
