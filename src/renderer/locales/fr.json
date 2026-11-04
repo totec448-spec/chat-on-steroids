@@ -3892,6 +3892,8 @@
   "Click while the Chat On Steroids window is active. If GNOME asks, choose Allow. The screenshot is discarded.": "Cliquez lorsque la fenêtre Chat On Steroids est active. Si GNOME demande, choisissez Autoriser. La capture est supprimée.",
   "Request screenshot permission": "Demander l’autorisation de capture",
   "GNOME screenshot permission could not be confirmed.": "Impossible de confirmer l’autorisation de capture d’écran GNOME.",
+  "Activate the Chat On Steroids window, then try again.": "Activez la fenêtre Chat On Steroids, puis réessayez.",
+  "Enable native Linux Desktop access and Screen permission, then try again.": "Activez l’accès natif au bureau Linux et l’autorisation Écran, puis réessayez.",
   "Drag a chat here, or move it from its menu.": "Faites glisser une conversation ici, ou déplacez-la depuis son menu.",
   "Move to project": "Déplacer vers un projet",
   "Move this chat to a project; its commands then run in that project's folder": "Déplacer cette conversation vers un projet ; ses commandes s’exécutent ensuite dans le dossier de ce projet",
