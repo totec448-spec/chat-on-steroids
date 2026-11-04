@@ -327,7 +327,7 @@ it('keeps actual-turn Stop through two authored sends and stops only the capture
   // A queued follow-up does not replace the real active turn as Stop's authority.
   send.click();
   await settle();
-  expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'held-turn');
+  expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'held-turn', 'chat-a');
   expect(cancel).not.toHaveBeenCalled();
   expect(input.value).toBe('');
 });
@@ -911,6 +911,19 @@ it.each([false, true])('does not redisplay the old reload receipt after Continue
   expect(host.hidden).toBe(false);
 });
 
+it('lets a later error replace a reload\'s receipt, so the row says what is happening now (CodeRabbit on #2062)', async () => {
+  const reloadedAt = Date.now() - 60_000;
+  const { w, append } = await boot([
+    { seq: 1, time: reloadedAt - 1000, source: 'extension', kind: 'user_message', messageId: 'q-1', message: text('Do the work') },
+    { seq: 2, time: reloadedAt, source: 'app', kind: 'progress', progressId: 'browser-repair:fixture', message: text('Reloaded chat to recover an interrupted response.') }
+  ] as SessionEvent[]);
+  const host = w.document.getElementById('recoveryStatus')!;
+  expect(host.querySelector('.queue-label')?.textContent).toContain('Reloaded chat');
+  await append([{ seq: 3, time: Date.now() - 1000, source: 'extension', kind: 'chat_error', message: text('Message delivery timed out. Please try again. Retry') } as SessionEvent]);
+  expect(host.hidden).toBe(false);
+  expect(host.querySelector('.queue-label')?.textContent).toBe('Message delivery timed out. Please try again. Retry');
+});
+
 it('reuses the Goal animation for a session-finish draft while ordinary automation is off', async () => {
   const { w, append } = await boot([]);
   const api = (w as any).api, original = api.getSessionControls;
@@ -1395,6 +1408,25 @@ it('keeps the latest recovery verdict in view until the chat works again', async
   expect(host.textContent).toContain('Could not restart this chat automatically');
   await app.append([{ seq: 4, time: T0 + 4000, source: 'extension', kind: 'turn_start', turnId: 'resumed' } as SessionEvent]);
   expect(host.hidden).toBe(true);
+});
+
+it('clears a stop note once an answer begun before it grows, but not on a revision that adds no text (CodeRabbit on #2062)', async () => {
+  const verdict = 'Stopped trying to recover this chat: 10 attempts were offered to the browser and none was picked up.';
+  const answer = (seq: number, value: string) => ({ seq, origin: 2, time: T0 + 2000, source: 'extension', kind: 'assistant_message', turnId: 'long',
+    messageId: 'a-long', state: 'streaming', message: text(value) }) as SessionEvent;
+  const app = await boot([
+    { seq: 1, time: T0 + 1000, source: 'extension', kind: 'turn_start', turnId: 'long' },
+    answer(2, 'Working through the list'),
+    { seq: 3, time: T0 + 3000, source: 'app', kind: 'note', message: text(verdict) }
+  ] as SessionEvent[]);
+  const host = app.w.document.getElementById('recoveryStatus')!;
+  expect(host.textContent).toContain('Stopped trying to recover this chat');
+  // The same words again (a markup-only revision): still stopped.
+  await app.append([answer(4, 'Working through the list')]);
+  expect(host.textContent).toContain('Stopped trying to recover this chat');
+  // More words: the chat is working, the note goes.
+  await app.append([answer(5, 'Working through the list. Item 1 is done; item 2 next.')]);
+  expect(host.hidden || !host.textContent?.includes('Stopped trying to recover')).toBe(true);
 });
 
 it('does not show a handoff note as a recovery verdict', async () => {

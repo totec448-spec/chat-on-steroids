@@ -187,6 +187,8 @@ const journalPreferences = new Set();
 let delivery = { at: 0, ok: null, events: 0, total: 0, conversationId: null, status: 0, error: null };
 /** Idempotent conversation-close deliveries awaiting an app ACK. */
 let closeOutbox = [];
+/** Last autonomous close decision, without chat IDs, for the existing /diagnostics report. */
+let closeOutboxDecision = null;
 /** Successful managed removals awaiting onRemoved; exact document receipts survive MV3 sleep. */
 let tabRemovals = {};
 /**
@@ -3230,6 +3232,46 @@ async function followAppNow(data) {
 }
 
 /**
+ * The popup paints with the app's colors and theme (the app's extension-appearance.ts sends them with
+ * every status). Stored when they change, so a popup opened while the app is closed keeps the last look.
+ */
+const APP_APPEARANCE_KEY = 'appAppearance';
+const APPEARANCE_THEMES = new Set(['light', 'dark', 'system']);
+// Every color the app sends (main/extension-appearance.ts); a palette missing one is no palette.
+const APPEARANCE_TOKENS = ['--page', '--card', '--ink', '--soft', '--faint', '--line', '--edge', '--hover', '--track',
+  '--accent', '--accent-wash', '--accent-fill', '--on-accent', '--knob-off', '--knob-on', '--green', '--green-wash',
+  '--red', '--red-wash'];
+let appAppearanceApplied = null;
+let appAppearanceWriting = null;
+let appAppearancePending = null;
+function validAppearanceTokens(tokens) {
+  if (!tokens || typeof tokens !== 'object' || Array.isArray(tokens)) return false;
+  const entries = Object.entries(tokens);
+  return entries.length > 0 && entries.length <= 40 && entries.every(([name, value]) => /^--[a-z-]{2,30}$/.test(name) && /^#[0-9a-f]{6}$/i.test(value)) &&
+    APPEARANCE_TOKENS.every(name => Object.hasOwn(tokens, name));
+}
+function followAppearance(value) {
+  if (!value || !APPEARANCE_THEMES.has(value.theme) || !validAppearanceTokens(value.light) || !validAppearanceTokens(value.dark)) return;
+  writeAppearance(JSON.stringify({ theme: value.theme, light: value.light, dark: value.dark }));
+}
+function writeAppearance(json) {
+  // One write at a time. Colors that arrive meanwhile wait, and only the newest of them is written
+  // after it: a theme changed during a slow write is not lost if no status follows.
+  if (appAppearanceWriting) { appAppearancePending = json; return; }
+  appAppearancePending = null;
+  if (json === appAppearanceApplied) return;
+  appAppearanceWriting = boundedStorage(chrome.storage.local.set({ [APP_APPEARANCE_KEY]: JSON.parse(json) }), 'write')
+    .then(() => { appAppearanceApplied = json; })
+    // A write that failed or timed out may still land later: nothing is known to be stored, so the
+    // next colors are written even when they equal the last ones written (CodeRabbit on #2013).
+    .catch(() => { appAppearanceApplied = null; })
+    .finally(() => {
+      appAppearanceWriting = null;
+      if (appAppearancePending) writeAppearance(appAppearancePending);
+    });
+}
+
+/**
  * "Open in ChatGPT" from the app, shown in this browser: the chat's tab if it has one, else a new
  * one. The app asks here rather than the OS, which can pick another browser or account (#882).
  */
@@ -3505,6 +3547,7 @@ async function maintainOnce() {
   const liveSending = Array.isArray(reply.data.inputSendingIds) ? new Set(reply.data.inputSendingIds) : null;
   void reloadForExtensionUpdate(reply.data.extensionUpdate, liveOpenings, liveCommands, liveSending).catch(() => undefined);
   void followApp(reply.data).catch(() => undefined);
+  followAppearance(reply.data.appearance);
   void revealChats(reply.data.reveals).catch(() => undefined);
   void followChat(reply.data.follow).catch(() => undefined);
   void runImageExports(reply.data.imageExports).catch(() => undefined);
@@ -3874,6 +3917,42 @@ function conversationStillOpen(conversationId) {
   return Object.values(tabConversations).some((value) => value === conversationId);
 }
 
+/**
+ * The persisted tab-to-chat cache is an optimization, not proof that a user closed a tab.
+ * After a worker restart or a document reload, the cache can be temporarily empty even
+ * while Chrome still has the conversation open. Never file a deliberate close from that
+ * absence alone. A failed tab query must defer the close rather than assert departure.
+ */
+async function verifiedConversationGone(conversationId) {
+  if (conversationStillOpen(conversationId)) return 'present';
+  let tabs;
+  try { tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS }); }
+  catch { return 'unknown'; }
+  if (!Array.isArray(tabs)) return 'unknown';
+  // A navigation in progress still carries its *old* committed tab.url. The
+  // pending URL is authoritative for departure so we do not keep a chat open
+  // merely because the tab is on its way to a different page.
+  if (tabs.some(tab => conversationFromUrl(tab.pendingUrl || tab.url) === conversationId)) return 'present';
+  // A fresh content-script bind may have arrived while tabs.query was pending.
+  return conversationStillOpen(conversationId) ? 'present' : 'gone';
+}
+
+// Each pending close is a distinct attempt. Repeated drains may see the same
+// reason hundreds of times while a tab stays open; the activity log only needs
+// the transition. Weak keys disappear with completed/replaced outbox entries and
+// add no fields to persisted closeOutbox records.
+const closeDecisionByEntry = new WeakMap();
+function noteCloseDecision(entry, action, reason) {
+  const previous = closeDecisionByEntry.get(entry);
+  if (previous?.action === action && previous?.reason === reason) return;
+  closeDecisionByEntry.set(entry, { action, reason });
+  // Keep the reason finite and data-free. The app's existing diagnostics report
+  // logs one actionable line; the worker console also shows it immediately.
+  closeOutboxDecision = { at: Math.max(Date.now(), (closeOutboxDecision?.at || 0) + 1), action, reason };
+  console.info(`close outbox: ${action} close; ${reason}`);
+  if (typeof publishCompanionDiagnostics === 'function') void publishCompanionDiagnostics(true);
+}
+
 async function enqueueClose(conversationId, byExtension = false) {
   const id = cleanConversationId(conversationId);
   if (!id) return false;
@@ -3906,7 +3985,29 @@ async function drainCloses() {
         changed = true;
         continue;
       }
-      if (conversationStillOpen(conversationId)) continue;
+      // An extension-owned navigation already has exact authority for this
+      // departure. Its old tab URL may still be visible while Chrome navigates;
+      // checking it would incorrectly suppress the close (#1086).
+      if (entry.byExtension !== true) {
+        const presence = await verifiedConversationGone(conversationId);
+        if (presence === 'present') {
+          if (conversationStillOpen(conversationId)) {
+            // A new binding proves this queued close was superseded.
+            noteCloseDecision(entry, 'discarded', 'conversation_binding_open');
+            closeOutbox = closeOutbox.filter((candidate) => candidate !== entry);
+            changed = true;
+          } else {
+            // A close can be queued before Chrome finishes the navigation.
+            // Keep it for the next pass rather than discard the only departure.
+            noteCloseDecision(entry, 'deferred', 'chrome_tab_open');
+          }
+          continue;
+        }
+        if (presence === 'unknown') {
+          noteCloseDecision(entry, 'deferred', 'chrome_inventory_unavailable');
+          continue;
+        }
+      }
       const result = await call('/closed', {
         method: 'POST',
         // Only a proven managed removal is non-manual; legacy/unknown departures stay conservative.
@@ -4090,7 +4191,7 @@ const COMPACT_CHECKPOINT_FLAGS = [
   'destinationDispatch',
   'destinationLost'
 ];
-const COMPACT_CHECKPOINT_TEXT = ['summary', 'sourceMessageId', 'destinationMessageId', 'sourceError', 'before', 'newestUserMessage'];
+const COMPACT_CHECKPOINT_TEXT = ['summary', 'sourceMessageId', 'destinationMessageId', 'sourceError', 'sourceErrorCode', 'before', 'newestUserMessage'];
 // Not a checkpoint of its own: it qualifies `sourceMessageId` by saying how far that exact
 // marked response has grown. Sent only alongside the field it describes, so a bare count can
 // never move a deadline by itself. `documentSince` likewise only qualifies the newest message a
@@ -5177,6 +5278,7 @@ async function companionDiagnosticSnapshot(found) {
   const languageState = appLanguageState();
   return {
     capturedAt: Date.now(),
+    ...(closeOutboxDecision ? { closeOutboxDecision } : {}),
     language: { ...languageState, error: languageState.error ?? readFailed,
       stored: typeof preferences[APP_LANGUAGE_KEY] === 'string' ? preferences[APP_LANGUAGE_KEY] : null },
     status: {
@@ -5915,6 +6017,10 @@ async function restoreChatgptTab(id, current = () => true, documentId = null) {
     if (!current()) return false;
     // Rebuild the isolated-world DOM adapter before the recorder that consumes it.
     await chrome.scripting.executeScript({ target, files: ['chatgpt-dom.js'] });
+    if (!current()) return false;
+    // The app's colors for the CoS parts of the page, before content.js, as the manifest loads them
+    // (CodeRabbit on #2038): a restored tab otherwise keeps the defaults until it reloads.
+    await chrome.scripting.executeScript({ target, files: ['app-palette.js'] });
     if (!current()) return false;
     // Keep the React/Fiber reader in ChatGPT's own world, exactly like the static manifest
     // declaration. An older helper may still answer too; the nonce/version gate in
