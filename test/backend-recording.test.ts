@@ -120,7 +120,7 @@ it('commits a newly proved owner to disk before request evidence is acknowledged
   expect(await recordRequestEvidence('conv-committed', evidence('committed-proof'))).toBe(id);
   // No flush: the ordinary snapshot is debounced, so only the acknowledgement barrier can have written this.
   const saved = JSON.parse(await fs.readFile(ledger, 'utf8'));
-  expect(saved).toMatchObject({ version: 6, complete: true });
+  expect(saved).toMatchObject({ version: 7, complete: true });
   expect(saved.entries.map((entry: { requestId: string }) => entry.requestId)).toEqual(['committed-proof']);
   // Re-proving a known owner adds nothing, so it does not rewrite the ledger.
   const write = vi.spyOn(fs, 'rename');

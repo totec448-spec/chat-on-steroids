@@ -8755,6 +8755,81 @@ describe('targeted open', () => {
     }
   });
 
+  // #1882 (2026-11-02, a user's Windows log): ChatGPT did not open the source Project within a minute
+  // while it was limiting that chat's history. The app abandoned the finished brief, and the next
+  // automatic try had to write a new one. Nothing was sent, so the brief is kept and opened again.
+  it.each([
+    ['source-ready-timeout:last=source-not-ready', true, true],
+    ['transition-timeout:last=source-route', true, true],
+    ['user-interrupted', true, false],
+    ['source-ready-timeout:last=source-not-ready', false, false]
+  ] as const)('keeps the brief of a Compact & Resume whose new chat ChatGPT did not open in time (%s, automatic: %s)', async (detail, automatic, kept) => {
+    setBrowserOpener(async (url) => { opened.push(url); });
+    await pair();
+    const source = `68888888-7777-8888-9999-${automatic ? 'a' : 'b'}${kept ? 'c' : 'd'}${detail.slice(0, 1) === 's' ? 'e' : detail.slice(0, 1) === 't' ? 'f' : '0'}aaaaaaaa1`;
+    const { sessionId, token } = automatic ? await automaticCompactedSession(source, 'the kept brief') : await compactedSession(source, 'the kept brief');
+    const first = queueResume(sessionId, token)!;
+    await waitForOpened(1, 10_000);
+    expect((await redeem(first.id, 'tab-1')).text).toContain('the kept brief');
+    const prior = new Set(getLog());
+    const ack = await request('POST', '/commands/ack', { body: { id: first.id, client: 'tab-1', status: 'failed',
+      error: 'ChatGPT could not open the source Project through its native link; nothing was sent', detail: `project-entry:${detail}` } });
+    expect(ack.status).toBe(200);
+    expect(pendingCommands().some(entry => entry.id === first.id)).toBe(false);
+    expect(continuationByToken(token)?.state === 'aborted').toBe(!kept);
+    expect(getLog().some(entry => !prior.has(entry) && entry.message.includes('the brief is kept and the new chat is opened again at the next pickup'))).toBe(kept);
+    if (!kept) return;
+    expect(continuationByToken(token)).toMatchObject({ destinationSend: { state: 'not-attempted' } });
+    // The same brief, not a new one, goes to the next attempt.
+    const second = queueResume(sessionId, token)!;
+    expect(second.id).not.toBe(first.id);
+    expect((await redeem(second.id, 'tab-2')).text).toContain('the kept brief');
+  });
+
+  // #1882: after its three quick tries, an automatic ticket with a written brief stopped trying to
+  // open its new chat at all, and while open it owns the chat's recovery: the chat stopped for good.
+  it('keeps opening the new chat of an automatic Compact & Resume once an hour after its quick tries', async () => {
+    vi.useFakeTimers();
+    try {
+      setBrowserOpener(async (url) => { opened.push(url); });
+      await pair();
+      const { sessionId, token } = await automaticCompactedSession('69999999-7777-8888-9999-aaaaaaaaaaa1', 'the hourly brief');
+      const resumes = () => pendingCommands().filter(entry => entry.what.startsWith('resume:'));
+      const fail = async () => {
+        const [command] = resumes();
+        expect(command, 'a resume is offered').toBeTruthy();
+        expect((await redeem(command!.id, `tab-${command!.id}`)).text).toContain('the hourly brief');
+        await request('POST', '/commands/ack', { body: { id: command!.id, client: `tab-${command!.id}`, status: 'failed',
+          error: 'nothing was sent', detail: 'project-entry:source-ready-timeout:last=source-not-ready' } });
+        expect(resumes()).toHaveLength(0);
+      };
+      // Whatever offered the first one, three quick pickups follow, each 15 minutes apart.
+      if (resumes().length) await fail();
+      await sweepStaleSwarm(Date.now()); // the opening phase's clock starts here
+      for (let quick = 0; quick < 3; quick++) {
+        await vi.advanceTimersByTimeAsync(15 * 60_000 + 1_000);
+        await sweepStaleSwarm(Date.now());
+        await fail();
+      }
+      // Then not every 15 minutes, but once an hour, said once: three hours swept every 5 minutes.
+      const offeredAt: number[] = [];
+      for (let step = 0; step < 36; step++) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        await sweepStaleSwarm(Date.now());
+        if (resumes().length) { offeredAt.push(Date.now()); await fail(); }
+      }
+      expect(offeredAt.length).toBeGreaterThanOrEqual(2);
+      expect(offeredAt.length).toBeLessThanOrEqual(3);
+      for (let at = 1; at < offeredAt.length; at++) expect(offeredAt[at]! - offeredAt[at - 1]!).toBe(60 * 60_000);
+      expect(getLog().filter(entry => entry.message.includes('could not open its new chat after 3 pickups — trying once an hour'))).toHaveLength(1);
+      expect(continuationByToken(token)?.state).not.toBe('aborted');
+      expect(getLog().filter(entry => entry.message.includes('trying once an hour'))).toHaveLength(1);
+      void sessionId;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('withdraws a cancelled resume so no tab opens for it afterwards', async () => {
     setBrowserOpener(async (url) => {
       opened.push(url);
