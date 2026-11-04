@@ -187,6 +187,10 @@ it('closes only an issue that says it is a feature request; an unclear one is le
   expect(intakeDecision(featureRequest({ title: 'Dark tabs', body: '### Proposed change\n\nDark tabs.' }), current).decision).toBe('feature');
   // "Idealistic" is not "Idea", nor is "Requesting help" a request for a feature by its first word alone.
   expect(intakeDecision(featureRequest({ title: 'Idealistic sync breaks', body: 'x' }), current).decision).toBe('none');
+  // A quoted example's headings and a heading naming the affected feature are not requests.
+  expect(intakeDecision(featureRequest({ title: 'Markdown headings render wrong', body: 'Pasting this:\n\n```md\n## Feature request\n```\n\nshows raw hashes.' }), current).decision).toBe('none');
+  expect(intakeDecision(featureRequest({ title: 'Markdown headings render wrong', body: '~~~\n### Proposed change\n~~~' }), current).decision).toBe('none');
+  expect(intakeDecision(featureRequest({ title: 'Folder approval crashes', body: '## Feature\n\nFolder approval\n\n## What happened\n\nIt crashed.' }), current).decision).toBe('none');
   for (const title of ['Feature X is broken', 'Request timed out on login', 'Feature request approve folders'])
     expect(intakeDecision(featureRequest({ title, body: 'x' }), current).decision).toBe(title.startsWith('Feature request') ? 'feature' : 'none');
 });
