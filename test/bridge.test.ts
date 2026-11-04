@@ -744,6 +744,16 @@ describe('who is allowed to talk to it', () => {
     expect(status.body).toMatchObject({ language: 'en', browserPreferences: { overwrite: false, durations: true } });
   });
 
+  // 2026-11-01: the popup looks like the app: its colors for both themes and the theme it shows.
+  it('hands the app\'s theme and colors to the extension in /status', async () => {
+    await pair();
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, theme: 'light' } });
+    const status = await request('POST', '/status', { body: { openConversations: [] } });
+    expect(status.body.appearance.theme).toBe('light');
+    expect(status.body.appearance.light['--page']).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(status.body.appearance.dark['--accent-fill']).toMatch(/^#[0-9a-f]{6}$/i);
+  });
+
   it('accepts only an exact plugin id or an exact missing report on /core-plugin', async () => {
     await pair();
     expect((await request('POST', '/core-plugin', { body: { appId: 'asdk_app_6aa5b6651c3c81919f03cb5dc38bf019' } })).status).toBe(200);
@@ -4328,6 +4338,47 @@ describe('automatic compaction', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // 2026-11-03 (Mac, 2 days): ChatGPT limited the chat's history, so its page never showed the latest
+  // tool results answered; every automatic attempt ended at that receipt, or a recovery reload cut the
+  // wait short, while the chat grew past its limit. The app now lets a later attempt ask without it.
+  it.each([
+    ['one attempt that waited the receipt out', ['results-unconfirmed'], true],
+    ['two attempts cut short', ['results-wait-changed', 'results-wait-changed'], false],
+    ['three attempts cut short', ['results-wait-changed', 'results-wait-changed', 'results-wait-changed'], true],
+    ['deferrals for other reasons', [null, null, null, null], false],
+    // This machine's own call kept the receipt from being checked: not a receipt miss (CodeRabbit on #2056).
+    ['attempts whose local call kept running', ['local-tools-running', 'local-tools-running', 'local-tools-running'], false]
+  ] as const)('asks for the handoff without the tool-result receipt after %s', async (_case, codes, waived) => {
+    await pair();
+    const conversationId = `a1a1a1a1-0000-4000-8000-0000000${String(codes.length)}${waived ? 'b' : 'c'}${codes[0] === null ? 'd' : codes[0] === 'local-tools-running' ? 'f' : 'e'}00`;
+    await request('POST', '/events', {
+      body: { conversationId, events: [{ kind: 'user_message', time: Date.now(), text: 'a long chat whose results ChatGPT never confirms', messageId: `m-${conversationId}` }] }
+    });
+    const first = await request('POST', '/compact', { body: { conversationId, ticket: true, automatic: true } });
+    expect(first.body.waiveReceipt).toBeUndefined();
+    const token = first.body.token as string;
+    for (const code of codes) {
+      expect((await request('POST', '/compact', { body: { conversationId, token, sourceDeferred: true,
+        sourceError: 'ChatGPT has not confirmed receiving the latest tool results. Nothing was compacted.', ...(code ? { sourceErrorCode: code } : {}) } })).status).toBe(200);
+    }
+    const again = await request('POST', '/compact', { body: { conversationId, ticket: true, automatic: true } });
+    expect(again.body.token).toBe(token);
+    expect(again.body.waiveReceipt === true).toBe(waived);
+    const lines = getLog().map(entry => entry.message).filter(line => line.includes(`compaction ticket ${token.slice(0, 8)}`) && line.includes('without ChatGPT\'s receipt'));
+    expect(lines).toHaveLength(waived ? 1 : 0);
+  });
+
+  it('never waives the receipt for a manual Compact & Resume', async () => {
+    await pair();
+    const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac1f';
+    await request('POST', '/events', {
+      body: { conversationId, events: [{ kind: 'user_message', time: Date.now(), text: 'a manual press', messageId: 'm-manual-waive' }] }
+    });
+    const filed = await request('POST', '/compact', { body: { conversationId, ticket: true } });
+    await request('POST', '/compact', { body: { conversationId, token: filed.body.token, sourceDeferred: true, sourceError: 'x', sourceErrorCode: 'results-unconfirmed' } });
+    expect((await request('POST', '/compact', { body: { conversationId, ticket: true } })).body.waiveReceipt).toBeUndefined();
   });
 
   it('takes no deferral reason for a manual Compact & Resume', async () => {
@@ -8750,6 +8801,81 @@ describe('targeted open', () => {
       // The ticket survives, and the next pickup can carry the brief.
       const second = queueResume(sessionId, token)!;
       expect((await redeem(second.id, 'tab-2')).text).toContain('the stalled brief');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // #1882 (2026-11-02, a user's Windows log): ChatGPT did not open the source Project within a minute
+  // while it was limiting that chat's history. The app abandoned the finished brief, and the next
+  // automatic try had to write a new one. Nothing was sent, so the brief is kept and opened again.
+  it.each([
+    ['source-ready-timeout:last=source-not-ready', true, true],
+    ['transition-timeout:last=source-route', true, true],
+    ['user-interrupted', true, false],
+    ['source-ready-timeout:last=source-not-ready', false, false]
+  ] as const)('keeps the brief of a Compact & Resume whose new chat ChatGPT did not open in time (%s, automatic: %s)', async (detail, automatic, kept) => {
+    setBrowserOpener(async (url) => { opened.push(url); });
+    await pair();
+    const source = `68888888-7777-8888-9999-${automatic ? 'a' : 'b'}${kept ? 'c' : 'd'}${detail.slice(0, 1) === 's' ? 'e' : detail.slice(0, 1) === 't' ? 'f' : '0'}aaaaaaaa1`;
+    const { sessionId, token } = automatic ? await automaticCompactedSession(source, 'the kept brief') : await compactedSession(source, 'the kept brief');
+    const first = queueResume(sessionId, token)!;
+    await waitForOpened(1, 10_000);
+    expect((await redeem(first.id, 'tab-1')).text).toContain('the kept brief');
+    const prior = new Set(getLog());
+    const ack = await request('POST', '/commands/ack', { body: { id: first.id, client: 'tab-1', status: 'failed',
+      error: 'ChatGPT could not open the source Project through its native link; nothing was sent', detail: `project-entry:${detail}` } });
+    expect(ack.status).toBe(200);
+    expect(pendingCommands().some(entry => entry.id === first.id)).toBe(false);
+    expect(continuationByToken(token)?.state === 'aborted').toBe(!kept);
+    expect(getLog().some(entry => !prior.has(entry) && entry.message.includes('the brief is kept and the new chat is opened again at the next pickup'))).toBe(kept);
+    if (!kept) return;
+    expect(continuationByToken(token)).toMatchObject({ destinationSend: { state: 'not-attempted' } });
+    // The same brief, not a new one, goes to the next attempt.
+    const second = queueResume(sessionId, token)!;
+    expect(second.id).not.toBe(first.id);
+    expect((await redeem(second.id, 'tab-2')).text).toContain('the kept brief');
+  });
+
+  // #1882: after its three quick tries, an automatic ticket with a written brief stopped trying to
+  // open its new chat at all, and while open it owns the chat's recovery: the chat stopped for good.
+  it('keeps opening the new chat of an automatic Compact & Resume once an hour after its quick tries', async () => {
+    vi.useFakeTimers();
+    try {
+      setBrowserOpener(async (url) => { opened.push(url); });
+      await pair();
+      const { sessionId, token } = await automaticCompactedSession('69999999-7777-8888-9999-aaaaaaaaaaa1', 'the hourly brief');
+      const resumes = () => pendingCommands().filter(entry => entry.what.startsWith('resume:'));
+      const fail = async () => {
+        const [command] = resumes();
+        expect(command, 'a resume is offered').toBeTruthy();
+        expect((await redeem(command!.id, `tab-${command!.id}`)).text).toContain('the hourly brief');
+        await request('POST', '/commands/ack', { body: { id: command!.id, client: `tab-${command!.id}`, status: 'failed',
+          error: 'nothing was sent', detail: 'project-entry:source-ready-timeout:last=source-not-ready' } });
+        expect(resumes()).toHaveLength(0);
+      };
+      // Whatever offered the first one, three quick pickups follow, each 15 minutes apart.
+      if (resumes().length) await fail();
+      await sweepStaleSwarm(Date.now()); // the opening phase's clock starts here
+      for (let quick = 0; quick < 3; quick++) {
+        await vi.advanceTimersByTimeAsync(15 * 60_000 + 1_000);
+        await sweepStaleSwarm(Date.now());
+        await fail();
+      }
+      // Then not every 15 minutes, but once an hour, said once: three hours swept every 5 minutes.
+      const offeredAt: number[] = [];
+      for (let step = 0; step < 36; step++) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        await sweepStaleSwarm(Date.now());
+        if (resumes().length) { offeredAt.push(Date.now()); await fail(); }
+      }
+      expect(offeredAt.length).toBeGreaterThanOrEqual(2);
+      expect(offeredAt.length).toBeLessThanOrEqual(3);
+      for (let at = 1; at < offeredAt.length; at++) expect(offeredAt[at]! - offeredAt[at - 1]!).toBe(60 * 60_000);
+      expect(getLog().filter(entry => entry.message.includes('could not open its new chat after 3 pickups — trying once an hour'))).toHaveLength(1);
+      expect(continuationByToken(token)?.state).not.toBe('aborted');
+      expect(getLog().filter(entry => entry.message.includes('trying once an hour'))).toHaveLength(1);
+      void sessionId;
     } finally {
       vi.useRealTimers();
     }
@@ -16834,6 +16960,37 @@ describe('the goal loop over the bridge', () => {
       const authority = recoveryBrowserWake.mock.calls[0]?.[3];
       expect(await authority?.current()).toBe(true);
     } finally { vi.useRealTimers(); }
+  });
+
+  // 2026-11-03 (Mac): the person's Continue reached the chat's page, which held it while ChatGPT still
+  // answered; a minute later the app failed it as "the browser did not pick up this message".
+  it('keeps a queued message the chat\'s page holds until ChatGPT\'s answer ends, and fails it only once no page holds it', async () => {
+    vi.useFakeTimers();
+    const input = await import('../src/main/session/input.js');
+    const { resetInputForTests, enqueueInput, listInputs } = input;
+    resetInputForTests();
+    const id = 'abca1103-0000-4000-8000-000000001103';
+    try {
+      await writeDurableNow('session-input', []);
+      await pair();
+      const chat = 'cafe1103-0000-4000-8000-000000001103';
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'work', messageId: 'held-user' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'held-turn' },
+        { kind: 'turn_end', time: Date.now(), turnId: 'held-turn', outcome: 'completed' }
+      ] } });
+      const session = (await findSessionByConversation(chat, { requireUnique: true }))!;
+      await enqueueInput({ id, sessionId: session.id, text: 'Continue', mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null });
+      const row = async () => (await listInputs()).find(entry => entry.id === id);
+      expect((await row())?.transportIntent).toBe('browser');
+      for (let step = 0; step < 4; step++) {
+        await vi.advanceTimersByTimeAsync(40_000);
+        expect((await request('POST', '/page-note', { body: { note: 'input-held', reason: 'still-answering', inputId: id, conversationId: chat } })).body).toEqual({ ok: true });
+        expect(await row()).toMatchObject({ state: 'queued', pageHold: { reason: 'still-answering' } });
+      }
+      await vi.advanceTimersByTimeAsync(60_001);
+      expect(await row()).toMatchObject({ state: 'failed', error: 'Not sent: the browser did not pick up this message within 60 seconds.' });
+    } finally { resetInputForTests(); vi.useRealTimers(); }
   });
 
   // 2026-10-31: an automatic Continue the app itself withheld was "uncollected"; the pickup reloaded the
