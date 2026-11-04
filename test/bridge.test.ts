@@ -18286,6 +18286,18 @@ describe('app requests to stop one exact active turn', () => {
     // Nothing of the app's own left: it says so.
     expect(await endOwnWorkAfterStop(sessionId, 'gone-turn')).toBe(false);
   });
+  it('turns off a Goal armed only by its objective when Stop names a turn no longer running (CodeRabbit on #2066)', async () => {
+    const { endOwnWorkAfterStop, sessionControlsFor } = await import('../src/main/bridge.js');
+    const { setGoalObjectiveNow, goalSwitchFor } = await import('../src/main/goal.js');
+    const conversationId = randomUUID();
+    const sessionId = await active(conversationId);
+    // An objective with no switch of its own arms Goal; the switch itself was never turned on.
+    await setGoalObjectiveNow(conversationId, 'Finish the quarterly report');
+    expect(goalSwitchFor(conversationId).enabled).toBe(false);
+    expect((await sessionControlsFor(sessionId)).automation).not.toBe('off');
+    expect(await endOwnWorkAfterStop(sessionId, 'gone-turn')).toBe(true);
+    expect((await sessionControlsFor(sessionId)).automation).toBe('off');
+  });
   it('offers Stop for a turn the page still holds after the app stopped counting it as work (2.1.47 round)', async () => {
     // Seen 2026-10-28: ChatGPT stopped loading a chat's history, the page kept its turn open, so it
     // took no message, while the app treated the turn as over and offered no Stop at all.
