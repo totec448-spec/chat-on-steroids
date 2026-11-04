@@ -3230,6 +3230,46 @@ async function followAppNow(data) {
 }
 
 /**
+ * The popup paints with the app's colors and theme (the app's extension-appearance.ts sends them with
+ * every status). Stored when they change, so a popup opened while the app is closed keeps the last look.
+ */
+const APP_APPEARANCE_KEY = 'appAppearance';
+const APPEARANCE_THEMES = new Set(['light', 'dark', 'system']);
+// Every color the app sends (main/extension-appearance.ts); a palette missing one is no palette.
+const APPEARANCE_TOKENS = ['--page', '--card', '--ink', '--soft', '--faint', '--line', '--edge', '--hover', '--track',
+  '--accent', '--accent-wash', '--accent-fill', '--on-accent', '--knob-off', '--knob-on', '--green', '--green-wash',
+  '--red', '--red-wash'];
+let appAppearanceApplied = null;
+let appAppearanceWriting = null;
+let appAppearancePending = null;
+function validAppearanceTokens(tokens) {
+  if (!tokens || typeof tokens !== 'object' || Array.isArray(tokens)) return false;
+  const entries = Object.entries(tokens);
+  return entries.length > 0 && entries.length <= 40 && entries.every(([name, value]) => /^--[a-z-]{2,30}$/.test(name) && /^#[0-9a-f]{6}$/i.test(value)) &&
+    APPEARANCE_TOKENS.every(name => Object.hasOwn(tokens, name));
+}
+function followAppearance(value) {
+  if (!value || !APPEARANCE_THEMES.has(value.theme) || !validAppearanceTokens(value.light) || !validAppearanceTokens(value.dark)) return;
+  writeAppearance(JSON.stringify({ theme: value.theme, light: value.light, dark: value.dark }));
+}
+function writeAppearance(json) {
+  // One write at a time. Colors that arrive meanwhile wait, and only the newest of them is written
+  // after it: a theme changed during a slow write is not lost if no status follows.
+  if (appAppearanceWriting) { appAppearancePending = json; return; }
+  appAppearancePending = null;
+  if (json === appAppearanceApplied) return;
+  appAppearanceWriting = boundedStorage(chrome.storage.local.set({ [APP_APPEARANCE_KEY]: JSON.parse(json) }), 'write')
+    .then(() => { appAppearanceApplied = json; })
+    // A write that failed or timed out may still land later: nothing is known to be stored, so the
+    // next colors are written even when they equal the last ones written (CodeRabbit on #2013).
+    .catch(() => { appAppearanceApplied = null; })
+    .finally(() => {
+      appAppearanceWriting = null;
+      if (appAppearancePending) writeAppearance(appAppearancePending);
+    });
+}
+
+/**
  * "Open in ChatGPT" from the app, shown in this browser: the chat's tab if it has one, else a new
  * one. The app asks here rather than the OS, which can pick another browser or account (#882).
  */
@@ -3505,6 +3545,7 @@ async function maintainOnce() {
   const liveSending = Array.isArray(reply.data.inputSendingIds) ? new Set(reply.data.inputSendingIds) : null;
   void reloadForExtensionUpdate(reply.data.extensionUpdate, liveOpenings, liveCommands, liveSending).catch(() => undefined);
   void followApp(reply.data).catch(() => undefined);
+  followAppearance(reply.data.appearance);
   void revealChats(reply.data.reveals).catch(() => undefined);
   void followChat(reply.data.follow).catch(() => undefined);
   void runImageExports(reply.data.imageExports).catch(() => undefined);

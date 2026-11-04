@@ -70,6 +70,7 @@ import { CHAT_ACTIVE_MS, CHAT_SILENCE_MS, continuationMarkerOf, isReasoningEffor
   type ReasoningEffort, type SessionEvent, type SessionOrigin, type StoredText, type ToolCallRecord } from '../shared/session.js';
 import { blockedChatIds, isChatBlocked, chatBlockedAt } from './session/blocked-chats.js';
 export { CHAT_ACTIVE_MS, CHAT_SILENCE_MS } from '../shared/session.js';
+import { extensionAppearance } from './extension-appearance.js';
 import { effectiveCapabilities, getConfig, updateConfig } from './config.js';
 import { BROWSER_BRIDGE_AUTO_PORTS } from '../shared/browser-bridge.js';
 import { bridgePortSelection } from './bridge-ports.js';
@@ -3127,6 +3128,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // The extension follows the app: its texts in the app's language, and preferences it lost
         // with a reinstall (a new id starts with empty storage) taken back from here.
         language: getConfig().ui.language ?? null,
+        // And its popup in the app's colors and theme (extension-appearance.ts).
+        appearance: extensionAppearance(),
         browserPreferences: getConfig().ui.browserPreferences ?? null
       },
       origin
@@ -5300,7 +5303,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         const sourceConversation = primeConversation(command.spec.runId);
         const source = sourceConversation ? await findSessionByConversation(sourceConversation, { requireUnique: true }) : null;
         const sessionId = source?.conversationId === sourceConversation ? source?.id : undefined;
-        described.text = await prepareSessionPrompt(described.text, { sessionId, workingDirectory });
+        described.text = await prepareSessionPrompt(described.text, { sessionId, workingDirectory, subAgent: true });
       } else if (workingDirectory) {
         // Revivals carry the prime's latest user-authored message, without repeating Core or
         // source AGENTS. Reassert the same checkout after a restart or worker reuse.
