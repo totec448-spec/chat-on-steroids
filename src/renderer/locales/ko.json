@@ -3742,6 +3742,8 @@
   "Yesterday": "어제",
   "Previous 7 days": "지난 7일",
   "Previous 30 days": "지난 30일",
+  "Waiting for ChatGPT to finish its answer": "ChatGPT가 답변을 마칠 때까지 기다리는 중",
+  "Waiting for ChatGPT's page to end its turn": "ChatGPT 페이지가 턴을 마칠 때까지 기다리는 중",
   "Native Linux screenshot consent is available only on Linux.": "Linux 기본 스크린샷 권한은 Linux에서만 사용할 수 있습니다.",
   "Enable native Linux Desktop and Screen access first.": "먼저 Linux 기본 데스크톱과 화면 접근을 켜세요.",
   "Activate the Chat On Steroids window before requesting screenshot permission.": "스크린샷 권한을 요청하기 전에 Chat On Steroids 창을 활성화하세요.",

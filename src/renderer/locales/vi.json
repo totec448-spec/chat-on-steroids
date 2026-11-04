@@ -3742,6 +3742,8 @@
   "Yesterday": "Hôm qua",
   "Previous 7 days": "7 ngày qua",
   "Previous 30 days": "30 ngày qua",
+  "Waiting for ChatGPT to finish its answer": "Đang chờ ChatGPT trả lời xong",
+  "Waiting for ChatGPT's page to end its turn": "Đang chờ trang ChatGPT kết thúc lượt",
   "Native Linux screenshot consent is available only on Linux.": "Quyền chụp màn hình gốc của Linux chỉ có trên Linux.",
   "Enable native Linux Desktop and Screen access first.": "Hãy bật màn hình nền Linux gốc và quyền truy cập màn hình trước.",
   "Activate the Chat On Steroids window before requesting screenshot permission.": "Hãy kích hoạt cửa sổ Chat On Steroids trước khi yêu cầu quyền chụp màn hình.",

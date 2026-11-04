@@ -3985,6 +3985,8 @@
   "Yesterday": "Вчера",
   "Previous 7 days": "Последние 7 дней",
   "Previous 30 days": "Последние 30 дней",
+  "Waiting for ChatGPT to finish its answer": "Ждём, пока ChatGPT закончит ответ",
+  "Waiting for ChatGPT's page to end its turn": "Ждём, пока страница ChatGPT завершит ход",
   "Native Linux screenshot consent is available only on Linux.": "Нативное разрешение на снимки экрана Linux доступно только в Linux.",
   "Enable native Linux Desktop and Screen access first.": "Сначала включите нативный рабочий стол Linux и доступ к экрану.",
   "Activate the Chat On Steroids window before requesting screenshot permission.": "Сделайте окно Chat On Steroids активным, прежде чем запрашивать разрешение на снимок экрана.",

@@ -3904,6 +3904,8 @@
   "Yesterday": "Ontem",
   "Previous 7 days": "Últimos 7 dias",
   "Previous 30 days": "Últimos 30 dias",
+  "Waiting for ChatGPT to finish its answer": "A aguardar que o ChatGPT termine a resposta",
+  "Waiting for ChatGPT's page to end its turn": "A aguardar que a página do ChatGPT termine o turno",
   "Native Linux screenshot consent is available only on Linux.": "A permissão nativa de captura do Linux só está disponível no Linux.",
   "Enable native Linux Desktop and Screen access first.": "Ative primeiro o ambiente de trabalho nativo do Linux e o acesso ao ecrã.",
   "Activate the Chat On Steroids window before requesting screenshot permission.": "Ative a janela do Chat On Steroids antes de pedir a permissão de captura.",

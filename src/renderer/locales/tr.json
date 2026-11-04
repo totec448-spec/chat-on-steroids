@@ -3823,6 +3823,8 @@
   "Yesterday": "Dün",
   "Previous 7 days": "Son 7 gün",
   "Previous 30 days": "Son 30 gün",
+  "Waiting for ChatGPT to finish its answer": "ChatGPT'nin yanıtını bitirmesi bekleniyor",
+  "Waiting for ChatGPT's page to end its turn": "ChatGPT sayfasının turunu bitirmesi bekleniyor",
   "Native Linux screenshot consent is available only on Linux.": "Yerel Linux ekran görüntüsü izni yalnızca Linux’ta kullanılabilir.",
   "Enable native Linux Desktop and Screen access first.": "Önce yerel Linux masaüstünü ve ekran erişimini açın.",
   "Activate the Chat On Steroids window before requesting screenshot permission.": "Ekran görüntüsü izni istemeden önce Chat On Steroids penceresini etkinleştirin.",
