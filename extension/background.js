@@ -3260,7 +3260,9 @@ function writeAppearance(json) {
   if (json === appAppearanceApplied) return;
   appAppearanceWriting = boundedStorage(chrome.storage.local.set({ [APP_APPEARANCE_KEY]: JSON.parse(json) }), 'write')
     .then(() => { appAppearanceApplied = json; })
-    .catch(() => undefined)
+    // A write that failed or timed out may still land later: nothing is known to be stored, so the
+    // next colors are written even when they equal the last ones written (CodeRabbit on #2013).
+    .catch(() => { appAppearanceApplied = null; })
     .finally(() => {
       appAppearanceWriting = null;
       if (appAppearancePending) writeAppearance(appAppearancePending);
