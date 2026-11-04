@@ -194,6 +194,9 @@ it('closes only an issue that says it is a feature request; an unclear one is le
   // A line with text after its marker does not close a fence, so the example after it is still code.
   expect(intakeDecision(featureRequest({ title: 'Nested fences render wrong', body: '````\n```md\n## Feature request\n```\n````' }), current).decision).toBe('none');
   expect(intakeDecision(featureRequest({ title: 'Code blocks break', body: '```\nx\n```md\n## Feature request' }), current).decision).toBe('none');
+  // CRLF line ends, as the web form sends them, do not hide a fence.
+  expect(intakeDecision(featureRequest({ title: 'Paste breaks', body: '```\r\n## Feature request\r\n```\r\nIt breaks.' }), current).decision).toBe('none');
+  expect(intakeDecision(featureRequest({ title: 'Dark tabs', body: '## Feature request\r\n\r\nDark tabs please.' }), current).decision).toBe('feature');
   // A comment marker inside a code block hides nothing, so the fence still ends where it ends.
   expect(intakeDecision(featureRequest({ title: 'Comments in code break', body: '```\n<!--\n```\n## Feature request\n```\n-->' }), current).decision).toBe('feature');
   expect(intakeDecision(featureRequest({ title: 'Comments in code break', body: '```\n<!--\n```  \n-->\n```\n## Feature request' }), current).decision).toBe('none');
