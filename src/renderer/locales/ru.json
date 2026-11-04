@@ -3995,7 +3995,6 @@
   "found, {0}, {1}": "найден, {0}, {1}",
   "not there yet": "пока нет",
   "not checked": "не проверено",
-  "Chat On Steroids does not run or check this command. Read it, then run it yourself in your own terminal, on your own responsibility.": "Chat On Steroids не запускает и не проверяет эту команду. Прочитайте её, затем запустите сами в своём терминале, под свою ответственность.",
   "Read-only is on in the app. This step runs in your own terminal, outside it.": "В приложении включено «Только чтение». Этот шаг выполняется в вашем собственном терминале, вне приложения.",
   "Mark as done": "Отметить выполненным",
   "Skip": "Пропустить",
@@ -4014,5 +4013,10 @@
   "Refused to ask you to run a step": "Отказано в просьбе выполнить шаг",
   "Could not check a step for you": "Не удалось проверить шаг для вас",
   "Refused to check a step for you": "Отказано в проверке шага для вас",
-  "From the sub-agent “{0}”": "От субагента «{0}»"
+  "From the sub-agent “{0}”": "От субагента «{0}»",
+  "Run it yourself, in your own terminal: Chat On Steroids does not run or check it.": "Запустите её сами в своём терминале: Chat On Steroids не запускает и не проверяет её.",
+  "{0} expected files": "Ожидаемых файлов: {0}",
+  "{0} expected files|one": "Ожидаемых файлов: {0}",
+  "{0} expected files|many": "Ожидаемых файлов: {0}",
+  "{0} expected files|few": "Ожидаемых файлов: {0}"
 }

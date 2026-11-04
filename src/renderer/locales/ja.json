@@ -3752,7 +3752,6 @@
   "found, {0}, {1}": "見つかりました、{0}、{1}",
   "not there yet": "まだありません",
   "not checked": "未確認",
-  "Chat On Steroids does not run or check this command. Read it, then run it yourself in your own terminal, on your own responsibility.": "Chat On Steroids はこのコマンドを実行も確認もしません。内容を読んでから、ご自身の責任でご自分のターミナルで実行してください。",
   "Read-only is on in the app. This step runs in your own terminal, outside it.": "アプリでは読み取り専用がオンです。この手順はアプリの外、ご自分のターミナルで実行されます。",
   "Mark as done": "完了にする",
   "Skip": "スキップ",
@@ -3768,5 +3767,7 @@
   "Refused to ask you to run a step": "手順の実行依頼を拒否しました",
   "Could not check a step for you": "あなたの手順を確認できませんでした",
   "Refused to check a step for you": "あなたの手順の確認を拒否しました",
-  "From the sub-agent “{0}”": "サブエージェント「{0}」から"
+  "From the sub-agent “{0}”": "サブエージェント「{0}」から",
+  "Run it yourself, in your own terminal: Chat On Steroids does not run or check it.": "ご自身のターミナルで自分で実行してください。Chat On Steroids はこのコマンドを実行も確認もしません。",
+  "{0} expected files": "想定されるファイル {0} 件"
 }
