@@ -3839,5 +3839,6 @@
   "A project can have at most 10 related folders": "Bir projenin en fazla 10 ilgili klasörü olabilir",
   "That answer had already ended, so ChatGPT was not asked to stop. This chat's automatic work is stopped.": "Bu yanıt zaten bitmişti, bu yüzden ChatGPT’den durması istenmedi. Bu sohbetin otomatik çalışması durduruldu.",
   "That answer had already ended; there was nothing to stop.": "Bu yanıt zaten bitmişti; durdurulacak bir şey yoktu.",
-  "Automatic Continue cancelled: you pressed Stop.": "Otomatik devam iptal edildi: Durdur’a bastınız."
+  "Automatic Continue cancelled: you pressed Stop.": "Otomatik devam iptal edildi: Durdur’a bastınız.",
+  "That answer had already ended, so ChatGPT was not asked to stop. Compact & Resume was already moving this chat and goes on.": "Bu yanıt zaten bitmişti, bu yüzden ChatGPT’den durması istenmedi. Sıkıştır ve sürdür bu sohbeti zaten taşıyordu ve sürüyor."
 }

@@ -3920,5 +3920,6 @@
   "A project can have at most 10 related folders": "Um projeto pode ter no máximo 10 pastas relacionadas",
   "That answer had already ended, so ChatGPT was not asked to stop. This chat's automatic work is stopped.": "Essa resposta já tinha terminado, por isso não foi pedido ao ChatGPT que parasse. O trabalho automático desta conversa foi interrompido.",
   "That answer had already ended; there was nothing to stop.": "Essa resposta já tinha terminado; não havia nada para parar.",
-  "Automatic Continue cancelled: you pressed Stop.": "Continuação automática cancelada: carregou em Parar."
+  "Automatic Continue cancelled: you pressed Stop.": "Continuação automática cancelada: carregou em Parar.",
+  "That answer had already ended, so ChatGPT was not asked to stop. Compact & Resume was already moving this chat and goes on.": "Essa resposta já tinha terminado, por isso não foi pedido ao ChatGPT que parasse. Compactar e retomar já estava a mover esta conversa e continua."
 }

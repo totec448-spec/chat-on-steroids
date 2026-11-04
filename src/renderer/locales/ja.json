@@ -3758,5 +3758,6 @@
   "A project can have at most 10 related folders": "1 つのプロジェクトに設定できる関連フォルダーは 10 個までです",
   "That answer had already ended, so ChatGPT was not asked to stop. This chat's automatic work is stopped.": "その回答はすでに終わっていたため、ChatGPT には停止を求めていません。このチャットの自動処理は停止しました。",
   "That answer had already ended; there was nothing to stop.": "その回答はすでに終わっていたため、停止するものはありませんでした。",
-  "Automatic Continue cancelled: you pressed Stop.": "停止が押されたため、自動続行を取り消しました。"
+  "Automatic Continue cancelled: you pressed Stop.": "停止が押されたため、自動続行を取り消しました。",
+  "That answer had already ended, so ChatGPT was not asked to stop. Compact & Resume was already moving this chat and goes on.": "その回答はすでに終わっていたため、ChatGPT には停止を求めていません。「圧縮して再開」はすでにこのチャットを移しているところで、そのまま続きます。"
 }

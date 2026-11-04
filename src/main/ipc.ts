@@ -2039,9 +2039,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       if (!(error instanceof Error) || error.message !== 'active_turn_changed') throw error;
       // The answer Stop showed for is no longer running: the app's own work still stops (Haz on #1883),
       // and the person reads what happened, not an error code.
-      throw new Error(await endOwnWorkAfterStop(id, expectedTurnId)
-        ? "That answer had already ended, so ChatGPT was not asked to stop. This chat's automatic work is stopped."
-        : 'That answer had already ended; there was nothing to stop.');
+      const outcome = await endOwnWorkAfterStop(id, expectedTurnId);
+      throw new Error(outcome.resumeGoesOn
+        ? 'That answer had already ended, so ChatGPT was not asked to stop. Compact & Resume was already moving this chat and goes on.'
+        : outcome.ended
+          ? "That answer had already ended, so ChatGPT was not asked to stop. This chat's automatic work is stopped."
+          : 'That answer had already ended; there was nothing to stop.');
     }
   });
   handle('sessions:releaseFinish', async (payload) => {
