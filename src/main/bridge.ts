@@ -2491,6 +2491,8 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string,
   endActivity(id);
   repairsInFlight.delete(id);
   if (!alreadyQueued) logInfo(`bridge: ${options.rotation ? 'fresh-turn' : `desktop (sent by ${options.from ?? 'the app'})`} Stop requested for session ${sessionId}, conversation ${id}, turn ${expectedTurnId}, command ${command.id}; native cancellation is unconfirmed`);
+  // #1882: a person's Stop that joins a queued one, a fresh-turn Stop included, still says who sent it (CodeRabbit on #2070).
+  else if (!options.rotation) logInfo(`bridge: desktop (sent by ${options.from ?? 'the app'}) Stop for session ${sessionId}, turn ${expectedTurnId} joins the Stop already requested (command ${command.id})`);
   else if (pendingHeld) logInfo(`bridge: Stop repeated for held turn ${expectedTurnId} in ${id}; command ${command.id} stays a held-turn Stop`);
   wakeBrowserWork();
   changed();

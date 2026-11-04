@@ -1247,11 +1247,14 @@ export async function setGoalSwitchNow(
       return {
         snapshot: goalSwitchesSnapshot(staged),
         publish: () => {
+          const armedBefore = goalArmedFor(targetConversationId);
           publishGoalSwitches(staged);
+          const changed = was.enabled !== next.enabled || was.mode !== next.mode;
           // Only an accepted change ends the kept "goal is met"; saving it as it was does not (CodeRabbit).
-          if (was.enabled !== next.enabled || was.mode !== next.mode) {
-            forgetGoalOutcome(targetConversationId);
-            // #1882: a mode that later reads differently can be traced to the change that set it.
+          if (changed) forgetGoalOutcome(targetConversationId);
+          // #1882: a mode that later reads differently can be traced to the change that set it. A Goal
+          // armed only by its objective keeps the same switch values when turned off (CodeRabbit on #2070).
+          if (changed || armedBefore !== goalArmedFor(targetConversationId)) {
             logInfo(`goal: ${targetConversationId} switched to ${next.enabled ? next.mode : 'Normal'}${from ? ` by ${from}` : ''}`);
           }
           notifyGoalChange();
