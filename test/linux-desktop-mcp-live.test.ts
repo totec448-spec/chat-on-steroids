@@ -20,6 +20,7 @@ import sharp from 'sharp';
 // This does NOT prove the human-facing Electron Desktop Ask overlay itself.
 const deferredAsk = vi.hoisted(() => ({
   enabled: false,
+  denyLate: false,
   resolve: null as null | ((value: string | null) => void)
 }));
 vi.mock('../src/main/desktop-ask-window.js', async importOriginal => {
@@ -27,8 +28,9 @@ vi.mock('../src/main/desktop-ask-window.js', async importOriginal => {
   return {
     ...original,
     askBeforeDesktopStep: (...args: Parameters<typeof original.askBeforeDesktopStep>) =>
-      deferredAsk.enabled ? new Promise<string | null>(resolve => { deferredAsk.resolve = resolve; })
-        : original.askBeforeDesktopStep(...args)
+      !deferredAsk.enabled ? original.askBeforeDesktopStep(...args)
+        : deferredAsk.denyLate ? Promise.resolve('DESKTOP_ASK_DENIED: test cleanup')
+        : new Promise<string | null>(resolve => { deferredAsk.resolve = resolve; })
   };
 });
 
@@ -253,12 +255,17 @@ describe.skipIf(!LIVE)('real Linux MCP HTTP and semantic desktop acceptance (exp
       expect(fixtureOutput).not.toContain('E2E_RESULT=');
     } finally {
       // A failed assertion or saveConfig must not strand an MCP request in Ask.
-      // Resolve it as a refusal, then drain the request before shutting down.
+      // Deny any Ask that starts during cleanup, then drain the request.
+      deferredAsk.denyLate = true;
       deferredAsk.resolve?.('DESKTOP_ASK_DENIED: test cleanup');
-      if (pending) await pending.catch(() => undefined);
-      deferredAsk.enabled = false;
-      deferredAsk.resolve = null;
-      await saveConfig(previous);
+      try {
+        if (pending) await pending.catch(() => undefined);
+      } finally {
+        deferredAsk.enabled = false;
+        deferredAsk.denyLate = false;
+        deferredAsk.resolve = null;
+        await saveConfig(previous);
+      }
     }
   });
 
@@ -293,10 +300,15 @@ describe.skipIf(!LIVE)('real Linux MCP HTTP and semantic desktop acceptance (exp
       expect(text(granted)).toContain('delivered_verified');
       expect(fixtureOutput).not.toContain('E2E_RESULT=');
     } finally {
+      deferredAsk.denyLate = true;
       deferredAsk.resolve?.('DESKTOP_ASK_DENIED: cleanup');
-      if (pending) await pending.catch(() => undefined);
-      deferredAsk.enabled = false;
-      deferredAsk.resolve = null;
+      try {
+        if (pending) await pending.catch(() => undefined);
+      } finally {
+        deferredAsk.enabled = false;
+        deferredAsk.denyLate = false;
+        deferredAsk.resolve = null;
+      }
     }
   });
 
