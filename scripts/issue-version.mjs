@@ -155,7 +155,8 @@ export const FEATURE_SINCE = '2026-11-03T21:00:00Z';
 export function ownText(body) {
   const out = [];
   let fence = null, comment = false;
-  for (const line of String(body).split('\n')) {
+  // Issue bodies from the web form come with CRLF line ends (CodeRabbit on #2060).
+  for (const line of String(body).split(/\r\n?|\n/)) {
     // Fences first, on the raw lines: a comment marker inside a code block hides nothing (CodeRabbit on #2060).
     const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
     if (fence) {
