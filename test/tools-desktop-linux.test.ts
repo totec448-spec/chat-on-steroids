@@ -17,6 +17,7 @@ vi.mock('../src/main/config.js', () => ({
   effectiveCapabilities: () => ({ screen: testState.screen, control: testState.control && !testState.readOnly })
 }));
 vi.mock('../src/main/mcp/call-context.js', () => ({ currentCaller: () => testState.caller }));
+vi.mock('../src/main/logger.js', () => ({ logInfo: vi.fn() }));
 vi.mock('../src/main/session/correlation.js', async original => ({ ...(await original<typeof import('../src/main/session/correlation.js')>()),
   requestCorrelation: (requestId: string) => testState.correlation?.requestId === requestId ? testState.correlation : null }));
 vi.mock('../src/main/desktop-ask-window.js', () => ({ askBeforeDesktopStep: (...args: unknown[]) => testState.ask(...args), desktopStepEnded: () => testState.ended() }));
@@ -80,11 +81,39 @@ describe.runIf(process.platform === 'linux')('native Linux connector authorizati
       ? good('list-windows', [window]) : kind === 'snapshot'
         ? good('snapshot', { snapshot_id: 's123', complete: true, window: { id: window.id },
           tree: { children: [{ ref_id: tooLongRef }] } }) : good(kind, {}));
-    expect((await observe({ what: 'snapshot', window_id: window.id })).isError).toBeUndefined();
+    const observation = await observe({ what: 'snapshot', window_id: window.id });
+    expect(observation.isError).toBe(true);
+    expect(observation.content[0].text).toContain('DESKTOP_SNAPSHOT_UNPROVEN');
+    expect(JSON.stringify(observation)).not.toContain(tooLongRef);
     const result = await act({ action: 'click', ref: tooLongRef });
     expect(result.content[0].text).toContain('STALE_OR_FOREIGN_REF');
     expect(testState.ask).not.toHaveBeenCalled();
     expect(testState.backend.mock.calls.filter(([arg]) => arg.kind === 'click')).toHaveLength(0);
+  });
+  it('fails closed rather than advertising refs when the accessibility tree is truncated', async () => {
+    const { observe, act } = handlers();
+    // Backend is marked complete, but each case would leave valid-looking refs
+    // in the published tree that cannot be used via linux_act.
+    let deep: any = { ref_id: '@s123:e25' };
+    for (let n = 0; n < 25; n++) deep = { children: [deep] };
+    const oversizedChildren = { children: Array.from({ length: 201 }, (_, i) => ({ ref_id: `@s123:e${i + 1}` })) };
+    const excessiveRefs = { children: Array.from({ length: 3 }, (_, page) => ({
+      children: Array.from({ length: 180 }, (_, i) => ({ ref_id: `@s123:e${page * 180 + i + 1}` }))
+    })) };
+    const cases = [deep, oversizedChildren, excessiveRefs, { children: [{ ref_id: '@s999:e1' }] }];
+    for (const tree of cases) {
+      testState.backend.mockReset();
+      testState.backend.mockImplementation(async ({ kind }: { kind: string }) => kind === 'windows'
+        ? good('list-windows', [window]) : kind === 'snapshot'
+          ? good('snapshot', { snapshot_id: 's123', complete: true, window: { id: window.id }, tree }) : good(kind, {}));
+      const result = await observe({ what: 'snapshot', window_id: window.id });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('DESKTOP_SNAPSHOT_UNPROVEN');
+      expect(JSON.stringify(result)).not.toContain('ref_id');
+      expect(testState.backend.mock.calls.filter(([arg]) => arg.kind === 'click')).toHaveLength(0);
+    }
+    expect((await act({ action: 'click', ref: '@s123:e1' })).content[0].text).toContain('STALE_OR_FOREIGN_REF');
+    expect(testState.ask).not.toHaveBeenCalled();
   });
   it('rejects an unvalidated screenshot display without calling the desktop backend', async () => {
     const { observe } = handlers();

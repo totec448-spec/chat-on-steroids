@@ -5942,6 +5942,10 @@ The version preflight requires the backend response command to be `version`,
 the OS to be Linux and the version to be 1.0.2. Accessibility refs must match
 `@s<snapshot>:e<element>` and be at most 128 characters: collection, MCP
 action schemas and native subprocess arguments enforce the same bound.
+If the native snapshot tree contains an invalid/foreign ref or traversal would
+skip nodes due to depth (24), children per node (200) or ref count (512),
+`linux_observe` refuses the whole snapshot with a fixed diagnostic; it never
+publishes an unusable ref or logs the ref values.
 
 The permission self-test reports native preflight results, not a completed capture or input.
 An actual screenshot and AX query remain separate evidence; the existing grant-history and

@@ -13,6 +13,7 @@ import { currentCaller } from './call-context.js';
 import { requestCorrelation } from '../session/correlation.js';
 import { fail, type SurfaceRegistrar, type ToolResult } from './kernel.js';
 import { toolDeclaration } from './tool-declarations.js';
+import { logInfo } from '../logger.js';
 
 interface WindowRow { id: string; app_name: string; pid: number; process_instance: string }
 interface Observation { window: WindowRow; session: string; refs: Set<string>; observedAt: number }
@@ -91,16 +92,26 @@ function identityStillMatches(earlier: WindowRow, current: WindowRow[]): boolean
   return matched.length === 1 && safeWindow(matched[0]!) && matched[0]!.app_name === earlier.app_name &&
     matched[0]!.pid === earlier.pid && matched[0]!.process_instance === earlier.process_instance;
 }
-function collectRefs(tree: unknown, snapshot: string): Set<string> {
+function collectRefs(tree: unknown, snapshot: string): Set<string> | null {
   const refs = new Set<string>();
+  let complete = true;
   const walk = (node: unknown, depth: number): void => {
-    if (!node || typeof node !== 'object' || depth > 24 || refs.size > 512) return;
+    if (!node || typeof node !== 'object' || !complete) return;
+    if (depth > 24) { complete = false; return; }
     const entry = node as { ref_id?: unknown; children?: unknown };
-    if (typeof entry.ref_id === 'string' && validLinuxDesktopRef(entry.ref_id) && entry.ref_id.startsWith(`@${snapshot}:`)) refs.add(entry.ref_id);
-    if (Array.isArray(entry.children)) for (const child of entry.children.slice(0, 200)) walk(child, depth + 1);
+    if (typeof entry.ref_id === 'string') {
+      if (!validLinuxDesktopRef(entry.ref_id) || !entry.ref_id.startsWith(`@${snapshot}:`)) { complete = false; return; }
+      refs.add(entry.ref_id);
+      if (refs.size > 512) { complete = false; return; }
+    }
+    if (Array.isArray(entry.children)) {
+      if (entry.children.length > 200) { complete = false; return; }
+      for (const child of entry.children) walk(child, depth + 1);
+    }
   };
+  if (!tree || typeof tree !== 'object') return null;
   walk(tree, 0);
-  return refs;
+  return complete ? refs : null;
 }
 
 const observeSchema = z.discriminatedUnion('what', [
@@ -186,8 +197,13 @@ export function registerLinuxDesktopTools(reg: SurfaceRegistrar): void {
     if (owner !== principal()) return fail('DESKTOP_IDENTITY_CHANGED: chat ownership changed during the Linux snapshot; observe again.');
     if (!result.ok) return successful(result);
     const data = result.data as { snapshot_id?: unknown; complete?: unknown; window?: { id?: unknown }; tree?: unknown } | null;
-    const refs = typeof data?.snapshot_id === 'string' ? collectRefs(data.tree, data.snapshot_id) : new Set<string>();
-    if (data?.window?.id !== input.window_id || data?.complete !== true || refs.size > 512) return fail('DESKTOP_SNAPSHOT_UNPROVEN: incomplete or mismatched accessibility snapshot; no refs issued.');
+    const refs = typeof data?.snapshot_id === 'string' ? collectRefs(data.tree, data.snapshot_id) : null;
+    if (data?.window?.id !== input.window_id || data?.complete !== true || refs === null) {
+      // Never log backend refs, UI labels or app/window names; rejected trees
+      // may contain private data. Nothing from this snapshot is published.
+      logInfo('linux desktop snapshot: rejected incomplete, mismatched or invalid accessibility refs');
+      return fail('DESKTOP_SNAPSHOT_UNPROVEN: incomplete or mismatched accessibility snapshot; no refs issued.');
+    }
     if (owner) {
       observations.delete(owner);
       observations.set(owner, { window: matches[0]!, session, refs, observedAt: Date.now() });
