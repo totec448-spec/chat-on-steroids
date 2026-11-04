@@ -148,12 +148,31 @@ describe('durable user input ownership', () => {
   });
   it('takes a hold only from the chat the message goes to now, after the session moved on (CodeRabbit on #2054)', async () => {
     binding.finishEnabled = false;
+    const info = vi.spyOn(logger, 'logInfo');
     const row = await enqueueInput(input());
     expect(await noteInputHeld(row.id, 'still-answering', 'conversation-a')).toBe('new');
     // A Compact & Resume moved the session to a new chat: the old chat's page no longer keeps it.
     binding.conversationId = 'conversation-moved';
     expect(await noteInputHeld(row.id, 'still-answering', 'conversation-a')).toBeNull();
+    // The new chat's first hold is news, not a repeat of the old chat's.
+    expect(await noteInputHeld(row.id, 'still-answering', 'conversation-moved')).toBe('new');
     expect(await noteInputHeld(row.id, 'still-answering', 'conversation-moved')).toBe('held');
+    expect(info).toHaveBeenCalledWith(`input ${row.id}: a hold from conversation-a does not keep it: it goes to conversation-moved`);
+    info.mockRestore();
+  });
+
+  it('counts an old chat\'s hold for nothing once the message goes to another chat (CodeRabbit on #2054)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      binding.finishEnabled = false;
+      const row = await enqueueInput(input());
+      vi.setSystemTime(Date.now() + 50_000);
+      expect(await noteInputHeld(row.id, 'still-answering', 'conversation-a')).toBe('new');
+      binding.conversationId = 'conversation-moved';
+      // 61 s after it was queued, 11 s after A's hold: A's hold no longer keeps it.
+      vi.setSystemTime(Date.now() + 11_000);
+      expect((await listInputs()).find(entry => entry.id === row.id)?.state).toBe('failed');
+    } finally { vi.useRealTimers(); }
   });
   it.each([
     ['turn-held', 'new', 'queued'], ['tool-running', 'new', 'queued'],
