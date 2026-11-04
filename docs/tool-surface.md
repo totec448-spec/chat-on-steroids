@@ -241,6 +241,9 @@ The backend version probe accepts only a `version` command response for Linux
 agent-desktop 1.0.2. Ref tokens (`@s<snapshot>:e<element>`) are capped at
 128 characters by observation collection, the action schema and the native
 subprocess adapter, so oversized backend refs never become actionable.
+An invalid ref or a tree that would be truncated by the 24-depth, 200-children
+or 512-ref bounds causes the whole snapshot to be refused before publication.
+Only a static diagnostic is logged; no backend ref or private UI text leaks.
 Desktop Ask (if configured) grants permission only to the exact proven
 Linux profile/session/conversation, not a shared transport connection.
 
