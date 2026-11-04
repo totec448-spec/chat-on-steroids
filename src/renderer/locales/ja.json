@@ -3743,5 +3743,7 @@
   "Previous 7 days": "過去 7 日間",
   "Previous 30 days": "過去 30 日間",
   "Waiting for ChatGPT to finish its answer": "ChatGPT の回答が終わるのを待っています",
-  "Waiting for ChatGPT's page to end its turn": "ChatGPT のページがターンを終えるのを待っています"
+  "Waiting for ChatGPT's page to end its turn": "ChatGPT のページがターンを終えるのを待っています",
+  "That answer had already ended, so ChatGPT was not asked to stop. This chat's automatic work is stopped.": "その回答はすでに終わっていたため、ChatGPT には停止を求めていません。このチャットの自動処理は停止しました。",
+  "That answer had already ended; there was nothing to stop.": "その回答はすでに終わっていたため、停止するものはありませんでした。"
 }

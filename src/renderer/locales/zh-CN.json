@@ -3743,5 +3743,7 @@
   "Previous 7 days": "过去 7 天",
   "Previous 30 days": "过去 30 天",
   "Waiting for ChatGPT to finish its answer": "正在等待 ChatGPT 完成回答",
-  "Waiting for ChatGPT's page to end its turn": "正在等待 ChatGPT 页面结束本轮"
+  "Waiting for ChatGPT's page to end its turn": "正在等待 ChatGPT 页面结束本轮",
+  "That answer had already ended, so ChatGPT was not asked to stop. This chat's automatic work is stopped.": "该回答已经结束，因此没有要求 ChatGPT 停止。此聊天的自动工作已停止。",
+  "That answer had already ended; there was nothing to stop.": "该回答已经结束，没有需要停止的内容。"
 }

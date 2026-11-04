@@ -18275,6 +18275,17 @@ describe('app requests to stop one exact active turn', () => {
     expect((await getSession(sessionId))?.activeTurnId).toBe('stop-turn-two');
     expect((await getSession(sessionId))?.finishTurn?.released).toBe(false);
   });
+  it('ends the app\'s own Loop when Stop names a turn no longer running, and asks ChatGPT to stop nothing (Haz on #1883)', async () => {
+    const { stopSessionTurn, endOwnWorkAfterStop, sessionControlsFor } = await import('../src/main/bridge.js');
+    const sessionId = await active(randomUUID());
+    await setSessionAutomation(sessionId, 'loop');
+    await expect(stopSessionTurn(sessionId, 'gone-turn')).rejects.toThrow('active_turn_changed');
+    expect(await endOwnWorkAfterStop(sessionId, 'gone-turn')).toBe(true);
+    expect((await sessionControlsFor(sessionId)).automation).toBe('off');
+    expect((await request('GET', '/status')).body.stopTurns).toEqual([]);
+    // Nothing of the app's own left: it says so.
+    expect(await endOwnWorkAfterStop(sessionId, 'gone-turn')).toBe(false);
+  });
   it('offers Stop for a turn the page still holds after the app stopped counting it as work (2.1.47 round)', async () => {
     // Seen 2026-10-28: ChatGPT stopped loading a chat's history, the page kept its turn open, so it
     // took no message, while the app treated the turn as over and offered no Stop at all.

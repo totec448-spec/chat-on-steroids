@@ -123,7 +123,7 @@ import {
   companionDiagnostics,
   sessionInputActivity,
   recoveryHeldByCalls, recoveryInputAllowed,
-  sessionControlsFor, cancelAssistantRecovery, pickupNow, stopSessionTurn, setSessionAutomation, setSessionObjective, compactSession, resumeFromSavedSummary, cancelSessionCompaction,
+  sessionControlsFor, cancelAssistantRecovery, pickupNow, stopSessionTurn, endOwnWorkAfterStop, setSessionAutomation, setSessionObjective, compactSession, resumeFromSavedSummary, cancelSessionCompaction,
   cancelWorkerCommands,
   chatUrl,
   revealChatInBrowser,
@@ -2020,7 +2020,16 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('sessions:stopTurn', async payload => {
     const { id, expectedTurnId } = sessionIdArg.extend({ expectedTurnId: z.string().min(1).max(256) }).parse(payload);
-    return stopSessionTurn(id, expectedTurnId);
+    try {
+      return await stopSessionTurn(id, expectedTurnId);
+    } catch (error) {
+      if (!(error instanceof Error) || error.message !== 'active_turn_changed') throw error;
+      // The answer Stop showed for is no longer running: the app's own work still stops (Haz on #1883),
+      // and the person reads what happened, not an error code.
+      throw new Error(await endOwnWorkAfterStop(id, expectedTurnId)
+        ? "That answer had already ended, so ChatGPT was not asked to stop. This chat's automatic work is stopped."
+        : 'That answer had already ended; there was nothing to stop.');
+    }
   });
   handle('sessions:releaseFinish', async (payload) => {
     const { id, expectedTurnId } = sessionIdArg.extend({ expectedTurnId: z.string().min(1).max(256) }).parse(payload);

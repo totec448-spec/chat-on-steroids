@@ -670,11 +670,22 @@ it('stops a held turn from the button with Plan armed, and stops nothing else wh
   send.click(); await settle();
   expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'page-held-turn');
   expect(plan).not.toHaveBeenCalled();
-  // Shown for the held turn, but by the time it is read again a different turn runs: that one is not stopped.
+  // Shown for the held turn, but by the time it is read again a different turn runs: that one is never
+  // named. Stop still goes to main for the turn it showed, which stops the app's own work and says the
+  // answer had ended (Haz on #1883).
   stop.mockClear();
   api.getSessionControls = controls({ activeTurnId: 'replacement-turn', heldTurnId: null });
   send.click(); await settle();
-  expect(stop).not.toHaveBeenCalled();
+  expect(stop).toHaveBeenCalledTimes(1);
+  expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'page-held-turn');
+  // And when no turn is left at all.
+  stop.mockClear();
+  api.getSessionControls = controls({ activeTurnId: null, heldTurnId: 'page-held-turn' });
+  await append([]); await append([]);
+  api.getSessionControls = controls({ activeTurnId: null, heldTurnId: null });
+  send.click(); await settle();
+  expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'page-held-turn');
+  expect(plan).not.toHaveBeenCalled();
 });
 
 describe('Esc in the empty composer during a turn', () => {
