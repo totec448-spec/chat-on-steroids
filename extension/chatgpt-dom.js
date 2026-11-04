@@ -1992,19 +1992,37 @@ var CLF_DOM = (() => {
    * Within one tab ChatGPT keeps the Project home's editor text after it was sent and the page moved
    * to the new chat. The next Compact & Resume in that Project found the brief already there,
    * waited for an empty editor and gave up ("could not open the source Project"), every time,
-   * until the person cleared or sent it by hand. Only a draft that begins with the app's own marker
-   * and opening sentence is taken; an attachment or a busy page keeps it.
+   * until the person cleared or sent it by hand. Only a brief this page typed itself, unchanged, is
+   * taken (a page reloaded since has none of its own); an attachment or a busy page keeps it.
    */
   function clearResumeResidue() {
-    return clearOwnResidue(RESUME_RESIDUE);
+    // Only a brief this page typed itself, word for word: one a person added to stays (CodeRabbit on #2069).
+    return clearOwnResidue(RESUME_RESIDUE, text => typedBriefs.includes(text));
   }
 
-  function clearOwnResidue(pattern) {
+  /** The Compact & Resume briefs this page typed, compacted as residue is compared; the newest few. */
+  const typedBriefs = [];
+  function rememberTypedBrief(value) {
+    const text = compactDraft(value);
+    if (!RESUME_RESIDUE.test(text) || typedBriefs.includes(text)) return;
+    typedBriefs.push(text);
+    if (typedBriefs.length > 4) typedBriefs.shift();
+  }
+
+  /**
+   * Editor text as residue is compared: without the escapes ChatGPT adds to stored text (a hard
+   * line break's backslash too, CodeRabbit on #2069) and without whitespace.
+   */
+  function compactDraft(value) {
+    return String(value).replace(/\\(?=\r?\n)/g, '').replace(/\\(?=[!-/:-@[-`{-~])/g, '').replace(/\s+/g, '');
+  }
+
+  function clearOwnResidue(pattern, owned = () => true) {
     return safe(() => {
       const box = composer();
       if (!composerWritable() || generating() || stopButton() || hasComposerAttachments()) return false;
-      const text = String(editorText(box)).replace(/\\(?=[!-/:-@[-`{-~])/g, '').replace(/\s+/g, '');
-      if (!text || !pattern.test(text)) return false;
+      const text = compactDraft(editorText(box));
+      if (!text || !pattern.test(text) || !owned(text)) return false;
       box.focus();
       const selection = document.getSelection();
       if (!selection || document.activeElement !== box) return false;
@@ -2443,7 +2461,9 @@ var CLF_DOM = (() => {
    * not a reason to hold a finished Goal reply at "sending" (2026-09-03: one letter did).
    */
   function insertPrompt(value, mode = false, failure = () => undefined) {
-    return insertIntoEditor(composer(), value, mode, failure, box => composer() === box);
+    const inserted = insertIntoEditor(composer(), value, mode, failure, box => composer() === box);
+    if (inserted) safe(() => rememberTypedBrief(value), undefined);
+    return inserted;
   }
 
   /**
