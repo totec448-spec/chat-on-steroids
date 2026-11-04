@@ -7023,7 +7023,8 @@ function decorateRecoveryEpisode(host: HTMLElement, episode: RecoveryEpisode | n
   const list = host.querySelector<HTMLElement>('.recovery-episode-list');
   if (!row || !episode || !sessionId) { old?.remove(); list?.remove(); return; }
   const expanded = expandedRecoveryEpisodes.has(sessionId);
-  const signature = JSON.stringify([sessionId, episode.since, episode.items.length, episode.items.at(-1)?.text, episode.tries, expanded, currentLanguage()]);
+  // Every shown step, so a reload that ended after a later step still updates an open list (CodeRabbit on #2062).
+  const signature = JSON.stringify([sessionId, episode.since, episode.items.map(item => [item.kind, item.time, item.text]), episode.tries, expanded, currentLanguage()]);
   if (old?.dataset.episode === signature && old.parentElement === row) return;
   old?.remove(); list?.remove();
   const since = new Date(episode.since).toLocaleTimeString(currentLanguage(), { hour: 'numeric', minute: '2-digit' });
@@ -7178,8 +7179,11 @@ function paintRecoveryVerdict(host: HTMLElement, sessionId: string | null): bool
   const verdict = detailFor === selectedId ? [...events].reverse().find(event => event.source === 'app' && event.kind === 'note' && !event.continuation) : undefined;
   if (verdict?.kind !== 'note') return false;
   const revision = JSON.stringify(['note', verdict.time, verdict.message.text]);
+  // The chat moved on after the note the way the episode counts it (#1883): a new turn or message, an
+  // answer from the page, or a tool call (CodeRabbit on #2062).
   const superseded = events.some(event => positionOf(event) > positionOf(verdict) &&
-    (event.kind === 'turn_start' || (event.kind === 'user_message' && event.source === 'extension')));
+    (event.kind === 'turn_start' || event.kind === 'tool_call' || (event.kind === 'user_message' && event.source === 'extension') ||
+      (event.kind === 'assistant_message' && event.source === 'extension')));
   if (superseded || (!!sessionId && dismissedRecoveryNotices.get(sessionId) === revision)) return false;
   const row = el('div', 'recovery-notice');
   row.append(icon('i-pulse'), el('span', 'queue-label', verdict.message.text),
