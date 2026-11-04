@@ -3986,5 +3986,7 @@
   "Previous 7 days": "Последние 7 дней",
   "Previous 30 days": "Последние 30 дней",
   "Waiting for ChatGPT to finish its answer": "Ждём, пока ChatGPT закончит ответ",
-  "Waiting for ChatGPT's page to end its turn": "Ждём, пока страница ChatGPT завершит ход"
+  "Waiting for ChatGPT's page to end its turn": "Ждём, пока страница ChatGPT завершит ход",
+  "That answer had already ended, so ChatGPT was not asked to stop. This chat's automatic work is stopped.": "Этот ответ уже завершился, поэтому ChatGPT не просили остановиться. Автоматическая работа этого чата остановлена.",
+  "That answer had already ended; there was nothing to stop.": "Этот ответ уже завершился; останавливать было нечего."
 }

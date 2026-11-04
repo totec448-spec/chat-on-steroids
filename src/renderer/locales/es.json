@@ -3905,5 +3905,7 @@
   "Previous 7 days": "Últimos 7 días",
   "Previous 30 days": "Últimos 30 días",
   "Waiting for ChatGPT to finish its answer": "Esperando a que ChatGPT termine su respuesta",
-  "Waiting for ChatGPT's page to end its turn": "Esperando a que la página de ChatGPT termine su turno"
+  "Waiting for ChatGPT's page to end its turn": "Esperando a que la página de ChatGPT termine su turno",
+  "That answer had already ended, so ChatGPT was not asked to stop. This chat's automatic work is stopped.": "Esa respuesta ya había terminado, así que no se pidió a ChatGPT que se detuviera. El trabajo automático de este chat está detenido.",
+  "That answer had already ended; there was nothing to stop.": "Esa respuesta ya había terminado; no había nada que detener."
 }

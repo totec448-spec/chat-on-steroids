@@ -2371,6 +2371,25 @@ async function stoppableTurn(sessionId: string): Promise<string | null> {
   const controls = await sessionControlsFor(sessionId);
   return controls.activeTurnId ?? controls.heldTurnId ?? null;
 }
+/**
+ * The person pressed Stop, but the turn it named is no longer the page's running turn (Haz on #1883):
+ * ChatGPT is not asked to stop anything, since that turn may have ended or another may run, but the
+ * app's own work for this chat ends as a Stop ends it: Goal or Loop off, a pending Compact & Resume
+ * cancelled, a silence Continue withdrawn. Says whether any of that was going on.
+ */
+export async function endOwnWorkAfterStop(sessionId: string, expectedTurnId: string): Promise<boolean> {
+  const id = await controlledConversation(sessionId);
+  const ended: string[] = [];
+  if (goalSwitchFor(id).enabled) { await setSessionAutomation(sessionId, 'off'); ended.push('Goal or Loop'); }
+  if (continuationForSession(sessionId)) { await cancelResumeNow(sessionId); ended.push('a pending Compact & Resume'); }
+  const before = (await listInputs()).filter(row => row.sessionId === sessionId && (row.silenceBoundary || row.completedTurnId) && row.state === 'queued').length;
+  await revokeSilenceInputs(sessionId);
+  if (before) ended.push('an automatic Continue');
+  logInfo(`bridge: Stop for turn ${expectedTurnId} in ${id} found that turn no longer running; ChatGPT was not asked to stop. ` +
+    (ended.length ? `The app's own work ended: ${ended.join(', ')}` : 'The app had nothing of its own going on'));
+  changed();
+  return ended.length > 0;
+}
 export async function stopSessionTurn(sessionId: string, expectedTurnId: string, options: { rotation?: boolean } = {}): Promise<SessionControlsView> {
   const id = await controlledConversation(sessionId);
   const assertCurrent = async () => {
