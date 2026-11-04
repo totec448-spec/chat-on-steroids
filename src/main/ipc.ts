@@ -2033,13 +2033,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('sessions:stopTurn', async payload => {
     const { id, expectedTurnId } = sessionIdArg.extend({ expectedTurnId: z.string().min(1).max(256) }).parse(payload);
+    // The chat and its Goal or Loop as Stop found them, before any of it changes.
+    const before = await sessionControlsFor(id).catch(() => null);
     try {
       return await stopSessionTurn(id, expectedTurnId);
     } catch (error) {
       if (!(error instanceof Error) || error.message !== 'active_turn_changed') throw error;
       // The answer Stop showed for is no longer running: the app's own work still stops (Haz on #1883),
       // and the person reads what happened, not an error code.
-      const outcome = await endOwnWorkAfterStop(id, expectedTurnId);
+      const outcome = await endOwnWorkAfterStop(id, expectedTurnId, before);
       throw new Error(outcome.resumeGoesOn
         ? 'That answer had already ended, so ChatGPT was not asked to stop. Compact & Resume was already moving this chat and goes on.'
         : outcome.ended

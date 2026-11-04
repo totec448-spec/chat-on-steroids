@@ -2378,13 +2378,22 @@ async function stoppableTurn(sessionId: string): Promise<string | null> {
  * app's own work for this chat ends as a Stop ends it: Goal or Loop off, a pending Compact & Resume
  * cancelled, a silence Continue withdrawn. Says whether any of that was going on.
  */
-export async function endOwnWorkAfterStop(sessionId: string, expectedTurnId: string): Promise<{ ended: boolean; resumeGoesOn: boolean }> {
+export async function endOwnWorkAfterStop(sessionId: string, expectedTurnId: string,
+  before: Pick<SessionControlsView, 'conversationId' | 'automation'> | null = null): Promise<{ ended: boolean; resumeGoesOn: boolean }> {
   const id = await controlledConversation(sessionId);
+  // Bound to the chat the Stop was pressed for: a Compact & Resume that moved the session to a new chat
+  // meanwhile is not that chat's to stop (CodeRabbit on #2066).
+  if (before && before.conversationId !== id) {
+    logInfo(`bridge: Stop for turn ${expectedTurnId} in ${before.conversationId} found the session moved to ${id}; nothing there was changed`);
+    return { ended: false, resumeGoesOn: true };
+  }
   const ended: string[] = [];
   // A Compact & Resume already committing cannot be stopped; the person is told so (CodeRabbit on #2066).
   let resumeGoesOn = false;
   // Off is saved as this chat's own choice, as a Stop saves it: a Goal armed only by its objective too (CodeRabbit on #2066).
-  const armed = goalArmedFor(id);
+  // Goal or Loop on when Stop was pressed counts, also when the Stop's own path already turned it off
+  // before it found the turn gone (CodeRabbit on #2066).
+  const armed = goalArmedFor(id) || (!!before && before.automation !== 'off');
   await setSessionAutomation(sessionId, 'off');
   if (armed) ended.push('Goal or Loop');
   if (continuationForSession(sessionId)) {
