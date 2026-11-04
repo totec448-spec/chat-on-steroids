@@ -8,13 +8,13 @@ import { nativePathIdentity, resolvePath, uniqueRootName } from './sandbox.js';
 import { parseRemote, remoteIdentity, sftpFor } from './remote/ssh.js';
 import { SftpError, type SftpClient } from './remote/sftp.js';
 import type { RemoteFolder, Root } from '../shared/types.js';
-import { bindSessionProject, findSessionByConversation, getSession, indexedSessions, moveSessionProject } from './session/store.js';
+import { bindSessionProject, findSessionByConversation, getSession, indexedSessions, markProjectNote, moveSessionProject } from './session/store.js';
 import { workspaceForChat } from './workspace.js';
 import { chatGroupsState, movedChatGroup, placeMovedChat } from './chat-groups.js';
 import type { ChatGroupsState } from '../shared/chat-groups.js';
 import { logInfo } from './logger.js';
 import { isListedChatgptProject } from './chatgpt-project-catalog.js';
-import { CHATGPT_PROJECT_ID, PROJECT_COLORS, type ChatgptProjectLink, type LocalProject, type ProjectColor } from '../shared/projects.js';
+import { CHATGPT_PROJECT_ID, MAX_RELATED_FOLDERS, PROJECT_COLORS, type ChatgptProjectLink, type LocalProject, type ProjectColor, type RelatedFolderView } from '../shared/projects.js';
 
 const at = z.number().finite().nonnegative();
 const requestId = z.string().uuid();
@@ -31,7 +31,9 @@ const projectSchema = z.object({
   color: z.enum(PROJECT_COLORS).optional(),
   createdAt: z.number().finite().nonnegative(), ungrouped: z.boolean().optional(), secretsShieldOff: z.boolean().optional(),
   chatgpt: chatgptSchema.optional(),
-  remote: z.object({ host: z.string().min(1).max(255), port: z.number().int().min(1).max(65535).optional(), path: z.string().min(1).max(4096) }).optional()
+  remote: z.object({ host: z.string().min(1).max(255), port: z.number().int().min(1).max(65535).optional(), path: z.string().min(1).max(4096) }).optional(),
+  // A damaged list is read as none rather than failing the whole catalog (#1689).
+  relatedFolders: z.array(z.string().min(1).max(32768)).max(MAX_RELATED_FOLDERS).optional().catch(undefined)
 });
 const catalogSchema = z.array(projectSchema).max(200);
 let mutations: Promise<unknown> = Promise.resolve();
@@ -298,6 +300,84 @@ export function setProjectSecretsShieldOff(projectId: string, off: boolean): Pro
       await writeDurableNow('projects', projects).catch(() => undefined);
       throw error;
     }
+    return updated;
+  });
+  mutations = operation.catch(() => undefined);
+  return operation;
+}
+
+/**
+ * Related folders (#1689): each one an approved folder, other than the project's own, found by its
+ * path. One that is no longer approved, or no longer there, is unavailable: shown so, and never
+ * told to ChatGPT. Approval is the only access; naming a folder here grants nothing.
+ */
+export async function relatedFolderViews(project: LocalProject): Promise<RelatedFolderView[]> {
+  const roots = getConfig().roots;
+  return Promise.all((project.relatedFolders ?? []).map(async (folder): Promise<RelatedFolderView> => {
+    const root = roots.find(entry => entry.remote ? entry.path === folder : samePath(entry.path, folder));
+    if (!root) return { path: folder, name: null, virtual: null, available: false };
+    const available = root.remote ? true : await fs.stat(root.path).then(stat => stat.isDirectory(), () => false);
+    return { path: folder, name: root.name, virtual: available ? `/${root.name}` : null, available };
+  }));
+}
+
+/** What a project chat's ChatGPT is told about related folders: the available ones, by their approved names. */
+export async function relatedFolderContext(projectId: string | null | undefined): Promise<string[]> {
+  if (!projectId) return [];
+  const project = await getProject(projectId).catch(() => null);
+  if (!project?.relatedFolders?.length) return [];
+  return (await relatedFolderViews(project)).flatMap(view => view.available && view.virtual ? [view.virtual] : []);
+}
+
+/**
+ * The person sets a project's related folders (#1689). Only approved folders other than the
+ * project's own, each once (compared as the same folder, not as text), at most ten. Open chats of the
+ * project tell ChatGPT the new list with the person's next message; nothing already sent changes.
+ */
+export function setRelatedFolders(projectId: string, folders: readonly string[]): Promise<LocalProject> {
+  const operation = mutations.then(async () => {
+    z.string().uuid().parse(projectId);
+    z.array(z.string().min(1).max(32768)).max(MAX_RELATED_FOLDERS * 4).parse(folders);
+    const projects = await listProjects();
+    const project = projects.find(row => row.id === projectId);
+    if (!project) throw new Error('Project not found');
+    const roots = getConfig().roots;
+    const chosen: string[] = [];
+    const saved = project.relatedFolders ?? [];
+    for (const folder of folders) {
+      const root = roots.find(entry => entry.remote ? entry.path === folder : samePath(entry.path, folder));
+      if (!root) {
+        // A saved folder that lost its approval may stay while the person edits the list (removing
+        // another one), shown as unavailable as before; it is never added anew (CodeRabbit on #2053).
+        const kept = saved.find(other => other === folder);
+        if (!kept) throw new Error('Choose a related folder from your approved folders');
+        if (!chosen.includes(kept)) chosen.push(kept);
+        continue;
+      }
+      if (root.remote ? root.path === project.path : samePath(root.path, project.path)) continue;
+      if (chosen.some(other => root.remote ? other === root.path : samePath(other, root.path))) continue;
+      chosen.push(root.path);
+    }
+    if (chosen.length > MAX_RELATED_FOLDERS) throw new Error('A project can have at most 10 related folders');
+    const before = project.relatedFolders ?? [];
+    if (before.length === chosen.length && before.every((folder, index) => folder === chosen[index])) return project;
+    const { relatedFolders: _, ...without } = project;
+    const updated: LocalProject = chosen.length ? { ...without, relatedFolders: chosen } : without;
+    try {
+      await writeDurableNow('projects', projects.map(row => row.id === projectId ? updated : row));
+    } catch (error) {
+      await writeDurableNow('projects', projects).catch(() => undefined);
+      throw error;
+    }
+    let told = 0;
+    // Chats used in the last 30 days: opening every old chat of a big project for this would cost
+    // more than it helps; an older chat gets the list when it is moved, or from a new chat's opening.
+    const since = Date.now() - 30 * 24 * 60 * 60_000;
+    for (const session of await indexedSessions()) {
+      if (session.projectId !== projectId || !session.conversationId || session.updatedAt < since) continue;
+      if (await markProjectNote(session.id, projectId).catch(() => false)) told++;
+    }
+    logInfo(`projects: related folders of project ${projectId} set to ${chosen.length}; ${told} open chat(s) hear the change with their next message`);
     return updated;
   });
   mutations = operation.catch(() => undefined);

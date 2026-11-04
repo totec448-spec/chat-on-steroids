@@ -1,9 +1,12 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const { WebSocket } = require('ws');
 const { transformSync, buildSync } = require('esbuild');
+const { startSnapProfileWatchdog } = require('./fixtures/snap-chromium-watchdog.cjs');
+const { snapChromiumPaths, isSnapChromiumLauncher } = require('./fixtures/snap-chromium-launchers.cjs');
 
 const root = path.resolve(__dirname, '..');
 const reactRuntime = process.argv.find(value => value.startsWith('--react-runtime='))?.slice('--react-runtime='.length);
@@ -56,10 +59,23 @@ const executable = [
     .flatMap(base => [path.join(base, 'Google/Chrome/Application/chrome.exe'), path.join(base, 'Microsoft/Edge/Application/msedge.exe')]),
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   '/Applications/Chromium.app/Contents/MacOS/Chromium',
-  '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'
+  '/usr/bin/google-chrome', '/usr/bin/chromium',
+  // Ubuntu's Chromium package is installed as a snap on supported desktops.
+  ...snapChromiumPaths, '/usr/bin/chromium-browser'
 ].find(candidate => candidate && fs.existsSync(candidate));
 assert(executable, 'No Chromium found; set COS_CHROME to a Chrome or Chromium executable.');
-const profile = path.join(output, 'profile');
+// Snap Chromium has a private /tmp, so the verifier must share its profile
+// directory with the confined browser in ~/snap/chromium/common.
+// On Ubuntu /usr/bin/chromium-browser can be a wrapper for the Chromium snap.
+// An explicit COS_CHROME override may still choose that wrapper or an alternate
+// snapd launcher; both need the Snap-accessible profile and watchdog.
+const snapChromium = isSnapChromiumLauncher(executable);
+const snapProfileRoot = path.join(os.homedir(), 'snap/chromium/common');
+if (snapChromium) fs.mkdirSync(snapProfileRoot, { recursive: true });
+const profile = snapChromium ? fs.mkdtempSync(path.join(snapProfileRoot, 'cos-shell-runtime-')) : path.join(output, 'profile');
+// Arm cleanup BEFORE the browser is launched: the UI runner may force-kill
+// this verifier, bypassing finally, and the Snap wrapper may outlive it.
+if (snapChromium) startSnapProfileWatchdog(profile);
 fs.rmSync(path.join(profile, 'DevToolsActivePort'), { force: true });
 const browser = spawn(executable, [`--user-data-dir=${profile}`, '--headless=new', '--remote-debugging-port=0', '--no-first-run', '--no-default-browser-check', '--disable-background-networking', 'about:blank'], { windowsHide: true, stdio: 'ignore' });
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -292,7 +308,15 @@ async function evaluate(expression) {
     fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify(report, null, 2));
     console.log(JSON.stringify(report, null, 2));
   } finally {
-    if (socket?.readyState === WebSocket.OPEN) { try { await cdp('Browser.close', {}, null); } catch {} socket.close(); }
+    if (socket?.readyState === WebSocket.OPEN) { try { await cdp('Browser.close', {}, null); } catch {} }
+    // Wait for Chromium itself to close its CDP connection before deleting the
+    // Snap profile; the launcher can exit while Chromium still writes cache files.
+    if (socket && socket.readyState !== WebSocket.CLOSED) {
+      await Promise.race([new Promise(resolve => socket.once('close', resolve)), delay(3000)]);
+      socket.close();
+    }
     browser.kill();
+    // The independent watchdog retires the Snap profile after this process
+    // exits, whether normally or because a test timeout killed it.
   }
 })().catch(error => { console.error(error.message); process.exitCode = 1; });

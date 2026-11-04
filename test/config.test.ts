@@ -44,6 +44,20 @@ describe('browser bridge port config', () => {
 });
 
 describe('settings migration', () => {
+  it('defaults missing or damaged Linux Desktop opt-in to off, but retains an explicit true across reload', async () => {
+    const fresh = defaultConfig();
+    expect(fresh.ui.linuxDesktopEnabled).toBe(false);
+    const { linuxDesktopEnabled: _, ...legacyUi } = fresh.ui;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...fresh, ui: legacyUi }), 'utf8');
+    expect((await loadConfig()).ui.linuxDesktopEnabled).toBe(false);
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({
+      ...fresh, ui: { ...fresh.ui, linuxDesktopEnabled: 'yes' }
+    }), 'utf8');
+    expect((await loadConfig()).ui.linuxDesktopEnabled).toBe(false);
+    await saveConfig({ ...fresh, ui: { ...fresh.ui, linuxDesktopEnabled: true } });
+    expect((await loadConfig()).ui.linuxDesktopEnabled).toBe(true);
+  });
+
   it('defaults command policy enforcement off in allow mode and round-trips both modes', async () => {
     expect(defaultConfig().commandAllowlist).toEqual({ enabled: false, mode: 'allow', rules: [] });
     const legacy = defaultConfig() as Partial<ReturnType<typeof defaultConfig>>;
