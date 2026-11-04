@@ -75,6 +75,7 @@ import {
   awaitRequestCorrelation,
   commitRequestCorrelations,
   observeRequestCorrelations,
+  onRequestCorrelation,
   requestCorrelation,
   resetCorrelationRegistryForTests,
 } from './correlation.js';
@@ -832,6 +833,10 @@ function retryFailedAttributionRepair(): void {
   attributionRepairTimer.unref?.();
 }
 
+// Native page proof already schedules repair in noteCallEvidence. Provider-session proof
+// can arrive independently of page observations and must use that same repair owner.
+onRequestCorrelation(owner => { if (owner.providerSessionAnchor) scheduleAttributionRepair(owner.requestId); });
+
 /**
  * Feeds the one request-correlation registry.
  *
@@ -982,17 +987,21 @@ async function repairAttributionNow(affected?: ReadonlySet<string>): Promise<{ s
   let storageFailed = false;
 
   for (const summary of await indexedSessions()) try {
-    if ((summary.provisionalToolCalls ?? 0) > 0) {
+    if ((summary.provisionalToolCalls ?? 0) > 0 || (summary.providerSessionToolCalls ?? 0) > 0) {
       const events = await readEvents(summary.id, { kinds: ['tool_call'] });
       let repaired = 0;
       for (const event of events) {
-        if (event.kind !== 'tool_call' || event.call.attributionMethod !== 'generation' || !event.call.requestId) continue;
+        if (event.kind !== 'tool_call' || event.call.attributionMethod !== 'generation' && !event.call.providerSessionAnchor || !event.call.requestId) continue;
         try {
           const proof = requestCorrelation(event.call.requestId);
           if (!proof || !await getSession(proof.sessionId)) continue;
+          if (event.call.providerSessionAnchor && proof.providerSessionAnchor === event.call.providerSessionAnchor &&
+            proof.sessionId === summary.id && proof.conversationId === event.call.conversationId) continue;
           const same = proof.sessionId === summary.id;
           const corrected = { ...event, call: { ...event.call, conversationId: proof.conversationId,
             attribution: 'request_id' as const, attributionMethod: 'request_id' as const } };
+          if (proof.providerSessionAnchor) corrected.call.providerSessionAnchor = proof.providerSessionAnchor;
+          else delete corrected.call.providerSessionAnchor;
           // A provisional turn cannot establish an exact turn in a different conversation.
           if (!same || proof.conversationId !== event.call.conversationId) delete corrected.turnId;
           if (!same) {
@@ -1015,7 +1024,7 @@ async function repairAttributionNow(affected?: ReadonlySet<string>): Promise<{ s
             const existing = await readEvents(proof.sessionId, { kinds: ['tool_call'] });
             if (!existing.some(row => row.kind === 'tool_call' && row.call.callId === event.call.callId)) {
               const { seq: _seq, ...copy } = corrected;
-              await (copy.call.process ? recordProcessCall : appendEvent)(proof.sessionId, copy);
+              await (copy.call.process || copy.call.providerSessionAnchor ? recordProcessCall : appendEvent)(proof.sessionId, copy);
               changed.add(proof.sessionId);
             }
           }
@@ -1133,7 +1142,8 @@ async function repairAttributionNow(affected?: ReadonlySet<string>): Promise<{ s
         );
         for (const { event, conversationId } of group) {
           if (existingCallIds.has(event.call.callId)) continue;
-          await appendEvent(targetSessionId, {
+          const providerAnchor = event.call.requestId ? requestCorrelation(event.call.requestId)?.providerSessionAnchor : undefined;
+          await (providerAnchor ? recordProcessCall : appendEvent)(targetSessionId, {
             time: event.time,
             source: 'mcp',
             kind: 'tool_call',
@@ -1141,7 +1151,8 @@ async function repairAttributionNow(affected?: ReadonlySet<string>): Promise<{ s
               ...event.call,
               attribution: 'request_id',
               conversationId,
-              attributionMethod: 'request_id'
+              attributionMethod: 'request_id',
+              ...(providerAnchor ? { providerSessionAnchor: providerAnchor } : {})
             },
             ...(event.agent ? { agent: event.agent } : {}),
             ...(event.turnId ? { turnId: event.turnId } : {})
@@ -1306,6 +1317,8 @@ export interface ToolContentPart {
 }
 
 export interface ToolCallInput {
+  /** Provenance captured at admission, retained if native proof changes during execution. */
+  providerSessionAnchor?: string;
   /** Captured before the handler. Presentation only; never binds caller or agent identity. */
   recordingContext?: RecordingContext | null;
   /** Proven by dispatcher nesting, never inferred from request ids or timing. */
@@ -1440,6 +1453,12 @@ export function recordToolCall(input: ToolCallInput): Promise<ToolCallRecord | n
       attribution: 'request_id',
       turnId: live?.turnId ?? null
     };
+    if (input.providerSessionAnchor) {
+      target.conversationId = correlation?.conversationId ?? null;
+      target.sessionId = correlation?.sessionId ?? null;
+      target.attribution = correlation ? 'request_id' : 'unattributed';
+      if (target.conversationId !== input.conversationId) target.turnId = null;
+    }
     if (input.bind) bindAgentConversation(input.bind, input.conversationId);
     attributing = Promise.resolve(target);
   } else {
@@ -1651,6 +1670,8 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
       callId: randomUUID(),
       tool: input.tool,
       attribution: target.attribution,
+      ...(target.attribution === 'request_id' && input.requestId && requestCorrelation(input.requestId)?.providerSessionAnchor
+        ? { providerSessionAnchor: requestCorrelation(input.requestId)!.providerSessionAnchor } : {}),
       requestId: input.requestId ?? null,
       conversationId: target.conversationId,
       attributionMethod:
@@ -1685,6 +1706,18 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
         logInfo(`request attribution: provisional admission rejected for call ${call.callId}, request ${input.requestId ?? 'none'}; recording context no longer current, retrying as unattributed`);
         return fileToolCall(input, { conversationId: null, sessionId: null, turnId: null, attribution: 'unattributed' });
       }
+    } else if (call.providerSessionAnchor) {
+      const admitted = await recordProcessCall(sessionId, event, () => {
+        const proof = requestCorrelation(input.requestId);
+        return proof?.sessionId === sessionId && proof.conversationId === target.conversationId &&
+          proof.providerSessionAnchor === call.providerSessionAnchor;
+      });
+      if (!admitted) {
+        const proof = requestCorrelation(input.requestId);
+        logInfo(`request attribution: provider-session proof changed before recording call ${call.callId}; rereading its owner`);
+        return fileToolCall(input, { conversationId: proof?.conversationId ?? null,
+          sessionId: proof?.sessionId ?? null, attribution: proof ? 'request_id' : 'unattributed', turnId: null });
+      }
     } else await (call.process ? recordProcessCall : appendEvent)(sessionId, event);
     if (call.process && evidence.processCompletion) {
       // Bind once to the recorded call, never look up a reusable numeric process id.
@@ -1712,7 +1745,10 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
       });
     }
     if (target.attribution === 'generation') {
-      logInfo(`request attribution: ${input.requestId} provisionally recorded in ${target.conversationId}; only observed running turn, not caller identity`);
+      // Provisional placement still lacks exact proof. Preserve stream diagnostics and
+      // register the unresolved id so a trace arriving later is reported too.
+      const trace = input.requestId ? requestTraceNote(input.requestId) : '';
+      logInfo(`request attribution: ${input.requestId} provisionally recorded in ${target.conversationId}; only observed running turn, not caller identity${trace || '; no matching stream trace observed'}`);
       notifyChanged(sessionId);
       if (input.requestId && requestCorrelation(input.requestId)) scheduleAttributionRepair(input.requestId);
       // Presentation cannot reopen a turn, bind an agent, transfer a terminal or grant

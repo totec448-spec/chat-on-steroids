@@ -10,7 +10,12 @@ const version = require('../package.json').version;
 const built = path.join(root, 'out/renderer');
 const output = path.join(root, 'outputs/update-readiness');
 const before = process.argv.includes('--before');
-app.setPath('userData', path.join(output, 'runtime'));
+// A preceding failed run can leave Chromium caches and session storage in this
+// synthetic profile. Keep every run independent; never touch real userData.
+fs.mkdirSync(output, { recursive: true });
+const runtime = path.join(output, 'runtime');
+fs.rmSync(runtime, { recursive: true, force: true });
+app.setPath('userData', runtime);
 app.whenReady().then(async () => {
   const fixture = `${fixtureConfigSource()}
     const p = new URLSearchParams(location.search);
@@ -51,14 +56,39 @@ app.whenReady().then(async () => {
   let win;
   try {
     await new Promise(resolve => server.listen(0,'127.0.0.1',resolve)); fs.mkdirSync(output,{recursive:true});
-    win = new BrowserWindow({show:false,width:1100,height:850,webPreferences:{offscreen:true,sandbox:true}});
+    // A hidden offscreen compositor can lose navigations after repeated
+    // resize/capture cycles on native Wayland. Opt in to a mapped test window.
+    const showLinuxFixture = process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1';
     const errors = [];
-    win.webContents.on('console-message', event => { if (event.level === 'error' && !event.message.includes('ResizeObserver loop')) errors.push(event.message); });
+    // A mapped Wayland compositor may ignore programmatic size changes.
+    // Each layout viewport gets a fresh window with the requested content size.
+    const windowAt = (width, height) => {
+      const previous = win;
+      win = new BrowserWindow({ show:showLinuxFixture, width, height, useContentSize:true,
+        webPreferences:{offscreen:!showLinuxFixture,sandbox:true,backgroundThrottling:false}});
+      win.webContents.on('console-message', event => {
+        if (event.level === 'error' && !event.message.includes('ResizeObserver loop')) errors.push(event.message);
+      });
+      // Keep an Electron window alive throughout the swap; closing the last
+      // window can otherwise start the app's automatic quit path on Linux.
+      previous?.destroy();
+    };
+    windowAt(1100,850);
     const js = expression => win.webContents.executeJavaScript(expression);
     const pause = ms => new Promise(resolve => setTimeout(resolve,ms));
     const until = async expression => { const end=Date.now()+8000; while(Date.now()<end) { if(await js(expression)) return; await pause(40); } throw new Error('Timeout: '+expression); };
     const open = async query => {
-      await win.loadURL('http://127.0.0.1:'+server.address().port+'/?'+query);
+      const url = 'http://127.0.0.1:'+server.address().port+'/?'+query;
+      try { await win.loadURL(url); }
+      catch (error) {
+        // Electron occasionally returns ERR_FAILED while reloading the local
+        // synthetic HTTP page through dozens of language/resize transitions.
+        // Retry only that transport error, once; all page assertions still run.
+        if (!/ERR_FAILED \(-2\)/.test(String(error)) || win.isDestroyed()) throw error;
+        console.warn('Synthetic UI navigation retried once after ERR_FAILED:', query);
+        await pause(200);
+        await win.loadURL(url);
+      }
       await until(`document.getElementById('versionLine').textContent.length>0`);
       await js(`document.querySelector('#tabs [data-tab="activity"]').click()`); await pause(400);
       await until(`!document.querySelector('.toast')`);
@@ -100,7 +130,7 @@ app.whenReady().then(async () => {
     await js(`(()=>{const next=structuredClone(window.fixtureState);next.connectorRefresh.core={schemaId:'schema-a',state:'unknown',responding:true};window.fixturePush(next)})()`);
     assert.equal(await js(`document.getElementById('updateReadinessDetails').open`),true,'Operational but unverified schemas need attention');
     await pause(600); await shot('schema-unverified-expanded-en.png');
-    win.setContentSize(700,850);
+    windowAt(700,850);
     for (const lang of ['en','ja']) {
       await open('lang='+lang);
       await js(`(()=>{const next=structuredClone(window.fixtureState);next.connectorRefresh.core.state='manual';window.fixturePush(next)})()`);
@@ -110,7 +140,10 @@ app.whenReady().then(async () => {
       await shot('manual-'+lang+'-narrow.png');
     }
     // Activity keeps main's fixed page and lets the event feed use the remaining height.
-    win.setContentSize(700,600); await pause(200);
+    windowAt(700,600);
+    await open('lang=ja');
+    await js(`(()=>{const next=structuredClone(window.fixtureState);next.connectorRefresh.core.state='manual';window.fixturePush(next)})()`);
+    await until(`document.getElementById('updateReadinessDetails').open`);
     assert.equal(await js(`(()=>{const p=document.querySelector('[data-panel="activity"]');return p.scrollHeight<=p.clientHeight+1})()`),true,'Long history does not add page scrolling');
     const expandedFeedHeight = await js(`document.getElementById('fullFeed').clientHeight`);
     await js(`document.querySelector('#updateReadinessDetails > summary').click()`);
@@ -122,7 +155,10 @@ app.whenReady().then(async () => {
     await js(`window.fixturePush(window.fixtureState);document.getElementById('updateAll').scrollIntoView({block:'nearest'})`);
     assert.equal(await js(`(()=>{const b=document.getElementById('updateAll'),r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.left+r.width/2,r.bottom-4))})()`),true,'Compact Update all is not covered by the event card');
     await js(`(()=>{const next=structuredClone(window.fixtureState);next.connectorRefresh.core.state='manual';window.fixturePush(next)})()`);
-    win.setContentSize(700,460);
+    windowAt(700,460);
+    await open('lang=ja');
+    await js(`(()=>{const next=structuredClone(window.fixtureState);next.connectorRefresh.core.state='manual';window.fixturePush(next)})()`);
+    await until(`document.getElementById('updateReadinessDetails').open`);
     await until(`innerWidth===700&&innerHeight===460`);
     const short = await js(`(()=>{const b=document.getElementById('updateReviewSetup');b.scrollIntoView({block:'nearest'});const a=b.getBoundingClientRect();return {top:a.top,bottom:a.bottom,viewport:innerHeight,reachable:b.contains(document.elementFromPoint(a.left+a.width/2,a.top+a.height/2))}})()`);
     assert.ok(short.top>=0 && short.bottom<=short.viewport+1,'Short window action is reachable (subpixel scroll rounding): '+JSON.stringify(short));
@@ -139,7 +175,7 @@ app.whenReady().then(async () => {
     win.webContents.sendInputEvent({type:'char',keyCode:'\r'});
     win.webContents.sendInputEvent({type:'keyUp',keyCode:'Enter'});
     await until(`document.querySelector('[data-panel="setup"]').classList.contains('is-active')`);
-    win.setContentSize(1100,850); await open('lang=en');
+    windowAt(1100,850); await open('lang=en');
     await js(`(()=>{const next=structuredClone(window.fixtureState);next.update.latest='99.0.0';next.update.stage='ready';window.fixturePush(next)})()`);
     // A ready update is asked about in the app's own dialog, Keep working first (2.1.38).
     for (const theme of ['light','dark']) {
@@ -209,7 +245,7 @@ app.whenReady().then(async () => {
     assert.equal(await js(`document.getElementById('updateReadinessSummary').dataset.ready`),'false');
     await pause(600); await shot('macos-manual-permissions-en.png');
     // All locales must keep failures and recovery actions accessible outside closed details.
-    win.setContentSize(700,600);
+    windowAt(700,600);
     for (const lang of ['en','ja','de','es','fr','ko','pt-BR','pt-PT','ru','tr','vi','zh-CN','zh-TW']) {
       await open('lang='+lang);
       await js(`(()=>{const size=document.getElementById('appearanceSize');size.value='18';size.dispatchEvent(new Event('input',{bubbles:true}))})()`);
@@ -309,10 +345,45 @@ app.whenReady().then(async () => {
       await js(`document.getElementById('updateReadinessToggle').click()`);
       assert.equal(await js(`(()=>{const e=document.getElementById('updateAllError'),b=document.getElementById('updateAll'),r=b.getBoundingClientRect();return e.checkVisibility()&&e.getBoundingClientRect().bottom<=innerHeight&&r.bottom<=innerHeight&&b.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2))})()`),true,lang+' network failure and retry stay reachable with closed details');
       if(['en','ja','de'].includes(lang)){await pause(200);await shot('network-after-'+lang+'.png');}
+      // A retained operation error cannot hide recovery for a later automatic cache failure.
+      await js(`(()=>{const next=structuredClone(window.fixtureState);next.update={...next.update,stage:'failed',latest:'99.0.0',error:'the update staging path must use ordinary directories'};window.fixturePush(next)})()`);
+      await until(`!document.querySelector('.toast')`);
+      assert.ok(await js(`document.getElementById('updateAllError').textContent.includes(${JSON.stringify(networkReason)})`),lang+' retained operation error stays visible');
+      const mixedRecovery = await js(`(()=>{const b=document.getElementById('updateDiagnosticsReport'),r=b.getBoundingClientRect(),c=document.getElementById('updateReadinessCard');return {visible:b.checkVisibility(),reachable:r.bottom<=innerHeight&&b.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)),scrollable:getComputedStyle(c).overflowY==='auto'&&c.scrollHeight>c.clientHeight}})()`);
+      assert.ok(mixedRecovery.visible&&(mixedRecovery.reachable||mixedRecovery.scrollable),lang+' retained network error leaves recovery reachable or natively scrollable: '+JSON.stringify(mixedRecovery));
+      if (!mixedRecovery.reachable) await js(`const c=document.getElementById('updateReadinessCard');c.scrollTop=c.scrollHeight`);
+      assert.equal(await js(`(()=>{const b=document.getElementById('updateDiagnosticsReport'),r=b.getBoundingClientRect();return r.bottom<=innerHeight&&b.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2))})()`),true,lang+' mixed-error report receives pointer input after ordinary card scrolling');
+      const beforeAutomaticReport=await js('window.mutations.length');
+      await js(`document.getElementById('updateDiagnosticsReport').click()`);
+      await until(`!document.getElementById('updateDiagnosticsReport').disabled`);
+      assert.deepEqual(await js(`window.mutations.slice(${beforeAutomaticReport})`),['diagnostics-report'],lang+' mixed-error report does not retry updates');
+      if(['en','de'].includes(lang)){await pause(200);await shot('mixed-error-diagnostics-'+lang+'.png');}
+      await js(`window.fixturePush(window.fixtureState)`);
+      assert.equal(await js(`document.getElementById('updateDiagnosticsReport').hidden`),true,lang+' clearing only the automatic Diagnostics error hides recovery');
+      assert.equal(await js(`document.getElementById('updateAllError').hidden`),false,lang+' healthy state push does not clear retained network operation error');
       await js(`document.getElementById('updateAll').click();window.fixtureFinishUpdate();window.fixturePush(window.fixtureState)`);
       await until(`!document.getElementById('updateAll').disabled`);
       assert.equal(await js(`document.getElementById('updateAllError').hidden`),true,lang+' explicit successful retry clears network error');
       assert.equal(await js(`document.getElementById('updateReadinessSummary').dataset.ready`),'true');
+      await js(`(()=>{const next=structuredClone(window.fixtureState);next.update={...next.update,stage:'failed',latest:'99.0.0',error:'the update staging path must use ordinary directories'};window.fixturePush(next)})()`);
+      const cacheError = await js(`document.querySelector('[data-update-part="app"]').textContent`);
+      assert.ok(cacheError.includes(copy('The update cache and its version folders must be ordinary folders, not files or links.')),lang+' linked cache reason is translated');
+      assert.ok(cacheError.includes(copy('Save a Diagnostics report from Activity for help with recovery. The saved state has been kept.')),lang+' blocked cache directs diagnostics rather than unchanged retry');
+      await until(`!document.querySelector('.toast')`);
+      assert.equal(await js(`document.getElementById('updateDiagnosticsReport').checkVisibility()`),true,lang+' automatic blocked cache exposes report action without Update all');
+      assert.equal(await js(`(()=>{const b=document.getElementById('updateDiagnosticsReport'),r=b.getBoundingClientRect();return r.bottom<=innerHeight&&b.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2))})()`),true,lang+' automatic failure report is reachable');
+      await js(`window.mutations.length=0;document.getElementById('updateDiagnosticsReport').click()`);
+      await until(`!document.getElementById('updateDiagnosticsReport').disabled`);
+      assert.deepEqual(await js('window.mutations'),['diagnostics-report'],lang+' automatic failure report does not retry updates');
+      if(lang==='en'){await pause(200);await shot('automatic-cache-rejection-en.png');}
+      await js(`window.fixturePush(window.fixtureState)`);
+      assert.equal(await js(`document.getElementById('updateDiagnosticsReport').hidden`),true,lang+' recovered update hides report action');
+      await js(`document.getElementById('updateAll').click();window.fixtureFinishUpdate({ok:false,error:'the update staging path must use ordinary directories'})`);
+      await until(`!document.getElementById('updateAll').disabled`);
+      await until(`!document.querySelector('.toast')`);
+      assert.equal(await js(`document.getElementById('updateDiagnosticsReport').checkVisibility()`),true,lang+' blocked cache exposes report action');
+      assert.equal(await js(`(()=>{const c=document.querySelector('.update-readiness');return c.scrollWidth<=c.clientWidth+1&&[...c.querySelectorAll('p:not(.sr-only),button')].every(e=>e.scrollWidth<=e.clientWidth+1)})()`),true,lang+' cache rejection copy wraps');
+      if(lang==='ja'){await pause(200);await shot('cache-rejection-ja.png');}
       console.log('PASS locale: '+lang+'; closed details, translated failure, both actions reachable, no implicit retry');
     }
     assert.deepEqual(errors,[],'No production renderer errors');
