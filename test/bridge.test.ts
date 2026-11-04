@@ -4330,6 +4330,47 @@ describe('automatic compaction', () => {
     }
   });
 
+  // 2026-11-03 (Mac, 2 days): ChatGPT limited the chat's history, so its page never showed the latest
+  // tool results answered; every automatic attempt ended at that receipt, or a recovery reload cut the
+  // wait short, while the chat grew past its limit. The app now lets a later attempt ask without it.
+  it.each([
+    ['one attempt that waited the receipt out', ['results-unconfirmed'], true],
+    ['two attempts cut short', ['results-wait-changed', 'results-wait-changed'], false],
+    ['three attempts cut short', ['results-wait-changed', 'results-wait-changed', 'results-wait-changed'], true],
+    ['deferrals for other reasons', [null, null, null, null], false],
+    // This machine's own call kept the receipt from being checked: not a receipt miss (CodeRabbit on #2056).
+    ['attempts whose local call kept running', ['local-tools-running', 'local-tools-running', 'local-tools-running'], false]
+  ] as const)('asks for the handoff without the tool-result receipt after %s', async (_case, codes, waived) => {
+    await pair();
+    const conversationId = `a1a1a1a1-0000-4000-8000-0000000${String(codes.length)}${waived ? 'b' : 'c'}${codes[0] === null ? 'd' : codes[0] === 'local-tools-running' ? 'f' : 'e'}00`;
+    await request('POST', '/events', {
+      body: { conversationId, events: [{ kind: 'user_message', time: Date.now(), text: 'a long chat whose results ChatGPT never confirms', messageId: `m-${conversationId}` }] }
+    });
+    const first = await request('POST', '/compact', { body: { conversationId, ticket: true, automatic: true } });
+    expect(first.body.waiveReceipt).toBeUndefined();
+    const token = first.body.token as string;
+    for (const code of codes) {
+      expect((await request('POST', '/compact', { body: { conversationId, token, sourceDeferred: true,
+        sourceError: 'ChatGPT has not confirmed receiving the latest tool results. Nothing was compacted.', ...(code ? { sourceErrorCode: code } : {}) } })).status).toBe(200);
+    }
+    const again = await request('POST', '/compact', { body: { conversationId, ticket: true, automatic: true } });
+    expect(again.body.token).toBe(token);
+    expect(again.body.waiveReceipt === true).toBe(waived);
+    const lines = getLog().map(entry => entry.message).filter(line => line.includes(`compaction ticket ${token.slice(0, 8)}`) && line.includes('without ChatGPT\'s receipt'));
+    expect(lines).toHaveLength(waived ? 1 : 0);
+  });
+
+  it('never waives the receipt for a manual Compact & Resume', async () => {
+    await pair();
+    const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac1f';
+    await request('POST', '/events', {
+      body: { conversationId, events: [{ kind: 'user_message', time: Date.now(), text: 'a manual press', messageId: 'm-manual-waive' }] }
+    });
+    const filed = await request('POST', '/compact', { body: { conversationId, ticket: true } });
+    await request('POST', '/compact', { body: { conversationId, token: filed.body.token, sourceDeferred: true, sourceError: 'x', sourceErrorCode: 'results-unconfirmed' } });
+    expect((await request('POST', '/compact', { body: { conversationId, ticket: true } })).body.waiveReceipt).toBeUndefined();
+  });
+
   it('takes no deferral reason for a manual Compact & Resume', async () => {
     await pair();
     const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac0f';
@@ -16909,6 +16950,37 @@ describe('the goal loop over the bridge', () => {
       const authority = recoveryBrowserWake.mock.calls[0]?.[3];
       expect(await authority?.current()).toBe(true);
     } finally { vi.useRealTimers(); }
+  });
+
+  // 2026-11-03 (Mac): the person's Continue reached the chat's page, which held it while ChatGPT still
+  // answered; a minute later the app failed it as "the browser did not pick up this message".
+  it('keeps a queued message the chat\'s page holds until ChatGPT\'s answer ends, and fails it only once no page holds it', async () => {
+    vi.useFakeTimers();
+    const input = await import('../src/main/session/input.js');
+    const { resetInputForTests, enqueueInput, listInputs } = input;
+    resetInputForTests();
+    const id = 'abca1103-0000-4000-8000-000000001103';
+    try {
+      await writeDurableNow('session-input', []);
+      await pair();
+      const chat = 'cafe1103-0000-4000-8000-000000001103';
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'work', messageId: 'held-user' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'held-turn' },
+        { kind: 'turn_end', time: Date.now(), turnId: 'held-turn', outcome: 'completed' }
+      ] } });
+      const session = (await findSessionByConversation(chat, { requireUnique: true }))!;
+      await enqueueInput({ id, sessionId: session.id, text: 'Continue', mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null });
+      const row = async () => (await listInputs()).find(entry => entry.id === id);
+      expect((await row())?.transportIntent).toBe('browser');
+      for (let step = 0; step < 4; step++) {
+        await vi.advanceTimersByTimeAsync(40_000);
+        expect((await request('POST', '/page-note', { body: { note: 'input-held', reason: 'still-answering', inputId: id, conversationId: chat } })).body).toEqual({ ok: true });
+        expect(await row()).toMatchObject({ state: 'queued', pageHold: { reason: 'still-answering' } });
+      }
+      await vi.advanceTimersByTimeAsync(60_001);
+      expect(await row()).toMatchObject({ state: 'failed', error: 'Not sent: the browser did not pick up this message within 60 seconds.' });
+    } finally { resetInputForTests(); vi.useRealTimers(); }
   });
 
   // 2026-10-31: an automatic Continue the app itself withheld was "uncollected"; the pickup reloaded the
