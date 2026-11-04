@@ -3959,5 +3959,6 @@
   "That chat cannot take messages from here.": "Ce chat ne peut pas recevoir de messages d’ici.",
   "That notification is too old to answer. Send /status to see your chats.": "Cette notification est trop ancienne pour y répondre. Envoyez /status pour voir vos chats.",
   "Let replies send messages to chats": "Laisser les réponses envoyer des messages aux chats",
-  "A reply to a notification goes to that chat as your message, and ChatGPT may then run tools on this computer. Anyone who can use your Telegram account could do the same.": "Une réponse à une notification part vers ce chat comme votre message, et ChatGPT peut alors exécuter des outils sur cet ordinateur. Toute personne pouvant utiliser votre compte Telegram pourrait faire de même."
+  "A reply to a notification goes to that chat as your message, and ChatGPT may then run tools on this computer. Anyone who can use your Telegram account could do the same.": "Une réponse à une notification part vers ce chat comme votre message, et ChatGPT peut alors exécuter des outils sur cet ordinateur. Toute personne pouvant utiliser votre compte Telegram pourrait faire de même.",
+  "From Telegram": "Depuis Telegram"
 }

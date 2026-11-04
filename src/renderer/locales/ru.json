@@ -4040,5 +4040,6 @@
   "That chat cannot take messages from here.": "Этот чат не может принимать сообщения отсюда.",
   "That notification is too old to answer. Send /status to see your chats.": "Это уведомление слишком старое, чтобы на него отвечать. Отправьте /status, чтобы увидеть свои чаты.",
   "Let replies send messages to chats": "Отправлять ответы в чаты как сообщения",
-  "A reply to a notification goes to that chat as your message, and ChatGPT may then run tools on this computer. Anyone who can use your Telegram account could do the same.": "Ответ на уведомление уходит в этот чат как ваше сообщение, и ChatGPT может затем запускать инструменты на этом компьютере. Любой, кто может пользоваться вашим аккаунтом Telegram, сможет сделать то же самое."
+  "A reply to a notification goes to that chat as your message, and ChatGPT may then run tools on this computer. Anyone who can use your Telegram account could do the same.": "Ответ на уведомление уходит в этот чат как ваше сообщение, и ChatGPT может затем запускать инструменты на этом компьютере. Любой, кто может пользоваться вашим аккаунтом Telegram, сможет сделать то же самое.",
+  "From Telegram": "Из Telegram"
 }

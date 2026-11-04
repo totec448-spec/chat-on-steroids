@@ -3878,5 +3878,6 @@
   "That chat cannot take messages from here.": "Bu sohbet buradan mesaj alamaz.",
   "That notification is too old to answer. Send /status to see your chats.": "Bu bildirim yanıtlanamayacak kadar eski. Sohbetlerinizi görmek için /status gönderin.",
   "Let replies send messages to chats": "Yanıtların sohbetlere mesaj olarak gitmesine izin ver",
-  "A reply to a notification goes to that chat as your message, and ChatGPT may then run tools on this computer. Anyone who can use your Telegram account could do the same.": "Bir bildirime verilen yanıt, sizin mesajınız olarak o sohbete gider ve ChatGPT bu bilgisayarda araç çalıştırabilir. Telegram hesabınızı kullanabilen herkes aynısını yapabilir."
+  "A reply to a notification goes to that chat as your message, and ChatGPT may then run tools on this computer. Anyone who can use your Telegram account could do the same.": "Bir bildirime verilen yanıt, sizin mesajınız olarak o sohbete gider ve ChatGPT bu bilgisayarda araç çalıştırabilir. Telegram hesabınızı kullanabilen herkes aynısını yapabilir.",
+  "From Telegram": "Telegram’dan"
 }

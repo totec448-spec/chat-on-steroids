@@ -383,6 +383,8 @@ export type SessionEvent =
       inputId?: string;
       /** #1826: the message was a run of the chat's schedule, due then, and sent late when `late`. */
       scheduled?: { dueAt: number; late: boolean };
+      /** Sent by the person from elsewhere: a reply to a Telegram notification (Haz on #1990). */
+      via?: 'telegram';
       /** Tool handout remains unconfirmed until a later exact invocation proves receipt. */
       inputDelivery?: 'offered' | 'confirmed';
       /** Original app-authored text, excluding transport-only control instructions. */
