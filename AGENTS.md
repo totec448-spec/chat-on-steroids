@@ -777,7 +777,18 @@ source turn still works), `asking` (the request is being sent) or `held` (the so
 and stopped before asking); the dock shows it without a clock. An automatic attempt the page stops
 before asking keeps its ticket and posts `/compact` `sourceDeferred` with `sourceError`, its reason:
 the app logs it and shows `held` until its next pickup. Only the chat's open, still unsent automatic
-ticket accepts it. From the request on, the chat's Compact & Resume timeline row reports progress
+ticket accepts it. A deferral at the tool-result receipt also carries `sourceErrorCode`
+(`results-unconfirmed` after the whole wait with nothing running here, `results-wait-changed` when
+the chat changed during it on the same route (a tab that moved to another chat reports nothing, so
+the relay never rebinds it), `local-tools-running` when this
+machine's own calls or a missing activity answer kept the receipt from being checked, never counted;
+the code lives with its attempt, never shared);
+the bridge counts them per ticket (`compactionReceiptMisses`, in memory). After one
+`results-unconfirmed`, or three such deferrals in all, the next automatic `ticket` answer carries
+`waiveReceipt: true` and logs why: the page then still waits for this machine's running calls
+(#825) but no longer for ChatGPT to show the latest results answered, and stops the turn and asks.
+2026-11-03: a chat whose history ChatGPT limited never showed them answered, so every attempt ended
+there for two days while the chat grew past its limit. A manual press never takes the waiver. From the request on, the chat's Compact & Resume timeline row reports progress
 and the projection is empty. The countdown authorizes nothing.
 Once a chat's history has been limited, the page's Retry presses after Retry-After back off to
 0 s, 2, 4, 8, then 15 minutes (`LOAD_FAILURE_LIMITED_BACKOFF_MS`), instead of the once-a-minute
