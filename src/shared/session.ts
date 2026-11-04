@@ -235,6 +235,8 @@ export interface ToolCallRecord {
   conversationId: string | null;
   /** Exact, provisional, unresolved or deliberately retired recording placement. */
   attributionMethod: 'request_id' | 'unattributed' | 'superseded' | 'generation';
+  /** Native request that anchored a verified host conversation-metadata correlation. */
+  providerSessionAnchor?: string;
   /** Exact arguments as JSON. Cut inline past the cap, with the whole text in an asset. */
   args: StoredText;
   result: StoredText;
@@ -672,6 +674,13 @@ export interface SessionSummary {
   selectedModel?: { conversationId: string; model: string; observedAt: number; reasoningEffort?: ReasoningEffort };
   /** Explicit local project; durable across frontend conversation replacement. */
   projectId?: string;
+  /**
+   * The person moved this chat to its project, or out of one (#1919). The app then never binds it
+   * to a project by itself again, as it does for a chat started in a linked ChatGPT Project.
+   */
+  projectChosen?: true;
+  /** Moved into its project since the person's last message: the next one names the folder once. */
+  projectNotePending?: true;
   id: string;
   title: string;
   /**
@@ -704,6 +713,8 @@ export interface SessionSummary {
   toolCalls: number;
   /** Calls provisionally placed by the only observed running turn; never caller proof. */
   provisionalToolCalls?: number;
+  /** Provider-proven calls whose provenance can be upgraded by native request evidence. */
+  providerSessionToolCalls?: number;
   /** Start time of the newest exact attributed tool call, independent of later page noise. */
   lastToolCallAt: number | null;
   /**

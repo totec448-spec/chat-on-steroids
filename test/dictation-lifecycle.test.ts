@@ -126,7 +126,9 @@ describe('Windows dictation child lifetime', () => {
 
   it.runIf(process.platform === 'win32')('the recognizer script parses, and its loop exits when its parent disappears or Stop asks (no microphone)', () => {
     execFileSync(process.execPath, ['scripts/fixtures/smoke-dictation-parent-windows.cjs'], {
-      cwd: process.cwd(), encoding: 'utf8', timeout: 40_000
+      // The script's own steps have ceilings of their own (60 + 90 + 2 × 30 s for a cold PowerShell
+      // on a loaded runner); this one only has to sit above them.
+      cwd: process.cwd(), encoding: 'utf8', timeout: 240_000
     });
-  }, 45_000);
+  }, 250_000);
 });

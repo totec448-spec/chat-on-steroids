@@ -159,6 +159,8 @@ const api = {
   renameChatGroup: (id: string, name: string) => call<ChatGroupsState>('chatGroups:rename', { id, name }),
   deleteChatGroup: (id: string) => call<ChatGroupsState>('chatGroups:delete', { id }),
   assignChatGroup: (sessionId: string, groupId: string | null) => call<ChatGroupsState>('chatGroups:assign', { sessionId, groupId }),
+  moveChatProject: (sessionId: string, projectId: string | null, groupId?: string | null) =>
+    call<{ from: string | null; fromGroup: string | null; groups: ChatGroupsState; summaries: SessionSummary[] }>('sessions:moveProject', { sessionId, projectId, ...(groupId !== undefined ? { groupId } : {}) }),
   petsList: () => call<PetLibraryState>('pets:list'),
   petsOverlayState: () => call<PetOverlayControlState>('pets:overlayState'),
   petsSetOverlayVisible: (visible: boolean) => call<PetOverlayControlState>('pets:overlayVisible', { visible }),
@@ -181,6 +183,8 @@ const api = {
   markTourDone: () => call<void>('ui:tourDone'),
   /** #1864: the desktop question waiting now, its answer from the app's window, and when it changes. */
   desktopAskPending: () => call<DesktopAskPending | null>('desktopAsk:pending'),
+  /** Explicit one-time GNOME screenshot consent check, never returns the screenshot itself. */
+  linuxScreenshotConsent: () => call<{ pngBytes: number }>('desktop:linuxScreenshotConsent'),
   answerDesktopAsk: (id: string, choice: 'go' | 'not-now') => call<boolean>('desktopAsk:answer', { id, choice }),
   onDesktopAskPending: (listener: (pending: DesktopAskPending | null) => void): (() => void) => {
     const wrapped = (_event: unknown, pending: DesktopAskPending | null): void => listener(pending);
