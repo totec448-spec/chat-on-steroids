@@ -184,6 +184,9 @@ export function registerLinuxDesktopTools(reg: SurfaceRegistrar): void {
       }
     }
     const windows = await inventory(); if (!Array.isArray(windows)) return windows;
+    // The inventory subprocess may outlive a Screen-permission grant. Refuse
+    // before starting an accessibility-tree read, not just before publishing it.
+    const revokedBeforeSnapshot = refusal(false); if (revokedBeforeSnapshot) return revokedBeforeSnapshot;
     const matches = windows.filter(row => row.id === input.window_id);
     if (matches.length !== 1 || !safeWindow(matches[0]!)) return fail('DESKTOP_TARGET_UNPROVEN: browser, missing or ambiguous windows cannot be targeted with native Linux tools.');
     const owner = principal();
