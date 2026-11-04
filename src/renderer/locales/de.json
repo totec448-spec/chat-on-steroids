@@ -3844,5 +3844,9 @@
   "{0} tries": "{0} Versuche",
   "{0} tries|one": "{0} Versuch",
   "Show what was tried": "Zeigen, was versucht wurde",
-  "Hide what was tried": "Ausblenden, was versucht wurde"
+  "Hide what was tried": "Ausblenden, was versucht wurde",
+  "That answer had already ended, so ChatGPT was not asked to stop. This chat's automatic work is stopped.": "Diese Antwort war schon beendet, deshalb wurde ChatGPT nicht gebeten anzuhalten. Die automatische Arbeit dieses Chats ist gestoppt.",
+  "That answer had already ended; there was nothing to stop.": "Diese Antwort war schon beendet; es gab nichts anzuhalten.",
+  "Automatic Continue cancelled: you pressed Stop.": "Automatisches Fortsetzen abgebrochen: Du hast Stopp gedrückt.",
+  "That answer had already ended, so ChatGPT was not asked to stop. Compact & Resume was already moving this chat and goes on.": "Diese Antwort war schon beendet, deshalb wurde ChatGPT nicht gebeten anzuhalten. Komprimieren & fortsetzen war schon dabei, diesen Chat zu verschieben, und läuft weiter."
 }

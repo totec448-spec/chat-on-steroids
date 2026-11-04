@@ -3762,5 +3762,9 @@
   "Since {0} · {1}": "{0} から · {1}",
   "{0} tries": "{0} 回の試行",
   "Show what was tried": "試したことを表示",
-  "Hide what was tried": "試したことを隠す"
+  "Hide what was tried": "試したことを隠す",
+  "That answer had already ended, so ChatGPT was not asked to stop. This chat's automatic work is stopped.": "その回答はすでに終わっていたため、ChatGPT には停止を求めていません。このチャットの自動処理は停止しました。",
+  "That answer had already ended; there was nothing to stop.": "その回答はすでに終わっていたため、停止するものはありませんでした。",
+  "Automatic Continue cancelled: you pressed Stop.": "停止が押されたため、自動続行を取り消しました。",
+  "That answer had already ended, so ChatGPT was not asked to stop. Compact & Resume was already moving this chat and goes on.": "その回答はすでに終わっていたため、ChatGPT には停止を求めていません。「圧縮して再開」はすでにこのチャットを移しているところで、そのまま続きます。"
 }
