@@ -3755,5 +3755,12 @@
   "Unavailable": "사용할 수 없음",
   "No longer approved or no longer there; ChatGPT is not told about it.": "더 이상 승인되지 않았거나 없어졌습니다. ChatGPT에 알리지 않습니다.",
   "Choose a related folder from your approved folders": "승인된 폴더 중에서 관련 폴더를 고르세요",
-  "A project can have at most 10 related folders": "프로젝트에는 관련 폴더를 최대 10개까지 둘 수 있습니다"
+  "A project can have at most 10 related folders": "프로젝트에는 관련 폴더를 최대 10개까지 둘 수 있습니다",
+  "Fresh turn started": "새 턴 시작",
+  "Automatic Continue sent": "자동 계속하기 보냄",
+  "The turn failed": "턴이 실패했습니다",
+  "Since {0} · {1}": "{0}부터 · {1}",
+  "{0} tries": "{0}번 시도",
+  "Show what was tried": "시도한 내용 보기",
+  "Hide what was tried": "시도한 내용 숨기기"
 }

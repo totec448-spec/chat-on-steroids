@@ -3836,5 +3836,13 @@
   "Unavailable": "Nicht verfügbar",
   "No longer approved or no longer there; ChatGPT is not told about it.": "Nicht mehr freigegeben oder nicht mehr vorhanden; ChatGPT erfährt nichts davon.",
   "Choose a related folder from your approved folders": "Wähle einen verwandten Ordner aus deinen freigegebenen Ordnern",
-  "A project can have at most 10 related folders": "Ein Projekt kann höchstens 10 verwandte Ordner haben"
+  "A project can have at most 10 related folders": "Ein Projekt kann höchstens 10 verwandte Ordner haben",
+  "Fresh turn started": "Neuer Durchgang gestartet",
+  "Automatic Continue sent": "Automatisches Weiter gesendet",
+  "The turn failed": "Der Durchgang ist fehlgeschlagen",
+  "Since {0} · {1}": "Seit {0} · {1}",
+  "{0} tries": "{0} Versuche",
+  "{0} tries|one": "{0} Versuch",
+  "Show what was tried": "Zeigen, was versucht wurde",
+  "Hide what was tried": "Ausblenden, was versucht wurde"
 }

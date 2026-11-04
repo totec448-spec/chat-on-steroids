@@ -3755,5 +3755,12 @@
   "Unavailable": "Không khả dụng",
   "No longer approved or no longer there; ChatGPT is not told about it.": "Không còn được duyệt hoặc không còn tồn tại; ChatGPT không được báo về thư mục này.",
   "Choose a related folder from your approved folders": "Hãy chọn thư mục liên quan trong các thư mục đã duyệt",
-  "A project can have at most 10 related folders": "Một dự án có tối đa 10 thư mục liên quan"
+  "A project can have at most 10 related folders": "Một dự án có tối đa 10 thư mục liên quan",
+  "Fresh turn started": "Đã bắt đầu lượt mới",
+  "Automatic Continue sent": "Đã gửi Tiếp tục tự động",
+  "The turn failed": "Lượt đã thất bại",
+  "Since {0} · {1}": "Từ {0} · {1}",
+  "{0} tries": "{0} lần thử",
+  "Show what was tried": "Hiện những gì đã thử",
+  "Hide what was tried": "Ẩn những gì đã thử"
 }

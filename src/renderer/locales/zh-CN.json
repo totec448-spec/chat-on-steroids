@@ -3755,5 +3755,12 @@
   "Unavailable": "不可用",
   "No longer approved or no longer there; ChatGPT is not told about it.": "已不再批准或已不存在；不会告诉 ChatGPT。",
   "Choose a related folder from your approved folders": "请从已批准的文件夹中选择相关文件夹",
-  "A project can have at most 10 related folders": "一个项目最多可有 10 个相关文件夹"
+  "A project can have at most 10 related folders": "一个项目最多可有 10 个相关文件夹",
+  "Fresh turn started": "已开始新一轮",
+  "Automatic Continue sent": "已发送自动继续",
+  "The turn failed": "本轮失败",
+  "Since {0} · {1}": "自 {0} · {1}",
+  "{0} tries": "{0} 次尝试",
+  "Show what was tried": "显示已尝试的操作",
+  "Hide what was tried": "隐藏已尝试的操作"
 }
