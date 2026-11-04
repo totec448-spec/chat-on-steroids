@@ -81,6 +81,7 @@
 .ph.ph-keyboard::before { content: '\e2d8'; }
 .ph.ph-lightning::before { content: '\e2de'; }
 .ph.ph-link-break::before { content: '\e2e4'; }
+.ph.ph-link-simple::before { content: '\e2e6'; }
 .ph.ph-arrows-left-right::before { content: '\e0a0'; }
 .ph.ph-browser::before { content: '\e0f4'; }
 .ph.ph-brain::before { content: '\e74e'; }
