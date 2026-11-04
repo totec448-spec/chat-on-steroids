@@ -18999,6 +18999,49 @@ describe('the context meter and automatic compaction', () => {
       .toEqual([expect.objectContaining({ sourceError: expect.stringContaining('has not confirmed receiving') })]);
   });
 
+  // 2026-11-03 (Mac, 2 days): ChatGPT limited the chat's history and its page never showed the latest
+  // results answered; every automatic attempt stopped at this receipt while the chat outgrew its limit.
+  it.each([
+    ['the app waived the receipt', true, 0, true],
+    ['the app waived it, but a local call still runs', true, 1, false],
+    ['no waiver', false, 0, false]
+  ] as const)('stops and asks without ChatGPT\'s receipt only when the app waives it (%s)', async (_case, waived, pendingTools, compacts) => {
+    live = await harness(undefined, {
+      activity: () => withContext(205_000, settings({ auto: true }), { pendingTools, sentResults: { count: 0, settled: true } }),
+      compact: () => ({ ok: true, data: { token: 'waived-token', prompt: 'Write the brief.', ...automaticTicket('not-attempted'),
+        ...(waived ? { waiveReceipt: true } : {}) } })
+    });
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'waived-source', []);
+    compactionFiber(section, () => [compactionCall(false)], () => []);
+    const stopped = vi.fn(() => stopGenerating(live!.document));
+    live.document.querySelector('[data-testid="stop-button"]')!.addEventListener('click', stopped);
+    const sends = watchSend(live.document);
+    await live.hook.startCompact(true);
+    expect(stopped).toHaveBeenCalledTimes(compacts ? 1 : 0);
+    expect(sends()).toBe(compacts ? 1 : 0);
+    // A deferred attempt tells the app why as a code it can count, not only as a sentence.
+    // A wait that ran out while this machine's own call still ran never checked the receipt: the app
+    // must not count it toward the waiver (CodeRabbit on #2056).
+    expect(live.sent.filter((message) => message.type === 'compact' && message.sourceDeferred === true))
+      .toEqual(compacts ? [] : [expect.objectContaining({ token: 'waived-token', sourceErrorCode: pendingTools ? 'local-tools-running' : 'results-unconfirmed' })]);
+  });
+
+  it('a manual press never skips the receipt, even if the app answered with a waiver', async () => {
+    live = await harness(undefined, {
+      activity: () => withContext(205_000, settings({ auto: true }), { pendingTools: 0, sentResults: { count: 1, settled: true } }),
+      compact: () => ({ ok: true, data: { token: 'manual-token', prompt: 'Write the brief.', waiveReceipt: true } })
+    });
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'manual-source', []);
+    compactionFiber(section, () => [compactionCall(true)], () => []);
+    const stopped = vi.fn(() => stopGenerating(live!.document));
+    live.document.querySelector('[data-testid="stop-button"]')!.addEventListener('click', stopped);
+    await live.hook.startCompact(false);
+    // A press stops at once as it always did: the receipt wait is for automatic runs only.
+    expect(stopped).toHaveBeenCalledTimes(1);
+  });
+
   it('checks less often once a receipt wait has run for a while', async () => {
     // The release build's slow Intel runner timed the 6-minute wait out: 1,440 checks at 250 ms,
     // each reading the page. On a real page that is minutes of needless work on the slowest machines.
