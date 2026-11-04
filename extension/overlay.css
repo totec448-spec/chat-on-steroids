@@ -1471,7 +1471,8 @@
   opacity: 0.45;
 }
 
-.clf-menu-goal-save {
+/* Doubled with the button rule above so these colors win over its generic button color (CodeRabbit on #2038). */
+.clf-menu-goal-buttons button.clf-menu-goal-save {
   border-color: transparent !important;
   background: var(--clf-app-accent-fill) !important;
   color: var(--clf-app-on-accent);
@@ -1483,7 +1484,7 @@
 
 /* Clearing a goal ends a loop somebody set up deliberately, so it is set apart from Cancel
    rather than sitting beside it as a third equal button. */
-.clf-menu-goal-clear {
+.clf-menu-goal-buttons button.clf-menu-goal-clear {
   margin-left: auto;
   color: var(--clf-app-red);
 }

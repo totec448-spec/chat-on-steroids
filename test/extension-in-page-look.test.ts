@@ -106,3 +106,13 @@ it('has a default for every app color the overlay uses, in both themes', () => {
     expect(block(":root[data-clf-theme='light']"), name).toContain(`${name}:`);
   }
 });
+
+// CodeRabbit on #2038: Save and Clear keep the app's colors over the goal buttons' generic button color,
+// so their selectors must be more specific than `.clf-menu-goal-buttons button`.
+it('gives Save and Clear selectors that outrank the generic goal button rule', async () => {
+  const css = await readFile(new URL('../extension/overlay.css', import.meta.url), 'utf8');
+  const rule = (selector: string) => new RegExp(`(^|\\n)${selector.replace(/[.]/g, '\\.')}\\s*\\{([^}]*)\\}`).exec(css)?.[2] ?? '';
+  expect(rule('.clf-menu-goal-buttons button')).toMatch(/color:/);
+  expect(rule('.clf-menu-goal-buttons button.clf-menu-goal-save')).toMatch(/color: var\(--clf-app-on-accent\)/);
+  expect(rule('.clf-menu-goal-buttons button.clf-menu-goal-clear')).toMatch(/color: var\(--clf-app-red\)/);
+});
