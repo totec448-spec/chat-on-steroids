@@ -5289,7 +5289,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         const sourceConversation = primeConversation(command.spec.runId);
         const source = sourceConversation ? await findSessionByConversation(sourceConversation, { requireUnique: true }) : null;
         const sessionId = source?.conversationId === sourceConversation ? source?.id : undefined;
-        described.text = await prepareSessionPrompt(described.text, { sessionId, workingDirectory });
+        described.text = await prepareSessionPrompt(described.text, { sessionId, workingDirectory, subAgent: true });
       } else if (workingDirectory) {
         // Revivals carry the prime's latest user-authored message, without repeating Core or
         // source AGENTS. Reassert the same checkout after a restart or worker reuse.

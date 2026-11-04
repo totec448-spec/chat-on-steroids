@@ -343,9 +343,17 @@ export function setRelatedFolders(projectId: string, folders: readonly string[])
     if (!project) throw new Error('Project not found');
     const roots = getConfig().roots;
     const chosen: string[] = [];
+    const saved = project.relatedFolders ?? [];
     for (const folder of folders) {
       const root = roots.find(entry => entry.remote ? entry.path === folder : samePath(entry.path, folder));
-      if (!root) throw new Error('Choose a related folder from your approved folders');
+      if (!root) {
+        // A saved folder that lost its approval may stay while the person edits the list (removing
+        // another one), shown as unavailable as before; it is never added anew (CodeRabbit on #2053).
+        const kept = saved.find(other => other === folder);
+        if (!kept) throw new Error('Choose a related folder from your approved folders');
+        if (!chosen.includes(kept)) chosen.push(kept);
+        continue;
+      }
       if (root.remote ? root.path === project.path : samePath(root.path, project.path)) continue;
       if (chosen.some(other => root.remote ? other === root.path : samePath(other, root.path))) continue;
       chosen.push(root.path);
