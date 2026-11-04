@@ -118,8 +118,15 @@ describe.skipIf(process.platform !== 'linux')('manual GNOME screenshot permissio
     } } as never);
     await expect(testLinuxScreenshotConsent(deps)).rejects.toThrow('PERM_DENIED');
     expect(deps.run).toHaveBeenCalledTimes(1);
-    expect(logInfo).toHaveBeenCalledExactlyOnceWith('linux screenshot consent: refused because the GNOME screenshot portal did not grant a screenshot');
-    expect(JSON.stringify(vi.mocked(logInfo).mock.calls)).not.toMatch(/PERM_DENIED|secret application title|private screen text/);
+    // The log keeps the code for diagnosis (CodeRabbit on #2065), never the backend's text.
+    expect(logInfo).toHaveBeenCalledExactlyOnceWith('linux screenshot consent: refused because the screenshot backend returned PERM_DENIED');
+    expect(JSON.stringify(vi.mocked(logInfo).mock.calls)).not.toMatch(/secret application title|private screen text/);
+  });
+  it('keeps a backend code out of the log and the error unless it looks like a code', async () => {
+    const deps = context();
+    deps.run.mockResolvedValueOnce({ ok: false, command: 'screenshot', error: { code: 'Payroll – Q3 report.xlsx' } } as never);
+    await expect(testLinuxScreenshotConsent(deps)).rejects.toThrow('returned UNKNOWN');
+    expect(logInfo).toHaveBeenCalledExactlyOnceWith('linux screenshot consent: refused because the screenshot backend returned UNKNOWN');
   });
   it('rejects malformed PNG results without exposing their content', async () => {
     const deps = context();
