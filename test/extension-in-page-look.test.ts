@@ -30,7 +30,8 @@ async function open(stored: unknown, read?: Promise<unknown>) {
   await new Promise(resolve => setTimeout(resolve, 0));
   const change = (value: unknown, area = 'local') => listeners.forEach(listener => listener({ appAppearance: { newValue: value } }, area));
   const css = () => page!.window.document.getElementById('clf-app-palette')?.textContent ?? null;
-  return { change, css };
+  const again = async () => { page!.window.eval(script); await new Promise(resolve => setTimeout(resolve, 0)); };
+  return { change, css, again, listeners };
 }
 
 it('loads the palette script with the content scripts, before content.js', () => {
@@ -115,4 +116,12 @@ it('gives Save and Clear selectors that outrank the generic goal button rule', a
   expect(rule('.clf-menu-goal-buttons button')).toMatch(/color:/);
   expect(rule('.clf-menu-goal-buttons button.clf-menu-goal-save')).toMatch(/color: var\(--clf-app-on-accent\)/);
   expect(rule('.clf-menu-goal-buttons button.clf-menu-goal-clear')).toMatch(/color: var\(--clf-app-red\)/);
+});
+
+// CodeRabbit on #2038: the manifest, a recovered tab and a recorder repair can each load the script.
+it('registers one storage listener per page however often the script is loaded', async () => {
+  const look = await open(appearance);
+  await look.again(); await look.again();
+  expect(look.listeners).toHaveLength(1);
+  expect(page!.window.document.querySelectorAll('#clf-app-palette')).toHaveLength(1);
 });
