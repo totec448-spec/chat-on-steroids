@@ -2286,6 +2286,11 @@
     // group while the turn runs. A top-level item owns its id; a nested copy of it is not read twice.
     const topLevel = new Set(entry.turn.items.filter(item => item?.type === 'assistant-message').map(item => str(item.messageId)).filter(Boolean));
     let work = 0;
+    // ChatGPT's own times for this turn (#2005): a question found in older history was recorded at the
+    // moment it was read, hours or months late. The question was sent when the turn's work started
+    // (its own `sentAtMs` once ChatGPT keeps it), and a finished answer was written when it completed.
+    const at = value => Number.isFinite(value) && value > 0 && value < 1e14 ? value : undefined;
+    const startedAt = at(entry.turn.workStartedAtMs), completedAt = at(entry.turn.workCompletedAtMs);
     for (const [index, item] of entry.turn.items.entries()) {
       if (++work > MAX_ROWS) return null;
       if (item?.type === 'user-message' || item?.type === 'assistant-message') {
@@ -2296,7 +2301,9 @@
         const final = !user && item.phase === 'final_answer';
         if (final) lastAnswer = item;
         const completed = final && item.completed === true && entry.turn.status === 'complete';
+        const written = user ? at(item.sentAtMs) ?? startedAt : completed ? completedAt : undefined;
         messages.push({ id, author: { role }, content: { content_type: 'text', parts: [typeof text === 'string' ? text : ''] },
+          ...(written !== undefined ? { create_time: written } : {}),
           channel: user ? null : final ? 'final' : 'commentary', end_turn: completed,
           status: completed ? 'finished_successfully' : 'in_progress',
           // The turn's place belongs to its first message. A message sent into the running answer
@@ -2317,7 +2324,9 @@
         images.set(item, asset);
         // Typed generated outputs are public tool media, never assistant prose.
         // Multiple assets may share their owning provider message.
+        const made = item.status === 'completed' && item.isPreview !== true && entry.turn.status === 'complete' ? completedAt : undefined;
         messages.push({ id, author: { role: 'tool' }, recipient: 'all', channel: 'final',
+          ...(made !== undefined ? { create_time: made } : {}),
           status: item.status === 'completed' && item.isPreview !== true ? 'finished_successfully' : 'in_progress',
           content: { content_type: 'multimodal_text', parts: [{ content_type: 'image_asset_pointer',
             asset_pointer: item.src, width: item.width, height: item.height }] } });
