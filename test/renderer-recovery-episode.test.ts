@@ -94,3 +94,12 @@ it('reads a reload the window already folded into one row at the time it ended (
   // A tool call after the error but before the reload ended does not make it over.
   expect(recoveryEpisode([asked(0), folded, error(2), tool(2.5)])!.current).toBe(true);
 });
+
+it('keeps a reload that ended late among the 50 newest steps (CodeRabbit on #2062)', () => {
+  const late = ev({ kind: 'progress', time: at(1), updatedAt: at(200), source: 'app', progressId: 'browser-repair:late', message: text('Reloaded chat.') });
+  const many = Array.from({ length: 60 }, (_, index) => error(index + 2, `error ${index}`));
+  const episode = recoveryEpisode([asked(0), late, ...many])!;
+  expect(episode.items).toHaveLength(50);
+  expect(episode.items.at(-1)).toMatchObject({ kind: 'reload', time: at(200) });
+  expect(episode.since).toBe(at(13));
+});
