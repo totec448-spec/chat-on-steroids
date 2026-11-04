@@ -18223,6 +18223,26 @@ describe('app requests to stop one exact active turn', () => {
     const activity = await request('GET', `/activity?conversationId=${conversationId}`);
     expect(activity.body.stopTurn).toEqual({ turnId: 'unanchored-turn', userMessageId: null });
   });
+  // #1882: a Stop that turned Loop off could not be told apart from the app's button or the control API.
+  it('names who sent a Stop, in its log line and in the Loop it turned off', async () => {
+    const { stopSessionTurn, setSessionAutomation } = await import('../src/main/bridge.js');
+    const logger = await import('../src/main/logger.js');
+    const info = vi.spyOn(logger, 'logInfo');
+    const conversationId = 'e9999999-aaaa-4bbb-8ccc-111111111111';
+    const sessionId = await active(conversationId, 'sent-turn');
+    await setSessionAutomation(sessionId, 'loop', undefined, 'the app');
+    await stopSessionTurn(sessionId, 'sent-turn', { from: 'the control API' });
+    const lines = info.mock.calls.map(([line]) => String(line));
+    expect(lines).toContain(`goal: ${conversationId} switched to loop by the app`);
+    expect(lines).toContain(`goal: ${conversationId} switched to Normal by a Stop sent by the control API`);
+    expect(lines.some(line => line.startsWith(`bridge: desktop (sent by the control API) Stop requested for session ${sessionId}`))).toBe(true);
+    // A second Stop of the same answer joins the queued one, and still says who sent it.
+    info.mockClear();
+    await stopSessionTurn(sessionId, 'sent-turn');
+    expect(info.mock.calls.map(([line]) => String(line))
+      .some(line => line.startsWith(`bridge: desktop (sent by the app) Stop for session ${sessionId}`) && line.includes('joins the Stop already requested'))).toBe(true);
+    info.mockRestore();
+  });
   it('hands a new Stop to the shared absent-browser startup owner once and revokes it for a newer turn', async () => {
     const { stopSessionTurn } = await import('../src/main/bridge.js');
     const conversationId = 'e8888888-aaaa-4bbb-8ccc-111111111111';

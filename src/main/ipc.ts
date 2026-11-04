@@ -2078,7 +2078,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('sessions:automation', async (payload) => {
     const { id, automation, afterTurn } = sessionIdArg.extend({ automation: z.enum(['off', 'goal', 'loop']), afterTurn: z.boolean().optional() }).parse(payload);
-    return setSessionAutomation(id, automation, afterTurn);
+    return setSessionAutomation(id, automation, afterTurn, 'the app');
   });
   handle('sessions:objective', async (payload) => {
     const { id, text, mode } = sessionIdArg.extend({ text: z.string().max(MAX_TASK_REQUEST_CHARS), mode: z.enum(['goal', 'loop']) }).parse(payload);
@@ -2666,7 +2666,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       const mode = automation === 'off' ? goalSwitchFor(conversationId).mode : automation;
       // Reserve switch ordering immediately, before awaiting another ledger write.
       // A user Off arriving during persistence must remain later than this attempt.
-      const switchWrite = setGoalSwitchNow(conversationId, mode, automation !== 'off', loopAfterTurn);
+      const switchWrite = setGoalSwitchNow(conversationId, mode, automation !== 'off', loopAfterTurn, "the app's message settings");
       const [held] = await Promise.all([switchWrite, setGoalReplyActiveNow(conversationId, false)]);
       // A fresh chat can finish before its send ACK arrives. Its newest final is
       // this message's own response, so it may be picked up after binding.
