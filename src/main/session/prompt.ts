@@ -14,6 +14,8 @@ import type { RoutedSkillSelection } from '../../shared/skill-routing.js';
 type PromptScope = { sessionId?: string | null; projectId?: string | null; autoSkills?: readonly RoutedSkillSelection[];
   /** Verified broker-owned worker checkout; the selected project is only the source of instructions. */
   workingDirectory?: string;
+  /** A sub-agent's opening: it reads its source project's instructions, never the project's related folders. */
+  subAgent?: boolean;
 };
 export type PromptLimits = { maxChars: number; maxBytes: number };
 type ProjectInstructions = { directory: string; text: string; truncated: boolean;
@@ -25,8 +27,15 @@ const cutNotice = '\n\n[Cut off because of the message limit. Read AGENTS.md you
 const promptFolder = (scope: PromptScope) => scope.sessionId ? getSessionProject(scope.sessionId)
   : scope.projectId ? projectWorkspace(scope.projectId) : Promise.resolve(null);
 /** The related folders of this chat's project (#1689), read when the message is prepared, so never stale. */
-const relatedFolders = async (scope: PromptScope): Promise<string[]> =>
-  relatedFolderContext(scope.sessionId ? (await getSession(scope.sessionId))?.projectId : scope.projectId);
+const scopeProject = async (scope: PromptScope): Promise<string | null> =>
+  (scope.sessionId ? (await getSession(scope.sessionId))?.projectId : scope.projectId) ?? null;
+const relatedFolders = async (scope: PromptScope): Promise<string[]> => {
+  const project = await scopeProject(scope);
+  const related = await relatedFolderContext(project);
+  // The chat moved to another project while its folders were read: they are not this message's (CodeRabbit on #2053).
+  if (await scopeProject(scope) !== project) throw new Error('The selected project changed during Skill preparation');
+  return related;
+};
 /** The line after the project directory; it says plainly that nothing about the working directory changes. */
 export function relatedFoldersLine(related: readonly string[]): string {
   return related.length ? `\nRelated folders (other approved folders this work also uses): ${related.join(', ')}. Your working directory stays the project directory; read a related folder's own AGENTS.md before you change files there.` : '';
@@ -143,8 +152,9 @@ export async function prepareSessionPrompt(text: string, scope: PromptScope = {}
   const skills = await selectedSkillInstructions(authored, skillScope, library, scope.autoSkills);
   fitSessionPrompt(text, core, null, budget, [], scope.workingDirectory); // Only Core/task overflow is mandatory.
   const found = await projectInstructions(scope);
-  // A worker in its own worktree keeps only its worktree line (its source project's folders are not its own).
-  const agents = found && !scope.workingDirectory ? { ...found, related: await relatedFolders(scope) } : found;
+  // A worker, in its own worktree or not, keeps only its directory line: its source project's related
+  // folders are the person's context for the project's chats, not a worker's (CodeRabbit on #2053).
+  const agents = found && !scope.workingDirectory && !scope.subAgent ? { ...found, related: await relatedFolders(scope) } : found;
   if ((await promptFolder(scope))?.real !== folder?.real) throw new Error('The selected project changed during Skill preparation');
   return fitSessionPrompt(text, core, agents, budget, skills, scope.workingDirectory);
 }
@@ -157,7 +167,7 @@ export async function prepareSessionPrompt(text: string, scope: PromptScope = {}
 export async function prepareSkillFollowup(text: string, authored: string, budget = limits, scope: PromptScope = {}, projectNote = false): Promise<string> {
   const folder = await promptFolder(scope);
   const skills = await selectedSkillInstructions(authored, { projectPath: localProjectPath(folder) }, undefined, scope.autoSkills);
-  if ((await promptFolder(scope))?.real !== folder?.real) throw new Error('The selected project changed during Skill preparation');
   const note = projectNote && folder ? { directory: folder.virtual, text: '', truncated: false, related: await relatedFolders(scope) } : null;
+  if ((await promptFolder(scope))?.real !== folder?.real) throw new Error('The selected project changed during Skill preparation');
   return skills.length || note ? fitSessionPrompt(text, '', note, budget, skills) : text;
 }
