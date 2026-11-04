@@ -327,7 +327,7 @@ it('keeps actual-turn Stop through two authored sends and stops only the capture
   // A queued follow-up does not replace the real active turn as Stop's authority.
   send.click();
   await settle();
-  expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'held-turn');
+  expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'held-turn', 'chat-a');
   expect(cancel).not.toHaveBeenCalled();
   expect(input.value).toBe('');
 });

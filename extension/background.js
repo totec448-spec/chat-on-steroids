@@ -5957,6 +5957,10 @@ async function restoreChatgptTab(id, current = () => true, documentId = null) {
     // Rebuild the isolated-world DOM adapter before the recorder that consumes it.
     await chrome.scripting.executeScript({ target, files: ['chatgpt-dom.js'] });
     if (!current()) return false;
+    // The app's colors for the CoS parts of the page, before content.js, as the manifest loads them
+    // (CodeRabbit on #2038): a restored tab otherwise keeps the defaults until it reloads.
+    await chrome.scripting.executeScript({ target, files: ['app-palette.js'] });
+    if (!current()) return false;
     // Keep the React/Fiber reader in ChatGPT's own world, exactly like the static manifest
     // declaration. An older helper may still answer too; the nonce/version gate in
     // content.js makes those replies harmless, and a future version bump rejects them.
