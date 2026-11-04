@@ -2380,11 +2380,25 @@ async function stoppableTurn(sessionId: string): Promise<string | null> {
 export async function endOwnWorkAfterStop(sessionId: string, expectedTurnId: string): Promise<boolean> {
   const id = await controlledConversation(sessionId);
   const ended: string[] = [];
-  if (goalSwitchFor(id).enabled) { await setSessionAutomation(sessionId, 'off'); ended.push('Goal or Loop'); }
-  if (continuationForSession(sessionId)) { await cancelResumeNow(sessionId); ended.push('a pending Compact & Resume'); }
-  const before = (await listInputs()).filter(row => row.sessionId === sessionId && (row.silenceBoundary || row.completedTurnId) && row.state === 'queued').length;
+  // Off is saved as this chat's own choice, as a Stop saves it: a Goal armed only by its objective too (CodeRabbit on #2066).
+  const armed = goalArmedFor(id);
+  await setSessionAutomation(sessionId, 'off');
+  if (armed) ended.push('Goal or Loop');
+  if (continuationForSession(sessionId)) {
+    if (await cancelResumeNow(sessionId)) ended.push('a pending Compact & Resume');
+    else logInfo(`bridge: Stop in ${id} came too late for its Compact & Resume, which was already moving the chat; it goes on`);
+  }
+  // The named turn's silence recovery ends with it, so no new Continue is filed for that turn; another
+  // turn's activity is left alone (CodeRabbit on #2066).
+  const repair = repairsInFlight.get(id);
+  const silenced = repair?.reason === 'silence' && repair.silenceGrant?.turnId === expectedTurnId;
+  if (silenced) repairsInFlight.delete(id);
+  if (activeUntil.get(id)?.turnId === expectedTurnId) endActivity(id);
+  // Counted as revokeSilenceInputs withdraws them: waiting, or claimed by a browser but not yet sent.
+  const withdrawn = (await listInputs()).filter(row => row.sessionId === sessionId && (row.silenceBoundary || row.completedTurnId) &&
+    (row.state === 'queued' || (row.state === 'browser' && row.sendAuthorizedAt === undefined))).length;
   await revokeSilenceInputs(sessionId);
-  if (before) ended.push('an automatic Continue');
+  if (withdrawn || silenced) ended.push('an automatic Continue');
   logInfo(`bridge: Stop for turn ${expectedTurnId} in ${id} found that turn no longer running; ChatGPT was not asked to stop. ` +
     (ended.length ? `The app's own work ended: ${ended.join(', ')}` : 'The app had nothing of its own going on'));
   changed();
