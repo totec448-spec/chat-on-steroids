@@ -1802,6 +1802,35 @@ function withoutSilenceClaim(row: InputEntry, preserveBoundary = false): InputEn
     ...(manualInput(row) ? { transportIntent: 'tool' } : {}),
     companionInputId: undefined, offeredAt: undefined, sendAuthorizedAt: undefined, requiresAuthorization: undefined, deliveryText: undefined, error: undefined };
 }
+/**
+ * The person's Stop for an answer that had already ended (#2066): every unsent Continue of the app's
+ * own for this chat goes, counted in the same step that withdraws it, so a send authorized meanwhile is
+ * neither withdrawn nor counted. Silence tickets go as revokeSilenceInputs takes them; a Continue the app
+ * had turned into an ordinary message and the fresh-turn Continue of the named turn are cancelled too
+ * (CodeRabbit on #2066). Returns how many automatic Continues were cancelled.
+ */
+export function withdrawOwnContinuesAfterStop(sessionId: string, turnId: string): Promise<number> {
+  return serial(async () => {
+    const current = await load();
+    let cancelled = 0;
+    const next = current.map(row => {
+      if (row.sessionId !== sessionId || !(row.state === 'queued' || (row.state === 'browser' && row.sendAuthorizedAt === undefined))) return row;
+      if (row.silenceBoundary || row.completedTurnId) {
+        const out = withoutSilenceClaim(row);
+        if (out.state === 'cancelled') cancelled++;
+        return out;
+      }
+      if (row.continuedFrom === 'recovery' || (row.purpose === 'rotation' && row.queuedTurn?.turnId === turnId)) {
+        cancelled++;
+        return { ...row, state: 'cancelled' as const, owner: null, error: 'Automatic Continue cancelled: you pressed Stop.' };
+      }
+      return row;
+    });
+    if (next.some((row, index) => row !== current[index])) await commit(next);
+    return cancelled;
+  });
+}
+
 /** New work revokes an unspent ticket. Authorized sends retain custody until their exact receipt/failure. */
 export function revokeSilenceInputs(sessionId: string): Promise<void> {
   return serial(async () => {
