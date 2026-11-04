@@ -40,7 +40,21 @@ it('shows the exact command, folder, purpose and expected files, with no verdict
   const small = userRequestCard(request({ found: [{ path: 'build/flash.log', state: 'found', size: 9, modifiedAt: 1 }, { path: '../secret', state: 'unchecked' }] }), { answer, readOnly: () => false });
   expect(small.querySelector('.user-request-file-state')!.textContent).toMatch(/^found, 9 bytes, /);
   // It says the app neither runs nor checks it, and nothing reads as "safe".
-  expect(card.textContent).toContain('does not run or check this command');
+  expect(card.querySelector('.user-request-note')!.textContent).toBe('Run it yourself, in your own terminal: Chat On Steroids does not run or check it.');
+  // Two expected files and a note fold into one line; the folder stays in view (Haz on #2049).
+  const more = card.querySelector<HTMLDetailsElement>('details.user-request-more')!;
+  expect(more.open).toBe(false);
+  expect(more.querySelector('summary')!.textContent).toBe('2 expected files · Note');
+  expect(more.contains(card.querySelector('.user-request-files'))).toBe(true);
+  const folderFact = [...card.querySelectorAll(':scope > .user-request-facts dt')].map(dt => dt.textContent);
+  expect(folderFact).toEqual(['Folder']);
+  // One file and a short note stay in view, unfolded.
+  const short = userRequestCard(request({ expected: [{ path: 'build/flash.log' }], found: [] }), { answer, readOnly: () => false });
+  expect(short.querySelector('details')).toBeNull();
+  expect([...short.querySelectorAll('.user-request-facts dt')].map(dt => dt.textContent)).toEqual(['Folder', 'Expected', 'Note']);
+  // A long note folds even alone.
+  const long = userRequestCard(request({ expected: [], found: [], constraints: 'x '.repeat(80) }), { answer, readOnly: () => false });
+  expect(long.querySelector('details.user-request-more summary')!.textContent).toBe('Note');
   expect(card.textContent?.toLowerCase()).not.toMatch(/\bsafe\b|verified|harmless/);
   expect(card.textContent).not.toContain('Read-only');
 

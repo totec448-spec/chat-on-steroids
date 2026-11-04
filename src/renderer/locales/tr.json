@@ -3833,7 +3833,6 @@
   "found, {0}, {1}": "bulundu, {0}, {1}",
   "not there yet": "henüz yok",
   "not checked": "denetlenmedi",
-  "Chat On Steroids does not run or check this command. Read it, then run it yourself in your own terminal, on your own responsibility.": "Chat On Steroids bu komutu çalıştırmaz ve denetlemez. Önce okuyun, sonra kendi sorumluluğunuzda kendi terminalinizde kendiniz çalıştırın.",
   "Read-only is on in the app. This step runs in your own terminal, outside it.": "Uygulamada Salt okunur açık. Bu adım uygulamanın dışında, kendi terminalinizde çalışır.",
   "Mark as done": "Yapıldı olarak işaretle",
   "Skip": "Atla",
@@ -3850,5 +3849,8 @@
   "Refused to ask you to run a step": "Bir adımı çalıştırmanızı isteme reddedildi",
   "Could not check a step for you": "Sizin için bir adım denetlenemedi",
   "Refused to check a step for you": "Sizin için bir adımı denetleme reddedildi",
-  "From the sub-agent “{0}”": "“{0}” yardımcı ajanından"
+  "From the sub-agent “{0}”": "“{0}” yardımcı ajanından",
+  "Run it yourself, in your own terminal: Chat On Steroids does not run or check it.": "Kendi terminalinizde kendiniz çalıştırın: Chat On Steroids bunu çalıştırmaz ve denetlemez.",
+  "{0} expected files": "{0} beklenen dosya",
+  "{0} expected files|one": "{0} beklenen dosya"
 }

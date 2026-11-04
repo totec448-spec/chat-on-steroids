@@ -1,5 +1,5 @@
 import { currentLanguage, ui, t, tn } from './i18n.js';
-import { el, icon, run, toast } from './dom.js';
+import { disclosureChevron, el, icon, run, toast } from './dom.js';
 import type { UserRequestView } from '../shared/user-requests.js';
 
 /**
@@ -60,6 +60,10 @@ export function userRequestCard(request: UserRequestView, actions: UserRequestAc
   const folder = el('dd');
   folder.append(el('code', '', request.folder));
   facts.append(el('dt', '', () => t('Folder')), folder);
+  card.append(facts);
+  // Purpose, command, folder and the buttons always show; what the step should leave behind and its
+  // note fold into one line when they run long (Haz on #2049), so the card stays easy to read.
+  const extra = el('dl', 'user-request-facts');
   if (request.expected.length) {
     const list = el('ul', 'user-request-files');
     for (const file of request.expected) {
@@ -75,14 +79,24 @@ export function userRequestCard(request: UserRequestView, actions: UserRequestAc
     }
     const dd = el('dd');
     dd.append(list);
-    facts.append(el('dt', '', () => t('Expected')), dd);
+    extra.append(el('dt', '', () => t('Expected')), dd);
   }
-  if (request.constraints) facts.append(el('dt', '', () => t('Note')), el('dd', '', request.constraints));
-  card.append(facts);
+  if (request.constraints) extra.append(el('dt', '', () => t('Note')), el('dd', '', request.constraints));
+  if (request.expected.length >= 2 || (request.constraints?.length ?? 0) > 120) {
+    const more = el('details', 'user-request-more');
+    const summary = el('summary', '', () => [
+      request.expected.length ? tn('{0} expected file', '{0} expected files', request.expected.length) : '',
+      request.constraints ? t('Note') : ''
+    ].filter(Boolean).join(' · '));
+    summary.prepend(disclosureChevron());
+    more.append(summary, extra);
+    card.append(more);
+  } else if (extra.childElementCount) {
+    card.append(extra);
+  }
 
   if (request.state === 'open') {
-    card.append(el('p', 'user-request-note', () =>
-      t('Chat On Steroids does not run or check this command. Read it, then run it yourself in your own terminal, on your own responsibility.')));
+    card.append(el('p', 'user-request-note', () => t('Run it yourself, in your own terminal: Chat On Steroids does not run or check it.')));
     if (actions.readOnly()) card.append(el('p', 'user-request-note', () => t('Read-only is on in the app. This step runs in your own terminal, outside it.')));
     const buttons = el('div', 'user-request-actions');
     const done = el('button', 'btn btn-solid', () => t('Mark as done')) as HTMLButtonElement;

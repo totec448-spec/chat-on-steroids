@@ -3752,7 +3752,6 @@
   "found, {0}, {1}": "已找到，{0}，{1}",
   "not there yet": "尚未出现",
   "not checked": "未检查",
-  "Chat On Steroids does not run or check this command. Read it, then run it yourself in your own terminal, on your own responsibility.": "Chat On Steroids 不会运行或检查此命令。请先阅读，然后自行在你自己的终端中运行，责任由你自负。",
   "Read-only is on in the app. This step runs in your own terminal, outside it.": "应用中已开启只读。此步骤在应用之外、你自己的终端中运行。",
   "Mark as done": "标记为完成",
   "Skip": "跳过",
@@ -3768,5 +3767,7 @@
   "Refused to ask you to run a step": "已拒绝请你执行步骤",
   "Could not check a step for you": "无法查看需要你执行的步骤",
   "Refused to check a step for you": "已拒绝查看需要你执行的步骤",
-  "From the sub-agent “{0}”": "来自子智能体“{0}”"
+  "From the sub-agent “{0}”": "来自子智能体“{0}”",
+  "Run it yourself, in your own terminal: Chat On Steroids does not run or check it.": "请在你自己的终端中亲自运行：Chat On Steroids 不会运行或检查它。",
+  "{0} expected files": "{0} 个预期文件"
 }

@@ -65,7 +65,7 @@ app.whenReady().then(async () => {
   assert.equal(card.visible, true, 'The step card is shown in the timeline');
   assert.equal(card.summaryHidden, true, 'The card replaces the tool row headline');
   assert.equal(card.pre, 'cd firmware && make flash PORT=/dev/tty.usbserial-0001');
-  assert.match(card.text, /does not run or check this command/);
+  assert.match(card.text, /Run it yourself, in your own terminal: Chat On Steroids does not run or check it\./);
   assert.doesNotMatch(card.text.toLowerCase(), /\bsafe\b|verified/);
   assert.deepEqual(card.buttons, ['Mark as done', 'Skip']);
   assert.match(card.text, /found, 18 kB, /); assert.match(card.text, /not there yet/);
@@ -74,6 +74,15 @@ app.whenReady().then(async () => {
   await until(`!document.getElementById('userRequests').hidden`);
   assert.equal(await js(`document.querySelector('.user-requests-title').textContent`), '2 steps waiting for you');
   await shot('timeline-dark.png');
+  // Long details fold into one line under the folder (Haz on #2049); opening it shows the files.
+  const folded = await js(`(() => { const d=document.querySelector('#timeline .user-request details.user-request-more'); return d ? { open: d.open, summary: d.querySelector('summary').textContent } : null; })()`);
+  if (folded) {
+    assert.equal(folded.open, false);
+    await js(`document.querySelector('#timeline .user-request details.user-request-more > summary').click()`);
+    await until(`document.querySelector('#timeline .user-request details.user-request-more').open`);
+    await shot('timeline-details-open.png');
+    await js(`document.querySelector('#timeline .user-request details.user-request-more > summary').click()`);
+  }
   await js(`document.querySelector('.user-requests-shell').open=true`);
   await until(`document.querySelectorAll('#userRequests .user-request').length===2`);
   assert.match(await js(`document.querySelectorAll('#userRequests .user-request')[1].textContent`), /From the sub-agent “Sensor calibration”/);
