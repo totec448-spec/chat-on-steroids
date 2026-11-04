@@ -933,6 +933,7 @@ async function rebuildSummaryFromHistory(
         userMessages: rebuilt.userMessages,
         toolCalls: rebuilt.toolCalls,
         provisionalToolCalls: rebuilt.provisionalToolCalls ?? 0,
+        providerSessionToolCalls: rebuilt.providerSessionToolCalls ?? 0,
         lastToolCallAt: rebuilt.lastToolCallAt,
         lastToolActivity: rebuilt.lastToolActivity,
         lastAssistantFinalAt: rebuilt.lastAssistantFinalAt,
@@ -1142,6 +1143,7 @@ function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
   if (event.kind === 'tool_call') {
     summary.toolCalls += 1;
     if (event.call.attributionMethod === 'generation') summary.provisionalToolCalls = (summary.provisionalToolCalls ?? 0) + 1;
+    if (event.call.providerSessionAnchor) summary.providerSessionToolCalls = (summary.providerSessionToolCalls ?? 0) + 1;
     const priorToolAt = summary.lastToolCallAt ?? 0;
     summary.lastToolCallAt = Math.max(priorToolAt, event.time);
     // Attribution repair can append an older call after newer activity. Keep the projection
@@ -1740,7 +1742,7 @@ export async function reviseProvisionalCall(sessionId: string, callId: string,
   await enqueueSessionOperation(entry, 'provisional attribution', async () => {
     const key = `tool_call\u0000${callId}`;
     const previous = entry.messages.get(key);
-    if (previous?.kind !== 'tool_call' || previous.call.attributionMethod !== 'generation') return;
+    if (previous?.kind !== 'tool_call' || previous.call.attributionMethod !== 'generation' && !previous.call.providerSessionAnchor) return;
     // Invalidate the checkpoint before changing shards, including when the deleted shard
     // was not the newest. A crash at any following boundary must rebuild the counters.
     await writeSummary(entry.summary, -1);
@@ -3679,6 +3681,23 @@ export async function moveSessionProject(id: string, projectId: string | null): 
   });
 }
 
+/**
+ * The person changed this chat's project's related folders (#1689): their next message tells ChatGPT
+ * the project folder and the related folders again, once, as after a move. Old messages stay as they are.
+ */
+export async function markProjectNote(id: string, projectId: string): Promise<boolean> {
+  const entry = await ensureOpen(id);
+  return enqueueSessionOperation(entry, 'project note', async () => {
+    const subAgent = entry.summary.origin?.kind === 'worker' || entry.summary.origin?.kind === 'helper';
+    if (entry.summary.projectId !== projectId || subAgent || entry.summary.projectNotePending) return false;
+    const staged: SessionSummary = { ...entry.summary, projectNotePending: true };
+    await writeSummary(staged, entry.historySeq);
+    entry.summary = staged;
+    publishAttachmentSummary(staged);
+    return true;
+  });
+}
+
 /** The person's message that told ChatGPT a moved chat's folder was delivered. */
 export async function clearProjectNote(id: string): Promise<void> {
   const entry = await ensureOpen(id);
@@ -3818,6 +3837,12 @@ export async function rebindSession(
       browserRecoveryDismissedAt: undefined,
       ...(committedResumeHandoffId !== undefined
         ? { lastCommittedResumeHandoffId: committedResumeHandoffId }
+        : {}),
+      // After Compact & Resume the person's next message tells the new chat its project folder and
+      // the project's related folders as they are then (#1689), not as the old chat's brief knew them.
+      ...(committedResumeHandoffId !== undefined && entry.summary.projectId &&
+        entry.summary.origin?.kind !== 'worker' && entry.summary.origin?.kind !== 'helper'
+        ? { projectNotePending: true as const }
         : {}),
       updatedAt: Date.now(),
       // A session whose chat was closed during the handover is live again the moment its new
