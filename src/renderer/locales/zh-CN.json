@@ -3743,5 +3743,17 @@
   "Previous 7 days": "过去 7 天",
   "Previous 30 days": "过去 30 天",
   "Waiting for ChatGPT to finish its answer": "正在等待 ChatGPT 完成回答",
-  "Waiting for ChatGPT's page to end its turn": "正在等待 ChatGPT 页面结束本轮"
+  "Waiting for ChatGPT's page to end its turn": "正在等待 ChatGPT 页面结束本轮",
+  "Related folders": "相关文件夹",
+  "Related folders…": "相关文件夹…",
+  "Related folders: {0}": "相关文件夹：{0}",
+  "Other approved folders this work also uses": "此工作还会用到的其他已批准文件夹",
+  "Adds context for ChatGPT; does not change the working directory or grant access.": "只为 ChatGPT 提供上下文；不会更改工作目录，也不会授予访问权限。",
+  "No related folders yet.": "还没有相关文件夹。",
+  "Approved folder to add": "要添加的已批准文件夹",
+  "Every approved folder is already here. Approve another folder in Settings to add it.": "所有已批准的文件夹都已在此。要添加，请先在设置中批准另一个文件夹。",
+  "Unavailable": "不可用",
+  "No longer approved or no longer there; ChatGPT is not told about it.": "已不再批准或已不存在；不会告诉 ChatGPT。",
+  "Choose a related folder from your approved folders": "请从已批准的文件夹中选择相关文件夹",
+  "A project can have at most 10 related folders": "一个项目最多可有 10 个相关文件夹"
 }
