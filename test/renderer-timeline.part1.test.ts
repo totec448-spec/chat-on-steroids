@@ -966,6 +966,61 @@ it('says when the send check holds an automatic message, with its reason', async
   expect(w.document.querySelector('#inputQueue .pending-message')?.textContent ?? '').not.toContain('Held');
 });
 
+// 2026-11-03 (Mac): the chat's page had the person's Continue and held it while ChatGPT still answered.
+it('says a queued message waits for ChatGPT\'s answer while the chat\'s page holds it, and stops saying so once that is old', async () => {
+  // A frozen clock: a slow runner can never let a hold lapse before its wording is checked (CodeRabbit on #2054).
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date(2026, 10, 3, 15, 0));
+  try {
+    const asked = Date.now() - 12_000;
+    const { w, live, append } = await boot([
+      { seq: 1, time: asked - 100, source: 'extension', kind: 'turn_start', turnId: 'held-turn' },
+      { kind: 'user_message', seq: 2, origin: 2, time: asked, source: 'extension', turnId: 'held-turn', messageId: 'q-now', message: text('Run the tests') }
+    ]);
+    const api = (w as any).api;
+    const chat = await import('../src/renderer/chat.js');
+    const state = (await api.getState()).data;
+    chat.chatApply({ ...state, bridge: { ...state.bridge, present: true } });
+    const queued: InputEntry = { id: 'held-one', sessionId: summary(live.events).id, state: 'queued', owner: null, text: 'Continue',
+      mode: 'auto', model: null, reasoningEffort: null, dueAt: T0, createdAt: T0, conversationId: 'chat-a',
+      pageHold: { reason: 'still-answering', at: Date.now() - 2_000 } };
+    const status = () => w.document.querySelector('#inputQueue .pending-message')?.textContent ?? '';
+    // Each change is announced the way main does, then the queue's own refresh is waited for (CodeRabbit on #2054).
+    const shows = async (expected: string | null, absent?: string) => {
+      await append([]);
+      await waitFor(() => {
+        if (expected) expect(status()).toContain(expected);
+        if (absent) expect(status()).not.toContain(absent);
+      });
+    };
+    live.inputs.push(queued);
+    await shows('Waiting for ChatGPT to finish its answer');
+    live.inputs[0] = { ...queued, pageHold: { reason: 'turn-held', at: Date.now() - 2_000 } };
+    await shows("Waiting for ChatGPT's page to end its turn");
+    live.inputs[0] = { ...queued, pageHold: { reason: 'tool-running', at: Date.now() - 2_000 } };
+    await shows('Waiting for the running tool call to finish');
+    // A hold no page repeats lapses after 75 s by itself, with no queue refresh to repaint it (CodeRabbit on #2054).
+    live.inputs[0] = { ...queued, pageHold: { reason: 'still-answering', at: Date.now() - 73_500 } };
+    await shows('Waiting for ChatGPT to finish its answer');
+    const button = w.document.querySelector<HTMLButtonElement>('#inputQueue .pending-message button')!;
+    const control = [button.className, button.getAttribute('aria-label')];
+    button.focus();
+    // Only now does the hold grow past 75 s; the lapse timer repaints by itself.
+    vi.setSystemTime(Date.now() + 2_000);
+    await waitFor(() => expect(status()).not.toContain('Waiting for ChatGPT'), { timeout: 5_000 });
+    // The rebuilt row's same control keeps the keyboard focus.
+    const focused = w.document.activeElement as HTMLElement;
+    expect(focused.closest('.pending-message')).not.toBeNull();
+    expect([focused.className, focused.getAttribute('aria-label')]).toEqual(control);
+    // The message fails while its Cancel has focus: the failed row's own first control takes it, not the page.
+    live.inputs[0] = { ...queued, pageHold: undefined, state: 'failed', error: 'Not sent: the browser did not pick up this message within 60 seconds.' };
+    await shows('Not sent');
+    const after = w.document.activeElement as HTMLElement;
+    expect(after.tagName).toBe('BUTTON');
+    expect(after.closest('.pending-message')).not.toBeNull();
+  } finally { vi.useRealTimers(); }
+});
+
 it('says why a queued message waits: no extension, or a running tool call', async () => {
   const asked = Date.now() - 12_000;
   const { w, live, append } = await boot([

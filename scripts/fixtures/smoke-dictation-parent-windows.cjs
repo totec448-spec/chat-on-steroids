@@ -28,7 +28,9 @@ try {
   const parse = "$errors = $null; $tokens = $null; [void][System.Management.Automation.Language.Parser]::ParseFile($env:COS_SMOKE_SCRIPT, [ref]$tokens, [ref]$errors); " +
     "if($errors.Count) { $errors | ForEach-Object { [Console]::Error.WriteLine($_.ToString()) }; exit 1 }";
   execFileSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encode(parse)], {
-    env: { ...process.env, COS_SMOKE_SCRIPT: scriptFile }, encoding: 'utf8', timeout: 15_000
+    // Ceilings, not expectations: a cold PowerShell on a loaded CI runner took more than 15 s to
+    // start (2026-11-02, Windows x64 shard, both attempts); a healthy run takes about two seconds.
+    env: { ...process.env, COS_SMOKE_SCRIPT: scriptFile }, encoding: 'utf8', timeout: 60_000
   });
 } finally { fs.rmSync(scriptFile, { force: true }); }
 
@@ -36,7 +38,7 @@ try {
 const definitions = original.slice(0, original.indexOf('\r\n$modern = $false'));
 if (!definitions.includes('function CompileRecognizer')) throw new Error('Recognizer definitions not found');
 const compiledOutput = execFileSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand',
-  encode(definitions.replace('__COS_PARENT_PID__', String(process.pid)) + "\r\nCompileRecognizer\r\n'compiled'")], { encoding: 'utf8', timeout: 30_000 });
+  encode(definitions.replace('__COS_PARENT_PID__', String(process.pid)) + "\r\nCompileRecognizer\r\n'compiled'")], { encoding: 'utf8', timeout: 90_000 });
 if (!compiledOutput.includes('compiled')) throw new Error('The recognizer did not compile: ' + compiledOutput.slice(-500));
 
 // 2. Substitute only the recognizer setup. The real while/Wait-Event loop, parent-PID check,
@@ -67,7 +69,7 @@ function run(name, onListening) {
       child.kill();
       console.error(`FAIL (${name}): PowerShell did not exit`);
       finish(false);
-    }, 8000);
+    }, 30_000); // a cold start on a loaded runner, not the loop's own speed
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', chunk => {
       buffer += chunk;

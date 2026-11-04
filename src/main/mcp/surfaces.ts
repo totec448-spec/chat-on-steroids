@@ -134,7 +134,7 @@ const DESKTOP: SurfaceDefinition = {
     'and reading the clipboard or copying and pasting text between programs.',
   cardSummary: 'Browser and desktop apps.',
   required: false,
-  tools: [...BROWSER_TOOLS, ...WINDOWS_COMPUTER_METHODS, 'read_clipboard', 'write_clipboard', 'observe', 'computer', 'exec']
+  tools: [...BROWSER_TOOLS, ...WINDOWS_COMPUTER_METHODS, 'read_clipboard', 'write_clipboard', 'observe', 'computer', 'linux_observe', 'exec']
 };
 
 const PLUGINS: SurfaceDefinition = {
@@ -178,6 +178,7 @@ export function liveConnectorName(id: SurfaceId): string {
 /** Platform/capability projection used by setup; each registrar enforces the same split. */
 export function desktopToolNames(caps: Capabilities, platform: NodeJS.Platform = process.platform): string[] {
   const browser = [...(caps.screen ? BROWSER_READ_TOOLS : []), ...(caps.control ? BROWSER_WRITE_TOOLS : [])];
+  if (platform === 'linux') return [...browser, ...(getConfig().ui.linuxDesktopEnabled === true && caps.screen ? ['linux_observe'] : [])];
   if (!desktopAutomationSupported(platform)) return browser;
   if (platform !== 'win32') return [...browser, ...(caps.screen ? ['observe'] : []), ...(caps.control || caps.clipboardRead || caps.clipboardWrite ? ['computer'] : [])];
   return [

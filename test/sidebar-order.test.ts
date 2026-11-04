@@ -106,3 +106,72 @@ it('puts the chat tooltip away through the app\'s own cleanup when a drag starts
   expect(dismiss).toHaveBeenCalledTimes(1);
 });
 
+
+it('drops a held row onto a place that takes it instead of reordering, and highlights it while over it (#1919)', () => {
+  dom = new JSDOM('<div class="scroll"><div id="list"><div id="place">Project</div></div></div>', { url: 'https://local.test', pretendToBeVisual: true });
+  const w = dom.window;
+  Object.assign(globalThis, { window: w, document: w.document });
+  const list = w.document.getElementById('list')!, place = w.document.getElementById('place')!;
+  list.setPointerCapture = vi.fn(); list.hasPointerCapture = () => false;
+  const rows = ['a', 'b'].map((id, index) => {
+    const row = w.document.createElement('div'); row.dataset.id = id; row.dataset.sortScope = '';
+    row.getClientRects = () => [{ top: 40 + index * 40, height: 40 }] as unknown as DOMRectList;
+    row.getBoundingClientRect = () => ({ top: 40 + index * 40, height: 40 }) as DOMRect;
+    list.append(row); return row;
+  });
+  let under: Element | null = null;
+  w.document.elementFromPoint = () => under;
+  const drop = vi.fn();
+  const order = createSidebarOrder(list, () => [{ id: 'a', scope: '' }, { id: 'b', scope: '' }], vi.fn(), () => {},
+    { target: (id, at) => id === 'b' && at === place ? place : null, drop });
+  const pointer = (target: Element | Window, type: string, y: number) => target.dispatchEvent(new w.MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: 20, clientY: y }));
+  // Over the place: highlighted, and the drop goes to it; no new order is saved.
+  pointer(rows[1]!, 'pointerdown', 90); under = place; pointer(list, 'pointermove', 10);
+  expect(place.classList.contains('is-drop-target')).toBe(true);
+  expect(list.querySelector('.sort-before, .sort-after')).toBeNull();
+  pointer(w as unknown as Window, 'pointerup', 10);
+  expect(drop).toHaveBeenCalledWith('b', place);
+  expect(place.classList.contains('is-drop-target')).toBe(false);
+  expect(order.ordered('', [{ id: 'a' }, { id: 'b' }]).map(row => row.id)).toEqual(['a', 'b']);
+  // Moved off it again before letting go: an ordinary reorder, and nothing dropped.
+  drop.mockClear();
+  pointer(rows[1]!, 'pointerdown', 90); under = place; pointer(list, 'pointermove', 10);
+  under = rows[0]!; pointer(list, 'pointermove', 41);
+  expect(place.classList.contains('is-drop-target')).toBe(false);
+  pointer(w as unknown as Window, 'pointerup', 41);
+  expect(drop).not.toHaveBeenCalled();
+  expect(order.ordered('', [{ id: 'a' }, { id: 'b' }]).map(row => row.id)).toEqual(['b', 'a']);
+  // A row the place does not take (a) is never highlighted over it.
+  pointer(rows[0]!, 'pointerdown', 50); under = place; pointer(list, 'pointermove', 10);
+  expect(place.classList.contains('is-drop-target')).toBe(false);
+  pointer(w as unknown as Window, 'pointerup', 10);
+  expect(drop).not.toHaveBeenCalled();
+});
+
+// CodeRabbit on #1965: an open dialog over the list (the connection popover) must not let a drop through to
+// the project row hidden under it, and must not reorder either.
+it('cancels a drop made over a dialog that covers the list', () => {
+  dom = new JSDOM('<div class="scroll"><div id="list"><div id="place">Project</div></div></div><section id="popover" role="dialog">Connection</section>', { url: 'https://local.test', pretendToBeVisual: true });
+  const w = dom.window;
+  Object.assign(globalThis, { window: w, document: w.document });
+  const list = w.document.getElementById('list')!, place = w.document.getElementById('place')!, popover = w.document.getElementById('popover')!;
+  list.setPointerCapture = vi.fn(); list.hasPointerCapture = () => false;
+  const rows = ['a', 'b'].map((id, index) => {
+    const row = w.document.createElement('div'); row.dataset.id = id; row.dataset.sortScope = '';
+    row.getClientRects = () => [{ top: 40 + index * 40, height: 40 }] as unknown as DOMRectList;
+    row.getBoundingClientRect = () => ({ top: 40 + index * 40, height: 40 }) as DOMRect;
+    list.append(row); return row;
+  });
+  // The popover is on top; the project row is under it.
+  w.document.elementsFromPoint = () => [popover, place, list];
+  const drop = vi.fn(), save = vi.fn();
+  const order = createSidebarOrder(list, () => [{ id: 'a', scope: '' }, { id: 'b', scope: '' }], save, () => {},
+    { target: (id, at) => id === 'b' && at === place ? place : null, drop });
+  const pointer = (target: Element | Window, type: string, y: number) => target.dispatchEvent(new w.MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: 20, clientY: y }));
+  pointer(rows[1]!, 'pointerdown', 90); pointer(list, 'pointermove', 10);
+  expect(place.classList.contains('is-drop-target')).toBe(false);
+  expect(list.querySelector('.sort-before, .sort-after')).toBeNull();
+  pointer(w as unknown as Window, 'pointerup', 10);
+  expect(drop).not.toHaveBeenCalled();
+  expect(order.ordered('', [{ id: 'a' }, { id: 'b' }]).map(row => row.id)).toEqual(['a', 'b']);
+});
