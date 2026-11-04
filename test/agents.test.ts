@@ -5238,6 +5238,30 @@ describe('simultaneous independent prime families', () => {
     }
   });
 
+  it('counts a running worker\'s chat once, and frees a failed or refused worker\'s slot at once (Haz on #2051)', async () => {
+    const slots = await import('../src/main/chats-at-once.js');
+    const before = slots.workingChatsSourceForTests();
+    slots.resetChatsAtOnceForTests();
+    const working = new Set([PRIME_CHAT]);
+    slots.setWorkingChatsSource(() => working);
+    await setEnabled(true, 4);
+    getConfig().multiAgent.chatsAtOnce = 3;
+    try {
+      const a = recruit(prime, 2);
+      // worker-1's chat opens and works: the prime, worker-1 and worker-2's reservation are three, not four.
+      expect(bindConversation('worker-1', 'slot-worker-1', a.runId)).toBe(true);
+      working.add('slot-worker-1');
+      expect(slots.automaticSendRefusal('input:other', 'other-chat')).toMatch(/3 chats are working/);
+      // worker-2 never started: its slot is free at once, not after two minutes.
+      failAgent('worker-2', 'tab never opened', undefined, {}, a.runId);
+      expect(slots.automaticSendRefusal('input:other', 'other-chat')).toBeNull();
+    } finally {
+      getConfig().multiAgent.chatsAtOnce = 0;
+      slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(before);
+      await setEnabled(true);
+    }
+  });
+
   it('counts an unpublished staged spawn as a global admission reservation', async () => {
     await setEnabled(true, 2, false, 1);
     try {

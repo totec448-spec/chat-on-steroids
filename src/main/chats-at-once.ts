@@ -27,9 +27,16 @@ const SHARED_LIMIT_WINDOW_MS = 10 * 60_000;
 const DEFAULT_PAUSE_MS = 15 * 60_000;
 const STATE = 'chats-at-once';
 
+/**
+ * What became of a worker a slot was reserved for (agents.ts installs it, Haz on #2051): still
+ * starting, working in its own chat, or over (failed, finished, refused, or a wake that did not go).
+ */
+export type WorkerSlotState = { kind: 'pending' } | { kind: 'over' } | { kind: 'chat'; conversationId: string };
+let workerSlotState: (worker: string, reservedAt: number, now: number) => WorkerSlotState = () => ({ kind: 'pending' });
+export function setWorkerSlotSource(source: (worker: string, reservedAt: number, now: number) => WorkerSlotState): void { workerSlotState = source; }
+
 const waiting = new Map<string, { since: number; asked: number }>();
-const admitted = new Map<string, { conversationId: string | null; at: number; seen: boolean }>();
-let workerReservations = 0;
+const admitted = new Map<string, { conversationId: string | null; at: number; seen: boolean; worker?: string }>();
 const limitSeen = new Map<string, { at: number; retryAt: number | null }>();
 let pauseUntil: number | null = null;
 const listeners = new Set<() => void>();
@@ -56,6 +63,13 @@ function occupied(now: number): Set<string> {
   const working = new Set(workingChats());
   const taken = new Set<string>(working);
   for (const [key, entry] of admitted) {
+    // A worker's reservation follows its worker: once its chat is known it is that chat's slot, so a
+    // running worker counts once; a worker that ended or never started gives its slot back at once.
+    if (entry.worker) {
+      const state = workerSlotState(entry.worker, entry.at, now);
+      if (state.kind === 'over') { admitted.delete(key); continue; }
+      if (state.kind === 'chat') entry.conversationId = state.conversationId;
+    }
     const isWorking = entry.conversationId !== null && working.has(entry.conversationId);
     if (isWorking) { entry.seen = true; continue; }
     if (entry.seen || now - entry.at > ADMISSION_HOLD_MS) { admitted.delete(key); continue; }
@@ -103,19 +117,21 @@ function note(key: string, now: number): void {
 /**
  * Room for workers a prime starts or wakes (#1694): null when all fit, else why not. The calling
  * prime's own slot passes to its workers, since it delegates and then ends its turn; the others'
- * slots stay theirs. On success each worker holds a slot until its own chat shows as working.
+ * slots stay theirs. On success each worker holds a slot until its own chat shows as working; `workers` names them
+ * (see setWorkerSlotSource), so the slot follows the worker rather than a timer.
  * Refused rather than queued, like the other worker limits: no second scheduler (Haz on #1694).
  */
-export function workerSlotsRefusal(callerConversationId: string | null, count: number, now = Date.now()): string | null {
+export function workerSlotsRefusal(callerConversationId: string | null, workers: readonly string[], now = Date.now()): string | null {
   const limit = chatsAtOnceLimit();
+  const count = workers.length;
   if (!limit || count <= 0) return null;
   const pause = activePause(now);
   if (pause !== null) return `ChatGPT asked to slow down; automatic work resumes at ${new Date(pause).toISOString()}`;
   const taken = occupied(now);
   if (callerConversationId) taken.delete(callerConversationId);
   if (taken.size + count > limit) return `${taken.size} other chats are working and the limit is ${limit}`;
-  // Each worker its own reservation: two spawns in the same millisecond must not share one.
-  for (let index = 0; index < count; index++) admitted.set(`worker:${++workerReservations}`, { conversationId: null, at: now, seen: false });
+  // Each worker its own reservation, named after it: two spawns in the same millisecond never share one.
+  for (const worker of workers) admitted.set(`worker:${worker}`, { conversationId: null, at: now, seen: false, worker });
   return null;
 }
 
