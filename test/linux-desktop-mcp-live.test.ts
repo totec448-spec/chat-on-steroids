@@ -90,11 +90,19 @@ async function windowId(): Promise<string> {
   return windowIdFor(TITLE, windowsPid);
 }
 async function windowIdFor(title: string, pid: number): Promise<string> {
-  const result = await runLinuxDesktop({ kind: 'windows' });
-  if (!result.ok || !Array.isArray(result.data)) throw new Error('Cannot inspect live window inventory');
-  const own = result.data.filter((row: any) => row.title === title && row.pid === pid && row.accessible === true);
-  if (own.length !== 1) throw new Error(`Expected exactly one own fixture, found ${own.length}`);
-  return (own[0] as { id: string }).id;
+  // GTK can emit E2E_READY before AT-SPI has published the accessible window.
+  // Wait only for our exact fixture title + PID; never fall back to another app.
+  const deadline = Date.now() + 15_000;
+  while (true) {
+    const result = await runLinuxDesktop({ kind: 'windows' });
+    if (result.ok && Array.isArray(result.data)) {
+      const own = result.data.filter((row: any) => row.title === title && row.pid === pid && row.accessible === true);
+      if (own.length === 1) return (own[0] as { id: string }).id;
+      if (own.length > 1) throw new Error('Ambiguous GTK test fixture window');
+    }
+    if (Date.now() >= deadline) throw new Error('GTK test fixture did not become accessible before the deadline');
+    await new Promise(resolve => setTimeout(resolve, 150));
+  }
 }
 
 // Normal repository verification never launches a window or changes desktop state.
@@ -137,7 +145,7 @@ describe.skipIf(!LIVE)('real Linux MCP HTTP and semantic desktop acceptance (exp
       roots: [], caps: effectiveCapabilities(getConfig()), readOnly: getConfig().readOnly,
       setupProfileId: 'default', exposedLinuxDesktop: true, sessionTools: false, agentTools: false
     }));
-  }, 20_000);
+  }, 40_000);
 
   afterAll(async () => {
     if (endpoint) await endpoint.stop();
@@ -233,8 +241,9 @@ describe.skipIf(!LIVE)('real Linux MCP HTTP and semantic desktop acceptance (exp
     const validRef = ref(observed, { role: 'button', name: 'Apply test message' });
     const previous = getConfig();
     deferredAsk.enabled = true;
+    let pending: Promise<any> | null = null;
     try {
-      const pending = call('tools/call', 'linux_act', { action: 'click', ref: validRef });
+      pending = call('tools/call', 'linux_act', { action: 'click', ref: validRef });
       await vi.waitFor(() => expect(deferredAsk.resolve).not.toBeNull(), { timeout: 10_000 });
       await saveConfig({ ...previous, capabilities: { ...previous.capabilities, control: false } });
       deferredAsk.resolve!(null); // Simulated approval after the person waited.
@@ -243,6 +252,10 @@ describe.skipIf(!LIVE)('real Linux MCP HTTP and semantic desktop acceptance (exp
       expect(text(result)).toContain('TOOL_DISABLED');
       expect(fixtureOutput).not.toContain('E2E_RESULT=');
     } finally {
+      // A failed assertion or saveConfig must not strand an MCP request in Ask.
+      // Resolve it as a refusal, then drain the request before shutting down.
+      deferredAsk.resolve?.('DESKTOP_ASK_DENIED: test cleanup');
+      if (pending) await pending.catch(() => undefined);
       deferredAsk.enabled = false;
       deferredAsk.resolve = null;
       await saveConfig(previous);
@@ -252,14 +265,17 @@ describe.skipIf(!LIVE)('real Linux MCP HTTP and semantic desktop acceptance (exp
   it('delivers GTK input only after a simulated explicit Ask grant and refuses a denial', async () => {
     const id = await windowId();
     deferredAsk.enabled = true;
+    let pending: Promise<any> | null = null;
     try {
       const first = await call('tools/call', 'linux_observe', { what: 'snapshot', window_id: id });
       const firstRef = ref(first, { role: 'textfield', name: 'Test message' });
       const rejected = call('tools/call', 'linux_act', { action: 'set_value', ref: firstRef, value: 'DENIED_INPUT' });
+      pending = rejected;
       await vi.waitFor(() => expect(deferredAsk.resolve).not.toBeNull(), { timeout: 10_000 });
       expect(fixtureOutput).not.toContain('E2E_RESULT=');
       deferredAsk.resolve!('DESKTOP_ASK_DENIED: simulated user refusal');
       const denied = await rejected;
+      pending = null;
       expect(denied.isError).toBe(true);
       expect(text(denied)).toContain('DESKTOP_ASK_DENIED');
       deferredAsk.resolve = null;
@@ -267,15 +283,18 @@ describe.skipIf(!LIVE)('real Linux MCP HTTP and semantic desktop acceptance (exp
       const second = await call('tools/call', 'linux_observe', { what: 'snapshot', window_id: id });
       const nextRef = ref(second, { role: 'textfield', name: 'Test message' });
       const allowed = call('tools/call', 'linux_act', { action: 'set_value', ref: nextRef, value: 'GATED_INPUT_ALLOWED' });
+      pending = allowed;
       await vi.waitFor(() => expect(deferredAsk.resolve).not.toBeNull(), { timeout: 10_000 });
       expect(fixtureOutput).not.toContain('E2E_RESULT=');
       deferredAsk.resolve!(null); // Test-controlled approval, not a human's GUI click.
       const granted = await allowed;
+      pending = null;
       expect(granted.isError).not.toBe(true);
       expect(text(granted)).toContain('delivered_verified');
       expect(fixtureOutput).not.toContain('E2E_RESULT=');
     } finally {
-      if (deferredAsk.resolve) deferredAsk.resolve('DESKTOP_ASK_DENIED: cleanup');
+      deferredAsk.resolve?.('DESKTOP_ASK_DENIED: cleanup');
+      if (pending) await pending.catch(() => undefined);
       deferredAsk.enabled = false;
       deferredAsk.resolve = null;
     }
