@@ -605,7 +605,7 @@ function linuxScreenshotConsentErrorText(error: unknown): string {
       return t('Activate the Chat On Steroids window, then try again.');
     case 'Enable native Linux Desktop and Screen access first.':
     case 'Screen access was disabled before the screenshot request.':
-    case 'Native Linux Desktop or Screen access was disabled during the request.':
+    case 'Native Linux Desktop or Screen access was disabled during the screenshot request.':
       return t('Enable native Linux Desktop access and Screen permission, then try again.');
     case 'Screenshot permission can be requested only from the Chat On Steroids main window.':
       return t('Screenshot permission can be requested only from the Chat On Steroids main window.');
