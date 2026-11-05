@@ -29,6 +29,9 @@ import {
 import path from 'node:path';
 import { app } from 'electron';
 
+/** The small part of Electron's app surface that determines extension paths. */
+export type ExtensionPathApp = Pick<typeof app, 'isPackaged' | 'getPath' | 'getAppPath'>;
+
 const MATERIALIZED_FINGERPRINT = '.chat-on-steroids-source';
 const PUBLISH_LAST = new Set(['manifest.json', MATERIALIZED_FINGERPRINT]);
 
@@ -265,10 +268,11 @@ function materializePackagedExtension(bundled: string, stable: string): string |
  * dev run process.resourcesPath points into Electron's own resources, where there is no
  * extension folder — so the checkout path is what answers there.
  */
-export function extensionDir(): string | null {
-  if (app.isPackaged) {
+export function extensionDir(host?: ExtensionPathApp): string | null {
+  const electronApp = host ?? app;
+  if (electronApp.isPackaged) {
     const bundled = path.join(process.resourcesPath, 'extension');
-    const stable = path.join(app.getPath('userData'), 'extension');
+    const stable = path.join(electronApp.getPath('userData'), 'extension');
     try {
       return materializePackagedExtension(bundled, stable);
     } catch {
@@ -280,7 +284,7 @@ export function extensionDir(): string | null {
   }
 
   const candidates = [
-    path.join(app.getAppPath(), 'extension'),
+    path.join(electronApp.getAppPath(), 'extension'),
     path.join(process.cwd(), 'extension'),
     path.join(process.resourcesPath, 'extension')
   ];
@@ -298,10 +302,10 @@ export function extensionDir(): string | null {
  * Each root is read where it is used, because `process.resourcesPath` is undefined outside
  * Electron and must not stop the other candidates from answering.
  */
-function shippedExtensionDir(): string | null {
-  const candidates = app.isPackaged
-    ? [() => path.join(process.resourcesPath, 'extension'), () => path.join(app.getPath('userData'), 'extension')]
-    : [() => path.join(app.getAppPath(), 'extension'), () => path.join(process.cwd(), 'extension')];
+function shippedExtensionDir(host: ExtensionPathApp): string | null {
+  const candidates = host.isPackaged
+    ? [() => path.join(process.resourcesPath, 'extension'), () => path.join(host.getPath('userData'), 'extension')]
+    : [() => path.join(host.getAppPath(), 'extension'), () => path.join(process.cwd(), 'extension')];
   for (const candidate of candidates) {
     try {
       const dir = candidate();
@@ -324,11 +328,13 @@ function shippedExtensionDir(): string | null {
  * that greets every extension request.
  */
 let shippedStamp: string | null | undefined;
-export function shippedExtensionBuild(): string | null {
+export function shippedExtensionBuild(host?: ExtensionPathApp): string | null {
   if (shippedStamp !== undefined) return shippedStamp;
   shippedStamp = null;
   try {
-    const dir = shippedExtensionDir();
+    // Resolve Electron inside the guard: some bridge-only tests deliberately mock only
+    // safeStorage, and a missing app export must not break the bridge's /status and /pair routes.
+    const dir = shippedExtensionDir(host ?? app);
     if (dir) shippedStamp = readFileSync(path.join(dir, 'build-stamp.txt'), 'utf8').trim().slice(0, 12) || null;
   } catch {
     // No stamp, a damaged resource, or no Electron at all: the comparison simply says nothing.
@@ -342,10 +348,11 @@ export function setShippedExtensionBuildForTest(stamp?: string | null): void {
 }
 
 /** The build stamp of the folder Chrome loads the packaged extension from, or null. */
-export function materializedExtensionBuild(): string | null {
+export function materializedExtensionBuild(host?: ExtensionPathApp): string | null {
   try {
-    if (app?.isPackaged !== true) return null;
-    return readFileSync(path.join(app.getPath('userData'), 'extension', 'build-stamp.txt'), 'utf8').trim().slice(0, 12) || null;
+    const electronApp = host ?? app;
+    if (electronApp.isPackaged !== true) return null;
+    return readFileSync(path.join(electronApp.getPath('userData'), 'extension', 'build-stamp.txt'), 'utf8').trim().slice(0, 12) || null;
   } catch {
     return null;
   }
@@ -360,13 +367,14 @@ export function materializedExtensionBuild(): string | null {
  * while the old worker still runs, so the copy waits for `prepareExtensionUpdate`, which the
  * extension asks for only when it is idle and about to reload.
  */
-export function extensionUpdateOffer(running: string | null): { build: string } | null {
+export function extensionUpdateOffer(running: string | null, host?: ExtensionPathApp): { build: string } | null {
   // Part of every `/status` answer, so it must never throw: a missing stamp or a partly
   // available Electron simply means there is nothing to offer.
   try {
     if (!running) return null;
-    const shipped = shippedExtensionBuild();
-    if (!shipped || running === shipped || app?.isPackaged !== true) return null;
+    const electronApp = host ?? app;
+    const shipped = shippedExtensionBuild(electronApp);
+    if (!shipped || running === shipped || electronApp.isPackaged !== true) return null;
     return { build: shipped };
   } catch {
     return null;
@@ -374,9 +382,12 @@ export function extensionUpdateOffer(running: string | null): { build: string } 
 }
 
 /** Brings the loaded folder up to the shipped build for an idle extension that will reload now. */
-export function prepareExtensionUpdate(running: string | null): { build: string; ready: boolean } | null {
-  const offer = extensionUpdateOffer(running);
+export function prepareExtensionUpdate(running: string | null, host?: ExtensionPathApp): { build: string; ready: boolean } | null {
+  const offer = extensionUpdateOffer(running, host);
   if (!offer) return null;
-  try { extensionDir(); } catch { /* reported as not ready below */ }
-  return { build: offer.build, ready: materializedExtensionBuild() === offer.build };
+  let electronApp: ExtensionPathApp;
+  try { electronApp = host ?? app; }
+  catch { return { build: offer.build, ready: false }; }
+  try { extensionDir(electronApp); } catch { /* readiness is checked against the stable folder below */ }
+  return { build: offer.build, ready: materializedExtensionBuild(electronApp) === offer.build };
 }
