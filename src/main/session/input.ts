@@ -2153,6 +2153,27 @@ export async function ownUnsentTexts(conversationId: string, exceptId: string, n
     .map(row => row.deliveryText ?? row.text);
 }
 
+/**
+ * The exact texts a page may treat as this app's own leftover when a repair finds the message box
+ * not empty (#2074): what it sent into this chat by itself and ChatGPT received (an automatic
+ * Continue, a fresh turn, a scheduled run), plus its unsent ones (`ownUnsentTexts`). After a reload
+ * ChatGPT can put an already-sent message back into the box, and every repair was then held as if it
+ * were the person's draft. Messages the person wrote are never listed; nor is anything with an image,
+ * a file or a companion message. The page also requires the text to be the chat's latest message.
+ */
+export async function ownRepairResidueTexts(conversationId: string, now = Date.now()): Promise<string[]> {
+  const rows = await listInputs();
+  const companions = new Set(rows.flatMap(row => row.companionInputId ? [row.companionInputId] : []));
+  const sent = rows
+    .filter(row => row.conversationId === conversationId && automaticSendKind(row) !== null &&
+      (row.deliveredAt !== undefined || !!row.messageId) && !row.companionInputId && !companions.has(row.id) &&
+      !row.images?.length && !row.attachments?.length && now - row.createdAt < OWN_UNSENT_MS)
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, OWN_UNSENT_MAX)
+    .map(row => row.deliveryText ?? row.text);
+  return [...new Set([...sent, ...await ownUnsentTexts(conversationId, '', now)])];
+}
+
 export function claimBrowserInput(id: string, owner: string, conversationId: string | null, requiresAuthorization = false): Promise<InputEntry | null> {
   return serial(async () => {
     const current = await load();

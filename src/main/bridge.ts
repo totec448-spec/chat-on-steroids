@@ -39,7 +39,7 @@ export { setBrowserWorkArea } from './browser-window-layout.js';
 import { pendingBrowserPreferenceRequest, acknowledgeBrowserPreferences } from './browser-preferences.js';
 import { sessionFinishHeld, releaseSessionFinish, getSessionFinishDraft, sessionFinishWaiting } from './session/finish.js';
 import { observeUsage } from './session/usage.js';
-import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, lostBrowserOpening, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, queuedInputOfferBlocker, continueAsOrdinaryMessage, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, withdrawOwnContinuesAfterStop, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation, ownUnsentTexts, retireMismatchedRecoveryInput, noteInputHeld } from './session/input.js';
+import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, lostBrowserOpening, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, queuedInputOfferBlocker, continueAsOrdinaryMessage, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, withdrawOwnContinuesAfterStop, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation, ownUnsentTexts, ownRepairResidueTexts, retireMismatchedRecoveryInput, noteInputHeld } from './session/input.js';
 /**
  * The local bridge between the Chrome extension and this app.
  *
@@ -3189,6 +3189,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     const repairHeld = url.searchParams.get('repairHeld');
     if (repairHeld) noteRepairHeld(repairHeld.slice(0, 64), url.searchParams.get('why'));
+    const repairCleared = url.searchParams.get('repairCleared');
+    if (repairCleared) noteRepairCleared(repairCleared.slice(0, 64));
     const revivals = pendingBrowserRevivals();
     const revival = revivals[0] ?? null;
     const inputRows = await listInputs();
@@ -11228,6 +11230,8 @@ async function takePendingRepairs(
     conversationId: string;
     token: string;
     reason: Repair['reason'];
+    /** Texts this app sent into the chat by itself: one restored into the box is not a draft (#2074). */
+    ownTexts?: string[];
     /** Raise the tab (or open the chat in front) before acting: a background tab is throttled. */
     focus: boolean;
     requiresClaim?: boolean;
@@ -11328,7 +11332,9 @@ async function takePendingRepairs(
     if (allowed && repairsInFlight.get(conversationId) === repair && !isChatBlocked(conversationId) &&
         !stopRequestedFor(conversationId) && !heldByApproval)
       {
+        const ownTexts = await ownRepairResidueTexts(conversationId).catch(() => []);
         ready.push({ conversationId, token: repair.token, reason: repair.reason, focus: repair.reason === 'compaction',
+          ...(ownTexts.length ? { ownTexts } : {}),
           ...(repairNeedsClaim(repair) ? { requiresClaim: true } : {}),
           ...(repair.reason === 'silence' && recoveryInputAllowed(repair.sessionId, conversationId) ? { continueFollows: true } : {}) });
       }
@@ -11471,12 +11477,22 @@ function noteRepairHeld(token: string, why: string | null): void {
   const reason = why && Object.hasOwn(REPAIR_HOLD_REASONS, why) ? why : 'unknown';
   const held = [...repairsInFlight].find(([, repair]) => repair.token === token);
   if (!held) return;
+  // A page that answers "held" is there: its replies never count toward the no-page budget, which
+  // otherwise ended recovery with "no page" while that page kept answering (#2074).
+  held[1].claimAskedAt = Date.now();
   const key = `${token}:${reason}`;
   if (repairHoldsLogged.has(key)) return;
   repairHoldsLogged.add(key);
   if (repairHoldsLogged.size > 500) for (const old of [...repairHoldsLogged].slice(0, 100)) repairHoldsLogged.delete(old);
   const [conversationId, repair] = held;
   logInfo(`bridge: the page held the ${repair.reason} repair for ${conversationId}: ${REPAIR_HOLD_REASONS[reason] ?? 'it gave no reason'}`);
+}
+
+/** The page removed this app's own already-sent message from the message box before the repair (#2074). */
+function noteRepairCleared(token: string): void {
+  const held = [...repairsInFlight].find(([, repair]) => repair.token === token);
+  if (!held) return;
+  logInfo(`bridge: the page removed this app's own already-sent message, restored into ${held[0]}'s message box, before the ${held[1].reason} repair`);
 }
 
 /** Why a handed repair took no browser action, in the words the log uses. */
