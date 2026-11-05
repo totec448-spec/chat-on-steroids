@@ -3276,6 +3276,28 @@ describe('automatic compaction', () => {
     expect((await request('GET', '/status')).body.repairs.some((row: { token: string }) => row.token === handout.token)).toBe(true);
   });
 
+  // #2074: a page that kept answering "held" (the app's own Continue was back in its message box) used
+  // up the no-page budget, and recovery ended with "no page; not offering again" while that page was there.
+  it('never ends recovery as "no page" while the page keeps answering that it holds the repair, and logs a cleared leftover', async () => {
+    await pair();
+    const conversationId = randomUUID();
+    const session = await createSession({ conversationId });
+    await compactSession(session.id);
+    for (let pass = 0; pass < 15; pass++) {
+      const offered = (await request('GET', '/status')).body.repairs
+        .find((row: { conversationId: string }) => row.conversationId === conversationId);
+      expect(offered).toBeTruthy();
+      await request('GET', `/status?repairHeld=${encodeURIComponent(offered.token)}&why=draft`);
+    }
+    expect(getLog().some(entry => entry.message.includes(`${conversationId} never claimed`))).toBe(false);
+    const handout = (await request('GET', '/status')).body.repairs
+      .find((row: { conversationId: string }) => row.conversationId === conversationId);
+    // The report itself hands out no work, as for a held repair (CodeRabbit on #2079).
+    expect((await request('GET', `/status?repairCleared=${encodeURIComponent(handout.token)}`)).body.repairs).toEqual([]);
+    expect(getLog().some(entry => entry.message ===
+      `bridge: the page removed this app's own already-sent message, restored into ${conversationId}'s message box, before the compaction repair`)).toBe(true);
+  });
+
   it('says an app-started Compact & resume reloaded its chat to send the request, in a row naming that chat', async () => {
     await pair();
     const conversationId = randomUUID();
@@ -8506,6 +8528,21 @@ ${SAMPLE_BRIEF}` }
       expect((await poll(other, [])).placement).toBeNull();
       expect((await poll(holder, [home])).placement).toMatchObject({ id: command.id, homeConversationId: home, active: true });
     });
+
+    // CodeRabbit on #2079: a repair report's reply is not read, so it must not spend a placement.
+    it('keeps a placement for the next poll when the browser only reports a repair', async () => {
+      await pair();
+      const home = 'c0c0c0c0-1111-4222-8333-000000000b04';
+      const { sessionId, token } = await compactedSession(home, 'carry on');
+      await poll(holder, [home]);
+      const command = queueResume(sessionId, token)!;
+      await vi.waitFor(async () => expect((await readDurable<any>('bridge-commands'))?.commands?.some((row: any) => row.id === command.id && row.phase === 'leased')).toBe(true), { timeout: 10_000 });
+      for (const report of ['repairCleared=some-token', 'repairHeld=some-token&why=draft', 'repairFailed=some-token&why=changed']) {
+        const reply = await request('POST', `/status?${report}`, { body: { openConversations: [home] }, browser: holder });
+        expect(reply.body.placement ?? null).toBeNull();
+      }
+      expect((await poll(holder, [home])).placement).toMatchObject({ id: command.id, homeConversationId: home, active: true });
+    });
   });
 
   it('never issues a second open while the handed-out browser tab is still hydrating', async () => {
@@ -9954,6 +9991,27 @@ describe('unattributed activity recovery', () => {
     await maintenance(retry!.token, 'reloaded');
     await events(OTHER, [{ kind: 'chat_error', time: Date.now(), turnId: 'h2-turn', text: 'another notice', recoverable: true, reason: 'stream_gone' }]);
     expect(await maintenance()).toBeNull();
+  });
+
+  // CodeRabbit on #2080: a finished repair that keeps no activity grant is no work for history Retry.
+  it('stops counting a finished repair as work once its chat keeps no activity grant', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(OTHER, [{ kind: 'user_message', time: Date.now(), messageId: 'retry-done-question', text: 'Work on this task.' }, openTurn('retry-done-turn')]);
+      await events(OTHER, [{ kind: 'chat_error', time: Date.now(), turnId: 'retry-done-turn', text: 'The response stream is unavailable.',
+        recoverable: true, reason: 'stream_gone' }]);
+      const repair = await maintenance();
+      expect(repair).toMatchObject({ conversationId: OTHER, reason: 'assistant-error' });
+      expect((await request('POST', '/repairs/claim', { body: { token: repair!.token } })).body.allowed).toBe(true);
+      await maintenance(repair!.token, 'reloaded');
+      await events(OTHER, [{ kind: 'turn_end', time: Date.now(), turnId: 'retry-done-turn', outcome: 'completed' }]);
+      const view = async () => (await request('GET', `/activity?conversationId=${OTHER}`)).body.historyRetry;
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect(await view()).toEqual({ wanted: false });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('lets the user cancel an interrupted-response reload for this answer only (#1032)', async () => {
@@ -12235,6 +12293,26 @@ describe('unattributed activity recovery', () => {
       await note({ note: 'input-held', reason: 'tool-running', inputId: id(0), conversationId: id(0) });
       expect(lines(id(0))).toBe(2);
     } finally { vi.useRealTimers(); }
+  });
+
+  // #2076: each Retry press is another history request; an idle chat leaves it to the person.
+  it('tells the page to press history Retry only while work waits, and not inside the app hold', async () => {
+    await pair();
+    await events(PRIME, [{ kind: 'model_selection', time: Date.now(), model: 'GPT-5.6 Sol', reasoningEffort: 'high' }]);
+    const view = async () => (await request('GET', `/activity?conversationId=${PRIME}`)).body.historyRetry;
+    expect(await view()).toEqual({ wanted: false });
+    // A running call no chat is proven to own is not this chat's work (CodeRabbit on #2080).
+    const { trackInFlight, emptyEvidence } = await import('../src/main/mcp/call-context.js');
+    await trackInFlight({ startedAt: Date.now(), transportKey: null, agent: null, outcome: null, evidence: emptyEvidence(),
+      caller: { conversationId: null, requestId: 'no-chat-call', transportKey: null } }, async () => {
+      expect(await view()).toEqual({ wanted: false });
+    });
+    await events(PRIME, [openTurn('retry-work')]);
+    expect(await view()).toMatchObject({ wanted: true });
+    const retryAt = Date.now() + 10 * 60_000;
+    await events(PRIME, [{ kind: 'chat_error', time: Date.now(), turnId: 'retry-work', recoverable: false, blocking: true, retryAt,
+      text: 'ChatGPT temporarily rate-limited loading this conversation history.' }]);
+    expect((await view()).until).toBeGreaterThanOrEqual(retryAt);
   });
 
   it('records a repeating history limit once, while its deadline keeps following the newest (2026-10-11)', async () => {

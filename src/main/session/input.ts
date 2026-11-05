@@ -2153,6 +2153,167 @@ export async function ownUnsentTexts(conversationId: string, exceptId: string, n
     .map(row => row.deliveryText ?? row.text);
 }
 
+/**
+ * Each chat's latest automatic send ChatGPT confirmed with a message id (#2074), kept apart from the
+ * outbox: its history keeps only the newest 50 finished rows across all chats, so a busy app could
+ * forget the very Continue a repair needs to recognise while it is still the chat's latest message
+ * (CodeRabbit on #2079). One per chat, at most 200 chats; texts over 20,000 characters are not kept.
+ */
+const OWN_SENT_STATE = 'own-sent-receipts';
+const OWN_SENT_RECEIPTS_MAX = 200;
+const OWN_SENT_TEXT_MAX = 20_000;
+const ownSentReceiptSchema = z.object({ conversationId: z.string().min(1).max(256), text: z.string().min(1).max(OWN_SENT_TEXT_MAX),
+  messageId: z.string().min(1).max(256), at: z.number() });
+type OwnSentReceipt = z.infer<typeof ownSentReceiptSchema>;
+/**
+ * Saved as `{ version: 1, receipts, forgotten }`. `forgotten` names chats deleted in the last 24 h:
+ * a send still being acknowledged for one of them must not record it again (CodeRabbit on #2079).
+ */
+type OwnSentStore = { receipts: OwnSentReceipt[]; forgotten: Array<{ conversationId: string; at: number }> };
+const ownSentForgottenSchema = z.object({ conversationId: z.string().min(1).max(256), at: z.number() });
+let ownSentStore: OwnSentStore | null = null;
+/**
+ * Every change to the store runs in this chain, its own and not the input queue: deletion calls it
+ * from outside that queue, and failInputsForDeletedConversation from inside it (CodeRabbit on #2079).
+ */
+let ownSentChain: Promise<unknown> = Promise.resolve();
+function withOwnSentLock<T>(work: () => Promise<T>): Promise<T> {
+  const run = ownSentChain.then(work, work);
+  ownSentChain = run.catch(() => undefined);
+  return run;
+}
+let ownSentPruneTimer: NodeJS.Timeout | null = null;
+/** Receipts that could not be saved because the store was unreadable; added once it reads again (CodeRabbit on #2079). */
+let ownSentUnsaved: OwnSentReceipt[] = [];
+/** One shared read: two first callers must not each install their own snapshot (CodeRabbit on #2079). */
+let ownSentLoad: Promise<OwnSentStore> | null = null;
+function loadOwnSentStore(): Promise<OwnSentStore> {
+  if (ownSentStore) return Promise.resolve(ownSentStore);
+  // Read strictly: a file whose JSON is damaged still holds its text on disk and is replaced below,
+  // while a missing or unreadable one is simply empty (CodeRabbit on #2079).
+  let damaged = false;
+  ownSentLoad ??= readDurable<unknown>(OWN_SENT_STATE, { strict: true }).catch((error: Error & { damaged?: boolean }) => {
+    if (error?.damaged === true) { damaged = true; return null; }
+    // Unreadable for the moment: not cached as empty, or the next write would replace what is there.
+    // The next access reads the file again (CodeRabbit on #2079).
+    logWarn(`own-sent records could not be read now; trying again on the next access (${error?.message ?? 'error'})`);
+    ownSentLoad = null;
+    throw error;
+  }).then(saved => {
+    const record = saved && typeof saved === 'object' && !Array.isArray(saved) ? saved as { receipts?: unknown; forgotten?: unknown } : null;
+    // A damaged entry is dropped, never guessed at; the rest stay.
+    const valid = <T>(rows: unknown, schema: z.ZodType<T>): T[] => (Array.isArray(rows) ? rows : []).flatMap(row => {
+      const parsed = schema.safeParse(row);
+      return parsed.success ? [parsed.data] : [];
+    });
+    if (!ownSentStore) {
+      const loaded = {
+        receipts: valid(record ? record.receipts : saved, ownSentReceiptSchema),
+        forgotten: valid(record?.forgotten, ownSentForgottenSchema)
+      };
+      ownSentStore = trimOwnSent(loaded);
+      // Sends whose receipt could not be saved while the store was unreadable, unless their chat was deleted since.
+      const late = ownSentUnsaved.filter(row => !ownSentStore!.forgotten.some(gone => gone.conversationId === row.conversationId));
+      ownSentUnsaved = [];
+      if (late.length) {
+        const chats = new Set(late.map(row => row.conversationId));
+        ownSentStore = trimOwnSent({ ...ownSentStore, receipts: [...ownSentStore.receipts.filter(row => !chats.has(row.conversationId)), ...late] });
+        damaged = true;
+      }
+      // Expired, damaged or rejected text leaves the disk when the store is read, not only on the next
+      // send: whatever differs from the cleaned store is rewritten (CodeRabbit on #2079).
+      if (damaged || (saved !== null && JSON.stringify(saved) !== JSON.stringify({ version: 1, ...ownSentStore })))
+        writeDurableSoon(OWN_SENT_STATE, { version: 1, ...ownSentStore });
+      // And while the app stays open: once an hour.
+      ownSentPruneTimer ??= setInterval(() => { void pruneOwnSent().catch(() => undefined); }, 60 * 60_000);
+      ownSentPruneTimer.unref?.();
+    }
+    return ownSentStore;
+  });
+  return ownSentLoad;
+}
+/** Drops what is older than 24 h and saves it, if anything was. */
+function pruneOwnSent(now = Date.now()): Promise<void> {
+  return withOwnSentLock(async () => {
+    const store = await loadOwnSentStore();
+    const next = trimOwnSent(store, now);
+    if (next.receipts.length === store.receipts.length && next.forgotten.length === store.forgotten.length) return;
+    ownSentStore = next;
+    writeDurableSoon(OWN_SENT_STATE, { version: 1, ...next });
+  });
+}
+async function loadOwnSentReceipts(): Promise<OwnSentReceipt[]> { return (await loadOwnSentStore()).receipts; }
+/** Kept without anything older than the window a page may use it in. */
+function trimOwnSent(store: OwnSentStore, now = Date.now()): OwnSentStore {
+  return {
+    receipts: store.receipts.filter(row => now - row.at < OWN_UNSENT_MS).slice(-OWN_SENT_RECEIPTS_MAX),
+    forgotten: store.forgotten.filter(row => now - row.at < OWN_UNSENT_MS).slice(-OWN_SENT_RECEIPTS_MAX)
+  };
+}
+async function rememberOwnSent(entry: InputEntry, current: InputEntry[], conversationId: string, messageId: string): Promise<void> {
+  const text = entry.deliveryText ?? entry.text;
+  if (automaticSendKind(entry) === null || entry.images?.length || entry.attachments?.length || entry.companionInputId ||
+      current.some(row => row.companionInputId === entry.id) || messageId.startsWith('input:') || text.length > OWN_SENT_TEXT_MAX) return;
+  // An unreadable store never fails the acknowledgement it rides on; the receipt waits in memory and is
+  // added once the store reads again.
+  const receipt = { conversationId, text, messageId, at: Date.now() };
+  await withOwnSentLock(async () => {
+    const store = await loadOwnSentStore();
+    // A chat deleted meanwhile stays forgotten, even when its send is acknowledged late (CodeRabbit on #2079).
+    if (store.forgotten.some(row => row.conversationId === conversationId)) return;
+    ownSentStore = trimOwnSent({ ...store, receipts: [...store.receipts.filter(row => row.conversationId !== conversationId),
+      receipt] });
+    writeDurableSoon(OWN_SENT_STATE, { version: 1, ...ownSentStore });
+  }).catch((error: Error) => {
+    logWarn(`input ${entry.id}: its own-sent record waits until the store can be read (${error.message})`);
+    ownSentUnsaved = [...ownSentUnsaved.filter(row => row.conversationId !== conversationId), receipt].slice(-OWN_SENT_RECEIPTS_MAX);
+  });
+}
+/**
+ * A deleted chat's receipt goes with it (CodeRabbit on #2079): a scheduled run's text can be the
+ * person's own words. Called with every ChatGPT conversation the deleted chat had, before the chat
+ * itself is removed, and saved before it returns: a crash right after cannot bring the text back.
+ */
+export async function forgetOwnSent(conversationIds: readonly string[], now = Date.now()): Promise<void> {
+  const ids = new Set(conversationIds.filter(Boolean));
+  if (!ids.size) return;
+  // A receipt still waiting for an unreadable store goes too, at once.
+  ownSentUnsaved = ownSentUnsaved.filter(row => !ids.has(row.conversationId));
+  await withOwnSentLock(async () => {
+    const store = await loadOwnSentStore();
+    const next = trimOwnSent({
+      receipts: store.receipts.filter(row => !ids.has(row.conversationId)),
+      forgotten: [...store.forgotten.filter(row => !ids.has(row.conversationId)), ...[...ids].map(conversationId => ({ conversationId, at: now }))]
+    }, now);
+    await writeDurableNow(OWN_SENT_STATE, { version: 1, ...next });
+    ownSentStore = next;
+  });
+}
+
+/**
+ * The app's own automatic messages ChatGPT received in a chat, with their message ids (#2074): what a
+ * repair's page may treat as the app's leftover when ChatGPT puts one back into the message box after
+ * a reload. Only sends with a known ChatGPT message id (an automatic Continue, a fresh turn, a scheduled
+ * run); never the person's messages, never anything with an image, a file or a companion message, and
+ * never an unsent text, which has no message to prove it (CodeRabbit on #2079). The page also requires
+ * that exact message to be the chat's latest user message.
+ */
+export async function ownSentResidue(conversationId: string, now = Date.now()): Promise<Array<{ text: string; messageId: string }>> {
+  await pruneOwnSent(now);
+  const rows = await listInputs();
+  const companions = new Set(rows.flatMap(row => row.companionInputId ? [row.companionInputId] : []));
+  return rows
+    .filter(row => row.conversationId === conversationId && automaticSendKind(row) !== null && !!row.messageId &&
+      !row.companionInputId && !companions.has(row.id) && !row.images?.length && !row.attachments?.length &&
+      now - row.createdAt < OWN_UNSENT_MS)
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, OWN_UNSENT_MAX)
+    .map(row => ({ text: row.deliveryText ?? row.text, messageId: row.messageId! }))
+    .concat((await loadOwnSentReceipts()).filter(row => row.conversationId === conversationId && now - row.at < OWN_UNSENT_MS)
+      .map(row => ({ text: row.text, messageId: row.messageId })))
+    .filter((row, index, all) => !row.messageId.startsWith('input:') && all.findIndex(other => other.messageId === row.messageId) === index);
+}
+
 export function claimBrowserInput(id: string, owner: string, conversationId: string | null, requiresAuthorization = false): Promise<InputEntry | null> {
   return serial(async () => {
     const current = await load();
@@ -2350,6 +2511,7 @@ export function acknowledgeBrowserInput(id: string, owner: string, conversationI
       entry.state !== 'cancelled' && (entry.opening || !entry.sessionId) && entry.automation && deliveredConversation && entry.purpose !== 'decision' ? [acknowledged] : [], 'after-send');
     if (entry.completedTurnId && entry.sessionId && deliveredConversation)
       await consumeGoalReplyForInputNow(deliveredConversation, entry.sessionId, entry.completedTurnId);
+    if (messageId && deliveredConversation && entry.state !== 'cancelled') await rememberOwnSent(entry, current, deliveredConversation, messageId);
     // The page saw its edit replace the question: that is known now, before ChatGPT draws its versions.
     if (entry.edit && messageId && entry.sessionId) await noteEditReplacement(entry.sessionId, messageId, entry.edit.messageId)
       .catch((err: Error) => logWarn(`input ${id}: could not mark the edited question (${err.message})`));
@@ -2454,7 +2616,9 @@ export function offerToolInput(sessionId: string | null | undefined, conversatio
   });
 }
 
-export function resetInputForTests(): void { entries = null; chain = Promise.resolve(); offered.clear(); decisionWaiters.clear(); declinedRotations.clear(); slotWaits.clear(); }
+export function resetInputForTests(): void {
+  ownSentStore = null; ownSentLoad = null; ownSentChain = Promise.resolve(); ownSentUnsaved = [];
+  if (ownSentPruneTimer) { clearInterval(ownSentPruneTimer); ownSentPruneTimer = null; } entries = null; chain = Promise.resolve(); offered.clear(); decisionWaiters.clear(); declinedRotations.clear(); slotWaits.clear(); }
 
 export async function pausedBrowserHelpers(): Promise<Array<{ id: string; sourceSessionId: string }>> {
   return (await listInputs()).filter(row => row.purpose === 'decision' && row.state === 'cancelled' && row.cancelledByUser === true && !row.conversationId && row.decisionSourceSessionId)
@@ -2677,6 +2841,8 @@ export function failBrowserInput(id: string, owner: string, error: string, detai
  */
 export function failInputsForDeletedConversation(conversationId: string): Promise<number> {
   return serial(async () => {
+    // ChatGPT deleted it: its own-sent receipt goes too (#2074).
+    await forgetOwnSent([conversationId]).catch((error: Error) => logWarn(`own-sent record of ${conversationId} not removed (${error.message})`));
     const current = await load();
     const ended = new Set<string>();
     for (const row of current) {

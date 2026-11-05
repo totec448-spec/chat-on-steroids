@@ -39,7 +39,7 @@ export { setBrowserWorkArea } from './browser-window-layout.js';
 import { pendingBrowserPreferenceRequest, acknowledgeBrowserPreferences } from './browser-preferences.js';
 import { sessionFinishHeld, releaseSessionFinish, getSessionFinishDraft, sessionFinishWaiting } from './session/finish.js';
 import { observeUsage } from './session/usage.js';
-import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, lostBrowserOpening, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, queuedInputOfferBlocker, continueAsOrdinaryMessage, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, withdrawOwnContinuesAfterStop, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation, ownUnsentTexts, retireMismatchedRecoveryInput, noteInputHeld } from './session/input.js';
+import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, lostBrowserOpening, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, queuedInputOfferBlocker, continueAsOrdinaryMessage, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, withdrawOwnContinuesAfterStop, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation, ownUnsentTexts, ownSentResidue, retireMismatchedRecoveryInput, noteInputHeld } from './session/input.js';
 /**
  * The local bridge between the Chrome extension and this app.
  *
@@ -3189,6 +3189,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     const repairHeld = url.searchParams.get('repairHeld');
     if (repairHeld) noteRepairHeld(repairHeld.slice(0, 64), url.searchParams.get('why'));
+    const repairCleared = url.searchParams.get('repairCleared');
+    if (repairCleared) noteRepairCleared(repairCleared.slice(0, 64));
     const revivals = pendingBrowserRevivals();
     const revival = revivals[0] ?? null;
     const inputRows = await listInputs();
@@ -3258,13 +3260,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         commandIds: commands.map(command => command.id),
         revival: takesWork ? revival : null,
         revivals: takesWork ? revivals : [],
-        placement: takesWork ? pendingBrowserPlacement(null, browser) : null,
+        // A repair report is answered with no work: its reply is not read, and a placement handed
+        // here would be consumed and never placed (CodeRabbit on #2079).
+        placement: takesWork && !repairFailed && !repairHeld && !repairCleared ? pendingBrowserPlacement(null, browser) : null,
         ...(canReveal ? { reveals: takeReveals(browser) } : {}),
         ...(follow ? { follow } : {}),
         ...(req.method === 'POST' && imageExportRequested ? { imageExports: pendingImageExports() } : {}),
         // A failure report closes this request. Reissuing the repair in the same response would
         // replace the visible failure with "Trying" before a renderer could ever observe it.
-        repairs: repairFailed || repairHeld ? [] : await takePendingRepairs(Date.now(), browser, takesWork, chosenBuiltIn),
+        repairs: repairFailed || repairHeld || repairCleared ? [] : await takePendingRepairs(Date.now(), browser, takesWork, chosenBuiltIn),
         ...tabPolicy,
         recoveryMonitoring: browserRecoveryMonitoring(),
         // A newer extension build ships with this app. The extension reloads into it on its own
@@ -4042,6 +4046,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           job: null,
           progress: conversationProgress(id),
           goal: await goalView(),
+          ...await historyRetryView(id, astraSession?.id ?? null),
           ...(goalFencedChat(id) || superseded
             ? {
                 // Worker conversations are never Compact & Resume sources. Keep the page's
@@ -4327,6 +4332,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // chat currently has in flight. The draft's text grows on this feed, which is what
         // the panel above the composer streams — there is no second connection to hold open.
         goal: await goalView(),
+        // Whether the page may press ChatGPT's Retry on a history that could not load (#2076).
+        ...await historyRetryView(live.conversationId, live.sessionId),
         // Local calls still executing for *this chat*. ChatGPT-native compaction waits for
         // this to reach zero after interrupting the turn, so the handoff is written about a
         // settled machine rather than one mid-edit. Recorder-only attribution settling is
@@ -8693,6 +8700,31 @@ type ProviderDeferredColdStart = {
 /** Queue-time authority snapshots only for Goal/compaction work actually deferred by Retry-After. */
 const providerDeferredColdStarts = new Map<string, ProviderDeferredColdStart>();
 
+/**
+ * Whether the page may press ChatGPT's Retry on a chat whose history could not load (#2076): only
+ * while the app still owes this chat work, and not before the app's own hold for it ends. Each
+ * press is another history request; an idle chat leaves Retry to the person.
+ */
+async function historyRetryView(conversationId: string, sessionId: string | null): Promise<{ historyRetry: { wanted: boolean; until?: number } }> {
+  const inputs = sessionId ? await listInputs().catch(() => []) : [];
+  // Read after the await: a limit that arrived meanwhile must not be missed (CodeRabbit on #2080).
+  const now = Date.now();
+  const until = providerHistoryBackoff(conversationId, now);
+  const repair = repairsInFlight.get(conversationId);
+  tidyCommands();
+  const wanted =
+    // A finished repair still owes work only while its chat keeps its activity grant (CodeRabbit on #2080).
+    (!!repair && (repair.state !== 'done' || (activeUntil.get(conversationId)?.until ?? 0) > now)) ||
+    goalPendingReplyFor(conversationId) !== null ||
+    // Calls this chat exactly owns; an unattributed call is no chat's work (CodeRabbit on #2080).
+    runningToolProgress(conversationId) !== null || chatIsWorkingNow(conversationId, now) ||
+    // A worker wake still waiting for delivery into this chat (CodeRabbit on #2080).
+    commands.some(entry => entry.spec.type === 'revive' && entry.spec.conversationId === conversationId && !revivalDeliveryProven(entry)) ||
+    (sessionId !== null && (!!continuationForSession(sessionId) ||
+      inputs.some(row => row.sessionId === sessionId && ['queued', 'browser', 'tool'].includes(row.state))));
+  return { historyRetry: { wanted, ...(until !== null ? { until } : {}) } };
+}
+
 function providerHistoryBackoff(conversationId: string, now = Date.now()): number | null {
   const until = providerHistoryBackoffUntil.get(conversationId);
   if (!until) return null;
@@ -11228,6 +11260,8 @@ async function takePendingRepairs(
     conversationId: string;
     token: string;
     reason: Repair['reason'];
+    /** This app's own automatic sends in the chat, with their message ids: one restored into the box is not a draft (#2074). */
+    ownSent?: Array<{ text: string; messageId: string }>;
     /** Raise the tab (or open the chat in front) before acting: a background tab is throttled. */
     focus: boolean;
     requiresClaim?: boolean;
@@ -11328,7 +11362,9 @@ async function takePendingRepairs(
     if (allowed && repairsInFlight.get(conversationId) === repair && !isChatBlocked(conversationId) &&
         !stopRequestedFor(conversationId) && !heldByApproval)
       {
+        const ownSent = await ownSentResidue(conversationId).catch(() => []);
         ready.push({ conversationId, token: repair.token, reason: repair.reason, focus: repair.reason === 'compaction',
+          ...(ownSent.length ? { ownSent } : {}),
           ...(repairNeedsClaim(repair) ? { requiresClaim: true } : {}),
           ...(repair.reason === 'silence' && recoveryInputAllowed(repair.sessionId, conversationId) ? { continueFollows: true } : {}) });
       }
@@ -11471,12 +11507,22 @@ function noteRepairHeld(token: string, why: string | null): void {
   const reason = why && Object.hasOwn(REPAIR_HOLD_REASONS, why) ? why : 'unknown';
   const held = [...repairsInFlight].find(([, repair]) => repair.token === token);
   if (!held) return;
+  // A page that answers "held" is there: its replies never count toward the no-page budget, which
+  // otherwise ended recovery with "no page" while that page kept answering (#2074).
+  held[1].claimAskedAt = Date.now();
   const key = `${token}:${reason}`;
   if (repairHoldsLogged.has(key)) return;
   repairHoldsLogged.add(key);
   if (repairHoldsLogged.size > 500) for (const old of [...repairHoldsLogged].slice(0, 100)) repairHoldsLogged.delete(old);
   const [conversationId, repair] = held;
   logInfo(`bridge: the page held the ${repair.reason} repair for ${conversationId}: ${REPAIR_HOLD_REASONS[reason] ?? 'it gave no reason'}`);
+}
+
+/** The page removed this app's own already-sent message from the message box before the repair (#2074). */
+function noteRepairCleared(token: string): void {
+  const held = [...repairsInFlight].find(([, repair]) => repair.token === token);
+  if (!held) return;
+  logInfo(`bridge: the page removed this app's own already-sent message, restored into ${held[0]}'s message box, before the ${held[1].reason} repair`);
 }
 
 /** Why a handed repair took no browser action, in the words the log uses. */
