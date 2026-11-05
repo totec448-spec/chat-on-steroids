@@ -2220,9 +2220,12 @@ The global Scheduled page projects these same per-chat records with `schedules:l
 current chat titles without creating a second task store. It opens the existing chat and
 calls the existing pause/resume/delete actions. `schedules:runNow` queues a manual run through
 the same input outbox (waiting for the active turn if necessary) without advancing the
-recurrence cursor; it durably records the manual input id before enqueue. If enqueue rejects,
-the previous input id is restored only when the manual id is not pending; a pending manual row
-keeps its id so the due runner cannot duplicate it. A deleted chat cannot be targeted, and a
+recurrence cursor; it durably records a recoverable manual-run intent (the exact input id, text and
+time) before enqueue. After restart, the runner reconciles that intent against the exact outbox row
+or replays the same id if no row exists; the intent is cleared only after that reconciliation is
+saved. The due runner checks every pending outbox row for the schedule id, not only the latest
+`lastInputId`, so a newer manual run cannot hide an older queued run. A failed session read is
+logged and retains the schedule. A deleted chat cannot be targeted, and a
 confirmed orphan record is removed and logged. A chat whose session directory is still present
 but whose metadata cannot be read is retained; only a positively absent session directory is
 treated as a deleted chat. A chat that cannot be read during the global list refresh is kept and
@@ -4782,6 +4785,8 @@ evicted. Historical browsing leaves committed inputs with history. Never infer m
 the minimum event timestamp: old observations and tool start times can occur on newer pages.
 Pushes and async loads are scoped to selection/draft generation; a late load must not overwrite
 focused edits or a newer A → B → A view.
+The Scheduled list coalesces overlapping refreshes, but a mutation waits for only one read requested
+after the mutation; a continuing `session:changed` stream must not keep its controls disabled.
 `session:changed` carries a `SessionChange`: the recorder coalesces the exact local ids it
 wrote in one 400 ms burst (`sessionIds`; input-history offered → confirmed revisions publish
 their owner there too), and a mutation without enumerable owners, such as image-storage

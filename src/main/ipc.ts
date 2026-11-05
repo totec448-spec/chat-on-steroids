@@ -1416,7 +1416,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         return summary ? { id: summary.id, conversationId: summary.conversationId ?? null, activeTurnId: summary.activeTurnId ?? null } : null;
       },
       enqueue: input => enqueueInput(input),
-      pending: async () => new Set((await listInputs()).filter(row => ['queued', 'browser', 'tool'].includes(row.state)).map(row => row.id)),
+      inputs: async () => (await listInputs()).map(({ id, state, scheduled }) => ({ id, state, scheduled })),
       log: logInfo
     });
     if (queued) push('session:changed');

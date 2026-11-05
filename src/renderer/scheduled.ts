@@ -49,6 +49,8 @@ export function initScheduled(controller: ScheduledController): { refresh: () =>
   let busy = false;
   let refreshInFlight: Promise<void> | null = null;
   let refreshDirty = false;
+  let refreshEpoch = 0;
+  let refreshWaiters: Array<{ after: number; resolve: () => void }> = [];
   let feedback = '';
   let feedbackError = false;
 
@@ -138,24 +140,37 @@ export function initScheduled(controller: ScheduledController): { refresh: () =>
     }
   };
 
-  const refresh = (): Promise<void> => {
-    if (refreshInFlight) {
-      refreshDirty = true;
-      return refreshInFlight;
-    }
+  const startRefresh = (): Promise<void> => {
+    const epoch = ++refreshEpoch;
     let task: Promise<void>;
-    task = (async () => {
-      do {
-        refreshDirty = false;
-        await readOnce();
-      } while (refreshDirty);
-    })().finally(() => {
+    task = readOnce().finally(() => {
       if (refreshInFlight === task) refreshInFlight = null;
+      const ready = refreshWaiters.filter(waiter => waiter.after <= epoch);
+      refreshWaiters = refreshWaiters.filter(waiter => waiter.after > epoch);
+      ready.forEach(waiter => waiter.resolve());
+      if (refreshDirty) {
+        refreshDirty = false;
+        void startRefresh();
+      }
       applyDisabled();
     });
     refreshInFlight = task;
     applyDisabled();
     return task;
+  };
+  const refresh = (): Promise<void> => {
+    if (refreshInFlight) {
+      refreshDirty = true;
+      return refreshInFlight;
+    }
+    return startRefresh();
+  };
+  // A mutation waits for one read requested after it, not for the push stream to become quiet.
+  const refreshAfterMutation = (): Promise<void> => {
+    if (!refreshInFlight) return refresh();
+    const after = refreshEpoch + 1;
+    refreshDirty = true;
+    return new Promise(resolve => refreshWaiters.push({ after, resolve }));
   };
 
   const mutate = async <T>(work: () => Promise<Reply<T>>, success?: (data: T) => string): Promise<void> => {
@@ -167,7 +182,7 @@ export function initScheduled(controller: ScheduledController): { refresh: () =>
       const result = await work();
       if (!result.ok) throw new Error(result.error);
       if (!success && !feedbackError) setStatus('');
-      await refresh();
+      await refreshAfterMutation();
       if (success) setStatus(success(result.data));
     } catch (error) {
       setStatus(error instanceof Error ? error.message : t('Operation failed'), true);

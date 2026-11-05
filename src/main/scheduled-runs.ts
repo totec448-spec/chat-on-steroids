@@ -42,6 +42,8 @@ const recordSchema = z.object({
   lastDueAt: time.nullable(),
   /** The message the last run queued, so the next time can tell whether it still waits. */
   lastInputId: z.string().uuid().optional(),
+  /** A manual Run now accepted before its outbox write; replayed or reconciled after restart. */
+  manualRunIntent: z.object({ id: z.string().uuid(), dueAt: time, text: z.string().trim().min(1).max(MAX_CHATGPT_MESSAGE_CHARS) }).strict().optional(),
   /** Send one late run after missed ones; off, a missed run is skipped (the default, Haz on #1826). */
   catchUp: z.boolean().optional(),
   /** The last run skipped as missed, shown as "Missed" until a run goes out again. */
@@ -50,13 +52,19 @@ const recordSchema = z.object({
 export type ScheduledRun = z.infer<typeof recordSchema>;
 const storeSchema = z.object({ version: z.literal(1), schedules: z.array(z.unknown()).max(MAX_SCHEDULES) });
 
+export interface ScheduledInputSnapshot {
+  id: string;
+  state: 'queued' | 'browser' | 'tool' | 'sent' | 'cancelled' | 'failed' | 'decision';
+  scheduled?: { scheduleId: string; dueAt: number; late: boolean };
+}
+
 /** What the runner needs from the rest of the app; injected so its rules are testable alone. */
 export interface RunnerDeps {
   session(id: string): Promise<{ id: string; conversationId: string | null; activeTurnId: string | null } | null>;
   enqueue(input: { id: string; sessionId: string; text: string; mode: 'auto' | 'after-turn'; dueAt: number; model: null; reasoningEffort: null;
     scheduled: { scheduleId: string; dueAt: number; late: boolean } }): Promise<unknown>;
-  /** Ids of the queue's messages that have not gone out yet (queued, being sent, or sent into a turn). */
-  pending(): Promise<Set<string>>;
+  /** Existing outbox rows, including terminal receipts, so manual intents can recover exactly once. */
+  inputs(): Promise<ScheduledInputSnapshot[]>;
   log(line: string): void;
 }
 
@@ -65,7 +73,7 @@ export interface ScheduleListDeps {
   log(line: string): void;
 }
 
-export type RunNowDeps = Pick<RunnerDeps, 'session' | 'enqueue' | 'pending' | 'log'>;
+export type RunNowDeps = Pick<RunnerDeps, 'session' | 'enqueue' | 'inputs' | 'log'>;
 
 let chain: Promise<unknown> = Promise.resolve();
 /** One change at a time: a save, a pause and a run never interleave on the same file. */
@@ -106,6 +114,57 @@ const asSchedule = (run: ScheduledRun): Schedule =>
 function runInputId(scheduleId: string, dueAt: number): string {
   const hex = createHash('sha256').update(`${scheduleId}:${dueAt}`).digest('hex');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-${((parseInt(hex[16]!, 16) & 0x3) | 0x8).toString(16)}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+const pendingInput = (input: ScheduledInputSnapshot): boolean => ['queued', 'browser', 'tool'].includes(input.state);
+
+function manualRunInput(run: ScheduledRun, intent: NonNullable<ScheduledRun['manualRunIntent']>, session: { activeTurnId: string | null }) {
+  return {
+    id: intent.id,
+    sessionId: run.sessionId,
+    text: intent.text,
+    mode: session.activeTurnId ? 'after-turn' as const : 'auto' as const,
+    dueAt: intent.dueAt,
+    model: null,
+    reasoningEffort: null,
+    scheduled: { scheduleId: run.id, dueAt: intent.dueAt, late: false }
+  };
+}
+
+/** Finish a durable manual intent from its exact outbox identity, or replay that same identity. */
+async function settleManualRunIntent(
+  run: ScheduledRun,
+  schedules: ScheduledRun[],
+  session: NonNullable<Awaited<ReturnType<RunNowDeps['session']>>>,
+  deps: Pick<RunnerDeps, 'enqueue' | 'log'>,
+  inputs: ScheduledInputSnapshot[]
+): Promise<{ run: ScheduledRun; schedules: ScheduledRun[]; pending: boolean }> {
+  const intent = run.manualRunIntent;
+  if (!intent) return { run, schedules, pending: false };
+  const existing = inputs.find(input => input.id === intent.id);
+  if (existing) {
+    if (existing.scheduled?.scheduleId !== run.id) throw new Error('The saved manual run id belongs to a different scheduled message.');
+    const pending = pendingInput(existing);
+    const { manualRunIntent: _intent, ...withoutIntent } = run;
+    const next = pending || existing.state === 'sent' ? { ...withoutIntent, lastInputId: intent.id } : withoutIntent;
+    const updated = schedules.map(row => row.id === run.id ? next : row);
+    await save(updated);
+    deps.log(pending
+      ? `scheduled run: recovered manual run already pending (${run.sessionId})`
+      : existing.state === 'sent'
+        ? `scheduled run: recovered manual run already sent (${run.sessionId})`
+        : `scheduled run: manual run ended before delivery (${existing.state}); cleared its recovery intent (${run.sessionId})`);
+    return { run: next, schedules: updated, pending };
+  }
+
+  await deps.enqueue(manualRunInput(run, intent, session));
+  inputs.push({ id: intent.id, state: 'queued', scheduled: { scheduleId: run.id, dueAt: intent.dueAt, late: false } });
+  const { manualRunIntent: _intent, ...withoutIntent } = run;
+  const next = { ...withoutIntent, lastInputId: intent.id };
+  const updated = schedules.map(row => row.id === run.id ? next : row);
+  await save(updated);
+  deps.log(`scheduled run: recovered manual run (${run.sessionId})`);
+  return { run: next, schedules: updated, pending: true };
 }
 
 export function listSchedules(): Promise<ScheduledRun[]> { return serial(load); }
@@ -167,7 +226,7 @@ export function saveSchedule(input: { sessionId: string; text: string; repeat: S
     if (!prior && schedules.length >= MAX_SCHEDULES) throw new Error('There are too many scheduled chats. Remove one first.');
     const record = recordSchema.parse({ id: prior?.id ?? randomUUID(), sessionId: input.sessionId, text: input.text.trim(),
       repeat: input.repeat, until: input.until, paused: false, createdAt: now, lastDueAt: null, ...(input.catchUp ? { catchUp: true } : {}),
-      ...(prior?.lastInputId ? { lastInputId: prior.lastInputId } : {}) });
+      ...(prior?.lastInputId ? { lastInputId: prior.lastInputId } : {}), ...(prior?.manualRunIntent ? { manualRunIntent: prior.manualRunIntent } : {}) });
     await save([...schedules.filter(row => row.sessionId !== input.sessionId), record]);
     return record;
   });
@@ -197,55 +256,66 @@ export function deleteSchedule(sessionId: string): Promise<boolean> {
 /** Queues this schedule once immediately without advancing or otherwise changing its recurrence. */
 export function runScheduleNow(sessionId: string, now: number, deps: RunNowDeps): Promise<boolean> {
   return serial(async () => {
-    const schedules = await load();
-    const run = schedules.find(row => row.sessionId === sessionId);
+    let schedules = await load();
+    let run = schedules.find(row => row.sessionId === sessionId);
     if (!run) {
       deps.log('scheduled run: not queued now: no schedule exists');
       return false;
     }
-    const session = await deps.session(run.sessionId);
+    const runId = run.id;
+    let session: Awaited<ReturnType<RunNowDeps['session']>>;
+    try { session = await deps.session(run.sessionId); }
+    catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      deps.log(`scheduled run: not queued now: its chat could not be read (${detail}); schedule kept (${run.sessionId})`);
+      throw error;
+    }
     if (!session) {
       deps.log('scheduled run: removed: its chat no longer exists');
-      await save(schedules.filter(row => row.id !== run.id));
+      await save(schedules.filter(row => row.id !== runId));
       return false;
     }
-    const id = randomUUID();
-    // Publish the outbox identity before the outbox side effect. If this write fails, nothing is
-    // queued. If the process stops after this write, the dangling non-pending id is harmless; if
-    // enqueue succeeds, the next scheduled tick can already see the exact pending manual run.
-    await save(schedules.map(row => row.id === run.id ? { ...row, lastInputId: id } : row));
-    try {
-      await deps.enqueue({
-        id,
-        sessionId: run.sessionId,
-        text: run.text,
-        mode: session.activeTurnId ? 'after-turn' : 'auto',
-        dueAt: now,
-        model: null,
-        reasoningEffort: null,
-        scheduled: { scheduleId: run.id, dueAt: now, late: false }
-      });
-    } catch (error) {
+
+    // A prior click may have stopped between its durable intent and outbox acknowledgement.
+    // Settle that exact id before accepting another click; never overwrite an unrecovered intent.
+    if (run.manualRunIntent) {
+      const previousIntentId = run.manualRunIntent.id;
       try {
-        // enqueue may reject after it has durably written the input. Keep the new identity
-        // whenever that exact row is still waiting; otherwise restore the previous row so
-        // the next due tick continues to guard it against a duplicate.
-        const pending = await deps.pending();
-        if (!pending.has(id)) {
-          const restored = schedules.map(row => {
-            if (row.id !== run.id) return row;
-            const { lastInputId: _manualInputId, ...previous } = row;
-            return run.lastInputId ? { ...previous, lastInputId: run.lastInputId } : previous;
-          });
-          await save(restored);
-          deps.log('scheduled run: manual enqueue failed and its input is not pending; restored the previous input identity');
-        } else {
-          deps.log('scheduled run: manual enqueue reported failure but its input remains pending; kept its identity');
-        }
-      } catch (reconcileError) {
-        const detail = reconcileError instanceof Error ? reconcileError.message : String(reconcileError);
-        deps.log('scheduled run: could not reconcile a rejected manual enqueue (' + detail + '); kept its durable input identity');
+        const recovered = await settleManualRunIntent(run, schedules, session, deps, await deps.inputs());
+        schedules = recovered.schedules;
+        run = recovered.run;
+        // A repeated click that completes the prior accepted intent is its acknowledgement, not
+        // a second manual run. A terminal failed/cancelled row has no lastInputId and may retry.
+        if (run.lastInputId === previousIntentId) return true;
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        deps.log(`scheduled run: could not recover the previous manual run (${detail}); intent kept (${run.sessionId})`);
+        throw error;
       }
+    }
+
+    const intent = { id: randomUUID(), dueAt: now, text: run.text };
+    const prepared: ScheduledRun = { ...run, manualRunIntent: intent };
+    const withIntent = schedules.map(row => row.id === run!.id ? prepared : row);
+    try { await save(withIntent); }
+    catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      deps.log(`scheduled run: not queued now: could not save its recovery intent (${detail}); no message queued (${run.sessionId})`);
+      throw error;
+    }
+
+    let enqueued = false;
+    try {
+      await deps.enqueue(manualRunInput(prepared, intent, session));
+      enqueued = true;
+      const { manualRunIntent: _intent, ...withoutIntent } = prepared;
+      const completed: ScheduledRun = { ...withoutIntent, lastInputId: intent.id };
+      await save(withIntent.map(row => row.id === run!.id ? completed : row));
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      deps.log(enqueued
+        ? `scheduled run: manual run was queued but its recovery intent could not be cleared (${detail}); intent kept (${run.sessionId})`
+        : `scheduled run: manual enqueue failed (${detail}); recovery intent kept (${run.sessionId})`);
       throw error;
     }
     deps.log(`scheduled run: queued now for ${run.sessionId}`);
@@ -259,9 +329,18 @@ const clock = (instant: number) => { const d = new Date(instant); return `${Stri
 export function runDueSchedules(now: number, deps: RunnerDeps): Promise<void> {
   return serial(async () => {
     let schedules = await load();
-    for (const run of [...schedules]) {
+    let inputs: ScheduledInputSnapshot[];
+    try { inputs = await deps.inputs(); }
+    catch (error) {
+      deps.log(`scheduled run: the input outbox could not be read (${error instanceof Error ? error.message : String(error)}); no runs were queued; checked again in 30 s`);
+      return;
+    }
+    for (const original of [...schedules]) {
+      let run = schedules.find(row => row.id === original.id);
+      if (!run) continue;
+      const runId = run.id;
       const replace = async (next: ScheduledRun | null) => {
-        schedules = next ? schedules.map(row => row.id === run.id ? next : row) : schedules.filter(row => row.id !== run.id);
+        schedules = next ? schedules.map(row => row.id === runId ? next : row) : schedules.filter(row => row.id !== runId);
         await save(schedules);
       };
       // The chat first, for every schedule: a deleted chat's schedule goes with it even while paused or ended.
@@ -278,6 +357,19 @@ export function runDueSchedules(now: number, deps: RunnerDeps): Promise<void> {
         deps.log(`scheduled run: its chat could not be read (${error instanceof Error ? error.message : String(error)}); checked again in 30 s (${run.sessionId})`);
         continue;
       }
+
+      if (run.manualRunIntent) {
+        try {
+          const recovered = await settleManualRunIntent(run, schedules, session, deps, inputs);
+          schedules = recovered.schedules;
+          run = recovered.run;
+          if (recovered.pending) continue;
+        } catch (error) {
+          deps.log(`scheduled run: manual run recovery failed (${error instanceof Error ? error.message : String(error)}); intent kept (${run.sessionId})`);
+          continue;
+        }
+      }
+
       const due = dueRun(asSchedule(run), now);
       if (!due) {
         // An ended schedule sends nothing; a run it missed before its end date is said once, and kept as "Missed".
@@ -295,9 +387,12 @@ export function runDueSchedules(now: number, deps: RunnerDeps): Promise<void> {
         continue;
       }
       try {
-        if (run.lastInputId && (await deps.pending()).has(run.lastInputId)) {
+        const pendingLastInput = inputs.find(input => pendingInput(input) && input.id === run!.lastInputId);
+        const pendingScheduled = inputs.filter(input => pendingInput(input) && input.scheduled?.scheduleId === run!.id).at(-1);
+        const blockingInput = pendingLastInput ?? pendingScheduled;
+        if (blockingInput) {
           deps.log(`scheduled run: ${clock(due.dueAt)} skipped: the previous run still waits in the queue (${run.sessionId})`);
-          await replace({ ...run, lastDueAt: due.dueAt });
+          await replace({ ...run, lastDueAt: due.dueAt, lastInputId: blockingInput.id });
           continue;
         }
         // Missed while the app was closed or asleep: skipped unless catching up was chosen, since a
@@ -311,6 +406,7 @@ export function runDueSchedules(now: number, deps: RunnerDeps): Promise<void> {
         try {
           await deps.enqueue({ id, sessionId: run.sessionId, text: run.text, mode: session.activeTurnId ? 'after-turn' : 'auto',
             dueAt: now, model: null, reasoningEffort: null, scheduled: { scheduleId: run.id, dueAt: due.dueAt, late: due.late } });
+          inputs.push({ id, state: 'queued', scheduled: { scheduleId: run.id, dueAt: due.dueAt, late: due.late } });
         } catch (error) {
           // That time is skipped, once, so a chat the queue refuses is not retried (and logged)
           // every 30 s; the next time tries again.
