@@ -2187,7 +2187,13 @@ let ownSentPruneTimer: NodeJS.Timeout | null = null;
 let ownSentLoad: Promise<OwnSentStore> | null = null;
 function loadOwnSentStore(): Promise<OwnSentStore> {
   if (ownSentStore) return Promise.resolve(ownSentStore);
-  ownSentLoad ??= readDurable<unknown>(OWN_SENT_STATE).catch(() => null).then(saved => {
+  // Read strictly: a file whose JSON is damaged still holds its text on disk and is replaced below,
+  // while a missing or unreadable one is simply empty (CodeRabbit on #2079).
+  let damaged = false;
+  ownSentLoad ??= readDurable<unknown>(OWN_SENT_STATE, { strict: true }).catch((error: { damaged?: boolean }) => {
+    damaged = error?.damaged === true;
+    return null;
+  }).then(saved => {
     const record = saved && typeof saved === 'object' && !Array.isArray(saved) ? saved as { receipts?: unknown; forgotten?: unknown } : null;
     // A damaged entry is dropped, never guessed at; the rest stay.
     const valid = <T>(rows: unknown, schema: z.ZodType<T>): T[] => (Array.isArray(rows) ? rows : []).flatMap(row => {
@@ -2202,7 +2208,7 @@ function loadOwnSentStore(): Promise<OwnSentStore> {
       ownSentStore = trimOwnSent(loaded);
       // Expired, damaged or rejected text leaves the disk when the store is read, not only on the next
       // send: whatever differs from the cleaned store is rewritten (CodeRabbit on #2079).
-      if (saved !== null && JSON.stringify(saved) !== JSON.stringify({ version: 1, ...ownSentStore }))
+      if (damaged || (saved !== null && JSON.stringify(saved) !== JSON.stringify({ version: 1, ...ownSentStore })))
         writeDurableSoon(OWN_SENT_STATE, { version: 1, ...ownSentStore });
       // And while the app stays open: once an hour.
       ownSentPruneTimer ??= setInterval(() => { void pruneOwnSent().catch(() => undefined); }, 60 * 60_000);
