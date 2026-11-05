@@ -3130,6 +3130,8 @@ function paintGoalProgress(): void {
   else if (wait && !['saving', 'failed'].includes(phase)) { phase = 'settling'; text = ''; error = undefined; }
   // The next step's draft waits for the Goal step reviewer before it asks the helper (#1832).
   if (phase === 'sending' && wait?.reason === 'reviewer') { phase = 'settling'; text = ''; error = undefined; }
+  // A ready message held before Send by Chats working at once says why, not "Message ready" (CodeRabbit on #2051).
+  if (phase === 'ready' && (wait?.reason === 'slots' || wait?.reason === 'paused')) { phase = 'settling'; text = ''; error = undefined; }
   const labels: Record<string, string> = { saving: t("Saving task…"), saved: t("Task saved · waiting for the next completed answer"),
     preparing: t("Preparing the opening message…"), generating: t("Generating the opening message…"), ready: t("Message ready · awaiting ChatGPT delivery"),
     sending: t("Preparing a continuation…"), answering: t("Generating a continuation…"), queued: t("Opening message queued"),

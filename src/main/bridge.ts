@@ -8024,7 +8024,14 @@ async function goalInputPriority(conversationId: string, sessionId: string, turn
  * The wait of a next step's draft that is waiting for the Goal step reviewer (#1832): from reading the
  * step and finding a worker slot to the answer. Any other draft describes itself.
  */
-function draftReviewWait(conversationId: string, stage: string): import('../shared/goal.js').GoalWait | null {
+function draftReviewWait(conversationId: string, stage: string, now = Date.now()): import('../shared/goal.js').GoalWait | null {
+  // A ready message held before Send by Chats working at once (#1694): the chat says so (CodeRabbit on #2051).
+  if (stage === 'ready') {
+    const slot = goalSlotWaits.get(conversationId);
+    if (!slot || now - slot.at >= 60_000) return null;
+    const pause = chatsAtOnceStatus(now).pauseUntil;
+    return slot.paused && pause !== null ? { reason: 'paused', until: pause } : { reason: 'slots' };
+  }
   if (stage !== 'sending') return null;
   const until = reviewWaitUntil(conversationId);
   return until === null ? null : { reason: 'reviewer', until };
