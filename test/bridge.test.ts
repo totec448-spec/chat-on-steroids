@@ -616,6 +616,32 @@ describe('direct browser control over the paired bridge', () => {
 });
 
 describe('who is allowed to talk to it', () => {
+  it('logs only bounded close-outbox decision codes and only once per extension report', async () => {
+    await pair();
+    const logger = await import('../src/main/logger.js');
+    const info = vi.spyOn(logger, 'logInfo');
+    const report = (action: string, reason: string, at: number) => request('POST', '/diagnostics', {
+      browser: 'aaaaaaaaaaaaaaaa',
+      body: { capturedAt: Date.now(), status: { connected: true, paired: true },
+        preferences: { overwrite: true, durations: false },
+        closeOutboxDecision: { at, action, reason } }
+    });
+    const lines = () => info.mock.calls.map(([line]) => String(line)).filter(line => line.startsWith('browser: deferred /closed:') ||
+      line.startsWith('browser: discarded stale /closed:'));
+    await report('deferred', 'chrome_tab_open', 10_000);
+    await report('deferred', 'chrome_tab_open', 10_000);
+    await report('deferred', 'chrome_inventory_unavailable', 10_001);
+    await report('discarded', 'conversation_binding_open', 10_002);
+    await report('deferred', 'user chat title; forged status', 10_003);
+    await report('constructor', 'chrome_tab_open', 10_004);
+    expect(lines()).toEqual([
+      'browser: deferred /closed: Chrome still has the conversation tab',
+      'browser: deferred /closed: Chrome tab inventory was unavailable',
+      'browser: discarded stale /closed: the conversation was rebound'
+    ]);
+    info.mockRestore();
+  });
+
   // 2026-10-30: an extension that kept Chrome's language for weeks said nothing anywhere.
   it('logs once when the extension\'s stored language is not the app\'s, with its last error', async () => {
     await pair();
@@ -12323,21 +12349,23 @@ describe('unattributed activity recovery', () => {
       // A second limit while the first still holds is the same episode, not a failed retry.
       await vi.advanceTimersByTimeAsync(30_000);
       expect(await limited(60_000)).toBe(60_000);
-      // Each retry that is limited again waits longer: 2, 4, 8, then 15 minutes, and stays there.
-      for (const expected of [120_000, 240_000, 480_000, 900_000, 900_000]) {
+      // Each retry that is limited again waits longer: 2, 4, 8, 15, 30, then 60 minutes, and stays
+      // there. A limit that outlasted a quarter-hour cadence for 8.5 hours (#1882, 2026-11-05) gets
+      // fewer tries the longer it lasts, not one every 25 minutes forever.
+      for (const expected of [120_000, 240_000, 480_000, 900_000, 1_800_000, 3_600_000, 3_600_000]) {
         const [hold] = (await sessionControlsFor(session.id)).recovery ?? [];
         await vi.advanceTimersByTimeAsync(hold!.deadline - Date.now() + 1_000);
         expect(await limited(60_000)).toBe(expected);
       }
       // Each longer hold says why in the log, once per failed retry.
       expect(getLog().filter(entry => entry.message.includes(`${PRIME} history was limited again after its wait`))
-        .map(entry => /holding automatic recovery (\d+) minutes/.exec(entry.message)?.[1])).toEqual(['2', '4', '8', '15', '15']);
+        .map(entry => /holding automatic recovery (\d+) minutes/.exec(entry.message)?.[1])).toEqual(['2', '4', '8', '15', '30', '60', '60']);
       // A longer Retry-After from ChatGPT still wins.
       const [held] = (await sessionControlsFor(session.id)).recovery ?? [];
       await vi.advanceTimersByTimeAsync(held!.deadline - Date.now() + 1_000);
-      expect(await limited(20 * 60_000)).toBe(20 * 60_000);
+      expect(await limited(90 * 60_000)).toBe(90 * 60_000);
       // A limit that comes back after a quiet quarter of an hour starts over.
-      await vi.advanceTimersByTimeAsync(20 * 60_000 + 15 * 60_000 + 1_000);
+      await vi.advanceTimersByTimeAsync(90 * 60_000 + 15 * 60_000 + 1_000);
       expect(await limited(60_000)).toBe(60_000);
     } finally { vi.useRealTimers(); }
   });
@@ -18196,6 +18224,26 @@ describe('app requests to stop one exact active turn', () => {
     await stopSessionTurn(result.body.sessionId, 'unanchored-turn');
     const activity = await request('GET', `/activity?conversationId=${conversationId}`);
     expect(activity.body.stopTurn).toEqual({ turnId: 'unanchored-turn', userMessageId: null });
+  });
+  // #1882: a Stop that turned Loop off could not be told apart from the app's button or the control API.
+  it('names who sent a Stop, in its log line and in the Loop it turned off', async () => {
+    const { stopSessionTurn, setSessionAutomation } = await import('../src/main/bridge.js');
+    const logger = await import('../src/main/logger.js');
+    const info = vi.spyOn(logger, 'logInfo');
+    const conversationId = 'e9999999-aaaa-4bbb-8ccc-111111111111';
+    const sessionId = await active(conversationId, 'sent-turn');
+    await setSessionAutomation(sessionId, 'loop', undefined, 'the app');
+    await stopSessionTurn(sessionId, 'sent-turn', { from: 'the control API' });
+    const lines = info.mock.calls.map(([line]) => String(line));
+    expect(lines).toContain(`goal: ${conversationId} switched to loop by the app`);
+    expect(lines).toContain(`goal: ${conversationId} switched to Normal by a Stop sent by the control API`);
+    expect(lines.some(line => line.startsWith(`bridge: desktop (sent by the control API) Stop requested for session ${sessionId}`))).toBe(true);
+    // A second Stop of the same answer joins the queued one, and still says who sent it.
+    info.mockClear();
+    await stopSessionTurn(sessionId, 'sent-turn');
+    expect(info.mock.calls.map(([line]) => String(line))
+      .some(line => line.startsWith(`bridge: desktop (sent by the app) Stop for session ${sessionId}`) && line.includes('joins the Stop already requested'))).toBe(true);
+    info.mockRestore();
   });
   it('hands a new Stop to the shared absent-browser startup owner once and revokes it for a newer turn', async () => {
     const { stopSessionTurn } = await import('../src/main/bridge.js');

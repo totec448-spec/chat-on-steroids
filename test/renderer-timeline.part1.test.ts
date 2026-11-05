@@ -1328,7 +1328,7 @@ it('says why a pickup could not be tried now', async () => {
     return found!;
   });
   button.click();
-  await waitFor(() => expect(w.document.querySelector('.toast')?.textContent).toBe('ChatGPT limits this chat for a few minutes. The app tries again right after.'));
+  await waitFor(() => expect(w.document.querySelector('.toast')?.textContent).toBe('ChatGPT is limiting this chat right now. The app tries again when the wait is over.'));
 });
 
 // CodeRabbit on #1979: tries used up leave only a waiting Continue to send; nothing to try again.

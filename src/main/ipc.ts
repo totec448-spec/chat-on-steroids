@@ -98,7 +98,7 @@ import { onBackgroundExecChange, runningExecProcesses, stopExecProcess } from '.
 import { keychainNoticeReady } from './keychain-notice.js';
 import { runDiagnostics } from './diagnostics.js';
 import { collectReportFacts, readRecentLog, renderDiagnosticsReport, saveDiagnosticsReport, systemFacts, memoryFacts } from './diagnostics-report.js';
-import { clearProjectNote, listSessions, readTurnTraces } from './session/store.js';
+import { answerUserRequest, clearProjectNote, listSessions, readTurnTraces } from './session/store.js';
 import { deleteSchedule, listSchedules, saveSchedule, scheduleRepeatSchema, setSchedulePaused } from './scheduled-runs.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, logWarn, onLog } from './logger.js';
 import { markStartup } from './startup-timing.js';
@@ -124,7 +124,7 @@ import {
   companionDiagnostics,
   sessionInputActivity,
   recoveryHeldByCalls, recoveryInputAllowed,
-  sessionControlsFor, cancelAssistantRecovery, pickupNow, stopSessionTurn, endOwnWorkAfterStop, setSessionAutomation, setSessionObjective, compactSession, resumeFromSavedSummary, cancelSessionCompaction,
+  sessionControlsFor, userRequestViews, cancelAssistantRecovery, pickupNow, stopSessionTurn, endOwnWorkAfterStop, setSessionAutomation, setSessionObjective, compactSession, resumeFromSavedSummary, cancelSessionCompaction,
   cancelWorkerCommands,
   chatUrl,
   revealChatInBrowser,
@@ -2074,6 +2074,23 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('sessions:controls', async (payload) => sessionControlsFor(sessionIdArg.parse(payload).id));
   // Resume now (#1694): the person ends ChatGPT's pause early, at the risk of the limit returning.
   handle('automation:resumeNow', async () => resumeAutomaticSends());
+  // A step handed to the person (#1695): only their click answers it, and the app runs nothing.
+  handle('sessions:answerUserRequest', async (payload) => {
+    const parsed = sessionIdArg.extend({
+      requestId: z.string().regex(/^ur_[a-z0-9]{12}$/),
+      answer: z.enum(['done', 'skipped'])
+    }).safeParse(payload);
+    if (!parsed.success) {
+      // Field names only, never the payload (CodeRabbit on #2049).
+      logWarn(`user request answer refused: invalid ${[...new Set(parsed.error.issues.map(issue => String(issue.path[0] ?? 'payload')))].join(', ')}`);
+      throw parsed.error;
+    }
+    const { id, requestId, answer } = parsed.data;
+    const answered = await answerUserRequest(id, requestId, answer);
+    if (answered?.changed) logInfo(`user request ${requestId} marked ${answer} by the person in session ${id}`);
+    else logInfo(`user request ${requestId} not changed: ${answered ? `already ${answered.request.state}` : 'not found'} (session ${id})`);
+    return userRequestViews(id);
+  });
   // #1032: the user keeps this answer from being reloaded; false once the browser claimed it.
   handle('sessions:cancelRecovery', async (payload) => cancelAssistantRecovery(sessionIdArg.parse(payload).id));
   // A chat whose next step was not picked up: the person's one click (2026-10-31).
@@ -2083,7 +2100,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('sessions:automation', async (payload) => {
     const { id, automation, afterTurn } = sessionIdArg.extend({ automation: z.enum(['off', 'goal', 'loop']), afterTurn: z.boolean().optional() }).parse(payload);
-    return setSessionAutomation(id, automation, afterTurn);
+    return setSessionAutomation(id, automation, afterTurn, 'the app');
   });
   handle('sessions:objective', async (payload) => {
     const { id, text, mode } = sessionIdArg.extend({ text: z.string().max(MAX_TASK_REQUEST_CHARS), mode: z.enum(['goal', 'loop']) }).parse(payload);
@@ -2671,7 +2688,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       const mode = automation === 'off' ? goalSwitchFor(conversationId).mode : automation;
       // Reserve switch ordering immediately, before awaiting another ledger write.
       // A user Off arriving during persistence must remain later than this attempt.
-      const switchWrite = setGoalSwitchNow(conversationId, mode, automation !== 'off', loopAfterTurn);
+      const switchWrite = setGoalSwitchNow(conversationId, mode, automation !== 'off', loopAfterTurn, "the app's message settings");
       const [held] = await Promise.all([switchWrite, setGoalReplyActiveNow(conversationId, false)]);
       // A fresh chat can finish before its send ACK arrives. Its newest final is
       // this message's own response, so it may be picked up after binding.

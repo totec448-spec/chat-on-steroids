@@ -248,7 +248,7 @@ async function stop(sessionId: string, rawBody: unknown): Promise<ActionReply> {
   if (!actionsAllowed()) throw new RequestError(403, 'actions_disabled');
   let controls: SessionControlsView;
   try {
-    controls = await stopSessionTurn(sessionId, body.turnId);
+    controls = await stopSessionTurn(sessionId, body.turnId, { from: 'the control API' });
   } catch (error) {
     const message = error instanceof Error ? error.message : '';
     if (message === 'active_turn_changed') throw new RequestError(409, 'turn_not_running', 'the answer this turnId names is not running');
