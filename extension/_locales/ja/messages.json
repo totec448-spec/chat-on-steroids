@@ -512,6 +512,12 @@
   "content_goal_wait_workers": {
     "message": "このチャットのワーカーを待っています"
   },
+  "content_goal_wait_slots": {
+    "message": "空きを待っています（同時に作業するチャット数）"
+  },
+  "content_goal_wait_paused": {
+    "message": "ChatGPT から速度を落とすよう求められました · 指定時刻まで待機"
+  },
   "content_goal_writing_first_message": {
     "message": "$1 が最初のメッセージを作成中"
   },

@@ -406,6 +406,7 @@ const api = {
     return () => ipcRenderer.removeListener('chatModels:changed', wrapped);
   },
   getSessionControls: (id: string) => call<SessionControlsView>('sessions:controls', { id }),
+  resumeAutomaticSends: () => call<boolean>('automation:resumeNow'),
   answerUserRequest: (id: string, requestId: string, answer: 'done' | 'skipped') =>
     call<NonNullable<SessionControlsView['userRequests']>>('sessions:answerUserRequest', { id, requestId, answer }),
   cancelRecovery: (id: string) => call<boolean>('sessions:cancelRecovery', { id }),
