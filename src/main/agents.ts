@@ -17,6 +17,7 @@ import { randomUUID } from 'node:crypto';
 import type { AgentInfo, AgentMessage, AgentState, ReasoningEffort, SwarmState } from '../shared/session.js';
 import { REASONING_EFFORTS, isReasoningEffort } from '../shared/session.js';
 import { getConfig } from './config.js';
+import { setWorkerSlotSource, workerSlotsRefusal } from './chats-at-once.js';
 import { liveConnectorName } from './mcp/surfaces.js';
 import { workerBrief, workerOwnTask } from '../shared/worker-brief.js';
 import { getChatModels, refreshForUnoffered } from './chat-models.js';
@@ -220,6 +221,22 @@ export class IdentityLostError extends AgentError {
 export function isOver(state: AgentState): boolean {
   return state === 'finished' || state === 'failed';
 }
+
+/** A woken worker still asleep this long after its slot was reserved was not woken after all. */
+const WAKE_SLOT_GRACE_MS = 10_000;
+const workerSlotKey = (runId: string, id: string): string => `${runId}/${id}`;
+// What became of a worker a "Chats working at once" slot was reserved for (#1694, Haz on #2051).
+setWorkerSlotSource((key, reservedAt, now) => {
+  const slash = key.lastIndexOf('/');
+  const run = runs.get(key.slice(0, slash));
+  // The run is gone: its spawn was refused or it ended.
+  if (!run) return { kind: 'over' };
+  const agent = run.agents.get(key.slice(slash + 1));
+  if (!agent) return { kind: 'pending' };
+  const state = agent.info.state;
+  if (isOver(state) || state === 'detached' || (state === 'sleeping' && now - reservedAt > WAKE_SLOT_GRACE_MS)) return { kind: 'over' };
+  return agent.info.conversationId ? { kind: 'chat', conversationId: agent.info.conversationId } : { kind: 'pending' };
+});
 
 /**
  * Whether this state consumes one of the run's worker slots.
@@ -2309,6 +2326,19 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
     if (!activeRun.agents.has(id)) ids.push(id);
   }
 
+  // Chats working at once (#1694): workers are chats too. The prime's own slot passes to them, and
+  // each new worker's slot is named after it so it follows the worker (Haz on #2051).
+  const chatsAtOnce = workerSlotsRefusal(conversationId, ids.map(id => workerSlotKey(activeRun.runId, id)));
+  if (chatsAtOnce) {
+    if (resumedDormant) parkRun(run, 'a new spawn was refused by the chats-at-once limit');
+    else if (createdFreshRun) runs.delete(run.runId);
+    logInfo(`agents: spawn of ${planned.length} worker(s) refused: ${chatsAtOnce}`);
+    throw new AgentError(
+      `CHATS_AT_ONCE: ${chatsAtOnce} ("Chats working at once" in the app). No workers were created. ` +
+        'Continue the work yourself, or end this turn and spawn when another chat has finished; do not retry right away.'
+    );
+  }
+
   const created: AgentInfo[] = [];
   const createdAgents: Agent[] = [];
   for (const [index, worker] of planned.entries()) {
@@ -2768,6 +2798,15 @@ function stageMessagesActive(
           throw new AgentError(
             `GLOBAL_WORKER_LIMIT: ${toId} is asleep and all ${globalMax} globally admitted worker slots are busy, so it ` +
               `cannot be woken right now${where}. Nothing was sent. Wait for a worker to stop and try again.`
+          );
+        }
+        // Chats working at once (#1694): a woken worker is a working chat again.
+        const chatsAtOnce = workerSlotsRefusal(caller.conversationId ?? null, [workerSlotKey(run?.runId ?? to.info.workerAllocationRunId ?? '', to.info.id)]);
+        if (chatsAtOnce) {
+          logInfo(`agents: waking ${toId} refused: ${chatsAtOnce}`);
+          throw new AgentError(
+            `CHATS_AT_ONCE: ${toId} is asleep and ${chatsAtOnce} ("Chats working at once" in the app), so it cannot be ` +
+              `woken right now${where}. Nothing was sent. Continue yourself, or end this turn and try when another chat has finished.`
           );
         }
       }

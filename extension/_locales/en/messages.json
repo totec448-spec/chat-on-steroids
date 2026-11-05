@@ -515,6 +515,12 @@
   "content_goal_wait_workers": {
     "message": "Waiting for this chat’s sub-agents"
   },
+  "content_goal_wait_slots": {
+    "message": "Waiting for a free slot (Chats working at once)"
+  },
+  "content_goal_wait_paused": {
+    "message": "ChatGPT asked to slow down · waits until it says"
+  },
   "content_goal_writing_first_message": {
     "message": "$1 is writing the first message"
   },

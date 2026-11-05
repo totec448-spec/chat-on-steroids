@@ -181,6 +181,11 @@
         <span>The keys saved on this computer could not be read, so new keys cannot be saved. If restarting the app does not help, you can start fresh.</span>
         <button class="btn btn-quiet" id="credentialsStartFresh" type="button">Start fresh…</button>
       </div>
+      <div class="notice" id="automaticPause" role="status" hidden>
+        <i class="ico ph ph-clock" aria-hidden="true"></i>
+        <span id="automaticPauseText"></span>
+        <button class="btn btn-quiet" id="resumeAutomaticSends" type="button" title="Send automatic messages again now. ChatGPT may slow them down again." aria-describedby="automaticPauseText">Resume now</button>
+      </div>
       <div class="notice" id="recordingStorageFull" role="status" hidden>
         <i class="ico ph ph-warning" aria-hidden="true"></i>
         <span>Recording storage is full. New images and long texts are no longer saved in your chats.</span>
@@ -1137,6 +1142,14 @@
                 </div>
                 <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Workers & recovery</h2><p>Set worker limits and which chats can resume after interruptions.</p></div></header>
                 <div class="settings-surface pane">
+                  <div class="setting">
+                    <span class="setting-text">
+                      <b id="chatsAtOnceTitle">Chats working at once</b>
+                      <em>At most this many chats work at the same time, sub-agents included. Messages the app sends by itself wait their turn; a message you send always goes out.</em>
+                    </span>
+                    <select id="chatsAtOnce" aria-labelledby="chatsAtOnceTitle"><option value="0">Off</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option></select>
+                  </div>
+
                   <div class="setting">
                     <span class="setting-text">
                       <b id="maWorkersTitle">Sub-agent workers</b>
