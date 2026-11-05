@@ -53,10 +53,12 @@ export function initScheduled(controller: ScheduledController): { refresh: () =>
   let refreshWaiters: Array<{ after: number; resolve: () => void }> = [];
   let feedback = '';
   let feedbackError = false;
+  let feedbackLoadError = false;
 
-  const setStatus = (message: string, error = false): void => {
+  const setStatus = (message: string, error = false, loadError = false): void => {
     feedback = message;
     feedbackError = error;
+    feedbackLoadError = loadError;
     status.hidden = !message;
     status.textContent = message ? t(message) : '';
     status.classList.toggle('is-error', error);
@@ -81,7 +83,8 @@ export function initScheduled(controller: ScheduledController): { refresh: () =>
   };
   const applyDisabled = (): void => {
     for (const action of list.querySelectorAll<HTMLButtonElement>('button[data-scheduled-action]')) action.disabled = busy;
-    refreshButton.disabled = busy || refreshInFlight !== null;
+    refreshButton.disabled = busy;
+    refreshButton.setAttribute('aria-busy', String(refreshInFlight !== null));
   };
 
   const render = (): void => {
@@ -129,14 +132,14 @@ export function initScheduled(controller: ScheduledController): { refresh: () =>
       const result = await controller.list();
       if (!result.ok) throw new Error(result.error);
       const signature = JSON.stringify(result.data);
-      if (feedbackError) setStatus('');
+      if (feedbackLoadError) setStatus('');
       if (signature !== recordsSignature) {
         records = result.data;
         recordsSignature = signature;
         render();
       }
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : t('Could not load schedules'), true);
+      setStatus(error instanceof Error ? error.message : t('Could not load schedules'), true, true);
     }
   };
 

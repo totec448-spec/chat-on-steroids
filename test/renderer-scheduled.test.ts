@@ -80,7 +80,8 @@ it('reuses pause, runNow and delete actions for the exact original chat; deletio
 it('keeps the visible rows when listing fails and never presents an empty schedule store', async () => {
   const { initScheduled } = await import('../src/renderer/scheduled.js');
   const calls = {
-    list: vi.fn().mockResolvedValueOnce(ok([schedule(idA)])).mockResolvedValueOnce({ ok: false, error: 'Cannot read schedules' }),
+    list: vi.fn().mockResolvedValueOnce(ok([schedule(idA)])).mockResolvedValueOnce({ ok: false, error: 'Cannot read schedules' })
+      .mockResolvedValueOnce(ok([schedule(idA)])),
     pause: vi.fn(async () => ok(true)),
     runNow: vi.fn(async () => ok(true)),
     delete: vi.fn(async () => ok(true)),
@@ -91,6 +92,33 @@ it('keeps the visible rows when listing fails and never presents an empty schedu
   await view.refresh();
   expect(document.querySelector('.scheduled-index-row')?.textContent).toContain('Economics monitoring');
   expect(document.getElementById('scheduledStatus')?.textContent).toContain('Cannot read schedules');
+  await view.refresh();
+  expect(document.getElementById('scheduledStatus')?.hidden).toBe(true);
+});
+
+it('keeps the Refresh button enabled and focused while exposing active reads with aria-busy', async () => {
+  const { initScheduled } = await import('../src/renderer/scheduled.js');
+  type ScheduleReply = { ok: true; data: ReturnType<typeof schedule>[] };
+  let release!: (value: ScheduleReply) => void;
+  const calls = {
+    list: vi.fn(() => new Promise<ScheduleReply>(resolve => { release = resolve; })),
+    pause: vi.fn(async () => ok(true)),
+    runNow: vi.fn(async () => ok(true)),
+    delete: vi.fn(async () => ok(true)),
+    openChat: vi.fn()
+  };
+  const view = initScheduled(calls);
+  const refresh = document.getElementById('scheduledRefresh') as HTMLButtonElement;
+  refresh.focus();
+  const pending = view.refresh();
+  expect(refresh.disabled).toBe(false);
+  expect(refresh.getAttribute('aria-busy')).toBe('true');
+  expect(document.activeElement).toBe(refresh);
+  release(ok([schedule(idA)]));
+  await pending;
+  expect(refresh.disabled).toBe(false);
+  expect(refresh.getAttribute('aria-busy')).toBe('false');
+  expect(document.activeElement).toBe(refresh);
 });
 
 it('coalesces a burst of refreshes to one in-flight read plus one dirty follow-up', async () => {
@@ -145,6 +173,26 @@ it('releases mutation controls after one post-mutation read while refresh pushes
     .find(node => node.textContent === 'Resume')!;
   expect(resume.disabled).toBe(false);
   expect(calls.list).toHaveBeenCalledTimes(4); // A further refresh may continue without holding busy.
+});
+
+it('keeps action errors visible after a successful background refresh', async () => {
+  const { initScheduled } = await import('../src/renderer/scheduled.js');
+  const calls = {
+    list: vi.fn(async () => ok([schedule(idA)])),
+    pause: vi.fn(async () => ({ ok: false as const, error: 'Permission denied' })),
+    runNow: vi.fn(async () => ok(true)),
+    delete: vi.fn(async () => ok(true)),
+    openChat: vi.fn()
+  };
+  const view = initScheduled(calls);
+  await view.refresh();
+  const pause = [...document.querySelectorAll<HTMLButtonElement>('.scheduled-index-row button')]
+    .find(node => node.textContent === 'Pause')!;
+  pause.click();
+  await settle();
+  expect(document.getElementById('scheduledStatus')?.textContent).toBe('Permission denied');
+  await view.refresh();
+  expect(document.getElementById('scheduledStatus')?.textContent).toBe('Permission denied');
 });
 
 it('keeps unchanged rows mounted, restores action focus after a changed row, and reports run-now outcome', async () => {

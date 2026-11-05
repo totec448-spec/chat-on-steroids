@@ -212,12 +212,12 @@ it('logs why Run now did not enqueue when that chat has no schedule', async () =
 
 it('replays a durable Run now intent after restart if the process stops before enqueue', async () => {
   const now = local('2026-10-24T10:30:00');
-  const { runs, deps, queued } = await setup({ enqueue: vi.fn(async () => { throw new Error('process stopped before enqueue'); }) });
+  const { runs } = await setup();
   const saved = await runs.saveSchedule({ sessionId: SESSION, text: 'Hourly check', repeat: { kind: 'hours', every: 1 }, until: null }, local('2026-10-24T10:00:00'));
-  await expect(runs.runScheduleNow(SESSION, now, deps)).rejects.toThrow('process stopped before enqueue');
-  const intent = (await runs.listSchedules())[0]!.manualRunIntent!;
-  expect(intent).toMatchObject({ dueAt: now, text: 'Hourly check' });
-  expect(queued).toEqual([]);
+  const intentId = '11111111-1111-4111-8111-111111111111';
+  const durable = await import('../src/main/durable.js');
+  await durable.writeDurableNow('scheduled-runs', { version: 1, schedules: [{ ...saved,
+    manualRunIntent: { id: intentId, dueAt: now, text: 'Hourly check' } }] });
 
   vi.resetModules();
   (await import('../src/main/durable.js')).initDurableStore(dir);
@@ -230,9 +230,9 @@ it('replays a durable Run now intent after restart if the process stops before e
     log: vi.fn()
   };
   await restarted.runDueSchedules(now + 1_000, replayDeps);
-  expect(replayed).toEqual([expect.objectContaining({ id: intent.id, text: intent.text,
+  expect(replayed).toEqual([expect.objectContaining({ id: intentId, text: 'Hourly check',
     scheduled: { scheduleId: saved.id, dueAt: now, late: false } })]);
-  expect((await restarted.listSchedules())[0]).toMatchObject({ lastInputId: intent.id });
+  expect((await restarted.listSchedules())[0]).toMatchObject({ lastInputId: intentId });
   expect((await restarted.listSchedules())[0]?.manualRunIntent).toBeUndefined();
 });
 
@@ -255,13 +255,57 @@ it('reconciles a manual Run now row already written when its enqueue acknowledge
   expect((await runs.listSchedules())[0]?.manualRunIntent).toBeUndefined();
 });
 
+it('drops a new manual intent when enqueue rejects and a fresh outbox read confirms no row', async () => {
+  const { runs, deps } = await setup({ enqueue: vi.fn(async () => { throw new Error('conversation id missing'); }) });
+  await runs.saveSchedule({ sessionId: SESSION, text: 'Hourly check', repeat: { kind: 'hours', every: 1 }, until: null }, local('2026-10-24T10:00:00'));
+  await expect(runs.runScheduleNow(SESSION, local('2026-10-24T10:30:00'), deps)).rejects.toThrow('conversation id missing');
+  expect((await runs.listSchedules())[0]?.manualRunIntent).toBeUndefined();
+  expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('outbox confirms no row, recovery intent dropped'));
+});
+
+it('drops a recovered intent when enqueue rejects and a fresh outbox read confirms no row', async () => {
+  const { runs, deps } = await setup();
+  const now = local('2026-10-24T10:30:00');
+  const saved = await runs.saveSchedule({ sessionId: SESSION, text: 'Hourly check', repeat: { kind: 'hours', every: 1 }, until: null }, local('2026-10-24T10:00:00'));
+  const intentId = '22222222-2222-4222-8222-222222222222';
+  const durable = await import('../src/main/durable.js');
+  await durable.writeDurableNow('scheduled-runs', { version: 1, schedules: [{ ...saved,
+    manualRunIntent: { id: intentId, dueAt: now, text: 'Hourly check' } }] });
+  const inputs = vi.fn(async () => []);
+  const enqueue = vi.fn(async () => { throw new Error('session has no conversation id'); });
+
+  await runs.runDueSchedules(now + 1_000, { ...deps, inputs, enqueue });
+  expect(inputs).toHaveBeenCalledTimes(2);
+  expect(enqueue).toHaveBeenCalledOnce();
+  expect((await runs.listSchedules())[0]?.manualRunIntent).toBeUndefined();
+  expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('outbox confirms no row, recovery intent dropped'));
+});
+
 it('treats a repeated Run now click as acknowledgement of the recovered request, not a second run', async () => {
   const now = local('2026-10-24T10:30:00');
-  const { runs, deps, queued } = await setup({ enqueue: vi.fn(async () => { throw new Error('outbox unavailable'); }) });
+  const rows: ScheduledInputSnapshot[] = [];
+  const queued: Array<Record<string, unknown>> = [];
+  let reads = 0;
+  let failFirstEnqueue = true;
+  const { runs, deps } = await setup({
+    enqueue: vi.fn(async input => {
+      if (failFirstEnqueue) { failFirstEnqueue = false; throw new Error('outbox unavailable'); }
+      queued.push(input as never);
+      rows.push({ id: input.id, state: 'queued', scheduled: input.scheduled });
+    }),
+    inputs: async () => {
+      reads++;
+      if (reads === 1) throw new Error('outbox read unavailable');
+      return rows;
+    }
+  });
   await runs.saveSchedule({ sessionId: SESSION, text: 'Hourly check', repeat: { kind: 'hours', every: 1 }, until: null }, local('2026-10-24T10:00:00'));
   await expect(runs.runScheduleNow(SESSION, now, deps)).rejects.toThrow('outbox unavailable');
   const intentId = (await runs.listSchedules())[0]!.manualRunIntent!.id;
-  const retryEnqueue = vi.fn(async input => { queued.push(input as never); });
+  const retryEnqueue = vi.fn(async input => {
+    queued.push(input as never);
+    rows.push({ id: input.id, state: 'queued', scheduled: input.scheduled });
+  });
   expect(await runs.runScheduleNow(SESSION, now + 1_000, { ...deps, enqueue: retryEnqueue })).toBe(true);
   expect(retryEnqueue).toHaveBeenCalledOnce();
   expect(queued).toHaveLength(1);

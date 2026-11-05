@@ -2222,8 +2222,10 @@ calls the existing pause/resume/delete actions. `schedules:runNow` queues a manu
 the same input outbox (waiting for the active turn if necessary) without advancing the
 recurrence cursor; it durably records a recoverable manual-run intent (the exact input id, text and
 time) before enqueue. After restart, the runner reconciles that intent against the exact outbox row
-or replays the same id if no row exists; the intent is cleared only after that reconciliation is
-saved. The due runner checks every pending outbox row for the schedule id, not only the latest
+or replays the same id if no row exists. If enqueue rejects, it re-reads the outbox: keep the intent
+when the row exists or the read fails, but drop it after a successful read proves the row is absent,
+so a pre-commit refusal does not retry forever. The intent is cleared only after that reconciliation
+is saved. The due runner checks every pending outbox row for the schedule id, not only the latest
 `lastInputId`, so a newer manual run cannot hide an older queued run. A failed session read is
 logged and retains the schedule. A deleted chat cannot be targeted, and a
 confirmed orphan record is removed and logged. A chat whose session directory is still present
@@ -4787,6 +4789,9 @@ Pushes and async loads are scoped to selection/draft generation; a late load mus
 focused edits or a newer A → B → A view.
 The Scheduled list coalesces overlapping refreshes, but a mutation waits for only one read requested
 after the mutation; a continuing `session:changed` stream must not keep its controls disabled.
+The Refresh button remains enabled and keyboard-focusable during reads and exposes the read state
+through `aria-busy`; only an active mutation disables it. A successful background read clears a
+load error, never an action error.
 `session:changed` carries a `SessionChange`: the recorder coalesces the exact local ids it
 wrote in one 400 ms burst (`sessionIds`; input-history offered → confirmed revisions publish
 their owner there too), and a mutation without enumerable owners, such as image-storage
