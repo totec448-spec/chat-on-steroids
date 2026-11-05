@@ -3191,7 +3191,10 @@ tab or touches the user's own windows (#1249). With `backgroundPlacement: 'group
 follow and the extension ignores one (#128).
 For a new chat sent from the app, its reserved local session is selected before ChatGPT assigns
 the conversation id. When the selected session's first provider binding appears in the refreshed
-catalog, the renderer requests that same follow once; selecting a different chat first prevents it.
+catalog or a project-history merge, the renderer requests that same follow once; selecting a
+different chat first prevents it. The same IPC accepts `{ id: null }` when New Chat or no session
+is selected. Every selection request clears an older queued follow before its session lookup, so
+a late response or an unbound selection cannot activate the previous chat's tab.
 
 Core's `save_image` (created only with the create-files permission) saves the original file of an
 image ChatGPT generated in the calling chat (#889); the recording keeps only a preview. The call's

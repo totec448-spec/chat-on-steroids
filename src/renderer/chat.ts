@@ -1617,6 +1617,7 @@ async function deleteSession(id: string): Promise<void> {
   sessionTotal = Math.max(0, sessionTotal - 1);
   if (selectedId === id) {
     selectedId = null;
+    requestSelectedTabFollow(null);
     events = [];
     totalEvents = 0;
     detailFor = null;
@@ -1639,9 +1640,27 @@ function sortSessionRows(rows: SessionSummary[]): SessionSummary[] {
 }
 
 function mergeSessionRows(rows: SessionSummary[]): void {
+  const selectedBefore = selectedId === null ? undefined : sessions.find(entry => entry.id === selectedId);
   const merged = new Map(sessions.map((entry) => [entry.id, entry]));
   for (const entry of rows) merged.set(entry.id, entry);
   sessions = sortSessionRows([...merged.values()]);
+  followFirstSelectedBinding(selectedBefore, selectedId === null ? undefined : merged.get(selectedId));
+}
+
+function requestSelectedTabFollow(id: string | null): void {
+  void api.followSessionTab?.(id)?.catch(() => undefined);
+}
+
+const followedFirstBindings = new Set<string>();
+function followFirstSelectedBinding(before: SessionSummary | undefined, after: SessionSummary | undefined): void {
+  // Project history may merge the first binding before the newest-page refresh sees it.
+  if (before?.id === selectedId && before.origin?.kind === 'desktop' && before.conversationId === null &&
+      after?.id === before.id && after.origin?.kind === 'desktop' && after.conversationId) {
+    const binding = `${after.id}:${after.conversationId}`;
+    if (followedFirstBindings.has(binding)) return;
+    followedFirstBindings.add(binding);
+    requestSelectedTabFollow(after.id);
+  }
 }
 
 /**
@@ -1692,16 +1711,12 @@ async function loadSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
     selectedId = null;
     detailFor = null;
     detailCursor = null;
+    requestSelectedTabFollow(null);
   }
   paintSessions();
   chatSearch?.refresh();
   const row = selectedId === null ? undefined : sessions.find(entry => entry.id === selectedId);
-  // New Chat selects its reserved local session before ChatGPT assigns a conversation id.
-  // Follow that first binding once it exists, provided the person still has this chat selected.
-  if (selectedBefore?.origin?.kind === 'desktop' && selectedBefore.conversationId === null &&
-      row?.id === selectedBefore.id && row.conversationId) {
-    void api.followSessionTab?.(row.id)?.catch(() => undefined);
-  }
+  followFirstSelectedBinding(selectedBefore ?? undefined, row);
   if (detail === 'reread' || selectedId === null || detailFor !== selectedId || changed.all || changed.ids.has(selectedId) ||
       row?.updatedAt !== detailStamp?.updatedAt || row?.events !== detailStamp?.events) await loadDetail();
   else void refreshSessionControls();
@@ -9558,7 +9573,7 @@ function selectSession(id: string): void {
     paintDetail(false);
     paintHandoff();
     // With Background chats on, the chat's tab becomes the selected one in that window (#1249).
-    void api.followSessionTab?.(id)?.catch(() => undefined);
+    requestSelectedTabFollow(id);
   }
   void loadDetail();
   void refreshInputQueue();
@@ -9572,6 +9587,7 @@ function selectNewChat(projectId: string | null = null, branch: typeof newChatBr
   inputQueueGeneration++;
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   newChatSelected = true; selectedId = null; selectedProjectId = projectId; detailFor = null; detailCursor = null;
+  requestSelectedTabFollow(null);
   refreshBackgroundProcesses();
   sendAnchor = null; readingAfterSend = false; readerAtEnd = true;
   if (projectId) expandedProjects.add(projectId);
@@ -9589,6 +9605,7 @@ function selectNewChat(projectId: string | null = null, branch: typeof newChatBr
 }
 
 export function initChat(next: Deps): void {
+  followedFirstBindings.clear();
   sidebarCompletion = createSidebarCompletionState();
   sidebarPins = createSidebarPins();
   sidebarOrder = createSidebarOrder($('sessionList'), () => [
