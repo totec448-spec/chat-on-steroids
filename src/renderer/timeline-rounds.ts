@@ -40,6 +40,8 @@ export function isActivity(event: SessionEvent | undefined, answers: ReadonlySet
   // An answer still being written is not yet final, but it is the answer, not one more sentence.
   if (event.kind === 'assistant_message' && ((event.providerMessageId && answers.has(event.providerMessageId)) ||
       (event.messageId && answers.has(event.messageId)))) return false;
+  // A step handed to the person (#1695) stands on its own, like an approval: a closed round must not fold it away.
+  if (event.kind === 'tool_call' && event.call.tool === 'ask_user_to_run' && event.call.outcome === 'ok') return false;
   if (event.kind === 'tool_call' || event.kind === 'page_tool' || event.kind === 'agent_message') return true;
   // ChatGPT's own phase captions belong to the work; the app's notes and approval rows stand alone.
   if (event.kind === 'progress') return event.source !== 'app' && !event.progressId?.startsWith('approval');
