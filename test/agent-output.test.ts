@@ -142,3 +142,51 @@ it('bounds a huge line without spaces: it shows, minus a held end, and memory st
   expect(shownText(shown).length).toBeGreaterThan(150_000);
   expect((stream as unknown as { pending: string }).pending.length).toBeLessThanOrEqual(70_000);
 });
+
+// CodeRabbit on #2052: a key whose BEGIN line fell into the omitted part of a long command's output.
+it('hides key lines kept after the gap when their BEGIN line was omitted, through END or until it comes', () => {
+  const body = ['MIIEpAIBAAKCAQEA1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4', 'y5z6A7B8C9D0E1F2G3H4I5J6K7L8M9N0O1P2Q3R4S5T6U7V8W9X0Y1Z2a3b4c5d6'];
+  {
+    const { shown, stream } = collect(true);
+    stream.start(Buffer.from(`first line\nhead piece\n... 9000 bytes omitted ...\ncut ${body[0]!.slice(5)}\n${body[0]}\n${body[1]}\n-----END RSA PRIVATE KEY-----\nafter the key\n`));
+    const all = shownText(shown);
+    expect(all).toContain('first line\n');
+    expect(all).toContain('[redacted private key]');
+    expect(all).toContain('after the key\n');
+    for (const line of body) expect(all).not.toContain(line);
+    expect(all).not.toContain('END RSA PRIVATE KEY');
+  }
+  {
+    // Still printing the key when the view opened: its lines stay hidden until END arrives.
+    const { shown, stream } = collect(true);
+    stream.start(Buffer.from(`first line\nhead piece\n... 9000 bytes omitted ...\ncut piece\n${body[0]}\n`));
+    stream.push(Buffer.from(`${body[1]}\n-----END RSA PRIVATE KEY-----\nafter the key\n`));
+    stream.flush(1_000);
+    const all = shownText(shown);
+    expect(all).toContain('[redacted private key]');
+    expect(all).toContain('after the key\n');
+    for (const line of body) expect(all).not.toContain(line);
+  }
+});
+
+it('keeps a credential header whose value is on the next line until the value arrives', () => {
+  const token = 'q9W8e7R6t5Y4u3I2o1P0a9S8d7F6g5H4';
+  for (const [header, value] of [['Authorization: Bearer', token], ['Authorization:', `Bearer ${token}`], ['Bearer', token]] as const) {
+    const { shown, stream } = collect(true);
+    stream.push(Buffer.from(`request headers\n${header}\n`));
+    stream.flush(0);
+    stream.flush(5_000);
+    expect(shownText(shown)).toBe('request headers\n');
+    stream.push(Buffer.from(`${value}\ndone\n`));
+    stream.flush(5_100);
+    const all = shownText(shown);
+    expect(all).not.toContain(token);
+    expect(all).toContain('done\n');
+  }
+  // A header left without a value is shown when the command ends.
+  const { shown, stream } = collect(true);
+  stream.push(Buffer.from('Authorization: Bearer\n'));
+  stream.flush(0);
+  stream.flush(0, true);
+  expect(shownText(shown)).toBe('Authorization: Bearer\n');
+});

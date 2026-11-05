@@ -25,11 +25,20 @@ export function registerAgentOutputIpc(getWindow: () => BrowserWindow | null): v
       processId: z.number().int().min(1_000).max(99_999), incarnation: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) }).strict(),
     z.object({ action: z.literal('close'), id: z.string().uuid() }).strict()
   ]);
+  /** A refusal: its message goes to the window, its reason to the log, never the request (CodeRabbit on #2052). */
+  class Refusal extends Error { constructor(message: string, readonly reason: string) { super(message); } }
   ipcMain.handle('agentOutput:request', async (event, payload: unknown) => {
+    let what = 'a request';
+    let held: { id: string; entry: { stop: () => void } } | null = null;
     try {
       const target = getWindow();
-      if (!target || target.isDestroyed() || event.sender !== target.webContents || event.senderFrame !== target.webContents.mainFrame) throw new Error('The window is unavailable');
-      const args = request.parse(payload);
+      if (!target || target.isDestroyed() || event.sender !== target.webContents || event.senderFrame !== target.webContents.mainFrame) {
+        throw new Refusal('The window is unavailable', 'it did not come from the app window');
+      }
+      const parsed = request.safeParse(payload);
+      if (!parsed.success) throw new Refusal('The request was not valid', 'it was not a valid request');
+      const args = parsed.data;
+      what = args.action === 'open' ? 'to open a view' : 'to close a view';
       if (owner !== event.sender) {
         closeAll(); owner = event.sender;
         const current = owner;
@@ -38,11 +47,23 @@ export function registerAgentOutputIpc(getWindow: () => BrowserWindow | null): v
       }
       if (args.action === 'close') { views.get(args.id)?.stop(); views.delete(args.id); return { ok: true, data: true }; }
       if (views.has(args.id)) return { ok: true, data: true };
-      if (views.size >= MAX_VIEWS) throw new Error('Close an agent output tab first');
+      if (views.size >= MAX_VIEWS) throw new Refusal('Close an agent output tab first', `${MAX_VIEWS} views are already open`);
       if (!runningExecProcesses(args.sessionId).some(process => process.processId === args.processId && process.incarnation === args.incarnation)) {
-        throw new Error('This command is no longer running');
+        throw new Refusal('This command is no longer running', 'the command is no longer running');
       }
-      const shield = getConfig().ui.secretsShield !== false && !await sessionSecretsShieldOff(args.sessionId).catch(() => false);
+      // The slot is taken before the wait below, so a close that arrives meanwhile finds it and
+      // nothing is watched for a tab already gone (CodeRabbit on #2052).
+      const reservation = { stop: () => undefined };
+      views.set(args.id, reservation);
+      held = { id: args.id, entry: reservation };
+      const reserved = (): boolean => views.get(args.id) === reservation;
+      let shield: boolean;
+      try {
+        shield = getConfig().ui.secretsShield !== false && !await sessionSecretsShieldOff(args.sessionId).catch(() => false);
+      } finally {
+        if (!reserved()) logInfo(`agent output: a view was closed before it opened; nothing is watched`);
+      }
+      if (!reserved()) return { ok: true, data: true };
       const sender = owner!;
       const send = (value: AgentOutputEvent): void => { if (owner === sender && !sender.isDestroyed()) sender.send('agentOutput:event', value); };
       const stream = new AgentOutputStream(shield, text => send({ id: args.id, data: text }));
@@ -53,12 +74,17 @@ export function registerAgentOutputIpc(getWindow: () => BrowserWindow | null): v
         finish();
         send({ id: args.id, exit: exitSummary(completion.exitCode, completion.durationMs) });
       });
-      if (!watched) throw new Error('This command is no longer running');
+      if (!watched) { views.delete(args.id); throw new Refusal('This command is no longer running', 'the command is no longer running'); }
       stream.start(watched.history);
       timer = setInterval(() => stream.flush(), AGENT_OUTPUT_FLUSH_MS);
       views.set(args.id, { stop: () => { finish(); watched.unsubscribe(); } });
       logInfo(`agent output: the person opened command ${args.processId}'s output read-only${shield ? '' : ' (secrets shield off)'}`);
       return { ok: true, data: true };
-    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
+    } catch (error) {
+      // Any failure after the slot was taken gives it back.
+      if (held && views.get(held.id) === held.entry) views.delete(held.id);
+      logInfo(`agent output: refused ${what}: ${error instanceof Refusal ? error.reason : 'it failed'}`);
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
   });
 }
