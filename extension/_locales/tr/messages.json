@@ -515,6 +515,12 @@
   "content_goal_wait_workers": {
     "message": "Bu sohbetin yardımcı ajanları bekleniyor"
   },
+  "content_goal_wait_slots": {
+    "message": "Boş yer bekleniyor (Aynı anda çalışan sohbetler)"
+  },
+  "content_goal_wait_paused": {
+    "message": "ChatGPT yavaşlamayı istedi · belirttiği saate kadar bekler"
+  },
   "content_goal_writing_first_message": {
     "message": "$1 ilk mesajı yazıyor"
   },

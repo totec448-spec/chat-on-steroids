@@ -3963,6 +3963,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       } else if (!slotWait && slotBefore !== undefined && goalSendSlotWaits.delete(id)) {
         logInfo(`goal: ${id}'s ready message has a free slot`);
       }
+      // The chat's caption says why (the same "waiting for a free slot" or pause words as a held
+      // Goal step) instead of "next message written" (CodeRabbit on #2051).
+      if (slotWait) goalSlotWaits.set(id, { at: Date.now(), paused: slotWait.startsWith('ChatGPT asked to slow down') });
+      else if (slotBefore !== undefined) goalSlotWaits.delete(id);
       return ({
       ...(slotWait ? { slotWait } : {}),
       enabled: !superseded && !finishOnly && goalEnabledFor(id),
@@ -4847,17 +4851,6 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     if (await goalInputPriority(id, sessionId, turnId))
       return goalJson(res, 409, { error: 'user_input_pending', retryable: true }, origin);
-    // Chats working at once (#1694): the next automatic step waits its turn; the page keeps the
-    // turn and asks again, and the helper is not asked meanwhile. The chat's own running turn takes no new slot.
-    const slot = automaticSendRefusal(`goal:${id}`, id);
-    if (slot) {
-      const paused = slot.startsWith('ChatGPT asked to slow down');
-      const before = goalSlotWaits.get(id);
-      if (!before || before.paused !== paused) logInfo(`goal: ${id}'s next step waits: ${slot}`);
-      goalSlotWaits.set(id, { at: Date.now(), paused });
-      return goalJson(res, 409, { error: 'chats_at_once', retryable: true, message: slot }, origin);
-    }
-    if (goalSlotWaits.delete(id)) logInfo(`goal: ${id}'s next step has a free slot`);
     if (body['nativeBusy'] === true) {
       const pro = await extendedSilenceWindowFor(id, sessionId);
       const pending = goalPendingReplyFor(id);
@@ -4955,6 +4948,20 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       discardPreparedGoalDraft(id, draft.token);
       return goalJson(res, 409, { error: 'goal_reply_not_pending', retryable: false }, origin);
     }
+    // Chats working at once (#1694): the next automatic step waits its turn; the page keeps the
+    // turn and asks again, and the helper is not asked meanwhile. The chat's own running turn takes
+    // no new slot. Asked last, right before the draft starts, so a request refused for any other
+    // reason never holds a slot (CodeRabbit on #2051).
+    const slot = automaticSendRefusal(`goal:${id}`, id);
+    if (slot) {
+      discardPreparedGoalDraft(id, draft.token);
+      const paused = slot.startsWith('ChatGPT asked to slow down');
+      const before = goalSlotWaits.get(id);
+      if (!before || before.paused !== paused) logInfo(`goal: ${id}'s next step waits: ${slot}`);
+      goalSlotWaits.set(id, { at: Date.now(), paused });
+      return goalJson(res, 409, { error: 'chats_at_once', retryable: true, message: slot }, origin);
+    }
+    if (goalSlotWaits.delete(id)) logInfo(`goal: ${id}'s next step has a free slot`);
     beginGoalDraft(id, draft.token);
     return goalJson(res, 200, { goal: draft, sessionId }, origin);
   }
