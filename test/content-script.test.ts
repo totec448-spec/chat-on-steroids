@@ -13535,6 +13535,62 @@ describe('evidence from the page context', () => {
     expect(clicks).toBe(2);
   });
 
+  // CodeRabbit on #2080: the word belongs to one chat, is awaited once, and a Stop revokes it.
+  it("waits for the app's first answer and never applies one chat's word to another", async () => {
+    live = await harness();
+    let clicks = 0;
+    const retry = live.document.createElement('button');
+    retry.addEventListener('click', () => { clicks++; });
+    (live.window as any).CLF_DOM.conversationLoadFailure = () => retry;
+    // Chat A's app says: nothing to do here.
+    live.reply.set('activity', () => ({ ok: true, data: { stream: [], entries: [], pendingTools: 0, historyRetry: { wanted: false } } }));
+    await live.hook.pullActivity();
+    // The tab moves to chat B, whose first answer is still on its way: no press for now.
+    live.reply.set('activity', () => new Promise(() => undefined));
+    live.dom.reconfigure({ url: 'https://chatgpt.com/c/11111111-2222-3333-4444-555555555555' });
+    const start = live.window.Date.now();
+    expect(live.hook.recoverConversationLoad(start)).toBe(false);
+    expect(live.hook.recoverConversationLoad(start + 10_000)).toBe(false);
+    expect(clicks).toBe(0);
+    // Chat A's "no work" is not chat B's: once the wait for B's first answer is over, B follows the page's own rule.
+    expect(live.hook.recoverConversationLoad(start + 61_000)).toBe(true);
+    expect(clicks).toBe(1);
+  });
+
+  it("needs a newer word from the app after Stop before it presses history Retry", async () => {
+    const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', turnId = 'retry-stop-turn';
+    live = await harness(undefined, {
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, activeTurnId: turnId,
+        stopTurn: { turnId, userMessageId: 'm-retry-question' }, historyRetry: { wanted: true } } }),
+      stop_redeem: () => ({ ok: true, command: { type: 'stop', conversationId, turnId, userMessageId: 'm-retry-question' } }),
+      stop_ack: () => ({ ok: true })
+    });
+    userTurn(live.document, 'retry-question', 'A question before Stop', { sent: false });
+    startGenerating(live.document, { send: false });
+    assistantTurn(live.document, 'retry-stop-assistant', []);
+    const button = live.document.querySelector('[data-testid="stop-button"]') as HTMLButtonElement;
+    Object.defineProperty(button, 'getClientRects', { value: () => [{ width: 10, height: 10 }] });
+    await live.hook.pullActivity();
+    expect(await live.runtimeMessage({ type: 'clf-stop-turn', id: '1111111111111111', conversationId, turnId })).toEqual({ ok: true });
+    let clicks = 0;
+    const retry = live.document.createElement('button');
+    retry.addEventListener('click', () => { clicks++; });
+    (live.window as any).CLF_DOM.conversationLoadFailure = () => retry;
+    const start = live.window.Date.now();
+    expect(live.hook.recoverConversationLoad(start)).toBe(false);
+    // The word "work waits" came before Stop: not enough.
+    expect(live.hook.recoverConversationLoad(start + 10_000)).toBe(false);
+    expect(clicks).toBe(0);
+    // ChatGPT has stopped; a newer word after Stop decides again.
+    stopGenerating(live.document);
+    await settle();
+    await new Promise(resolve => setTimeout(resolve, 5));
+    live.reply.set('activity', () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, historyRetry: { wanted: true } } }));
+    await live.hook.pullActivity();
+    expect(live.hook.recoverConversationLoad(live.window.Date.now() + 10_000)).toBe(true);
+    expect(clicks).toBe(1);
+  });
+
   it('keeps its history Retry backoff across a reload of the same chat (#1882, 2026-11-05)', async () => {
     // Every app reload used to start a new page at the fastest step, so each quarter-hour reload of
     // a limited chat came with presses after 0, 2 and 4 minutes: 23 such rounds in 8.5 hours.
