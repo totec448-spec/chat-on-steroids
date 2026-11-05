@@ -9956,6 +9956,27 @@ describe('unattributed activity recovery', () => {
     expect(await maintenance()).toBeNull();
   });
 
+  // CodeRabbit on #2080: a finished repair that keeps no activity grant is no work for history Retry.
+  it('stops counting a finished repair as work once its chat keeps no activity grant', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(OTHER, [{ kind: 'user_message', time: Date.now(), messageId: 'retry-done-question', text: 'Work on this task.' }, openTurn('retry-done-turn')]);
+      await events(OTHER, [{ kind: 'chat_error', time: Date.now(), turnId: 'retry-done-turn', text: 'The response stream is unavailable.',
+        recoverable: true, reason: 'stream_gone' }]);
+      const repair = await maintenance();
+      expect(repair).toMatchObject({ conversationId: OTHER, reason: 'assistant-error' });
+      expect((await request('POST', '/repairs/claim', { body: { token: repair!.token } })).body.allowed).toBe(true);
+      await maintenance(repair!.token, 'reloaded');
+      await events(OTHER, [{ kind: 'turn_end', time: Date.now(), turnId: 'retry-done-turn', outcome: 'completed' }]);
+      const view = async () => (await request('GET', `/activity?conversationId=${OTHER}`)).body.historyRetry;
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect(await view()).toEqual({ wanted: false });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('lets the user cancel an interrupted-response reload for this answer only (#1032)', async () => {
     await pair();
     const errorFor = (turnId: string) => ({ kind: 'chat_error' as const, time: Date.now(), turnId,
@@ -12235,6 +12256,26 @@ describe('unattributed activity recovery', () => {
       await note({ note: 'input-held', reason: 'tool-running', inputId: id(0), conversationId: id(0) });
       expect(lines(id(0))).toBe(2);
     } finally { vi.useRealTimers(); }
+  });
+
+  // #2076: each Retry press is another history request; an idle chat leaves it to the person.
+  it('tells the page to press history Retry only while work waits, and not inside the app hold', async () => {
+    await pair();
+    await events(PRIME, [{ kind: 'model_selection', time: Date.now(), model: 'GPT-5.6 Sol', reasoningEffort: 'high' }]);
+    const view = async () => (await request('GET', `/activity?conversationId=${PRIME}`)).body.historyRetry;
+    expect(await view()).toEqual({ wanted: false });
+    // A running call no chat is proven to own is not this chat's work (CodeRabbit on #2080).
+    const { trackInFlight, emptyEvidence } = await import('../src/main/mcp/call-context.js');
+    await trackInFlight({ startedAt: Date.now(), transportKey: null, agent: null, outcome: null, evidence: emptyEvidence(),
+      caller: { conversationId: null, requestId: 'no-chat-call', transportKey: null } }, async () => {
+      expect(await view()).toEqual({ wanted: false });
+    });
+    await events(PRIME, [openTurn('retry-work')]);
+    expect(await view()).toMatchObject({ wanted: true });
+    const retryAt = Date.now() + 10 * 60_000;
+    await events(PRIME, [{ kind: 'chat_error', time: Date.now(), turnId: 'retry-work', recoverable: false, blocking: true, retryAt,
+      text: 'ChatGPT temporarily rate-limited loading this conversation history.' }]);
+    expect((await view()).until).toBeGreaterThanOrEqual(retryAt);
   });
 
   it('records a repeating history limit once, while its deadline keeps following the newest (2026-10-11)', async () => {
