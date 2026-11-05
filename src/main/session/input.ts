@@ -2166,23 +2166,41 @@ const ownSentReceiptSchema = z.object({ conversationId: z.string().min(1).max(25
   messageId: z.string().min(1).max(256), at: z.number() });
 type OwnSentReceipt = z.infer<typeof ownSentReceiptSchema>;
 let ownSentReceipts: OwnSentReceipt[] | null = null;
-async function loadOwnSentReceipts(): Promise<OwnSentReceipt[]> {
-  if (ownSentReceipts) return ownSentReceipts;
-  const saved = await readDurable<unknown>(OWN_SENT_STATE).catch(() => null);
-  // A damaged entry is dropped, never guessed at; the rest stay.
-  ownSentReceipts = (Array.isArray(saved) ? saved : []).flatMap(row => {
-    const parsed = ownSentReceiptSchema.safeParse(row);
-    return parsed.success ? [parsed.data] : [];
-  }).slice(-OWN_SENT_RECEIPTS_MAX);
-  return ownSentReceipts;
+/** One shared read: two first callers must not each install their own snapshot (CodeRabbit on #2079). */
+let ownSentLoad: Promise<OwnSentReceipt[]> | null = null;
+function loadOwnSentReceipts(): Promise<OwnSentReceipt[]> {
+  if (ownSentReceipts) return Promise.resolve(ownSentReceipts);
+  ownSentLoad ??= readDurable<unknown>(OWN_SENT_STATE).catch(() => null).then(saved => {
+    // A damaged entry is dropped, never guessed at; the rest stay.
+    ownSentReceipts ??= (Array.isArray(saved) ? saved : []).flatMap(row => {
+      const parsed = ownSentReceiptSchema.safeParse(row);
+      return parsed.success ? [parsed.data] : [];
+    }).slice(-OWN_SENT_RECEIPTS_MAX);
+    return ownSentReceipts;
+  });
+  return ownSentLoad;
+}
+/** Saved without anything older than the window a page may use it in. */
+function saveOwnSent(receipts: OwnSentReceipt[], now = Date.now()): void {
+  ownSentReceipts = receipts.filter(row => now - row.at < OWN_UNSENT_MS).slice(-OWN_SENT_RECEIPTS_MAX);
+  writeDurableSoon(OWN_SENT_STATE, ownSentReceipts);
 }
 async function rememberOwnSent(entry: InputEntry, current: InputEntry[], conversationId: string, messageId: string): Promise<void> {
   const text = entry.deliveryText ?? entry.text;
   if (automaticSendKind(entry) === null || entry.images?.length || entry.attachments?.length || entry.companionInputId ||
       current.some(row => row.companionInputId === entry.id) || messageId.startsWith('input:') || text.length > OWN_SENT_TEXT_MAX) return;
   const kept = (await loadOwnSentReceipts()).filter(row => row.conversationId !== conversationId);
-  ownSentReceipts = [...kept, { conversationId, text, messageId, at: Date.now() }].slice(-OWN_SENT_RECEIPTS_MAX);
-  writeDurableSoon(OWN_SENT_STATE, ownSentReceipts);
+  saveOwnSent([...kept, { conversationId, text, messageId, at: Date.now() }]);
+}
+/**
+ * A deleted chat's receipt goes with it (CodeRabbit on #2079): a scheduled run's text can be the
+ * person's own words. Called with every ChatGPT conversation the deleted chat had.
+ */
+export async function forgetOwnSent(conversationIds: readonly string[]): Promise<void> {
+  const ids = new Set(conversationIds);
+  const receipts = await loadOwnSentReceipts();
+  if (!receipts.some(row => ids.has(row.conversationId))) return;
+  saveOwnSent(receipts.filter(row => !ids.has(row.conversationId)));
 }
 
 /**
@@ -2510,7 +2528,7 @@ export function offerToolInput(sessionId: string | null | undefined, conversatio
   });
 }
 
-export function resetInputForTests(): void { ownSentReceipts = null; entries = null; chain = Promise.resolve(); offered.clear(); decisionWaiters.clear(); declinedRotations.clear(); slotWaits.clear(); }
+export function resetInputForTests(): void { ownSentReceipts = null; ownSentLoad = null; entries = null; chain = Promise.resolve(); offered.clear(); decisionWaiters.clear(); declinedRotations.clear(); slotWaits.clear(); }
 
 export async function pausedBrowserHelpers(): Promise<Array<{ id: string; sourceSessionId: string }>> {
   return (await listInputs()).filter(row => row.purpose === 'decision' && row.state === 'cancelled' && row.cancelledByUser === true && !row.conversationId && row.decisionSourceSessionId)
@@ -2733,6 +2751,8 @@ export function failBrowserInput(id: string, owner: string, error: string, detai
  */
 export function failInputsForDeletedConversation(conversationId: string): Promise<number> {
   return serial(async () => {
+    // ChatGPT deleted it: its own-sent receipt goes too (#2074).
+    await forgetOwnSent([conversationId]);
     const current = await load();
     const ended = new Set<string>();
     for (const row of current) {
