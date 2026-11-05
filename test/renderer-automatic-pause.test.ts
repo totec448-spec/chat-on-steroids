@@ -41,6 +41,18 @@ it('moves keyboard focus to the message box when Resume now hides the notice', a
   const resume = document.getElementById('resumeAutomaticSends') as HTMLButtonElement;
   resume.focus();
   resume.click();
-  await vi.waitFor(() => expect(document.getElementById('automaticPause')!.hidden).toBe(true));
+  await vi.waitFor(() => expect(document.getElementById('automaticPause')!.hidden).toBe(true), { timeout: 5_000 });
+  expect(document.activeElement).toBe(document.getElementById('chatInput'));
+});
+
+it('moves keyboard focus to the message box when the pause ends by itself', async () => {
+  (window as any).api = { resumeAutomaticSends: vi.fn() };
+  const { paintAutomaticPause } = await import('../src/renderer/automatic-pause.js');
+  const start = Date.now();
+  paintAutomaticPause(start + 60_000);
+  (document.getElementById('resumeAutomaticSends') as HTMLButtonElement).focus();
+  vi.setSystemTime(start + 61_000);
+  vi.advanceTimersByTime(61_000);
+  expect(document.getElementById('automaticPause')!.hidden).toBe(true);
   expect(document.activeElement).toBe(document.getElementById('chatInput'));
 });
