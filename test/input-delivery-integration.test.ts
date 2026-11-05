@@ -4291,3 +4291,20 @@ it('drops expired own-sent text from disk on read, and keeps both changes when a
   expect((saved.receipts as Array<{ messageId: string }>).map(row => row.messageId)).toEqual(['kept-message']);
   expect((saved.forgotten as Array<{ conversationId: string }>).map(row => row.conversationId)).toEqual([deleted]);
 });
+
+// CodeRabbit on #2079: a store that cannot be read for the moment is not cached as empty.
+it('reads the own-sent store again after it could not be read for a moment', async () => {
+  const conversationId = randomUUID();
+  const dir = path.join(directory, 'state', 'own-sent-receipts.json');
+  await flushDurable();
+  await fs.rm(dir, { force: true });
+  // A directory where the file belongs: unreadable, but not damaged data.
+  await fs.mkdir(dir, { recursive: true });
+  input.resetInputForTests();
+  await expect(input.ownSentResidue(conversationId)).rejects.toThrow();
+  await fs.rm(dir, { recursive: true, force: true });
+  await writeDurableNow('own-sent-receipts', { version: 1, receipts: [
+    { conversationId, text: 'Continue the task', messageId: 'readable-again', at: Date.now() }], forgotten: [] });
+  // Not the empty snapshot of the failed read.
+  expect(await input.ownSentResidue(conversationId)).toEqual([{ text: 'Continue the task', messageId: 'readable-again' }]);
+});
