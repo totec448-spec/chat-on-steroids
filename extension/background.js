@@ -3616,7 +3616,12 @@ async function maintainOnce() {
       requiresClaim: entry?.requiresClaim === true,
       continueFollows: entry?.continueFollows === true,
       suspended: entry?.reason === 'stalled',
-      focus: Boolean(entry && entry.focus === true)
+      focus: Boolean(entry && entry.focus === true),
+      // The app's own automatic sends in this chat, with their message ids (#2074): bounded, well-formed only.
+      ...(Array.isArray(entry?.ownSent) ? { ownSent: entry.ownSent
+        .filter((sent) => sent && typeof sent.text === 'string' && sent.text.length <= 100_000 &&
+          typeof sent.messageId === 'string' && sent.messageId.length <= 200)
+        .map((sent) => ({ text: sent.text, messageId: sent.messageId })).slice(0, 10) } : {})
     }))
     .filter((entry) => entry.conversationId && entry.token);
   // Fulfilling a due repair must not wait behind window layout, input preparation
@@ -3741,7 +3746,7 @@ function repairChangeDetail(latest) {
 }
 
 async function performBrowserRepairs(repairs, policy) {
-  for (const { conversationId, token, reason, focus, requiresClaim, continueFollows, suspended } of repairs) {
+  for (const { conversationId, token, reason, focus, requiresClaim, continueFollows, suspended, ownSent } of repairs) {
     // Re-scanned per repair rather than reused from above. Earlier entries in this same batch
     // may have created a tab, and the scan has to be the state immediately before the action or
     // the duplicate rule below is deciding on a tab list that no longer exists.
@@ -3790,8 +3795,12 @@ async function performBrowserRepairs(repairs, policy) {
         // own busy page is what it may recover, not an ordinary turn to keep idle.
         const inspectTurn = target && !suspended;
         const draftOnly = reason === 'compaction';
+        // The exact texts the app sent into this chat by itself: one restored into the box is its own
+        // leftover, not the person's draft (#2074).
+        const own = Array.isArray(ownSent) ? { ownSent } : {};
         const check = inspectTurn ? await tabReply(target.id,
-          { type: 'clf-repair-check', conversationId, draftOnly }, documentId ? { documentId } : undefined) : null;
+          { type: 'clf-repair-check', conversationId, draftOnly, ...own }, documentId ? { documentId } : undefined) : null;
+        if (check?.cleared === 'own-sent') await call(`/status?repairCleared=${encodeURIComponent(token)}`);
         if (check?.safe === false) {
           // The repair stays handed for the next pass; the app logs once why the page held it.
           await call(`/status?repairHeld=${encodeURIComponent(token)}&why=${encodeURIComponent(check.why || 'unknown')}`);
@@ -3800,7 +3809,7 @@ async function performBrowserRepairs(repairs, policy) {
         const claim = await call('/repairs/claim', { method: 'POST', body: JSON.stringify({ token }) });
         if (!claim.ok || claim.data?.allowed !== true) continue;
         if (target && !suspended) {
-          const latest = inspectTurn ? await tabReply(target.id, { type: 'clf-repair-check', conversationId, draftOnly,
+          const latest = inspectTurn ? await tabReply(target.id, { type: 'clf-repair-check', conversationId, draftOnly, ...own,
             ...(check?.safe === true ? { expected: { revision: check.revision, turnId: check.turnId, questionId: check.questionId } } : {}) },
             documentId ? { documentId } : undefined) : null;
           const tab = await chrome.tabs.get(target.id);

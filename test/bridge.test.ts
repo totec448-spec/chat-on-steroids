@@ -3276,6 +3276,28 @@ describe('automatic compaction', () => {
     expect((await request('GET', '/status')).body.repairs.some((row: { token: string }) => row.token === handout.token)).toBe(true);
   });
 
+  // #2074: a page that kept answering "held" (the app's own Continue was back in its message box) used
+  // up the no-page budget, and recovery ended with "no page; not offering again" while that page was there.
+  it('never ends recovery as "no page" while the page keeps answering that it holds the repair, and logs a cleared leftover', async () => {
+    await pair();
+    const conversationId = randomUUID();
+    const session = await createSession({ conversationId });
+    await compactSession(session.id);
+    for (let pass = 0; pass < 15; pass++) {
+      const offered = (await request('GET', '/status')).body.repairs
+        .find((row: { conversationId: string }) => row.conversationId === conversationId);
+      expect(offered).toBeTruthy();
+      await request('GET', `/status?repairHeld=${encodeURIComponent(offered.token)}&why=draft`);
+    }
+    expect(getLog().some(entry => entry.message.includes(`${conversationId} never claimed`))).toBe(false);
+    const handout = (await request('GET', '/status')).body.repairs
+      .find((row: { conversationId: string }) => row.conversationId === conversationId);
+    // The report itself hands out no work, as for a held repair (CodeRabbit on #2079).
+    expect((await request('GET', `/status?repairCleared=${encodeURIComponent(handout.token)}`)).body.repairs).toEqual([]);
+    expect(getLog().some(entry => entry.message ===
+      `bridge: the page removed this app's own already-sent message, restored into ${conversationId}'s message box, before the compaction repair`)).toBe(true);
+  });
+
   it('says an app-started Compact & resume reloaded its chat to send the request, in a row naming that chat', async () => {
     await pair();
     const conversationId = randomUUID();
@@ -8504,6 +8526,21 @@ ${SAMPLE_BRIEF}` }
       await vi.waitFor(async () => expect((await readDurable<any>('bridge-commands'))?.commands?.[0]?.phase).toBe('leased'));
       expect(opened, 'the operating system picks a browser, not the one holding the chat').toEqual([]);
       expect((await poll(other, [])).placement).toBeNull();
+      expect((await poll(holder, [home])).placement).toMatchObject({ id: command.id, homeConversationId: home, active: true });
+    });
+
+    // CodeRabbit on #2079: a repair report's reply is not read, so it must not spend a placement.
+    it('keeps a placement for the next poll when the browser only reports a repair', async () => {
+      await pair();
+      const home = 'c0c0c0c0-1111-4222-8333-000000000b04';
+      const { sessionId, token } = await compactedSession(home, 'carry on');
+      await poll(holder, [home]);
+      const command = queueResume(sessionId, token)!;
+      await vi.waitFor(async () => expect((await readDurable<any>('bridge-commands'))?.commands?.some((row: any) => row.id === command.id && row.phase === 'leased')).toBe(true), { timeout: 10_000 });
+      for (const report of ['repairCleared=some-token', 'repairHeld=some-token&why=draft', 'repairFailed=some-token&why=changed']) {
+        const reply = await request('POST', `/status?${report}`, { body: { openConversations: [home] }, browser: holder });
+        expect(reply.body.placement ?? null).toBeNull();
+      }
       expect((await poll(holder, [home])).placement).toMatchObject({ id: command.id, homeConversationId: home, active: true });
     });
   });
