@@ -18684,7 +18684,12 @@ describe('selecting a chat in the app selects its background tab (#1249)', () =>
     const socket = await connect();
     try {
       await poll(BROWSER_B, [CHAT]);
-      followChatInBackground(CHAT);
+      const logger = await import('../src/main/logger.js');
+      const info = vi.spyOn(logger, 'logInfo');
+      try {
+        followChatInBackground(CHAT);
+        expect(info).toHaveBeenCalledWith('browser follow: skipped, background chats are disabled');
+      } finally { info.mockRestore(); }
       expect((await poll(BROWSER_B, [CHAT])).follow).toBeUndefined();
     } finally { await close(socket); await background(true); }
   });
@@ -18692,7 +18697,12 @@ describe('selecting a chat in the app selects its background tab (#1249)', () =>
   it('reports a disconnected browser so the renderer can retain and retry its pending selection', async () => {
     await pair();
     await background(true);
-    expect(followChatInBackground(CHAT)).toBe(false);
+    const logger = await import('../src/main/logger.js');
+    const info = vi.spyOn(logger, 'logInfo');
+    try {
+      expect(followChatInBackground(CHAT)).toBe(false);
+      expect(info).toHaveBeenCalledWith('browser follow: deferred, no connected browser can reveal tabs; renderer may retry while pending');
+    } finally { info.mockRestore(); }
     const socket = await connect();
     try {
       await poll(BROWSER_B, [CHAT]);
@@ -18729,7 +18739,12 @@ describe('selecting a chat in the app selects its background tab (#1249)', () =>
     const socket = await connect();
     try {
       await poll(BROWSER_B, [CHAT]);
-      followChatInBackground(CHAT);
+      const logger = await import('../src/main/logger.js');
+      const info = vi.spyOn(logger, 'logInfo');
+      try {
+        followChatInBackground(CHAT);
+        expect(info).toHaveBeenCalledWith('browser follow: skipped, background tabs are grouped');
+      } finally { info.mockRestore(); }
       expect((await poll(BROWSER_B, [CHAT])).follow).toBeUndefined();
     } finally { await close(socket); await placement('window'); }
   });

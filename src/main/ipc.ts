@@ -2201,7 +2201,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const conversationId = session?.conversationId;
     if (selection !== followSelection) return true;
     if (!session) return true;
-    if (!conversationId) return false;
+    if (!conversationId) {
+      logInfo('browser follow: selected chat has no conversation binding; follow stays pending for retry');
+      return false;
+    }
     if (/^[0-9a-z-]{8,64}$/i.test(conversationId)) return followChatInBackground(conversationId);
     return true;
   });
