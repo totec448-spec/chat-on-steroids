@@ -4042,6 +4042,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           job: null,
           progress: conversationProgress(id),
           goal: await goalView(),
+          ...await historyRetryView(id, astraSession?.id ?? null),
           ...(goalFencedChat(id) || superseded
             ? {
                 // Worker conversations are never Compact & Resume sources. Keep the page's
@@ -4327,6 +4328,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // chat currently has in flight. The draft's text grows on this feed, which is what
         // the panel above the composer streams — there is no second connection to hold open.
         goal: await goalView(),
+        // Whether the page may press ChatGPT's Retry on a history that could not load (#2076).
+        ...await historyRetryView(live.conversationId, live.sessionId),
         // Local calls still executing for *this chat*. ChatGPT-native compaction waits for
         // this to reach zero after interrupting the turn, so the handoff is written about a
         // settled machine rather than one mid-edit. Recorder-only attribution settling is
@@ -8692,6 +8695,31 @@ type ProviderDeferredColdStart = {
 };
 /** Queue-time authority snapshots only for Goal/compaction work actually deferred by Retry-After. */
 const providerDeferredColdStarts = new Map<string, ProviderDeferredColdStart>();
+
+/**
+ * Whether the page may press ChatGPT's Retry on a chat whose history could not load (#2076): only
+ * while the app still owes this chat work, and not before the app's own hold for it ends. Each
+ * press is another history request; an idle chat leaves Retry to the person.
+ */
+async function historyRetryView(conversationId: string, sessionId: string | null): Promise<{ historyRetry: { wanted: boolean; until?: number } }> {
+  const inputs = sessionId ? await listInputs().catch(() => []) : [];
+  // Read after the await: a limit that arrived meanwhile must not be missed (CodeRabbit on #2080).
+  const now = Date.now();
+  const until = providerHistoryBackoff(conversationId, now);
+  const repair = repairsInFlight.get(conversationId);
+  tidyCommands();
+  const wanted =
+    // A finished repair still owes work only while its chat keeps its activity grant (CodeRabbit on #2080).
+    (!!repair && (repair.state !== 'done' || (activeUntil.get(conversationId)?.until ?? 0) > now)) ||
+    goalPendingReplyFor(conversationId) !== null ||
+    // Calls this chat exactly owns; an unattributed call is no chat's work (CodeRabbit on #2080).
+    runningToolProgress(conversationId) !== null || chatIsWorkingNow(conversationId, now) ||
+    // A worker wake still waiting for delivery into this chat (CodeRabbit on #2080).
+    commands.some(entry => entry.spec.type === 'revive' && entry.spec.conversationId === conversationId && !revivalDeliveryProven(entry)) ||
+    (sessionId !== null && (!!continuationForSession(sessionId) ||
+      inputs.some(row => row.sessionId === sessionId && ['queued', 'browser', 'tool'].includes(row.state))));
+  return { historyRetry: { wanted, ...(until !== null ? { until } : {}) } };
+}
 
 function providerHistoryBackoff(conversationId: string, now = Date.now()): number | null {
   const until = providerHistoryBackoffUntil.get(conversationId);
