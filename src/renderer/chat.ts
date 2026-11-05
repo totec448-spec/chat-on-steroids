@@ -7009,7 +7009,7 @@ function pickupNowWords(done: PickupNowOutcome): string {
   if (done.ok) return done.did === 'queued' ? t('Continue queued. It goes out as soon as ChatGPT takes it.') : t('Trying again now.');
   switch (done.code) {
     case 'no-chat': return t('This chat has no ChatGPT conversation yet.');
-    case 'history-limit': return t('ChatGPT limits this chat for a few minutes. The app tries again right after.');
+    case 'history-limit': return t('ChatGPT is limiting this chat right now. The app tries again when the wait is over.');
     case 'nothing-waiting': return t('Nothing is waiting to be picked up in this chat any more.');
     case 'changed': return t('This step changed meanwhile. Check the chat and try again.');
     case 'not-sent': return t('Not sent now: something in this chat is still running. The app keeps trying.');
