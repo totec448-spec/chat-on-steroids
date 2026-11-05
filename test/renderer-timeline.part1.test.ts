@@ -66,6 +66,25 @@ it('shows elapsed runtime and stops the owned background process from the dock',
   expect(row.hidden).toBe(true);
 });
 
+// CodeRabbit on #2052: Output appears only when the app offers it, and a repaint keeps its keyboard focus.
+it('offers Output only with agent output available, and keeps its focus across a repaint', async () => {
+  const { w, publishBackgroundProcesses } = await boot([]);
+  const row = { processId: 4111, incarnation: 92, command: 'npm run dev', startedAt: Date.now() - 30_000, tty: false };
+  const host = w.document.getElementById('backgroundExecStatus')!;
+  // An older preload without agent output: no Output button.
+  (w as any).api.agentOutputOpen = undefined;
+  await publishBackgroundProcesses([row]);
+  expect(host.querySelector('.background-exec-output')).toBeNull();
+  (w as any).api.agentOutputOpen = vi.fn(async () => ({ ok: true, data: true }));
+  await publishBackgroundProcesses([{ ...row, startedAt: row.startedAt - 1 }]);
+  const output = host.querySelector<HTMLButtonElement>('.background-exec-output')!;
+  expect(output).not.toBeNull();
+  output.focus();
+  await publishBackgroundProcesses([{ ...row, startedAt: row.startedAt - 2 }]);
+  const repainted = host.querySelector<HTMLButtonElement>('.background-exec-output')!;
+  expect(w.document.activeElement).toBe(repainted);
+});
+
 it('expands multiple background processes and stops each one from its own row', async () => {
   const { w, publishBackgroundProcesses } = await boot([]);
   const startedAt = Date.now() - 45_000;

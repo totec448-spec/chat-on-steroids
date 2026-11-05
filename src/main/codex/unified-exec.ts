@@ -244,6 +244,13 @@ export interface SpawnParams {
 
 const EARLY_EXIT_GRACE_PERIOD_MS = 150;
 const POST_EXIT_CLOSE_WAIT_CAP_MS = 50;
+/**
+ * A person's view of a command (#1920) shows its exit line only after its output went quiet this
+ * long: a PTY closes its output with its exit, yet its last data can arrive just after it
+ * (CodeRabbit on #2052). Bounded, and only the view waits; the agent's own reads are unchanged.
+ */
+const WATCH_EXIT_QUIET_MS = 150;
+const WATCH_EXIT_QUIET_CAP_MS = 1_000;
 export const MAX_COMPLETED_EXEC_RESULTS = 64;
 export const COMPLETED_EXEC_OUTPUT_BYTES = 256 * 1024;
 
@@ -1060,8 +1067,25 @@ export class UnifiedExecProcessManager {
     const entry = this.processes.get(processId);
     if (!entry || entry.incarnation !== incarnation) return null;
     let watching = true;
-    const stop = entry.process.watch(onChunk);
-    void entry.process.completion.then(completion => { if (watching) onExit(completion); });
+    let lastChunkAt = 0;
+    const process = entry.process;
+    const stop = process.watch(chunk => { lastChunkAt = Date.now(); onChunk(chunk); });
+    void process.completion.then(async completion => {
+      // A pipe's streams can still be draining when it exits: the same bounded wait as a completed read.
+      if (!process.outputClosed) {
+        const closed = process.outputClosedNotify.notified();
+        try { await raceWithTimeout([closed], POST_EXIT_CLOSE_WAIT_CAP_MS); } finally { closed.dispose(); }
+      }
+      if (process.tty) {
+        const exitedAt = Date.now();
+        while (watching && Date.now() - exitedAt < WATCH_EXIT_QUIET_CAP_MS) {
+          const quietFor = Date.now() - Math.max(lastChunkAt, exitedAt);
+          if (quietFor >= WATCH_EXIT_QUIET_MS) break;
+          await new Promise(resolve => setTimeout(resolve, WATCH_EXIT_QUIET_MS - quietFor));
+        }
+      }
+      if (watching) onExit(completion);
+    });
     return { history: entry.process.historyBytes(), startedAt: entry.startedAt, unsubscribe: () => { watching = false; stop(); } };
   }
 

@@ -7428,9 +7428,15 @@ function configureBackgroundProcessStop(stop: HTMLButtonElement, row: RunningExe
 }
 
 /** Output: the command's output, read-only, in a Terminal dock tab (#1920). */
+/** Only when this app offers agent output: an older preload or a fixture shows no Output (CodeRabbit on #2052). */
+function agentOutputAvailable(): boolean {
+  return typeof (window.api as { agentOutputOpen?: unknown }).agentOutputOpen === 'function';
+}
 function backgroundProcessOutputButton(row: RunningExecProcess): HTMLButtonElement {
   const button = el('button', 'background-exec-output') as HTMLButtonElement;
   button.type = 'button';
+  // Which process and incarnation it opens, so a repaint can give a keyboard user the same button back.
+  button.dataset.process = `${row.processId}:${row.incarnation}`;
   button.append(icon('i-terminal'), el('span', '', () => t('Output')));
   ui(button, 'title', () => t('Show this command\'s output, read-only'));
   ui(button, 'aria-label', () => t('Show the output of {0}, read-only', [backgroundCommand(row.command) || '#' + row.processId]));
@@ -7456,6 +7462,8 @@ function paintBackgroundProcesses(): void {
   const liveStatus = $('backgroundExecLiveStatus');
   const list = $('backgroundExecList');
   const rows = sortedBackgroundProcesses();
+  // A repaint replaces the Output buttons: the focused one is found again afterwards (CodeRabbit on #2052).
+  const focusedOutput = (document.activeElement as HTMLElement | null)?.closest?.<HTMLElement>('.background-exec-output')?.dataset.process;
   if (!selectedId || !rows.length) {
     if (selectedId) expandedBackgroundProcessSessions.delete(selectedId);
     host.hidden = true;
@@ -7491,7 +7499,7 @@ function paintBackgroundProcesses(): void {
   stop.hidden = multiple;
   configureBackgroundProcessStop(stop, first);
   host.querySelector('.background-exec-output')?.remove();
-  if (!multiple) stop.before(backgroundProcessOutputButton(first));
+  if (!multiple && agentOutputAvailable()) stop.before(backgroundProcessOutputButton(first));
   const chevron = host.querySelector<HTMLElement>('.background-exec-chevron')!;
   chevron.hidden = !multiple;
   host.classList.toggle('is-expandable', multiple);
@@ -7543,11 +7551,15 @@ function paintBackgroundProcesses(): void {
       stopIcon.setAttribute('aria-hidden', 'true');
       itemStop.append(stopIcon, el('span'));
       configureBackgroundProcessStop(itemStop, row);
-      item.append(itemCommand, itemTime, backgroundProcessOutputButton(row), itemStop);
+      item.append(itemCommand, itemTime, ...(agentOutputAvailable() ? [backgroundProcessOutputButton(row)] : []), itemStop);
       list.append(item);
     }
   }
   host.hidden = false;
+  if (focusedOutput && !host.contains(document.activeElement) && !list.contains(document.activeElement)) {
+    [...host.querySelectorAll<HTMLElement>('.background-exec-output'), ...list.querySelectorAll<HTMLElement>('.background-exec-output')]
+      .find(button => button.dataset.process === focusedOutput)?.focus();
+  }
   paintBackgroundProcessTimes();
   syncBackgroundProcessClock(true);
 }
