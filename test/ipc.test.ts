@@ -2209,6 +2209,8 @@ describe('session IPC contracts', () => {
     expect(deleted.ok, deleted.error).toBe(true);
     expect(await outbox.ownSentResidue(conversationId)).toEqual([]);
     expect(await outbox.ownSentResidue(other)).toEqual([{ text: 'Continue the task', messageId: 'other-chat-message' }]);
+    // On disk before the delete answered, not on a later timer (CodeRabbit on #2079).
+    expect(((await readDurable('own-sent-receipts')) as any).receipts.map((row: any) => row.messageId)).toEqual(['other-chat-message']);
     // Saved that way: a restart does not bring it back.
     await flushDurable();
     outbox.resetInputForTests();
