@@ -12349,21 +12349,23 @@ describe('unattributed activity recovery', () => {
       // A second limit while the first still holds is the same episode, not a failed retry.
       await vi.advanceTimersByTimeAsync(30_000);
       expect(await limited(60_000)).toBe(60_000);
-      // Each retry that is limited again waits longer: 2, 4, 8, then 15 minutes, and stays there.
-      for (const expected of [120_000, 240_000, 480_000, 900_000, 900_000]) {
+      // Each retry that is limited again waits longer: 2, 4, 8, 15, 30, then 60 minutes, and stays
+      // there. A limit that outlasted a quarter-hour cadence for 8.5 hours (#1882, 2026-11-05) gets
+      // fewer tries the longer it lasts, not one every 25 minutes forever.
+      for (const expected of [120_000, 240_000, 480_000, 900_000, 1_800_000, 3_600_000, 3_600_000]) {
         const [hold] = (await sessionControlsFor(session.id)).recovery ?? [];
         await vi.advanceTimersByTimeAsync(hold!.deadline - Date.now() + 1_000);
         expect(await limited(60_000)).toBe(expected);
       }
       // Each longer hold says why in the log, once per failed retry.
       expect(getLog().filter(entry => entry.message.includes(`${PRIME} history was limited again after its wait`))
-        .map(entry => /holding automatic recovery (\d+) minutes/.exec(entry.message)?.[1])).toEqual(['2', '4', '8', '15', '15']);
+        .map(entry => /holding automatic recovery (\d+) minutes/.exec(entry.message)?.[1])).toEqual(['2', '4', '8', '15', '30', '60', '60']);
       // A longer Retry-After from ChatGPT still wins.
       const [held] = (await sessionControlsFor(session.id)).recovery ?? [];
       await vi.advanceTimersByTimeAsync(held!.deadline - Date.now() + 1_000);
-      expect(await limited(20 * 60_000)).toBe(20 * 60_000);
+      expect(await limited(90 * 60_000)).toBe(90 * 60_000);
       // A limit that comes back after a quiet quarter of an hour starts over.
-      await vi.advanceTimersByTimeAsync(20 * 60_000 + 15 * 60_000 + 1_000);
+      await vi.advanceTimersByTimeAsync(90 * 60_000 + 15 * 60_000 + 1_000);
       expect(await limited(60_000)).toBe(60_000);
     } finally { vi.useRealTimers(); }
   });
