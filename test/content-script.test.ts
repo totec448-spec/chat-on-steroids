@@ -13475,7 +13475,7 @@ describe('evidence from the page context', () => {
 
   it('backs off ChatGPT history Retry after a rate limit instead of pressing it once a minute (2026-10-11)', async () => {
     // Each press after Retry-After drew another 429 with a longer Retry-After, so a press a minute
-    // kept the limit alive for half an hour. After a limit the presses spread out: 0 s, 2, 4, 8, 15 min.
+    // kept the limit alive for half an hour. After a limit the presses spread out: 0 s, 2, 4, 8, 15, 30, 60 min.
     live = await harness();
     const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
     const start = live.window.Date.now();
@@ -13501,6 +13501,75 @@ describe('evidence from the page context', () => {
     expect(live.hook.recoverConversationLoad(second + 125_001)).toBe(false);
     expect(live.hook.recoverConversationLoad(second + 245_001)).toBe(true);
     expect(clicks).toBe(3);
+  });
+
+  it('keeps its history Retry backoff across a reload of the same chat (#1882, 2026-11-05)', async () => {
+    // Every app reload used to start a new page at the fastest step, so each quarter-hour reload of
+    // a limited chat came with presses after 0, 2 and 4 minutes: 23 such rounds in 8.5 hours.
+    const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const limitAndPress = async (page: Harness, retryAt: number) => {
+      page.window.dispatchEvent(new page.window.MessageEvent('message', {
+        source: page.window as unknown as Window,
+        origin: 'https://chatgpt.com',
+        data: { type: 'cos-history-rate-limit', conversationId, observedAt: retryAt - 10_000, retryAt }
+      }));
+      await settle();
+    };
+    const failing = (page: Harness) => {
+      let clicks = 0;
+      const retry = page.document.createElement('button');
+      retry.addEventListener('click', () => { clicks++; });
+      (page.window as any).CLF_DOM.conversationLoadFailure = () => retry;
+      return () => clicks;
+    };
+    live = await harness();
+    const start = live.window.Date.now();
+    const firstClicks = failing(live);
+    await limitAndPress(live, start + 10_000);
+    expect(live.hook.recoverConversationLoad(start + 10_001)).toBe(false);
+    expect(live.hook.recoverConversationLoad(start + 15_002)).toBe(true);
+    expect(live.hook.recoverConversationLoad(start + 15_002 + 125_001)).toBe(true);
+    expect(firstClicks()).toBe(2);
+    const saved = live.window.sessionStorage.getItem('clf-history-limit-v1');
+    expect(saved).not.toBeNull();
+
+    // The reloaded page of the same chat waits the next step (4 minutes), not the first one.
+    const reloadAt = start + 15_002 + 125_001 + 60_000;
+    const seed = (stored: string | null) => (document: Document) => {
+      if (stored !== null) document.defaultView!.sessionStorage.setItem('clf-history-limit-v1', stored);
+    };
+    let reloaded = await harness(undefined, {}, seed(saved));
+    const clicks = failing(reloaded);
+    await limitAndPress(reloaded, reloadAt + 10_000);
+    expect(reloaded.hook.recoverConversationLoad(reloadAt + 10_001)).toBe(false);
+    expect(reloaded.hook.recoverConversationLoad(reloadAt + 15_002)).toBe(false);
+    expect(reloaded.hook.recoverConversationLoad(reloadAt + 10_001 + 244_999)).toBe(false);
+    expect(reloaded.hook.recoverConversationLoad(reloadAt + 10_001 + 245_000)).toBe(true);
+    expect(clicks()).toBe(1);
+    reloaded.dom.window.close();
+
+    // A step remembered for another chat, or from long ago, is not carried over.
+    for (const stored of [
+      JSON.stringify({ ...JSON.parse(saved!), conversationId: '11111111-2222-3333-4444-555555555555' }),
+      JSON.stringify({ ...JSON.parse(saved!), at: reloadAt - 3 * 60 * 60_000 }),
+      '{not json'
+    ]) {
+      reloaded = await harness(undefined, {}, seed(stored));
+      const fresh = failing(reloaded);
+      await limitAndPress(reloaded, reloadAt + 10_000);
+      expect(reloaded.hook.recoverConversationLoad(reloadAt + 10_001)).toBe(false);
+      expect(reloaded.hook.recoverConversationLoad(reloadAt + 15_002)).toBe(true);
+      expect(fresh()).toBe(1);
+      reloaded.dom.window.close();
+    }
+
+    // Once the chat loads again, the remembered step is gone.
+    reloaded = await harness(undefined, {}, seed(saved));
+    (reloaded.window as any).CLF_DOM.conversationLoadFailure = () => null;
+    assistantTurn(reloaded.document, 'loaded-again', []);
+    expect(reloaded.hook.recoverConversationLoad(reloadAt)).toBe(false);
+    expect(reloaded.window.sessionStorage.getItem('clf-history-limit-v1')).toBeNull();
+    reloaded.dom.window.close();
   });
 
   it('does not press ChatGPT history Retry inside the provider Retry-After window', async () => {

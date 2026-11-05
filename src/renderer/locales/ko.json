@@ -3705,7 +3705,7 @@
   "Continue queued. It goes out as soon as ChatGPT takes it.": "계속하기를 대기열에 넣었습니다. ChatGPT가 받는 즉시 전송됩니다.",
   "Trying again now.": "지금 다시 시도합니다.",
   "This chat has no ChatGPT conversation yet.": "이 채팅에는 아직 ChatGPT 대화가 없습니다.",
-  "ChatGPT limits this chat for a few minutes. The app tries again right after.": "ChatGPT가 이 채팅을 몇 분 동안 제한합니다. 그 직후 앱이 다시 시도합니다.",
+  "ChatGPT is limiting this chat right now. The app tries again when the wait is over.": "ChatGPT가 지금 이 채팅을 제한하고 있습니다. 대기 시간이 끝나면 앱이 다시 시도합니다.",
   "Nothing is waiting to be picked up in this chat any more.": "이 채팅에서 기다리는 것이 더 이상 없습니다.",
   "This step changed meanwhile. Check the chat and try again.": "그사이 이 단계가 바뀌었습니다. 채팅을 확인한 뒤 다시 시도하세요.",
   "Not sent now: something in this chat is still running. The app keeps trying.": "지금은 보내지 않았습니다. 이 채팅에서 아직 무언가가 실행 중입니다. 앱이 계속 시도합니다.",

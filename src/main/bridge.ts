@@ -8549,8 +8549,13 @@ const providerHistoryBackoffUntil = new Map<string, number>();
  * another 429. Each limited retry holds longer, the same steps the page's own Retry presses take
  * (content.js LOAD_FAILURE_LIMITED_BACKOFF_MS); ChatGPT's own longer Retry-After still wins. A
  * limit that returns after a quiet quarter of an hour starts over.
+ *
+ * A limit that outlasts the quarter-hour step keeps growing to 30 and then 60 minutes. Measured
+ * 2026-11-05 (#1882): one chat stayed limited for 8.5 hours through 23 retries at a quarter-hour
+ * hold, each retry a reload plus the page's own Retry presses. A limit that long is answered with
+ * fewer tries, never with none.
  */
-const PROVIDER_HISTORY_STREAK_HOLDS_MS = [0, 120_000, 240_000, 480_000, 900_000];
+const PROVIDER_HISTORY_STREAK_HOLDS_MS = [0, 120_000, 240_000, 480_000, 900_000, 1_800_000, 3_600_000];
 const PROVIDER_HISTORY_STREAK_RESET_MS = 15 * 60_000;
 const providerHistoryStreaks = new Map<string, { strikes: number; until: number }>();
 /** The hold deadline a deferred pickup was last logged for, so each hold is logged once. */

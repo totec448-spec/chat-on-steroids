@@ -3705,7 +3705,7 @@
   "Continue queued. It goes out as soon as ChatGPT takes it.": "「続ける」をキューに入れました。ChatGPT が受け取り次第送信されます。",
   "Trying again now.": "今すぐ再試行しています。",
   "This chat has no ChatGPT conversation yet.": "このチャットにはまだ ChatGPT の会話がありません。",
-  "ChatGPT limits this chat for a few minutes. The app tries again right after.": "ChatGPT がこのチャットを数分間制限しています。直後にアプリが再試行します。",
+  "ChatGPT is limiting this chat right now. The app tries again when the wait is over.": "ChatGPT が現在このチャットを制限しています。待ち時間が終わるとアプリが再試行します。",
   "Nothing is waiting to be picked up in this chat any more.": "このチャットで待っているものはもうありません。",
   "This step changed meanwhile. Check the chat and try again.": "このステップはその間に変わりました。チャットを確認して、もう一度お試しください。",
   "Not sent now: something in this chat is still running. The app keeps trying.": "今は送信されませんでした。このチャットではまだ何かが実行中です。アプリは試行を続けます。",
