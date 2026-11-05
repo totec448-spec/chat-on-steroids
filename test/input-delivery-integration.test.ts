@@ -4186,3 +4186,24 @@ it("lists only the app's own automatic messages ChatGPT received, never the pers
   input.resetInputForTests();
   expect(await input.ownSentResidue(conversationId)).toEqual([expect.objectContaining({ messageId: 'scheduled-message' })]);
 });
+
+// #2074 saved data: the own-sent store starts empty for data saved by the previous version, and a
+// damaged file or entry is dropped while the good entries stay.
+it('reads the own-sent store from an older version as empty and drops damaged entries', async () => {
+  const conversationId = randomUUID();
+  await flushDurable();
+  await writeDurableNow('own-sent-receipts', null);
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(conversationId)).toEqual([]);
+  await writeDurableNow('own-sent-receipts', 'not a list');
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(conversationId)).toEqual([]);
+  await writeDurableNow('own-sent-receipts', [
+    { conversationId, text: 'Continue the task', messageId: 'kept-message', at: Date.now() },
+    { conversationId, text: '', messageId: 'empty-text', at: Date.now() },
+    { conversationId: 42, text: 'Broken owner', messageId: 'bad-owner', at: Date.now() },
+    'garbage'
+  ]);
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(conversationId)).toEqual([{ text: 'Continue the task', messageId: 'kept-message' }]);
+});
