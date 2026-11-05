@@ -24,12 +24,22 @@ const KEY_BEGIN = /-----BEGIN [A-Z ]*PRIVATE KEY-----/g;
 const KEY_END = /-----END [A-Z ]*PRIVATE KEY-----[^\n]*\n?/;
 /** The line between the kept head and tail of a long command's output (formatOutputOmissionMarker). */
 const OMISSION = /^\.\.\. \d+ bytes omitted \.\.\.$/m;
+/**
+ * A credential header still waiting for its value at the end of what would be shown. The masking
+ * shapes let the value follow on the next line, so the header is held until it does, or until the
+ * command ends (CodeRabbit on #2052).
+ */
+const DANGLING_HEADER = /(?:\bAuthorization:\s*(?:(?:Basic|Bearer|Token)\s*)?|\bBearer\s*)$/i;
+/** A line of a private key's body: what is left of a key whose BEGIN line was omitted. */
+const KEY_BODY_LINE = /^[A-Za-z0-9+/=]{40,}$/;
+const KEY_MASK = '[redacted private key]';
 
 export class AgentOutputStream {
   private readonly decoder = new StringDecoder('utf8');
   private pending = '';
   private partialSince: number | null = null;
   private inKey = false;
+  private keyOpenAfterStart = false;
 
   constructor(private readonly shield: boolean, private readonly emit: (text: string) => void) {}
 
@@ -42,10 +52,30 @@ export class AgentOutputStream {
       const before = text.slice(0, gap.index), after = text.slice(gap.index + gap[0].length);
       const headEnd = before.replace(/\n$/, '').lastIndexOf('\n') + 1;
       const tailStart = after.replace(/^\n/, '').indexOf('\n');
-      text = `${before.slice(0, headEnd)}${gap[0]}\n${tailStart < 0 ? '' : after.replace(/^\n/, '').slice(tailStart + 1)}`;
+      const tail = tailStart < 0 ? '' : after.replace(/^\n/, '').slice(tailStart + 1);
+      text = `${before.slice(0, headEnd)}${gap[0]}\n${this.keyCutByGap(tail)}`;
     }
     this.pending += text;
     this.flush(Date.now(), false, true);
+    if (this.keyOpenAfterStart) { this.keyOpenAfterStart = false; this.inKey = true; }
+  }
+
+  /**
+   * The kept tail of a long command's output, when the gap may have swallowed a private key's BEGIN
+   * line (CodeRabbit on #2052): key lines before any BEGIN in the tail are hidden through their END,
+   * and when no END is there yet, until it arrives. Fails closed: the masking alone would not know.
+   */
+  private keyCutByGap(tail: string): string {
+    const begin = tail.search(/-----BEGIN [A-Z ]*PRIVATE KEY-----/);
+    const before = begin < 0 ? tail : tail.slice(0, begin);
+    const end = KEY_END.exec(before);
+    if (end) return `${KEY_MASK}\n${tail.slice(end.index + end[0].length)}`;
+    const first = before.split('\n').find(line => line.trim() !== '');
+    if (first === undefined || !KEY_BODY_LINE.test(first.trim())) return tail;
+    // Still being printed (no BEGIN in the tail, so nothing else is kept): what follows stays hidden
+    // until its END line passes, from right after the output so far is shown.
+    this.keyOpenAfterStart = true;
+    return `${KEY_MASK}\n`;
   }
 
   push(chunk: Buffer): void { this.pending += this.decoder.write(chunk); }
@@ -63,6 +93,11 @@ export class AgentOutputStream {
       else if (partialDue || partial >= PARTIAL_LINE_BYTES || now - this.partialSince >= PARTIAL_LINE_MS) {
         take = this.shield ? this.safeCut(take) : this.pending.length;
       }
+    }
+    // A credential header at the end waits for its value, which may start the next line.
+    if (!final && this.shield && take > 0) {
+      const dangling = DANGLING_HEADER.exec(this.pending.slice(0, take));
+      if (dangling) take = this.pending.lastIndexOf('\n', dangling.index - 1) + 1;
     }
     if (take === 0) return;
     const text = this.pending.slice(0, take);
@@ -83,7 +118,10 @@ export class AgentOutputStream {
     }
     const whole = redactSecretText(text);
     // A cut is safe when masking the shown part alone gives what masking everything gives for it.
-    for (const cut of candidates) if (whole.startsWith(redactSecretText(text.slice(0, cut)))) return cut;
+    for (const cut of candidates) {
+      const shown = text.slice(0, cut);
+      if (!DANGLING_HEADER.test(shown) && whole.startsWith(redactSecretText(shown))) return cut;
+    }
     return lineStart;
   }
 

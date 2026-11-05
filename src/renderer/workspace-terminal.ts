@@ -106,7 +106,8 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
     const tab = tabs.get(id); if (!tab) return;
     tabs.delete(id); tab.term.dispose(); tab.node.remove();
     // Closing an agent's tab only stops watching; the command goes on (Stop is its own button).
-    if (tab.agent) void window.api.agentOutputClose(id); else void window.api.terminalClose(id);
+    // An older preload may not offer agent output; closing its tab must still work (CodeRabbit on #2052).
+    if (tab.agent) void window.api.agentOutputClose?.(id)?.catch(() => undefined); else void window.api.terminalClose(id);
     if (selected === id) selected = [...tabs.keys()].at(-1) ?? null;
     remember(); paint(); fit();
     if (!tabs.size) options.onEmpty?.();
@@ -222,6 +223,8 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
    * nothing; the tab says so. Opening the same command again selects its tab.
    */
   const openAgent = (agent: AgentCommand): string | null => {
+    // No tab for a view this app cannot open (an older preload or a fixture, CodeRabbit on #2052).
+    if (typeof window.api.agentOutputOpen !== 'function') return null;
     const existing = [...tabs.values()].find(tab => tab.agent?.processId === agent.processId && tab.agent.incarnation === agent.incarnation);
     if (existing) { selected = existing.id; if (!options.dockedTabs) setOpen(true); paint(); fit(); return existing.id; }
     if (tabs.size - shells() >= 8) { toast(t('Close an agent output tab first')); return null; }
@@ -249,10 +252,14 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
     });
     if (!options.dockedTabs) setOpen(true);
     paint(); fit(); options.onTabsChanged?.();
-    void window.api.agentOutputOpen(id, agent.sessionId, agent.processId, agent.incarnation).then(reply => {
-      if (!tabs.has(id) || reply.ok) return;
-      tab.exited = true; term.writeln(t(reply.error)); paint(); options.onTabsChanged?.();
-    });
+    const failed = (message: string): void => {
+      if (!tabs.has(id)) return;
+      tab.exited = true; term.writeln(message); paint(); options.onTabsChanged?.();
+    };
+    void window.api.agentOutputOpen(id, agent.sessionId, agent.processId, agent.incarnation).then(
+      reply => { if (!reply.ok) failed(t(reply.error)); },
+      // A rejected call says so in its tab instead of leaving it empty (CodeRabbit on #2052).
+      () => failed(t('The window is unavailable')));
     return id;
   };
   // An older preload, or a fixture, may not offer agent output: the person's own shells still work.
