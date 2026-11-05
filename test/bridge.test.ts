@@ -12237,6 +12237,20 @@ describe('unattributed activity recovery', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  // #2076: each Retry press is another history request; an idle chat leaves it to the person.
+  it('tells the page to press history Retry only while work waits, and not inside the app hold', async () => {
+    await pair();
+    await events(PRIME, [{ kind: 'model_selection', time: Date.now(), model: 'GPT-5.6 Sol', reasoningEffort: 'high' }]);
+    const view = async () => (await request('GET', `/activity?conversationId=${PRIME}`)).body.historyRetry;
+    expect(await view()).toEqual({ wanted: false });
+    await events(PRIME, [openTurn('retry-work')]);
+    expect(await view()).toMatchObject({ wanted: true });
+    const retryAt = Date.now() + 10 * 60_000;
+    await events(PRIME, [{ kind: 'chat_error', time: Date.now(), turnId: 'retry-work', recoverable: false, blocking: true, retryAt,
+      text: 'ChatGPT temporarily rate-limited loading this conversation history.' }]);
+    expect((await view()).until).toBeGreaterThanOrEqual(retryAt);
+  });
+
   it('records a repeating history limit once, while its deadline keeps following the newest (2026-10-11)', async () => {
     // A throttled history answered every retry with the same limit: eight identical blocking notices
     // stacked up in eight minutes. One notice says it; the hold still follows each new Retry-After.

@@ -4042,6 +4042,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           job: null,
           progress: conversationProgress(id),
           goal: await goalView(),
+          ...await historyRetryView(id, astraSession?.id ?? null),
           ...(goalFencedChat(id) || superseded
             ? {
                 // Worker conversations are never Compact & Resume sources. Keep the page's
@@ -4327,6 +4328,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // chat currently has in flight. The draft's text grows on this feed, which is what
         // the panel above the composer streams — there is no second connection to hold open.
         goal: await goalView(),
+        // Whether the page may press ChatGPT's Retry on a history that could not load (#2076).
+        ...await historyRetryView(live.conversationId, live.sessionId),
         // Local calls still executing for *this chat*. ChatGPT-native compaction waits for
         // this to reach zero after interrupting the turn, so the handoff is written about a
         // settled machine rather than one mid-edit. Recorder-only attribution settling is
@@ -8692,6 +8695,21 @@ type ProviderDeferredColdStart = {
 };
 /** Queue-time authority snapshots only for Goal/compaction work actually deferred by Retry-After. */
 const providerDeferredColdStarts = new Map<string, ProviderDeferredColdStart>();
+
+/**
+ * Whether the page may press ChatGPT's Retry on a chat whose history could not load (#2076): only
+ * while the app still owes this chat work, and not before the app's own hold for it ends. Each
+ * press is another history request; an idle chat leaves Retry to the person.
+ */
+async function historyRetryView(conversationId: string, sessionId: string | null, now = Date.now()): Promise<{ historyRetry: { wanted: boolean; until?: number } }> {
+  const until = providerHistoryBackoff(conversationId, now);
+  const inputs = sessionId ? await listInputs().catch(() => []) : [];
+  const wanted = repairsInFlight.has(conversationId) || goalPendingReplyFor(conversationId) !== null ||
+    runningToolCalls(conversationId) > 0 || chatIsWorkingNow(conversationId, now) ||
+    (sessionId !== null && (!!continuationForSession(sessionId) ||
+      inputs.some(row => row.sessionId === sessionId && ['queued', 'browser', 'tool'].includes(row.state))));
+  return { historyRetry: { wanted, ...(until !== null ? { until } : {}) } };
+}
 
 function providerHistoryBackoff(conversationId: string, now = Date.now()): number | null {
   const until = providerHistoryBackoffUntil.get(conversationId);

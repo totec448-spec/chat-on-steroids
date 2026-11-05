@@ -801,7 +801,12 @@ last press; forgotten after 75 quiet minutes, on another chat, or once the chat'
 the app's own reload after each hold no longer restarts the page at 0 s. The app's hold after a
 retry that is limited again uses the same steps (`PROVIDER_HISTORY_STREAK_HOLDS_MS`), and "Try now"
 is refused while it lasts. Measured 2026-11-05 (#1882): a chat limited for 8.5 hours took 23
-quarter-hour rounds, each a reload plus presses after 0, 2 and 4 minutes. The recorder writes a repeating history-limit notice (one
+quarter-hour rounds, each a reload plus presses after 0, 2 and 4 minutes. The page presses Retry
+only while the app still owes the chat work and after the app's own hold (#2076): `/activity`
+returns `historyRetry: { wanted, until? }` (`historyRetryView`: a repair in flight, an owed Goal/Loop
+reply, a running call or turn, a continuation, or a queued/claimed input; `until` is
+`providerHistoryBackoff`). An idle chat leaves Retry to the person. A word older than 2 minutes, or
+none from an older app, keeps the page's own rule. The recorder writes a repeating history-limit notice (one
 that carries `retryAt`) once: an identical one within 30 minutes of the newest blocking `chat_error`
 is not appended again (a passing failure in between, such as a stream 404, does not repeat it), while the provider access dialog is still recorded again after 30 s. The bridge's
 provider-limit hold still follows every new Retry-After, because it reads the observations, not

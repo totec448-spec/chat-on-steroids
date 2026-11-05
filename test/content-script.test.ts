@@ -13503,6 +13503,38 @@ describe('evidence from the page context', () => {
     expect(clicks).toBe(3);
   });
 
+  // #2076: each press is another history request; an idle chat leaves Retry to the person.
+  it("presses ChatGPT's history Retry only while the app owes the chat work and its own hold has ended", async () => {
+    live = await harness();
+    let clicks = 0;
+    const retry = live.document.createElement('button');
+    retry.addEventListener('click', () => { clicks++; });
+    (live.window as any).CLF_DOM.conversationLoadFailure = () => retry;
+    const word = async (historyRetry: unknown) => {
+      live!.reply.set('activity', () => ({ ok: true, data: { stream: [], entries: [], pendingTools: 0, ...(historyRetry ? { historyRetry } : {}) } }));
+      await live!.hook.pullActivity();
+    };
+    const start = live.window.Date.now();
+    // An idle chat: no press once the page's own wait is over, nor later.
+    await word({ wanted: false });
+    expect(live.hook.recoverConversationLoad(start)).toBe(false);
+    expect(live.hook.recoverConversationLoad(start + 10_000)).toBe(false);
+    expect(live.hook.recoverConversationLoad(start + 60_000)).toBe(false);
+    expect(clicks).toBe(0);
+    // Work waits, but the app still holds this chat's history for ten minutes: no press.
+    await word({ wanted: true, until: start + 10 * 60_000 });
+    expect(live.hook.recoverConversationLoad(start + 70_000)).toBe(false);
+    expect(clicks).toBe(0);
+    // Work waits and the hold has ended: pressed.
+    await word({ wanted: true });
+    expect(live.hook.recoverConversationLoad(start + 80_000)).toBe(true);
+    expect(clicks).toBe(1);
+    // An older app says nothing: the page's own rule, as before (next press after 5 + 15 s).
+    await word(null);
+    expect(live.hook.recoverConversationLoad(start + 101_000)).toBe(true);
+    expect(clicks).toBe(2);
+  });
+
   it('keeps its history Retry backoff across a reload of the same chat (#1882, 2026-11-05)', async () => {
     // Every app reload used to start a new page at the fastest step, so each quarter-hour reload of
     // a limited chat came with presses after 0, 2 and 4 minutes: 23 such rounds in 8.5 hours.
