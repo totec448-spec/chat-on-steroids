@@ -13563,6 +13563,30 @@ describe('evidence from the page context', () => {
       reloaded.dom.window.close();
     }
 
+    // An entry that does not apply to the chat this page shows is removed, so it cannot come back
+    // when the tab returns to its chat later (CodeRabbit on #2072).
+    reloaded = await harness('https://chatgpt.com/c/11111111-2222-3333-4444-555555555555', {}, seed(saved));
+    failing(reloaded);
+    reloaded.hook.recoverConversationLoad(reloadAt);
+    expect(reloaded.window.sessionStorage.getItem('clf-history-limit-v1')).toBeNull();
+    reloaded.dom.window.close();
+
+    // A page that stays open on the limited chat also forgets a step whose last press is more than
+    // 75 minutes old, and starts again at the first step.
+    reloaded = await harness(undefined, {}, seed(saved));
+    const resumed = failing(reloaded);
+    await limitAndPress(reloaded, reloadAt + 10_000);
+    expect(reloaded.hook.recoverConversationLoad(reloadAt + 10_001)).toBe(false);
+    expect(reloaded.hook.recoverConversationLoad(reloadAt + 10_001 + 245_000)).toBe(true);
+    const lastPress = reloadAt + 10_001 + 245_000;
+    const late = lastPress + 75 * 60_000 + 1;
+    expect(reloaded.hook.recoverConversationLoad(late)).toBe(false);
+    expect(reloaded.hook.recoverConversationLoad(late + 5_000)).toBe(true);
+    expect(resumed()).toBe(2);
+    // Until ChatGPT limits it again, the press is an ordinary one and nothing is remembered.
+    expect(reloaded.window.sessionStorage.getItem('clf-history-limit-v1')).toBeNull();
+    reloaded.dom.window.close();
+
     // Once the chat loads again, the remembered step is gone.
     reloaded = await harness(undefined, {}, seed(saved));
     (reloaded.window as any).CLF_DOM.conversationLoadFailure = () => null;

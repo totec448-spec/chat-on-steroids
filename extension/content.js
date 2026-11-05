@@ -12688,6 +12688,7 @@
   let loadFailureRoute = null;
   let loadFailureToldAt = 0;
   let loadFailureStored = false;
+  let loadFailureLastPress = 0;
   function restoreLimitedLoadFailure(route, now) {
     try {
       const raw = sessionStorage.getItem(LOAD_FAILURE_LIMITED_STORAGE);
@@ -12699,6 +12700,12 @@
           Number.isFinite(saved.at) && saved.at <= now && now - saved.at <= LOAD_FAILURE_LIMITED_MEMORY_MS) {
         loadFailureRetries = saved.retries;
         loadFailureLimited = true;
+        loadFailureLastPress = saved.at;
+      } else if (route) {
+        // Another chat's, an expired or a damaged entry: removed, so it cannot come back when the
+        // tab returns to its chat later. A page between routes keeps it.
+        sessionStorage.removeItem(LOAD_FAILURE_LIMITED_STORAGE);
+        loadFailureStored = false;
       }
     } catch {
       // A corrupt or blocked entry costs only the remembered step; the page starts at the first one.
@@ -12726,6 +12733,7 @@
       loadFailureSince = 0;
       loadFailureRetries = 0;
       loadFailureLimited = false;
+      loadFailureLastPress = 0;
       restoreLimitedLoadFailure(route, now);
     }
     // The provider has already told this exact history read when it may be tried again.
@@ -12753,12 +12761,22 @@
       loadFailureToldAt = now;
       void ask({ type: 'load_failure', conversationId: route }).catch(() => undefined);
     }
+    // A page that stayed open on this chat forgets a step whose last press is as old as a stored
+    // one would be, and starts over, the same as after a reload.
+    if (loadFailureLastPress && now - loadFailureLastPress > LOAD_FAILURE_LIMITED_MEMORY_MS) {
+      loadFailureRetries = 0;
+      loadFailureLimited = false;
+      loadFailureLastPress = 0;
+      loadFailureSince = 0;
+      rememberLimitedLoadFailure(route, now);
+    }
     if (!loadFailureSince) loadFailureSince = now;
     const schedule = loadFailureLimited ? LOAD_FAILURE_LIMITED_BACKOFF_MS : LOAD_FAILURE_BACKOFF_MS;
     const wait = LOAD_FAILURE_SETTLE_MS + schedule[Math.min(loadFailureRetries, schedule.length - 1)];
     if (now - loadFailureSince < wait) return false;
     loadFailureRetries++;
     loadFailureSince = now;
+    loadFailureLastPress = now;
     if (loadFailureLimited) rememberLimitedLoadFailure(route, now);
     retry.click();
     return true;
