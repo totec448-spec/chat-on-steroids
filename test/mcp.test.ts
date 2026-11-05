@@ -3844,6 +3844,21 @@ describe('steps handed to the person over MCP (#1695)', () => {
     expect(await readSessionUserRequests(session.id)).toHaveLength(1);
   });
 
+  it('does not move the working folder to where an expected file is (CodeRabbit on #2049)', async () => {
+    setup();
+    await writeTree(approved, { 'elsewhere/keep.txt': 'x' });
+    const session = await createSession({ conversationId: 'step-http-workspace' });
+    const prove = proveFor(session.id, 'step-http-workspace');
+    expect(prove('wfr_ws_one')).toBe('stored');
+    expect(failed(await sendAs('wfr_ws_one', 'ask_user_to_run', { ...step, expected: ['/workspace/elsewhere/out.bin'] }))).toBe(false);
+    expect(prove('wfr_ws_two')).toBe('stored');
+    expect(failed(await sendAs('wfr_ws_two', 'ask_user_to_run', { ...step, command: 'make flash', expected: [] }))).toBe(false);
+    const saved = await readSessionUserRequests(session.id);
+    expect(saved[0]!.expected).toEqual([{ path: '/workspace/elsewhere/out.bin', real: path.join(approved, 'elsewhere', 'out.bin') }]);
+    // The next step without a folder still uses the approved folder, not the expected file's.
+    expect(saved[1]).toMatchObject({ command: 'make flash', folder: approved });
+  });
+
   it('reports the person\'s answer and the expected files, never what is inside them', async () => {
     setup();
     const session = await createSession({ conversationId: 'step-http-status' });

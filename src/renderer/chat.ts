@@ -27,7 +27,7 @@ import { KIND_ICON } from './agent-activity.js';
 import { createFilePanel } from './file-panel.js';
 import { initCommitDialog } from './commit-dialog.js';
 import { renderAgentPlan } from './agent-plan.js';
-import { renderUserRequestsDock, userRequestCard, type UserRequestActions } from './user-requests.js';
+import { keepStepFocus, renderUserRequestsDock, userRequestCard, type UserRequestActions } from './user-requests.js';
 import { USER_REQUEST_ID, type UserRequestView } from '../shared/user-requests.js';
 import { userPromptText } from '../shared/user-prompt.js';
 import { messageReaction, withoutMessageReaction } from '../shared/message-reaction.js';
@@ -3544,7 +3544,8 @@ const userRequestActions: UserRequestActions = {
     const answered = await run(api.answerUserRequest(owner, request.id, answer));
     if (answered && id === selectedId) await refreshSessionControls();
   },
-  readOnly: () => deps.state()?.config.readOnly === true
+  readOnly: () => deps.state()?.config.readOnly === true,
+  focusFallback: () => $<HTMLTextAreaElement>('chatInput').focus()
 };
 
 function paintUserRequestSlot(slot: HTMLElement): void {
@@ -3560,8 +3561,11 @@ function paintUserRequestSlot(slot: HTMLElement): void {
   const signature = request ? JSON.stringify([request, userRequestActions.readOnly()]) : gone ? 'gone' : 'waiting';
   if (slot.dataset.signature === signature) return;
   slot.dataset.signature = signature;
-  if (request) slot.replaceChildren(userRequestCard(request, userRequestActions));
-  else slot.replaceChildren(...(gone ? [el('p', 'user-request-note', () => t('This step is no longer kept.'))] : []));
+  // An answered card replaces the focused one: keep the keyboard user's place (CodeRabbit on #2049).
+  keepStepFocus(slot, () => {
+    if (request) slot.replaceChildren(userRequestCard(request, userRequestActions));
+    else slot.replaceChildren(...(gone ? [el('p', 'user-request-note', () => t('This step is no longer kept.'))] : []));
+  }, userRequestActions.focusFallback);
 }
 
 /** Null requests: not read yet for this chat (cards wait instead of saying a step is gone). */
@@ -3620,7 +3624,8 @@ async function refreshSessionControls(): Promise<void> {
   const controls = await run(api.getSessionControls(id));
   if (generation !== controlsGeneration || id !== selectedId) return;
   renderAgentPlan(planHost, id, controls?.plan ?? null);
-  applyUserRequests(id, controls?.userRequests ?? [], askedAt);
+  // A failed read is not an empty list: keep the last view instead of calling steps gone (CodeRabbit on #2049).
+  if (controls) applyUserRequests(id, controls.userRequests ?? [], askedAt);
   controlledSessionId = id;
   controlledSelection = selectionGeneration;
   controlledTurnId = controls?.activeTurnId ?? null;
@@ -5421,7 +5426,9 @@ function toolBody(event: Extract<SessionEvent, { kind: 'tool_call' }>, context?:
 
   // A step handed to the person (#1695): the card is the row's content, always shown. Its state
   // comes from the chat's steps (controls), so it updates in place when the person answers.
-  const requestId = call.tool === 'ask_user_to_run' && call.outcome === 'ok' ? USER_REQUEST_ID.exec(call.result.text)?.[0] : undefined;
+  // Only in the selected chat's own timeline: the worker inspector (`context`) has no step list for
+  // that worker, so there the call keeps its normal, readable tool output (CodeRabbit on #2049).
+  const requestId = !context && call.tool === 'ask_user_to_run' && call.outcome === 'ok' ? USER_REQUEST_ID.exec(call.result.text)?.[0] : undefined;
   if (requestId) {
     box.classList.add('is-user-request');
     box.open = true;
