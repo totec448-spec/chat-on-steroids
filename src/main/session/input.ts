@@ -2190,9 +2190,13 @@ function loadOwnSentStore(): Promise<OwnSentStore> {
   // Read strictly: a file whose JSON is damaged still holds its text on disk and is replaced below,
   // while a missing or unreadable one is simply empty (CodeRabbit on #2079).
   let damaged = false;
-  ownSentLoad ??= readDurable<unknown>(OWN_SENT_STATE, { strict: true }).catch((error: { damaged?: boolean }) => {
-    damaged = error?.damaged === true;
-    return null;
+  ownSentLoad ??= readDurable<unknown>(OWN_SENT_STATE, { strict: true }).catch((error: Error & { damaged?: boolean }) => {
+    if (error?.damaged === true) { damaged = true; return null; }
+    // Unreadable for the moment: not cached as empty, or the next write would replace what is there.
+    // The next access reads the file again (CodeRabbit on #2079).
+    logWarn(`own-sent records could not be read now; trying again on the next access (${error?.message ?? 'error'})`);
+    ownSentLoad = null;
+    throw error;
   }).then(saved => {
     const record = saved && typeof saved === 'object' && !Array.isArray(saved) ? saved as { receipts?: unknown; forgotten?: unknown } : null;
     // A damaged entry is dropped, never guessed at; the rest stay.
@@ -2240,6 +2244,7 @@ async function rememberOwnSent(entry: InputEntry, current: InputEntry[], convers
   const text = entry.deliveryText ?? entry.text;
   if (automaticSendKind(entry) === null || entry.images?.length || entry.attachments?.length || entry.companionInputId ||
       current.some(row => row.companionInputId === entry.id) || messageId.startsWith('input:') || text.length > OWN_SENT_TEXT_MAX) return;
+  // An unreadable store never fails the acknowledgement it rides on; the send just is not recorded.
   await withOwnSentLock(async () => {
     const store = await loadOwnSentStore();
     // A chat deleted meanwhile stays forgotten, even when its send is acknowledged late (CodeRabbit on #2079).
@@ -2247,7 +2252,7 @@ async function rememberOwnSent(entry: InputEntry, current: InputEntry[], convers
     ownSentStore = trimOwnSent({ ...store, receipts: [...store.receipts.filter(row => row.conversationId !== conversationId),
       { conversationId, text, messageId, at: Date.now() }] });
     writeDurableSoon(OWN_SENT_STATE, { version: 1, ...ownSentStore });
-  });
+  }).catch((error: Error) => logWarn(`input ${entry.id}: its own-sent record was not saved (${error.message})`));
 }
 /**
  * A deleted chat's receipt goes with it (CodeRabbit on #2079): a scheduled run's text can be the
@@ -2820,7 +2825,7 @@ export function failBrowserInput(id: string, owner: string, error: string, detai
 export function failInputsForDeletedConversation(conversationId: string): Promise<number> {
   return serial(async () => {
     // ChatGPT deleted it: its own-sent receipt goes too (#2074).
-    await forgetOwnSent([conversationId]);
+    await forgetOwnSent([conversationId]).catch((error: Error) => logWarn(`own-sent record of ${conversationId} not removed (${error.message})`));
     const current = await load();
     const ended = new Set<string>();
     for (const row of current) {
