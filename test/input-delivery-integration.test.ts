@@ -4142,8 +4142,11 @@ it("asks again at Send for a ready Goal message whose slot hold ran out while it
     now += 3 * 60_000;
     working = new Set(['another-chat']);
     expect((await activity()).goal).toMatchObject({ draft: { stage: 'ready' }, slotWait: expect.stringMatching(/1 chats are working/) });
+    // The desktop chat says why too, instead of "Message ready" (CodeRabbit on #2051).
+    expect((await bridge.sessionControlsFor(session.id)).goalWait).toEqual({ reason: 'slots' });
     working = new Set();
     expect((await activity()).goal.slotWait).toBeUndefined();
+    expect((await bridge.sessionControlsFor(session.id)).goalWait).toBeNull();
     await bridge.setSessionAutomation(session.id, 'off');
   } finally {
     clock.mockRestore();
