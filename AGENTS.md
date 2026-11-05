@@ -803,10 +803,14 @@ retry that is limited again uses the same steps (`PROVIDER_HISTORY_STREAK_HOLDS_
 is refused while it lasts. Measured 2026-11-05 (#1882): a chat limited for 8.5 hours took 23
 quarter-hour rounds, each a reload plus presses after 0, 2 and 4 minutes. The page presses Retry
 only while the app still owes the chat work and after the app's own hold (#2076): `/activity`
-returns `historyRetry: { wanted, until? }` (`historyRetryView`: a repair in flight, an owed Goal/Loop
-reply, a running call or turn, a continuation, or a queued/claimed input; `until` is
-`providerHistoryBackoff`). An idle chat leaves Retry to the person. A word older than 2 minutes, or
-none from an older app, keeps the page's own rule. The recorder writes a repeating history-limit notice (one
+returns `historyRetry: { wanted, until? }` (`historyRetryView`: a repair in flight, or a finished one
+while the chat keeps its activity grant; an owed Goal/Loop reply; a call the chat exactly owns
+(`runningToolProgress`); a working turn; a worker wake still owed delivery; a continuation; or a
+queued/claimed input. `until` is `providerHistoryBackoff`, read after the input lookup). An idle chat
+leaves Retry to the person. The word is bound to the chat it was asked for; a newly shown chat waits
+up to 60 s for its first answer (any reply, even a failure, counts); a Stop since the last word needs
+a newer one; a word older than 2 minutes, or an answer without it from an older app, keeps the page's
+own rule. The recorder writes a repeating history-limit notice (one
 that carries `retryAt`) once: an identical one within 30 minutes of the newest blocking `chat_error`
 is not appended again (a passing failure in between, such as a stream 404, does not repeat it), while the provider access dialog is still recorded again after 30 s. The bridge's
 provider-limit hold still follows every new Retry-After, because it reads the observations, not

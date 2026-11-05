@@ -8701,11 +8701,21 @@ const providerDeferredColdStarts = new Map<string, ProviderDeferredColdStart>();
  * while the app still owes this chat work, and not before the app's own hold for it ends. Each
  * press is another history request; an idle chat leaves Retry to the person.
  */
-async function historyRetryView(conversationId: string, sessionId: string | null, now = Date.now()): Promise<{ historyRetry: { wanted: boolean; until?: number } }> {
-  const until = providerHistoryBackoff(conversationId, now);
+async function historyRetryView(conversationId: string, sessionId: string | null): Promise<{ historyRetry: { wanted: boolean; until?: number } }> {
   const inputs = sessionId ? await listInputs().catch(() => []) : [];
-  const wanted = repairsInFlight.has(conversationId) || goalPendingReplyFor(conversationId) !== null ||
-    runningToolCalls(conversationId) > 0 || chatIsWorkingNow(conversationId, now) ||
+  // Read after the await: a limit that arrived meanwhile must not be missed (CodeRabbit on #2080).
+  const now = Date.now();
+  const until = providerHistoryBackoff(conversationId, now);
+  const repair = repairsInFlight.get(conversationId);
+  tidyCommands();
+  const wanted =
+    // A finished repair still owes work only while its chat keeps its activity grant (CodeRabbit on #2080).
+    (!!repair && (repair.state !== 'done' || (activeUntil.get(conversationId)?.until ?? 0) > now)) ||
+    goalPendingReplyFor(conversationId) !== null ||
+    // Calls this chat exactly owns; an unattributed call is no chat's work (CodeRabbit on #2080).
+    runningToolProgress(conversationId) !== null || chatIsWorkingNow(conversationId, now) ||
+    // A worker wake still waiting for delivery into this chat (CodeRabbit on #2080).
+    commands.some(entry => entry.spec.type === 'revive' && entry.spec.conversationId === conversationId && !revivalDeliveryProven(entry)) ||
     (sessionId !== null && (!!continuationForSession(sessionId) ||
       inputs.some(row => row.sessionId === sessionId && ['queued', 'browser', 'tool'].includes(row.state))));
   return { historyRetry: { wanted, ...(until !== null ? { until } : {}) } };

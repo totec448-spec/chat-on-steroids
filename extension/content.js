@@ -1192,6 +1192,8 @@
   let goalConfig = null;
   /** The app's word on this chat's Retry (#2076): null from an older app, which keeps the page's own rule. */
   let appHistoryRetry = null;
+  /** The chat the app last answered about at all, with or without that word (CodeRabbit on #2080). */
+  let appHistoryAnsweredFor = null;
   let goalDraft = null;
   /**
    * The generation the goal loop has already acted on.
@@ -7198,6 +7200,9 @@
         ...(sentResult ? { approvalResult: sentResult } : {})
       });
       if (sentResult && reply && reply.ok === true && approvalResult === sentResult) approvalResult = null;
+      // Any answer for this chat, even a failure, ends the wait for the app's first word on its
+      // history Retry (#2076): an app that cannot be reached leaves the page's own rule.
+      if (CLF_DOM.conversationId() === forId) appHistoryAnsweredFor = forId;
       if (!reply || reply.ok !== true || !reply.data) {
         // Keep waiting only for failures that can genuinely mean "the local app/worker is
         // not reachable yet". A structured application refusal is an answer to the identity
@@ -7387,9 +7392,14 @@
       const goalBefore = JSON.stringify([goalConfig?.enabled ?? null, goalConfig?.objective ?? null, bootstrap]);
       goalConfig = data.goal && typeof data.goal === 'object' ? data.goal : null;
       // Whether the app still owes this chat work, and its own hold on the chat's history (#2076).
-      appHistoryRetry = data.historyRetry && typeof data.historyRetry === 'object'
-        ? { conversationId: CLF_DOM.conversationId(), wanted: data.historyRetry.wanted !== false,
-          until: Number.isFinite(data.historyRetry.until) ? data.historyRetry.until : 0, at: Date.now() } : null;
+      // Bound to the chat this reply was asked for, and only while the page still shows it
+      // (CodeRabbit on #2080): a reply for chat A never speaks for chat B.
+      if (CLF_DOM.conversationId() === forId) {
+        appHistoryAnsweredFor = forId;
+        appHistoryRetry = data.historyRetry && typeof data.historyRetry === 'object'
+          ? { conversationId: forId, wanted: data.historyRetry.wanted !== false,
+            until: Number.isFinite(data.historyRetry.until) ? data.historyRetry.until : 0, at: Date.now() } : null;
+      }
       if (goalConfig) goalDraft = goalConfig.draft || null;
       const nextBootstrap = data.bootstrap === 'resume' || data.bootstrap === 'worker' ? data.bootstrap : null;
       bootstrapOwner = nextBootstrap && typeof data.bootstrapMessageId === 'string' && data.bootstrapMessageId
@@ -12721,6 +12731,9 @@
   let loadFailureLastPress = 0;
   /** How long the app's word holds without a newer activity reply. */
   const APP_HISTORY_RETRY_FRESH_MS = 2 * 60_000;
+  /** How long a newly shown chat waits for the app's first answer before the page's own rule applies. */
+  const APP_HISTORY_FIRST_ANSWER_MS = 60_000;
+  let historyRouteSince = 0;
   let historyRetryHeldToldAt = 0;
   /**
    * ChatGPT's Retry on a history that could not load is pressed only while the app still owes this
@@ -12729,8 +12742,15 @@
    */
   function appAllowsHistoryRetry(route, now) {
     const word = appHistoryRetry;
-    if (!word || word.conversationId !== route || now - word.at > APP_HISTORY_RETRY_FRESH_MS) return true;
-    const why = word.until > now ? 'the app holds this chat\'s history until its wait ends'
+    // Until the app has answered for this chat once, wait (at most a minute); an app that answers
+    // without the word is an older one, and the page's own rule applies (CodeRabbit on #2080).
+    const unanswered = appHistoryAnsweredFor !== route && now - historyRouteSince < APP_HISTORY_FIRST_ANSWER_MS;
+    const applies = word && word.conversationId === route && now - word.at <= APP_HISTORY_RETRY_FRESH_MS;
+    const why = unanswered ? 'waiting for the app\'s first answer about this chat'
+      // A Stop since the app's last word revokes it: a newer answer is needed (CodeRabbit on #2080).
+      : applies && stopRequestedAt && word.at <= stopRequestedAt ? 'Stop was pressed; waiting for the app\'s next answer'
+      : !applies ? ''
+      : word.until > now ? 'the app holds this chat\'s history until its wait ends'
       : !word.wanted ? 'this chat has no work waiting, so Retry is left to you' : '';
     if (!why) return true;
     if (now - historyRetryHeldToldAt >= 60_000) {
@@ -12784,6 +12804,7 @@
       loadFailureRetries = 0;
       loadFailureLimited = false;
       loadFailureLastPress = 0;
+      historyRouteSince = now;
       restoreLimitedLoadFailure(route, now);
     }
     // The provider has already told this exact history read when it may be tried again.
