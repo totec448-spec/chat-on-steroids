@@ -531,6 +531,8 @@ function projectColorName(color: ProjectColor): string {
   return { blue: t('Blue'), green: t('Green'), amber: t('Amber'), purple: t('Purple'), rose: t('Rose'), teal: t('Teal') }[color];
 }
 let workspaceTerminal: ReturnType<typeof createWorkspaceTerminal> | null = null;
+/** Opens the bottom Terminal dock without starting a shell; set once the docks exist. */
+let openBottomTerminalWithoutNewShell = (): void => undefined;
 let rightWorkspaceTerminal: ReturnType<typeof createWorkspaceTerminal> | null = null;
 let workspaceDocks: ReturnType<typeof createWorkspaceDocks> | null = null;
 
@@ -7428,6 +7430,30 @@ function configureBackgroundProcessStop(stop: HTMLButtonElement, row: RunningExe
   };
 }
 
+/** Output: the command's output, read-only, in a Terminal dock tab (#1920). */
+/** Only when this app offers agent output: an older preload or a fixture shows no Output (CodeRabbit on #2052). */
+function agentOutputAvailable(): boolean {
+  return typeof (window.api as { agentOutputOpen?: unknown }).agentOutputOpen === 'function';
+}
+function backgroundProcessOutputButton(row: RunningExecProcess): HTMLButtonElement {
+  const button = el('button', 'background-exec-output') as HTMLButtonElement;
+  button.type = 'button';
+  // Which process and incarnation it opens, so a repaint can give a keyboard user the same button back.
+  button.dataset.process = `${row.processId}:${row.incarnation}`;
+  button.append(icon('i-terminal'), el('span', '', () => t('Output')));
+  ui(button, 'title', () => t('Show this command\'s output, read-only'));
+  ui(button, 'aria-label', () => t('Show the output of {0}, read-only', [backgroundCommand(row.command) || '#' + row.processId]));
+  button.onclick = event => {
+    event.stopPropagation();
+    const sessionId = selectedId;
+    if (!sessionId || !workspaceTerminal) return;
+    if (workspaceTerminal.openAgentOutput({ sessionId, processId: row.processId, incarnation: row.incarnation, command: row.command })) {
+      openBottomTerminalWithoutNewShell();
+    }
+  };
+  return button;
+}
+
 function paintBackgroundProcessStops(): void {
   const disabled = backgroundProcessStopping !== null;
   $('backgroundExecStatus').querySelectorAll<HTMLButtonElement>('.background-exec-stop').forEach(stop => { stop.disabled = disabled; });
@@ -7439,6 +7465,8 @@ function paintBackgroundProcesses(): void {
   const liveStatus = $('backgroundExecLiveStatus');
   const list = $('backgroundExecList');
   const rows = sortedBackgroundProcesses();
+  // A repaint replaces the Output buttons: the focused one is found again afterwards (CodeRabbit on #2052).
+  const focusedOutput = (document.activeElement as HTMLElement | null)?.closest?.<HTMLElement>('.background-exec-output')?.dataset.process;
   if (!selectedId || !rows.length) {
     if (selectedId) expandedBackgroundProcessSessions.delete(selectedId);
     host.hidden = true;
@@ -7473,6 +7501,13 @@ function paintBackgroundProcesses(): void {
   const stop = host.querySelector<HTMLButtonElement>('.background-exec-stop')!;
   stop.hidden = multiple;
   configureBackgroundProcessStop(stop, first);
+  // The same process keeps its button: a press that spans a repaint (every 400 ms while a chat works)
+  // still lands on it (CodeRabbit on #2052).
+  const outputKey = `${first.processId}:${first.incarnation}`;
+  const shownOutput = host.querySelector<HTMLElement>('.background-exec-output');
+  const keepOutput = !multiple && agentOutputAvailable();
+  if (shownOutput && (!keepOutput || shownOutput.dataset.process !== outputKey)) shownOutput.remove();
+  if (keepOutput && (!shownOutput || shownOutput.dataset.process !== outputKey)) stop.before(backgroundProcessOutputButton(first));
   const chevron = host.querySelector<HTMLElement>('.background-exec-chevron')!;
   chevron.hidden = !multiple;
   host.classList.toggle('is-expandable', multiple);
@@ -7506,6 +7541,10 @@ function paintBackgroundProcesses(): void {
     host.onkeydown = null;
   }
   list.hidden = !expanded;
+  // Each row keeps its Output button while its process and incarnation are the same, so a press that
+  // spans a repaint still lands (CodeRabbit on #2052).
+  const keptOutputs = new Map([...list.querySelectorAll<HTMLButtonElement>('.background-exec-output')]
+    .map(button => [button.dataset.process ?? '', button] as const));
   list.replaceChildren();
   if (expanded) {
     for (const row of rows) {
@@ -7524,11 +7563,17 @@ function paintBackgroundProcesses(): void {
       stopIcon.setAttribute('aria-hidden', 'true');
       itemStop.append(stopIcon, el('span'));
       configureBackgroundProcessStop(itemStop, row);
-      item.append(itemCommand, itemTime, itemStop);
+      const output = agentOutputAvailable()
+        ? keptOutputs.get(`${row.processId}:${row.incarnation}`) ?? backgroundProcessOutputButton(row) : null;
+      item.append(itemCommand, itemTime, ...(output ? [output] : []), itemStop);
       list.append(item);
     }
   }
   host.hidden = false;
+  if (focusedOutput && !host.contains(document.activeElement) && !list.contains(document.activeElement)) {
+    [...host.querySelectorAll<HTMLElement>('.background-exec-output'), ...list.querySelectorAll<HTMLElement>('.background-exec-output')]
+      .find(button => button.dataset.process === focusedOutput)?.focus();
+  }
   paintBackgroundProcessTimes();
   syncBackgroundProcessClock(true);
 }
@@ -9945,6 +9990,7 @@ export function initChat(next: Deps): void {
   workspaceTerminal = createWorkspaceTerminal(() => docks.toggleBottomTerminal(), docks.bottomBody,
     { onEmpty: () => docks.setBottomOpen(false), onClosePanel: () => docks.setBottomOpen(false), onSendSelection });
   workspaceTerminal.update(selectedLocalProject());
+  openBottomTerminalWithoutNewShell = () => docks.setBottomOpen(true, false);
   rightWorkspaceTerminal = createWorkspaceTerminal(() => docks.toggleBottomTerminal(), docks.body,
     { id: 'workspaceTerminalRight', dockedTabs: true, onTabsChanged: () => docks.sync(), onSendSelection });
   rightWorkspaceTerminal.update(selectedLocalProject());

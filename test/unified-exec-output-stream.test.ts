@@ -52,3 +52,53 @@ it('drains each PTY chunk once without suppressing a newly emitted screen repain
   expect(retained.replayed).toBe(true);
   expect(retained.rawOutput.toString()).toBe('first=received\r\n' + repaint);
 });
+
+it('lets the person watch a running command without taking anything from the agent\'s own reads (#1920)', async () => {
+  const processId = manager.allocateProcessId();
+  const started = await manager.execCommand({
+    command: ['fixture-pty'], shellType: 'bash', hookCommand: 'watched stream',
+    processId, yieldTimeMs: 1, maxOutputTokens: undefined, truncationPolicy,
+    cwd: process.cwd(), displayCwd: '/fixture', env: {}, tty: true
+  });
+  const incarnation = manager.listProcesses().find(row => row.processId === processId)!.incarnation;
+  pty.data!('before watching\r\n');
+  const seen: string[] = [];
+  let ended: number | null | undefined;
+  expect(manager.watchOutput(processId, incarnation + 1, () => undefined, () => undefined)).toBeNull();
+  const watch = manager.watchOutput(processId, incarnation, chunk => seen.push(chunk.toString()), done => { ended = done.exitCode; })!;
+  expect(watch.history.toString()).toBe('before watching\r\n');
+  pty.data!('while watching\r\n');
+  expect(seen).toEqual(['while watching\r\n']);
+  // The agent's poll reads both, exactly as without a viewer.
+  const poll = () => manager.writeStdin({ processId, input: '', yieldTimeMs: 1, maxOutputTokens: undefined, truncationPolicy });
+  expect((await poll()).rawOutput.toString()).toBe('before watching\r\nwhile watching\r\n');
+  pty.exit!({ exitCode: 3 });
+  await poll();
+  // The exit line follows once the output went quiet (a PTY's last data can trail its exit).
+  await vi.waitFor(() => expect(ended).toBe(3), { timeout: 3_000 });
+  // A closed view hears nothing more.
+  const second = manager.allocateProcessId();
+  await manager.execCommand({ command: ['fixture-pty'], shellType: 'bash', hookCommand: 'closed view', processId: second, yieldTimeMs: 1,
+    maxOutputTokens: undefined, truncationPolicy, cwd: process.cwd(), displayCwd: '/fixture', env: {}, tty: true });
+  const secondIncarnation = manager.listProcesses().find(row => row.processId === second)!.incarnation;
+  const late: string[] = [];
+  manager.watchOutput(second, secondIncarnation, chunk => late.push(chunk.toString()), () => undefined)!.unsubscribe();
+  pty.data!('after closing\r\n');
+  expect(late).toEqual([]);
+  expect(started.processId).toBe(processId);
+});
+
+// CodeRabbit on #2052: a PTY can deliver its last output just after it reports its exit.
+it('shows output that arrives just after a PTY exits before the exit line', async () => {
+  const processId = manager.allocateProcessId();
+  await manager.execCommand({ command: ['fixture-pty'], shellType: 'bash', hookCommand: 'late tail', processId, yieldTimeMs: 1,
+    maxOutputTokens: undefined, truncationPolicy, cwd: process.cwd(), displayCwd: '/fixture', env: {}, tty: true });
+  const incarnation = manager.listProcesses().find(row => row.processId === processId)!.incarnation;
+  const events: string[] = [];
+  manager.watchOutput(processId, incarnation, chunk => events.push(`data ${chunk.toString().trim()}`), done => events.push(`exit ${done.exitCode}`));
+  pty.exit!({ exitCode: 0 });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  pty.data!('last line\r\n');
+  await vi.waitFor(() => expect(events).toContain('exit 0'), { timeout: 3_000 });
+  expect(events).toEqual(['data last line', 'exit 0']);
+});

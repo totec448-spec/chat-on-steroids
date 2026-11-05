@@ -1,3 +1,4 @@
+import { registerAgentOutputIpc } from './agent-output-ipc.js';
 import { onChatsAtOnceChange, resumeAutomaticSends } from './chats-at-once.js';
 import { MAX_CHAT_STYLE_CHARS } from '../shared/chat-style.js';
 import { registerWorkspaceTerminalIpc } from './workspace-terminal-ipc.js';
@@ -752,6 +753,7 @@ export function personsMessage(entry: InputEntry): boolean {
 
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
   registerWorkspaceTerminalIpc(getWindow);
+  registerAgentOutputIpc(getWindow);
   registerDictationIpc(getWindow);
   // A session row remains visible until its delete IPC resolves. Fence Trust while deletion is
   // in flight so a second click cannot recreate permission after the row's durable revoke.
