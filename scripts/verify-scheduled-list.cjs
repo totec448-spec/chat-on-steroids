@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const sharp = require('sharp');
+const { JSDOM } = require('jsdom');
 
 if (!process.versions.electron) {
   const env = { ...process.env };
@@ -44,10 +45,16 @@ app.whenReady().then(async () => {
     .replace('@phosphor-icons/web/fill/Phosphor-Fill.woff2', glyph('fill', 'Phosphor-Fill.woff2'));
   const css = [iconCss, ...['styles.css', 'settings.css', 'scheduled.css']
     .map(file => fs.readFileSync(path.join(root, 'src/renderer', file), 'utf8'))].join('\n');
-  const html = fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')
-    .replace(/<link[^>]+rel="stylesheet"[^>]*\/>/g, '')
-    .replace(/<script[^>]+src="\.\/main\.ts"[^>]*><\/script>/, '')
-    .replace('</head>', '<style>' + css + '</style></head>');
+  // Parse the fixture as HTML instead of removing tags with string substitution.
+  // Removing nested markup by regex can leave behind executable HTML.
+  const fixture = new JSDOM(fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8'));
+  const doc = fixture.window.document;
+  doc.querySelectorAll('link[rel="stylesheet"], script[src="./main.ts"]').forEach(node => node.remove());
+  const styles = doc.createElement('style');
+  styles.textContent = css;
+  doc.head.append(styles);
+  const html = fixture.serialize();
+  fixture.window.close();
   const win = new BrowserWindow({ show: false, width: 1280, height: 820,
     webPreferences: { sandbox: true, offscreen: true, backgroundThrottling: false } });
   try {
