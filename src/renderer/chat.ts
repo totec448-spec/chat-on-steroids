@@ -7498,8 +7498,13 @@ function paintBackgroundProcesses(): void {
   const stop = host.querySelector<HTMLButtonElement>('.background-exec-stop')!;
   stop.hidden = multiple;
   configureBackgroundProcessStop(stop, first);
-  host.querySelector('.background-exec-output')?.remove();
-  if (!multiple && agentOutputAvailable()) stop.before(backgroundProcessOutputButton(first));
+  // The same process keeps its button: a press that spans a repaint (every 400 ms while a chat works)
+  // still lands on it (CodeRabbit on #2052).
+  const outputKey = `${first.processId}:${first.incarnation}`;
+  const shownOutput = host.querySelector<HTMLElement>('.background-exec-output');
+  const keepOutput = !multiple && agentOutputAvailable();
+  if (shownOutput && (!keepOutput || shownOutput.dataset.process !== outputKey)) shownOutput.remove();
+  if (keepOutput && (!shownOutput || shownOutput.dataset.process !== outputKey)) stop.before(backgroundProcessOutputButton(first));
   const chevron = host.querySelector<HTMLElement>('.background-exec-chevron')!;
   chevron.hidden = !multiple;
   host.classList.toggle('is-expandable', multiple);
