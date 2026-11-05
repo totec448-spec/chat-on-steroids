@@ -4308,3 +4308,28 @@ it('reads the own-sent store again after it could not be read for a moment', asy
   // Not the empty snapshot of the failed read.
   expect(await input.ownSentResidue(conversationId)).toEqual([{ text: 'Continue the task', messageId: 'readable-again' }]);
 });
+
+// CodeRabbit on #2079: a send acknowledged while the store could not be read is recorded once it can.
+it('records an automatic send acknowledged while the own-sent store was unreadable, once it reads again', async () => {
+  const { readDurable } = await import('../src/main/durable.js');
+  await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Acknowledged while unreadable', conversationId });
+  const file = path.join(directory, 'state', 'own-sent-receipts.json');
+  await flushDurable();
+  await fs.rm(file, { recursive: true, force: true });
+  await fs.mkdir(file, { recursive: true });
+  input.resetInputForTests();
+  const scheduled = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Continue while unreadable',
+    scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+  expect(await input.claimBrowserInput(scheduled.id, 'unreadable-page', conversationId, true)).not.toBeNull();
+  expect(await input.authorizeBrowserInput(scheduled.id, 'unreadable-page', conversationId)).toBe(true);
+  // The acknowledgement itself never fails on the store.
+  expect(await input.acknowledgeBrowserInput(scheduled.id, 'unreadable-page', conversationId, 'unreadable-message')).toBe(true);
+  await fs.rm(file, { recursive: true, force: true });
+  await writeDurableNow('session-input', []);
+  // Readable again, and the outbox history no longer has the row: the receipt is still recorded.
+  expect(await input.ownSentResidue(conversationId)).toEqual([expect.objectContaining({ messageId: 'unreadable-message' })]);
+  await flushDurable();
+  expect(JSON.stringify(await readDurable('own-sent-receipts'))).toContain('unreadable-message');
+});
