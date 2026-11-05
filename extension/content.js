@@ -13328,6 +13328,26 @@
     return false;
   }
 
+  /**
+   * After a reload ChatGPT can put the app's own already-sent automatic message back into the message
+   * box, and every repair was then held as if it were the person's draft, for hours (#2074). The app
+   * names the exact texts it sent into this chat by itself; one of them, with nothing attached, that is
+   * also the chat's latest message is the app's leftover. It is removed only while unchanged
+   * (captureComposerDraft's lease); anything else stays a draft and holds the repair as before.
+   */
+  function clearOwnSentResidue(values) {
+    const own = (Array.isArray(values) ? values : []).filter(value => typeof value === 'string' && value.trim())
+      .slice(0, 10).map(sendText);
+    if (!own.length || desktopInputBusy || CLF_DOM.hasComposerAttachments() || handoffMarked(CLF_DOM.composer())) return false;
+    const shown = CLF_DOM.composerText() || '';
+    const forms = new Set([sendText(shown), sendText(unescapeMarkdown(shown))]);
+    if (![...forms].some(form => form && own.includes(form))) return false;
+    const latest = CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.text || '';
+    if (![sendText(latest), sendText(unescapeMarkdown(latest))].some(form => form && forms.has(form))) return false;
+    const lease = CLF_DOM.captureComposerDraft(shown);
+    try { return lease.withdraw() === true; } finally { lease.dispose(); }
+  }
+
   async function inspectRepairPage(message) {
     const target = conversationId, forEpoch = epoch;
     const current = () => alive && target === message.conversationId && conversationId === target &&
@@ -13341,9 +13361,10 @@
     // Holding here instead left the chat's handoff waiting with nothing on screen (2026-10-10).
     const draft = () => !handoffMarked(CLF_DOM.composer()) &&
       Boolean((CLF_DOM.composerText() || '').trim() || CLF_DOM.hasComposerAttachments());
+    const cleared = current() && clearOwnSentResidue(message.ownTexts);
     const verdict = (holds, extra) => {
       const why = holds.find(([held]) => held)?.[1];
-      return { safe: !why, ...(why ? { why } : {}), ...extra };
+      return { safe: !why, ...(why ? { why } : {}), ...(cleared ? { cleared: 'own-sent' } : {}), ...extra };
     };
     if (message.draftOnly === true) {
       const questionId = CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id ?? null;

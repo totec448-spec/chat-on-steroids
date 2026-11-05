@@ -1674,6 +1674,39 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
     expect(worker.tabsReload).not.toHaveBeenCalled();
   });
 
+  // #2074: the page is told which texts the app sent by itself, and a cleared leftover is reported.
+  it("hands the page the app's own sent texts for its check, and tells the app it cleared one", async () => {
+    let handed = false;
+    const cleared: string[] = [];
+    const checks: Array<Record<string, unknown>> = [];
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/repairs/claim') return response(200, { allowed: false });
+      if (url.pathname === '/status') {
+        if (url.searchParams.has('repairCleared')) cleared.push(url.searchParams.get('repairCleared')!);
+        if (handed) return response(200, { repairs: [] });
+        handed = true;
+        return response(200, { repairs: [{ conversationId: CHAT, token: 'own-leftover', reason: 'silence', requiresClaim: true,
+          ownTexts: ['Continue with the task'] }] });
+      }
+      return response(200, {});
+    });
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch,
+      tabsGet: async () => ({ id: 21, url: `https://chatgpt.com/c/${CHAT}` }),
+      tabsSendMessage: async (_id, message) => {
+        if (message.type !== 'clf-repair-check') return { ok: true };
+        checks.push(message);
+        return { safe: true, cleared: 'own-sent' };
+      },
+      tabsQuery: async () => [{ id: 21, url: `https://chatgpt.com/c/${CHAT}` }] });
+    await worker.registerTab(21);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 21);
+    await worker.fireAlarm();
+    expect(checks[0]).toMatchObject({ conversationId: CHAT, ownTexts: ['Continue with the task'] });
+    expect(cleared).toEqual(['own-leftover']);
+  });
+
   /**
    * Two tabs of one chat used to end the repair: neither was reloaded and the duplicate stayed
    * open, so the chat was left broken *and* the tab spam was left standing. One chat is one tab,

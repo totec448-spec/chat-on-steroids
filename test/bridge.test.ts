@@ -3276,6 +3276,27 @@ describe('automatic compaction', () => {
     expect((await request('GET', '/status')).body.repairs.some((row: { token: string }) => row.token === handout.token)).toBe(true);
   });
 
+  // #2074: a page that kept answering "held" (the app's own Continue was back in its message box) used
+  // up the no-page budget, and recovery ended with "no page; not offering again" while that page was there.
+  it('never ends recovery as "no page" while the page keeps answering that it holds the repair, and logs a cleared leftover', async () => {
+    await pair();
+    const conversationId = randomUUID();
+    const session = await createSession({ conversationId });
+    await compactSession(session.id);
+    for (let pass = 0; pass < 15; pass++) {
+      const offered = (await request('GET', '/status')).body.repairs
+        .find((row: { conversationId: string }) => row.conversationId === conversationId);
+      expect(offered).toBeTruthy();
+      await request('GET', `/status?repairHeld=${encodeURIComponent(offered.token)}&why=draft`);
+    }
+    expect(getLog().some(entry => entry.message.includes(`${conversationId} never claimed`))).toBe(false);
+    const handout = (await request('GET', '/status')).body.repairs
+      .find((row: { conversationId: string }) => row.conversationId === conversationId);
+    await request('GET', `/status?repairCleared=${encodeURIComponent(handout.token)}`);
+    expect(getLog().some(entry => entry.message ===
+      `bridge: the page removed this app's own already-sent message, restored into ${conversationId}'s message box, before the compaction repair`)).toBe(true);
+  });
+
   it('says an app-started Compact & resume reloaded its chat to send the request, in a row naming that chat', async () => {
     await pair();
     const conversationId = randomUUID();
