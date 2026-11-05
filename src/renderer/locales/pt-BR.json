@@ -3867,7 +3867,7 @@
   "Continue queued. It goes out as soon as ChatGPT takes it.": "Continuar na fila. Ele sai assim que o ChatGPT aceitar.",
   "Trying again now.": "Tentando de novo agora.",
   "This chat has no ChatGPT conversation yet.": "Este chat ainda não tem uma conversa do ChatGPT.",
-  "ChatGPT limits this chat for a few minutes. The app tries again right after.": "O ChatGPT limita este chat por alguns minutos. O app tenta de novo logo depois.",
+  "ChatGPT is limiting this chat right now. The app tries again when the wait is over.": "O ChatGPT está limitando este chat agora. O app tenta de novo quando a espera terminar.",
   "Nothing is waiting to be picked up in this chat any more.": "Nada mais está esperando neste chat.",
   "This step changed meanwhile. Check the chat and try again.": "Esta etapa mudou nesse meio-tempo. Confira o chat e tente de novo.",
   "Not sent now: something in this chat is still running. The app keeps trying.": "Não enviado agora: algo neste chat ainda está em execução. O app continua tentando.",

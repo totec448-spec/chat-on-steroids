@@ -3705,7 +3705,7 @@
   "Continue queued. It goes out as soon as ChatGPT takes it.": "Đã xếp hàng Tiếp tục. Tin nhắn sẽ được gửi ngay khi ChatGPT nhận.",
   "Trying again now.": "Đang thử lại ngay.",
   "This chat has no ChatGPT conversation yet.": "Cuộc trò chuyện này chưa có cuộc hội thoại ChatGPT.",
-  "ChatGPT limits this chat for a few minutes. The app tries again right after.": "ChatGPT giới hạn cuộc trò chuyện này trong vài phút. Ứng dụng sẽ thử lại ngay sau đó.",
+  "ChatGPT is limiting this chat right now. The app tries again when the wait is over.": "ChatGPT đang giới hạn cuộc trò chuyện này. Ứng dụng sẽ thử lại khi hết thời gian chờ.",
   "Nothing is waiting to be picked up in this chat any more.": "Không còn gì chờ trong cuộc trò chuyện này.",
   "This step changed meanwhile. Check the chat and try again.": "Bước này đã thay đổi trong lúc đó. Hãy kiểm tra cuộc trò chuyện và thử lại.",
   "Not sent now: something in this chat is still running. The app keeps trying.": "Chưa gửi lúc này: vẫn còn tác vụ đang chạy trong cuộc trò chuyện này. Ứng dụng vẫn tiếp tục thử.",

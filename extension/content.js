@@ -12669,14 +12669,62 @@
    * alive: measured 2026-10-11, each press after Retry-After drew another 429 with a longer
    * Retry-After (11 s → 47 s) and the chat stayed unreadable for half an hour. The first press
    * still comes when ChatGPT said it may; the ones after it back off further, to one every 15
-   * minutes, and still never stop.
+   * minutes, and still never stop. A limit that outlasts that grows to 30 and then 60 minutes,
+   * the same steps as the app's own hold (bridge.ts PROVIDER_HISTORY_STREAK_HOLDS_MS).
    */
-  const LOAD_FAILURE_LIMITED_BACKOFF_MS = [0, 120_000, 240_000, 480_000, 900_000];
+  const LOAD_FAILURE_LIMITED_BACKOFF_MS = [0, 120_000, 240_000, 480_000, 900_000, 1_800_000, 3_600_000];
+  /*
+   * The step reached survives a reload of the same chat in this tab. The app reloads a limited
+   * chat after each of its holds, and a fresh page used to start again at the first step: every
+   * reload came with presses after 0, 2 and 4 minutes, 23 rounds in 8.5 hours (#1882,
+   * 2026-11-05). A step older than the longest one plus a quarter hour is forgotten, the same
+   * quiet period after which the app starts its own count over.
+   */
+  const LOAD_FAILURE_LIMITED_STORAGE = 'clf-history-limit-v1';
+  const LOAD_FAILURE_LIMITED_MEMORY_MS = 3_600_000 + 15 * 60_000;
   let loadFailureSince = 0;
   let loadFailureRetries = 0;
   let loadFailureLimited = false;
   let loadFailureRoute = null;
   let loadFailureToldAt = 0;
+  let loadFailureStored = false;
+  let loadFailureLastPress = 0;
+  function restoreLimitedLoadFailure(route, now) {
+    try {
+      const raw = sessionStorage.getItem(LOAD_FAILURE_LIMITED_STORAGE);
+      if (raw === null) return;
+      loadFailureStored = true;
+      const saved = raw.length <= 512 ? JSON.parse(raw) : null;
+      if (saved && typeof saved === 'object' && route && saved.conversationId === route &&
+          Number.isInteger(saved.retries) && saved.retries > 0 && saved.retries <= 1000 &&
+          Number.isFinite(saved.at) && saved.at <= now && now - saved.at <= LOAD_FAILURE_LIMITED_MEMORY_MS) {
+        loadFailureRetries = saved.retries;
+        loadFailureLimited = true;
+        loadFailureLastPress = saved.at;
+      } else if (route) {
+        // Another chat's, an expired or a damaged entry: removed, so it cannot come back when the
+        // tab returns to its chat later. A page between routes keeps it.
+        sessionStorage.removeItem(LOAD_FAILURE_LIMITED_STORAGE);
+        loadFailureStored = false;
+      }
+    } catch {
+      // A corrupt or blocked entry costs only the remembered step; the page starts at the first one.
+    }
+  }
+  function rememberLimitedLoadFailure(route, now) {
+    try {
+      if (loadFailureLimited && route) {
+        sessionStorage.setItem(LOAD_FAILURE_LIMITED_STORAGE,
+          JSON.stringify({ conversationId: route, retries: loadFailureRetries, at: now }));
+        loadFailureStored = true;
+      } else if (loadFailureStored) {
+        sessionStorage.removeItem(LOAD_FAILURE_LIMITED_STORAGE);
+        loadFailureStored = false;
+      }
+    } catch {
+      // This document still keeps its own step.
+    }
+  }
   function recoverConversationLoad(now = Date.now()) {
     const route = CLF_DOM.conversationId();
     if (route !== loadFailureRoute) {
@@ -12685,6 +12733,8 @@
       loadFailureSince = 0;
       loadFailureRetries = 0;
       loadFailureLimited = false;
+      loadFailureLastPress = 0;
+      restoreLimitedLoadFailure(route, now);
     }
     // The provider has already told this exact history read when it may be tried again.
     // Do not spend the page's own Retry button inside that window: each click is another
@@ -12698,7 +12748,11 @@
     const retry = CLF_DOM.conversationLoadFailure ? CLF_DOM.conversationLoadFailure() : null;
     if (!retry) {
       loadFailureSince = 0;
-      if (CLF_DOM.turns().length) { loadFailureRetries = 0; loadFailureLimited = false; }
+      if (CLF_DOM.turns().length) {
+        loadFailureRetries = 0;
+        loadFailureLimited = false;
+        if (loadFailureStored) rememberLimitedLoadFailure(route, now);
+      }
       return false;
     }
     // Whoever presses Retry here, the tab may leave this chat for ChatGPT's home page. Say so first,
@@ -12707,12 +12761,23 @@
       loadFailureToldAt = now;
       void ask({ type: 'load_failure', conversationId: route }).catch(() => undefined);
     }
+    // A page that stayed open on this chat forgets a step whose last press is as old as a stored
+    // one would be, and starts over, the same as after a reload.
+    if (loadFailureLastPress && now - loadFailureLastPress > LOAD_FAILURE_LIMITED_MEMORY_MS) {
+      loadFailureRetries = 0;
+      loadFailureLimited = false;
+      loadFailureLastPress = 0;
+      loadFailureSince = 0;
+      rememberLimitedLoadFailure(route, now);
+    }
     if (!loadFailureSince) loadFailureSince = now;
     const schedule = loadFailureLimited ? LOAD_FAILURE_LIMITED_BACKOFF_MS : LOAD_FAILURE_BACKOFF_MS;
     const wait = LOAD_FAILURE_SETTLE_MS + schedule[Math.min(loadFailureRetries, schedule.length - 1)];
     if (now - loadFailureSince < wait) return false;
     loadFailureRetries++;
     loadFailureSince = now;
+    loadFailureLastPress = now;
+    if (loadFailureLimited) rememberLimitedLoadFailure(route, now);
     retry.click();
     return true;
   }
