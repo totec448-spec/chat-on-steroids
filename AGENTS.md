@@ -791,9 +791,15 @@ the bridge counts them per ticket (`compactionReceiptMisses`, in memory). After 
 there for two days while the chat grew past its limit. A manual press never takes the waiver. From the request on, the chat's Compact & Resume timeline row reports progress
 and the projection is empty. The countdown authorizes nothing.
 Once a chat's history has been limited, the page's Retry presses after Retry-After back off to
-0 s, 2, 4, 8, then 15 minutes (`LOAD_FAILURE_LIMITED_BACKOFF_MS`), instead of the once-a-minute
-pace kept for an ordinary load failure. Measured 2026-10-11: pressing every minute drew a new 429
-with a longer Retry-After each time. The recorder writes a repeating history-limit notice (one
+0 s, 2, 4, 8, 15, 30, then 60 minutes (`LOAD_FAILURE_LIMITED_BACKOFF_MS`), instead of the
+once-a-minute pace kept for an ordinary load failure. Measured 2026-10-11: pressing every minute
+drew a new 429 with a longer Retry-After each time. The step reached survives a reload of the same
+chat in that tab (`sessionStorage` key `clf-history-limit-v1`: conversation id, step, time of the
+last press; forgotten after 75 quiet minutes, on another chat, or once the chat's turns render), so
+the app's own reload after each hold no longer restarts the page at 0 s. The app's hold after a
+retry that is limited again uses the same steps (`PROVIDER_HISTORY_STREAK_HOLDS_MS`), and "Try now"
+is refused while it lasts. Measured 2026-11-05 (#1882): a chat limited for 8.5 hours took 23
+quarter-hour rounds, each a reload plus presses after 0, 2 and 4 minutes. The recorder writes a repeating history-limit notice (one
 that carries `retryAt`) once: an identical one within 30 minutes of the newest blocking `chat_error`
 is not appended again (a passing failure in between, such as a stream 404, does not repeat it), while the provider access dialog is still recorded again after 30 s. The bridge's
 provider-limit hold still follows every new Retry-After, because it reads the observations, not
