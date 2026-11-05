@@ -121,13 +121,20 @@ it('pauses and resumes, and a resumed schedule does not catch up on what passed 
   expect(queued).toHaveLength(1);
 });
 
-it('lists schedules with authoritative chat titles and removes only a proven-missing chat', async () => {
+it('lists readable schedules, preserves an unreadable chat, and logs only confirmed orphan cleanup', async () => {
   const missing = '2026-10-24-ccccdddd';
+  const unreadable = '2026-10-24-eeeeffff';
   const { runs } = await setup();
   await runs.saveSchedule({ sessionId: SESSION, text: 'Hourly', repeat: { kind: 'hours', every: 1 }, until: null }, local('2026-10-24T10:00:00'));
   await runs.saveSchedule({ sessionId: missing, text: 'Orphan', repeat: { kind: 'daily', at: '09:00' }, until: null }, local('2026-10-24T10:00:00'));
+  await runs.saveSchedule({ sessionId: unreadable, text: 'Keep', repeat: { kind: 'daily', at: '10:00' }, until: null }, local('2026-10-24T10:00:00'));
+  const log = vi.fn();
   const items = await runs.listScheduleItems(local('2026-10-24T10:30:00'), {
-    session: async id => id === SESSION ? { id, title: 'Release checks' } : null
+    session: async id => {
+      if (id === unreadable) throw new Error('metadata temporarily unreadable');
+      return id === SESSION ? { id, title: 'Release checks' } : null;
+    },
+    log
   });
   expect(items).toEqual([expect.objectContaining({
     sessionId: SESSION,
@@ -135,7 +142,24 @@ it('lists schedules with authoritative chat titles and removes only a proven-mis
     text: 'Hourly',
     nextRunAt: local('2026-10-24T11:00:00')
   })]);
-  expect((await runs.listSchedules()).map(row => row.sessionId)).toEqual([SESSION]);
+  expect((await runs.listSchedules()).map(row => row.sessionId)).toEqual([SESSION, unreadable]);
+  expect(log).toHaveBeenCalledWith(expect.stringContaining(`removed: its chat no longer exists (${missing})`));
+  expect(log).toHaveBeenCalledWith(expect.stringContaining(`could not be read (metadata temporarily unreadable); kept (${unreadable})`));
+});
+
+it('keeps an ended chat schedule visible in the global list without a future run', async () => {
+  const { runs } = await setup();
+  const createdAt = local('2026-10-24T10:00:00');
+  const until = local('2026-10-24T12:00:00');
+  await runs.saveSchedule({ sessionId: SESSION, text: 'Daily report', repeat: { kind: 'daily', at: '11:00' }, until }, createdAt);
+  const items = await runs.listScheduleItems(local('2026-10-25T13:00:00'), {
+    session: async id => ({ id, title: 'Ended reports' }),
+    log: vi.fn()
+  });
+  expect(items).toEqual([expect.objectContaining({
+    sessionId: SESSION, sessionTitle: 'Ended reports', paused: false, until, nextRunAt: null
+  })]);
+  expect(await runs.listSchedules()).toHaveLength(1);
 });
 
 it('runs a schedule now through its chat queue without moving the recurring schedule', async () => {
@@ -157,6 +181,53 @@ it('runs a schedule now through its chat queue without moving the recurring sche
   await runs.runDueSchedules(local('2026-10-24T11:00:10'), deps);
   expect(queued).toHaveLength(2);
   expect(queued[1]).toMatchObject({ scheduled: { scheduleId: saved.id, dueAt: local('2026-10-24T11:00:00'), late: false } });
+});
+
+it('durably records Run now before enqueue so a failed schedule write cannot create an untracked outbox row', async () => {
+  const { runs, deps, queued } = await setup();
+  await runs.saveSchedule({ sessionId: SESSION, text: 'Hourly check', repeat: { kind: 'hours', every: 1 }, until: null }, local('2026-10-24T10:00:00'));
+  const durable = await import('../src/main/durable.js');
+  const write = vi.spyOn(durable, 'writeDurableNow').mockImplementationOnce(async (name, value) => {
+    if (name === 'scheduled-runs') throw new Error('disk gone');
+    return durable.writeDurableNow(name, value);
+  });
+  await expect(runs.runScheduleNow(SESSION, local('2026-10-24T10:30:00'), deps)).rejects.toThrow('disk gone');
+  write.mockRestore();
+  expect(queued).toEqual([]);
+
+  // Restart from the unchanged durable schedule. The next real due time queues exactly once.
+  vi.resetModules();
+  (await import('../src/main/durable.js')).initDurableStore(dir);
+  const restarted = await import('../src/main/scheduled-runs.js');
+  const afterRestart: Array<Record<string, unknown>> = [];
+  await restarted.runDueSchedules(local('2026-10-24T11:00:10'), {
+    session: async id => ({ id, conversationId: 'chat-1', activeTurnId: null }),
+    enqueue: vi.fn(async input => { afterRestart.push(input as never); }),
+    pending: async () => new Set(),
+    log: vi.fn()
+  });
+  expect(afterRestart).toHaveLength(1);
+  expect(afterRestart[0]).toMatchObject({ scheduled: { dueAt: local('2026-10-24T11:00:00'), late: false } });
+});
+
+it('keeps Run now repeatable and tracks the newest manual row when an automatic run is already pending', async () => {
+  const { runs, deps, queued } = await setup();
+  await runs.saveSchedule({ sessionId: SESSION, text: 'Hourly check', repeat: { kind: 'hours', every: 1 }, until: null }, local('2026-10-24T10:00:00'));
+  await runs.runDueSchedules(local('2026-10-24T11:00:10'), deps);
+  const automaticId = queued[0]!.id as string;
+  expect(await runs.runScheduleNow(SESSION, local('2026-10-24T11:30:00'), deps)).toBe(true);
+  const firstManualId = queued[1]!.id as string;
+  expect(await runs.runScheduleNow(SESSION, local('2026-10-24T11:31:00'), deps)).toBe(true);
+  const newestManualId = queued[2]!.id as string;
+  expect(new Set([automaticId, firstManualId, newestManualId]).size).toBe(3);
+  expect((await runs.listSchedules())[0]?.lastInputId).toBe(newestManualId);
+
+  await runs.runDueSchedules(local('2026-10-24T12:00:10'), {
+    ...deps,
+    pending: async () => new Set([automaticId, firstManualId, newestManualId])
+  });
+  expect(queued).toHaveLength(3);
+  expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('previous run still waits in the queue'));
 });
 
 it('a manual Run now pending in the input outbox prevents a duplicate at the next scheduled time', async () => {

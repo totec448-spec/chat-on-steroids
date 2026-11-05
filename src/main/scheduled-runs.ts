@@ -62,6 +62,7 @@ export interface RunnerDeps {
 
 export interface ScheduleListDeps {
   session(id: string): Promise<{ id: string; title: string } | null>;
+  log(line: string): void;
 }
 
 export type RunNowDeps = Pick<RunnerDeps, 'session' | 'enqueue' | 'log'>;
@@ -115,10 +116,19 @@ export function listScheduleItems(now: number, deps: ScheduleListDeps): Promise<
     let schedules = await load();
     const items: ScheduledRunListItem[] = [];
     for (const run of [...schedules]) {
-      const session = await deps.session(run.sessionId);
+      let session: Awaited<ReturnType<ScheduleListDeps['session']>>;
+      try {
+        session = await deps.session(run.sessionId);
+      } catch (error) {
+        // A chat that cannot be read right now is not proof that it was deleted. Keep its
+        // schedule and continue projecting the other chats instead of losing the whole list.
+        deps.log(`scheduled run: its chat could not be read (${error instanceof Error ? error.message : String(error)}); kept (${run.sessionId})`);
+        continue;
+      }
       if (!session) {
         schedules = schedules.filter(row => row.id !== run.id);
         await save(schedules);
+        deps.log(`scheduled run: removed: its chat no longer exists (${run.sessionId})`);
         continue;
       }
       items.push({
@@ -190,6 +200,10 @@ export function runScheduleNow(sessionId: string, now: number, deps: RunNowDeps)
       return false;
     }
     const id = randomUUID();
+    // Publish the outbox identity before the outbox side effect. If this write fails, nothing is
+    // queued. If the process stops after this write, the dangling non-pending id is harmless; if
+    // enqueue succeeds, the next scheduled tick can already see the exact pending manual run.
+    await save(schedules.map(row => row.id === run.id ? { ...row, lastInputId: id } : row));
     await deps.enqueue({
       id,
       sessionId: run.sessionId,
@@ -200,10 +214,6 @@ export function runScheduleNow(sessionId: string, now: number, deps: RunNowDeps)
       reasoningEffort: null,
       scheduled: { scheduleId: run.id, dueAt: now, late: false }
     });
-    // Run now does not move the recurrence cursor. It does still count as the
-    // last queued schedule input, so a periodic tick does not enqueue the same
-    // message again while this manual run is waiting in the outbox.
-    await save(schedules.map(row => row.id === run.id ? { ...row, lastInputId: id } : row));
     deps.log(`scheduled run: queued now for ${run.sessionId}`);
     return true;
   });
