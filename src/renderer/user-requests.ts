@@ -10,6 +10,34 @@ import type { UserRequestView } from '../shared/user-requests.js';
 export interface UserRequestActions {
   answer(request: UserRequestView, answer: 'done' | 'skipped'): Promise<void>;
   readOnly(): boolean;
+  /** Where keyboard focus goes when no step action is left to hold it (the composer). */
+  focusFallback?(): void;
+}
+
+const STEP_ACTION = '.user-request[data-state="open"] .user-request-actions button:not(:disabled)';
+
+/**
+ * Replaces step cards without dropping keyboard focus (CodeRabbit on #2049): when focus was on a
+ * step inside `container`, it moves to the step now in the same place (or the one before it), and
+ * when no open step is left, `fallback` takes it. Focus elsewhere is never moved.
+ */
+export function keepStepFocus(container: HTMLElement, replace: () => void, fallback?: () => void): void {
+  const active = document.activeElement;
+  // A clicked button is disabled while its answer is saved, which can drop focus to the body;
+  // the card marks itself so the place is still known.
+  const answering = container.querySelector<HTMLElement>('.user-request[data-answering]');
+  const holder = active && active !== document.body && container.contains(active) ? active : answering;
+  const cards = holder ? [...container.querySelectorAll<HTMLElement>('.user-request')] : [];
+  const index = holder ? cards.findIndex(card => card.contains(holder)) : -1;
+  replace();
+  if (!holder || index < 0) return;
+  const now = document.activeElement;
+  if (now && now !== document.body && container.contains(now)) return;
+  const open = [...container.querySelectorAll<HTMLButtonElement>(STEP_ACTION)]
+    .filter(button => button === button.closest('.user-request')!.querySelector(STEP_ACTION));
+  const next = open[Math.min(index, open.length - 1)];
+  if (next) next.focus();
+  else fallback?.();
 }
 
 /** In the app's language, with its own unit names. */
@@ -104,9 +132,13 @@ export function userRequestCard(request: UserRequestView, actions: UserRequestAc
     for (const [button, answer] of [[done, 'done'], [skip, 'skipped']] as const) {
       button.type = 'button';
       button.addEventListener('click', () => void (async () => {
+        if (document.activeElement === button) card.dataset.answering = '';
         done.disabled = true; skip.disabled = true;
         try { await actions.answer(request, answer); }
-        finally { if (button.isConnected) { done.disabled = false; skip.disabled = false; } }
+        finally {
+          delete card.dataset.answering;
+          if (button.isConnected) { done.disabled = false; skip.disabled = false; }
+        }
       })());
     }
     buttons.append(done, skip);
@@ -126,7 +158,11 @@ export function userRequestCard(request: UserRequestView, actions: UserRequestAc
 export function renderUserRequestsDock(host: HTMLElement, sessionId: string | null, requests: readonly UserRequestView[], actions: UserRequestActions): void {
   const open = sessionId ? requests.filter(request => request.state === 'open') : [];
   if (host.dataset.sessionId !== (sessionId ?? '')) { host.replaceChildren(); host.dataset.sessionId = sessionId ?? ''; delete host.dataset.signature; }
-  if (!open.length) { host.hidden = true; host.replaceChildren(); delete host.dataset.signature; return; }
+  if (!open.length) {
+    keepStepFocus(host, () => { host.hidden = true; host.replaceChildren(); }, actions.focusFallback);
+    delete host.dataset.signature;
+    return;
+  }
   const signature = JSON.stringify([open, actions.readOnly()]);
   if (host.dataset.signature === signature) return;
   const wasOpen = host.querySelector<HTMLDetailsElement>('.user-requests-shell')?.open ?? false;
@@ -137,7 +173,7 @@ export function renderUserRequestsDock(host: HTMLElement, sessionId: string | nu
   const body = el('div', 'user-requests-body');
   for (const request of open) body.append(userRequestCard(request, actions));
   shell.append(heading, body);
-  host.replaceChildren(shell);
+  keepStepFocus(host, () => host.replaceChildren(shell), actions.focusFallback);
   host.hidden = false;
   host.dataset.signature = signature;
 }

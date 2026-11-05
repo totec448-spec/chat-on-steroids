@@ -2071,10 +2071,16 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('sessions:controls', async (payload) => sessionControlsFor(sessionIdArg.parse(payload).id));
   // A step handed to the person (#1695): only their click answers it, and the app runs nothing.
   handle('sessions:answerUserRequest', async (payload) => {
-    const { id, requestId, answer } = sessionIdArg.extend({
+    const parsed = sessionIdArg.extend({
       requestId: z.string().regex(/^ur_[a-z0-9]{12}$/),
       answer: z.enum(['done', 'skipped'])
-    }).parse(payload);
+    }).safeParse(payload);
+    if (!parsed.success) {
+      // Field names only, never the payload (CodeRabbit on #2049).
+      logWarn(`user request answer refused: invalid ${[...new Set(parsed.error.issues.map(issue => String(issue.path[0] ?? 'payload')))].join(', ')}`);
+      throw parsed.error;
+    }
+    const { id, requestId, answer } = parsed.data;
     const answered = await answerUserRequest(id, requestId, answer);
     if (answered?.changed) logInfo(`user request ${requestId} marked ${answer} by the person in session ${id}`);
     else logInfo(`user request ${requestId} not changed: ${answered ? `already ${answered.request.state}` : 'not found'} (session ${id})`);

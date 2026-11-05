@@ -101,3 +101,44 @@ it('shows one quiet line above the composer while steps wait, in the person\'s l
   renderUserRequestsDock(host, null, [request()], actions);
   expect(host.hidden).toBe(true);
 });
+
+it('keeps keyboard focus on the next step after one is answered, or hands it back (CodeRabbit on #2049)', async () => {
+  (window as any).api = { writeClipboard: vi.fn() };
+  const { renderUserRequestsDock, keepStepFocus, userRequestCard } = await import('../src/renderer/user-requests.js');
+  const host = document.getElementById('userRequests')!;
+  const fallback = vi.fn();
+  const actions = { answer: vi.fn(async () => undefined), readOnly: () => false, focusFallback: fallback };
+  const second = request({ id: 'ur_bcdefghijklm', command: 'second' });
+  const third = request({ id: 'ur_cdefghijklmn', command: 'third' });
+  renderUserRequestsDock(host, 's1', [request(), second, third], actions);
+  host.querySelector<HTMLDetailsElement>('.user-requests-shell')!.open = true;
+  const buttonOf = (index: number) => host.querySelectorAll<HTMLElement>('.user-request')[index]!.querySelector<HTMLButtonElement>('.user-request-actions button')!;
+  // The second step is answered with the keyboard: focus moves to the step that took its place.
+  buttonOf(1).focus();
+  renderUserRequestsDock(host, 's1', [request(), third], actions);
+  expect(document.activeElement).toBe(buttonOf(1));
+  expect(buttonOf(1).closest('.user-request')!.getAttribute('data-request-id')).toBe('ur_cdefghijklmn');
+  // The last one in the list: focus goes to the one before it.
+  buttonOf(1).focus();
+  renderUserRequestsDock(host, 's1', [request()], actions);
+  expect(document.activeElement).toBe(buttonOf(0));
+  // None left: focus is handed back.
+  buttonOf(0).focus();
+  renderUserRequestsDock(host, 's1', [], actions);
+  expect(fallback).toHaveBeenCalledTimes(1);
+  // A refresh while focus is elsewhere moves nothing.
+  const outside = document.createElement('button');
+  document.body.append(outside);
+  outside.focus();
+  renderUserRequestsDock(host, 's1', [request(), second], actions);
+  expect(document.activeElement).toBe(outside);
+  expect(fallback).toHaveBeenCalledTimes(1);
+
+  // A timeline card replaced by its answered state hands focus back too.
+  const slot = document.createElement('div');
+  document.body.append(slot);
+  slot.append(userRequestCard(request(), actions));
+  slot.querySelector<HTMLButtonElement>('.user-request-actions button')!.focus();
+  keepStepFocus(slot, () => slot.replaceChildren(userRequestCard(request({ state: 'done', answeredAt: 2 }), actions)), fallback);
+  expect(fallback).toHaveBeenCalledTimes(2);
+});

@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { afterAll, beforeAll, expect, it } from 'vitest';
+import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import {
   answerUserRequest, createSession, fileUserRequest, flushSessions, initSessionStore, readSessionUserRequests,
   resetSessionStoreForTests, sessionsRoot, setSessionOrigin
@@ -60,11 +60,55 @@ it('keeps an unreadable steps file aside instead of overwriting it', async () =>
   const session = await createSession({ conversationId: 'steps-damaged' });
   const folder = path.join(sessionsRoot(), session.id);
   await fs.writeFile(path.join(folder, 'requests.json'), '{"version":1,"requests":[{"id":', 'utf8');
+  // A reader outside the session queue only reads: it must not move a file a queued write may
+  // just have replaced (CodeRabbit on #2049).
   expect(await readSessionUserRequests(session.id)).toEqual([]);
+  expect((await fs.readdir(folder)).filter(name => name.startsWith('requests.json.unreadable-'))).toHaveLength(0);
+  expect(await fs.readFile(path.join(folder, 'requests.json'), 'utf8')).toBe('{"version":1,"requests":[{"id":');
+  // The queued write keeps it aside before it writes anything new.
+  const fresh = await fileUserRequest(session.id, step('fresh', 'steps-damaged'));
+  expect('request' in fresh).toBe(true);
   const aside = (await fs.readdir(folder)).filter(name => name.startsWith('requests.json.unreadable-'));
   expect(aside).toHaveLength(1);
   expect(await fs.readFile(path.join(folder, aside[0]!), 'utf8')).toBe('{"version":1,"requests":[{"id":');
-  expect('request' in await fileUserRequest(session.id, step('fresh', 'steps-damaged'))).toBe(true);
+  expect((await readSessionUserRequests(session.id)).map(row => row.command)).toEqual(['fresh']);
+});
+
+it('reads a full steps file of the largest allowed steps', async () => {
+  const session = await createSession({ conversationId: 'steps-large' });
+  const big = (index: number) => ({
+    // A control character takes six bytes in JSON (\u0001), so a full file is several MB (CodeRabbit on #2049).
+    command: `${index} ${'\u0001'.repeat(USER_REQUEST_LIMITS.commandBytes - 8)}`,
+    folder: '/work/app', remote: false, purpose: 'p'.repeat(USER_REQUEST_LIMITS.purpose),
+    expected: Array.from({ length: USER_REQUEST_LIMITS.expected }, (_, file) => ({ path: `${'d/'.repeat(240)}${file}`, real: `/work/app/${'d/'.repeat(240)}${file}` })),
+    constraints: 'c'.repeat(USER_REQUEST_LIMITS.constraints), conversationId: 'steps-large'
+  });
+  for (let index = 0; index < USER_REQUEST_LIMITS.kept; index++) {
+    const filed = await fileUserRequest(session.id, big(index));
+    if (!('request' in filed)) throw new Error('refused');
+    if (index < USER_REQUEST_LIMITS.kept - USER_REQUEST_LIMITS.open) await answerUserRequest(session.id, filed.request.id, 'done');
+  }
+  const stat = await fs.stat(path.join(sessionsRoot(), session.id, 'requests.json'));
+  expect(stat.size).toBeGreaterThan(2 * 1024 * 1024);
+  const read = await readSessionUserRequests(session.id);
+  expect(read).toHaveLength(USER_REQUEST_LIMITS.kept);
+  expect(read.filter(row => row.state === 'open')).toHaveLength(USER_REQUEST_LIMITS.open);
+  // Still read, so the open limit holds instead of a set-aside file starting empty.
+  expect(await fileUserRequest(session.id, step('one more', 'steps-large'))).toEqual({ refused: 'open-limit' });
+});
+
+it('writes nothing over a damaged steps file it could not keep aside', async () => {
+  const session = await createSession({ conversationId: 'steps-locked' });
+  const target = path.join(sessionsRoot(), session.id, 'requests.json');
+  await fs.writeFile(target, 'not json', 'utf8');
+  const rename = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+    if (String(to).includes('.unreadable-')) throw Object.assign(new Error('locked'), { code: 'EBUSY' });
+    throw new Error(`unexpected rename ${String(from)}`);
+  });
+  try {
+    await expect(fileUserRequest(session.id, step('blocked', 'steps-locked'))).rejects.toThrow(/could not be kept aside/);
+  } finally { rename.mockRestore(); }
+  expect(await fs.readFile(target, 'utf8')).toBe('not json');
 });
 
 it('tells the next chat after Compact & Resume, and Goal or Loop, which steps still wait for the person', async () => {

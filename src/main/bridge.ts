@@ -2283,7 +2283,12 @@ export async function userRequestViews(sessionId: string): Promise<UserRequestVi
   }
   for (const id of family.slice(1)) {
     const title = all.find(entry => entry.id === id)?.title ?? '';
-    for (const request of await readSessionUserRequests(id).catch(() => [])) {
+    const requests = await readSessionUserRequests(id).catch((error: NodeJS.ErrnoException) => {
+      // Said once per read, with only the reason: no step text and no ids (CodeRabbit on #2049).
+      logWarn(`steps for the person: a sub-agent's saved steps could not be read (${error?.code ?? 'error'}); they are left out of the main chat's list`);
+      return [];
+    });
+    for (const request of requests) {
       if (request.state === 'open') views.push({ ...request, found: await userRequestFound(request), from: { sessionId: id, title } });
     }
   }
