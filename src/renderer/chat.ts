@@ -39,6 +39,7 @@ import { createSidebarOrder, SIDEBAR_PROJECT_SCOPE } from './sidebar-order.js';
 import { dateSections, type DateSection } from './date-sections.js';
 import { createSidebarPins, pinnedSortScope } from './sidebar-pins.js';
 import { createComposerDrafts } from './composer-drafts.js';
+import { createSelectedTabFollow } from './selected-tab-follow.js';
 import { createSidebarCompletionState } from './sidebar-completion.js';
 import { toolResultText } from './tool-result.js';
 import { renderEditCards } from './tool-artifacts.js';
@@ -1640,27 +1641,15 @@ function sortSessionRows(rows: SessionSummary[]): SessionSummary[] {
 }
 
 function mergeSessionRows(rows: SessionSummary[]): void {
-  const selectedBefore = selectedId === null ? undefined : sessions.find(entry => entry.id === selectedId);
   const merged = new Map(sessions.map((entry) => [entry.id, entry]));
   for (const entry of rows) merged.set(entry.id, entry);
   sessions = sortSessionRows([...merged.values()]);
-  followFirstSelectedBinding(selectedBefore, selectedId === null ? undefined : merged.get(selectedId));
+  selectedTabFollow?.observe(selectedId === null ? undefined : merged.get(selectedId));
 }
 
+let selectedTabFollow: ReturnType<typeof createSelectedTabFollow> | null = null;
 function requestSelectedTabFollow(id: string | null): void {
-  void api.followSessionTab?.(id)?.catch(() => undefined);
-}
-
-const followedFirstBindings = new Set<string>();
-function followFirstSelectedBinding(before: SessionSummary | undefined, after: SessionSummary | undefined): void {
-  // Project history may merge the first binding before the newest-page refresh sees it.
-  if (before?.id === selectedId && before.origin?.kind === 'desktop' && before.conversationId === null &&
-      after?.id === before.id && after.origin?.kind === 'desktop' && after.conversationId) {
-    const binding = `${after.id}:${after.conversationId}`;
-    if (followedFirstBindings.has(binding)) return;
-    followedFirstBindings.add(binding);
-    requestSelectedTabFollow(after.id);
-  }
+  selectedTabFollow?.select(id === null ? null : sessions.find(row => row.id === id) ?? { id, conversationId: null, origin: null });
 }
 
 /**
@@ -1673,7 +1662,6 @@ async function loadSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
   const generation = ++sessionsLoadGeneration;
   const [list, catalog] = await Promise.all([run(api.listSessions({ limit: SESSION_PAGE_SIZE })), run(api.listProjects())]);
   if (!list || generation !== sessionsLoadGeneration) return;
-  const selectedBefore = selectedId === null ? null : sessions.find(entry => entry.id === selectedId);
   const changed = changedTranscripts;
   changedTranscripts = { all: false, ids: new Set() };
   if (catalog) projects = catalog;
@@ -1713,10 +1701,12 @@ async function loadSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
     detailCursor = null;
     requestSelectedTabFollow(null);
   }
+  const recoveredFollow = selectedTabFollow?.restore(sessions);
+  if (selectedId === null && recoveredFollow) selectSession(recoveredFollow);
   paintSessions();
   chatSearch?.refresh();
   const row = selectedId === null ? undefined : sessions.find(entry => entry.id === selectedId);
-  followFirstSelectedBinding(selectedBefore ?? undefined, row);
+  selectedTabFollow?.observe(row);
   if (detail === 'reread' || selectedId === null || detailFor !== selectedId || changed.all || changed.ids.has(selectedId) ||
       row?.updatedAt !== detailStamp?.updatedAt || row?.events !== detailStamp?.events) await loadDetail();
   else void refreshSessionControls();
@@ -8693,6 +8683,7 @@ export function chatApply(state: AppState, previous?: Config): void {
   const { config, bridge } = state;
   applyRouteSettling(state.status.routeSettlingUntil ?? 0);
   if (bridgePresent !== bridge.present) { bridgePresent = bridge.present; paintPendingInputs(); }
+  selectedTabFollow?.observe(sessions.find(row => row.id === selectedId));
   if (sendCheckConfigured !== !!config.ui.sendCheckUrl) { sendCheckConfigured = !!config.ui.sendCheckUrl; paintPendingInputs(); }
   if (visible && selectedId) void refreshSessionControls();
   applyChatModels(config, previous);
@@ -9605,7 +9596,7 @@ function selectNewChat(projectId: string | null = null, branch: typeof newChatBr
 }
 
 export function initChat(next: Deps): void {
-  followedFirstBindings.clear();
+  selectedTabFollow = createSelectedTabFollow(id => api.followSessionTab?.(id));
   sidebarCompletion = createSidebarCompletionState();
   sidebarPins = createSidebarPins();
   sidebarOrder = createSidebarOrder($('sessionList'), () => [
