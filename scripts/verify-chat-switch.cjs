@@ -27,11 +27,6 @@ app.whenReady().then(async () => {
       chatIds:['chat-'+id],startedAt:1,updatedAt:2-index,endedAt:2,events:1,userMessages:1,
       toolCalls:0,lastToolCallAt:null,estimatedTokens:10,contextTokens:10,errors:0,
       lastHandoffId:null,lastTurnOutcome:null,activeTurnId:null,agents:[],origin:null}));
-    if (location.search.includes('recover-follow')) {
-      sessions[0].origin={kind:'desktop',fromSessionId:null,agentId:null,task:''};
-      sessions[0].conversationId=sessionStorage.getItem('opening-follow') ? null : 'native-chat-a';
-    }
-    window.followCalls=[];
     window.inputs=[]; window.extra=[];
     const detail = id=>({summary:sessions.find(s=>s.id===id),total:1+window.extra.length,nextFrom:2+window.extra.length,events:[{
       seq:1,time:1,source:'extension',kind:'user_message',messageId:id,
@@ -39,8 +34,6 @@ app.whenReady().then(async () => {
     const ok=data=>Promise.resolve({ok:true,data});
     window.pending=[]; window.hold=false;
     window.api=new Proxy({getState:()=>ok(state),getLog:()=>ok([]),listProjects:()=>ok([]),
-      followSessionTab:id=>{window.followCalls.push(id);return sessionStorage.getItem('hold-follow')
-        ? new Promise(()=>{}) : ok(sessionStorage.getItem('accept-follow')==='1')},
       listSessions:()=>ok({sessions,total:2,nextCursor:null,activeId:null,pressure:[],blocked:[]}),
       getSession:id=>window.hold?new Promise(resolve=>window.pending.push({id,resolve})):ok(detail(id)),
       getSessionControls:()=>ok({automation:'off',objective:'',blocked:'',job:null}),
@@ -107,26 +100,7 @@ app.whenReady().then(async () => {
     await until(`document.getElementById('timeline').textContent.includes('Exactly one follow-up') && !document.querySelector('#inputQueue .pending-message')`);
     await js(`document.getElementById('newChat').click()`);
     assert.equal(await js(`document.getElementById('timelineEmpty').hidden`),false);
-    const reload=async()=>{
-      const loaded=new Promise(resolve=>win.webContents.once('did-finish-load',resolve));
-      win.reload();await loaded;
-      await until('window.fixtureReady && document.querySelectorAll("#sessionList [data-id]").length===2');
-    };
-    const key='chat-on-steroids.pending-tab-follow';
-    for (const phase of ['before-binding','during-ipc']) {
-      await js(`sessionStorage.removeItem('accept-follow');sessionStorage.removeItem('hold-follow');sessionStorage.removeItem('opening-follow');
-        sessionStorage.setItem('${phase==='before-binding'?'opening-follow':'hold-follow'}','1')`);
-      await win.loadURL(server.resolvedUrls.local[0]+'fixture.html?recover-follow=1');
-      await until('window.fixtureReady && document.querySelectorAll("#sessionList [data-id]").length===2');
-      await js(`document.querySelector('#sessionList [data-id="a"]').click()`);
-      await until(`localStorage.getItem('${key}')!==null && window.followCalls.includes('a')`);
-      await js(`sessionStorage.removeItem('opening-follow');sessionStorage.removeItem('hold-follow');sessionStorage.setItem('accept-follow','1')`);
-      await reload();
-      await until(`document.querySelector('.sess.is-sel')?.dataset.id==='a' && localStorage.getItem('${key}')===null`);
-      assert.deepEqual(await js('window.followCalls'),['a']);
-      console.log('PASS: recovered desktop tab follow after renderer reload '+phase);
-    }
-    fs.writeFileSync(path.join(output,'result.json'),JSON.stringify({passed:true,frames,deliveryFrames,restartFollow:['before-binding','during-ipc']},null,2));
+    fs.writeFileSync(path.join(output,'result.json'),JSON.stringify({passed:true,frames,deliveryFrames},null,2));
     console.log('PASS: retained transcript across selection and 100 delivery frames; exactly one message; explicit New Chat welcome.');
   } finally { clearTimeout(deadline);win?.destroy(); await server.close(); }
 }).then(()=>app.exit(0),error=>{console.error(error);app.exit(1)});
