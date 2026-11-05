@@ -207,7 +207,7 @@ it('logs why Run now did not enqueue when that chat has no schedule', async () =
   const { runs, deps, queued } = await setup();
   expect(await runs.runScheduleNow(SESSION, local('2026-10-24T10:30:00'), deps)).toBe(false);
   expect(queued).toHaveLength(0);
-  expect(deps.log).toHaveBeenCalledWith(expect.stringContaining(`not queued now: no schedule exists (${SESSION})`));
+  expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('not queued now: no schedule exists'));
 });
 
 it('durably records Run now before enqueue so a failed schedule write cannot create an untracked outbox row', async () => {
@@ -235,6 +235,49 @@ it('durably records Run now before enqueue so a failed schedule write cannot cre
   });
   expect(afterRestart).toHaveLength(1);
   expect(afterRestart[0]).toMatchObject({ scheduled: { dueAt: local('2026-10-24T11:00:00'), late: false } });
+});
+
+it('restores the previous pending input id when a rejected Run now was not written to the outbox', async () => {
+  const { runs, deps, queued } = await setup();
+  await runs.saveSchedule({ sessionId: SESSION, text: 'Hourly check', repeat: { kind: 'hours', every: 1 }, until: null }, local('2026-10-24T10:00:00'));
+  await runs.runDueSchedules(local('2026-10-24T11:00:10'), deps);
+  const automaticId = queued[0]!.id as string;
+  const rejectedManual = {
+    ...deps,
+    enqueue: vi.fn(async () => { throw new Error('outbox write failed'); }),
+    pending: async () => new Set([automaticId])
+  };
+
+  await expect(runs.runScheduleNow(SESSION, local('2026-10-24T11:30:00'), rejectedManual)).rejects.toThrow('outbox write failed');
+  expect((await runs.listSchedules())[0]?.lastInputId).toBe(automaticId);
+  expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('its input is not pending; restored the previous input identity'));
+
+  await runs.runDueSchedules(local('2026-10-24T12:00:10'), { ...deps, pending: async () => new Set([automaticId]) });
+  expect(queued).toHaveLength(1);
+  expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('previous run still waits in the queue'));
+});
+
+it('keeps the manual input id when enqueue rejects after the manual row became pending', async () => {
+  const { runs, deps, queued } = await setup();
+  await runs.saveSchedule({ sessionId: SESSION, text: 'Hourly check', repeat: { kind: 'hours', every: 1 }, until: null }, local('2026-10-24T10:00:00'));
+  let manualId = '';
+  const persistedThenRejected = {
+    ...deps,
+    enqueue: vi.fn(async input => {
+      manualId = input.id;
+      queued.push(input as never);
+      throw new Error('outbox acknowledgement lost');
+    }),
+    pending: async () => new Set(manualId ? [manualId] : [])
+  };
+
+  await expect(runs.runScheduleNow(SESSION, local('2026-10-24T10:30:00'), persistedThenRejected)).rejects.toThrow('outbox acknowledgement lost');
+  expect((await runs.listSchedules())[0]?.lastInputId).toBe(manualId);
+  expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('its input remains pending; kept its identity'));
+
+  await runs.runDueSchedules(local('2026-10-24T11:00:10'), { ...deps, pending: async () => new Set([manualId]) });
+  expect(queued).toHaveLength(1);
+  expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('previous run still waits in the queue'));
 });
 
 it('keeps Run now repeatable and tracks the newest manual row when an automatic run is already pending', async () => {

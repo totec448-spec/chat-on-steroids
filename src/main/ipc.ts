@@ -99,7 +99,7 @@ import { onBackgroundExecChange, runningExecProcesses, stopExecProcess } from '.
 import { keychainNoticeReady } from './keychain-notice.js';
 import { runDiagnostics } from './diagnostics.js';
 import { collectReportFacts, readRecentLog, renderDiagnosticsReport, saveDiagnosticsReport, systemFacts, memoryFacts } from './diagnostics-report.js';
-import { answerUserRequest, clearProjectNote, listSessions, readTurnTraces } from './session/store.js';
+import { answerUserRequest, clearProjectNote, getSessionOrNullIfMissing, listSessions, readTurnTraces } from './session/store.js';
 import { deleteSchedule, listScheduleItems, listSchedules, runScheduleNow, saveSchedule, scheduleRepeatSchema, setSchedulePaused } from './scheduled-runs.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, logWarn, onLog } from './logger.js';
 import { markStartup } from './startup-timing.js';
@@ -1379,7 +1379,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('schedules:list', async () => listScheduleItems(Date.now(), {
     session: async id => {
-      const summary = await getSession(id);
+      const summary = await getSessionOrNullIfMissing(id);
       return summary ? { id: summary.id, title: summary.title } : null;
     },
     log: logInfo
@@ -1388,7 +1388,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const request = z.object({ sessionId: scheduleSession, text: z.string().max(200_000), repeat: z.unknown(), until: z.number().int().nonnegative().nullable(),
       catchUp: z.boolean().optional() }).strict().parse(payload);
     const repeat = scheduleRepeatSchema.parse(request.repeat);
-    if (!(await getSession(request.sessionId))) throw new Error('This chat no longer exists.');
+    if (!(await getSessionOrNullIfMissing(request.sessionId))) throw new Error('This chat no longer exists.');
     const saved = await saveSchedule({ sessionId: request.sessionId, text: request.text, repeat, until: request.until, catchUp: request.catchUp === true });
     logInfo(`scheduled run: schedule saved (${repeat.kind}) for ${request.sessionId}`);
     push('session:changed');
@@ -1412,10 +1412,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { sessionId } = z.object({ sessionId: scheduleSession }).strict().parse(payload);
     const queued = await runScheduleNow(sessionId, Date.now(), {
       session: async id => {
-        const summary = await getSession(id);
+        const summary = await getSessionOrNullIfMissing(id);
         return summary ? { id: summary.id, conversationId: summary.conversationId ?? null, activeTurnId: summary.activeTurnId ?? null } : null;
       },
       enqueue: input => enqueueInput(input),
+      pending: async () => new Set((await listInputs()).filter(row => ['queued', 'browser', 'tool'].includes(row.state)).map(row => row.id)),
       log: logInfo
     });
     if (queued) push('session:changed');

@@ -65,7 +65,7 @@ export interface ScheduleListDeps {
   log(line: string): void;
 }
 
-export type RunNowDeps = Pick<RunnerDeps, 'session' | 'enqueue' | 'log'>;
+export type RunNowDeps = Pick<RunnerDeps, 'session' | 'enqueue' | 'pending' | 'log'>;
 
 let chain: Promise<unknown> = Promise.resolve();
 /** One change at a time: a save, a pause and a run never interleave on the same file. */
@@ -200,12 +200,12 @@ export function runScheduleNow(sessionId: string, now: number, deps: RunNowDeps)
     const schedules = await load();
     const run = schedules.find(row => row.sessionId === sessionId);
     if (!run) {
-      deps.log(`scheduled run: not queued now: no schedule exists (${sessionId})`);
+      deps.log('scheduled run: not queued now: no schedule exists');
       return false;
     }
     const session = await deps.session(run.sessionId);
     if (!session) {
-      deps.log(`scheduled run: removed: its chat no longer exists (${run.sessionId})`);
+      deps.log('scheduled run: removed: its chat no longer exists');
       await save(schedules.filter(row => row.id !== run.id));
       return false;
     }
@@ -214,16 +214,40 @@ export function runScheduleNow(sessionId: string, now: number, deps: RunNowDeps)
     // queued. If the process stops after this write, the dangling non-pending id is harmless; if
     // enqueue succeeds, the next scheduled tick can already see the exact pending manual run.
     await save(schedules.map(row => row.id === run.id ? { ...row, lastInputId: id } : row));
-    await deps.enqueue({
-      id,
-      sessionId: run.sessionId,
-      text: run.text,
-      mode: session.activeTurnId ? 'after-turn' : 'auto',
-      dueAt: now,
-      model: null,
-      reasoningEffort: null,
-      scheduled: { scheduleId: run.id, dueAt: now, late: false }
-    });
+    try {
+      await deps.enqueue({
+        id,
+        sessionId: run.sessionId,
+        text: run.text,
+        mode: session.activeTurnId ? 'after-turn' : 'auto',
+        dueAt: now,
+        model: null,
+        reasoningEffort: null,
+        scheduled: { scheduleId: run.id, dueAt: now, late: false }
+      });
+    } catch (error) {
+      try {
+        // enqueue may reject after it has durably written the input. Keep the new identity
+        // whenever that exact row is still waiting; otherwise restore the previous row so
+        // the next due tick continues to guard it against a duplicate.
+        const pending = await deps.pending();
+        if (!pending.has(id)) {
+          const restored = schedules.map(row => {
+            if (row.id !== run.id) return row;
+            const { lastInputId: _manualInputId, ...previous } = row;
+            return run.lastInputId ? { ...previous, lastInputId: run.lastInputId } : previous;
+          });
+          await save(restored);
+          deps.log('scheduled run: manual enqueue failed and its input is not pending; restored the previous input identity');
+        } else {
+          deps.log('scheduled run: manual enqueue reported failure but its input remains pending; kept its identity');
+        }
+      } catch (reconcileError) {
+        const detail = reconcileError instanceof Error ? reconcileError.message : String(reconcileError);
+        deps.log('scheduled run: could not reconcile a rejected manual enqueue (' + detail + '); kept its durable input identity');
+      }
+      throw error;
+    }
     deps.log(`scheduled run: queued now for ${run.sessionId}`);
     return true;
   });

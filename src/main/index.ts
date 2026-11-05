@@ -42,7 +42,7 @@ import { executableFingerprint, initKeychainNotice } from './keychain-notice.js'
 import { pluginManager } from './plugins/manager.js';
 import { sessionActivityExpiresAt, setBrowserOpener, setBrowserWorkArea, shutdownBridge, startBridge } from './bridge.js';
 import { setStuckNotifier } from './stuck-notice.js';
-import { flushSessions, getSession, initSessionStore, listSessions, readRecentEvents, setRecordingStorageLimit } from './session/store.js';
+import { flushSessions, getSession, getSessionOrNullIfMissing, initSessionStore, listSessions, readRecentEvents, setRecordingStorageLimit } from './session/store.js';
 import { runDueSchedules, type RunnerDeps } from './scheduled-runs.js';
 import { enqueueInput, listInputs } from './session/input.js';
 import { createTurnNotifier } from './turn-notifications.js';
@@ -574,7 +574,10 @@ void app.whenReady().then(async () => {
   // while it slept or the app was closed goes out once, labelled late.
   const scheduleDeps: RunnerDeps = {
     // A lookup that fails is not a deleted chat: the runner keeps the schedule and asks again.
-    session: async id => { const summary = await getSession(id); return summary ? { id: summary.id, conversationId: summary.conversationId ?? null, activeTurnId: summary.activeTurnId ?? null } : null; },
+    session: async id => {
+      const summary = await getSessionOrNullIfMissing(id);
+      return summary ? { id: summary.id, conversationId: summary.conversationId ?? null, activeTurnId: summary.activeTurnId ?? null } : null;
+    },
     enqueue: input => enqueueInput(input),
     pending: async () => new Set((await listInputs()).filter(row => ['queued', 'browser', 'tool'].includes(row.state)).map(row => row.id)),
     log: logInfo

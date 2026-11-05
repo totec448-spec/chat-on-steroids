@@ -233,23 +233,36 @@ describe('terminateProcess', () => {
   it('ends only the process it names, and what that process started keeps running', async () => {
     const pidFile = path.join(cwd, 'terminate-one-child.pid');
     const { spawn } = await import('node:child_process');
+    const shell = IS_WINDOWS ? findPowerShell() : null;
+    if (IS_WINDOWS) expect(shell).not.toBeNull();
     // On Windows the parent is PowerShell starting a program the way the desktop helper does. A
     // node parent would not do: libuv puts a node process's children in a kill-on-close job, so
     // they end with it however it is ended.
+    const script = "$ErrorActionPreference = 'Stop'; $s = New-Object System.Diagnostics.ProcessStartInfo; " +
+      "$s.FileName = Join-Path $env:SystemRoot 'System32\\ping.exe'; $s.Arguments = '-n 600 127.0.0.1'; " +
+      "$s.UseShellExecute = $false; $s.CreateNoWindow = $true; $p = [System.Diagnostics.Process]::Start($s); " +
+      "if (-not $p) { throw 'Could not start ping.exe' }; " +
+      "Set-Content -LiteralPath $env:COS_TEST_PID_FILE -Value $p.Id -NoNewline; Start-Sleep -Seconds 600";
+    const encodedScript = Buffer.from(script, 'utf16le').toString('base64');
     const started = IS_WINDOWS
-      ? spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-        `$s = New-Object System.Diagnostics.ProcessStartInfo; $s.FileName = 'ping.exe'; $s.Arguments = '-n 600 127.0.0.1'; $s.UseShellExecute = $false; $s.CreateNoWindow = $true; ` +
-        '$p = [System.Diagnostics.Process]::Start($s); Set-Content -LiteralPath $env:COS_TEST_PID_FILE -Value $p.Id; Start-Sleep 600'],
-      { stdio: 'ignore', windowsHide: true, env: { ...process.env, COS_TEST_PID_FILE: pidFile } })
+      ? spawn(shell!, ['-NoProfile', '-NonInteractive', '-EncodedCommand', encodedScript],
+        { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true, env: { ...process.env, COS_TEST_PID_FILE: pidFile } })
       : spawn(node, ['-e', `const {spawn}=require('node:child_process'); const fs=require('node:fs'); const child=spawn(${JSON.stringify(node)}, ['-e', 'setInterval(() => {}, 1000)'], {stdio:'ignore'}); fs.writeFileSync(${JSON.stringify(pidFile)}, String(child.pid)); setInterval(() => {}, 1000);`], { stdio: 'ignore' });
     const exited = new Promise((resolve) => started.once('exit', resolve));
+    const spawnReady = new Promise<void>((resolve, reject) => {
+      started.once('spawn', resolve);
+      started.once('error', reject);
+    });
+    const stderr: string[] = [];
+    started.stderr?.on('data', chunk => stderr.push(String(chunk)));
     let childPid = 0;
     try {
+      await spawnReady;
       for (let tries = 0; tries < 200 && !childPid; tries++) {
         childPid = Number.parseInt((await fs.readFile(pidFile, 'utf8').catch(() => '0')).trim(), 10) || 0;
         if (!childPid) await new Promise((resolve) => setTimeout(resolve, 50));
       }
-      expect(childPid).toBeGreaterThan(0);
+      expect(childPid, stderr.join('') || 'the parent process did not write its child PID').toBeGreaterThan(0);
       await terminateProcess(started.pid!);
       await exited;
       expect(() => process.kill(childPid, 0)).not.toThrow();
