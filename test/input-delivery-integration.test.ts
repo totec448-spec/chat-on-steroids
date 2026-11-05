@@ -4091,6 +4091,10 @@ it("holds a Loop step at /goal/draft while other chats fill every slot, says so 
     expect((await bridge.sessionControlsFor(session.id)).goalWait).toEqual({ reason: 'slots' });
     working = new Set();
     expect((await post('/goal/draft', draft)).status).toBe(200);
+    // A request refused for another reason holds no slot (CodeRabbit on #2051): the gate is asked last.
+    slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(() => working);
+    expect((await post('/goal/draft', { ...draft, clientId: 'another-page' })).body.error).toBe('goal_owned_elsewhere');
+    expect(slots.automaticSendRefusal('input:someone-else', 'someone-else')).toBeNull();
     await bridge.setSessionAutomation(session.id, 'off');
   } finally {
     clock.mockRestore();

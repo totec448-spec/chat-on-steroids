@@ -9373,6 +9373,20 @@
           ? t('content_goal_backend_custom_endpoint', 'custom endpoint')
           : 'OpenRouter';
     const bar = (at, done = false) => ({ steps: GOAL_STEPS, at, done });
+    // Chats working at once (#1694): a ready message waits for a free slot or ChatGPT's pause before
+    // Send. Said as such, not as written or settling (CodeRabbit on #2051).
+    if (draft?.stage === 'ready' && goal.slotWait) {
+      const paused = String(goal.slotWait).startsWith('ChatGPT asked to slow down');
+      return {
+        stage: paused
+          ? t('content_goal_wait_paused', 'ChatGPT asked to slow down · waits until it says')
+          : t('content_goal_wait_slots', 'Waiting for a free slot (Chats working at once)'),
+        detail: '',
+        body: draft.reply || '',
+        kind: 'goal',
+        ...bar(2)
+      };
+    }
     const failure = goal.error || (draft && draft.stage === 'failed'
       ? goalFailureText(draft) || draft.error || t('content_goal_backend_no_answer', '$1 did not answer', dest)
       : '');

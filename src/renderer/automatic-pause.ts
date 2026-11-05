@@ -14,7 +14,11 @@ export function paintAutomaticPause(until: number | null): void {
   if (!notice) return;
   const active = until !== null && until > Date.now() ? until : null;
   window.clearTimeout(timer);
-  if (active === null) { notice.hidden = true; shownUntil = null; return; }
+  if (active === null) {
+    // Ended by itself, or by Resume now: a keyboard user on its button continues in the message box (CodeRabbit on #2051).
+    if (!notice.hidden && notice.contains(document.activeElement)) document.getElementById('chatInput')?.focus();
+    notice.hidden = true; shownUntil = null; return;
+  }
   if (shownUntil !== active) {
     shownUntil = active;
     ui(document.getElementById('automaticPauseText')!, 'textContent', () =>
@@ -29,8 +33,6 @@ export function paintAutomaticPause(until: number | null): void {
     resume.disabled = true;
     try {
       if (await run(window.api.resumeAutomaticSends())) {
-        // The notice and its button go away: a keyboard user continues in the message box (CodeRabbit on #2051).
-        if (notice.contains(document.activeElement)) document.getElementById('chatInput')?.focus();
         paintAutomaticPause(null);
       }
     }

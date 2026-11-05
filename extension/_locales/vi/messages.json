@@ -512,6 +512,12 @@
   "content_goal_wait_workers": {
     "message": "Đang chờ các tác nhân phụ của cuộc trò chuyện này"
   },
+  "content_goal_wait_slots": {
+    "message": "Đang chờ chỗ trống (Số cuộc trò chuyện làm việc cùng lúc)"
+  },
+  "content_goal_wait_paused": {
+    "message": "ChatGPT yêu cầu chậm lại · chờ đến giờ đã báo"
+  },
   "content_goal_writing_first_message": {
     "message": "$1 đang viết tin nhắn đầu tiên"
   },
