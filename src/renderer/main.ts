@@ -89,7 +89,7 @@ const scheduled = initScheduled({
   pause: (sessionId, paused) => api.pauseSchedule(sessionId, paused),
   runNow: sessionId => api.runScheduleNow(sessionId),
   delete: sessionId => api.deleteSchedule(sessionId),
-  openChat: sessionId => { showTab('chat'); openScheduledChat(sessionId); }
+  openChat: sessionId => { showTab('chat'); void openScheduledChat(sessionId); }
 });
 api.onSessionChanged(() => {
   if (document.querySelector('.panel[data-panel="scheduled"]')?.classList.contains('is-active')) void scheduled.refresh();

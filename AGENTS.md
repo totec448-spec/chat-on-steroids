@@ -2193,7 +2193,8 @@ calls the existing pause/resume/delete actions. `schedules:runNow` queues a manu
 the same input outbox (waiting for the active turn if necessary) without advancing the
 recurrence cursor; it updates only the last queued input id so a scheduled tick
 does not duplicate a pending manual run. A deleted chat cannot be targeted,
-and a confirmed orphan record is removed.
+and a confirmed orphan record is removed and logged. A chat that cannot be read during the global
+list refresh is kept and omitted from that refresh while the other schedules continue loading.
 The delivered `user_message` records `scheduled { dueAt, late }` (copied from the input in
 `recordDeliveredInput`, kept when a later page echo lacks it), so the sent message keeps the same
 line in the chat after the outbox row is pruned.

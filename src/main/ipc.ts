@@ -1381,7 +1381,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     session: async id => {
       const summary = await getSession(id);
       return summary ? { id: summary.id, title: summary.title } : null;
-    }
+    },
+    log: logInfo
   }));
   handle('schedules:save', async payload => {
     const request = z.object({ sessionId: scheduleSession, text: z.string().max(200_000), repeat: z.unknown(), until: z.number().int().nonnegative().nullable(),

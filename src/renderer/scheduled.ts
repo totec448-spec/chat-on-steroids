@@ -6,7 +6,7 @@ type Reply<T> = { ok: true; data: T } | { ok: false; error: string };
 export interface ScheduledController {
   list: () => Promise<Reply<ScheduledRunListItem[]>>;
   pause: (sessionId: string, paused: boolean) => Promise<Reply<unknown>>;
-  runNow: (sessionId: string) => Promise<Reply<unknown>>;
+  runNow: (sessionId: string) => Promise<Reply<boolean>>;
   delete: (sessionId: string) => Promise<Reply<unknown>>;
   openChat: (sessionId: string) => void;
 }
@@ -45,17 +45,42 @@ export function initScheduled(controller: ScheduledController): { refresh: () =>
   const description = document.getElementById('scheduledDescription')!;
   const refreshButton = document.getElementById('scheduledRefresh') as HTMLButtonElement;
   let records: ScheduledRunListItem[] = [];
+  let recordsSignature = '';
   let busy = false;
-  let reading = 0;
+  let refreshInFlight: Promise<void> | null = null;
+  let refreshDirty = false;
   let feedback = '';
+  let feedbackError = false;
 
   const setStatus = (message: string, error = false): void => {
     feedback = message;
+    feedbackError = error;
     status.hidden = !message;
     status.textContent = message ? t(message) : '';
     status.classList.toggle('is-error', error);
   };
   description.textContent = t('Manage the messages scheduled in your chats.');
+
+  type ActionFocus = { sessionId: string; action: string; row: number };
+  const focusedAction = (): ActionFocus | null => {
+    const active = document.activeElement as HTMLButtonElement | null;
+    if (!active?.dataset.scheduledAction || !active.dataset.sessionId || !list.contains(active)) return null;
+    const row = [...list.querySelectorAll<HTMLElement>('.scheduled-index-row')].indexOf(active.closest<HTMLElement>('.scheduled-index-row')!);
+    return { sessionId: active.dataset.sessionId, action: active.dataset.scheduledAction, row };
+  };
+  const restoreFocus = (saved: ActionFocus | null): void => {
+    if (!saved) return;
+    const buttons = [...list.querySelectorAll<HTMLButtonElement>('button[data-scheduled-action]')];
+    const exact = buttons.find(node => node.dataset.sessionId === saved.sessionId && node.dataset.scheduledAction === saved.action);
+    if (exact) { exact.focus(); return; }
+    const rows = [...list.querySelectorAll<HTMLElement>('.scheduled-index-row')];
+    const row = rows[Math.min(Math.max(saved.row, 0), rows.length - 1)];
+    (row?.querySelector<HTMLButtonElement>('button[data-scheduled-action]') ?? refreshButton).focus();
+  };
+  const applyDisabled = (): void => {
+    for (const action of list.querySelectorAll<HTMLButtonElement>('button[data-scheduled-action]')) action.disabled = busy;
+    refreshButton.disabled = busy || refreshInFlight !== null;
+  };
 
   const render = (): void => {
     list.replaceChildren();
@@ -75,52 +100,81 @@ export function initScheduled(controller: ScheduledController): { refresh: () =>
       const body = element('div', 'scheduled-index-body');
       body.append(title, meta, element('p', 'scheduled-index-message', record.text));
       const actions = element('div', 'scheduled-index-actions');
+      const action = (label: string, name: string, run: () => void, className = 'btn') => {
+        const node = button(label, run, className);
+        node.dataset.scheduledAction = name;
+        node.dataset.sessionId = record.sessionId;
+        return node;
+      };
       actions.append(
-        button(t('Open chat'), () => controller.openChat(record.sessionId)),
-        button(record.paused ? t('Resume') : t('Pause'), () => void mutate(() => controller.pause(record.sessionId, !record.paused))),
-        button(t('Run now'), () => void mutate(() => controller.runNow(record.sessionId)), 'btn btn-solid'),
-        button(t('Delete'), () => {
+        action(t('Open chat'), 'open', () => controller.openChat(record.sessionId)),
+        action(record.paused ? t('Resume') : t('Pause'), 'pause', () => void mutate(() => controller.pause(record.sessionId, !record.paused))),
+        action(t('Run now'), 'run-now', () => void mutate(() => controller.runNow(record.sessionId), queued => queued ? 'Queued' : 'Skipped'), 'btn btn-solid'),
+        action(t('Delete'), 'delete', () => {
           if (window.confirm(t('Delete the schedule for {0}?', [record.sessionTitle || t('Untitled chat')]))) {
             void mutate(() => controller.delete(record.sessionId));
           }
         }, 'btn scheduled-index-delete')
       );
-      for (const action of actions.querySelectorAll('button')) action.disabled = busy;
       row.append(body, actions);
       list.append(row);
     }
+    applyDisabled();
   };
 
-  const refresh = async (): Promise<void> => {
-    const own = ++reading;
-    refreshButton.disabled = true;
+  const readOnce = async (): Promise<void> => {
     try {
       const result = await controller.list();
-      if (own !== reading) return;
       if (!result.ok) throw new Error(result.error);
-      records = result.data;
-      setStatus('');
-      render();
+      const signature = JSON.stringify(result.data);
+      if (feedbackError) setStatus('');
+      if (signature !== recordsSignature) {
+        records = result.data;
+        recordsSignature = signature;
+        render();
+      }
     } catch (error) {
-      if (own === reading) setStatus(error instanceof Error ? error.message : t('Could not load schedules'), true);
-    } finally {
-      if (own === reading) refreshButton.disabled = false;
+      setStatus(error instanceof Error ? error.message : t('Could not load schedules'), true);
     }
   };
 
-  const mutate = async (work: () => Promise<Reply<unknown>>): Promise<void> => {
+  const refresh = (): Promise<void> => {
+    if (refreshInFlight) {
+      refreshDirty = true;
+      return refreshInFlight;
+    }
+    let task: Promise<void>;
+    task = (async () => {
+      do {
+        refreshDirty = false;
+        await readOnce();
+      } while (refreshDirty);
+    })().finally(() => {
+      if (refreshInFlight === task) refreshInFlight = null;
+      applyDisabled();
+    });
+    refreshInFlight = task;
+    applyDisabled();
+    return task;
+  };
+
+  const mutate = async <T>(work: () => Promise<Reply<T>>, success?: (data: T) => string): Promise<void> => {
     if (busy) return;
+    const focus = focusedAction();
     busy = true;
-    render();
+    applyDisabled();
     try {
       const result = await work();
       if (!result.ok) throw new Error(result.error);
+      if (!success && !feedbackError) setStatus('');
       await refresh();
+      if (success) setStatus(success(result.data));
     } catch (error) {
       setStatus(error instanceof Error ? error.message : t('Operation failed'), true);
     } finally {
       busy = false;
-      render();
+      applyDisabled();
+      restoreFocus(focus);
     }
   };
   refreshButton.addEventListener('click', () => void refresh());

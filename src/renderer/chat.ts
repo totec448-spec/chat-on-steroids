@@ -1008,6 +1008,13 @@ let changedTranscripts: { all: boolean; ids: Set<string> } = { all: false, ids: 
 let detailStamp: { updatedAt: number; events: number } | null = null;
 let toolActivityTimer: number | undefined;
 let sessionsLoadGeneration = 0;
+/** The newest whole-catalog read still running. Scheduled-list navigation waits for it before
+ * deciding that a target is outside the newest page, so opening a chat never races showTab's load. */
+let sessionsLoadPromise: Promise<void> | null = null;
+/** One exact summary fetched to open a chat outside the newest catalog page. It stays alongside
+ * that page while selected; this is not pagination and therefore must not set loadedOlderSessions. */
+let selectedCatalogFallback: SessionSummary | null = null;
+let scheduledOpenGeneration = 0;
 let detailLoadGeneration = 0;
 let handoffLoadGeneration = 0;
 
@@ -1662,7 +1669,7 @@ function requestSelectedTabFollow(id: string | null): void {
  * explicit refreshes keep `'reread'`. Pushes are consumed after the list arrives, so the
  * detail read that follows always starts after every write they announced.
  */
-async function loadSessions(detail: 'reread' | 'changed' = 'reread'): Promise<void> {
+async function readSessions(detail: 'reread' | 'changed' = 'reread'): Promise<void> {
   const generation = ++sessionsLoadGeneration;
   const [list, catalog] = await Promise.all([run(api.listSessions({ limit: SESSION_PAGE_SIZE })), run(api.listProjects())]);
   if (!list || generation !== sessionsLoadGeneration) return;
@@ -1685,6 +1692,17 @@ async function loadSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
   else {
     sessions = list.sessions;
     sessionPageCursor = list.nextCursor ?? null;
+    // A selected chat opened from a global surface can sit outside this newest page. Keep that
+    // exact fetched summary mounted without pretending the user paged older history.
+    if (selectedCatalogFallback?.id === selectedId && !sessions.some(row => row.id === selectedCatalogFallback!.id)) {
+      mergeSessionRows([selectedCatalogFallback]);
+    }
+  }
+  // If the target temporarily reaches the newest page, keep the fallback current rather than
+  // retiring it: it can fall off that bounded page again while it is still the selected chat.
+  if (selectedCatalogFallback) {
+    const current = list.sessions.find(row => row.id === selectedCatalogFallback!.id);
+    if (current) selectedCatalogFallback = current;
   }
   sessionTotal = typeof list.total === 'number' ? list.total : list.sessions.length;
   activeId = list.activeId;
@@ -1713,6 +1731,20 @@ async function loadSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
       row?.updatedAt !== detailStamp?.updatedAt || row?.events !== detailStamp?.events) await loadDetail();
   else void refreshSessionControls();
   void refreshInputQueue();
+}
+
+function loadSessions(detail: 'reread' | 'changed' = 'reread'): Promise<void> {
+  const read = readSessions(detail);
+  let tracked: Promise<void>;
+  tracked = read.finally(() => { if (sessionsLoadPromise === tracked) sessionsLoadPromise = null; });
+  sessionsLoadPromise = tracked;
+  return tracked;
+}
+
+/** Wait for the catalog read that was current when navigation began. A later session-change read
+ * must not starve navigation; selectedCatalogFallback keeps the fetched target through it. */
+async function awaitCurrentSessionsLoad(): Promise<void> {
+  await (sessionsLoadPromise ?? loadSessions());
 }
 
 async function loadMoreSessions(): Promise<void> {
@@ -9640,6 +9672,7 @@ function selectSession(id: string): void {
   // An edit belongs to its chat: leaving it gives the composer back the draft it held before.
   if (editingQuestion) endEditing(true);
   const ownerChanged = id !== selectedId;
+  if (selectedCatalogFallback?.id !== id) selectedCatalogFallback = null;
   rememberDraft();
   selectionGeneration++; chatFind?.selectionChanged(); replaceComposerDraft();
   inputQueueGeneration++;
@@ -9684,8 +9717,23 @@ function selectSession(id: string): void {
 }
 
 /** Open a chat from the global Scheduled list using the same selection path as the sidebar. */
-export function openScheduledChat(sessionId: string): void {
-  selectSession(sessionId);
+export async function openScheduledChat(sessionId: string): Promise<void> {
+  const opening = ++scheduledOpenGeneration;
+  const selection = selectionGeneration;
+  // showTab('chat') starts a catalog read before calling here. Let the read current at this moment
+  // settle before deciding the target is off-page; a later refresh is fenced by the fallback below.
+  await awaitCurrentSessionsLoad();
+  if (opening !== scheduledOpenGeneration || selection !== selectionGeneration) return;
+  let summary = sessions.find(row => row.id === sessionId);
+  if (!summary) {
+    const detail = await run(api.getSession(sessionId, { limit: 1 }));
+    if (opening !== scheduledOpenGeneration || selection !== selectionGeneration || !detail?.summary) return;
+    summary = detail.summary;
+    selectedCatalogFallback = summary;
+    mergeSessionRows([summary]);
+  }
+  if (opening !== scheduledOpenGeneration || selection !== selectionGeneration) return;
+  selectSession(summary.id);
 }
 
 function selectNewChat(projectId: string | null = null, branch: typeof newChatBranch = null): void {
@@ -9695,6 +9743,7 @@ function selectNewChat(projectId: string | null = null, branch: typeof newChatBr
   rememberDraft(); selectionGeneration++; chatFind?.selectionChanged(); replaceComposerDraft(); pendingNewInput = null;
   inputQueueGeneration++;
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
+  selectedCatalogFallback = null;
   newChatSelected = true; selectedId = null; selectedProjectId = projectId; detailFor = null; detailCursor = null;
   requestSelectedTabFollow(null);
   refreshBackgroundProcesses();

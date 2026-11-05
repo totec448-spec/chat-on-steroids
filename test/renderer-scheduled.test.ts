@@ -92,3 +92,65 @@ it('keeps the visible rows when listing fails and never presents an empty schedu
   expect(document.querySelector('.scheduled-index-row')?.textContent).toContain('Economics monitoring');
   expect(document.getElementById('scheduledStatus')?.textContent).toContain('Cannot read schedules');
 });
+
+it('coalesces a burst of refreshes to one in-flight read plus one dirty follow-up', async () => {
+  const { initScheduled } = await import('../src/renderer/scheduled.js');
+  let release!: (value: ReturnType<typeof ok>) => void;
+  const first = new Promise<ReturnType<typeof ok>>(resolve => { release = resolve; });
+  const calls = {
+    list: vi.fn().mockImplementationOnce(() => first).mockResolvedValue(ok([schedule(idA)])),
+    pause: vi.fn(async () => ok(true)),
+    runNow: vi.fn(async () => ok(true)),
+    delete: vi.fn(async () => ok(true)),
+    openChat: vi.fn()
+  };
+  const view = initScheduled(calls);
+  const pending = view.refresh();
+  for (let i = 0; i < 20; i++) void view.refresh();
+  expect(calls.list).toHaveBeenCalledTimes(1);
+  release(ok([schedule(idA)]));
+  await pending;
+  expect(calls.list).toHaveBeenCalledTimes(2);
+});
+
+it('keeps unchanged rows mounted, restores action focus after a changed row, and reports run-now outcome', async () => {
+  const { initScheduled } = await import('../src/renderer/scheduled.js');
+  let paused = false;
+  let current = schedule(idA, paused);
+  const calls = {
+    list: vi.fn(async () => ok([current])),
+    pause: vi.fn(async (_sessionId: string, next: boolean) => { paused = next; current = schedule(idA, paused); return ok(true); }),
+    runNow: vi.fn().mockResolvedValueOnce(ok(true)).mockResolvedValueOnce(ok(false)),
+    delete: vi.fn(async () => ok(true)),
+    openChat: vi.fn()
+  };
+  const view = initScheduled(calls);
+  await view.refresh();
+  const original = document.querySelector('.scheduled-index-row')!;
+  await view.refresh();
+  expect(document.querySelector('.scheduled-index-row')).toBe(original);
+
+  const runNow = [...original.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Run now')!;
+  runNow.focus(); runNow.click(); await settle();
+  expect(document.querySelector('.scheduled-index-row')).toBe(original);
+  expect(document.activeElement).toBe(runNow);
+  expect(document.getElementById('scheduledStatus')?.textContent).toBe('Queued');
+  await view.refresh();
+  expect(document.getElementById('scheduledStatus')?.textContent).toBe('Queued');
+  runNow.click(); await settle();
+  expect(document.getElementById('scheduledStatus')?.textContent).toBe('Skipped');
+
+  const pause = [...original.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Pause')!;
+  pause.focus(); pause.click(); await settle();
+  const resume = [...document.querySelectorAll<HTMLButtonElement>('.scheduled-index-row button')].find(node => node.textContent === 'Resume')!;
+  expect(document.activeElement).toBe(resume);
+});
+
+it('has translated queued and skipped feedback in every shipped locale', () => {
+  const locales = ['de', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'zh-CN', 'zh-TW'];
+  for (const locale of locales) {
+    const messages = JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8')) as Record<string, string>;
+    expect(messages.Queued, locale).toBeTruthy();
+    expect(messages.Skipped, locale).toBeTruthy();
+  }
+});
