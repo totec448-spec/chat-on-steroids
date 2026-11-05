@@ -4211,6 +4211,15 @@ it('reads the own-sent store from an older version as empty and drops damaged en
   await flushDurable();
   const { readDurable } = await import('../src/main/durable.js');
   expect(JSON.stringify(await readDurable('own-sent-receipts'))).not.toContain('Private words');
+  // A file whose JSON is broken still holds text on disk: it is replaced by a clean store.
+  const file = path.join(directory, 'state', 'own-sent-receipts.json');
+  await fs.writeFile(file, '[{"conversationId":"x","text":"Private words in a broken file"', 'utf8');
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(conversationId)).toEqual([]);
+  await flushDurable();
+  const raw = await fs.readFile(file, 'utf8');
+  expect(raw).not.toContain('Private words');
+  expect(JSON.parse(raw)).toEqual({ version: 1, receipts: [], forgotten: [] });
 });
 
 // CodeRabbit on #2079: a chat ChatGPT deleted loses its own-sent record, and a save keeps nothing
