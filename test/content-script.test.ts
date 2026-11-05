@@ -24980,6 +24980,22 @@ describe('ordinary Continue native recovery', () => {
     expect(composer.textContent).toBe('');
   });
 
+  it("clears the app's own multiline send, read with its line breaks (CodeRabbit on #2079)", async () => {
+    live = await harness(`https://chatgpt.com/c/${chat}`);
+    await settle();
+    userTurn(live.document, 'own-scheduled', 'Check the open issues\nThen report what changed', { sent: false });
+    await settle();
+    const composer = live.document.getElementById('prompt-textarea')!;
+    const check = () => live!.runtimeMessage({ type: 'clf-repair-check', conversationId: chat,
+      ownSent: [{ text: 'Check the open issues\nThen report what changed', messageId: 'm-own-scheduled' }] });
+    // The lines joined into one is a different text: held.
+    composer.innerHTML = '<p>Check the open issues Then report what changed</p>';
+    expect(await check()).toMatchObject({ safe: false, why: 'draft' });
+    composer.innerHTML = '<p>Check the open issues</p><p>Then report what changed</p>';
+    expect(await check()).toMatchObject({ safe: true, cleared: 'own-sent' });
+    expect(composer.textContent).toBe('');
+  });
+
   it("holds the app's own text when the chat's latest message is not that send, even with the same text", async () => {
     const own = 'Continue with the task from where you stopped. Pick up exactly where the last step ended.';
     for (const later of ['A newer question from the person', own]) {

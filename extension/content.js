@@ -13347,9 +13347,11 @@
     if (!sent) return false;
     const lines = (value) => String(value || '').replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ')
       .split('\n').map(line => line.trim()).join('\n').replace(/\n{2,}/g, '\n').trim();
+    // Read with its line breaks: textContent joins a multiline send's paragraphs into one (CodeRabbit on #2079).
     const shown = CLF_DOM.composerText() || '';
+    const shownLines = (CLF_DOM.composerLines ? CLF_DOM.composerLines() : shown) || '';
     const want = lines(sent.text);
-    if (lines(shown) !== want && lines(unescapeMarkdown(shown)) !== want) return false;
+    if (lines(shownLines) !== want && lines(unescapeMarkdown(shownLines)) !== want) return false;
     const lease = CLF_DOM.captureComposerDraft(shown);
     try { return lease.withdraw() === true; } finally { lease.dispose(); }
   }
