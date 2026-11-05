@@ -3260,7 +3260,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         commandIds: commands.map(command => command.id),
         revival: takesWork ? revival : null,
         revivals: takesWork ? revivals : [],
-        placement: takesWork ? pendingBrowserPlacement(null, browser) : null,
+        // A repair report is answered with no work: its reply is not read, and a placement handed
+        // here would be consumed and never placed (CodeRabbit on #2079).
+        placement: takesWork && !repairFailed && !repairHeld && !repairCleared ? pendingBrowserPlacement(null, browser) : null,
         ...(canReveal ? { reveals: takeReveals(browser) } : {}),
         ...(follow ? { follow } : {}),
         ...(req.method === 'POST' && imageExportRequested ? { imageExports: pendingImageExports() } : {}),

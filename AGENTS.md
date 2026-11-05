@@ -1796,12 +1796,15 @@ draft (#1922: a rotation continue left in the box refused every later message).
 Browser repairs recognise one more leftover in an occupied composer (#2074): each repair offer
 carries `ownSent` (`ownSentResidue`: the app's own automatic sends in that chat that ChatGPT
 received, `automaticSendKind` with a `messageId`, as `{ text, messageId }`; no images, attachments or
-companions, last 24 h, at most 5; never an unsent text). `clf-repair-check` clears the composer only
+companions, last 24 h, at most 5; never an unsent text). Each chat's latest such send is also kept in
+the durable `own-sent-receipts` (one per chat, at most 200 chats, texts up to 20,000 characters), so it
+is still known after the outbox history (newest 50 finished rows across all chats) drops it. `clf-repair-check` clears the composer only
 when the chat's latest user message has one of those message ids, the composer holds exactly that
 send's text (line breaks and outer spaces aside, or ChatGPT's Markdown-escaped form; no
 whitespace-blind match), and nothing is attached, through the `captureComposerDraft` lease (unchanged
 text only). The page then reports `cleared: 'own-sent'` (`/status?repairCleared=`, logged once; that
-report, like `repairHeld`, hands out no work). Anything else is held as `draft` as before. A
+report, like `repairHeld` and `repairFailed`, hands out no work: no repairs and no placement, since
+its reply is not read). Anything else is held as `draft` as before. A
 `repairHeld` reply stamps `claimAskedAt`, so a page that keeps holding never spends the no-page
 offer budget.
 

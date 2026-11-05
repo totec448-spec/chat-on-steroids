@@ -4179,4 +4179,10 @@ it("lists only the app's own automatic messages ChatGPT received, never the pers
   expect(sent.some(row => row.text.includes('Not sent yet'))).toBe(false);
   expect(await input.ownSentResidue(randomUUID())).toEqual([]);
   await input.cancelInput(waiting.id);
+  // The outbox keeps only its newest finished rows across all chats; the chat's latest automatic
+  // send is still known after they are gone, and after a restart (CodeRabbit on #2079).
+  await flushDurable();
+  await writeDurableNow('session-input', []);
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(conversationId)).toEqual([expect.objectContaining({ messageId: 'scheduled-message' })]);
 });

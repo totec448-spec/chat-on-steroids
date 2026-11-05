@@ -2154,6 +2154,38 @@ export async function ownUnsentTexts(conversationId: string, exceptId: string, n
 }
 
 /**
+ * Each chat's latest automatic send ChatGPT confirmed with a message id (#2074), kept apart from the
+ * outbox: its history keeps only the newest 50 finished rows across all chats, so a busy app could
+ * forget the very Continue a repair needs to recognise while it is still the chat's latest message
+ * (CodeRabbit on #2079). One per chat, at most 200 chats; texts over 20,000 characters are not kept.
+ */
+const OWN_SENT_STATE = 'own-sent-receipts';
+const OWN_SENT_RECEIPTS_MAX = 200;
+const OWN_SENT_TEXT_MAX = 20_000;
+const ownSentReceiptSchema = z.object({ conversationId: z.string().min(1).max(256), text: z.string().min(1).max(OWN_SENT_TEXT_MAX),
+  messageId: z.string().min(1).max(256), at: z.number() });
+type OwnSentReceipt = z.infer<typeof ownSentReceiptSchema>;
+let ownSentReceipts: OwnSentReceipt[] | null = null;
+async function loadOwnSentReceipts(): Promise<OwnSentReceipt[]> {
+  if (ownSentReceipts) return ownSentReceipts;
+  const saved = await readDurable<unknown>(OWN_SENT_STATE).catch(() => null);
+  // A damaged entry is dropped, never guessed at; the rest stay.
+  ownSentReceipts = (Array.isArray(saved) ? saved : []).flatMap(row => {
+    const parsed = ownSentReceiptSchema.safeParse(row);
+    return parsed.success ? [parsed.data] : [];
+  }).slice(-OWN_SENT_RECEIPTS_MAX);
+  return ownSentReceipts;
+}
+async function rememberOwnSent(entry: InputEntry, current: InputEntry[], conversationId: string, messageId: string): Promise<void> {
+  const text = entry.deliveryText ?? entry.text;
+  if (automaticSendKind(entry) === null || entry.images?.length || entry.attachments?.length || entry.companionInputId ||
+      current.some(row => row.companionInputId === entry.id) || messageId.startsWith('input:') || text.length > OWN_SENT_TEXT_MAX) return;
+  const kept = (await loadOwnSentReceipts()).filter(row => row.conversationId !== conversationId);
+  ownSentReceipts = [...kept, { conversationId, text, messageId, at: Date.now() }].slice(-OWN_SENT_RECEIPTS_MAX);
+  writeDurableSoon(OWN_SENT_STATE, ownSentReceipts);
+}
+
+/**
  * The app's own automatic messages ChatGPT received in a chat, with their message ids (#2074): what a
  * repair's page may treat as the app's leftover when ChatGPT puts one back into the message box after
  * a reload. Only sends with a known ChatGPT message id (an automatic Continue, a fresh turn, a scheduled
@@ -2170,7 +2202,10 @@ export async function ownSentResidue(conversationId: string, now = Date.now()): 
       now - row.createdAt < OWN_UNSENT_MS)
     .sort((a, b) => b.createdAt - a.createdAt)
     .slice(0, OWN_UNSENT_MAX)
-    .map(row => ({ text: row.deliveryText ?? row.text, messageId: row.messageId! }));
+    .map(row => ({ text: row.deliveryText ?? row.text, messageId: row.messageId! }))
+    .concat((await loadOwnSentReceipts()).filter(row => row.conversationId === conversationId && now - row.at < OWN_UNSENT_MS)
+      .map(row => ({ text: row.text, messageId: row.messageId })))
+    .filter((row, index, all) => !row.messageId.startsWith('input:') && all.findIndex(other => other.messageId === row.messageId) === index);
 }
 
 export function claimBrowserInput(id: string, owner: string, conversationId: string | null, requiresAuthorization = false): Promise<InputEntry | null> {
@@ -2370,6 +2405,7 @@ export function acknowledgeBrowserInput(id: string, owner: string, conversationI
       entry.state !== 'cancelled' && (entry.opening || !entry.sessionId) && entry.automation && deliveredConversation && entry.purpose !== 'decision' ? [acknowledged] : [], 'after-send');
     if (entry.completedTurnId && entry.sessionId && deliveredConversation)
       await consumeGoalReplyForInputNow(deliveredConversation, entry.sessionId, entry.completedTurnId);
+    if (messageId && deliveredConversation && entry.state !== 'cancelled') await rememberOwnSent(entry, current, deliveredConversation, messageId);
     // The page saw its edit replace the question: that is known now, before ChatGPT draws its versions.
     if (entry.edit && messageId && entry.sessionId) await noteEditReplacement(entry.sessionId, messageId, entry.edit.messageId)
       .catch((err: Error) => logWarn(`input ${id}: could not mark the edited question (${err.message})`));
@@ -2474,7 +2510,7 @@ export function offerToolInput(sessionId: string | null | undefined, conversatio
   });
 }
 
-export function resetInputForTests(): void { entries = null; chain = Promise.resolve(); offered.clear(); decisionWaiters.clear(); declinedRotations.clear(); slotWaits.clear(); }
+export function resetInputForTests(): void { ownSentReceipts = null; entries = null; chain = Promise.resolve(); offered.clear(); decisionWaiters.clear(); declinedRotations.clear(); slotWaits.clear(); }
 
 export async function pausedBrowserHelpers(): Promise<Array<{ id: string; sourceSessionId: string }>> {
   return (await listInputs()).filter(row => row.purpose === 'decision' && row.state === 'cancelled' && row.cancelledByUser === true && !row.conversationId && row.decisionSourceSessionId)

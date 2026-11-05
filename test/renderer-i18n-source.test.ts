@@ -104,6 +104,8 @@ it('translates every delivery error a queued message can show', () => {
     'Fresh-turn continue declined: no Send while ChatGPT works.',
     'User authorized a new helper',
     'session-input',
+    // The durable store of each chat's latest automatic send (#2074), never shown.
+    'own-sent-receipts',
     '\\n--- New instructions from the user ---\\n'
   ]);
   const source = readFileSync('src/main/session/input.ts', 'utf8');
