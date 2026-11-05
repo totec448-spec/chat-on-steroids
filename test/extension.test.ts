@@ -1688,7 +1688,7 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
         if (handed) return response(200, { repairs: [] });
         handed = true;
         return response(200, { repairs: [{ conversationId: CHAT, token: 'own-leftover', reason: 'silence', requiresClaim: true,
-          ownTexts: ['Continue with the task'] }] });
+          ownSent: [{ text: 'Continue with the task', messageId: 'm-continue' }, { text: 'no id' }] }] });
       }
       return response(200, {});
     });
@@ -1703,7 +1703,8 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
     await worker.registerTab(21);
     await worker.send({ type: 'bind', conversationId: CHAT }, 21);
     await worker.fireAlarm();
-    expect(checks[0]).toMatchObject({ conversationId: CHAT, ownTexts: ['Continue with the task'] });
+    expect(checks[0]).toMatchObject({ conversationId: CHAT, ownSent: [{ text: 'Continue with the task', messageId: 'm-continue' }] });
+    expect((checks[0]!.ownSent as unknown[]).length).toBe(1);
     expect(cleared).toEqual(['own-leftover']);
   });
 

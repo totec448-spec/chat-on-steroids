@@ -2154,24 +2154,23 @@ export async function ownUnsentTexts(conversationId: string, exceptId: string, n
 }
 
 /**
- * The exact texts a page may treat as this app's own leftover when a repair finds the message box
- * not empty (#2074): what it sent into this chat by itself and ChatGPT received (an automatic
- * Continue, a fresh turn, a scheduled run), plus its unsent ones (`ownUnsentTexts`). After a reload
- * ChatGPT can put an already-sent message back into the box, and every repair was then held as if it
- * were the person's draft. Messages the person wrote are never listed; nor is anything with an image,
- * a file or a companion message. The page also requires the text to be the chat's latest message.
+ * The app's own automatic messages ChatGPT received in a chat, with their message ids (#2074): what a
+ * repair's page may treat as the app's leftover when ChatGPT puts one back into the message box after
+ * a reload. Only sends with a known ChatGPT message id (an automatic Continue, a fresh turn, a scheduled
+ * run); never the person's messages, never anything with an image, a file or a companion message, and
+ * never an unsent text, which has no message to prove it (CodeRabbit on #2079). The page also requires
+ * that exact message to be the chat's latest user message.
  */
-export async function ownRepairResidueTexts(conversationId: string, now = Date.now()): Promise<string[]> {
+export async function ownSentResidue(conversationId: string, now = Date.now()): Promise<Array<{ text: string; messageId: string }>> {
   const rows = await listInputs();
   const companions = new Set(rows.flatMap(row => row.companionInputId ? [row.companionInputId] : []));
-  const sent = rows
-    .filter(row => row.conversationId === conversationId && automaticSendKind(row) !== null &&
-      (row.deliveredAt !== undefined || !!row.messageId) && !row.companionInputId && !companions.has(row.id) &&
-      !row.images?.length && !row.attachments?.length && now - row.createdAt < OWN_UNSENT_MS)
+  return rows
+    .filter(row => row.conversationId === conversationId && automaticSendKind(row) !== null && !!row.messageId &&
+      !row.companionInputId && !companions.has(row.id) && !row.images?.length && !row.attachments?.length &&
+      now - row.createdAt < OWN_UNSENT_MS)
     .sort((a, b) => b.createdAt - a.createdAt)
     .slice(0, OWN_UNSENT_MAX)
-    .map(row => row.deliveryText ?? row.text);
-  return [...new Set([...sent, ...await ownUnsentTexts(conversationId, '', now)])];
+    .map(row => ({ text: row.deliveryText ?? row.text, messageId: row.messageId! }));
 }
 
 export function claimBrowserInput(id: string, owner: string, conversationId: string | null, requiresAuthorization = false): Promise<InputEntry | null> {
