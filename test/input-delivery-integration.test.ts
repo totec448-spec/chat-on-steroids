@@ -4248,3 +4248,32 @@ it("does not record a deleted chat's automatic send that is acknowledged afterwa
   expect((await readDurable<{ receipts: Array<{ conversationId: string }> }>('own-sent-receipts'))?.receipts
     .some(row => row.conversationId === conversationId)).toBe(false);
 });
+
+// CodeRabbit on #2079: expired text leaves the disk when the store is read, and a deletion racing
+// another chat's send keeps both changes.
+it('drops expired own-sent text from disk on read, and keeps both changes when a deletion races a send', async () => {
+  const { readDurable } = await import('../src/main/durable.js');
+  await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  const expired = randomUUID(), deleted = randomUUID();
+  await flushDurable();
+  await writeDurableNow('own-sent-receipts', { version: 1, receipts: [
+    { conversationId: expired, text: 'An expired continue', messageId: 'expired-message', at: Date.now() - 25 * 60 * 60_000 },
+    { conversationId: deleted, text: 'Soon deleted', messageId: 'deleted-message', at: Date.now() }
+  ], forgotten: [] });
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(expired)).toEqual([]);
+  await flushDurable();
+  expect(((await readDurable<any>('own-sent-receipts'))!.receipts as Array<{ messageId: string }>).map(row => row.messageId)).toEqual(['deleted-message']);
+  // A send for another chat is acknowledged while the deletion is being saved.
+  const kept = randomUUID();
+  const session = await createSession({ title: 'Kept while another is deleted', conversationId: kept });
+  const scheduled = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Kept continue',
+    scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+  expect(await input.claimBrowserInput(scheduled.id, 'race-page', kept, true)).not.toBeNull();
+  expect(await input.authorizeBrowserInput(scheduled.id, 'race-page', kept)).toBe(true);
+  await Promise.all([input.forgetOwnSent([deleted]), input.acknowledgeBrowserInput(scheduled.id, 'race-page', kept, 'kept-message')]);
+  await flushDurable();
+  const saved = (await readDurable<any>('own-sent-receipts'))!;
+  expect((saved.receipts as Array<{ messageId: string }>).map(row => row.messageId)).toEqual(['kept-message']);
+  expect((saved.forgotten as Array<{ conversationId: string }>).map(row => row.conversationId)).toEqual([deleted]);
+});

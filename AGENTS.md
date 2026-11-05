@@ -1802,7 +1802,9 @@ is still known after the outbox history (newest 50 finished rows across all chat
 chat's record goes with the chat (`forgetOwnSent`: deleting it in the app, for every conversation id
 it had, saved before the chat itself is removed; or ChatGPT reporting it deleted). The store is
 `{ version: 1, receipts, forgotten }`: `forgotten` lists chats deleted in the last 24 h, so a send
-acknowledged late for one is not recorded again. Nothing older than 24 h is kept. `clf-repair-check` clears the composer only
+acknowledged late for one is not recorded again. Nothing older than 24 h is kept: it is trimmed when
+the store loads, on each read, and hourly. All changes run in the store's own lock (not the input
+queue, which the deletion path may already hold). `clf-repair-check` clears the composer only
 when the chat's latest user message has one of those message ids, the composer holds exactly that
 send's text (line breaks and outer spaces aside, or ChatGPT's Markdown-escaped form; no
 whitespace-blind match), and nothing is attached, through the `captureComposerDraft` lease (unchanged
