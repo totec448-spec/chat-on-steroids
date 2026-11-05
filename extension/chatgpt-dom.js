@@ -94,6 +94,18 @@ var CLF_DOM = (() => {
     for (const injected of clone.querySelectorAll(NOT_PROMPT)) injected.remove();
     return clone.textContent ?? '';
   };
+  /**
+   * The editor's text with its line breaks (#2074): each paragraph its own line, and a <br> a line
+   * break, which textContent drops. Only for comparisons that must see lines; composerText stays as is.
+   */
+  const editorLines = (node) => {
+    if (!node || node.matches?.(NOT_PROMPT) || typeof node.cloneNode !== 'function') return editorText(node);
+    const clone = node.cloneNode(true);
+    for (const injected of clone.querySelectorAll(NOT_PROMPT)) injected.remove();
+    for (const br of clone.querySelectorAll('br')) br.replaceWith('\n');
+    const blocks = [...clone.children].some(child => /^(P|DIV|LI|PRE|BLOCKQUOTE|H[1-6])$/.test(child.tagName));
+    return blocks ? [...clone.childNodes].map(child => child.textContent ?? '').join('\n') : clone.textContent ?? '';
+  };
   const authoredText = (node) => {
     if (!node?.querySelector?.(APP_MENTION_CHIP) || typeof node.cloneNode !== 'function') return text(node);
     const clone = node.cloneNode(true);
@@ -3932,6 +3944,7 @@ var CLF_DOM = (() => {
     composerAuthoredText,
     /** The composer's prompt text, without nodes ChatGPT injects for presentation (#1792). */
     composerText: (box = composer()) => editorText(box),
+    composerLines: (box = composer()) => editorLines(box),
     pageChecks,
     userPromptText,
     userMessageReaction,
