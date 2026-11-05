@@ -2172,6 +2172,17 @@ type OwnSentReceipt = z.infer<typeof ownSentReceiptSchema>;
 type OwnSentStore = { receipts: OwnSentReceipt[]; forgotten: Array<{ conversationId: string; at: number }> };
 const ownSentForgottenSchema = z.object({ conversationId: z.string().min(1).max(256), at: z.number() });
 let ownSentStore: OwnSentStore | null = null;
+/**
+ * Every change to the store runs in this chain, its own and not the input queue: deletion calls it
+ * from outside that queue, and failInputsForDeletedConversation from inside it (CodeRabbit on #2079).
+ */
+let ownSentChain: Promise<unknown> = Promise.resolve();
+function withOwnSentLock<T>(work: () => Promise<T>): Promise<T> {
+  const run = ownSentChain.then(work, work);
+  ownSentChain = run.catch(() => undefined);
+  return run;
+}
+let ownSentPruneTimer: NodeJS.Timeout | null = null;
 /** One shared read: two first callers must not each install their own snapshot (CodeRabbit on #2079). */
 let ownSentLoad: Promise<OwnSentStore> | null = null;
 function loadOwnSentStore(): Promise<OwnSentStore> {
@@ -2183,13 +2194,32 @@ function loadOwnSentStore(): Promise<OwnSentStore> {
       const parsed = schema.safeParse(row);
       return parsed.success ? [parsed.data] : [];
     });
-    ownSentStore ??= {
-      receipts: valid(record ? record.receipts : saved, ownSentReceiptSchema).slice(-OWN_SENT_RECEIPTS_MAX),
-      forgotten: valid(record?.forgotten, ownSentForgottenSchema).slice(-OWN_SENT_RECEIPTS_MAX)
-    };
+    if (!ownSentStore) {
+      const loaded = {
+        receipts: valid(record ? record.receipts : saved, ownSentReceiptSchema),
+        forgotten: valid(record?.forgotten, ownSentForgottenSchema)
+      };
+      ownSentStore = trimOwnSent(loaded);
+      // Expired text leaves the disk when the store is read, not only on the next send (CodeRabbit on #2079).
+      if (ownSentStore.receipts.length !== loaded.receipts.length || ownSentStore.forgotten.length !== loaded.forgotten.length)
+        writeDurableSoon(OWN_SENT_STATE, { version: 1, ...ownSentStore });
+      // And while the app stays open: once an hour.
+      ownSentPruneTimer ??= setInterval(() => { void pruneOwnSent().catch(() => undefined); }, 60 * 60_000);
+      ownSentPruneTimer.unref?.();
+    }
     return ownSentStore;
   });
   return ownSentLoad;
+}
+/** Drops what is older than 24 h and saves it, if anything was. */
+function pruneOwnSent(now = Date.now()): Promise<void> {
+  return withOwnSentLock(async () => {
+    const store = await loadOwnSentStore();
+    const next = trimOwnSent(store, now);
+    if (next.receipts.length === store.receipts.length && next.forgotten.length === store.forgotten.length) return;
+    ownSentStore = next;
+    writeDurableSoon(OWN_SENT_STATE, { version: 1, ...next });
+  });
 }
 async function loadOwnSentReceipts(): Promise<OwnSentReceipt[]> { return (await loadOwnSentStore()).receipts; }
 /** Kept without anything older than the window a page may use it in. */
@@ -2203,12 +2233,14 @@ async function rememberOwnSent(entry: InputEntry, current: InputEntry[], convers
   const text = entry.deliveryText ?? entry.text;
   if (automaticSendKind(entry) === null || entry.images?.length || entry.attachments?.length || entry.companionInputId ||
       current.some(row => row.companionInputId === entry.id) || messageId.startsWith('input:') || text.length > OWN_SENT_TEXT_MAX) return;
-  const store = await loadOwnSentStore();
-  // A chat deleted meanwhile stays forgotten, even when its send is acknowledged late (CodeRabbit on #2079).
-  if (store.forgotten.some(row => row.conversationId === conversationId)) return;
-  ownSentStore = trimOwnSent({ ...store, receipts: [...store.receipts.filter(row => row.conversationId !== conversationId),
-    { conversationId, text, messageId, at: Date.now() }] });
-  writeDurableSoon(OWN_SENT_STATE, { version: 1, ...ownSentStore });
+  await withOwnSentLock(async () => {
+    const store = await loadOwnSentStore();
+    // A chat deleted meanwhile stays forgotten, even when its send is acknowledged late (CodeRabbit on #2079).
+    if (store.forgotten.some(row => row.conversationId === conversationId)) return;
+    ownSentStore = trimOwnSent({ ...store, receipts: [...store.receipts.filter(row => row.conversationId !== conversationId),
+      { conversationId, text, messageId, at: Date.now() }] });
+    writeDurableSoon(OWN_SENT_STATE, { version: 1, ...ownSentStore });
+  });
 }
 /**
  * A deleted chat's receipt goes with it (CodeRabbit on #2079): a scheduled run's text can be the
@@ -2218,13 +2250,15 @@ async function rememberOwnSent(entry: InputEntry, current: InputEntry[], convers
 export async function forgetOwnSent(conversationIds: readonly string[], now = Date.now()): Promise<void> {
   const ids = new Set(conversationIds.filter(Boolean));
   if (!ids.size) return;
-  const store = await loadOwnSentStore();
-  const next = trimOwnSent({
-    receipts: store.receipts.filter(row => !ids.has(row.conversationId)),
-    forgotten: [...store.forgotten.filter(row => !ids.has(row.conversationId)), ...[...ids].map(conversationId => ({ conversationId, at: now }))]
-  }, now);
-  await writeDurableNow(OWN_SENT_STATE, { version: 1, ...next });
-  ownSentStore = next;
+  await withOwnSentLock(async () => {
+    const store = await loadOwnSentStore();
+    const next = trimOwnSent({
+      receipts: store.receipts.filter(row => !ids.has(row.conversationId)),
+      forgotten: [...store.forgotten.filter(row => !ids.has(row.conversationId)), ...[...ids].map(conversationId => ({ conversationId, at: now }))]
+    }, now);
+    await writeDurableNow(OWN_SENT_STATE, { version: 1, ...next });
+    ownSentStore = next;
+  });
 }
 
 /**
@@ -2236,6 +2270,7 @@ export async function forgetOwnSent(conversationIds: readonly string[], now = Da
  * that exact message to be the chat's latest user message.
  */
 export async function ownSentResidue(conversationId: string, now = Date.now()): Promise<Array<{ text: string; messageId: string }>> {
+  await pruneOwnSent(now);
   const rows = await listInputs();
   const companions = new Set(rows.flatMap(row => row.companionInputId ? [row.companionInputId] : []));
   return rows
@@ -2552,7 +2587,9 @@ export function offerToolInput(sessionId: string | null | undefined, conversatio
   });
 }
 
-export function resetInputForTests(): void { ownSentStore = null; ownSentLoad = null; entries = null; chain = Promise.resolve(); offered.clear(); decisionWaiters.clear(); declinedRotations.clear(); slotWaits.clear(); }
+export function resetInputForTests(): void {
+  ownSentStore = null; ownSentLoad = null; ownSentChain = Promise.resolve();
+  if (ownSentPruneTimer) { clearInterval(ownSentPruneTimer); ownSentPruneTimer = null; } entries = null; chain = Promise.resolve(); offered.clear(); decisionWaiters.clear(); declinedRotations.clear(); slotWaits.clear(); }
 
 export async function pausedBrowserHelpers(): Promise<Array<{ id: string; sourceSessionId: string }>> {
   return (await listInputs()).filter(row => row.purpose === 'decision' && row.state === 'cancelled' && row.cancelledByUser === true && !row.conversationId && row.decisionSourceSessionId)
