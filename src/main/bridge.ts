@@ -116,6 +116,8 @@ import {
   startGoalDraft
 } from './goal.js';
 import { logInfo, logWarn } from './logger.js';
+import { userRequestFound } from './user-request-files.js';
+import type { UserRequestView } from '../shared/user-requests.js';
 import { markStartup } from './startup-timing.js';
 import {
   closeConversation,
@@ -144,6 +146,8 @@ import {
   findSessionByConversation,
   getSession,
   readSessionPlan,
+  readSessionUserRequests,
+  indexedSessions,
   listUsageSessions,
   readRecentEvents,
   readLatestUserMessage,
@@ -1112,6 +1116,13 @@ function diagnosticEnvironment(value: unknown): CompanionEnvironment | null {
 const extensionLanguageLogged = new Map<string, string>();
 /** Per browser: the last error-page reload the app has logged (the extension's clock) and its count. */
 const errorPageReloadsLogged = new Map<string, { at: number; count: number; skippedAt?: number }>();
+/** Per browser, the last extension close-outbox decision already written to the app log. */
+const closeOutboxDecisionsLogged = new Map<string, number>();
+const CLOSE_OUTBOX_REASONS: Record<string, string> = {
+  deferred_chrome_tab_open: 'deferred /closed: Chrome still has the conversation tab',
+  deferred_chrome_inventory_unavailable: 'deferred /closed: Chrome tab inventory was unavailable',
+  discarded_conversation_binding_open: 'discarded stale /closed: the conversation was rebound'
+};
 const ERROR_PAGE_SKIPS: Record<string, (nextIn: number) => string> = {
   offline: () => 'not reloaded while the browser is offline',
   backoff: nextIn => `the next reload is in ${nextIn} s (it backs off after each reload)`,
@@ -1120,6 +1131,14 @@ const ERROR_PAGE_SKIPS: Record<string, (nextIn: number) => string> = {
 function recordCompanionDiagnostics(value: unknown, browser = ''): void {
   const next = sanitiseCompanionDiagnostics(value);
   if (!next) return;
+  const decision = diagnosticObject(diagnosticObject(value)?.closeOutboxDecision);
+  const decisionAt = diagnosticNumber(decision?.at);
+  const key = `${String(decision?.action ?? '')}_${String(decision?.reason ?? '')}`;
+  if (Object.hasOwn(CLOSE_OUTBOX_REASONS, key) && decisionAt > (closeOutboxDecisionsLogged.get(browser) ?? 0)) {
+    logInfo(`browser: ${CLOSE_OUTBOX_REASONS[key]}`);
+    closeOutboxDecisionsLogged.set(browser, decisionAt);
+    if (closeOutboxDecisionsLogged.size > 16) closeOutboxDecisionsLogged.delete(closeOutboxDecisionsLogged.keys().next().value!);
+  }
   // A chat tab that loaded offline and sat on Chrome's error page was reloaded by the extension.
   const reloads = diagnosticObject(diagnosticObject(value)?.errorPageReloads);
   const reloadedAt = diagnosticNumber(reloads?.lastAt), reloadCount = Math.round(diagnosticNumber(reloads?.count, 100_000));
@@ -2214,6 +2233,8 @@ export type SessionControlsView = {
   sessionId: string;
   recovery?: import('../shared/recovery.js').RecoveryCountdown[];
   plan: import('../shared/agent-plan.js').AgentPlan | null;
+  /** Steps handed to the person (#1695), open and answered. */
+  userRequests?: UserRequestView[];
   conversationId: string;
   automation: 'off' | 'goal' | 'loop';
   loopAfterTurn?: boolean;
@@ -2258,6 +2279,37 @@ async function controlledConversation(sessionId: string): Promise<string> {
   if ((await getSession(sessionId))?.conversationId !== id) throw new Error('conversation_changed');
   return id;
 }
+
+/**
+ * Steps handed to the person (#1695); expected files are looked up for the open ones only. The open
+ * steps of this chat's sub-agents (workers, at any depth) come after its own, so the person sees
+ * every step waiting for them in the chat they watch.
+ */
+export async function userRequestViews(sessionId: string): Promise<UserRequestView[]> {
+  const own = await readSessionUserRequests(sessionId);
+  const views: UserRequestView[] = await Promise.all(own.map(async request =>
+    ({ ...request, found: request.state === 'open' ? await userRequestFound(request) : [] })));
+  const all = await indexedSessions();
+  const family = [sessionId];
+  for (let index = 0; index < family.length && family.length <= 50; index++) {
+    for (const child of all) {
+      if (child.origin?.kind === 'worker' && child.origin.fromSessionId === family[index] && !family.includes(child.id)) family.push(child.id);
+    }
+  }
+  for (const id of family.slice(1)) {
+    const title = all.find(entry => entry.id === id)?.title ?? '';
+    const requests = await readSessionUserRequests(id).catch((error: NodeJS.ErrnoException) => {
+      // Said once per read, with only the reason: no step text and no ids (CodeRabbit on #2049).
+      logWarn(`steps for the person: a sub-agent's saved steps could not be read (${error?.code ?? 'error'}); they are left out of the main chat's list`);
+      return [];
+    });
+    for (const request of requests) {
+      if (request.state === 'open') views.push({ ...request, found: await userRequestFound(request), from: { sessionId: id, title } });
+    }
+  }
+  return views;
+}
+
 export async function sessionControlsFor(sessionId: string): Promise<SessionControlsView> {
   const id = await controlledConversation(sessionId);
   const control = goalSwitchFor(id);
@@ -2280,9 +2332,10 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
   const draft = goalViewFor(id) ?? goalOutcomeFor(id);
   const inputPolicy = await sessionInputPolicy(sessionId, sessionInputActivity(session));
   const plan = await readSessionPlan(sessionId);
+  const userRequests = await userRequestViews(sessionId);
   const finishWaiting = await sessionFinishWaiting(sessionId, activeTurnId, id);
   const recovery = await sessionRecoveryCountdowns(sessionId, id);
-  return { sessionId, plan, conversationId: id, activeTurnId, heldTurnId, finishHeld,
+  return { sessionId, plan, userRequests, conversationId: id, activeTurnId, heldTurnId, finishHeld,
     recovery,
     queueAtFinish: !blocked && inputPolicy.queueAtFinish, canInject: !blocked && inputPolicy.canInject,
     canSendDirectly: !blocked && !!inputPolicy.directTurn,
@@ -2379,7 +2432,8 @@ async function stoppableTurn(sessionId: string): Promise<string | null> {
  * cancelled, a silence Continue withdrawn. Says whether any of that was going on.
  */
 export async function endOwnWorkAfterStop(sessionId: string, expectedTurnId: string,
-  before: Pick<SessionControlsView, 'conversationId' | 'automation'> | null = null): Promise<{ ended: boolean; resumeGoesOn: boolean }> {
+  before: Pick<SessionControlsView, 'conversationId' | 'automation'> | null = null,
+  from = 'the app'): Promise<{ ended: boolean; resumeGoesOn: boolean }> {
   const id = await controlledConversation(sessionId);
   // Bound to the chat the Stop was pressed for: a Compact & Resume that moved the session to a new chat
   // meanwhile is not that chat's to stop (CodeRabbit on #2066).
@@ -2394,7 +2448,7 @@ export async function endOwnWorkAfterStop(sessionId: string, expectedTurnId: str
   // Goal or Loop on when Stop was pressed counts, also when the Stop's own path already turned it off
   // before it found the turn gone (CodeRabbit on #2066).
   const armed = goalArmedFor(id) || (!!before && before.automation !== 'off');
-  await setSessionAutomation(sessionId, 'off');
+  await setSessionAutomation(sessionId, 'off', undefined, `a Stop sent by ${from}`);
   if (armed) ended.push('Goal or Loop');
   if (continuationForSession(sessionId)) {
     if (await cancelResumeNow(sessionId)) ended.push('a pending Compact & Resume');
@@ -2418,7 +2472,9 @@ export async function endOwnWorkAfterStop(sessionId: string, expectedTurnId: str
   changed();
   return { ended: ended.length > 0, resumeGoesOn };
 }
-export async function stopSessionTurn(sessionId: string, expectedTurnId: string, options: { rotation?: boolean } = {}): Promise<SessionControlsView> {
+export async function stopSessionTurn(sessionId: string, expectedTurnId: string,
+  /** `from` names who sent a person's Stop (the app or the control API), for the log (#1882). */
+  options: { rotation?: boolean; from?: string } = {}): Promise<SessionControlsView> {
   const id = await controlledConversation(sessionId);
   const assertCurrent = async () => {
     const latest = await getSession(sessionId);
@@ -2441,7 +2497,7 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string,
       logInfo(`turn rotation: ${id} — the person stopped turn ${expectedTurnId}; the fresh turn the app was starting is cancelled`);
       if (!cleared) logWarn(`turn rotation: ${id} — the cancelled fresh turn could not be saved; a restart within ${Math.round(FENCE_MS / 1000)} s could still continue after the person's Stop`);
     }
-    await setSessionAutomation(sessionId, 'off');
+    await setSessionAutomation(sessionId, 'off', undefined, `a Stop sent by ${options.from ?? 'the app'}`);
     await assertCurrent();
     if (continuationForSession(sessionId)) { await cancelResumeNow(sessionId); await assertCurrent(); }
   }
@@ -2472,7 +2528,9 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string,
   await revokeSilenceInputs(sessionId);
   endActivity(id);
   repairsInFlight.delete(id);
-  if (!alreadyQueued) logInfo(`bridge: ${options.rotation ? 'fresh-turn' : 'desktop'} Stop requested for session ${sessionId}, conversation ${id}, turn ${expectedTurnId}, command ${command.id}; native cancellation is unconfirmed`);
+  if (!alreadyQueued) logInfo(`bridge: ${options.rotation ? 'fresh-turn' : `desktop (sent by ${options.from ?? 'the app'})`} Stop requested for session ${sessionId}, conversation ${id}, turn ${expectedTurnId}, command ${command.id}; native cancellation is unconfirmed`);
+  // #1882: a person's Stop that joins a queued one, a fresh-turn Stop included, still says who sent it (CodeRabbit on #2070).
+  else if (!options.rotation) logInfo(`bridge: desktop (sent by ${options.from ?? 'the app'}) Stop for session ${sessionId}, turn ${expectedTurnId} joins the Stop already requested (command ${command.id})`);
   else if (pendingHeld) logInfo(`bridge: Stop repeated for held turn ${expectedTurnId} in ${id}; command ${command.id} stays a held-turn Stop`);
   wakeBrowserWork();
   changed();
@@ -2530,7 +2588,7 @@ function activateConversationGoalReply(id: string, active: boolean): Promise<boo
 
 /** Both UIs write the existing objective/switch/ticket authorities in the same order. */
 async function saveConversationObjective(id: string, text: string, named: 'goal' | 'loop' | null,
-  assertCurrent: () => Promise<void> = async () => undefined) {
+  assertCurrent: () => Promise<void> = async () => undefined, from = 'the ChatGPT page') {
   await assertCurrent();
   if (goalWorkerChat(id)) throw new Error('goal_worker_chat');
   if (text.trim() && await conversationWasSuperseded(id)) throw new Error('conversation_superseded');
@@ -2541,7 +2599,7 @@ async function saveConversationObjective(id: string, text: string, named: 'goal'
     const on = text.trim().length > 0;
     const which = on ? named : held.enabled ? held.mode : named;
     await assertCurrent();
-    try { chatSwitch = await setGoalSwitchNow(id, which, on); }
+    try { chatSwitch = await setGoalSwitchNow(id, which, on, undefined, `${from} (objective saved)`); }
     catch { throw new Error('goal_switch_not_durable'); }
   }
   await assertCurrent();
@@ -2559,15 +2617,17 @@ export async function setSessionObjective(sessionId: string, text: string, mode:
   const id = await controlledConversation(sessionId);
   await saveConversationObjective(id, text, mode, async () => {
     if (await controlledConversation(sessionId) !== id) throw new Error('conversation_changed');
-  });
+  }, 'the app');
   return sessionControlsFor(sessionId);
 }
-export async function setSessionAutomation(sessionId: string, automation: SessionControlsView['automation'], afterTurn?: boolean): Promise<SessionControlsView> {
+export async function setSessionAutomation(sessionId: string, automation: SessionControlsView['automation'], afterTurn?: boolean,
+  /** Who changed it, for the log (#1882). */
+  from?: string): Promise<SessionControlsView> {
   const id = await controlledConversation(sessionId);
   if (automation !== 'off' && goalBlockReason(id)) throw new Error(goalWorkerChat(id) ? 'worker_goal_disabled' : 'chat_blocked');
   const mode = automation === 'off' ? goalSwitchFor(id).mode : automation;
   // The existing reply setter retires drafts and durably closes the pickup for Off.
-  const held = await setGoalSwitchNow(id, mode, automation !== 'off', afterTurn);
+  const held = await setGoalSwitchNow(id, mode, automation !== 'off', afterTurn, from);
   if (!loopAfterTurnFor(id) && goalPendingReplyFor(id)?.silencePro) await revokeSilenceLoop(id);
   const keyPresent = held.enabled && await goalKeyPresent(mode);
   if (await controlledConversation(sessionId) !== id) throw new Error('conversation_changed');
@@ -5015,7 +5075,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       const session = await findSessionByConversation(settingsConversation, { requireUnique: true });
       if (!session) return json(res, 409, { error: 'session_not_recorded' }, origin);
       const control = goalSwitchFor(settingsConversation);
-      await setSessionAutomation(session.id, control.enabled ? control.mode : 'off', body['loopAfterTurn']);
+      await setSessionAutomation(session.id, control.enabled ? control.mode : 'off', body['loopAfterTurn'], 'the ChatGPT page');
       return json(res, 200, { goal: { afterTurn: goalSwitchFor(settingsConversation).afterTurn } }, origin);
     }
     // One switch per request. Goal and Loop are one setting drawn as two controls, so a body
@@ -5085,7 +5145,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       };
     });
     const chatSwitch = scoped
-      ? await setGoalSwitchNow(settingsConversation as string, which as 'goal' | 'loop', (goal ?? loop) as boolean)
+      ? await setGoalSwitchNow(settingsConversation as string, which as 'goal' | 'loop', (goal ?? loop) as boolean, undefined, 'the ChatGPT page')
       : null;
     if (auto === false) {
       try {
@@ -8527,8 +8587,13 @@ const providerHistoryBackoffUntil = new Map<string, number>();
  * another 429. Each limited retry holds longer, the same steps the page's own Retry presses take
  * (content.js LOAD_FAILURE_LIMITED_BACKOFF_MS); ChatGPT's own longer Retry-After still wins. A
  * limit that returns after a quiet quarter of an hour starts over.
+ *
+ * A limit that outlasts the quarter-hour step keeps growing to 30 and then 60 minutes. Measured
+ * 2026-11-05 (#1882): one chat stayed limited for 8.5 hours through 23 retries at a quarter-hour
+ * hold, each retry a reload plus the page's own Retry presses. A limit that long is answered with
+ * fewer tries, never with none.
  */
-const PROVIDER_HISTORY_STREAK_HOLDS_MS = [0, 120_000, 240_000, 480_000, 900_000];
+const PROVIDER_HISTORY_STREAK_HOLDS_MS = [0, 120_000, 240_000, 480_000, 900_000, 1_800_000, 3_600_000];
 const PROVIDER_HISTORY_STREAK_RESET_MS = 15 * 60_000;
 const providerHistoryStreaks = new Map<string, { strikes: number; until: number }>();
 /** The hold deadline a deferred pickup was last logged for, so each hold is logged once. */

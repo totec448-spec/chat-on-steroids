@@ -1,5 +1,6 @@
 import { toolDeclaration } from './tool-declarations.js';
 import { registerPlanTool } from './plan-tool.js';
+import { registerUserRequestTools } from './user-request-tools.js';
 import { goalWorkerChat, imageExportCapable } from '../bridge.js';
 import { exportImage, ImageExportError } from '../image-export.js';
 import { awaitRequestCorrelation } from '../session/correlation.js';
@@ -1195,6 +1196,13 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           }
         })
     );
+  }
+
+  // A step for the person (#1695): offered with the command tools, and also in Read-only mode,
+  // which turns those off: it runs nothing, and the person's own terminal is theirs.
+  // Kept registered once offered (ToolContext.exposedUserRequests); the handler refuses while off.
+  if (ctx.exposedUserRequests ?? ((exposedCaps.command || (ctx.readOnly && getConfig().capabilities.command)) && reg.sessionToolsExposed)) {
+    registerUserRequestTools(reg);
   }
 
   // ------------------------------------------------------- plan and finish
