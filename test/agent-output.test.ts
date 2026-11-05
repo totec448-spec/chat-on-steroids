@@ -190,3 +190,20 @@ it('keeps a credential header whose value is on the next line until the value ar
   stream.flush(0, true);
   expect(shownText(shown)).toBe('Authorization: Bearer\n');
 });
+
+// CodeRabbit on #2052: hiding output on purpose is said in the log, once per stretch, without the text.
+it('notes each deliberate hiding once, without the hidden text', () => {
+  const notes: string[] = [];
+  const shown: string[] = [];
+  const stream = new AgentOutputStream(true, text => shown.push(text), reason => notes.push(reason));
+  stream.start(Buffer.from('first line\nhead piece\n... 9000 bytes omitted ...\ncut piece\nMIIEpAIBAAKCAQEA1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4\n'));
+  stream.push(Buffer.from('y5z6A7B8C9D0E1F2G3H4I5J6K7L8M9N0O1P2Q3R4S5T6U7V8W9X0Y1Z2a3b4c5d6\n'));
+  stream.flush(1_000);
+  stream.push(Buffer.from('-----END RSA PRIVATE KEY-----\nafter\n-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\n'));
+  stream.flush(2_000);
+  stream.push(Buffer.from('more key body line that is long enough to look like base64 AAAA\n'));
+  stream.flush(3_000);
+  expect(notes).toEqual(['a private key\'s lines were kept after the omitted part; hidden until its END line',
+    'a private key is being printed; hidden until its END line']);
+  expect(notes.join('\n')).not.toMatch(/MIIE|b3Bl/);
+});
