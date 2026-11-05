@@ -65,6 +65,8 @@ const CALLS: Array<{ tool: string; args: unknown; evidence?: Partial<CallEvidenc
   { tool: 'computer', args: { actions: [{ type: 'swipe' }, { type: 'type' }] } },
   { tool: 'update_plan', args: { plan: [{ step: 'a', status: 'completed' }, { step: 'b', status: 'pending' }] } },
   { tool: 'update_plan', args: { plan: [] } },
+  { tool: 'ask_user_to_run', args: { command: 'make', purpose: 'Sign in to the license server' } },
+  { tool: 'user_request_status', args: { id: 'ur_abcdefghijkl' } },
   { tool: 'session', args: { action: 'search', query: 'release' }, evidence: { count: 5 } },
   { tool: 'session', args: { action: 'search' }, evidence: { count: 1 } },
   { tool: 'session', args: { action: 'read', tool_call: 'x' }, evidence: { count: 1 } },

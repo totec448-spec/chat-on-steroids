@@ -4989,6 +4989,53 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .agent-plan-step[data-status='in_progress'] .agent-plan-marker { border-color: var(--ink); color: var(--ink); }
 .agent-plan-step[data-status='completed'] .agent-plan-marker { color: var(--soft); border-color: transparent; }
 .agent-plan-details { padding: 0 14px 10px 32px; color: var(--faint); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* A step handed to the person (#1695): one card in the timeline and in the list above the composer. */
+/* The card is the row: it lines up with the messages and carries its own surface, so the open
+   call's sunk background and its outdent (.ev-tool_call .tool) do not apply. */
+.ev-tool_call .tool.is-user-request { margin: 4px 0 14px; background: transparent; }
+.tool.is-user-request > summary { display: none; }
+.user-request { display: grid; gap: 10px; min-width: 0; padding: 12px 14px; border: 1px solid var(--edge); border-radius: 12px; background: var(--card); color: var(--ink); font-size: calc(13px * var(--text-scale, 1)); }
+.user-request-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.user-request-head .ico { --ico: 15px; color: var(--soft); }
+.user-request-head b { flex: 1; min-width: 0; font-weight: 600; }
+.user-request-state { flex: none; color: var(--faint); font-size: calc(12px * var(--text-scale, 1)); }
+.user-request[data-state='open'] .user-request-state { color: var(--ink); font-weight: 550; }
+.user-request-from { margin: 0; color: var(--faint); font-size: calc(12px * var(--text-scale, 1)); overflow-wrap: anywhere; }
+.user-request-purpose { margin: 0; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* One look wherever the card stands (inside a call row the well styles differ). */
+.user-request .user-request-command { border: 0; border-radius: var(--r-sm); background: var(--page); }
+.user-request .user-request-command > .tool-output-header { min-height: 24px; padding: 4px 8px 0; border-bottom: 0; background: transparent; }
+.user-request .tool-copy { opacity: 1; }
+.user-request .user-request-command > .pre { margin: 0; padding: 4px 10px 9px; border-radius: 0; background: transparent; color: var(--ink); max-height: 220px; }
+.user-request-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; margin: 0; }
+.user-request-facts dt { color: var(--faint); }
+.user-request-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.user-request-facts code { font-family: var(--mono); font-size: calc(12px * var(--text-scale, 1)); }
+.user-request-files { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.user-request-files li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
+.user-request-file-state { color: var(--faint); font-size: calc(12px * var(--text-scale, 1)); }
+.user-request-file-state[data-found='found'] { color: var(--ink); }
+.user-request-more { min-width: 0; }
+.user-request-more > summary { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 0; border-radius: 6px; color: var(--faint); font-size: calc(12px * var(--text-scale, 1)); list-style: none; cursor: pointer; }
+.user-request-more > summary::-webkit-details-marker { display: none; }
+.user-request-more > summary:hover { color: var(--ink); }
+.user-request-more > summary:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.user-request-more > summary .disclosure-chevron { width: 14px; height: 14px; transition: transform 120ms ease; }
+.user-request-more[open] > summary .disclosure-chevron { transform: rotate(90deg); }
+.user-request-more > .user-request-facts { margin-top: 6px; }
+.user-request-note, .user-request-answered { margin: 0; color: var(--faint); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.5; }
+.user-request-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.user-requests { min-width: 0; border-bottom: 1px solid var(--edge); color: var(--soft); font-size: calc(13px * var(--text-scale, 1)); overflow: hidden; }
+.user-requests[hidden], .app[data-screen='settings'] .user-requests { display: none; }
+.user-requests summary { display: flex; align-items: center; gap: 9px; min-height: 38px; padding: 8px 12px; list-style: none; cursor: pointer; }
+.user-requests summary::-webkit-details-marker { display: none; }
+.user-requests summary:hover { background: var(--hover); color: var(--ink); }
+.user-requests summary:focus-visible { outline: 2px solid var(--ink); outline-offset: -3px; border-radius: 7px; }
+.user-requests summary .ico { --ico: 15px; }
+.user-requests summary::after { content: ''; width: 7px; height: 7px; flex: none; margin: 0 4px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); }
+.user-requests-shell[open] > summary::after { transform: rotate(225deg); }
+.user-requests-title { flex: 1; font-weight: 550; color: var(--ink); }
+.user-requests-body { display: grid; gap: 8px; max-height: min(360px, 40vh); overflow-y: auto; overscroll-behavior: contain; padding: 0 8px 8px; }
 
 .composer-dock { --edge: var(--composer-edge); min-height: 0; width: min(836px, calc(100% - 72px)); margin: 15px auto -15px; border: 1px solid var(--edge); border-block-width: 0; border-radius: 16px 16px 0 0; background: var(--card); overflow: hidden; opacity: 0; pointer-events: none; transition: opacity 120ms ease-in, margin-top 140ms ease-out; }
 /* Visibility and borders follow the actual occupants, not an observer's cached size. */
@@ -5076,7 +5123,7 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
      and the two large sublists independently scrollable. Wide desktop layouts are unchanged. */
   .composer-dock-body { max-height: 46vh; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
   .background-exec-status { position: sticky; top: 0; z-index: 2; background: var(--card); }
-  .agent-plan-body, #finishQueue { max-height: 22vh; }
+  .agent-plan-body, .user-requests-body, #finishQueue { max-height: 22vh; }
   #taskPlanPreview { max-height: 28vh; }
 }
 /* Status spans need a real row: inline padding does not contribute to dock height. */

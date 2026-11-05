@@ -116,6 +116,8 @@ import {
   startGoalDraft
 } from './goal.js';
 import { logInfo, logWarn } from './logger.js';
+import { userRequestFound } from './user-request-files.js';
+import type { UserRequestView } from '../shared/user-requests.js';
 import { markStartup } from './startup-timing.js';
 import {
   closeConversation,
@@ -144,6 +146,8 @@ import {
   findSessionByConversation,
   getSession,
   readSessionPlan,
+  readSessionUserRequests,
+  indexedSessions,
   listUsageSessions,
   readRecentEvents,
   readLatestUserMessage,
@@ -2229,6 +2233,8 @@ export type SessionControlsView = {
   sessionId: string;
   recovery?: import('../shared/recovery.js').RecoveryCountdown[];
   plan: import('../shared/agent-plan.js').AgentPlan | null;
+  /** Steps handed to the person (#1695), open and answered. */
+  userRequests?: UserRequestView[];
   conversationId: string;
   automation: 'off' | 'goal' | 'loop';
   loopAfterTurn?: boolean;
@@ -2273,6 +2279,37 @@ async function controlledConversation(sessionId: string): Promise<string> {
   if ((await getSession(sessionId))?.conversationId !== id) throw new Error('conversation_changed');
   return id;
 }
+
+/**
+ * Steps handed to the person (#1695); expected files are looked up for the open ones only. The open
+ * steps of this chat's sub-agents (workers, at any depth) come after its own, so the person sees
+ * every step waiting for them in the chat they watch.
+ */
+export async function userRequestViews(sessionId: string): Promise<UserRequestView[]> {
+  const own = await readSessionUserRequests(sessionId);
+  const views: UserRequestView[] = await Promise.all(own.map(async request =>
+    ({ ...request, found: request.state === 'open' ? await userRequestFound(request) : [] })));
+  const all = await indexedSessions();
+  const family = [sessionId];
+  for (let index = 0; index < family.length && family.length <= 50; index++) {
+    for (const child of all) {
+      if (child.origin?.kind === 'worker' && child.origin.fromSessionId === family[index] && !family.includes(child.id)) family.push(child.id);
+    }
+  }
+  for (const id of family.slice(1)) {
+    const title = all.find(entry => entry.id === id)?.title ?? '';
+    const requests = await readSessionUserRequests(id).catch((error: NodeJS.ErrnoException) => {
+      // Said once per read, with only the reason: no step text and no ids (CodeRabbit on #2049).
+      logWarn(`steps for the person: a sub-agent's saved steps could not be read (${error?.code ?? 'error'}); they are left out of the main chat's list`);
+      return [];
+    });
+    for (const request of requests) {
+      if (request.state === 'open') views.push({ ...request, found: await userRequestFound(request), from: { sessionId: id, title } });
+    }
+  }
+  return views;
+}
+
 export async function sessionControlsFor(sessionId: string): Promise<SessionControlsView> {
   const id = await controlledConversation(sessionId);
   const control = goalSwitchFor(id);
@@ -2295,9 +2332,10 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
   const draft = goalViewFor(id) ?? goalOutcomeFor(id);
   const inputPolicy = await sessionInputPolicy(sessionId, sessionInputActivity(session));
   const plan = await readSessionPlan(sessionId);
+  const userRequests = await userRequestViews(sessionId);
   const finishWaiting = await sessionFinishWaiting(sessionId, activeTurnId, id);
   const recovery = await sessionRecoveryCountdowns(sessionId, id);
-  return { sessionId, plan, conversationId: id, activeTurnId, heldTurnId, finishHeld,
+  return { sessionId, plan, userRequests, conversationId: id, activeTurnId, heldTurnId, finishHeld,
     recovery,
     queueAtFinish: !blocked && inputPolicy.queueAtFinish, canInject: !blocked && inputPolicy.canInject,
     canSendDirectly: !blocked && !!inputPolicy.directTurn,
