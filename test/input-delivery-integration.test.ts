@@ -4207,3 +4207,22 @@ it('reads the own-sent store from an older version as empty and drops damaged en
   input.resetInputForTests();
   expect(await input.ownSentResidue(conversationId)).toEqual([{ text: 'Continue the task', messageId: 'kept-message' }]);
 });
+
+// CodeRabbit on #2079: a chat ChatGPT deleted loses its own-sent record, and a save keeps nothing
+// older than the window a page may use it in.
+it('forgets the own-sent record of a chat ChatGPT deleted, and drops old records when it saves', async () => {
+  const { readDurable } = await import('../src/main/durable.js');
+  const gone = randomUUID(), old = randomUUID();
+  await flushDurable();
+  await writeDurableNow('own-sent-receipts', [
+    { conversationId: gone, text: 'Continue the task', messageId: 'gone-message', at: Date.now() },
+    { conversationId: old, text: 'An old continue', messageId: 'old-message', at: Date.now() - 25 * 60 * 60_000 }
+  ]);
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(gone)).toEqual([{ text: 'Continue the task', messageId: 'gone-message' }]);
+  expect(await input.ownSentResidue(old)).toEqual([]);
+  await input.failInputsForDeletedConversation(gone);
+  expect(await input.ownSentResidue(gone)).toEqual([]);
+  await flushDurable();
+  expect(await readDurable('own-sent-receipts')).toEqual([]);
+});
