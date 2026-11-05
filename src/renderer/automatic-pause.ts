@@ -21,12 +21,19 @@ export function paintAutomaticPause(until: number | null): void {
       t('ChatGPT asked to slow down. Automatic messages resume at {0}.', [new Date(active).toLocaleTimeString(currentLanguage(), { hour: '2-digit', minute: '2-digit' })]));
   }
   notice.hidden = false;
-  // It ends by itself at ChatGPT's time, also when nothing else repaints the window.
-  timer = window.setTimeout(() => paintAutomaticPause(null), Math.min(active - Date.now() + 500, 2 ** 31 - 1));
+  // It ends by itself at ChatGPT's time, also when nothing else repaints the window. The timer checks
+  // the clock again when it fires: a clock set back must not hide a pause that still holds (CodeRabbit on #2051).
+  timer = window.setTimeout(() => paintAutomaticPause(active), Math.min(active - Date.now() + 500, 2 ** 31 - 1));
   const resume = document.getElementById('resumeAutomaticSends') as HTMLButtonElement;
   resume.onclick = () => void (async () => {
     resume.disabled = true;
-    try { if (await run(window.api.resumeAutomaticSends())) paintAutomaticPause(null); }
+    try {
+      if (await run(window.api.resumeAutomaticSends())) {
+        // The notice and its button go away: a keyboard user continues in the message box (CodeRabbit on #2051).
+        if (notice.contains(document.activeElement)) document.getElementById('chatInput')?.focus();
+        paintAutomaticPause(null);
+      }
+    }
     finally { resume.disabled = false; }
   })();
 }

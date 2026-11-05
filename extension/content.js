@@ -11300,6 +11300,9 @@
     }
     if (goalWasSpent(conversationId, `busy:${draft.token}`)) return deferGoalDraftForWork(draft);
     if (goalConfig?.queuePending) return;
+    // Chats working at once (#1694): the app says this ready message waits for a slot or ChatGPT's
+    // pause. Keep it, untyped, and try again on a later pull.
+    if (goalConfig?.slotWait) return;
     if (!goalUsable()) {
       // Settings are live. Turning Goal Mode off (or removing its key) while OpenRouter is
       // drafting must revoke permission to type the result, even if that result becomes ready
@@ -11411,7 +11414,7 @@
         const ready = allowed?.draft;
         if (!allowed || !ready || ready.token !== draft.token || ready.stage !== 'ready' || ready.reply !== draft.reply ||
             !(allowed.enabled === true || (allowed.own !== true && allowed.objective)) || allowed.hasKey !== true ||
-            allowed.blocked || allowed.queuePending || authorization.data.job?.busy || authorization.data.pendingTools > 0 ||
+            allowed.blocked || allowed.queuePending || allowed.slotWait || authorization.data.job?.busy || authorization.data.pendingTools > 0 ||
             goalSourceGenerating() || CLF_DOM.generating() || nativeBusy || job?.busy) return false;
         // The page inserted this reply, and ChatGPT stores inserted text Markdown-escaped: a raw
         // comparison never matched a reply with `code` or *emphasis*, and its turn never opened.
