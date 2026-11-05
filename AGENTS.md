@@ -1800,7 +1800,9 @@ companions, last 24 h, at most 5; never an unsent text). Each chat's latest such
 the durable `own-sent-receipts` (one per chat, at most 200 chats, texts up to 20,000 characters), so it
 is still known after the outbox history (newest 50 finished rows across all chats) drops it. A
 chat's record goes with the chat (`forgetOwnSent`: deleting it in the app, for every conversation id
-it had, or ChatGPT reporting it deleted), and a save keeps nothing older than 24 h. `clf-repair-check` clears the composer only
+it had, saved before the chat itself is removed; or ChatGPT reporting it deleted). The store is
+`{ version: 1, receipts, forgotten }`: `forgotten` lists chats deleted in the last 24 h, so a send
+acknowledged late for one is not recorded again. Nothing older than 24 h is kept. `clf-repair-check` clears the composer only
 when the chat's latest user message has one of those message ids, the composer holds exactly that
 send's text (line breaks and outer spaces aside, or ChatGPT's Markdown-escaped form; no
 whitespace-blind match), and nothing is attached, through the `captureComposerDraft` lease (unchanged
