@@ -3195,6 +3195,20 @@ catalog or a project-history merge, the renderer requests that same follow once;
 different chat first prevents it. The same IPC accepts `{ id: null }` when New Chat or no session
 is selected. Every selection request clears an older queued follow before its session lookup, so
 a late response or an unbound selection cannot activate the previous chat's tab.
+`selected-tab-follow.ts` owns one pending desktop selection, saved synchronously before IPC in
+renderer local storage (`chat-on-steroids.pending-tab-follow`: session id, nullable conversation
+id and expiry). Missing legacy state is empty; malformed, oversized, expired, deleted, foreign or
+rebound entries are discarded. A reload/restart restores only that still-current pending chat
+within 10 seconds; explicit New Chat or another selection cancels it. A first binding observed
+in the live window starts its own 10-second acceptance window. Catalog refreshes and bridge-state
+updates retry a rejected request without renewing that deadline or adding a timer. IPC returns
+false for an unbound chat or unavailable browser; true means queued, superseded, deleted, or
+handled without a follow under the existing background/group policy, not proof of tab activation.
+Only a matching binding's accepted response clears its saved copy; late responses cannot clear
+a newer intent. Accepted follows retain the bridge's existing in-memory TTL and one-shot pickup;
+this adds restart recovery before acceptance, not a durable browser-delivery receipt.
+Regressions: `selected-tab-follow.test.ts`, `renderer-timeline.part1.test.ts`, `ipc.test.ts` and
+`bridge.test.ts` cover restart before/during IPC, browser reconnection, cancellation and stale ACKs.
 
 Core's `save_image` (created only with the create-files permission) saves the original file of an
 image ChatGPT generated in the calling chat (#889); the recording keeps only a preview. The call's

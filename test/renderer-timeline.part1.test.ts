@@ -383,6 +383,51 @@ it('does not focus a newly bound chat after the person has selected another one'
   expect(followed).toEqual([]);
 });
 
+const FOLLOW_STORAGE = 'chat-on-steroids.pending-tab-follow';
+
+it('recovers a selected desktop chat already bound when the renderer restarts before following it', async () => {
+  const row: SessionSummary = { ...summary([]), origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } };
+  const { w } = await boot([], false, [], [], { sessions: [row], storage: {
+    [FOLLOW_STORAGE]: JSON.stringify({ id: row.id, conversationId: null, expiresAt: Date.now() + 10_000 })
+  } });
+  await waitFor(() => expect(w.document.querySelector('.sess.is-sel')?.getAttribute('data-id')).toBe(row.id));
+  await waitFor(() => expect(w.localStorage.getItem(FOLLOW_STORAGE)).toBeNull());
+});
+
+it('keeps a first binding pending until main accepts it and retries on a catalog refresh', async () => {
+  const opening: SessionSummary = { ...summary([]), conversationId: null, chatIds: [],
+    origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } };
+  const rows = [opening];
+  const { w, notifySession } = await boot([], false, [], [], { sessions: rows });
+  const follow = vi.fn(async () => ({ ok: true, data: false }));
+  (w as any).api.followSessionTab = follow;
+  w.document.querySelector<HTMLElement>(`#sessionList [data-id="${opening.id}"]`)!.click();
+  rows[0] = { ...opening, conversationId: 'new-native-chat', chatIds: ['new-native-chat'] };
+  notifySession();
+  await waitFor(() => expect(follow).toHaveBeenCalledTimes(2));
+  expect(JSON.parse(w.localStorage.getItem(FOLLOW_STORAGE)!)).toMatchObject({ id: opening.id, conversationId: 'new-native-chat' });
+  follow.mockResolvedValue({ ok: true, data: true });
+  notifySession();
+  await waitFor(() => expect(w.localStorage.getItem(FOLLOW_STORAGE)).toBeNull());
+  expect(follow).toHaveBeenCalledTimes(3);
+});
+
+it('does not let a delayed acknowledgement erase the newer selected chat follow', async () => {
+  const origin = { kind: 'desktop' as const, fromSessionId: null, agentId: null, task: '' };
+  const first = { ...summary([]), origin };
+  const second = { ...summary([]), id: '2026-09-02-test0002', origin };
+  const { w } = await boot([], false, [], [], { sessions: [first, second] });
+  let release!: (value: { ok: true; data: boolean }) => void;
+  (w as any).api.followSessionTab = vi.fn()
+    .mockImplementationOnce(() => new Promise(resolve => { release = resolve; }))
+    .mockResolvedValue({ ok: true, data: false });
+  w.document.querySelector<HTMLElement>(`#sessionList [data-id="${first.id}"]`)!.click();
+  w.document.querySelector<HTMLElement>(`#sessionList [data-id="${second.id}"]`)!.click();
+  release({ ok: true, data: true });
+  await settle();
+  expect(JSON.parse(w.localStorage.getItem(FOLLOW_STORAGE)!)).toMatchObject({ id: second.id });
+});
+
 it('clears control projections on an existing-session switch and fences A to B to A responses', async () => {
   const first = summary([]), second = { ...summary([]), id: '2026-09-02-test0002', title: 'Other session' };
   const { w, append } = await boot([], true, [], [], { sessions: [first, second] });

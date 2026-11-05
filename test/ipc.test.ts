@@ -2468,7 +2468,7 @@ it('follows only the newest chat selection when an earlier lookup finishes last 
   const store = await import('../src/main/session/store.js');
   const first = await createSession({ title: 'first', conversationId: 'aaaaaaaa-1111-4222-8333-444444444444' });
   const second = await createSession({ title: 'second', conversationId: 'bbbbbbbb-1111-4222-8333-444444444444' });
-  const followed = vi.spyOn(bridge, 'followChatInBackground').mockImplementation(() => undefined);
+  const followed = vi.spyOn(bridge, 'followChatInBackground').mockImplementation(() => true);
   const lookup = store.getSession;
   let releaseFirst: () => void = () => undefined;
   const firstHeld = new Promise<void>(resolve => { releaseFirst = resolve; });
@@ -2486,10 +2486,24 @@ it('follows only the newest chat selection when an earlier lookup finishes last 
   } finally { slow.mockRestore(); followed.mockRestore(); }
 });
 
+it.each([false, true])('reports browser tab-follow acceptance (%s) instead of acknowledging a rejected follow', async accepted => {
+  const bridge = await import('../src/main/bridge.js');
+  const session = await createSession({ title: 'selected', conversationId: 'aaaaaaaa-1111-4222-8333-444444444444' });
+  const follow = vi.spyOn(bridge, 'followChatInBackground').mockReturnValue(accepted);
+  try {
+    expect(await handlers.get('sessions:followTab')!(null, { id: session.id })).toEqual({ ok: true, data: accepted });
+  } finally { follow.mockRestore(); }
+});
+
+it('keeps an unbound desktop selection pending instead of claiming its follow was accepted', async () => {
+  const session = await createSession({ title: 'opening', conversationId: null });
+  expect(await handlers.get('sessions:followTab')!(null, { id: session.id })).toEqual({ ok: true, data: false });
+});
+
 it('cancels an already queued tab follow when the user selects New Chat', async () => {
   const bridge = await import('../src/main/bridge.js');
   const first = await createSession({ title: 'first', conversationId: 'aaaaaaaa-1111-4222-8333-444444444444' });
-  const followed = vi.spyOn(bridge, 'followChatInBackground').mockImplementation(() => undefined);
+  const followed = vi.spyOn(bridge, 'followChatInBackground').mockImplementation(() => true);
   try {
     const initial = await handlers.get('sessions:followTab')!(null, { id: first.id }) as any;
     const clear = await handlers.get('sessions:followTab')!(null, { id: null }) as any;
@@ -2505,7 +2519,7 @@ it('discards a slow tab lookup if New Chat is selected before the lookup resolve
   const bridge = await import('../src/main/bridge.js');
   const store = await import('../src/main/session/store.js');
   const first = await createSession({ title: 'first', conversationId: 'aaaaaaaa-1111-4222-8333-444444444444' });
-  const followed = vi.spyOn(bridge, 'followChatInBackground').mockImplementation(() => undefined);
+  const followed = vi.spyOn(bridge, 'followChatInBackground').mockImplementation(() => true);
   const lookup = store.getSession;
   let release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });
