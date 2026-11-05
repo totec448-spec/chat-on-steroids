@@ -7541,6 +7541,10 @@ function paintBackgroundProcesses(): void {
     host.onkeydown = null;
   }
   list.hidden = !expanded;
+  // Each row keeps its Output button while its process and incarnation are the same, so a press that
+  // spans a repaint still lands (CodeRabbit on #2052).
+  const keptOutputs = new Map([...list.querySelectorAll<HTMLButtonElement>('.background-exec-output')]
+    .map(button => [button.dataset.process ?? '', button] as const));
   list.replaceChildren();
   if (expanded) {
     for (const row of rows) {
@@ -7559,7 +7563,9 @@ function paintBackgroundProcesses(): void {
       stopIcon.setAttribute('aria-hidden', 'true');
       itemStop.append(stopIcon, el('span'));
       configureBackgroundProcessStop(itemStop, row);
-      item.append(itemCommand, itemTime, ...(agentOutputAvailable() ? [backgroundProcessOutputButton(row)] : []), itemStop);
+      const output = agentOutputAvailable()
+        ? keptOutputs.get(`${row.processId}:${row.incarnation}`) ?? backgroundProcessOutputButton(row) : null;
+      item.append(itemCommand, itemTime, ...(output ? [output] : []), itemStop);
       list.append(item);
     }
   }

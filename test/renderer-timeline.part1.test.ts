@@ -87,6 +87,27 @@ it('offers Output only with agent output available, and keeps its focus across a
   expect(w.document.activeElement).toBe(repainted);
 });
 
+it('keeps each expanded row\'s Output button across a repaint while its process is the same', async () => {
+  const { w, publishBackgroundProcesses } = await boot([]);
+  (w as any).api.agentOutputOpen = vi.fn(async () => ({ ok: true, data: true }));
+  const startedAt = Date.now() - 45_000;
+  const rows = [
+    { processId: 4301, incarnation: 111, command: 'npm run watch', startedAt, tty: false },
+    { processId: 4302, incarnation: 112, command: 'node server.js', startedAt: startedAt + 5_000, tty: true }
+  ];
+  await publishBackgroundProcesses(rows);
+  w.document.getElementById('backgroundExecStatus')!.click();
+  const list = w.document.getElementById('backgroundExecList')!;
+  const before = [...list.querySelectorAll<HTMLButtonElement>('.background-exec-output')];
+  expect(before).toHaveLength(2);
+  // A repaint with the same processes keeps both buttons (CodeRabbit on #2052); a new incarnation gets a new one.
+  await publishBackgroundProcesses([rows[0]!, { ...rows[1]!, incarnation: 113 }]);
+  const after = [...list.querySelectorAll<HTMLButtonElement>('.background-exec-output')];
+  expect(after[0]).toBe(before[0]);
+  expect(after[1]).not.toBe(before[1]);
+  expect(after[1]!.dataset.process).toBe('4302:113');
+});
+
 it('expands multiple background processes and stops each one from its own row', async () => {
   const { w, publishBackgroundProcesses } = await boot([]);
   const startedAt = Date.now() - 45_000;
