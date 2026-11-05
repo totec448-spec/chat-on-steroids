@@ -14,8 +14,8 @@ const fixture = `(() => {
  const old=window.api,f=composerFixture,now=Date.now(),ok=data=>Promise.resolve({ok:true,data});
  const stored=text=>({text,chars:text.length,truncated:false});
  const command='cd firmware && make flash PORT=/dev/tty.usbserial-0001';
- const request=(id,extra)=>({id,command,folder:'/Users/sam/projects/thermostat',remote:false,purpose:'Flash the new firmware onto the board. It needs the USB cable and the reset button, so the agent cannot do it.',
-  expected:[{path:'firmware/build/flash.log',real:'/Users/sam/projects/thermostat/firmware/build/flash.log'},{path:'firmware/build/checksum.txt',real:'/Users/sam/projects/thermostat/firmware/build/checksum.txt'}],
+ const request=(id,extra)=>({id,command,folder:'/Users/you/projects/thermostat',remote:false,purpose:'Flash the new firmware onto the board. It needs the USB cable and the reset button, so the agent cannot do it.',
+  expected:[{path:'firmware/build/flash.log',real:'/Users/you/projects/thermostat/firmware/build/flash.log'},{path:'firmware/build/checksum.txt',real:'/Users/you/projects/thermostat/firmware/build/checksum.txt'}],
   constraints:'Takes about 2 minutes. Run it once.',state:'open',createdAt:now-120000,conversationId:'preview-chat',
   found:[{path:'firmware/build/flash.log',state:'found',size:18432,modifiedAt:now-60000},{path:'firmware/build/checksum.txt',state:'missing'}],...extra});
  window.requests=[request('ur_firmware0001'),{...request('ur_sensortest01'),command:'python3 tools/calibrate.py --sensor bme280',purpose:'Calibrate the sensor while you hold it at room temperature.',expected:[],found:[],constraints:undefined,from:{sessionId:'worker-session',title:'Sensor calibration'}}];

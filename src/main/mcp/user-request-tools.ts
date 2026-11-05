@@ -1,11 +1,11 @@
 import { currentCaller } from './call-context.js';
-import { fail, failIdentity, guard, ok, resolveCwd, resolveIn, type SurfaceRegistrar } from './kernel.js';
+import { fail, failIdentity, guard, ok, resolveCwd, type SurfaceRegistrar } from './kernel.js';
 import { toolDeclaration } from './tool-declarations.js';
 import { fileUserRequest, readSessionUserRequests } from '../session/store.js';
 import { userRequestFound } from '../user-request-files.js';
 import { getConfig } from '../config.js';
 import { logInfo } from '../logger.js';
-import { SandboxError } from '../sandbox.js';
+import { resolvePath, SandboxError } from '../sandbox.js';
 import {
   USER_REQUEST_LIMITS, userRequestInputSchema, userRequestStatusInputSchema, type UserRequest, type UserRequestFound
 } from '../../shared/user-requests.js';
@@ -84,7 +84,9 @@ export function registerUserRequestTools(reg: SurfaceRegistrar): void {
     const expected = await Promise.all((input.expected ?? []).map(async file => {
       if (remote) return { path: file };
       try {
-        return { path: file, real: (await resolveIn(reg.ctx.roots, file, { allowMissing: true, base })).real };
+        // resolvePath, not resolveIn: an expected file only names a place, so it must not
+        // become the folder later commands run in.
+        return { path: file, real: (await resolvePath(reg.ctx.roots, file, { allowMissing: true, base })).real };
       } catch (error) {
         if (error instanceof SandboxError) return { path: file };
         throw error;

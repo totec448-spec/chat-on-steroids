@@ -3461,9 +3461,15 @@ export async function updateSessionPlan(
  * Steps handed to the person (#1695): one small `requests.json` per session, like the plan. Keyed
  * by session, not by ChatGPT chat, so a chat continued by Compact & Resume can still check them.
  */
-const MAX_USER_REQUESTS_BYTES = 1024 * 1024;
+// A full file of the largest allowed steps, with JSON escaping, stays well under this (about 21 MB).
+const MAX_USER_REQUESTS_BYTES = 32 * 1024 * 1024;
 
-async function readUserRequestsFile(id: string): Promise<UserRequest[]> {
+/**
+ * `quarantine` only inside the session queue: a reader outside it could otherwise move aside a
+ * valid file a queued write had just put in place, losing a step the tool already reported.
+ * Outside the queue a damaged file reads as no steps and stays where it is.
+ */
+async function readUserRequestsFile(id: string, quarantine = false): Promise<UserRequest[]> {
   const target = path.join(sessionDir(id), 'requests.json');
   let text: string;
   try {
@@ -3479,9 +3485,19 @@ async function readUserRequestsFile(id: string): Promise<UserRequest[]> {
     const parsed = userRequestsFileSchema.safeParse(JSON.parse(text));
     if (parsed.success) return parsed.data.requests;
   } catch { /* unreadable: kept aside below */ }
-  // Kept aside rather than overwritten, so a damaged file can still be looked at.
+  if (!quarantine) {
+    logWarn(`session ${id}: steps for the person are unreadable; showing none until the next change keeps the file aside`);
+    return [];
+  }
+  // Kept aside rather than overwritten, so a damaged file can still be looked at. If it cannot be
+  // moved, nothing new is written over it.
   const aside = `${target}.unreadable-${Date.now()}`;
-  await fs.rename(target, aside).catch(() => undefined);
+  try {
+    await fs.rename(target, aside);
+  } catch (error) {
+    logWarn(`session ${id}: steps for the person are unreadable and could not be kept aside (${(error as NodeJS.ErrnoException).code ?? 'error'}); not writing over them`);
+    throw new Error('The saved steps for the person are damaged and could not be kept aside, so no new step was written.');
+  }
   logWarn(`session ${id}: steps for the person were unreadable; kept as ${path.basename(aside)} and started empty`);
   return [];
 }
@@ -3515,7 +3531,7 @@ export async function fileUserRequest(
 ): Promise<FileUserRequestResult> {
   const entry = await ensureOpen(id);
   return enqueueSessionOperation(entry, 'user-request', async () => {
-    const requests = await readUserRequestsFile(id);
+    const requests = await readUserRequestsFile(id, true);
     const existing = requests.find(request => request.state === 'open' && sameUserRequest(request, input));
     if (existing) return { request: existing, existing: true };
     if (requests.filter(request => request.state === 'open').length >= USER_REQUEST_LIMITS.open) return { refused: 'open-limit' };
@@ -3538,7 +3554,7 @@ export async function answerUserRequest(
 ): Promise<{ request: UserRequest; changed: boolean } | null> {
   const entry = await ensureOpen(id);
   return enqueueSessionOperation(entry, 'user-request', async () => {
-    const requests = await readUserRequestsFile(id);
+    const requests = await readUserRequestsFile(id, true);
     const index = requests.findIndex(request => request.id === requestId);
     const current = requests[index];
     if (!current) return null;
