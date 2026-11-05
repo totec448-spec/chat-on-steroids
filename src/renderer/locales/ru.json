@@ -3948,7 +3948,7 @@
   "Continue queued. It goes out as soon as ChatGPT takes it.": "«Продолжить» поставлено в очередь. Оно уйдёт, как только ChatGPT его примет.",
   "Trying again now.": "Пробую снова.",
   "This chat has no ChatGPT conversation yet.": "У этого чата ещё нет разговора в ChatGPT.",
-  "ChatGPT limits this chat for a few minutes. The app tries again right after.": "ChatGPT ограничил этот чат на несколько минут. Приложение попробует сразу после этого.",
+  "ChatGPT is limiting this chat right now. The app tries again when the wait is over.": "ChatGPT сейчас ограничивает этот чат. Приложение попробует снова, когда ожидание закончится.",
   "Nothing is waiting to be picked up in this chat any more.": "В этом чате больше ничего не ждёт.",
   "This step changed meanwhile. Check the chat and try again.": "Этот шаг тем временем изменился. Проверьте чат и попробуйте снова.",
   "Not sent now: something in this chat is still running. The app keeps trying.": "Сейчас не отправлено: в этом чате ещё что-то выполняется. Приложение продолжает попытки.",

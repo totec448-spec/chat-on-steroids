@@ -3705,7 +3705,7 @@
   "Continue queued. It goes out as soon as ChatGPT takes it.": "「繼續」已排入佇列。ChatGPT 一接收就會送出。",
   "Trying again now.": "正在重新嘗試。",
   "This chat has no ChatGPT conversation yet.": "此對話還沒有 ChatGPT 對話。",
-  "ChatGPT limits this chat for a few minutes. The app tries again right after.": "ChatGPT 限制了此對話幾分鐘。應用程式會在之後立即重試。",
+  "ChatGPT is limiting this chat right now. The app tries again when the wait is over.": "ChatGPT 目前正在限制此對話。等待結束後應用程式會重試。",
   "Nothing is waiting to be picked up in this chat any more.": "此對話中已沒有等待的內容。",
   "This step changed meanwhile. Check the chat and try again.": "此步驟在這段期間已變更。請查看聊天後再試一次。",
   "Not sent now: something in this chat is still running. The app keeps trying.": "暫未送出：此聊天中仍有內容在執行。應用程式會繼續嘗試。",
