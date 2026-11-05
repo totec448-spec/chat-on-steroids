@@ -2774,7 +2774,9 @@ function chatIsWorkingNow(conversationId: string, now = Date.now()): boolean {
  * The chats working right now, for "Chats working at once" (#1694): a turn the page reports or the
  * silence window holds, or a running tool call, by exact ownership. A chat leaves only by the
  * recovery system's own states: its page detached (it leaves the live set), or recovery found no
- * page for it. A long-thinking turn the page still reports keeps its slot however long it takes.
+ * page for it. A turn the page reports with nothing else live (no running tool call, no activity
+ * grant) counts for at most OPEN_TURN_RECOVERY_MS (60 minutes, liveTurnIsCurrent's rule): longer
+ * thinking can free its slot early (CodeRabbit on #2051).
  */
 function workingChatsNow(now = Date.now()): Set<string> {
   const working = new Set<string>();
@@ -2786,6 +2788,8 @@ function workingChatsNow(now = Date.now()): Set<string> {
 setWorkingChatsSource(() => workingChatsNow());
 /** The last time each chat's Goal/Loop step was held for a slot, and why (#1694), for its wait caption. */
 const goalSlotWaits = new Map<string, { at: number; paused: boolean }>();
+/** Ready Goal messages held at the native Send by Chats working at once; true while ChatGPT's pause holds them. */
+const goalSendSlotWaits = new Map<string, boolean>();
 
 async function handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   const receivedAt = Date.now();
@@ -3948,7 +3952,19 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       const currentPending = goalPendingReplyFor(id);
       if (pending && (currentPending?.replyId !== pending.replyId || currentPending.turnId !== pending.turnId ||
           currentPending.acceptedAt !== pending.acceptedAt)) pending = null;
+      // Chats working at once (#1694), asked again at the native Send: a draft can outlast its slot's
+      // hold, and a pause can start while it is drafted (CodeRabbit on #2051). The page keeps a ready
+      // draft untyped while this is set, and refuses Send when it appears at the last check.
+      const slotWait = draft?.stage === 'ready' ? automaticSendRefusal(`goal:${id}`, id) : null;
+      const slotBefore = goalSendSlotWaits.get(id);
+      if (slotWait && slotBefore !== slotWait.startsWith('ChatGPT asked to slow down')) {
+        goalSendSlotWaits.set(id, slotWait.startsWith('ChatGPT asked to slow down'));
+        logInfo(`goal: ${id}'s ready message waits before Send: ${slotWait}`);
+      } else if (!slotWait && slotBefore !== undefined && goalSendSlotWaits.delete(id)) {
+        logInfo(`goal: ${id}'s ready message has a free slot`);
+      }
       return ({
+      ...(slotWait ? { slotWait } : {}),
       enabled: !superseded && !finishOnly && goalEnabledFor(id),
       configuredEnabled: !superseded && goalEnabledFor(id),
       afterTurn: loopAfterTurnFor(id),
@@ -8677,8 +8693,6 @@ function noteProviderHistoryBackoff(conversationId: string, observations: readon
         `holding automatic recovery ${Math.ceil((until - item.time) / 60_000)} minutes`);
     }
     providerHistoryStreaks.set(conversationId, { strikes, until: Math.max(streak && strikes ? streak.until : 0, until) });
-    // A second chat limited within ten minutes makes the pause every chat's (#1694, only while that setting is on).
-    noteChatLimit(conversationId, item.retryAt!, now);
   }
   if (!until) return;
   providerHistoryBackoffUntil.set(conversationId, until);
@@ -9275,6 +9289,15 @@ async function noteRecoveryObservations(
     (item.blocking === true ||
       /^too many requests\b.*temporarily limited.*access.*few minutes/i.test((item.text ?? '').replace(/\s+/g, ' ')));
   noteProviderHistoryBackoff(conversationId, observations);
+  // A second chat limited within ten minutes makes the pause every chat's (#1694, only while that
+  // setting is on). Every access-limit notice counts, with or without a retry time, at the time the
+  // page saw it, so a replayed old notice is not new evidence (CodeRabbit on #2051).
+  for (const item of observations) {
+    if (!accessLimit(item) || item.authoredTime === true) continue;
+    const now = Date.now();
+    const retryAt = Number.isFinite(item.retryAt) && item.retryAt! > now && item.retryAt! - item.time <= 24 * 60 * 60_000 ? item.retryAt! : null;
+    noteChatLimit(conversationId, retryAt, item.time, now);
+  }
   // The recorder owns idempotency. Raw batches may contain a historical user row or turn_start
   // beside a newly accepted title, so inferring activity from `stored > 0` re-armed completed
   // chats on every recovery reload. Only the recorder's per-event acceptance verdict may move

@@ -21,6 +21,13 @@ export function workingChatsSourceForTests(): () => ReadonlySet<string> { return
 const WAITER_GONE_MS = 2 * 60_000;
 /** An admitted send holds its slot until its chat is seen working, at most this long. */
 const ADMISSION_HOLD_MS = 2 * 60_000;
+/**
+ * A worker's reservation, while the worker is still starting or waking, holds at most this long:
+ * a delivery-proven revival may take up to REVIVAL_ACTIVITY_MS (bridge.ts, 3 + 3 minutes) before its
+ * chat shows as working (CodeRabbit on #2051). A worker that ended, failed or stayed asleep frees
+ * its slot at once through setWorkerSlotSource, so this bound only covers a worker really on its way.
+ */
+export const WORKER_ADMISSION_HOLD_MS = 6 * 60_000;
 /** Two chats showing ChatGPT's limit within this window make the pause account-wide. */
 const SHARED_LIMIT_WINDOW_MS = 10 * 60_000;
 /** The pause when ChatGPT names no time. */
@@ -39,6 +46,8 @@ const waiting = new Map<string, { since: number; asked: number }>();
 const admitted = new Map<string, { conversationId: string | null; at: number; seen: boolean; worker?: string }>();
 const limitSeen = new Map<string, { at: number; retryAt: number | null }>();
 let pauseUntil: number | null = null;
+/** When the person last pressed Resume now: a limit notice seen before it is not new evidence. */
+let resumedAt = 0;
 const listeners = new Set<() => void>();
 export function onChatsAtOnceChange(listener: () => void): () => void { listeners.add(listener); return () => listeners.delete(listener); }
 function changed(): void { for (const listener of listeners) listener(); }
@@ -72,7 +81,7 @@ function occupied(now: number): Set<string> {
     }
     const isWorking = entry.conversationId !== null && working.has(entry.conversationId);
     if (isWorking) { entry.seen = true; continue; }
-    if (entry.seen || now - entry.at > ADMISSION_HOLD_MS) { admitted.delete(key); continue; }
+    if (entry.seen || now - entry.at > (entry.worker ? WORKER_ADMISSION_HOLD_MS : ADMISSION_HOLD_MS)) { admitted.delete(key); continue; }
     taken.add(`admitted:${key}`);
   }
   return taken;
@@ -108,6 +117,16 @@ export function automaticSendRefusal(key: string, conversationId: string | null,
   return null;
 }
 
+/**
+ * Only ChatGPT's account-wide pause, for a send that already has its slot: rechecked right before
+ * Send, since a pause can start between the offer and the click (CodeRabbit on #2051).
+ */
+export function automaticPauseRefusal(now = Date.now()): string | null {
+  if (!chatsAtOnceLimit()) return null;
+  const pause = activePause(now);
+  return pause === null ? null : `ChatGPT asked to slow down; automatic messages resume at ${new Date(pause).toISOString()}`;
+}
+
 function note(key: string, now: number): void {
   const entry = waiting.get(key);
   if (entry) entry.asked = now;
@@ -136,13 +155,20 @@ export function workerSlotsRefusal(callerConversationId: string | null, workers:
 }
 
 /**
- * ChatGPT showed its limit message in a chat (a blocking error with a retry time). One chat is that
- * chat's limit, already held there. A second chat within ten minutes is evidence the limit is the
- * account's, and then every chat's automatic sends wait until the time ChatGPT named.
+ * ChatGPT showed its limit message in a chat (a blocking access-limit notice, with or without a
+ * retry time). One chat is that chat's limit, already held there. A second chat within ten minutes
+ * is evidence the limit is the account's, and then every chat's automatic sends wait until the
+ * time ChatGPT named, or 15 minutes when it named none.
+ *
+ * `observedAt` is when the page saw the notice: a replayed old notice, or one from before the
+ * person's Resume now, is not new evidence (CodeRabbit on #2051).
  */
-export function noteChatLimit(conversationId: string, retryAt: number | null, now = Date.now()): void {
+export function noteChatLimit(conversationId: string, retryAt: number | null, observedAt: number, now = Date.now()): void {
   if (!chatsAtOnceLimit()) return;
-  limitSeen.set(conversationId, { at: now, retryAt: retryAt !== null && retryAt > now ? retryAt : null });
+  if (!Number.isFinite(observedAt) || observedAt <= resumedAt || now - observedAt > SHARED_LIMIT_WINDOW_MS || observedAt > now + 60_000) return;
+  const previous = limitSeen.get(conversationId);
+  if (previous && previous.at >= observedAt) return;
+  limitSeen.set(conversationId, { at: Math.min(observedAt, now), retryAt: retryAt !== null && retryAt > now ? retryAt : null });
   for (const [id, seen] of limitSeen) if (now - seen.at > SHARED_LIMIT_WINDOW_MS) limitSeen.delete(id);
   if (limitSeen.size < 2) return;
   const until = Math.max(...[...limitSeen.values()].map(seen => seen.retryAt ?? seen.at + DEFAULT_PAUSE_MS));
@@ -154,13 +180,23 @@ export function noteChatLimit(conversationId: string, retryAt: number | null, no
   changed();
 }
 
-/** The person's Resume now: automatic messages go out again at once, at the risk of the limit returning. */
-export function resumeAutomaticSends(now = Date.now()): boolean {
+/**
+ * The person's Resume now: automatic messages go out again at once, at the risk of the limit
+ * returning. The cleared pause is saved before this answers, so a restart cannot bring back a pause
+ * the screen already said was over (CodeRabbit on #2051); if saving fails, the pause stays.
+ */
+export async function resumeAutomaticSends(now = Date.now()): Promise<boolean> {
   if (pauseUntil === null || pauseUntil <= now) return false;
+  try {
+    await writeDurableNow(STATE, { version: 1, pauseUntil: null });
+  } catch (error) {
+    logWarn(`chats at once: Resume now could not be saved, so the pause stays: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error('Resume now could not be saved. Automatic messages stay paused.');
+  }
   pauseUntil = null;
   limitSeen.clear();
+  resumedAt = now;
   logInfo('chats at once: the person resumed automatic messages before ChatGPT\'s time');
-  void writeDurableNow(STATE, { version: 1, pauseUntil: null }).catch(() => undefined);
   changed();
   return true;
 }
@@ -178,5 +214,5 @@ export async function restoreChatsAtOnce(now = Date.now()): Promise<void> {
 }
 
 export function resetChatsAtOnceForTests(): void {
-  waiting.clear(); admitted.clear(); limitSeen.clear(); pauseUntil = null; workingChats = () => new Set();
+  waiting.clear(); admitted.clear(); limitSeen.clear(); pauseUntil = null; resumedAt = 0; workingChats = () => new Set();
 }

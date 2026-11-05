@@ -1,10 +1,12 @@
-import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { getConfig } from '../src/main/config.js';
 import {
   automaticSendRefusal, chatsAtOnceStatus, noteChatLimit, resetChatsAtOnceForTests, restoreChatsAtOnce,
-  resumeAutomaticSends, setWorkerSlotSource, setWorkingChatsSource, workerSlotsRefusal, type WorkerSlotState
+  resumeAutomaticSends, setWorkerSlotSource, WORKER_ADMISSION_HOLD_MS, setWorkingChatsSource, workerSlotsRefusal, type WorkerSlotState
 } from '../src/main/chats-at-once.js';
+import * as durable from '../src/main/durable.js';
 import { flushDurable, initDurableStore, resetDurableForTests } from '../src/main/durable.js';
+import { REVIVAL_ACTIVITY_MS } from '../src/main/bridge.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
 // "Chats working at once" (#1694): automatic sends wait their turn; a person's own message never does.
@@ -75,11 +77,11 @@ it('applies a lowered limit to new sends only, never stopping what runs', () => 
 
 it('pauses every chat\'s automatic sends only when two chats show ChatGPT\'s limit, until the time ChatGPT names', async () => {
   const now = 1_000_000;
-  noteChatLimit('a', now + 20 * 60_000, now);
+  noteChatLimit('a', now + 20 * 60_000, now, now);
   expect(chatsAtOnceStatus(now).pauseUntil).toBeNull();
   expect(automaticSendRefusal('input:c', 'c', now)).toBeNull();
   // A second chat within ten minutes is the evidence that the limit is the account's.
-  noteChatLimit('b', now + 30 * 60_000, now + 60_000);
+  noteChatLimit('b', now + 30 * 60_000, now + 60_000, now + 60_000);
   expect(chatsAtOnceStatus(now + 60_000).pauseUntil).toBe(now + 30 * 60_000);
   expect(automaticSendRefusal('input:c', 'c', now + 61_000)).toMatch(/ChatGPT asked to slow down/);
   // Saved: a restart keeps the pause.
@@ -91,22 +93,22 @@ it('pauses every chat\'s automatic sends only when two chats show ChatGPT\'s lim
   expect(automaticSendRefusal('input:c', 'c', now + 31 * 60_000)).toBeNull();
 });
 
-it('does not pause on two limits far apart, uses 15 minutes when ChatGPT names no time, and Resume now ends it', () => {
+it('does not pause on two limits far apart, uses 15 minutes when ChatGPT names no time, and Resume now ends it', async () => {
   const now = 5_000_000;
-  noteChatLimit('a', null, now);
-  noteChatLimit('b', null, now + 11 * 60_000);
+  noteChatLimit('a', null, now, now);
+  noteChatLimit('b', null, now + 11 * 60_000, now + 11 * 60_000);
   expect(chatsAtOnceStatus(now + 11 * 60_000).pauseUntil).toBeNull();
-  noteChatLimit('c', null, now + 12 * 60_000);
+  noteChatLimit('c', null, now + 12 * 60_000, now + 12 * 60_000);
   expect(chatsAtOnceStatus(now + 12 * 60_000).pauseUntil).toBe(now + 27 * 60_000);
-  resumeAutomaticSends(now + 13 * 60_000);
+  expect(await resumeAutomaticSends(now + 13 * 60_000)).toBe(true);
   expect(chatsAtOnceStatus(now + 13 * 60_000).pauseUntil).toBeNull();
   expect(automaticSendRefusal('input:d', 'd', now + 13 * 60_000)).toBeNull();
 });
 
 it('never pauses while the setting is off', () => {
   getConfig().multiAgent.chatsAtOnce = 0;
-  noteChatLimit('a', 9e12, 1_000);
-  noteChatLimit('b', 9e12, 2_000);
+  noteChatLimit('a', 9e12, 1_000, 1_000);
+  noteChatLimit('b', 9e12, 2_000, 2_000);
   expect(chatsAtOnceStatus(2_000).pauseUntil).toBeNull();
   expect(automaticSendRefusal('input:c', 'c', 3_000)).toBeNull();
 });
@@ -127,4 +129,50 @@ it('counts a running worker once and gives back the slot of a worker that ended,
   expect(automaticSendRefusal('input:x', 'x', 3)).toBeNull();
   // Two workers named the same never share one slot, and a refused spawn reserves nothing.
   expect(workerSlotsRefusal('prime', ['run/worker-3', 'run/worker-4'], 4)).toMatch(/limit is 3/);
+});
+
+// CodeRabbit on #2051: limit evidence is the page's own observation time, and Resume now wins over old notices.
+it('ignores a replayed or pre-Resume limit notice, and counts a blocking notice without a retry time', async () => {
+  const now = 9_000_000;
+  // Two old notices replayed now: not two recent limits.
+  noteChatLimit('a', now + 20 * 60_000, now - 11 * 60_000, now);
+  noteChatLimit('b', now + 20 * 60_000, now - 12 * 60_000, now);
+  expect(chatsAtOnceStatus(now).pauseUntil).toBeNull();
+  // Two fresh blocking notices without a retry time: the 15-minute pause.
+  noteChatLimit('a', null, now, now);
+  noteChatLimit('b', null, now + 1_000, now + 1_000);
+  expect(chatsAtOnceStatus(now + 1_000).pauseUntil).toBe(now + 1_000 + 15 * 60_000);
+  expect(await resumeAutomaticSends(now + 2_000)).toBe(true);
+  // Both notices replayed after Resume now (still showing on their pages): no new pause.
+  noteChatLimit('a', null, now, now + 3_000);
+  noteChatLimit('b', null, now + 1_000, now + 3_000);
+  expect(chatsAtOnceStatus(now + 3_000).pauseUntil).toBeNull();
+  // New notices after it do count.
+  noteChatLimit('a', null, now + 4_000, now + 4_000);
+  noteChatLimit('c', null, now + 5_000, now + 5_000);
+  expect(chatsAtOnceStatus(now + 5_000).pauseUntil).toBe(now + 5_000 + 15 * 60_000);
+});
+
+it('keeps the pause when Resume now cannot be saved', async () => {
+  const now = 12_000_000;
+  noteChatLimit('a', null, now, now);
+  noteChatLimit('b', null, now, now);
+  const write = vi.spyOn(durable, 'writeDurableNow').mockRejectedValueOnce(new Error('disk full'));
+  try {
+    await expect(resumeAutomaticSends(now + 1_000)).rejects.toThrow(/could not be saved/);
+  } finally { write.mockRestore(); }
+  expect(chatsAtOnceStatus(now + 1_000).pauseUntil).toBe(now + 15 * 60_000);
+  expect(await resumeAutomaticSends(now + 2_000)).toBe(true);
+  expect(chatsAtOnceStatus(now + 2_000).pauseUntil).toBeNull();
+});
+
+it('holds a waking worker\'s slot for the whole revival window', () => {
+  expect(WORKER_ADMISSION_HOLD_MS).toBeGreaterThanOrEqual(REVIVAL_ACTIVITY_MS);
+  getConfig().multiAgent.chatsAtOnce = 1;
+  // Waking: its chat is known but not working yet, and the run still has it.
+  setWorkerSlotSource(() => ({ kind: 'chat', conversationId: 'w1' }));
+  expect(workerSlotsRefusal(null, ['run/worker-1'], 0)).toBeNull();
+  expect(automaticSendRefusal('input:x', 'x', 4 * 60_000)).toMatch(/1 chats are working/);
+  expect(automaticSendRefusal('input:x', 'x', WORKER_ADMISSION_HOLD_MS - 1)).not.toBeNull();
+  expect(automaticSendRefusal('input:x', 'x', WORKER_ADMISSION_HOLD_MS + 1)).toBeNull();
 });

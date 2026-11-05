@@ -3932,6 +3932,135 @@ it("holds a scheduled run while other chats fill every slot, never the person's 
   }
 });
 
+// CodeRabbit on #2051: time the app itself held a message is not the browser's minute.
+it('keeps a slot-held scheduled run queued past the pickup minute, also across a restart, and counts the minute from the release', async () => {
+  const slots = await import('../src/main/chats-at-once.js');
+  const bridgeSource = slots.workingChatsSourceForTests();
+  let working = new Set<string>(['another-chat']);
+  slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(() => working);
+  let now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false },
+      multiAgent: { ...defaultConfig().multiAgent, chatsAtOnce: 1 } });
+    const session = await createSession({ title: 'Scheduled run held past a minute', conversationId: randomUUID() });
+    const scheduled = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Check the issues',
+      scheduled: { scheduleId: randomUUID(), dueAt: now, late: false } });
+    const state = async () => (await input.listInputs()).find(item => item.id === scheduled.id)?.state;
+    for (let step = 0; step < 6; step++) {
+      expect((await input.pendingBrowserInputs()).some(item => item.id === scheduled.id)).toBe(false);
+      now += 20_000;
+    }
+    expect(await state()).toBe('queued');
+    // A restart while it is held: the saved hold still counts.
+    await flushDurable(); input.resetInputForTests();
+    now += 30_000;
+    expect(await state()).toBe('queued');
+    // The slot frees: offered, and the browser's minute starts now.
+    working = new Set();
+    expect((await input.pendingBrowserInputs()).some(item => item.id === scheduled.id)).toBe(true);
+    now += 50_000;
+    expect(await state()).toBe('queued');
+    now += 15_000;
+    expect(await state()).toBe('failed');
+  } finally {
+    clock.mockRestore();
+    slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(bridgeSource);
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  }
+});
+
+it("refuses the claim and Send of an automatic message once ChatGPT's pause starts after its offer", async () => {
+  const slots = await import('../src/main/chats-at-once.js');
+  const bridgeSource = slots.workingChatsSourceForTests();
+  slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(() => new Set());
+  try {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false },
+      multiAgent: { ...defaultConfig().multiAgent, chatsAtOnce: 2 } });
+    const conversationId = randomUUID();
+    const session = await createSession({ title: 'Pause after the offer', conversationId });
+    const scheduled = () => input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Check the issues',
+      scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+    const first = await scheduled();
+    expect((await input.pendingBrowserInputs()).some(item => item.id === first.id)).toBe(true);
+    // Claimed with Send still to be authorized, then the pause starts.
+    expect(await input.claimBrowserInput(first.id, 'pause-page', conversationId, true)).not.toBeNull();
+    const now = Date.now();
+    slots.noteChatLimit('limited-a', null, now, now);
+    slots.noteChatLimit('limited-b', null, now, now);
+    expect(await input.authorizeBrowserInput(first.id, 'pause-page', conversationId)).toBe(false);
+    await input.cancelInput(first.id);
+    // Offered before the pause, claimed after it: not handed out, still queued.
+    slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(() => new Set());
+    const second = await scheduled();
+    expect((await input.pendingBrowserInputs()).some(item => item.id === second.id)).toBe(true);
+    slots.noteChatLimit('limited-a', null, Date.now(), Date.now());
+    slots.noteChatLimit('limited-b', null, Date.now(), Date.now());
+    expect(await input.claimBrowserInput(second.id, 'pause-page', conversationId, true)).toBeNull();
+    expect((await input.listInputs()).find(item => item.id === second.id)?.state).toBe('queued');
+    await input.cancelInput(second.id);
+  } finally {
+    slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(bridgeSource);
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  }
+});
+
+it("pauses on ChatGPT's blocking limit notice in two chats even without a retry time, and not on a replayed old one", async () => {
+  const slots = await import('../src/main/chats-at-once.js');
+  const bridgeSource = slots.workingChatsSourceForTests();
+  slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(() => new Set());
+  try {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false },
+      multiAgent: { ...defaultConfig().multiAgent, chatsAtOnce: 2 } });
+    const limited = async (at: number) => {
+      const conversationId = randomUUID();
+      await createSession({ title: 'Limited chat', conversationId });
+      await post('/events', { conversationId, events: [
+        { kind: 'chat_error', text: 'You have hit your limit. Please try again later.', recoverable: false, blocking: true, time: at }
+      ] });
+    };
+    // Two notices replayed from twenty minutes ago: no new evidence.
+    await limited(Date.now() - 20 * 60_000);
+    await limited(Date.now() - 20 * 60_000);
+    expect(slots.chatsAtOnceStatus().pauseUntil).toBeNull();
+    // Two fresh ones without a retry time: the 15-minute pause (CodeRabbit on #2051).
+    await limited(Date.now());
+    expect(slots.chatsAtOnceStatus().pauseUntil).toBeNull();
+    await limited(Date.now());
+    expect(slots.chatsAtOnceStatus().pauseUntil).toBeGreaterThan(Date.now() + 14 * 60_000);
+  } finally {
+    slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(bridgeSource);
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  }
+});
+
+it('takes no slot for a message that waits for its ChatGPT Project anyway', async () => {
+  const slots = await import('../src/main/chats-at-once.js');
+  const bridgeSource = slots.workingChatsSourceForTests();
+  slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(() => new Set());
+  const folder = path.join(directory, 'slot-project-' + randomUUID());
+  await fs.mkdir(folder);
+  try {
+    const config = defaultConfig();
+    await saveConfig({ ...config, roots: [{ name: 'slot-project', path: folder }], goal: { ...config.goal, enabled: false },
+      multiAgent: { ...config.multiAgent, chatsAtOnce: 1 } });
+    // The project's ChatGPT Project is still being asked for: its new chat cannot open yet.
+    const project = await addProject(folder);
+    const waiting = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', projectId: project.id, text: 'Start the report',
+      scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+    expect((await input.pendingBrowserInputs()).some(item => item.id === waiting.id)).toBe(false);
+    // The only slot stays free for another chat's automatic message.
+    const session = await createSession({ title: 'Gets the free slot', conversationId: randomUUID() });
+    const other = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Check the issues',
+      scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+    expect((await input.pendingBrowserInputs()).some(item => item.id === other.id)).toBe(true);
+    await input.cancelInput(other.id); await input.cancelInput(waiting.id);
+  } finally {
+    slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(bridgeSource);
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  }
+});
+
 it("holds a Loop step at /goal/draft while other chats fill every slot, says so in the chat, and lets it ask once one frees", async () => {
   const bridge = await import('../src/main/bridge.js');
   const slots = await import('../src/main/chats-at-once.js');
@@ -3962,6 +4091,55 @@ it("holds a Loop step at /goal/draft while other chats fill every slot, says so 
     expect((await bridge.sessionControlsFor(session.id)).goalWait).toEqual({ reason: 'slots' });
     working = new Set();
     expect((await post('/goal/draft', draft)).status).toBe(200);
+    await bridge.setSessionAutomation(session.id, 'off');
+  } finally {
+    clock.mockRestore();
+    slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(bridgeSource);
+    await saveConfig(defaultConfig());
+  }
+});
+
+it("asks again at Send for a ready Goal message whose slot hold ran out while it was drafted (CodeRabbit on #2051)", async () => {
+  const bridge = await import('../src/main/bridge.js');
+  const slots = await import('../src/main/chats-at-once.js');
+  const bridgeSource = slots.workingChatsSourceForTests();
+  let working = new Set<string>();
+  slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(() => working);
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Goal message waits at Send', conversationId });
+  let now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    // Offline templates: the draft is ready without a helper chat or an API key.
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, backend: 'templates' },
+      multiAgent: { ...defaultConfig().multiAgent, chatsAtOnce: 1 } });
+    await goal.setGoalObjectiveNow(conversationId, 'Complete the current requested work');
+    await goal.setGoalSwitchNow(conversationId, 'goal', true);
+    await post('/events', { conversationId, events: [
+      { kind: 'model_selection', model: 'gpt-6-pro', time: now },
+      { kind: 'user_message', messageId: 'request', text: 'Build all stage layers', time: now },
+      { kind: 'turn_start', turnId: 'send-source', time: now },
+      { kind: 'assistant_message', turnId: 'send-source', messageId: 'send-source-answer', text: 'More remains\n[[COS_GOAL:CONTINUE]]', state: 'final', final: true, time: now + 1 },
+      { kind: 'turn_end', turnId: 'send-source', outcome: 'completed', time: now + 2 }
+    ] });
+    const store = await import('../src/main/session/store.js');
+    const [answer] = await store.readRecentEvents(session.id, 1, { kinds: ['assistant_message'] });
+    await goal.acceptGoalReplyNow({ conversationId, sessionId: session.id, replyId: 'send-source-obligation', turnId: 'send-source', eventSeq: answer!.seq, blocked: false });
+    const pending = goal.goalPendingReplyFor(conversationId)!;
+    expect(pending).toBeTruthy();
+    expect((await post('/goal/draft', { conversationId, turnId: pending.turnId, clientId: 'slot-page', terminalRequired: true })).status).toBe(200);
+    // Drafting outlasts the slot's hold and another chat takes the only slot meanwhile: the ready
+    // message is asked about again at Send and waits, untyped (CodeRabbit on #2051).
+    await vi.waitFor(() => expect(goal.goalViewFor(conversationId, 'slot-page')?.stage).toBe('ready'), { timeout: 10_000, interval: 25 });
+    const activity = () => fetch(`http://127.0.0.1:${bridgePort()}/activity?conversationId=${conversationId}&goalClient=slot-page`, { headers: {
+      authorization: `Bearer ${bearer}`, 'x-extension-version': APP_VERSION, 'x-extension-protocol': String(BRIDGE_PROTOCOL)
+    } }).then(r => r.json());
+    expect((await activity()).goal.slotWait).toBeUndefined();
+    now += 3 * 60_000;
+    working = new Set(['another-chat']);
+    expect((await activity()).goal).toMatchObject({ draft: { stage: 'ready' }, slotWait: expect.stringMatching(/1 chats are working/) });
+    working = new Set();
+    expect((await activity()).goal.slotWait).toBeUndefined();
     await bridge.setSessionAutomation(session.id, 'off');
   } finally {
     clock.mockRestore();
