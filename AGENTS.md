@@ -1793,14 +1793,17 @@ attachments, not part of a combined companion claim, the last 24 h, at most 5, n
 claimed message itself). The page re-reads it after model selection, where ChatGPT may restore it. The page compares with whitespace removed, also
 Markdown-unescaped, and replaces that text as a whole; edited or unlisted text stays the person's
 draft (#1922: a rotation continue left in the box refused every later message).
-Browser repairs use the same rule for an occupied composer (#2074): each repair offer carries
-`ownTexts` (`ownRepairResidueTexts`: the app's own automatic messages ChatGPT received in that chat,
-`automaticSendKind` with `deliveredAt` or `messageId`, plus `ownUnsentTexts`; no images, attachments
-or companions, last 24 h, at most 5 each). `clf-repair-check` clears the composer only when its text is
-exactly one of them, nothing is attached, and it is also the chat's latest user message, through the
-`captureComposerDraft` lease (unchanged text only); the page then reports `cleared: 'own-sent'`
-(`/status?repairCleared=`, logged once). Anything else is held as `draft` as before. A `repairHeld`
-reply stamps `claimAskedAt`, so a page that keeps holding never spends the no-page offer budget.
+Browser repairs recognise one more leftover in an occupied composer (#2074): each repair offer
+carries `ownSent` (`ownSentResidue`: the app's own automatic sends in that chat that ChatGPT
+received, `automaticSendKind` with a `messageId`, as `{ text, messageId }`; no images, attachments or
+companions, last 24 h, at most 5; never an unsent text). `clf-repair-check` clears the composer only
+when the chat's latest user message has one of those message ids, the composer holds exactly that
+send's text (line breaks and outer spaces aside, or ChatGPT's Markdown-escaped form; no
+whitespace-blind match), and nothing is attached, through the `captureComposerDraft` lease (unchanged
+text only). The page then reports `cleared: 'own-sent'` (`/status?repairCleared=`, logged once; that
+report, like `repairHeld`, hands out no work). Anything else is held as `draft` as before. A
+`repairHeld` reply stamps `claimAskedAt`, so a page that keeps holding never spends the no-page
+offer budget.
 
 Direct active-turn corrections freeze `directTurn` in the same outbox entry. The exact turn
 start decides eligibility; earlier or running MCP calls do not revoke it. Recheck the exact claim

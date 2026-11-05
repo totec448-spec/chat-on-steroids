@@ -3617,9 +3617,11 @@ async function maintainOnce() {
       continueFollows: entry?.continueFollows === true,
       suspended: entry?.reason === 'stalled',
       focus: Boolean(entry && entry.focus === true),
-      // Texts the app sent into this chat by itself (#2074): bounded, strings only.
-      ...(Array.isArray(entry?.ownTexts) ? { ownTexts: entry.ownTexts
-        .filter((text) => typeof text === 'string' && text.length <= 100_000).slice(0, 10) } : {})
+      // The app's own automatic sends in this chat, with their message ids (#2074): bounded, well-formed only.
+      ...(Array.isArray(entry?.ownSent) ? { ownSent: entry.ownSent
+        .filter((sent) => sent && typeof sent.text === 'string' && sent.text.length <= 100_000 &&
+          typeof sent.messageId === 'string' && sent.messageId.length <= 200)
+        .map((sent) => ({ text: sent.text, messageId: sent.messageId })).slice(0, 10) } : {})
     }))
     .filter((entry) => entry.conversationId && entry.token);
   // Fulfilling a due repair must not wait behind window layout, input preparation
@@ -3744,7 +3746,7 @@ function repairChangeDetail(latest) {
 }
 
 async function performBrowserRepairs(repairs, policy) {
-  for (const { conversationId, token, reason, focus, requiresClaim, continueFollows, suspended, ownTexts } of repairs) {
+  for (const { conversationId, token, reason, focus, requiresClaim, continueFollows, suspended, ownSent } of repairs) {
     // Re-scanned per repair rather than reused from above. Earlier entries in this same batch
     // may have created a tab, and the scan has to be the state immediately before the action or
     // the duplicate rule below is deciding on a tab list that no longer exists.
@@ -3795,7 +3797,7 @@ async function performBrowserRepairs(repairs, policy) {
         const draftOnly = reason === 'compaction';
         // The exact texts the app sent into this chat by itself: one restored into the box is its own
         // leftover, not the person's draft (#2074).
-        const own = Array.isArray(ownTexts) ? { ownTexts } : {};
+        const own = Array.isArray(ownSent) ? { ownSent } : {};
         const check = inspectTurn ? await tabReply(target.id,
           { type: 'clf-repair-check', conversationId, draftOnly, ...own }, documentId ? { documentId } : undefined) : null;
         if (check?.cleared === 'own-sent') await call(`/status?repairCleared=${encodeURIComponent(token)}`);

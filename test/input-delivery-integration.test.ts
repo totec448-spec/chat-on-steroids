@@ -4172,10 +4172,11 @@ it("lists only the app's own automatic messages ChatGPT received, never the pers
   await deliver(mine, 'my-message');
   const waiting = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Not sent yet',
     scheduled: { scheduleId: randomUUID(), dueAt: Date.now() + 60 * 60_000, late: false } });
-  const texts = await input.ownRepairResidueTexts(conversationId);
-  expect(texts.some(text => text.includes('Check the open issues and report'))).toBe(true);
-  expect(texts.some(text => text.includes('My own question'))).toBe(false);
-  expect(texts.some(text => text.includes('Not sent yet'))).toBe(false);
-  expect(await input.ownRepairResidueTexts(randomUUID())).toEqual([]);
+  const sent = await input.ownSentResidue(conversationId);
+  // Each with its ChatGPT message id, which the page matches to the chat's latest message (CodeRabbit on #2079).
+  expect(sent).toEqual([expect.objectContaining({ messageId: 'scheduled-message', text: expect.stringContaining('Check the open issues and report') })]);
+  expect(sent.some(row => row.text.includes('My own question'))).toBe(false);
+  expect(sent.some(row => row.text.includes('Not sent yet'))).toBe(false);
+  expect(await input.ownSentResidue(randomUUID())).toEqual([]);
   await input.cancelInput(waiting.id);
 });

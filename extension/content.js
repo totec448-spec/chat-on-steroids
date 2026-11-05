@@ -13331,19 +13331,25 @@
   /**
    * After a reload ChatGPT can put the app's own already-sent automatic message back into the message
    * box, and every repair was then held as if it were the person's draft, for hours (#2074). The app
-   * names the exact texts it sent into this chat by itself; one of them, with nothing attached, that is
-   * also the chat's latest message is the app's leftover. It is removed only while unchanged
-   * (captureComposerDraft's lease); anything else stays a draft and holds the repair as before.
+   * names its own automatic sends in this chat with their ChatGPT message ids. The box is the app's
+   * leftover only when the chat's latest user message is one of those exact messages and the box holds
+   * exactly its text (line breaks and outer spaces aside, or in ChatGPT's own Markdown-escaped form),
+   * with nothing attached. It is removed only while unchanged (captureComposerDraft's lease); anything
+   * else stays a draft and holds the repair as before (CodeRabbit on #2079: no whitespace-blind match,
+   * and an unsent text or a text without its message proves nothing).
    */
   function clearOwnSentResidue(values) {
-    const own = (Array.isArray(values) ? values : []).filter(value => typeof value === 'string' && value.trim())
-      .slice(0, 10).map(sendText);
+    const own = (Array.isArray(values) ? values : []).filter(value => value && typeof value.text === 'string' &&
+      value.text.trim() && typeof value.messageId === 'string' && value.messageId).slice(0, 10);
     if (!own.length || desktopInputBusy || CLF_DOM.hasComposerAttachments() || handoffMarked(CLF_DOM.composer())) return false;
+    const latest = CLF_DOM.messages().filter(row => row.role === 'user').at(-1);
+    const sent = latest?.id ? own.find(value => value.messageId === latest.id) : undefined;
+    if (!sent) return false;
+    const lines = (value) => String(value || '').replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ')
+      .split('\n').map(line => line.trim()).join('\n').replace(/\n{2,}/g, '\n').trim();
     const shown = CLF_DOM.composerText() || '';
-    const forms = new Set([sendText(shown), sendText(unescapeMarkdown(shown))]);
-    if (![...forms].some(form => form && own.includes(form))) return false;
-    const latest = CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.text || '';
-    if (![sendText(latest), sendText(unescapeMarkdown(latest))].some(form => form && forms.has(form))) return false;
+    const want = lines(sent.text);
+    if (lines(shown) !== want && lines(unescapeMarkdown(shown)) !== want) return false;
     const lease = CLF_DOM.captureComposerDraft(shown);
     try { return lease.withdraw() === true; } finally { lease.dispose(); }
   }
@@ -13361,7 +13367,7 @@
     // Holding here instead left the chat's handoff waiting with nothing on screen (2026-10-10).
     const draft = () => !handoffMarked(CLF_DOM.composer()) &&
       Boolean((CLF_DOM.composerText() || '').trim() || CLF_DOM.hasComposerAttachments());
-    const cleared = current() && clearOwnSentResidue(message.ownTexts);
+    const cleared = current() && clearOwnSentResidue(message.ownSent);
     const verdict = (holds, extra) => {
       const why = holds.find(([held]) => held)?.[1];
       return { safe: !why, ...(why ? { why } : {}), ...(cleared ? { cleared: 'own-sent' } : {}), ...extra };
