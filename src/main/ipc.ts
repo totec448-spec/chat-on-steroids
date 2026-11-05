@@ -2197,9 +2197,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // Clear an older queued follow before awaiting a lookup (or when New Chat has no session).
     followChatInBackground(null);
     if (id === null) return true;
-    const conversationId = (await getSession(id))?.conversationId;
+    const session = await getSession(id);
+    const conversationId = session?.conversationId;
     if (selection !== followSelection) return true;
-    if (conversationId && /^[0-9a-z-]{8,64}$/i.test(conversationId)) followChatInBackground(conversationId);
+    if (!session) return true;
+    if (!conversationId) return false;
+    if (/^[0-9a-z-]{8,64}$/i.test(conversationId)) return followChatInBackground(conversationId);
     return true;
   });
 

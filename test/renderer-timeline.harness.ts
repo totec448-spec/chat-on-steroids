@@ -234,6 +234,7 @@ export async function boot(events: SessionEvent[], selectExisting = true, paused
   const api: any = new Proxy(
     {
       getState: () => ok(state),
+      followSessionTab: () => ok(true),
       getChatModels: () => options.noModels ? ok({ state: 'unavailable', requestedAt: 1, observedAt: null, models: [] }) : ok({ state: 'ready', requestedAt: 1, observedAt: Date.now(), models: [{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', efforts: options.pro ? ['high', 'pro'] : ['none', 'high'] },
         ...(options.astra ? [{ id: 'gpt-6-pro', label: 'GPT-6 Pro', efforts: ['pro'] }] : [])] }),
       getSessionControls: (id: string) => ok({ sessionId: id, conversationId: 'chat-a', automation: live.automation, activeTurnId: 'held-turn', finishHeld: live.finishHeld, blocked: '', job: live.compacting ? { busy: true } : null }),

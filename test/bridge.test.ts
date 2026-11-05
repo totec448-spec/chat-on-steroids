@@ -18689,6 +18689,18 @@ describe('selecting a chat in the app selects its background tab (#1249)', () =>
     } finally { await close(socket); await background(true); }
   });
 
+  it('reports a disconnected browser so the renderer can retain and retry its pending selection', async () => {
+    await pair();
+    await background(true);
+    expect(followChatInBackground(CHAT)).toBe(false);
+    const socket = await connect();
+    try {
+      await poll(BROWSER_B, [CHAT]);
+      expect(followChatInBackground(CHAT)).toBe(true);
+      expect((await poll(BROWSER_B, [CHAT])).follow).toBe(CHAT);
+    } finally { await close(socket); }
+  });
+
   it('lets an old selection lapse instead of acting on it later', async () => {
     await pair();
     await background(true);
