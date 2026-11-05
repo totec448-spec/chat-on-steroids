@@ -290,6 +290,43 @@ it('saves, reads, pauses and removes a chat\'s schedule, and refuses one that ca
   expect(await call('schedules:get', { sessionId: session.id })).toEqual({ ok: true, data: null });
 });
 
+it('lists schedules with chat titles and Run now uses the ordinary outbox without changing recurrence', async () => {
+  const input = await import('../src/main/session/input.js');
+  const original = await input.listInputs();
+  await writeDurableNow('session-input', []); input.resetInputForTests();
+  const session = await createSession({ conversationId: 'ipc-schedule-list-chat', title: 'Nightly review' });
+  const call = (name: string, payload?: unknown) => handlers.get(name)!(null, payload) as Promise<any>;
+  try {
+    const saved = await call('schedules:save', { sessionId: session.id, text: 'Review queue', repeat: { kind: 'hours', every: 6 }, until: null });
+    const listed = await call('schedules:list');
+    expect(listed).toMatchObject({ ok: true });
+    expect(listed.data).toContainEqual(expect.objectContaining({
+      id: saved.data.id,
+      sessionId: session.id,
+      sessionTitle: 'Nightly review',
+      text: 'Review queue',
+      nextRunAt: expect.any(Number)
+    }));
+
+    const before = await call('schedules:get', { sessionId: session.id });
+    expect(await call('schedules:runNow', { sessionId: session.id })).toEqual({ ok: true, data: true });
+    const rows = (await input.listInputs()).filter(row => row.sessionId === session.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      text: 'Review queue',
+      mode: 'auto',
+      conversationId: 'ipc-schedule-list-chat',
+      scheduled: { scheduleId: saved.data.id, late: false }
+    });
+    const after = await call('schedules:get', { sessionId: session.id });
+    expect(after.data).toMatchObject({ lastDueAt: before.data.lastDueAt, createdAt: before.data.createdAt });
+    expect(after.data.lastInputId).toBe(rows[0]!.id);
+  } finally {
+    await call('schedules:delete', { sessionId: session.id });
+    await writeDurableNow('session-input', original); input.resetInputForTests();
+  }
+});
+
 it('answers a turn\'s changed files and refuses a malformed request (#1827)', async () => {
   const session = await createSession({ conversationId: 'ipc-turn-changes', title: 'Changes' });
   const call = (name: string, payload: unknown) => handlers.get(name)!(null, payload) as Promise<any>;

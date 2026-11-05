@@ -39,7 +39,7 @@ import { paintWindowTheme } from './theme.js';
 import { usageOverview } from './session/usage.js';
 import { exportUsageCsv } from './session/usage-export.js';
 import { readProviderUsage } from './provider-usage.js';
-import { inputArgs, listInputs, editQueuedInput, sendQueuedInputNow, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs, type InputEntry } from './session/input.js';
+import { inputArgs, enqueueInput, listInputs, editQueuedInput, sendQueuedInputNow, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs, type InputEntry } from './session/input.js';
 import { draftOpeningMessage, onGoalChange, nativeGoalFailure } from './goal.js';
 import { cancelTaskRequest, runTaskRequest } from './task-request.js';
 import { randomUUID } from 'node:crypto';
@@ -100,7 +100,7 @@ import { keychainNoticeReady } from './keychain-notice.js';
 import { runDiagnostics } from './diagnostics.js';
 import { collectReportFacts, readRecentLog, renderDiagnosticsReport, saveDiagnosticsReport, systemFacts, memoryFacts } from './diagnostics-report.js';
 import { answerUserRequest, clearProjectNote, listSessions, readTurnTraces } from './session/store.js';
-import { deleteSchedule, listSchedules, saveSchedule, scheduleRepeatSchema, setSchedulePaused } from './scheduled-runs.js';
+import { deleteSchedule, listScheduleItems, listSchedules, runScheduleNow, saveSchedule, scheduleRepeatSchema, setSchedulePaused } from './scheduled-runs.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, logWarn, onLog } from './logger.js';
 import { markStartup } from './startup-timing.js';
 import { managedWorktreeCleanupOffers, acknowledgeManagedWorktreeCleanupOffer } from './agents.js';
@@ -1377,6 +1377,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { sessionId } = z.object({ sessionId: scheduleSession }).strict().parse(payload);
     return (await listSchedules()).find(row => row.sessionId === sessionId) ?? null;
   });
+  handle('schedules:list', async () => listScheduleItems(Date.now(), {
+    session: async id => {
+      const summary = await getSession(id);
+      return summary ? { id: summary.id, title: summary.title } : null;
+    }
+  }));
   handle('schedules:save', async payload => {
     const request = z.object({ sessionId: scheduleSession, text: z.string().max(200_000), repeat: z.unknown(), until: z.number().int().nonnegative().nullable(),
       catchUp: z.boolean().optional() }).strict().parse(payload);
@@ -1400,6 +1406,19 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (removed) logInfo(`scheduled run: schedule removed for ${sessionId}`);
     push('session:changed');
     return removed;
+  });
+  handle('schedules:runNow', async payload => {
+    const { sessionId } = z.object({ sessionId: scheduleSession }).strict().parse(payload);
+    const queued = await runScheduleNow(sessionId, Date.now(), {
+      session: async id => {
+        const summary = await getSession(id);
+        return summary ? { id: summary.id, conversationId: summary.conversationId ?? null, activeTurnId: summary.activeTurnId ?? null } : null;
+      },
+      enqueue: input => enqueueInput(input),
+      log: logInfo
+    });
+    if (queued) push('session:changed');
+    return queued;
   });
   // Linking a project to a ChatGPT Project the account already has (#1756).
   handle('projects:chatgpt-choices', async () => chatgptProjectChoices());

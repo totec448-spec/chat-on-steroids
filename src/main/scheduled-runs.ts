@@ -17,7 +17,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { readDurable, writeDurableNow } from './durable.js';
-import { SCHEDULE_ON_TIME_MS, dueRun, validSchedule, type Schedule, type ScheduleRepeat } from '../shared/schedule.js';
+import { SCHEDULE_ON_TIME_MS, dueRun, nextRunAfter, validSchedule, type Schedule, type ScheduledRunListItem, type ScheduleRepeat } from '../shared/schedule.js';
 import { MAX_CHATGPT_MESSAGE_CHARS } from '../shared/user-prompt.js';
 
 const STORE = 'scheduled-runs';
@@ -59,6 +59,12 @@ export interface RunnerDeps {
   pending(): Promise<Set<string>>;
   log(line: string): void;
 }
+
+export interface ScheduleListDeps {
+  session(id: string): Promise<{ id: string; title: string } | null>;
+}
+
+export type RunNowDeps = Pick<RunnerDeps, 'session' | 'enqueue' | 'log'>;
 
 let chain: Promise<unknown> = Promise.resolve();
 /** One change at a time: a save, a pause and a run never interleave on the same file. */
@@ -103,6 +109,36 @@ function runInputId(scheduleId: string, dueAt: number): string {
 
 export function listSchedules(): Promise<ScheduledRun[]> { return serial(load); }
 
+/** All saved schedules with their current chat titles. Proven-orphaned schedules are removed here too. */
+export function listScheduleItems(now: number, deps: ScheduleListDeps): Promise<ScheduledRunListItem[]> {
+  return serial(async () => {
+    let schedules = await load();
+    const items: ScheduledRunListItem[] = [];
+    for (const run of [...schedules]) {
+      const session = await deps.session(run.sessionId);
+      if (!session) {
+        schedules = schedules.filter(row => row.id !== run.id);
+        await save(schedules);
+        continue;
+      }
+      items.push({
+        id: run.id,
+        sessionId: run.sessionId,
+        sessionTitle: session.title,
+        text: run.text,
+        repeat: run.repeat,
+        until: run.until,
+        paused: run.paused,
+        createdAt: run.createdAt,
+        lastDueAt: run.lastDueAt,
+        ...(run.catchUp ? { catchUp: true } : {}),
+        nextRunAt: nextRunAfter(asSchedule(run), Math.max(now, run.lastDueAt ?? 0))
+      });
+    }
+    return items;
+  });
+}
+
 /** Creates or replaces a chat's schedule. It starts at its next time, never at once. */
 export function saveSchedule(input: { sessionId: string; text: string; repeat: ScheduleRepeat; until: number | null; catchUp?: boolean }, now = Date.now()): Promise<ScheduledRun> {
   return serial(async () => {
@@ -137,6 +173,38 @@ export function deleteSchedule(sessionId: string): Promise<boolean> {
     const schedules = await load();
     if (!schedules.some(row => row.sessionId === sessionId)) return false;
     await save(schedules.filter(row => row.sessionId !== sessionId));
+    return true;
+  });
+}
+
+/** Queues this schedule once immediately without advancing or otherwise changing its recurrence. */
+export function runScheduleNow(sessionId: string, now: number, deps: RunNowDeps): Promise<boolean> {
+  return serial(async () => {
+    const schedules = await load();
+    const run = schedules.find(row => row.sessionId === sessionId);
+    if (!run) return false;
+    const session = await deps.session(run.sessionId);
+    if (!session) {
+      deps.log(`scheduled run: removed: its chat no longer exists (${run.sessionId})`);
+      await save(schedules.filter(row => row.id !== run.id));
+      return false;
+    }
+    const id = randomUUID();
+    await deps.enqueue({
+      id,
+      sessionId: run.sessionId,
+      text: run.text,
+      mode: session.activeTurnId ? 'after-turn' : 'auto',
+      dueAt: now,
+      model: null,
+      reasoningEffort: null,
+      scheduled: { scheduleId: run.id, dueAt: now, late: false }
+    });
+    // Run now does not move the recurrence cursor. It does still count as the
+    // last queued schedule input, so a periodic tick does not enqueue the same
+    // message again while this manual run is waiting in the outbox.
+    await save(schedules.map(row => row.id === run.id ? { ...row, lastInputId: id } : row));
+    deps.log(`scheduled run: queued now for ${run.sessionId}`);
     return true;
   });
 }

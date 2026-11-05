@@ -3817,5 +3817,14 @@
   "Refused to check a step for you": "직접 하실 단계 확인이 거부됨",
   "From the sub-agent “{0}”": "서브에이전트 \"{0}\"에서",
   "Run it yourself, in your own terminal: Chat On Steroids does not run or check it.": "직접 자신의 터미널에서 실행하세요. Chat On Steroids는 이 명령을 실행하거나 확인하지 않습니다.",
-  "{0} expected files": "예상 파일 {0}개"
+  "{0} expected files": "예상 파일 {0}개",
+  "No scheduled messages yet": "예약된 메시지가 없습니다",
+  "Open a chat and choose Schedule… from its menu to add one.": "채팅을 열고 메뉴에서 ‘예약…’을 선택하여 일정을 추가하세요.",
+  "Untitled chat": "제목 없는 채팅",
+  "Open chat": "채팅 열기",
+  "Run now": "지금 실행",
+  "Delete the schedule for {0}?": "{0}의 예약을 삭제하시겠습니까?",
+  "Could not load schedules": "예약 목록을 불러올 수 없습니다",
+  "Operation failed": "작업에 실패했습니다",
+  "Manage the messages scheduled in your chats.": "채팅에서 예약한 메시지를 관리합니다."
 }

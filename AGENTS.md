@@ -2187,6 +2187,13 @@ run still waits in the queue is skipped; a refused queueing skips that time once
 loop); saving or resuming starts at the next time; an ended schedule sends nothing; a deleted chat's
 schedule is removed. IPC `schedules:get|save|pause|delete`; errors are sentences the renderer
 translates. Queue rows and pending messages say "Scheduled" (late: "Scheduled · late, was due …").
+The global Scheduled page projects these same per-chat records with `schedules:list`, resolving
+current chat titles without creating a second task store. It opens the existing chat and
+calls the existing pause/resume/delete actions. `schedules:runNow` queues a manual run through
+the same input outbox (waiting for the active turn if necessary) without advancing the
+recurrence cursor; it updates only the last queued input id so a scheduled tick
+does not duplicate a pending manual run. A deleted chat cannot be targeted,
+and a confirmed orphan record is removed.
 The delivered `user_message` records `scheduled { dueAt, late }` (copied from the input in
 `recordDeliveredInput`, kept when a later page echo lacks it), so the sent message keeps the same
 line in the chat after the outbox row is pruned.

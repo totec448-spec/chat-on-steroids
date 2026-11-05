@@ -3817,5 +3817,14 @@
   "Refused to check a step for you": "已拒絕查看需要你執行的步驟",
   "From the sub-agent “{0}”": "來自子代理「{0}」",
   "Run it yourself, in your own terminal: Chat On Steroids does not run or check it.": "請在你自己的終端機中親自執行：Chat On Steroids 不會執行或檢查它。",
-  "{0} expected files": "{0} 個預期檔案"
+  "{0} expected files": "{0} 個預期檔案",
+  "No scheduled messages yet": "目前沒有排程訊息",
+  "Open a chat and choose Schedule… from its menu to add one.": "開啟聊天，然後在選單中選擇「排程…」來新增排程。",
+  "Untitled chat": "未命名聊天",
+  "Open chat": "開啟聊天",
+  "Run now": "立即執行",
+  "Delete the schedule for {0}?": "要刪除 {0} 的排程嗎？",
+  "Could not load schedules": "無法載入排程",
+  "Operation failed": "操作失敗",
+  "Manage the messages scheduled in your chats.": "管理各聊天中的排程訊息。"
 }

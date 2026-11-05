@@ -3817,5 +3817,14 @@
   "Refused to check a step for you": "Đã từ chối kiểm tra một bước dành cho bạn",
   "From the sub-agent “{0}”": "Từ tác nhân phụ “{0}”",
   "Run it yourself, in your own terminal: Chat On Steroids does not run or check it.": "Hãy tự chạy lệnh này trong terminal của bạn: Chat On Steroids không chạy hay kiểm tra nó.",
-  "{0} expected files": "{0} tệp dự kiến"
+  "{0} expected files": "{0} tệp dự kiến",
+  "No scheduled messages yet": "Chưa có tin nhắn được lên lịch",
+  "Open a chat and choose Schedule… from its menu to add one.": "Mở một cuộc trò chuyện rồi chọn Lên lịch… trong menu để thêm lịch.",
+  "Untitled chat": "Cuộc trò chuyện chưa đặt tên",
+  "Open chat": "Mở cuộc trò chuyện",
+  "Run now": "Chạy ngay",
+  "Delete the schedule for {0}?": "Xóa lịch của {0}?",
+  "Could not load schedules": "Không thể tải các lịch đã đặt",
+  "Operation failed": "Thao tác thất bại",
+  "Manage the messages scheduled in your chats.": "Quản lý tin nhắn đã lên lịch trong các cuộc trò chuyện."
 }

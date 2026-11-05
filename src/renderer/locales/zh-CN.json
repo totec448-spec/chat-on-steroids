@@ -3817,5 +3817,14 @@
   "Refused to check a step for you": "已拒绝查看需要你执行的步骤",
   "From the sub-agent “{0}”": "来自子智能体“{0}”",
   "Run it yourself, in your own terminal: Chat On Steroids does not run or check it.": "请在你自己的终端中亲自运行：Chat On Steroids 不会运行或检查它。",
-  "{0} expected files": "{0} 个预期文件"
+  "{0} expected files": "{0} 个预期文件",
+  "No scheduled messages yet": "尚无已安排的消息",
+  "Open a chat and choose Schedule… from its menu to add one.": "打开一个聊天，然后在菜单中选择“定时发送…”以添加计划。",
+  "Untitled chat": "未命名聊天",
+  "Open chat": "打开聊天",
+  "Run now": "立即运行",
+  "Delete the schedule for {0}?": "删除 {0} 的计划？",
+  "Could not load schedules": "无法加载计划",
+  "Operation failed": "操作失败",
+  "Manage the messages scheduled in your chats.": "管理所有聊天中的定时消息。"
 }

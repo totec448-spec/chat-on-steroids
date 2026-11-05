@@ -9683,6 +9683,11 @@ function selectSession(id: string): void {
   void refreshInputQueue();
 }
 
+/** Open a chat from the global Scheduled list using the same selection path as the sidebar. */
+export function openScheduledChat(sessionId: string): void {
+  selectSession(sessionId);
+}
+
 function selectNewChat(projectId: string | null = null, branch: typeof newChatBranch = null): void {
   quoteSelection?.reset();
   if (editingQuestion) endEditing(true);
