@@ -2497,7 +2497,12 @@ it.each([false, true])('reports browser tab-follow acceptance (%s) instead of ac
 
 it('keeps an unbound desktop selection pending instead of claiming its follow was accepted', async () => {
   const session = await createSession({ title: 'opening', conversationId: null });
-  expect(await handlers.get('sessions:followTab')!(null, { id: session.id })).toEqual({ ok: true, data: false });
+  const logger = await import('../src/main/logger.js');
+  const info = vi.spyOn(logger, 'logInfo');
+  try {
+    expect(await handlers.get('sessions:followTab')!(null, { id: session.id })).toEqual({ ok: true, data: false });
+    expect(info).toHaveBeenCalledWith('browser follow: selected chat has no conversation binding; follow stays pending for retry');
+  } finally { info.mockRestore(); }
 });
 
 it('cancels an already queued tab follow when the user selects New Chat', async () => {
