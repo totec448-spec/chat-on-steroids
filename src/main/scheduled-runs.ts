@@ -126,9 +126,16 @@ export function listScheduleItems(now: number, deps: ScheduleListDeps): Promise<
         continue;
       }
       if (!session) {
-        schedules = schedules.filter(row => row.id !== run.id);
-        await save(schedules);
-        deps.log(`scheduled run: removed: its chat no longer exists (${run.sessionId})`);
+        // A failed cleanup must not hide all the healthy schedules from the global page.
+        // Keep this entry in memory and on disk for the next pass if persistence refuses.
+        const remaining = schedules.filter(row => row.id !== run.id);
+        try {
+          await save(remaining);
+          schedules = remaining;
+          deps.log(`scheduled run: removed: its chat no longer exists (${run.sessionId})`);
+        } catch (error) {
+          deps.log(`scheduled run: could not remove the missing chat's schedule (${error instanceof Error ? error.message : String(error)}); will retry (${run.sessionId})`);
+        }
         continue;
       }
       items.push({
@@ -192,7 +199,10 @@ export function runScheduleNow(sessionId: string, now: number, deps: RunNowDeps)
   return serial(async () => {
     const schedules = await load();
     const run = schedules.find(row => row.sessionId === sessionId);
-    if (!run) return false;
+    if (!run) {
+      deps.log(`scheduled run: not queued now: no schedule exists (${sessionId})`);
+      return false;
+    }
     const session = await deps.session(run.sessionId);
     if (!session) {
       deps.log(`scheduled run: removed: its chat no longer exists (${run.sessionId})`);
