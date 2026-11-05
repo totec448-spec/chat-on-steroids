@@ -1701,8 +1701,6 @@ async function loadSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
     detailCursor = null;
     requestSelectedTabFollow(null);
   }
-  const recoveredFollow = selectedTabFollow?.restore(sessions);
-  if (selectedId === null && recoveredFollow) selectSession(recoveredFollow);
   paintSessions();
   chatSearch?.refresh();
   const row = selectedId === null ? undefined : sessions.find(entry => entry.id === selectedId);
