@@ -485,6 +485,23 @@ it('names the wait for this chat’s own sub-agents without inventing a countdow
   expect(row.hidden).toBe(true);
 });
 
+// CodeRabbit on #2051: a ready message held before Send by Chats working at once says why.
+it('names the slot wait of a ready Goal message instead of calling it ready', async () => {
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  const draft = { token: 'g1', turnId: 't1', stage: 'ready', text: '', reply: 'Run the final check', backend: 'templates', model: 'Offline Goal' };
+  api.getSessionControls = async () => ({ ok: true, data: { automation: 'goal', objective: 'Ship it', blocked: '', job: null,
+    goalWait: { reason: 'slots' }, goalDraft: draft } });
+  await append([]);
+  const row = w.document.getElementById('goalLifecycle')!;
+  expect(row.textContent).toContain('Goal · Waiting for a free slot (Chats working at once)');
+  expect(row.textContent).not.toContain('Message ready');
+  api.getSessionControls = async () => ({ ok: true, data: { automation: 'goal', objective: 'Ship it', blocked: '', job: null,
+    goalWait: null, goalDraft: draft } });
+  await append([]);
+  expect(row.textContent).toContain('Message ready');
+});
+
 it('names the wait for the Goal step reviewer (#1832)', async () => {
   const { w, append } = await boot([]);
   const api = (w as any).api;

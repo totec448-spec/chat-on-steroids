@@ -515,6 +515,12 @@
   "content_goal_wait_workers": {
     "message": "Warte auf die Sub-Agenten dieses Chats"
   },
+  "content_goal_wait_slots": {
+    "message": "Wartet auf einen freien Platz (Gleichzeitig arbeitende Chats)"
+  },
+  "content_goal_wait_paused": {
+    "message": "ChatGPT hat um eine Pause gebeten · wartet bis zur genannten Zeit"
+  },
   "content_goal_writing_first_message": {
     "message": "$1 schreibt die erste Nachricht"
   },

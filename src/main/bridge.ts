@@ -160,7 +160,8 @@ import {
   turnEndedDurably,
   requestTurnOwnershipCutoff
 } from './session/store.js';
-import { inFlightMcpRequests, inFlightToolCalls, runningToolCalls, runningToolProgress, sentResults, settlingToolCalls } from './mcp/call-context.js';
+import { inFlightMcpRequests, inFlightToolCalls, runningToolCalls, runningToolConversations, runningToolProgress, sentResults, settlingToolCalls } from './mcp/call-context.js';
+import { automaticSendRefusal, chatsAtOnceStatus, noteChatLimit, restoreChatsAtOnce, setWorkingChatsSource } from './chats-at-once.js';
 import { nativeHandoffPrompt } from './session/handoff-prompt.js';
 import { DEFAULT_HANDOFF_PROMPT } from '../shared/handoff.js';
 import { briefShortfall, resumeBootstrapText } from './session/handoff.js';
@@ -1249,7 +1250,8 @@ export async function bridgeStatus(): Promise<BridgeStatus> {
     lastSeenAt,
     ...versionStatus(),
     externalExtension: externalExtensionStatus(),
-    cosExtension: { present: cosExtensionPresent() }
+    cosExtension: { present: cosExtensionPresent() },
+    automaticPauseUntil: chatsAtOnceStatus().pauseUntil
   };
 }
 
@@ -2768,6 +2770,27 @@ function chatIsWorkingNow(conversationId: string, now = Date.now()): boolean {
   return liveTurnIsCurrent(conversationId, now) || (activeUntil.get(conversationId)?.until ?? 0) > now;
 }
 
+/**
+ * The chats working right now, for "Chats working at once" (#1694): a turn the page reports or the
+ * silence window holds, or a running tool call, by exact ownership. A chat leaves only by the
+ * recovery system's own states: its page detached (it leaves the live set), or recovery found no
+ * page for it. A turn the page reports with nothing else live (no running tool call, no activity
+ * grant) counts for at most OPEN_TURN_RECOVERY_MS (60 minutes, liveTurnIsCurrent's rule): longer
+ * thinking can free its slot early (CodeRabbit on #2051).
+ */
+function workingChatsNow(now = Date.now()): Set<string> {
+  const working = new Set<string>();
+  for (const entry of liveConversations()) if (chatIsWorkingNow(entry.conversationId, now)) working.add(entry.conversationId);
+  for (const conversationId of runningToolConversations()) working.add(conversationId);
+  for (const conversationId of pagelessChats) working.delete(conversationId);
+  return working;
+}
+setWorkingChatsSource(() => workingChatsNow());
+/** The last time each chat's Goal/Loop step was held for a slot, and why (#1694), for its wait caption. */
+const goalSlotWaits = new Map<string, { at: number; paused: boolean }>();
+/** Ready Goal messages held at the native Send by Chats working at once; true while ChatGPT's pause holds them. */
+const goalSendSlotWaits = new Map<string, boolean>();
+
 async function handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   const receivedAt = Date.now();
   const { ok: originAllowed, origin } = originOf(req);
@@ -3929,7 +3952,23 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       const currentPending = goalPendingReplyFor(id);
       if (pending && (currentPending?.replyId !== pending.replyId || currentPending.turnId !== pending.turnId ||
           currentPending.acceptedAt !== pending.acceptedAt)) pending = null;
+      // Chats working at once (#1694), asked again at the native Send: a draft can outlast its slot's
+      // hold, and a pause can start while it is drafted (CodeRabbit on #2051). The page keeps a ready
+      // draft untyped while this is set, and refuses Send when it appears at the last check.
+      const slotWait = draft?.stage === 'ready' ? automaticSendRefusal(`goal:${id}`, id) : null;
+      const slotBefore = goalSendSlotWaits.get(id);
+      if (slotWait && slotBefore !== slotWait.startsWith('ChatGPT asked to slow down')) {
+        goalSendSlotWaits.set(id, slotWait.startsWith('ChatGPT asked to slow down'));
+        logInfo(`goal: ${id}'s ready message waits before Send: ${slotWait}`);
+      } else if (!slotWait && slotBefore !== undefined && goalSendSlotWaits.delete(id)) {
+        logInfo(`goal: ${id}'s ready message has a free slot`);
+      }
+      // The chat's caption says why (the same "waiting for a free slot" or pause words as a held
+      // Goal step) instead of "next message written" (CodeRabbit on #2051).
+      if (slotWait) goalSlotWaits.set(id, { at: Date.now(), paused: slotWait.startsWith('ChatGPT asked to slow down') });
+      else if (slotBefore !== undefined) goalSlotWaits.delete(id);
       return ({
+      ...(slotWait ? { slotWait } : {}),
       enabled: !superseded && !finishOnly && goalEnabledFor(id),
       configuredEnabled: !superseded && goalEnabledFor(id),
       afterTurn: loopAfterTurnFor(id),
@@ -4909,6 +4948,20 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       discardPreparedGoalDraft(id, draft.token);
       return goalJson(res, 409, { error: 'goal_reply_not_pending', retryable: false }, origin);
     }
+    // Chats working at once (#1694): the next automatic step waits its turn; the page keeps the
+    // turn and asks again, and the helper is not asked meanwhile. The chat's own running turn takes
+    // no new slot. Asked last, right before the draft starts, so a request refused for any other
+    // reason never holds a slot (CodeRabbit on #2051).
+    const slot = automaticSendRefusal(`goal:${id}`, id);
+    if (slot) {
+      discardPreparedGoalDraft(id, draft.token);
+      const paused = slot.startsWith('ChatGPT asked to slow down');
+      const before = goalSlotWaits.get(id);
+      if (!before || before.paused !== paused) logInfo(`goal: ${id}'s next step waits: ${slot}`);
+      goalSlotWaits.set(id, { at: Date.now(), paused });
+      return goalJson(res, 409, { error: 'chats_at_once', retryable: true, message: slot }, origin);
+    }
+    if (goalSlotWaits.delete(id)) logInfo(`goal: ${id}'s next step has a free slot`);
     beginGoalDraft(id, draft.token);
     return goalJson(res, 200, { goal: draft, sessionId }, origin);
   }
@@ -6437,6 +6490,7 @@ async function startBridgeOnce(epoch: number, prepared?: PreparedBridge): Promis
   // any worker chat the broker is still owed — a run restored from disk at startup
   // has nobody to ask until this moment — and queue() folds a replayed worker into
   // the restored command for the same worker rather than opening a second tab.
+  await restoreChatsAtOnce().catch(() => undefined);
   try {
     await restoreCommands();
   } catch (err) {
@@ -7970,7 +8024,14 @@ async function goalInputPriority(conversationId: string, sessionId: string, turn
  * The wait of a next step's draft that is waiting for the Goal step reviewer (#1832): from reading the
  * step and finding a worker slot to the answer. Any other draft describes itself.
  */
-function draftReviewWait(conversationId: string, stage: string): import('../shared/goal.js').GoalWait | null {
+function draftReviewWait(conversationId: string, stage: string, now = Date.now()): import('../shared/goal.js').GoalWait | null {
+  // A ready message held before Send by Chats working at once (#1694): the chat says so (CodeRabbit on #2051).
+  if (stage === 'ready') {
+    const slot = goalSlotWaits.get(conversationId);
+    if (!slot || now - slot.at >= 60_000) return null;
+    const pause = chatsAtOnceStatus(now).pauseUntil;
+    return slot.paused && pause !== null ? { reason: 'paused', until: pause } : { reason: 'slots' };
+  }
   if (stage !== 'sending') return null;
   const until = reviewWaitUntil(conversationId);
   return until === null ? null : { reason: 'reviewer', until };
@@ -7996,6 +8057,12 @@ async function goalWaitFor(conversationId: string, sessionId: string, now = Date
     return visible ? { reason: 'silence', until: visible.deadline } : null;
   }
   if (runningToolCalls(conversationId) > 0) return { reason: 'tools' };
+  // Held for a slot within the last page ask (#1694); ChatGPT's pause shows when it ends.
+  const slotWait = goalSlotWaits.get(conversationId);
+  if (slotWait && now - slotWait.at < 60_000) {
+    const pause = chatsAtOnceStatus(now).pauseUntil;
+    return slotWait.paused && pause !== null ? { reason: 'paused', until: pause } : { reason: 'slots' };
+  }
   // The Goal step reviewer's hold has a known end (#1832), so its wait shows a countdown.
   const reviewUntil = reviewerHoldUntil(conversationId) ?? reviewWaitUntil(conversationId);
   if (reviewUntil !== null) return { reason: 'reviewer', until: reviewUntil };
@@ -9236,6 +9303,15 @@ async function noteRecoveryObservations(
     (item.blocking === true ||
       /^too many requests\b.*temporarily limited.*access.*few minutes/i.test((item.text ?? '').replace(/\s+/g, ' ')));
   noteProviderHistoryBackoff(conversationId, observations);
+  // A second chat limited within ten minutes makes the pause every chat's (#1694, only while that
+  // setting is on). Every access-limit notice counts, with or without a retry time, at the time the
+  // page saw it, so a replayed old notice is not new evidence (CodeRabbit on #2051).
+  for (const item of observations) {
+    if (!accessLimit(item) || item.authoredTime === true) continue;
+    const now = Date.now();
+    const retryAt = Number.isFinite(item.retryAt) && item.retryAt! > now && item.retryAt! - item.time <= 24 * 60 * 60_000 ? item.retryAt! : null;
+    noteChatLimit(conversationId, retryAt, item.time, now);
+  }
   // The recorder owns idempotency. Raw batches may contain a historical user row or turn_start
   // beside a newly accepted title, so inferring activity from `stored > 0` re-armed completed
   // chats on every recovery reload. Only the recorder's per-event acceptance verdict may move

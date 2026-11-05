@@ -4047,7 +4047,35 @@ across families when the sender already has the destination's explicit run addre
 broker-wide worker-admission cap: `0` preserves the historical unlimited-across-families behavior,
 while a positive value limits slot-holding workers across every active family. Admission counts
 staged unpublished spawn reservations so two primes cannot overbook the final global slot; lowering
-the cap never evicts existing workers. Display names such as
+the cap never evicts existing workers.
+
+**Chats working at once (#1694).** `multiAgent.chatsAtOnce` (`0` off, `1`–`10`; a damaged value
+reads as off) bounds how many chats work at the same time, workers included. `chats-at-once.ts` is
+one gate, not a scheduler: each existing send path keeps its queue, order and no-duplicate rules and
+asks `automaticSendRefusal(key, conversationId)`. Working = `bridge.ts workingChatsNow()`: a live
+turn by the recorder's rule (`chatIsWorkingNow`; a bare open turn counts at most
+`OPEN_TURN_RECOVERY_MS`, 60 minutes) or an exactly owned running call, minus `pagelessChats`; a
+detached page leaves the live set. No other timer releases a running turn. Gated: the
+app's own sends only — input rows with `automaticSendKind` or a non-user finish owner
+(`pendingBrowserInputs`, checked last after every other offer reason; reason in
+`queuedInputOfferBlocker`; `listInputs` adds an unsaved `slotWait`; asked again at
+`claimBrowserInput`, and the pause alone at `authorizeBrowserInput`; saved `slotHold` keeps the
+one-minute pickup deadline from counting held time, across restarts), Goal/Loop at `/goal/draft`
+(409 `chats_at_once`, retryable; the page keeps the turn like `chat_still_working`; `goalWait`
+`slots`/`paused`) and again at Send (a ready draft's `/activity` goal view carries `slotWait`; the
+page keeps it untyped and refuses Send), and worker spawn/wake in `agents.ts`
+(`CHATS_AT_ONCE` refusal like `GLOBAL_WORKER_LIMIT`; the calling prime's slot passes to its
+workers). Never gated: the person's messages, Stop, approvals, the Goal helper's own question.
+Waiters go in the order they began to wait (one gone two minutes leaves the line); an admitted
+send holds its slot until its chat shows as working (at most two minutes; a starting or waking
+worker `WORKER_ADMISSION_HOLD_MS`, six, the revival window). Two chats showing ChatGPT's limit (any
+access-limit notice in `noteRecoveryObservations`, with or without `retryAt`, at its observation
+time; notices from before Resume now ignored) within ten minutes pause every automatic send until
+the latest time named (15 minutes if none); durable `chats-at-once`,
+`BridgeStatus.automaticPauseUntil`, `automation:resumeNow` (Resume now, saved before it answers; a
+failed save keeps the pause). Only while the setting is on.
+
+Display names such as
 `worker-1` are scoped by run incarnation/prime. Resolve a proven caller first, then its family;
 never select the newest run globally. Workspace, inbox, activity and finish routing follow
 that identity. With unattributed calls allowed, `primeRequestId` holds a provisional family

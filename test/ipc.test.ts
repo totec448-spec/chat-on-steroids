@@ -91,6 +91,19 @@ const removeRoot = (payload: unknown): Promise<any> => handlers.get('roots:remov
 const sessionEvents = (payload: unknown): Promise<any> => handlers.get('sessions:events')!(null, payload) as Promise<any>;
 const sessionList = (): Promise<any> => handlers.get('sessions:list')!(null, undefined) as Promise<any>;
 
+it('saves "Chats working at once" from Settings and refuses a value outside 0–10 (#1694)', async () => {
+  const before = getConfig();
+  try {
+    await save({ ...before, multiAgent: { ...before.multiAgent, chatsAtOnce: 3 } }, before);
+    expect(getConfig().multiAgent.chatsAtOnce).toBe(3);
+    const reply = await save({ ...getConfig(), multiAgent: { ...getConfig().multiAgent, chatsAtOnce: 11 } }, getConfig()).catch((error: Error) => ({ error }));
+    expect(getConfig().multiAgent.chatsAtOnce).toBe(3);
+    expect(reply).toBeTruthy();
+  } finally {
+    await save({ ...getConfig(), multiAgent: { ...getConfig().multiAgent, chatsAtOnce: 0 } }, getConfig());
+  }
+});
+
 it('keeps the reported interface language and the extension preferences through a Settings save', async () => {
   // Neither is part of the settings form. The save replaces the whole `ui` object, so both must be
   // carried through, or the extension would lose its language and its kept preferences.

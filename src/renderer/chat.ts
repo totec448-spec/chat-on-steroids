@@ -3130,6 +3130,8 @@ function paintGoalProgress(): void {
   else if (wait && !['saving', 'failed'].includes(phase)) { phase = 'settling'; text = ''; error = undefined; }
   // The next step's draft waits for the Goal step reviewer before it asks the helper (#1832).
   if (phase === 'sending' && wait?.reason === 'reviewer') { phase = 'settling'; text = ''; error = undefined; }
+  // A ready message held before Send by Chats working at once says why, not "Message ready" (CodeRabbit on #2051).
+  if (phase === 'ready' && (wait?.reason === 'slots' || wait?.reason === 'paused')) { phase = 'settling'; text = ''; error = undefined; }
   const labels: Record<string, string> = { saving: t("Saving task…"), saved: t("Task saved · waiting for the next completed answer"),
     preparing: t("Preparing the opening message…"), generating: t("Generating the opening message…"), ready: t("Message ready · awaiting ChatGPT delivery"),
     sending: t("Preparing a continuation…"), answering: t("Generating a continuation…"), queued: t("Opening message queued"),
@@ -3139,7 +3141,7 @@ function paintGoalProgress(): void {
   labels.retrying = t("Provider busy · retry {0}{1}", [progress?.attempt ?? '', progress?.retryAt ? t(' at {0}', [new Date(progress.retryAt).toLocaleTimeString(currentLanguage())]) : '']);
   const mode = $<HTMLSelectElement>('chatAutomation').value === 'loop' ? t('Loop') : t('Goal');
   labels.settling = `${mode} · ${wait?.reason === 'native-busy' ? t('ChatGPT resumed work · waiting before retry') : wait?.reason === 'silence' ? t('Waiting before recovery reload') : wait?.reason === 'quiet' ? t('Waiting for tool inactivity') :
-    wait?.reason === 'reviewer' ? t('Waiting for the reviewer') : wait?.reason === 'workers' ? t('Waiting for this chat’s sub-agents') : wait?.reason === 'tools' ? t('Waiting for running tools') : wait?.reason === 'listening' ? t('Waiting for activity after recovery') : wait?.reason === 'closed' ? t('Paused until this chat is open in the browser') : t('Answer settling')}`;
+    wait?.reason === 'reviewer' ? t('Waiting for the reviewer') : wait?.reason === 'workers' ? t('Waiting for this chat’s sub-agents') : wait?.reason === 'tools' ? t('Waiting for running tools') : wait?.reason === 'listening' ? t('Waiting for activity after recovery') : wait?.reason === 'closed' ? t('Paused until this chat is open in the browser') : wait?.reason === 'slots' ? t('Waiting for a free slot (Chats working at once)') : wait?.reason === 'paused' ? t('ChatGPT asked to slow down') : t('Answer settling')}`;
   // The dock already describes this same silence/listening deadline. Keep the
   // Loop/Goal task controls, but do not present its shared wait as another action.
   const sharedRecoveryWait = phase === 'settling' && wait?.until !== undefined &&
@@ -3167,6 +3169,7 @@ function paintGoalProgress(): void {
     // The reviewer's deadline is when Goal goes on without the review (#1832), not another check.
     const timer = el('span', 'recovery-countdown', wait.reason === 'reviewer'
       ? (seconds ? t('Continues without the review in {0}', [left]) : t('Continuing without the review…'))
+      : wait.reason === 'paused' ? t('Resumes in {0}', [left])
       : seconds ? t('Check in {0}', [left]) : t('Checking for activity…'));
     timer.setAttribute('role', 'timer'); timer.setAttribute('aria-live', 'off'); row.append(timer);
   }
@@ -8204,6 +8207,7 @@ export function chatSettingsPatch(current: Config): {
       enabled: $<HTMLInputElement>('homeMaEnabled').checked,
       maxWorkers: number('maWorkers', current.multiAgent.maxWorkers, 1, 8),
       globalMaxWorkers: number('globalMaWorkers', current.multiAgent.globalMaxWorkers ?? 0, 0, 64),
+      chatsAtOnce: Math.min(10, Math.max(0, Number.parseInt($<HTMLSelectElement>('chatsAtOnce').value, 10) || 0)),
       allowUnattributedCalls: $<HTMLInputElement>('allowUnattributedCalls').checked,
       strictChatAllowlist: $<HTMLInputElement>('strictChatAllowlist').checked,
       recoverAgentTabs: $<HTMLInputElement>('recoverAgentTabs').checked,
@@ -8654,7 +8658,7 @@ const CHAT_INPUTS = [
   'goalReviewer',
   'autoCompact',
   'autoCompactTokens',
-  'maWorkers', 'globalMaWorkers',
+  'maWorkers', 'globalMaWorkers', 'chatsAtOnce',
   'allowUnattributedCalls',
   'strictChatAllowlist',
   'recoverAgentTabs',
@@ -8716,9 +8720,11 @@ function heldBySendCheck(entry: InputEntry): boolean {
   return entry.state === 'queued' && !!entry.sendCheck && sendCheckConfigured && entry.sendCheck.nextAt > Date.now();
 }
 
-function queuedWaitReason(entry: InputEntry): 'send-check' | 'extension' | 'tool-call' | 'chatgpt-answering' | 'chatgpt-turn' | 'chatgpt-project' | 'chatgpt-project-failed' | 'project-removed' | null {
+function queuedWaitReason(entry: InputEntry): 'send-check' | 'extension' | 'tool-call' | 'chatgpt-answering' | 'chatgpt-turn' | 'chatgpt-project' | 'chatgpt-project-failed' | 'project-removed' | 'slots' | 'paused' | null {
   if (entry.state !== 'queued' || entry.error || entry.dueAt > Date.now() || entry.delivery === 'tool') return null;
   if (heldBySendCheck(entry)) return 'send-check';
+  // Chats working at once (#1694): main says which automatic sends wait, and for what.
+  if (entry.slotWait) return entry.slotWait;
   if (!bridgePresent) return 'extension';
   // The chat's page has it and sends it when its own turn ends (2026-11-03); pages repeat the hold
   // every few seconds, so an older one no longer says why.
@@ -8771,6 +8777,7 @@ export function chatApply(state: AppState, previous?: Config): void {
     String(config.multiAgent.globalMaxWorkers ?? 0),
     previous?.multiAgent.globalMaxWorkers
   );
+  applyChatValue($<HTMLSelectElement>('chatsAtOnce'), String(config.multiAgent.chatsAtOnce ?? 0), previous?.multiAgent.chatsAtOnce);
   if (previous && workerSlotLimit(previous.multiAgent) !== workerSlotLimit(config.multiAgent)) agentPanel?.refreshSlots();
   applyChatChecked(
     $<HTMLInputElement>('allowUnattributedCalls'),
@@ -8910,7 +8917,7 @@ function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
   if (!visibleInputIds.has(entry.id)) row.classList.add('is-entering');
   visibleInputIds.add(entry.id);
   if (visibleInputIds.size > 100) visibleInputIds.delete(visibleInputIds.values().next().value!);
-  const status = () => entry.error ? t(entry.error) : held ? t("Sending in a moment…") : waiting === 'send-check' ? sendCheckHold(entry)! : waiting === 'extension' ? t("Waiting for the browser extension to connect") : waiting === 'tool-call' ? t("Waiting for the running tool call to finish") : waiting === 'chatgpt-answering' ? t("Waiting for ChatGPT to finish its answer") : waiting === 'chatgpt-turn' ? t("Waiting for ChatGPT's page to end its turn") : waiting === 'chatgpt-project' ? t("Creating this project in ChatGPT…") : waiting === 'chatgpt-project-failed' ? t("This project's ChatGPT Project isn't available. Retry it from the project's menu.") : waiting === 'project-removed' ? t("This chat's project was removed from the sidebar. Add its folder again to send this message, or cancel it.") : (entry.state === 'failed' ? t("Delivery not confirmed") : entry.state === 'decision' ? t("Preparing follow-up") : entry.state === 'browser' ? t("Delivery confirmation pending") : entry.state === 'tool' ? t("Sent to the active turn · awaiting receipt") : entry.dueAt > Date.now() ? t("Scheduled {0}", [new Date(entry.dueAt).toLocaleString(currentLanguage())]) : entry.delivery === 'tool' ? t("Waiting for the next tool call") : t("Queued"));
+  const status = () => entry.error ? t(entry.error) : held ? t("Sending in a moment…") : waiting === 'send-check' ? sendCheckHold(entry)! : waiting === 'slots' ? t("Waiting for a free slot (Chats working at once)") : waiting === 'paused' ? t("ChatGPT asked to slow down · waits until it says") : waiting === 'extension' ? t("Waiting for the browser extension to connect") : waiting === 'tool-call' ? t("Waiting for the running tool call to finish") : waiting === 'chatgpt-answering' ? t("Waiting for ChatGPT to finish its answer") : waiting === 'chatgpt-turn' ? t("Waiting for ChatGPT's page to end its turn") : waiting === 'chatgpt-project' ? t("Creating this project in ChatGPT…") : waiting === 'chatgpt-project-failed' ? t("This project's ChatGPT Project isn't available. Retry it from the project's menu.") : waiting === 'project-removed' ? t("This chat's project was removed from the sidebar. Add its folder again to send this message, or cancel it.") : (entry.state === 'failed' ? t("Delivery not confirmed") : entry.state === 'decision' ? t("Preparing follow-up") : entry.state === 'browser' ? t("Delivery confirmation pending") : entry.state === 'tool' ? t("Sent to the active turn · awaiting receipt") : entry.dueAt > Date.now() ? t("Scheduled {0}", [new Date(entry.dueAt).toLocaleString(currentLanguage())]) : entry.delivery === 'tool' ? t("Waiting for the next tool call") : t("Queued"));
   const files = el('div', 'message-attachments');
   if (entry.attachments?.length) files.append(...entry.attachments.map(file => attachmentCard(file)));
   for (const image of entry.images ?? []) { const preview = document.createElement('img'); preview.src = image.dataUrl; preview.alt = image.name; files.append(preview); }
