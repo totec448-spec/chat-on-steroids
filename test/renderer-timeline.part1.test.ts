@@ -322,6 +322,49 @@ it('follows a newly sent chat when its first native conversation ID arrives, onc
   expect(followed).toEqual([opening.id]);
 });
 
+it('follows the first binding even when project history merges it before the newest-page refresh', async () => {
+  const project: LocalProject = { id: '33333333-3333-4333-8333-333333333333', name: 'Project', path: '/repo', createdAt: T0 };
+  const opening: SessionSummary = { ...summary([]), projectId: project.id, conversationId: null, chatIds: [],
+    origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } };
+  const bound = { ...opening, conversationId: 'new-native-chat', chatIds: ['new-native-chat'] };
+  const { w, notifySession } = await boot([], false, [], [project], { sessions: [opening] });
+  const api = (w as any).api;
+  const followed: string[] = [];
+  api.followSessionTab = async (id: string) => { followed.push(id); return { ok: true, data: true }; };
+  w.document.querySelector<HTMLElement>('#sessionList [data-id="' + opening.id + '"]')!.click();
+  followed.length = 0;
+  let newestPage = opening;
+  api.listSessions = async (options: { projectId?: string }) => ({ ok: true, data: {
+    sessions: options?.projectId === project.id ? [bound] : [newestPage],
+    total: 1, nextCursor: null, activeId: null, pressure: [], blocked: [], approval: [], recoveryStopped: []
+  } });
+
+  const heading = w.document.querySelector<HTMLElement>('.project-group .project-heading')!;
+  // Selecting the chat already expands its project; close and reopen to request history.
+  heading.click(); heading.click();
+  await settle(300);
+  expect(followed).toEqual([opening.id]);
+  newestPage = bound;
+  notifySession(); await settle(550);
+  expect(followed).toEqual([opening.id]);
+  // A stale newest page may briefly show the old unbound summary again.
+  newestPage = opening;
+  notifySession(); await settle(550);
+  newestPage = bound;
+  notifySession(); await settle(550);
+  expect(followed).toEqual([opening.id]);
+});
+
+it('invalidates a queued browser follow when New Chat replaces the selected session', async () => {
+  const first = summary([]);
+  const { w } = await boot([], false, [], [], { sessions: [first] });
+  const followed: Array<string | null> = [];
+  (w as any).api.followSessionTab = async (id: string | null) => { followed.push(id); return { ok: true, data: true }; };
+  w.document.querySelector<HTMLElement>('#sessionList [data-id="' + first.id + '"]')!.click();
+  w.document.getElementById('newChat')!.click();
+  expect(followed).toEqual([first.id, null]);
+});
+
 it('does not focus a newly bound chat after the person has selected another one', async () => {
   const opening: SessionSummary = { ...summary([]), conversationId: null, chatIds: [],
     origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } };
