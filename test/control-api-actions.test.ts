@@ -1136,7 +1136,8 @@ describe('stopping an answer', () => {
     try {
       const reply = await post('/v1/sessions/' + chatSession + '/stop', { turnId: 'turn-1' });
       expect(reply.status).toBe(202);
-      expect(stops).toHaveBeenCalledWith(chatSession, 'turn-1');
+      // #1882: the log names the control API as the Stop's sender.
+      expect(stops).toHaveBeenCalledWith(chatSession, 'turn-1', { from: 'the control API' });
       expect(reply.body.live).toMatchObject({ activeTurnId: 'turn-1', stopPending: true });
     } finally {
       stops.mockRestore();

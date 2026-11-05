@@ -61,6 +61,8 @@ const PHRASES: ReadonlyArray<readonly [done: string, running: string | null, inf
   ['Acted', 'Acting', 'act'],
   ['Updated the task plan', 'Updating the task plan', null],
   ['Cleared the task plan', 'Clearing the task plan', null],
+  ['Asked you to run a step', 'Asking you to run a step', 'ask you to run a step'],
+  ['Checked a step for you', 'Checking a step for you', 'check a step for you'],
   ['Searched recordings {0}', 'Searching recordings {0}', 'search recordings {0}'],
   ['Listed recent recordings', 'Listing recent recordings', 'list recent recordings'],
   ['Opened one recorded tool call', 'Opening one recorded tool call', 'open one recorded tool call'],

@@ -37,7 +37,9 @@ import {
   initSessionStore,
   readRecentEvents,
   rebindSession,
-  readSessionPlan
+  readSessionPlan,
+  readSessionUserRequests,
+  answerUserRequest
 } from '../src/main/session/store.js';
 import {
   bindConversation,
@@ -902,7 +904,7 @@ describe('surface boundaries', () => {
     everything();
     const names = toolNames(await core('tools/list'));
     // find is absent because exec_command is present — they are mutually exclusive.
-    expect(names).toEqual(['agents', 'apply_patch', 'exec', 'exec_command', 'read', 'save_image', 'update_plan', 'usage', 'view_image', 'write_stdin']);
+    expect(names).toEqual(['agents', 'apply_patch', 'ask_user_to_run', 'exec', 'exec_command', 'read', 'save_image', 'update_plan', 'usage', 'user_request_status', 'view_image', 'write_stdin']);
     for (const name of surfaceDefinition('desktop').tools.filter(name => name !== 'exec')) expect(names, name).not.toContain(name);
   });
 
@@ -1237,7 +1239,7 @@ describe('surface boundaries', () => {
     const desktopTools = toolList(await desktop('tools/list'));
 
     // Each populated surface includes code mode; find and the shell exec pair remain exclusive.
-    expect(coreTools).toHaveLength(10);
+    expect(coreTools).toHaveLength(12);
     expect(desktopTools).toHaveLength(BROWSER_TOOLS.length + (IS_WINDOWS ? 16 : process.platform === 'darwin' ? 3 : 1));
 
     // And the size, which is what a discovery pull actually costs the model on every
@@ -3799,6 +3801,130 @@ describe('agent-maintained plans over MCP', () => {
     const disabled = await core('tools/call', { name: 'update_plan', arguments: { plan: [] } });
     expect(failed(disabled)).toBe(true);
     expect(textOf(disabled)).toContain('Session recording');
+  });
+});
+
+describe('steps handed to the person over MCP (#1695)', () => {
+  const setup = (): void => {
+    ctx.readOnly = false;
+    ctx.caps = withCaps({ command: true });
+    ctx.sessionTools = true;
+    ctx.agentTools = false;
+  };
+  const sendAs = (requestId: string | null, name: string, arguments_: Record<string, unknown>) => modern('tools/call',
+    { name, arguments: arguments_ }, requestId ? { 'x-request-id': `${requestId}/att1` } : {});
+  const proveFor = (sessionId: string, conversationId: string) => (requestId: string, tool = 'ask_user_to_run') =>
+    observeRequestCorrelation({ requestId, conversationId, sessionId, messageId: `msg-${requestId}`, tool, observedAt: Date.now() });
+  const step = { command: 'make release', purpose: 'Sign in to the license server first', expected: ['out/report.txt', '../private/passwords.txt'] };
+
+  it('records a step only for an identified chat, returns the same open step when asked again, and runs nothing', async () => {
+    setup();
+    const session = await createSession({ conversationId: 'step-http-source' });
+    const prove = proveFor(session.id, 'step-http-source');
+    expect(failed(await sendAs(null, 'ask_user_to_run', step))).toBe(true);
+    expect(await readSessionUserRequests(session.id)).toEqual([]);
+
+    expect(prove('wfr_step_one')).toBe('stored');
+    const first = await sendAs('wfr_step_one', 'ask_user_to_run', { ...step, constraints: 'Run once' });
+    expect(failed(first)).toBe(false);
+    const id = /ur_[a-z0-9]{12}/.exec(textOf(first))?.[0];
+    expect(id).toBeTruthy();
+    expect(textOf(first)).toContain('does not run it');
+    const [saved] = await readSessionUserRequests(session.id);
+    expect(saved).toMatchObject({ id, command: 'make release', folder: approved, remote: false, state: 'open', constraints: 'Run once', conversationId: 'step-http-source' });
+    // The expected file inside the folder is placed; the one climbing out of it never is.
+    expect(saved!.expected).toEqual([{ path: 'out/report.txt', real: path.join(approved, 'out', 'report.txt') }, { path: '../private/passwords.txt' }]);
+    // Nothing ran: no file appeared.
+    await expect(fs.stat(path.join(approved, 'out'))).rejects.toThrow();
+
+    expect(prove('wfr_step_two')).toBe('stored');
+    const again = await sendAs('wfr_step_two', 'ask_user_to_run', { ...step, command: '  make release  ' });
+    expect(textOf(again)).toContain('already waiting');
+    expect(textOf(again)).toContain(id!);
+    expect(await readSessionUserRequests(session.id)).toHaveLength(1);
+  });
+
+  it('does not move the working folder to where an expected file is (CodeRabbit on #2049)', async () => {
+    setup();
+    await writeTree(approved, { 'elsewhere/keep.txt': 'x' });
+    const session = await createSession({ conversationId: 'step-http-workspace' });
+    const prove = proveFor(session.id, 'step-http-workspace');
+    expect(prove('wfr_ws_one')).toBe('stored');
+    expect(failed(await sendAs('wfr_ws_one', 'ask_user_to_run', { ...step, expected: ['/workspace/elsewhere/out.bin'] }))).toBe(false);
+    expect(prove('wfr_ws_two')).toBe('stored');
+    expect(failed(await sendAs('wfr_ws_two', 'ask_user_to_run', { ...step, command: 'make flash', expected: [] }))).toBe(false);
+    const saved = await readSessionUserRequests(session.id);
+    expect(saved[0]!.expected).toEqual([{ path: '/workspace/elsewhere/out.bin', real: path.join(approved, 'elsewhere', 'out.bin') }]);
+    // The next step without a folder still uses the approved folder, not the expected file's.
+    expect(saved[1]).toMatchObject({ command: 'make flash', folder: approved });
+  });
+
+  it('reports the person\'s answer and the expected files, never what is inside them', async () => {
+    setup();
+    const session = await createSession({ conversationId: 'step-http-status' });
+    const prove = proveFor(session.id, 'step-http-status');
+    expect(prove('wfr_status_ask')).toBe('stored');
+    const id = /ur_[a-z0-9]{12}/.exec(textOf(await sendAs('wfr_status_ask', 'ask_user_to_run', step)))![0];
+    expect(prove('wfr_status_open', 'user_request_status')).toBe('stored');
+    const open = textOf(await sendAs('wfr_status_open', 'user_request_status', { id }));
+    expect(open).toContain('OPEN');
+    expect(open).toContain('out/report.txt not found');
+    expect(open).toContain('../private/passwords.txt not checked');
+    expect(open).not.toContain('hunter2');
+
+    await writeTree(approved, { 'out/report.txt': 'secret result text' });
+    const { sessionControlsFor } = await import('../src/main/bridge.js');
+    const shown = (await sessionControlsFor(session.id)).userRequests?.[0];
+    expect(shown?.found[0]).toMatchObject({ path: 'out/report.txt', state: 'found', size: 18 });
+    expect(shown?.found[1]).toMatchObject({ state: 'unchecked' });
+
+    expect((await answerUserRequest(session.id, id, 'done'))?.changed).toBe(true);
+    // The first answer stands.
+    expect((await answerUserRequest(session.id, id, 'skipped'))?.changed).toBe(false);
+    expect(prove('wfr_status_done', 'user_request_status')).toBe('stored');
+    const done = textOf(await sendAs('wfr_status_done', 'user_request_status', { id }));
+    expect(done).toContain('DONE');
+    expect(done).not.toContain('secret result text');
+    expect(prove('wfr_status_unknown', 'user_request_status')).toBe('stored');
+    expect(failed(await sendAs('wfr_status_unknown', 'user_request_status', { id: 'ur_000000000000' }))).toBe(true);
+    await fs.rm(path.join(approved, 'out'), { recursive: true, force: true });
+  });
+
+  it('refuses a folder outside the approved ones, an overlong command, and a chat with recording off', async () => {
+    setup();
+    const session = await createSession({ conversationId: 'step-http-refusals' });
+    const prove = proveFor(session.id, 'step-http-refusals');
+    expect(prove('wfr_refuse_folder')).toBe('stored');
+    const outsideFolder = await sendAs('wfr_refuse_folder', 'ask_user_to_run', { ...step, workdir: outside });
+    expect(failed(outsideFolder)).toBe(true);
+    expect(textOf(outsideFolder)).toContain('No step was recorded');
+    expect(prove('wfr_refuse_long')).toBe('stored');
+    const long = await sendAs('wfr_refuse_long', 'ask_user_to_run', { ...step, command: 'x'.repeat(8 * 1024 + 1) });
+    expect(textOf(long)).toContain('longer than 8 KB');
+    ctx.sessionTools = false;
+    expect(prove('wfr_refuse_recording')).toBe('stored');
+    expect(textOf(await sendAs('wfr_refuse_recording', 'ask_user_to_run', step))).toContain('Session recording');
+    expect(await readSessionUserRequests(session.id)).toEqual([]);
+  });
+
+  it('is offered in Read-only mode over Run programs, since it runs nothing, and not without Run programs', async () => {
+    setup();
+    const session = await createSession({ conversationId: 'step-http-readonly' });
+    const prove = proveFor(session.id, 'step-http-readonly');
+    const configured = getConfig().capabilities.command;
+    try {
+      getConfig().capabilities.command = true;
+      ctx.readOnly = true;
+      ctx.caps = withCaps({});
+      expect(toolNames(await core('tools/list'))).toContain('ask_user_to_run');
+      expect(prove('wfr_readonly')).toBe('stored');
+      expect(failed(await sendAs('wfr_readonly', 'ask_user_to_run', step))).toBe(false);
+      getConfig().capabilities.command = false;
+      expect(prove('wfr_readonly_off')).toBe('stored');
+      expect(textOf(await sendAs('wfr_readonly_off', 'ask_user_to_run', { ...step, command: 'other' }))).toContain('Run programs');
+    } finally {
+      getConfig().capabilities.command = configured;
+    }
   });
 });
 

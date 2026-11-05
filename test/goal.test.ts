@@ -2595,6 +2595,23 @@ describe('a chat driven towards a specific goal', () => {
     expect(await goal.setGoalSwitchNow('c-switch-loud', 'loop', true)).toEqual({ enabled: true, mode: 'loop' });
   });
 
+  // #1882: a Loop that read Normal after a move could not be traced to who turned it off.
+  it('logs each change of one chat\'s switch once, with where it came from', async () => {
+    const logger = await import('../src/main/logger.js');
+    const info = vi.spyOn(logger, 'logInfo');
+    const lines = () => info.mock.calls.map(([line]) => String(line)).filter(line => line.startsWith('goal: c-switch-said '));
+    await goal.setGoalSwitchNow('c-switch-said', 'loop', true, undefined, 'the app');
+    await goal.setGoalSwitchNow('c-switch-said', 'loop', true, undefined, 'the ChatGPT page');
+    await goal.setGoalSwitchNow('c-switch-said', 'loop', false, undefined, 'a Stop sent by the control API');
+    await goal.setGoalSwitchNow('c-switch-said', 'goal', true);
+    expect(lines()).toEqual([
+      'goal: c-switch-said switched to loop by the app',
+      'goal: c-switch-said switched to Normal by a Stop sent by the control API',
+      'goal: c-switch-said switched to goal'
+    ]);
+    info.mockRestore();
+  });
+
   it('carries one chat\'s switch across a snapshot, a restore and a resume', async () => {
     await goal.setGoalSwitchNow('c-switch-parent', 'loop', true);
     const saved = goal.snapshotGoalSwitches();
@@ -2616,8 +2633,15 @@ describe('a chat driven towards a specific goal', () => {
     expect(goal.goalSwitchFor('c-switch-child')).toEqual({ enabled: true, mode: 'loop', own: true, afterTurn: false });
 
     // The app's own switch going off is the master stop and reaches every override there is.
+    const cleared = vi.spyOn(logger, 'logInfo');
     goal.clearAllGoalSwitches();
     expect(goal.goalSwitchFor('c-switch-child').own).toBe(false);
+    expect(cleared.mock.calls.map(([line]) => String(line)).filter(line => line.includes('went back to the app-wide setting')))
+      .toEqual([expect.stringMatching(/^goal: the app's own switch was turned off; [1-9]\d* chat\(s\) went back to the app-wide setting$/)]);
+    // Nothing left to clear: nothing is said.
+    goal.clearAllGoalSwitches();
+    expect(cleared.mock.calls.filter(([line]) => String(line).includes('went back to the app-wide setting'))).toHaveLength(1);
+    cleared.mockRestore();
   });
 
   /**
