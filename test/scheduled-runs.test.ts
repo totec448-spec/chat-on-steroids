@@ -147,6 +147,26 @@ it('lists readable schedules, preserves an unreadable chat, and logs only confir
   expect(log).toHaveBeenCalledWith(expect.stringContaining(`could not be read (metadata temporarily unreadable); kept (${unreadable})`));
 });
 
+it('continues listing healthy schedules when removing a confirmed orphan fails to save', async () => {
+  const missing = '2026-10-24-ccccdddd';
+  const { runs } = await setup();
+  await runs.saveSchedule({ sessionId: missing, text: 'Orphan', repeat: { kind: 'daily', at: '09:00' }, until: null }, local('2026-10-24T10:00:00'));
+  await runs.saveSchedule({ sessionId: SESSION, text: 'Healthy', repeat: { kind: 'hours', every: 1 }, until: null }, local('2026-10-24T10:00:00'));
+  const durable = await import('../src/main/durable.js');
+  const write = vi.spyOn(durable, 'writeDurableNow').mockRejectedValueOnce(new Error('disk full'));
+  const log = vi.fn();
+  const deps = { session: async (id: string) => id === SESSION ? { id, title: 'Healthy chat' } : null, log };
+  const items = await runs.listScheduleItems(local('2026-10-24T10:30:00'), deps);
+  write.mockRestore();
+  expect(items).toEqual([expect.objectContaining({ sessionId: SESSION, sessionTitle: 'Healthy chat' })]);
+  expect((await runs.listSchedules()).map(row => row.sessionId)).toEqual([missing, SESSION]);
+  expect(log).toHaveBeenCalledWith(expect.stringContaining('could not remove the missing chat\'s schedule (disk full); will retry'));
+  expect(log).not.toHaveBeenCalledWith(expect.stringContaining('removed: its chat no longer exists'));
+  await runs.listScheduleItems(local('2026-10-24T10:31:00'), deps);
+  expect((await runs.listSchedules()).map(row => row.sessionId)).toEqual([SESSION]);
+  expect(log).toHaveBeenCalledWith(expect.stringContaining('removed: its chat no longer exists'));
+});
+
 it('keeps an ended chat schedule visible in the global list without a future run', async () => {
   const { runs } = await setup();
   const createdAt = local('2026-10-24T10:00:00');
@@ -181,6 +201,13 @@ it('runs a schedule now through its chat queue without moving the recurring sche
   await runs.runDueSchedules(local('2026-10-24T11:00:10'), deps);
   expect(queued).toHaveLength(2);
   expect(queued[1]).toMatchObject({ scheduled: { scheduleId: saved.id, dueAt: local('2026-10-24T11:00:00'), late: false } });
+});
+
+it('logs why Run now did not enqueue when that chat has no schedule', async () => {
+  const { runs, deps, queued } = await setup();
+  expect(await runs.runScheduleNow(SESSION, local('2026-10-24T10:30:00'), deps)).toBe(false);
+  expect(queued).toHaveLength(0);
+  expect(deps.log).toHaveBeenCalledWith(expect.stringContaining(`not queued now: no schedule exists (${SESSION})`));
 });
 
 it('durably records Run now before enqueue so a failed schedule write cannot create an untracked outbox row', async () => {
