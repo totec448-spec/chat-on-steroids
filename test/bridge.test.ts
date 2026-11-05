@@ -18664,6 +18664,20 @@ describe('selecting a chat in the app selects its background tab (#1249)', () =>
     } finally { await close(socket); }
   });
 
+  it('withdraws a queued tab follow when the selected chat becomes New Chat', async () => {
+    await pair();
+    await background(true);
+    const socket = await connect();
+    try {
+      await poll(BROWSER_B, [CHAT]);
+      followChatInBackground(CHAT);
+      followChatInBackground(null);
+      expect((await poll(BROWSER_B, [CHAT])).follow).toBeUndefined();
+      followChatInBackground(CHAT);
+      expect((await poll(BROWSER_B, [CHAT])).follow).toBe(CHAT);
+    } finally { await close(socket); }
+  });
+
   it('asks for nothing with Background chats off', async () => {
     await pair();
     await background(false);

@@ -911,8 +911,11 @@ function takeReveals(browser: string | null): string[] {
 const FOLLOW_TTL_MS = 10_000;
 let pendingFollow: { conversationId: string; at: number } | null = null;
 
-export function followChatInBackground(conversationId: string): void {
-  if (getConfig().ui.backgroundChats !== true || getConfig().ui.backgroundPlacement === 'group' ||
+export function followChatInBackground(conversationId: string | null): void {
+  if (pendingFollow && pendingFollow.conversationId !== conversationId)
+    logInfo('browser follow: a newer selection cancelled the previously queued tab follow');
+  pendingFollow = null;
+  if (!conversationId || getConfig().ui.backgroundChats !== true || getConfig().ui.backgroundPlacement === 'group' ||
       !browserWakeConnected() || !revealCapable()) return;
   pendingFollow = { conversationId, at: Date.now() };
   wakeBrowserWork();
