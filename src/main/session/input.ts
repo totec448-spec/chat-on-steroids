@@ -2200,8 +2200,9 @@ function loadOwnSentStore(): Promise<OwnSentStore> {
         forgotten: valid(record?.forgotten, ownSentForgottenSchema)
       };
       ownSentStore = trimOwnSent(loaded);
-      // Expired text leaves the disk when the store is read, not only on the next send (CodeRabbit on #2079).
-      if (ownSentStore.receipts.length !== loaded.receipts.length || ownSentStore.forgotten.length !== loaded.forgotten.length)
+      // Expired, damaged or rejected text leaves the disk when the store is read, not only on the next
+      // send: whatever differs from the cleaned store is rewritten (CodeRabbit on #2079).
+      if (saved !== null && JSON.stringify(saved) !== JSON.stringify({ version: 1, ...ownSentStore }))
         writeDurableSoon(OWN_SENT_STATE, { version: 1, ...ownSentStore });
       // And while the app stays open: once an hour.
       ownSentPruneTimer ??= setInterval(() => { void pruneOwnSent().catch(() => undefined); }, 60 * 60_000);

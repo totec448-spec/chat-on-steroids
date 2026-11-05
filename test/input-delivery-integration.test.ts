@@ -4202,10 +4202,15 @@ it('reads the own-sent store from an older version as empty and drops damaged en
     { conversationId, text: 'Continue the task', messageId: 'kept-message', at: Date.now() },
     { conversationId, text: '', messageId: 'empty-text', at: Date.now() },
     { conversationId: 42, text: 'Broken owner', messageId: 'bad-owner', at: Date.now() },
+    { conversationId, text: 'Private words with a broken time', messageId: 'bad-time', at: 'yesterday' },
     'garbage'
   ]);
   input.resetInputForTests();
   expect(await input.ownSentResidue(conversationId)).toEqual([{ text: 'Continue the task', messageId: 'kept-message' }]);
+  // The rejected rows leave the disk too, not only memory (CodeRabbit on #2079).
+  await flushDurable();
+  const { readDurable } = await import('../src/main/durable.js');
+  expect(JSON.stringify(await readDurable('own-sent-receipts'))).not.toContain('Private words');
 });
 
 // CodeRabbit on #2079: a chat ChatGPT deleted loses its own-sent record, and a save keeps nothing
