@@ -3292,7 +3292,8 @@ describe('automatic compaction', () => {
     expect(getLog().some(entry => entry.message.includes(`${conversationId} never claimed`))).toBe(false);
     const handout = (await request('GET', '/status')).body.repairs
       .find((row: { conversationId: string }) => row.conversationId === conversationId);
-    await request('GET', `/status?repairCleared=${encodeURIComponent(handout.token)}`);
+    // The report itself hands out no work, as for a held repair (CodeRabbit on #2079).
+    expect((await request('GET', `/status?repairCleared=${encodeURIComponent(handout.token)}`)).body.repairs).toEqual([]);
     expect(getLog().some(entry => entry.message ===
       `bridge: the page removed this app's own already-sent message, restored into ${conversationId}'s message box, before the compaction repair`)).toBe(true);
   });

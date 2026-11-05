@@ -24956,11 +24956,14 @@ describe('ordinary Continue native recovery', () => {
     userTurn(live.document, 'own-continue', own, { sent: false });
     await settle();
     const composer = live.document.getElementById('prompt-textarea')!;
-    const check = () => live!.runtimeMessage({ type: 'clf-repair-check', conversationId: chat, ownTexts: [own] });
-    // Edited, even by one word: the person's draft, held as before.
-    composer.textContent = `${own} Also check the logs.`;
-    expect(await check()).toMatchObject({ safe: false, why: 'draft' });
-    expect(composer.textContent).toBe(`${own} Also check the logs.`);
+    const ownSent = [{ text: own, messageId: 'm-own-continue' }];
+    const check = () => live!.runtimeMessage({ type: 'clf-repair-check', conversationId: chat, ownSent });
+    // Edited, even by one word, or by spacing alone: the person's draft, held as before (CodeRabbit on #2079).
+    for (const edited of [`${own} Also check the logs.`, own.replace('the task', 'the  task')]) {
+      composer.textContent = edited;
+      expect(await check()).toMatchObject({ safe: false, why: 'draft' });
+      expect(composer.textContent).toBe(edited);
+    }
     // Exactly the app's own text, but with something attached: held.
     const dom = (live.window as any).CLF_DOM;
     const attached = dom.hasComposerAttachments;
@@ -24968,25 +24971,31 @@ describe('ordinary Continue native recovery', () => {
     composer.textContent = own;
     expect(await check()).toMatchObject({ safe: false, why: 'draft' });
     dom.hasComposerAttachments = attached;
-    // Not told it is the app's own: held.
+    // Not told it is the app's own, or told without its message: held.
     expect(await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat })).toMatchObject({ safe: false, why: 'draft' });
-    // Exactly the app's own sent text, which is also the chat's latest message: cleared, and the repair goes on.
+    expect(await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat, ownSent: [{ text: own }] }))
+      .toMatchObject({ safe: false, why: 'draft' });
+    // Exactly the app's own sent message, which is also the chat's latest message: cleared, and the repair goes on.
     expect(await check()).toMatchObject({ safe: true, cleared: 'own-sent' });
     expect(composer.textContent).toBe('');
   });
 
-  it("holds the app's own text when it is not the chat's latest message", async () => {
+  it("holds the app's own text when the chat's latest message is not that send, even with the same text", async () => {
     const own = 'Continue with the task from where you stopped. Pick up exactly where the last step ended.';
-    live = await harness(`https://chatgpt.com/c/${chat}`);
-    await settle();
-    userTurn(live.document, 'own-continue', own, { sent: false });
-    userTurn(live.document, 'later-question', 'A newer question from the person', { sent: false });
-    await settle();
-    const composer = live.document.getElementById('prompt-textarea')!;
-    composer.textContent = own;
-    expect(await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat, ownTexts: [own] }))
-      .toMatchObject({ safe: false, why: 'draft' });
-    expect(composer.textContent).toBe(own);
+    for (const later of ['A newer question from the person', own]) {
+      live = await harness(`https://chatgpt.com/c/${chat}`);
+      await settle();
+      userTurn(live.document, 'own-continue', own, { sent: false });
+      // The person sent a newer message, here even one with the very same text (CodeRabbit on #2079).
+      userTurn(live.document, 'person-later', later, { sent: false });
+      await settle();
+      const composer = live.document.getElementById('prompt-textarea')!;
+      composer.textContent = own;
+      expect(await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat, ownSent: [{ text: own, messageId: 'm-own-continue' }] }))
+        .toMatchObject({ safe: false, why: 'draft' });
+      expect(composer.textContent).toBe(own);
+      live.dom.window.close();
+    }
   });
 
   it('names why a repair is held: an unsent draft in the message box, then nothing once it is cleared', async () => {
