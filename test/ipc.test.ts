@@ -327,6 +327,31 @@ it('lists schedules with chat titles and Run now uses the ordinary outbox withou
   }
 });
 
+it('keeps a schedule when its chat directory exists but its metadata cannot be read', async () => {
+  const session = await createSession({ conversationId: 'ipc-schedule-damaged-meta', title: 'Damaged metadata' });
+  const call = (name: string, payload?: unknown) => handlers.get(name)!(null, payload) as Promise<any>;
+  await call('schedules:save', { sessionId: session.id, text: 'Preserve this schedule', repeat: { kind: 'daily', at: '09:00' }, until: null });
+  const folder = path.join(dir, 'sessions', session.id);
+  await fs.writeFile(path.join(folder, 'meta.json'), '{"id":"damaged');
+  await fs.rm(path.join(folder, 'meta.backup.json'), { force: true });
+  resetSessionStoreForTests();
+
+  try {
+    const listed = await call('schedules:list');
+    expect(listed).toMatchObject({ ok: true, data: [] });
+    expect(await call('schedules:runNow', { sessionId: session.id })).toMatchObject({
+      ok: false, error: 'The session exists but its metadata could not be read.'
+    });
+    expect(await call('schedules:get', { sessionId: session.id })).toMatchObject({
+      ok: true, data: { sessionId: session.id, text: 'Preserve this schedule' }
+    });
+  } finally {
+    await call('schedules:delete', { sessionId: session.id });
+    await fs.rm(folder, { recursive: true, force: true });
+    resetSessionStoreForTests();
+  }
+});
+
 it('answers a turn\'s changed files and refuses a malformed request (#1827)', async () => {
   const session = await createSession({ conversationId: 'ipc-turn-changes', title: 'Changes' });
   const call = (name: string, payload: unknown) => handlers.get(name)!(null, payload) as Promise<any>;

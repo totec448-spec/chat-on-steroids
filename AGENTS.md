@@ -2191,10 +2191,13 @@ The global Scheduled page projects these same per-chat records with `schedules:l
 current chat titles without creating a second task store. It opens the existing chat and
 calls the existing pause/resume/delete actions. `schedules:runNow` queues a manual run through
 the same input outbox (waiting for the active turn if necessary) without advancing the
-recurrence cursor; it updates only the last queued input id so a scheduled tick
-does not duplicate a pending manual run. A deleted chat cannot be targeted,
-and a confirmed orphan record is removed and logged. A chat that cannot be read during the global
-list refresh is kept and omitted from that refresh while the other schedules continue loading.
+recurrence cursor; it durably records the manual input id before enqueue. If enqueue rejects,
+the previous input id is restored only when the manual id is not pending; a pending manual row
+keeps its id so the due runner cannot duplicate it. A deleted chat cannot be targeted, and a
+confirmed orphan record is removed and logged. A chat whose session directory is still present
+but whose metadata cannot be read is retained; only a positively absent session directory is
+treated as a deleted chat. A chat that cannot be read during the global list refresh is kept and
+omitted from that refresh while the other schedules continue loading.
 The delivered `user_message` records `scheduled { dueAt, late }` (copied from the input in
 `recordDeliveredInput`, kept when a later page echo lacks it), so the sent message keeps the same
 line in the chat after the outbox row is pruned.
