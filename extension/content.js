@@ -1190,6 +1190,10 @@
    * /activity poll as everything else.
    */
   let goalConfig = null;
+  /** The app's word on this chat's Retry (#2076): null from an older app, which keeps the page's own rule. */
+  let appHistoryRetry = null;
+  /** The chat the app last answered about at all, with or without that word (CodeRabbit on #2080). */
+  let appHistoryAnsweredFor = null;
   let goalDraft = null;
   /**
    * The generation the goal loop has already acted on.
@@ -7196,6 +7200,9 @@
         ...(sentResult ? { approvalResult: sentResult } : {})
       });
       if (sentResult && reply && reply.ok === true && approvalResult === sentResult) approvalResult = null;
+      // Any answer for this chat, even a failure, ends the wait for the app's first word on its
+      // history Retry (#2076): an app that cannot be reached leaves the page's own rule.
+      if (CLF_DOM.conversationId() === forId) appHistoryAnsweredFor = forId;
       if (!reply || reply.ok !== true || !reply.data) {
         // Keep waiting only for failures that can genuinely mean "the local app/worker is
         // not reachable yet". A structured application refusal is an answer to the identity
@@ -7384,6 +7391,15 @@
       // finished and the page has been repainted with what the draft is doing.
       const goalBefore = JSON.stringify([goalConfig?.enabled ?? null, goalConfig?.objective ?? null, bootstrap]);
       goalConfig = data.goal && typeof data.goal === 'object' ? data.goal : null;
+      // Whether the app still owes this chat work, and its own hold on the chat's history (#2076).
+      // Bound to the chat this reply was asked for, and only while the page still shows it
+      // (CodeRabbit on #2080): a reply for chat A never speaks for chat B.
+      if (CLF_DOM.conversationId() === forId) {
+        appHistoryAnsweredFor = forId;
+        appHistoryRetry = data.historyRetry && typeof data.historyRetry === 'object'
+          ? { conversationId: forId, wanted: data.historyRetry.wanted !== false,
+            until: Number.isFinite(data.historyRetry.until) ? data.historyRetry.until : 0, at: Date.now() } : null;
+      }
       if (goalConfig) goalDraft = goalConfig.draft || null;
       const nextBootstrap = data.bootstrap === 'resume' || data.bootstrap === 'worker' ? data.bootstrap : null;
       bootstrapOwner = nextBootstrap && typeof data.bootstrapMessageId === 'string' && data.bootstrapMessageId
@@ -12713,6 +12729,36 @@
   let loadFailureToldAt = 0;
   let loadFailureStored = false;
   let loadFailureLastPress = 0;
+  /** How long the app's word holds without a newer activity reply. */
+  const APP_HISTORY_RETRY_FRESH_MS = 2 * 60_000;
+  /** How long a newly shown chat waits for the app's first answer before the page's own rule applies. */
+  const APP_HISTORY_FIRST_ANSWER_MS = 60_000;
+  let historyRouteSince = 0;
+  let historyRetryHeldToldAt = 0;
+  /**
+   * ChatGPT's Retry on a history that could not load is pressed only while the app still owes this
+   * chat work, and never before the app's own hold for it ends (#2076): each press is another history
+   * request, and an idle chat leaves Retry to the person.
+   */
+  function appAllowsHistoryRetry(route, now) {
+    const word = appHistoryRetry;
+    // Until the app has answered for this chat once, wait (at most a minute); an app that answers
+    // without the word is an older one, and the page's own rule applies (CodeRabbit on #2080).
+    const unanswered = appHistoryAnsweredFor !== route && now - historyRouteSince < APP_HISTORY_FIRST_ANSWER_MS;
+    const applies = word && word.conversationId === route && now - word.at <= APP_HISTORY_RETRY_FRESH_MS;
+    const why = unanswered ? 'waiting for the app\'s first answer about this chat'
+      // A Stop since the app's last word revokes it: a newer answer is needed (CodeRabbit on #2080).
+      : applies && stopRequestedAt && word.at <= stopRequestedAt ? 'Stop was pressed; waiting for the app\'s next answer'
+      : !applies ? ''
+      : word.until > now ? 'the app holds this chat\'s history until its wait ends'
+      : !word.wanted ? 'this chat has no work waiting, so Retry is left to you' : '';
+    if (!why) return true;
+    if (now - historyRetryHeldToldAt >= 60_000) {
+      historyRetryHeldToldAt = now;
+      console.info(`Chat On Steroids: not pressing Retry: ${why}.`);
+    }
+    return false;
+  }
   function restoreLimitedLoadFailure(route, now) {
     try {
       const raw = sessionStorage.getItem(LOAD_FAILURE_LIMITED_STORAGE);
@@ -12758,6 +12804,7 @@
       loadFailureRetries = 0;
       loadFailureLimited = false;
       loadFailureLastPress = 0;
+      historyRouteSince = now;
       restoreLimitedLoadFailure(route, now);
     }
     // The provider has already told this exact history read when it may be tried again.
@@ -12798,6 +12845,7 @@
     const schedule = loadFailureLimited ? LOAD_FAILURE_LIMITED_BACKOFF_MS : LOAD_FAILURE_BACKOFF_MS;
     const wait = LOAD_FAILURE_SETTLE_MS + schedule[Math.min(loadFailureRetries, schedule.length - 1)];
     if (now - loadFailureSince < wait) return false;
+    if (!appAllowsHistoryRetry(route, now)) return false;
     loadFailureRetries++;
     loadFailureSince = now;
     loadFailureLastPress = now;
@@ -13328,6 +13376,34 @@
     return false;
   }
 
+  /**
+   * After a reload ChatGPT can put the app's own already-sent automatic message back into the message
+   * box, and every repair was then held as if it were the person's draft, for hours (#2074). The app
+   * names its own automatic sends in this chat with their ChatGPT message ids. The box is the app's
+   * leftover only when the chat's latest user message is one of those exact messages and the box holds
+   * exactly its text (line breaks and outer spaces aside, or in ChatGPT's own Markdown-escaped form),
+   * with nothing attached. It is removed only while unchanged (captureComposerDraft's lease); anything
+   * else stays a draft and holds the repair as before (CodeRabbit on #2079: no whitespace-blind match,
+   * and an unsent text or a text without its message proves nothing).
+   */
+  function clearOwnSentResidue(values) {
+    const own = (Array.isArray(values) ? values : []).filter(value => value && typeof value.text === 'string' &&
+      value.text.trim() && typeof value.messageId === 'string' && value.messageId).slice(0, 10);
+    if (!own.length || desktopInputBusy || CLF_DOM.hasComposerAttachments() || handoffMarked(CLF_DOM.composer())) return false;
+    const latest = CLF_DOM.messages().filter(row => row.role === 'user').at(-1);
+    const sent = latest?.id ? own.find(value => value.messageId === latest.id) : undefined;
+    if (!sent) return false;
+    const lines = (value) => String(value || '').replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ')
+      .split('\n').map(line => line.trim()).join('\n').replace(/\n{2,}/g, '\n').trim();
+    // Read with its line breaks: textContent joins a multiline send's paragraphs into one (CodeRabbit on #2079).
+    const shown = CLF_DOM.composerText() || '';
+    const shownLines = (CLF_DOM.composerLines ? CLF_DOM.composerLines() : shown) || '';
+    const want = lines(sent.text);
+    if (lines(shownLines) !== want && lines(unescapeMarkdown(shownLines)) !== want) return false;
+    const lease = CLF_DOM.captureComposerDraft(shown);
+    try { return lease.withdraw() === true; } finally { lease.dispose(); }
+  }
+
   async function inspectRepairPage(message) {
     const target = conversationId, forEpoch = epoch;
     const current = () => alive && target === message.conversationId && conversationId === target &&
@@ -13341,9 +13417,10 @@
     // Holding here instead left the chat's handoff waiting with nothing on screen (2026-10-10).
     const draft = () => !handoffMarked(CLF_DOM.composer()) &&
       Boolean((CLF_DOM.composerText() || '').trim() || CLF_DOM.hasComposerAttachments());
+    const cleared = current() && clearOwnSentResidue(message.ownSent);
     const verdict = (holds, extra) => {
       const why = holds.find(([held]) => held)?.[1];
-      return { safe: !why, ...(why ? { why } : {}), ...extra };
+      return { safe: !why, ...(why ? { why } : {}), ...(cleared ? { cleared: 'own-sent' } : {}), ...extra };
     };
     if (message.draftOnly === true) {
       const questionId = CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id ?? null;

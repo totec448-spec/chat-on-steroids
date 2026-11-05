@@ -13503,6 +13503,94 @@ describe('evidence from the page context', () => {
     expect(clicks).toBe(3);
   });
 
+  // #2076: each press is another history request; an idle chat leaves Retry to the person.
+  it("presses ChatGPT's history Retry only while the app owes the chat work and its own hold has ended", async () => {
+    live = await harness();
+    let clicks = 0;
+    const retry = live.document.createElement('button');
+    retry.addEventListener('click', () => { clicks++; });
+    (live.window as any).CLF_DOM.conversationLoadFailure = () => retry;
+    const word = async (historyRetry: unknown) => {
+      live!.reply.set('activity', () => ({ ok: true, data: { stream: [], entries: [], pendingTools: 0, ...(historyRetry ? { historyRetry } : {}) } }));
+      await live!.hook.pullActivity();
+    };
+    const start = live.window.Date.now();
+    // An idle chat: no press once the page's own wait is over, nor later.
+    await word({ wanted: false });
+    expect(live.hook.recoverConversationLoad(start)).toBe(false);
+    expect(live.hook.recoverConversationLoad(start + 10_000)).toBe(false);
+    expect(live.hook.recoverConversationLoad(start + 60_000)).toBe(false);
+    expect(clicks).toBe(0);
+    // Work waits, but the app still holds this chat's history for ten minutes: no press.
+    await word({ wanted: true, until: start + 10 * 60_000 });
+    expect(live.hook.recoverConversationLoad(start + 70_000)).toBe(false);
+    expect(clicks).toBe(0);
+    // Work waits and the hold has ended: pressed.
+    await word({ wanted: true });
+    expect(live.hook.recoverConversationLoad(start + 80_000)).toBe(true);
+    expect(clicks).toBe(1);
+    // An older app says nothing: the page's own rule, as before (next press after 5 + 15 s).
+    await word(null);
+    expect(live.hook.recoverConversationLoad(start + 101_000)).toBe(true);
+    expect(clicks).toBe(2);
+  });
+
+  // CodeRabbit on #2080: the word belongs to one chat, is awaited once, and a Stop revokes it.
+  it("waits for the app's first answer and never applies one chat's word to another", async () => {
+    live = await harness();
+    let clicks = 0;
+    const retry = live.document.createElement('button');
+    retry.addEventListener('click', () => { clicks++; });
+    (live.window as any).CLF_DOM.conversationLoadFailure = () => retry;
+    // Chat A's app says: nothing to do here.
+    live.reply.set('activity', () => ({ ok: true, data: { stream: [], entries: [], pendingTools: 0, historyRetry: { wanted: false } } }));
+    await live.hook.pullActivity();
+    // The tab moves to chat B, whose first answer is still on its way: no press for now.
+    live.reply.set('activity', () => new Promise(() => undefined));
+    live.dom.reconfigure({ url: 'https://chatgpt.com/c/11111111-2222-3333-4444-555555555555' });
+    const start = live.window.Date.now();
+    expect(live.hook.recoverConversationLoad(start)).toBe(false);
+    expect(live.hook.recoverConversationLoad(start + 10_000)).toBe(false);
+    expect(clicks).toBe(0);
+    // Chat A's "no work" is not chat B's: once the wait for B's first answer is over, B follows the page's own rule.
+    expect(live.hook.recoverConversationLoad(start + 61_000)).toBe(true);
+    expect(clicks).toBe(1);
+  });
+
+  it("needs a newer word from the app after Stop before it presses history Retry", async () => {
+    const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', turnId = 'retry-stop-turn';
+    live = await harness(undefined, {
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, activeTurnId: turnId,
+        stopTurn: { turnId, userMessageId: 'm-retry-question' }, historyRetry: { wanted: true } } }),
+      stop_redeem: () => ({ ok: true, command: { type: 'stop', conversationId, turnId, userMessageId: 'm-retry-question' } }),
+      stop_ack: () => ({ ok: true })
+    });
+    userTurn(live.document, 'retry-question', 'A question before Stop', { sent: false });
+    startGenerating(live.document, { send: false });
+    assistantTurn(live.document, 'retry-stop-assistant', []);
+    const button = live.document.querySelector('[data-testid="stop-button"]') as HTMLButtonElement;
+    Object.defineProperty(button, 'getClientRects', { value: () => [{ width: 10, height: 10 }] });
+    await live.hook.pullActivity();
+    expect(await live.runtimeMessage({ type: 'clf-stop-turn', id: '1111111111111111', conversationId, turnId })).toEqual({ ok: true });
+    let clicks = 0;
+    const retry = live.document.createElement('button');
+    retry.addEventListener('click', () => { clicks++; });
+    (live.window as any).CLF_DOM.conversationLoadFailure = () => retry;
+    const start = live.window.Date.now();
+    expect(live.hook.recoverConversationLoad(start)).toBe(false);
+    // The word "work waits" came before Stop: not enough.
+    expect(live.hook.recoverConversationLoad(start + 10_000)).toBe(false);
+    expect(clicks).toBe(0);
+    // ChatGPT has stopped; a newer word after Stop decides again.
+    stopGenerating(live.document);
+    await settle();
+    await new Promise(resolve => setTimeout(resolve, 5));
+    live.reply.set('activity', () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, historyRetry: { wanted: true } } }));
+    await live.hook.pullActivity();
+    expect(live.hook.recoverConversationLoad(live.window.Date.now() + 10_000)).toBe(true);
+    expect(clicks).toBe(1);
+  });
+
   it('keeps its history Retry backoff across a reload of the same chat (#1882, 2026-11-05)', async () => {
     // Every app reload used to start a new page at the fastest step, so each quarter-hour reload of
     // a limited chat came with presses after 0, 2 and 4 minutes: 23 such rounds in 8.5 hours.
@@ -24945,6 +25033,73 @@ describe('ordinary Continue native recovery', () => {
     expect(await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat })).not.toMatchObject({ why: 'draft' });
     composer.textContent = 'Chat On Steroids is compacting this conversation';
     expect(await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat })).toMatchObject({ safe: false, why: 'draft' });
+  });
+
+  // #2074: after a reload ChatGPT put the app's own already-sent Continue back into the box, and every
+  // repair was held as if it were the person's draft, for hours.
+  it("clears the app's own already-sent message left in the box, and still holds any real draft", async () => {
+    const own = 'Continue with the task from where you stopped. Pick up exactly where the last step ended.';
+    live = await harness(`https://chatgpt.com/c/${chat}`);
+    await settle();
+    userTurn(live.document, 'own-continue', own, { sent: false });
+    await settle();
+    const composer = live.document.getElementById('prompt-textarea')!;
+    const ownSent = [{ text: own, messageId: 'm-own-continue' }];
+    const check = () => live!.runtimeMessage({ type: 'clf-repair-check', conversationId: chat, ownSent });
+    // Edited, even by one word, or by spacing alone: the person's draft, held as before (CodeRabbit on #2079).
+    for (const edited of [`${own} Also check the logs.`, own.replace('the task', 'the  task')]) {
+      composer.textContent = edited;
+      expect(await check()).toMatchObject({ safe: false, why: 'draft' });
+      expect(composer.textContent).toBe(edited);
+    }
+    // Exactly the app's own text, but with something attached: held.
+    const dom = (live.window as any).CLF_DOM;
+    const attached = dom.hasComposerAttachments;
+    dom.hasComposerAttachments = () => true;
+    composer.textContent = own;
+    expect(await check()).toMatchObject({ safe: false, why: 'draft' });
+    dom.hasComposerAttachments = attached;
+    // Not told it is the app's own, or told without its message: held.
+    expect(await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat })).toMatchObject({ safe: false, why: 'draft' });
+    expect(await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat, ownSent: [{ text: own }] }))
+      .toMatchObject({ safe: false, why: 'draft' });
+    // Exactly the app's own sent message, which is also the chat's latest message: cleared, and the repair goes on.
+    expect(await check()).toMatchObject({ safe: true, cleared: 'own-sent' });
+    expect(composer.textContent).toBe('');
+  });
+
+  it("clears the app's own multiline send, read with its line breaks (CodeRabbit on #2079)", async () => {
+    live = await harness(`https://chatgpt.com/c/${chat}`);
+    await settle();
+    userTurn(live.document, 'own-scheduled', 'Check the open issues\nThen report what changed', { sent: false });
+    await settle();
+    const composer = live.document.getElementById('prompt-textarea')!;
+    const check = () => live!.runtimeMessage({ type: 'clf-repair-check', conversationId: chat,
+      ownSent: [{ text: 'Check the open issues\nThen report what changed', messageId: 'm-own-scheduled' }] });
+    // The lines joined into one is a different text: held.
+    composer.innerHTML = '<p>Check the open issues Then report what changed</p>';
+    expect(await check()).toMatchObject({ safe: false, why: 'draft' });
+    composer.innerHTML = '<p>Check the open issues</p><p>Then report what changed</p>';
+    expect(await check()).toMatchObject({ safe: true, cleared: 'own-sent' });
+    expect(composer.textContent).toBe('');
+  });
+
+  it("holds the app's own text when the chat's latest message is not that send, even with the same text", async () => {
+    const own = 'Continue with the task from where you stopped. Pick up exactly where the last step ended.';
+    for (const later of ['A newer question from the person', own]) {
+      live = await harness(`https://chatgpt.com/c/${chat}`);
+      await settle();
+      userTurn(live.document, 'own-continue', own, { sent: false });
+      // The person sent a newer message, here even one with the very same text (CodeRabbit on #2079).
+      userTurn(live.document, 'person-later', later, { sent: false });
+      await settle();
+      const composer = live.document.getElementById('prompt-textarea')!;
+      composer.textContent = own;
+      expect(await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat, ownSent: [{ text: own, messageId: 'm-own-continue' }] }))
+        .toMatchObject({ safe: false, why: 'draft' });
+      expect(composer.textContent).toBe(own);
+      live.dom.window.close();
+    }
   });
 
   it('names why a repair is held: an unsent draft in the message box, then nothing once it is cleared', async () => {
