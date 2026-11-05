@@ -1231,6 +1231,8 @@ describe('surface boundaries', () => {
     // It names the Core that answered, so a call sent to another computer's Core says so (#1097).
     expect(refusal).toContain('Chat On Steroids Core could not tell');
     expect(refusal).toContain('If the chat belongs to another computer');
+    expect(refusal).toContain('calling it from an exec step is fine');
+    expect(refusal).not.toMatch(/not from inside a/);
   });
 
   it('keeps the worst-case no-query discovery of each surface small', async () => {

@@ -38,8 +38,8 @@ export async function desktopCallerRefusal(tool: string, waitMs = DESKTOP_CALLER
     'the screen, mouse and keyboard were not touched');
   return failIdentity(`DESKTOP_IDENTITY_REQUIRED: ${liveConnectorName('desktop')} could not tell which chat this ${tool} call came from, ` +
     'so it did not look at the screen or use the mouse or keyboard. If the chat belongs to another computer, call that ' +
-    `computer's Chat On Steroids Desktop instead. Otherwise call ${tool} directly as its own tool call, not from inside a ` +
-    'JavaScript or exec step, and try again.');
+    `computer's Chat On Steroids Desktop instead. Otherwise wait a moment and call ${tool} once more; calling it from an ` +
+    'exec step is fine. The app ties a call to its chat through the Chat On Steroids extension in that chat\'s browser tab.');
 }
 
 /** The same registrar, with every tool it registers behind desktopCallerRefusal. */

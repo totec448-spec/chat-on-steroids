@@ -46,6 +46,9 @@ it('refuses a desktop call with no chat, even with Allow unattributed calls on, 
   expect(result.content[0]!.text).toContain('DESKTOP_IDENTITY_REQUIRED');
   expect(result.content[0]!.text).toContain('could not tell which chat this computer call came from');
   expect(result.content[0]!.text).toContain('If the chat belongs to another computer');
+  // Some ChatGPT surfaces offer tools only through exec: never told to avoid it (#2004).
+  expect(result.content[0]!.text).toContain('calling it from an exec step is fine');
+  expect(result.content[0]!.text).not.toMatch(/not from inside a/);
   expect(getLog().some(entry => entry.message.includes('desktop: refused computer'))).toBe(true);
 });
 
