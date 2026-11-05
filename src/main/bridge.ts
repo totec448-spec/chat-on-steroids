@@ -916,11 +916,27 @@ function takeReveals(browser: string | null): string[] {
 const FOLLOW_TTL_MS = 10_000;
 let pendingFollow: { conversationId: string; at: number } | null = null;
 
-export function followChatInBackground(conversationId: string): void {
-  if (getConfig().ui.backgroundChats !== true || getConfig().ui.backgroundPlacement === 'group' ||
-      !browserWakeConnected() || !revealCapable()) return;
+export function followChatInBackground(conversationId: string | null): boolean {
+  if (pendingFollow && pendingFollow.conversationId !== conversationId)
+    logInfo('browser follow: a newer selection cancelled the previously queued tab follow');
+  pendingFollow = null;
+  if (!conversationId) return true;
+  const { backgroundChats, backgroundPlacement } = getConfig().ui;
+  if (backgroundChats !== true) {
+    logInfo('browser follow: skipped, background chats are disabled');
+    return true;
+  }
+  if (backgroundPlacement === 'group') {
+    logInfo('browser follow: skipped, background tabs are grouped');
+    return true;
+  }
+  if (!browserWakeConnected() || !revealCapable()) {
+    logInfo('browser follow: deferred, no connected browser can reveal tabs; renderer may retry while pending');
+    return false;
+  }
   pendingFollow = { conversationId, at: Date.now() };
   wakeBrowserWork();
+  return true;
 }
 
 function takeFollow(browser: string | null): string | null {

@@ -2216,11 +2216,20 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // the newest selection counts: a slower lookup for an earlier click must not win (#1267).
   let followSelection = 0;
   handle('sessions:followTab', async (payload) => {
-    const { id } = sessionIdArg.parse(payload);
+    const { id } = sessionIdArg.extend({ id: sessionIdArg.shape.id.nullable() }).parse(payload);
     const selection = ++followSelection;
-    const conversationId = (await getSession(id))?.conversationId;
+    // Clear an older queued follow before awaiting a lookup (or when New Chat has no session).
+    followChatInBackground(null);
+    if (id === null) return true;
+    const session = await getSession(id);
+    const conversationId = session?.conversationId;
     if (selection !== followSelection) return true;
-    if (conversationId && /^[0-9a-z-]{8,64}$/i.test(conversationId)) followChatInBackground(conversationId);
+    if (!session) return true;
+    if (!conversationId) {
+      logInfo('browser follow: selected chat has no conversation binding; follow stays pending for retry');
+      return false;
+    }
+    if (/^[0-9a-z-]{8,64}$/i.test(conversationId)) return followChatInBackground(conversationId);
     return true;
   });
 
