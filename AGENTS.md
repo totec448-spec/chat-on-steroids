@@ -1525,6 +1525,25 @@ Ctrl+backtick toggle its dock; its first opening shows Terminal and starts a she
 project is selected, main chooses the OS user's home directory as the initial cwd; the renderer
 does not supply a path. Selecting a project later does not retarget that shell. The bottom
 header's X hides the dock but preserves its shells.
+**Agent command output, read-only (#1920).** Each running-command row has **Output**: the bottom
+Terminal dock opens an "Agent" tab (`openAgentOutput`) after the person's own tabs, with xterm
+`disableStdin` and a placeholder line saying typing does nothing, plus Stop and close in the tab.
+`agent-output-ipc.ts` (`agentOutput:request` open/close, `agentOutput:event` data/exit) opens only a
+process `runningExecProcesses(sessionId)` lists for that session, at most eight views, and closes
+them on window reload. `UnifiedExecProcessManager.watchOutput` gives the retained history, then each
+chunk, then the exit (after a pipe's streams close, and for a PTY after 150 ms of quiet, at most
+1 s, since its last data can trail its exit). It never consumes the agent's unread buffer.
+`AgentOutputStream` decodes UTF-8 across chunks and masks with `redactSecretText` (the secrets
+shield's setting and project switch): whole lines go out as they end; a partial line after 1 s or
+4 KB only up to a safe cut (its newest 8 words held, and only where masking the shown part alone
+equals masking all pending text); a trailing credential header (`Authorization:` with or without its
+scheme, or a bare `Bearer`) waits for its value; a private key stays hidden from BEGIN to END across
+flushes; at the gap of a long command's kept output the cut lines are dropped, and key lines kept
+after it with their BEGIN omitted are hidden through END (or until it arrives). Batches every 250 ms.
+The open request reserves its view before it waits, so a close meanwhile watches nothing; every
+refusal writes one log line without the request. Closing a tab only stops watching; agent tabs
+are not remembered across restarts. Output shows only when the preload offers `agentOutputOpen`,
+and a repaint gives a focused Output button back.
 The bottom `+` menu opens another bottom shell. On the right, each shell is one dock tab
 alongside Files, Review and Sub-agents; there is no nested Terminal tab bar. The right
 `+` menu creates a new shell tab, while the Terminal quick action/shortcut selects an
