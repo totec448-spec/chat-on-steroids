@@ -3901,5 +3901,14 @@
   "From the sub-agent “{0}”": "Vom Unteragenten „{0}“",
   "Run it yourself, in your own terminal: Chat On Steroids does not run or check it.": "Führe ihn selbst in deinem eigenen Terminal aus: Chat On Steroids führt ihn weder aus noch prüft es ihn.",
   "{0} expected files": "{0} erwartete Dateien",
-  "{0} expected files|one": "{0} erwartete Datei"
+  "{0} expected files|one": "{0} erwartete Datei",
+  "No scheduled messages yet": "Noch keine geplanten Nachrichten",
+  "Open a chat and choose Schedule… from its menu to add one.": "Öffne einen Chat und wähle in seinem Menü „Planen…“, um einen Zeitplan hinzuzufügen.",
+  "Untitled chat": "Unbenannter Chat",
+  "Open chat": "Chat öffnen",
+  "Run now": "Jetzt ausführen",
+  "Delete the schedule for {0}?": "Zeitplan für {0} löschen?",
+  "Could not load schedules": "Zeitpläne konnten nicht geladen werden",
+  "Operation failed": "Vorgang fehlgeschlagen",
+  "Manage the messages scheduled in your chats.": "Verwalte die geplanten Nachrichten deiner Chats."
 }

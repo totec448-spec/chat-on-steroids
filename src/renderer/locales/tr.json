@@ -3901,5 +3901,14 @@
   "From the sub-agent “{0}”": "“{0}” yardımcı ajanından",
   "Run it yourself, in your own terminal: Chat On Steroids does not run or check it.": "Kendi terminalinizde kendiniz çalıştırın: Chat On Steroids bunu çalıştırmaz ve denetlemez.",
   "{0} expected files": "{0} beklenen dosya",
-  "{0} expected files|one": "{0} beklenen dosya"
+  "{0} expected files|one": "{0} beklenen dosya",
+  "No scheduled messages yet": "Henüz zamanlanmış mesaj yok",
+  "Open a chat and choose Schedule… from its menu to add one.": "Bir sohbet açın ve zamanlama eklemek için menüsünden Planla… seçeneğini seçin.",
+  "Untitled chat": "Başlıksız sohbet",
+  "Open chat": "Sohbeti aç",
+  "Run now": "Şimdi çalıştır",
+  "Delete the schedule for {0}?": "{0} için zamanlama silinsin mi?",
+  "Could not load schedules": "Zamanlamalar yüklenemedi",
+  "Operation failed": "İşlem başarısız",
+  "Manage the messages scheduled in your chats.": "Sohbetlerinizde zamanlanan mesajları yönetin."
 }

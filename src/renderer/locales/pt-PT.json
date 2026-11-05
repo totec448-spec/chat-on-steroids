@@ -3985,5 +3985,14 @@
   "Run it yourself, in your own terminal: Chat On Steroids does not run or check it.": "Execute-o você mesmo, no seu próprio terminal: o Chat On Steroids não o executa nem o verifica.",
   "{0} expected files": "{0} ficheiros esperados",
   "{0} expected files|one": "{0} ficheiro esperado",
-  "{0} expected files|many": "{0} de ficheiros esperados"
+  "{0} expected files|many": "{0} de ficheiros esperados",
+  "No scheduled messages yet": "Ainda não existem mensagens agendadas",
+  "Open a chat and choose Schedule… from its menu to add one.": "Abra uma conversa e escolha Agendar… no respetivo menu para adicionar um.",
+  "Untitled chat": "Conversa sem título",
+  "Open chat": "Abrir chat",
+  "Run now": "Executar agora",
+  "Delete the schedule for {0}?": "Eliminar o agendamento de {0}?",
+  "Could not load schedules": "Não foi possível carregar os agendamentos",
+  "Operation failed": "A operação falhou",
+  "Manage the messages scheduled in your chats.": "Gira as mensagens agendadas nas suas conversas."
 }

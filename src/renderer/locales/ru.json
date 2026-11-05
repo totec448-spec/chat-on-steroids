@@ -4069,5 +4069,14 @@
   "{0} expected files": "Ожидаемых файлов: {0}",
   "{0} expected files|one": "Ожидаемых файлов: {0}",
   "{0} expected files|many": "Ожидаемых файлов: {0}",
-  "{0} expected files|few": "Ожидаемых файлов: {0}"
+  "{0} expected files|few": "Ожидаемых файлов: {0}",
+  "No scheduled messages yet": "Запланированных сообщений пока нет",
+  "Open a chat and choose Schedule… from its menu to add one.": "Откройте чат и выберите «Запланировать…» в его меню, чтобы добавить расписание.",
+  "Untitled chat": "Чат без названия",
+  "Open chat": "Открыть чат",
+  "Run now": "Запустить сейчас",
+  "Delete the schedule for {0}?": "Удалить расписание для {0}?",
+  "Could not load schedules": "Не удалось загрузить расписания",
+  "Operation failed": "Не удалось выполнить операцию",
+  "Manage the messages scheduled in your chats.": "Управляйте запланированными сообщениями во всех чатах."
 }

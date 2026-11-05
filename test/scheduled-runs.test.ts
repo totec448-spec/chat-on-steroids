@@ -121,6 +121,67 @@ it('pauses and resumes, and a resumed schedule does not catch up on what passed 
   expect(queued).toHaveLength(1);
 });
 
+it('lists schedules with authoritative chat titles and removes only a proven-missing chat', async () => {
+  const missing = '2026-10-24-ccccdddd';
+  const { runs } = await setup();
+  await runs.saveSchedule({ sessionId: SESSION, text: 'Hourly', repeat: { kind: 'hours', every: 1 }, until: null }, local('2026-10-24T10:00:00'));
+  await runs.saveSchedule({ sessionId: missing, text: 'Orphan', repeat: { kind: 'daily', at: '09:00' }, until: null }, local('2026-10-24T10:00:00'));
+  const items = await runs.listScheduleItems(local('2026-10-24T10:30:00'), {
+    session: async id => id === SESSION ? { id, title: 'Release checks' } : null
+  });
+  expect(items).toEqual([expect.objectContaining({
+    sessionId: SESSION,
+    sessionTitle: 'Release checks',
+    text: 'Hourly',
+    nextRunAt: local('2026-10-24T11:00:00')
+  })]);
+  expect((await runs.listSchedules()).map(row => row.sessionId)).toEqual([SESSION]);
+});
+
+it('runs a schedule now through its chat queue without moving the recurring schedule', async () => {
+  const { runs, deps, queued } = await setup({ session: async id => ({ id, conversationId: 'chat-1', activeTurnId: 'turn-1' }) });
+  const createdAt = local('2026-10-24T10:00:00');
+  const saved = await runs.saveSchedule({ sessionId: SESSION, text: 'Hourly check', repeat: { kind: 'hours', every: 1 }, until: null }, createdAt);
+  const now = local('2026-10-24T10:30:00');
+  expect(await runs.runScheduleNow(SESSION, now, deps)).toBe(true);
+  expect(queued).toEqual([expect.objectContaining({
+    sessionId: SESSION,
+    text: 'Hourly check',
+    mode: 'after-turn',
+    dueAt: now,
+    scheduled: { scheduleId: saved.id, dueAt: now, late: false }
+  })]);
+  expect((await runs.listSchedules())[0]).toMatchObject({ createdAt, lastDueAt: null });
+  expect((await runs.listSchedules())[0]?.lastInputId).toBe(queued[0]?.id);
+
+  await runs.runDueSchedules(local('2026-10-24T11:00:10'), deps);
+  expect(queued).toHaveLength(2);
+  expect(queued[1]).toMatchObject({ scheduled: { scheduleId: saved.id, dueAt: local('2026-10-24T11:00:00'), late: false } });
+});
+
+it('a manual Run now pending in the input outbox prevents a duplicate at the next scheduled time', async () => {
+  const { runs, deps, queued } = await setup();
+  const createdAt = local('2026-10-24T10:00:00');
+  await runs.saveSchedule({ sessionId: SESSION, text: 'Hourly check', repeat: { kind: 'hours', every: 1 }, until: null }, createdAt);
+  const now = local('2026-10-24T10:30:00');
+  expect(await runs.runScheduleNow(SESSION, now, deps)).toBe(true);
+  const manualId = queued[0]?.id as string;
+  const pendingDeps = { ...deps, pending: async () => new Set([manualId]) };
+  await runs.runDueSchedules(local('2026-10-24T11:00:10'), pendingDeps);
+  expect(queued).toHaveLength(1);
+  expect((await runs.listSchedules())[0]).toMatchObject({ lastDueAt: local('2026-10-24T11:00:00'), lastInputId: manualId });
+  expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('previous run still waits in the queue'));
+});
+
+it('Run now removes a schedule whose chat is proven gone', async () => {
+  const { runs, deps, queued } = await setup({ session: async () => null });
+  await runs.saveSchedule({ sessionId: SESSION, text: 'Daily', repeat: { kind: 'daily', at: '09:00' }, until: null }, local('2026-10-24T08:00:00'));
+  expect(await runs.runScheduleNow(SESSION, local('2026-10-24T08:30:00'), deps)).toBe(false);
+  expect(queued).toEqual([]);
+  expect(await runs.listSchedules()).toEqual([]);
+  expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('removed: its chat no longer exists'));
+});
+
 it('removes the schedule of a chat that no longer exists, and refuses a schedule that cannot run', async () => {
   const { runs, deps, queued } = await setup({ session: async () => null });
   await runs.saveSchedule({ sessionId: SESSION, text: 'Daily', repeat: { kind: 'daily', at: '09:00' }, until: null }, local('2026-10-24T08:00:00'));
