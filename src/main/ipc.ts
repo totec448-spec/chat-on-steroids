@@ -39,7 +39,7 @@ import { paintWindowTheme } from './theme.js';
 import { usageOverview } from './session/usage.js';
 import { exportUsageCsv } from './session/usage-export.js';
 import { readProviderUsage } from './provider-usage.js';
-import { inputArgs, listInputs, editQueuedInput, sendQueuedInputNow, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs, type InputEntry } from './session/input.js';
+import { inputArgs, listInputs, editQueuedInput, sendQueuedInputNow, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs, forgetOwnSent, type InputEntry } from './session/input.js';
 import { draftOpeningMessage, onGoalChange, nativeGoalFailure } from './goal.js';
 import { cancelTaskRequest, runTaskRequest } from './task-request.js';
 import { randomUUID } from 'node:crypto';
@@ -2394,6 +2394,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
           ...committedResumeAncestorsFromSummary(summary, summary.conversationId)
         ], false);
       }
+      // The app's record of its latest automatic message goes first, saved before the chat is (#2074):
+      // that text can be the person's own words, and a crash in between must not leave it behind.
+      if (summary) await forgetOwnSent([...new Set([...(summary.conversationId ? [summary.conversationId] : []), ...(summary.chatIds ?? [])])])
+        .catch((error: Error) => logWarn(`session ${id}: its own-sent record could not be removed (${error.message})`));
       await deleteSession(id);
       // A deleted chat leaves its group too; the group itself stays.
       await forgetChatGroupMember(id);

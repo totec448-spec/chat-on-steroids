@@ -25035,6 +25035,73 @@ describe('ordinary Continue native recovery', () => {
     expect(await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat })).toMatchObject({ safe: false, why: 'draft' });
   });
 
+  // #2074: after a reload ChatGPT put the app's own already-sent Continue back into the box, and every
+  // repair was held as if it were the person's draft, for hours.
+  it("clears the app's own already-sent message left in the box, and still holds any real draft", async () => {
+    const own = 'Continue with the task from where you stopped. Pick up exactly where the last step ended.';
+    live = await harness(`https://chatgpt.com/c/${chat}`);
+    await settle();
+    userTurn(live.document, 'own-continue', own, { sent: false });
+    await settle();
+    const composer = live.document.getElementById('prompt-textarea')!;
+    const ownSent = [{ text: own, messageId: 'm-own-continue' }];
+    const check = () => live!.runtimeMessage({ type: 'clf-repair-check', conversationId: chat, ownSent });
+    // Edited, even by one word, or by spacing alone: the person's draft, held as before (CodeRabbit on #2079).
+    for (const edited of [`${own} Also check the logs.`, own.replace('the task', 'the  task')]) {
+      composer.textContent = edited;
+      expect(await check()).toMatchObject({ safe: false, why: 'draft' });
+      expect(composer.textContent).toBe(edited);
+    }
+    // Exactly the app's own text, but with something attached: held.
+    const dom = (live.window as any).CLF_DOM;
+    const attached = dom.hasComposerAttachments;
+    dom.hasComposerAttachments = () => true;
+    composer.textContent = own;
+    expect(await check()).toMatchObject({ safe: false, why: 'draft' });
+    dom.hasComposerAttachments = attached;
+    // Not told it is the app's own, or told without its message: held.
+    expect(await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat })).toMatchObject({ safe: false, why: 'draft' });
+    expect(await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat, ownSent: [{ text: own }] }))
+      .toMatchObject({ safe: false, why: 'draft' });
+    // Exactly the app's own sent message, which is also the chat's latest message: cleared, and the repair goes on.
+    expect(await check()).toMatchObject({ safe: true, cleared: 'own-sent' });
+    expect(composer.textContent).toBe('');
+  });
+
+  it("clears the app's own multiline send, read with its line breaks (CodeRabbit on #2079)", async () => {
+    live = await harness(`https://chatgpt.com/c/${chat}`);
+    await settle();
+    userTurn(live.document, 'own-scheduled', 'Check the open issues\nThen report what changed', { sent: false });
+    await settle();
+    const composer = live.document.getElementById('prompt-textarea')!;
+    const check = () => live!.runtimeMessage({ type: 'clf-repair-check', conversationId: chat,
+      ownSent: [{ text: 'Check the open issues\nThen report what changed', messageId: 'm-own-scheduled' }] });
+    // The lines joined into one is a different text: held.
+    composer.innerHTML = '<p>Check the open issues Then report what changed</p>';
+    expect(await check()).toMatchObject({ safe: false, why: 'draft' });
+    composer.innerHTML = '<p>Check the open issues</p><p>Then report what changed</p>';
+    expect(await check()).toMatchObject({ safe: true, cleared: 'own-sent' });
+    expect(composer.textContent).toBe('');
+  });
+
+  it("holds the app's own text when the chat's latest message is not that send, even with the same text", async () => {
+    const own = 'Continue with the task from where you stopped. Pick up exactly where the last step ended.';
+    for (const later of ['A newer question from the person', own]) {
+      live = await harness(`https://chatgpt.com/c/${chat}`);
+      await settle();
+      userTurn(live.document, 'own-continue', own, { sent: false });
+      // The person sent a newer message, here even one with the very same text (CodeRabbit on #2079).
+      userTurn(live.document, 'person-later', later, { sent: false });
+      await settle();
+      const composer = live.document.getElementById('prompt-textarea')!;
+      composer.textContent = own;
+      expect(await live.runtimeMessage({ type: 'clf-repair-check', conversationId: chat, ownSent: [{ text: own, messageId: 'm-own-continue' }] }))
+        .toMatchObject({ safe: false, why: 'draft' });
+      expect(composer.textContent).toBe(own);
+      live.dom.window.close();
+    }
+  });
+
   it('names why a repair is held: an unsent draft in the message box, then nothing once it is cleared', async () => {
     live = await harness(`https://chatgpt.com/c/${chat}`);
     await settle();

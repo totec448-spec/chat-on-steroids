@@ -4154,3 +4154,182 @@ it("asks again at Send for a ready Goal message whose slot hold ran out while it
     await saveConfig(defaultConfig());
   }
 });
+
+// #2074: the texts a page may treat as this app's own leftover in the message box.
+it("lists only the app's own automatic messages ChatGPT received, never the person's, as message-box leftovers", async () => {
+  await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Own leftovers', conversationId });
+  const deliver = async (row: { id: string }, messageId: string) => {
+    expect(await input.claimBrowserInput(row.id, 'leftover-page', conversationId, true)).not.toBeNull();
+    expect(await input.authorizeBrowserInput(row.id, 'leftover-page', conversationId)).toBe(true);
+    expect(await input.acknowledgeBrowserInput(row.id, 'leftover-page', conversationId, messageId)).toBe(true);
+  };
+  const scheduled = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Check the open issues and report',
+    scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+  await deliver(scheduled, 'scheduled-message');
+  const mine = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'My own question about the issues' });
+  await deliver(mine, 'my-message');
+  const waiting = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Not sent yet',
+    scheduled: { scheduleId: randomUUID(), dueAt: Date.now() + 60 * 60_000, late: false } });
+  const sent = await input.ownSentResidue(conversationId);
+  // Each with its ChatGPT message id, which the page matches to the chat's latest message (CodeRabbit on #2079).
+  expect(sent).toEqual([expect.objectContaining({ messageId: 'scheduled-message', text: expect.stringContaining('Check the open issues and report') })]);
+  expect(sent.some(row => row.text.includes('My own question'))).toBe(false);
+  expect(sent.some(row => row.text.includes('Not sent yet'))).toBe(false);
+  expect(await input.ownSentResidue(randomUUID())).toEqual([]);
+  await input.cancelInput(waiting.id);
+  // The outbox keeps only its newest finished rows across all chats; the chat's latest automatic
+  // send is still known after they are gone, and after a restart (CodeRabbit on #2079).
+  await flushDurable();
+  await writeDurableNow('session-input', []);
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(conversationId)).toEqual([expect.objectContaining({ messageId: 'scheduled-message' })]);
+});
+
+// #2074 saved data: the own-sent store starts empty for data saved by the previous version, and a
+// damaged file or entry is dropped while the good entries stay.
+it('reads the own-sent store from an older version as empty and drops damaged entries', async () => {
+  const conversationId = randomUUID();
+  await flushDurable();
+  await writeDurableNow('own-sent-receipts', null);
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(conversationId)).toEqual([]);
+  await writeDurableNow('own-sent-receipts', 'not a list');
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(conversationId)).toEqual([]);
+  await writeDurableNow('own-sent-receipts', [
+    { conversationId, text: 'Continue the task', messageId: 'kept-message', at: Date.now() },
+    { conversationId, text: '', messageId: 'empty-text', at: Date.now() },
+    { conversationId: 42, text: 'Broken owner', messageId: 'bad-owner', at: Date.now() },
+    { conversationId, text: 'Private words with a broken time', messageId: 'bad-time', at: 'yesterday' },
+    'garbage'
+  ]);
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(conversationId)).toEqual([{ text: 'Continue the task', messageId: 'kept-message' }]);
+  // The rejected rows leave the disk too, not only memory (CodeRabbit on #2079).
+  await flushDurable();
+  const { readDurable } = await import('../src/main/durable.js');
+  expect(JSON.stringify(await readDurable('own-sent-receipts'))).not.toContain('Private words');
+  // A file whose JSON is broken still holds text on disk: it is replaced by a clean store.
+  const file = path.join(directory, 'state', 'own-sent-receipts.json');
+  await fs.writeFile(file, '[{"conversationId":"x","text":"Private words in a broken file"', 'utf8');
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(conversationId)).toEqual([]);
+  await flushDurable();
+  const raw = await fs.readFile(file, 'utf8');
+  expect(raw).not.toContain('Private words');
+  expect(JSON.parse(raw)).toEqual({ version: 1, receipts: [], forgotten: [] });
+});
+
+// CodeRabbit on #2079: a chat ChatGPT deleted loses its own-sent record, and a save keeps nothing
+// older than the window a page may use it in.
+it('forgets the own-sent record of a chat ChatGPT deleted, and drops old records when it saves', async () => {
+  const { readDurable } = await import('../src/main/durable.js');
+  const gone = randomUUID(), old = randomUUID();
+  await flushDurable();
+  await writeDurableNow('own-sent-receipts', [
+    { conversationId: gone, text: 'Continue the task', messageId: 'gone-message', at: Date.now() },
+    { conversationId: old, text: 'An old continue', messageId: 'old-message', at: Date.now() - 25 * 60 * 60_000 }
+  ]);
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(gone)).toEqual([{ text: 'Continue the task', messageId: 'gone-message' }]);
+  expect(await input.ownSentResidue(old)).toEqual([]);
+  await input.failInputsForDeletedConversation(gone);
+  expect(await input.ownSentResidue(gone)).toEqual([]);
+  // Saved at once, without the deleted chat's text and without the old record.
+  expect(await readDurable('own-sent-receipts')).toEqual({ version: 1, receipts: [], forgotten: [expect.objectContaining({ conversationId: gone })] });
+});
+
+// CodeRabbit on #2079: a send acknowledged after its chat was deleted does not record it again.
+it("does not record a deleted chat's automatic send that is acknowledged afterwards", async () => {
+  const { readDurable } = await import('../src/main/durable.js');
+  await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Deleted while sending', conversationId });
+  const scheduled = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'The person\'s scheduled words',
+    scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+  expect(await input.claimBrowserInput(scheduled.id, 'late-page', conversationId, true)).not.toBeNull();
+  expect(await input.authorizeBrowserInput(scheduled.id, 'late-page', conversationId)).toBe(true);
+  await input.forgetOwnSent([conversationId]);
+  expect(await input.acknowledgeBrowserInput(scheduled.id, 'late-page', conversationId, 'late-message')).toBe(true);
+  await flushDurable();
+  const saved = await readDurable<{ receipts: Array<{ conversationId: string }> }>('own-sent-receipts');
+  expect(saved?.receipts.some(row => row.conversationId === conversationId)).toBe(false);
+  // After a restart too.
+  input.resetInputForTests();
+  await input.forgetOwnSent([]);
+  expect((await readDurable<{ receipts: Array<{ conversationId: string }> }>('own-sent-receipts'))?.receipts
+    .some(row => row.conversationId === conversationId)).toBe(false);
+});
+
+// CodeRabbit on #2079: expired text leaves the disk when the store is read, and a deletion racing
+// another chat's send keeps both changes.
+it('drops expired own-sent text from disk on read, and keeps both changes when a deletion races a send', async () => {
+  const { readDurable } = await import('../src/main/durable.js');
+  await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  const expired = randomUUID(), deleted = randomUUID();
+  await flushDurable();
+  await writeDurableNow('own-sent-receipts', { version: 1, receipts: [
+    { conversationId: expired, text: 'An expired continue', messageId: 'expired-message', at: Date.now() - 25 * 60 * 60_000 },
+    { conversationId: deleted, text: 'Soon deleted', messageId: 'deleted-message', at: Date.now() }
+  ], forgotten: [] });
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(expired)).toEqual([]);
+  await flushDurable();
+  expect(((await readDurable<any>('own-sent-receipts'))!.receipts as Array<{ messageId: string }>).map(row => row.messageId)).toEqual(['deleted-message']);
+  // A send for another chat is acknowledged while the deletion is being saved.
+  const kept = randomUUID();
+  const session = await createSession({ title: 'Kept while another is deleted', conversationId: kept });
+  const scheduled = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Kept continue',
+    scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+  expect(await input.claimBrowserInput(scheduled.id, 'race-page', kept, true)).not.toBeNull();
+  expect(await input.authorizeBrowserInput(scheduled.id, 'race-page', kept)).toBe(true);
+  await Promise.all([input.forgetOwnSent([deleted]), input.acknowledgeBrowserInput(scheduled.id, 'race-page', kept, 'kept-message')]);
+  await flushDurable();
+  const saved = (await readDurable<any>('own-sent-receipts'))!;
+  expect((saved.receipts as Array<{ messageId: string }>).map(row => row.messageId)).toEqual(['kept-message']);
+  expect((saved.forgotten as Array<{ conversationId: string }>).map(row => row.conversationId)).toEqual([deleted]);
+});
+
+// CodeRabbit on #2079: a store that cannot be read for the moment is not cached as empty.
+it('reads the own-sent store again after it could not be read for a moment', async () => {
+  const conversationId = randomUUID();
+  const dir = path.join(directory, 'state', 'own-sent-receipts.json');
+  await flushDurable();
+  await fs.rm(dir, { force: true });
+  // A directory where the file belongs: unreadable, but not damaged data.
+  await fs.mkdir(dir, { recursive: true });
+  input.resetInputForTests();
+  await expect(input.ownSentResidue(conversationId)).rejects.toThrow();
+  await fs.rm(dir, { recursive: true, force: true });
+  await writeDurableNow('own-sent-receipts', { version: 1, receipts: [
+    { conversationId, text: 'Continue the task', messageId: 'readable-again', at: Date.now() }], forgotten: [] });
+  // Not the empty snapshot of the failed read.
+  expect(await input.ownSentResidue(conversationId)).toEqual([{ text: 'Continue the task', messageId: 'readable-again' }]);
+});
+
+// CodeRabbit on #2079: a send acknowledged while the store could not be read is recorded once it can.
+it('records an automatic send acknowledged while the own-sent store was unreadable, once it reads again', async () => {
+  const { readDurable } = await import('../src/main/durable.js');
+  await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Acknowledged while unreadable', conversationId });
+  const file = path.join(directory, 'state', 'own-sent-receipts.json');
+  await flushDurable();
+  await fs.rm(file, { recursive: true, force: true });
+  await fs.mkdir(file, { recursive: true });
+  input.resetInputForTests();
+  const scheduled = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Continue while unreadable',
+    scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+  expect(await input.claimBrowserInput(scheduled.id, 'unreadable-page', conversationId, true)).not.toBeNull();
+  expect(await input.authorizeBrowserInput(scheduled.id, 'unreadable-page', conversationId)).toBe(true);
+  // The acknowledgement itself never fails on the store.
+  expect(await input.acknowledgeBrowserInput(scheduled.id, 'unreadable-page', conversationId, 'unreadable-message')).toBe(true);
+  await fs.rm(file, { recursive: true, force: true });
+  await writeDurableNow('session-input', []);
+  // Readable again, and the outbox history no longer has the row: the receipt is still recorded.
+  expect(await input.ownSentResidue(conversationId)).toEqual([expect.objectContaining({ messageId: 'unreadable-message' })]);
+  await flushDurable();
+  expect(JSON.stringify(await readDurable('own-sent-receipts'))).toContain('unreadable-message');
+});
