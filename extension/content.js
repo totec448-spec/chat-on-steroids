@@ -1190,6 +1190,8 @@
    * /activity poll as everything else.
    */
   let goalConfig = null;
+  /** The app's word on this chat's Retry (#2076): null from an older app, which keeps the page's own rule. */
+  let appHistoryRetry = null;
   let goalDraft = null;
   /**
    * The generation the goal loop has already acted on.
@@ -7384,6 +7386,10 @@
       // finished and the page has been repainted with what the draft is doing.
       const goalBefore = JSON.stringify([goalConfig?.enabled ?? null, goalConfig?.objective ?? null, bootstrap]);
       goalConfig = data.goal && typeof data.goal === 'object' ? data.goal : null;
+      // Whether the app still owes this chat work, and its own hold on the chat's history (#2076).
+      appHistoryRetry = data.historyRetry && typeof data.historyRetry === 'object'
+        ? { conversationId: CLF_DOM.conversationId(), wanted: data.historyRetry.wanted !== false,
+          until: Number.isFinite(data.historyRetry.until) ? data.historyRetry.until : 0, at: Date.now() } : null;
       if (goalConfig) goalDraft = goalConfig.draft || null;
       const nextBootstrap = data.bootstrap === 'resume' || data.bootstrap === 'worker' ? data.bootstrap : null;
       bootstrapOwner = nextBootstrap && typeof data.bootstrapMessageId === 'string' && data.bootstrapMessageId
@@ -12713,6 +12719,26 @@
   let loadFailureToldAt = 0;
   let loadFailureStored = false;
   let loadFailureLastPress = 0;
+  /** How long the app's word holds without a newer activity reply. */
+  const APP_HISTORY_RETRY_FRESH_MS = 2 * 60_000;
+  let historyRetryHeldToldAt = 0;
+  /**
+   * ChatGPT's Retry on a history that could not load is pressed only while the app still owes this
+   * chat work, and never before the app's own hold for it ends (#2076): each press is another history
+   * request, and an idle chat leaves Retry to the person.
+   */
+  function appAllowsHistoryRetry(route, now) {
+    const word = appHistoryRetry;
+    if (!word || word.conversationId !== route || now - word.at > APP_HISTORY_RETRY_FRESH_MS) return true;
+    const why = word.until > now ? 'the app holds this chat\'s history until its wait ends'
+      : !word.wanted ? 'this chat has no work waiting, so Retry is left to you' : '';
+    if (!why) return true;
+    if (now - historyRetryHeldToldAt >= 60_000) {
+      historyRetryHeldToldAt = now;
+      console.info(`Chat On Steroids: not pressing Retry: ${why}.`);
+    }
+    return false;
+  }
   function restoreLimitedLoadFailure(route, now) {
     try {
       const raw = sessionStorage.getItem(LOAD_FAILURE_LIMITED_STORAGE);
@@ -12798,6 +12824,7 @@
     const schedule = loadFailureLimited ? LOAD_FAILURE_LIMITED_BACKOFF_MS : LOAD_FAILURE_BACKOFF_MS;
     const wait = LOAD_FAILURE_SETTLE_MS + schedule[Math.min(loadFailureRetries, schedule.length - 1)];
     if (now - loadFailureSince < wait) return false;
+    if (!appAllowsHistoryRetry(route, now)) return false;
     loadFailureRetries++;
     loadFailureSince = now;
     loadFailureLastPress = now;
