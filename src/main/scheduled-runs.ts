@@ -131,12 +131,31 @@ function manualRunInput(run: ScheduledRun, intent: NonNullable<ScheduledRun['man
   };
 }
 
+/** A rejected enqueue is safe to forget only when a fresh outbox read proves its ID is absent. */
+async function dropManualRunIntentIfOutboxAbsent(
+  run: ScheduledRun,
+  schedules: ScheduledRun[],
+  deps: Pick<RunnerDeps, 'inputs'>
+): Promise<{ run: ScheduledRun; schedules: ScheduledRun[] } | null> {
+  const intent = run.manualRunIntent;
+  if (!intent) return null;
+  let after: ScheduledInputSnapshot[];
+  try { after = await deps.inputs(); }
+  catch { return null; }
+  if (after.some(input => input.id === intent.id)) return null;
+  const { manualRunIntent: _intent, ...withoutIntent } = run;
+  const updated = schedules.map(row => row.id === run.id ? withoutIntent : row);
+  try { await save(updated); }
+  catch { return null; }
+  return { run: withoutIntent, schedules: updated };
+}
+
 /** Finish a durable manual intent from its exact outbox identity, or replay that same identity. */
 async function settleManualRunIntent(
   run: ScheduledRun,
   schedules: ScheduledRun[],
   session: NonNullable<Awaited<ReturnType<RunNowDeps['session']>>>,
-  deps: Pick<RunnerDeps, 'enqueue' | 'log'>,
+  deps: Pick<RunnerDeps, 'enqueue' | 'inputs' | 'log'>,
   inputs: ScheduledInputSnapshot[]
 ): Promise<{ run: ScheduledRun; schedules: ScheduledRun[]; pending: boolean }> {
   const intent = run.manualRunIntent;
@@ -157,7 +176,15 @@ async function settleManualRunIntent(
     return { run: next, schedules: updated, pending };
   }
 
-  await deps.enqueue(manualRunInput(run, intent, session));
+  try { await deps.enqueue(manualRunInput(run, intent, session)); }
+  catch (error) {
+    const dropped = await dropManualRunIntentIfOutboxAbsent(run, schedules, deps);
+    if (dropped) {
+      deps.log(`scheduled run: manual enqueue failed (${error instanceof Error ? error.message : String(error)}); outbox confirms no row, recovery intent dropped (${run.sessionId})`);
+      return { ...dropped, pending: false };
+    }
+    throw error;
+  }
   inputs.push({ id: intent.id, state: 'queued', scheduled: { scheduleId: run.id, dueAt: intent.dueAt, late: false } });
   const { manualRunIntent: _intent, ...withoutIntent } = run;
   const next = { ...withoutIntent, lastInputId: intent.id };
@@ -313,9 +340,12 @@ export function runScheduleNow(sessionId: string, now: number, deps: RunNowDeps)
       await save(withIntent.map(row => row.id === run!.id ? completed : row));
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
+      const dropped = !enqueued && await dropManualRunIntentIfOutboxAbsent(prepared, withIntent, deps);
       deps.log(enqueued
         ? `scheduled run: manual run was queued but its recovery intent could not be cleared (${detail}); intent kept (${run.sessionId})`
-        : `scheduled run: manual enqueue failed (${detail}); recovery intent kept (${run.sessionId})`);
+        : dropped
+          ? `scheduled run: manual enqueue failed (${detail}); outbox confirms no row, recovery intent dropped (${run.sessionId})`
+          : `scheduled run: manual enqueue failed (${detail}); recovery intent kept (${run.sessionId})`);
       throw error;
     }
     deps.log(`scheduled run: queued now for ${run.sessionId}`);
