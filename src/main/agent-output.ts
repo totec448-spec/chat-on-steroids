@@ -41,7 +41,12 @@ export class AgentOutputStream {
   private inKey = false;
   private keyOpenAfterStart = false;
 
-  constructor(private readonly shield: boolean, private readonly emit: (text: string) => void) {}
+  /**
+   * `note` hears each deliberate hiding once, when it starts, in fixed words without the text
+   * (CodeRabbit on #2052): the IPC writes it to the log.
+   */
+  constructor(private readonly shield: boolean, private readonly emit: (text: string) => void,
+    private readonly note: (reason: string) => void = () => undefined) {}
 
   /** The output so far, shown at once: whole lines, and the line still being written up to a safe cut. */
   start(history: Buffer): void {
@@ -69,12 +74,16 @@ export class AgentOutputStream {
     const begin = tail.search(/-----BEGIN [A-Z ]*PRIVATE KEY-----/);
     const before = begin < 0 ? tail : tail.slice(0, begin);
     const end = KEY_END.exec(before);
-    if (end) return `${KEY_MASK}\n${tail.slice(end.index + end[0].length)}`;
+    if (end) {
+      this.note('a private key\'s lines were kept after the omitted part; hidden');
+      return `${KEY_MASK}\n${tail.slice(end.index + end[0].length)}`;
+    }
     const first = before.split('\n').find(line => line.trim() !== '');
     if (first === undefined || !KEY_BODY_LINE.test(first.trim())) return tail;
     // Still being printed (no BEGIN in the tail, so nothing else is kept): what follows stays hidden
     // until its END line passes, from right after the output so far is shown.
     this.keyOpenAfterStart = true;
+    this.note('a private key\'s lines were kept after the omitted part; hidden until its END line');
     return `${KEY_MASK}\n`;
   }
 
@@ -137,7 +146,10 @@ export class AgentOutputStream {
     }
     const begins = [...rest.matchAll(KEY_BEGIN)];
     const lastBegin = begins.at(-1);
-    if (lastBegin && !KEY_END.test(rest.slice(lastBegin.index + lastBegin[0].length))) this.inKey = true;
+    if (lastBegin && !KEY_END.test(rest.slice(lastBegin.index + lastBegin[0].length))) {
+      this.inKey = true;
+      this.note('a private key is being printed; hidden until its END line');
+    }
     const out = redactSecretText(rest);
     if (out) this.emit(out);
   }

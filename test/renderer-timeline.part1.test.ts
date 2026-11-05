@@ -82,6 +82,8 @@ it('offers Output only with agent output available, and keeps its focus across a
   output.focus();
   await publishBackgroundProcesses([{ ...row, startedAt: row.startedAt - 2 }]);
   const repainted = host.querySelector<HTMLButtonElement>('.background-exec-output')!;
+  // The same button stays, so a press that spans a repaint still lands (CodeRabbit on #2052).
+  expect(repainted).toBe(output);
   expect(w.document.activeElement).toBe(repainted);
 });
 

@@ -66,7 +66,8 @@ export function registerAgentOutputIpc(getWindow: () => BrowserWindow | null): v
       if (!reserved()) return { ok: true, data: true };
       const sender = owner!;
       const send = (value: AgentOutputEvent): void => { if (owner === sender && !sender.isDestroyed()) sender.send('agentOutput:event', value); };
-      const stream = new AgentOutputStream(shield, text => send({ id: args.id, data: text }));
+      const stream = new AgentOutputStream(shield, text => send({ id: args.id, data: text }),
+        reason => logInfo(`agent output: command ${args.processId}: ${reason}`));
       let timer: NodeJS.Timeout | null = null;
       const finish = (): void => { if (timer) clearInterval(timer); timer = null; };
       const watched = unifiedExecManager.watchOutput(args.processId, args.incarnation, chunk => stream.push(chunk), completion => {
