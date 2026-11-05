@@ -512,6 +512,12 @@
   "content_goal_wait_workers": {
     "message": "正在等待此對話的子代理"
   },
+  "content_goal_wait_slots": {
+    "message": "等待空位（同時工作的聊天數）"
+  },
+  "content_goal_wait_paused": {
+    "message": "ChatGPT 要求放慢速度 · 等到它指定的時間"
+  },
   "content_goal_writing_first_message": {
     "message": "$1 正在撰寫第一則訊息"
   },

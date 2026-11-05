@@ -23,6 +23,7 @@ import { noteChatOrigin } from './recorder.js';
 import { seedBranchHistory } from './branch-history.js';
 import { DEFAULT_HELPER_CHAT_MODEL, isAstraModel, isProModel } from '../../shared/chat-models.js';
 import { inFlightToolCalls } from '../mcp/call-context.js';
+import { automaticPauseRefusal, automaticSendRefusal } from '../chats-at-once.js';
 import { automaticFinishEnabled, goalDrivingMode, consumeGoalReplyForInputNow } from '../goal.js';
 import { finishInstruction } from '../../shared/finish.js';
 import { CONVERSATION_DELETED } from '../../shared/chat-error.js';
@@ -164,6 +165,14 @@ const entrySchema = inputArgs.extend({
   queueOrder: z.number().int().nonnegative().optional(),
   /** #1794: the send check held this automatic send; it is asked again from `nextAt`. */
   sendCheck: z.object({ attempt: z.number().int().positive(), nextAt: z.number(), reason: z.string().max(200), answered: z.boolean() }).optional(),
+  /** Shown, never saved: this automatic send waits for a free slot or ChatGPT's pause (#1694). */
+  slotWait: z.enum(['slots', 'paused']).optional(),
+  /**
+   * "Chats working at once" holds this message back (#1694): `at` is the last time it did (refreshed
+   * while `open`) or when the hold ended. The app never offered it meanwhile, so the one-minute
+   * pickup deadline counts from `at`; saved, so a restart keeps it (CodeRabbit on #2051).
+   */
+  slotHold: z.object({ at: z.number(), open: z.boolean() }).optional(),
   /**
    * A page has this message and holds it back until its own turn ends (2026-11-03): ChatGPT still
    * answering, a turn the page still holds, or a running tool call. The browser did pick it up, so
@@ -188,6 +197,32 @@ export function automaticSendKind(row: Pick<InputEntry, 'recovery' | 'purpose' |
   if (row.purpose === 'rotation' || row.afterStop) return 'fresh-turn';
   if (row.scheduled) return 'scheduled';
   return null;
+}
+
+/**
+ * Whether "Chats working at once" (#1694) applies: only the app's own sends wait. A message the
+ * person sent, and a finish step they asked for, never do. The Goal helper's own question belongs
+ * to a Goal step that was already admitted at /goal/draft.
+ */
+function slotGated(row: InputEntry): boolean {
+  return automaticSendKind(row) !== null || (!!row.finishOwner && row.finishOwner.userRequested !== true);
+}
+/** Why each automatic send waits for a slot now, for its row and the offer log; never saved. */
+const slotWaits = new Map<string, string>();
+/** How often a held message's saved `slotHold` is refreshed: well inside the one-minute pickup deadline. */
+const SLOT_HELD_REFRESH_MS = 15_000;
+function noteSlotWait(id: string, reason: string | null): void {
+  const before = slotWaits.get(id);
+  if (reason === null) {
+    if (before !== undefined) { slotWaits.delete(id); logInfo(`input ${id}: a slot is free; the automatic send goes out`); deliveryHooks?.changed(); }
+    return;
+  }
+  if (before === reason) return;
+  slotWaits.set(id, reason);
+  // Once per kind of wait (a slot, or ChatGPT's pause), not per poll or per count.
+  const kind = (text: string) => text.startsWith('ChatGPT asked to slow down') ? 'paused' : 'slots';
+  if (before === undefined || kind(before) !== kind(reason)) logInfo(`input ${id} waits: ${reason}`);
+  deliveryHooks?.changed();
 }
 
 /** Held by the send check until its next ask; clearing the check's address releases it at once. */
@@ -632,7 +667,8 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
         !row.error?.startsWith('Message queued. ') &&
         // Time the person's send check held it is not the browser's: its minute starts when the hold ends (#1794).
         // Nor is time a page held it until its own turn ended: that page has it (2026-11-03).
-        Date.now() - Math.max(row.createdAt, row.dueAt, row.sendCheck?.nextAt ?? 0, await heldUntil(row)) >= 60_000)
+        // Nor time "Chats working at once" held it back: the app never offered it then (#1694, CodeRabbit on #2051).
+        Date.now() - Math.max(row.createdAt, row.dueAt, row.sendCheck?.nextAt ?? 0, await heldUntil(row), row.slotHold?.at ?? 0) >= 60_000)
       return { ...row, state: 'failed', pickupFailedAt: Date.now(), error: 'Not sent: the browser did not pick up this message within 60 seconds.' };
     // Preparation can expire before Send. Once authorized, this exact claim owns
     // the uncertain outcome until receipt or explicit cancellation, regardless of
@@ -1141,7 +1177,10 @@ export function listInputs(): Promise<InputEntry[]> {
     }
     if (next.length !== current.length || next.some((entry, index) => entry !== current[index])) await commit(next);
     await publishHistory();
-    return ordered(await load()).map((entry) => ({ ...entry }));
+    return ordered(await load()).map((entry) => {
+      const slot = entry.state === 'queued' ? slotWaits.get(entry.id) : undefined;
+      return slot ? { ...entry, slotWait: slot.startsWith('ChatGPT asked to slow down') ? 'paused' as const : 'slots' as const } : { ...entry };
+    });
   });
 }
 export interface PickupRecoveryState { attempts: number; nextAt?: number; stoppedAt?: number }
@@ -1364,6 +1403,12 @@ export function authorizeBrowserInput(id: string, owner: string, conversationId:
     if (!row || row.sendAuthorizedAt !== undefined || companionOf(current, row)) return false;
     if (!(await browserInputAllowed(row)) || await target(row) !== conversationId) return false;
     if (await continuedInvalidReason(row)) return false;
+    // Its slot was admitted at the offer; ChatGPT's pause may have started since (CodeRabbit on #2051).
+    // Refused like any other last-moment veto: nothing is sent and the claim's own retry rules apply.
+    if (slotGated(row)) {
+      const paused = automaticPauseRefusal();
+      if (paused) { logInfo(`input ${row.id}: Send not authorized: ${paused}`); return false; }
+    }
     if (row.companionInputId) {
       const companion = current.find(other => other.id === row.companionInputId && other.state === 'browser' && other.owner === owner && other.sessionId === row.sessionId);
       const session = row.sessionId ? await getSession(row.sessionId) : null;
@@ -1862,6 +1907,7 @@ export function pendingBrowserInputs(): Promise<Array<{ id: string; conversation
   return serial(async () => {
     const result: Array<{ id: string; conversationId: string | null; recovery?: { questionId: string; stop: boolean }; silenceTurnId?: string; directTurn?: InputEntry['directTurn']; supersededConversationId?: string; lifetime?: 'temporary-planner'; project?: string; branch?: { conversationId: string; messageId: string }; edit?: { messageId: string } }> = [];
     const current = await load();
+    const slotHeld = new Map<string, NonNullable<InputEntry['slotHold']>>();
     for (const entry of ordered(current)) {
       if (companionOf(current, entry)) continue;
       if (!preparable(entry) || entry.dueAt > Date.now() || heldBySendCheck(entry)) continue;
@@ -1877,6 +1923,16 @@ export function pendingBrowserInputs(): Promise<Array<{ id: string; conversation
         const chatgptProject = !conversationId && entry.projectId && entry.purpose !== 'decision' && !entry.lifetime && !entry.branch
           ? (await getProject(entry.projectId))?.chatgpt : undefined;
         if (chatgptProject && chatgptProject.state !== 'linked') continue;
+        // Chats working at once (#1694): the app's own send waits its turn; the line is kept by first wait.
+        // Last, after every other reason not to offer it: a message that cannot go yet anyway must not
+        // hold a slot others could use (CodeRabbit on #2051).
+        if (entry.state === 'queued' && slotGated(entry)) {
+          const refusal = automaticSendRefusal(`input:${entry.id}`, conversationId);
+          noteSlotWait(entry.id, refusal);
+          const now = Date.now(), hold = entry.slotHold;
+          if (refusal ? !hold?.open || now - hold.at >= SLOT_HELD_REFRESH_MS : hold?.open) slotHeld.set(entry.id, { at: now, open: !!refusal });
+          if (refusal) continue;
+        }
         const [end] = !entry.silenceBoundary && manualInput(entry) && entry.sessionId
           ? await readRecentEvents(entry.sessionId, 1, { kinds: ['turn_start', 'turn_end'] }) : [];
         const silenceTurnId = entry.silenceBoundary?.turnId ?? (end?.kind === 'turn_end' && end.outcome === 'failed' &&
@@ -1893,6 +1949,7 @@ export function pendingBrowserInputs(): Promise<Array<{ id: string; conversation
           ...(entry.edit && conversationId ? { edit: { messageId: entry.edit.messageId } } : {}) });
       } catch { /* blocked/deleted stays user-visible */ }
     }
+    if (slotHeld.size) await commit(current.map(row => slotHeld.has(row.id) && row.state === 'queued' ? { ...row, slotHold: slotHeld.get(row.id)! } : row));
     return result;
   });
 }
@@ -1936,6 +1993,8 @@ export function queuedInputOfferBlocker(id: string): Promise<string | null> {
       const conversationId = await target(entry);
       if (conversationId && !readyForWake(conversationId)) return 'its chat is being restored from ChatGPT\'s archive';
     } catch { return 'its chat cannot be resolved'; }
+    const slot = slotGated(entry) ? slotWaits.get(entry.id) : undefined;
+    if (slot) return `it waits for a free slot: ${slot}`;
     return null;
   });
 }
@@ -2108,6 +2167,13 @@ export function claimBrowserInput(id: string, owner: string, conversationId: str
     if (queuedFollowup(entry) && !completedTurnId) return null;
     if (await target(entry) !== conversationId) return null;
     if (!(await browserInputAllowed(entry))) return null;
+    // Chats working at once (#1694), asked again at the claim: a pause may have started, or the
+    // slot gone, since the offer (CodeRabbit on #2051). Refused, it simply stays queued.
+    if (entry.state === 'queued' && slotGated(entry)) {
+      const refusal = automaticSendRefusal(`input:${entry.id}`, conversationId);
+      noteSlotWait(entry.id, refusal);
+      if (refusal) return null;
+    }
     if (entry.purpose === 'decision' && !decisionWaiters.has(id)) return null;
     if (entry.projectId) await projectWorkspace(entry.projectId);
     if (entry.sessionId) {
@@ -2388,7 +2454,7 @@ export function offerToolInput(sessionId: string | null | undefined, conversatio
   });
 }
 
-export function resetInputForTests(): void { entries = null; chain = Promise.resolve(); offered.clear(); decisionWaiters.clear(); declinedRotations.clear(); }
+export function resetInputForTests(): void { entries = null; chain = Promise.resolve(); offered.clear(); decisionWaiters.clear(); declinedRotations.clear(); slotWaits.clear(); }
 
 export async function pausedBrowserHelpers(): Promise<Array<{ id: string; sourceSessionId: string }>> {
   return (await listInputs()).filter(row => row.purpose === 'decision' && row.state === 'cancelled' && row.cancelledByUser === true && !row.conversationId && row.decisionSourceSessionId)

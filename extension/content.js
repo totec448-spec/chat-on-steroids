@@ -9373,6 +9373,20 @@
           ? t('content_goal_backend_custom_endpoint', 'custom endpoint')
           : 'OpenRouter';
     const bar = (at, done = false) => ({ steps: GOAL_STEPS, at, done });
+    // Chats working at once (#1694): a ready message waits for a free slot or ChatGPT's pause before
+    // Send. Said as such, not as written or settling (CodeRabbit on #2051).
+    if (draft?.stage === 'ready' && goal.slotWait) {
+      const paused = String(goal.slotWait).startsWith('ChatGPT asked to slow down');
+      return {
+        stage: paused
+          ? t('content_goal_wait_paused', 'ChatGPT asked to slow down · waits until it says')
+          : t('content_goal_wait_slots', 'Waiting for a free slot (Chats working at once)'),
+        detail: '',
+        body: draft.reply || '',
+        kind: 'goal',
+        ...bar(2)
+      };
+    }
     const failure = goal.error || (draft && draft.stage === 'failed'
       ? goalFailureText(draft) || draft.error || t('content_goal_backend_no_answer', '$1 did not answer', dest)
       : '');
@@ -11225,6 +11239,13 @@
         void retryGoalDraft(forTurn, true);
         return;
       }
+      // "Chats working at once" (#1694): other chats hold every slot, or ChatGPT asked the app to
+      // slow down. The same as above: keep the turn, show the settling step, ask again shortly.
+      if (failure.error === 'chats_at_once') {
+        setGoalPhase('settling');
+        void retryGoalDraft(forTurn, true);
+        return;
+      }
       // The phase is kept rather than collapsed into `failed`: it names the step that
       // stopped, so the bar draws the run where it ended instead of back at the beginning.
       setGoalPhase('requesting', replyError(reply) || t('content_app_did_not_answer_lower', 'the app did not answer'));
@@ -11293,6 +11314,9 @@
     }
     if (goalWasSpent(conversationId, `busy:${draft.token}`)) return deferGoalDraftForWork(draft);
     if (goalConfig?.queuePending) return;
+    // Chats working at once (#1694): the app says this ready message waits for a slot or ChatGPT's
+    // pause. Keep it, untyped, and try again on a later pull.
+    if (goalConfig?.slotWait) return;
     if (!goalUsable()) {
       // Settings are live. Turning Goal Mode off (or removing its key) while OpenRouter is
       // drafting must revoke permission to type the result, even if that result becomes ready
@@ -11404,7 +11428,7 @@
         const ready = allowed?.draft;
         if (!allowed || !ready || ready.token !== draft.token || ready.stage !== 'ready' || ready.reply !== draft.reply ||
             !(allowed.enabled === true || (allowed.own !== true && allowed.objective)) || allowed.hasKey !== true ||
-            allowed.blocked || allowed.queuePending || authorization.data.job?.busy || authorization.data.pendingTools > 0 ||
+            allowed.blocked || allowed.queuePending || allowed.slotWait || authorization.data.job?.busy || authorization.data.pendingTools > 0 ||
             goalSourceGenerating() || CLF_DOM.generating() || nativeBusy || job?.busy) return false;
         // The page inserted this reply, and ChatGPT stores inserted text Markdown-escaped: a raw
         // comparison never matched a reply with `code` or *emphasis*, and its turn never opened.

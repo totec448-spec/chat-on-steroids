@@ -512,6 +512,12 @@
   "content_goal_wait_workers": {
     "message": "이 채팅의 서브에이전트 대기 중"
   },
+  "content_goal_wait_slots": {
+    "message": "빈자리를 기다리는 중(동시에 작업하는 채팅 수)"
+  },
+  "content_goal_wait_paused": {
+    "message": "ChatGPT가 속도를 늦춰 달라고 함 · 안내된 시각까지 대기"
+  },
   "content_goal_writing_first_message": {
     "message": "$1이(가) 첫 메시지를 작성하는 중"
   },

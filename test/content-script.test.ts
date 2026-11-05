@@ -22582,6 +22582,14 @@ describe('the goal loop', () => {
     expect(view({ phase: 'settling', wait: { reason: 'listening', until: live.window.Date.now() + 60_000 } })).toMatchObject({
       stage: 'Waiting for activity after recovery', detail: 'Checking again in 1:00'
     });
+    // Chats working at once (#1694, CodeRabbit on #2051): a ready message held before Send says why.
+    const ready = { stage: 'ready', model: MODEL, text: '', reply: 'Run the final check' };
+    expect(view({ phase: 'sending', model: MODEL, draft: ready, slotWait: '2 chats are working (limit 2)' })).toMatchObject({
+      stage: 'Waiting for a free slot (Chats working at once)', body: 'Run the final check'
+    });
+    expect(view({ phase: 'sending', model: MODEL, draft: ready, slotWait: 'ChatGPT asked to slow down; automatic messages resume at 2026-11-05T14:00:00.000Z' })).toMatchObject({
+      stage: 'ChatGPT asked to slow down · waits until it says'
+    });
     expect(view({ phase: 'requesting', error: '', model: MODEL, draft: null })).toMatchObject({
       stage: 'Sending the answer to OpenRouter',
       // The short name, because `deepseek/deepseek-v4-flash` is the id the API wants and not
