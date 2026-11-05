@@ -113,6 +113,40 @@ it('coalesces a burst of refreshes to one in-flight read plus one dirty follow-u
   expect(calls.list).toHaveBeenCalledTimes(2);
 });
 
+it('releases mutation controls after one post-mutation read while refresh pushes continue', async () => {
+  const { initScheduled } = await import('../src/renderer/scheduled.js');
+  let releaseSecond!: (value: ReturnType<typeof ok>) => void;
+  let releaseThird!: (value: ReturnType<typeof ok>) => void;
+  const calls = {
+    list: vi.fn()
+      .mockResolvedValueOnce(ok([schedule(idA)]))
+      .mockImplementationOnce(() => new Promise<ReturnType<typeof ok>>(resolve => { releaseSecond = resolve; }))
+      .mockImplementationOnce(() => new Promise<ReturnType<typeof ok>>(resolve => { releaseThird = resolve; }))
+      .mockImplementation(() => new Promise<ReturnType<typeof ok>>(() => {})),
+    pause: vi.fn(async (_sessionId: string, paused: boolean) => ok(paused)),
+    runNow: vi.fn(async () => ok(true)),
+    delete: vi.fn(async () => ok(true)),
+    openChat: vi.fn()
+  };
+  const view = initScheduled(calls);
+  await view.refresh();
+  void view.refresh(); // A read that began before the mutation.
+  const pause = [...document.querySelectorAll<HTMLButtonElement>('.scheduled-index-row button')]
+    .find(node => node.textContent === 'Pause')!;
+  pause.click();
+  await settle();
+  releaseSecond(ok([schedule(idA)]));
+  await settle();
+  expect(calls.list).toHaveBeenCalledTimes(3); // The mutation's required post-write read has started.
+  void view.refresh(); // Keep the dirty stream active during that read.
+  releaseThird(ok([schedule(idA, true)]));
+  await settle();
+  const resume = [...document.querySelectorAll<HTMLButtonElement>('.scheduled-index-row button')]
+    .find(node => node.textContent === 'Resume')!;
+  expect(resume.disabled).toBe(false);
+  expect(calls.list).toHaveBeenCalledTimes(4); // A further refresh may continue without holding busy.
+});
+
 it('keeps unchanged rows mounted, restores action focus after a changed row, and reports run-now outcome', async () => {
   const { initScheduled } = await import('../src/renderer/scheduled.js');
   let paused = false;

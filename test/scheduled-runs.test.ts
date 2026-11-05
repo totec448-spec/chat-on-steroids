@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { makeTempDir, removeTempDir } from './helpers.js';
-import type { RunnerDeps } from '../src/main/scheduled-runs.js';
+import type { RunnerDeps, ScheduledInputSnapshot } from '../src/main/scheduled-runs.js';
 
 /**
  * #1826: a chat's schedule puts one message into that chat's own queue at each time. Exactly once
@@ -28,7 +28,8 @@ async function setup(over: Partial<RunnerDeps> = {}) {
   const deps: RunnerDeps = {
     session: async id => id === SESSION ? { id, conversationId: 'chat-1', activeTurnId: null } : null,
     enqueue: vi.fn(async input => { queued.push(input as never); }),
-    pending: async () => new Set(),
+    inputs: async () => queued.map(row => ({ id: row.id as string, state: 'queued' as const,
+      ...(row.scheduled ? { scheduled: row.scheduled as ScheduledInputSnapshot['scheduled'] } : {}) })),
     log: vi.fn(),
     ...over
   };
@@ -85,18 +86,16 @@ it('skips a time while the previous run still waits in the queue, and says so', 
   const { runs, deps, queued } = await setup();
   await runs.saveSchedule({ sessionId: SESSION, text: 'Hourly', repeat: { kind: 'hours', every: 1 }, until: null }, local('2026-10-24T10:00:00'));
   await runs.runDueSchedules(local('2026-10-24T11:00:10'), deps);
-  const first = queued[0]!.id as string;
-  await runs.runDueSchedules(local('2026-10-24T12:00:10'), { ...deps, pending: async () => new Set([first]) });
+  await runs.runDueSchedules(local('2026-10-24T12:00:10'), deps);
   expect(queued).toHaveLength(1);
   expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('skipped: the previous run still waits'));
   // It is not tried again for that time once the previous one has gone out.
-  await runs.runDueSchedules(local('2026-10-24T12:30:00'), deps);
-  expect(queued).toHaveLength(1);
-  await runs.runDueSchedules(local('2026-10-24T13:00:10'), deps);
+  const delivered = { ...deps, inputs: async () => [] };
+  await runs.runDueSchedules(local('2026-10-24T13:00:10'), delivered);
   expect(queued).toHaveLength(2);
 });
 
-it('queues the same message again after a crash before it saved, which the queue keeps as one', async () => {
+it('does not enqueue again when a crash leaves the due run in the outbox before the schedule save', async () => {
   const { runs, deps, queued } = await setup();
   await runs.saveSchedule({ sessionId: SESSION, text: 'Daily', repeat: { kind: 'daily', at: '09:00' }, until: null }, local('2026-10-24T08:00:00'));
   const durable = await import('../src/main/durable.js');
@@ -104,8 +103,8 @@ it('queues the same message again after a crash before it saved, which the queue
   await runs.runDueSchedules(local('2026-10-24T09:00:10'), deps);
   write.mockRestore();
   await runs.runDueSchedules(local('2026-10-24T09:00:40'), deps);
-  expect(queued).toHaveLength(2);
-  expect(queued[0]!.id).toBe(queued[1]!.id);
+  expect(queued).toHaveLength(1);
+  expect((await runs.listSchedules())[0]).toMatchObject({ lastDueAt: local('2026-10-24T09:00:00'), lastInputId: queued[0]!.id });
 });
 
 it('pauses and resumes, and a resumed schedule does not catch up on what passed while paused', async () => {
@@ -199,8 +198,9 @@ it('runs a schedule now through its chat queue without moving the recurring sche
   expect((await runs.listSchedules())[0]?.lastInputId).toBe(queued[0]?.id);
 
   await runs.runDueSchedules(local('2026-10-24T11:00:10'), deps);
-  expect(queued).toHaveLength(2);
-  expect(queued[1]).toMatchObject({ scheduled: { scheduleId: saved.id, dueAt: local('2026-10-24T11:00:00'), late: false } });
+  expect(queued).toHaveLength(1);
+  expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('previous run still waits in the queue'));
+  expect((await runs.listSchedules())[0]).toMatchObject({ lastDueAt: local('2026-10-24T11:00:00'), lastInputId: queued[0]?.id });
 });
 
 it('logs why Run now did not enqueue when that chat has no schedule', async () => {
@@ -210,74 +210,88 @@ it('logs why Run now did not enqueue when that chat has no schedule', async () =
   expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('not queued now: no schedule exists'));
 });
 
-it('durably records Run now before enqueue so a failed schedule write cannot create an untracked outbox row', async () => {
-  const { runs, deps, queued } = await setup();
-  await runs.saveSchedule({ sessionId: SESSION, text: 'Hourly check', repeat: { kind: 'hours', every: 1 }, until: null }, local('2026-10-24T10:00:00'));
-  const durable = await import('../src/main/durable.js');
-  const write = vi.spyOn(durable, 'writeDurableNow').mockImplementationOnce(async (name, value) => {
-    if (name === 'scheduled-runs') throw new Error('disk gone');
-    return durable.writeDurableNow(name, value);
-  });
-  await expect(runs.runScheduleNow(SESSION, local('2026-10-24T10:30:00'), deps)).rejects.toThrow('disk gone');
-  write.mockRestore();
+it('replays a durable Run now intent after restart if the process stops before enqueue', async () => {
+  const now = local('2026-10-24T10:30:00');
+  const { runs, deps, queued } = await setup({ enqueue: vi.fn(async () => { throw new Error('process stopped before enqueue'); }) });
+  const saved = await runs.saveSchedule({ sessionId: SESSION, text: 'Hourly check', repeat: { kind: 'hours', every: 1 }, until: null }, local('2026-10-24T10:00:00'));
+  await expect(runs.runScheduleNow(SESSION, now, deps)).rejects.toThrow('process stopped before enqueue');
+  const intent = (await runs.listSchedules())[0]!.manualRunIntent!;
+  expect(intent).toMatchObject({ dueAt: now, text: 'Hourly check' });
   expect(queued).toEqual([]);
 
-  // Restart from the unchanged durable schedule. The next real due time queues exactly once.
   vi.resetModules();
   (await import('../src/main/durable.js')).initDurableStore(dir);
   const restarted = await import('../src/main/scheduled-runs.js');
-  const afterRestart: Array<Record<string, unknown>> = [];
-  await restarted.runDueSchedules(local('2026-10-24T11:00:10'), {
+  const replayed: Array<Record<string, unknown>> = [];
+  const replayDeps: RunnerDeps = {
     session: async id => ({ id, conversationId: 'chat-1', activeTurnId: null }),
-    enqueue: vi.fn(async input => { afterRestart.push(input as never); }),
-    pending: async () => new Set(),
+    enqueue: vi.fn(async input => { replayed.push(input as never); }),
+    inputs: async () => [],
     log: vi.fn()
-  });
-  expect(afterRestart).toHaveLength(1);
-  expect(afterRestart[0]).toMatchObject({ scheduled: { dueAt: local('2026-10-24T11:00:00'), late: false } });
+  };
+  await restarted.runDueSchedules(now + 1_000, replayDeps);
+  expect(replayed).toEqual([expect.objectContaining({ id: intent.id, text: intent.text,
+    scheduled: { scheduleId: saved.id, dueAt: now, late: false } })]);
+  expect((await restarted.listSchedules())[0]).toMatchObject({ lastInputId: intent.id });
+  expect((await restarted.listSchedules())[0]?.manualRunIntent).toBeUndefined();
 });
 
-it('restores the previous pending input id when a rejected Run now was not written to the outbox', async () => {
-  const { runs, deps, queued } = await setup();
+it('reconciles a manual Run now row already written when its enqueue acknowledgement is lost', async () => {
+  const now = local('2026-10-24T10:30:00');
+  const { runs, deps, queued } = await setup({ enqueue: vi.fn(async input => {
+    queued.push(input as never);
+    throw new Error('outbox acknowledgement lost');
+  }) });
   await runs.saveSchedule({ sessionId: SESSION, text: 'Hourly check', repeat: { kind: 'hours', every: 1 }, until: null }, local('2026-10-24T10:00:00'));
+  await expect(runs.runScheduleNow(SESSION, now, deps)).rejects.toThrow('outbox acknowledgement lost');
+  const manualId = queued[0]!.id as string;
+  expect((await runs.listSchedules())[0]?.manualRunIntent?.id).toBe(manualId);
+
+  const retryEnqueue = vi.fn(async input => { queued.push(input as never); });
+  await runs.runDueSchedules(now + 30_000, { ...deps, enqueue: retryEnqueue });
+  expect(retryEnqueue).not.toHaveBeenCalled();
+  expect(queued).toHaveLength(1);
+  expect((await runs.listSchedules())[0]).toMatchObject({ lastInputId: manualId });
+  expect((await runs.listSchedules())[0]?.manualRunIntent).toBeUndefined();
+});
+
+it('treats a repeated Run now click as acknowledgement of the recovered request, not a second run', async () => {
+  const now = local('2026-10-24T10:30:00');
+  const { runs, deps, queued } = await setup({ enqueue: vi.fn(async () => { throw new Error('outbox unavailable'); }) });
+  await runs.saveSchedule({ sessionId: SESSION, text: 'Hourly check', repeat: { kind: 'hours', every: 1 }, until: null }, local('2026-10-24T10:00:00'));
+  await expect(runs.runScheduleNow(SESSION, now, deps)).rejects.toThrow('outbox unavailable');
+  const intentId = (await runs.listSchedules())[0]!.manualRunIntent!.id;
+  const retryEnqueue = vi.fn(async input => { queued.push(input as never); });
+  expect(await runs.runScheduleNow(SESSION, now + 1_000, { ...deps, enqueue: retryEnqueue })).toBe(true);
+  expect(retryEnqueue).toHaveBeenCalledOnce();
+  expect(queued).toHaveLength(1);
+  expect(queued[0]?.id).toBe(intentId);
+  expect((await runs.listSchedules())[0]?.manualRunIntent).toBeUndefined();
+});
+
+it('logs a failed session read for Run now and retains the schedule', async () => {
+  const { runs, deps } = await setup({ session: async () => { throw new Error('metadata unreadable'); } });
+  await runs.saveSchedule({ sessionId: SESSION, text: 'Hourly check', repeat: { kind: 'hours', every: 1 }, until: null }, local('2026-10-24T10:00:00'));
+  await expect(runs.runScheduleNow(SESSION, local('2026-10-24T10:30:00'), deps)).rejects.toThrow('metadata unreadable');
+  expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('not queued now: its chat could not be read'));
+  expect(await runs.listSchedules()).toHaveLength(1);
+});
+
+it('keeps an older pending scheduled run as a blocker after the newest manual run is cancelled', async () => {
+  const { runs, deps, queued } = await setup();
+  const saved = await runs.saveSchedule({ sessionId: SESSION, text: 'Hourly check', repeat: { kind: 'hours', every: 1 }, until: null }, local('2026-10-24T10:00:00'));
   await runs.runDueSchedules(local('2026-10-24T11:00:10'), deps);
-  const automaticId = queued[0]!.id as string;
-  const rejectedManual = {
-    ...deps,
-    enqueue: vi.fn(async () => { throw new Error('outbox write failed'); }),
-    pending: async () => new Set([automaticId])
-  };
-
-  await expect(runs.runScheduleNow(SESSION, local('2026-10-24T11:30:00'), rejectedManual)).rejects.toThrow('outbox write failed');
-  expect((await runs.listSchedules())[0]?.lastInputId).toBe(automaticId);
-  expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('its input is not pending; restored the previous input identity'));
-
-  await runs.runDueSchedules(local('2026-10-24T12:00:10'), { ...deps, pending: async () => new Set([automaticId]) });
-  expect(queued).toHaveLength(1);
+  const automatic = queued[0]!;
+  await runs.runScheduleNow(SESSION, local('2026-10-24T11:30:00'), deps);
+  const manual = queued[1]!;
+  const inputs: ScheduledInputSnapshot[] = [
+    { id: automatic.id as string, state: 'queued', scheduled: automatic.scheduled as ScheduledInputSnapshot['scheduled'] },
+    { id: manual.id as string, state: 'cancelled', scheduled: manual.scheduled as ScheduledInputSnapshot['scheduled'] }
+  ];
+  await runs.runDueSchedules(local('2026-10-24T12:00:10'), { ...deps, inputs: async () => inputs });
+  expect(queued).toHaveLength(2);
   expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('previous run still waits in the queue'));
-});
-
-it('keeps the manual input id when enqueue rejects after the manual row became pending', async () => {
-  const { runs, deps, queued } = await setup();
-  await runs.saveSchedule({ sessionId: SESSION, text: 'Hourly check', repeat: { kind: 'hours', every: 1 }, until: null }, local('2026-10-24T10:00:00'));
-  let manualId = '';
-  const persistedThenRejected = {
-    ...deps,
-    enqueue: vi.fn(async input => {
-      manualId = input.id;
-      queued.push(input as never);
-      throw new Error('outbox acknowledgement lost');
-    }),
-    pending: async () => new Set(manualId ? [manualId] : [])
-  };
-
-  await expect(runs.runScheduleNow(SESSION, local('2026-10-24T10:30:00'), persistedThenRejected)).rejects.toThrow('outbox acknowledgement lost');
-  expect((await runs.listSchedules())[0]?.lastInputId).toBe(manualId);
-  expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('its input remains pending; kept its identity'));
-
-  await runs.runDueSchedules(local('2026-10-24T11:00:10'), { ...deps, pending: async () => new Set([manualId]) });
-  expect(queued).toHaveLength(1);
-  expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('previous run still waits in the queue'));
+  expect((await runs.listSchedules())[0]).toMatchObject({ id: saved.id, lastInputId: automatic.id, lastDueAt: local('2026-10-24T12:00:00') });
 });
 
 it('keeps Run now repeatable and tracks the newest manual row when an automatic run is already pending', async () => {
@@ -293,8 +307,7 @@ it('keeps Run now repeatable and tracks the newest manual row when an automatic 
   expect((await runs.listSchedules())[0]?.lastInputId).toBe(newestManualId);
 
   await runs.runDueSchedules(local('2026-10-24T12:00:10'), {
-    ...deps,
-    pending: async () => new Set([automaticId, firstManualId, newestManualId])
+    ...deps
   });
   expect(queued).toHaveLength(3);
   expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('previous run still waits in the queue'));
@@ -307,8 +320,7 @@ it('a manual Run now pending in the input outbox prevents a duplicate at the nex
   const now = local('2026-10-24T10:30:00');
   expect(await runs.runScheduleNow(SESSION, now, deps)).toBe(true);
   const manualId = queued[0]?.id as string;
-  const pendingDeps = { ...deps, pending: async () => new Set([manualId]) };
-  await runs.runDueSchedules(local('2026-10-24T11:00:10'), pendingDeps);
+  await runs.runDueSchedules(local('2026-10-24T11:00:10'), deps);
   expect(queued).toHaveLength(1);
   expect((await runs.listSchedules())[0]).toMatchObject({ lastDueAt: local('2026-10-24T11:00:00'), lastInputId: manualId });
   expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('previous run still waits in the queue'));
@@ -360,7 +372,9 @@ it('is accepted by the real queue, which keeps one row for the same run queued t
     const runs = await import('../src/main/scheduled-runs.js');
     const deps: RunnerDeps = {
       session: async id => ({ id, conversationId: null, activeTurnId: null }),
-      enqueue: queued => input.enqueueInput(queued), pending: async () => new Set(), log: () => {}
+      enqueue: queued => input.enqueueInput(queued),
+      inputs: async () => (await input.listInputs()).map(({ id, state, scheduled }) => ({ id, state, scheduled })),
+      log: () => {}
     };
     await runs.saveSchedule({ sessionId: session.id, text: 'Daily check', repeat: { kind: 'daily', at: '09:00' }, until: null }, local('2026-10-24T08:00:00'));
     const durable = await import('../src/main/durable.js');
@@ -374,6 +388,38 @@ it('is accepted by the real queue, which keeps one row for the same run queued t
     expect(rows[0]).toMatchObject({ text: 'Daily check', scheduled: { dueAt: local('2026-10-24T09:00:00'), late: false } });
     // The retry is the same run, so the schedule records it as sent and the next time can see it waiting (CodeRabbit).
     expect((await runs.listSchedules())[0]).toMatchObject({ lastInputId: rows[0]!.id, lastDueAt: local('2026-10-24T09:00:00') });
+  } finally { input.resetInputForTests(); resetSessionStoreForTests(); }
+});
+
+it('reconciles a Run now intent against the real outbox after enqueue commits but its acknowledgement is lost', async () => {
+  const { initSessionStore, createSession, resetSessionStoreForTests } = await import('../src/main/session/store.js');
+  const input = await import('../src/main/session/input.js');
+  initSessionStore(dir); input.resetInputForTests();
+  input.configureInputDelivery({ changed: () => {}, applyAutomation: async () => {}, recordDelivered: async () => undefined } as never);
+  try {
+    const session = await createSession({ title: 'Scheduled manual recovery', conversationId: 'chat-scheduled-manual' } as never);
+    const runs = await import('../src/main/scheduled-runs.js');
+    let loseAcknowledgement = true;
+    const deps: RunnerDeps = {
+      session: async id => ({ id, conversationId: 'chat-scheduled-manual', activeTurnId: null }),
+      enqueue: async queued => {
+        const row = await input.enqueueInput(queued);
+        if (loseAcknowledgement) { loseAcknowledgement = false; throw new Error('outbox acknowledgement lost'); }
+        return row;
+      },
+      inputs: async () => (await input.listInputs()).map(({ id, state, scheduled }) => ({ id, state, scheduled })),
+      log: vi.fn()
+    };
+    await runs.saveSchedule({ sessionId: session.id, text: 'Manual recovery', repeat: { kind: 'daily', at: '09:00' }, until: null }, local('2026-10-24T08:00:00'));
+    await expect(runs.runScheduleNow(session.id, local('2026-10-24T08:30:00'), deps)).rejects.toThrow('outbox acknowledgement lost');
+    const intentId = (await runs.listSchedules())[0]!.manualRunIntent!.id;
+    expect((await input.listInputs()).filter(row => row.sessionId === session.id)).toHaveLength(1);
+
+    await runs.runDueSchedules(local('2026-10-24T08:31:00'), deps);
+    const rows = (await input.listInputs()).filter(row => row.sessionId === session.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: intentId, text: 'Manual recovery', scheduled: { scheduleId: (await runs.listSchedules())[0]!.id, late: false } });
+    expect((await runs.listSchedules())[0]?.manualRunIntent).toBeUndefined();
   } finally { input.resetInputForTests(); resetSessionStoreForTests(); }
 });
 
