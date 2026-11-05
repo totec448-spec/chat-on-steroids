@@ -12,7 +12,7 @@ composes that connector's own tools.
 
 | Connector | Purpose | Possible tools |
 | --- | --- | --- |
-| **Chat On Steroids Core** | Approved files, patches, terminal, generated images, task plans, workers | `read`, `view_image`, `find`, `apply_patch`, `save_image`, `exec_command`, `write_stdin`, `update_plan`, `agents`, `session_finish`, `exec` |
+| **Chat On Steroids Core** | Approved files, patches, terminal, generated images, task plans, workers | `read`, `view_image`, `find`, `apply_patch`, `save_image`, `exec_command`, `write_stdin`, `ask_user_to_run`, `user_request_status`, `update_plan`, `agents`, `session_finish`, `exec` |
 | **Chat On Steroids Desktop** | Browser tabs through the companion (all platforms); screen, windows, mouse/keyboard and clipboard (Windows/macOS); opt-in GNOME Wayland read-only display screenshots (Linux) | `browser_tabs`, `browser_snapshot`, `browser_screenshot`, `browser_navigate`, `browser_action`, `browser_evaluate`, `browser_console`, `browser_network`; Windows: `list_windows`, `get_window`, `list_apps`, `get_window_state`, `launch_app`, `click`, `press_key`, `type_text`, `scroll`, `set_value`, `drag`, `perform_secondary_action`, `activate_window`, `read_clipboard`, `write_clipboard`; macOS: `observe`, `computer`; Linux opt-in: `linux_observe` (screenshot only); `exec` |
 | **Chat On Steroids Plugins** | External MCP tools the user enabled in Settings | Each enabled tool under its own schema, plus `exec` |
 
@@ -25,7 +25,7 @@ Windows or macOS. Linux GNOME screenshots require an independent default-off opt
 not silently widened.
 
 With fresh defaults, Core advertises `read`, `view_image`, `apply_patch`, `save_image`,
-`exec_command`, `write_stdin`, `update_plan`, `agents` and `exec`. `session_finish` appears while
+`exec_command`, `write_stdin`, `ask_user_to_run`, `user_request_status`, `update_plan`, `agents` and `exec`. `session_finish` appears while
 Session finish is on.
 `find` is the search fallback for a snapshot where search is enabled and command execution is
 unavailable; `find` and the `exec_command`/`write_stdin` pair are never exposed together. Tool exposure is monotonic within a running connector instance, so a permission
@@ -107,6 +107,19 @@ Codex's collection-window behaviour so one interactive response is gathered whol
 Always available (recording is always on). Replaces the exact caller’s displayed progress plan; it does
 not execute queued work. Local history continues recording messages and real tool results for the
 app transcript and continuation. There is no model-facing recording search/read tool.
+
+### `ask_user_to_run` and `user_request_status`
+
+Offered with the command tools (also in Read-only mode over Run programs, since they run nothing).
+`ask_user_to_run` hands one step to the person: the exact command (up to 8 KB, shown in full), the
+folder (an approved folder or inside one; defaults like `exec_command`), a one-line purpose, the
+files it should leave (at most 10) and constraints. The app records it in that chat, shows it as a
+card with Copy, Mark as done and Skip, and returns an id at once. It never runs the command. The
+same open command and folder returns the existing id; a chat holds at most 20 open steps.
+`user_request_status` reports open, done or skipped, and for each expected file whether it exists
+with its size and time; nothing is read. Only the person marks a step done. The description asks
+the model never to use it for an action it declined or that was refused for safety; the app cannot
+enforce that.
 
 Compact & Resume is app/browser orchestration. There is no model-visible `save_handoff` or
 `resume_session` tool.
@@ -212,19 +225,40 @@ Linux does not advertise or execute these schemas. Windows publishes one tool pe
 `activate_window` act; `read_clipboard` and `write_clipboard` follow the clipboard permissions.
 macOS publishes `observe` and `computer`, described below.
 
-### `linux_observe` (read-only display screenshot, Linux)
+### `linux_observe` (read-only screenshots and semantic observation, Linux)
 
-This first Linux stage publishes `linux_observe` only when a person enables
-`ui.linuxDesktopEnabled` and grants Screen permission. Its input schema allows
-only `{ what: 'screenshot', display: 0 }` (display 0 is the only allowed value).
-The bounded output is an MCP PNG image plus text metadata labeled `scope: 'display'`.
+The screenshot-only part 2 first published `linux_observe` after a person enabled
+`ui.linuxDesktopEnabled` and granted Screen permission. Part 3 extends the
+read-only input schema to `windows`, `apps`, `displays`, `snapshot` with a
+`window_id`, and `screenshot` with `display: 0` (the only permitted screenshot
+display). Inventory and snapshots return bounded structured data; screenshot
+output is an MCP PNG image plus text metadata labeled `scope: 'display'`.
 GNOME's operating-system portal can ask for consent and can be cancelled; do not retry
 automatically. The separate Settings test requests one portal screenshot but discards it
 without returning pixels to the renderer. Unknown caller identity requires the existing,
 separately chosen `desktopUnattributed` setting; the default is to refuse.
 
-Linux has **no `linux_act`, window inventory, accessibility snapshot, text entry, click,
-or coordinate input** in this PR. Those belong to the later control PR.
+The semantic snapshot mode requires a proven nonbrowser window. Refs are kept
+only for the proven Setup profile, session and
+conversation; an unattributed observation gets ephemeral non-actionable refs.
+
+### `linux_act` (semantic accessibility refs only, Linux)
+
+Requires the native opt-in, live Control permission, Read-only mode off and
+an owned, unexpired `linux_observe` snapshot. Supports only semantic
+`click` and `set_value` on the exact window's snapshot-scoped refs.
+The target process incarnation, ref, owner and grants are rechecked
+after any approval wait; every action consumes its refs. It cannot
+target browser windows or fall back to physical pointer/keyboard input.
+The backend version probe accepts only a `version` command response for Linux
+agent-desktop 1.0.2. Ref tokens (`@s<snapshot>:e<element>`) are capped at
+128 characters by observation collection, the action schema and the native
+subprocess adapter, so oversized backend refs never become actionable.
+An invalid ref or a tree that would be truncated by the 24-depth, 200-children
+or 512-ref bounds causes the whole snapshot to be refused before publication.
+Only a static diagnostic is logged; no backend ref or private UI text leaks.
+Desktop Ask (if configured) grants permission only to the exact proven
+Linux profile/session/conversation, not a shared transport connection.
 
 ### `observe`
 
