@@ -4,6 +4,7 @@ vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTermina
 }) }));
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { JSDOM } from 'jsdom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -138,10 +139,25 @@ describe('session summary pages', () => {
   });
 
   it('pages past the first 60 while reporting the full retained total', async () => {
-    for (let index = 0; index < 65; index++) {
-      const session = await createSession({ title: `history-${index}`, conversationId: null });
-      await endSession(session.id);
-    }
+    // The behavior under test is the cold on-disk catalog and cursor paging, not session creation.
+    // Seed valid version-current summary files from one real session instead of performing 130
+    // durable create/end writes; that setup exceeded Vitest's 30 s limit on Windows x64.
+    const template = await createSession({ title: 'history-0', conversationId: null });
+    await endSession(template.id);
+    const templateMeta = JSON.parse(await fs.readFile(path.join(dir, 'sessions', template.id, 'meta.json'), 'utf8')) as Record<string, unknown>;
+    const ids = [template.id];
+    const now = Date.now();
+    await Promise.all(Array.from({ length: 64 }, async (_, index) => {
+      const id = randomUUID();
+      const updatedAt = now + index + 1;
+      const meta = { ...templateMeta, id, title: `history-${index + 1}`, startedAt: updatedAt,
+        updatedAt, endedAt: updatedAt + 1, conversationId: null, chatIds: [] };
+      const folder = path.join(dir, 'sessions', id);
+      await fs.mkdir(folder, { recursive: true });
+      await fs.writeFile(path.join(folder, 'meta.json'), JSON.stringify(meta));
+      ids.push(id);
+    }));
+    expect(ids).toHaveLength(65);
     resetSessionStoreForTests();
 
     const first = await listSessionPage({ limit: 60 });
