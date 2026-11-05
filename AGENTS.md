@@ -76,6 +76,7 @@ losing the project, history, workers or queued instructions when a chat grows to
 | Goal / Loop | Mutually exclusive modes of one driver. Goal can decide no further message is needed; Loop continues within scope. |
 | Generated workflow / checkpoints | User instructions owned by the outbox; delivered at real finish/completion boundaries. |
 | `update_plan` | The agent's displayed progress plan. It does not execute or consume queue entries. |
+| `ask_user_to_run` / `user_request_status` | A step handed to the person (#1695): recorded and shown, never run by the app; only the person marks it done or skipped. |
 | `session_finish` | Astra's explicit near-finish hold/notice boundary; does not mean the whole task is already verified. |
 | Prime / worker | One owning conversation and its reusable subordinate chats. Several prime families may run independently. |
 | Decision helper / planner | A role-specific chat that produces a continuation decision or workflow; it must not execute the reference task. |
@@ -426,13 +427,14 @@ still checks live policy. Schema visibility is never the security boundary.
 
 | Surface | Advertised operations under current eligibility |
 | --- | --- |
-| Core — `chat-on-steroids-core` | `read`, `view_image`, `find` when command execution is off, `apply_patch`, `exec_command`/`write_stdin`, `update_plan`, `agents`, `session_finish`, code-mode `exec`. |
+| Core — `chat-on-steroids-core` | `read`, `view_image`, `find` when command execution is off, `apply_patch`, `exec_command`/`write_stdin`, `ask_user_to_run`/`user_request_status`, `update_plan`, `agents`, `session_finish`, code-mode `exec`. |
 | Desktop — `chat-on-steroids-desktop` | All Chromium extension hosts: `browser_tabs`, `browser_snapshot`, `browser_screenshot`, `browser_console`, `browser_network`, `browser_navigate`, `browser_action`, `browser_evaluate`. Windows additionally exposes 13 Window2 operations, clipboard and `exec` with `sky`; macOS adds `observe`/`computer`. Surface `exec` composes browser tools too. |
 | Plugins — `chat-on-steroids-plugins` | Enabled external tools with their upstream names and schemas, plus code-mode `exec` when that composition name is available. |
 
 `read` needs read/browse/metadata as appropriate; images need read; patch checks each hunk's
 create/edit/move/delete permission; command controls both terminal tools.
-Recording controls `update_plan`; multi-agent controls `agents`;
+Recording controls `update_plan`; recording plus command (or Read-only over command) controls
+`ask_user_to_run`/`user_request_status`; multi-agent controls `agents`;
 the finish setting controls `session_finish`. Windows publishes four observation methods under
 screen access, nine input/launch methods under control, and clipboard methods under their own
 permissions. Multiline `type_text` additionally requires clipboard write. macOS `computer`
@@ -791,9 +793,15 @@ the bridge counts them per ticket (`compactionReceiptMisses`, in memory). After 
 there for two days while the chat grew past its limit. A manual press never takes the waiver. From the request on, the chat's Compact & Resume timeline row reports progress
 and the projection is empty. The countdown authorizes nothing.
 Once a chat's history has been limited, the page's Retry presses after Retry-After back off to
-0 s, 2, 4, 8, then 15 minutes (`LOAD_FAILURE_LIMITED_BACKOFF_MS`), instead of the once-a-minute
-pace kept for an ordinary load failure. Measured 2026-10-11: pressing every minute drew a new 429
-with a longer Retry-After each time. The recorder writes a repeating history-limit notice (one
+0 s, 2, 4, 8, 15, 30, then 60 minutes (`LOAD_FAILURE_LIMITED_BACKOFF_MS`), instead of the
+once-a-minute pace kept for an ordinary load failure. Measured 2026-10-11: pressing every minute
+drew a new 429 with a longer Retry-After each time. The step reached survives a reload of the same
+chat in that tab (`sessionStorage` key `clf-history-limit-v1`: conversation id, step, time of the
+last press; forgotten after 75 quiet minutes, on another chat, or once the chat's turns render), so
+the app's own reload after each hold no longer restarts the page at 0 s. The app's hold after a
+retry that is limited again uses the same steps (`PROVIDER_HISTORY_STREAK_HOLDS_MS`), and "Try now"
+is refused while it lasts. Measured 2026-11-05 (#1882): a chat limited for 8.5 hours took 23
+quarter-hour rounds, each a reload plus presses after 0, 2 and 4 minutes. The recorder writes a repeating history-limit notice (one
 that carries `retryAt`) once: an identical one within 30 minutes of the newest blocking `chat_error`
 is not appended again (a passing failure in between, such as a stream 404, does not repeat it), while the provider access dialog is still recorded again after 30 s. The bridge's
 provider-limit hold still follows every new Retry-After, because it reads the observations, not
@@ -2084,6 +2092,21 @@ composition retain their ordinary editing behavior.
   message limit, preserving the brief's ends with an explicit middle-omission notice when needed.
   Plan statuses are reported progress, not verification evidence. This card neither delivers
   instructions nor completes/deletes queued checkpoints.
+- **Steps for the person (#1695):** `ask_user_to_run` records one step (exact command, folder
+  inside an approved root, purpose, expected files, constraints) in the session's `requests.json`
+  (`fileUserRequest`, serialized with the session's other writes) and returns its `ur_…` id. The
+  app never runs, retries or reroutes it, and nothing labels it safe or checked. The same open
+  command and folder returns the first id; at most 20 open and 60 kept per session (oldest answered
+  dropped); an unreadable file is renamed aside (`requests.json.unreadable-<ms>`), never
+  overwritten. Expected files are placed inside approved roots when recorded and only `lstat`ed
+  later (size, time); server folders and paths outside are reported unchecked. Only the person
+  answers (`sessions:answerUserRequest` → `answerUserRequest`, first answer stands). Session
+  controls carry `userRequests` (open ones with `found`); the timeline renders an `ok`
+  `ask_user_to_run` call as the step's card outside round folding, and the composer dock lists open
+  steps. Prepared handoffs list open steps (at most 10) and Goal/Loop get one system line while any
+  is open. Tools stay registered once offered (`exposedUserRequests`); handlers refuse while
+  recording or command (unless Read-only over command) is off. The boundary against asking the
+  person to run what the model declined is stated to the model only; it is not enforceable.
   Before attribution, `request-plans.ts` durably retains the latest complete plan for each
   request (256 entries / seven days) and attaches it on proof or restart. The session's rebind
   commit records `retiredChatAt` alongside its existing lineage. Recovery may attach a historical
@@ -5953,8 +5976,10 @@ process once and retains an explicit access error; ordinary network retry remain
 
 ### Native Desktop
 
-Native mouse/keyboard Desktop control is available only on Windows and supported macOS.
-Linux preserves those stored preferences but exposes no native input tool at this stage.
+Native physical mouse/keyboard Desktop control is available only on Windows and supported macOS.
+Linux instead offers separately opted-in, semantic AT-SPI `linux_act` input:
+`click` and `set_value` of fresh, chat-owned accessibility refs only, never
+unrestricted pointer/keyboard input or a physical-input fallback.
 Windows uses the bounded PowerShell/Win32/
 UIA helper; macOS uses Swift ScreenCaptureKit/AX/CGEvent through an architecture-matched N-API
 addon on an Electron worker. The packaged Electron app is the macOS permission subject; a
@@ -5980,8 +6005,33 @@ GNOME screenshot portal request and returns only the PNG byte count; no image is
 to the renderer. Aborted/denied portal prompts are not retried. Saved opt-in changes invalidate
 MCP surface exposure so a removed tool is not retained in model-facing discovery. Tests cover
 the backend command boundary, malformed PNG, opt-in and Screen revocation mid-capture, Settings
-consent and twelve locale catalogs. A future control PR adds accessibility refs and input
-*after* this read-only path, with its own ownership and permission gates.
+consent and twelve locale catalogs.
+
+**Native Linux semantic control (part 3, dependent on part 2).** `linux_observe`
+also admits window/app/display inventories and a semantic accessibility snapshot
+of one identified nonbrowser window. Snapshot references are scoped to a proven
+profile, session and conversation (32 owners maximum, 120-second expiry).
+Unattributed observations may have ephemeral private snapshots but cannot act.
+`linux_act` supports **only** click and set_value of previously observed,
+snapshot-scoped refs: it rejects stale/foreign refs, browsers, changed owners,
+ambiguous process incarnations and revoked Control/Read-only permission.
+CoS's own windows are excluded by its main process PID and recognized app IDs
+(including the packaged `com.chatonsteroids.app.desktop`), even in other app
+instances, to prevent a chat from clicking its own Desktop Ask or Settings.
+It rechecks the exact app identity and grant after any per-chat Desktop Ask
+approval, consumes refs after any attempted action and never falls back to a
+physical pointer, keyboard, coordinate command or automatic action retry.
+The command adapter remains pinned to agent-desktop 1.0.2, never uses a shell,
+and only publishes bounded backend error codes. Tests cover those ownership
+and revocation gates as well as legacy Windows/macOS Desktop Ask behavior.
+The version preflight requires the backend response command to be `version`,
+the OS to be Linux and the version to be 1.0.2. Accessibility refs must match
+`@s<snapshot>:e<element>` and be at most 128 characters: collection, MCP
+action schemas and native subprocess arguments enforce the same bound.
+If the native snapshot tree contains an invalid/foreign ref or traversal would
+skip nodes due to depth (24), children per node (200) or ref count (512),
+`linux_observe` refuses the whole snapshot with a fixed diagnostic; it never
+publishes an unusable ref or logs the ref values.
 
 The permission self-test reports native preflight results, not a completed capture or input.
 An actual screenshot and AX query remain separate evidence; the existing grant-history and

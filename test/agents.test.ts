@@ -5590,10 +5590,12 @@ it('archives accepted renamed assignments before broker expiry and restores save
   rejected.rollback();
   // The archive follows the durable write in the background; it never holds up acceptance.
   await persistCriticalSwarmNow();
-  await vi.waitFor(async () => expect((await getSession(session.id))?.workerAssignment?.label).toBe('Worker 1'));
+  // A slow Windows runner took over a second for that background write (2026-11-05, CI on #2072),
+  // past vi.waitFor's default; the same condition is awaited longer.
+  await vi.waitFor(async () => expect((await getSession(session.id))?.workerAssignment?.label).toBe('Worker 1'), { timeout: 10_000 });
   const staged = stageMessages(prime, [{ to: 'worker-1', text: 'New task', label: 'Review' }]);
   await persistCriticalSwarmNow(); staged.commit();
-  await vi.waitFor(async () => expect((await getSession(session.id))?.workerAssignment).toMatchObject({ label: 'Review', task: 'New task' }));
+  await vi.waitFor(async () => expect((await getSession(session.id))?.workerAssignment).toMatchObject({ label: 'Review', task: 'New task' }), { timeout: 10_000 });
   noteAgentAlive('c-worker-archive', 'call'); finishAgent(worker.caller, 'done'); releaseQuiescentRun();
   const saved = snapshotSwarm()!;
   resetAgentsForTests();

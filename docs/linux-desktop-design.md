@@ -1,9 +1,9 @@
-# Linux Desktop integration — read-only screenshot stage
+# Linux Desktop integration — screenshot (part 2) and semantic control (part 3)
 
-This document is the design/acceptance boundary of part 2 in the three-PR
-split requested by the upstream maintainer on #2022.
+This document records part 2's read-only screenshot boundary and the part 3
+semantic-control extension in the three-PR split requested on #2022.
 
-## User flow
+## Part 2 — read-only screenshot user flow
 
 1. In Linux Settings, choose **Allow native Linux Desktop access**. The switch
    is off for new and upgraded installations. Enable **Screen** permission
@@ -11,18 +11,19 @@ split requested by the upstream maintainer on #2022.
 2. With the CoS window focused, choose **Request screenshot permission**.
    GNOME Wayland may present a portal confirmation. The diagnostic returns
    only success/failure and PNG byte length; screen pixels are discarded.
-3. When authorized, the Desktop connector exposes `linux_observe` with only
-   `{what:'screenshot',display:0}`. The MCP tool admits only display 0;
+3. In part 2, the Desktop connector exposed `linux_observe` with only
+   `{what:'screenshot',display:0}`. The MCP screenshot tool admits only display 0;
    other display indexes are rejected even though the standalone backend can
    address them. Its answer uses MCP image content and
-   explicit **display**, not window, metadata. No click, type, control or
-   accessibility snapshot is present in this PR.
+   explicit **display**, not window, metadata. Part 2 added no click, type,
+   control or accessibility snapshot; part 3 extends the observation surface.
 
-## Security and lifecycle
+## Part 2 — screenshot security and lifecycle
 
 - Screenshot transport is pinned to the reviewed Linux `agent-desktop` 1.0.2
-  contract. Its subprocess adapter has just two commands: version and screenshot.
-  There is no shell execution or generic argument pass-through.
+  contract. In part 2, its subprocess adapter had only version and screenshot
+  commands; part 3 adds bounded inventory, snapshot and semantic actions.
+  Neither stage uses shell execution or generic argument pass-through.
 - The backend output, decoded pixels and MCP wire image are bounded and
   verified. Invalid or refused portal answers never expose private text or
   image bytes in logs or user-facing error messages.
@@ -39,13 +40,23 @@ split requested by the upstream maintainer on #2022.
 
 ## Validation and staged rollout
 
-The unit tests exercise invalid envelopes, PNG dimensions, bounded output,
+Part 2 unit tests exercise invalid envelopes, PNG dimensions, bounded output,
 backend version, missing grant, late revocation, and the absence of native
-action schemas. The renderer tests exercise saving, consent, translations and
-discarding capture bytes. GNOME portal consent must be accepted by a person
+action schemas at that stage. The renderer tests exercise saving, consent,
+translations and discarding capture bytes. GNOME portal consent must be accepted by a person
 for a true end-to-end screenshot; unit-test data does **not** prove a live grant.
 Linux UI/packaging acceptance must run in an isolated app instance.
 
-Part 3 builds on this reviewed read-only surface and supplies native
-accessibility snapshots and semantic control with additional owner/ref
-checks. Nothing in part 2 confers that future input permission.
+## Part 3 — current semantic native control extension
+
+The follow-on stage adds app/window/display inventory and accessibility
+snapshots. Each snapshot belongs to a proven chat and Setup profile, has a
+bounded lifetime and is restricted to an exact nonbrowser window/process.
+`linux_act` may click or set a value through a fresh semantic ref under
+live Control permission. It revalidates owner, refs, target and permission
+after any approval prompt, then consumes the refs.
+
+Unattributed observations, when separately opted into, have ephemeral
+non-actionable refs. Physical mouse/keyboard events, coordinates, browser
+AT-SPI input and unbounded command execution are never supported.
+No capability from part 2 grants native input by itself.
