@@ -3,7 +3,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 const logs: string[] = [];
 vi.mock('../src/main/logger.js', () => ({ logInfo: (line: string) => logs.push(line), logWarn: (line: string) => logs.push(line) }));
 
-import { createDesktopAsk, type DesktopAskDeps, type DesktopAskPrompt } from '../src/main/desktop-ask.js';
+import { createDesktopAsk, DECLINED_TEXT, type DesktopAskDeps, type DesktopAskPrompt } from '../src/main/desktop-ask.js';
 import { ASK_GRANT_MS } from '../src/shared/desktop-ask.js';
 
 /**
@@ -74,6 +74,45 @@ it('ends the grant early when the person uses the mouse or keyboard again', asyn
   answers = ['not-now'];
   expect(await ask.admit({ words: 'click', app: null }, chat1)).not.toBeNull();
   expect(asked).toHaveLength(2);
+});
+
+it('does not share a Linux grant across conversations rebound to the same local session', async () => {
+  const ask = gate('always');
+  answers = ['go', 'not-now'];
+  const first = { ...chat1, scopedPrincipal: JSON.stringify(['profile', 's-1', 'c-1']) };
+  expect(await ask.admit({ words: 'click', app: null }, first)).toBeNull();
+  ask.stepEnded();
+  clock += 2_000;
+  const rebound = { ...first, conversationId: 'c-2', scopedPrincipal: JSON.stringify(['profile', 's-1', 'c-2']) };
+  expect(await ask.admit({ words: 'click', app: null }, rebound)).toBe(DECLINED_TEXT);
+  expect(asked).toHaveLength(2);
+});
+
+it('preserves the existing local-session grant for legacy Windows/macOS callers', async () => {
+  const ask = gate('always');
+  answers = ['go'];
+  expect(await ask.admit({ words: 'click', app: null }, chat1)).toBeNull();
+  ask.stepEnded();
+  clock += 2_000;
+  expect(await ask.admit({ words: 'click', app: null }, { ...chat1, conversationId: 'c-2' })).toBeNull();
+  expect(asked).toHaveLength(1);
+});
+
+it('binds Linux grants to the proven profile, session and conversation, not the connector transport', async () => {
+  const ask = gate('always');
+  answers = ['go', 'not-now', 'not-now'];
+  const first = { sessionId: 'session-a', conversationId: 'chat-a', transportKey: 'shared',
+    scopedPrincipal: JSON.stringify(['profile-a', 'session-a', 'chat-a']) };
+  expect(await ask.admit({ words: 'click', app: null }, first)).toBeNull();
+  ask.stepEnded();
+  clock += 2_000;
+  expect(await ask.admit({ words: 'click', app: null }, {
+    ...first, conversationId: 'chat-b', scopedPrincipal: JSON.stringify(['profile-a', 'session-a', 'chat-b'])
+  })).toBe(DECLINED_TEXT);
+  expect(await ask.admit({ words: 'click', app: null }, {
+    ...first, scopedPrincipal: JSON.stringify(['profile-b', 'session-a', 'chat-a'])
+  })).toBe(DECLINED_TEXT);
+  expect(asked).toHaveLength(3);
 });
 
 it('refuses only the step on Not now or no answer, saying so plainly and without retrying', async () => {

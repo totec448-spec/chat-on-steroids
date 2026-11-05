@@ -109,7 +109,7 @@ const CORE: SurfaceDefinition = {
     'enabled it — spawns and coordinates worker agents, subagents or a parallel swarm across several ChatGPT conversations.',
   cardSummary: 'Files, patches and terminal.',
   required: true,
-  tools: ['read', 'view_image', 'find', 'apply_patch', 'save_image', 'exec_command', 'write_stdin', 'update_plan', 'agents', 'session_finish', 'usage', 'exec']
+  tools: ['read', 'view_image', 'find', 'apply_patch', 'save_image', 'exec_command', 'write_stdin', 'ask_user_to_run', 'user_request_status', 'update_plan', 'agents', 'session_finish', 'usage', 'exec']
 };
 
 /**
@@ -134,7 +134,7 @@ const DESKTOP: SurfaceDefinition = {
     'and reading the clipboard or copying and pasting text between programs.',
   cardSummary: 'Browser and desktop apps.',
   required: false,
-  tools: [...BROWSER_TOOLS, ...WINDOWS_COMPUTER_METHODS, 'read_clipboard', 'write_clipboard', 'observe', 'computer', 'linux_observe', 'exec']
+  tools: [...BROWSER_TOOLS, ...WINDOWS_COMPUTER_METHODS, 'read_clipboard', 'write_clipboard', 'observe', 'computer', 'linux_observe', 'linux_act', 'exec']
 };
 
 const PLUGINS: SurfaceDefinition = {
@@ -178,7 +178,8 @@ export function liveConnectorName(id: SurfaceId): string {
 /** Platform/capability projection used by setup; each registrar enforces the same split. */
 export function desktopToolNames(caps: Capabilities, platform: NodeJS.Platform = process.platform): string[] {
   const browser = [...(caps.screen ? BROWSER_READ_TOOLS : []), ...(caps.control ? BROWSER_WRITE_TOOLS : [])];
-  if (platform === 'linux') return [...browser, ...(getConfig().ui.linuxDesktopEnabled === true && caps.screen ? ['linux_observe'] : [])];
+  if (platform === 'linux') return [...browser, ...(getConfig().ui.linuxDesktopEnabled === true
+    ? [...(caps.screen ? ['linux_observe'] : []), ...(caps.control ? ['linux_act'] : [])] : [])];
   if (!desktopAutomationSupported(platform)) return browser;
   if (platform !== 'win32') return [...browser, ...(caps.screen ? ['observe'] : []), ...(caps.control || caps.clipboardRead || caps.clipboardWrite ? ['computer'] : [])];
   return [
