@@ -518,6 +518,12 @@
   "content_goal_wait_workers": {
     "message": "Aguardando os subagentes deste chat"
   },
+  "content_goal_wait_slots": {
+    "message": "Aguardando uma vaga livre (Chats trabalhando ao mesmo tempo)"
+  },
+  "content_goal_wait_paused": {
+    "message": "O ChatGPT pediu para ir mais devagar · aguarda o horário indicado"
+  },
   "content_goal_writing_first_message": {
     "message": "$1 está escrevendo a primeira mensagem"
   },

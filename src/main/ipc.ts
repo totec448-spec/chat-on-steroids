@@ -1,3 +1,4 @@
+import { onChatsAtOnceChange, resumeAutomaticSends } from './chats-at-once.js';
 import { MAX_CHAT_STYLE_CHARS } from '../shared/chat-style.js';
 import { registerWorkspaceTerminalIpc } from './workspace-terminal-ipc.js';
 import { forgetSurfaceTokens } from './mcp/persistent-paths.js';
@@ -334,6 +335,7 @@ const settingsPatch = z.object({
     defaultReasoning: z.enum(['', ...REASONING_EFFORTS]).optional(),
     maxWorkers: z.number().int().min(1).max(8),
     globalMaxWorkers: z.number().int().min(0).max(64).optional(),
+    chatsAtOnce: z.number().int().min(0).max(10).optional(),
     allowUnattributedCalls: z.boolean(),
     strictChatAllowlist: z.boolean().optional(),
     recoverAgentTabs: z.boolean(),
@@ -584,6 +586,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         base.multiAgent.globalMaxWorkers ?? 0,
         wanted.multiAgent.globalMaxWorkers ?? 0
       ),
+      chatsAtOnce: pick(current.multiAgent.chatsAtOnce ?? 0, base.multiAgent.chatsAtOnce ?? 0, wanted.multiAgent.chatsAtOnce ?? 0),
       allowUnattributedCalls: pick(
         current.multiAgent.allowUnattributedCalls,
         base.multiAgent.allowUnattributedCalls,
@@ -2069,6 +2072,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('browser:preferences', async (payload) => requestBrowserPreferences(payload));
   handle('chatModels:request', async () => startChatModelDiscovery());
   handle('sessions:controls', async (payload) => sessionControlsFor(sessionIdArg.parse(payload).id));
+  // Resume now (#1694): the person ends ChatGPT's pause early, at the risk of the limit returning.
+  handle('automation:resumeNow', async () => resumeAutomaticSends());
   // A step handed to the person (#1695): only their click answers it, and the app runs nothing.
   handle('sessions:answerUserRequest', async (payload) => {
     const parsed = sessionIdArg.extend({
@@ -2705,6 +2710,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     });
   };
   onStatusChange(pushState);
+  onChatsAtOnceChange(pushState);
   onRecordingStorageFullChange(pushState);
   onBridgeChange(pushState);
   onCosBrowserSignInChange(pushState);
