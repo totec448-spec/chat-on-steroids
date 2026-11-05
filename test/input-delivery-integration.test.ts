@@ -4223,6 +4223,28 @@ it('forgets the own-sent record of a chat ChatGPT deleted, and drops old records
   expect(await input.ownSentResidue(old)).toEqual([]);
   await input.failInputsForDeletedConversation(gone);
   expect(await input.ownSentResidue(gone)).toEqual([]);
+  // Saved at once, without the deleted chat's text and without the old record.
+  expect(await readDurable('own-sent-receipts')).toEqual({ version: 1, receipts: [], forgotten: [expect.objectContaining({ conversationId: gone })] });
+});
+
+// CodeRabbit on #2079: a send acknowledged after its chat was deleted does not record it again.
+it("does not record a deleted chat's automatic send that is acknowledged afterwards", async () => {
+  const { readDurable } = await import('../src/main/durable.js');
+  await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Deleted while sending', conversationId });
+  const scheduled = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'The person\'s scheduled words',
+    scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+  expect(await input.claimBrowserInput(scheduled.id, 'late-page', conversationId, true)).not.toBeNull();
+  expect(await input.authorizeBrowserInput(scheduled.id, 'late-page', conversationId)).toBe(true);
+  await input.forgetOwnSent([conversationId]);
+  expect(await input.acknowledgeBrowserInput(scheduled.id, 'late-page', conversationId, 'late-message')).toBe(true);
   await flushDurable();
-  expect(await readDurable('own-sent-receipts')).toEqual([]);
+  const saved = await readDurable<{ receipts: Array<{ conversationId: string }> }>('own-sent-receipts');
+  expect(saved?.receipts.some(row => row.conversationId === conversationId)).toBe(false);
+  // After a restart too.
+  input.resetInputForTests();
+  await input.forgetOwnSent([]);
+  expect((await readDurable<{ receipts: Array<{ conversationId: string }> }>('own-sent-receipts'))?.receipts
+    .some(row => row.conversationId === conversationId)).toBe(false);
 });

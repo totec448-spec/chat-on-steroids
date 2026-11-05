@@ -2394,12 +2394,13 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
           ...committedResumeAncestorsFromSummary(summary, summary.conversationId)
         ], false);
       }
+      // The app's record of its latest automatic message goes first, saved before the chat is (#2074):
+      // that text can be the person's own words, and a crash in between must not leave it behind.
+      if (summary) await forgetOwnSent([...new Set([...(summary.conversationId ? [summary.conversationId] : []), ...(summary.chatIds ?? [])])])
+        .catch((error: Error) => logWarn(`session ${id}: its own-sent record could not be removed (${error.message})`));
       await deleteSession(id);
       // A deleted chat leaves its group too; the group itself stays.
       await forgetChatGroupMember(id);
-      // And the app's record of its latest automatic message (#2074): that text can be the person's own words.
-      if (summary) await forgetOwnSent([...new Set([...(summary.conversationId ? [summary.conversationId] : []), ...(summary.chatIds ?? [])])])
-        .catch((error: Error) => logWarn(`session ${id}: its own-sent record could not be removed (${error.message})`));
       logInfo(
         detached.length > 0
           ? `session ${id} deleted; ${detached.length} live conversation(s) will start a new session`
