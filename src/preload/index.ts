@@ -406,6 +406,8 @@ const api = {
     return () => ipcRenderer.removeListener('chatModels:changed', wrapped);
   },
   getSessionControls: (id: string) => call<SessionControlsView>('sessions:controls', { id }),
+  answerUserRequest: (id: string, requestId: string, answer: 'done' | 'skipped') =>
+    call<NonNullable<SessionControlsView['userRequests']>>('sessions:answerUserRequest', { id, requestId, answer }),
   cancelRecovery: (id: string) => call<boolean>('sessions:cancelRecovery', { id }),
   pickupNow: (id: string, shown: { next: 'queue' | 'goal' | 'loop' | 'continue'; stoppedAt: number }) =>
     call<{ ok: true; did: 'queued' | 'retrying' } | { ok: false; code: 'no-chat' | 'history-limit' | 'nothing-waiting' | 'changed' | 'not-sent' | 'not-started' }>('sessions:pickupNow', { id, ...shown }),

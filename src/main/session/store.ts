@@ -22,7 +22,7 @@
  */
 
 import { modelFacingText } from '../../shared/content-reference.js';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { isProModel } from '../../shared/chat-models.js';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -48,6 +48,7 @@ import { applyTurnIdentity, authoredTimeOf, chronological, injectedUserMessage, 
 import { automaticTitle, firstTitleMessage, legacyContextTitle, legacyLabelPending, projectPageTitle, providerTitleIgnored, refreshUserTitle, userTitle } from './title.js';
 import { agentPlanSchema, agentPlanUpdateSchema, MAX_AGENT_PLAN_BYTES, type AgentPlan, type AgentPlanUpdate } from '../../shared/agent-plan.js';
 import { turnTrace, type TurnTrace } from '../../shared/turn-trace.js';
+import { sameUserRequest, USER_REQUEST_LIMITS, userRequestSchema, userRequestsFileSchema, type UserRequest } from '../../shared/user-requests.js';
 import { getConfig } from '../config.js';
 import { logError, logInfo, logWarn } from '../logger.js';
 
@@ -3454,6 +3455,130 @@ export async function updateSessionPlan(
     }
     return true;
   });
+}
+
+/**
+ * Steps handed to the person (#1695): one small `requests.json` per session, like the plan. Keyed
+ * by session, not by ChatGPT chat, so a chat continued by Compact & Resume can still check them.
+ */
+// A full file of the largest allowed steps, with JSON escaping, stays well under this (about 21 MB).
+const MAX_USER_REQUESTS_BYTES = 32 * 1024 * 1024;
+
+/**
+ * `quarantine` only inside the session queue: a reader outside it could otherwise move aside a
+ * valid file a queued write had just put in place, losing a step the tool already reported.
+ * Outside the queue a damaged file reads as no steps and stays where it is.
+ */
+/** Sessions whose damaged steps file was already reported; the screen reads it every few hundred ms. */
+const unreadableUserRequests = new Set<string>();
+
+async function readUserRequestsFile(id: string, quarantine = false): Promise<UserRequest[]> {
+  const target = path.join(sessionDir(id), 'requests.json');
+  let text: string;
+  try {
+    const stat = await fs.stat(target);
+    if (stat.size > MAX_USER_REQUESTS_BYTES) throw new SyntaxError('too large');
+    text = await fs.readFile(target, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') { unreadableUserRequests.delete(id); return []; }
+    if (!(error instanceof SyntaxError)) throw error;
+    text = '';
+  }
+  try {
+    const parsed = userRequestsFileSchema.safeParse(JSON.parse(text));
+    if (parsed.success) { unreadableUserRequests.delete(id); return parsed.data.requests; }
+  } catch { /* unreadable: kept aside below */ }
+  if (!quarantine) {
+    // Once per damaged file, not on every read (CodeRabbit on #2049).
+    if (!unreadableUserRequests.has(id)) {
+      if (unreadableUserRequests.size >= 256) unreadableUserRequests.delete(unreadableUserRequests.values().next().value!);
+      unreadableUserRequests.add(id);
+      logWarn(`session ${id}: steps for the person are unreadable; showing none until the next change keeps the file aside`);
+    }
+    return [];
+  }
+  // Kept aside rather than overwritten, so a damaged file can still be looked at. If it cannot be
+  // moved, nothing new is written over it.
+  const aside = `${target}.unreadable-${Date.now()}`;
+  try {
+    await fs.rename(target, aside);
+  } catch (error) {
+    logWarn(`session ${id}: steps for the person are unreadable and could not be kept aside (${(error as NodeJS.ErrnoException).code ?? 'error'}); not writing over them`);
+    throw new Error('The saved steps for the person are damaged and could not be kept aside, so no new step was written.');
+  }
+  unreadableUserRequests.delete(id);
+  logWarn(`session ${id}: steps for the person were unreadable; kept as ${path.basename(aside)} and started empty`);
+  return [];
+}
+
+async function writeUserRequestsFile(id: string, requests: UserRequest[]): Promise<void> {
+  const target = path.join(sessionDir(id), 'requests.json');
+  const temporary = `${target}.${randomUUID()}.tmp`;
+  try {
+    await fs.writeFile(temporary, JSON.stringify({ version: 1, requests }), 'utf8');
+    await fs.rename(temporary, target);
+  } finally {
+    await fs.rm(temporary, { force: true }).catch(() => undefined);
+  }
+}
+
+function newUserRequestId(): string {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  // randomInt draws without the bias a byte modulo 36 would have (CodeQL on #2049).
+  return `ur_${Array.from({ length: 12 }, () => alphabet[randomInt(alphabet.length)]).join('')}`;
+}
+
+export type FileUserRequestResult =
+  | { request: UserRequest; existing: boolean }
+  | { refused: 'open-limit' };
+
+/** Records a step for the person; the same open step asked again returns the first one. */
+export async function fileUserRequest(
+  id: string,
+  input: Omit<UserRequest, 'id' | 'state' | 'createdAt' | 'answeredAt'>,
+  now = Date.now()
+): Promise<FileUserRequestResult> {
+  const entry = await ensureOpen(id);
+  return enqueueSessionOperation(entry, 'user-request', async () => {
+    const requests = await readUserRequestsFile(id, true);
+    const existing = requests.find(request => request.state === 'open' && sameUserRequest(request, input));
+    if (existing) return { request: existing, existing: true };
+    if (requests.filter(request => request.state === 'open').length >= USER_REQUEST_LIMITS.open) return { refused: 'open-limit' };
+    const request = userRequestSchema.parse({ ...input, id: newUserRequestId(), state: 'open', createdAt: now });
+    const kept = [...requests, request];
+    // Answered steps make room, oldest first; open ones are never dropped (20 open < 60 kept).
+    while (kept.length > USER_REQUEST_LIMITS.kept) {
+      const oldest = kept.findIndex(row => row.state !== 'open');
+      if (oldest < 0) break;
+      kept.splice(oldest, 1);
+    }
+    await writeUserRequestsFile(id, kept);
+    return { request, existing: false };
+  });
+}
+
+/** The person's answer. Null when the step is unknown; an answered step keeps its first answer. */
+export async function answerUserRequest(
+  id: string, requestId: string, answer: 'done' | 'skipped', now = Date.now()
+): Promise<{ request: UserRequest; changed: boolean } | null> {
+  const entry = await ensureOpen(id);
+  return enqueueSessionOperation(entry, 'user-request', async () => {
+    const requests = await readUserRequestsFile(id, true);
+    const index = requests.findIndex(request => request.id === requestId);
+    const current = requests[index];
+    if (!current) return null;
+    if (current.state !== 'open') return { request: current, changed: false };
+    const request: UserRequest = { ...current, state: answer, answeredAt: now };
+    requests[index] = request;
+    await writeUserRequestsFile(id, requests);
+    return { request, changed: true };
+  });
+}
+
+export async function readSessionUserRequests(id: string): Promise<UserRequest[]> {
+  assertSessionId(id);
+  await open.get(id)?.queue;
+  return readUserRequestsFile(id);
 }
 
 /**

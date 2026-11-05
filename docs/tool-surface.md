@@ -12,7 +12,7 @@ composes that connector's own tools.
 
 | Connector | Purpose | Possible tools |
 | --- | --- | --- |
-| **Chat On Steroids Core** | Approved files, patches, terminal, generated images, task plans, workers | `read`, `view_image`, `find`, `apply_patch`, `save_image`, `exec_command`, `write_stdin`, `update_plan`, `agents`, `session_finish`, `exec` |
+| **Chat On Steroids Core** | Approved files, patches, terminal, generated images, task plans, workers | `read`, `view_image`, `find`, `apply_patch`, `save_image`, `exec_command`, `write_stdin`, `ask_user_to_run`, `user_request_status`, `update_plan`, `agents`, `session_finish`, `exec` |
 | **Chat On Steroids Desktop** | Browser tabs through the companion (all platforms); screen, windows, mouse/keyboard and clipboard (Windows/macOS); opt-in GNOME Wayland read-only display screenshots (Linux) | `browser_tabs`, `browser_snapshot`, `browser_screenshot`, `browser_navigate`, `browser_action`, `browser_evaluate`, `browser_console`, `browser_network`; Windows: `list_windows`, `get_window`, `list_apps`, `get_window_state`, `launch_app`, `click`, `press_key`, `type_text`, `scroll`, `set_value`, `drag`, `perform_secondary_action`, `activate_window`, `read_clipboard`, `write_clipboard`; macOS: `observe`, `computer`; Linux opt-in: `linux_observe` (screenshot only); `exec` |
 | **Chat On Steroids Plugins** | External MCP tools the user enabled in Settings | Each enabled tool under its own schema, plus `exec` |
 
@@ -25,7 +25,7 @@ Windows or macOS. Linux GNOME screenshots require an independent default-off opt
 not silently widened.
 
 With fresh defaults, Core advertises `read`, `view_image`, `apply_patch`, `save_image`,
-`exec_command`, `write_stdin`, `update_plan`, `agents` and `exec`. `session_finish` appears while
+`exec_command`, `write_stdin`, `ask_user_to_run`, `user_request_status`, `update_plan`, `agents` and `exec`. `session_finish` appears while
 Session finish is on.
 `find` is the search fallback for a snapshot where search is enabled and command execution is
 unavailable; `find` and the `exec_command`/`write_stdin` pair are never exposed together. Tool exposure is monotonic within a running connector instance, so a permission
@@ -107,6 +107,19 @@ Codex's collection-window behaviour so one interactive response is gathered whol
 Always available (recording is always on). Replaces the exact caller’s displayed progress plan; it does
 not execute queued work. Local history continues recording messages and real tool results for the
 app transcript and continuation. There is no model-facing recording search/read tool.
+
+### `ask_user_to_run` and `user_request_status`
+
+Offered with the command tools (also in Read-only mode over Run programs, since they run nothing).
+`ask_user_to_run` hands one step to the person: the exact command (up to 8 KB, shown in full), the
+folder (an approved folder or inside one; defaults like `exec_command`), a one-line purpose, the
+files it should leave (at most 10) and constraints. The app records it in that chat, shows it as a
+card with Copy, Mark as done and Skip, and returns an id at once. It never runs the command. The
+same open command and folder returns the existing id; a chat holds at most 20 open steps.
+`user_request_status` reports open, done or skipped, and for each expected file whether it exists
+with its size and time; nothing is read. Only the person marks a step done. The description asks
+the model never to use it for an action it declined or that was refused for safety; the app cannot
+enforce that.
 
 Compact & Resume is app/browser orchestration. There is no model-visible `save_handoff` or
 `resume_session` tool.
