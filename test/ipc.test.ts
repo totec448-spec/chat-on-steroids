@@ -2194,6 +2194,27 @@ describe('session IPC contracts', () => {
     }
   });
 
+  // CodeRabbit on #2079: the app's record of a chat's latest automatic message goes with the chat.
+  it("removes a deleted chat's own-sent record and keeps other chats' records", async () => {
+    const outbox = await import('../src/main/session/input.js');
+    const conversationId = 'cccccccc-1111-2222-3333-444444444444', other = 'dddddddd-1111-2222-3333-444444444444';
+    const session = await createSession({ title: 'own-sent then deleted', conversationId });
+    await writeDurableNow('own-sent-receipts', [
+      { conversationId, text: 'Scheduled: the person\'s own words', messageId: 'deleted-chat-message', at: Date.now() },
+      { conversationId: other, text: 'Continue the task', messageId: 'other-chat-message', at: Date.now() }
+    ]);
+    outbox.resetInputForTests();
+    expect(await outbox.ownSentResidue(conversationId)).toHaveLength(1);
+    const deleted = (await handlers.get('sessions:delete')!(null, { id: session.id })) as any;
+    expect(deleted.ok, deleted.error).toBe(true);
+    expect(await outbox.ownSentResidue(conversationId)).toEqual([]);
+    expect(await outbox.ownSentResidue(other)).toEqual([{ text: 'Continue the task', messageId: 'other-chat-message' }]);
+    // Saved that way: a restart does not bring it back.
+    await flushDurable();
+    outbox.resetInputForTests();
+    expect(await outbox.ownSentResidue(conversationId)).toEqual([]);
+  });
+
   it('releases a block when the row that carries its button is deleted', async () => {
     const { isChatBlocked, resetBlockedChatsForTests } = await import('../src/main/session/blocked-chats.js');
     resetBlockedChatsForTests();

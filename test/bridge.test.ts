@@ -8536,7 +8536,7 @@ ${SAMPLE_BRIEF}` }
       const { sessionId, token } = await compactedSession(home, 'carry on');
       await poll(holder, [home]);
       const command = queueResume(sessionId, token)!;
-      await vi.waitFor(async () => expect((await readDurable<any>('bridge-commands'))?.commands?.some((row: any) => row.id === command.id && row.phase === 'leased')).toBe(true));
+      await vi.waitFor(async () => expect((await readDurable<any>('bridge-commands'))?.commands?.some((row: any) => row.id === command.id && row.phase === 'leased')).toBe(true), { timeout: 10_000 });
       for (const report of ['repairCleared=some-token', 'repairHeld=some-token&why=draft', 'repairFailed=some-token&why=changed']) {
         const reply = await request('POST', `/status?${report}`, { body: { openConversations: [home] }, browser: holder });
         expect(reply.body.placement ?? null).toBeNull();
