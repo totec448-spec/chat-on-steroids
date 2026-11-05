@@ -4154,3 +4154,28 @@ it("asks again at Send for a ready Goal message whose slot hold ran out while it
     await saveConfig(defaultConfig());
   }
 });
+
+// #2074: the texts a page may treat as this app's own leftover in the message box.
+it("lists only the app's own automatic messages ChatGPT received, never the person's, as message-box leftovers", async () => {
+  await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Own leftovers', conversationId });
+  const deliver = async (row: { id: string }, messageId: string) => {
+    expect(await input.claimBrowserInput(row.id, 'leftover-page', conversationId, true)).not.toBeNull();
+    expect(await input.authorizeBrowserInput(row.id, 'leftover-page', conversationId)).toBe(true);
+    expect(await input.acknowledgeBrowserInput(row.id, 'leftover-page', conversationId, messageId)).toBe(true);
+  };
+  const scheduled = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Check the open issues and report',
+    scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+  await deliver(scheduled, 'scheduled-message');
+  const mine = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'My own question about the issues' });
+  await deliver(mine, 'my-message');
+  const waiting = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Not sent yet',
+    scheduled: { scheduleId: randomUUID(), dueAt: Date.now() + 60 * 60_000, late: false } });
+  const texts = await input.ownRepairResidueTexts(conversationId);
+  expect(texts.some(text => text.includes('Check the open issues and report'))).toBe(true);
+  expect(texts.some(text => text.includes('My own question'))).toBe(false);
+  expect(texts.some(text => text.includes('Not sent yet'))).toBe(false);
+  expect(await input.ownRepairResidueTexts(randomUUID())).toEqual([]);
+  await input.cancelInput(waiting.id);
+});
