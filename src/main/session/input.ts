@@ -2183,6 +2183,8 @@ function withOwnSentLock<T>(work: () => Promise<T>): Promise<T> {
   return run;
 }
 let ownSentPruneTimer: NodeJS.Timeout | null = null;
+/** Receipts that could not be saved because the store was unreadable; added once it reads again (CodeRabbit on #2079). */
+let ownSentUnsaved: OwnSentReceipt[] = [];
 /** One shared read: two first callers must not each install their own snapshot (CodeRabbit on #2079). */
 let ownSentLoad: Promise<OwnSentStore> | null = null;
 function loadOwnSentStore(): Promise<OwnSentStore> {
@@ -2210,6 +2212,14 @@ function loadOwnSentStore(): Promise<OwnSentStore> {
         forgotten: valid(record?.forgotten, ownSentForgottenSchema)
       };
       ownSentStore = trimOwnSent(loaded);
+      // Sends whose receipt could not be saved while the store was unreadable, unless their chat was deleted since.
+      const late = ownSentUnsaved.filter(row => !ownSentStore!.forgotten.some(gone => gone.conversationId === row.conversationId));
+      ownSentUnsaved = [];
+      if (late.length) {
+        const chats = new Set(late.map(row => row.conversationId));
+        ownSentStore = trimOwnSent({ ...ownSentStore, receipts: [...ownSentStore.receipts.filter(row => !chats.has(row.conversationId)), ...late] });
+        damaged = true;
+      }
       // Expired, damaged or rejected text leaves the disk when the store is read, not only on the next
       // send: whatever differs from the cleaned store is rewritten (CodeRabbit on #2079).
       if (damaged || (saved !== null && JSON.stringify(saved) !== JSON.stringify({ version: 1, ...ownSentStore })))
@@ -2244,15 +2254,20 @@ async function rememberOwnSent(entry: InputEntry, current: InputEntry[], convers
   const text = entry.deliveryText ?? entry.text;
   if (automaticSendKind(entry) === null || entry.images?.length || entry.attachments?.length || entry.companionInputId ||
       current.some(row => row.companionInputId === entry.id) || messageId.startsWith('input:') || text.length > OWN_SENT_TEXT_MAX) return;
-  // An unreadable store never fails the acknowledgement it rides on; the send just is not recorded.
+  // An unreadable store never fails the acknowledgement it rides on; the receipt waits in memory and is
+  // added once the store reads again.
+  const receipt = { conversationId, text, messageId, at: Date.now() };
   await withOwnSentLock(async () => {
     const store = await loadOwnSentStore();
     // A chat deleted meanwhile stays forgotten, even when its send is acknowledged late (CodeRabbit on #2079).
     if (store.forgotten.some(row => row.conversationId === conversationId)) return;
     ownSentStore = trimOwnSent({ ...store, receipts: [...store.receipts.filter(row => row.conversationId !== conversationId),
-      { conversationId, text, messageId, at: Date.now() }] });
+      receipt] });
     writeDurableSoon(OWN_SENT_STATE, { version: 1, ...ownSentStore });
-  }).catch((error: Error) => logWarn(`input ${entry.id}: its own-sent record was not saved (${error.message})`));
+  }).catch((error: Error) => {
+    logWarn(`input ${entry.id}: its own-sent record waits until the store can be read (${error.message})`);
+    ownSentUnsaved = [...ownSentUnsaved.filter(row => row.conversationId !== conversationId), receipt].slice(-OWN_SENT_RECEIPTS_MAX);
+  });
 }
 /**
  * A deleted chat's receipt goes with it (CodeRabbit on #2079): a scheduled run's text can be the
@@ -2262,6 +2277,8 @@ async function rememberOwnSent(entry: InputEntry, current: InputEntry[], convers
 export async function forgetOwnSent(conversationIds: readonly string[], now = Date.now()): Promise<void> {
   const ids = new Set(conversationIds.filter(Boolean));
   if (!ids.size) return;
+  // A receipt still waiting for an unreadable store goes too, at once.
+  ownSentUnsaved = ownSentUnsaved.filter(row => !ids.has(row.conversationId));
   await withOwnSentLock(async () => {
     const store = await loadOwnSentStore();
     const next = trimOwnSent({
@@ -2600,7 +2617,7 @@ export function offerToolInput(sessionId: string | null | undefined, conversatio
 }
 
 export function resetInputForTests(): void {
-  ownSentStore = null; ownSentLoad = null; ownSentChain = Promise.resolve();
+  ownSentStore = null; ownSentLoad = null; ownSentChain = Promise.resolve(); ownSentUnsaved = [];
   if (ownSentPruneTimer) { clearInterval(ownSentPruneTimer); ownSentPruneTimer = null; } entries = null; chain = Promise.resolve(); offered.clear(); decisionWaiters.clear(); declinedRotations.clear(); slotWaits.clear(); }
 
 export async function pausedBrowserHelpers(): Promise<Array<{ id: string; sourceSessionId: string }>> {
