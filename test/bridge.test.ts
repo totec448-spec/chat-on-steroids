@@ -8528,6 +8528,21 @@ ${SAMPLE_BRIEF}` }
       expect((await poll(other, [])).placement).toBeNull();
       expect((await poll(holder, [home])).placement).toMatchObject({ id: command.id, homeConversationId: home, active: true });
     });
+
+    // CodeRabbit on #2079: a repair report's reply is not read, so it must not spend a placement.
+    it('keeps a placement for the next poll when the browser only reports a repair', async () => {
+      await pair();
+      const home = 'c0c0c0c0-1111-4222-8333-000000000b04';
+      const { sessionId, token } = await compactedSession(home, 'carry on');
+      await poll(holder, [home]);
+      const command = queueResume(sessionId, token)!;
+      await vi.waitFor(async () => expect((await readDurable<any>('bridge-commands'))?.commands?.some((row: any) => row.id === command.id && row.phase === 'leased')).toBe(true));
+      for (const report of ['repairCleared=some-token', 'repairHeld=some-token&why=draft', 'repairFailed=some-token&why=changed']) {
+        const reply = await request('POST', `/status?${report}`, { body: { openConversations: [home] }, browser: holder });
+        expect(reply.body.placement ?? null).toBeNull();
+      }
+      expect((await poll(holder, [home])).placement).toMatchObject({ id: command.id, homeConversationId: home, active: true });
+    });
   });
 
   it('never issues a second open while the handed-out browser tab is still hydrating', async () => {
