@@ -41,6 +41,7 @@ import { createSidebarOrder, SIDEBAR_PROJECT_SCOPE } from './sidebar-order.js';
 import { dateSections, type DateSection } from './date-sections.js';
 import { createSidebarPins, pinnedSortScope } from './sidebar-pins.js';
 import { createComposerDrafts } from './composer-drafts.js';
+import { createSelectedTabFollow } from './selected-tab-follow.js';
 import { createSidebarCompletionState } from './sidebar-completion.js';
 import { toolResultText } from './tool-result.js';
 import { renderEditCards } from './tool-artifacts.js';
@@ -1621,6 +1622,7 @@ async function deleteSession(id: string): Promise<void> {
   sessionTotal = Math.max(0, sessionTotal - 1);
   if (selectedId === id) {
     selectedId = null;
+    requestSelectedTabFollow(null);
     events = [];
     totalEvents = 0;
     detailFor = null;
@@ -1646,6 +1648,12 @@ function mergeSessionRows(rows: SessionSummary[]): void {
   const merged = new Map(sessions.map((entry) => [entry.id, entry]));
   for (const entry of rows) merged.set(entry.id, entry);
   sessions = sortSessionRows([...merged.values()]);
+  selectedTabFollow?.observe(selectedId === null ? undefined : merged.get(selectedId));
+}
+
+let selectedTabFollow: ReturnType<typeof createSelectedTabFollow> | null = null;
+function requestSelectedTabFollow(id: string | null): void {
+  selectedTabFollow?.select(id === null ? null : sessions.find(row => row.id === id) ?? { id, conversationId: null, origin: null });
 }
 
 /**
@@ -1695,10 +1703,12 @@ async function loadSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
     selectedId = null;
     detailFor = null;
     detailCursor = null;
+    requestSelectedTabFollow(null);
   }
   paintSessions();
   chatSearch?.refresh();
   const row = selectedId === null ? undefined : sessions.find(entry => entry.id === selectedId);
+  selectedTabFollow?.observe(row);
   if (detail === 'reread' || selectedId === null || detailFor !== selectedId || changed.all || changed.ids.has(selectedId) ||
       row?.updatedAt !== detailStamp?.updatedAt || row?.events !== detailStamp?.events) await loadDetail();
   else void refreshSessionControls();
@@ -8785,6 +8795,7 @@ export function chatApply(state: AppState, previous?: Config): void {
   const { config, bridge } = state;
   applyRouteSettling(state.status.routeSettlingUntil ?? 0);
   if (bridgePresent !== bridge.present) { bridgePresent = bridge.present; paintPendingInputs(); }
+  selectedTabFollow?.observe(sessions.find(row => row.id === selectedId));
   if (sendCheckConfigured !== !!config.ui.sendCheckUrl) { sendCheckConfigured = !!config.ui.sendCheckUrl; paintPendingInputs(); }
   if (visible && selectedId) void refreshSessionControls();
   applyChatModels(config, previous);
@@ -9666,7 +9677,7 @@ function selectSession(id: string): void {
     paintDetail(false);
     paintHandoff();
     // With Background chats on, the chat's tab becomes the selected one in that window (#1249).
-    void api.followSessionTab?.(id)?.catch(() => undefined);
+    requestSelectedTabFollow(id);
   }
   void loadDetail();
   void refreshInputQueue();
@@ -9680,6 +9691,7 @@ function selectNewChat(projectId: string | null = null, branch: typeof newChatBr
   inputQueueGeneration++;
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   newChatSelected = true; selectedId = null; selectedProjectId = projectId; detailFor = null; detailCursor = null;
+  requestSelectedTabFollow(null);
   refreshBackgroundProcesses();
   sendAnchor = null; readingAfterSend = false; readerAtEnd = true;
   if (projectId) expandedProjects.add(projectId);
@@ -9697,6 +9709,7 @@ function selectNewChat(projectId: string | null = null, branch: typeof newChatBr
 }
 
 export function initChat(next: Deps): void {
+  selectedTabFollow = createSelectedTabFollow(id => api.followSessionTab?.(id));
   sidebarCompletion = createSidebarCompletionState();
   sidebarPins = createSidebarPins();
   sidebarOrder = createSidebarOrder($('sessionList'), () => [

@@ -2481,7 +2481,7 @@ it('follows only the newest chat selection when an earlier lookup finishes last 
   const store = await import('../src/main/session/store.js');
   const first = await createSession({ title: 'first', conversationId: 'aaaaaaaa-1111-4222-8333-444444444444' });
   const second = await createSession({ title: 'second', conversationId: 'bbbbbbbb-1111-4222-8333-444444444444' });
-  const followed = vi.spyOn(bridge, 'followChatInBackground').mockImplementation(() => undefined);
+  const followed = vi.spyOn(bridge, 'followChatInBackground').mockImplementation(() => true);
   const lookup = store.getSession;
   let releaseFirst: () => void = () => undefined;
   const firstHeld = new Promise<void>(resolve => { releaseFirst = resolve; });
@@ -2495,8 +2495,64 @@ it('follows only the newest chat selection when an earlier lookup finishes last 
     expect(later.ok, later.error).toBe(true);
     releaseFirst();
     expect(((await earlier) as any).ok).toBe(true);
-    expect(followed.mock.calls).toEqual([['bbbbbbbb-1111-4222-8333-444444444444']]);
+    expect(followed.mock.calls).toEqual([[null], [null], ['bbbbbbbb-1111-4222-8333-444444444444']]);
   } finally { slow.mockRestore(); followed.mockRestore(); }
+});
+
+it.each([false, true])('reports browser tab-follow acceptance (%s) instead of acknowledging a rejected follow', async accepted => {
+  const bridge = await import('../src/main/bridge.js');
+  const session = await createSession({ title: 'selected', conversationId: 'aaaaaaaa-1111-4222-8333-444444444444' });
+  const follow = vi.spyOn(bridge, 'followChatInBackground').mockReturnValue(accepted);
+  try {
+    expect(await handlers.get('sessions:followTab')!(null, { id: session.id })).toEqual({ ok: true, data: accepted });
+  } finally { follow.mockRestore(); }
+});
+
+it('keeps an unbound desktop selection pending instead of claiming its follow was accepted', async () => {
+  const session = await createSession({ title: 'opening', conversationId: null });
+  const logger = await import('../src/main/logger.js');
+  const info = vi.spyOn(logger, 'logInfo');
+  try {
+    expect(await handlers.get('sessions:followTab')!(null, { id: session.id })).toEqual({ ok: true, data: false });
+    expect(info).toHaveBeenCalledWith('browser follow: selected chat has no conversation binding; follow stays pending for retry');
+  } finally { info.mockRestore(); }
+});
+
+it('cancels an already queued tab follow when the user selects New Chat', async () => {
+  const bridge = await import('../src/main/bridge.js');
+  const first = await createSession({ title: 'first', conversationId: 'aaaaaaaa-1111-4222-8333-444444444444' });
+  const followed = vi.spyOn(bridge, 'followChatInBackground').mockImplementation(() => true);
+  try {
+    const initial = await handlers.get('sessions:followTab')!(null, { id: first.id }) as any;
+    const clear = await handlers.get('sessions:followTab')!(null, { id: null }) as any;
+    expect(initial.ok, initial.error).toBe(true);
+    expect(clear.ok, clear.error).toBe(true);
+    expect(followed.mock.calls).toEqual([
+      [null], ['aaaaaaaa-1111-4222-8333-444444444444'], [null]
+    ]);
+  } finally { followed.mockRestore(); }
+});
+
+it('discards a slow tab lookup if New Chat is selected before the lookup resolves', async () => {
+  const bridge = await import('../src/main/bridge.js');
+  const store = await import('../src/main/session/store.js');
+  const first = await createSession({ title: 'first', conversationId: 'aaaaaaaa-1111-4222-8333-444444444444' });
+  const followed = vi.spyOn(bridge, 'followChatInBackground').mockImplementation(() => true);
+  const lookup = store.getSession;
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const slow = vi.spyOn(store, 'getSession').mockImplementation(async (id, ...rest) => {
+    if (id === first.id) await held;
+    return lookup(id, ...rest);
+  });
+  try {
+    const earlier = handlers.get('sessions:followTab')!(null, { id: first.id });
+    const later = await handlers.get('sessions:followTab')!(null, { id: null }) as any;
+    expect(later.ok, later.error).toBe(true);
+    release();
+    expect(((await earlier) as any).ok).toBe(true);
+    expect(followed.mock.calls).toEqual([[null], [null]]);
+  } finally { slow.mockRestore(); followed.mockRestore(); release(); }
 });
 
 it('saves this computer\'s connector suffix normalized, refuses an invalid one, and keeps a newer one through an older form', async () => {

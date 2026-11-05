@@ -18666,15 +18666,51 @@ describe('selecting a chat in the app selects its background tab (#1249)', () =>
     } finally { await close(socket); }
   });
 
+  it('withdraws a queued tab follow when the selected chat becomes New Chat', async () => {
+    await pair();
+    await background(true);
+    const socket = await connect();
+    try {
+      await poll(BROWSER_B, [CHAT]);
+      followChatInBackground(CHAT);
+      followChatInBackground(null);
+      expect((await poll(BROWSER_B, [CHAT])).follow).toBeUndefined();
+      followChatInBackground(CHAT);
+      expect((await poll(BROWSER_B, [CHAT])).follow).toBe(CHAT);
+    } finally { await close(socket); }
+  });
+
   it('asks for nothing with Background chats off', async () => {
     await pair();
     await background(false);
     const socket = await connect();
     try {
       await poll(BROWSER_B, [CHAT]);
-      followChatInBackground(CHAT);
+      const logger = await import('../src/main/logger.js');
+      const info = vi.spyOn(logger, 'logInfo');
+      try {
+        followChatInBackground(CHAT);
+        expect(info).toHaveBeenCalledWith('browser follow: skipped, background chats are disabled');
+      } finally { info.mockRestore(); }
       expect((await poll(BROWSER_B, [CHAT])).follow).toBeUndefined();
     } finally { await close(socket); await background(true); }
+  });
+
+  it('reports a disconnected browser so the renderer can retain and retry its pending selection', async () => {
+    await pair();
+    await background(true);
+    const logger = await import('../src/main/logger.js');
+    const info = vi.spyOn(logger, 'logInfo');
+    try {
+      expect(followChatInBackground(CHAT)).toBe(false);
+      expect(info).toHaveBeenCalledWith('browser follow: deferred, no connected browser can reveal tabs; renderer may retry while pending');
+    } finally { info.mockRestore(); }
+    const socket = await connect();
+    try {
+      await poll(BROWSER_B, [CHAT]);
+      expect(followChatInBackground(CHAT)).toBe(true);
+      expect((await poll(BROWSER_B, [CHAT])).follow).toBe(CHAT);
+    } finally { await close(socket); }
   });
 
   it('lets an old selection lapse instead of acting on it later', async () => {
@@ -18705,7 +18741,12 @@ describe('selecting a chat in the app selects its background tab (#1249)', () =>
     const socket = await connect();
     try {
       await poll(BROWSER_B, [CHAT]);
-      followChatInBackground(CHAT);
+      const logger = await import('../src/main/logger.js');
+      const info = vi.spyOn(logger, 'logInfo');
+      try {
+        followChatInBackground(CHAT);
+        expect(info).toHaveBeenCalledWith('browser follow: skipped, background tabs are grouped');
+      } finally { info.mockRestore(); }
       expect((await poll(BROWSER_B, [CHAT])).follow).toBeUndefined();
     } finally { await close(socket); await placement('window'); }
   });
