@@ -9,6 +9,7 @@ import { prepareHandoff } from '../src/main/session/handoff.js';
 import { goalUserRequestsContext } from '../src/main/goal-user-requests.js';
 import { flushDurable, initDurableStore, resetDurableForTests } from '../src/main/durable.js';
 import { USER_REQUEST_LIMITS } from '../src/shared/user-requests.js';
+import { getLog } from '../src/main/logger.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
 // Steps handed to the person (#1695): kept per session beside its plan, answered only by the person.
@@ -63,6 +64,10 @@ it('keeps an unreadable steps file aside instead of overwriting it', async () =>
   // A reader outside the session queue only reads: it must not move a file a queued write may
   // just have replaced (CodeRabbit on #2049).
   expect(await readSessionUserRequests(session.id)).toEqual([]);
+  // The screen reads it every few hundred ms while a chat works: said once, not on every read.
+  expect(await readSessionUserRequests(session.id)).toEqual([]);
+  const warned = () => getLog().filter(entry => entry.message.includes(`session ${session.id}: steps for the person are unreadable`)).length;
+  expect(warned()).toBe(1);
   expect((await fs.readdir(folder)).filter(name => name.startsWith('requests.json.unreadable-'))).toHaveLength(0);
   expect(await fs.readFile(path.join(folder, 'requests.json'), 'utf8')).toBe('{"version":1,"requests":[{"id":');
   // The queued write keeps it aside before it writes anything new.
@@ -72,6 +77,11 @@ it('keeps an unreadable steps file aside instead of overwriting it', async () =>
   expect(aside).toHaveLength(1);
   expect(await fs.readFile(path.join(folder, aside[0]!), 'utf8')).toBe('{"version":1,"requests":[{"id":');
   expect((await readSessionUserRequests(session.id)).map(row => row.command)).toEqual(['fresh']);
+  // Damaged again later: said again, once.
+  await fs.writeFile(path.join(folder, 'requests.json'), 'broken', 'utf8');
+  expect(await readSessionUserRequests(session.id)).toEqual([]);
+  expect(await readSessionUserRequests(session.id)).toEqual([]);
+  expect(warned()).toBe(2);
 });
 
 it('reads a full steps file of the largest allowed steps', async () => {

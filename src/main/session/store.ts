@@ -3469,6 +3469,9 @@ const MAX_USER_REQUESTS_BYTES = 32 * 1024 * 1024;
  * valid file a queued write had just put in place, losing a step the tool already reported.
  * Outside the queue a damaged file reads as no steps and stays where it is.
  */
+/** Sessions whose damaged steps file was already reported; the screen reads it every few hundred ms. */
+const unreadableUserRequests = new Set<string>();
+
 async function readUserRequestsFile(id: string, quarantine = false): Promise<UserRequest[]> {
   const target = path.join(sessionDir(id), 'requests.json');
   let text: string;
@@ -3477,16 +3480,21 @@ async function readUserRequestsFile(id: string, quarantine = false): Promise<Use
     if (stat.size > MAX_USER_REQUESTS_BYTES) throw new SyntaxError('too large');
     text = await fs.readFile(target, 'utf8');
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') { unreadableUserRequests.delete(id); return []; }
     if (!(error instanceof SyntaxError)) throw error;
     text = '';
   }
   try {
     const parsed = userRequestsFileSchema.safeParse(JSON.parse(text));
-    if (parsed.success) return parsed.data.requests;
+    if (parsed.success) { unreadableUserRequests.delete(id); return parsed.data.requests; }
   } catch { /* unreadable: kept aside below */ }
   if (!quarantine) {
-    logWarn(`session ${id}: steps for the person are unreadable; showing none until the next change keeps the file aside`);
+    // Once per damaged file, not on every read (CodeRabbit on #2049).
+    if (!unreadableUserRequests.has(id)) {
+      if (unreadableUserRequests.size >= 256) unreadableUserRequests.delete(unreadableUserRequests.values().next().value!);
+      unreadableUserRequests.add(id);
+      logWarn(`session ${id}: steps for the person are unreadable; showing none until the next change keeps the file aside`);
+    }
     return [];
   }
   // Kept aside rather than overwritten, so a damaged file can still be looked at. If it cannot be
@@ -3498,6 +3506,7 @@ async function readUserRequestsFile(id: string, quarantine = false): Promise<Use
     logWarn(`session ${id}: steps for the person are unreadable and could not be kept aside (${(error as NodeJS.ErrnoException).code ?? 'error'}); not writing over them`);
     throw new Error('The saved steps for the person are damaged and could not be kept aside, so no new step was written.');
   }
+  unreadableUserRequests.delete(id);
   logWarn(`session ${id}: steps for the person were unreadable; kept as ${path.basename(aside)} and started empty`);
   return [];
 }
