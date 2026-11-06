@@ -2221,12 +2221,18 @@ current chat titles without creating a second task store. It opens the existing 
 calls the existing pause/resume/delete actions. `schedules:runNow` queues a manual run through
 the same input outbox (waiting for the active turn if necessary) without advancing the
 recurrence cursor; it durably records a recoverable manual-run intent (the exact input id, text and
-time) before enqueue. After restart, the runner reconciles that intent against the exact outbox row
-or replays the same id if no row exists. If enqueue rejects, it re-reads the outbox: keep the intent
-when the row exists or the read fails, but drop it after a successful read proves the row is absent,
-so a pre-commit refusal does not retry forever. The intent is cleared only after that reconciliation
-is saved. The due runner checks every pending outbox row for the schedule id, not only the latest
-`lastInputId`, so a newer manual run cannot hide an older queued run. A failed session read is
+time) before enqueue. Run now first checks the same outbox and returns `false` (already waiting)
+instead of queueing another identical message while any row for that schedule remains pending;
+the due runner checks every pending outbox row for the schedule id, not only the latest
+`lastInputId`, so a newer manual run cannot hide an older queued run. An interrupted manual intent
+is reconciled against its exact outbox row or replayed with the same id only after no different
+scheduled message is still pending. If enqueue rejects, it re-reads the outbox:
+keep the intent when the row exists or the read fails, but drop it after a successful read proves
+the row is absent, so a pre-commit refusal does not retry forever. The intent is cleared only after
+that reconciliation is saved. If saving a new intent fails, the prior schedule snapshot supersedes
+that failed durable generation before returning; a refused click cannot become a hidden enqueue on
+retry or shutdown. Failure logs use safe error codes only, never raw error messages, local paths or
+chat ids. A failed session read is
 logged and retains the schedule. A deleted chat cannot be targeted, and a
 confirmed orphan record is removed and logged. A chat whose session directory is still present
 but whose metadata cannot be read is retained; only a positively absent session directory is

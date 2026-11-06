@@ -53,15 +53,21 @@ export function initScheduled(controller: ScheduledController): { refresh: () =>
   let refreshWaiters: Array<{ after: number; resolve: () => void }> = [];
   let feedback = '';
   let feedbackError = false;
+  let actionFeedback: { message: string; error: boolean } | null = null;
+  let loadFeedback: { message: string; error: boolean } | null = null;
   let feedbackLoadError = false;
 
   const setStatus = (message: string, error = false, loadError = false): void => {
-    feedback = message;
-    feedbackError = error;
-    feedbackLoadError = loadError;
-    status.hidden = !message;
-    status.textContent = message ? t(message) : '';
-    status.classList.toggle('is-error', error);
+    const next = message ? { message, error } : null;
+    if (loadError) loadFeedback = next;
+    else actionFeedback = next;
+    const visible = actionFeedback ?? loadFeedback;
+    feedback = visible?.message ?? '';
+    feedbackError = visible?.error ?? false;
+    feedbackLoadError = loadFeedback !== null;
+    status.hidden = !feedback;
+    status.textContent = feedback ? t(feedback) : '';
+    status.classList.toggle('is-error', feedbackError);
   };
   description.textContent = t('Manage the messages scheduled in your chats.');
 
@@ -132,7 +138,7 @@ export function initScheduled(controller: ScheduledController): { refresh: () =>
       const result = await controller.list();
       if (!result.ok) throw new Error(result.error);
       const signature = JSON.stringify(result.data);
-      if (feedbackLoadError) setStatus('');
+      if (feedbackLoadError) setStatus('', false, true);
       if (signature !== recordsSignature) {
         records = result.data;
         recordsSignature = signature;
