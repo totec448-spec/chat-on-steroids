@@ -894,10 +894,10 @@
     "message": "待處理"
   },
   "popup_pipeline_call_fallback_many": {
-    "message": "應用程式無法依請求 ID 歸屬 $1 次呼叫——已改用 $2。"
+    "message": "應用程式無法依請求 ID 歸屬 $1 次呼叫。改用：$2。"
   },
   "popup_pipeline_call_fallback_one": {
-    "message": "應用程式無法依請求 ID 歸屬一次呼叫——已改用 $1。"
+    "message": "應用程式無法依請求 ID 歸屬一次呼叫。改用：$1。"
   },
   "popup_pipeline_delivery_blocked": {
     "message": "在應用程式連線且確認通訊協定相容之前，傳送會被封鎖。"
