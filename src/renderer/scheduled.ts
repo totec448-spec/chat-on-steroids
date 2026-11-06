@@ -29,9 +29,20 @@ const dateTime = (instant: number): string => new Intl.DateTimeFormat(currentLan
   month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
 }).format(new Date(instant));
 
+const SCHEDULED_MESSAGE_PREVIEW_CHARS = 320;
+
+/** Keep a broken or older IPC projection from putting an unbounded prompt into the DOM. */
+function messagePreview(text: string): string {
+  if (text.length <= SCHEDULED_MESSAGE_PREVIEW_CHARS) return text;
+  // Do not leave half of a UTF-16 surrogate pair at the end of the visible preview.
+  const preview = text.slice(0, SCHEDULED_MESSAGE_PREVIEW_CHARS - 1).replace(/[\uD800-\uDBFF]$/, '');
+  return `${preview}…`;
+}
+
 function repeatText(repeat: ScheduleRepeat): string {
   if (repeat.kind === 'hours') return repeat.every === 1 ? t('every hour') : tn('every {0} hour', 'every {0} hours', repeat.every);
-  const at = repeat.at;
+  const [hour, minute] = repeat.at.split(':').map(Number) as [number, number];
+  const at = new Date(2024, 0, 1, hour, minute).toLocaleTimeString(currentLanguage(), { hour: '2-digit', minute: '2-digit' });
   if (repeat.kind === 'daily') return t('every day at {0}', [at]);
   if (repeat.kind === 'weekdays') return t('every weekday at {0}', [at]);
   const weekday = new Intl.DateTimeFormat(currentLanguage(), { weekday: 'long' }).format(new Date(2024, 0, 7 + repeat.day));
@@ -88,39 +99,50 @@ export function initScheduled(controller: ScheduledController): { refresh: () =>
     (row?.querySelector<HTMLButtonElement>('button[data-scheduled-action]') ?? refreshButton).focus();
   };
   const applyDisabled = (): void => {
-    for (const action of list.querySelectorAll<HTMLButtonElement>('button[data-scheduled-action]')) action.disabled = busy;
+    for (const action of list.querySelectorAll<HTMLButtonElement>('button[data-scheduled-action]'))
+      action.disabled = busy || action.dataset.scheduledDisabled === 'true';
     refreshButton.disabled = busy;
     refreshButton.setAttribute('aria-busy', String(refreshInFlight !== null));
   };
 
   const render = (): void => {
+    const focus = focusedAction();
     list.replaceChildren();
     if (records.length === 0) {
       const empty = element('div', 'scheduled-index-empty');
       empty.append(element('i', 'ico ph ph-clock'), element('h2', '', t('No scheduled messages yet')),
         element('p', '', t('Open a chat and choose Schedule… from its menu to add one.')));
       list.append(empty);
+      applyDisabled();
+      restoreFocus(focus);
       return;
     }
     for (const record of records) {
       const row = element('article', 'scheduled-index-row');
       const title = element('h2', '', record.sessionTitle || t('Untitled chat'));
+      title.dir = 'auto';
       const meta = element('p', 'scheduled-index-meta', record.paused ? t('Paused') :
-        record.nextRunAt === null ? t('ended') : t('next {0}', [dateTime(record.nextRunAt)]));
+        record.retryDueAt !== undefined ? t('Retrying the run due {0}', [dateTime(record.retryDueAt)]) :
+          record.nextRunAt === null ? t('ended') : t('next {0}', [dateTime(record.nextRunAt)]));
+      if (record.missedDueAt !== undefined) meta.append(document.createTextNode(' · ' + t('missed {0}', [dateTime(record.missedDueAt)])));
       meta.append(document.createTextNode(' · ' + repeatText(record.repeat)));
       const body = element('div', 'scheduled-index-body');
-      body.append(title, meta, element('p', 'scheduled-index-message', record.text));
+      const message = element('p', 'scheduled-index-message', messagePreview(record.text));
+      message.dir = 'auto';
+      body.append(title, meta, message);
       const actions = element('div', 'scheduled-index-actions');
-      const action = (label: string, name: string, run: () => void, className = 'btn') => {
+      const action = (label: string, name: string, run: () => void, className = 'btn', unavailable = false) => {
         const node = button(label, run, className);
         node.dataset.scheduledAction = name;
         node.dataset.sessionId = record.sessionId;
+        node.dataset.scheduledDisabled = String(unavailable);
         return node;
       };
       actions.append(
         action(t('Open chat'), 'open', () => controller.openChat(record.sessionId)),
         action(record.paused ? t('Resume') : t('Pause'), 'pause', () => void mutate(() => controller.pause(record.sessionId, !record.paused))),
-        action(t('Run now'), 'run-now', () => void mutate(() => controller.runNow(record.sessionId), queued => queued ? 'Queued' : 'Skipped'), 'btn btn-solid'),
+        action(t('Run now'), 'run-now', () => void mutate(() => controller.runNow(record.sessionId), queued => queued ? 'Queued' : 'Skipped'),
+          'btn btn-solid', record.retryDueAt !== undefined),
         action(t('Delete'), 'delete', () => {
           if (window.confirm(t('Delete the schedule for {0}?', [record.sessionTitle || t('Untitled chat')]))) {
             void mutate(() => controller.delete(record.sessionId));
@@ -131,6 +153,7 @@ export function initScheduled(controller: ScheduledController): { refresh: () =>
       list.append(row);
     }
     applyDisabled();
+    restoreFocus(focus);
   };
 
   const readOnce = async (): Promise<void> => {
@@ -190,7 +213,9 @@ export function initScheduled(controller: ScheduledController): { refresh: () =>
     try {
       const result = await work();
       if (!result.ok) throw new Error(result.error);
-      if (!success && !feedbackError) setStatus('');
+      // A successful mutation clears an older action error. A load error remains visible
+      // until a successful read clears it, because setStatus keeps the two sources separate.
+      if (!success) setStatus('');
       await refreshAfterMutation();
       if (success) setStatus(success(result.data));
     } catch (error) {

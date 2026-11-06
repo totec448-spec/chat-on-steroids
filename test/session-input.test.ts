@@ -6,7 +6,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { flushDurable, initDurableStore, readDurable, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
 import {
-  fileSilenceInput, deferSilenceInput, revokeSilenceInputs, pendingQueuedPickups, inputBeforeGoal, inputArgs, acknowledgeBrowserInput, cancelInput, claimBrowserInput, completeBrowserDecision, enqueueInput,
+  fileSilenceInput, deferSilenceInput, revokeSilenceInputs, pendingQueuedPickups, inputBeforeGoal, inputArgs, acknowledgeBrowserInput, cancelInput, claimBrowserInput, completeBrowserDecision, deliveryProof, enqueueInput,
   failBrowserInput, listInputs, offerToolInput as offerToolInputBatch, acknowledgeToolInput, pendingBrowserInputs, requestBrowserDecision, resetInputForTests, configureInputDelivery,
   authorizeBrowserHelperRetry, pausedBrowserHelpers, hasEligibleToolInput, editQueuedInput, reorderQueuedInputs, setInputAutomation, authorizeBrowserInput, sessionInputPolicy, retryUnclaimedInput,
   noteInputStartupError, fileRotationInput, failBranchInput, BRANCH_ERRORS, holdInputForSendCheck, ownUnsentTexts, noteInputHeld, withdrawOwnContinuesAfterStop
@@ -18,6 +18,7 @@ import { noteChatOrigin } from '../src/main/session/recorder.js';
 import { stageInputAttachment } from '../src/main/session/input-attachments.js';
 import { listUsageSessions, turnHasMcpCall } from '../src/main/session/store.js';
 import { trackInFlight, emptyEvidence, type CallContext } from '../src/main/mcp/call-context.js';
+import { listSchedules, runDueSchedules, runScheduleNow, saveSchedule } from '../src/main/scheduled-runs.js';
 // Ownership tests inspect messages; batch-specific assertions use the complete delivery below.
 const offerToolInput = async (...args: Parameters<typeof offerToolInputBatch>) => (await offerToolInputBatch(...args)).messages;
 vi.mock('../src/main/session/recorder.js', () => ({ noteChatOrigin: vi.fn(async () => undefined) }));
@@ -93,6 +94,68 @@ afterEach(async () => {
 });
 
 describe('durable user input ownership', () => {
+  it('treats a missing durable outbox as an empty first-run queue', async () => {
+    expect(await listInputs()).toEqual([]);
+    expect(await enqueueInput(input())).toMatchObject({ state: 'queued' });
+  });
+
+  it('fails closed on durable outbox read errors and does not overwrite the unreadable file on enqueue', async () => {
+    const stateDir = path.join(directory, 'state');
+    await fs.mkdir(stateDir, { recursive: true });
+    const outbox = path.join(stateDir, 'session-input.json');
+    const original = '{"preserve":"unreadable outbox"}';
+    await fs.writeFile(outbox, original, 'utf8');
+    const failure = Object.assign(new Error(`read '${outbox}'`), { code: 'EIO' });
+    const read = vi.spyOn(fs, 'readFile').mockRejectedValue(failure);
+    try {
+      await expect(listInputs()).rejects.toThrow('Could not read session-input state');
+      await expect(enqueueInput(input())).rejects.toThrow('Could not read session-input state');
+    } finally {
+      read.mockRestore();
+    }
+    expect(await fs.readFile(outbox, 'utf8')).toBe(original);
+    expect(changed).not.toHaveBeenCalled();
+  });
+
+  it('fails closed on malformed durable outbox JSON and does not replace it on enqueue', async () => {
+    const stateDir = path.join(directory, 'state');
+    await fs.mkdir(stateDir, { recursive: true });
+    const outbox = path.join(stateDir, 'session-input.json');
+    const original = '{"unfinished":';
+    await fs.writeFile(outbox, original, 'utf8');
+
+    await expect(listInputs()).rejects.toThrow('Could not read session-input state');
+    await expect(enqueueInput(input())).rejects.toThrow('Could not read session-input state');
+
+    expect(await fs.readFile(outbox, 'utf8')).toBe(original);
+    expect(changed).not.toHaveBeenCalled();
+  });
+
+  it('fails closed on schema-invalid durable outbox data and does not replace it on enqueue', async () => {
+    const stateDir = path.join(directory, 'state');
+    await fs.mkdir(stateDir, { recursive: true });
+    const outbox = path.join(stateDir, 'session-input.json');
+    const original = '[{}]';
+    await fs.writeFile(outbox, original, 'utf8');
+
+    await expect(listInputs()).rejects.toThrow('The message outbox could not be read safely');
+    await expect(enqueueInput(input())).rejects.toThrow('The message outbox could not be read safely');
+
+    expect(await fs.readFile(outbox, 'utf8')).toBe(original);
+    expect(changed).not.toHaveBeenCalled();
+  });
+
+  it('can defer the renderer change event until an outer durable transaction completes', async () => {
+    const quiet = await enqueueInput(input(), undefined, { notify: false });
+    expect(quiet.state).toBe('queued');
+    expect(changed).not.toHaveBeenCalled();
+
+    await expect(cancelInput(quiet.id)).resolves.toBe(true);
+    changed.mockClear();
+    await enqueueInput(input());
+    expect(changed).toHaveBeenCalledOnce();
+  });
+
   it.each([
     ['held for Setup', 'Message queued. Finish Setup to send: Enter a tunnel ID that looks like tunnel_ followed by 32 hex characters.', 'queued'],
     ['held after a failed browser start', 'Message queued. Browser startup failed: Chrome refused startup', 'queued'],
@@ -256,6 +319,60 @@ describe('durable user input ownership', () => {
     now += 2_000;
     expect((await pendingBrowserInputs()).some(row => row.id === run.id)).toBe(false);
   });
+  it('starts the scheduled pickup timeout only after its after-turn boundary becomes eligible', async () => {
+    binding.activeTurnId = 'scheduled-busy-turn';
+    binding.end = { kind: 'turn_start', outcome: '', turnId: 'scheduled-busy-turn', time: now };
+    const scheduled = { scheduleId: randomUUID(), dueAt: now, late: false };
+    const row = await enqueueInput(input({ scheduled }));
+    expect(row).toMatchObject({ mode: 'after-turn', queuedTurn: { conversationId: binding.conversationId, turnId: 'scheduled-busy-turn' } });
+    expect(await pendingBrowserInputs()).toEqual([]);
+    now += 120_000;
+    expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'queued' });
+    expect((await listInputs()).find(entry => entry.id === row.id)).not.toHaveProperty('scheduledPickupSince');
+    expect((await listInputs()).find(entry => entry.id === row.id)).not.toHaveProperty('scheduledPickupMs');
+
+    binding.activeTurnId = null;
+    binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'scheduled-busy-turn', time: now };
+    expect((await pendingBrowserInputs()).some(entry => entry.id === row.id)).toBe(true);
+    now += 60_001;
+    expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'failed',
+      error: 'Not sent: the browser did not pick up this message within 60 seconds.' });
+  });
+  it('does not count send-check holds or app downtime in the scheduled pickup timeout and keeps clock writes quiet', async () => {
+    const row = await enqueueInput(input({ scheduled: { scheduleId: randomUUID(), dueAt: now, late: false } }));
+    changed.mockClear();
+    expect(await holdInputForSendCheck(row.id, 1, 'not yet', true)).toBe(true);
+    now += 20_000;
+    expect(await holdInputForSendCheck(row.id, 2, 'not yet', true)).toBe(true);
+    now += 20_000;
+    expect(await holdInputForSendCheck(row.id, 3, 'not yet', true)).toBe(true);
+    now += 20_000;
+    expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'queued' });
+    expect((await listInputs()).find(entry => entry.id === row.id)).not.toHaveProperty('scheduledPickupSince');
+    changed.mockClear();
+    now += 10_001;
+    expect((await pendingBrowserInputs()).some(entry => entry.id === row.id)).toBe(true);
+    expect(changed).not.toHaveBeenCalled();
+
+    now += 45_000;
+    const checkpointed = (await listInputs()).find(entry => entry.id === row.id)!;
+    expect(checkpointed.scheduledPickupMs).toBe(45_000);
+    expect(changed).not.toHaveBeenCalled();
+    resetInputForTests();
+    now += 60 * 60_000;
+    const afterRestart = (await listInputs()).find(entry => entry.id === row.id)!;
+    expect(afterRestart).toMatchObject({ state: 'queued', scheduledPickupMs: 45_000 });
+    expect(afterRestart.scheduledPickupSince).toBeUndefined();
+    expect(changed).not.toHaveBeenCalled();
+
+    expect((await pendingBrowserInputs()).some(entry => entry.id === row.id)).toBe(true);
+    now += 14_999;
+    expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'queued', scheduledPickupMs: 59_999 });
+    now += 1;
+    expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'failed',
+      error: 'Not sent: the browser did not pick up this message within 60 seconds.' });
+    expect(changed).toHaveBeenCalledOnce();
+  });
   it('lets a message typed just before the reported close through its claim and its final send check', async () => {
     binding.model = 'gpt-5.6-sol'; binding.finishEnabled = false;
     const typed = await enqueueInput(input());
@@ -405,6 +522,243 @@ describe('durable user input ownership', () => {
     expect(await failBrowserInput(direct.id, 'native-page', 'Native Send was withdrawn before its click.')).toBe(true);
     expect((await listInputs()).find(row => row.id === direct.id)).toMatchObject({ state: 'failed', error: 'Not sent: ChatGPT did not accept the message.' });
     expect(await pendingBrowserInputs()).toEqual([]);
+  });
+  it('never advertises an idle scheduled browser message as eligible tool input', async () => {
+    const scheduled = { scheduleId: randomUUID(), dueAt: now, late: false };
+    const row = await enqueueInput(input({ scheduled }));
+    expect(row).toMatchObject({ state: 'queued', mode: 'auto', transportIntent: 'browser', scheduled });
+    expect(await hasEligibleToolInput(sessionId)).toBe(false);
+    expect(await hasEligibleToolInput(sessionId, true)).toBe(false);
+    expect(await offerToolInput(sessionId, binding.conversationId, 'active-tool', now)).toEqual([]);
+    expect((await listInputs()).find(entry => entry.id === row.id)?.state).toBe('queued');
+  });
+  it('keeps a cancelled authorized manual schedule intent until a late ACK proves delivery', async () => {
+    await saveSchedule({ sessionId, text: 'Run the scheduled check', repeat: { kind: 'daily', at: '09:00' }, until: null }, now);
+    let enqueueCalls = 0;
+    const deps = {
+      session: async (id: string) => ({ id, conversationId: binding.conversationId, activeTurnId: binding.activeTurnId }),
+      enqueue: async (queued: InputArgs, options?: { notify?: boolean }) => {
+        enqueueCalls++;
+        await enqueueInput(queued, undefined, options);
+        throw new Error('response lost after durable outbox commit');
+      },
+      inputs: async () => (await listInputs()).map(row => ({ id: row.id, state: row.state, deliveredAt: row.deliveredAt,
+        scheduled: row.scheduled, sendAuthorizedAt: row.sendAuthorizedAt, deliveryProof: deliveryProof(row) })),
+      log: vi.fn(), changed: vi.fn()
+    };
+    await expect(runScheduleNow(sessionId, now, deps)).rejects.toThrow('response lost after durable outbox commit');
+    const [row] = await listInputs();
+    expect(row?.scheduled).toBeDefined();
+    expect(await claimBrowserInput(row!.id, 'native-page', binding.conversationId, true)).not.toBeNull();
+    expect(await authorizeBrowserInput(row!.id, 'native-page', binding.conversationId)).toBe(true);
+    expect(await cancelInput(row!.id)).toBe(true);
+    expect((await listInputs())[0]).toMatchObject({ state: 'cancelled', sendAuthorizedAt: expect.any(Number) });
+    expect(deliveryProof((await listInputs())[0]!)).toBe('unconfirmed');
+
+    // A fresh main-process cache must keep the exact manual intent while the authorized send is ambiguous.
+    resetInputForTests();
+    await runDueSchedules(now + 30_000, deps);
+    expect((await listSchedules())[0]?.manualRunIntent?.id).toBe(row!.id);
+    expect(await runScheduleNow(sessionId, now + 31_000, deps)).toBe(false);
+    expect(enqueueCalls).toBe(1);
+
+    // A late receipt settles that same id; recovery must not mint a replacement.
+    expect(await acknowledgeBrowserInput(row!.id, 'native-page', binding.conversationId, 'late-native-message')).toBe(true);
+    expect(deliveryProof((await listInputs())[0]!)).toBe('sent');
+    await runDueSchedules(now + 32_000, deps);
+    const [settled] = await listSchedules();
+    expect(settled?.manualRunIntent).toBeUndefined();
+    expect(settled?.lastInputId).toBe(row!.id);
+    expect(await listInputs()).toHaveLength(1);
+    expect(enqueueCalls).toBe(1);
+  });
+  it('allows a manual schedule retry only after the exact no-send proof is durable', async () => {
+    const schedule = await saveSchedule({ sessionId, text: 'Run the scheduled check', repeat: { kind: 'daily', at: '09:00' }, until: null }, now);
+    let enqueueCalls = 0;
+    const inputs = async () => (await listInputs()).map(row => ({ id: row.id, state: row.state, deliveredAt: row.deliveredAt,
+      scheduled: row.scheduled, sendAuthorizedAt: row.sendAuthorizedAt, deliveryProof: deliveryProof(row) }));
+    const deps = {
+      session: async (id: string) => ({ id, conversationId: binding.conversationId, activeTurnId: binding.activeTurnId }),
+      enqueue: async (queued: InputArgs, options?: { notify?: boolean }) => {
+        enqueueCalls++;
+        await enqueueInput(queued, undefined, options);
+        if (enqueueCalls === 1) throw new Error('response lost after durable outbox commit');
+      },
+      inputs, log: vi.fn(), changed: vi.fn()
+    };
+    await expect(runScheduleNow(sessionId, now, deps)).rejects.toThrow('response lost after durable outbox commit');
+    const [first] = await listInputs();
+    expect(first?.scheduled?.scheduleId).toBe(schedule.id);
+    expect(await claimBrowserInput(first!.id, 'native-page', binding.conversationId, true)).not.toBeNull();
+    expect(await authorizeBrowserInput(first!.id, 'native-page', binding.conversationId)).toBe(true);
+    expect(await failBrowserInput(first!.id, 'native-page', 'Native Send was withdrawn before its click.')).toBe(true);
+    expect((await listInputs()).find(row => row.id === first!.id)).toMatchObject({ state: 'queued', notTakenRetries: 1 });
+    expect(await claimBrowserInput(first!.id, 'native-page', binding.conversationId, true)).not.toBeNull();
+    expect(await authorizeBrowserInput(first!.id, 'native-page', binding.conversationId)).toBe(true);
+    expect(await failBrowserInput(first!.id, 'native-page', 'Native Send was withdrawn before its click.')).toBe(true);
+    const provenNoSend = (await listInputs()).find(row => row.id === first!.id)!;
+    expect(provenNoSend).toMatchObject({ state: 'failed', error: 'Not sent: ChatGPT did not accept the message.' });
+    expect(deliveryProof(provenNoSend)).toBe('not_sent');
+
+    expect(await runScheduleNow(sessionId, now + 1_000, deps)).toBe(true);
+    const rows = (await listInputs()).filter(row => row.scheduled?.scheduleId === schedule.id);
+    expect(rows).toHaveLength(2);
+    const retry = rows.find(row => row.id !== first!.id)!;
+    expect(retry).toMatchObject({ state: 'queued', scheduled: { scheduleId: schedule.id } });
+    expect(retry.id).not.toBe(first!.id);
+    expect((await listSchedules())[0]?.lastInputId).toBe(retry.id);
+    expect((await listSchedules())[0]?.manualRunIntent).toBeUndefined();
+    expect(enqueueCalls).toBe(2);
+  });
+  it('migrates a queued legacy Astra scheduled finish row to browser-only after-turn custody', async () => {
+    const scheduled = { scheduleId: randomUUID(), dueAt: now, late: false };
+    const id = randomUUID();
+    const legacy: InputEntry = { ...input({ id, mode: 'finish', scheduled }), requestedMode: 'after-turn',
+      delivery: 'tool', transportIntent: 'tool', toolTurnId: 'previous-turn',
+      queuedTurn: { conversationId: binding.conversationId, turnId: 'previous-turn' },
+      state: 'queued', owner: null, createdAt: now, conversationId: binding.conversationId };
+    await writeDurableNow('session-input', [legacy]);
+    resetInputForTests();
+    binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'previous-turn', time: now - 1 };
+
+    const migrated = (await listInputs()).find(row => row.id === id)!;
+    expect(migrated).toMatchObject({ id, state: 'queued', mode: 'after-turn', transportIntent: 'browser', scheduled,
+      queuedTurn: { conversationId: binding.conversationId, turnId: 'previous-turn' } });
+    expect(migrated.requestedMode).toBeUndefined();
+    expect(migrated.delivery).toBeUndefined();
+    expect(migrated.toolTurnId).toBeUndefined();
+    expect((await pendingBrowserInputs()).some(row => row.id === id)).toBe(true);
+    expect(await claimBrowserInput(id, 'native-page', binding.conversationId, true)).toMatchObject({ id, state: 'browser' });
+  });
+  it('keeps a scheduled row behind pending user input and releases it after that input is acknowledged', async () => {
+    const user = await enqueueInput(input({ text: 'User instruction first', dueAt: 0 }));
+    const scheduled = { scheduleId: randomUUID(), dueAt: now, late: false };
+    const run = await enqueueInput(input({ scheduled }));
+    expect((await listInputs()).filter(row => row.scheduled)).toHaveLength(1);
+    expect(await pendingBrowserInputs()).toEqual([expect.objectContaining({ id: user.id })]);
+    expect(await claimBrowserInput(run.id, 'native-page', binding.conversationId, true)).toBeNull();
+    expect(await claimBrowserInput(user.id, 'native-page', binding.conversationId, true)).not.toBeNull();
+    expect(await authorizeBrowserInput(user.id, 'native-page', binding.conversationId)).toBe(true);
+    expect(await acknowledgeBrowserInput(user.id, 'native-page', binding.conversationId, 'user-message-receipt')).toBe(true);
+    expect((await pendingBrowserInputs()).some(row => row.id === run.id)).toBe(true);
+    expect(await claimBrowserInput(run.id, 'native-page', binding.conversationId, true)).toMatchObject({ id: run.id, state: 'browser' });
+  });
+  it('lets authored input take priority over an already queued scheduled row', async () => {
+    const scheduled = { scheduleId: randomUUID(), dueAt: 0, late: false };
+    const run = await enqueueInput(input({ dueAt: 0, scheduled }));
+    const user = await enqueueInput(input({ text: 'A later authored instruction', dueAt: now }));
+    expect(user.state).toBe('queued');
+    expect(await pendingBrowserInputs()).toEqual([expect.objectContaining({ id: user.id })]);
+    expect(await claimBrowserInput(run.id, 'native-page', binding.conversationId, true)).toBeNull();
+    expect(await claimBrowserInput(user.id, 'native-page', binding.conversationId, true)).not.toBeNull();
+    expect(await authorizeBrowserInput(user.id, 'native-page', binding.conversationId)).toBe(true);
+    expect(await acknowledgeBrowserInput(user.id, 'native-page', binding.conversationId, 'later-user-receipt')).toBe(true);
+    expect((await pendingBrowserInputs()).some(entry => entry.id === run.id)).toBe(true);
+    expect(await claimBrowserInput(run.id, 'native-page', binding.conversationId, true)).toMatchObject({ id: run.id, state: 'browser' });
+  });
+  it('releases a scheduled browser claim when an already queued user message becomes due before Send authorization', async () => {
+    const user = await enqueueInput(input({ text: 'User work becomes due during scheduled claim', dueAt: now + 1_000 }));
+    const scheduled = await enqueueInput(input({ dueAt: 0, scheduled: { scheduleId: randomUUID(), dueAt: 0, late: false } }));
+    expect(await pendingBrowserInputs()).toEqual([expect.objectContaining({ id: scheduled.id })]);
+    expect(await claimBrowserInput(scheduled.id, 'native-page', binding.conversationId, true)).not.toBeNull();
+    await expect(enqueueInput(input({ text: 'New work after native claim', dueAt: now })))
+      .rejects.toThrow('One message is already awaiting delivery');
+    now += 1_001;
+    expect(await authorizeBrowserInput(scheduled.id, 'native-page', binding.conversationId)).toBe(false);
+    expect((await listInputs()).find(row => row.id === scheduled.id)).toMatchObject({ state: 'queued', owner: null });
+    expect(await pendingBrowserInputs()).toEqual([expect.objectContaining({ id: user.id })]);
+    expect(await claimBrowserInput(user.id, 'native-page', binding.conversationId, true)).not.toBeNull();
+    expect(await authorizeBrowserInput(user.id, 'native-page', binding.conversationId)).toBe(true);
+    expect(await acknowledgeBrowserInput(user.id, 'native-page', binding.conversationId, 'late-user-work-receipt')).toBe(true);
+    expect((await pendingBrowserInputs()).some(row => row.id === scheduled.id)).toBe(true);
+    expect(await claimBrowserInput(scheduled.id, 'native-page', binding.conversationId, true)).toMatchObject({ id: scheduled.id, state: 'browser' });
+  });
+  it('does not let a scheduled after-turn row block an ordinary finish tool head', async () => {
+    binding.activeTurnId = null;
+    binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'previous-turn', time: now - 1 };
+    const scheduled = await seedLegacyInput(input({ mode: 'after-turn', scheduled: { scheduleId: randomUUID(), dueAt: now, late: false } }));
+    const ordinary = await enqueueInput(input({ mode: 'finish', text: 'Ordinary finish checkpoint' }));
+    const offered = await offerToolInput(sessionId, binding.conversationId, 'active-tool', now, true);
+    expect(offered.some(row => row.text.includes('Ordinary finish checkpoint'))).toBe(true);
+    expect((await listInputs()).find(row => row.id === ordinary.id)?.state).toBe('tool');
+    expect((await listInputs()).find(row => row.id === scheduled.id)?.state).toBe('queued');
+  });
+  it('repairs only a never-authorized legacy Astra scheduled browser claim after timeout', async () => {
+    const scheduled = { scheduleId: randomUUID(), dueAt: now, late: false };
+    const authorizedSchedule = { scheduleId: randomUUID(), dueAt: now, late: false };
+    const id = randomUUID();
+    const authorizedId = randomUUID();
+    const legacyClaim: InputEntry = { ...input({ id, mode: 'finish', scheduled }), requestedMode: 'after-turn',
+      delivery: 'tool', transportIntent: 'tool', toolTurnId: 'legacy-turn', completedTurnId: 'legacy-turn',
+      queuedTurn: { conversationId: binding.conversationId, turnId: 'legacy-turn' },
+      state: 'browser', owner: 'legacy-page', createdAt: now, offeredAt: now, requiresAuthorization: true,
+      conversationId: binding.conversationId };
+    const authorized: InputEntry = { ...input({ id: authorizedId, sessionId: 'session-two', mode: 'finish', scheduled: authorizedSchedule }),
+      requestedMode: 'after-turn', delivery: 'tool', transportIntent: 'tool', toolTurnId: 'authorized-turn',
+      queuedTurn: { conversationId: 'conversation-b', turnId: 'authorized-turn' },
+      state: 'browser', owner: 'authorized-page', createdAt: now, offeredAt: now, requiresAuthorization: true,
+      sendAuthorizedAt: now, conversationId: 'conversation-b' };
+    await writeDurableNow('session-input', [legacyClaim, authorized]);
+    resetInputForTests();
+    now += 60_001;
+    binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'legacy-turn', time: now - 1 };
+
+    const rows = await listInputs();
+    const repaired = rows.find(row => row.id === id)!;
+    expect(repaired).toMatchObject({ id, state: 'queued', mode: 'after-turn', transportIntent: 'browser', scheduled,
+      queuedTurn: { conversationId: binding.conversationId, turnId: 'legacy-turn' } });
+    expect(repaired.delivery).toBeUndefined();
+    expect(repaired.toolTurnId).toBeUndefined();
+    const stillAmbiguous = rows.find(row => row.id === authorizedId)!;
+    expect(stillAmbiguous).toMatchObject({ state: 'browser', sendAuthorizedAt: now - 60_001, scheduled: authorizedSchedule });
+    expect(deliveryProof(stillAmbiguous)).toBe('unconfirmed');
+    expect(await pendingBrowserInputs()).toContainEqual(expect.objectContaining({ id }));
+    expect(await claimBrowserInput(id, 'native-page', binding.conversationId, true)).toMatchObject({ id, state: 'browser' });
+    expect(await claimBrowserInput(authorizedId, 'authorized-page', 'conversation-b', true)).toBeNull();
+  });
+  it('keeps scheduled delivery browser-only during exact bridge activity without requiring a missing turn boundary', async () => {
+    let activity: { possible: boolean; exact: boolean; turnId?: string } = { possible: true, exact: true, turnId: 'bridge-only-turn' };
+    configureInputDelivery({ applyAutomation: automate, changed, recoveryAllowed: () => binding.recoveryAllowed, activity: () => activity });
+    const scheduled = { scheduleId: randomUUID(), dueAt: now, late: false };
+    binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'previous-turn', time: now - 1 };
+    const row = await enqueueInput(input({ scheduled }));
+    expect(row).toMatchObject({ state: 'queued', mode: 'auto', transportIntent: 'browser' });
+    expect(row.queuedTurn).toBeUndefined();
+    expect(await pendingBrowserInputs()).toEqual([]);
+    now += 120_000;
+    expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'queued' });
+
+    // Restart and retry the same scheduled UUID while the exact bridge activity is still live.
+    resetInputForTests();
+    expect((await enqueueInput(input({ id: row.id, scheduled }))).id).toBe(row.id);
+    activity = { possible: false, exact: false };
+    expect((await pendingBrowserInputs()).some(entry => entry.id === row.id)).toBe(true);
+    expect(await claimBrowserInput(row.id, 'native-page', binding.conversationId, true)).toMatchObject({ id: row.id, state: 'browser' });
+  });
+  it('retries an authorized scheduled browser Send once after the page proves it was withdrawn before clicking', async () => {
+    const scheduled = { scheduleId: randomUUID(), dueAt: now, late: false };
+    const row = await seedLegacyInput(input({ mode: 'after-turn', scheduled }));
+    binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'previous-turn', time: now };
+    expect(await claimBrowserInput(row.id, 'native-page', binding.conversationId, true)).not.toBeNull();
+    expect(await authorizeBrowserInput(row.id, 'native-page', binding.conversationId)).toBe(true);
+    binding.activeTurnId = 'new-turn';
+    binding.end = { kind: 'turn_start', outcome: '', turnId: 'new-turn', time: now };
+    expect(await failBrowserInput(row.id, 'native-page', 'Native Send was withdrawn before its click.')).toBe(true);
+    expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({
+      id: row.id, state: 'queued', owner: null, mode: 'after-turn', notTakenRetries: 1
+    });
+    expect((await listInputs()).find(entry => entry.id === row.id)?.completedTurnId).toBeUndefined();
+    expect(await pendingBrowserInputs()).toEqual([]);
+    binding.activeTurnId = null;
+    binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'new-turn', time: now + 1 };
+    expect((await pendingBrowserInputs()).some(entry => entry.id === row.id)).toBe(true);
+    expect(await claimBrowserInput(row.id, 'native-page', binding.conversationId, true)).not.toBeNull();
+    expect(await authorizeBrowserInput(row.id, 'native-page', binding.conversationId)).toBe(true);
+    expect(await failBrowserInput(row.id, 'native-page', 'Native Send was withdrawn before its click.')).toBe(true);
+    expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({
+      state: 'failed', error: 'Not sent: ChatGPT did not accept the message.'
+    });
+    expect(deliveryProof((await listInputs()).find(entry => entry.id === row.id)!)).toBe('not_sent');
   });
   it('keeps an unauthorized claim as it is when the page reports a withdrawn Send', async () => {
     const direct = await enqueueInput(input());
@@ -2156,6 +2510,25 @@ describe('one silence delivery for a correction and its next checkpoint', () => 
     now = listenUntil;
     return { head, later, correction };
   }
+
+  it('keeps scheduled rows out of silence selection so an ordinary after-turn row owns the pickup', async () => {
+    binding.model = 'gpt-6-astra'; binding.finishEnabled = false; binding.activeTurnId = null;
+    binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'silent-turn', time: now + 1, seq: 13 };
+    const previousQuestions = binding.questions;
+    binding.questions = [{ kind: 'assistant_message', message: { text: 'Answer', truncated: false, chars: 6 },
+      final: true, seq: 12, time: now, source: 'extension', turnId: 'silent-turn' }];
+    try {
+      const scheduled = await seedLegacyInput(input({ mode: 'after-turn', scheduled: { scheduleId: randomUUID(), dueAt: now, late: false } }));
+      const ordinary = await seedLegacyInput(input({ mode: 'after-turn', text: 'Ordinary checkpoint' }));
+      const listenUntil = now + 300_000;
+      expect(await fileSilenceInput(sessionId, binding.conversationId, 'silent-turn', () => true, listenUntil)).toBe(true);
+      expect((await listInputs()).find(row => row.id === scheduled.id)?.silenceBoundary).toBeUndefined();
+      expect((await listInputs()).find(row => row.id === ordinary.id)?.silenceBoundary).toMatchObject({ turnId: 'silent-turn', listenUntil });
+      expect(await pendingQueuedPickups()).toEqual([expect.objectContaining({ inputId: ordinary.id, sourceTurnId: 'silent-turn' })]);
+    } finally {
+      binding.questions = previousQuestions;
+    }
+  });
 
   it('keeps the Core mention on a picture request that goes out together with a queued checkpoint', async () => {
     // The combined message also carries the next instruction, which may need the app.

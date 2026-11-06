@@ -35,6 +35,12 @@ interface PendingWrite {
   snapshot?: () => unknown;
   background?: boolean;
   work?: Promise<void>;
+  onPersisted?: () => void;
+}
+
+export interface DurableWriteOptions {
+  /** Called exactly once when this generation (or its retained retry) reaches disk. */
+  onPersisted?: () => void;
 }
 
 const pending = new Map<string, PendingWrite>();
@@ -79,6 +85,18 @@ export async function readDurable<T>(name: string, options: { strict?: boolean }
 
 function nextWrite(value: unknown): PendingWrite {
   return { generation: nextGeneration++, value };
+}
+
+/** Filesystem error messages include absolute user-data paths; logs retain only the safe code. */
+const SAFE_WRITE_FAILURE_CODES = new Set([
+  'EACCES', 'EADDRINUSE', 'EADDRNOTAVAIL', 'EAGAIN', 'EBUSY', 'ECONNREFUSED', 'ECONNRESET', 'EEXIST',
+  'EHOSTUNREACH', 'EINTR', 'EINVAL', 'EIO', 'EISDIR', 'EMFILE', 'ENAMETOOLONG', 'ENETUNREACH',
+  'ENFILE', 'ENODEV', 'ENOENT', 'ENOSPC', 'ENOTDIR', 'ENOTEMPTY', 'ENOTSOCK', 'EOPNOTSUPP', 'EPIPE',
+  'EPERM', 'EROFS', 'ETIMEDOUT', 'EXDEV'
+]);
+function safeWriteFailure(error: unknown): string {
+  const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+  return typeof code === 'string' && SAFE_WRITE_FAILURE_CODES.has(code) ? code : 'write failed';
 }
 
 function enqueue(name: string, write: () => Promise<void>): Promise<void> {
@@ -160,7 +178,7 @@ async function flushOne(name: string, slot: PendingWrite): Promise<void> {
       await fs.rename(tmp, target);
     }
   } catch (err) {
-    logWarn(`could not save ${name} state: ${(err as Error).message}`);
+    logWarn(`could not save ${name} state: ${safeWriteFailure(err)}`);
     throw err;
   }
 
@@ -171,6 +189,12 @@ async function flushOne(name: string, slot: PendingWrite): Promise<void> {
     pending.delete(name);
     retryAttempts.delete(name);
   }
+  // The caller's generation reached disk even when a newer generation superseded its
+  // pending slot in the meantime. Its receipt must not be lost in that race.
+  const onPersisted = slot.onPersisted;
+  delete slot.onPersisted;
+  try { onPersisted?.(); }
+  catch { logWarn(`could not notify after ${name} state save`); }
 }
 
 /** Queues a write. Repeated calls before the timer fires collapse into one. */
@@ -195,14 +219,14 @@ export function writeDurableSnapshotSoon(name: string, snapshot: () => unknown):
  * snapshot is correct for ordinary progress, but cannot close a crash window between two
  * files when recovery needs to know which side of the boundary the process reached.
  */
-export async function writeDurableNow(name: string, value: unknown): Promise<void> {
+export async function writeDurableNow(name: string, value: unknown, options: DurableWriteOptions = {}): Promise<void> {
   if (!root) return;
   const timer = timers.get(name);
   if (timer) {
     clearTimeout(timer);
     timers.delete(name);
   }
-  const slot = nextWrite(value);
+  const slot = { ...nextWrite(value), ...(options.onPersisted ? { onPersisted: options.onPersisted } : {}) };
   pending.set(name, slot);
   try {
     // Flush this exact generation even if a newer debounced value arrives while it waits in

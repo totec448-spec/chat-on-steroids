@@ -1519,6 +1519,7 @@
   "Try another name or description.": "Başka bir ad veya açıklama deneyin.",
   "Import a text skill file to add one.": "Eklemek için metin biçiminde bir beceri dosyasını içe aktarın.",
   "Retry": "Yeniden dene",
+  "Retrying the run due {0}": "{0} için planlanan çalışma yeniden deneniyor",
   "Check the error above, then try again.": "Yukarıdaki hatayı kontrol edip yeniden deneyin.",
   "After your first Chat On Steroids tool call, open the ChatGPT window created by CoS. A tool approval prompt may be waiting there, with choices such as Allow once, Always allow or Deny.": "İlk Chat On Steroids araç çağrınızdan sonra CoS'un açtığı ChatGPT penceresini açın. Orada Allow once, Always allow veya Deny seçenekleri içeren bir araç onayı istemi bekliyor olabilir.",
   "Goal, Loop and agents can appear stuck while ChatGPT is waiting for your decision. Review the requested action and choose in ChatGPT.": "ChatGPT kararınızı beklerken Hedef, Döngü ve ajanlar takılmış gibi görünebilir. İstenen işlemi inceleyip ChatGPT'de seçiminizi yapın.",
@@ -3428,6 +3429,7 @@
   "Scheduled": "Planlandı",
   "Scheduled · late, was due {0}": "Planlandı · gecikti, zamanı {0} idi",
   "This chat no longer exists.": "Bu sohbet artık yok.",
+  "This chat is not connected to a ChatGPT conversation yet.": "Bu sohbet henüz bir ChatGPT konuşmasına bağlı değil.",
   "Write the message to send.": "Gönderilecek mesajı yaz.",
   "Choose a schedule that runs at least once an hour apart.": "En az bir saat arayla çalışan bir zamanlama seç.",
   "Choose an end date in the future.": "Gelecekte bir bitiş tarihi seç.",
@@ -3910,5 +3912,9 @@
   "Delete the schedule for {0}?": "{0} için zamanlama silinsin mi?",
   "Could not load schedules": "Zamanlamalar yüklenemedi",
   "Operation failed": "İşlem başarısız",
-  "Manage the messages scheduled in your chats.": "Sohbetlerinizde zamanlanan mesajları yönetin."
+  "Manage the messages scheduled in your chats.": "Sohbetlerinizde zamanlanan mesajları yönetin.",
+  "The session exists but its metadata could not be read.": "Oturum mevcut, ancak meta verileri okunamadı.",
+  "Could not read scheduled-runs state": "Zamanlanmış çalıştırmaların durumu okunamadı.",
+  "The saved manual run id belongs to a different scheduled message.": "Kaydedilen manuel çalıştırma kimliği başka bir zamanlanmış iletiye ait.",
+  "The schedule operation failed. Check the local app logs for details.": "Zamanlama işlemi başarısız oldu. Ayrıntılar için uygulamanın yerel günlüklerini kontrol edin."
 }

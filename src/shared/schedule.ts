@@ -37,6 +37,10 @@ export interface ScheduledRunListItem {
   paused: boolean;
   createdAt: number;
   lastDueAt: number | null;
+  /** Most recent run missed while the app was closed or asleep; shown until a later run goes out. */
+  missedDueAt?: number;
+  /** An exact occurrence retained for retry after a transient outbox failure. */
+  retryDueAt?: number;
   catchUp?: boolean;
   /** Next future run from the time the list was read; null while paused or after the end. */
   nextRunAt: number | null;

@@ -39,7 +39,7 @@ import { paintWindowTheme } from './theme.js';
 import { usageOverview } from './session/usage.js';
 import { exportUsageCsv } from './session/usage-export.js';
 import { readProviderUsage } from './provider-usage.js';
-import { inputArgs, enqueueInput, listInputs, editQueuedInput, sendQueuedInputNow, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs, forgetOwnSent, type InputEntry } from './session/input.js';
+import { inputArgs, deliveryProof, enqueueInput, listInputs, editQueuedInput, sendQueuedInputNow, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs, forgetOwnSent, type InputEntry } from './session/input.js';
 import { draftOpeningMessage, onGoalChange, nativeGoalFailure } from './goal.js';
 import { cancelTaskRequest, runTaskRequest } from './task-request.js';
 import { randomUUID } from 'node:crypto';
@@ -706,13 +706,37 @@ async function buildState(): Promise<AppState> {
   };
 }
 
+const SCHEDULE_SAFE_ERRORS = new Set([
+  'The session exists but its metadata could not be read.',
+  'Could not read scheduled-runs state',
+  'The saved manual run id belongs to a different scheduled message.',
+  'These schedules were saved by a newer version of Chat On Steroids. Update the app to change them.',
+  'This chat is not connected to a ChatGPT conversation yet.',
+  'Write the message to send.',
+  'Choose a schedule that runs at least once an hour apart.',
+  'Choose an end date in the future.',
+  'There are too many scheduled chats. Remove one first.',
+  'This chat is not connected to a ChatGPT conversation yet.',
+  'This chat no longer exists.'
+]);
+
+/** Schedule IPC must not expose native filesystem errors or user-data paths to the renderer. */
+function scheduleIpcError(err: unknown): string {
+  if (err instanceof z.ZodError) return err.issues[0]?.message ?? 'Invalid input';
+  return err instanceof Error && SCHEDULE_SAFE_ERRORS.has(err.message)
+    ? err.message
+    : 'The schedule operation failed. Check the local app logs for details.';
+}
+
 /** Wraps a handler so a thrown error becomes a message the UI can show. */
 function handle<T>(channel: string, fn: (payload: unknown, event: IpcMainInvokeEvent) => Promise<T>): void {
   ipcMain.handle(channel, async (event, payload: unknown) => {
     try {
       return { ok: true as const, data: await fn(payload, event) };
     } catch (err) {
-      const message =
+      const message = channel.startsWith('schedules:')
+        ? scheduleIpcError(err)
+        :
         err instanceof SandboxError || err instanceof z.ZodError
           ? err instanceof z.ZodError
             ? (err.issues[0]?.message ?? 'Invalid input')
@@ -1388,38 +1412,46 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const request = z.object({ sessionId: scheduleSession, text: z.string().max(200_000), repeat: z.unknown(), until: z.number().int().nonnegative().nullable(),
       catchUp: z.boolean().optional() }).strict().parse(payload);
     const repeat = scheduleRepeatSchema.parse(request.repeat);
-    if (!(await getSessionOrNullIfMissing(request.sessionId))) throw new Error('This chat no longer exists.');
+    const session = await getSessionOrNullIfMissing(request.sessionId);
+    if (!session) throw new Error('This chat no longer exists.');
+    if (!session.conversationId) throw new Error('This chat is not connected to a ChatGPT conversation yet.');
     const saved = await saveSchedule({ sessionId: request.sessionId, text: request.text, repeat, until: request.until, catchUp: request.catchUp === true });
-    logInfo(`scheduled run: schedule saved (${repeat.kind}) for ${request.sessionId}`);
+    logInfo(`scheduled run: schedule saved (${repeat.kind})`);
     push('session:changed');
     return saved;
   });
   handle('schedules:pause', async payload => {
     const { sessionId, paused } = z.object({ sessionId: scheduleSession, paused: z.boolean() }).strict().parse(payload);
     const updated = await setSchedulePaused(sessionId, paused);
-    if (updated) logInfo(`scheduled run: ${paused ? 'paused' : 'resumed'} for ${sessionId}`);
+    if (updated) logInfo(`scheduled run: ${paused ? 'paused' : 'resumed'}`);
     push('session:changed');
     return updated;
   });
   handle('schedules:delete', async payload => {
     const { sessionId } = z.object({ sessionId: scheduleSession }).strict().parse(payload);
     const removed = await deleteSchedule(sessionId);
-    if (removed) logInfo(`scheduled run: schedule removed for ${sessionId}`);
+    if (removed) logInfo('scheduled run: schedule removed');
     push('session:changed');
     return removed;
   });
   handle('schedules:runNow', async payload => {
     const { sessionId } = z.object({ sessionId: scheduleSession }).strict().parse(payload);
+    const session = await getSessionOrNullIfMissing(sessionId);
+    if (session && !session.conversationId) throw new Error('This chat is not connected to a ChatGPT conversation yet.');
+    const changed = () => push('session:changed');
     const queued = await runScheduleNow(sessionId, Date.now(), {
       session: async id => {
         const summary = await getSessionOrNullIfMissing(id);
         return summary ? { id: summary.id, conversationId: summary.conversationId ?? null, activeTurnId: summary.activeTurnId ?? null } : null;
       },
-      enqueue: input => enqueueInput(input),
-      inputs: async () => (await listInputs()).map(({ id, state, scheduled }) => ({ id, state, scheduled })),
-      log: logInfo
+      enqueue: (input, options) => enqueueInput(input, undefined, options),
+      inputs: async () => (await listInputs()).map(row => ({
+        id: row.id, state: row.state, deliveredAt: row.deliveredAt, scheduled: row.scheduled,
+        sendAuthorizedAt: row.sendAuthorizedAt, deliveryProof: deliveryProof(row)
+      })),
+      log: logInfo,
+      changed
     });
-    if (queued) push('session:changed');
     return queued;
   });
   // Linking a project to a ChatGPT Project the account already has (#1756).

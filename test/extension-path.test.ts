@@ -2,21 +2,13 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { makeTempDir, removeTempDir } from './helpers.js';
-import type { ExtensionPathApp } from '../src/main/extension-path.js';
 
 let base: string | null = null;
 const originalResourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
 
-function packagedApp(userData: string, appPath: string): ExtensionPathApp {
-  return {
-    isPackaged: true,
-    getPath: name => name === 'userData' ? userData : '',
-    getAppPath: () => appPath
-  };
-}
-
 afterEach(async () => {
   vi.resetModules();
+  vi.doUnmock('electron');
   if (base) await removeTempDir(base);
   base = null;
   Object.defineProperty(process, 'resourcesPath', {
@@ -41,10 +33,16 @@ it('materializes a packaged extension into a stable per-user folder', async () =
     writable: true,
     value: resources
   });
-  const host = packagedApp(userData, path.join(base!, 'not-used'));
+  vi.doMock('electron', () => ({
+    app: {
+      isPackaged: true,
+      getPath: (name: string) => (name === 'userData' ? userData : ''),
+      getAppPath: () => path.join(base!, 'not-used')
+    }
+  }));
 
   const { extensionDir } = await import('../src/main/extension-path.js');
-  const first = extensionDir(host);
+  const first = extensionDir();
   expect(first).toBe(path.join(userData, 'extension'));
   expect(first).not.toContain('ephemeral-appimage-mount');
   expect(await fs.readFile(path.join(first!, 'background.js'), 'utf8')).toBe('current package');
@@ -54,14 +52,14 @@ it('materializes a packaged extension into a stable per-user folder', async () =
   // An app update refreshes files at the same Chrome-visible path rather than asking the user
   // to Load unpacked again from a new versioned directory.
   await fs.writeFile(path.join(bundled, 'background.js'), 'updated package');
-  expect(extensionDir(host)).toBe(first);
+  expect(extensionDir()).toBe(first);
   expect((await fs.stat(first!)).ino).toBe(publishedInode);
   expect(await fs.readFile(path.join(first!, 'background.js'), 'utf8')).toBe('updated package');
 
   // Once a complete stable copy exists, later package damage must not make the Finder/Chrome
   // path disappear. The source is used to refresh; the stable copy is what the user loaded.
   await fs.rm(path.join(bundled, 'manifest.json'));
-  expect(extensionDir(host)).toBe(first);
+  expect(extensionDir()).toBe(first);
   expect(await fs.readFile(path.join(first!, 'background.js'), 'utf8')).toBe('updated package');
 });
 
@@ -90,10 +88,16 @@ it('repairs a stale destination shape with a complete staged extension instead o
     writable: true,
     value: resources
   });
-  const host = packagedApp(userData, path.join(base!, 'not-used'));
+  vi.doMock('electron', () => ({
+    app: {
+      isPackaged: true,
+      getPath: (name: string) => (name === 'userData' ? userData : ''),
+      getAppPath: () => path.join(base!, 'not-used')
+    }
+  }));
 
   const { extensionDir } = await import('../src/main/extension-path.js');
-  expect(extensionDir(host)).toBe(stable);
+  expect(extensionDir()).toBe(stable);
   expect((await fs.stat(stable)).ino).toBe(publishedInode);
   expect(await fs.readFile(path.join(stable, 'background.js'), 'utf8')).toBe('new background');
   expect(await fs.readFile(path.join(stable, 'icons', 'icon128.png'), 'utf8')).toBe('new icon');
@@ -130,10 +134,16 @@ it('recovers an interrupted promotion from the valid old copy before trusting st
     writable: true,
     value: resources
   });
-  const host = packagedApp(userData, path.join(base!, 'not-used'));
+  vi.doMock('electron', () => ({
+    app: {
+      isPackaged: true,
+      getPath: (name: string) => (name === 'userData' ? userData : ''),
+      getAppPath: () => path.join(base!, 'not-used')
+    }
+  }));
 
   const { extensionDir } = await import('../src/main/extension-path.js');
-  expect(extensionDir(host)).toBe(stable);
+  expect(extensionDir()).toBe(stable);
   expect((await fs.stat(stable)).ino).toBe(publishedInode);
   expect(await fs.readFile(path.join(stable, 'background.js'), 'utf8')).toBe('last known good');
   expect(JSON.parse(await fs.readFile(path.join(stable, 'manifest.json'), 'utf8'))).toEqual({ version: '1.9.9' });
@@ -172,10 +182,16 @@ it('restores an interrupted in-place update even when the mixed published tree s
     writable: true,
     value: resources
   });
-  const host = packagedApp(userData, path.join(base!, 'not-used'));
+  vi.doMock('electron', () => ({
+    app: {
+      isPackaged: true,
+      getPath: (name: string) => (name === 'userData' ? userData : ''),
+      getAppPath: () => path.join(base!, 'not-used')
+    }
+  }));
 
   const { extensionDir } = await import('../src/main/extension-path.js');
-  expect(extensionDir(host)).toBe(stable);
+  expect(extensionDir()).toBe(stable);
   expect((await fs.stat(stable)).ino).toBe(publishedInode);
   // Recovery first restores the complete old copy, then this same startup safely applies the
   // complete bundled update. The important invariant is that neither step replaces the root.
@@ -194,14 +210,14 @@ it('offers a newer extension build without touching the folder until an idle ext
   await fs.writeFile(path.join(bundled, 'manifest.json'), JSON.stringify({ version: '9.9.9' }));
   await fs.writeFile(path.join(bundled, 'build-stamp.txt'), 'bbbbbbbbbbbb\n');
   Object.defineProperty(process, 'resourcesPath', { configurable: true, writable: true, value: resources });
-  const host = packagedApp(userData, base!);
+  vi.doMock('electron', () => ({ app: { isPackaged: true, getPath: (name: string) => (name === 'userData' ? userData : ''), getAppPath: () => base! } }));
   const { extensionUpdateOffer, prepareExtensionUpdate, materializedExtensionBuild } = await import('../src/main/extension-path.js');
-  expect(extensionUpdateOffer(null, host)).toBeNull(); // an unstamped check cannot be compared
-  expect(extensionUpdateOffer('bbbbbbbbbbbb', host)).toBeNull();
-  expect(extensionUpdateOffer('aaaaaaaaaaaa', host)).toEqual({ build: 'bbbbbbbbbbbb' });
+  expect(extensionUpdateOffer(null)).toBeNull(); // an unstamped checkout cannot be compared
+  expect(extensionUpdateOffer('bbbbbbbbbbbb')).toBeNull();
+  expect(extensionUpdateOffer('aaaaaaaaaaaa')).toEqual({ build: 'bbbbbbbbbbbb' });
   // Offering must not replace the folder a live service worker still runs from.
-  expect(materializedExtensionBuild(host)).toBeNull();
-  expect(prepareExtensionUpdate('bbbbbbbbbbbb', host)).toBeNull();
-  expect(prepareExtensionUpdate('aaaaaaaaaaaa', host)).toEqual({ build: 'bbbbbbbbbbbb', ready: true });
-  expect(materializedExtensionBuild(host)).toBe('bbbbbbbbbbbb');
+  expect(materializedExtensionBuild()).toBeNull();
+  expect(prepareExtensionUpdate('bbbbbbbbbbbb')).toBeNull();
+  expect(prepareExtensionUpdate('aaaaaaaaaaaa')).toEqual({ build: 'bbbbbbbbbbbb', ready: true });
+  expect(materializedExtensionBuild()).toBe('bbbbbbbbbbbb');
 });
