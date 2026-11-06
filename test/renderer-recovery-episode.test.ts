@@ -103,3 +103,23 @@ it('keeps a reload that ended late among the 50 newest steps (CodeRabbit on #206
   expect(episode.items.at(-1)).toMatchObject({ kind: 'reload', time: at(200) });
   expect(episode.since).toBe(at(13));
 });
+
+// ChatGPT's notice carries its own Retry button in its text; the app shows the notice without that
+// button's label, in the languages the transport classifier knows (2.1.51 polish pass).
+it('shows a ChatGPT notice without its trailing Retry button label', () => {
+  const notice = (minute: number, value: string) =>
+    ev({ kind: 'chat_error', time: at(minute), source: 'extension', recoverable: true, message: text(value) });
+  const episode = recoveryEpisode([
+    asked(0), notice(1, 'Message delivery timed out. Please try again. Retry'),
+    notice(2, 'Zeitüberschreitung bei der Übermittlung der Nachricht. Bitte versuche es erneut. Erneut versuchen'),
+    notice(3, 'A entrega da mensagem atingiu o tempo limite. Tente novamente. Tentar novamente'),
+    // Not a recoverable transport notice: its words stay exactly as ChatGPT wrote them.
+    ev({ kind: 'chat_error', time: at(4), source: 'extension', message: text('Something about Retry') })
+  ])!;
+  expect(episode.items.map(item => item.text)).toEqual([
+    'Message delivery timed out. Please try again.',
+    'Zeitüberschreitung bei der Übermittlung der Nachricht. Bitte versuche es erneut.',
+    'A entrega da mensagem atingiu o tempo limite. Tente novamente.',
+    'Something about Retry'
+  ]);
+});
