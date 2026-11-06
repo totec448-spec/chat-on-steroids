@@ -327,6 +327,122 @@ it('lists schedules with chat titles and Run now uses the ordinary outbox withou
   }
 });
 
+it('refuses to schedule an unbound local chat instead of silently losing every due occurrence', async () => {
+  const session = await createSession({ title: 'No ChatGPT conversation yet', conversationId: null });
+  const call = (name: string, payload?: unknown) => handlers.get(name)!(null, payload) as Promise<any>;
+  expect(await call('schedules:save', {
+    sessionId: session.id, text: 'Do not silently skip',
+    repeat: { kind: 'daily', at: '09:00' }, until: null
+  })).toEqual({ ok: false, error: 'This chat is not connected to a ChatGPT conversation yet.' });
+  expect(await call('schedules:get', { sessionId: session.id })).toEqual({ ok: true, data: null });
+  expect(await call('schedules:runNow', { sessionId: session.id }))
+    .toEqual({ ok: false, error: 'This chat is not connected to a ChatGPT conversation yet.' });
+});
+
+it('does not expose a local filesystem path to the Scheduled page when Run now persistence fails', async () => {
+  const input = await import('../src/main/session/input.js');
+  const original = await input.listInputs();
+  await writeDurableNow('session-input', []); input.resetInputForTests();
+  const session = await createSession({ conversationId: 'ipc-schedule-private-path', title: 'Private path check' });
+  const call = (name: string, payload?: unknown) => handlers.get(name)!(null, payload) as Promise<any>;
+  try {
+    await call('schedules:save', { sessionId: session.id, text: 'Check the queue', repeat: { kind: 'hours', every: 1 }, until: null });
+    const privatePath = path.join(dir, 'state', 'scheduled-runs.json');
+    const failure = Object.assign(new Error(`rename '${privatePath}.tmp' -> '${privatePath}'`), { code: 'EIO' });
+    const rename = vi.spyOn(fs, 'rename').mockRejectedValueOnce(failure);
+    const result = await call('schedules:runNow', { sessionId: session.id });
+    rename.mockRestore();
+
+    expect(result).toEqual({ ok: false, error: 'The schedule operation failed. Check the local app logs for details.' });
+    expect(JSON.stringify(result)).not.toContain(dir);
+    expect((await input.listInputs()).filter(row => row.sessionId === session.id)).toHaveLength(0);
+    expect(await call('schedules:get', { sessionId: session.id })).toMatchObject({ ok: true, data: { text: 'Check the queue' } });
+  } finally {
+    await call('schedules:delete', { sessionId: session.id });
+    await writeDurableNow('session-input', original); input.resetInputForTests();
+  }
+});
+
+it('keeps the translated scheduled-state read error at the IPC boundary without exposing its path', async () => {
+  const call = (name: string, payload?: unknown) => handlers.get(name)!(null, payload) as Promise<any>;
+  const privatePath = path.join(dir, 'state', 'scheduled-runs.json');
+  const failure = Object.assign(new Error(`read '${privatePath}'`), { code: 'EIO' });
+  const read = vi.spyOn(fs, 'readFile').mockRejectedValueOnce(failure);
+  const result = await call('schedules:get', { sessionId: 'scheduled-read-error' });
+  read.mockRestore();
+
+  expect(result).toEqual({ ok: false, error: 'Could not read scheduled-runs state' });
+  expect(JSON.stringify(result)).not.toContain(dir);
+});
+
+it('reports a newer schedule store as incompatible instead of claiming there are no schedules', async () => {
+  const call = (name: string, payload?: unknown) => handlers.get(name)!(null, payload) as Promise<any>;
+  const original = await readDurable('scheduled-runs');
+  const future = { version: 2, schedules: [{ id: 'a future schedule' }] };
+  try {
+    await writeDurableNow('scheduled-runs', future);
+    const result = await call('schedules:list');
+    expect(result).toEqual({
+      ok: false,
+      error: 'These schedules were saved by a newer version of Chat On Steroids. Update the app to change them.'
+    });
+    expect(await call('schedules:get', { sessionId: 'future-session-id' })).toEqual(result);
+    expect(await readDurable('scheduled-runs')).toEqual(future);
+  } finally {
+    await writeDurableNow('scheduled-runs', original);
+  }
+});
+
+it.each([
+  ['malformed JSON', '{"version":1,"schedules":'],
+  ['invalid schedule envelope', '{"version":1,"schedules":"not-an-array"}'],
+  ['invalid individual schedule', '{"version":1,"schedules":[{}]}']
+])('refuses to replace %s when listing and saving schedules', async (_kind, damaged) => {
+  const call = (name: string, payload?: unknown) => handlers.get(name)!(null, payload) as Promise<any>;
+  const session = await createSession({ conversationId: 'ipc-corrupt-schedule-store', title: 'Keep schedules safe' });
+  const original = await readDurable('scheduled-runs');
+  const file = path.join(dir, 'state', 'scheduled-runs.json');
+  try {
+    await fs.writeFile(file, damaged);
+    const listing = await call('schedules:list');
+    expect(listing).toEqual({ ok: false, error: 'Could not read scheduled-runs state' });
+    const saving = await call('schedules:save', {
+      sessionId: session.id, text: 'Never replace unreadable schedules',
+      repeat: { kind: 'daily', at: '09:00' }, until: null
+    });
+    expect(saving).toEqual({ ok: false, error: 'Could not read scheduled-runs state' });
+    expect(await fs.readFile(file, 'utf8')).toBe(damaged);
+  } finally {
+    await writeDurableNow('scheduled-runs', original);
+  }
+});
+
+it('keeps the translated manual-intent mismatch error at the IPC boundary', async () => {
+  const input = await import('../src/main/session/input.js');
+  const original = await input.listInputs();
+  await writeDurableNow('session-input', []); input.resetInputForTests();
+  const session = await createSession({ conversationId: 'ipc-schedule-intent-mismatch', title: 'Intent mismatch' });
+  const call = (name: string, payload?: unknown) => handlers.get(name)!(null, payload) as Promise<any>;
+  try {
+    const saved = await call('schedules:save', { sessionId: session.id, text: 'Check the queue', repeat: { kind: 'hours', every: 1 }, until: null });
+    const intentId = '99999999-9999-4999-8999-999999999999';
+    const otherScheduleId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const dueAt = Date.now();
+    await input.enqueueInput({ id: intentId, sessionId: session.id, text: 'Other scheduled message', mode: 'auto',
+      dueAt, model: null, reasoningEffort: null,
+      scheduled: { scheduleId: otherScheduleId, dueAt, late: false } });
+    await writeDurableNow('scheduled-runs', { version: 1, schedules: [{ ...saved.data,
+      manualRunIntent: { id: intentId, dueAt, text: saved.data.text } }] });
+
+    const result = await call('schedules:runNow', { sessionId: session.id });
+    expect(result).toEqual({ ok: false, error: 'The saved manual run id belongs to a different scheduled message.' });
+    expect((await input.listInputs()).filter(row => row.sessionId === session.id)).toHaveLength(1);
+  } finally {
+    await call('schedules:delete', { sessionId: session.id });
+    await writeDurableNow('session-input', original); input.resetInputForTests();
+  }
+});
+
 it('keeps a schedule when its chat directory exists but its metadata cannot be read', async () => {
   const session = await createSession({ conversationId: 'ipc-schedule-damaged-meta', title: 'Damaged metadata' });
   const call = (name: string, payload?: unknown) => handlers.get(name)!(null, payload) as Promise<any>;

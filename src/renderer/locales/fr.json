@@ -1543,6 +1543,7 @@
   "Try another name or description.": "Essayez un autre nom ou une autre description.",
   "Import a text skill file to add one.": "Importez un fichier de compétence texte pour en ajouter une.",
   "Retry": "Réessayer",
+  "Retrying the run due {0}": "Nouvelle tentative de l’exécution prévue le {0}",
   "Check the error above, then try again.": "Vérifiez l'erreur ci-dessus, puis réessayez.",
   "After your first Chat On Steroids tool call, open the ChatGPT window created by CoS. A tool approval prompt may be waiting there, with choices such as Allow once, Always allow or Deny.": "Après votre premier appel d'outil Chat On Steroids, ouvrez la fenêtre ChatGPT créée par CoS. Une invite d'approbation d'outil peut y attendre, avec des choix comme Allow once, Always allow ou Deny.",
   "Goal, Loop and agents can appear stuck while ChatGPT is waiting for your decision. Review the requested action and choose in ChatGPT.": "Goal, Loop et les agents peuvent sembler bloqués pendant que ChatGPT attend votre décision. Examinez l'action demandée et choisissez dans ChatGPT.",
@@ -3493,6 +3494,7 @@
   "Scheduled": "Programmé",
   "Scheduled · late, was due {0}": "Programmé · en retard, prévu à {0}",
   "This chat no longer exists.": "Ce chat n’existe plus.",
+  "This chat is not connected to a ChatGPT conversation yet.": "Ce chat n’est pas encore associé à une conversation ChatGPT.",
   "Write the message to send.": "Écrivez le message à envoyer.",
   "Choose a schedule that runs at least once an hour apart.": "Choisissez une programmation espacée d’au moins une heure.",
   "Choose an end date in the future.": "Choisissez une date de fin dans le futur.",
@@ -3994,5 +3996,9 @@
   "Delete the schedule for {0}?": "Supprimer la programmation de {0} ?",
   "Could not load schedules": "Impossible de charger les programmations",
   "Operation failed": "Échec de l’opération",
-  "Manage the messages scheduled in your chats.": "Gérez les messages programmés de vos discussions."
+  "Manage the messages scheduled in your chats.": "Gérez les messages programmés de vos discussions.",
+  "The session exists but its metadata could not be read.": "La session existe, mais ses métadonnées n’ont pas pu être lues.",
+  "Could not read scheduled-runs state": "Impossible de lire l’état des exécutions planifiées.",
+  "The saved manual run id belongs to a different scheduled message.": "L’identifiant enregistré de l’exécution manuelle appartient à un autre message planifié.",
+  "The schedule operation failed. Check the local app logs for details.": "L’opération de planification a échoué. Consultez les journaux locaux de l’application pour plus de détails."
 }

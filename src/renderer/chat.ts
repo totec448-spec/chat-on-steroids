@@ -1338,7 +1338,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
         title: () => t('Save this chat as one web page file to send to anyone. You see the page before it is saved.'), run: () => openSharePage(summary.id) }
     );
     // #1826: a chat sends its own message at set times; workers are started by their prime, never on a clock.
-    if (summary.origin?.kind !== 'worker') {
+    if (summary.origin?.kind !== 'worker' && !!summary.conversationId) {
       items.push({ action: 'schedule', icon: 'i-clock', label: () => t('Schedule…'), title: () => t('Send a message into this chat at set times'),
         run: () => void scheduleDialog?.open(summary.id, summary.id === selectedId ? $<HTMLTextAreaElement>('chatInput').value : '') });
     }

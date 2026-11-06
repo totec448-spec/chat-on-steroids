@@ -1533,6 +1533,7 @@
   "Try another name or description.": "Tente outro nome ou descrição.",
   "Import a text skill file to add one.": "Importe um ficheiro de skill de texto para adicionar uma.",
   "Retry": "Tentar novamente",
+  "Retrying the run due {0}": "A tentar novamente a execução prevista para {0}",
   "Check the error above, then try again.": "Verifique o erro acima e tente novamente.",
   "After your first Chat On Steroids tool call, open the ChatGPT window created by CoS. A tool approval prompt may be waiting there, with choices such as Allow once, Always allow or Deny.": "Após a primeira chamada de ferramenta do Chat On Steroids, abra a janela do ChatGPT criada pelo CoS. Pode estar aí um pedido de aprovação de ferramenta, com opções como Allow once, Always allow ou Deny.",
   "Goal, Loop and agents can appear stuck while ChatGPT is waiting for your decision. Review the requested action and choose in ChatGPT.": "Goal, Loop e agentes podem parecer bloqueados enquanto o ChatGPT aguarda a sua decisão. Reveja a ação pedida e escolha no ChatGPT.",
@@ -3493,6 +3494,7 @@
   "Scheduled": "Agendado",
   "Scheduled · late, was due {0}": "Agendado · atrasado, era para as {0}",
   "This chat no longer exists.": "Este chat já não existe.",
+  "This chat is not connected to a ChatGPT conversation yet.": "Este chat ainda não está ligado a uma conversa do ChatGPT.",
   "Write the message to send.": "Escreva a mensagem a enviar.",
   "Choose a schedule that runs at least once an hour apart.": "Escolha um agendamento com pelo menos uma hora de intervalo.",
   "Choose an end date in the future.": "Escolha uma data de fim no futuro.",
@@ -3994,5 +3996,9 @@
   "Delete the schedule for {0}?": "Eliminar o agendamento de {0}?",
   "Could not load schedules": "Não foi possível carregar os agendamentos",
   "Operation failed": "A operação falhou",
-  "Manage the messages scheduled in your chats.": "Gira as mensagens agendadas nas suas conversas."
+  "Manage the messages scheduled in your chats.": "Gira as mensagens agendadas nas suas conversas.",
+  "The session exists but its metadata could not be read.": "A sessão existe, mas não foi possível ler os respetivos metadados.",
+  "Could not read scheduled-runs state": "Não foi possível ler o estado das execuções agendadas.",
+  "The saved manual run id belongs to a different scheduled message.": "O ID da execução manual guardada pertence a outra mensagem agendada.",
+  "The schedule operation failed. Check the local app logs for details.": "A operação de agendamento falhou. Consulte os registos locais da aplicação para obter mais informações."
 }

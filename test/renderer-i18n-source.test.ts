@@ -156,6 +156,22 @@ it('translates every error the Files panel, projects, pets, skills and settings 
   }
 });
 
+it('translates every backend error the global Scheduled page can show', () => {
+  const messages = [
+    'The session exists but its metadata could not be read.',
+    'Could not read scheduled-runs state',
+    'The saved manual run id belongs to a different scheduled message.',
+    'The schedule operation failed. Check the local app logs for details.'
+  ];
+  expect(readFileSync('src/main/session/store.ts', 'utf8')).toContain(messages[0]);
+  expect(readFileSync('src/main/durable.ts', 'utf8')).toContain('`Could not read ${name} state`');
+  expect(readFileSync('src/main/scheduled-runs.ts', 'utf8')).toContain(messages[2]);
+  for (const locale of LOCALES) {
+    const catalog = JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8')) as Record<string, string>;
+    expect(messages.filter(message => !Object.hasOwn(catalog, message)), locale).toEqual([]);
+  }
+});
+
 it("shows the app's own errors through the catalog, not as they came", () => {
   // These three showed a failed action's English text in every language (2.1.45 pass).
   const terminal = readFileSync('src/renderer/workspace-terminal.ts', 'utf8');

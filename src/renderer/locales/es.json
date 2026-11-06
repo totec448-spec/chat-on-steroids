@@ -1592,6 +1592,7 @@
   "Resize file preview": "Cambiar tamaño de la vista previa del archivo",
   "Resize work panel": "Cambiar tamaño del panel de trabajo",
   "Retry": "Reintentar",
+  "Retrying the run due {0}": "Reintentando la ejecución prevista para {0}",
   "Save ChatGPT files": "Guardar archivos de ChatGPT",
   "Save images and files ChatGPT generates into an approved folder.": "Guardar las imágenes y los archivos que genera ChatGPT en una carpeta aprobada.",
   "Show pet": "Mostrar mascota",
@@ -3493,6 +3494,7 @@
   "Scheduled": "Programado",
   "Scheduled · late, was due {0}": "Programado · tarde, tocaba a las {0}",
   "This chat no longer exists.": "Este chat ya no existe.",
+  "This chat is not connected to a ChatGPT conversation yet.": "Este chat aún no está conectado a una conversación de ChatGPT.",
   "Write the message to send.": "Escribe el mensaje que se enviará.",
   "Choose a schedule that runs at least once an hour apart.": "Elige una programación con al menos una hora de separación.",
   "Choose an end date in the future.": "Elige una fecha de fin en el futuro.",
@@ -3994,5 +3996,9 @@
   "Delete the schedule for {0}?": "¿Eliminar la programación de {0}?",
   "Could not load schedules": "No se pudieron cargar las programaciones",
   "Operation failed": "Error en la operación",
-  "Manage the messages scheduled in your chats.": "Gestiona los mensajes programados de tus chats."
+  "Manage the messages scheduled in your chats.": "Gestiona los mensajes programados de tus chats.",
+  "The session exists but its metadata could not be read.": "La sesión existe, pero no se pudieron leer sus metadatos.",
+  "Could not read scheduled-runs state": "No se pudo leer el estado de las ejecuciones programadas.",
+  "The saved manual run id belongs to a different scheduled message.": "El identificador guardado de la ejecución manual pertenece a otro mensaje programado.",
+  "The schedule operation failed. Check the local app logs for details.": "No se pudo completar la operación de programación. Consulta los registros locales de la aplicación para obtener más información."
 }

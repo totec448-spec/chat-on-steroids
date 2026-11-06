@@ -96,6 +96,59 @@ it('keeps the visible rows when listing fails and never presents an empty schedu
   expect(document.getElementById('scheduledStatus')?.hidden).toBe(true);
 });
 
+it('keeps existing rows visible and explains when schedules were saved by a newer app version', async () => {
+  const { initScheduled } = await import('../src/renderer/scheduled.js');
+  const error = 'These schedules were saved by a newer version of Chat On Steroids. Update the app to change them.';
+  const calls = {
+    list: vi.fn().mockResolvedValueOnce(ok([schedule(idA)])).mockResolvedValueOnce({ ok: false, error }),
+    pause: vi.fn(async () => ok(true)),
+    runNow: vi.fn(async () => ok(true)),
+    delete: vi.fn(async () => ok(true)),
+    openChat: vi.fn()
+  };
+  const view = initScheduled(calls);
+  await view.refresh();
+  await view.refresh();
+
+  expect(document.querySelector('.scheduled-index-row')?.textContent).toContain('Economics monitoring');
+  expect(document.querySelector('.scheduled-index-empty')).toBeNull();
+  expect(document.getElementById('scheduledStatus')?.textContent).toContain(error);
+});
+
+it('sets automatic text direction for chat titles and message previews', async () => {
+  const { initScheduled } = await import('../src/renderer/scheduled.js');
+  const record = { ...schedule(idA), sessionTitle: 'مراقبة الاقتصاد', text: 'שלום, 123' };
+  const calls = {
+    list: vi.fn(async () => ok([record])),
+    pause: vi.fn(async () => ok(true)),
+    runNow: vi.fn(async () => ok(true)),
+    delete: vi.fn(async () => ok(true)),
+    openChat: vi.fn()
+  };
+  await initScheduled(calls).refresh();
+
+  expect(document.querySelector('.scheduled-index-row h2')?.getAttribute('dir')).toBe('auto');
+  expect(document.querySelector('.scheduled-index-message')?.getAttribute('dir')).toBe('auto');
+  expect(document.querySelector('.scheduled-index-message')?.textContent).toBe(record.text);
+});
+
+it('bounds message text retained by the DOM and does not split a surrogate pair', async () => {
+  const { initScheduled } = await import('../src/renderer/scheduled.js');
+  const text = 'a'.repeat(319) + '😀' + 'b'.repeat(100_000);
+  const calls = {
+    list: vi.fn(async () => ok([{ ...schedule(idA), text }])),
+    pause: vi.fn(async () => ok(true)),
+    runNow: vi.fn(async () => ok(true)),
+    delete: vi.fn(async () => ok(true)),
+    openChat: vi.fn()
+  };
+  await initScheduled(calls).refresh();
+
+  const preview = document.querySelector('.scheduled-index-message')?.textContent ?? '';
+  expect(preview).toBe('a'.repeat(319) + '…');
+  expect(preview.length).toBe(320);
+});
+
 it('keeps the Refresh button enabled and focused while exposing active reads with aria-busy', async () => {
   const { initScheduled } = await import('../src/renderer/scheduled.js');
   type ScheduleReply = { ok: true; data: ReturnType<typeof schedule>[] };
@@ -180,8 +233,8 @@ it('keeps action errors visible after a failed read and a later successful refre
   const calls = {
     list: vi.fn().mockResolvedValueOnce(ok([schedule(idA)]))
       .mockRejectedValueOnce(new Error('Temporary read failure'))
-      .mockResolvedValueOnce(ok([schedule(idA)])),
-    pause: vi.fn(async () => ({ ok: false as const, error: 'Permission denied' })),
+      .mockResolvedValue(ok([schedule(idA)])),
+    pause: vi.fn().mockResolvedValueOnce({ ok: false as const, error: 'Permission denied' }).mockResolvedValue(ok(true)),
     runNow: vi.fn(async () => ok(true)),
     delete: vi.fn(async () => ok(true)),
     openChat: vi.fn()
@@ -197,6 +250,9 @@ it('keeps action errors visible after a failed read and a later successful refre
   expect(document.getElementById('scheduledStatus')?.textContent).toBe('Permission denied');
   await view.refresh();
   expect(document.getElementById('scheduledStatus')?.textContent).toBe('Permission denied');
+  pause.click();
+  await settle();
+  expect(document.getElementById('scheduledStatus')?.hidden).toBe(true);
 });
 
 it('keeps unchanged rows mounted, restores action focus after a changed row, and reports run-now outcome', async () => {
@@ -230,6 +286,99 @@ it('keeps unchanged rows mounted, restores action focus after a changed row, and
   pause.focus(); pause.click(); await settle();
   const resume = [...document.querySelectorAll<HTMLButtonElement>('.scheduled-index-row button')].find(node => node.textContent === 'Resume')!;
   expect(document.activeElement).toBe(resume);
+});
+
+it('preserves keyboard focus when a background refresh changes a different schedule row', async () => {
+  const { initScheduled } = await import('../src/renderer/scheduled.js');
+  const first = schedule(idA);
+  const second = schedule(idB, true);
+  const calls = {
+    list: vi.fn().mockResolvedValueOnce(ok([first, second])).mockResolvedValueOnce(ok([first, { ...second, paused: false, nextRunAt: Date.now() + 7200000 }])),
+    pause: vi.fn(async () => ok(true)),
+    runNow: vi.fn(async () => ok(true)),
+    delete: vi.fn(async () => ok(true)),
+    openChat: vi.fn()
+  };
+  const view = initScheduled(calls);
+  await view.refresh();
+  const focused = [...document.querySelectorAll<HTMLButtonElement>('.scheduled-index-row button')]
+    .find(node => node.dataset.sessionId === idA && node.dataset.scheduledAction === 'pause')!;
+  focused.focus();
+  expect(document.activeElement).toBe(focused);
+
+  await view.refresh();
+  const restored = document.activeElement as HTMLButtonElement;
+  expect(restored.dataset.sessionId).toBe(idA);
+  expect(restored.dataset.scheduledAction).toBe('pause');
+});
+
+it('moves focus to a surviving row or Refresh when a background refresh removes the focused row', async () => {
+  const { initScheduled } = await import('../src/renderer/scheduled.js');
+  const calls = {
+    list: vi.fn().mockResolvedValueOnce(ok([schedule(idA), schedule(idB, true)]))
+      .mockResolvedValueOnce(ok([schedule(idB, true)]))
+      .mockResolvedValueOnce(ok([])),
+    pause: vi.fn(async () => ok(true)),
+    runNow: vi.fn(async () => ok(true)),
+    delete: vi.fn(async () => ok(true)),
+    openChat: vi.fn()
+  };
+  const view = initScheduled(calls);
+  await view.refresh();
+  const focusedA = [...document.querySelectorAll<HTMLButtonElement>('.scheduled-index-row button')]
+    .find(node => node.dataset.sessionId === idA && node.dataset.scheduledAction === 'pause')!;
+  focusedA.focus();
+
+  await view.refresh();
+  expect((document.activeElement as HTMLButtonElement).dataset.sessionId).toBe(idB);
+
+  const focusedB = document.activeElement as HTMLButtonElement;
+  focusedB.focus();
+  await view.refresh();
+  expect(document.activeElement).toBe(document.getElementById('scheduledRefresh'));
+});
+
+it('shows a missed run in the global list and formats recurrence time for the selected locale', async () => {
+  const { initScheduled } = await import('../src/renderer/scheduled.js');
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  const missedAt = new Date(2026, 10, 5, 9, 0).getTime();
+  const record = { ...schedule(idA), missedDueAt: missedAt };
+  const calls = {
+    list: vi.fn(async () => ok([record])),
+    pause: vi.fn(async () => ok(true)),
+    runNow: vi.fn(async () => ok(true)),
+    delete: vi.fn(async () => ok(true)),
+    openChat: vi.fn()
+  };
+  const view = initScheduled(calls);
+  try {
+    setLanguage('en');
+    await view.refresh();
+    expect(document.querySelector('.scheduled-index-meta')?.textContent).toContain('missed');
+    const englishTime = new Date(2024, 0, 1, 9, 0).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' });
+    expect(document.querySelector('.scheduled-index-meta')?.textContent).toContain(englishTime);
+
+    setLanguage('pt-PT');
+    const portugueseTime = new Date(2024, 0, 1, 9, 0).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
+    expect(document.querySelector('.scheduled-index-meta')?.textContent).toContain(portugueseTime);
+  } finally { setLanguage('en'); }
+});
+
+it('shows the exact overdue occurrence while the scheduler is retrying an outbox failure', async () => {
+  const { initScheduled } = await import('../src/renderer/scheduled.js');
+  const retryAt = new Date(2026, 10, 5, 9, 0).getTime();
+  const calls = {
+    list: vi.fn(async () => ok([{ ...schedule(idA), retryDueAt: retryAt }])),
+    pause: vi.fn(async () => ok(true)),
+    runNow: vi.fn(async () => ok(true)),
+    delete: vi.fn(async () => ok(true)),
+    openChat: vi.fn()
+  };
+  await initScheduled(calls).refresh();
+  const meta = document.querySelector('.scheduled-index-meta')?.textContent ?? '';
+  expect(meta).toContain('Retrying the run due');
+  expect(meta).toContain(new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(retryAt));
+  expect(document.querySelector<HTMLButtonElement>('button[data-scheduled-action="run-now"]')?.disabled).toBe(true);
 });
 
 it('has translated queued and skipped feedback in every shipped locale', () => {

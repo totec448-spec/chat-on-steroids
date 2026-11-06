@@ -1450,6 +1450,7 @@
   "Use": "使用",
   "Use {0}": "使用 {0}",
   "Retry": "重試",
+  "Retrying the run due {0}": "正在重試原定於 {0} 的執行",
   "Skills could not be loaded.": "無法載入技能。",
   "Check the error above, then try again.": "請檢查上方錯誤，然後重試。",
   "Important: ChatGPT may be waiting for approval": "重要：ChatGPT 可能正在等待你的核准",
@@ -3363,6 +3364,7 @@
   "Scheduled": "已安排",
   "Scheduled · late, was due {0}": "已安排 · 延遲傳送，原定 {0}",
   "This chat no longer exists.": "此對話已不存在。",
+  "This chat is not connected to a ChatGPT conversation yet.": "此聊天尚未連結至 ChatGPT 對話。",
   "Write the message to send.": "請寫下要傳送的訊息。",
   "Choose a schedule that runs at least once an hour apart.": "請選擇至少間隔一小時執行的排程。",
   "Choose an end date in the future.": "請選擇一個未來的結束日期。",
@@ -3826,5 +3828,9 @@
   "Delete the schedule for {0}?": "要刪除 {0} 的排程嗎？",
   "Could not load schedules": "無法載入排程",
   "Operation failed": "操作失敗",
-  "Manage the messages scheduled in your chats.": "管理各聊天中的排程訊息。"
+  "Manage the messages scheduled in your chats.": "管理各聊天中的排程訊息。",
+  "The session exists but its metadata could not be read.": "工作階段存在，但無法讀取其中繼資料。",
+  "Could not read scheduled-runs state": "無法讀取排程執行的狀態。",
+  "The saved manual run id belongs to a different scheduled message.": "已儲存的手動執行 ID 屬於另一則排程訊息。",
+  "The schedule operation failed. Check the local app logs for details.": "排程作業失敗。請查看應用程式的本機記錄以瞭解詳細資訊。"
 }

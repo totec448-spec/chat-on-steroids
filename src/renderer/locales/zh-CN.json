@@ -1544,6 +1544,7 @@
   "Resize file preview": "调整文件预览大小",
   "Resize work panel": "调整工作面板大小",
   "Retry": "重试",
+  "Retrying the run due {0}": "正在重试原定于 {0} 的运行",
   "Save ChatGPT files": "保存 ChatGPT 文件",
   "Save images and files ChatGPT generates into an approved folder.": "将 ChatGPT 生成的图片和文件保存到已批准的文件夹。",
   "Show pet": "显示宠物",
@@ -3363,6 +3364,7 @@
   "Scheduled": "已安排",
   "Scheduled · late, was due {0}": "已安排 · 延迟发送，原定 {0}",
   "This chat no longer exists.": "此对话已不存在。",
+  "This chat is not connected to a ChatGPT conversation yet.": "此聊天尚未连接到 ChatGPT 对话。",
   "Write the message to send.": "请写下要发送的消息。",
   "Choose a schedule that runs at least once an hour apart.": "请选择至少间隔一小时运行的计划。",
   "Choose an end date in the future.": "请选择一个将来的结束日期。",
@@ -3826,5 +3828,9 @@
   "Delete the schedule for {0}?": "删除 {0} 的计划？",
   "Could not load schedules": "无法加载计划",
   "Operation failed": "操作失败",
-  "Manage the messages scheduled in your chats.": "管理所有聊天中的定时消息。"
+  "Manage the messages scheduled in your chats.": "管理所有聊天中的定时消息。",
+  "The session exists but its metadata could not be read.": "会话存在，但无法读取其元数据。",
+  "Could not read scheduled-runs state": "无法读取计划任务的运行状态。",
+  "The saved manual run id belongs to a different scheduled message.": "已保存的手动运行 ID 属于另一条计划消息。",
+  "The schedule operation failed. Check the local app logs for details.": "计划操作失败。请查看应用本地日志了解详情。"
 }
