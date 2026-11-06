@@ -1,3 +1,4 @@
+import { promises as fs } from 'node:fs';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { makeTempDir, removeTempDir } from './helpers.js';
 import type { RunnerDeps, ScheduledInputSnapshot } from '../src/main/scheduled-runs.js';
@@ -143,7 +144,8 @@ it('lists readable schedules, preserves an unreadable chat, and logs only confir
   })]);
   expect((await runs.listSchedules()).map(row => row.sessionId)).toEqual([SESSION, unreadable]);
   expect(log).toHaveBeenCalledWith(expect.stringContaining(`removed: its chat no longer exists (${missing})`));
-  expect(log).toHaveBeenCalledWith(expect.stringContaining(`could not be read (metadata temporarily unreadable); kept (${unreadable})`));
+  expect(log).toHaveBeenCalledWith('scheduled run: its chat could not be read (operation failed); kept');
+  expect(vi.mocked(log).mock.calls.flat().join('\n')).not.toContain(unreadable);
 });
 
 it('continues listing healthy schedules when removing a confirmed orphan fails to save', async () => {
@@ -159,7 +161,7 @@ it('continues listing healthy schedules when removing a confirmed orphan fails t
   write.mockRestore();
   expect(items).toEqual([expect.objectContaining({ sessionId: SESSION, sessionTitle: 'Healthy chat' })]);
   expect((await runs.listSchedules()).map(row => row.sessionId)).toEqual([missing, SESSION]);
-  expect(log).toHaveBeenCalledWith(expect.stringContaining('could not remove the missing chat\'s schedule (disk full); will retry'));
+  expect(log).toHaveBeenCalledWith('scheduled run: could not remove the missing chat\'s schedule (operation failed); will retry');
   expect(log).not.toHaveBeenCalledWith(expect.stringContaining('removed: its chat no longer exists'));
   await runs.listScheduleItems(local('2026-10-24T10:31:00'), deps);
   expect((await runs.listSchedules()).map(row => row.sessionId)).toEqual([SESSION]);
@@ -208,6 +210,24 @@ it('logs why Run now did not enqueue when that chat has no schedule', async () =
   expect(await runs.runScheduleNow(SESSION, local('2026-10-24T10:30:00'), deps)).toBe(false);
   expect(queued).toHaveLength(0);
   expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('not queued now: no schedule exists'));
+});
+
+it('supersedes a failed manual-intent write with the prior snapshot before returning', async () => {
+  const { runs, deps } = await setup();
+  await runs.saveSchedule({ sessionId: SESSION, text: 'Hourly check', repeat: { kind: 'hours', every: 1 }, until: null }, local('2026-10-24T10:00:00'));
+  const durable = await import('../src/main/durable.js');
+  const failRename = async () => { throw Object.assign(new Error('/private/state/scheduled-runs.json'), { code: 'EIO' }); };
+  const rename = vi.spyOn(fs, 'rename').mockImplementationOnce(failRename).mockImplementationOnce(failRename);
+  await expect(runs.runScheduleNow(SESSION, local('2026-10-24T10:30:00'), deps)).rejects.toThrow('/private/state/scheduled-runs.json');
+  rename.mockRestore();
+
+  expect(deps.enqueue).not.toHaveBeenCalled();
+  expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('EIO'));
+  expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('previous snapshot queued for recovery'));
+  // Shutdown flushes the latest durable generation. It must be the old schedule, not the
+  // rejected intent left behind by the first failed rename.
+  await durable.flushDurable();
+  expect((await runs.listSchedules())[0]?.manualRunIntent).toBeUndefined();
 });
 
 it('replays a durable Run now intent after restart if the process stops before enqueue', async () => {
@@ -263,6 +283,17 @@ it('drops a new manual intent when enqueue rejects and a fresh outbox read confi
   expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('outbox confirms no row, recovery intent dropped'));
 });
 
+it('does not log local paths or chat ids when a manual enqueue fails', async () => {
+  const privatePath = '/Users/private/Library/Application Support/Chat On Steroids/state/scheduled-runs.json';
+  const { runs, deps } = await setup({ enqueue: vi.fn(async () => { throw new Error(privatePath); }) });
+  await runs.saveSchedule({ sessionId: SESSION, text: 'Hourly check', repeat: { kind: 'hours', every: 1 }, until: null }, local('2026-10-24T10:00:00'));
+  await expect(runs.runScheduleNow(SESSION, local('2026-10-24T10:30:00'), deps)).rejects.toThrow(privatePath);
+  const logs = vi.mocked(deps.log).mock.calls.map(([line]) => line).join('\n');
+  expect(logs).toContain('operation failed');
+  expect(logs).not.toContain(privatePath);
+  expect(logs).not.toContain(SESSION);
+});
+
 it('drops a recovered intent when enqueue rejects and a fresh outbox read confirms no row', async () => {
   const { runs, deps } = await setup();
   const now = local('2026-10-24T10:30:00');
@@ -295,7 +326,7 @@ it('treats a repeated Run now click as acknowledgement of the recovered request,
     }),
     inputs: async () => {
       reads++;
-      if (reads === 1) throw new Error('outbox read unavailable');
+      if (reads === 2) throw new Error('outbox read unavailable');
       return rows;
     }
   });
@@ -326,35 +357,57 @@ it('keeps an older pending scheduled run as a blocker after the newest manual ru
   const saved = await runs.saveSchedule({ sessionId: SESSION, text: 'Hourly check', repeat: { kind: 'hours', every: 1 }, until: null }, local('2026-10-24T10:00:00'));
   await runs.runDueSchedules(local('2026-10-24T11:00:10'), deps);
   const automatic = queued[0]!;
-  await runs.runScheduleNow(SESSION, local('2026-10-24T11:30:00'), deps);
-  const manual = queued[1]!;
+  expect(await runs.runScheduleNow(SESSION, local('2026-10-24T11:30:00'), deps)).toBe(false);
+  const manualId = '44444444-4444-4444-8444-444444444444';
+  const durable = await import('../src/main/durable.js');
+  const current = (await runs.listSchedules())[0]!;
+  // Model a legacy state created before Run now began refusing a second pending message.
+  await durable.writeDurableNow('scheduled-runs', { version: 1, schedules: [{ ...current, lastInputId: manualId }] });
   const inputs: ScheduledInputSnapshot[] = [
     { id: automatic.id as string, state: 'queued', scheduled: automatic.scheduled as ScheduledInputSnapshot['scheduled'] },
-    { id: manual.id as string, state: 'cancelled', scheduled: manual.scheduled as ScheduledInputSnapshot['scheduled'] }
+    { id: manualId, state: 'cancelled', scheduled: { scheduleId: saved.id, dueAt: local('2026-10-24T11:30:00'), late: false } }
   ];
   await runs.runDueSchedules(local('2026-10-24T12:00:10'), { ...deps, inputs: async () => inputs });
-  expect(queued).toHaveLength(2);
+  expect(queued).toHaveLength(1);
   expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('previous run still waits in the queue'));
   expect((await runs.listSchedules())[0]).toMatchObject({ id: saved.id, lastInputId: automatic.id, lastDueAt: local('2026-10-24T12:00:00') });
 });
 
-it('keeps Run now repeatable and tracks the newest manual row when an automatic run is already pending', async () => {
+it('refuses Run now while an automatic run is still waiting in the queue', async () => {
   const { runs, deps, queued } = await setup();
-  await runs.saveSchedule({ sessionId: SESSION, text: 'Hourly check', repeat: { kind: 'hours', every: 1 }, until: null }, local('2026-10-24T10:00:00'));
+  const saved = await runs.saveSchedule({ sessionId: SESSION, text: 'Hourly check', repeat: { kind: 'hours', every: 1 }, until: null }, local('2026-10-24T10:00:00'));
   await runs.runDueSchedules(local('2026-10-24T11:00:10'), deps);
   const automaticId = queued[0]!.id as string;
-  expect(await runs.runScheduleNow(SESSION, local('2026-10-24T11:30:00'), deps)).toBe(true);
-  const firstManualId = queued[1]!.id as string;
-  expect(await runs.runScheduleNow(SESSION, local('2026-10-24T11:31:00'), deps)).toBe(true);
-  const newestManualId = queued[2]!.id as string;
-  expect(new Set([automaticId, firstManualId, newestManualId]).size).toBe(3);
-  expect((await runs.listSchedules())[0]?.lastInputId).toBe(newestManualId);
+  expect(await runs.runScheduleNow(SESSION, local('2026-10-24T11:30:00'), deps)).toBe(false);
+  expect(queued).toHaveLength(1);
+  expect((await runs.listSchedules())[0]).toMatchObject({ id: saved.id, lastInputId: automaticId });
+  expect(deps.log).toHaveBeenCalledWith('scheduled run: not queued now: a previous run is already waiting');
+});
 
-  await runs.runDueSchedules(local('2026-10-24T12:00:10'), {
-    ...deps
-  });
-  expect(queued).toHaveLength(3);
-  expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('previous run still waits in the queue'));
+it('defers recovery of a manual intent while a different scheduled message is still pending', async () => {
+  const { runs, deps, queued } = await setup();
+  const saved = await runs.saveSchedule({ sessionId: SESSION, text: 'Hourly check', repeat: { kind: 'hours', every: 1 }, until: null }, local('2026-10-24T10:00:00'));
+  await runs.runDueSchedules(local('2026-10-24T11:00:10'), deps);
+  const automatic = queued[0]!;
+  const intentId = '33333333-3333-4333-8333-333333333333';
+  const durable = await import('../src/main/durable.js');
+  const current = (await runs.listSchedules())[0]!;
+  await durable.writeDurableNow('scheduled-runs', { version: 1, schedules: [{ ...current,
+    manualRunIntent: { id: intentId, dueAt: local('2026-10-24T11:30:00'), text: saved.text } }] });
+
+  await runs.runDueSchedules(local('2026-10-24T11:00:20'), deps);
+  expect(queued).toHaveLength(1);
+  expect((await runs.listSchedules())[0]?.manualRunIntent?.id).toBe(intentId);
+  expect(deps.log).toHaveBeenCalledWith('scheduled run: manual recovery deferred: a previous run is already waiting');
+
+  await runs.runDueSchedules(local('2026-10-24T11:00:30'), { ...deps, inputs: async () => [{
+    id: automatic.id as string,
+    state: 'sent',
+    scheduled: automatic.scheduled as ScheduledInputSnapshot['scheduled']
+  }] });
+  expect(queued).toHaveLength(2);
+  expect(queued[1]).toMatchObject({ id: intentId, text: saved.text });
+  expect((await runs.listSchedules())[0]?.manualRunIntent).toBeUndefined();
 });
 
 it('a manual Run now pending in the input outbox prevents a duplicate at the next scheduled time', async () => {
@@ -400,10 +453,10 @@ it('keeps the other schedules when one chat cannot be queued, and skips that tim
   await runs.saveSchedule({ sessionId: other, text: 'B', repeat: { kind: 'daily', at: '09:00' }, until: null }, local('2026-10-24T08:00:00'));
   await runs.runDueSchedules(local('2026-10-24T09:00:10'), deps);
   expect(queued).toEqual([expect.objectContaining({ sessionId: other })]);
-  expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('skipped: it could not be queued (queue full)'));
+  expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('skipped: it could not be queued (operation failed)'));
   // Skipped once, not retried and logged every check until the next time.
   await runs.runDueSchedules(local('2026-10-24T09:01:00'), deps);
-  expect(vi.mocked(deps.log).mock.calls.filter(([line]) => line.includes('queue full'))).toHaveLength(1);
+  expect(vi.mocked(deps.log).mock.calls.filter(([line]) => line.includes('operation failed'))).toHaveLength(1);
 });
 
 it('is accepted by the real queue, which keeps one row for the same run queued twice', async () => {

@@ -175,10 +175,12 @@ it('releases mutation controls after one post-mutation read while refresh pushes
   expect(calls.list).toHaveBeenCalledTimes(4); // A further refresh may continue without holding busy.
 });
 
-it('keeps action errors visible after a successful background refresh', async () => {
+it('keeps action errors visible after a failed read and a later successful refresh', async () => {
   const { initScheduled } = await import('../src/renderer/scheduled.js');
   const calls = {
-    list: vi.fn(async () => ok([schedule(idA)])),
+    list: vi.fn().mockResolvedValueOnce(ok([schedule(idA)]))
+      .mockRejectedValueOnce(new Error('Temporary read failure'))
+      .mockResolvedValueOnce(ok([schedule(idA)])),
     pause: vi.fn(async () => ({ ok: false as const, error: 'Permission denied' })),
     runNow: vi.fn(async () => ok(true)),
     delete: vi.fn(async () => ok(true)),
@@ -190,6 +192,8 @@ it('keeps action errors visible after a successful background refresh', async ()
     .find(node => node.textContent === 'Pause')!;
   pause.click();
   await settle();
+  expect(document.getElementById('scheduledStatus')?.textContent).toBe('Permission denied');
+  await view.refresh();
   expect(document.getElementById('scheduledStatus')?.textContent).toBe('Permission denied');
   await view.refresh();
   expect(document.getElementById('scheduledStatus')?.textContent).toBe('Permission denied');

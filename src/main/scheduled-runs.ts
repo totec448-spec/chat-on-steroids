@@ -118,6 +118,18 @@ function runInputId(scheduleId: string, dueAt: number): string {
 
 const pendingInput = (input: ScheduledInputSnapshot): boolean => ['queued', 'browser', 'tool'].includes(input.state);
 
+/** Error messages can contain local paths or user identifiers; logs may include only a safe code. */
+function safeFailureReason(error: unknown): string {
+  const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+  return typeof code === 'string' && /^[A-Z][A-Z0-9_]{0,31}$/.test(code) ? code : 'operation failed';
+}
+
+/** The latest id is preferred, but any pending row for this schedule remains a blocker. */
+function pendingScheduledInput(run: ScheduledRun, inputs: ScheduledInputSnapshot[]): ScheduledInputSnapshot | undefined {
+  return inputs.find(input => pendingInput(input) && input.id === run.lastInputId)
+    ?? inputs.filter(input => pendingInput(input) && input.scheduled?.scheduleId === run.id).at(-1);
+}
+
 function manualRunInput(run: ScheduledRun, intent: NonNullable<ScheduledRun['manualRunIntent']>, session: { activeTurnId: string | null }) {
   return {
     id: intent.id,
@@ -180,7 +192,7 @@ async function settleManualRunIntent(
   catch (error) {
     const dropped = await dropManualRunIntentIfOutboxAbsent(run, schedules, deps);
     if (dropped) {
-      deps.log(`scheduled run: manual enqueue failed (${error instanceof Error ? error.message : String(error)}); outbox confirms no row, recovery intent dropped (${run.sessionId})`);
+      deps.log(`scheduled run: manual enqueue failed (${safeFailureReason(error)}); outbox confirms no row, recovery intent dropped`);
       return { ...dropped, pending: false };
     }
     throw error;
@@ -208,7 +220,7 @@ export function listScheduleItems(now: number, deps: ScheduleListDeps): Promise<
       } catch (error) {
         // A chat that cannot be read right now is not proof that it was deleted. Keep its
         // schedule and continue projecting the other chats instead of losing the whole list.
-        deps.log(`scheduled run: its chat could not be read (${error instanceof Error ? error.message : String(error)}); kept (${run.sessionId})`);
+        deps.log(`scheduled run: its chat could not be read (${safeFailureReason(error)}); kept`);
         continue;
       }
       if (!session) {
@@ -220,7 +232,7 @@ export function listScheduleItems(now: number, deps: ScheduleListDeps): Promise<
           schedules = remaining;
           deps.log(`scheduled run: removed: its chat no longer exists (${run.sessionId})`);
         } catch (error) {
-          deps.log(`scheduled run: could not remove the missing chat's schedule (${error instanceof Error ? error.message : String(error)}); will retry (${run.sessionId})`);
+          deps.log(`scheduled run: could not remove the missing chat's schedule (${safeFailureReason(error)}); will retry`);
         }
         continue;
       }
@@ -293,8 +305,7 @@ export function runScheduleNow(sessionId: string, now: number, deps: RunNowDeps)
     let session: Awaited<ReturnType<RunNowDeps['session']>>;
     try { session = await deps.session(run.sessionId); }
     catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      deps.log(`scheduled run: not queued now: its chat could not be read (${detail}); schedule kept (${run.sessionId})`);
+      deps.log(`scheduled run: not queued now: its chat could not be read (${safeFailureReason(error)}); schedule kept`);
       throw error;
     }
     if (!session) {
@@ -303,22 +314,47 @@ export function runScheduleNow(sessionId: string, now: number, deps: RunNowDeps)
       return false;
     }
 
+    let inputs: ScheduledInputSnapshot[];
+    try { inputs = await deps.inputs(); }
+    catch (error) {
+      deps.log(`scheduled run: not queued now: the input outbox could not be read (${safeFailureReason(error)})`);
+      throw error;
+    }
+
+    // Do not add a manual message while any message for this schedule is still waiting.
+    // An older durable intent is retained and recovered after the existing message leaves.
+    const pendingBeforeRecovery = pendingScheduledInput(run, inputs);
+    if (pendingBeforeRecovery && pendingBeforeRecovery.id !== run.manualRunIntent?.id) {
+      deps.log('scheduled run: not queued now: a previous run is already waiting');
+      return false;
+    }
+
     // A prior click may have stopped between its durable intent and outbox acknowledgement.
     // Settle that exact id before accepting another click; never overwrite an unrecovered intent.
     if (run.manualRunIntent) {
       const previousIntentId = run.manualRunIntent.id;
+      const existingIntent = inputs.find(input => input.id === previousIntentId);
       try {
-        const recovered = await settleManualRunIntent(run, schedules, session, deps, await deps.inputs());
+        const recovered = await settleManualRunIntent(run, schedules, session, deps, inputs);
         schedules = recovered.schedules;
         run = recovered.run;
+        if (existingIntent && pendingInput(existingIntent)) {
+          deps.log('scheduled run: not queued now: a previous run is already waiting');
+          return false;
+        }
         // A repeated click that completes the prior accepted intent is its acknowledgement, not
         // a second manual run. A terminal failed/cancelled row has no lastInputId and may retry.
         if (run.lastInputId === previousIntentId) return true;
       } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        deps.log(`scheduled run: could not recover the previous manual run (${detail}); intent kept (${run.sessionId})`);
+        deps.log(`scheduled run: could not recover the previous manual run (${safeFailureReason(error)}); intent kept`);
         throw error;
       }
+    }
+
+    const blockingInput = pendingScheduledInput(run, inputs);
+    if (blockingInput) {
+      deps.log('scheduled run: not queued now: a previous run is already waiting');
+      return false;
     }
 
     const intent = { id: randomUUID(), dueAt: now, text: run.text };
@@ -326,8 +362,19 @@ export function runScheduleNow(sessionId: string, now: number, deps: RunNowDeps)
     const withIntent = schedules.map(row => row.id === run!.id ? prepared : row);
     try { await save(withIntent); }
     catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      deps.log(`scheduled run: not queued now: could not save its recovery intent (${detail}); no message queued (${run.sessionId})`);
+      // writeDurableNow retains a failed generation for retry/shutdown. Supersede that
+      // generation with the prior snapshot so this refused click can never become a hidden send.
+      let rollback = 'previous snapshot retained';
+      if (!foreign) {
+        try {
+          await save(schedules);
+          rollback = 'previous snapshot restored';
+        } catch {
+          // The durable writer now retains the safe prior snapshot as the newest retry generation.
+          rollback = 'previous snapshot queued for recovery';
+        }
+      }
+      deps.log(`scheduled run: not queued now: could not save its recovery intent (${safeFailureReason(error)}); no message queued; ${rollback}`);
       throw error;
     }
 
@@ -339,13 +386,12 @@ export function runScheduleNow(sessionId: string, now: number, deps: RunNowDeps)
       const completed: ScheduledRun = { ...withoutIntent, lastInputId: intent.id };
       await save(withIntent.map(row => row.id === run!.id ? completed : row));
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
       const dropped = !enqueued && await dropManualRunIntentIfOutboxAbsent(prepared, withIntent, deps);
       deps.log(enqueued
-        ? `scheduled run: manual run was queued but its recovery intent could not be cleared (${detail}); intent kept (${run.sessionId})`
+        ? `scheduled run: manual run was queued but its recovery intent could not be cleared (${safeFailureReason(error)}); intent kept`
         : dropped
-          ? `scheduled run: manual enqueue failed (${detail}); outbox confirms no row, recovery intent dropped (${run.sessionId})`
-          : `scheduled run: manual enqueue failed (${detail}); recovery intent kept (${run.sessionId})`);
+          ? `scheduled run: manual enqueue failed (${safeFailureReason(error)}); outbox confirms no row, recovery intent dropped`
+          : `scheduled run: manual enqueue failed (${safeFailureReason(error)}); recovery intent kept`);
       throw error;
     }
     deps.log(`scheduled run: queued now for ${run.sessionId}`);
@@ -362,7 +408,7 @@ export function runDueSchedules(now: number, deps: RunnerDeps): Promise<void> {
     let inputs: ScheduledInputSnapshot[];
     try { inputs = await deps.inputs(); }
     catch (error) {
-      deps.log(`scheduled run: the input outbox could not be read (${error instanceof Error ? error.message : String(error)}); no runs were queued; checked again in 30 s`);
+      deps.log(`scheduled run: the input outbox could not be read (${safeFailureReason(error)}); no runs were queued; checked again in 30 s`);
       return;
     }
     for (const original of [...schedules]) {
@@ -384,18 +430,23 @@ export function runDueSchedules(now: number, deps: RunnerDeps): Promise<void> {
         }
       } catch (error) {
         // Not readable right now is not gone: kept, and checked again in 30 s.
-        deps.log(`scheduled run: its chat could not be read (${error instanceof Error ? error.message : String(error)}); checked again in 30 s (${run.sessionId})`);
+        deps.log(`scheduled run: its chat could not be read (${safeFailureReason(error)}); checked again in 30 s`);
         continue;
       }
 
       if (run.manualRunIntent) {
+        const blockingInput = pendingScheduledInput(run, inputs);
+        if (blockingInput && blockingInput.id !== run.manualRunIntent.id) {
+          deps.log('scheduled run: manual recovery deferred: a previous run is already waiting');
+          continue;
+        }
         try {
           const recovered = await settleManualRunIntent(run, schedules, session, deps, inputs);
           schedules = recovered.schedules;
           run = recovered.run;
           if (recovered.pending) continue;
         } catch (error) {
-          deps.log(`scheduled run: manual run recovery failed (${error instanceof Error ? error.message : String(error)}); intent kept (${run.sessionId})`);
+          deps.log(`scheduled run: manual run recovery failed (${safeFailureReason(error)}); intent kept`);
           continue;
         }
       }
@@ -410,16 +461,14 @@ export function runDueSchedules(now: number, deps: RunnerDeps): Promise<void> {
               await replace({ ...run, lastDueAt: missed.dueAt, missedDueAt: missed.dueAt });
               deps.log(`scheduled run: ${clock(missed.dueAt)} not sent: the schedule ended before it could run (${run.sessionId})`);
             } catch (error) {
-              deps.log(`scheduled run: ${clock(missed.dueAt)} not recorded yet (${error instanceof Error ? error.message : String(error)}); checked again in 30 s (${run.sessionId})`);
+              deps.log(`scheduled run: ${clock(missed.dueAt)} not recorded yet (${safeFailureReason(error)}); checked again in 30 s`);
             }
           }
         }
         continue;
       }
       try {
-        const pendingLastInput = inputs.find(input => pendingInput(input) && input.id === run!.lastInputId);
-        const pendingScheduled = inputs.filter(input => pendingInput(input) && input.scheduled?.scheduleId === run!.id).at(-1);
-        const blockingInput = pendingLastInput ?? pendingScheduled;
+        const blockingInput = pendingScheduledInput(run, inputs);
         if (blockingInput) {
           deps.log(`scheduled run: ${clock(due.dueAt)} skipped: the previous run still waits in the queue (${run.sessionId})`);
           await replace({ ...run, lastDueAt: due.dueAt, lastInputId: blockingInput.id });
@@ -440,7 +489,7 @@ export function runDueSchedules(now: number, deps: RunnerDeps): Promise<void> {
         } catch (error) {
           // That time is skipped, once, so a chat the queue refuses is not retried (and logged)
           // every 30 s; the next time tries again.
-          deps.log(`scheduled run: ${clock(due.dueAt)} skipped: it could not be queued (${error instanceof Error ? error.message : String(error)}) (${run.sessionId})`);
+          deps.log(`scheduled run: ${clock(due.dueAt)} skipped: it could not be queued (${safeFailureReason(error)})`);
           await replace({ ...run, lastDueAt: due.dueAt });
           continue;
         }
@@ -449,7 +498,7 @@ export function runDueSchedules(now: number, deps: RunnerDeps): Promise<void> {
         const { missedDueAt: _cleared, ...sent } = run;
         await replace({ ...sent, lastDueAt: due.dueAt, lastInputId: id });
       } catch (error) {
-        deps.log(`scheduled run: ${clock(due.dueAt)} not recorded yet (${error instanceof Error ? error.message : String(error)}); checked again in 30 s (${run.sessionId})`);
+        deps.log(`scheduled run: ${clock(due.dueAt)} not recorded yet (${safeFailureReason(error)}); checked again in 30 s`);
       }
     }
   });
