@@ -1678,10 +1678,28 @@ async function verifySelectedCatalogFallback(id: string, generation: number, sel
   } else if (verification && !verification.ok && verification.error === 'Session not found') {
     selectedCatalogFallback = null;
     sessions = sessions.filter(row => row.id !== id);
-    // The selected chat is gone: the still-visible composer now belongs to a real new chat.
-    // This also lets an accepted opening be adopted and selected by adoptAcceptedOpening().
+    const previousDraftKey = draftKey();
+    const visibleDraft = authoredComposerText();
+    const visibleAttachments = imageDrafts.get(previousDraftKey) ?? [];
+    rememberDraft();
     newChatSelected = true;
     selectedId = null;
+    const newDraftKey = draftKey();
+    // The selected chat's text stays saved under its old key. An existing New Chat draft wins;
+    // otherwise carry the visible text into the new owner.
+    if (!inputDrafts.has(newDraftKey)) inputDrafts.set(newDraftKey, visibleDraft);
+    // Merge files so every tile shown by the new composer is included in its send payload.
+    if (visibleAttachments.length) {
+      const combinedAttachments = [...visibleAttachments, ...(imageDrafts.get(newDraftKey) ?? [])];
+      const combinedBytes = combinedAttachments.reduce((sum, file) => sum + ('size' in file ? file.size : 0), 0);
+      if (combinedAttachments.length <= 20 && combinedBytes <= 512 * 1024 * 1024) {
+        imageDrafts.set(newDraftKey, combinedAttachments);
+        imageDrafts.delete(previousDraftKey);
+      } else toast(t('Attach up to 20 files and 512 MB per message'));
+    }
+    // The selected chat is gone; the new-chat owner can now adopt an accepted opening.
+    replaceComposerDraft();
+    restoreDraft();
     detailFor = null;
     detailCursor = null;
     requestSelectedTabFollow(null);
