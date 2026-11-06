@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { appendEvent, createSession, initSessionStore, resetSessionStoreForTests, upsertMessageEvent } from '../src/main/session/store.js';
+import { appendEvent, createSession, flushSessions, initSessionStore, resetSessionStoreForTests, upsertMessageEvent } from '../src/main/session/store.js';
 import { readSessionEvents } from '../src/main/session/read-model.js';
 import { residenceOf } from '../src/shared/chronology.js';
 
@@ -62,4 +62,19 @@ it('shows the final answer on exactly one page when reading back through history
     before = Math.min(...page.events.map(residenceOf));
   }
   expect(seen).toHaveLength(1);
+});
+
+it('does not report unreadable session metadata as a confirmed missing session', async () => {
+  const session = await createSession({ conversationId: 'chat-metadata-check', title: 'Metadata check' });
+  await flushSessions();
+  const folder = path.join(directory, 'sessions', session.id);
+  await fs.writeFile(path.join(folder, 'meta.json'), '{"id":"damaged');
+  await fs.rm(path.join(folder, 'meta.backup.json'), { force: true });
+  resetSessionStoreForTests();
+
+  await expect(readSessionEvents(session.id, {})).rejects.toThrow('The session exists but its metadata could not be read.');
+
+  await fs.rm(folder, { recursive: true, force: true });
+  resetSessionStoreForTests();
+  expect(await readSessionEvents(session.id, {})).toBeNull();
 });

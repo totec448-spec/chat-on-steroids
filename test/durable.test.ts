@@ -182,16 +182,16 @@ describe('durable state commit boundary', () => {
     await flushDurable();
   });
 
-  it('does not trust arbitrary uppercase values as durable error codes', async () => {
+  it.each(['PRIVATE_CHAT_ID', 'ENOTRECOVERABLE'])('does not trust unlisted durable error code %s', async code => {
     const dir = await tempStore();
     const privatePath = path.join(dir, 'state', 'probe.json');
-    const failure = Object.assign(new Error(`rename '${privatePath}.tmp' -> '${privatePath}'`), { code: 'PRIVATE_CHAT_ID' });
+    const failure = Object.assign(new Error(`rename '${privatePath}.tmp' -> '${privatePath}'`), { code });
     const rename = vi.spyOn(fs, 'rename').mockRejectedValueOnce(failure);
 
-    await expect(writeDurableNow('probe', { generation: 1 })).rejects.toMatchObject({ code: 'PRIVATE_CHAT_ID' });
+    await expect(writeDurableNow('probe', { generation: 1 })).rejects.toMatchObject({ code });
     const log = getLog().map(entry => entry.message).join('\n');
     expect(log).toContain('could not save probe state: write failed');
-    expect(log).not.toContain('PRIVATE_CHAT_ID');
+    expect(log).not.toContain(code);
     expect(log).not.toContain(dir);
 
     rename.mockRestore();

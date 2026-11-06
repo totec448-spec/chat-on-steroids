@@ -46,6 +46,26 @@ it('projects different chats from one schedule list and opens the selected chat'
   expect(calls.openChat).toHaveBeenCalledExactlyOnceWith(idB);
 });
 
+it('shows blocked delivery receipts and disables Run now until the outbox is definitive', async () => {
+  const { initScheduled } = await import('../src/renderer/scheduled.js');
+  const calls = {
+    list: vi.fn(async () => ok([
+      { ...schedule(idA), deliveryBlock: 'unconfirmed' as const },
+      { ...schedule(idB), deliveryBlock: 'pending' as const }
+    ])),
+    pause: vi.fn(async () => ok(true)),
+    runNow: vi.fn(async () => ok(true)),
+    delete: vi.fn(async () => ok(true)),
+    openChat: vi.fn()
+  };
+  await initScheduled(calls).refresh();
+  const rows = [...document.querySelectorAll<HTMLElement>('.scheduled-index-row')];
+  expect(rows[0]?.querySelector('.scheduled-index-meta')?.textContent).toContain('Delivery not confirmed');
+  expect(rows[1]?.querySelector('.scheduled-index-meta')?.textContent).toContain('Delivery confirmation pending');
+  expect(rows.every(row => [...row.querySelectorAll<HTMLButtonElement>('button')]
+    .find(button => button.textContent === 'Run now')?.disabled)).toBe(true);
+});
+
 it('reuses pause, runNow and delete actions for the exact original chat; deletion asks first', async () => {
   const { initScheduled } = await import('../src/renderer/scheduled.js');
   const calls = {

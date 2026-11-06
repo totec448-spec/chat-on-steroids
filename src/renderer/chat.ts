@@ -1676,6 +1676,37 @@ async function readSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
   const changed = changedTranscripts;
   changedTranscripts = { all: false, ids: new Set() };
   if (catalog) projects = catalog;
+  let fallbackId = selectedCatalogFallback?.id === selectedId ? selectedId : null;
+  let fallbackToKeep = fallbackId ? selectedCatalogFallback : null;
+  const present = new Set(list.sessions.map(row => row.id));
+  if (fallbackId && !present.has(fallbackId)) {
+    // A bounded page is not authoritative for a selected chat fetched from another
+    // surface. Verify that exact id before dropping it; only a confirmed missing-session
+    // response is deletion, while an IPC error or unreadable summary keeps the last known row.
+    const fallbackSelectionGeneration = selectionGeneration;
+    let verification: Awaited<ReturnType<typeof api.getSession>> | null = null;
+    try { verification = await api.getSession(fallbackId, { limit: 1 }); } catch { /* Keep the last known summary. */ }
+    if (generation !== sessionsLoadGeneration) return;
+    if (selectionGeneration !== fallbackSelectionGeneration) {
+      // The user may have selected another chat while the exact-id read was in flight.
+      // Rebase the fallback on the current selection; never apply the old result to it.
+      fallbackId = selectedCatalogFallback?.id === selectedId ? selectedId : null;
+      fallbackToKeep = fallbackId ? selectedCatalogFallback : null;
+    } else if (selectedId === fallbackId && selectedCatalogFallback?.id === fallbackId) {
+      if (verification?.ok && verification.data?.summary) {
+        fallbackToKeep = verification.data.summary;
+        selectedCatalogFallback = fallbackToKeep;
+      } else if (verification && !verification.ok && verification.error === 'Session not found') {
+        fallbackToKeep = null;
+        selectedCatalogFallback = null;
+      }
+    } else fallbackToKeep = null;
+  }
+  if (fallbackId && present.has(fallbackId)) {
+    fallbackToKeep = list.sessions.find(row => row.id === fallbackId) ?? fallbackToKeep;
+    if (fallbackToKeep) selectedCatalogFallback = fallbackToKeep;
+  }
+  const fallbackWasDropped = fallbackId !== null && !present.has(fallbackId) && fallbackToKeep === null;
   // Once older pages have been requested, a hot refresh only replaces/updates the newest page.
   // Throwing the older rows away here would make scrolling history vanish every 400 ms while a
   // live chat is recording. Before pagination begins, replacing the first page is cheaper and
@@ -1684,25 +1715,21 @@ async function readSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
     // This page is authoritative for its covered range, including withdrawn openings.
     // Keep older pages, but do not merge a deleted newest row back into the sidebar.
     const oldest = list.sessions.at(-1);
-    const present = new Set(list.sessions.map(row => row.id));
-    sessions = sessions.filter(row => present.has(row.id) || (!!list.nextCursor && !!oldest &&
-      (row.updatedAt < oldest.updatedAt || (row.updatedAt === oldest.updatedAt && row.id < oldest.id))));
+    sessions = sessions.filter(row => {
+      if (row.id === fallbackId && fallbackWasDropped) return false;
+      if (row.id === fallbackToKeep?.id) return true;
+      return present.has(row.id) || (!!list.nextCursor && !!oldest &&
+        (row.updatedAt < oldest.updatedAt || (row.updatedAt === oldest.updatedAt && row.id < oldest.id)));
+    });
     mergeSessionRows(list.sessions);
+    if (fallbackToKeep && !present.has(fallbackToKeep.id)) mergeSessionRows([fallbackToKeep]);
   }
   else {
     sessions = list.sessions;
     sessionPageCursor = list.nextCursor ?? null;
     // A selected chat opened from a global surface can sit outside this newest page. Keep that
     // exact fetched summary mounted without pretending the user paged older history.
-    if (selectedCatalogFallback?.id === selectedId && !sessions.some(row => row.id === selectedCatalogFallback!.id)) {
-      mergeSessionRows([selectedCatalogFallback]);
-    }
-  }
-  // If the target temporarily reaches the newest page, keep the fallback current rather than
-  // retiring it: it can fall off that bounded page again while it is still the selected chat.
-  if (selectedCatalogFallback) {
-    const current = list.sessions.find(row => row.id === selectedCatalogFallback!.id);
-    if (current) selectedCatalogFallback = current;
+    if (fallbackToKeep && !present.has(fallbackToKeep.id)) mergeSessionRows([fallbackToKeep]);
   }
   sessionTotal = typeof list.total === 'number' ? list.total : list.sessions.length;
   activeId = list.activeId;

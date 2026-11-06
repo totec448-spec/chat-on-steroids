@@ -1406,6 +1406,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       const summary = await getSessionOrNullIfMissing(id);
       return summary ? { id: summary.id, title: summary.title } : null;
     },
+    inputs: async () => (await listInputs()).map(row => ({
+      id: row.id, state: row.state, deliveredAt: row.deliveredAt, scheduled: row.scheduled,
+      sendAuthorizedAt: row.sendAuthorizedAt, deliveryProof: deliveryProof(row)
+    })),
     log: logInfo
   }));
   handle('schedules:save', async payload => {

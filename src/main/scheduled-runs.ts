@@ -83,6 +83,8 @@ export interface RunnerDeps {
 
 export interface ScheduleListDeps {
   session(id: string): Promise<{ id: string; title: string } | null>;
+  /** Existing outbox rows, including terminal receipts, so the list reflects the runner's blocker. */
+  inputs(): Promise<ScheduledInputSnapshot[]>;
   log(line: string): void;
 }
 
@@ -285,6 +287,9 @@ export function listSchedules(): Promise<ScheduledRun[]> { return serial(load); 
 export function listScheduleItems(now: number, deps: ScheduleListDeps): Promise<ScheduledRunListItem[]> {
   return serial(async () => {
     let schedules = await load();
+    // Fail closed if delivery state cannot be read. An empty fallback could hide an
+    // ambiguous Send and incorrectly invite the person to queue a duplicate.
+    const inputs = schedules.length ? await deps.inputs() : [];
     const items: ScheduledRunListItem[] = [];
     for (const run of [...schedules]) {
       let session: Awaited<ReturnType<ScheduleListDeps['session']>>;
@@ -309,6 +314,7 @@ export function listScheduleItems(now: number, deps: ScheduleListDeps): Promise<
         }
         continue;
       }
+      const blockingInput = pendingScheduledInput(run, inputs);
       items.push({
         id: run.id,
         sessionId: run.sessionId,
@@ -322,6 +328,7 @@ export function listScheduleItems(now: number, deps: ScheduleListDeps): Promise<
         ...(run.missedDueAt !== undefined ? { missedDueAt: run.missedDueAt } : {}),
         ...(run.retryDueAt !== undefined ? { retryDueAt: run.retryDueAt } : {}),
         ...(run.catchUp ? { catchUp: true } : {}),
+        ...(blockingInput ? { deliveryBlock: uncertainInput(blockingInput) ? 'unconfirmed' as const : 'pending' as const } : {}),
         nextRunAt: nextRunAfter(asSchedule(run), Math.max(now, run.lastDueAt ?? 0))
       });
     }

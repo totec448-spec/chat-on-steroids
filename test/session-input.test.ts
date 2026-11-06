@@ -6,7 +6,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { flushDurable, initDurableStore, readDurable, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
 import {
-  fileSilenceInput, deferSilenceInput, revokeSilenceInputs, pendingQueuedPickups, inputBeforeGoal, inputArgs, acknowledgeBrowserInput, cancelInput, claimBrowserInput, completeBrowserDecision, deliveryProof, enqueueInput,
+  fileSilenceInput, deferSilenceInput, revokeSilenceInputs, pendingQueuedPickups, inputBeforeGoal, inputArgs, acknowledgeBrowserInput, cancelInput, claimBrowserInput, completeBrowserDecision, deliveryProof, enqueueInput, queuedInputOfferBlocker,
   failBrowserInput, listInputs, offerToolInput as offerToolInputBatch, acknowledgeToolInput, pendingBrowserInputs, requestBrowserDecision, resetInputForTests, configureInputDelivery,
   authorizeBrowserHelperRetry, pausedBrowserHelpers, hasEligibleToolInput, editQueuedInput, reorderQueuedInputs, setInputAutomation, authorizeBrowserInput, sessionInputPolicy, retryUnclaimedInput,
   noteInputStartupError, fileRotationInput, failBranchInput, BRANCH_ERRORS, holdInputForSendCheck, ownUnsentTexts, noteInputHeld, withdrawOwnContinuesAfterStop
@@ -1954,6 +1954,43 @@ it.each(['finish', 'after-turn'] as const)('sends only one queued %s after each 
   binding.activeTurnId = null;
   binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'turn-two', time: now + 2 };
   expect(await pendingBrowserInputs()).toEqual([{ id: second.id, conversationId: binding.conversationId }]);
+});
+
+it('offers and claims scheduled after-turn rows in queue order despite distinct metadata objects', async () => {
+  binding.model = 'gpt-5.6-sol';
+  binding.finishEnabled = false;
+  const scheduleId = randomUUID();
+  binding.activeTurnId = 'scheduled-source-turn';
+  binding.end = { kind: 'turn_start', outcome: '', turnId: 'scheduled-source-turn', time: now };
+  const first = await enqueueInput(input({ mode: 'after-turn', dueAt: now,
+    scheduled: { scheduleId, dueAt: now, late: false }, text: 'Older scheduled run' }));
+  const second = await enqueueInput(input({ mode: 'after-turn', dueAt: now + 1,
+    scheduled: { scheduleId, dueAt: now + 1, late: false }, text: 'Later scheduled run' }));
+  expect(first.mode).toBe('after-turn');
+  expect(second.mode).toBe('after-turn');
+
+  binding.activeTurnId = null;
+  binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'scheduled-source-turn', time: now + 1 };
+  now += 2;
+  expect(await pendingBrowserInputs()).toEqual([{ id: first.id, conversationId: binding.conversationId }]);
+  expect(await queuedInputOfferBlocker(second.id)).toContain(first.id);
+  expect(await claimBrowserInput(second.id, 'later-page', binding.conversationId, true)).toBeNull();
+  expect(await claimBrowserInput(first.id, 'first-page', binding.conversationId, true)).toMatchObject({ id: first.id, state: 'browser' });
+});
+
+it('keeps direct scheduled browser claims FIFO across distinct metadata objects', async () => {
+  binding.model = 'gpt-5.6-sol';
+  binding.finishEnabled = false;
+  const scheduleId = randomUUID();
+  const first = await enqueueInput(input({ dueAt: now,
+    scheduled: { scheduleId, dueAt: now, late: false }, text: 'Older direct scheduled run' }));
+  const second = await enqueueInput(input({ dueAt: now + 1,
+    scheduled: { scheduleId, dueAt: now + 1, late: false }, text: 'Later direct scheduled run' }));
+  binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'after-admission-turn', time: now + 1 };
+  now += 2;
+
+  expect(await claimBrowserInput(second.id, 'later-page', binding.conversationId, true)).toBeNull();
+  expect(await claimBrowserInput(first.id, 'first-page', binding.conversationId, true)).toMatchObject({ id: first.id, state: 'browser' });
 });
 
 it.each(['finish', 'after-turn'] as const)('does not advance %s on interruption, unknown outcome, error, or stale completion', async mode => {

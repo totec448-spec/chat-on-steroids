@@ -121,9 +121,11 @@ export function initScheduled(controller: ScheduledController): { refresh: () =>
       const row = element('article', 'scheduled-index-row');
       const title = element('h2', '', record.sessionTitle || t('Untitled chat'));
       title.dir = 'auto';
-      const meta = element('p', 'scheduled-index-meta', record.paused ? t('Paused') :
-        record.retryDueAt !== undefined ? t('Retrying the run due {0}', [dateTime(record.retryDueAt)]) :
-          record.nextRunAt === null ? t('ended') : t('next {0}', [dateTime(record.nextRunAt)]));
+      const meta = element('p', 'scheduled-index-meta', record.deliveryBlock === 'unconfirmed' ? t('Delivery not confirmed') :
+        record.deliveryBlock === 'pending' ? t('Delivery confirmation pending') : record.paused ? t('Paused') :
+          record.retryDueAt !== undefined ? t('Retrying the run due {0}', [dateTime(record.retryDueAt)]) :
+            record.nextRunAt === null ? t('ended') : t('next {0}', [dateTime(record.nextRunAt)]));
+      if (record.deliveryBlock && record.paused) meta.append(document.createTextNode(' · ' + t('Paused')));
       if (record.missedDueAt !== undefined) meta.append(document.createTextNode(' · ' + t('missed {0}', [dateTime(record.missedDueAt)])));
       meta.append(document.createTextNode(' · ' + repeatText(record.repeat)));
       const body = element('div', 'scheduled-index-body');
@@ -142,7 +144,7 @@ export function initScheduled(controller: ScheduledController): { refresh: () =>
         action(t('Open chat'), 'open', () => controller.openChat(record.sessionId)),
         action(record.paused ? t('Resume') : t('Pause'), 'pause', () => void mutate(() => controller.pause(record.sessionId, !record.paused))),
         action(t('Run now'), 'run-now', () => void mutate(() => controller.runNow(record.sessionId), queued => queued ? 'Queued' : 'Skipped'),
-          'btn btn-solid', record.retryDueAt !== undefined),
+          'btn btn-solid', record.retryDueAt !== undefined || record.deliveryBlock !== undefined),
         action(t('Delete'), 'delete', () => {
           if (window.confirm(t('Delete the schedule for {0}?', [record.sessionTitle || t('Untitled chat')]))) {
             void mutate(() => controller.delete(record.sessionId));

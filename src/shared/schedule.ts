@@ -42,6 +42,8 @@ export interface ScheduledRunListItem {
   /** An exact occurrence retained for retry after a transient outbox failure. */
   retryDueAt?: number;
   catchUp?: boolean;
+  /** A prior scheduled send still blocks another send until the outbox records a definitive receipt. */
+  deliveryBlock?: 'pending' | 'unconfirmed';
   /** Next future run from the time the list was read; null while paused or after the end. */
   nextRunAt: number | null;
 }
