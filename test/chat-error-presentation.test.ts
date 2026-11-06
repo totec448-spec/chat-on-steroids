@@ -150,3 +150,12 @@ it('keeps a resolved notice resolved when the rows that prove it leave the loade
   // Another notice of that page is not resolved by it.
   expect(chatErrorPresentation({ ...failed, seq: 42 }, [question, failed]).resolved).toBe(false);
 });
+
+it('shows a recoverable ChatGPT notice without the label of its own Retry button (2.1.51 polish pass)', () => {
+  expect(chatErrorPresentation(error('Message delivery timed out. Please try again. Retry', { recoverable: true })).message)
+    .toBe('Message delivery timed out. Please try again.');
+  expect(chatErrorPresentation(error('Verbindung unterbrochen. Warten auf die vollständige Antwort. Erneut versuchen', { recoverable: true })).message)
+    .toBe('Verbindung unterbrochen. Warten auf die vollständige Antwort.');
+  // A notice not classified recoverable keeps its words.
+  expect(chatErrorPresentation(error('Unknown Retry')).message).toBe('Unknown Retry');
+});

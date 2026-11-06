@@ -1,6 +1,6 @@
 import type { SessionEvent } from '../shared/session.js';
 import { positionOf } from '../shared/chronology.js';
-import { chatErrorMessageKey, CONVERSATION_DELETED } from '../shared/chat-error.js';
+import { chatErrorDisplayText, chatErrorMessageKey, CONVERSATION_DELETED } from '../shared/chat-error.js';
 import { currentLanguage, t } from './i18n.js';
 
 type ChatError = Extract<SessionEvent, { kind: 'chat_error' }>;
@@ -48,7 +48,7 @@ export function chatErrorPresentation(error: ChatError, history: readonly Sessio
   const title = thinking ? t('Thinking failed') : stalled ? t('Response stalled') : t('ChatGPT reported a problem');
   // Older recordings described our open-turn bookkeeping as native generation.
   const message = thinking ? t('ChatGPT’s page reported a failure. This does not prove the work stopped.')
-    : stalled ? t('No visible progress for ten minutes. The app could not confirm that this turn finished.') : error.message.text;
+    : stalled ? t('No visible progress for ten minutes. The app could not confirm that this turn finished.') : chatErrorDisplayText(error.message.text, error.recoverable === true);
   let next = error.blocking === true
     ? error.retryAt
       ? t('ChatGPT asked to wait until at least {0}. After that the app continues by itself. Reloading cannot remove this limit.', [retryTime(error.retryAt, error.time)])
