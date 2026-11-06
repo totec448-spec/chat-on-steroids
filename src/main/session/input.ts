@@ -2089,7 +2089,7 @@ async function completedStageBoundary(entry: InputEntry, current: InputEntry[]):
   if (!entry.sessionId || !queuedFollowup(entry)) return null;
   // Match the displayed order. A finish-only/file/delayed head cannot be silently
   // skipped by a later after-turn row just because that transport is ready first.
-  const first = ordered(current).find(row => row.sessionId === entry.sessionId && row.scheduled === entry.scheduled &&
+  const first = ordered(current).find(row => row.sessionId === entry.sessionId && !!row.scheduled === !!entry.scheduled &&
     queuedFollowup(row) && row.state === 'queued');
   if (first?.id !== entry.id || first.dueAt > Date.now() || !await browserInputAllowed(first)) return null;
   const turnId = await eligibleStageEnd(entry);
@@ -2191,7 +2191,7 @@ export function queuedInputOfferBlocker(id: string): Promise<string | null> {
       return earlier ? `an earlier user message (${earlier.id}) goes first` : 'an earlier user message goes first';
     }
     if (queuedFollowup(entry) && !await completedStageBoundary(entry, current)) {
-      const first = ordered(current).find(row => row.sessionId === entry.sessionId && row.scheduled === entry.scheduled &&
+      const first = ordered(current).find(row => row.sessionId === entry.sessionId && !!row.scheduled === !!entry.scheduled &&
         queuedFollowup(row) && row.state === 'queued');
       if (first && first.id !== entry.id) return `an earlier queued message of this chat (${first.id}) goes first`;
       if (!await browserInputAllowed(entry)) return await notAllowedReason(entry);
@@ -2565,7 +2565,7 @@ export function claimBrowserInput(id: string, owner: string, conversationId: str
     if (entry.sessionId) {
       if (current.some((row) => !sameDelivery(entry, row) && row.sessionId === entry.sessionId && ['browser', 'tool'].includes(row.state))) return null;
       // A row the send check holds waits apart: it never holds back a later message (#1794).
-      const first = ordered(current).find((row) => row.sessionId === entry.sessionId && row.scheduled === entry.scheduled &&
+      const first = ordered(current).find((row) => row.sessionId === entry.sessionId && !!row.scheduled === !!entry.scheduled &&
         row.state === 'queued' && queuedFollowup(row) === queuedFollowup(entry) &&
         row.dueAt <= Date.now() && !heldBySendCheck(row));
       // Follow-ups were already elected by completedStageBoundary with live

@@ -71,7 +71,9 @@ it('skips runs missed while the app was closed, and says which was missed (user 
   expect(deps.log).toHaveBeenCalledWith('scheduled run: 09:00 missed (the app was closed or asleep); not caught up');
   expect(changed).toHaveBeenCalledOnce();
   expect((await runs.listSchedules()).find(row => row.sessionId === SESSION)).toMatchObject({ lastDueAt: local('2026-10-24T09:00:00'), missedDueAt: local('2026-10-24T09:00:00') });
-  const projected = await runs.listScheduleItems(local('2026-10-24T12:00:00'), { session: async id => ({ id, title: 'Daily report' }), log: vi.fn() });
+  const projected = await runs.listScheduleItems(local('2026-10-24T12:00:00'), {
+    session: async id => ({ id, title: 'Daily report' }), inputs: deps.inputs, log: vi.fn()
+  });
   expect(projected[0]?.missedDueAt).toBe(local('2026-10-24T09:00:00'));
   // The normal times go on, and an on-time run clears the missed mark.
   await runs.runDueSchedules(local('2026-10-25T09:00:30'), deps);
@@ -213,6 +215,7 @@ it('lists readable schedules, preserves an unreadable chat, and logs only confir
       if (id === unreadable) throw new Error('metadata temporarily unreadable');
       return id === SESSION ? { id, title: 'Release checks' } : null;
     },
+    inputs: async () => [],
     log
   });
   expect(items).toEqual([expect.objectContaining({
@@ -235,7 +238,7 @@ it('continues listing healthy schedules when removing a confirmed orphan fails t
   const durable = await import('../src/main/durable.js');
   const write = vi.spyOn(durable, 'writeDurableNow').mockRejectedValueOnce(new Error('disk full'));
   const log = vi.fn();
-  const deps = { session: async (id: string) => id === SESSION ? { id, title: 'Healthy chat' } : null, log };
+  const deps = { session: async (id: string) => id === SESSION ? { id, title: 'Healthy chat' } : null, inputs: async () => [], log };
   const items = await runs.listScheduleItems(local('2026-10-24T10:30:00'), deps);
   write.mockRestore();
   expect(items).toEqual([expect.objectContaining({ sessionId: SESSION, sessionTitle: 'Healthy chat' })]);
@@ -245,6 +248,38 @@ it('continues listing healthy schedules when removing a confirmed orphan fails t
   await runs.listScheduleItems(local('2026-10-24T10:31:00'), deps);
   expect((await runs.listSchedules()).map(row => row.sessionId)).toEqual([SESSION]);
   expect(log).toHaveBeenCalledWith(expect.stringContaining('removed: its chat no longer exists'));
+});
+
+it('keeps an old cancelled scheduled send blocked until its delivery receipt is recorded', async () => {
+  const dueAt = local('2026-10-24T09:00:00');
+  const oldInput: ScheduledInputSnapshot = {
+    id: 'old-cancelled-scheduled-input',
+    state: 'cancelled',
+    sendAuthorizedAt: dueAt,
+    deliveryProof: 'unconfirmed',
+    scheduled: { scheduleId: '00000000-0000-4000-8000-000000000001', dueAt, late: false }
+  };
+  let outbox: ScheduledInputSnapshot[] = [oldInput];
+  const { runs } = await setup({ inputs: async () => outbox });
+  const saved = await runs.saveSchedule({
+    sessionId: SESSION, text: 'Do not duplicate', repeat: { kind: 'hours', every: 1 }, until: null
+  }, dueAt - 60 * 60_000);
+  outbox = [{ ...oldInput, scheduled: { ...oldInput.scheduled!, scheduleId: saved.id } }];
+  const deps = {
+    session: async (id: string) => ({ id, title: 'Scheduled chat' }),
+    inputs: async () => outbox,
+    log: vi.fn()
+  };
+
+  const oldProjection = await runs.listScheduleItems(dueAt + 7 * 24 * 60 * 60_000, deps);
+  expect(oldProjection[0]).toMatchObject({ deliveryBlock: 'unconfirmed' });
+  // Even much later, elapsed time is not evidence that an authorized Send was not delivered.
+  const stillUnconfirmed = await runs.listScheduleItems(dueAt + 30 * 24 * 60 * 60_000, deps);
+  expect(stillUnconfirmed[0]).toMatchObject({ deliveryBlock: 'unconfirmed' });
+
+  outbox = [{ ...outbox[0]!, deliveredAt: dueAt + 1, deliveryProof: 'sent' }];
+  const confirmed = await runs.listScheduleItems(dueAt + 30 * 24 * 60 * 60_000, deps);
+  expect(confirmed[0]).not.toHaveProperty('deliveryBlock');
 });
 
 it('does not report a missing-chat schedule removed until its durable deletion succeeds', async () => {
@@ -305,6 +340,7 @@ it('keeps an ended chat schedule visible in the global list without a future run
   await runs.saveSchedule({ sessionId: SESSION, text: 'Daily report', repeat: { kind: 'daily', at: '11:00' }, until }, createdAt);
   const items = await runs.listScheduleItems(local('2026-10-25T13:00:00'), {
     session: async id => ({ id, title: 'Ended reports' }),
+    inputs: async () => [],
     log: vi.fn()
   });
   expect(items).toEqual([expect.objectContaining({
@@ -319,6 +355,7 @@ it('bounds the global list text preview without truncating the saved message', a
   await runs.saveSchedule({ sessionId: SESSION, text, repeat: { kind: 'daily', at: '09:00' }, until: null }, local('2026-10-24T08:00:00'));
   const items = await runs.listScheduleItems(local('2026-10-24T08:30:00'), {
     session: async id => ({ id, title: 'Long schedule' }),
+    inputs: async () => [],
     log: vi.fn()
   });
   expect(items[0]?.text.length).toBeLessThanOrEqual(320);
@@ -895,7 +932,7 @@ it('durably retries the exact due occurrence after an outbox EIO, even beyond th
   expect(queued).toHaveLength(0);
   expect((await runs.listSchedules())[0]).toMatchObject({ lastDueAt: null, retryDueAt: dueAt });
   const retryProjection = await runs.listScheduleItems(dueAt + 20_000, {
-    session: async id => ({ id, title: 'Retrying report' }), log: vi.fn()
+    session: async id => ({ id, title: 'Retrying report' }), inputs: deps.inputs, log: vi.fn()
   });
   expect(retryProjection[0]?.retryDueAt).toBe(dueAt);
   expect(await runs.runScheduleNow(SESSION, dueAt + 20_000, deps)).toBe(false);
@@ -916,7 +953,7 @@ it('durably retries the exact due occurrence after an outbox EIO, even beyond th
   expect(recovered.lastDueAt).toBe(dueAt);
   expect(recovered.lastInputId).toBe(queued[0]?.id);
   const projected = await restarted.listScheduleItems(dueAt + 5 * 60_000, {
-    session: async id => ({ id, title: 'Retrying report' }), log: vi.fn()
+    session: async id => ({ id, title: 'Retrying report' }), inputs: deps.inputs, log: vi.fn()
   });
   expect(projected[0]?.retryDueAt).toBeUndefined();
   await restarted.runDueSchedules(dueAt + 6 * 60_000, deps);
@@ -1216,7 +1253,7 @@ it('starts empty only when the schedule file is absent and preserves malformed e
   const { runs } = await setup();
   expect(await runs.listSchedules()).toEqual([]);
   const durable = await import('../src/main/durable.js');
-  const listDeps = { session: async (id: string) => ({ id, title: 'Schedule' }), log: vi.fn() };
+  const listDeps = { session: async (id: string) => ({ id, title: 'Schedule' }), inputs: async () => [], log: vi.fn() };
   const malformed = { version: 1, schedules: 'broken' };
   await durable.writeDurableNow('scheduled-runs', malformed);
   await expect(runs.listSchedules()).rejects.toThrow('Could not read scheduled-runs state');
@@ -1252,7 +1289,9 @@ it('reports a future schedule version through both list paths and never overwrit
   await durable.writeDurableNow('scheduled-runs', future);
   const message = 'These schedules were saved by a newer version of Chat On Steroids. Update the app to change them.';
   await expect(runs.listSchedules()).rejects.toThrow(message);
-  await expect(runs.listScheduleItems(local('2026-10-24T09:00:00'), { session: async id => ({ id, title: 'Schedule' }), log: vi.fn() }))
+  await expect(runs.listScheduleItems(local('2026-10-24T09:00:00'), {
+    session: async id => ({ id, title: 'Schedule' }), inputs: async () => [], log: vi.fn()
+  }))
     .rejects.toThrow(message);
   await expect(runs.saveSchedule({ sessionId: SESSION, text: 'Do not overwrite', repeat: { kind: 'daily', at: '09:00' }, until: null }, local('2026-10-24T08:00:00')))
     .rejects.toThrow(message);
