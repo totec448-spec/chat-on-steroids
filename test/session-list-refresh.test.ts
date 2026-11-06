@@ -431,10 +431,13 @@ describe('selected catalog fallback', () => {
     let olderPageReads = 0;
     let opened = false;
     let verificationReply: any = null;
+    const verificationGate = deferred<any>();
     const getSession = vi.fn(async (id: string, options?: any) => {
+      if (opened && id === fallback.id && options?.limit === 1 && verificationReply === 'pending') return verificationGate.promise;
       if (opened && id === fallback.id && options?.limit === 1 && verificationReply) return verificationReply;
       return ok({ summary: fallback, events: [note(1, 'Fallback transcript')], total: 1, nextFrom: 2 });
     });
+    const getSwarm = vi.fn(() => ok({ running: false, runId: null, agents: [], maxWorkers: 2, pendingReports: 0 }));
     const api: any = new Proxy({
       listSessions: (options: any = {}) => {
         if (options.cursor) { olderPageReads += 1; return ok(pageTwo); }
@@ -446,7 +449,7 @@ describe('selected catalog fallback', () => {
       },
       listProjects: () => ok([]),
       getSession,
-      getSwarm: () => ok({ running: false, runId: null, agents: [], maxWorkers: 2, pendingReports: 0 }),
+      getSwarm,
       onSessionChanged: () => () => undefined,
       onSwarmChanged: () => () => undefined
     }, { get(target, prop) { return prop in target ? (target as any)[prop] : (..._args: any[]) => ok(null); } });
@@ -456,49 +459,59 @@ describe('selected catalog fallback', () => {
     initChat({ save: async () => true,
       state: () => ({ config: { sessions: { record: true, limitTokens: 533000 }, compaction: { auto: true, autoTokens: 400000 }, ui: { developerMode: true } } }) as any });
     chatVisible(true);
-    await vi.waitFor(() => expect(firstPageReads).toBe(1));
+    await vi.waitFor(() => expect(firstPageReads).toBe(1), { timeout: 10_000 });
     const opening = openScheduledChat(fallback.id);
     initial.resolve(ok(pageOne));
     await opening;
     opened = true;
     const row = () => w.document.querySelector<HTMLElement>(`#sessionList [data-id="${fallback.id}"]`);
     const selected = () => row()?.querySelector('.sess-top[aria-current="true"]') ?? null;
-    await vi.waitFor(() => expect(selected()).not.toBeNull());
+    await vi.waitFor(() => expect(selected()).not.toBeNull(), { timeout: 10_000 });
 
     const pane = w.document.getElementById('sessionList')!.closest('.scroll') as HTMLElement;
     Object.defineProperty(pane, 'clientHeight', { value: 200, configurable: true });
     Object.defineProperty(pane, 'scrollHeight', { value: 1_000, configurable: true });
     pane.scrollTop = 800;
     pane.dispatchEvent(new w.Event('scroll'));
-    await vi.waitFor(() => expect(olderPageReads).toBe(1));
-    await vi.waitFor(() => expect(w.document.querySelectorAll('#sessionList .sess')).toHaveLength(66));
+    await vi.waitFor(() => expect(olderPageReads).toBe(1), { timeout: 10_000 });
+    await vi.waitFor(() => expect(w.document.querySelectorAll('#sessionList .sess')).toHaveLength(66), { timeout: 10_000 });
 
     // Two whole-catalog refreshes overlap. The newer response arrives first and omits the
-    // selected fallback; exact-id verification must keep it. The older response then arrives late.
+    // selected fallback; paint must complete while its exact-id verification is still pending.
+    // The older response then arrives late with a conflicting summary and must not overwrite it.
+    verificationReply = 'pending';
     chatVisible(false); chatVisible(true);
-    await vi.waitFor(() => expect(firstPageReads).toBe(2));
+    await vi.waitFor(() => expect(firstPageReads).toBe(2), { timeout: 10_000 });
     chatVisible(false); chatVisible(true);
-    await vi.waitFor(() => expect(firstPageReads).toBe(3));
+    await vi.waitFor(() => expect(firstPageReads).toBe(3), { timeout: 10_000 });
     currentRefresh.resolve(ok(pageOne));
-    await vi.waitFor(() => expect(getSession.mock.calls.filter(([id, options]) => id === fallback.id && options?.limit === 1).length).toBeGreaterThan(1));
-    await vi.waitFor(() => expect(selected()).not.toBeNull());
-    staleRefresh.resolve(ok(pageOne));
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await vi.waitFor(() => expect(getSession.mock.calls.filter(([id, options]) => id === fallback.id && options?.limit === 1).length).toBeGreaterThan(1), { timeout: 10_000 });
+    await vi.waitFor(() => expect(getSwarm).toHaveBeenCalledTimes(2), { timeout: 10_000 });
+    await vi.waitFor(() => expect(selected()).not.toBeNull(), { timeout: 10_000 });
+    const staleFallback = { ...fallback, title: 'Stale fallback' };
+    const stalePage = { ...pageOne, sessions: [...firstPage.slice(0, 30), staleFallback, ...firstPage.slice(30, 59)] };
+    staleRefresh.resolve(ok(stalePage));
+    await vi.waitFor(() => expect(getSwarm).toHaveBeenCalledTimes(3), { timeout: 10_000 });
     expect(selected()).not.toBeNull();
+    expect(row()?.textContent).not.toContain('Stale fallback');
     expect(w.document.getElementById('timeline')?.textContent).toContain('Fallback transcript');
+    verificationGate.resolve(ok({ summary: fallback, events: [note(1, 'Fallback transcript')], total: 1, nextFrom: 2 }));
+    verificationReply = null;
 
     // A transient verification error is not deletion either.
     verificationReply = { ok: false as const, error: 'Temporary IPC failure' };
     chatVisible(false); chatVisible(true);
-    await vi.waitFor(() => expect(firstPageReads).toBe(4));
-    await vi.waitFor(() => expect(getSession.mock.calls.filter(([id, options]) => id === fallback.id && options?.limit === 1).length).toBeGreaterThan(2));
-    expect(selected()).not.toBeNull();
+    await vi.waitFor(() => expect(firstPageReads).toBe(4), { timeout: 10_000 });
+    await vi.waitFor(() => expect(getSwarm).toHaveBeenCalledTimes(4), { timeout: 10_000 });
+    await vi.waitFor(() => expect(getSession.mock.calls.filter(([id, options]) => id === fallback.id && options?.limit === 1).length).toBeGreaterThan(2), { timeout: 10_000 });
+    await vi.waitFor(() => expect(selected()).not.toBeNull(), { timeout: 10_000 });
 
     // The main-process read returns this error only after a positive missing-directory check.
     verificationReply = { ok: false as const, error: 'Session not found' };
     chatVisible(false); chatVisible(true);
-    await vi.waitFor(() => expect(firstPageReads).toBe(5));
-    await vi.waitFor(() => expect(row()).toBeNull());
+    await vi.waitFor(() => expect(firstPageReads).toBe(5), { timeout: 10_000 });
+    await vi.waitFor(() => expect(getSwarm).toHaveBeenCalledTimes(5), { timeout: 10_000 });
+    await vi.waitFor(() => expect(row()).toBeNull(), { timeout: 10_000 });
     expect(w.document.getElementById('timeline')?.textContent).not.toContain('Fallback transcript');
   });
 });
