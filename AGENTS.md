@@ -1450,7 +1450,9 @@ live-process capacity charge or automatic reoffer. Eviction/shutdown drops their
 custody entries; retained ids cannot be reallocated. Unread results keep their separate bounds.
 Tool descriptions and result markers say what a tool does, never how its output should be treated or
 that a call is harmless: ChatGPT's safety check flagged `write_stdin`'s "including automatic delivery;
-never reruns work" as a Suspicious Instruction and held a long run on an approval card (2026-10-15).
+never reruns work" as a Suspicious Instruction and held a long run on an approval card (2026-10-15), and
+then "Empty chars read the session output … Completed processes reject input" (2026-11-06): say neither
+how empty input nor how a finished process is treated.
 The connector instructions follow the same rule (#1755): they say what is enabled and what a ChatGPT
 message means, never how to treat blocks, approvals or ChatGPT's own messages (`test/mcp-user-instructions.test.ts`).
 
