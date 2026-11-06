@@ -1214,6 +1214,13 @@ describe('surface boundaries', () => {
     const tool = toolList(await core('tools/list')).find((entry) => entry.name === 'write_stdin');
     expect(tool?.description).toBeTruthy();
     expect(tool!.description).not.toMatch(/automatic(ally)? deliver|never reruns|delivered automatically/i);
+    // Flagged again on 2026-11-06 (VM): "Empty chars read the session output … Completed processes
+    // reject input" read as "a policy-like instruction to treat empty input as a read operation".
+    // Neither the tool nor its input may say how empty input or a finished process is to be treated.
+    const chars = (tool as any).inputSchema?.properties?.chars?.description as string | undefined;
+    for (const text of [tool!.description, chars ?? '']) {
+      expect(text).not.toMatch(/empty (chars|input)[^.]*\bread|\breject|read operation|treated/i);
+    }
   });
 
   it('saves a generated image only for a call it can tie to its chat (#889)', async () => {
