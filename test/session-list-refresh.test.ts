@@ -415,6 +415,7 @@ describe('selected catalog fallback', () => {
     const fallback = summary('2026-08-25-ffffffff', 99_970, 0);
     const newChatId = '2026-08-26-ffffffff';
     const newChatSummary = { ...summary(newChatId, 100_100, 0), title: 'Draft from deleted chat', conversationId: null, chatIds: [] };
+    const deletedAttachment = { id: 'deleted-chat-file', name: 'deleted-chat.txt', size: 12, mimeType: 'text/plain' };
     expect(fallback.updatedAt).toBeLessThan(firstPage[0]!.updatedAt);
     expect(fallback.updatedAt).toBeGreaterThan(firstPage.at(-1)!.updatedAt);
     const cursor = { updatedAt: firstPage.at(-1)!.updatedAt, id: firstPage.at(-1)!.id };
@@ -455,6 +456,7 @@ describe('selected catalog fallback', () => {
       listProjects: () => ok([]),
       getSession,
       sendInput,
+      chooseFiles: () => ok([deletedAttachment]),
       getSwarm,
       onSessionChanged: () => () => undefined,
       onSwarmChanged: () => () => undefined
@@ -516,6 +518,8 @@ describe('selected catalog fallback', () => {
     const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
     input.value = 'Draft from deleted chat';
     input.dispatchEvent(new w.Event('input', { bubbles: true }));
+    w.document.getElementById('attachImages')!.click();
+    await vi.waitFor(() => expect(w.document.getElementById('composerImages')?.textContent).toContain('deleted-chat.txt'), { timeout: 10_000 });
     verificationReply = { ok: false as const, error: 'Session not found' };
     chatVisible(false); chatVisible(true);
     await vi.waitFor(() => expect(firstPageReads).toBe(5), { timeout: 10_000 });
@@ -524,14 +528,96 @@ describe('selected catalog fallback', () => {
     expect(w.document.getElementById('timeline')?.textContent).not.toContain('Fallback transcript');
     expect(w.document.getElementById('chatTitle')?.textContent).toBe('New chat');
     expect(input.value).toBe('Draft from deleted chat');
+    expect(w.document.getElementById('composerImages')?.textContent).toContain('deleted-chat.txt');
 
     // The visible draft must be sent as a new opening, and its receipt must select that chat.
     w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
     await vi.waitFor(() => expect(sendInput).toHaveBeenCalledTimes(1), { timeout: 10_000 });
-    expect(sendInput).toHaveBeenCalledWith(expect.objectContaining({ sessionId: null, text: 'Draft from deleted chat' }));
+    expect(sendInput).toHaveBeenCalledWith(expect.objectContaining({ sessionId: null, text: 'Draft from deleted chat', attachments: [deletedAttachment] }));
     const openedRow = () => w.document.querySelector<HTMLElement>(`#sessionList .sess[data-id="${newChatId}"]`);
     await vi.waitFor(() => expect(openedRow()?.querySelector('.sess-top[aria-current="true"]')).not.toBeNull(), { timeout: 10_000 });
     await vi.waitFor(() => expect(w.document.getElementById('chatTitle')?.textContent).toBe('Draft from deleted chat'), { timeout: 10_000 });
+  });
+
+  it('keeps an existing new-chat draft and sends every attachment shown after fallback deletion', async () => {
+    const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
+    dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
+    const w = dom.window;
+    Object.assign(globalThis, {
+      window: w, document: w.document, HTMLElement: w.HTMLElement, Element: w.Element, Node: w.Node,
+      DocumentFragment: w.DocumentFragment, HTMLInputElement: w.HTMLInputElement, HTMLSelectElement: w.HTMLSelectElement,
+      HTMLTextAreaElement: w.HTMLTextAreaElement, HTMLButtonElement: w.HTMLButtonElement
+    });
+    if (!(w.HTMLElement.prototype as any).scrollIntoView) (w.HTMLElement.prototype as any).scrollIntoView = () => {};
+
+    const fallback = summary('2026-08-27-ffffffff', 99_000, 0);
+    const other = summary('2026-08-27-00000001', 100_000, 0);
+    const newChatId = '2026-08-28-ffffffff';
+    const newChatSummary = { ...summary(newChatId, 100_100, 0), title: 'Existing new-chat draft', conversationId: null, chatIds: [] };
+    const page = { sessions: [other], activeId: null, pressure: [], blocked: [], approval: [], recoveryStopped: [], trusted: [], total: 1, nextCursor: null };
+    const ok = (data: any) => Promise.resolve({ ok: true as const, data });
+    const newAttachment = { id: 'new-chat-file', name: 'new-chat.txt', size: 10, mimeType: 'text/plain' };
+    const visibleAttachment = { id: 'deleted-chat-file', name: 'deleted-chat.txt', size: 12, mimeType: 'text/plain' };
+    let chooseFileCalls = 0;
+    let opened = false;
+    let deleted = false;
+    const listSessions = vi.fn(() => ok(page));
+    const sendInput = vi.fn(async (request: any) => ok({ ...request, sessionId: newChatId, opening: true,
+      state: 'queued', owner: null, createdAt: Date.now(), conversationId: null }));
+    const getSession = vi.fn(async (id: string, options?: any) => {
+      if (id === newChatId) return ok({ summary: newChatSummary, events: [], total: 0, nextFrom: 1 });
+      if (id === fallback.id && opened && deleted && options?.limit === 1) return { ok: false as const, error: 'Session not found' };
+      return ok({ summary: fallback, events: [], total: 0, nextFrom: 1 });
+    });
+    const getSwarm = vi.fn(() => ok({ running: false, runId: null, agents: [], maxWorkers: 2, pendingReports: 0 }));
+    const api: any = new Proxy({
+      listSessions,
+      listProjects: () => ok([]),
+      getSession,
+      sendInput,
+      chooseFiles: () => ok([chooseFileCalls++ === 0 ? newAttachment : visibleAttachment]),
+      getSwarm,
+      onSessionChanged: () => () => undefined,
+      onSwarmChanged: () => () => undefined
+    }, { get(target, prop) { return prop in target ? (target as any)[prop] : (..._args: any[]) => ok(null); } });
+    Object.defineProperty(w, 'api', { value: api, configurable: true });
+
+    const { chatVisible, initChat, openScheduledChat } = await import('../src/renderer/chat.js');
+    initChat({ save: async () => true,
+      state: () => ({ config: { sessions: { record: true, limitTokens: 533000 }, compaction: { auto: true, autoTokens: 400000 }, ui: { developerMode: true } } }) as any });
+    chatVisible(true);
+    await vi.waitFor(() => expect(listSessions).toHaveBeenCalledTimes(1), { timeout: 10_000 });
+
+    const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+    input.value = 'Existing new-chat draft';
+    input.dispatchEvent(new w.Event('input', { bubbles: true }));
+    w.document.getElementById('attachImages')!.click();
+    await vi.waitFor(() => expect(w.document.getElementById('composerImages')?.textContent).toContain('new-chat.txt'), { timeout: 10_000 });
+
+    await openScheduledChat(fallback.id);
+    opened = true;
+    input.value = 'Draft from deleted chat';
+    input.dispatchEvent(new w.Event('input', { bubbles: true }));
+    w.document.getElementById('attachImages')!.click();
+    await vi.waitFor(() => expect(w.document.getElementById('composerImages')?.textContent).toContain('deleted-chat.txt'), { timeout: 10_000 });
+
+    deleted = true;
+    chatVisible(false); chatVisible(true);
+    const fallbackRow = () => w.document.querySelector<HTMLElement>(`#sessionList [data-id="${fallback.id}"]`);
+    await vi.waitFor(() => expect(fallbackRow()).toBeNull(), { timeout: 10_000 });
+    expect(input.value).toBe('Existing new-chat draft');
+    expect(w.document.getElementById('composerImages')?.textContent).toContain('new-chat.txt');
+    expect(w.document.getElementById('composerImages')?.textContent).toContain('deleted-chat.txt');
+    await vi.waitFor(() => {
+      const drafts = JSON.parse(w.localStorage.getItem('chat-on-steroids.composer-drafts') ?? '[]');
+      expect(drafts).toContainEqual([fallback.id, 'Draft from deleted chat']);
+      expect(drafts).toContainEqual(['new', 'Existing new-chat draft']);
+    }, { timeout: 10_000 });
+
+    w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(sendInput).toHaveBeenCalledTimes(1), { timeout: 10_000 });
+    expect(sendInput).toHaveBeenCalledWith(expect.objectContaining({ sessionId: null, text: 'Existing new-chat draft',
+      attachments: [visibleAttachment, newAttachment] }));
   });
 });
 
