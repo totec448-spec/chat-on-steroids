@@ -413,6 +413,8 @@ describe('selected catalog fallback', () => {
     // This fetched summary sorts inside the first page's covered range, despite being absent
     // from the stale page response. The old pagination filter therefore discarded it.
     const fallback = summary('2026-08-25-ffffffff', 99_970, 0);
+    const newChatId = '2026-08-26-ffffffff';
+    const newChatSummary = { ...summary(newChatId, 100_100, 0), title: 'Draft from deleted chat', conversationId: null, chatIds: [] };
     expect(fallback.updatedAt).toBeLessThan(firstPage[0]!.updatedAt);
     expect(fallback.updatedAt).toBeGreaterThan(firstPage.at(-1)!.updatedAt);
     const cursor = { updatedAt: firstPage.at(-1)!.updatedAt, id: firstPage.at(-1)!.id };
@@ -432,7 +434,10 @@ describe('selected catalog fallback', () => {
     let opened = false;
     let verificationReply: any = null;
     const verificationGate = deferred<any>();
+    const sendInput = vi.fn(async (request: any) => ok({ ...request, sessionId: newChatId, opening: true,
+      state: 'queued', owner: null, createdAt: Date.now(), conversationId: null }));
     const getSession = vi.fn(async (id: string, options?: any) => {
+      if (id === newChatId) return ok({ summary: newChatSummary, events: [], total: 0, nextFrom: 1 });
       if (opened && id === fallback.id && options?.limit === 1 && verificationReply === 'pending') return verificationGate.promise;
       if (opened && id === fallback.id && options?.limit === 1 && verificationReply) return verificationReply;
       return ok({ summary: fallback, events: [note(1, 'Fallback transcript')], total: 1, nextFrom: 2 });
@@ -449,6 +454,7 @@ describe('selected catalog fallback', () => {
       },
       listProjects: () => ok([]),
       getSession,
+      sendInput,
       getSwarm,
       onSessionChanged: () => () => undefined,
       onSwarmChanged: () => () => undefined
@@ -507,12 +513,25 @@ describe('selected catalog fallback', () => {
     await vi.waitFor(() => expect(selected()).not.toBeNull(), { timeout: 10_000 });
 
     // The main-process read returns this error only after a positive missing-directory check.
+    const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+    input.value = 'Draft from deleted chat';
+    input.dispatchEvent(new w.Event('input', { bubbles: true }));
     verificationReply = { ok: false as const, error: 'Session not found' };
     chatVisible(false); chatVisible(true);
     await vi.waitFor(() => expect(firstPageReads).toBe(5), { timeout: 10_000 });
     await vi.waitFor(() => expect(getSwarm).toHaveBeenCalledTimes(5), { timeout: 10_000 });
     await vi.waitFor(() => expect(row()).toBeNull(), { timeout: 10_000 });
     expect(w.document.getElementById('timeline')?.textContent).not.toContain('Fallback transcript');
+    expect(w.document.getElementById('chatTitle')?.textContent).toBe('New chat');
+    expect(input.value).toBe('Draft from deleted chat');
+
+    // The visible draft must be sent as a new opening, and its receipt must select that chat.
+    w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(sendInput).toHaveBeenCalledTimes(1), { timeout: 10_000 });
+    expect(sendInput).toHaveBeenCalledWith(expect.objectContaining({ sessionId: null, text: 'Draft from deleted chat' }));
+    const openedRow = () => w.document.querySelector<HTMLElement>(`#sessionList .sess[data-id="${newChatId}"]`);
+    await vi.waitFor(() => expect(openedRow()?.querySelector('.sess-top[aria-current="true"]')).not.toBeNull(), { timeout: 10_000 });
+    await vi.waitFor(() => expect(w.document.getElementById('chatTitle')?.textContent).toBe('Draft from deleted chat'), { timeout: 10_000 });
   });
 });
 
