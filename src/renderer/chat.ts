@@ -1678,6 +1678,9 @@ async function verifySelectedCatalogFallback(id: string, generation: number, sel
   } else if (verification && !verification.ok && verification.error === 'Session not found') {
     selectedCatalogFallback = null;
     sessions = sessions.filter(row => row.id !== id);
+    // The selected chat is gone: the still-visible composer now belongs to a real new chat.
+    // This also lets an accepted opening be adopted and selected by adoptAcceptedOpening().
+    newChatSelected = true;
     selectedId = null;
     detailFor = null;
     detailCursor = null;
