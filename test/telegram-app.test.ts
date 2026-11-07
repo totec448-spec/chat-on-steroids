@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
+// A gate on the pause marker's write, to meet two changes at an exact moment (CodeRabbit on #1990).
+const gate = vi.hoisted(() => ({ hold: null as Promise<void> | null, blocked: 0 }));
+vi.mock('../src/main/durable.js', async importOriginal => {
+  const real = await importOriginal<typeof import('../src/main/durable.js')>();
+  return { ...real, writeDurableNow: async (name: string, value: unknown) => {
+    if (name === 'telegram-paused' && gate.hold) { gate.blocked += 1; await gate.hold; }
+    return real.writeDurableNow(name, value);
+  } };
+});
 vi.mock('../src/main/secrets.js', () => ({
   getSecret: vi.fn(async () => '123456789:AAbbCCddEEffGGhhIIjjKKllMMnnOOppQQ1'),
   setSecret: vi.fn(async () => undefined),
@@ -162,4 +171,43 @@ it('forgets a pause the person undid and redid in the app, so /resume never turn
   await vi.waitFor(() => expect(telegram.sent.at(-1)?.text).toBe('No chat was paused from here.'), { timeout: 5_000, interval: 10 });
   expect(app.setAutomation).not.toHaveBeenCalled();
   expect(await readDurable('telegram-paused')).toEqual([]);
+});
+
+// CodeRabbit on #1990: an unknown chat is refused for Stop too, as it already was for pause and resume.
+it('does not stop a chat that is no longer in the chat list, such as a worker that left it', async () => {
+  const telegram = fakeTelegram();
+  const app = await start(telegram, [{ sessionId: 'chat-a', automation: null }]);
+  expect(await telegramDestination()!.send('A chat finished.', { sessionId: 'gone-worker' })).toBe(true);
+  telegram.say('/stop', telegram.lastMessageId);
+  await vi.waitFor(() => expect(telegram.sent.at(-1)?.text).toBe('Nothing is running there.'), { timeout: 5_000, interval: 10 });
+  expect(app.stop).not.toHaveBeenCalled();
+});
+
+// CodeRabbit on #1990: a change by the person's own control, made while /pause is still writing, must not be undone.
+it('keeps the pause marker the person ended in the app while another pause was still being written', async () => {
+  const chats: Array<{ sessionId: string; automation: 'Goal' | 'Loop' | null }> = [{ sessionId: 'chat-a', automation: 'Loop' }, { sessionId: 'chat-b', automation: null }];
+  await writeDurableNow('telegram-paused', ['chat-b']);
+  const telegram = fakeTelegram();
+  const app = await start(telegram, chats);
+  const { noteAutomationChanged } = await import('../src/main/telegram-app.js');
+  let release: () => void = () => undefined;
+  gate.hold = new Promise<void>(resolve => { release = resolve; });
+  try {
+    gate.blocked = 0;
+    telegram.say('/pause');
+    // Waits until /pause's own write of the marker is really held.
+    await vi.waitFor(() => expect(gate.blocked).toBe(1), { timeout: 5_000, interval: 5 });
+    // While chat-a's marker is being written, the person turns chat-b on in the app: its marker ends at once.
+    noteAutomationChanged('chat-b', true);
+    chats[1]!.automation = null;
+    release();
+  } finally { release(); gate.hold = null; }
+  await vi.waitFor(() => expect(telegram.sent.at(-1)?.text).toBe('Paused. /resume starts it again.'), { timeout: 5_000, interval: 10 });
+  await flushDurable();
+  expect(await readDurable('telegram-paused')).toEqual(['chat-a']);
+  app.setAutomation.mockClear();
+  telegram.say('/resume');
+  await vi.waitFor(() => expect(telegram.sent.at(-1)?.text).toBe('Resumed.'), { timeout: 5_000, interval: 10 });
+  expect(app.setAutomation).toHaveBeenCalledTimes(1);
+  expect(app.setAutomation).toHaveBeenCalledWith('chat-a', true);
 });
