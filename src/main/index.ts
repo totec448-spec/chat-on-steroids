@@ -36,6 +36,7 @@ import { workspaceTerminalsExited } from './workspace-terminal.js';
 import { getSecret, initSecretsPath, keychainReadPending } from './secrets.js';
 import { installPhonePush, pushToPhone } from './phone-push.js';
 import { startTelegram, stopTelegram, telegramDestination } from './telegram-app.js';
+import { statusChatsFrom } from './telegram-status.js';
 import { approvalCardView, requestApprovalAnswer } from './approval-wait.js';
 import { createSoundReadiness, installSoundCues, soundCue, soundQuietHours } from './sound-cues.js';
 import { DEFAULT_PHONE_PUSH } from '../shared/phone-push.js';
@@ -556,12 +557,8 @@ void app.whenReady().then(async () => {
     log: logInfo,
     mainText,
     details: () => ({ ...DEFAULT_PHONE_PUSH, ...getConfig().ui.phonePush }).includeDetails,
-    chats: async () => (await listSessions()).filter(chat => chat.origin?.kind !== 'helper').map(chat => {
-      const goal = chat.conversationId ? goalSwitchFor(chat.conversationId) : null;
-      const card = chat.conversationId ? approvalCardView(chat.conversationId) : null;
-      return { sessionId: chat.id, title: chat.title, working: !!chat.activeTurnId, approval: !!card && !card.answer,
-        automation: goal?.enabled ? (goal.mode === 'loop' ? 'Loop' as const : 'Goal' as const) : null };
-    }),
+    chats: async () => statusChatsFrom(await listSessions(),
+      { goal: goalSwitchFor, card: approvalCardView, activityExpiresAt: sessionActivityExpiresAt }, Date.now()),
     // Phase 2 (2026-10-31): the app's own Stop and Goal/Loop switch, and the composer's send path.
     stop: async sessionId => {
       try {
