@@ -5063,13 +5063,20 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .background-exec-chevron { flex: 0 0 16px; width: 16px; height: 16px; color: var(--faint); transition: transform 120ms ease; }
 .background-exec-status.is-expanded .background-exec-chevron { transform: rotate(90deg); }
 .background-exec-list[hidden] { display: none; }
-.background-exec-list { max-height: min(220px, 30vh); overflow-y: auto; overscroll-behavior: contain; background: var(--card); }
+.background-exec-list { max-height: min(220px, 30vh); overflow-y: auto; overscroll-behavior: contain; background: var(--card); container-type: inline-size; }
 .background-exec-process { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 6px 12px 6px 37px; border-bottom: 1px solid var(--edge); color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); }
-.background-exec-process-command { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.background-exec-process-command { flex: 1; min-width: 4em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
 .background-exec-time { flex-shrink: 0; color: var(--faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .background-exec-stop, .background-exec-output { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 6px; padding: 5px 7px; background: transparent; color: var(--soft); font: inherit; cursor: pointer; }
 .background-exec-stop:hover, .background-exec-output:hover { color: var(--ink); background: var(--hover); }
 .background-exec-stop:disabled { cursor: default; opacity: .55; }
+/* The chat column, not the window, decides: with a sidebar open a 640px window leaves a column of
+   about 300px, where a row's time, Output and Stop would push Stop past the edge. The button labels
+   go first (both keep their icon and accessible name); the elapsed time stays as long as it fits. */
+@container (max-width: 340px) { .background-exec-stop > span, .background-exec-output > span { display: none; } .background-exec-stop, .background-exec-output { padding-inline: 5px; } }
+/* A long elapsed label (an hour count in French or German) shrinks with an ellipsis before it can push Stop out. */
+.background-exec-process-time { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+@container (max-width: 230px) { .background-exec-process-time { display: none; } .background-exec-list .background-exec-process { gap: 4px; padding-inline: 8px; } }
 @media (max-width: 480px) {
   /* Preserve the actionable process row at laptop zoom / phone-width windows. The row tooltip
      still carries elapsed time and full commands; the Stop control keeps its accessible label. */
