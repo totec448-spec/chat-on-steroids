@@ -1380,6 +1380,12 @@ export function appendEvent(sessionId: string, event: NewSessionEvent): Promise<
  * preserves the sequence/time position where that stable website message first appeared, so
  * revisions cannot move either a user response boundary or assistant prose through later work.
  */
+/** True when `next` is complete text that starts with all of `previous` and has more after it. */
+function continuesFinalText(previous: StoredText, next: StoredText): boolean {
+  return !previous.truncated && !next.truncated && previous.text.length > 0 &&
+    next.text.length > previous.text.length && next.text.startsWith(previous.text);
+}
+
 export function upsertMessageEvent(
   sessionId: string,
   event: NewMessageEvent,
@@ -1413,7 +1419,11 @@ export function upsertMessageEvent(
         event.kind === 'assistant_message' &&
         (previous.final === true || previous.state === 'final') &&
         event.final !== true &&
-        event.state !== 'final'
+        event.state !== 'final' &&
+        // A snapshot that carries the final text and then more is new writing, not a stale copy: after
+        // a Stop that ChatGPT had not obeyed, the page reported the first sentence as final and the
+        // same message kept growing (#2097). Anything shorter or different is still ignored.
+        !continuesFinalText(previous.message, event.message)
       ) {
         return { event: previous, changed: false, contentChanged: false };
       }
