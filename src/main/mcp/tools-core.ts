@@ -1,5 +1,6 @@
 import { toolDeclaration } from './tool-declarations.js';
 import { registerPlanTool } from './plan-tool.js';
+import { registerUserRequestTools } from './user-request-tools.js';
 import { goalWorkerChat, imageExportCapable } from '../bridge.js';
 import { exportImage, ImageExportError } from '../image-export.js';
 import { awaitRequestCorrelation } from '../session/correlation.js';
@@ -515,8 +516,8 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             // may send a chat's call to another computer's Core, which never sees that chat (#1097).
             return fail(`${liveConnectorName('core')} could not tell which chat this save_image call came from, ` +
               'so it does not know which image to save. If the chat belongs to another computer, call save_image of that ' +
-              'computer\'s Chat On Steroids Core instead. Otherwise call save_image directly as its own tool call, not from ' +
-              'inside a JavaScript or exec step, and try again.');
+              'computer\'s Chat On Steroids Core instead. Otherwise wait a moment and call save_image once more; calling it ' +
+              'from an exec step is fine. The app ties a call to its chat through the Chat On Steroids extension in that chat\'s browser tab.');
           }
           if (!imageExportCapable()) {
             return fail('save_image needs the Chat On Steroids browser extension to be connected and up to date, so the chat\'s page can hand over the image.');
@@ -1195,6 +1196,13 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           }
         })
     );
+  }
+
+  // A step for the person (#1695): offered with the command tools, and also in Read-only mode,
+  // which turns those off: it runs nothing, and the person's own terminal is theirs.
+  // Kept registered once offered (ToolContext.exposedUserRequests); the handler refuses while off.
+  if (ctx.exposedUserRequests ?? ((exposedCaps.command || (ctx.readOnly && getConfig().capabilities.command)) && reg.sessionToolsExposed)) {
+    registerUserRequestTools(reg);
   }
 
   // ------------------------------------------------------- plan and finish

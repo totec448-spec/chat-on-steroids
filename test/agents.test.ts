@@ -5214,6 +5214,54 @@ describe('simultaneous independent prime families', () => {
     }
   });
 
+  it('refuses workers past "Chats working at once", passing the calling prime\'s own slot to them (#1694)', async () => {
+    const slots = await import('../src/main/chats-at-once.js');
+    const before = slots.workingChatsSourceForTests();
+    slots.resetChatsAtOnceForTests();
+    slots.setWorkingChatsSource(() => new Set([PRIME_CHAT, 'someone-elses-chat']));
+    await setEnabled(true, 4);
+    getConfig().multiAgent.chatsAtOnce = 2;
+    try {
+      // The prime delegates and ends its turn: its slot is the worker's. Two workers would make three.
+      expect(() => recruit(prime, 2)).toThrow(/CHATS_AT_ONCE: 1 other chats are working and the limit is 2/);
+      const a = recruit(prime, 1);
+      // That worker holds its slot until its own chat shows as working: a second one does not fit.
+      expect(() => spawn({ caller: prime, workers: [{ task: 'one too many' }] })).toThrow(/CHATS_AT_ONCE/);
+      expect(a.created).toHaveLength(1);
+      // Off again: no limit.
+      getConfig().multiAgent.chatsAtOnce = 0;
+      expect(spawn({ caller: prime, workers: [{ task: 'no limit' }] }).created).toHaveLength(1);
+    } finally {
+      getConfig().multiAgent.chatsAtOnce = 0;
+      slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(before);
+      await setEnabled(true);
+    }
+  });
+
+  it('counts a running worker\'s chat once, and frees a failed or refused worker\'s slot at once (Haz on #2051)', async () => {
+    const slots = await import('../src/main/chats-at-once.js');
+    const before = slots.workingChatsSourceForTests();
+    slots.resetChatsAtOnceForTests();
+    const working = new Set([PRIME_CHAT]);
+    slots.setWorkingChatsSource(() => working);
+    await setEnabled(true, 4);
+    getConfig().multiAgent.chatsAtOnce = 3;
+    try {
+      const a = recruit(prime, 2);
+      // worker-1's chat opens and works: the prime, worker-1 and worker-2's reservation are three, not four.
+      expect(bindConversation('worker-1', 'slot-worker-1', a.runId)).toBe(true);
+      working.add('slot-worker-1');
+      expect(slots.automaticSendRefusal('input:other', 'other-chat')).toMatch(/3 chats are working/);
+      // worker-2 never started: its slot is free at once, not after two minutes.
+      failAgent('worker-2', 'tab never opened', undefined, {}, a.runId);
+      expect(slots.automaticSendRefusal('input:other', 'other-chat')).toBeNull();
+    } finally {
+      getConfig().multiAgent.chatsAtOnce = 0;
+      slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(before);
+      await setEnabled(true);
+    }
+  });
+
   it('counts an unpublished staged spawn as a global admission reservation', async () => {
     await setEnabled(true, 2, false, 1);
     try {
@@ -5590,10 +5638,12 @@ it('archives accepted renamed assignments before broker expiry and restores save
   rejected.rollback();
   // The archive follows the durable write in the background; it never holds up acceptance.
   await persistCriticalSwarmNow();
-  await vi.waitFor(async () => expect((await getSession(session.id))?.workerAssignment?.label).toBe('Worker 1'));
+  // A slow Windows runner took over a second for that background write (2026-11-05, CI on #2072),
+  // past vi.waitFor's default; the same condition is awaited longer.
+  await vi.waitFor(async () => expect((await getSession(session.id))?.workerAssignment?.label).toBe('Worker 1'), { timeout: 10_000 });
   const staged = stageMessages(prime, [{ to: 'worker-1', text: 'New task', label: 'Review' }]);
   await persistCriticalSwarmNow(); staged.commit();
-  await vi.waitFor(async () => expect((await getSession(session.id))?.workerAssignment).toMatchObject({ label: 'Review', task: 'New task' }));
+  await vi.waitFor(async () => expect((await getSession(session.id))?.workerAssignment).toMatchObject({ label: 'Review', task: 'New task' }), { timeout: 10_000 });
   noteAgentAlive('c-worker-archive', 'call'); finishAgent(worker.caller, 'done'); releaseQuiescentRun();
   const saved = snapshotSwarm()!;
   resetAgentsForTests();

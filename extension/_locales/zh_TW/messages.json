@@ -512,6 +512,12 @@
   "content_goal_wait_workers": {
     "message": "正在等待此對話的子代理"
   },
+  "content_goal_wait_slots": {
+    "message": "等待空位（同時工作的聊天數）"
+  },
+  "content_goal_wait_paused": {
+    "message": "ChatGPT 要求放慢速度 · 等到它指定的時間"
+  },
   "content_goal_writing_first_message": {
     "message": "$1 正在撰寫第一則訊息"
   },
@@ -888,10 +894,10 @@
     "message": "待處理"
   },
   "popup_pipeline_call_fallback_many": {
-    "message": "應用程式無法依請求 ID 歸屬 $1 次呼叫——已改用 $2。"
+    "message": "應用程式無法依請求 ID 歸屬 $1 次呼叫。改用：$2。"
   },
   "popup_pipeline_call_fallback_one": {
-    "message": "應用程式無法依請求 ID 歸屬一次呼叫——已改用 $1。"
+    "message": "應用程式無法依請求 ID 歸屬一次呼叫。改用：$1。"
   },
   "popup_pipeline_delivery_blocked": {
     "message": "在應用程式連線且確認通訊協定相容之前，傳送會被封鎖。"

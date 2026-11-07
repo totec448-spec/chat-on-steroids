@@ -25,6 +25,8 @@ export interface DesktopAskCaller {
   sessionId?: string | null;
   conversationId?: string | null;
   transportKey?: string | null;
+  /** A proven, fully scoped native-desktop owner (profile + session + conversation). */
+  scopedPrincipal?: string | null;
 }
 
 export interface DesktopAskDeps {
@@ -57,9 +59,12 @@ export function createDesktopAsk(deps: DesktopAskDeps): {
   let lastAppStepEndedAt: number | null = null;
   let queue: Promise<unknown> = Promise.resolve();
 
-  // A chat without proof is held apart by its connection; a call with neither shares no grant.
-  const keyOf = (caller: DesktopAskCaller): string | null => caller.sessionId ? `s:${caller.sessionId}`
-    : caller.conversationId ? `c:${caller.conversationId}` : caller.transportKey ? `t:${caller.transportKey}` : null;
+  // Native Linux actions provide a proven profile/session/conversation owner.
+  // Keep the pre-existing fallback for Windows/macOS; those callers historically
+  // hold a grant across the local session even when the ChatGPT tab is rebound.
+  const keyOf = (caller: DesktopAskCaller): string | null => caller.scopedPrincipal ? `p:${caller.scopedPrincipal}`
+    : caller.sessionId ? `s:${caller.sessionId}`
+      : caller.conversationId ? `c:${caller.conversationId}` : caller.transportKey ? `t:${caller.transportKey}` : null;
 
   async function decide(step: { words: DesktopStepWords; app: string | null }, caller: DesktopAskCaller): Promise<string | null> {
     const mode = deps.mode();

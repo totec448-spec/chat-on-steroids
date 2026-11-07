@@ -66,6 +66,48 @@ it('shows elapsed runtime and stops the owned background process from the dock',
   expect(row.hidden).toBe(true);
 });
 
+// CodeRabbit on #2052: Output appears only when the app offers it, and a repaint keeps its keyboard focus.
+it('offers Output only with agent output available, and keeps its focus across a repaint', async () => {
+  const { w, publishBackgroundProcesses } = await boot([]);
+  const row = { processId: 4111, incarnation: 92, command: 'npm run dev', startedAt: Date.now() - 30_000, tty: false };
+  const host = w.document.getElementById('backgroundExecStatus')!;
+  // An older preload without agent output: no Output button.
+  (w as any).api.agentOutputOpen = undefined;
+  await publishBackgroundProcesses([row]);
+  expect(host.querySelector('.background-exec-output')).toBeNull();
+  (w as any).api.agentOutputOpen = vi.fn(async () => ({ ok: true, data: true }));
+  await publishBackgroundProcesses([{ ...row, startedAt: row.startedAt - 1 }]);
+  const output = host.querySelector<HTMLButtonElement>('.background-exec-output')!;
+  expect(output).not.toBeNull();
+  output.focus();
+  await publishBackgroundProcesses([{ ...row, startedAt: row.startedAt - 2 }]);
+  const repainted = host.querySelector<HTMLButtonElement>('.background-exec-output')!;
+  // The same button stays, so a press that spans a repaint still lands (CodeRabbit on #2052).
+  expect(repainted).toBe(output);
+  expect(w.document.activeElement).toBe(repainted);
+});
+
+it('keeps each expanded row\'s Output button across a repaint while its process is the same', async () => {
+  const { w, publishBackgroundProcesses } = await boot([]);
+  (w as any).api.agentOutputOpen = vi.fn(async () => ({ ok: true, data: true }));
+  const startedAt = Date.now() - 45_000;
+  const rows = [
+    { processId: 4301, incarnation: 111, command: 'npm run watch', startedAt, tty: false },
+    { processId: 4302, incarnation: 112, command: 'node server.js', startedAt: startedAt + 5_000, tty: true }
+  ];
+  await publishBackgroundProcesses(rows);
+  w.document.getElementById('backgroundExecStatus')!.click();
+  const list = w.document.getElementById('backgroundExecList')!;
+  const before = [...list.querySelectorAll<HTMLButtonElement>('.background-exec-output')];
+  expect(before).toHaveLength(2);
+  // A repaint with the same processes keeps both buttons (CodeRabbit on #2052); a new incarnation gets a new one.
+  await publishBackgroundProcesses([rows[0]!, { ...rows[1]!, incarnation: 113 }]);
+  const after = [...list.querySelectorAll<HTMLButtonElement>('.background-exec-output')];
+  expect(after[0]).toBe(before[0]);
+  expect(after[1]).not.toBe(before[1]);
+  expect(after[1]!.dataset.process).toBe('4302:113');
+});
+
 it('expands multiple background processes and stops each one from its own row', async () => {
   const { w, publishBackgroundProcesses } = await boot([]);
   const startedAt = Date.now() - 45_000;
@@ -303,6 +345,121 @@ it('asks for the selected chat\'s background tab once per switch (#1249)', async
   row(second.id).click();
   row(first.id).click();
   expect(followed).toEqual([second.id, first.id]);
+});
+
+it('follows a newly sent chat when its first native conversation ID arrives, once', async () => {
+  const opening: SessionSummary = { ...summary([]), conversationId: null, chatIds: [],
+    origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } };
+  const sessions = [opening];
+  const { w, notifySession } = await boot([], false, [], [], { sessions });
+  const followed: string[] = [];
+  (w as any).api.followSessionTab = async (id: string) => { followed.push(id); return { ok: true, data: true }; };
+  w.document.querySelector<HTMLElement>(`#sessionList [data-id="${opening.id}"]`)!.click();
+  followed.length = 0; // The initial selection cannot follow a chat that has no provider ID yet.
+
+  sessions[0] = { ...opening, conversationId: 'new-native-chat', chatIds: ['new-native-chat'] };
+  notifySession(); await settle(550);
+  expect(followed).toEqual([opening.id]);
+  notifySession(); await settle(550);
+  expect(followed).toEqual([opening.id]);
+});
+
+it('follows the first binding even when project history merges it before the newest-page refresh', async () => {
+  const project: LocalProject = { id: '33333333-3333-4333-8333-333333333333', name: 'Project', path: '/repo', createdAt: T0 };
+  const opening: SessionSummary = { ...summary([]), projectId: project.id, conversationId: null, chatIds: [],
+    origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } };
+  const bound = { ...opening, conversationId: 'new-native-chat', chatIds: ['new-native-chat'] };
+  const { w, notifySession } = await boot([], false, [], [project], { sessions: [opening] });
+  const api = (w as any).api;
+  const followed: string[] = [];
+  api.followSessionTab = async (id: string) => { followed.push(id); return { ok: true, data: true }; };
+  w.document.querySelector<HTMLElement>('#sessionList [data-id="' + opening.id + '"]')!.click();
+  followed.length = 0;
+  let newestPage = opening;
+  api.listSessions = async (options: { projectId?: string }) => ({ ok: true, data: {
+    sessions: options?.projectId === project.id ? [bound] : [newestPage],
+    total: 1, nextCursor: null, activeId: null, pressure: [], blocked: [], approval: [], recoveryStopped: []
+  } });
+
+  const heading = w.document.querySelector<HTMLElement>('.project-group .project-heading')!;
+  // Selecting the chat already expands its project; close and reopen to request history.
+  heading.click(); heading.click();
+  await settle(300);
+  expect(followed).toEqual([opening.id]);
+  newestPage = bound;
+  notifySession(); await settle(550);
+  expect(followed).toEqual([opening.id]);
+  // A stale newest page may briefly show the old unbound summary again.
+  newestPage = opening;
+  notifySession(); await settle(550);
+  newestPage = bound;
+  notifySession(); await settle(550);
+  expect(followed).toEqual([opening.id]);
+});
+
+it('invalidates a queued browser follow when New Chat replaces the selected session', async () => {
+  const first = summary([]);
+  const { w } = await boot([], false, [], [], { sessions: [first] });
+  const followed: Array<string | null> = [];
+  (w as any).api.followSessionTab = async (id: string | null) => { followed.push(id); return { ok: true, data: true }; };
+  w.document.querySelector<HTMLElement>('#sessionList [data-id="' + first.id + '"]')!.click();
+  w.document.getElementById('newChat')!.click();
+  expect(followed).toEqual([first.id, null]);
+});
+
+it('does not focus a newly bound chat after the person has selected another one', async () => {
+  const opening: SessionSummary = { ...summary([]), conversationId: null, chatIds: [],
+    origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } };
+  const other: SessionSummary = { ...summary([]), id: '2026-09-02-test0002', title: 'Other chat' };
+  const sessions = [opening, other];
+  const { w, notifySession } = await boot([], false, [], [], { sessions });
+  const followed: string[] = [];
+  (w as any).api.followSessionTab = async (id: string) => { followed.push(id); return { ok: true, data: true }; };
+  const row = (id: string) => w.document.querySelector<HTMLElement>(`#sessionList [data-id="${id}"]`)!;
+  row(opening.id).click();
+  row(other.id).click();
+  followed.length = 0;
+
+  sessions[0] = { ...opening, conversationId: 'new-native-chat', chatIds: ['new-native-chat'] };
+  notifySession(); await settle(550);
+  expect(followed).toEqual([]);
+});
+
+it('keeps a first binding pending until main accepts it and retries on a catalog refresh', async () => {
+  const opening: SessionSummary = { ...summary([]), conversationId: null, chatIds: [],
+    origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } };
+  const rows = [opening];
+  const { w, notifySession } = await boot([], false, [], [], { sessions: rows });
+  const follow = vi.fn(async () => ({ ok: true, data: false }));
+  (w as any).api.followSessionTab = follow;
+  w.document.querySelector<HTMLElement>(`#sessionList [data-id="${opening.id}"]`)!.click();
+  rows[0] = { ...opening, conversationId: 'new-native-chat', chatIds: ['new-native-chat'] };
+  notifySession();
+  await waitFor(() => expect(follow).toHaveBeenCalledTimes(2));
+  follow.mockResolvedValue({ ok: true, data: true });
+  notifySession();
+  await waitFor(() => expect(follow).toHaveBeenCalledTimes(3));
+  notifySession(); await settle(550);
+  expect(follow).toHaveBeenCalledTimes(3);
+});
+
+it('does not let a delayed acknowledgement erase the newer selected chat follow', async () => {
+  const origin = { kind: 'desktop' as const, fromSessionId: null, agentId: null, task: '' };
+  const first = { ...summary([]), origin };
+  const second = { ...summary([]), id: '2026-09-02-test0002', origin };
+  const { w, notifySession } = await boot([], false, [], [], { sessions: [first, second] });
+  let release!: (value: { ok: true; data: boolean }) => void;
+  const follow = vi.fn()
+    .mockImplementationOnce(() => new Promise(resolve => { release = resolve; }))
+    .mockResolvedValue({ ok: true, data: false });
+  (w as any).api.followSessionTab = follow;
+  w.document.querySelector<HTMLElement>(`#sessionList [data-id="${first.id}"]`)!.click();
+  w.document.querySelector<HTMLElement>(`#sessionList [data-id="${second.id}"]`)!.click();
+  release({ ok: true, data: true });
+  await settle();
+  notifySession();
+  await waitFor(() => expect(follow).toHaveBeenCalledTimes(3));
+  expect(follow.mock.calls.map(([id]) => id)).toEqual([first.id, second.id, second.id]);
 });
 
 it('clears control projections on an existing-session switch and fences A to B to A responses', async () => {
@@ -1328,7 +1485,7 @@ it('says why a pickup could not be tried now', async () => {
     return found!;
   });
   button.click();
-  await waitFor(() => expect(w.document.querySelector('.toast')?.textContent).toBe('ChatGPT limits this chat for a few minutes. The app tries again right after.'));
+  await waitFor(() => expect(w.document.querySelector('.toast')?.textContent).toBe('ChatGPT is limiting this chat right now. The app tries again when the wait is over.'));
 });
 
 // CodeRabbit on #1979: tries used up leave only a waiting Continue to send; nothing to try again.

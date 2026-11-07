@@ -240,6 +240,11 @@ export interface ToolContext {
   exposedSessionTools?: boolean;
   exposedAgentTools?: boolean;
   /**
+   * Whether the steps-for-the-person tools (#1695) stay registered, for the same reason. They
+   * follow Run programs, and also Read-only over it, which switches the command tools off.
+   */
+  exposedUserRequests?: boolean;
+  /**
    * Whether `find` must stay registered for the lifetime of the endpoint.
    *
    * `find` and the exec pair are mutually exclusive, and that choice cannot be derived
