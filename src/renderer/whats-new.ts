@@ -14,6 +14,15 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.51': {
+    lead: () => t("Steps for you, a limit on busy chats, and Telegram notifications."),
+    highlights: [
+      { icon: 'i-terminal', title: () => t("Steps for you"), text: () => t("When ChatGPT needs something only you can do, it hands you the step. You run it and mark it done.") },
+      { icon: 'i-agents', title: () => t("A limit on busy chats"), text: () => t("Choose how many chats may work at once. Your own messages always go out.") },
+      { icon: 'i-phone', title: () => t("Telegram notifications"), text: () => t("Link your own bot to get a message when a chat finishes or needs you, and stop or pause it from your phone.") },
+      { icon: 'i-stop', title: () => t("Stop works all the way"), text: () => t("After a Stop, a chat no longer stays busy, and your next message goes out.") }
+    ]
+  },
   '2.1.50': {
     lead: () => t("Move chats between projects, chats that keep going, and an extension that updates during long runs."),
     highlights: [

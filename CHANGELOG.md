@@ -9,6 +9,46 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.51] — Steps for you, a limit on busy chats, and Telegram
+ChatGPT can now hand you a step it cannot do itself, you can limit how many chats work at once, and you can get your chat notifications in Telegram. Chats that get stuck after a Stop or a reload now end up where you expect, and the browser extension and ChatGPT's page share the app's look.
+
+### 👉 After updating
+
+- Nothing to do. The browser extension updates itself.
+- Telegram is optional and off until you link your own bot. See **Settings → Phone notifications → Telegram**.
+
+### ✨ New
+
+- **Steps for you.** When ChatGPT needs something only you can do (a sign-in, a USB key, a command it must not run), it hands you a step. It appears in the chat and above the message box with the exact command, the folder and what it expects to see. You run it yourself and mark it **done** or **skip** it, and ChatGPT is told which. The app never runs it.
+- **Chats working at once.** Settings → Agents & automation has a limit for how many chats may work at the same time. Messages the app sends by itself (Goal, Loop, Continue) wait for a free slot; a message you send always goes out.
+- **Command output, read-only.** A command that an agent runs has its output in the Terminal dock. You can watch it, but typing there does nothing, and secrets are hidden.
+- **Related folders for a project.** Add context folders from your approved folders to a project: ChatGPT is told about them, but they never become the working folder or grant access.
+- **"Why is it stuck?" in one row.** When a chat has trouble, one row shows since when, how often the app tried, and each step it took. It turns amber once the app has stopped trying.
+- **Telegram notifications, with your own bot.** Get a message when a chat finishes, needs you or fails, ask `/status` for what is running, and use **Deny** under an approval. `/stop`, `/pause` and `/resume` act on a chat, and replies to a notification can go to that chat as your message if you turn that on (it is off by default). Remote **Allow** does not exist.
+- **The browser extension and ChatGPT's page in the app's look.** The extension's popup and the app's parts inside ChatGPT use the same colors, theme and switches.
+- **Linux:** read-only screenshots on GNOME with a consent message in your language, and desktop control of the chat's own windows.
+
+### 💪 Better
+
+- **Stop works all the way.** After you pressed Stop, a tool call ChatGPT had already lined up could reopen the turn and leave the chat "working" for good, with your next message waiting behind it. The app now ends such a turn again once it goes quiet, and a Stop is never refused because of missing bookkeeping.
+- **Compact & Resume is more reliable.** It keeps its summary when ChatGPT opens a Project late, no longer asks for a receipt that never comes, and clears its own leftover brief from the Project's home.
+- **A held message stays queued.** When the page holds your message until ChatGPT's answer ends, the queue says so instead of calling it "not picked up".
+- **Easier on ChatGPT's history limit.** The app waits longer between tries, up to an hour, and presses ChatGPT's own Retry only while it still has work in that chat.
+- **No leftover Continue in the message box.** If ChatGPT restores the app's own already-sent message, the repair clears it itself.
+- **Images that ChatGPT generates** are recorded in full, also when they appear inside its working group, and older images keep ChatGPT's own times.
+- **Tool calls find their chat.** Calls are matched to their chat through the proven ChatGPT session, so later calls in a long chat no longer end up unattributed.
+- **New chat tabs are followed** in your browser once the chat exists.
+- **Clear logs.** Who sent each Stop and each Goal or Loop switch is now in the log.
+
+### 🛠 Fixed
+
+- A step ChatGPT hands you in a new chat's first answer is no longer refused.
+- ChatGPT's own Retry button label no longer appears at the end of its error text.
+- Small layout fixes: the plugin offer in narrow windows, the folder choice in Related folders on one line, and the time of an answered step.
+- Text fixes in several languages in the extension popup.
+- Fewer false "chat closed" messages when a tab outlives its worker.
+- Update downloads that are no longer needed are cleaned up without losing handoff receipts.
+
 ## [2.1.50] — Move chats between projects, and chats that keep going
 
 You can now move a chat into another project by dragging it or from its menu, with Undo. Long chats keep going in more situations: when a step is not picked up, the app keeps trying, tells you, and lets you continue with one click. The browser extension now updates itself even while long chats run, and very long chats no longer slow the app down.
