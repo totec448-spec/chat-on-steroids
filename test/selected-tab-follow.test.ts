@@ -46,31 +46,86 @@ it('does not renew the deadline when retrying a temporarily unavailable browser'
   expect(send).toHaveBeenCalledTimes(2);
 });
 
-it('does not follow a first binding arriving after the original selection deadline', async () => {
+it.each([10_000, 11_148, 60_000])('follows the still-selected chat when its first binding arrives after %i ms', async delay => {
   let now = 100_000;
   vi.spyOn(Date, 'now').mockImplementation(() => now);
   const send = vi.fn(async () => ({ ok: true, data: false }));
   const follow = createSelectedTabFollow(send);
   follow.select({ ...row, conversationId: null });
   await tick();
-  now += 10_000;
-  follow.observe(row);
-  expect(send).toHaveBeenCalledTimes(1);
-});
-
-it('does not renew the original selection deadline when its first binding arrives', async () => {
-  let now = 100_000;
-  vi.spyOn(Date, 'now').mockImplementation(() => now);
-  const send = vi.fn(async () => ({ ok: true, data: false }));
-  const follow = createSelectedTabFollow(send);
-  follow.select({ ...row, conversationId: null });
-  await tick();
-  now += 9_000;
+  now += delay;
+  send.mockResolvedValue({ ok: true, data: true });
   follow.observe(row);
   await tick();
-  now += 1_000;
   follow.observe(row);
   expect(send).toHaveBeenCalledTimes(2);
+});
+
+it('starts one bounded retry window at the first binding without renewing it on later observations', async () => {
+  let now = 100_000;
+  vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const send = vi.fn(async () => ({ ok: true, data: false }));
+  const follow = createSelectedTabFollow(send);
+  follow.select({ ...row, conversationId: null });
+  await tick();
+  now += 60_000;
+  follow.observe(row);
+  await tick();
+  now += 9_999;
+  follow.observe({ ...row, conversationId: null });
+  follow.observe(row);
+  await tick();
+  now++;
+  follow.observe(row);
+  expect(send).toHaveBeenCalledTimes(3);
+});
+
+it.each(['new chat', 'another chat'])('cancels a slow first-binding wait on %s', async selection => {
+  let now = 100_000;
+  vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const send = vi.fn(async () => ({ ok: true, data: false }));
+  const follow = createSelectedTabFollow(send);
+  follow.select({ ...row, conversationId: null });
+  await tick();
+  now += 60_000;
+  follow.select(selection === 'new chat' ? null : { ...row, id: 'other-session' });
+  await tick();
+  follow.observe(row);
+  expect(send.mock.calls).toEqual([[row.id], [selection === 'new chat' ? null : 'other-session']]);
+});
+
+it('does not follow a later conversation rebind after a slow first binding', async () => {
+  let now = 100_000;
+  vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const send = vi.fn(async () => ({ ok: true, data: false }));
+  const follow = createSelectedTabFollow(send);
+  follow.select({ ...row, conversationId: null });
+  await tick();
+  now += 11_148;
+  follow.observe(row);
+  await tick();
+  follow.observe({ ...row, conversationId: 'native-chat-b' });
+  follow.observe(row);
+  expect(send).toHaveBeenCalledTimes(2);
+});
+
+it('ignores the old unbound reply while the first binding is waiting for acceptance', async () => {
+  let now = 100_000;
+  vi.spyOn(Date, 'now').mockImplementation(() => now);
+  let release!: (reply: { ok: boolean; data: boolean }) => void;
+  const send = vi.fn().mockImplementationOnce(() => new Promise(resolve => { release = resolve; }))
+    .mockResolvedValueOnce({ ok: true, data: false }).mockResolvedValue({ ok: true, data: true });
+  const follow = createSelectedTabFollow(send);
+  follow.select({ ...row, conversationId: null });
+  now += 11_148;
+  follow.observe(row);
+  await tick();
+  release({ ok: true, data: true });
+  await tick();
+  follow.observe(row);
+  await tick();
+  follow.observe(row);
+  expect(send).toHaveBeenCalledTimes(3);
 });
 
 it('follows an unbound selection once its first binding is observed', async () => {
