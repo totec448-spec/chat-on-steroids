@@ -401,7 +401,8 @@ function projectMenuItems(id: string): RowMenuItem[] {
       run: () => {
         const project = projects.find(row => row.id === id);
         if (project) void openRelatedFolders(api, project, message => toast(t(message)),
-          () => document.querySelector<HTMLElement>(`.project-group[data-project-id="${CSS.escape(id)}"] .project-menu`));
+          // The project's own ⋯ button in the tree or the Inbox layout (CodeRabbit on #2092).
+          () => rowMenuButton(`project:${id}`));
       }
     },
     // #1797: on unless this project or Settings turned it off; Settings wins, so the switch waits there.

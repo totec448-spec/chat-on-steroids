@@ -116,9 +116,19 @@ app.whenReady().then(async () => {
   await js(`${dialog}.querySelector('.related-folders-item.is-unavailable .related-folders-remove').click()`);
   await until(`${dialog}.querySelectorAll('.related-folders-item').length===1`);
   assert.deepEqual(await js('window.saved.at(-1)'), ['/Users/sample/code/api']);
-  // Escape closes it like Done.
+  // Escape closes it like Done, and also hands the keyboard back to the project's menu.
   await js(`${dialog}.dispatchEvent(new Event('cancel',{cancelable:true}))`);
   await until(`!${dialog}`);
+  assert.equal(await js(`document.activeElement?.classList.contains('project-menu') ?? false`), true);
+  // The project goes away while its dialog is open: closing still works, and no other element is
+  // focused in its place (CodeRabbit on #2092).
+  await openMenu();
+  await js(`document.querySelector('.row-menu-item[data-row-action="related-folders"]').click()`);
+  await until(`!!${dialog}`);
+  await js(`document.querySelector('.project-group[data-project-id]').remove()`);
+  await js(`${dialog}.querySelector('.file-entry-dialog-actions .btn-solid').click()`);
+  await until(`!${dialog}`);
+  assert.equal(await js(`!!document.activeElement?.closest('[data-row-menu]')`), false);
   assert.deepEqual(errors, []);
   console.log('PASS: ' + feature + ' menu item and icon, dialog text, Add, no duplicates, Unavailable, Remove, hover text, narrow window');
   win.destroy(); await server.close(); app.exit(0);
