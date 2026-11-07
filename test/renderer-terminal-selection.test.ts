@@ -158,3 +158,22 @@ it('sends a selection from a shell started out of a previous-session tab, and sh
   send.click();
   expect(input.value).toBe('```\nError: boom\n```\n\n');
 });
+
+// CodeRabbit on #2052: the read-only Agent tab needs the app to offer agent output.
+it('opens no Agent tab without agent output, and a rejected open says so in its tab', async () => {
+  setup();
+  const terminal = createWorkspaceTerminal(() => {}, document.getElementById('dock')!, {});
+  const agent = { sessionId: 'session-one', processId: 4001, incarnation: 1, command: 'npm run build' };
+  expect(terminal.openAgentOutput(agent)).toBeNull();
+  const lines: string[] = [];
+  (vi.spyOn(xterm.FakeTerminal.prototype, 'writeln') as unknown as { mockImplementation(fn: (line: string) => void): void }).mockImplementation(line => { lines.push(line); });
+  Object.assign((window as any).api, {
+    agentOutputOpen: vi.fn(async () => { throw new Error('channel closed'); }),
+    agentOutputClose: vi.fn(async () => { throw new Error('channel closed'); })
+  });
+  const id = terminal.openAgentOutput(agent);
+  expect(id).not.toBeNull();
+  await vi.waitFor(() => expect(lines).toContain('The window is unavailable'), { timeout: 5_000 });
+  // Closing it with a failing close call does not throw.
+  expect(() => terminal.closeTab(id!)).not.toThrow();
+});

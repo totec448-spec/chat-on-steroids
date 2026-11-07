@@ -195,11 +195,14 @@ describe('what an import would open up', () => {
     expect(widerAccess({ ...base, ui }, after(copy => { copy.ui.secretsShield = false; }))).toEqual(['ui.secretsShield']);
   });
   it('translates the native Linux Desktop access warning in every settings catalog', () => {
-    const key = 'Native Linux Desktop access on';
+    const keys = ['Native Linux Desktop access on',
+      'Off by default. GNOME display screenshots require Screen permission and OS consent. Semantic accessibility actions require Control permission, a proven chat, and explicit approval when configured. No physical-input fallback.'];
     for (const locale of ['de', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'zh-CN', 'zh-TW']) {
       const catalog = JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8')) as Record<string, string>;
-      expect(catalog[key], locale).toBeTruthy();
-      expect(catalog[key], locale).not.toBe(key);
+      for (const key of keys) {
+        expect(catalog[key], locale).toBeTruthy();
+        expect(catalog[key], locale).not.toBe(key);
+      }
     }
   });
 });

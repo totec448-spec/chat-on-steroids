@@ -512,6 +512,12 @@
   "content_goal_wait_workers": {
     "message": "このチャットのワーカーを待っています"
   },
+  "content_goal_wait_slots": {
+    "message": "空きを待っています（同時に作業するチャット数）"
+  },
+  "content_goal_wait_paused": {
+    "message": "ChatGPT から速度を落とすよう求められました · 指定時刻まで待機"
+  },
   "content_goal_writing_first_message": {
     "message": "$1 が最初のメッセージを作成中"
   },
@@ -888,10 +894,10 @@
     "message": "待機中"
   },
   "popup_pipeline_call_fallback_many": {
-    "message": "アプリは $1 件の呼び出しをリクエスト ID で割り当てられなかったため、$2 を使用しました。"
+    "message": "アプリは $1 件の呼び出しをリクエスト ID で割り当てられませんでした。代わりに使用：$2。"
   },
   "popup_pipeline_call_fallback_one": {
-    "message": "アプリは呼び出しをリクエスト ID で割り当てられなかったため、$1 を使用しました。"
+    "message": "アプリは呼び出しをリクエスト ID で割り当てられませんでした。代わりに使用：$1。"
   },
   "popup_pipeline_delivery_blocked": {
     "message": "アプリが接続され、プロトコルの互換性が確認されるまで送信をブロックします。"

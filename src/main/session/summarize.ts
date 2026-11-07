@@ -466,6 +466,11 @@ function build(
       return { kind: 'session', tone: 'neutral', title: steps.length ? 'Updated the task plan' : 'Cleared the task plan',
         ...(steps.length ? { detail: `${completed} / ${steps.length} completed` } : {}) };
     }
+    // The step's own words are on its card (#1695); the row says only what happened.
+    case 'ask_user_to_run':
+      return { kind: 'session', tone: 'neutral', title: 'Asked you to run a step' };
+    case 'user_request_status':
+      return { kind: 'session', tone: 'neutral', title: 'Checked a step for you' };
     case 'session': {
       const action = str(args['action']) ?? 'search';
       const query = str(args['query']);

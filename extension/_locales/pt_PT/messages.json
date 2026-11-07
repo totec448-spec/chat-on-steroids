@@ -518,6 +518,12 @@
   "content_goal_wait_workers": {
     "message": "A aguardar os subagentes deste chat"
   },
+  "content_goal_wait_slots": {
+    "message": "À espera de uma vaga livre (Chats a trabalhar ao mesmo tempo)"
+  },
+  "content_goal_wait_paused": {
+    "message": "O ChatGPT pediu para abrandar · aguarda a hora indicada"
+  },
   "content_goal_writing_first_message": {
     "message": "$1 está a escrever a primeira mensagem"
   },
@@ -942,16 +948,16 @@
     "message": "pendente"
   },
   "popup_pipeline_call_fallback_many": {
-    "message": "A app não conseguiu associar $1 chamadas pelo ID da solicitação — recorreu a $2."
+    "message": "A app não conseguiu associar $1 chamadas pelo ID da solicitação. Em vez disso: $2."
   },
   "popup_pipeline_call_fallback_many__one": {
-    "message": "A app não conseguiu associar $1 chamada pelo ID da solicitação — recorreu a $2."
+    "message": "A app não conseguiu associar $1 chamada pelo ID da solicitação. Em vez disso: $2."
   },
   "popup_pipeline_call_fallback_many__many": {
-    "message": "A app não conseguiu associar $1 de chamadas pelo ID da solicitação — recorreu a $2."
+    "message": "A app não conseguiu associar $1 de chamadas pelo ID da solicitação. Em vez disso: $2."
   },
   "popup_pipeline_call_fallback_one": {
-    "message": "A app não conseguiu associar uma chamada pelo ID da solicitação — recorreu a $1."
+    "message": "A app não conseguiu associar uma chamada pelo ID da solicitação. Em vez disso: $1."
   },
   "popup_pipeline_delivery_blocked": {
     "message": "O envio está bloqueado até a aplicação estar ligada e a compatibilidade do protocolo ser confirmada."

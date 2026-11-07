@@ -147,3 +147,30 @@ describe('extension localization catalogs', () => {
     }
   });
 });
+
+// The popup's "fell back to" sentence takes a label that also stands alone in the per-call rows
+// ("the only chat generating"). Built into a clause it broke grammar: German "auf der einzige Chat",
+// Spanish "a el", Portuguese "a o". So the label follows a colon in every language (2.1.51 polish pass).
+it('names the fallback label after a colon in every language, never inside a clause', async () => {
+  for (const locale of expectedLocales) {
+    const messages = await catalog(locale);
+    const keys = Object.keys(messages).filter((key) => key.startsWith('popup_pipeline_call_fallback'));
+    expect(keys.length, locale).toBeGreaterThan(0);
+    for (const key of keys) {
+      const label = key.startsWith('popup_pipeline_call_fallback_one') ? '$1' : '$2';
+      expect(messages[key]!.message, `${locale} ${key}`).toMatch(new RegExp(`[:：]\\s?\\${label}[.。]?$`));
+    }
+  }
+});
+
+// The version-mismatch help names the app's own button; it must be the name the app shows in that
+// language. Russian kept "Open extension folder" in English (2.1.51 polish pass).
+it('names the app\'s Open extension folder button as the app shows it in each language', async () => {
+  const appLocale: Record<string, string> = { de: 'de', es: 'es', fr: 'fr', ja: 'ja', ko: 'ko', pt_BR: 'pt-BR', pt_PT: 'pt-PT', ru: 'ru', tr: 'tr', vi: 'vi', zh_CN: 'zh-CN', zh_TW: 'zh-TW' };
+  const typographic = (value: string) => value.replace(/[’']/g, '\'');
+  for (const [locale, app] of Object.entries(appLocale)) {
+    const button = (JSON.parse(await readFile(path.join(root, 'src/renderer/locales', `${app}.json`), 'utf8')) as Record<string, string>)['Open extension folder']!;
+    const help = (await catalog(locale)).popup_version_mismatch_help!.message;
+    expect(typographic(help), locale).toContain(typographic(button));
+  }
+});

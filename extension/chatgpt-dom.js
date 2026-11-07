@@ -94,6 +94,18 @@ var CLF_DOM = (() => {
     for (const injected of clone.querySelectorAll(NOT_PROMPT)) injected.remove();
     return clone.textContent ?? '';
   };
+  /**
+   * The editor's text with its line breaks (#2074): each paragraph its own line, and a <br> a line
+   * break, which textContent drops. Only for comparisons that must see lines; composerText stays as is.
+   */
+  const editorLines = (node) => {
+    if (!node || node.matches?.(NOT_PROMPT) || typeof node.cloneNode !== 'function') return editorText(node);
+    const clone = node.cloneNode(true);
+    for (const injected of clone.querySelectorAll(NOT_PROMPT)) injected.remove();
+    for (const br of clone.querySelectorAll('br')) br.replaceWith('\n');
+    const blocks = [...clone.children].some(child => /^(P|DIV|LI|PRE|BLOCKQUOTE|H[1-6])$/.test(child.tagName));
+    return blocks ? [...clone.childNodes].map(child => child.textContent ?? '').join('\n') : clone.textContent ?? '';
+  };
   const authoredText = (node) => {
     if (!node?.querySelector?.(APP_MENTION_CHIP) || typeof node.cloneNode !== 'function') return text(node);
     const clone = node.cloneNode(true);
@@ -1977,11 +1989,52 @@ var CLF_DOM = (() => {
    * is reclaimed; anything a person added after it, an attachment, or a busy page keeps it.
    */
   function clearRevivalResidue() {
+    return clearOwnResidue(REVIVAL_RESIDUE);
+  }
+
+  /**
+   * How every Compact & Resume brief begins (src/main/session/handoff.ts resumeBootstrapText),
+   * compared without whitespace: its marker, then the fixed first sentence.
+   */
+  const RESUME_RESIDUE = /^\[\[CLF-RESUME:[A-Za-z0-9_-]{8,64}\]\]ContinuingaChatOnSteroidssessionthatwascompacted\./;
+
+  /**
+   * Empties a Project home editor that holds only an earlier Compact & Resume brief (#2068).
+   *
+   * Within one tab ChatGPT keeps the Project home's editor text after it was sent and the page moved
+   * to the new chat. The next Compact & Resume in that Project found the brief already there,
+   * waited for an empty editor and gave up ("could not open the source Project"), every time,
+   * until the person cleared or sent it by hand. Only a brief this page typed itself, unchanged, is
+   * taken (a page reloaded since has none of its own); an attachment or a busy page keeps it.
+   */
+  function clearResumeResidue() {
+    // Only a brief this page typed itself, word for word: one a person added to stays (CodeRabbit on #2069).
+    return clearOwnResidue(RESUME_RESIDUE, text => typedBriefs.includes(text));
+  }
+
+  /** The Compact & Resume briefs this page typed, compacted as residue is compared; the newest few. */
+  const typedBriefs = [];
+  function rememberTypedBrief(value) {
+    const text = compactDraft(value);
+    if (!RESUME_RESIDUE.test(text) || typedBriefs.includes(text)) return;
+    typedBriefs.push(text);
+    if (typedBriefs.length > 4) typedBriefs.shift();
+  }
+
+  /**
+   * Editor text as residue is compared: without the escapes ChatGPT adds to stored text (a hard
+   * line break's backslash too, CodeRabbit on #2069) and without whitespace.
+   */
+  function compactDraft(value) {
+    return String(value).replace(/\\(?=\r?\n)/g, '').replace(/\\(?=[!-/:-@[-`{-~])/g, '').replace(/\s+/g, '');
+  }
+
+  function clearOwnResidue(pattern, owned = () => true) {
     return safe(() => {
       const box = composer();
       if (!composerWritable() || generating() || stopButton() || hasComposerAttachments()) return false;
-      const text = String(editorText(box)).replace(/\\(?=[!-/:-@[-`{-~])/g, '').replace(/\s+/g, '');
-      if (!text || !REVIVAL_RESIDUE.test(text)) return false;
+      const text = compactDraft(editorText(box));
+      if (!text || !pattern.test(text) || !owned(text)) return false;
       box.focus();
       const selection = document.getSelection();
       if (!selection || document.activeElement !== box) return false;
@@ -2420,7 +2473,9 @@ var CLF_DOM = (() => {
    * not a reason to hold a finished Goal reply at "sending" (2026-09-03: one letter did).
    */
   function insertPrompt(value, mode = false, failure = () => undefined) {
-    return insertIntoEditor(composer(), value, mode, failure, box => composer() === box);
+    const inserted = insertIntoEditor(composer(), value, mode, failure, box => composer() === box);
+    if (inserted) safe(() => rememberTypedBrief(value), undefined);
+    return inserted;
   }
 
   /**
@@ -3643,7 +3698,7 @@ var CLF_DOM = (() => {
       new URL(link.href, location.href).origin === location.origin &&
       projectHomeId(new URL(link.href, location.href).pathname) === entry.id);
     return new Promise(resolve => {
-      let clicked = false, done = false, lastObservation = 'source-not-ready';
+      let clicked = false, done = false, lastObservation = 'source-not-ready', residueCleared = false;
       // Where the source chat was when the link was clicked, and how many times its own route
       // rewrite has since taken that click away.
       let clickedPath = '', reclicks = 0;
@@ -3665,6 +3720,8 @@ var CLF_DOM = (() => {
         // Turns of the earlier pages ChatGPT keeps mounted, undisplayed, are not on this page.
         if (clicked && projectHomeId() === entry.id) {
           if (!composer()?.isConnected || !composerSubmitReady()) {
+            // An earlier brief of the app's own that ChatGPT kept in this Project home (#2068).
+            if (!residueCleared && clearResumeResidue()) { residueCleared = true; return check(); }
             lastObservation = 'composer-not-ready';
             return;
           }
@@ -3887,6 +3944,7 @@ var CLF_DOM = (() => {
     composerAuthoredText,
     /** The composer's prompt text, without nodes ChatGPT injects for presentation (#1792). */
     composerText: (box = composer()) => editorText(box),
+    composerLines: (box = composer()) => editorLines(box),
     pageChecks,
     userPromptText,
     userMessageReaction,
@@ -3993,6 +4051,7 @@ var CLF_DOM = (() => {
     composer,
     composerSubmitReady,
     clearRevivalResidue,
+    clearResumeResidue,
     composerWritable,
     composerBox,
     pageTheme,

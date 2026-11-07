@@ -7,3 +7,8 @@ export interface RunningExecProcess {
   startedAt: number;
   tty: boolean;
 }
+
+/** What the window hears from a read-only agent output view (#1920). */
+export type AgentOutputEvent =
+  | { id: string; data: string }
+  | { id: string; exit: { exitCode: number | null; seconds: number } };

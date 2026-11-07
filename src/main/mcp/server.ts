@@ -217,6 +217,7 @@ export function tunnelProbeHeaders(): Record<string, string> {
  */
 interface SurfaceExposure {
   finishTool: boolean;
+  userRequests: boolean;
   caps: ToolContext['caps'] | null;
   sessionTools: boolean;
   agentTools: boolean;
@@ -238,7 +239,7 @@ const surfaceExposure = new Map<SurfaceId, SurfaceExposure>();
 function exposureFor(surface: SurfaceId): SurfaceExposure {
   let state = surfaceExposure.get(surface);
   if (!state) {
-    state = { finishTool: false, caps: null, sessionTools: false, agentTools: false, find: null, linuxDesktop: false };
+    state = { finishTool: false, userRequests: false, caps: null, sessionTools: false, agentTools: false, find: null, linuxDesktop: false };
     surfaceExposure.set(surface, state);
   }
   return state;
@@ -314,6 +315,8 @@ export async function startMcpServer(
     exposed.finishTool = exposed.finishTool || config.ui.finishTool === true;
     exposed.sessionTools = exposed.sessionTools || sessionTools;
     exposed.agentTools = exposed.agentTools || agentTools;
+    exposed.userRequests = exposed.userRequests ||
+      (sessionTools && (live.caps.command || (live.readOnly && config.capabilities.command)));
     if (surface === 'desktop') exposed.linuxDesktop ||= config.ui.linuxDesktopEnabled === true;
     return {
       ...live,
@@ -322,6 +325,7 @@ export async function startMcpServer(
       exposedCaps: { ...exposed.caps },
       exposedSessionTools: exposed.sessionTools,
       exposedFinishTool: exposed.finishTool,
+      exposedUserRequests: exposed.userRequests,
       exposedAgentTools: exposed.agentTools,
       exposedLinuxDesktop: exposed.linuxDesktop,
       exposedFind: exposed.find

@@ -1,45 +1,44 @@
 /*
- * ChatGPT's surface, rounded the way theirs is: near-black ground, raised cards at a
- * generous radius, one line icon per row, and green reserved for "this worked".
+ * The app's own look (2026-11-01): its palette, its switches, its type. The app sends its colors and
+ * theme with every status, and popup.js puts them on :root as the app's token names (--page, --card,
+ * --ink …). Until it has (an extension never paired yet), these defaults are the app's default palette,
+ * light or dark as the computer is set, exactly as paletteTokens() computes them.
  */
 :root {
-  color-scheme: dark light;
-  --bg: #0e0e0e;
-  --card: #1a1a1a;
-  --edge: rgba(255, 255, 255, 0.07);
-  --hover: rgba(255, 255, 255, 0.045);
-  --text: #f2f2f2;
-  --muted: #9d9d9d;
-  --faint: #6f6f6f;
-  --hollow: rgba(255, 255, 255, 0.16);
-  --scroll: rgba(255, 255, 255, 0.22);
-  --scroll-strong: rgba(255, 255, 255, 0.34);
-  --green: #1fbf75;
-  --green-soft: rgba(31, 191, 117, 0.12);
-  --red: #ef6b62;
-  --red-soft: rgba(239, 107, 98, 0.12);
-  --ink: #0b0b0b;
-  --sans: 'OpenAI Sans', 'Söhne', ui-sans-serif, -apple-system, 'Segoe UI Variable Text',
-    'Segoe UI', system-ui, Helvetica, Arial, sans-serif;
+  color-scheme: light;
+  --page: #f4f4f5; --card: #e7e7e8; --ink: #000000; --soft: #5d5d5d; --faint: #636364;
+  --line: #d0d0d1; --edge: #c6c6c7; --hover: #dfdfe0; --track: #b9b9b9;
+  --accent: #486f9d; --accent-wash: #dfe4ea; --accent-fill: #486f9d; --on-accent: #ffffff;
+  --knob-off: #000000; --knob-on: #ffffff;
+  --green: #1f7146; --green-wash: #dbe7e1; --red: #b43b3b; --red-wash: #f0dfe0;
+  --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC',
+    'Noto Sans CJK SC', system-ui, sans-serif;
   --mono: ui-monospace, 'SF Mono', 'Cascadia Mono', 'Segoe UI Mono', Consolas, monospace;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #ffffff;
-    --card: #f6f6f7;
-    --edge: rgba(0, 0, 0, 0.07);
-    --hover: rgba(0, 0, 0, 0.035);
-    --text: #0d0d0d;
-    --muted: #5c5c5c;
-    --faint: #8b8b8b;
-    --hollow: rgba(0, 0, 0, 0.18);
-    --scroll: rgba(0, 0, 0, 0.22);
-    --scroll-strong: rgba(0, 0, 0, 0.34);
-    --green: #12a06a;
-    --green-soft: rgba(18, 160, 106, 0.1);
-    --ink: #ffffff;
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --page: #181818; --card: #262626; --ink: #ffffff; --soft: #aeaeae; --faint: #979797;
+    --line: #3f3f3f; --edge: #494949; --hover: #2e2e2e; --track: #555555;
+    --accent: #b0cbed; --accent-wash: #2a2d32; --accent-fill: #b0cbed; --on-accent: #000000;
+    --knob-off: #ffffff; --knob-on: #000000;
+    --green: #519d75; --green-wash: #1a251f; --red: #dd6a6a; --red-wash: #2f1d1d;
   }
+}
+
+/* The names the rules below were written with, on the app's tokens. */
+:root {
+  --bg: var(--page);
+  --text: var(--ink);
+  --muted: var(--soft);
+  --hollow: var(--edge);
+  --scroll: color-mix(in srgb, var(--ink) 22%, transparent);
+  --scroll-strong: color-mix(in srgb, var(--ink) 34%, transparent);
+  --green-soft: var(--green-wash);
+  --red-soft: var(--red-wash);
+  /* The check drawn inside a filled status circle. */
+  --check: var(--card);
 }
 
 * {
@@ -202,7 +201,9 @@ h1 b {
 .card {
   margin: 0 0 16px;
   padding: 0 13px;
-  border-radius: 16px;
+  /* The app's settings surface: its card color, a hairline and its large radius. */
+  border: 1px solid var(--line);
+  border-radius: 18px;
   background: var(--card);
 }
 
@@ -217,7 +218,7 @@ h1 b {
 .row + .row,
 details + .row,
 #stream > summary {
-  box-shadow: inset 0 1px 0 var(--edge);
+  box-shadow: inset 0 1px 0 var(--line);
 }
 
 .ico {
@@ -288,7 +289,7 @@ button.meta:disabled {
   position: absolute;
   inset: -1.5px;
   opacity: 0;
-  background: var(--ink);
+  background: var(--check);
   -webkit-mask: center / 12px 12px no-repeat var(--m);
   mask: center / 12px 12px no-repeat var(--m);
   --m: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23000' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round' d='M3.8 8.2l2.9 2.9 5.5-5.6'/%3E%3C/svg%3E");
@@ -365,7 +366,7 @@ details[open] > summary .chevron {
 
 .stages {
   padding: 4px 0 12px 31px;
-  box-shadow: inset 0 1px 0 var(--edge);
+  box-shadow: inset 0 1px 0 var(--line);
 }
 
 .stage {
@@ -399,7 +400,7 @@ details[open] > summary .chevron {
   position: absolute;
   inset: -1.5px;
   opacity: 0;
-  background: var(--ink);
+  background: var(--check);
   -webkit-mask: center / 10px 10px no-repeat var(--m);
   mask: center / 10px 10px no-repeat var(--m);
   --m: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23000' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round' d='M3.8 8.2l2.9 2.9 5.5-5.6'/%3E%3C/svg%3E");
@@ -521,7 +522,7 @@ label.row {
   height: 22px;
   padding: 2.5px;
   border-radius: 999px;
-  background: var(--hollow);
+  background: var(--track);
   transition: background 150ms ease;
 }
 
@@ -530,13 +531,18 @@ label.row {
   width: 17px;
   height: 17px;
   border-radius: 999px;
-  background: #ffffff;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
-  transition: transform 150ms ease;
+  background: var(--knob-off);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 22%);
+  transition: transform 150ms ease, background 150ms ease;
 }
 
+/* The app's switch: accent when on, its knob in the color readable on the accent. */
 input:checked + .track {
-  background: var(--green);
+  background: var(--accent-fill);
+}
+
+input:checked + .track .thumb {
+  background: var(--knob-on);
 }
 
 input:checked + .track .thumb {
@@ -544,7 +550,7 @@ input:checked + .track .thumb {
 }
 
 input:focus-visible + .track {
-  outline: 2px solid var(--muted);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -658,8 +664,9 @@ button:focus-visible {
   padding: 10px 18px;
   border: 0;
   border-radius: 999px;
-  background: var(--text);
-  color: var(--ink);
+  /* The app's primary pill (What's New's "Got it"): ink on the page color. */
+  background: var(--ink);
+  color: var(--page);
   font: 600 13.5px/1.25 var(--sans);
   cursor: pointer;
   transition: background 160ms ease, color 160ms ease, transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
