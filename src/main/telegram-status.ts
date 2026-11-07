@@ -4,6 +4,9 @@
  * no names then; with it, one line per chat (at most eight, then how many more).
  */
 
+import type { SessionSummary } from '../shared/session.js';
+import { sessionWorkingAt } from '../shared/session-activity.js';
+
 export interface StatusChat {
   title: string;
   /** An approval card waits for the person. */
@@ -43,4 +46,26 @@ export function telegramStatus(chats: readonly StatusChat[], details: boolean, t
   });
   if (ordered.length > SHOWN) rows.push(text('{0} more', [ordered.length - SHOWN]));
   return [...lines, '', ...rows].join('\n');
+}
+
+/** What `/status` needs from the app about each chat, without the bot importing the app's state. */
+export interface StatusLookups {
+  goal(conversationId: string): { enabled: boolean; mode: string } | null;
+  card(conversationId: string): { answer?: unknown } | null;
+  activityExpiresAt(summary: SessionSummary): number | null | undefined;
+}
+
+/**
+ * The chats as `/status` sees them. A chat works when the app's own sidebar shows it working, never
+ * because its stored record still names an open turn: that is history, and a sub-agent's from five
+ * days earlier made `/status` say "Working: 6" while nothing ran (live test, 2026-11-07).
+ */
+export function statusChatsFrom(list: readonly SessionSummary[], lookups: StatusLookups, now: number): Array<StatusChat & { sessionId: string }> {
+  return list.filter(chat => chat.origin?.kind !== 'helper').map(chat => {
+    const goal = chat.conversationId ? lookups.goal(chat.conversationId) : null;
+    const card = chat.conversationId ? lookups.card(chat.conversationId) : null;
+    return { sessionId: chat.id, title: chat.title, working: sessionWorkingAt({ ...chat, activityExpiresAt: lookups.activityExpiresAt(chat) }, now),
+      approval: !!card && !card.answer,
+      automation: goal?.enabled ? (goal.mode === 'loop' ? 'Loop' as const : 'Goal' as const) : null };
+  });
 }
