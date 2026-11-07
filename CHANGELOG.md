@@ -47,6 +47,8 @@ ChatGPT can now hand you a step it cannot do itself, you can limit how many chat
 - Small layout fixes: the plugin offer in narrow windows, the folder choice in Related folders on one line, and the time of an answered step.
 - Text fixes in several languages in the extension popup.
 - Fewer false "chat closed" messages when a tab outlives its worker.
+- An answer that kept growing after a Stop that ChatGPT had not obeyed is no longer cut off after its first sentence in the app.
+- Tabs that an agent opens through the browser stay in the Chrome window it is already working in, instead of following the window you last clicked.
 - Update downloads that are no longer needed are cleaned up without losing handoff receipts.
 
 ## [2.1.50] — Move chats between projects, and chats that keep going
