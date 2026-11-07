@@ -2559,7 +2559,8 @@ describe('active agent tab discard protection', () => {
 
   it.each([
     ['selects its tab in the Background chats window', 'dddddddd-eeee-4fff-8aaa-777777777777', 12],
-    ['leaves a chat whose only tab is in the user\'s window alone', 'dddddddd-eeee-4fff-8aaa-888888888888', null]
+    ['leaves a chat whose only tab is in the user\'s window alone', 'dddddddd-eeee-4fff-8aaa-888888888888', null],
+    ['discards the follow for a closed chat tab without recreating it', 'dddddddd-eeee-4fff-8aaa-999999999999', null]
   ])('follows the chat selected in the app: %s (#1249)', async (_name, target, selected) => {
     const BACKGROUND = 9;
     let handed = false;

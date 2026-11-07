@@ -3265,9 +3265,10 @@ only to a browser that already has the chat open, and it lapses after 10 s. The 
 that tab the selected one in its Background chats window. That never focuses the window, opens a
 tab or touches the user's own windows (#1249). With `backgroundPlacement: 'group'` the app sends no
 follow and the extension ignores one (#128).
-New desktop chats follow their first catalog/project-history binding through one in-memory pending
-selection, once accepted and within 10 s of selection. A false `sessions:followTab` reply keeps it
-pending for later catalog/bridge updates within that same deadline; no state is saved or restored.
+New desktop chats keep one in-memory pending selection while awaiting their first catalog/project-history
+binding. The 10 s acceptance window starts at that binding (or selection if already bound), is logged,
+and is never renewed by retries or later observations. A false `sessions:followTab` reply keeps it pending
+for later catalog/bridge updates within that window; no state is saved or restored and no timer is added.
 Every selection clears older follows before lookup; `{ id: null }`, New Chat and deletion cancel them.
 
 Core's `save_image` (created only with the create-files permission) saves the original file of an
