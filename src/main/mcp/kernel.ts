@@ -802,7 +802,8 @@ async function dispatchTracked(
     name === 'exec' || name === 'update_plan' || (identitySensitive && swarmRunning())
   ));
   if (!context.caller.conversationId && needsExactIdentity && requestId) {
-    const wait = name === 'session_finish' || (workerStarting() && !desktopContext)
+    // A step for the person keeps the ordinary identity window, also while a worker starts (CodeRabbit on #2088).
+    const wait = name === 'session_finish' || (workerStarting() && !desktopContext && !stepForPerson)
       ? SPAWN_EVIDENCE_MS
       : desktopContext && allowUnattributed
       ? UNATTRIBUTED_DESKTOP_EVIDENCE_MS
