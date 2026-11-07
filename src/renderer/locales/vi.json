@@ -3874,5 +3874,6 @@
   "Refused to check a step for you": "Đã từ chối kiểm tra một bước dành cho bạn",
   "From the sub-agent “{0}”": "Từ tác nhân phụ “{0}”",
   "Run it yourself, in your own terminal: Chat On Steroids does not run or check it.": "Hãy tự chạy lệnh này trong terminal của bạn: Chat On Steroids không chạy hay kiểm tra nó.",
-  "{0} expected files": "{0} tệp dự kiến"
+  "{0} expected files": "{0} tệp dự kiến",
+  "Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.": "Gửi /start kèm mã hiển thị trong Chat On Steroids: Cài đặt → Thông báo trên điện thoại → Telegram."
 }

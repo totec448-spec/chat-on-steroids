@@ -74,6 +74,7 @@ export type ChatAction = 'stop' | 'pause' | 'resume';
 export type TelegramText =
   | 'Connected to Chat On Steroids. Its notifications arrive here.'
   | 'This code is not valid any more. Get a new one in Chat On Steroids: Settings → Phone notifications → Telegram.'
+  | 'Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.'
   | 'Chat On Steroids notifications arrive here. Commands: /status, /stop, /pause, /resume. Reply to a notification to send that chat a message.'
   | 'I know /status, /stop, /pause, /resume and /help. Reply to a notification to send that chat a message.'
   | 'Deny'
@@ -179,6 +180,12 @@ export function createTelegram(deps: TelegramDeps) {
       // Only `/start <code>` while a code is on screen links an account; anything else from an
       // account that is not the linked one gets no answer at all.
       if (name === '/start' && pairing && !link) {
+        // A plain /start (Telegram's Start button, or typed) carries no code: say how to link (live test, 2026-11-07).
+        if (!argument) {
+          deps.log('telegram: a /start came without a code');
+          await reply(message.chat.id, deps.text('Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.'));
+          return;
+        }
         if (argument.toUpperCase() !== pairing.code || deps.now() > pairing.until) {
           deps.log('telegram: a /start came with a code that is not the one on screen, or came too late');
           await reply(message.chat.id, deps.text('This code is not valid any more. Get a new one in Chat On Steroids: Settings → Phone notifications → Telegram.'));

@@ -3874,5 +3874,6 @@
   "Refused to check a step for you": "已拒絕查看需要你執行的步驟",
   "From the sub-agent “{0}”": "來自子代理「{0}」",
   "Run it yourself, in your own terminal: Chat On Steroids does not run or check it.": "請在你自己的終端機中親自執行：Chat On Steroids 不會執行或檢查它。",
-  "{0} expected files": "{0} 個預期檔案"
+  "{0} expected files": "{0} 個預期檔案",
+  "Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.": "請傳送 /start 加上 Chat On Steroids 中顯示的代碼：設定 → 手機通知 → Telegram。"
 }
