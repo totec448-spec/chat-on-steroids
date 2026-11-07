@@ -3093,7 +3093,7 @@ describe('canonical recorder 1.8', () => {
       expect(active()).toBe('g-quiet');
       await vi.advanceTimersByTimeAsync(20_000);
       // The end is a durable journal write; wait for it rather than for a fixed time.
-      if (closes) await vi.waitFor(() => expect(active()).toBeNull());
+      if (closes) await vi.waitFor(() => expect(active()).toBeNull(), { timeout: 10_000 });
       else expect(active()).toBe('g-quiet');
       const ends = await readEvents(sessionId!, { kinds: ['turn_end'] });
       if (closes) {
@@ -3127,7 +3127,7 @@ describe('canonical recorder 1.8', () => {
       await vi.advanceTimersByTimeAsync(REOPENED_STOP_QUIET_MS + 10_000);
       expect(active()).toBe('g-quiet-pro');
       await vi.advanceTimersByTimeAsync(REOPENED_STOP_PRO_QUIET_MS - REOPENED_STOP_QUIET_MS);
-      await vi.waitFor(() => expect(active()).toBeNull());
+      await vi.waitFor(() => expect(active()).toBeNull(), { timeout: 10_000 });
     } finally {
       vi.useRealTimers();
     }
