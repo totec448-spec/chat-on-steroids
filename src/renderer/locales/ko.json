@@ -3874,5 +3874,6 @@
   "Refused to check a step for you": "직접 하실 단계 확인이 거부됨",
   "From the sub-agent “{0}”": "서브에이전트 \"{0}\"에서",
   "Run it yourself, in your own terminal: Chat On Steroids does not run or check it.": "직접 자신의 터미널에서 실행하세요. Chat On Steroids는 이 명령을 실행하거나 확인하지 않습니다.",
-  "{0} expected files": "예상 파일 {0}개"
+  "{0} expected files": "예상 파일 {0}개",
+  "Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.": "Chat On Steroids에 표시된 코드와 함께 /start를 보내세요: 설정 → 휴대폰 알림 → Telegram."
 }

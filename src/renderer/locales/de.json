@@ -3958,5 +3958,6 @@
   "From the sub-agent “{0}”": "Vom Unteragenten „{0}“",
   "Run it yourself, in your own terminal: Chat On Steroids does not run or check it.": "Führe ihn selbst in deinem eigenen Terminal aus: Chat On Steroids führt ihn weder aus noch prüft es ihn.",
   "{0} expected files": "{0} erwartete Dateien",
-  "{0} expected files|one": "{0} erwartete Datei"
+  "{0} expected files|one": "{0} erwartete Datei",
+  "Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.": "Sende /start mit dem Code, den Chat On Steroids zeigt: Einstellungen → Handy-Benachrichtigungen → Telegram."
 }
