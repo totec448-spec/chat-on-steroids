@@ -241,6 +241,12 @@ async function finishReleased(sessionId: string, turnId: string, conversationId:
 export async function releaseSessionFinish(sessionId: string, expectedTurnId: string, reason: 'end' | 'stop' = 'end'): Promise<void> {
   const session = await getSession(sessionId);
   if (!session?.conversationId || session.activeTurnId !== expectedTurnId) throw new Error('The active turn changed; refresh before ending it');
+  // #2082: a person's Stop never waits on finish bookkeeping. A turn whose finish record does not
+  // name it (started outside the app's own send, or a rebuilt summary) holds nothing to release.
+  if (reason === 'stop' && session.finishTurn?.turnId !== expectedTurnId) {
+    logInfo(`finish: Stop of turn ${expectedTurnId} in ${session.conversationId} — no finish hold was recorded for this turn; nothing to release`);
+    return;
+  }
   if (await finishReleased(sessionId, expectedTurnId, session.conversationId)) return;
   const latest = await getSession(sessionId);
   if (latest?.activeTurnId !== expectedTurnId || latest.conversationId !== session.conversationId) throw new Error('The active turn changed; refresh before ending it');
