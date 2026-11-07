@@ -2541,6 +2541,28 @@ it('keeps an unbound desktop selection pending instead of claiming its follow wa
   } finally { info.mockRestore(); }
 });
 
+it('logs the never-bound selection once across repeated renderer catalog observations', async () => {
+  const { createSelectedTabFollow } = await import('../src/renderer/selected-tab-follow.js');
+  const bridge = await import('../src/main/bridge.js');
+  const logger = await import('../src/main/logger.js');
+  const session = await createSession({ title: 'never bound', conversationId: null });
+  const info = vi.spyOn(logger, 'logInfo');
+  const follow = vi.spyOn(bridge, 'followChatInBackground').mockReturnValue(true);
+  const send = vi.fn((id: string | null) => handlers.get('sessions:followTab')!(null, { id }) as Promise<{ ok: boolean; data?: boolean }>);
+  try {
+    const selection = { id: session.id, conversationId: null,
+      origin: { kind: 'desktop' as const, fromSessionId: null, agentId: null, task: '' } };
+    const pending = createSelectedTabFollow(send);
+    pending.select(selection);
+    await send.mock.results[0]!.value;
+    for (let i = 0; i < 50; i++) pending.observe(selection);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(follow.mock.calls).toEqual([[null]]); // Clears an older follow; no chat is handed to the browser.
+    expect(info.mock.calls.filter(([line]) => line === 'browser follow: selected chat has no conversation binding; follow stays pending for retry'))
+      .toHaveLength(1);
+  } finally { info.mockRestore(); follow.mockRestore(); }
+});
+
 it('cancels an already queued tab follow when the user selects New Chat', async () => {
   const bridge = await import('../src/main/bridge.js');
   const first = await createSession({ title: 'first', conversationId: 'aaaaaaaa-1111-4222-8333-444444444444' });
