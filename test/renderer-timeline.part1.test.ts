@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { T0, boot, settle, settleHistoryFrame, summary, text, toolCall, waitFor, type Handoff, type InputEntry, type LocalProject, type SessionEvent, type SessionSummary } from './renderer-timeline.harness.js';
+import { T0, boot, closeDom, settle, settleHistoryFrame, summary, text, toolCall, waitFor, type Handoff, type InputEntry, type LocalProject, type SessionEvent, type SessionSummary } from './renderer-timeline.harness.js';
 
 vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTerminal: () => ({
   update: vi.fn(), show: vi.fn(), hide: vi.fn(), hasTabs: () => false,
@@ -405,6 +405,55 @@ it('invalidates a queued browser follow when New Chat replaces the selected sess
   w.document.querySelector<HTMLElement>('#sessionList [data-id="' + first.id + '"]')!.click();
   w.document.getElementById('newChat')!.click();
   expect(followed).toEqual([first.id, null]);
+});
+
+it.each(['catalog removal', 'delete action'])('cancels an unbound chat follow after %s, even if its bound row is seen later', async removal => {
+  const opening: SessionSummary = { ...summary([]), conversationId: null, chatIds: [],
+    origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } };
+  const sessions = [opening];
+  const follow = vi.fn(async (_id: string | null) => ({ ok: true, data: false }));
+  const { w, notifySession } = await boot([], false, [], [], { sessions, followSessionTab: follow });
+  const selector = `#sessionList [data-id="${opening.id}"]`;
+  w.document.querySelector<HTMLElement>(selector)!.click();
+  if (removal === 'delete action') {
+    (w as any).api.deleteSession = async () => { sessions.splice(0); return { ok: true, data: true }; };
+    w.document.querySelector<HTMLElement>(`${selector} [data-row-menu]`)!.click();
+    w.document.querySelector<HTMLElement>('[data-row-action="remove"]')!.click();
+  } else {
+    sessions.splice(0);
+    notifySession();
+  }
+  await waitFor(() => expect(follow.mock.calls).toEqual([[opening.id], [null]]));
+  await waitFor(() => expect(w.document.querySelector(selector)).toBeNull());
+  sessions.push({ ...opening, title: 'Late bound row', conversationId: 'late-chat', chatIds: ['late-chat'] });
+  notifySession();
+  await waitFor(() => expect(w.document.querySelector(selector)?.textContent).toContain('Late bound row'));
+  expect(follow.mock.calls).toEqual([[opening.id], [null]]);
+});
+
+it('drops the unbound follow across a renderer restart with the previous window storage restored', async () => {
+  const opening: SessionSummary = { ...summary([]), conversationId: null, chatIds: [],
+    origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } };
+  const sessions = [opening];
+  const follow = vi.fn(async (_id: string | null) => ({ ok: true, data: false }));
+  const previous = await boot([], false, [], [], { sessions, followSessionTab: follow });
+  const selector = `#sessionList [data-id="${opening.id}"]`;
+  previous.w.document.querySelector<HTMLElement>(selector)!.click();
+  expect(follow.mock.calls).toEqual([[opening.id]]);
+  const storage = Object.fromEntries(Array.from({ length: previous.w.localStorage.length }, (_, i) => {
+    const key = previous.w.localStorage.key(i)!;
+    return [key, previous.w.localStorage.getItem(key)!];
+  }));
+  closeDom();
+  vi.resetModules();
+  const restarted = await boot([], false, [], [], { sessions, storage, followSessionTab: follow });
+  sessions[0] = { ...opening, title: 'Bound after restart', conversationId: 'late-chat', chatIds: ['late-chat'] };
+  restarted.notifySession();
+  await waitFor(() => expect(restarted.w.document.querySelector(selector)?.textContent).toContain('Bound after restart'));
+  expect(follow.mock.calls).toEqual([[opening.id]]);
+  // Only a fresh user selection in the new window authorizes another follow.
+  restarted.w.document.querySelector<HTMLElement>(selector)!.click();
+  expect(follow.mock.calls).toEqual([[opening.id], [opening.id]]);
 });
 
 it('does not focus a newly bound chat after the person has selected another one', async () => {
