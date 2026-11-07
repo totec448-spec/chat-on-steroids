@@ -5071,10 +5071,10 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .background-exec-stop:hover, .background-exec-output:hover { color: var(--ink); background: var(--hover); }
 .background-exec-stop:disabled { cursor: default; opacity: .55; }
 /* The chat column, not the window, decides: with a sidebar open a 640px window leaves a column of
-   about 300px, where a row's time, Output and Stop would push Stop past the edge. The time is in
-   the row's tooltip, so it goes first; the button labels go when the column is narrower still. */
-@container (max-width: 340px) { .background-exec-time { display: none; } }
-@container (max-width: 270px) { .background-exec-stop > span, .background-exec-output > span { display: none; } .background-exec-stop, .background-exec-output { padding-inline: 5px; } }
+   about 300px, where a row's time, Output and Stop would push Stop past the edge. The button labels
+   go first (both keep their icon and accessible name); the elapsed time stays as long as it fits. */
+@container (max-width: 340px) { .background-exec-stop > span, .background-exec-output > span { display: none; } .background-exec-stop, .background-exec-output { padding-inline: 5px; } }
+@container (max-width: 230px) { .background-exec-process-time { display: none; } }
 @media (max-width: 480px) {
   /* Preserve the actionable process row at laptop zoom / phone-width windows. The row tooltip
      still carries elapsed time and full commands; the Stop control keeps its accessible label. */

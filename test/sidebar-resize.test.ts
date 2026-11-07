@@ -64,6 +64,11 @@ it('reports the target width through aria-valuenow while the measured width stil
   expect(handle.getAttribute('aria-valuenow')).toBe('180');
   handle.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'End' }));
   expect(handle.getAttribute('aria-valuenow')).toBe('480');
+  // A step right after Home starts from the reported 180, not from the lagging box.
+  handle.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Home' }));
+  handle.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight' }));
+  expect(handle.getAttribute('aria-valuenow')).toBe('190');
+  handle.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'End' }));
   // A window that allows less clamps the announced value like the style does.
   Object.defineProperty(dom.window, 'innerWidth', { value: 600 });
   dom.window.dispatchEvent(new dom.window.Event('resize'));
