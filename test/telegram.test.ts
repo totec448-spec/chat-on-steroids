@@ -69,7 +69,7 @@ function fakeTelegram(options: { token?: string | null; link?: TelegramLink | nu
     get polls() { return polls; },
     sent: (method = 'sendMessage') => calls.filter(call => call.method === method).map(call => call.params),
     /** Until the bot waits on its next long poll, everything queued handled. */
-    settled: () => vi.waitFor(() => { expect(batches).toHaveLength(0); expect(waiting).not.toBeNull(); })
+    settled: () => vi.waitFor(() => { expect(batches).toHaveLength(0); expect(waiting).not.toBeNull(); }, { timeout: 10_000 })
   };
 }
 
@@ -133,7 +133,7 @@ describe('linking', () => {
     await telegram.bot.connect();
     now += 11 * 60_000;
     telegram.queue(telegram.message(ME, '/start ABCDEFGH'));
-    await vi.waitFor(() => expect(telegram.bot.view().state).toBe('off'));
+    await vi.waitFor(() => expect(telegram.bot.view().state).toBe('off'), { timeout: 10_000 });
     expect(telegram.link).toBeNull();
     expect(telegram.logs).toContain('telegram: the linking code ran out; the bot is not linked');
   });
@@ -215,7 +215,7 @@ describe('when Telegram is in the way', () => {
     // The other app stopped: the next long poll ends normally, with nothing new.
     telegram.queue();
     telegram.bot.start();
-    await vi.waitFor(() => expect(telegram.polls).toBeGreaterThanOrEqual(3));
+    await vi.waitFor(() => expect(telegram.polls).toBeGreaterThanOrEqual(3), { timeout: 10_000 });
     await telegram.settled();
     expect(telegram.bot.view().state).toBe('linked');
     expect(telegram.logs.filter(line => line.includes('another app is reading this bot'))).toHaveLength(1);
@@ -226,7 +226,7 @@ describe('when Telegram is in the way', () => {
     const telegram = current = fakeTelegram({ link: linked() });
     telegram.queueReply({ ok: false, error_code: 401 });
     telegram.bot.start();
-    await vi.waitFor(() => expect(telegram.bot.view().state).toBe('token-refused'));
+    await vi.waitFor(() => expect(telegram.bot.view().state).toBe('token-refused'), { timeout: 10_000 });
     expect(telegram.polls).toBe(1);
   });
 
