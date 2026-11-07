@@ -1414,16 +1414,22 @@ export function upsertMessageEvent(
       // Final is terminal for one canonical ChatGPT message. The page can briefly re-report
       // an older streaming DOM snapshot after settling/remounting; accepting that snapshot
       // would turn a completed answer back into a partial one and could replace its text.
+      // A snapshot that carries the final text and then more is new writing, not a stale copy: after
+      // a Stop that ChatGPT had not obeyed, the page reported the first sentence as final and the
+      // same message kept growing (#2097). It stays final (the page called it final), so a delayed
+      // shorter snapshot is ignored by the rule below, and only longer text of the same message is taken.
+      const continuing =
+        previous?.kind === 'assistant_message' && event.kind === 'assistant_message' &&
+        (previous.final === true || previous.state === 'final') &&
+        event.final !== true && event.state !== 'final' &&
+        continuesFinalText(previous.message, event.message);
       if (
         previous?.kind === 'assistant_message' &&
         event.kind === 'assistant_message' &&
         (previous.final === true || previous.state === 'final') &&
         event.final !== true &&
         event.state !== 'final' &&
-        // A snapshot that carries the final text and then more is new writing, not a stale copy: after
-        // a Stop that ChatGPT had not obeyed, the page reported the first sentence as final and the
-        // same message kept growing (#2097). Anything shorter or different is still ignored.
-        !continuesFinalText(previous.message, event.message)
+        !continuing
       ) {
         return { event: previous, changed: false, contentChanged: false };
       }
@@ -1448,8 +1454,8 @@ export function upsertMessageEvent(
               resolvedModel: event.resolvedModel ?? previous.resolvedModel,
               references: event.references ?? previous.references,
               // `final` is a compatibility mirror of state, not an independent truth.
-              state: event.state === 'final' || event.final === true ? 'final' : 'streaming',
-              final: event.state === 'final' || event.final === true,
+              state: continuing || event.state === 'final' || event.final === true ? 'final' : 'streaming',
+              final: continuing || event.state === 'final' || event.final === true,
               // Goal eligibility is an accepted fact about this stable reply, not a property a
               // later sparse page snapshot may retract. This is what makes a 503/reload replay
               // re-offer the same durable obligation instead of silently dropping it.
@@ -1586,6 +1592,11 @@ export function upsertMessageEvent(
         entry.summary.contextTokens = Math.max(0, entry.summary.contextTokens + delta);
         entry.summary.updatedAt = Math.max(entry.summary.updatedAt, nextEvent.time);
         noteFinishWork(entry.summary, full);
+        // The worker dock's answer line follows the newest final answer, also when that answer grows.
+        if (full.kind === 'assistant_message' && (full.final === true || full.state === 'final') &&
+            full.time >= (entry.summary.lastAssistantFinalAt ?? 0)) {
+          entry.summary.lastAnswerLine = answerLine(full.message.text);
+        }
         // Only a new final is new work. The same finished answer re-reported after a reload or a
         // branch keeps its boundary, or the sidebar would call a read chat "New response".
         const finalBefore = sameMessage && previous.kind === 'assistant_message' &&
