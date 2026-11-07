@@ -4952,7 +4952,7 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .related-folders-state { flex: none; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); }
 .related-folders-remove { flex: none; }
 .related-folders-add { display: flex; gap: 8px; }
-.related-folders-add .related-folders-select { flex: 1; }
+.related-folders-add .related-folders-select { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .related-folders-add .btn { flex: none; padding: 8px 12px; }
 .file-confirm-dialog-body { display: grid; gap: 12px; padding: 20px; }
 .file-confirm-dialog-body h2 { margin: 0; font-size: calc(16px * var(--text-scale, 1)); font-weight: 650; }
