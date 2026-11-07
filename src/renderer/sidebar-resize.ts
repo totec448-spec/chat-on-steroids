@@ -26,7 +26,9 @@ export function initSidebarResize(): void {
     else app.style.setProperty('--sidebar-width', `${Math.min(maximum(), preferred)}px`);
     handle.setAttribute('aria-valuemin', String(minimum));
     handle.setAttribute('aria-valuemax', String(maximum()));
-    handle.setAttribute('aria-valuenow', String(Math.round(sidebar.getBoundingClientRect().width)));
+    // The width just set, not a measurement: the sidebar is still gliding to it, so a measurement now
+    // would announce a value from the middle of the glide.
+    handle.setAttribute('aria-valuenow', String(preferred === null ? Math.round(sidebar.getBoundingClientRect().width) : Math.round(Math.min(maximum(), preferred))));
   }
   function save(): void {
     try {
