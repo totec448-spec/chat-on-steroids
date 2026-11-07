@@ -512,6 +512,12 @@
   "content_goal_wait_workers": {
     "message": "이 채팅의 서브에이전트 대기 중"
   },
+  "content_goal_wait_slots": {
+    "message": "빈자리를 기다리는 중(동시에 작업하는 채팅 수)"
+  },
+  "content_goal_wait_paused": {
+    "message": "ChatGPT가 속도를 늦춰 달라고 함 · 안내된 시각까지 대기"
+  },
   "content_goal_writing_first_message": {
     "message": "$1이(가) 첫 메시지를 작성하는 중"
   },
@@ -888,10 +894,10 @@
     "message": "대기 중"
   },
   "popup_pipeline_call_fallback_many": {
-    "message": "앱이 호출 $1개를 요청 ID로 배치하지 못해 $2(으)로 대체했습니다."
+    "message": "앱이 호출 $1개를 요청 ID로 배치하지 못했습니다. 대신 사용: $2."
   },
   "popup_pipeline_call_fallback_one": {
-    "message": "앱이 호출 하나를 요청 ID로 배치하지 못해 $1(으)로 대체했습니다."
+    "message": "앱이 호출 하나를 요청 ID로 배치하지 못했습니다. 대신 사용: $1."
   },
   "popup_pipeline_delivery_blocked": {
     "message": "앱 연결과 프로토콜 호환성이 확인될 때까지 전송이 차단됩니다."

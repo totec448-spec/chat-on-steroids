@@ -531,7 +531,9 @@ describe('the chat panel cards', () => {
     expect(document.getElementById('backgroundExecStatus')!.nextElementSibling?.id).toBe('backgroundExecLiveStatus');
     expect((document.getElementById('backgroundExecLiveStatus') as HTMLElement).hidden).toBe(true);
     expect(document.getElementById('backgroundExecLiveStatus')!.nextElementSibling?.id).toBe('backgroundExecList');
-    expect(document.getElementById('backgroundExecList')!.nextElementSibling?.id).toBe('agentPlan');
+    expect(document.getElementById('backgroundExecList')!.nextElementSibling?.id).toBe('userRequests');
+    // Steps waiting for the person (#1695) come first: they wait on someone, the plan only reports.
+    expect(document.getElementById('userRequests')!.nextElementSibling?.id).toBe('agentPlan');
     expect(document.getElementById('inputQueue')!.closest('#chatBody')).not.toBeNull();
     expect(card.classList.contains('is-session')).toBe(true);
     expect(tracks("[data-panel='chat'] .card.is-session")).toHaveLength(layoutChildren.length);
@@ -545,7 +547,9 @@ describe('the chat panel cards', () => {
     expect(rule('.background-exec-list')).toContain('overflow-y: auto');
     expect(document.getElementById('backgroundExecStatus')!.nextElementSibling?.id).toBe('backgroundExecLiveStatus');
     expect(document.getElementById('backgroundExecLiveStatus')!.nextElementSibling?.id).toBe('backgroundExecList');
-    expect(document.getElementById('backgroundExecList')!.nextElementSibling?.id).toBe('agentPlan');
+    expect(document.getElementById('backgroundExecList')!.nextElementSibling?.id).toBe('userRequests');
+    // Steps waiting for the person (#1695) come first: they wait on someone, the plan only reports.
+    expect(document.getElementById('userRequests')!.nextElementSibling?.id).toBe('agentPlan');
     expect(document.getElementById('finishQueue')!.previousElementSibling?.id).toBe('taskPlanPreview');
     // A chat's schedule (#1826) is one quiet line right under its queue.
     expect(document.getElementById('finishQueue')!.nextElementSibling?.id).toBe('scheduleLine');
