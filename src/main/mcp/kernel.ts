@@ -790,8 +790,12 @@ async function dispatchTracked(
   // Identity and the finish hold share one ingress deadline; late proof must not
   // add another complete hold interval to an already waiting provider request.
   const finishDeadline = name === 'session_finish' ? sessionFinishDeadline(startedAt) : null;
-  const identityWindow = (requested: number): number => finishDeadline === null
-    ? requested : Math.min(requested, Math.max(0, finishDeadline - Date.now()));
+  // A step for the person (#1695) waits for its chat at most the ordinary identity window in total,
+  // across every later identity check too (CodeRabbit on #2088).
+  const stepDeadline = name === 'ask_user_to_run' || name === 'user_request_status' ? startedAt + IDENTITY_EVIDENCE_MS : null;
+  const deadline = finishDeadline ?? stepDeadline;
+  const identityWindow = (requested: number): number => deadline === null
+    ? requested : Math.min(requested, Math.max(0, deadline - Date.now()));
   // Windows observation/input gets one short grace even under the opt-in. Exact proof can then
   // alias the observation directly to the durable session, while a genuinely headless caller
   // falls back to its request principal instead of waiting the old full identity window.
