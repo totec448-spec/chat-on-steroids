@@ -111,6 +111,7 @@ export const MAIN_TEXTS = [
   // The Telegram bot's own messages (#1934): telegram.ts and telegram-status.ts.
   "Connected to Chat On Steroids. Its notifications arrive here.",
   "This code is not valid any more. Get a new one in Chat On Steroids: Settings → Phone notifications → Telegram.",
+  "Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.",
   "Chat On Steroids sends its notifications here. /status shows what your chats are doing.",
   "I know /status and /help.",
   "Deny",

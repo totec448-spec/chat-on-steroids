@@ -109,6 +109,7 @@ export function mainTexts(): Record<MainText, string> {
     'Shared from Chat On Steroids': t('Shared from Chat On Steroids'),
     'Connected to Chat On Steroids. Its notifications arrive here.': t('Connected to Chat On Steroids. Its notifications arrive here.'),
     'This code is not valid any more. Get a new one in Chat On Steroids: Settings → Phone notifications → Telegram.': t('This code is not valid any more. Get a new one in Chat On Steroids: Settings → Phone notifications → Telegram.'),
+    'Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.': t('Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.'),
     'Chat On Steroids sends its notifications here. /status shows what your chats are doing.': t('Chat On Steroids sends its notifications here. /status shows what your chats are doing.'),
     'I know /status and /help.': t('I know /status and /help.'),
     'Deny': t('Deny'),

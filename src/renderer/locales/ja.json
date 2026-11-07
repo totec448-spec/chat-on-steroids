@@ -3855,5 +3855,6 @@
   "Refused to check a step for you": "あなたの手順の確認を拒否しました",
   "From the sub-agent “{0}”": "サブエージェント「{0}」から",
   "Run it yourself, in your own terminal: Chat On Steroids does not run or check it.": "ご自身のターミナルで自分で実行してください。Chat On Steroids はこのコマンドを実行も確認もしません。",
-  "{0} expected files": "想定されるファイル {0} 件"
+  "{0} expected files": "想定されるファイル {0} 件",
+  "Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.": "Chat On Steroids に表示されるコードを付けて /start を送ってください：設定 → スマートフォン通知 → Telegram。"
 }
