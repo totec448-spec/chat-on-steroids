@@ -1128,6 +1128,10 @@ describe('session store', () => {
     expect(delayed.changed).toBe(false);
     // The worker dock's answer line follows the grown text, not the first sentence.
     expect((await getSession(summary.id))?.lastAnswerLine).toContain('There are two separations');
+    // A delayed final replay of only the first sentence is not a correction and cannot cut the text back.
+    const replay = await upsertMessageEvent(summary.id, { time: 160, source: 'extension', kind: 'assistant_message', messageId,
+      message: text('I found the relevant code paths.'), state: 'final', final: true });
+    expect(replay.changed).toBe(false);
     const done = await upsertMessageEvent(summary.id, { time: 180, source: 'extension', kind: 'assistant_message', messageId,
       message: text('I found the relevant code paths. There are two separations to keep. Done.'), state: 'final', final: true });
     expect(done.changed).toBe(true);
@@ -1142,6 +1146,21 @@ describe('session store', () => {
     const other = await upsertMessageEvent(summary.id, { time: 210, source: 'extension', kind: 'assistant_message', messageId,
       message: text('Something else entirely, and it is even longer than the final text above it was.'), state: 'streaming', final: false });
     expect(other.changed).toBe(false);
+  });
+
+  // CodeRabbit on #2099: streaming first, final later, then the continuation: the answer line must follow the text.
+  it('shows the grown text in the answer line when a streaming message becomes final and then continues', async () => {
+    const summary = await createSession({ title: 'answer line of a growing final' });
+    const messageId = 'msg-line';
+    const text = (value: string) => ({ text: value, truncated: false, chars: value.length });
+    await upsertMessageEvent(summary.id, { time: 80, source: 'extension', kind: 'assistant_message', messageId,
+      message: text('First part'), state: 'streaming', final: false });
+    await upsertMessageEvent(summary.id, { time: 100, source: 'extension', kind: 'assistant_message', messageId,
+      message: text('First part is done.'), state: 'final', final: true });
+    expect((await getSession(summary.id))?.lastAnswerLine).toBe('First part is done.');
+    await upsertMessageEvent(summary.id, { time: 140, source: 'extension', kind: 'assistant_message', messageId,
+      message: text('First part is done. And then more.'), state: 'streaming', final: false });
+    expect((await getSession(summary.id))?.lastAnswerLine).toBe('First part is done. And then more.');
   });
 
   it('keeps rich HTML when the same canonical prose is reobserved without rendered HTML', async () => {
