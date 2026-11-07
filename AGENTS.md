@@ -2290,6 +2290,9 @@ UUID plus sediment asset id. They are neither assistant prose nor local tool cal
 establish turn completion, Goal eligibility or activity. Typed public tool/assistant image
 outputs supply metadata first; final provider status and a complete, exactly owned native IMG
 permit optional preview capture. Main/thumbnail/mask clones of the same asset share that identity.
+Public `generated-image` items are read both at the turn's top level and as direct children of
+`chatgpt-reasoning-group`. Both use the same exact message/asset and pixel-ownership checks;
+an image inside a working group never establishes top-level answer completion or exposes reasoning text.
 A gallery (several images in one answer) mounts one large preview plus a thumbnail strip
 (`div[role=group] > button[aria-pressed] > img`, part of `GENERATED_IMAGE`). Its blob pixels belong to
 an asset only through `galleryImageAsset` (#2005): the image's own id (the preview's `imageId`, which
