@@ -1111,6 +1111,33 @@ describe('session store', () => {
     expect(stored?.kind === 'assistant_message' && stored.message.text).toBe('Complete answer.');
   });
 
+  // #2097: after a Stop the page reported the first sentence as final, but ChatGPT had not stopped and
+  // kept writing the same message. The rest was thrown away because "final is terminal".
+  it('keeps the rest of a message that continues after the page reported it final', async () => {
+    const summary = await createSession({ title: 'final that continues' });
+    const messageId = 'msg-continues';
+    const text = (value: string) => ({ text: value, truncated: false, chars: value.length });
+    await upsertMessageEvent(summary.id, { time: 100, source: 'extension', kind: 'assistant_message', messageId,
+      message: text('I found the relevant code paths.'), state: 'final', final: true });
+    const more = await upsertMessageEvent(summary.id, { time: 140, source: 'extension', kind: 'assistant_message', messageId,
+      message: text('I found the relevant code paths. There are two separations to keep.'), state: 'streaming', final: false });
+    expect(more.changed).toBe(true);
+    const done = await upsertMessageEvent(summary.id, { time: 180, source: 'extension', kind: 'assistant_message', messageId,
+      message: text('I found the relevant code paths. There are two separations to keep. Done.'), state: 'final', final: true });
+    expect(done.changed).toBe(true);
+    const stored = await readEvents(summary.id, { kinds: ['assistant_message'] });
+    const last = stored.at(-1);
+    expect(last?.kind === 'assistant_message' && last.message.text).toBe('I found the relevant code paths. There are two separations to keep. Done.');
+    expect(last?.kind === 'assistant_message' && last.final).toBe(true);
+    // An unrelated or shorter streaming snapshot of a final message is still ignored.
+    const stale = await upsertMessageEvent(summary.id, { time: 200, source: 'extension', kind: 'assistant_message', messageId,
+      message: text('I found'), state: 'streaming', final: false });
+    expect(stale.changed).toBe(false);
+    const other = await upsertMessageEvent(summary.id, { time: 210, source: 'extension', kind: 'assistant_message', messageId,
+      message: text('Something else entirely, and it is even longer than the final text above it was.'), state: 'streaming', final: false });
+    expect(other.changed).toBe(false);
+  });
+
   it('keeps rich HTML when the same canonical prose is reobserved without rendered HTML', async () => {
     const summary = await createSession({ title: 'sparse rich final' });
     const messageId = 'msg-sparse-rich';
