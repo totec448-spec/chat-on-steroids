@@ -433,6 +433,53 @@ it('records every image of a gallery: the large preview as whichever image it sh
   expect(thumbs.map(thumb => stampedFile(thumb, files))).toEqual(files);
 });
 
+// Observed public page shape: ImageGen outputs can be children of the working
+// group instead of top-level answer items, including before this turn finishes.
+it.each(['running', 'group-complete', 'assistant-final'] as const)(
+  'reads generated images inside the current reasoning group (%s)', async state => {
+    const f = fixture(); const g = gallery(f, 1);
+    f.entry.turn.status = state === 'running' ? 'in_progress' : 'complete';
+    f.entry.turn.items = [f.entry.turn.items[0], {
+      type: 'chatgpt-reasoning-group', completed: state !== 'running', items: [
+        { type: 'reasoning', presentation: 'analysis', content: 'NEVER_COPY_PRIVATE_REASONING' },
+        ...g.images
+      ]
+    }];
+    if (state === 'assistant-final') {
+      f.entry.turn.messageIds.push(OTHER);
+      f.entry.turn.items.push({ type: 'assistant-message', messageId: OTHER,
+        content: 'Both images are ready.', phase: 'final_answer', completed: true });
+    }
+    const turn = (await f.ask()).turns[0];
+    expect(turn.images.map((image: any) => image.assetId)).toEqual(g.files);
+    expect(turn.images.every((image: any) => image.providerStatus === 'finished_successfully')).toBe(true);
+    expect(stampedFile(g.big, g.files)).toBe(g.files[1]);
+    expect(g.thumbs.map(thumb => stampedFile(thumb, g.files))).toEqual(g.files);
+    expect(turn.endMessageId).toBe(state === 'assistant-final' ? OTHER : null);
+    expect(JSON.stringify(turn)).not.toContain('NEVER_COPY_PRIVATE_REASONING');
+  }
+);
+
+it('keeps newer nested image identities after an older top-level image', async () => {
+  const f = fixture(); const g = gallery(f, 2);
+  const newest = '66666666-6666-4666-8666-666666666666';
+  g.images[1]!.chatGptMessageId = OTHER;
+  g.images[2]!.chatGptMessageId = newest;
+  Object.assign(g.shown[1]!, g.images[1]);
+  Object.assign(g.shown[2]!, g.images[2]);
+  f.entry.turn.status = 'in_progress';
+  f.entry.turn.messageIds.push(OTHER, newest);
+  f.entry.turn.items = [f.entry.turn.items[0], g.images[0], {
+    type: 'chatgpt-reasoning-group', items: [g.images[1], g.images[2]]
+  }];
+  const turn = (await f.ask()).turns[0];
+  expect(turn.images.map((image: any) => [image.messageId, image.assetId])).toEqual([
+    [ANSWER, g.files[0]], [OTHER, g.files[1]], [newest, g.files[2]]
+  ]);
+  expect(stampedFile(g.big, g.files)).toBe(g.files[2]);
+  expect(turn.endMessageId).toBeNull();
+});
+
 it.each([
   ['an id no typed image of this turn has', (g: ReturnType<typeof gallery>) => { g.shown[1]!.id = `${ANSWER}:image-asset:9`; }],
   ['another message', (g: ReturnType<typeof gallery>) => { g.shown[1]!.chatGptMessageId = OTHER; }],
@@ -448,6 +495,22 @@ it.each([
   // The other images of the gallery are unaffected.
   expect(stampedFile(g.thumbs[2]!, g.files)).toBe(g.files[2]);
 });
+
+it.each(['foreign message', 'invalid asset', 'running image', 'preview'])(
+  'keeps nested image validation and pixel ownership strict (%s)', async scenario => {
+    const f = fixture(); const { image, node } = generatedAnswer(f);
+    f.entry.turn.items = [f.entry.turn.items[0], { type: 'chatgpt-reasoning-group', items: [image] }];
+    if (scenario === 'foreign message') image.chatGptMessageId = OTHER;
+    if (scenario === 'invalid asset') image.src = 'https://example.com/not-an-owned-asset';
+    if (scenario === 'running image') image.status = 'in_progress';
+    if (scenario === 'preview') image.isPreview = true;
+    const turn = (await f.ask()).turns[0];
+    expect(turn.endMessageId).toBeNull();
+    if (scenario === 'foreign message' || scenario === 'invalid asset') expect(turn.images).toEqual([]);
+    else expect(turn.images).toEqual([expect.objectContaining({ providerStatus: 'in_progress' })]);
+    expect(node.hasAttribute('data-clf-fiber-image')).toBe(false);
+  }
+);
 
 it('does not take a large preview that ChatGPT marks incomplete or a preview', async () => {
   for (const flags of [{ isComplete: false, isPreview: false }, { isComplete: true, isPreview: true }]) {
