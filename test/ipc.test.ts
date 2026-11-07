@@ -2719,6 +2719,28 @@ it('keeps an unbound desktop selection pending instead of claiming its follow wa
   } finally { info.mockRestore(); }
 });
 
+it('logs the never-bound selection once across repeated renderer catalog observations', async () => {
+  const { createSelectedTabFollow } = await import('../src/renderer/selected-tab-follow.js');
+  const bridge = await import('../src/main/bridge.js');
+  const logger = await import('../src/main/logger.js');
+  const session = await createSession({ title: 'never bound', conversationId: null });
+  const info = vi.spyOn(logger, 'logInfo');
+  const follow = vi.spyOn(bridge, 'followChatInBackground').mockReturnValue(true);
+  const send = vi.fn((id: string | null) => handlers.get('sessions:followTab')!(null, { id }) as Promise<{ ok: boolean; data?: boolean }>);
+  try {
+    const selection = { id: session.id, conversationId: null,
+      origin: { kind: 'desktop' as const, fromSessionId: null, agentId: null, task: '' } };
+    const pending = createSelectedTabFollow(send);
+    pending.select(selection);
+    await send.mock.results[0]!.value;
+    for (let i = 0; i < 50; i++) pending.observe(selection);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(follow.mock.calls).toEqual([[null]]); // Clears an older follow; no chat is handed to the browser.
+    expect(info.mock.calls.filter(([line]) => line === 'browser follow: selected chat has no conversation binding; follow stays pending for retry'))
+      .toHaveLength(1);
+  } finally { info.mockRestore(); follow.mockRestore(); }
+});
+
 it('cancels an already queued tab follow when the user selects New Chat', async () => {
   const bridge = await import('../src/main/bridge.js');
   const first = await createSession({ title: 'first', conversationId: 'aaaaaaaa-1111-4222-8333-444444444444' });
@@ -3489,7 +3511,7 @@ describe('settings backup over IPC', () => {
 });
 
 describe('phone notifications over IPC', () => {
-  const phone = (over: Record<string, unknown> = {}) => ({ enabled: true, server: 'https://ntfy.sh/', topic: 'cos-fixturetopic234567', needsYou: true, failures: true,
+  const phone = (over: Record<string, unknown> = {}) => ({ enabled: true, ntfy: true, server: 'https://ntfy.sh/', topic: 'cos-fixturetopic234567', needsYou: true, failures: true,
     finishedAfterMinutes: 5, onlyWhenAway: true, quietHours: null, includeDetails: false, ...over });
   beforeAll(() => {
     // An earlier test registers the handlers against a destroyed window; these use the live one.
@@ -3508,6 +3530,39 @@ describe('phone notifications over IPC', () => {
     // Switched off, a half-filled form still saves.
     expect((await save({ ...now, ui: { ...now.ui, phonePush: phone({ enabled: false, topic: '' }) } }, now)).ok).toBe(true);
     expect(getConfig().ui.phonePush).toMatchObject({ enabled: false, topic: '' });
+  });
+
+  // #1934: with ntfy off (Telegram only), its topic and server are not asked for, and an older form
+  // without the switch leaves it as it is.
+  it('needs no ntfy topic with ntfy off, and keeps the switch through a form that has none', async () => {
+    const base = getConfig();
+    const first = await save({ ...base, ui: { ...base.ui, phonePush: phone({ ntfy: false, topic: '', server: '' }) } }, base);
+    expect(first.ok).toBe(true);
+    expect(getConfig().ui.phonePush).toMatchObject({ enabled: true, ntfy: false, topic: '' });
+    const now = getConfig();
+    const { ntfy: _ntfy, ...older } = phone({ ntfy: false, topic: '', server: '', includeDetails: true });
+    expect((await save({ ...now, ui: { ...now.ui, phonePush: older as never } }, now)).ok).toBe(true);
+    expect(getConfig().ui.phonePush).toMatchObject({ ntfy: false, includeDetails: true });
+    const later = getConfig();
+    expect(await save({ ...later, ui: { ...later.ui, phonePush: phone({ ntfy: true, topic: '' }) } }, later))
+      .toEqual({ ok: false, error: 'Choose a topic of letters, digits, - and _ (up to 64).' });
+  });
+
+  // Telegram phase 2 (2026-10-31): replies as messages stay off until switched on, and a form without
+  // the switch (an older window or backup) leaves it as it is.
+  it('keeps the Telegram reply switch off by default and through a form that has none', async () => {
+    const base = getConfig();
+    expect((await save({ ...base, ui: { ...base.ui, phonePush: phone() } }, base)).ok).toBe(true);
+    expect(getConfig().ui.phonePush?.telegramSteer).toBeUndefined();
+    const on = getConfig();
+    expect((await save({ ...on, ui: { ...on.ui, phonePush: phone({ telegramSteer: true }) } }, on)).ok).toBe(true);
+    expect(getConfig().ui.phonePush).toMatchObject({ telegramSteer: true });
+    const now = getConfig();
+    expect((await save({ ...now, ui: { ...now.ui, phonePush: phone({ includeDetails: true }) } }, now)).ok).toBe(true);
+    expect(getConfig().ui.phonePush).toMatchObject({ telegramSteer: true, includeDetails: true });
+    const later = getConfig();
+    expect((await save({ ...later, ui: { ...later.ui, phonePush: phone({ telegramSteer: false }) } }, later)).ok).toBe(true);
+    expect(getConfig().ui.phonePush).toMatchObject({ telegramSteer: false });
   });
 
   it('checks the settings as they will be saved, not the stale form, and logs a refusal', async () => {

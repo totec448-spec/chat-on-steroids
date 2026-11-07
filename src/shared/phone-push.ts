@@ -2,7 +2,10 @@
 export interface QuietHours { from: string; to: string }
 
 export interface PhonePushSettings {
+  /** Phone notifications at all; each destination below is on its own too. */
   enabled: boolean;
+  /** Through ntfy (server and topic). Missing, as in settings from before Telegram: on. */
+  ntfy?: boolean;
   server: string;
   topic: string;
   needsYou: boolean;
@@ -13,10 +16,15 @@ export interface PhonePushSettings {
   quietHours: QuietHours | null;
   /** The chat's name, the start of its answer and a link to it. */
   includeDetails: boolean;
+  /**
+   * A reply to a Telegram notification is sent to that chat as the person's message (phase 2,
+   * 2026-10-31). Missing: off. A message can make ChatGPT run tools here, so it is its own choice.
+   */
+  telegramSteer?: boolean;
 }
 
 export const DEFAULT_PHONE_PUSH: PhonePushSettings = {
-  enabled: false, server: 'https://ntfy.sh', topic: '', needsYou: true, failures: true, finishedAfterMinutes: 5,
+  enabled: false, ntfy: true, server: 'https://ntfy.sh', topic: '', needsYou: true, failures: true, finishedAfterMinutes: 5,
   onlyWhenAway: true, quietHours: null, includeDetails: false
 };
 

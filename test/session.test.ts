@@ -27,6 +27,8 @@ import {
   recordToolCall,
   repairDeterministicAttribution,
   rebindConversation,
+  REOPENED_STOP_PRO_QUIET_MS,
+  REOPENED_STOP_QUIET_MS,
   resetRecorderForTests,
   sessionForConversation,
 } from '../src/main/session/recorder.js';
@@ -1125,6 +1127,82 @@ describe('session store', () => {
     const [stored] = await readEvents(summary.id, { kinds: ['assistant_message'] });
     expect(stored?.kind === 'assistant_message' && stored.final).toBe(true);
     expect(stored?.kind === 'assistant_message' && stored.message.text).toBe('Complete answer.');
+  });
+
+  // #2097: after a Stop the page reported the first sentence as final, but ChatGPT had not stopped and
+  // kept writing the same message. The rest was thrown away because "final is terminal".
+  it('keeps the rest of a message that continues after the page reported it final', async () => {
+    const summary = await createSession({ title: 'final that continues' });
+    const messageId = 'msg-continues';
+    const text = (value: string) => ({ text: value, truncated: false, chars: value.length });
+    await upsertMessageEvent(summary.id, { time: 100, source: 'extension', kind: 'assistant_message', messageId,
+      message: text('I found the relevant code paths.'), state: 'final', final: true });
+    const more = await upsertMessageEvent(summary.id, { time: 140, source: 'extension', kind: 'assistant_message', messageId,
+      message: text('I found the relevant code paths. There are two separations to keep.'), state: 'streaming', final: false });
+    expect(more.changed).toBe(true);
+    // The grown message is still final; a delayed shorter streaming snapshot must not shrink it (CodeRabbit on #2099).
+    const delayed = await upsertMessageEvent(summary.id, { time: 150, source: 'extension', kind: 'assistant_message', messageId,
+      message: text('I found the relevant code paths. There'), state: 'streaming', final: false });
+    expect(delayed.changed).toBe(false);
+    // The worker dock's answer line follows the grown text, not the first sentence.
+    expect((await getSession(summary.id))?.lastAnswerLine).toContain('There are two separations');
+    // A delayed final replay of only the first sentence is not a correction and cannot cut the text back.
+    const replay = await upsertMessageEvent(summary.id, { time: 160, source: 'extension', kind: 'assistant_message', messageId,
+      message: text('I found the relevant code paths.'), state: 'final', final: true });
+    expect(replay.changed).toBe(false);
+    const done = await upsertMessageEvent(summary.id, { time: 180, source: 'extension', kind: 'assistant_message', messageId,
+      message: text('I found the relevant code paths. There are two separations to keep. Done.'), state: 'final', final: true });
+    expect(done.changed).toBe(true);
+    const stored = await readEvents(summary.id, { kinds: ['assistant_message'] });
+    const last = stored.at(-1);
+    expect(last?.kind === 'assistant_message' && last.message.text).toBe('I found the relevant code paths. There are two separations to keep. Done.');
+    expect(last?.kind === 'assistant_message' && last.final).toBe(true);
+    // An unrelated or shorter streaming snapshot of a final message is still ignored.
+    const stale = await upsertMessageEvent(summary.id, { time: 200, source: 'extension', kind: 'assistant_message', messageId,
+      message: text('I found'), state: 'streaming', final: false });
+    expect(stale.changed).toBe(false);
+    const other = await upsertMessageEvent(summary.id, { time: 210, source: 'extension', kind: 'assistant_message', messageId,
+      message: text('Something else entirely, and it is even longer than the final text above it was.'), state: 'streaming', final: false });
+    expect(other.changed).toBe(false);
+  });
+
+  // CodeRabbit on #2099: streaming first, final later, then the continuation: the answer line must follow the text.
+  it('shows the grown text in the answer line when a streaming message becomes final and then continues', async () => {
+    const summary = await createSession({ title: 'answer line of a growing final' });
+    const messageId = 'msg-line';
+    const text = (value: string) => ({ text: value, truncated: false, chars: value.length });
+    await upsertMessageEvent(summary.id, { time: 80, source: 'extension', kind: 'assistant_message', messageId,
+      message: text('First part'), state: 'streaming', final: false });
+    await upsertMessageEvent(summary.id, { time: 100, source: 'extension', kind: 'assistant_message', messageId,
+      message: text('First part is done.'), state: 'final', final: true });
+    expect((await getSession(summary.id))?.lastAnswerLine).toBe('First part is done.');
+    await upsertMessageEvent(summary.id, { time: 140, source: 'extension', kind: 'assistant_message', messageId,
+      message: text('First part is done. And then more.'), state: 'streaming', final: false });
+    expect((await getSession(summary.id))?.lastAnswerLine).toBe('First part is done. And then more.');
+  });
+
+  it('does not let an older message with the same first line take over the answer line when it grows', async () => {
+    const summary = await createSession({ title: 'two finals with one first line' });
+    const text = (value: string) => ({ text: value, truncated: false, chars: value.length });
+    await upsertMessageEvent(summary.id, { time: 100, source: 'extension', kind: 'assistant_message', messageId: 'older',
+      message: text('Done.'), state: 'final', final: true });
+    await upsertMessageEvent(summary.id, { time: 200, source: 'extension', kind: 'assistant_message', messageId: 'newer',
+      message: text('Done.\nSecond answer.'), state: 'final', final: true });
+    expect((await getSession(summary.id))?.lastAnswerLine).toBe('Done.');
+    await upsertMessageEvent(summary.id, { time: 240, source: 'extension', kind: 'assistant_message', messageId: 'older',
+      message: text('Done. And then a lot more text for the older one.'), state: 'streaming', final: false });
+    expect((await getSession(summary.id))?.lastAnswerLine).toBe('Done.');
+  });
+
+  // CodeRabbit on #2099: an authored-time promotion moves the message's own time forward; it must not count as "a newer final".
+  it('updates the answer line of a growing message whose time was promoted by the same revision', async () => {
+    const summary = await createSession({ title: 'promoted time' });
+    const text = (value: string) => ({ text: value, truncated: false, chars: value.length });
+    await upsertMessageEvent(summary.id, { time: 100, source: 'extension', kind: 'assistant_message', messageId: 'm',
+      message: text('Done.'), state: 'final', final: true });
+    await upsertMessageEvent(summary.id, { time: 150, source: 'extension', kind: 'assistant_message', messageId: 'm',
+      message: text('Done. And then more.'), state: 'streaming', final: false }, { preferTime: true });
+    expect((await getSession(summary.id))?.lastAnswerLine).toBe('Done. And then more.');
   });
 
   it('keeps rich HTML when the same canonical prose is reobserved without rendered HTML', async () => {
@@ -3072,6 +3150,81 @@ describe('canonical recorder 1.8', () => {
     expect(secondCalls).toHaveLength(1);
     expect(firstCalls[0]!.kind === 'tool_call' && firstCalls[0]!.call.requestId).toBe('wfr_concurrent_a');
     expect(secondCalls[0]!.kind === 'tool_call' && secondCalls[0]!.call.requestId).toBe('wfr_concurrent_b');
+  });
+
+  /**
+   * #2082 (three reports, 2026-11-06; reproduced on the Windows VM 2026-11-07): the person stops a
+   * turn, a call ChatGPT had already lined up reopens it, and then the calls stop. A hidden or
+   * reloaded page never ended it again, so the app showed the turn running for good and every next
+   * message waited behind it. Once that request is quiet with no call running, the app ends the
+   * reopened turn as stopped again itself.
+   */
+  it.each([
+    ['stopped', true],
+    ['completed', false]
+  ] as const)('ends a turn reopened after a %s end once its request goes quiet: %s', async (outcome, closes) => {
+    vi.useFakeTimers();
+    try {
+      const conversationId = `conv-reopened-quiet-${outcome}`;
+      const request = `wfr_reopened_quiet_${outcome}`;
+      const sessionId = await sessionForConversation(conversationId);
+      const active = () => liveConversations().find((entry) => entry.conversationId === conversationId)?.activeTurnId ?? null;
+      const start = Date.now();
+      await recordChatObservations(conversationId, [
+        { kind: 'turn_start', time: start, turnId: 'g-quiet' },
+        { kind: 'tool_evidence', time: start, fiberConversationId: conversationId,
+          calls: [{ messageId: 'quiet-0', tool: 'read', order: 0, answered: false, requestId: request }] }
+      ]);
+      await tool(request, start + 10);
+      await recordChatObservations(conversationId, [{ kind: 'turn_end', time: start + 20, turnId: 'g-quiet', outcome }]);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await tool(request, Date.now());
+      expect(active()).toBe('g-quiet');
+      // Another call of the same request inside the quiet window keeps it open.
+      await vi.advanceTimersByTimeAsync(REOPENED_STOP_QUIET_MS - 10_000);
+      await tool(request, Date.now());
+      await vi.advanceTimersByTimeAsync(REOPENED_STOP_QUIET_MS - 10_000);
+      expect(active()).toBe('g-quiet');
+      await vi.advanceTimersByTimeAsync(20_000);
+      // The end is a durable journal write; wait for it rather than for a fixed time.
+      if (closes) await vi.waitFor(() => expect(active()).toBeNull(), { timeout: 10_000 });
+      else expect(active()).toBe('g-quiet');
+      const ends = await readEvents(sessionId!, { kinds: ['turn_end'] });
+      if (closes) {
+        expect(ends.at(-1)).toMatchObject({ kind: 'turn_end', turnId: 'g-quiet', outcome: 'stopped', source: 'app' });
+        expect((await getSession(sessionId!))?.activeTurnId ?? null).toBeNull();
+      } else expect(ends).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('waits the longer Pro window before it ends a Pro turn reopened after a Stop (#2082)', async () => {
+    vi.useFakeTimers();
+    try {
+      const conversationId = 'conv-reopened-quiet-pro';
+      const request = 'wfr_reopened_quiet_pro';
+      await sessionForConversation(conversationId);
+      const active = () => liveConversations().find((entry) => entry.conversationId === conversationId)?.activeTurnId ?? null;
+      const start = Date.now();
+      await recordChatObservations(conversationId, [
+        { kind: 'model_selection', model: 'gpt-6-pro', reasoningEffort: 'pro', time: start },
+        { kind: 'turn_start', time: start, turnId: 'g-quiet-pro' },
+        { kind: 'tool_evidence', time: start, fiberConversationId: conversationId,
+          calls: [{ messageId: 'quiet-pro-0', tool: 'read', order: 0, answered: false, requestId: request }] }
+      ]);
+      await tool(request, start + 10);
+      await recordChatObservations(conversationId, [{ kind: 'turn_end', time: start + 20, turnId: 'g-quiet-pro', outcome: 'stopped' }]);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await tool(request, Date.now());
+      expect(active()).toBe('g-quiet-pro');
+      await vi.advanceTimersByTimeAsync(REOPENED_STOP_QUIET_MS + 10_000);
+      expect(active()).toBe('g-quiet-pro');
+      await vi.advanceTimersByTimeAsync(REOPENED_STOP_PRO_QUIET_MS - REOPENED_STOP_QUIET_MS);
+      await vi.waitFor(() => expect(active()).toBeNull(), { timeout: 10_000 });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps an unmatched modern request unattributed and never borrows another chat', async () => {

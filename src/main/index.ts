@@ -1,5 +1,6 @@
 import { closeRemoteSessions } from './remote/ssh.js';
-import { stopInputStartup } from './session/start-input.js';
+import { sendDesktopInput, stopInputStartup } from './session/start-input.js';
+import { steerFromTelegram } from './telegram-steer.js';
 import { browserExtensionRequired } from '../shared/types.js';
 import { requestSessionFinishGoal, setFinishNotifier } from './session/finish.js';
 /**
@@ -34,13 +35,16 @@ import { unifiedExecManager } from './codex/manager.js';
 import { workspaceTerminalsExited } from './workspace-terminal.js';
 import { getSecret, initSecretsPath, keychainReadPending } from './secrets.js';
 import { installPhonePush, pushToPhone } from './phone-push.js';
+import { noteAutomationChanged, startTelegram, stopTelegram, telegramDestination } from './telegram-app.js';
+import { statusChatsFrom } from './telegram-status.js';
+import { approvalCardView, requestApprovalAnswer } from './approval-wait.js';
 import { createSoundReadiness, installSoundCues, soundCue, soundQuietHours } from './sound-cues.js';
 import { DEFAULT_PHONE_PUSH } from '../shared/phone-push.js';
 import { mainText, mainTextTranslations, onMainTextsChange, restoreMainTextTranslations } from './main-texts.js';
 import { isMainText } from '../shared/main-texts.js';
 import { executableFingerprint, initKeychainNotice } from './keychain-notice.js';
 import { pluginManager } from './plugins/manager.js';
-import { sessionActivityExpiresAt, setBrowserOpener, setBrowserWorkArea, shutdownBridge, startBridge } from './bridge.js';
+import { onSessionAutomationChange, sessionActivityExpiresAt, sessionControlsFor, sessionHoldsTurn, setBrowserOpener, setBrowserWorkArea, setSessionAutomation, shutdownBridge, startBridge, stopSessionTurn } from './bridge.js';
 import { setStuckNotifier } from './stuck-notice.js';
 import { flushSessions, getSession, getSessionOrNullIfMissing, initSessionStore, listSessions, readRecentEvents, setRecordingStorageLimit } from './session/store.js';
 import { runDueSchedules, safeFailureReason, type RunnerDeps } from './scheduled-runs.js';
@@ -99,6 +103,7 @@ import {
   GOAL_HELPER_SIZE_STATE,
   restoreGoalHelperSize,
   goalSwitchEnabledFor,
+  goalSwitchFor,
   restoreGoalObjectives,
   restoreGoalOutcomes,
   restoreGoalReplies,
@@ -292,8 +297,13 @@ const chatNoticeAt = new Map<string, number>();
 /** A chat that waits for the person, for the phone: its own rules decide whether it goes out. */
 const phoneNeedsYou = (sessionId: string): void => {
   soundCue('needs-you', sessionId);
-  void getSession(sessionId).catch(() => null).then(summary => pushToPhone({ kind: 'needs-you', sessionId,
-    chatTitle: summary?.title || 'Chat On Steroids', conversationId: summary?.conversationId ?? null }));
+  void getSession(sessionId).catch(() => null).then(summary => {
+    // An approval card that waits, unanswered: Telegram offers Deny under the message (#1934).
+    const card = summary?.conversationId ? approvalCardView(summary.conversationId) : null;
+    return pushToPhone({ kind: 'needs-you', sessionId,
+      chatTitle: summary?.title || 'Chat On Steroids', conversationId: summary?.conversationId ?? null,
+      ...(card && !card.answer ? { approval: { sessionId, cardId: card.id } } : {}) });
+  });
 };
 
 function showWindow(): void {
@@ -538,8 +548,61 @@ void app.whenReady().then(async () => {
       const reply = await net.fetch(url, { method: 'POST', body, headers, signal: AbortSignal.timeout(10_000) });
       return { ok: reply.ok, status: reply.status };
     },
-    log: logInfo
+    log: logInfo,
+    telegram: telegramDestination
   });
+  // Telegram's pause stands only until the person's own control changes the switch (#1990).
+  onSessionAutomationChange((sessionId, on, from) => { if (from !== 'Telegram') noteAutomationChanged(sessionId, on); });
+  // A Telegram bot of the person's own, as a second phone destination (#1934): outgoing requests only.
+  void startTelegram({
+    fetch: (url, init) => net.fetch(url, init),
+    log: logInfo,
+    mainText,
+    details: () => ({ ...DEFAULT_PHONE_PUSH, ...getConfig().ui.phonePush }).includeDetails,
+    chats: async () => statusChatsFrom(await listSessions(),
+      { goal: goalSwitchFor, card: approvalCardView, activityExpiresAt: sessionActivityExpiresAt,
+        held: sessionHoldsTurn }, Date.now()),
+    // Phase 2 (2026-10-31): the app's own Stop and Goal/Loop switch, and the composer's send path.
+    stop: async sessionId => {
+      try {
+        const controls = await sessionControlsFor(sessionId);
+        const turnId = controls.activeTurnId ?? controls.heldTurnId;
+        if (!turnId) return 'nothing';
+        await stopSessionTurn(sessionId, turnId, { from: 'Telegram' });
+        logInfo(`telegram: Stop requested for session ${sessionId}, turn ${turnId}`);
+        return 'done';
+      } catch (error) {
+        logWarn(`telegram: could not stop session ${sessionId}: ${error instanceof Error ? error.message : String(error)}`);
+        return 'failed';
+      }
+    },
+    setAutomation: async (sessionId, on) => {
+      const conversationId = (await getSession(sessionId).catch(() => null))?.conversationId;
+      if (!conversationId) return false;
+      try {
+        // Off keeps which of Goal and Loop it was; on brings that one back.
+        await setSessionAutomation(sessionId, on ? goalSwitchFor(conversationId).mode : 'off', undefined, 'Telegram');
+        return true;
+      } catch (error) {
+        logWarn(`telegram: could not turn ${on ? 'on' : 'off'} Goal/Loop for session ${sessionId}: ${error instanceof Error ? error.message : String(error)}`);
+        return false;
+      }
+    },
+    steer: (sessionId, text) => steerFromTelegram({
+      allowed: () => ({ ...DEFAULT_PHONE_PUSH, ...getConfig().ui.phonePush }).telegramSteer === true,
+      session: getSession,
+      followUpQueues: () => getConfig().ui.followUp === 'queue',
+      send: sendDesktopInput,
+      log: logInfo
+    }, sessionId, text),
+    deny: async (sessionId, cardId) => {
+      const conversationId = (await getSession(sessionId).catch(() => null))?.conversationId;
+      if (!conversationId) return 'already';
+      const answer = requestApprovalAnswer(conversationId, cardId, 'deny');
+      if (answer.ok) { logInfo(`approval card: the user chose deny in Telegram for ${conversationId}`); return 'denied'; }
+      return answer.error === 'no_card' || answer.error === 'card_changed' || answer.error === 'answer_pending' ? 'already' : 'failed';
+    }
+  }).catch(error => logWarn(`telegram: could not start: ${error instanceof Error ? error.message : String(error)}`));
   // Codex's turn-completion notifications: a finished answer in a background window.
   const turnNotifier = createTurnNotifier({
     getSession,
@@ -824,6 +887,8 @@ app.on('before-quit', () => {
   windowActivation.disable();
   usageWarmup.abort();
   void stopAgentRuntimeGc();
+  // Its long poll would otherwise hold a request open while the app goes.
+  stopTelegram();
 });
 
 app.on('window-all-closed', () => {

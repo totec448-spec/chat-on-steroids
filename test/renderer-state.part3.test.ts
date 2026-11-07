@@ -1505,8 +1505,10 @@ describe('phone notifications in Settings', () => {
     await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.enabled).toBe(true));
     const saved = mounted.calls.at(-1).ui.phonePush;
     expect(saved.topic).toMatch(/^cos-[a-km-np-z2-9]{20}$/);
-    expect(saved).toEqual({ enabled: true, server: 'https://ntfy.sh', topic: saved.topic, needsYou: true, failures: true,
+    expect(saved).toEqual({ enabled: true, ntfy: true, server: 'https://ntfy.sh', topic: saved.topic, needsYou: true, failures: true,
       finishedAfterMinutes: 5, onlyWhenAway: true, quietHours: null, includeDetails: false });
+    // Replies from Telegram were never touched: no value is written, which means off.
+    expect('telegramSteer' in saved).toBe(false);
   });
 
   it('shows the essentials first and keeps server, token and a new topic behind Advanced; Copy copies the topic', async () => {
@@ -1623,6 +1625,28 @@ describe('phone notifications in Settings', () => {
     (doc.getElementById('phonePushTest') as HTMLButtonElement).click();
     await waitFor(() => expect(doc.getElementById('phonePushTestStatus')!.classList.contains('is-warn')).toBe(true));
     expect(doc.getElementById('phonePushTestStatus')!.textContent).toContain('refused the message');
+  });
+
+  // CodeRabbit on #1990: replies from Telegram are a remote permission; the form must neither invent a value for
+  // an older config nor show it off while the saved value is on.
+  it('leaves an absent Telegram reply setting absent until the switch is touched', async () => {
+    const mounted = await withPhone(phone());
+    const doc = mounted.window.document;
+    change(doc, 'phonePushFailures', false);
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.failures).toBe(false));
+    expect('telegramSteer' in mounted.calls.at(-1).ui.phonePush).toBe(false);
+    change(doc, 'telegramSteer', true);
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.telegramSteer).toBe(true));
+  });
+
+  it('shows a Telegram reply switch that could not be turned off as on again, as the saved setting says', async () => {
+    const mounted = await withPhone(phone({ telegramSteer: true }), { saveSettings: async () => ({ ok: false, error: 'Fixture save refused' }) });
+    const doc = mounted.window.document;
+    const box = doc.getElementById('telegramSteer') as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    box.focus();
+    change(doc, 'telegramSteer', false);
+    await waitFor(() => expect(box.checked).toBe(true));
   });
 
   it('sends no test when the settings could not be saved', async () => {

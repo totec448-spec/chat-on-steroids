@@ -790,16 +790,24 @@ async function dispatchTracked(
   // Identity and the finish hold share one ingress deadline; late proof must not
   // add another complete hold interval to an already waiting provider request.
   const finishDeadline = name === 'session_finish' ? sessionFinishDeadline(startedAt) : null;
-  const identityWindow = (requested: number): number => finishDeadline === null
-    ? requested : Math.min(requested, Math.max(0, finishDeadline - Date.now()));
+  // A step for the person (#1695) waits for its chat at most the ordinary identity window in total,
+  // across every later identity check too (CodeRabbit on #2088).
+  const stepDeadline = name === 'ask_user_to_run' || name === 'user_request_status' ? startedAt + IDENTITY_EVIDENCE_MS : null;
+  const deadline = finishDeadline ?? stepDeadline;
+  const identityWindow = (requested: number): number => deadline === null
+    ? requested : Math.min(requested, Math.max(0, deadline - Date.now()));
   // Windows observation/input gets one short grace even under the opt-in. Exact proof can then
   // alias the observation directly to the durable session, while a genuinely headless caller
   // falls back to its request principal instead of waiting the old full identity window.
-  const needsExactIdentity = name === 'session_finish' || desktopContext || (!allowUnattributed && (
+  // A step for the person (#1695) is shown in its own chat and refused without it, so it waits for
+  // the page's proof like session_finish: ChatGPT can hand one before that proof arrives (VM, 2026-11-07).
+  const stepForPerson = name === 'ask_user_to_run' || name === 'user_request_status';
+  const needsExactIdentity = name === 'session_finish' || stepForPerson || desktopContext || (!allowUnattributed && (
     name === 'exec' || name === 'update_plan' || (identitySensitive && swarmRunning())
   ));
   if (!context.caller.conversationId && needsExactIdentity && requestId) {
-    const wait = name === 'session_finish' || (workerStarting() && !desktopContext)
+    // A step for the person keeps the ordinary identity window, also while a worker starts (CodeRabbit on #2088).
+    const wait = name === 'session_finish' || (workerStarting() && !desktopContext && !stepForPerson)
       ? SPAWN_EVIDENCE_MS
       : desktopContext && allowUnattributed
       ? UNATTRIBUTED_DESKTOP_EVIDENCE_MS

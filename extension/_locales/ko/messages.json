@@ -894,10 +894,10 @@
     "message": "대기 중"
   },
   "popup_pipeline_call_fallback_many": {
-    "message": "앱이 호출 $1개를 요청 ID로 배치하지 못해 $2(으)로 대체했습니다."
+    "message": "앱이 호출 $1개를 요청 ID로 배치하지 못했습니다. 대신 사용: $2."
   },
   "popup_pipeline_call_fallback_one": {
-    "message": "앱이 호출 하나를 요청 ID로 배치하지 못해 $1(으)로 대체했습니다."
+    "message": "앱이 호출 하나를 요청 ID로 배치하지 못했습니다. 대신 사용: $1."
   },
   "popup_pipeline_delivery_blocked": {
     "message": "앱 연결과 프로토콜 호환성이 확인될 때까지 전송이 차단됩니다."

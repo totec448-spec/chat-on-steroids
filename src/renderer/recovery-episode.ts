@@ -1,4 +1,5 @@
 import type { SessionEvent } from '../shared/session.js';
+import { chatErrorDisplayText } from '../shared/chat-error.js';
 
 /**
  * One recovery episode (#1883): what went wrong in this chat and what the app tried since it last
@@ -49,7 +50,7 @@ export function recoveryEpisode(events: readonly SessionEvent[]): RecoveryEpisod
     }
     let item: EpisodeItem | null = null;
     if (event.kind === 'chat_error' && event.source === 'extension') {
-      item = { time: event.time, kind: 'error', text: event.message.text };
+      item = { time: event.time, kind: 'error', text: chatErrorDisplayText(event.message.text, event.recoverable === true) };
     } else if (event.kind === 'progress' && event.source === 'app' && event.progressId?.startsWith('browser-repair:')) {
       // One reload is one row: its "Trying…" line is replaced by how it ended.
       const known = reloads.get(event.progressId);

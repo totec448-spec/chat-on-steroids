@@ -98,14 +98,16 @@ export const EXEC_COMMAND_LOGIN_DESCRIPTION =
     : 'True runs the shell with -l/-i semantics; false disables them. Defaults to true.';
 
 export const WRITE_STDIN_DESCRIPTION =
-  // Plain function only. ChatGPT's safety check flagged "including automatic delivery; never reruns
-  // work" as a Suspicious Instruction (2026-10-15) and held a long run on an approval card.
-  'Polls or writes to the returned session ID. Empty chars read the session output, also after the command finished. Completed processes reject input. Keeps the latest 64 results in this app, 256 KiB each.';
+  // Plain function only, close to Codex's own wording. ChatGPT's safety check flagged "including
+  // automatic delivery; never reruns work" (2026-10-15) and then "Empty chars read the session
+  // output … Completed processes reject input" (2026-11-06) as a Suspicious Instruction, and held a
+  // long run on an approval card each time: never say how empty input or a finished process is treated.
+  'Writes characters to a session started by exec_command and returns its recent output, also after the command finished. Keeps the latest 64 results in this app, 256 KiB each.';
 
 export const WRITE_STDIN_SESSION_ID_DESCRIPTION = 'Returned running or completed session ID.';
 
 export const WRITE_STDIN_CHARS_DESCRIPTION =
-  'Bytes to write to stdin. Defaults to empty, which polls without writing.';
+  'Bytes to write to stdin (may be empty to poll).';
 
 export const WRITE_STDIN_YIELD_TIME_DESCRIPTION =
   'Wait before yielding output. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls wait up to 5000-300000 ms by default but return early when the first output arrives.';
