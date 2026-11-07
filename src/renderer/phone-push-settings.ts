@@ -33,7 +33,10 @@ export function readPhonePush(previous: PhonePushSettings | undefined): PhonePus
     finishedAfterMinutes: finished === 'never' ? null : Number(finished),
     onlyWhenAway: checkbox('phonePushAway').checked,
     quietHours: quiet === 'custom' ? previous?.quietHours ?? null : from && to ? { from, to } : null,
-    includeDetails: checkbox('phonePushDetails').checked
+    includeDetails: checkbox('phonePushDetails').checked,
+    // An older config has no value: it stays absent until the switch is touched, so an untouched form
+    // never counts as a change of the phone settings (CodeRabbit on #1990).
+    ...(previous?.telegramSteer === undefined && !checkbox('telegramSteer').checked ? {} : { telegramSteer: checkbox('telegramSteer').checked })
   };
 }
 
@@ -71,6 +74,7 @@ export function applyPhonePush(state: AppState): void {
   set('phonePushFailures', push.failures, () => { checkbox('phonePushFailures').checked = push.failures; });
   set('phonePushAway', push.onlyWhenAway, () => { checkbox('phonePushAway').checked = push.onlyWhenAway; });
   set('phonePushDetails', push.includeDetails, () => { checkbox('phonePushDetails').checked = push.includeDetails; });
+  set('telegramSteer', push.telegramSteer === true, () => { checkbox('telegramSteer').checked = push.telegramSteer === true; });
   set('phonePushFinished', finishedValue, () => {
     const select = $<HTMLSelectElement>('phonePushFinished');
     const value = finishedValue;
@@ -124,6 +128,8 @@ function applyTelegram(state: AppState): void {
   $('telegramTest').hidden = telegram.state !== 'linked';
   $('telegramUnlink').hidden = !linked && telegram.state !== 'token-refused';
   $('telegramLink').hidden = linked || telegram.state === 'pairing';
+  // Replies as messages only mean something with a linked bot (phase 2, 2026-10-31).
+  $('telegramSteerRow').hidden = !linked;
   if (telegram.state === 'pairing') telegramSetupOpen = true;
   if (linked) telegramSetupOpen = false;
   $('telegramSetup').hidden = !telegramSetupOpen;
