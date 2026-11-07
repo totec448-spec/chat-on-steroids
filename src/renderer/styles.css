@@ -5053,11 +5053,6 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .composer-dock:has(> .composer-dock-body > :not([hidden])) { margin-top: 10px; border-top-width: 1px; opacity: 1; pointer-events: auto; animation: surface-in 140ms ease-out; }
 .composer-dock[hidden], .app[data-screen='settings'] .composer-dock { display: none; }
 .composer-dock-body { display: flow-root; }
-.recovered-draft-notices[hidden] { display: none; }
-.recovered-draft-notices { display: flex; flex-direction: column; }
-.recovered-draft-row { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 7px 12px; border-bottom: 1px solid var(--edge); color: var(--soft); font-size: calc(13px * var(--text-scale, 1)); }
-.recovered-draft-row > .ico { flex: none; color: var(--ink); }
-.recovered-draft-row .queue-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .composer-dock { transition: none; animation: none !important; } }
 .composer-dock .queued-input, #activeGoalRow, .recovery-notice, .background-exec-status, .branch-draft, .edit-draft, .schedule-line, .tour-offer { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 7px 12px; margin: 0; border: 0; border-bottom: 1px solid var(--edge); font-size: calc(13px * var(--text-scale, 1)); color: var(--soft); }
 .background-exec-status[hidden] { display: none; }

@@ -40,10 +40,7 @@ import { preserveTimelineViewport, ROUNDING_PX } from './timeline-scroll.js';
 import { createSidebarOrder, SIDEBAR_PROJECT_SCOPE } from './sidebar-order.js';
 import { dateSections, type DateSection } from './date-sections.js';
 import { createSidebarPins, pinnedSortScope } from './sidebar-pins.js';
-import {
-  createComposerDrafts, createRecoveredComposerDrafts, mergeComposerAttachments,
-  MAX_COMPOSER_FILES
-} from './composer-drafts.js';
+import { createComposerDrafts } from './composer-drafts.js';
 import { createSelectedTabFollow } from './selected-tab-follow.js';
 import { createSidebarCompletionState } from './sidebar-completion.js';
 import { toolResultText } from './tool-result.js';
@@ -196,8 +193,6 @@ let selectedId: string | null = null;
 let scheduleDialog: { open(sessionId: string, draft: string): Promise<void> } | null = null;
 let newChatSelected = true;
 let selectedProjectId: string | null = null;
-/** A recovered draft temporarily owns the new-chat composer without replacing New Chat's own draft. */
-let selectedRecoveryDraftKey: string | null = null;
 /** Branch in new chat (#482): the reply the new chat being written will branch from, if any. */
 let newChatBranch: { sessionId: string; conversationId: string; messageId: string; title: string } | null = null;
 /**
@@ -566,7 +561,7 @@ let sidebarPins: ReturnType<typeof createSidebarPins> | undefined;
 const pinnable = (entry: SessionSummary): boolean => !!entry.conversationId && entry.origin?.kind !== 'worker';
 const pinnedChat = (entry: SessionSummary): boolean => pinnable(entry) && sidebarPins?.has(entry.id) === true;
 let sidebarCompletion: ReturnType<typeof createSidebarCompletionState> | undefined;
-function draftKey(): string { return selectedRecoveryDraftKey ?? selectedId ?? (selectedProjectId ? `project:${selectedProjectId}` : 'new'); }
+function draftKey(): string { return selectedId ?? (selectedProjectId ? `project:${selectedProjectId}` : 'new'); }
 /**
  * The composer's placeholder has several owners (a project's new chat, Plan mode, a chat). Each sets
  * it here; while files are dragged over the window the drop hint stands in for it, and the drag's
@@ -610,19 +605,6 @@ const inputDrafts = createComposerDrafts({
 });
 const newChatTasks = new Map<string, { objective: string; automation: string; loopDelivery: string }>();
 const imageDrafts = new Map<string, Array<InputImage | InputAttachment>>();
-const recoveredComposerDrafts = createRecoveredComposerDrafts();
-for (const [key] of inputDrafts.entries()) if (key.startsWith('recovery:') && !recoveredComposerDrafts.has(key)) {
-  const sourceDraftKey = key.slice('recovery:'.length);
-  recoveredComposerDrafts.set(key, { sourceTitle: sourceDraftKey, projectId: null, sourceDraftKey, attachments: [], unavailableFileCount: 0 });
-}
-for (const [key, draft] of recoveredComposerDrafts.entries()) {
-  if (draft.attachments.length) imageDrafts.set(key, [...draft.attachments]);
-  // If the window closed between writing the recovery index and its text, the old owner is retained.
-  if (!inputDrafts.has(key)) {
-    const sourceText = inputDrafts.get(draft.sourceDraftKey);
-    if (sourceText) inputDrafts.set(key, sourceText);
-  }
-}
 const startingInputs = new Map<string, InputEntry>();
 const visibleInputIds = new Set<string>();
 // Window-local presentation only: a new incident or changed status is visible again.
@@ -644,7 +626,7 @@ function dismissInputNotice(id: string): void {
 function authoredComposerText(): string { return skillPicker?.authoredText() ?? $<HTMLTextAreaElement>('chatInput').value; }
 function rememberDraft(): void {
   inputDrafts.set(draftKey(), authoredComposerText());
-  if (selectedId === null && selectedRecoveryDraftKey === null) newChatTasks.set(draftKey(), {
+  if (selectedId === null) newChatTasks.set(draftKey(), {
     objective: $<HTMLTextAreaElement>('sessionObjective').value,
     automation: $<HTMLSelectElement>('chatAutomation').value,
     loopDelivery: $<HTMLSelectElement>('loopDelivery').value
@@ -966,26 +948,10 @@ function paintComposerImages(): void {
     const tile = 'dataUrl' in image ? el('div', 'composer-image') : attachmentCard(image, true);
     if ('dataUrl' in image) { const preview = document.createElement('img'); preview.src = image.dataUrl; preview.alt = image.name; tile.append(preview); }
     const remove = el('button', 'image-remove', '×'); remove.setAttribute('type', 'button'); ui(remove, 'aria-label', () => t("Remove {0}", [image.name]));
-    remove.addEventListener('click', () => {
-      const remaining = images.filter((_entry, at) => at !== index);
-      imageDrafts.set(key, remaining);
-      saveRecoveredComposerFiles(key, remaining);
-      paintComposerImages();
-    });
+    remove.addEventListener('click', () => { imageDrafts.set(key, images.filter((_entry, at) => at !== index)); paintComposerImages(); });
     tile.append(remove); box.append(tile);
   });
   paintDeliveryControls();
-  paintRecoveredComposerDraftNotices();
-}
-function saveRecoveredComposerFiles(key: string, files: readonly (InputImage | InputAttachment)[]): void {
-  const recovered = recoveredComposerDrafts.get(key);
-  if (!recovered) return;
-  const saved = recoveredComposerDrafts.set(key, {
-    ...recovered,
-    attachments: files.filter((file): file is InputAttachment => 'id' in file),
-    unavailableFileCount: files.filter((file): file is InputImage => 'dataUrl' in file).length
-  });
-  if (!saved) toast(t('Recovered draft could not be saved. Keep this window open.'));
 }
 function attachmentCard(file: InputAttachment, inComposer = false): HTMLElement {
   if (file.preview) {
@@ -1702,90 +1668,6 @@ function requestSelectedTabFollow(id: string | null): void {
   selectedTabFollow?.select(id === null ? null : sessions.find(row => row.id === id) ?? { id, conversationId: null, origin: null });
 }
 
-/** Verify an off-page selected chat after the catalog has painted, never in its critical path. */
-async function verifySelectedCatalogFallback(id: string, generation: number, selection: number): Promise<void> {
-  let verification: Awaited<ReturnType<typeof api.getSession>> | null = null;
-  try { verification = await api.getSession(id, { limit: 1 }); } catch { /* Keep the last known summary. */ }
-  if (generation !== sessionsLoadGeneration || selection !== selectionGeneration ||
-      selectedId !== id || selectedCatalogFallback?.id !== id) return;
-  if (verification?.ok && verification.data?.summary) {
-    selectedCatalogFallback = verification.data.summary;
-    mergeSessionRows([verification.data.summary]);
-    paintSessions();
-    chatSearch?.refresh();
-    selectedTabFollow?.observe(verification.data.summary);
-  } else if (verification && !verification.ok && verification.error === 'Session not found') {
-    const previousSummary = selectedCatalogFallback?.id === id ? selectedCatalogFallback : sessions.find(row => row.id === id);
-    const sourceTitle = previousSummary ? shownSessionTitle(previousSummary) : t('Draft');
-    const previousProjectId = selectedProjectId;
-    const previousDraftKey = draftKey();
-    const sourceAttachments = imageDrafts.get(previousDraftKey);
-    const visibleAttachments = sourceAttachments ?? [];
-    const newDraftKey = selectedProjectId ? `project:${selectedProjectId}` : 'new';
-    const existingNewChatAttachments = imageDrafts.get(newDraftKey);
-    // New Chat's text is never replaced; the deleted chat's text always gets its own recovery key.
-    // Existing New Chat files have priority; merge what fits and keep every overflow file recoverable.
-    const { merged, overflow } = mergeComposerAttachments(existingNewChatAttachments ?? [], visibleAttachments);
-    let recoveryFiles = overflow;
-    let recoveryFilesPersisted = true;
-    const overflowImages = overflow.filter((file): file is InputImage => 'dataUrl' in file);
-    if (overflowImages.length) {
-      try {
-        const staged = await run(api.dropFiles(overflowImages.map(inputImageFile)));
-        if (!staged || staged.length !== overflowImages.length) throw new Error('Could not stage recovered images');
-        let next = 0;
-        recoveryFiles = overflow.map(file => 'dataUrl' in file ? staged[next++]! : file);
-      } catch {
-        recoveryFilesPersisted = false;
-        toast(t('Some recovered images could not be saved. Keep this window open to preserve them.'));
-      }
-    }
-    // Staging can take long enough for the person to navigate or edit the source composer.
-    // Do not let this old deletion result take ownership of a newer selection or draft.
-    if (generation !== sessionsLoadGeneration || selection !== selectionGeneration ||
-        selectedId !== id || selectedCatalogFallback?.id !== id) return;
-    if (imageDrafts.get(previousDraftKey) !== sourceAttachments || imageDrafts.get(newDraftKey) !== existingNewChatAttachments) {
-      void verifySelectedCatalogFallback(id, sessionsLoadGeneration, selectionGeneration);
-      return;
-    }
-    const recoveryText = authoredComposerText();
-    sessions = sessions.filter(row => row.id !== id);
-    selectNewChat(previousProjectId);
-    // selectNewChat retires the old edit state; keep the exact text that was visible when
-    // deletion was confirmed, not the pre-edit text used by its normal navigation path.
-    inputDrafts.set(previousDraftKey, recoveryText);
-    const destinationDraftKey = draftKey();
-    if (merged.length) imageDrafts.set(destinationDraftKey, merged); else imageDrafts.delete(destinationDraftKey);
-    let recoveryDraftPersisted = true;
-    if (recoveryText.trim() || recoveryFiles.length) {
-      const baseKey = `recovery:${previousDraftKey}`;
-      let recoveryKey = baseKey, suffix = 2;
-      while (recoveredComposerDrafts.has(recoveryKey) || inputDrafts.has(recoveryKey) || imageDrafts.has(recoveryKey))
-        recoveryKey = `${baseKey}:${suffix++}`;
-      if (recoveryText.trim()) inputDrafts.set(recoveryKey, recoveryText);
-      if (recoveryFiles.length) imageDrafts.set(recoveryKey, recoveryFiles);
-      const stagedFiles = recoveryFiles.filter((file): file is InputAttachment => 'id' in file);
-      const metadataSaved = recoveredComposerDrafts.set(recoveryKey, {
-        sourceTitle, projectId: previousProjectId, sourceDraftKey: previousDraftKey, attachments: stagedFiles,
-        unavailableFileCount: recoveryFiles.length - stagedFiles.length
-      });
-      const textSaved = !recoveryText.trim() || inputDrafts.flush(recoveryKey);
-      recoveryDraftPersisted = metadataSaved && textSaved;
-      if (!recoveryDraftPersisted) toast(t('Recovered draft could not be saved. Keep this window open.'));
-    }
-    // The previous key is retired only after its text and every attachment have a durable new owner.
-    if (recoveryFilesPersisted && recoveryDraftPersisted) {
-      inputDrafts.delete(previousDraftKey);
-      imageDrafts.delete(previousDraftKey);
-      newChatTasks.delete(previousDraftKey);
-      inputDrafts.flush();
-    }
-    // The selected chat is gone; the new-chat owner can now adopt an accepted opening.
-    paintComposerImages();
-    chatSearch?.refresh();
-  }
-}
-
 /**
  * Refreshes the catalog and controls. `detail: 'changed'` rereads the selected transcript only
  * when a consumed push named it (or all transcripts) or its refreshed summary proves it stale;
@@ -1799,13 +1681,37 @@ async function readSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
   const changed = changedTranscripts;
   changedTranscripts = { all: false, ids: new Set() };
   if (catalog) projects = catalog;
-  const fallbackId = selectedCatalogFallback?.id === selectedId ? selectedId : null;
-  const fallbackToKeep = fallbackId ? selectedCatalogFallback : null;
+  let fallbackId = selectedCatalogFallback?.id === selectedId ? selectedId : null;
+  let fallbackToKeep = fallbackId ? selectedCatalogFallback : null;
   const present = new Set(list.sessions.map(row => row.id));
-  if (fallbackId && present.has(fallbackId)) {
-    const refreshedFallback = list.sessions.find(row => row.id === fallbackId);
-    if (refreshedFallback) selectedCatalogFallback = refreshedFallback;
+  if (fallbackId && !present.has(fallbackId)) {
+    // A bounded page is not authoritative for a selected chat fetched from another
+    // surface. Verify that exact id before dropping it; only a confirmed missing-session
+    // response is deletion, while an IPC error or unreadable summary keeps the last known row.
+    const fallbackSelectionGeneration = selectionGeneration;
+    let verification: Awaited<ReturnType<typeof api.getSession>> | null = null;
+    try { verification = await api.getSession(fallbackId, { limit: 1 }); } catch { /* Keep the last known summary. */ }
+    if (generation !== sessionsLoadGeneration) return;
+    if (selectionGeneration !== fallbackSelectionGeneration) {
+      // The user may have selected another chat while the exact-id read was in flight.
+      // Rebase the fallback on the current selection; never apply the old result to it.
+      fallbackId = selectedCatalogFallback?.id === selectedId ? selectedId : null;
+      fallbackToKeep = fallbackId ? selectedCatalogFallback : null;
+    } else if (selectedId === fallbackId && selectedCatalogFallback?.id === fallbackId) {
+      if (verification?.ok && verification.data?.summary) {
+        fallbackToKeep = verification.data.summary;
+        selectedCatalogFallback = fallbackToKeep;
+      } else if (verification && !verification.ok && verification.error === 'Session not found') {
+        fallbackToKeep = null;
+        selectedCatalogFallback = null;
+      }
+    } else fallbackToKeep = null;
   }
+  if (fallbackId && present.has(fallbackId)) {
+    fallbackToKeep = list.sessions.find(row => row.id === fallbackId) ?? fallbackToKeep;
+    if (fallbackToKeep) selectedCatalogFallback = fallbackToKeep;
+  }
+  const fallbackWasDropped = fallbackId !== null && !present.has(fallbackId) && fallbackToKeep === null;
   // Once older pages have been requested, a hot refresh only replaces/updates the newest page.
   // Throwing the older rows away here would make scrolling history vanish every 400 ms while a
   // live chat is recording. Before pagination begins, replacing the first page is cheaper and
@@ -1815,6 +1721,7 @@ async function readSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
     // Keep older pages, but do not merge a deleted newest row back into the sidebar.
     const oldest = list.sessions.at(-1);
     sessions = sessions.filter(row => {
+      if (row.id === fallbackId && fallbackWasDropped) return false;
       if (row.id === fallbackToKeep?.id) return true;
       return present.has(row.id) || (!!list.nextCursor && !!oldest &&
         (row.updatedAt < oldest.updatedAt || (row.updatedAt === oldest.updatedAt && row.id < oldest.id)));
@@ -1850,10 +1757,6 @@ async function readSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
   }
   paintSessions();
   chatSearch?.refresh();
-  // The newest page cannot prove that a selected off-page chat was deleted. Paint the
-  // last known row immediately, then verify its exact id without delaying other updates.
-  if (fallbackId && !present.has(fallbackId))
-    void verifySelectedCatalogFallback(fallbackId, generation, selectionGeneration);
   const row = selectedId === null ? undefined : sessions.find(entry => entry.id === selectedId);
   selectedTabFollow?.observe(row);
   if (detail === 'reread' || selectedId === null || detailFor !== selectedId || changed.all || changed.ids.has(selectedId) ||
@@ -2766,7 +2669,6 @@ function syncSelectedWorkspace(): void {
   // Branch in new chat and Edit: the composer notices and the link back follow the selection in either layout.
   paintBranchNotices();
   paintEditNotice();
-  paintRecoveredComposerDraftNotices();
   syncBookmarks();
 }
 
@@ -2807,62 +2709,6 @@ function paintBranchNotices(): void {
   link.replaceChildren(icon('i-git-branch'), el('span', '', () => source
     ? t('Branched from “{0}”', [shownSessionTitle(source)]) : t('Branched from another chat')));
   link.onclick = source ? () => void openBranchSource(source.id, branchOf.messageId) : null;
-}
-
-/** A recovered draft stays available in the composer dock until it is sent or discarded. */
-function paintRecoveredComposerDraftNotices(): void {
-  const host = $('recoveredDraftNotices');
-  const entries = recoveredComposerDrafts.entries();
-  const signature = JSON.stringify(entries.map(([key, draft]) => [key, draft.sourceTitle, draft.projectId,
-    imageDrafts.get(key)?.length ?? 0, draft.unavailableFileCount, selectedRecoveryDraftKey === key]));
-  if (host.dataset.signature === signature) return;
-  host.dataset.signature = signature;
-  host.hidden = entries.length === 0;
-  host.replaceChildren();
-  for (const [key, draft] of entries) {
-    const active = selectedRecoveryDraftKey === key;
-    const files = (imageDrafts.get(key) ?? []).filter((file): file is InputAttachment => 'id' in file).length;
-    const unavailableFiles = Math.max(draft.unavailableFileCount,
-      (imageDrafts.get(key) ?? []).filter((file): file is InputImage => 'dataUrl' in file).length);
-    const row = el('div', 'recovered-draft-row');
-    const label = el('span', 'queue-label', () => `${t('Draft')} · ${draft.sourceTitle}${files ? ` · ${files} ${t('Files').toLowerCase()}` : ''}${unavailableFiles ? ` · ${t('{0} files not saved', [unavailableFiles])}` : ''}`);
-    const projectId = draft.projectId && projects.some(project => project.id === draft.projectId) ? draft.projectId : null;
-    const action = dockAction(() => active ? t('New chat') : t('Open'), active ? 'i-arrow-left' : 'i-arrow-right', event => {
-      event.stopPropagation();
-      selectNewChat(projectId, null, active ? null : key);
-    });
-    action.classList.add('recovered-draft-action');
-    action.dataset.recoveredDraftAction = active ? 'return' : 'open';
-    action.dataset.recoveredDraftKey = key;
-    row.append(icon('i-file'), label, action);
-    host.append(row);
-  }
-}
-
-/** The accepted outbox input now owns this content; it is no longer an unsent recovery draft. */
-function completeRecoveredComposerDraft(key: string): void {
-  const draft = recoveredComposerDrafts.get(key);
-  if (!draft) return;
-  inputDrafts.delete(key);
-  imageDrafts.delete(key);
-  newChatTasks.delete(key);
-  inputDrafts.delete(draft.sourceDraftKey);
-  imageDrafts.delete(draft.sourceDraftKey);
-  newChatTasks.delete(draft.sourceDraftKey);
-  recoveredComposerDrafts.delete(key);
-  if (selectedRecoveryDraftKey === key) selectedRecoveryDraftKey = null;
-  inputDrafts.flush();
-  paintRecoveredComposerDraftNotices();
-}
-
-function inputImageFile(image: InputImage): File {
-  const separator = image.dataUrl.indexOf(',');
-  const mimeType = /^data:([^;]+);base64$/.exec(image.dataUrl.slice(0, separator))?.[1];
-  if (separator < 0 || !mimeType) throw new Error('Invalid recovered image');
-  const binary = atob(image.dataUrl.slice(separator + 1));
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
-  return new File([bytes], image.name, { type: mimeType });
 }
 
 /** The composer's notice while one of your questions is being edited, drawn as a dock row. */
@@ -9290,7 +9136,6 @@ async function adoptAcceptedOpening(entry: InputEntry): Promise<boolean> {
   if (images) imageDrafts.set(summary.id, images);
   selectSession(summary.id);
   inputDrafts.delete(from); imageDrafts.delete(from); newChatTasks.delete(from);
-  completeRecoveredComposerDraft(from);
   return true;
 }
 /** A repaint for when the oldest shown page hold lapses, so a reason no page repeats goes away. */
@@ -9778,7 +9623,6 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
         pendingComposerInputs = [...pendingComposerInputs.filter(row => row.id !== id), retained];
         showAutoSkillReceipt(retained);
         await adoptAcceptedOpening(retained);
-        completeRecoveredComposerDraft(key);
         return true;
       }
       // A refused edit stays an edit of that question, with its text back to send again.
@@ -9806,7 +9650,6 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
       pendingNewInput = { id: result.id, generation };
       await adoptAcceptedOpening(result);
     }
-    completeRecoveredComposerDraft(key);
     $('composerStatus').textContent = '';
     void refreshInputQueue();
     return true;
@@ -9871,7 +9714,6 @@ function selectSession(id: string): void {
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   newChatSelected = false;
   selectedId = id;
-  selectedRecoveryDraftKey = null;
   refreshBackgroundProcesses();
   const selected = sessions.find(row => row.id === id);
   applyComposerSessionModel(`${id}:${selectionGeneration}`, composerSessionSelection(selected) ?? null);
@@ -9929,7 +9771,7 @@ export async function openScheduledChat(sessionId: string): Promise<void> {
   selectSession(summary.id);
 }
 
-function selectNewChat(projectId: string | null = null, branch: typeof newChatBranch = null, recoveryKey: string | null = null): void {
+function selectNewChat(projectId: string | null = null, branch: typeof newChatBranch = null): void {
   quoteSelection?.reset();
   if (editingQuestion) endEditing(true);
   newChatBranch = branch;
@@ -9937,7 +9779,7 @@ function selectNewChat(projectId: string | null = null, branch: typeof newChatBr
   inputQueueGeneration++;
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   selectedCatalogFallback = null;
-  newChatSelected = true; selectedId = null; selectedRecoveryDraftKey = recoveryKey; selectedProjectId = projectId; detailFor = null; detailCursor = null;
+  newChatSelected = true; selectedId = null; selectedProjectId = projectId; detailFor = null; detailCursor = null;
   requestSelectedTabFollow(null);
   refreshBackgroundProcesses();
   sendAnchor = null; readingAfterSend = false; readerAtEnd = true;
@@ -10210,11 +10052,9 @@ export function initChat(next: Deps): void {
   const appendImages = (owner: ComposerDraftOwner, chosen: InputAttachment[] | null | undefined): boolean => {
     if (!chosen?.length) return false;
     if (!ownsComposerDraft(owner)) { toast(t("Files were not added because the draft changed.")); return false; }
-    const { merged, overflow } = mergeComposerAttachments(imageDrafts.get(owner.key) ?? [], chosen);
-    if (overflow.length) { toast(t("Attach up to 20 files and 512 MB per message")); return false; }
-    imageDrafts.set(owner.key, merged);
-    saveRecoveredComposerFiles(owner.key, merged);
-    paintComposerImages();
+    const combined = [...(imageDrafts.get(owner.key) ?? []), ...chosen];
+    if (combined.length > 20 || combined.reduce((sum, file) => sum + ('size' in file ? file.size : 0), 0) > 512 * 1024 * 1024) { toast(t("Attach up to 20 files and 512 MB per message")); return false; }
+    imageDrafts.set(owner.key, combined); paintComposerImages();
     return true;
   };
   filePanel = createFilePanel({
@@ -10318,7 +10158,7 @@ export function initChat(next: Deps): void {
     if (!files.length) return;
     event.preventDefault();
     const owner = composerDraftOwner();
-    if (files.length + (imageDrafts.get(owner.key)?.length ?? 0) > MAX_COMPOSER_FILES) { toast(t('Attach up to 20 files per message')); return; }
+    if (files.length + (imageDrafts.get(owner.key)?.length ?? 0) > 20) { toast(t('Attach up to 20 files per message')); return; }
     appendImages(owner, await run(api.dropFiles(files)));
   });
   // #1884 (Haz): files dragged over the window go to the message being written, so the composer says
@@ -10348,7 +10188,7 @@ export function initChat(next: Deps): void {
     event.preventDefault();
     const files = Array.from(event.dataTransfer.files), owner = composerDraftOwner();
     if (!files.length) return;
-    if (files.length + (imageDrafts.get(owner.key)?.length ?? 0) > MAX_COMPOSER_FILES) { toast(t('Attach up to 20 files per message')); return; }
+    if (files.length + (imageDrafts.get(owner.key)?.length ?? 0) > 20) { toast(t('Attach up to 20 files per message')); return; }
     appendImages(owner, await run(api.dropFiles(files)));
   });
   api.onWriteSession?.(id => { selectSession(id); $<HTMLTextAreaElement>('chatInput').focus(); });
