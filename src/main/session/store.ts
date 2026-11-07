@@ -1606,7 +1606,11 @@ export function upsertMessageEvent(
         // as the newest one, and when its final text grows while the dock still shows it.
         if (full.kind === 'assistant_message' && (full.final === true || full.state === 'final')) {
           const wasFinal = previous.kind === 'assistant_message' && (previous.final === true || previous.state === 'final');
-          const showsThis = previous.kind === 'assistant_message' && entry.summary.lastAnswerLine === answerLine(previous.message.text);
+          // Same first line is not same owner: an older message with an identical line must not take over the
+          // dock's line from a newer final answer (CodeRabbit on #2099), so it also has to be the newest final.
+          const newestFinal = !([...entry.messages.values()].some(other => other !== previous && other.kind === 'assistant_message' &&
+            (other.final === true || other.state === 'final') && other.time > previous.time));
+          const showsThis = newestFinal && previous.kind === 'assistant_message' && entry.summary.lastAnswerLine === answerLine(previous.message.text);
           if (wasFinal ? showsThis : nextEvent.time >= (entry.summary.lastAssistantFinalAt ?? 0)) {
             entry.summary.lastAnswerLine = answerLine(full.message.text);
           }

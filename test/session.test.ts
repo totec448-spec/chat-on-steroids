@@ -1163,6 +1163,19 @@ describe('session store', () => {
     expect((await getSession(summary.id))?.lastAnswerLine).toBe('First part is done. And then more.');
   });
 
+  it('does not let an older message with the same first line take over the answer line when it grows', async () => {
+    const summary = await createSession({ title: 'two finals with one first line' });
+    const text = (value: string) => ({ text: value, truncated: false, chars: value.length });
+    await upsertMessageEvent(summary.id, { time: 100, source: 'extension', kind: 'assistant_message', messageId: 'older',
+      message: text('Done.'), state: 'final', final: true });
+    await upsertMessageEvent(summary.id, { time: 200, source: 'extension', kind: 'assistant_message', messageId: 'newer',
+      message: text('Done.\nSecond answer.'), state: 'final', final: true });
+    expect((await getSession(summary.id))?.lastAnswerLine).toBe('Done.');
+    await upsertMessageEvent(summary.id, { time: 240, source: 'extension', kind: 'assistant_message', messageId: 'older',
+      message: text('Done. And then a lot more text for the older one.'), state: 'streaming', final: false });
+    expect((await getSession(summary.id))?.lastAnswerLine).toBe('Done.');
+  });
+
   it('keeps rich HTML when the same canonical prose is reobserved without rendered HTML', async () => {
     const summary = await createSession({ title: 'sparse rich final' });
     const messageId = 'msg-sparse-rich';
