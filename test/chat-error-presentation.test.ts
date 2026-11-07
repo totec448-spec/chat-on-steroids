@@ -159,3 +159,8 @@ it('shows a recoverable ChatGPT notice without the label of its own Retry button
   // A notice not classified recoverable keeps its words.
   expect(chatErrorPresentation(error('Unknown Retry')).message).toBe('Unknown Retry');
 });
+
+it('keeps a notice that is not recoverable exactly as recorded, spaces included (CodeRabbit on #2084)', () => {
+  const text = '  Something  went wrong.\nRetry ';
+  expect(chatErrorPresentation(error(text)).message).toBe(text);
+});
