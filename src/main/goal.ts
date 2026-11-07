@@ -64,6 +64,7 @@ import { foldProgress } from '../shared/session.js';
 import { modelFacingText } from '../shared/content-reference.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
 import { BROWSER_PICKUP_ATTEMPT_LIMIT, BROWSER_PICKUP_MAX_ATTEMPTS, rotationMessage } from '../shared/recovery.js';
+import { hasFailedNativeGoalTest, NATIVE_GOAL_TEST_RECONSIDERATION } from './goal-native-test.js';
 
 /** A finish-only preference has authority only while the finish tool is available. */
 export async function astraFinishOnly(sessionId: string, conversationId: string): Promise<boolean> {
@@ -2138,6 +2139,22 @@ async function requestDrivingDecision(
   return decision;
 }
 
+/** An informational second opinion, never a fail-closed STOP veto. */
+async function reconsiderNativeTestStop(
+  decision: Awaited<ReturnType<typeof requestDrivingDecision>>,
+  request: GoalRequest, sessionId: string, conversationId: string, sourceTurnId?: string
+): Promise<Awaited<ReturnType<typeof requestDrivingDecision>>> {
+  if (request.mode !== 'goal' || decision.action !== 'stop' || !sourceTurnId) return decision;
+  const events = await readRecentEvents(sessionId, MAX_TOOL_CALLS_COUNTED, { kinds: ['tool_call'] });
+  if (!hasFailedNativeGoalTest(events.filter(event => event.kind === 'tool_call'), conversationId, sourceTurnId)) return decision;
+  logInfo(`goal: exact completed native test failed for ${conversationId}; reconsidering proposed STOP once`);
+  const revised = await requestDrivingDecision({
+    ...request, system: [...request.system, NATIVE_GOAL_TEST_RECONSIDERATION]
+  });
+  logInfo(`goal: native test reconsideration for ${conversationId} chose ${revised.action}`);
+  return revised; // A second STOP is allowed, including intentionally failing tests.
+}
+
 async function run(draft: GoalDraft): Promise<void> {
   if (await astraFinishOnly(draft.sessionId, draft.conversationId)) return settle(draft, 'no-reply');
   if (draft.mode === 'loop' && !await loopReplyHasAuthority(draft.sessionId, draft.conversationId, draft.turnId)) return settle(draft, 'no-reply');
@@ -2190,7 +2207,7 @@ async function run(draft: GoalDraft): Promise<void> {
   const effort = draft.helper?.reasoningEffort ?? null;
   const timer = setTimeout(() => abort.abort(new DOMException('Goal request timed out', 'TimeoutError')), limitMs);
   try {
-    const decision = draft.backend === 'templates' ? templateGoalDecision(templateDecisionText(messages), Math.floor(Math.random() * 200), Math.floor(Math.random() * 200)) : await requestDrivingDecision({
+    const request: GoalRequest | null = draft.backend === 'templates' ? null : {
       backend: draft.backend,
       endpoint,
       reasoning,
@@ -2224,7 +2241,13 @@ async function run(draft: GoalDraft): Promise<void> {
         draft.stage = 'answering';
         if (drafts.get(draft.conversationId) === draft) { draft.text = text; notifyGoalChange(); }
       }
-    });
+    };
+    let decision = draft.backend === 'templates'
+      ? templateGoalDecision(templateDecisionText(messages), Math.floor(Math.random() * 200), Math.floor(Math.random() * 200))
+      : await requestDrivingDecision(request!);
+    if (draft.backend !== 'templates' && decision.action === 'stop') {
+      decision = await reconsiderNativeTestStop(decision, request!, draft.sessionId, draft.conversationId, reviewTurn);
+    }
     if (draft.acknowledged || drafts.get(draft.conversationId) !== draft) return;
     if (await astraFinishOnly(draft.sessionId, draft.conversationId)) return settle(draft, 'no-reply');
     // Logged like the exception path below. Ten rate limits in a row on 2026-09-02 left no
@@ -2354,18 +2377,24 @@ export async function draftFastFollowup(sessionId: string, signal: AbortSignal =
   const messages = preparedMessages ?? await conversationMessages(sessionId, appInput);
   if (!objective && !messages.some(message => message.role === 'user')) throw new Error('No recorded user request is available for Goal');
   const prompt = mode === 'loop' ? settings.loopPrompt : objective ? settings.objectivePrompt : settings.prompt;
-  const decision = backend === 'templates'
-    ? templateGoalDecision(templateDecisionText(messages), Math.floor(Math.random() * 200), Math.floor(Math.random() * 200))
-    : await requestDrivingDecision({ sourceSessionId: sessionId, backend, endpoint, reasoning: settings.reasoning, key: key ?? '', model: settings.model, mode,
+  const request: GoalRequest | null = backend === 'templates' ? null : { sourceSessionId: sessionId, backend, endpoint, reasoning: settings.reasoning, key: key ?? '', model: settings.model, mode,
     system: objective ? [prompt, goalObjectiveMessage(objective)] : [prompt],
     messages,
     original: await originalRequestBlock(sessionId, messages),
-    trailer: mode === 'loop' ? GOAL_LOOP_TRAILER : objective ? GOAL_OBJECTIVE_TRAILER : GOAL_SYSTEM_TRAILER, signal, publish })
+    trailer: mode === 'loop' ? GOAL_LOOP_TRAILER : objective ? GOAL_OBJECTIVE_TRAILER : GOAL_SYSTEM_TRAILER, signal, publish };
+  let decision = backend === 'templates'
+    ? templateGoalDecision(templateDecisionText(messages), Math.floor(Math.random() * 200), Math.floor(Math.random() * 200))
+    : await requestDrivingDecision(request!)
       .catch(error => {
         if (signal.aborted && signal.reason?.name === 'TimeoutError') throw nativeGoalFailure('timeout_or_cancelled: Goal request timed out', backend);
         signal.throwIfAborted();
         throw nativeGoalFailure(`request_failed: ${error instanceof Error ? error.message : error}`, backend);
       });
+  if (backend !== 'templates' && decision.action === 'stop' && mode === 'goal') {
+    const [sourceEnd] = await readRecentEvents(sessionId, 1, { kinds: ['turn_end'] });
+    const sourceTurn = sourceEnd?.turnId ? await goalReplySourceTurn(sessionId, sourceEnd.turnId) : undefined;
+    decision = await reconsiderNativeTestStop(decision, request!, sessionId, session.conversationId, sourceTurn);
+  }
   if (decision.action === 'stop') {
     if (mode === 'loop') throw new Error('loop_stop_refused');
     return null;
