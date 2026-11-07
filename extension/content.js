@@ -1190,6 +1190,10 @@
    * /activity poll as everything else.
    */
   let goalConfig = null;
+  /** The app's word on this chat's Retry (#2076): null from an older app, which keeps the page's own rule. */
+  let appHistoryRetry = null;
+  /** The chat the app last answered about at all, with or without that word (CodeRabbit on #2080). */
+  let appHistoryAnsweredFor = null;
   let goalDraft = null;
   /**
    * The generation the goal loop has already acted on.
@@ -7196,6 +7200,9 @@
         ...(sentResult ? { approvalResult: sentResult } : {})
       });
       if (sentResult && reply && reply.ok === true && approvalResult === sentResult) approvalResult = null;
+      // Any answer for this chat, even a failure, ends the wait for the app's first word on its
+      // history Retry (#2076): an app that cannot be reached leaves the page's own rule.
+      if (CLF_DOM.conversationId() === forId) appHistoryAnsweredFor = forId;
       if (!reply || reply.ok !== true || !reply.data) {
         // Keep waiting only for failures that can genuinely mean "the local app/worker is
         // not reachable yet". A structured application refusal is an answer to the identity
@@ -7384,6 +7391,15 @@
       // finished and the page has been repainted with what the draft is doing.
       const goalBefore = JSON.stringify([goalConfig?.enabled ?? null, goalConfig?.objective ?? null, bootstrap]);
       goalConfig = data.goal && typeof data.goal === 'object' ? data.goal : null;
+      // Whether the app still owes this chat work, and its own hold on the chat's history (#2076).
+      // Bound to the chat this reply was asked for, and only while the page still shows it
+      // (CodeRabbit on #2080): a reply for chat A never speaks for chat B.
+      if (CLF_DOM.conversationId() === forId) {
+        appHistoryAnsweredFor = forId;
+        appHistoryRetry = data.historyRetry && typeof data.historyRetry === 'object'
+          ? { conversationId: forId, wanted: data.historyRetry.wanted !== false,
+            until: Number.isFinite(data.historyRetry.until) ? data.historyRetry.until : 0, at: Date.now() } : null;
+      }
       if (goalConfig) goalDraft = goalConfig.draft || null;
       const nextBootstrap = data.bootstrap === 'resume' || data.bootstrap === 'worker' ? data.bootstrap : null;
       bootstrapOwner = nextBootstrap && typeof data.bootstrapMessageId === 'string' && data.bootstrapMessageId
@@ -9373,6 +9389,20 @@
           ? t('content_goal_backend_custom_endpoint', 'custom endpoint')
           : 'OpenRouter';
     const bar = (at, done = false) => ({ steps: GOAL_STEPS, at, done });
+    // Chats working at once (#1694): a ready message waits for a free slot or ChatGPT's pause before
+    // Send. Said as such, not as written or settling (CodeRabbit on #2051).
+    if (draft?.stage === 'ready' && goal.slotWait) {
+      const paused = String(goal.slotWait).startsWith('ChatGPT asked to slow down');
+      return {
+        stage: paused
+          ? t('content_goal_wait_paused', 'ChatGPT asked to slow down · waits until it says')
+          : t('content_goal_wait_slots', 'Waiting for a free slot (Chats working at once)'),
+        detail: '',
+        body: draft.reply || '',
+        kind: 'goal',
+        ...bar(2)
+      };
+    }
     const failure = goal.error || (draft && draft.stage === 'failed'
       ? goalFailureText(draft) || draft.error || t('content_goal_backend_no_answer', '$1 did not answer', dest)
       : '');
@@ -9766,10 +9796,11 @@
     }, 0);
   }
 
-  function reportDeferredCompaction(forId, token, why) {
+  function reportDeferredCompaction(forId, token, why, code = null) {
     if (!token || !why) return;
     helperDeferral = fiberPresent === true ? null : { forId, forEpoch: epoch, why };
-    void ask({ type: 'compact', conversationId: forId, token, sourceDeferred: true, sourceError: why }).catch(() => undefined);
+    void ask({ type: 'compact', conversationId: forId, token, sourceDeferred: true, sourceError: why,
+      ...(code ? { sourceErrorCode: code } : {}) }).catch(() => undefined);
   }
 
   async function startCompact(automatic = false) {
@@ -9950,11 +9981,15 @@
     // summary of a machine state that had already moved on.
     // Automatic runs stop the turn exactly like a press does. They are *started* by a turn
     // being in flight, so refusing to interrupt one would refuse every automatic run.
-    const barrier = await stopAndSettle(forId, forEpoch, forRun, sameTurn, automatic);
+    // Why this attempt stopped at the receipt, kept with this attempt only (CodeRabbit on #2056).
+    const receipt = { code: null };
+    const barrier = await stopAndSettle(forId, forEpoch, forRun, sameTurn, automatic, automatic && filed.data.waiveReceipt === true, receipt);
     // Every await above can span an SPA navigation. `conversationId` is mutable global
     // state, so continuing after A -> B would otherwise post B to /compact and type A's
     // handoff instruction into B's composer. The new chat's reset already owns its UI state;
     // a stale continuation must not repaint or cancel anything there.
+    // The tab moved to another chat meanwhile: nothing is reported for the old one, because a report
+    // naming it would bind this tab to it again in the relay (CodeRabbit on #2056). Its next attempt counts.
     if (!current()) return;
     if (barrier) {
       pressedAt = 0;
@@ -9962,7 +9997,7 @@
       nativePhase = '';
       localError = barrier;
       if (!automatic) await retireUnsentCompaction(forId, String(filed.data.token || ''), barrier, current);
-      else reportDeferredCompaction(forId, String(filed.data.token || ''), barrier);
+      else reportDeferredCompaction(forId, String(filed.data.token || ''), barrier, receipt.code);
       if (!current()) return;
       renderControl();
       void pullActivity();
@@ -10143,7 +10178,15 @@
    * not hear about it, and the handoff would describe a machine that no longer exists by
    * the time the fresh chat reads it.
    */
-  async function stopAndSettle(forId, forEpoch, forRun, sameTurn, automatic) {
+  /**
+   * `receipt.code` says why an automatic attempt stopped at the tool-result receipt, for the app's count
+   * (2026-11-03): 'results-unconfirmed' after the whole wait with nothing running here,
+   * 'results-wait-changed' when the chat changed during it, and 'local-tools-running' when this
+   * machine's own calls (or the app's activity answer) kept the receipt from being checked at all,
+   * which the app does not count.
+   */
+  async function stopAndSettle(forId, forEpoch, forRun, sameTurn, automatic, waiveReceipt = false, receipt = { code: null }) {
+    receipt.code = null;
     const current = () =>
       alive &&
       nativeRun === forRun &&
@@ -10154,6 +10197,11 @@
       'content_compact_chat_changed_before_start',
       'This chat changed before compaction could start.'
     );
+    // The app waives the receipt once earlier attempts of this ticket could not get it (2026-11-03: a
+    // chat whose history ChatGPT limited never showed its results answered, and every attempt for two
+    // days ended here while the chat grew past its limit). Stopping now may cost the brief the very
+    // last result; never compacting cost the whole chat. The app logs that it waived it. Local calls
+    // still running on this machine are still waited for (#825): only ChatGPT's receipt is waived.
     if (automatic && CLF_DOM.generating()) {
       // A local result can file the ticket before ChatGPT receives that result. Stopping
       // here used to lose completed work from the brief. Require native receipt first;
@@ -10210,16 +10258,21 @@
       renderControl();
       let endedPolls = 0;
       let sent = null;
+      // Whether the last check found this machine's own calls still running (or no answer from the
+      // app at all): then the receipt was never the thing waited for.
+      let localBusy = true;
       const ready = await waitUntil(async () => {
         if (!current()) return true;
         const peek = await peekCompactionActivity(forId);
         const count = peek ? peek.pendingTools : null;
         sent = peek ? peek.sentResults : null;
         if (!current()) return true;
+        localBusy = count !== 0;
         if (count !== 0) {
           endedPolls = 0;
           return false;
         }
+        if (waiveReceipt) return true;
         // ChatGPT ending the turn by itself is its own receipt: it answered after the last
         // result and there is nothing left to stop. A retry started now skips this wait for
         // the same reason, yet the first attempt waited out the whole budget on a row it
@@ -10240,14 +10293,20 @@
         return !!fresh && seen.calls > 0 && !seen.answered && awaitingRequests.size === 0 &&
           sent?.settled === true && Number.isInteger(sent.count) && sent.count >= seen.calls;
       }, AUTO_RECEIPT_SETTLE_MS, AUTO_RECEIPT_QUICK_MS);
-      if (!current()) return t(
-        'content_compact_chat_changed_waiting_results',
-        'This chat changed while compaction was waiting for tool results.'
-      );
-      if (!ready) return t(
-        'content_compact_results_unconfirmed',
-        'ChatGPT has not confirmed receiving the latest tool results. Nothing was compacted.'
-      );
+      if (!current()) {
+        receipt.code = 'results-wait-changed';
+        return t(
+          'content_compact_chat_changed_waiting_results',
+          'This chat changed while compaction was waiting for tool results.'
+        );
+      }
+      if (!ready) {
+        receipt.code = localBusy ? 'local-tools-running' : 'results-unconfirmed';
+        return t(
+          'content_compact_results_unconfirmed',
+          'ChatGPT has not confirmed receiving the latest tool results. Nothing was compacted.'
+        );
+      }
     }
     // INTERRUPTING — stop the turn rather than wait it out. That is the whole request, by
     // hand or automatically: this happens because the turn is long, not because it is
@@ -11196,6 +11255,13 @@
         void retryGoalDraft(forTurn, true);
         return;
       }
+      // "Chats working at once" (#1694): other chats hold every slot, or ChatGPT asked the app to
+      // slow down. The same as above: keep the turn, show the settling step, ask again shortly.
+      if (failure.error === 'chats_at_once') {
+        setGoalPhase('settling');
+        void retryGoalDraft(forTurn, true);
+        return;
+      }
       // The phase is kept rather than collapsed into `failed`: it names the step that
       // stopped, so the bar draws the run where it ended instead of back at the beginning.
       setGoalPhase('requesting', replyError(reply) || t('content_app_did_not_answer_lower', 'the app did not answer'));
@@ -11264,6 +11330,9 @@
     }
     if (goalWasSpent(conversationId, `busy:${draft.token}`)) return deferGoalDraftForWork(draft);
     if (goalConfig?.queuePending) return;
+    // Chats working at once (#1694): the app says this ready message waits for a slot or ChatGPT's
+    // pause. Keep it, untyped, and try again on a later pull.
+    if (goalConfig?.slotWait) return;
     if (!goalUsable()) {
       // Settings are live. Turning Goal Mode off (or removing its key) while OpenRouter is
       // drafting must revoke permission to type the result, even if that result becomes ready
@@ -11375,7 +11444,7 @@
         const ready = allowed?.draft;
         if (!allowed || !ready || ready.token !== draft.token || ready.stage !== 'ready' || ready.reply !== draft.reply ||
             !(allowed.enabled === true || (allowed.own !== true && allowed.objective)) || allowed.hasKey !== true ||
-            allowed.blocked || allowed.queuePending || authorization.data.job?.busy || authorization.data.pendingTools > 0 ||
+            allowed.blocked || allowed.queuePending || allowed.slotWait || authorization.data.job?.busy || authorization.data.pendingTools > 0 ||
             goalSourceGenerating() || CLF_DOM.generating() || nativeBusy || job?.busy) return false;
         // The page inserted this reply, and ChatGPT stores inserted text Markdown-escaped: a raw
         // comparison never matched a reply with `code` or *emphasis*, and its turn never opened.
@@ -12640,14 +12709,92 @@
    * alive: measured 2026-10-11, each press after Retry-After drew another 429 with a longer
    * Retry-After (11 s → 47 s) and the chat stayed unreadable for half an hour. The first press
    * still comes when ChatGPT said it may; the ones after it back off further, to one every 15
-   * minutes, and still never stop.
+   * minutes, and still never stop. A limit that outlasts that grows to 30 and then 60 minutes,
+   * the same steps as the app's own hold (bridge.ts PROVIDER_HISTORY_STREAK_HOLDS_MS).
    */
-  const LOAD_FAILURE_LIMITED_BACKOFF_MS = [0, 120_000, 240_000, 480_000, 900_000];
+  const LOAD_FAILURE_LIMITED_BACKOFF_MS = [0, 120_000, 240_000, 480_000, 900_000, 1_800_000, 3_600_000];
+  /*
+   * The step reached survives a reload of the same chat in this tab. The app reloads a limited
+   * chat after each of its holds, and a fresh page used to start again at the first step: every
+   * reload came with presses after 0, 2 and 4 minutes, 23 rounds in 8.5 hours (#1882,
+   * 2026-11-05). A step older than the longest one plus a quarter hour is forgotten, the same
+   * quiet period after which the app starts its own count over.
+   */
+  const LOAD_FAILURE_LIMITED_STORAGE = 'clf-history-limit-v1';
+  const LOAD_FAILURE_LIMITED_MEMORY_MS = 3_600_000 + 15 * 60_000;
   let loadFailureSince = 0;
   let loadFailureRetries = 0;
   let loadFailureLimited = false;
   let loadFailureRoute = null;
   let loadFailureToldAt = 0;
+  let loadFailureStored = false;
+  let loadFailureLastPress = 0;
+  /** How long the app's word holds without a newer activity reply. */
+  const APP_HISTORY_RETRY_FRESH_MS = 2 * 60_000;
+  /** How long a newly shown chat waits for the app's first answer before the page's own rule applies. */
+  const APP_HISTORY_FIRST_ANSWER_MS = 60_000;
+  let historyRouteSince = 0;
+  let historyRetryHeldToldAt = 0;
+  /**
+   * ChatGPT's Retry on a history that could not load is pressed only while the app still owes this
+   * chat work, and never before the app's own hold for it ends (#2076): each press is another history
+   * request, and an idle chat leaves Retry to the person.
+   */
+  function appAllowsHistoryRetry(route, now) {
+    const word = appHistoryRetry;
+    // Until the app has answered for this chat once, wait (at most a minute); an app that answers
+    // without the word is an older one, and the page's own rule applies (CodeRabbit on #2080).
+    const unanswered = appHistoryAnsweredFor !== route && now - historyRouteSince < APP_HISTORY_FIRST_ANSWER_MS;
+    const applies = word && word.conversationId === route && now - word.at <= APP_HISTORY_RETRY_FRESH_MS;
+    const why = unanswered ? 'waiting for the app\'s first answer about this chat'
+      // A Stop since the app's last word revokes it: a newer answer is needed (CodeRabbit on #2080).
+      : applies && stopRequestedAt && word.at <= stopRequestedAt ? 'Stop was pressed; waiting for the app\'s next answer'
+      : !applies ? ''
+      : word.until > now ? 'the app holds this chat\'s history until its wait ends'
+      : !word.wanted ? 'this chat has no work waiting, so Retry is left to you' : '';
+    if (!why) return true;
+    if (now - historyRetryHeldToldAt >= 60_000) {
+      historyRetryHeldToldAt = now;
+      console.info(`Chat On Steroids: not pressing Retry: ${why}.`);
+    }
+    return false;
+  }
+  function restoreLimitedLoadFailure(route, now) {
+    try {
+      const raw = sessionStorage.getItem(LOAD_FAILURE_LIMITED_STORAGE);
+      if (raw === null) return;
+      loadFailureStored = true;
+      const saved = raw.length <= 512 ? JSON.parse(raw) : null;
+      if (saved && typeof saved === 'object' && route && saved.conversationId === route &&
+          Number.isInteger(saved.retries) && saved.retries > 0 && saved.retries <= 1000 &&
+          Number.isFinite(saved.at) && saved.at <= now && now - saved.at <= LOAD_FAILURE_LIMITED_MEMORY_MS) {
+        loadFailureRetries = saved.retries;
+        loadFailureLimited = true;
+        loadFailureLastPress = saved.at;
+      } else if (route) {
+        // Another chat's, an expired or a damaged entry: removed, so it cannot come back when the
+        // tab returns to its chat later. A page between routes keeps it.
+        sessionStorage.removeItem(LOAD_FAILURE_LIMITED_STORAGE);
+        loadFailureStored = false;
+      }
+    } catch {
+      // A corrupt or blocked entry costs only the remembered step; the page starts at the first one.
+    }
+  }
+  function rememberLimitedLoadFailure(route, now) {
+    try {
+      if (loadFailureLimited && route) {
+        sessionStorage.setItem(LOAD_FAILURE_LIMITED_STORAGE,
+          JSON.stringify({ conversationId: route, retries: loadFailureRetries, at: now }));
+        loadFailureStored = true;
+      } else if (loadFailureStored) {
+        sessionStorage.removeItem(LOAD_FAILURE_LIMITED_STORAGE);
+        loadFailureStored = false;
+      }
+    } catch {
+      // This document still keeps its own step.
+    }
+  }
   function recoverConversationLoad(now = Date.now()) {
     const route = CLF_DOM.conversationId();
     if (route !== loadFailureRoute) {
@@ -12656,6 +12803,9 @@
       loadFailureSince = 0;
       loadFailureRetries = 0;
       loadFailureLimited = false;
+      loadFailureLastPress = 0;
+      historyRouteSince = now;
+      restoreLimitedLoadFailure(route, now);
     }
     // The provider has already told this exact history read when it may be tried again.
     // Do not spend the page's own Retry button inside that window: each click is another
@@ -12669,7 +12819,11 @@
     const retry = CLF_DOM.conversationLoadFailure ? CLF_DOM.conversationLoadFailure() : null;
     if (!retry) {
       loadFailureSince = 0;
-      if (CLF_DOM.turns().length) { loadFailureRetries = 0; loadFailureLimited = false; }
+      if (CLF_DOM.turns().length) {
+        loadFailureRetries = 0;
+        loadFailureLimited = false;
+        if (loadFailureStored) rememberLimitedLoadFailure(route, now);
+      }
       return false;
     }
     // Whoever presses Retry here, the tab may leave this chat for ChatGPT's home page. Say so first,
@@ -12678,12 +12832,24 @@
       loadFailureToldAt = now;
       void ask({ type: 'load_failure', conversationId: route }).catch(() => undefined);
     }
+    // A page that stayed open on this chat forgets a step whose last press is as old as a stored
+    // one would be, and starts over, the same as after a reload.
+    if (loadFailureLastPress && now - loadFailureLastPress > LOAD_FAILURE_LIMITED_MEMORY_MS) {
+      loadFailureRetries = 0;
+      loadFailureLimited = false;
+      loadFailureLastPress = 0;
+      loadFailureSince = 0;
+      rememberLimitedLoadFailure(route, now);
+    }
     if (!loadFailureSince) loadFailureSince = now;
     const schedule = loadFailureLimited ? LOAD_FAILURE_LIMITED_BACKOFF_MS : LOAD_FAILURE_BACKOFF_MS;
     const wait = LOAD_FAILURE_SETTLE_MS + schedule[Math.min(loadFailureRetries, schedule.length - 1)];
     if (now - loadFailureSince < wait) return false;
+    if (!appAllowsHistoryRetry(route, now)) return false;
     loadFailureRetries++;
     loadFailureSince = now;
+    loadFailureLastPress = now;
+    if (loadFailureLimited) rememberLimitedLoadFailure(route, now);
     retry.click();
     return true;
   }
@@ -13210,6 +13376,34 @@
     return false;
   }
 
+  /**
+   * After a reload ChatGPT can put the app's own already-sent automatic message back into the message
+   * box, and every repair was then held as if it were the person's draft, for hours (#2074). The app
+   * names its own automatic sends in this chat with their ChatGPT message ids. The box is the app's
+   * leftover only when the chat's latest user message is one of those exact messages and the box holds
+   * exactly its text (line breaks and outer spaces aside, or in ChatGPT's own Markdown-escaped form),
+   * with nothing attached. It is removed only while unchanged (captureComposerDraft's lease); anything
+   * else stays a draft and holds the repair as before (CodeRabbit on #2079: no whitespace-blind match,
+   * and an unsent text or a text without its message proves nothing).
+   */
+  function clearOwnSentResidue(values) {
+    const own = (Array.isArray(values) ? values : []).filter(value => value && typeof value.text === 'string' &&
+      value.text.trim() && typeof value.messageId === 'string' && value.messageId).slice(0, 10);
+    if (!own.length || desktopInputBusy || CLF_DOM.hasComposerAttachments() || handoffMarked(CLF_DOM.composer())) return false;
+    const latest = CLF_DOM.messages().filter(row => row.role === 'user').at(-1);
+    const sent = latest?.id ? own.find(value => value.messageId === latest.id) : undefined;
+    if (!sent) return false;
+    const lines = (value) => String(value || '').replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ')
+      .split('\n').map(line => line.trim()).join('\n').replace(/\n{2,}/g, '\n').trim();
+    // Read with its line breaks: textContent joins a multiline send's paragraphs into one (CodeRabbit on #2079).
+    const shown = CLF_DOM.composerText() || '';
+    const shownLines = (CLF_DOM.composerLines ? CLF_DOM.composerLines() : shown) || '';
+    const want = lines(sent.text);
+    if (lines(shownLines) !== want && lines(unescapeMarkdown(shownLines)) !== want) return false;
+    const lease = CLF_DOM.captureComposerDraft(shown);
+    try { return lease.withdraw() === true; } finally { lease.dispose(); }
+  }
+
   async function inspectRepairPage(message) {
     const target = conversationId, forEpoch = epoch;
     const current = () => alive && target === message.conversationId && conversationId === target &&
@@ -13223,9 +13417,10 @@
     // Holding here instead left the chat's handoff waiting with nothing on screen (2026-10-10).
     const draft = () => !handoffMarked(CLF_DOM.composer()) &&
       Boolean((CLF_DOM.composerText() || '').trim() || CLF_DOM.hasComposerAttachments());
+    const cleared = current() && clearOwnSentResidue(message.ownSent);
     const verdict = (holds, extra) => {
       const why = holds.find(([held]) => held)?.[1];
-      return { safe: !why, ...(why ? { why } : {}), ...extra };
+      return { safe: !why, ...(why ? { why } : {}), ...(cleared ? { cleared: 'own-sent' } : {}), ...extra };
     };
     if (message.draftOnly === true) {
       const questionId = CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id ?? null;

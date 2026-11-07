@@ -459,3 +459,17 @@ it('keeps "the goal is met" when the switch or objective change it would replace
   await goal.setGoalObjectiveNow(SOURCE, 'A different objective');
   expect(goal.goalOutcomeFor(SOURCE)).toBeNull();
 });
+
+// #1882: a Goal armed only by its objective has the same switch values before and after it is
+// turned off, and that change is logged all the same.
+it('logs turning off a Goal that only its objective armed', async () => {
+  await goal.setGoalObjectiveNow(SOURCE, 'Finish the report');
+  expect(goal.goalSwitchFor(SOURCE)).toMatchObject({ enabled: false, own: false });
+  expect(goal.goalArmedFor(SOURCE)).toBe(true);
+  const logger = await import('../src/main/logger.js');
+  const info = vi.spyOn(logger, 'logInfo');
+  await goal.setGoalSwitchNow(SOURCE, 'goal', false, undefined, 'a Stop sent by the app');
+  expect(goal.goalArmedFor(SOURCE)).toBe(false);
+  expect(info.mock.calls.map(([line]) => String(line)).filter(line => line.startsWith(`goal: ${SOURCE} `)))
+    .toEqual([`goal: ${SOURCE} switched to Normal by a Stop sent by the app`]);
+});

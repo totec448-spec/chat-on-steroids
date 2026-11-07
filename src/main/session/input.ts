@@ -23,6 +23,7 @@ import { noteChatOrigin } from './recorder.js';
 import { seedBranchHistory } from './branch-history.js';
 import { DEFAULT_HELPER_CHAT_MODEL, isAstraModel, isProModel } from '../../shared/chat-models.js';
 import { inFlightToolCalls } from '../mcp/call-context.js';
+import { automaticPauseRefusal, automaticSendRefusal } from '../chats-at-once.js';
 import { automaticFinishEnabled, goalDrivingMode, consumeGoalReplyForInputNow } from '../goal.js';
 import { finishInstruction } from '../../shared/finish.js';
 import { CONVERSATION_DELETED } from '../../shared/chat-error.js';
@@ -165,7 +166,25 @@ const entrySchema = inputArgs.extend({
   completedTurnId: z.string().max(256).optional(),
   queueOrder: z.number().int().nonnegative().optional(),
   /** #1794: the send check held this automatic send; it is asked again from `nextAt`. */
-  sendCheck: z.object({ attempt: z.number().int().positive(), nextAt: z.number(), reason: z.string().max(200), answered: z.boolean() }).optional()
+  sendCheck: z.object({ attempt: z.number().int().positive(), nextAt: z.number(), reason: z.string().max(200), answered: z.boolean() }).optional(),
+  /** Shown, never saved: this automatic send waits for a free slot or ChatGPT's pause (#1694). */
+  slotWait: z.enum(['slots', 'paused']).optional(),
+  /**
+   * "Chats working at once" holds this message back (#1694): `at` is the last time it did (refreshed
+   * while `open`) or when the hold ended. The app never offered it meanwhile, so the one-minute
+   * pickup deadline counts from `at`; saved, so a restart keeps it (CodeRabbit on #2051).
+   */
+  slotHold: z.object({ at: z.number(), open: z.boolean() }).optional(),
+  /**
+   * A page has this message and holds it back until its own turn ends (2026-11-03): ChatGPT still
+   * answering, a turn the page still holds, or a running tool call. The browser did pick it up, so
+   * the one-minute pickup deadline counts from the last such hold, and the queue says why it waits.
+   */
+  pageHold: z.object({ reason: z.enum(['still-answering', 'turn-held', 'tool-running']), at: z.number(),
+    /** The chat whose page holds it; a hold counts only while the message still goes there (CodeRabbit on #2054). */
+    conversationId: z.string().nullable().optional(),
+    /** When the window was last told, so its wording is refreshed before it lapses (CodeRabbit on #2054). */
+    toldAt: z.number().optional() }).optional()
 });
 export type InputEntry = z.infer<typeof entrySchema>;
 
@@ -180,6 +199,32 @@ export function automaticSendKind(row: Pick<InputEntry, 'recovery' | 'purpose' |
   if (row.purpose === 'rotation' || row.afterStop) return 'fresh-turn';
   if (row.scheduled) return 'scheduled';
   return null;
+}
+
+/**
+ * Whether "Chats working at once" (#1694) applies: only the app's own sends wait. A message the
+ * person sent, and a finish step they asked for, never do. The Goal helper's own question belongs
+ * to a Goal step that was already admitted at /goal/draft.
+ */
+function slotGated(row: InputEntry): boolean {
+  return automaticSendKind(row) !== null || (!!row.finishOwner && row.finishOwner.userRequested !== true);
+}
+/** Why each automatic send waits for a slot now, for its row and the offer log; never saved. */
+const slotWaits = new Map<string, string>();
+/** How often a held message's saved `slotHold` is refreshed: well inside the one-minute pickup deadline. */
+const SLOT_HELD_REFRESH_MS = 15_000;
+function noteSlotWait(id: string, reason: string | null): void {
+  const before = slotWaits.get(id);
+  if (reason === null) {
+    if (before !== undefined) { slotWaits.delete(id); logInfo(`input ${id}: a slot is free; the automatic send goes out`); deliveryHooks?.changed(); }
+    return;
+  }
+  if (before === reason) return;
+  slotWaits.set(id, reason);
+  // Once per kind of wait (a slot, or ChatGPT's pause), not per poll or per count.
+  const kind = (text: string) => text.startsWith('ChatGPT asked to slow down') ? 'paused' : 'slots';
+  if (before === undefined || kind(before) !== kind(reason)) logInfo(`input ${id} waits: ${reason}`);
+  deliveryHooks?.changed();
 }
 
 /** Held by the send check until its next ask; clearing the check's address releases it at once. */
@@ -566,6 +611,15 @@ async function retireRemovedSessionReceipts(current: InputEntry[], pendingOnly =
   await commit(next);
   return next;
 }
+/** When a page last held this message, counted only while the message still goes to that page's chat. */
+async function heldUntil(row: InputEntry): Promise<number> {
+  const hold = row.pageHold;
+  if (!hold) return 0;
+  if (hold.conversationId === undefined) return hold.at;
+  const goesTo = await target(row).catch(() => undefined);
+  return goesTo !== undefined && (goesTo ?? null) === hold.conversationId ? hold.at : 0;
+}
+
 async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
   const next = await Promise.all(current.map(async (row): Promise<InputEntry> => {
     if (companionOf(current, row)) return row;
@@ -614,7 +668,9 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
         (row.transportIntent === 'browser' || (!row.transportIntent && !row.sessionId)) &&
         !row.error?.startsWith('Message queued. ') &&
         // Time the person's send check held it is not the browser's: its minute starts when the hold ends (#1794).
-        Date.now() - Math.max(row.createdAt, row.dueAt, row.sendCheck?.nextAt ?? 0) >= 60_000)
+        // Nor is time a page held it until its own turn ended: that page has it (2026-11-03).
+        // Nor time "Chats working at once" held it back: the app never offered it then (#1694, CodeRabbit on #2051).
+        Date.now() - Math.max(row.createdAt, row.dueAt, row.sendCheck?.nextAt ?? 0, await heldUntil(row), row.slotHold?.at ?? 0) >= 60_000)
       return { ...row, state: 'failed', pickupFailedAt: Date.now(), error: 'Not sent: the browser did not pick up this message within 60 seconds.' };
     // Preparation can expire before Send. Once authorized, this exact claim owns
     // the uncertain outcome until receipt or explicit cancellation, regardless of
@@ -1123,7 +1179,10 @@ export function listInputs(): Promise<InputEntry[]> {
     }
     if (next.length !== current.length || next.some((entry, index) => entry !== current[index])) await commit(next);
     await publishHistory();
-    return ordered(await load()).map((entry) => ({ ...entry }));
+    return ordered(await load()).map((entry) => {
+      const slot = entry.state === 'queued' ? slotWaits.get(entry.id) : undefined;
+      return slot ? { ...entry, slotWait: slot.startsWith('ChatGPT asked to slow down') ? 'paused' as const : 'slots' as const } : { ...entry };
+    });
   });
 }
 export interface PickupRecoveryState { attempts: number; nextAt?: number; stoppedAt?: number }
@@ -1346,6 +1405,12 @@ export function authorizeBrowserInput(id: string, owner: string, conversationId:
     if (!row || row.sendAuthorizedAt !== undefined || companionOf(current, row)) return false;
     if (!(await browserInputAllowed(row)) || await target(row) !== conversationId) return false;
     if (await continuedInvalidReason(row)) return false;
+    // Its slot was admitted at the offer; ChatGPT's pause may have started since (CodeRabbit on #2051).
+    // Refused like any other last-moment veto: nothing is sent and the claim's own retry rules apply.
+    if (slotGated(row)) {
+      const paused = automaticPauseRefusal();
+      if (paused) { logInfo(`input ${row.id}: Send not authorized: ${paused}`); return false; }
+    }
     if (row.companionInputId) {
       const companion = current.find(other => other.id === row.companionInputId && other.state === 'browser' && other.owner === owner && other.sessionId === row.sessionId);
       const session = row.sessionId ? await getSession(row.sessionId) : null;
@@ -1784,6 +1849,35 @@ function withoutSilenceClaim(row: InputEntry, preserveBoundary = false): InputEn
     ...(manualInput(row) ? { transportIntent: 'tool' } : {}),
     companionInputId: undefined, offeredAt: undefined, sendAuthorizedAt: undefined, requiresAuthorization: undefined, deliveryText: undefined, error: undefined };
 }
+/**
+ * The person's Stop for an answer that had already ended (#2066): every unsent Continue of the app's
+ * own for this chat goes, counted in the same step that withdraws it, so a send authorized meanwhile is
+ * neither withdrawn nor counted. Silence tickets go as revokeSilenceInputs takes them; a Continue the app
+ * had turned into an ordinary message and the fresh-turn Continue of the named turn are cancelled too
+ * (CodeRabbit on #2066). Returns how many automatic Continues were cancelled.
+ */
+export function withdrawOwnContinuesAfterStop(sessionId: string, turnId: string): Promise<number> {
+  return serial(async () => {
+    const current = await load();
+    let cancelled = 0;
+    const next = current.map(row => {
+      if (row.sessionId !== sessionId || !(row.state === 'queued' || (row.state === 'browser' && row.sendAuthorizedAt === undefined))) return row;
+      if (row.silenceBoundary || row.completedTurnId) {
+        const out = withoutSilenceClaim(row);
+        if (out.state === 'cancelled') cancelled++;
+        return out;
+      }
+      if (row.continuedFrom === 'recovery' || (row.purpose === 'rotation' && row.queuedTurn?.turnId === turnId)) {
+        cancelled++;
+        return { ...row, state: 'cancelled' as const, owner: null, error: 'Automatic Continue cancelled: you pressed Stop.' };
+      }
+      return row;
+    });
+    if (next.some((row, index) => row !== current[index])) await commit(next);
+    return cancelled;
+  });
+}
+
 /** New work revokes an unspent ticket. Authorized sends retain custody until their exact receipt/failure. */
 export function revokeSilenceInputs(sessionId: string): Promise<void> {
   return serial(async () => {
@@ -1815,6 +1909,7 @@ export function pendingBrowserInputs(): Promise<Array<{ id: string; conversation
   return serial(async () => {
     const result: Array<{ id: string; conversationId: string | null; recovery?: { questionId: string; stop: boolean }; silenceTurnId?: string; directTurn?: InputEntry['directTurn']; supersededConversationId?: string; lifetime?: 'temporary-planner'; project?: string; branch?: { conversationId: string; messageId: string }; edit?: { messageId: string } }> = [];
     const current = await load();
+    const slotHeld = new Map<string, NonNullable<InputEntry['slotHold']>>();
     for (const entry of ordered(current)) {
       if (companionOf(current, entry)) continue;
       if (!preparable(entry) || entry.dueAt > Date.now() || heldBySendCheck(entry)) continue;
@@ -1830,6 +1925,16 @@ export function pendingBrowserInputs(): Promise<Array<{ id: string; conversation
         const chatgptProject = !conversationId && entry.projectId && entry.purpose !== 'decision' && !entry.lifetime && !entry.branch
           ? (await getProject(entry.projectId))?.chatgpt : undefined;
         if (chatgptProject && chatgptProject.state !== 'linked') continue;
+        // Chats working at once (#1694): the app's own send waits its turn; the line is kept by first wait.
+        // Last, after every other reason not to offer it: a message that cannot go yet anyway must not
+        // hold a slot others could use (CodeRabbit on #2051).
+        if (entry.state === 'queued' && slotGated(entry)) {
+          const refusal = automaticSendRefusal(`input:${entry.id}`, conversationId);
+          noteSlotWait(entry.id, refusal);
+          const now = Date.now(), hold = entry.slotHold;
+          if (refusal ? !hold?.open || now - hold.at >= SLOT_HELD_REFRESH_MS : hold?.open) slotHeld.set(entry.id, { at: now, open: !!refusal });
+          if (refusal) continue;
+        }
         const [end] = !entry.silenceBoundary && manualInput(entry) && entry.sessionId
           ? await readRecentEvents(entry.sessionId, 1, { kinds: ['turn_start', 'turn_end'] }) : [];
         const silenceTurnId = entry.silenceBoundary?.turnId ?? (end?.kind === 'turn_end' && end.outcome === 'failed' &&
@@ -1846,6 +1951,7 @@ export function pendingBrowserInputs(): Promise<Array<{ id: string; conversation
           ...(entry.edit && conversationId ? { edit: { messageId: entry.edit.messageId } } : {}) });
       } catch { /* blocked/deleted stays user-visible */ }
     }
+    if (slotHeld.size) await commit(current.map(row => slotHeld.has(row.id) && row.state === 'queued' ? { ...row, slotHold: slotHeld.get(row.id)! } : row));
     return result;
   });
 }
@@ -1889,6 +1995,8 @@ export function queuedInputOfferBlocker(id: string): Promise<string | null> {
       const conversationId = await target(entry);
       if (conversationId && !readyForWake(conversationId)) return 'its chat is being restored from ChatGPT\'s archive';
     } catch { return 'its chat cannot be resolved'; }
+    const slot = slotGated(entry) ? slotWaits.get(entry.id) : undefined;
+    if (slot) return `it waits for a free slot: ${slot}`;
     return null;
   });
 }
@@ -1974,6 +2082,52 @@ export function holdInputForSendCheck(id: string, attempt: number, reason: strin
   });
 }
 
+const PAGE_HOLD_REASONS = new Set(['still-answering', 'turn-held', 'tool-running']);
+const discardedHoldLogged = new Map<string, number>();
+/** A page holding a hold note this recent is not rewritten: pages repeat it every few seconds. */
+const PAGE_HOLD_REFRESH_MS = 15_000;
+/** How often a still-held message's window is told again; with the refresh above, always under 75 s. */
+const PAGE_HOLD_TELL_MS = 45_000;
+/**
+ * A page reported it holds this queued message until its own turn ends (2026-11-03). Only those
+ * reasons keep it: a page with no message box, or one that moved on, will not send it by waiting.
+ * `new` when the queue's wording changes (a first hold, or another reason), `held` when it stays
+ * held, null when this hold does not keep it.
+ */
+export function noteInputHeld(id: string, reason: string, conversationId: string | null = null): Promise<'new' | 'held' | null> {
+  return serial(async () => {
+    if (!PAGE_HOLD_REASONS.has(reason)) return null;
+    const current = await load();
+    const row = current.find(entry => entry.id === id);
+    if (!row || row.state !== 'queued' || row.sendAuthorizedAt !== undefined) return null;
+    // Only the page of the chat the message goes to now holds it: after a Compact & Resume that is the
+    // new chat, not the one the row was queued for; a new chat has none yet (CodeRabbit on #2054).
+    const goesTo = await target(row).catch(() => undefined);
+    const now = Date.now();
+    if (goesTo === undefined || (goesTo ?? null) !== conversationId) {
+      // Pages repeat their note every few seconds: say once a minute per chat that it does not count.
+      const said = `${id}:${conversationId ?? ''}`;
+      const last = discardedHoldLogged.get(said);
+      if (last === undefined || now - last >= 60_000) {
+        for (const [key, at] of discardedHoldLogged) if (now - at >= 60_000) discardedHoldLogged.delete(key);
+        discardedHoldLogged.set(said, now);
+        logInfo(`input ${id}: a hold from ${conversationId ?? 'a page with no chat'} does not keep it: ` +
+          (goesTo === undefined ? 'its chat could not be looked up' : `it goes to ${goesTo ?? 'a new chat'}`));
+      }
+      return null;
+    }
+    // Another chat's hold (before a Compact & Resume moved the message) is not this one's (CodeRabbit on #2054).
+    const same = row.pageHold?.reason === reason && (row.pageHold.conversationId ?? conversationId) === conversationId;
+    if (same && now - row.pageHold!.at < PAGE_HOLD_REFRESH_MS) return 'held';
+    // The window shows the reason for 75 s after the hold it last heard of: tell it again well before.
+    const tell = !same || now - (row.pageHold!.toldAt ?? row.pageHold!.at) >= PAGE_HOLD_TELL_MS;
+    const toldAt = tell ? now : row.pageHold?.toldAt ?? row.pageHold?.at ?? now;
+    await commit(current.map(entry => entry === row
+      ? { ...entry, pageHold: { reason: reason as NonNullable<InputEntry['pageHold']>['reason'], at: now, toldAt, conversationId } } : entry));
+    return tell ? 'new' : 'held';
+  });
+}
+
 /** How long, and how many, of a chat's own unsent messages a page may recognise as the app's leftover. */
 const OWN_UNSENT_MS = 24 * 60 * 60_000;
 const OWN_UNSENT_MAX = 5;
@@ -2001,6 +2155,167 @@ export async function ownUnsentTexts(conversationId: string, exceptId: string, n
     .map(row => row.deliveryText ?? row.text);
 }
 
+/**
+ * Each chat's latest automatic send ChatGPT confirmed with a message id (#2074), kept apart from the
+ * outbox: its history keeps only the newest 50 finished rows across all chats, so a busy app could
+ * forget the very Continue a repair needs to recognise while it is still the chat's latest message
+ * (CodeRabbit on #2079). One per chat, at most 200 chats; texts over 20,000 characters are not kept.
+ */
+const OWN_SENT_STATE = 'own-sent-receipts';
+const OWN_SENT_RECEIPTS_MAX = 200;
+const OWN_SENT_TEXT_MAX = 20_000;
+const ownSentReceiptSchema = z.object({ conversationId: z.string().min(1).max(256), text: z.string().min(1).max(OWN_SENT_TEXT_MAX),
+  messageId: z.string().min(1).max(256), at: z.number() });
+type OwnSentReceipt = z.infer<typeof ownSentReceiptSchema>;
+/**
+ * Saved as `{ version: 1, receipts, forgotten }`. `forgotten` names chats deleted in the last 24 h:
+ * a send still being acknowledged for one of them must not record it again (CodeRabbit on #2079).
+ */
+type OwnSentStore = { receipts: OwnSentReceipt[]; forgotten: Array<{ conversationId: string; at: number }> };
+const ownSentForgottenSchema = z.object({ conversationId: z.string().min(1).max(256), at: z.number() });
+let ownSentStore: OwnSentStore | null = null;
+/**
+ * Every change to the store runs in this chain, its own and not the input queue: deletion calls it
+ * from outside that queue, and failInputsForDeletedConversation from inside it (CodeRabbit on #2079).
+ */
+let ownSentChain: Promise<unknown> = Promise.resolve();
+function withOwnSentLock<T>(work: () => Promise<T>): Promise<T> {
+  const run = ownSentChain.then(work, work);
+  ownSentChain = run.catch(() => undefined);
+  return run;
+}
+let ownSentPruneTimer: NodeJS.Timeout | null = null;
+/** Receipts that could not be saved because the store was unreadable; added once it reads again (CodeRabbit on #2079). */
+let ownSentUnsaved: OwnSentReceipt[] = [];
+/** One shared read: two first callers must not each install their own snapshot (CodeRabbit on #2079). */
+let ownSentLoad: Promise<OwnSentStore> | null = null;
+function loadOwnSentStore(): Promise<OwnSentStore> {
+  if (ownSentStore) return Promise.resolve(ownSentStore);
+  // Read strictly: a file whose JSON is damaged still holds its text on disk and is replaced below,
+  // while a missing or unreadable one is simply empty (CodeRabbit on #2079).
+  let damaged = false;
+  ownSentLoad ??= readDurable<unknown>(OWN_SENT_STATE, { strict: true }).catch((error: Error & { damaged?: boolean }) => {
+    if (error?.damaged === true) { damaged = true; return null; }
+    // Unreadable for the moment: not cached as empty, or the next write would replace what is there.
+    // The next access reads the file again (CodeRabbit on #2079).
+    logWarn(`own-sent records could not be read now; trying again on the next access (${error?.message ?? 'error'})`);
+    ownSentLoad = null;
+    throw error;
+  }).then(saved => {
+    const record = saved && typeof saved === 'object' && !Array.isArray(saved) ? saved as { receipts?: unknown; forgotten?: unknown } : null;
+    // A damaged entry is dropped, never guessed at; the rest stay.
+    const valid = <T>(rows: unknown, schema: z.ZodType<T>): T[] => (Array.isArray(rows) ? rows : []).flatMap(row => {
+      const parsed = schema.safeParse(row);
+      return parsed.success ? [parsed.data] : [];
+    });
+    if (!ownSentStore) {
+      const loaded = {
+        receipts: valid(record ? record.receipts : saved, ownSentReceiptSchema),
+        forgotten: valid(record?.forgotten, ownSentForgottenSchema)
+      };
+      ownSentStore = trimOwnSent(loaded);
+      // Sends whose receipt could not be saved while the store was unreadable, unless their chat was deleted since.
+      const late = ownSentUnsaved.filter(row => !ownSentStore!.forgotten.some(gone => gone.conversationId === row.conversationId));
+      ownSentUnsaved = [];
+      if (late.length) {
+        const chats = new Set(late.map(row => row.conversationId));
+        ownSentStore = trimOwnSent({ ...ownSentStore, receipts: [...ownSentStore.receipts.filter(row => !chats.has(row.conversationId)), ...late] });
+        damaged = true;
+      }
+      // Expired, damaged or rejected text leaves the disk when the store is read, not only on the next
+      // send: whatever differs from the cleaned store is rewritten (CodeRabbit on #2079).
+      if (damaged || (saved !== null && JSON.stringify(saved) !== JSON.stringify({ version: 1, ...ownSentStore })))
+        writeDurableSoon(OWN_SENT_STATE, { version: 1, ...ownSentStore });
+      // And while the app stays open: once an hour.
+      ownSentPruneTimer ??= setInterval(() => { void pruneOwnSent().catch(() => undefined); }, 60 * 60_000);
+      ownSentPruneTimer.unref?.();
+    }
+    return ownSentStore;
+  });
+  return ownSentLoad;
+}
+/** Drops what is older than 24 h and saves it, if anything was. */
+function pruneOwnSent(now = Date.now()): Promise<void> {
+  return withOwnSentLock(async () => {
+    const store = await loadOwnSentStore();
+    const next = trimOwnSent(store, now);
+    if (next.receipts.length === store.receipts.length && next.forgotten.length === store.forgotten.length) return;
+    ownSentStore = next;
+    writeDurableSoon(OWN_SENT_STATE, { version: 1, ...next });
+  });
+}
+async function loadOwnSentReceipts(): Promise<OwnSentReceipt[]> { return (await loadOwnSentStore()).receipts; }
+/** Kept without anything older than the window a page may use it in. */
+function trimOwnSent(store: OwnSentStore, now = Date.now()): OwnSentStore {
+  return {
+    receipts: store.receipts.filter(row => now - row.at < OWN_UNSENT_MS).slice(-OWN_SENT_RECEIPTS_MAX),
+    forgotten: store.forgotten.filter(row => now - row.at < OWN_UNSENT_MS).slice(-OWN_SENT_RECEIPTS_MAX)
+  };
+}
+async function rememberOwnSent(entry: InputEntry, current: InputEntry[], conversationId: string, messageId: string): Promise<void> {
+  const text = entry.deliveryText ?? entry.text;
+  if (automaticSendKind(entry) === null || entry.images?.length || entry.attachments?.length || entry.companionInputId ||
+      current.some(row => row.companionInputId === entry.id) || messageId.startsWith('input:') || text.length > OWN_SENT_TEXT_MAX) return;
+  // An unreadable store never fails the acknowledgement it rides on; the receipt waits in memory and is
+  // added once the store reads again.
+  const receipt = { conversationId, text, messageId, at: Date.now() };
+  await withOwnSentLock(async () => {
+    const store = await loadOwnSentStore();
+    // A chat deleted meanwhile stays forgotten, even when its send is acknowledged late (CodeRabbit on #2079).
+    if (store.forgotten.some(row => row.conversationId === conversationId)) return;
+    ownSentStore = trimOwnSent({ ...store, receipts: [...store.receipts.filter(row => row.conversationId !== conversationId),
+      receipt] });
+    writeDurableSoon(OWN_SENT_STATE, { version: 1, ...ownSentStore });
+  }).catch((error: Error) => {
+    logWarn(`input ${entry.id}: its own-sent record waits until the store can be read (${error.message})`);
+    ownSentUnsaved = [...ownSentUnsaved.filter(row => row.conversationId !== conversationId), receipt].slice(-OWN_SENT_RECEIPTS_MAX);
+  });
+}
+/**
+ * A deleted chat's receipt goes with it (CodeRabbit on #2079): a scheduled run's text can be the
+ * person's own words. Called with every ChatGPT conversation the deleted chat had, before the chat
+ * itself is removed, and saved before it returns: a crash right after cannot bring the text back.
+ */
+export async function forgetOwnSent(conversationIds: readonly string[], now = Date.now()): Promise<void> {
+  const ids = new Set(conversationIds.filter(Boolean));
+  if (!ids.size) return;
+  // A receipt still waiting for an unreadable store goes too, at once.
+  ownSentUnsaved = ownSentUnsaved.filter(row => !ids.has(row.conversationId));
+  await withOwnSentLock(async () => {
+    const store = await loadOwnSentStore();
+    const next = trimOwnSent({
+      receipts: store.receipts.filter(row => !ids.has(row.conversationId)),
+      forgotten: [...store.forgotten.filter(row => !ids.has(row.conversationId)), ...[...ids].map(conversationId => ({ conversationId, at: now }))]
+    }, now);
+    await writeDurableNow(OWN_SENT_STATE, { version: 1, ...next });
+    ownSentStore = next;
+  });
+}
+
+/**
+ * The app's own automatic messages ChatGPT received in a chat, with their message ids (#2074): what a
+ * repair's page may treat as the app's leftover when ChatGPT puts one back into the message box after
+ * a reload. Only sends with a known ChatGPT message id (an automatic Continue, a fresh turn, a scheduled
+ * run); never the person's messages, never anything with an image, a file or a companion message, and
+ * never an unsent text, which has no message to prove it (CodeRabbit on #2079). The page also requires
+ * that exact message to be the chat's latest user message.
+ */
+export async function ownSentResidue(conversationId: string, now = Date.now()): Promise<Array<{ text: string; messageId: string }>> {
+  await pruneOwnSent(now);
+  const rows = await listInputs();
+  const companions = new Set(rows.flatMap(row => row.companionInputId ? [row.companionInputId] : []));
+  return rows
+    .filter(row => row.conversationId === conversationId && automaticSendKind(row) !== null && !!row.messageId &&
+      !row.companionInputId && !companions.has(row.id) && !row.images?.length && !row.attachments?.length &&
+      now - row.createdAt < OWN_UNSENT_MS)
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, OWN_UNSENT_MAX)
+    .map(row => ({ text: row.deliveryText ?? row.text, messageId: row.messageId! }))
+    .concat((await loadOwnSentReceipts()).filter(row => row.conversationId === conversationId && now - row.at < OWN_UNSENT_MS)
+      .map(row => ({ text: row.text, messageId: row.messageId })))
+    .filter((row, index, all) => !row.messageId.startsWith('input:') && all.findIndex(other => other.messageId === row.messageId) === index);
+}
+
 export function claimBrowserInput(id: string, owner: string, conversationId: string | null, requiresAuthorization = false): Promise<InputEntry | null> {
   return serial(async () => {
     const current = await load();
@@ -2015,6 +2330,13 @@ export function claimBrowserInput(id: string, owner: string, conversationId: str
     if (queuedFollowup(entry) && !completedTurnId) return null;
     if (await target(entry) !== conversationId) return null;
     if (!(await browserInputAllowed(entry))) return null;
+    // Chats working at once (#1694), asked again at the claim: a pause may have started, or the
+    // slot gone, since the offer (CodeRabbit on #2051). Refused, it simply stays queued.
+    if (entry.state === 'queued' && slotGated(entry)) {
+      const refusal = automaticSendRefusal(`input:${entry.id}`, conversationId);
+      noteSlotWait(entry.id, refusal);
+      if (refusal) return null;
+    }
     if (entry.purpose === 'decision' && !decisionWaiters.has(id)) return null;
     if (entry.projectId) await projectWorkspace(entry.projectId);
     if (entry.sessionId) {
@@ -2191,6 +2513,7 @@ export function acknowledgeBrowserInput(id: string, owner: string, conversationI
       entry.state !== 'cancelled' && (entry.opening || !entry.sessionId) && entry.automation && deliveredConversation && entry.purpose !== 'decision' ? [acknowledged] : [], 'after-send');
     if (entry.completedTurnId && entry.sessionId && deliveredConversation)
       await consumeGoalReplyForInputNow(deliveredConversation, entry.sessionId, entry.completedTurnId);
+    if (messageId && deliveredConversation && entry.state !== 'cancelled') await rememberOwnSent(entry, current, deliveredConversation, messageId);
     // The page saw its edit replace the question: that is known now, before ChatGPT draws its versions.
     if (entry.edit && messageId && entry.sessionId) await noteEditReplacement(entry.sessionId, messageId, entry.edit.messageId)
       .catch((err: Error) => logWarn(`input ${id}: could not mark the edited question (${err.message})`));
@@ -2295,7 +2618,9 @@ export function offerToolInput(sessionId: string | null | undefined, conversatio
   });
 }
 
-export function resetInputForTests(): void { entries = null; chain = Promise.resolve(); offered.clear(); decisionWaiters.clear(); declinedRotations.clear(); }
+export function resetInputForTests(): void {
+  ownSentStore = null; ownSentLoad = null; ownSentChain = Promise.resolve(); ownSentUnsaved = [];
+  if (ownSentPruneTimer) { clearInterval(ownSentPruneTimer); ownSentPruneTimer = null; } entries = null; chain = Promise.resolve(); offered.clear(); decisionWaiters.clear(); declinedRotations.clear(); slotWaits.clear(); }
 
 export async function pausedBrowserHelpers(): Promise<Array<{ id: string; sourceSessionId: string }>> {
   return (await listInputs()).filter(row => row.purpose === 'decision' && row.state === 'cancelled' && row.cancelledByUser === true && !row.conversationId && row.decisionSourceSessionId)
@@ -2518,6 +2843,8 @@ export function failBrowserInput(id: string, owner: string, error: string, detai
  */
 export function failInputsForDeletedConversation(conversationId: string): Promise<number> {
   return serial(async () => {
+    // ChatGPT deleted it: its own-sent receipt goes too (#2074).
+    await forgetOwnSent([conversationId]).catch((error: Error) => logWarn(`own-sent record of ${conversationId} not removed (${error.message})`));
     const current = await load();
     const ended = new Set<string>();
     for (const row of current) {

@@ -196,6 +196,13 @@ export function runningToolProgress(conversationId: string): { count: number; si
   return owned.length ? { count: owned.length, since: Math.min(...owned.map(call => call.startedAt)) } : null;
 }
 
+/** The chats with a running call, by exact ownership only (#1694 counts them as working). */
+export function runningToolConversations(): Set<string> {
+  const owners = new Set<string>();
+  for (const call of running) { const owner = exactOwner(call); if (owner) owners.add(owner); }
+  return owners;
+}
+
 /** What this chat's calls are doing right now, oldest first. The same exact ownership. */
 export function runningToolActivity(conversationIds: readonly string[]): RunningToolActivity[] {
   return [...running]
