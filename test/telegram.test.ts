@@ -405,3 +405,15 @@ it('counts a chat as working only while it really works, as the sidebar does', (
   const live = { ...none, activityExpiresAt: () => now + 60_000 };
   expect(statusChatsFrom([{ ...base, lastToolCallAt: now - 1_000 }], live, now)).toEqual([expect.objectContaining({ working: true })]);
 });
+
+// Live test 2026-11-07: /pause asked "Several chats could be meant" with one Loop chat running and
+// seven idle old Goal/Loop chats. A bare command means the running chats first.
+it('lets a bare /pause mean the running Goal or Loop chat, and idle ones only when none runs', async () => {
+  const { telegramTargets } = await import('../src/main/telegram-app.js');
+  const chat = (sessionId: string, working: boolean, automation: 'Goal' | 'Loop' | null) => ({ sessionId, title: sessionId, working, approval: false, automation });
+  const chats = [chat('running-loop', true, 'Loop'), chat('idle-goal', false, 'Goal'), chat('idle-loop', false, 'Loop'), chat('plain', true, null)];
+  expect(telegramTargets('pause', chats, new Set())).toEqual([{ sessionId: 'running-loop' }]);
+  expect(telegramTargets('pause', chats.filter(row => row.sessionId !== 'running-loop'), new Set())).toEqual([{ sessionId: 'idle-goal' }, { sessionId: 'idle-loop' }]);
+  expect(telegramTargets('stop', chats, new Set())).toEqual([{ sessionId: 'running-loop' }, { sessionId: 'plain' }]);
+  expect(telegramTargets('resume', [chat('was-paused', false, null), chat('other', false, null)], new Set(['was-paused']))).toEqual([{ sessionId: 'was-paused' }]);
+});
