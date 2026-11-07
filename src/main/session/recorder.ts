@@ -1912,10 +1912,17 @@ async function reopenFalselyEndedTurn(
   logInfo(
     `session ${sessionId} reopened turn ${ended.turnId} — request ${requestId} kept calling tools after the page reported it ended`
   );
+  // A mark from an earlier reopening belongs to that one; this reopening decides afresh (CodeRabbit on #2087).
+  if (live.reopenedStop?.timer) clearTimeout(live.reopenedStop.timer);
+  live.reopenedStop = null;
   if (stoppedEnd) {
-    const model = (await getSession(sessionId))?.selectedModel;
-    armReopenedStop(sessionId, conversationId, live, ended.turnId,
-      model?.conversationId === conversationId && isProModel(model.model, model.reasoningEffort));
+    // The reopen is already committed: a failed read only loses the longer Pro window, never the timer.
+    let pro = false;
+    try {
+      const model = (await getSession(sessionId))?.selectedModel;
+      pro = model?.conversationId === conversationId && isProModel(model.model, model.reasoningEffort);
+    } catch { /* the normal window */ }
+    armReopenedStop(sessionId, conversationId, live, ended.turnId, pro);
   }
   return ended.turnId;
 }
@@ -1965,12 +1972,20 @@ async function endQuietReopenedStop(sessionId: string, conversationId: string, l
     scheduleReopenedStop(sessionId, conversationId, live, turnId, Math.max(1_000, quiet - quietFor));
     return;
   }
-  live.reopenedStop = null;
+  // The mark stays until the end is written: a failed write tries again rather than leaving the turn
+  // open for good (CodeRabbit on #2087).
   const time = Date.now();
-  await appendEvent(sessionId, {
-    time, source: 'app', kind: 'turn_end', turnId, outcome: 'stopped',
-    detail: 'the person stopped this turn; after a late call reopened it, ChatGPT made no further call'
-  });
+  try {
+    await appendEvent(sessionId, {
+      time, source: 'app', kind: 'turn_end', turnId, outcome: 'stopped',
+      detail: 'the person stopped this turn; after a late call reopened it, ChatGPT made no further call'
+    });
+  } catch (error) {
+    logWarn(`session ${sessionId}: the stopped turn ${turnId} could not be ended again (${error instanceof Error ? error.message : String(error)}); trying again in 30 s`);
+    if (live.reopenedStop === mark) scheduleReopenedStop(sessionId, conversationId, live, turnId, 30_000);
+    return;
+  }
+  if (live.reopenedStop === mark) live.reopenedStop = null;
   if (conversations.get(conversationId) !== live || live.turnId !== turnId) return;
   live.openTurns.delete(turnId);
   live.knownTurnEnds.add(turnId);
