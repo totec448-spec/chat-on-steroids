@@ -94,6 +94,15 @@ describe('browser creation and usable tab discovery',()=>{
     expect(chrome.tabs.create).toHaveBeenCalledExactlyOnceWith({url:'https://fixture.invalid/again',active:false,windowId:5});
   });
 
+  it('uses the window the owned tab was moved to while permission was being checked',async()=>{
+    const {chrome,control,entries,command,transport}=await fixture([{tabId:7,owner:'session:owner'}]);
+    entries.get(7)!.windowId=5;
+    let calls=0;
+    transport.mockImplementation(async()=>{ calls+=1; if(calls===2) entries.get(7)!.windowId=9; return {ok:true,data:{allowed:true,epoch:'epoch',policy:{read:true,write:true},requests:[]}}; });
+    await control.execute(command('new',{url:'https://fixture.invalid/moved'}));
+    expect(chrome.tabs.create).toHaveBeenCalledExactlyOnceWith({url:'https://fixture.invalid/moved',active:false,windowId:9});
+  });
+
   it('falls back to the default window when the owned tab is gone or has no window',async()=>{
     const {chrome,control,entries,command}=await fixture([{tabId:7,owner:'session:owner'}]);
     entries.delete(7);
