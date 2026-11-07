@@ -565,7 +565,7 @@ void app.whenReady().then(async () => {
         const controls = await sessionControlsFor(sessionId);
         const turnId = controls.activeTurnId ?? controls.heldTurnId;
         if (!turnId) return 'nothing';
-        await stopSessionTurn(sessionId, turnId);
+        await stopSessionTurn(sessionId, turnId, { from: 'Telegram' });
         logInfo(`telegram: Stop requested for session ${sessionId}, turn ${turnId}`);
         return 'done';
       } catch (error) {

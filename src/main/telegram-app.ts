@@ -43,6 +43,20 @@ function validLink(raw: unknown): TelegramLink | null {
     : null;
 }
 
+/**
+ * Which chats a bare /stop, /pause or /resume can mean. /pause means the running Goal or Loop chats
+ * first, and idle ones only when none runs: one running Loop beside seven idle old Goal and Loop
+ * chats asked "Several chats could be meant" (live test, 2026-11-07).
+ */
+export function telegramTargets(action: ChatAction, chats: ReadonlyArray<StatusChat & { sessionId: string }>, pausedHere: ReadonlySet<string>): Array<{ sessionId: string }> {
+  const pick = (rows: ReadonlyArray<StatusChat & { sessionId: string }>) => rows.map(chat => ({ sessionId: chat.sessionId }));
+  if (action === 'stop') return pick(chats.filter(chat => chat.working));
+  if (action === 'resume') return pick(chats.filter(chat => pausedHere.has(chat.sessionId) && chat.automation === null));
+  const automated = chats.filter(chat => chat.automation !== null);
+  const running = automated.filter(chat => chat.working);
+  return pick(running.length ? running : automated);
+}
+
 /** At startup: reads the linked account and, when there is one, starts listening. */
 export async function startTelegram(deps: TelegramAppDeps): Promise<void> {
   appDeps = deps;
@@ -70,9 +84,7 @@ export async function startTelegram(deps: TelegramAppDeps): Promise<void> {
     status: async details => telegramStatus(await deps.chats(), details, (source: StatusText, values) => fill(deps.mainText(source), values)),
     details: deps.details,
     deny: deps.deny,
-    targets: async (action: ChatAction) => (await deps.chats()).filter(chat =>
-      action === 'stop' ? chat.working : action === 'pause' ? chat.automation !== null : paused.has(chat.sessionId) && chat.automation === null)
-      .map(chat => ({ sessionId: chat.sessionId })),
+    targets: async (action: ChatAction) => telegramTargets(action, await deps.chats(), paused),
     act: async (action: ChatAction, sessionId: string) => {
       if (action === 'stop') return deps.stop(sessionId);
       const chat = (await deps.chats()).find(row => row.sessionId === sessionId);
