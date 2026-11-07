@@ -37,7 +37,7 @@ async function fixture(held: {tabId:number;owner:string}[] = []) {
   const control=create(chrome,transport,(id:number)=>id===7);
   await control.pump();
   const command=(action:string,args:Record<string,unknown>={})=>({id:randomUUID(),epoch:'epoch',owner:'session:owner',conversationId:null,tool:'browser_tabs',args:{action,...args},expiresAt:Date.now()+25000});
-  return {chrome,control,entries,browserId,command,revoke:()=>{allowed=false;}};
+  return {chrome,control,entries,browserId,command,transport,revoke:()=>{allowed=false;}};
 }
 afterEach(()=>vi.useRealTimers());
 
@@ -82,6 +82,16 @@ describe('browser creation and usable tab discovery',()=>{
     chrome.tabs.get.mockImplementation(async(id:number)=>{ Error.stackTraceLimit=60; const inLookup=!!new Error().stack?.includes('ownedWindow'); const tab=await real(id); if(!revoked&&inLookup){ revoked=true; revoke(); } return tab; });
     await expect(control.execute(command('new',{url:'https://fixture.invalid/revoked'}))).rejects.toThrow('BROWSER_PERMISSION_REVOKED');
     expect(chrome.tabs.create).not.toHaveBeenCalled();
+  });
+
+  // CodeRabbit on #2098: the permission check is asynchronous too, so the chosen attachment is rechecked after it.
+  it('chooses again when the owned tab detaches while permission is being checked',async()=>{
+    const {chrome,control,entries,command,transport}=await fixture([{tabId:7,owner:'session:owner'},{tabId:8,owner:'session:owner'}]);
+    entries.get(7)!.windowId=5; entries.get(8)!.windowId=6;
+    let calls=0;
+    transport.mockImplementation(async()=>{ calls+=1; if(calls===2){ await control.detached({tabId:8}); } return {ok:true,data:{allowed:true,epoch:'epoch',policy:{read:true,write:true},requests:[]}}; });
+    await control.execute(command('new',{url:'https://fixture.invalid/again'}));
+    expect(chrome.tabs.create).toHaveBeenCalledExactlyOnceWith({url:'https://fixture.invalid/again',active:false,windowId:5});
   });
 
   it('falls back to the default window when the owned tab is gone or has no window',async()=>{
