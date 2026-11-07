@@ -104,6 +104,22 @@ describe('linking', () => {
     expect(telegram.logs.join('\n')).not.toContain(TOKEN);
   });
 
+  // Live test 2026-11-07: a plain /start (Telegram's Start button, or typed) got "This code is not valid
+  // any more" although no code was sent. It says how to link instead; a wrong code still gets the old answer.
+  it('answers a /start without a code with how to link, not with an invalid code', async () => {
+    const telegram = current = fakeTelegram();
+    await telegram.bot.connect();
+    telegram.queue(telegram.message(ME, '/start'));
+    await telegram.settled();
+    expect(telegram.link).toBeNull();
+    expect(telegram.sent()).toEqual([
+      { chat_id: ME, text: 'Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.' }
+    ]);
+    telegram.queue(telegram.message(ME, '/start abcdefgh'));
+    await telegram.settled();
+    expect(telegram.link).toMatchObject({ userId: ME });
+  });
+
   it('refuses a token Telegram does not accept, with a sentence for the window', async () => {
     const telegram = current = fakeTelegram();
     telegram.replies.getMe = () => ({ ok: false, error_code: 401, description: 'Unauthorized' });
