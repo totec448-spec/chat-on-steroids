@@ -417,3 +417,39 @@ it('lets a bare /pause mean the running Goal or Loop chat, and idle ones only wh
   expect(telegramTargets('stop', chats, new Set())).toEqual([{ sessionId: 'running-loop' }, { sessionId: 'plain' }]);
   expect(telegramTargets('resume', [chat('was-paused', false, null), chat('other', false, null)], new Set(['was-paused']))).toEqual([{ sessionId: 'was-paused' }]);
 });
+
+// CodeRabbit on #1990: the phone acts only on the person's own chats, and a held turn counts as running.
+it('keeps workers and helpers out of every bare Telegram command, and counts a held turn as running for /stop', async () => {
+  const { telegramTargets } = await import('../src/main/telegram-app.js');
+  const chat = (sessionId: string, patch: Record<string, unknown> = {}) => ({ sessionId, title: sessionId, working: false, approval: false, automation: null, own: true, held: false, ...patch });
+  const chats = [chat('mine', { working: true }), chat('worker', { working: true, own: false }), chat('held', { held: true }), chat('idle')];
+  expect(telegramTargets('stop', chats as never, new Set())).toEqual([{ sessionId: 'mine' }, { sessionId: 'held' }]);
+  const looped = [chat('loop', { automation: 'Loop', working: true }), chat('worker-loop', { automation: 'Loop', working: true, own: false })];
+  expect(telegramTargets('pause', looped as never, new Set())).toEqual([{ sessionId: 'loop' }]);
+  expect(telegramTargets('resume', [chat('w', { own: false }), chat('p')] as never, new Set(['w', 'p']))).toEqual([{ sessionId: 'p' }]);
+});
+
+it('says the chats of /status without a worker or helper, as the sidebar lists the person\'s chats', async () => {
+  const { statusChatsFrom } = await import('../src/main/telegram-status.js');
+  const now = Date.parse('2026-11-07T12:00:00Z');
+  const base = { title: 'x', conversationId: 'c', updatedAt: now, lastToolCallAt: now - 1000, lastTurnEndAt: null, activeTurnId: 't' };
+  const none = { goal: () => null, card: () => null, activityExpiresAt: () => now + 60_000, held: () => false };
+  const rows = statusChatsFrom([{ ...base, id: 'a', origin: null }, { ...base, id: 'w', origin: { kind: 'worker' } }, { ...base, id: 'h', origin: { kind: 'helper' } }] as never, none, now);
+  expect(rows.map(row => [row.sessionId, row.own])).toEqual([['a', true], ['w', false]]);
+});
+
+// CodeRabbit on #1990: a new bot token must not keep the notices of the old bot. Telegram numbers messages per
+// chat, so a reply in the new chat could otherwise name a session of the old one.
+it('forgets the notices of the old bot when a new token is accepted', async () => {
+  const telegram = current = fakeTelegram({ link: linked() });
+  telegram.bot.start();
+  expect(await telegram.bot.send('A chat finished.', { sessionId: 'old-chat' })).toBe(true);
+  const oldNotice = telegram.lastMessageId;
+  await telegram.bot.connect();
+  telegram.queue(telegram.message(ME, '/start abcdefgh'));
+  await telegram.settled();
+  telegram.queue(telegram.message(ME, '/stop', { reply_to_message: { message_id: oldNotice } }));
+  await telegram.settled();
+  expect(telegram.act).not.toHaveBeenCalled();
+  expect(telegram.sent().at(-1)?.text).toBe('That notification is too old to answer. Send /status to see your chats.');
+});

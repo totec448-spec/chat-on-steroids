@@ -59,7 +59,7 @@ export interface TelegramDeps {
   /** The chats `/stop`, `/pause` or `/resume` could mean right now, when no notification says which. */
   targets(action: ChatAction): Promise<Array<{ sessionId: string }>>;
   /** Stops a chat's turn, turns its Goal or Loop off, or back on after a pause from here. */
-  act(action: ChatAction, sessionId: string): Promise<'done' | 'nothing' | 'failed'>;
+  act(action: ChatAction, sessionId: string): Promise<'done' | 'nothing' | 'failed' | 'refused'>;
   /** A reply to a notification, sent to that chat as the person's message (its own switch). */
   steer(sessionId: string, text: string): Promise<'sent' | 'queued' | 'off' | 'refused' | 'failed'>;
   text(source: TelegramText, values?: readonly (string | number)[]): string;
@@ -250,7 +250,8 @@ export function createTelegram(deps: TelegramDeps) {
     }
     const result = await deps.act(action, sessionId).catch(() => 'failed' as const);
     deps.log(`telegram: ${name} for chat ${sessionId}: ${result}`);
-    await reply(chatId, deps.text(result === 'failed' ? 'Could not do that. Open the chat in Chat On Steroids.' : ACTION_TEXTS[action][result]));
+    await reply(chatId, deps.text(result === 'failed' ? 'Could not do that. Open the chat in Chat On Steroids.'
+      : result === 'refused' ? 'That chat cannot take messages from here.' : ACTION_TEXTS[action][result]));
   }
 
   async function handleButton(query: NonNullable<Update['callback_query']>): Promise<void> {
@@ -370,6 +371,10 @@ export function createTelegram(deps: TelegramDeps) {
         throw new Error('Telegram does not accept this bot token. Copy it again from @BotFather.');
       }
       stopLoop();
+      // Notices and buttons of the earlier bot are not this one's: Telegram numbers messages per chat,
+      // so an id here could name a session of the old bot (CodeRabbit on #1990).
+      buttons.clear();
+      notices.clear();
       await deps.saveLink(null);
       botName = `@${bot.username}`;
       // Messages the bot got before this code was shown are not for it.

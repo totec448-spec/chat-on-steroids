@@ -57,13 +57,15 @@ function fakeTelegram() {
   };
 }
 
-function start(telegram: ReturnType<typeof fakeTelegram>, chats: Array<{ sessionId: string; automation: 'Goal' | 'Loop' | null; working?: boolean }>) {
-  const setAutomation = vi.fn(async (sessionId: string, on: boolean) => {
+function start(telegram: ReturnType<typeof fakeTelegram>, chats: Array<{ sessionId: string; automation: 'Goal' | 'Loop' | null; working?: boolean; own?: boolean }>,
+  options: { setAutomation?: (sessionId: string, on: boolean) => Promise<boolean> } = {}) {
+  const setAutomation = vi.fn(options.setAutomation ?? (async (sessionId: string, on: boolean) => {
     const chat = chats.find(row => row.sessionId === sessionId)!;
     chat.automation = on ? 'Goal' : null;
     return true;
-  });
+  }));
   const steer = vi.fn(async () => 'sent' as const);
+  const stop = vi.fn(async () => 'done' as const);
   return startTelegram({
     fetch: telegram.fetch as never,
     log: () => undefined,
@@ -71,10 +73,10 @@ function start(telegram: ReturnType<typeof fakeTelegram>, chats: Array<{ session
     chats: async () => chats.map(chat => ({ title: chat.sessionId, approval: false, working: chat.working ?? false, ...chat })),
     details: () => false,
     deny: async () => 'denied',
-    stop: async () => 'done',
+    stop,
     setAutomation,
     steer
-  }).then(() => ({ setAutomation, steer }));
+  }).then(() => ({ setAutomation, steer, stop }));
 }
 
 // Phase 2 (2026-10-31): /resume brings back only what /pause turned off from Telegram, also after a restart.
@@ -117,4 +119,47 @@ it('passes a reply to a notification to the app, which decides whether it may go
   telegram.say('Also run the tests', telegram.lastMessageId);
   await vi.waitFor(() => expect(telegram.sent.at(-1)?.text).toBe('On its way to the chat.'), { timeout: 5_000, interval: 10 });
   expect(app.steer).toHaveBeenCalledWith('chat-a', 'Also run the tests');
+});
+
+// CodeRabbit on #1990: a notification of a worker chat never lets the phone act on it.
+it('refuses a Stop, a pause and a reply for a worker chat even when its notification is replied to', async () => {
+  const telegram = fakeTelegram();
+  const app = await start(telegram, [{ sessionId: 'worker-1', automation: 'Loop', working: true, own: false }]);
+  expect(await telegramDestination()!.send('A chat finished.', { sessionId: 'worker-1' })).toBe(true);
+  const notice = telegram.lastMessageId;
+  for (const command of ['/stop', '/pause', 'please continue']) {
+    telegram.say(command, notice);
+    await vi.waitFor(() => expect(telegram.sent.at(-1)?.text).toBe('That chat cannot take messages from here.'), { timeout: 5_000, interval: 10 });
+    telegram.sent.length = 0;
+  }
+  expect(app.stop).not.toHaveBeenCalled();
+  expect(app.setAutomation).not.toHaveBeenCalled();
+  expect(app.steer).not.toHaveBeenCalled();
+});
+
+// CodeRabbit on #1990: Telegram owns a pause only if its switch-off really took effect.
+it('forgets the pause marker when the switch could not be turned off, and keeps it when it did', async () => {
+  const chats: Array<{ sessionId: string; automation: 'Goal' | 'Loop' | null }> = [{ sessionId: 'chat-a', automation: 'Loop' }];
+  const telegram = fakeTelegram();
+  await start(telegram, chats, { setAutomation: async () => false });
+  telegram.say('/pause');
+  await vi.waitFor(() => expect(telegram.sent.at(-1)?.text).toBe('Could not do that. Open the chat in Chat On Steroids.'), { timeout: 5_000, interval: 10 });
+  expect(await readDurable('telegram-paused')).toEqual([]);
+});
+
+it('forgets a pause the person undid and redid in the app, so /resume never turns it back on against their last choice', async () => {
+  const chats: Array<{ sessionId: string; automation: 'Goal' | 'Loop' | null }> = [{ sessionId: 'chat-a', automation: 'Loop' }];
+  const telegram = fakeTelegram();
+  const app = await start(telegram, chats);
+  telegram.say('/pause');
+  await vi.waitFor(() => expect(telegram.sent.at(-1)?.text).toBe('Paused. /resume starts it again.'), { timeout: 5_000, interval: 10 });
+  const { noteAutomationChanged } = await import('../src/main/telegram-app.js');
+  // The person turns it on in the app, then off again.
+  chats[0]!.automation = 'Loop'; noteAutomationChanged('chat-a', true);
+  chats[0]!.automation = null; noteAutomationChanged('chat-a', false);
+  app.setAutomation.mockClear();
+  telegram.say('/resume');
+  await vi.waitFor(() => expect(telegram.sent.at(-1)?.text).toBe('No chat was paused from here.'), { timeout: 5_000, interval: 10 });
+  expect(app.setAutomation).not.toHaveBeenCalled();
+  expect(await readDurable('telegram-paused')).toEqual([]);
 });

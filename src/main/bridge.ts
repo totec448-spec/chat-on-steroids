@@ -2328,6 +2328,16 @@ export async function userRequestViews(sessionId: string): Promise<UserRequestVi
   return views;
 }
 
+/**
+ * The chat holds a turn the app no longer counts as working: its stored record names an open turn
+ * and the live recorder still holds that same turn. A stored open turn alone is history (a worker's
+ * from five days earlier), never a reason for Stop to be offered (#1990).
+ */
+export function sessionHoldsTurn(session: SessionSummary): boolean {
+  const id = session.conversationId;
+  if (!id || !session.activeTurnId || session.browserRecoveryDismissedAt !== undefined || isChatBlocked(id)) return false;
+  return liveConversations().find(entry => entry.conversationId === id && entry.sessionId === session.id)?.activeTurnId === session.activeTurnId;
+}
 export async function sessionControlsFor(sessionId: string): Promise<SessionControlsView> {
   const id = await controlledConversation(sessionId);
   const control = goalSwitchFor(id);
@@ -2344,8 +2354,7 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
     (stopping || runningToolCalls(id) > 0 || (activityExpiry !== undefined ? activityExpiry !== null && activityExpiry > Date.now() :
       live?.activeTurnId === session.activeTurnId)) ? session.activeTurnId : null;
   // A worker chat may still be stopped (CodeRabbit); only the person's own Block refuses it.
-  const heldTurnId = !activeTurnId && !isChatBlocked(id) && session.activeTurnId && session.browserRecoveryDismissedAt === undefined &&
-    live?.activeTurnId === session.activeTurnId ? session.activeTurnId : null;
+  const heldTurnId = !activeTurnId && sessionHoldsTurn(session) ? session.activeTurnId : null;
   const finishHeld = !blocked && await sessionFinishHeld(sessionId, activeTurnId, id);
   const draft = goalViewFor(id) ?? goalOutcomeFor(id);
   const inputPolicy = await sessionInputPolicy(sessionId, sessionInputActivity(session));
@@ -2638,6 +2647,12 @@ export async function setSessionObjective(sessionId: string, text: string, mode:
   }, 'the app');
   return sessionControlsFor(sessionId);
 }
+/** Told after a chat's Goal or Loop was switched on or off, with who did it (Telegram's pause marker needs to know; #1990). */
+const automationListeners = new Set<(sessionId: string, on: boolean, from: string | undefined) => void>();
+export function onSessionAutomationChange(listener: (sessionId: string, on: boolean, from: string | undefined) => void): () => void {
+  automationListeners.add(listener);
+  return () => { automationListeners.delete(listener); };
+}
 export async function setSessionAutomation(sessionId: string, automation: SessionControlsView['automation'], afterTurn?: boolean,
   /** Who changed it, for the log (#1882). */
   from?: string): Promise<SessionControlsView> {
@@ -2654,6 +2669,7 @@ export async function setSessionAutomation(sessionId: string, automation: Sessio
     && getConfig().sessions.record && keyPresent);
   forgetGoalWatch(id);
   changed();
+  for (const listener of automationListeners) { try { listener(sessionId, automation !== 'off', from); } catch { /* a listener never fails a switch */ } }
   return sessionControlsFor(sessionId);
 }
 /** One ticket publication boundary shared by browser and app controls. */
