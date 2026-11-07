@@ -229,6 +229,10 @@ async function prepareNotice(sessionId: string, summary: string, userRequested =
 /** Release is an app-authored fact in the existing transcript, scoped to exact turn + frontend. */
 export async function sessionFinishHeld(sessionId: string, turnId: string | null | undefined, conversationId: string | null): Promise<boolean> {
   if (!getConfig().ui.finishTool || !turnId || !conversationId || isChatBlocked(conversationId)) return false;
+  // #2082: a turn without a finish record holds nothing. Reading the controls (Stop reads them first)
+  // must not fail on it; only ending such a turn stays refused (CodeRabbit on #2086).
+  const session = await getSession(sessionId);
+  if (session?.activeTurnId === turnId && session.conversationId === conversationId && session.finishTurn?.turnId !== turnId) return false;
   return !(await finishReleased(sessionId, turnId, conversationId));
 }
 async function finishReleased(sessionId: string, turnId: string, conversationId: string): Promise<boolean> {
