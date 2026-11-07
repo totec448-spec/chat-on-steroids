@@ -163,14 +163,14 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
     if (!observes && protectedTab(state.tabId, tab.url, command?.conversationId)) error('BROWSER_EXECUTOR_TAB: active ChatGPT orchestration owns this tab. browser_snapshot can inspect its DOM directly without attach. Input, navigation and arbitrary JavaScript remain unavailable here.');
     return tab;
   }
-  /** The window of this conversation's most recently attached tab that still exists, or null. */
+  /** The window of this conversation's most recently attached tab that still exists (with that attachment), or null. */
   async function ownedWindow(command) {
     for (const state of [...tabs.values()].reverse()) {
       if (!owns(state, command)) continue;
       const tab = await chrome.tabs.get(state.tabId).catch(() => null);
       // The lookup was asynchronous: the attachment must still be this conversation's afterwards.
       if (tabs.get(state.tabId) !== state || !owns(state, command)) continue;
-      if (Number.isInteger(tab?.windowId)) return tab.windowId;
+      if (Number.isInteger(tab?.windowId)) return { windowId: tab.windowId, state };
     }
     return null;
   }
@@ -736,9 +736,15 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
         await authorize(command);
         // Stay in the window this conversation already works in: without a window, Chrome uses the one the
         // person focused last, which scatters one task's tabs over their separate windows (#2095).
-        const windowId = await ownedWindow(command);
-        // Nothing may open after the permission was withdrawn while the window was looked up.
-        await authorize(command);
+        // Permission is checked after the lookup, and the chosen attachment must still be this
+        // conversation's after that check; otherwise the lookup is repeated (then Chrome's default).
+        let windowId = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const owned = await ownedWindow(command);
+          await authorize(command);
+          if (!owned) break;
+          if (tabs.get(owned.state.tabId) === owned.state && owns(owned.state, command)) { windowId = owned.windowId; break; }
+        }
         const tab = await chrome.tabs.create({url,active:false,...(windowId === null ? {} : {windowId})});
         // Creation is already accepted. Preserve that receipt even when attachment fails.
         // In particular, an unavailable debugger must not strand the requested URL on blank.
