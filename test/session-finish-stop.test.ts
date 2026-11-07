@@ -18,7 +18,7 @@ vi.mock('../src/main/session/store.js', async (importOriginal) => {
 });
 const { defaultConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { initSessionStore, createSession, appendEvent, readRecentEvents, resetSessionStoreForTests } = await import('../src/main/session/store.js');
-const { releaseSessionFinish } = await import('../src/main/session/finish.js');
+const { releaseSessionFinish, sessionFinishHeld } = await import('../src/main/session/finish.js');
 const { makeTempDir, removeTempDir } = await import('./helpers.js');
 
 let directory: string;
@@ -34,6 +34,9 @@ it('lets a Stop through for a turn without a finish record, and records no relea
   await appendEvent(session.id, { source: 'extension', kind: 'turn_start', turnId: 'turn-two', time: 1000 });
   hooks.dropFinish = true;
   try {
+    // The Stop path reads the chat's controls first: a turn without a finish record holds nothing
+    // (CodeRabbit on #2086), so that read must not throw either.
+    await expect(sessionFinishHeld(session.id, 'turn-two', session.conversationId)).resolves.toBe(false);
     await expect(releaseSessionFinish(session.id, 'turn-two', 'stop')).resolves.toBeUndefined();
     const progress = await readRecentEvents(session.id, 20, { kinds: ['progress'] });
     expect(progress.some(event => event.kind === 'progress' && event.progressId === 'finish-release:turn-two')).toBe(false);
