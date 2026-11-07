@@ -5074,6 +5074,8 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
    about 300px, where a row's time, Output and Stop would push Stop past the edge. The button labels
    go first (both keep their icon and accessible name); the elapsed time stays as long as it fits. */
 @container (max-width: 340px) { .background-exec-stop > span, .background-exec-output > span { display: none; } .background-exec-stop, .background-exec-output { padding-inline: 5px; } }
+/* A long elapsed label (an hour count in French or German) shrinks with an ellipsis before it can push Stop out. */
+.background-exec-process-time { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 @container (max-width: 230px) { .background-exec-process-time { display: none; } }
 @media (max-width: 480px) {
   /* Preserve the actionable process row at laptop zoom / phone-width windows. The row tooltip

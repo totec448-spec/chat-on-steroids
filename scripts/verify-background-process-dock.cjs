@@ -149,7 +149,9 @@ app.whenReady().then(async () => {
       {width:1100,height:800,zoom:1,theme:'dark',file:'wide-dark'},
       {width:640,height:800,zoom:1,theme:'light',file:'narrow-light'},
       {width:640,height:800,zoom:1.5,theme:'dark',file:'narrow-zoom'},
-      {width:420,height:800,zoom:1,theme:'dark',file:'phone-width'}
+      {width:420,height:800,zoom:1,theme:'dark',file:'phone-width'},
+      // A long elapsed label (a French or German hour count) in a ~240px column must shrink, never push Stop out (CodeRabbit on #2093).
+      {width:520,height:800,zoom:1,theme:'light',file:'narrow-long-time',longTime:true}
     ];
     const measurements = [];
     for (const sample of cases) {
@@ -157,6 +159,7 @@ app.whenReady().then(async () => {
       // 150% makes Electron preserve that effective CSS viewport for the next measurement.
       win.webContents.setZoomFactor(sample.zoom); win.setContentSize(sample.width, sample.height);
       await js(`document.documentElement.dataset.theme=${JSON.stringify(sample.theme)};frame()`);
+      if (sample.longTime) await js(`document.querySelectorAll('#backgroundExecList .background-exec-process-time').forEach(node=>{node.textContent='Läuft seit 12 Std. 59 Min. 59 Sek.'});frame()`);
       const measured = await js(`(() => {
         const dock=document.getElementById('composerDock'),proc=document.getElementById('backgroundExecStatus'),list=document.getElementById('backgroundExecList'),queue=document.getElementById('finishQueue'),composer=document.getElementById('composer');
         const stop=proc.querySelector('.background-exec-stop'),time=proc.querySelector('.background-exec-time');
