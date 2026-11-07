@@ -5813,6 +5813,41 @@ Local and public URLs, tunnel ids and plugin sources/config never appear; free t
 `redact()`. It holds no background timer, retry or recovery authority; the one timer it uses is
 one per read, cleared when the request is answered.
 
+Web Local (`main/web-local/`) is a **separate**, opt-in, read-only browser
+surface opened only by the owning Desktop main frame through the named
+`webLocal:open` IPC call. It binds numeric `127.0.0.1` on an ephemeral port
+only after that gesture, uses bounded single-use activation tickets and an
+HttpOnly/SameSite Strict cookie scoped to a random listener path, and stops
+with CoS shutdown. It currently reads only the projects owner's existing
+catalog and presents up to 50 non-ungrouped **names**, never paths, secrets,
+remote addresses, session histories or Control API credentials. No browser
+Send/Stop/worker/file/terminal/action route, Tailscale, public access or
+automatic startup exists. Its cookie is **not** port-isolated: a second local
+listener deliberately serving a known matching path can receive it, so the
+scope path is defense in depth, not device/process authentication. Stronger
+listener-bound credentials and real browser acceptance are gates before any
+sensitive Web data or commands. Unlike the Control API, this UI never enables
+the Control API's action switch.
+The single Settings → For developers row is explicitly labeled **Web Local
+preview (read-only)** with one **Open preview** button. It promises only the
+bounded Project-name preview; it adds no settings dashboard, icon or other
+control, and the listener remains off until this native gesture.
+
+Web Local diagnostics use fixed, credential-free Activity messages for an
+admitted Desktop open, listener startup/shutdown, successful one-time browser
+activation, the first successful Projects page response, a failed native
+browser handoff (whose ticket is revoked) and the first unavailable Projects
+read per listener. Expected HTTP Host, Origin,
+method, cookie and ticket refusals return their bounded HTTP errors but are
+intentionally **not** written to Activity one request at a time: an untrusted
+local client could otherwise flood the persisted log and expose credential
+material. Neither activation URLs, scope paths, cookies, project names nor raw
+browser/owner error messages enter Web Local diagnostics.
+The browser page uses a small dedicated copy catalog for English and the 12
+Desktop languages. It reads the selected UI language on each authenticated
+refresh (or Electron's system locale when unset), uses only shipped locale
+codes in HTML and falls back to English for unknown or invalid language tags.
+
 The read routes (`control-reads.ts`) are `GET /v1/sessions`, `/v1/sessions/{id}`,
 `/v1/sessions/{id}/events`, `/v1/inputs`, `/v1/agents`, `/v1/log` and `/v1/models` (the saved
 model catalog; reading it never starts discovery). Each asks the owner that

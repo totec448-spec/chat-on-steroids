@@ -86,6 +86,7 @@ import { performance } from 'node:perf_hooks';
 import { createStartupTiming, installStartupTiming, markStartup, STARTUP_STATE } from './startup-timing.js';
 import { loadConnectorIdentity } from './connector-identity.js';
 import { initControlApiPath, shutdownControlApi, startControlApi } from './control-api.js';
+import { shutdownWebLocal } from './web-local/index.js';
 import { restoreRequestCorrelations } from './session/correlation.js';
 import { restoreBlockedChats } from './session/blocked-chats.js';
 import { restoreTrustedChats } from './session/trusted-chats.js';
@@ -863,7 +864,7 @@ app.on('will-quit', (event) => {
       {
         name: 'admission/drain',
         budgetMs: 40_000,
-        run: () => [shutdownConnection(), shutdownBridge(), shutdownControlApi(), stopAgentRuntimeGc()]
+        run: () => [shutdownConnection(), shutdownBridge(), shutdownControlApi(), shutdownWebLocal(), stopAgentRuntimeGc()]
       },
       // Phase 2: only after request handlers are done may their owned child processes go.
       {
