@@ -27,6 +27,8 @@ import { KIND_ICON } from './agent-activity.js';
 import { createFilePanel } from './file-panel.js';
 import { initCommitDialog } from './commit-dialog.js';
 import { renderAgentPlan } from './agent-plan.js';
+import { keepStepFocus, renderUserRequestsDock, userRequestCard, type UserRequestActions } from './user-requests.js';
+import { USER_REQUEST_ID, type UserRequestView } from '../shared/user-requests.js';
 import { userPromptText } from '../shared/user-prompt.js';
 import { messageReaction, withoutMessageReaction } from '../shared/message-reaction.js';
 import { goalErrorMessage } from '../shared/goal-errors.js';
@@ -39,11 +41,13 @@ import { createSidebarOrder, SIDEBAR_PROJECT_SCOPE } from './sidebar-order.js';
 import { dateSections, type DateSection } from './date-sections.js';
 import { createSidebarPins, pinnedSortScope } from './sidebar-pins.js';
 import { createComposerDrafts } from './composer-drafts.js';
+import { createSelectedTabFollow } from './selected-tab-follow.js';
 import { createSidebarCompletionState } from './sidebar-completion.js';
 import { toolResultText } from './tool-result.js';
 import { renderEditCards } from './tool-artifacts.js';
 import { chatErrorPresentation, duplicateChatErrors } from './chat-error.js';
 import { renderRecoveryCountdowns } from './recovery.js';
+import { recoveryEpisode, type EpisodeItem, type RecoveryEpisode } from './recovery-episode.js';
 import { CUSTOM_CONTINUE_MAX_CHARS, type RecoveryCountdown } from '../shared/recovery.js';
 import { communicationTitle, foldAgentCommunication, participatingWorkers, workerAvatar } from './agent-communication.js';
 import { structureTimeline, type RoundPart } from './timeline-rounds.js';
@@ -123,6 +127,7 @@ import { firstTurnStart, renderTurnChanges, turnEditCount, turnFinished, turnFro
 import { initSharePage } from './share-page.js';
 import { initFeedbackDialog } from './feedback-dialog.js';
 import { createChatgptProjectPicker } from './chatgpt-project-picker.js';
+import { openRelatedFolders } from './related-folders-dialog.js';
 import { initScheduleDialog } from './schedule-dialog.js';
 import { nextRunAfter, sameLocalDay, type ScheduleRepeat } from '../shared/schedule.js';
 import { localToolDetail, localToolMetric, localToolTitle } from './tool-titles.js';
@@ -389,6 +394,12 @@ function projectMenuItems(id: string): RowMenuItem[] {
         label: () => choice ? projectColorName(choice) : t('None'), run: () => void saveProjectColor(id, choice)
       }))
     },
+    // #1689: context for this project's chats only; a link, not the groups' folder, so the two never look alike.
+    {
+      action: 'related-folders', icon: 'i-related', label: () => t('Related folders…'),
+      title: () => t('Other approved folders this work also uses'),
+      run: () => { const project = projects.find(row => row.id === id); if (project) void openRelatedFolders(api, project, message => toast(t(message))); }
+    },
     // #1797: on unless this project or Settings turned it off; Settings wins, so the switch waits there.
     {
       action: 'secrets-shield', icon: 'i-shield', toggle: true, checked: shieldEverywhere && !shieldOff,
@@ -521,6 +532,8 @@ function projectColorName(color: ProjectColor): string {
   return { blue: t('Blue'), green: t('Green'), amber: t('Amber'), purple: t('Purple'), rose: t('Rose'), teal: t('Teal') }[color];
 }
 let workspaceTerminal: ReturnType<typeof createWorkspaceTerminal> | null = null;
+/** Opens the bottom Terminal dock without starting a shell; set once the docks exist. */
+let openBottomTerminalWithoutNewShell = (): void => undefined;
 let rightWorkspaceTerminal: ReturnType<typeof createWorkspaceTerminal> | null = null;
 let workspaceDocks: ReturnType<typeof createWorkspaceDocks> | null = null;
 
@@ -1609,6 +1622,7 @@ async function deleteSession(id: string): Promise<void> {
   sessionTotal = Math.max(0, sessionTotal - 1);
   if (selectedId === id) {
     selectedId = null;
+    requestSelectedTabFollow(null);
     events = [];
     totalEvents = 0;
     detailFor = null;
@@ -1634,6 +1648,12 @@ function mergeSessionRows(rows: SessionSummary[]): void {
   const merged = new Map(sessions.map((entry) => [entry.id, entry]));
   for (const entry of rows) merged.set(entry.id, entry);
   sessions = sortSessionRows([...merged.values()]);
+  selectedTabFollow?.observe(selectedId === null ? undefined : merged.get(selectedId));
+}
+
+let selectedTabFollow: ReturnType<typeof createSelectedTabFollow> | null = null;
+function requestSelectedTabFollow(id: string | null): void {
+  selectedTabFollow?.select(id === null ? null : sessions.find(row => row.id === id) ?? { id, conversationId: null, origin: null });
 }
 
 /**
@@ -1683,10 +1703,12 @@ async function loadSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
     selectedId = null;
     detailFor = null;
     detailCursor = null;
+    requestSelectedTabFollow(null);
   }
   paintSessions();
   chatSearch?.refresh();
   const row = selectedId === null ? undefined : sessions.find(entry => entry.id === selectedId);
+  selectedTabFollow?.observe(row);
   if (detail === 'reread' || selectedId === null || detailFor !== selectedId || changed.all || changed.ids.has(selectedId) ||
       row?.updatedAt !== detailStamp?.updatedAt || row?.events !== detailStamp?.events) await loadDetail();
   else void refreshSessionControls();
@@ -2176,6 +2198,12 @@ function projectSortEntries(groupOf: typeof projectGroup = projectGroup): Array<
   return [...ids].map(id => ({ id, scope: SIDEBAR_PROJECT_SCOPE }));
 }
 
+/** The project row's hover text: its folder and, when it has some, its related folders (#1689). */
+function projectTooltip(project: LocalProject): string {
+  const related = (project.relatedFolders ?? []).map(folder => folder.split(/[\\/]/).filter(Boolean).pop() ?? folder);
+  return related.length ? `${project.path}\n${t('Related folders: {0}', [related.join(', ')])}` : project.path;
+}
+
 /**
  * The project's "⋯" button and the menu it opens (also at a right click): Color, Remove and, for a
  * native ChatGPT Project that could not be created, Retry. The project tree and the inbox share it.
@@ -2453,7 +2481,7 @@ function paintSessions(): void {
     heading.dataset.sortHandle = '';
     heading.setAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown');
     const label = el('span', 'project-name', () => project?.name ?? t("Unavailable project"));
-    ui(heading, 'title', () => project?.path ?? t("Unavailable project"));
+    ui(heading, 'title', () => project ? projectTooltip(project) : t("Unavailable project"));
     heading.append(icon('i-folder'), label);
     if (project?.remote) {
       // A folder on a server (#1469): the address is the hover text, the badge says how it is reached.
@@ -3060,6 +3088,8 @@ let controlledSessionId: string | null = null;
 let controlledTurnId: string | null = null;
 /** A turn the page still holds after the app stopped counting it as work: Stop only, no Working (2.1.47 round). */
 let controlledHeldTurnId: string | null = null;
+/** The ChatGPT chat the controls were read for: Stop names it, so it never acts on a chat the session moved to. */
+let controlledConversationId: string | null = null;
 let controlledSelection = -1;
 let controlledStopPending = false;
 let controlledFinishWaiting = false;
@@ -3112,6 +3142,8 @@ function paintGoalProgress(): void {
   else if (wait && !['saving', 'failed'].includes(phase)) { phase = 'settling'; text = ''; error = undefined; }
   // The next step's draft waits for the Goal step reviewer before it asks the helper (#1832).
   if (phase === 'sending' && wait?.reason === 'reviewer') { phase = 'settling'; text = ''; error = undefined; }
+  // A ready message held before Send by Chats working at once says why, not "Message ready" (CodeRabbit on #2051).
+  if (phase === 'ready' && (wait?.reason === 'slots' || wait?.reason === 'paused')) { phase = 'settling'; text = ''; error = undefined; }
   const labels: Record<string, string> = { saving: t("Saving task…"), saved: t("Task saved · waiting for the next completed answer"),
     preparing: t("Preparing the opening message…"), generating: t("Generating the opening message…"), ready: t("Message ready · awaiting ChatGPT delivery"),
     sending: t("Preparing a continuation…"), answering: t("Generating a continuation…"), queued: t("Opening message queued"),
@@ -3121,7 +3153,7 @@ function paintGoalProgress(): void {
   labels.retrying = t("Provider busy · retry {0}{1}", [progress?.attempt ?? '', progress?.retryAt ? t(' at {0}', [new Date(progress.retryAt).toLocaleTimeString(currentLanguage())]) : '']);
   const mode = $<HTMLSelectElement>('chatAutomation').value === 'loop' ? t('Loop') : t('Goal');
   labels.settling = `${mode} · ${wait?.reason === 'native-busy' ? t('ChatGPT resumed work · waiting before retry') : wait?.reason === 'silence' ? t('Waiting before recovery reload') : wait?.reason === 'quiet' ? t('Waiting for tool inactivity') :
-    wait?.reason === 'reviewer' ? t('Waiting for the reviewer') : wait?.reason === 'workers' ? t('Waiting for this chat’s sub-agents') : wait?.reason === 'tools' ? t('Waiting for running tools') : wait?.reason === 'listening' ? t('Waiting for activity after recovery') : wait?.reason === 'closed' ? t('Paused until this chat is open in the browser') : t('Answer settling')}`;
+    wait?.reason === 'reviewer' ? t('Waiting for the reviewer') : wait?.reason === 'workers' ? t('Waiting for this chat’s sub-agents') : wait?.reason === 'tools' ? t('Waiting for running tools') : wait?.reason === 'listening' ? t('Waiting for activity after recovery') : wait?.reason === 'closed' ? t('Paused until this chat is open in the browser') : wait?.reason === 'slots' ? t('Waiting for a free slot (Chats working at once)') : wait?.reason === 'paused' ? t('ChatGPT asked to slow down') : t('Answer settling')}`;
   // The dock already describes this same silence/listening deadline. Keep the
   // Loop/Goal task controls, but do not present its shared wait as another action.
   const sharedRecoveryWait = phase === 'settling' && wait?.until !== undefined &&
@@ -3149,6 +3181,7 @@ function paintGoalProgress(): void {
     // The reviewer's deadline is when Goal goes on without the review (#1832), not another check.
     const timer = el('span', 'recovery-countdown', wait.reason === 'reviewer'
       ? (seconds ? t('Continues without the review in {0}', [left]) : t('Continuing without the review…'))
+      : wait.reason === 'paused' ? t('Resumes in {0}', [left])
       : seconds ? t('Check in {0}', [left]) : t('Checking for activity…'));
     timer.setAttribute('role', 'timer'); timer.setAttribute('aria-live', 'off'); row.append(timer);
   }
@@ -3514,6 +3547,49 @@ function paintAutomationSwitch(): void {
   ui($<HTMLTextAreaElement>('sessionObjective'), 'placeholder', () => loop ? t("What should each continuation focus on?") : t("Optional. Leave empty to work toward what you asked in this chat."));
   paintTaskActions();
 }
+/** The selected chat's steps for the person (#1695), from its controls; cards and the dock line read them. */
+let userRequestsFor: { sessionId: string; requests: UserRequestView[]; readAt: number } | null = null;
+let userRequestsRefresh: number | undefined;
+const userRequestActions: UserRequestActions = {
+  async answer(request, answer) {
+    const id = selectedId;
+    if (!id) return;
+    // A sub-agent's step is answered in its own chat; this chat's list then reads it again.
+    const owner = request.from?.sessionId ?? id;
+    const answered = await run(api.answerUserRequest(owner, request.id, answer));
+    if (answered && id === selectedId) await refreshSessionControls();
+  },
+  readOnly: () => deps.state()?.config.readOnly === true,
+  focusFallback: () => $<HTMLTextAreaElement>('chatInput').focus()
+};
+
+function paintUserRequestSlot(slot: HTMLElement): void {
+  slot.dataset.seenAt ??= String(Date.now());
+  const known = userRequestsFor && userRequestsFor.sessionId === selectedId ? userRequestsFor : null;
+  const request = known?.requests.find(row => row.id === slot.dataset.requestId && !row.from);
+  // A step's row can arrive before the steps were read again: read them once more before saying
+  // it is gone. Older answered steps do make room for new ones (60 kept per chat).
+  const gone = !request && !!known && known.readAt > Number(slot.dataset.seenAt);
+  if (!request && known && !gone && userRequestsRefresh === undefined) {
+    userRequestsRefresh = window.setTimeout(() => { userRequestsRefresh = undefined; void refreshSessionControls(); }, 300);
+  }
+  const signature = request ? JSON.stringify([request, userRequestActions.readOnly()]) : gone ? 'gone' : 'waiting';
+  if (slot.dataset.signature === signature) return;
+  slot.dataset.signature = signature;
+  // An answered card replaces the focused one: keep the keyboard user's place (CodeRabbit on #2049).
+  keepStepFocus(slot, () => {
+    if (request) slot.replaceChildren(userRequestCard(request, userRequestActions));
+    else slot.replaceChildren(...(gone ? [el('p', 'user-request-note', () => t('This step is no longer kept.'))] : []));
+  }, userRequestActions.focusFallback);
+}
+
+/** Null requests: not read yet for this chat (cards wait instead of saying a step is gone). */
+function applyUserRequests(sessionId: string | null, requests: UserRequestView[] | null, readAt = Date.now()): void {
+  userRequestsFor = sessionId && requests ? { sessionId, requests, readAt } : null;
+  renderUserRequestsDock($('userRequests'), sessionId, requests ?? [], userRequestActions);
+  for (const slot of document.querySelectorAll<HTMLElement>('#timelineContent .user-request-slot')) paintUserRequestSlot(slot);
+}
+
 /**
  * When the selected chat's controls were last asked for (#1787). A running turn's clock is the app's
  * word that work goes on, and that word can lapse with nothing new written to the chat: a page that
@@ -3524,9 +3600,10 @@ let controlsAskedAt = 0;
 const RUNNING_CONTROLS_RECHECK_MS = 20_000;
 async function refreshSessionControls(): Promise<void> {
   const id = selectedId, generation = ++controlsGeneration;
-  controlsAskedAt = Date.now();
+  const askedAt = controlsAskedAt = Date.now();
   const planHost = $('agentPlan');
   if (planHost.dataset.sessionId !== (id ?? '')) renderAgentPlan(planHost, id, null);
+  if ((userRequestsFor?.sessionId ?? null) !== id) applyUserRequests(id, null);
   const menu = $('sessionControls');
   if (controlledSessionId !== id || controlledSelection !== selectionGeneration) {
     // Retire the previous selection's projection before awaiting the new owner's IPC.
@@ -3562,10 +3639,13 @@ async function refreshSessionControls(): Promise<void> {
   const controls = await run(api.getSessionControls(id));
   if (generation !== controlsGeneration || id !== selectedId) return;
   renderAgentPlan(planHost, id, controls?.plan ?? null);
+  // A failed read is not an empty list: keep the last view instead of calling steps gone (CodeRabbit on #2049).
+  if (controls) applyUserRequests(id, controls.userRequests ?? [], askedAt);
   controlledSessionId = id;
   controlledSelection = selectionGeneration;
   controlledTurnId = controls?.activeTurnId ?? null;
   controlledHeldTurnId = controls?.heldTurnId ?? null;
+  controlledConversationId = controls?.conversationId ?? null;
   goalDraftView = controls?.goalDraft ?? null;
   goalWaitView = controls?.goalWait ?? null;
   finishGoalDraftView = controls?.finishGoalDraft ?? null;
@@ -5359,6 +5439,21 @@ function toolBody(event: Extract<SessionEvent, { kind: 'tool_call' }>, context?:
   }
   box.append(head);
 
+  // A step handed to the person (#1695): the card is the row's content, always shown. Its state
+  // comes from the chat's steps (controls), so it updates in place when the person answers.
+  // Only in the selected chat's own timeline: the worker inspector (`context`) has no step list for
+  // that worker, so there the call keeps its normal, readable tool output (CodeRabbit on #2049).
+  const requestId = !context && call.tool === 'ask_user_to_run' && call.outcome === 'ok' ? USER_REQUEST_ID.exec(call.result.text)?.[0] : undefined;
+  if (requestId) {
+    box.classList.add('is-user-request');
+    box.open = true;
+    const slot = el('div', 'user-request-slot');
+    slot.dataset.requestId = requestId;
+    box.append(slot);
+    paintUserRequestSlot(slot);
+    return box;
+  }
+
   // Collapsed calls only need their headline. Large recorded results must not
   // consume layout/DOM work, or evict surrounding prose, before they are opened.
   let populated = false;
@@ -6992,7 +7087,7 @@ function pickupNowWords(done: PickupNowOutcome): string {
   if (done.ok) return done.did === 'queued' ? t('Continue queued. It goes out as soon as ChatGPT takes it.') : t('Trying again now.');
   switch (done.code) {
     case 'no-chat': return t('This chat has no ChatGPT conversation yet.');
-    case 'history-limit': return t('ChatGPT limits this chat for a few minutes. The app tries again right after.');
+    case 'history-limit': return t('ChatGPT is limiting this chat right now. The app tries again when the wait is over.');
     case 'nothing-waiting': return t('Nothing is waiting to be picked up in this chat any more.');
     case 'changed': return t('This step changed meanwhile. Check the chat and try again.');
     case 'not-sent': return t('Not sent now: something in this chat is still running. The app keeps trying.');
@@ -7001,8 +7096,110 @@ function pickupNowWords(done: PickupNowOutcome): string {
   return '';
 }
 
+/** Chats whose recovery episode list is open; per chat, until the episode ends. */
+const expandedRecoveryEpisodes = new Set<string>();
+
+function episodeItemText(item: EpisodeItem): string {
+  if (item.kind === 'continue') return item.text === 'fresh-turn' ? t('Fresh turn started') : t('Automatic Continue sent');
+  if (item.kind === 'turn') return t('The turn failed');
+  return item.kind === 'reload' ? repairRowText(t(item.text)) : t(item.text);
+}
+
+/**
+ * #1883: the recovery row shown says since when the chat has been in trouble and how often the app
+ * tried, and opens to every step; amber when the app stopped trying. Repaints only on a change, so
+ * the countdown's tick never rebuilds the control under the pointer or the keyboard focus.
+ */
+function decorateRecoveryEpisode(host: HTMLElement, episode: RecoveryEpisode | null, sessionId: string | null, stopped: boolean): void {
+  const row = host.querySelector<HTMLElement>('.recovery-notice');
+  for (const notice of host.querySelectorAll<HTMLElement>('.recovery-notice')) notice.classList.toggle('is-stopped', notice === row && stopped);
+  const old = host.querySelector<HTMLElement>('.recovery-episode-meta');
+  const list = host.querySelector<HTMLElement>('.recovery-episode-list');
+  if (!row || !episode || !sessionId) { old?.remove(); list?.remove(); return; }
+  const expanded = expandedRecoveryEpisodes.has(sessionId);
+  // Every shown step, so a reload that ended after a later step still updates an open list (CodeRabbit on #2062).
+  const signature = JSON.stringify([sessionId, episode.since, episode.items.map(item => [item.kind, item.time, item.text]), episode.tries, expanded, currentLanguage()]);
+  if (old?.dataset.episode === signature && old.parentElement === row) return;
+  old?.remove(); list?.remove();
+  const since = new Date(episode.since).toLocaleTimeString(currentLanguage(), { hour: 'numeric', minute: '2-digit' });
+  const summary = episode.tries ? t('Since {0} · {1}', [since, tn('{0} try', '{0} tries', episode.tries)]) : t('Since {0}', [since]);
+  const meta = el('button', 'recovery-episode-meta') as HTMLButtonElement;
+  meta.type = 'button';
+  meta.dataset.episode = signature;
+  meta.setAttribute('aria-expanded', String(expanded));
+  meta.setAttribute('aria-controls', 'recoveryEpisodeList');
+  meta.title = expanded ? t('Hide what was tried') : t('Show what was tried');
+  meta.setAttribute('aria-label', `${summary}. ${meta.title}`);
+  meta.append(el('span', '', summary), disclosureChevron());
+  meta.onclick = () => {
+    if (expandedRecoveryEpisodes.has(sessionId)) expandedRecoveryEpisodes.delete(sessionId);
+    else expandedRecoveryEpisodes.add(sessionId);
+    paintRecoveryStatus();
+    host.querySelector<HTMLElement>('.recovery-episode-meta')?.focus();
+  };
+  // Before the countdown and the row's own actions, after what is happening now, which shows on one
+  // line here: its full words are the label's tooltip and the first line of the list.
+  const label = row.querySelector<HTMLElement>('.queue-label');
+  if (label) label.title = label.textContent ?? '';
+  label?.after(meta);
+  if (!expanded) return;
+  const items = el('div', 'recovery-episode-list background-exec-list');
+  items.id = 'recoveryEpisodeList';
+  items.setAttribute('role', 'list');
+  for (const item of [...episode.items].reverse()) {
+    const line = el('div', 'recovery-episode-item');
+    line.setAttribute('role', 'listitem');
+    const time = document.createElement('time');
+    time.dateTime = new Date(item.time).toISOString();
+    time.textContent = new Date(item.time).toLocaleTimeString(currentLanguage(), { hour: 'numeric', minute: '2-digit' });
+    line.append(time, el('span', '', episodeItemText(item)));
+    items.append(line);
+  }
+  row.after(items);
+}
+
 /** The live deadline takes precedence over the existing dismissible repair receipt. */
 function paintRecoveryStatus(): boolean {
+  // The rows below are redrawn while a turn ticks; keyboard focus on the episode control stays put.
+  const focusedMeta = document.activeElement instanceof HTMLElement && document.activeElement.matches('#recoveryStatus .recovery-episode-meta');
+  const shown = paintRecoveryRows();
+  const host = $('recoveryStatus');
+  const sessionId = selectedId;
+  const episode = detailFor === selectedId ? recoveryEpisode(events) : null;
+  const countdowns = selectedId && controlledSessionId === selectedId && controlledSelection === selectionGeneration ? controlledRecovery : [];
+  const live = episode && (episode.current || countdowns.length) ? episode : null;
+  if (sessionId && !live) expandedRecoveryEpisodes.delete(sessionId);
+  // Nothing scheduled and no receipt or note shown, but the chat is still where ChatGPT's error or a
+  // failed turn left it: that stays in view until the chat works again or the person dismisses it. A
+  // reload keeps its own short receipt, and the app's notes their own row.
+  const lastItem = live?.items.at(-1);
+  if (host.hidden && live && sessionId && lastItem && (lastItem.kind === 'error' || lastItem.kind === 'turn')) {
+    const last = lastItem;
+    const revision = JSON.stringify(['episode', live.since, last.time, last.text]);
+    if (dismissedRecoveryNotices.get(sessionId) !== revision) {
+      const row = el('div', 'recovery-notice');
+      row.append(icon(live.stopped ? 'i-warning' : 'i-pulse'), el('span', 'queue-label', episodeItemText(last)),
+        dockAction(() => t('Dismiss recovery notice'), 'i-x', () => {
+          dismissedRecoveryNotices.set(sessionId, revision);
+          host.hidden = true; host.replaceChildren();
+        }));
+      host.replaceChildren(row);
+      host.hidden = false;
+    }
+  }
+  if (!host.hidden) {
+    const stopped = !!live && (live.stopped || countdowns.some(countdown => countdown.kind === 'pickup-stopped' && countdown.exhausted === true));
+    decorateRecoveryEpisode(host, live, sessionId, stopped);
+    const row = host.querySelector<HTMLElement>('.recovery-notice');
+    const glyph = row?.querySelector(':scope > .ico');
+    if (glyph) setIcon(glyph, stopped ? 'i-warning' : 'i-pulse');
+    const meta = host.querySelector<HTMLElement>('.recovery-episode-meta');
+    if (focusedMeta && meta && document.activeElement !== meta) meta.focus({ preventScroll: true });
+  }
+  return shown;
+}
+
+function paintRecoveryRows(): boolean {
   const host = $('recoveryStatus');
   const countdowns = selectedId && controlledSessionId === selectedId && controlledSelection === selectionGeneration ? controlledRecovery : [];
   const sessionForCountdown = controlledSessionId;
@@ -7048,7 +7245,11 @@ function paintRecoveryStatus(): boolean {
   const advanced = recovery && events.some(event => positionOf(event) > positionOf(recovery) &&
     ((event.kind === 'turn_start' && event.turnId !== recovery.turnId) ||
       (event.kind === 'user_message' && event.source === 'extension')));
-  host.hidden = !recovery || !!advanced || Date.now() - recovery.time > 120000 || (!!sessionId && dismissedRecoveryNotices.get(sessionId) === revision);
+  // A later step of the same episode (ChatGPT's error, a stop note) is what is happening now: the
+  // reload's receipt gives way to it (CodeRabbit on #2062).
+  const newest = recovery?.kind === 'progress' ? recoveryEpisode(events)?.items.at(-1) : undefined;
+  const superseded = !!newest && recovery?.kind === 'progress' && newest.time > (recovery.updatedAt ?? recovery.time);
+  host.hidden = !recovery || !!advanced || superseded || Date.now() - recovery.time > 120000 || (!!sessionId && dismissedRecoveryNotices.get(sessionId) === revision);
   host.replaceChildren();
   if (host.hidden) return paintRecoveryVerdict(host, sessionId);
   if (!host.hidden && recovery?.kind === 'progress') {
@@ -7072,13 +7273,25 @@ function paintRecoveryStatus(): boolean {
  * with every reason written somewhere nobody was looking. The newest app note (never a handoff
  * note) stays here until a newer question or turn supersedes it, or it is dismissed.
  */
+/** Per shown stop note: how long the chat's newest answer was when the note first showed. */
+const verdictAnswerChars = new Map<string, number>();
 function paintRecoveryVerdict(host: HTMLElement, sessionId: string | null): boolean {
   const verdict = detailFor === selectedId ? [...events].reverse().find(event => event.source === 'app' && event.kind === 'note' && !event.continuation) : undefined;
   if (verdict?.kind !== 'note') return false;
   const revision = JSON.stringify(['note', verdict.time, verdict.message.text]);
+  // An answer begun before the note that keeps growing is the chat working (CodeRabbit on #2062): its
+  // length when the note was first shown is the baseline; only more text counts, not a markup revision.
+  const answer = [...events].reverse().find(event => event.kind === 'assistant_message' && event.source === 'extension');
+  const answerChars = answer?.kind === 'assistant_message' ? answer.message.chars ?? answer.message.text.length : 0;
+  const key = `${sessionId ?? ''}\u0000${revision}`;
+  if (!verdictAnswerChars.has(key)) verdictAnswerChars.set(key, answerChars);
+  const grew = answerChars > verdictAnswerChars.get(key)!;
+  // The chat moved on after the note the way the episode counts it (#1883): a new turn or message, an
+  // answer from the page, or a tool call (CodeRabbit on #2062).
   const superseded = events.some(event => positionOf(event) > positionOf(verdict) &&
-    (event.kind === 'turn_start' || (event.kind === 'user_message' && event.source === 'extension')));
-  if (superseded || (!!sessionId && dismissedRecoveryNotices.get(sessionId) === revision)) return false;
+    (event.kind === 'turn_start' || event.kind === 'tool_call' || (event.kind === 'user_message' && event.source === 'extension') ||
+      (event.kind === 'assistant_message' && event.source === 'extension')));
+  if (superseded || grew || (!!sessionId && dismissedRecoveryNotices.get(sessionId) === revision)) return false;
   const row = el('div', 'recovery-notice');
   row.append(icon('i-pulse'), el('span', 'queue-label', verdict.message.text),
     dockAction(() => t('Dismiss recovery notice'), 'i-x', () => {
@@ -7227,6 +7440,30 @@ function configureBackgroundProcessStop(stop: HTMLButtonElement, row: RunningExe
   };
 }
 
+/** Output: the command's output, read-only, in a Terminal dock tab (#1920). */
+/** Only when this app offers agent output: an older preload or a fixture shows no Output (CodeRabbit on #2052). */
+function agentOutputAvailable(): boolean {
+  return typeof (window.api as { agentOutputOpen?: unknown }).agentOutputOpen === 'function';
+}
+function backgroundProcessOutputButton(row: RunningExecProcess): HTMLButtonElement {
+  const button = el('button', 'background-exec-output') as HTMLButtonElement;
+  button.type = 'button';
+  // Which process and incarnation it opens, so a repaint can give a keyboard user the same button back.
+  button.dataset.process = `${row.processId}:${row.incarnation}`;
+  button.append(icon('i-terminal'), el('span', '', () => t('Output')));
+  ui(button, 'title', () => t('Show this command\'s output, read-only'));
+  ui(button, 'aria-label', () => t('Show the output of {0}, read-only', [backgroundCommand(row.command) || '#' + row.processId]));
+  button.onclick = event => {
+    event.stopPropagation();
+    const sessionId = selectedId;
+    if (!sessionId || !workspaceTerminal) return;
+    if (workspaceTerminal.openAgentOutput({ sessionId, processId: row.processId, incarnation: row.incarnation, command: row.command })) {
+      openBottomTerminalWithoutNewShell();
+    }
+  };
+  return button;
+}
+
 function paintBackgroundProcessStops(): void {
   const disabled = backgroundProcessStopping !== null;
   $('backgroundExecStatus').querySelectorAll<HTMLButtonElement>('.background-exec-stop').forEach(stop => { stop.disabled = disabled; });
@@ -7238,6 +7475,8 @@ function paintBackgroundProcesses(): void {
   const liveStatus = $('backgroundExecLiveStatus');
   const list = $('backgroundExecList');
   const rows = sortedBackgroundProcesses();
+  // A repaint replaces the Output buttons: the focused one is found again afterwards (CodeRabbit on #2052).
+  const focusedOutput = (document.activeElement as HTMLElement | null)?.closest?.<HTMLElement>('.background-exec-output')?.dataset.process;
   if (!selectedId || !rows.length) {
     if (selectedId) expandedBackgroundProcessSessions.delete(selectedId);
     host.hidden = true;
@@ -7272,6 +7511,13 @@ function paintBackgroundProcesses(): void {
   const stop = host.querySelector<HTMLButtonElement>('.background-exec-stop')!;
   stop.hidden = multiple;
   configureBackgroundProcessStop(stop, first);
+  // The same process keeps its button: a press that spans a repaint (every 400 ms while a chat works)
+  // still lands on it (CodeRabbit on #2052).
+  const outputKey = `${first.processId}:${first.incarnation}`;
+  const shownOutput = host.querySelector<HTMLElement>('.background-exec-output');
+  const keepOutput = !multiple && agentOutputAvailable();
+  if (shownOutput && (!keepOutput || shownOutput.dataset.process !== outputKey)) shownOutput.remove();
+  if (keepOutput && (!shownOutput || shownOutput.dataset.process !== outputKey)) stop.before(backgroundProcessOutputButton(first));
   const chevron = host.querySelector<HTMLElement>('.background-exec-chevron')!;
   chevron.hidden = !multiple;
   host.classList.toggle('is-expandable', multiple);
@@ -7305,6 +7551,10 @@ function paintBackgroundProcesses(): void {
     host.onkeydown = null;
   }
   list.hidden = !expanded;
+  // Each row keeps its Output button while its process and incarnation are the same, so a press that
+  // spans a repaint still lands (CodeRabbit on #2052).
+  const keptOutputs = new Map([...list.querySelectorAll<HTMLButtonElement>('.background-exec-output')]
+    .map(button => [button.dataset.process ?? '', button] as const));
   list.replaceChildren();
   if (expanded) {
     for (const row of rows) {
@@ -7323,11 +7573,17 @@ function paintBackgroundProcesses(): void {
       stopIcon.setAttribute('aria-hidden', 'true');
       itemStop.append(stopIcon, el('span'));
       configureBackgroundProcessStop(itemStop, row);
-      item.append(itemCommand, itemTime, itemStop);
+      const output = agentOutputAvailable()
+        ? keptOutputs.get(`${row.processId}:${row.incarnation}`) ?? backgroundProcessOutputButton(row) : null;
+      item.append(itemCommand, itemTime, ...(output ? [output] : []), itemStop);
       list.append(item);
     }
   }
   host.hidden = false;
+  if (focusedOutput && !host.contains(document.activeElement) && !list.contains(document.activeElement)) {
+    [...host.querySelectorAll<HTMLElement>('.background-exec-output'), ...list.querySelectorAll<HTMLElement>('.background-exec-output')]
+      .find(button => button.dataset.process === focusedOutput)?.focus();
+  }
   paintBackgroundProcessTimes();
   syncBackgroundProcessClock(true);
 }
@@ -8006,6 +8262,7 @@ export function chatSettingsPatch(current: Config): {
       enabled: $<HTMLInputElement>('homeMaEnabled').checked,
       maxWorkers: number('maWorkers', current.multiAgent.maxWorkers, 1, 8),
       globalMaxWorkers: number('globalMaWorkers', current.multiAgent.globalMaxWorkers ?? 0, 0, 64),
+      chatsAtOnce: Math.min(10, Math.max(0, Number.parseInt($<HTMLSelectElement>('chatsAtOnce').value, 10) || 0)),
       allowUnattributedCalls: $<HTMLInputElement>('allowUnattributedCalls').checked,
       strictChatAllowlist: $<HTMLInputElement>('strictChatAllowlist').checked,
       recoverAgentTabs: $<HTMLInputElement>('recoverAgentTabs').checked,
@@ -8456,7 +8713,7 @@ const CHAT_INPUTS = [
   'goalReviewer',
   'autoCompact',
   'autoCompactTokens',
-  'maWorkers', 'globalMaWorkers',
+  'maWorkers', 'globalMaWorkers', 'chatsAtOnce',
   'allowUnattributedCalls',
   'strictChatAllowlist',
   'recoverAgentTabs',
@@ -8518,9 +8775,11 @@ function heldBySendCheck(entry: InputEntry): boolean {
   return entry.state === 'queued' && !!entry.sendCheck && sendCheckConfigured && entry.sendCheck.nextAt > Date.now();
 }
 
-function queuedWaitReason(entry: InputEntry): 'send-check' | 'extension' | 'tool-call' | 'chatgpt-answering' | 'chatgpt-turn' | 'chatgpt-project' | 'chatgpt-project-failed' | 'project-removed' | null {
+function queuedWaitReason(entry: InputEntry): 'send-check' | 'extension' | 'tool-call' | 'chatgpt-answering' | 'chatgpt-turn' | 'chatgpt-project' | 'chatgpt-project-failed' | 'project-removed' | 'slots' | 'paused' | null {
   if (entry.state !== 'queued' || entry.error || entry.dueAt > Date.now() || entry.delivery === 'tool') return null;
   if (heldBySendCheck(entry)) return 'send-check';
+  // Chats working at once (#1694): main says which automatic sends wait, and for what.
+  if (entry.slotWait) return entry.slotWait;
   if (!bridgePresent) return 'extension';
   // The chat's page has it and sends it when its own turn ends (2026-11-03); pages repeat the hold
   // every few seconds, so an older one no longer says why.
@@ -8536,6 +8795,7 @@ export function chatApply(state: AppState, previous?: Config): void {
   const { config, bridge } = state;
   applyRouteSettling(state.status.routeSettlingUntil ?? 0);
   if (bridgePresent !== bridge.present) { bridgePresent = bridge.present; paintPendingInputs(); }
+  selectedTabFollow?.observe(sessions.find(row => row.id === selectedId));
   if (sendCheckConfigured !== !!config.ui.sendCheckUrl) { sendCheckConfigured = !!config.ui.sendCheckUrl; paintPendingInputs(); }
   if (visible && selectedId) void refreshSessionControls();
   applyChatModels(config, previous);
@@ -8573,6 +8833,7 @@ export function chatApply(state: AppState, previous?: Config): void {
     String(config.multiAgent.globalMaxWorkers ?? 0),
     previous?.multiAgent.globalMaxWorkers
   );
+  applyChatValue($<HTMLSelectElement>('chatsAtOnce'), String(config.multiAgent.chatsAtOnce ?? 0), previous?.multiAgent.chatsAtOnce);
   if (previous && workerSlotLimit(previous.multiAgent) !== workerSlotLimit(config.multiAgent)) agentPanel?.refreshSlots();
   applyChatChecked(
     $<HTMLInputElement>('allowUnattributedCalls'),
@@ -8712,7 +8973,7 @@ function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
   if (!visibleInputIds.has(entry.id)) row.classList.add('is-entering');
   visibleInputIds.add(entry.id);
   if (visibleInputIds.size > 100) visibleInputIds.delete(visibleInputIds.values().next().value!);
-  const status = () => entry.error ? t(entry.error) : held ? t("Sending in a moment…") : waiting === 'send-check' ? sendCheckHold(entry)! : waiting === 'extension' ? t("Waiting for the browser extension to connect") : waiting === 'tool-call' ? t("Waiting for the running tool call to finish") : waiting === 'chatgpt-answering' ? t("Waiting for ChatGPT to finish its answer") : waiting === 'chatgpt-turn' ? t("Waiting for ChatGPT's page to end its turn") : waiting === 'chatgpt-project' ? t("Creating this project in ChatGPT…") : waiting === 'chatgpt-project-failed' ? t("This project's ChatGPT Project isn't available. Retry it from the project's menu.") : waiting === 'project-removed' ? t("This chat's project was removed from the sidebar. Add its folder again to send this message, or cancel it.") : (entry.state === 'failed' ? t("Delivery not confirmed") : entry.state === 'decision' ? t("Preparing follow-up") : entry.state === 'browser' ? t("Delivery confirmation pending") : entry.state === 'tool' ? t("Sent to the active turn · awaiting receipt") : entry.dueAt > Date.now() ? t("Scheduled {0}", [new Date(entry.dueAt).toLocaleString(currentLanguage())]) : entry.delivery === 'tool' ? t("Waiting for the next tool call") : t("Queued"));
+  const status = () => entry.error ? t(entry.error) : held ? t("Sending in a moment…") : waiting === 'send-check' ? sendCheckHold(entry)! : waiting === 'slots' ? t("Waiting for a free slot (Chats working at once)") : waiting === 'paused' ? t("ChatGPT asked to slow down · waits until it says") : waiting === 'extension' ? t("Waiting for the browser extension to connect") : waiting === 'tool-call' ? t("Waiting for the running tool call to finish") : waiting === 'chatgpt-answering' ? t("Waiting for ChatGPT to finish its answer") : waiting === 'chatgpt-turn' ? t("Waiting for ChatGPT's page to end its turn") : waiting === 'chatgpt-project' ? t("Creating this project in ChatGPT…") : waiting === 'chatgpt-project-failed' ? t("This project's ChatGPT Project isn't available. Retry it from the project's menu.") : waiting === 'project-removed' ? t("This chat's project was removed from the sidebar. Add its folder again to send this message, or cancel it.") : (entry.state === 'failed' ? t("Delivery not confirmed") : entry.state === 'decision' ? t("Preparing follow-up") : entry.state === 'browser' ? t("Delivery confirmation pending") : entry.state === 'tool' ? t("Sent to the active turn · awaiting receipt") : entry.dueAt > Date.now() ? t("Scheduled {0}", [new Date(entry.dueAt).toLocaleString(currentLanguage())]) : entry.delivery === 'tool' ? t("Waiting for the next tool call") : t("Queued"));
   const files = el('div', 'message-attachments');
   if (entry.attachments?.length) files.append(...entry.attachments.map(file => attachmentCard(file)));
   for (const image of entry.images ?? []) { const preview = document.createElement('img'); preview.src = image.dataUrl; preview.alt = image.name; files.append(preview); }
@@ -9164,11 +9425,19 @@ async function retryPlannedInput(entry: InputEntry): Promise<void> {
 function showAutoSkillReceipt(entry: Pick<InputEntry, 'autoSkills'>): void {
   if (entry.autoSkills?.length) toast(t('Auto-selected Skill: /{0}', [entry.autoSkills[0]!.id]));
 }
+/**
+ * Stop for the turn and chat the window showed. What came of it is said only while that chat is still
+ * the one in view: a reply that arrives after the person moved on belongs to the other chat (CodeRabbit on #2066).
+ */
+async function stopShownTurn(sessionId: string, turnId: string, conversationId: string | null, stillShown: () => boolean): Promise<void> {
+  const reply = await api.stopSessionTurn(sessionId, turnId, conversationId);
+  if (!reply.ok && stillShown()) toast(t(reply.error));
+}
 async function stopCurrentTurn(): Promise<void> {
   const id = selectedId, turnId = controlledTurnId ?? controlledHeldTurnId, generation = selectionGeneration;
   if (!id || controlledSessionId !== id || controlledSelection !== generation || !turnId || controlledStopPending) return;
   controlledStopPending = true; paintDeliveryControls();
-  try { await run(api.stopSessionTurn(id, turnId)); }
+  try { await stopShownTurn(id, turnId, controlledConversationId, () => selectedId === id && selectionGeneration === generation); }
   finally { if (selectedId === id && selectionGeneration === generation) { controlledStopPending = false; void refreshSessionControls(); } }
 }
 let composerDiscoveryGeneration = 0;
@@ -9190,6 +9459,7 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
     const sameSelection = () => selectedId === target && selectionGeneration === selection;
     // The turn the button showed Stop for, before the refresh can change it (CodeRabbit).
     const shownTurn = controlledSessionId === target && controlledSelection === selection ? controlledTurnId ?? controlledHeldTurnId : null;
+    const shownConversation = shownTurn ? controlledConversationId : null;
     await refreshSessionControls();
     if (!sameSelection()) return;
     // An actual turn takes precedence over queued follow-ups. Stop never silently
@@ -9198,9 +9468,13 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
     if (nowTurn && (!shownTurn || nowTurn === shownTurn)) {
       await stopCurrentTurn(); return;
     }
-    // The turn it showed Stop for ended or changed meanwhile (or the read failed): stop nothing
-    // else, and cancel nothing either.
-    if (shownTurn) return;
+    // The turn it showed Stop for ended or changed meanwhile (or the read failed): ChatGPT is asked to
+    // stop nothing else and no message is cancelled, but main still ends the app's own work for this
+    // chat and says what happened (Haz on #1883).
+    if (shownTurn) {
+      if (target) { await stopShownTurn(target, shownTurn, shownConversation, sameSelection); if (sameSelection()) void refreshSessionControls(); }
+      return;
+    }
     const pending = pendingComposerInput();
     if (pending && ['queued', 'browser'].includes(pending.state)) {
       const wasStarting = startingInputs.has(pending.id);
@@ -9403,7 +9677,7 @@ function selectSession(id: string): void {
     paintDetail(false);
     paintHandoff();
     // With Background chats on, the chat's tab becomes the selected one in that window (#1249).
-    void api.followSessionTab?.(id)?.catch(() => undefined);
+    requestSelectedTabFollow(id);
   }
   void loadDetail();
   void refreshInputQueue();
@@ -9417,6 +9691,7 @@ function selectNewChat(projectId: string | null = null, branch: typeof newChatBr
   inputQueueGeneration++;
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   newChatSelected = true; selectedId = null; selectedProjectId = projectId; detailFor = null; detailCursor = null;
+  requestSelectedTabFollow(null);
   refreshBackgroundProcesses();
   sendAnchor = null; readingAfterSend = false; readerAtEnd = true;
   if (projectId) expandedProjects.add(projectId);
@@ -9434,6 +9709,7 @@ function selectNewChat(projectId: string | null = null, branch: typeof newChatBr
 }
 
 export function initChat(next: Deps): void {
+  selectedTabFollow = createSelectedTabFollow(id => api.followSessionTab?.(id));
   sidebarCompletion = createSidebarCompletionState();
   sidebarPins = createSidebarPins();
   sidebarOrder = createSidebarOrder($('sessionList'), () => [
@@ -9727,6 +10003,7 @@ export function initChat(next: Deps): void {
   workspaceTerminal = createWorkspaceTerminal(() => docks.toggleBottomTerminal(), docks.bottomBody,
     { onEmpty: () => docks.setBottomOpen(false), onClosePanel: () => docks.setBottomOpen(false), onSendSelection });
   workspaceTerminal.update(selectedLocalProject());
+  openBottomTerminalWithoutNewShell = () => docks.setBottomOpen(true, false);
   rightWorkspaceTerminal = createWorkspaceTerminal(() => docks.toggleBottomTerminal(), docks.body,
     { id: 'workspaceTerminalRight', dockedTabs: true, onTabsChanged: () => docks.sync(), onSendSelection });
   rightWorkspaceTerminal.update(selectedLocalProject());

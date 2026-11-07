@@ -3896,3 +3896,440 @@ it.each(['GPT-5.6 Sol', 'gpt-6-pro'])('sends a message typed after Stop once Cha
   expect((await input.pendingBrowserInputs()).some(item => item.id === queued.id)).toBe(false);
 });
 
+
+// "Chats working at once" (#1694): the app's own sends wait for a slot; the person's never do.
+it("holds a scheduled run while other chats fill every slot, never the person's own message, and goes when one frees", async () => {
+  const slots = await import('../src/main/chats-at-once.js');
+  const bridgeSource = slots.workingChatsSourceForTests();
+  let working = new Set<string>(['another-chat']);
+  slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(() => working);
+  try {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false },
+      multiAgent: { ...defaultConfig().multiAgent, chatsAtOnce: 1 } });
+    const conversationId = randomUUID();
+    const session = await createSession({ title: 'Scheduled run waits for a slot', conversationId });
+    const scheduled = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Check the issues',
+      scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+    expect((await input.pendingBrowserInputs()).some(item => item.id === scheduled.id)).toBe(false);
+    expect((await input.listInputs()).find(item => item.id === scheduled.id)?.slotWait).toBe('slots');
+    expect(await input.queuedInputOfferBlocker(scheduled.id)).toMatch(/free slot: 1 chats are working \(limit 1\)/);
+    // The person's own message goes out with every slot taken, also in a chat that is not working.
+    const mine = await createSession({ title: 'My own chat', conversationId: randomUUID() });
+    const typed = await input.enqueueInput({ ...message(mine.id, 'off'), mode: 'auto', text: 'My own question' });
+    expect((await input.pendingBrowserInputs()).some(item => item.id === typed.id)).toBe(true);
+    await input.cancelInput(typed.id);
+    // The other chat finishes: the scheduled run is offered, and its row no longer says it waits.
+    working = new Set();
+    expect((await input.pendingBrowserInputs()).some(item => item.id === scheduled.id)).toBe(true);
+    expect((await input.listInputs()).find(item => item.id === scheduled.id)?.slotWait).toBeUndefined();
+    // Offered again on the next poll before its chat shows as working: its slot is its own.
+    working = new Set(['a-third-chat']);
+    expect((await input.pendingBrowserInputs()).some(item => item.id === scheduled.id)).toBe(true);
+    await input.cancelInput(scheduled.id);
+  } finally {
+    slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(bridgeSource);
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  }
+});
+
+// CodeRabbit on #2051: time the app itself held a message is not the browser's minute.
+it('keeps a slot-held scheduled run queued past the pickup minute, also across a restart, and counts the minute from the release', async () => {
+  const slots = await import('../src/main/chats-at-once.js');
+  const bridgeSource = slots.workingChatsSourceForTests();
+  let working = new Set<string>(['another-chat']);
+  slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(() => working);
+  let now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false },
+      multiAgent: { ...defaultConfig().multiAgent, chatsAtOnce: 1 } });
+    const session = await createSession({ title: 'Scheduled run held past a minute', conversationId: randomUUID() });
+    const scheduled = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Check the issues',
+      scheduled: { scheduleId: randomUUID(), dueAt: now, late: false } });
+    const state = async () => (await input.listInputs()).find(item => item.id === scheduled.id)?.state;
+    for (let step = 0; step < 6; step++) {
+      expect((await input.pendingBrowserInputs()).some(item => item.id === scheduled.id)).toBe(false);
+      now += 20_000;
+    }
+    expect(await state()).toBe('queued');
+    // A restart while it is held: the saved hold still counts.
+    await flushDurable(); input.resetInputForTests();
+    now += 30_000;
+    expect(await state()).toBe('queued');
+    // The slot frees: offered, and the browser's minute starts now.
+    working = new Set();
+    expect((await input.pendingBrowserInputs()).some(item => item.id === scheduled.id)).toBe(true);
+    now += 50_000;
+    expect(await state()).toBe('queued');
+    now += 15_000;
+    expect(await state()).toBe('failed');
+  } finally {
+    clock.mockRestore();
+    slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(bridgeSource);
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  }
+});
+
+it("refuses the claim and Send of an automatic message once ChatGPT's pause starts after its offer", async () => {
+  const slots = await import('../src/main/chats-at-once.js');
+  const bridgeSource = slots.workingChatsSourceForTests();
+  slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(() => new Set());
+  try {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false },
+      multiAgent: { ...defaultConfig().multiAgent, chatsAtOnce: 2 } });
+    const conversationId = randomUUID();
+    const session = await createSession({ title: 'Pause after the offer', conversationId });
+    const scheduled = () => input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Check the issues',
+      scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+    const first = await scheduled();
+    expect((await input.pendingBrowserInputs()).some(item => item.id === first.id)).toBe(true);
+    // Claimed with Send still to be authorized, then the pause starts.
+    expect(await input.claimBrowserInput(first.id, 'pause-page', conversationId, true)).not.toBeNull();
+    const now = Date.now();
+    slots.noteChatLimit('limited-a', null, now, now);
+    slots.noteChatLimit('limited-b', null, now, now);
+    expect(await input.authorizeBrowserInput(first.id, 'pause-page', conversationId)).toBe(false);
+    await input.cancelInput(first.id);
+    // Offered before the pause, claimed after it: not handed out, still queued.
+    slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(() => new Set());
+    const second = await scheduled();
+    expect((await input.pendingBrowserInputs()).some(item => item.id === second.id)).toBe(true);
+    slots.noteChatLimit('limited-a', null, Date.now(), Date.now());
+    slots.noteChatLimit('limited-b', null, Date.now(), Date.now());
+    expect(await input.claimBrowserInput(second.id, 'pause-page', conversationId, true)).toBeNull();
+    expect((await input.listInputs()).find(item => item.id === second.id)?.state).toBe('queued');
+    await input.cancelInput(second.id);
+  } finally {
+    slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(bridgeSource);
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  }
+});
+
+it("pauses on ChatGPT's blocking limit notice in two chats even without a retry time, and not on a replayed old one", async () => {
+  const slots = await import('../src/main/chats-at-once.js');
+  const bridgeSource = slots.workingChatsSourceForTests();
+  slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(() => new Set());
+  try {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false },
+      multiAgent: { ...defaultConfig().multiAgent, chatsAtOnce: 2 } });
+    const limited = async (at: number) => {
+      const conversationId = randomUUID();
+      await createSession({ title: 'Limited chat', conversationId });
+      await post('/events', { conversationId, events: [
+        { kind: 'chat_error', text: 'You have hit your limit. Please try again later.', recoverable: false, blocking: true, time: at }
+      ] });
+    };
+    // Two notices replayed from twenty minutes ago: no new evidence.
+    await limited(Date.now() - 20 * 60_000);
+    await limited(Date.now() - 20 * 60_000);
+    expect(slots.chatsAtOnceStatus().pauseUntil).toBeNull();
+    // Two fresh ones without a retry time: the 15-minute pause (CodeRabbit on #2051).
+    await limited(Date.now());
+    expect(slots.chatsAtOnceStatus().pauseUntil).toBeNull();
+    await limited(Date.now());
+    expect(slots.chatsAtOnceStatus().pauseUntil).toBeGreaterThan(Date.now() + 14 * 60_000);
+  } finally {
+    slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(bridgeSource);
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  }
+});
+
+it('takes no slot for a message that waits for its ChatGPT Project anyway', async () => {
+  const slots = await import('../src/main/chats-at-once.js');
+  const bridgeSource = slots.workingChatsSourceForTests();
+  slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(() => new Set());
+  const folder = path.join(directory, 'slot-project-' + randomUUID());
+  await fs.mkdir(folder);
+  try {
+    const config = defaultConfig();
+    await saveConfig({ ...config, roots: [{ name: 'slot-project', path: folder }], goal: { ...config.goal, enabled: false },
+      multiAgent: { ...config.multiAgent, chatsAtOnce: 1 } });
+    // The project's ChatGPT Project is still being asked for: its new chat cannot open yet.
+    const project = await addProject(folder);
+    const waiting = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', projectId: project.id, text: 'Start the report',
+      scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+    expect((await input.pendingBrowserInputs()).some(item => item.id === waiting.id)).toBe(false);
+    // The only slot stays free for another chat's automatic message.
+    const session = await createSession({ title: 'Gets the free slot', conversationId: randomUUID() });
+    const other = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Check the issues',
+      scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+    expect((await input.pendingBrowserInputs()).some(item => item.id === other.id)).toBe(true);
+    await input.cancelInput(other.id); await input.cancelInput(waiting.id);
+  } finally {
+    slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(bridgeSource);
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  }
+});
+
+it("holds a Loop step at /goal/draft while other chats fill every slot, says so in the chat, and lets it ask once one frees", async () => {
+  const bridge = await import('../src/main/bridge.js');
+  const slots = await import('../src/main/chats-at-once.js');
+  const bridgeSource = slots.workingChatsSourceForTests();
+  let working = new Set<string>(['another-chat']);
+  slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(() => working);
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Loop step waits for a slot', conversationId });
+  let now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    await saveConfig({ ...defaultConfig(), multiAgent: { ...defaultConfig().multiAgent, chatsAtOnce: 1 } });
+    await post('/events', { conversationId, events: [
+      { kind: 'model_selection', model: 'gpt-6-pro', time: now },
+      { kind: 'user_message', messageId: 'request', text: 'Build all stage layers', time: now },
+      { kind: 'turn_start', turnId: 'slot-source', time: now },
+      { kind: 'turn_end', turnId: 'slot-source', outcome: 'failed', reason: 'thinking_failed', time: now + 1 }
+    ] });
+    await goal.setGoalSwitchNow(conversationId, 'loop', false, true);
+    now += 300001;
+    await bridge.setSessionAutomation(session.id, 'loop');
+    const pending = goal.goalPendingReplyFor(conversationId)!;
+    expect(pending).toBeTruthy();
+    const draft = { conversationId, turnId: pending.turnId, clientId: 'slot-page', terminalRequired: true };
+    const held = await post('/goal/draft', draft);
+    expect(held.status).toBe(409);
+    expect(held.body).toMatchObject({ error: 'chats_at_once', retryable: true });
+    expect((await bridge.sessionControlsFor(session.id)).goalWait).toEqual({ reason: 'slots' });
+    working = new Set();
+    expect((await post('/goal/draft', draft)).status).toBe(200);
+    // A request refused for another reason holds no slot (CodeRabbit on #2051): the gate is asked last.
+    slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(() => working);
+    expect((await post('/goal/draft', { ...draft, clientId: 'another-page' })).body.error).toBe('goal_owned_elsewhere');
+    expect(slots.automaticSendRefusal('input:someone-else', 'someone-else')).toBeNull();
+    await bridge.setSessionAutomation(session.id, 'off');
+  } finally {
+    clock.mockRestore();
+    slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(bridgeSource);
+    await saveConfig(defaultConfig());
+  }
+});
+
+it("asks again at Send for a ready Goal message whose slot hold ran out while it was drafted (CodeRabbit on #2051)", async () => {
+  const bridge = await import('../src/main/bridge.js');
+  const slots = await import('../src/main/chats-at-once.js');
+  const bridgeSource = slots.workingChatsSourceForTests();
+  let working = new Set<string>();
+  slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(() => working);
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Goal message waits at Send', conversationId });
+  let now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    // Offline templates: the draft is ready without a helper chat or an API key.
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, backend: 'templates' },
+      multiAgent: { ...defaultConfig().multiAgent, chatsAtOnce: 1 } });
+    await goal.setGoalObjectiveNow(conversationId, 'Complete the current requested work');
+    await goal.setGoalSwitchNow(conversationId, 'goal', true);
+    await post('/events', { conversationId, events: [
+      { kind: 'model_selection', model: 'gpt-6-pro', time: now },
+      { kind: 'user_message', messageId: 'request', text: 'Build all stage layers', time: now },
+      { kind: 'turn_start', turnId: 'send-source', time: now },
+      { kind: 'assistant_message', turnId: 'send-source', messageId: 'send-source-answer', text: 'More remains\n[[COS_GOAL:CONTINUE]]', state: 'final', final: true, time: now + 1 },
+      { kind: 'turn_end', turnId: 'send-source', outcome: 'completed', time: now + 2 }
+    ] });
+    const store = await import('../src/main/session/store.js');
+    const [answer] = await store.readRecentEvents(session.id, 1, { kinds: ['assistant_message'] });
+    await goal.acceptGoalReplyNow({ conversationId, sessionId: session.id, replyId: 'send-source-obligation', turnId: 'send-source', eventSeq: answer!.seq, blocked: false });
+    const pending = goal.goalPendingReplyFor(conversationId)!;
+    expect(pending).toBeTruthy();
+    expect((await post('/goal/draft', { conversationId, turnId: pending.turnId, clientId: 'slot-page', terminalRequired: true })).status).toBe(200);
+    // Drafting outlasts the slot's hold and another chat takes the only slot meanwhile: the ready
+    // message is asked about again at Send and waits, untyped (CodeRabbit on #2051).
+    await vi.waitFor(() => expect(goal.goalViewFor(conversationId, 'slot-page')?.stage).toBe('ready'), { timeout: 10_000, interval: 25 });
+    const activity = () => fetch(`http://127.0.0.1:${bridgePort()}/activity?conversationId=${conversationId}&goalClient=slot-page`, { headers: {
+      authorization: `Bearer ${bearer}`, 'x-extension-version': APP_VERSION, 'x-extension-protocol': String(BRIDGE_PROTOCOL)
+    } }).then(r => r.json());
+    expect((await activity()).goal.slotWait).toBeUndefined();
+    now += 3 * 60_000;
+    working = new Set(['another-chat']);
+    expect((await activity()).goal).toMatchObject({ draft: { stage: 'ready' }, slotWait: expect.stringMatching(/1 chats are working/) });
+    // The desktop chat says why too, instead of "Message ready" (CodeRabbit on #2051).
+    expect((await bridge.sessionControlsFor(session.id)).goalWait).toEqual({ reason: 'slots' });
+    working = new Set();
+    expect((await activity()).goal.slotWait).toBeUndefined();
+    expect((await bridge.sessionControlsFor(session.id)).goalWait).toBeNull();
+    await bridge.setSessionAutomation(session.id, 'off');
+  } finally {
+    clock.mockRestore();
+    slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(bridgeSource);
+    await saveConfig(defaultConfig());
+  }
+});
+
+// #2074: the texts a page may treat as this app's own leftover in the message box.
+it("lists only the app's own automatic messages ChatGPT received, never the person's, as message-box leftovers", async () => {
+  await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Own leftovers', conversationId });
+  const deliver = async (row: { id: string }, messageId: string) => {
+    expect(await input.claimBrowserInput(row.id, 'leftover-page', conversationId, true)).not.toBeNull();
+    expect(await input.authorizeBrowserInput(row.id, 'leftover-page', conversationId)).toBe(true);
+    expect(await input.acknowledgeBrowserInput(row.id, 'leftover-page', conversationId, messageId)).toBe(true);
+  };
+  const scheduled = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Check the open issues and report',
+    scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+  await deliver(scheduled, 'scheduled-message');
+  const mine = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'My own question about the issues' });
+  await deliver(mine, 'my-message');
+  const waiting = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Not sent yet',
+    scheduled: { scheduleId: randomUUID(), dueAt: Date.now() + 60 * 60_000, late: false } });
+  const sent = await input.ownSentResidue(conversationId);
+  // Each with its ChatGPT message id, which the page matches to the chat's latest message (CodeRabbit on #2079).
+  expect(sent).toEqual([expect.objectContaining({ messageId: 'scheduled-message', text: expect.stringContaining('Check the open issues and report') })]);
+  expect(sent.some(row => row.text.includes('My own question'))).toBe(false);
+  expect(sent.some(row => row.text.includes('Not sent yet'))).toBe(false);
+  expect(await input.ownSentResidue(randomUUID())).toEqual([]);
+  await input.cancelInput(waiting.id);
+  // The outbox keeps only its newest finished rows across all chats; the chat's latest automatic
+  // send is still known after they are gone, and after a restart (CodeRabbit on #2079).
+  await flushDurable();
+  await writeDurableNow('session-input', []);
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(conversationId)).toEqual([expect.objectContaining({ messageId: 'scheduled-message' })]);
+});
+
+// #2074 saved data: the own-sent store starts empty for data saved by the previous version, and a
+// damaged file or entry is dropped while the good entries stay.
+it('reads the own-sent store from an older version as empty and drops damaged entries', async () => {
+  const conversationId = randomUUID();
+  await flushDurable();
+  await writeDurableNow('own-sent-receipts', null);
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(conversationId)).toEqual([]);
+  await writeDurableNow('own-sent-receipts', 'not a list');
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(conversationId)).toEqual([]);
+  await writeDurableNow('own-sent-receipts', [
+    { conversationId, text: 'Continue the task', messageId: 'kept-message', at: Date.now() },
+    { conversationId, text: '', messageId: 'empty-text', at: Date.now() },
+    { conversationId: 42, text: 'Broken owner', messageId: 'bad-owner', at: Date.now() },
+    { conversationId, text: 'Private words with a broken time', messageId: 'bad-time', at: 'yesterday' },
+    'garbage'
+  ]);
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(conversationId)).toEqual([{ text: 'Continue the task', messageId: 'kept-message' }]);
+  // The rejected rows leave the disk too, not only memory (CodeRabbit on #2079).
+  await flushDurable();
+  const { readDurable } = await import('../src/main/durable.js');
+  expect(JSON.stringify(await readDurable('own-sent-receipts'))).not.toContain('Private words');
+  // A file whose JSON is broken still holds text on disk: it is replaced by a clean store.
+  const file = path.join(directory, 'state', 'own-sent-receipts.json');
+  await fs.writeFile(file, '[{"conversationId":"x","text":"Private words in a broken file"', 'utf8');
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(conversationId)).toEqual([]);
+  await flushDurable();
+  const raw = await fs.readFile(file, 'utf8');
+  expect(raw).not.toContain('Private words');
+  expect(JSON.parse(raw)).toEqual({ version: 1, receipts: [], forgotten: [] });
+});
+
+// CodeRabbit on #2079: a chat ChatGPT deleted loses its own-sent record, and a save keeps nothing
+// older than the window a page may use it in.
+it('forgets the own-sent record of a chat ChatGPT deleted, and drops old records when it saves', async () => {
+  const { readDurable } = await import('../src/main/durable.js');
+  const gone = randomUUID(), old = randomUUID();
+  await flushDurable();
+  await writeDurableNow('own-sent-receipts', [
+    { conversationId: gone, text: 'Continue the task', messageId: 'gone-message', at: Date.now() },
+    { conversationId: old, text: 'An old continue', messageId: 'old-message', at: Date.now() - 25 * 60 * 60_000 }
+  ]);
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(gone)).toEqual([{ text: 'Continue the task', messageId: 'gone-message' }]);
+  expect(await input.ownSentResidue(old)).toEqual([]);
+  await input.failInputsForDeletedConversation(gone);
+  expect(await input.ownSentResidue(gone)).toEqual([]);
+  // Saved at once, without the deleted chat's text and without the old record.
+  expect(await readDurable('own-sent-receipts')).toEqual({ version: 1, receipts: [], forgotten: [expect.objectContaining({ conversationId: gone })] });
+});
+
+// CodeRabbit on #2079: a send acknowledged after its chat was deleted does not record it again.
+it("does not record a deleted chat's automatic send that is acknowledged afterwards", async () => {
+  const { readDurable } = await import('../src/main/durable.js');
+  await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Deleted while sending', conversationId });
+  const scheduled = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'The person\'s scheduled words',
+    scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+  expect(await input.claimBrowserInput(scheduled.id, 'late-page', conversationId, true)).not.toBeNull();
+  expect(await input.authorizeBrowserInput(scheduled.id, 'late-page', conversationId)).toBe(true);
+  await input.forgetOwnSent([conversationId]);
+  expect(await input.acknowledgeBrowserInput(scheduled.id, 'late-page', conversationId, 'late-message')).toBe(true);
+  await flushDurable();
+  const saved = await readDurable<{ receipts: Array<{ conversationId: string }> }>('own-sent-receipts');
+  expect(saved?.receipts.some(row => row.conversationId === conversationId)).toBe(false);
+  // After a restart too.
+  input.resetInputForTests();
+  await input.forgetOwnSent([]);
+  expect((await readDurable<{ receipts: Array<{ conversationId: string }> }>('own-sent-receipts'))?.receipts
+    .some(row => row.conversationId === conversationId)).toBe(false);
+});
+
+// CodeRabbit on #2079: expired text leaves the disk when the store is read, and a deletion racing
+// another chat's send keeps both changes.
+it('drops expired own-sent text from disk on read, and keeps both changes when a deletion races a send', async () => {
+  const { readDurable } = await import('../src/main/durable.js');
+  await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  const expired = randomUUID(), deleted = randomUUID();
+  await flushDurable();
+  await writeDurableNow('own-sent-receipts', { version: 1, receipts: [
+    { conversationId: expired, text: 'An expired continue', messageId: 'expired-message', at: Date.now() - 25 * 60 * 60_000 },
+    { conversationId: deleted, text: 'Soon deleted', messageId: 'deleted-message', at: Date.now() }
+  ], forgotten: [] });
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(expired)).toEqual([]);
+  await flushDurable();
+  expect(((await readDurable<any>('own-sent-receipts'))!.receipts as Array<{ messageId: string }>).map(row => row.messageId)).toEqual(['deleted-message']);
+  // A send for another chat is acknowledged while the deletion is being saved.
+  const kept = randomUUID();
+  const session = await createSession({ title: 'Kept while another is deleted', conversationId: kept });
+  const scheduled = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Kept continue',
+    scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+  expect(await input.claimBrowserInput(scheduled.id, 'race-page', kept, true)).not.toBeNull();
+  expect(await input.authorizeBrowserInput(scheduled.id, 'race-page', kept)).toBe(true);
+  await Promise.all([input.forgetOwnSent([deleted]), input.acknowledgeBrowserInput(scheduled.id, 'race-page', kept, 'kept-message')]);
+  await flushDurable();
+  const saved = (await readDurable<any>('own-sent-receipts'))!;
+  expect((saved.receipts as Array<{ messageId: string }>).map(row => row.messageId)).toEqual(['kept-message']);
+  expect((saved.forgotten as Array<{ conversationId: string }>).map(row => row.conversationId)).toEqual([deleted]);
+});
+
+// CodeRabbit on #2079: a store that cannot be read for the moment is not cached as empty.
+it('reads the own-sent store again after it could not be read for a moment', async () => {
+  const conversationId = randomUUID();
+  const dir = path.join(directory, 'state', 'own-sent-receipts.json');
+  await flushDurable();
+  await fs.rm(dir, { force: true });
+  // A directory where the file belongs: unreadable, but not damaged data.
+  await fs.mkdir(dir, { recursive: true });
+  input.resetInputForTests();
+  await expect(input.ownSentResidue(conversationId)).rejects.toThrow();
+  await fs.rm(dir, { recursive: true, force: true });
+  await writeDurableNow('own-sent-receipts', { version: 1, receipts: [
+    { conversationId, text: 'Continue the task', messageId: 'readable-again', at: Date.now() }], forgotten: [] });
+  // Not the empty snapshot of the failed read.
+  expect(await input.ownSentResidue(conversationId)).toEqual([{ text: 'Continue the task', messageId: 'readable-again' }]);
+});
+
+// CodeRabbit on #2079: a send acknowledged while the store could not be read is recorded once it can.
+it('records an automatic send acknowledged while the own-sent store was unreadable, once it reads again', async () => {
+  const { readDurable } = await import('../src/main/durable.js');
+  await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Acknowledged while unreadable', conversationId });
+  const file = path.join(directory, 'state', 'own-sent-receipts.json');
+  await flushDurable();
+  await fs.rm(file, { recursive: true, force: true });
+  await fs.mkdir(file, { recursive: true });
+  input.resetInputForTests();
+  const scheduled = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Continue while unreadable',
+    scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+  expect(await input.claimBrowserInput(scheduled.id, 'unreadable-page', conversationId, true)).not.toBeNull();
+  expect(await input.authorizeBrowserInput(scheduled.id, 'unreadable-page', conversationId)).toBe(true);
+  // The acknowledgement itself never fails on the store.
+  expect(await input.acknowledgeBrowserInput(scheduled.id, 'unreadable-page', conversationId, 'unreadable-message')).toBe(true);
+  await fs.rm(file, { recursive: true, force: true });
+  await writeDurableNow('session-input', []);
+  // Readable again, and the outbox history no longer has the row: the receipt is still recorded.
+  expect(await input.ownSentResidue(conversationId)).toEqual([expect.objectContaining({ messageId: 'unreadable-message' })]);
+  await flushDurable();
+  expect(JSON.stringify(await readDurable('own-sent-receipts'))).toContain('unreadable-message');
+});

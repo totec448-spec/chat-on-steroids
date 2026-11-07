@@ -518,6 +518,12 @@
   "content_goal_wait_workers": {
     "message": "Esperando a los subagentes de este chat"
   },
+  "content_goal_wait_slots": {
+    "message": "Esperando un hueco libre (Chats trabajando a la vez)"
+  },
+  "content_goal_wait_paused": {
+    "message": "ChatGPT pidió ir más despacio · espera hasta la hora indicada"
+  },
   "content_goal_writing_first_message": {
     "message": "$1 está escribiendo el primer mensaje"
   },
@@ -942,16 +948,16 @@
     "message": "pendiente"
   },
   "popup_pipeline_call_fallback_many": {
-    "message": "La aplicación no pudo ubicar $1 llamadas por ID de solicitud — recurrió a $2."
+    "message": "La aplicación no pudo ubicar $1 llamadas por ID de solicitud. En su lugar: $2."
   },
   "popup_pipeline_call_fallback_many__one": {
-    "message": "La aplicación no pudo ubicar $1 llamada por ID de solicitud — recurrió a $2."
+    "message": "La aplicación no pudo ubicar $1 llamada por ID de solicitud. En su lugar: $2."
   },
   "popup_pipeline_call_fallback_many__many": {
-    "message": "La aplicación no pudo ubicar $1 de llamadas por ID de solicitud — recurrió a $2."
+    "message": "La aplicación no pudo ubicar $1 de llamadas por ID de solicitud. En su lugar: $2."
   },
   "popup_pipeline_call_fallback_one": {
-    "message": "La aplicación no pudo ubicar una llamada por ID de solicitud — recurrió a $1."
+    "message": "La aplicación no pudo ubicar una llamada por ID de solicitud. En su lugar: $1."
   },
   "popup_pipeline_delivery_blocked": {
     "message": "El envío está bloqueado hasta conectar la aplicación y confirmar la compatibilidad del protocolo."

@@ -244,6 +244,13 @@ export interface SpawnParams {
 
 const EARLY_EXIT_GRACE_PERIOD_MS = 150;
 const POST_EXIT_CLOSE_WAIT_CAP_MS = 50;
+/**
+ * A person's view of a command (#1920) shows its exit line only after its output went quiet this
+ * long: a PTY closes its output with its exit, yet its last data can arrive just after it
+ * (CodeRabbit on #2052). Bounded, and only the view waits; the agent's own reads are unchanged.
+ */
+const WATCH_EXIT_QUIET_MS = 150;
+const WATCH_EXIT_QUIET_CAP_MS = 1_000;
 export const MAX_COMPLETED_EXEC_RESULTS = 64;
 export const COMPLETED_EXEC_OUTPUT_BYTES = 256 * 1024;
 
@@ -437,8 +444,15 @@ class UnifiedExecProcess {
     }
   }
 
+  /** Read-only viewers of this output (#1920); they see each chunk and take nothing from the agent's reads. */
+  private readonly watchers = new Set<(chunk: Buffer) => void>();
+  watch(listener: (chunk: Buffer) => void): () => void { this.watchers.add(listener); return () => { this.watchers.delete(listener); }; }
+  /** The output so far, as retained for completed results (head and tail, with a marker where bytes were left out). */
+  historyBytes(): Buffer { return this.history.toBytesWithOmissionMarker(); }
+
   private pushChunk(chunk: Buffer): void {
     if (chunk.length === 0) return;
+    for (const watcher of this.watchers) { try { watcher(chunk); } catch { /* a viewer never breaks the command */ } }
     this.history.pushChunk(chunk);
     this.buffer.pushChunk(chunk);
     if (this.batchDisplay) this.displayBuffer!.pushChunk(this.batchDisplay.push(chunk));
@@ -1043,6 +1057,38 @@ export class UnifiedExecProcessManager {
   }
 
   /** Live sessions, oldest id first. */
+  /**
+   * A live, read-only view of a running command's output for the person (#1920): the output so far,
+   * then each new chunk, then its exit. Nothing is consumed, so the agent's own polls read exactly
+   * what they would have. Null when that exact process (id and incarnation) is not running.
+   */
+  watchOutput(processId: number, incarnation: number, onChunk: (chunk: Buffer) => void,
+    onExit: (completion: ProcessCompletion) => void): { history: Buffer; startedAt: number; unsubscribe: () => void } | null {
+    const entry = this.processes.get(processId);
+    if (!entry || entry.incarnation !== incarnation) return null;
+    let watching = true;
+    let lastChunkAt = 0;
+    const process = entry.process;
+    const stop = process.watch(chunk => { lastChunkAt = Date.now(); onChunk(chunk); });
+    void process.completion.then(async completion => {
+      // A pipe's streams can still be draining when it exits: the same bounded wait as a completed read.
+      if (!process.outputClosed) {
+        const closed = process.outputClosedNotify.notified();
+        try { await raceWithTimeout([closed], POST_EXIT_CLOSE_WAIT_CAP_MS); } finally { closed.dispose(); }
+      }
+      if (process.tty) {
+        const exitedAt = Date.now();
+        while (watching && Date.now() - exitedAt < WATCH_EXIT_QUIET_CAP_MS) {
+          const quietFor = Date.now() - Math.max(lastChunkAt, exitedAt);
+          if (quietFor >= WATCH_EXIT_QUIET_MS) break;
+          await new Promise(resolve => setTimeout(resolve, WATCH_EXIT_QUIET_MS - quietFor));
+        }
+      }
+      if (watching) onExit(completion);
+    });
+    return { history: entry.process.historyBytes(), startedAt: entry.startedAt, unsubscribe: () => { watching = false; stop(); } };
+  }
+
   listProcesses(): BackgroundTerminalInfo[] {
     return [...this.processes.values()]
       .filter((entry) => !entry.process.hasExited())

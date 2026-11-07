@@ -114,7 +114,7 @@ export function showDesktopAskPrompt(prompt: DesktopAskPrompt): Promise<'go' | '
 
 /** The setting where the app can tell idle time and drive input; elsewhere it never asks. */
 function desktopAskMode(): DesktopAskMode {
-  if (process.platform !== 'darwin' && process.platform !== 'win32') return 'off';
+  if (process.platform !== 'darwin' && process.platform !== 'win32' && process.platform !== 'linux') return 'off';
   return getConfig().ui.desktopAsk ?? 'off';
 }
 
@@ -143,9 +143,14 @@ const desktopAsk = (): ReturnType<typeof createDesktopAsk> => gate ??= createDes
  * Before a desktop step that takes the real mouse or keyboard: null when it may run, else the
  * refusal to return instead. Call desktopStepEnded() once the step is over.
  */
-export function askBeforeDesktopStep(words: DesktopStepWords, app: string | null): Promise<string | null> {
-  const caller = currentCaller();
-  return desktopAsk().admit({ words, app }, { sessionId: caller.sessionId ?? null, conversationId: caller.conversationId, transportKey: caller.transportKey });
+export function askBeforeDesktopStep(words: DesktopStepWords, app: string | null, provenCaller?: DesktopAskCaller): Promise<string | null> {
+  // Linux refs resolve request-id proof separately from the asynchronous call context.
+  // Forward that exact proven owner rather than falling back to a shared transport key.
+  const caller = provenCaller ?? currentCaller();
+  return desktopAsk().admit({ words, app }, {
+    sessionId: caller.sessionId ?? null, conversationId: caller.conversationId,
+    transportKey: caller.transportKey, scopedPrincipal: provenCaller?.scopedPrincipal
+  });
 }
 
 export function desktopStepEnded(): void {
