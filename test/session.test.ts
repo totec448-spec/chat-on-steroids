@@ -1122,6 +1122,12 @@ describe('session store', () => {
     const more = await upsertMessageEvent(summary.id, { time: 140, source: 'extension', kind: 'assistant_message', messageId,
       message: text('I found the relevant code paths. There are two separations to keep.'), state: 'streaming', final: false });
     expect(more.changed).toBe(true);
+    // The grown message is still final; a delayed shorter streaming snapshot must not shrink it (CodeRabbit on #2099).
+    const delayed = await upsertMessageEvent(summary.id, { time: 150, source: 'extension', kind: 'assistant_message', messageId,
+      message: text('I found the relevant code paths. There'), state: 'streaming', final: false });
+    expect(delayed.changed).toBe(false);
+    // The worker dock's answer line follows the grown text, not the first sentence.
+    expect((await getSession(summary.id))?.lastAnswerLine).toContain('There are two separations');
     const done = await upsertMessageEvent(summary.id, { time: 180, source: 'extension', kind: 'assistant_message', messageId,
       message: text('I found the relevant code paths. There are two separations to keep. Done.'), state: 'final', final: true });
     expect(done.changed).toBe(true);
