@@ -142,3 +142,20 @@ it('keeps keyboard focus on the next step after one is answered, or hands it bac
   keepStepFocus(slot, () => slot.replaceChildren(userRequestCard(request({ state: 'done', answeredAt: 2 }), actions)), fallback);
   expect(fallback).toHaveBeenCalledTimes(2);
 });
+
+it('writes an answered step\'s time like the timeline does, without a leading zero (2.1.51 polish pass)', async () => {
+  (window as any).api = { writeClipboard: vi.fn() };
+  const { userRequestCard } = await import('../src/renderer/user-requests.js');
+  const at = new Date(2026, 10, 6, 5, 2).getTime();
+  const done = userRequestCard(request({ state: 'done', answeredAt: at, found: [] }), { answer: vi.fn(), readOnly: () => false });
+  const expected = new Date(at).toLocaleString('en', { hour: 'numeric', minute: '2-digit', month: 'short', day: 'numeric' });
+  expect(done.textContent).toContain(expected);
+  expect(done.textContent).not.toContain(new Date(at).toLocaleString('en', { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' }));
+  // A 24-hour language writes it as its own clock does (CodeRabbit on #2092).
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  try {
+    const german = userRequestCard(request({ state: 'done', answeredAt: at, found: [] }), { answer: vi.fn(), readOnly: () => false });
+    expect(german.textContent).toContain(new Date(at).toLocaleString('de', { hour: 'numeric', minute: '2-digit', month: 'short', day: 'numeric' }));
+  } finally { setLanguage('en'); }
+});
