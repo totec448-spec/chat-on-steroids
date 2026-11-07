@@ -48,7 +48,8 @@ function size(bytes: number): string {
 }
 
 function clock(at: number): string {
-  return new Date(at).toLocaleString(currentLanguage(), { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' });
+  // The hour as the timeline writes its own times ("5:02 PM", not "05:02 PM"; 2.1.51 polish pass).
+  return new Date(at).toLocaleString(currentLanguage(), { hour: 'numeric', minute: '2-digit', month: 'short', day: 'numeric' });
 }
 
 function copyButton(label: () => string, value: string): HTMLButtonElement {
