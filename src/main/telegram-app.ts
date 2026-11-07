@@ -49,12 +49,27 @@ function validLink(raw: unknown): TelegramLink | null {
  * chats asked "Several chats could be meant" (live test, 2026-11-07).
  */
 export function telegramTargets(action: ChatAction, chats: ReadonlyArray<StatusChat & { sessionId: string }>, pausedHere: ReadonlySet<string>): Array<{ sessionId: string }> {
+  // The phone acts only on the person's own chats: never a worker, whose Stop or pause would take
+  // work from the chat that started it (CodeRabbit on #1990).
+  const own = chats.filter(chat => chat.own !== false);
   const pick = (rows: ReadonlyArray<StatusChat & { sessionId: string }>) => rows.map(chat => ({ sessionId: chat.sessionId }));
-  if (action === 'stop') return pick(chats.filter(chat => chat.working));
-  if (action === 'resume') return pick(chats.filter(chat => pausedHere.has(chat.sessionId) && chat.automation === null));
-  const automated = chats.filter(chat => chat.automation !== null);
+  // A held turn is running as far as Stop goes: the stop callback ends it too.
+  if (action === 'stop') return pick(own.filter(chat => chat.working || chat.held === true));
+  if (action === 'resume') return pick(own.filter(chat => pausedHere.has(chat.sessionId) && chat.automation === null));
+  const automated = own.filter(chat => chat.automation !== null);
   const running = automated.filter(chat => chat.working);
   return pick(running.length ? running : automated);
+}
+
+/**
+ * The person's own control turned a chat's Goal or Loop on or off. A pause Telegram made no longer
+ * stands then: /resume must never turn it back on against what they did last (CodeRabbit on #1990).
+ */
+export function noteAutomationChanged(sessionId: string, on: boolean): void {
+  if (!paused.has(sessionId) || !on) return;
+  const next = new Set([...paused].filter(id => id !== sessionId));
+  paused = next;
+  void writeDurableNow(PAUSED_STATE, [...next]).catch(() => undefined);
 }
 
 /** At startup: reads the linked account and, when there is one, starts listening. */
@@ -85,15 +100,22 @@ export async function startTelegram(deps: TelegramAppDeps): Promise<void> {
     details: deps.details,
     deny: deps.deny,
     targets: async (action: ChatAction) => telegramTargets(action, await deps.chats(), paused),
-    act: async (action: ChatAction, sessionId: string) => {
-      if (action === 'stop') return deps.stop(sessionId);
+    act: async (action: ChatAction, sessionId: string): Promise<'done' | 'nothing' | 'failed' | 'refused'> => {
+      // Looked up now, not when the notification was sent: a reply to a worker's notification is
+      // refused here, and so is a chat that was a worker meanwhile (CodeRabbit on #1990).
       const chat = (await deps.chats()).find(row => row.sessionId === sessionId);
+      if (chat && chat.own === false) { deps.log(`telegram: /${action} refused: that chat is a worker`); return 'refused'; }
+      if (action === 'stop') return deps.stop(sessionId);
       if (!chat) return 'nothing';
       if (action === 'pause') {
         if (chat.automation === null) return 'nothing';
-        // Saved first: a pause /resume cannot find again would leave the chat off for good.
+        // Saved first: a pause /resume cannot find again would leave the chat off for good. Kept
+        // only if the switch really went off, so a failed pause is never resumed later.
         await savePaused(new Set([...paused, sessionId]));
-        return await deps.setAutomation(sessionId, false) ? 'done' : 'failed';
+        if (await deps.setAutomation(sessionId, false)) return 'done';
+        const now = (await deps.chats()).find(row => row.sessionId === sessionId);
+        if (now && now.automation !== null) await savePaused(new Set([...paused].filter(id => id !== sessionId)));
+        return 'failed';
       }
       // Turned back on in the app meanwhile, or never paused from here: nothing to resume.
       if (!paused.has(sessionId) || chat.automation !== null) {
@@ -104,7 +126,11 @@ export async function startTelegram(deps: TelegramAppDeps): Promise<void> {
       await savePaused(new Set([...paused].filter(id => id !== sessionId)));
       return 'done';
     },
-    steer: deps.steer,
+    steer: async (sessionId, text) => {
+      const chat = (await deps.chats()).find(row => row.sessionId === sessionId);
+      if (chat && chat.own === false) { deps.log('telegram: a reply was refused: that chat is a worker'); return 'refused'; }
+      return deps.steer(sessionId, text);
+    },
     text: (source: TelegramText, values) => fill(deps.mainText(source), values),
     changed: () => { for (const listener of listeners) listener(); },
     sleep: (ms, signal) => new Promise((resolve, reject) => {
