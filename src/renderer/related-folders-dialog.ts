@@ -15,7 +15,9 @@ export interface RelatedFoldersApi {
  * change is saved at once; Done or Escape closes. One that is no longer approved or no longer there
  * says Unavailable, with text and an icon, and ChatGPT is not told about it.
  */
-export async function openRelatedFolders(api: RelatedFoldersApi, project: LocalProject, onError: (message: string) => void): Promise<void> {
+export async function openRelatedFolders(api: RelatedFoldersApi, project: LocalProject, onError: (message: string) => void,
+  /** Where the keyboard goes back to when the dialog closes: the project's menu button (2.1.51 polish pass). */
+  returnFocus: () => HTMLElement | null = () => null): Promise<void> {
   document.querySelector('.related-folders-dialog')?.remove();
   const [views, state] = await Promise.all([api.relatedFolders(project.id), api.getState()]);
   if (!views.ok) { onError(views.error); return; }
@@ -74,9 +76,11 @@ export async function openRelatedFolders(api: RelatedFoldersApi, project: LocalP
     const choices = roots.filter(root => !sameRoot(root, project.path) && !current.some(view => sameRoot(root, view.path)));
     select.replaceChildren(...choices.map(root => {
       const option = document.createElement('option');
-      option.value = root.path; option.textContent = `${root.name} — ${root.path}`;
+      option.value = root.path; option.textContent = `${root.name} — ${root.path}`; option.title = option.textContent;
       return option;
     }));
+    // One line in the closed dropdown; its tooltip names the chosen folder in full.
+    select.title = select.selectedOptions[0]?.textContent ?? '';
     addRow.hidden = choices.length === 0;
     none.hidden = choices.length > 0;
     select.disabled = add.disabled = saving;
@@ -94,8 +98,10 @@ export async function openRelatedFolders(api: RelatedFoldersApi, project: LocalP
     }
   };
   add.addEventListener('click', () => { if (select.value) void save([...current.map(view => view.path), select.value]); });
-  form.addEventListener('submit', event => { event.preventDefault(); box.remove(); });
-  box.addEventListener('cancel', event => { event.preventDefault(); box.remove(); });
+  select.addEventListener('change', () => { select.title = select.selectedOptions[0]?.textContent ?? ''; });
+  const close = (): void => { box.remove(); returnFocus()?.focus({ preventScroll: true }); };
+  form.addEventListener('submit', event => { event.preventDefault(); close(); });
+  box.addEventListener('cancel', event => { event.preventDefault(); close(); });
   paint();
   if (typeof box.showModal === 'function') box.showModal();
   else box.setAttribute('open', '');
