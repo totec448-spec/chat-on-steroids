@@ -743,7 +743,10 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
           const owned = await ownedWindow(command);
           await authorize(command);
           if (!owned) break;
-          if (tabs.get(owned.state.tabId) === owned.state && owns(owned.state, command)) { windowId = owned.windowId; break; }
+          // The window is read again now: the tab may have been moved to another window meanwhile. Nothing
+          // asynchronous follows this read before the tab is created.
+          const now = await chrome.tabs.get(owned.state.tabId).catch(() => null);
+          if (tabs.get(owned.state.tabId) === owned.state && owns(owned.state, command) && Number.isInteger(now?.windowId)) { windowId = now.windowId; break; }
         }
         const tab = await chrome.tabs.create({url,active:false,...(windowId === null ? {} : {windowId})});
         // Creation is already accepted. Preserve that receipt even when attachment fails.
