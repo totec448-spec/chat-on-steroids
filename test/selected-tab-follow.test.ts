@@ -31,10 +31,11 @@ it('retains a failed IPC request for retry', async () => {
   expect(send).toHaveBeenCalledTimes(2);
 });
 
-it('does not renew the deadline when retrying a temporarily unavailable browser', async () => {
+it('keeps the ten-second deadline from selection for an already-bound chat, logging expiry once', async () => {
   let now = 100_000;
   vi.spyOn(Date, 'now').mockImplementation(() => now);
   const send = vi.fn(async () => ({ ok: true, data: false }));
+  const info = vi.spyOn(console, 'info').mockImplementation(() => {});
   const follow = createSelectedTabFollow(send);
   follow.select(row);
   await tick();
@@ -43,7 +44,30 @@ it('does not renew the deadline when retrying a temporarily unavailable browser'
   await tick();
   now++;
   follow.observe(row);
+  now += 60_000;
+  follow.observe(row);
   expect(send).toHaveBeenCalledTimes(2);
+  expect(info.mock.calls).toEqual([['Browser follow: pending selection expired before acceptance.']]);
+});
+
+it('keeps a never-bound chat pending without timers or repeated IPC work', async () => {
+  vi.useFakeTimers();
+  try {
+    const send = vi.fn(async () => ({ ok: true, data: false }));
+    const follow = createSelectedTabFollow(send);
+    const unbound = { ...row, conversationId: null };
+    const timers = vi.getTimerCount();
+    follow.select(unbound);
+    await tick();
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1_000);
+    for (let i = 0; i < 50; i++) follow.observe(unbound);
+    expect(send.mock.calls).toEqual([[row.id]]);
+    expect(vi.getTimerCount()).toBe(timers);
+    // A genuine later binding still works: inactivity did not quietly discard the intent.
+    follow.observe(row);
+    await tick();
+    expect(send.mock.calls).toEqual([[row.id], [row.id]]);
+  } finally { vi.useRealTimers(); }
 });
 
 it.each([10_000, 11_148, 60_000])('follows the still-selected chat when its first binding arrives after %i ms', async delay => {
