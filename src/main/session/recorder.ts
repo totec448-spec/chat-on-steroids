@@ -30,7 +30,8 @@ import type {
   ToolOutcome,
   TurnOutcome
 } from '../../shared/session.js';
-import { estimateTokens, isUnattributedSession, originTitle, UNATTRIBUTED_SESSION_TITLE } from '../../shared/session.js';
+import { CHAT_ACTIVE_MS, estimateTokens, isUnattributedSession, originTitle, UNATTRIBUTED_SESSION_TITLE } from '../../shared/session.js';
+import { isProModel } from '../../shared/chat-models.js';
 import { chatErrorMessageKey } from '../../shared/chat-error.js';
 import { continuedRequestTurn, overlappingRequestTurns, recordedRequestTurn, responseTurnId, turnOpenAt } from '../../shared/chronology.js';
 import { getConfig } from '../config.js';
@@ -119,6 +120,11 @@ interface LiveConversation {
   lastTurnStartedAt: number | null;
   /** ChatGPT request ids — one per server turn — that called tools while the open turn ran. */
   turnRequestIds: Set<string>;
+  /**
+   * #2082: a turn the person stopped that a late call reopened. When its calls stop, the app ends
+   * it as stopped again itself, so a hidden or reloaded page cannot leave it open for good.
+   */
+  reopenedStop?: { turnId: string; lastCallAt: number; timer: ReturnType<typeof setTimeout> | null; pro: boolean } | null;
   /**
    * The newest turn the page reported ended, with the server requests it was calling under.
    *
@@ -1857,8 +1863,13 @@ async function reopenFalselyEndedTurn(
   }
   if (live.turnStartedAt !== null) {
     if (callTurnId === live.turnId) live.turnRequestIds.add(requestId);
+    if (live.reopenedStop && live.reopenedStop.turnId === live.turnId && live.turnRequestIds.has(requestId)) {
+      live.reopenedStop.lastCallAt = Math.max(live.reopenedStop.lastCallAt, Date.now());
+    }
     return null;
   }
+  // Read before the reopen below clears it: only a turn the person stopped is closed again when quiet.
+  let stoppedEnd = live.lastTurnOutcome === 'stopped';
   const previousEnd = live.endedTurn;
   let ended = previousEnd;
   const current = (): boolean => conversations.get(conversationId) === live &&
@@ -1875,6 +1886,7 @@ async function reopenFalselyEndedTurn(
         responseTurnId(summary.timelineTurns, owner.turnId) !== responseTurnId(summary.timelineTurns, boundary.turnId)) return null;
     ended = { turnId: boundary.turnId, startedAt: live.lastTurnStartedAt,
       endedAt: boundary.time, requestIds: new Set([requestId]) };
+    stoppedEnd = boundary.outcome === 'stopped';
   }
   if (!ended || !ended.requestIds.has(requestId) || startedAt <= ended.endedAt) return null;
   // A request id proves conversation ownership, not that the selected native
@@ -1900,7 +1912,75 @@ async function reopenFalselyEndedTurn(
   logInfo(
     `session ${sessionId} reopened turn ${ended.turnId} — request ${requestId} kept calling tools after the page reported it ended`
   );
+  if (stoppedEnd) {
+    const model = (await getSession(sessionId))?.selectedModel;
+    armReopenedStop(sessionId, conversationId, live, ended.turnId,
+      model?.conversationId === conversationId && isProModel(model.model, model.reasoningEffort));
+  }
   return ended.turnId;
+}
+
+/**
+ * #2082: how long a stopped-then-reopened turn's request may stay silent before the app ends it
+ * again. Past the bridge's silence recovery (2 min) and chat activity window (3 min), so a reload of
+ * the page still comes first; Pro past its 10-minute silence window, as Pro can think quietly.
+ */
+export const REOPENED_STOP_QUIET_MS = CHAT_ACTIVE_MS + 60_000;
+export const REOPENED_STOP_PRO_QUIET_MS = 11 * 60_000;
+
+function reopenedStopQuietMs(live: LiveConversation): number {
+  return live.reopenedStop?.pro ? REOPENED_STOP_PRO_QUIET_MS : REOPENED_STOP_QUIET_MS;
+}
+
+function armReopenedStop(sessionId: string, conversationId: string, live: LiveConversation, turnId: string, pro: boolean): void {
+  if (live.reopenedStop?.timer) clearTimeout(live.reopenedStop.timer);
+  live.reopenedStop = { turnId, lastCallAt: Date.now(), timer: null, pro };
+  scheduleReopenedStop(sessionId, conversationId, live, turnId, reopenedStopQuietMs(live));
+}
+
+function scheduleReopenedStop(sessionId: string, conversationId: string, live: LiveConversation, turnId: string, delay: number): void {
+  if (live.reopenedStop?.turnId !== turnId) return;
+  const timer = setTimeout(() => {
+    void endQuietReopenedStop(sessionId, conversationId, live, turnId).catch(error =>
+      logWarn(`session ${sessionId}: the stopped turn ${turnId} could not be ended again: ${error instanceof Error ? error.message : String(error)}`));
+  }, delay);
+  timer.unref?.();
+  live.reopenedStop.timer = timer;
+}
+
+/**
+ * The person stopped this turn, a call ChatGPT had already lined up reopened it, and the request has
+ * now made no call for the quiet window with none running. The page that should end it again may be hidden
+ * or reloaded (#2082), so the app ends it as stopped itself; a later call reopens it as before.
+ */
+async function endQuietReopenedStop(sessionId: string, conversationId: string, live: LiveConversation, turnId: string): Promise<void> {
+  const mark = live.reopenedStop;
+  if (!mark || mark.turnId !== turnId) return;
+  if (conversations.get(conversationId) !== live || live.turnId !== turnId || live.turnStartedAt === null) {
+    live.reopenedStop = null;
+    return;
+  }
+  const quiet = reopenedStopQuietMs(live), quietFor = Date.now() - mark.lastCallAt;
+  if (quietFor < quiet || runningToolCalls(conversationId) > 0) {
+    scheduleReopenedStop(sessionId, conversationId, live, turnId, Math.max(1_000, quiet - quietFor));
+    return;
+  }
+  live.reopenedStop = null;
+  const time = Date.now();
+  await appendEvent(sessionId, {
+    time, source: 'app', kind: 'turn_end', turnId, outcome: 'stopped',
+    detail: 'the person stopped this turn; after a late call reopened it, ChatGPT made no further call'
+  });
+  if (conversations.get(conversationId) !== live || live.turnId !== turnId) return;
+  live.openTurns.delete(turnId);
+  live.knownTurnEnds.add(turnId);
+  live.lastTurnOutcome = 'stopped';
+  live.lastTurnStartedAt = live.turnStartedAt;
+  live.endedTurn = { turnId, startedAt: live.turnStartedAt, endedAt: time, requestIds: live.turnRequestIds };
+  live.turnRequestIds = new Set<string>();
+  live.turnStartedAt = null;
+  live.turnId = null;
+  logInfo(`session ${sessionId} ended turn ${turnId} again as stopped — after the Stop its request made no call for ${Math.round(quiet / 60_000)} min`);
 }
 
 interface Target {

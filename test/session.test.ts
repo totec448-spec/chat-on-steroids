@@ -27,6 +27,8 @@ import {
   recordToolCall,
   repairDeterministicAttribution,
   rebindConversation,
+  REOPENED_STOP_PRO_QUIET_MS,
+  REOPENED_STOP_QUIET_MS,
   resetRecorderForTests,
   sessionForConversation,
 } from '../src/main/session/recorder.js';
@@ -3054,6 +3056,81 @@ describe('canonical recorder 1.8', () => {
     expect(secondCalls).toHaveLength(1);
     expect(firstCalls[0]!.kind === 'tool_call' && firstCalls[0]!.call.requestId).toBe('wfr_concurrent_a');
     expect(secondCalls[0]!.kind === 'tool_call' && secondCalls[0]!.call.requestId).toBe('wfr_concurrent_b');
+  });
+
+  /**
+   * #2082 (three reports, 2026-11-06; reproduced on the Windows VM 2026-11-07): the person stops a
+   * turn, a call ChatGPT had already lined up reopens it, and then the calls stop. A hidden or
+   * reloaded page never ended it again, so the app showed the turn running for good and every next
+   * message waited behind it. Once that request is quiet with no call running, the app ends the
+   * reopened turn as stopped again itself.
+   */
+  it.each([
+    ['stopped', true],
+    ['completed', false]
+  ] as const)('ends a turn reopened after a %s end once its request goes quiet: %s', async (outcome, closes) => {
+    vi.useFakeTimers();
+    try {
+      const conversationId = `conv-reopened-quiet-${outcome}`;
+      const request = `wfr_reopened_quiet_${outcome}`;
+      const sessionId = await sessionForConversation(conversationId);
+      const active = () => liveConversations().find((entry) => entry.conversationId === conversationId)?.activeTurnId ?? null;
+      const start = Date.now();
+      await recordChatObservations(conversationId, [
+        { kind: 'turn_start', time: start, turnId: 'g-quiet' },
+        { kind: 'tool_evidence', time: start, fiberConversationId: conversationId,
+          calls: [{ messageId: 'quiet-0', tool: 'read', order: 0, answered: false, requestId: request }] }
+      ]);
+      await tool(request, start + 10);
+      await recordChatObservations(conversationId, [{ kind: 'turn_end', time: start + 20, turnId: 'g-quiet', outcome }]);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await tool(request, Date.now());
+      expect(active()).toBe('g-quiet');
+      // Another call of the same request inside the quiet window keeps it open.
+      await vi.advanceTimersByTimeAsync(REOPENED_STOP_QUIET_MS - 10_000);
+      await tool(request, Date.now());
+      await vi.advanceTimersByTimeAsync(REOPENED_STOP_QUIET_MS - 10_000);
+      expect(active()).toBe('g-quiet');
+      await vi.advanceTimersByTimeAsync(20_000);
+      // The end is a durable journal write; wait for it rather than for a fixed time.
+      if (closes) await vi.waitFor(() => expect(active()).toBeNull());
+      else expect(active()).toBe('g-quiet');
+      const ends = await readEvents(sessionId!, { kinds: ['turn_end'] });
+      if (closes) {
+        expect(ends.at(-1)).toMatchObject({ kind: 'turn_end', turnId: 'g-quiet', outcome: 'stopped', source: 'app' });
+        expect((await getSession(sessionId!))?.activeTurnId ?? null).toBeNull();
+      } else expect(ends).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('waits the longer Pro window before it ends a Pro turn reopened after a Stop (#2082)', async () => {
+    vi.useFakeTimers();
+    try {
+      const conversationId = 'conv-reopened-quiet-pro';
+      const request = 'wfr_reopened_quiet_pro';
+      await sessionForConversation(conversationId);
+      const active = () => liveConversations().find((entry) => entry.conversationId === conversationId)?.activeTurnId ?? null;
+      const start = Date.now();
+      await recordChatObservations(conversationId, [
+        { kind: 'model_selection', model: 'gpt-6-pro', reasoningEffort: 'pro', time: start },
+        { kind: 'turn_start', time: start, turnId: 'g-quiet-pro' },
+        { kind: 'tool_evidence', time: start, fiberConversationId: conversationId,
+          calls: [{ messageId: 'quiet-pro-0', tool: 'read', order: 0, answered: false, requestId: request }] }
+      ]);
+      await tool(request, start + 10);
+      await recordChatObservations(conversationId, [{ kind: 'turn_end', time: start + 20, turnId: 'g-quiet-pro', outcome: 'stopped' }]);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await tool(request, Date.now());
+      expect(active()).toBe('g-quiet-pro');
+      await vi.advanceTimersByTimeAsync(REOPENED_STOP_QUIET_MS + 10_000);
+      expect(active()).toBe('g-quiet-pro');
+      await vi.advanceTimersByTimeAsync(REOPENED_STOP_PRO_QUIET_MS - REOPENED_STOP_QUIET_MS);
+      await vi.waitFor(() => expect(active()).toBeNull());
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps an unmatched modern request unattributed and never borrows another chat', async () => {
