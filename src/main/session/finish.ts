@@ -229,6 +229,10 @@ async function prepareNotice(sessionId: string, summary: string, userRequested =
 /** Release is an app-authored fact in the existing transcript, scoped to exact turn + frontend. */
 export async function sessionFinishHeld(sessionId: string, turnId: string | null | undefined, conversationId: string | null): Promise<boolean> {
   if (!getConfig().ui.finishTool || !turnId || !conversationId || isChatBlocked(conversationId)) return false;
+  // #2082: a turn without a finish record holds nothing. Reading the controls (Stop reads them first)
+  // must not fail on it; only ending such a turn stays refused (CodeRabbit on #2086).
+  const session = await getSession(sessionId);
+  if (session?.activeTurnId === turnId && session.conversationId === conversationId && session.finishTurn?.turnId !== turnId) return false;
   return !(await finishReleased(sessionId, turnId, conversationId));
 }
 async function finishReleased(sessionId: string, turnId: string, conversationId: string): Promise<boolean> {
@@ -241,6 +245,12 @@ async function finishReleased(sessionId: string, turnId: string, conversationId:
 export async function releaseSessionFinish(sessionId: string, expectedTurnId: string, reason: 'end' | 'stop' = 'end'): Promise<void> {
   const session = await getSession(sessionId);
   if (!session?.conversationId || session.activeTurnId !== expectedTurnId) throw new Error('The active turn changed; refresh before ending it');
+  // #2082: a person's Stop never waits on finish bookkeeping. A turn whose finish record does not
+  // name it (started outside the app's own send, or a rebuilt summary) holds nothing to release.
+  if (reason === 'stop' && session.finishTurn?.turnId !== expectedTurnId) {
+    logInfo(`finish: Stop of turn ${expectedTurnId} in ${session.conversationId} — no finish hold was recorded for this turn; nothing to release`);
+    return;
+  }
   if (await finishReleased(sessionId, expectedTurnId, session.conversationId)) return;
   const latest = await getSession(sessionId);
   if (latest?.activeTurnId !== expectedTurnId || latest.conversationId !== session.conversationId) throw new Error('The active turn changed; refresh before ending it');
