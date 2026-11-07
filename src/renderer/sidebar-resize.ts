@@ -62,7 +62,8 @@ export function initSidebarResize(): void {
   handle.addEventListener('lostpointercapture', finish);
   handle.addEventListener('dblclick', () => { preferred = null; render(); save(); });
   handle.addEventListener('keydown', (event) => {
-    const width = sidebar.getBoundingClientRect().width;
+    // Steps start from the width the separator reports, not from a box that may still be gliding.
+    const width = preferred === null ? sidebar.getBoundingClientRect().width : Math.min(maximum(), preferred);
     if (event.key === 'ArrowLeft') setWidth(width - 10);
     else if (event.key === 'ArrowRight') setWidth(width + 10);
     else if (event.key === 'Home') setWidth(minimum);
