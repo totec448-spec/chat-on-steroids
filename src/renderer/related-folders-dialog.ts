@@ -76,7 +76,7 @@ export async function openRelatedFolders(api: RelatedFoldersApi, project: LocalP
     const choices = roots.filter(root => !sameRoot(root, project.path) && !current.some(view => sameRoot(root, view.path)));
     select.replaceChildren(...choices.map(root => {
       const option = document.createElement('option');
-      option.value = root.path; option.textContent = `${root.name} — ${root.path}`;
+      option.value = root.path; option.textContent = `${root.name} — ${root.path}`; option.title = option.textContent;
       return option;
     }));
     // One line in the closed dropdown; its tooltip names the chosen folder in full.
