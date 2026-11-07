@@ -51,7 +51,7 @@ import {
 import { resetWorkspaces, setWorkspaceFor } from '../src/main/workspace.js';
 import { DEFAULT_CAPABILITIES, type Capabilities, type Root } from '../src/shared/types.js';
 import { foldProgress, type ToolOutcome } from '../src/shared/session.js';
-import { emptyEvidence, noteExec, noteOutcome, runInCallContext, type CallContext } from '../src/main/mcp/call-context.js';
+import { emptyEvidence, inFlightMcpRequests, noteExec, noteOutcome, runInCallContext, type CallContext } from '../src/main/mcp/call-context.js';
 import { observeRequestCorrelation, requestCorrelation } from '../src/main/session/correlation.js';
 import { WINDOWS_COMPUTER_METHODS, WINDOWS_COMPUTER_READ_METHODS } from '../src/shared/windows-computer.js';
 import { BROWSER_TOOLS, BROWSER_READ_TOOLS } from '../src/shared/browser-control.js';
@@ -3834,7 +3834,11 @@ describe('steps handed to the person over MCP (#1695)', () => {
     const session = await createSession({ conversationId: 'step-late-proof' });
     const prove = proveFor(session.id, 'step-late-proof');
     const pending = sendAs('wfr_step_late', 'ask_user_to_run', step);
-    await new Promise(resolve => setTimeout(resolve, 300));
+    // The proof comes only once the call is inside the app and waiting, never by elapsed time
+    // (CodeRabbit on #2088): before the fix the call was refused at once and never waited here.
+    await vi.waitFor(() => expect(inFlightMcpRequests()).toBeGreaterThan(0), { timeout: 10_000 });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(inFlightMcpRequests()).toBeGreaterThan(0);
     expect(prove('wfr_step_late')).toBe('stored');
     const result = await pending;
     expect(failed(result)).toBe(false);
