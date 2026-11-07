@@ -1433,6 +1433,16 @@ export function upsertMessageEvent(
       ) {
         return { event: previous, changed: false, contentChanged: false };
       }
+      // A delayed final that only repeats the start of a longer stored final is a stale replay, not a
+      // correction: it would cut an accepted continuation back (CodeRabbit on #2099). Different text still wins.
+      if (
+        previous?.kind === 'assistant_message' && event.kind === 'assistant_message' &&
+        (previous.final === true || previous.state === 'final') &&
+        (event.final === true || event.state === 'final') &&
+        continuesFinalText(event.message, previous.message)
+      ) {
+        return { event: previous, changed: false, contentChanged: false };
+      }
 
       // Message bodies can be hundreds of kilobytes. The old path JSON.stringify-compared the
       // same StoredText pair once while preserving rendered HTML and then again while deciding
@@ -1592,10 +1602,14 @@ export function upsertMessageEvent(
         entry.summary.contextTokens = Math.max(0, entry.summary.contextTokens + delta);
         entry.summary.updatedAt = Math.max(entry.summary.updatedAt, nextEvent.time);
         noteFinishWork(entry.summary, full);
-        // The worker dock's answer line follows the newest final answer, also when that answer grows.
-        if (full.kind === 'assistant_message' && (full.final === true || full.state === 'final') &&
-            full.time >= (entry.summary.lastAssistantFinalAt ?? 0)) {
-          entry.summary.lastAnswerLine = answerLine(full.message.text);
+        // The worker dock's answer line follows the newest final answer: when this message becomes final
+        // as the newest one, and when its final text grows while the dock still shows it.
+        if (full.kind === 'assistant_message' && (full.final === true || full.state === 'final')) {
+          const wasFinal = previous.kind === 'assistant_message' && (previous.final === true || previous.state === 'final');
+          const showsThis = previous.kind === 'assistant_message' && entry.summary.lastAnswerLine === answerLine(previous.message.text);
+          if (wasFinal ? showsThis : nextEvent.time >= (entry.summary.lastAssistantFinalAt ?? 0)) {
+            entry.summary.lastAnswerLine = answerLine(full.message.text);
+          }
         }
         // Only a new final is new work. The same finished answer re-reported after a reload or a
         // branch keeps its boundary, or the sidebar would call a read chat "New response".
