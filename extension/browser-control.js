@@ -163,6 +163,15 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
     if (!observes && protectedTab(state.tabId, tab.url, command?.conversationId)) error('BROWSER_EXECUTOR_TAB: active ChatGPT orchestration owns this tab. browser_snapshot can inspect its DOM directly without attach. Input, navigation and arbitrary JavaScript remain unavailable here.');
     return tab;
   }
+  /** The window of this conversation's most recently attached tab that still exists, or null. */
+  async function ownedWindow(command) {
+    for (const state of [...tabs.values()].reverse()) {
+      if (!owns(state, command)) continue;
+      const tab = await chrome.tabs.get(state.tabId).catch(() => null);
+      if (Number.isInteger(tab?.windowId)) return tab.windowId;
+    }
+    return null;
+  }
   async function getTab(tabId) {
     try { return await chrome.tabs.get(tabId); }
     catch (cause) {
@@ -723,7 +732,10 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
         const url = pageURL(args.url || 'about:blank');
         if (tabs.size >= 32) error('BROWSER_TAB_LIMIT: release an unused attachment before opening another tab.');
         await authorize(command);
-        const tab = await chrome.tabs.create({url,active:false});
+        // Stay in the window this conversation already works in: without a window, Chrome uses the one the
+        // person focused last, which scatters one task's tabs over their separate windows (#2095).
+        const windowId = await ownedWindow(command);
+        const tab = await chrome.tabs.create({url,active:false,...(windowId === null ? {} : {windowId})});
         // Creation is already accepted. Preserve that receipt even when attachment fails.
         // In particular, an unavailable debugger must not strand the requested URL on blank.
         try {

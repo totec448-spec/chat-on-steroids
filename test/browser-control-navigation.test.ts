@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const source = readFileSync('extension/browser-control.js', 'utf8')
   .replace(/^import .*\n/, '').replace('export function ', 'function ');
-type Tab = {id:number;url:string;pendingUrl?:string;status:string;title?:string;active?:boolean};
+type Tab = {id:number;url:string;pendingUrl?:string;status:string;title?:string;active?:boolean;windowId?:number};
 function event() {
   const listeners = new Set<(...args:any[])=>void>();
   return {addListener:(fn:(...args:any[])=>void)=>listeners.add(fn),removeListener:(fn:(...args:any[])=>void)=>listeners.delete(fn),
@@ -20,7 +20,7 @@ async function fixture(held: {tabId:number;owner:string}[] = []) {
     permissions:{contains:vi.fn(async()=>true)},
     tabs:{get:vi.fn(async(id:number)=>{const tab=entries.get(id);if(!tab)throw new Error('No tab with id');return tab;}),
       query:vi.fn(async()=>[...entries.values()]),onUpdated:event(),onRemoved:event(),
-      create:vi.fn(async(args:{url:string;active:boolean})=>{const tab={id:99,url:args.url,status:'complete',active:args.active};entries.set(99,tab);return tab;}),
+      create:vi.fn(async(args:{url:string;active:boolean;windowId?:number})=>{const tab={id:99,url:args.url,status:'complete',active:args.active,...(args.windowId===undefined?{}:{windowId:args.windowId})} as Tab;entries.set(99,tab);return tab;}),
       remove:vi.fn(async(id:number)=>{entries.delete(id);})},
     scripting:{executeScript:vi.fn(async()=>[])},
     debugger:{attach:vi.fn(async()=>{}),detach:vi.fn(async()=>{}),getTargets:vi.fn(async()=>[]),
@@ -52,6 +52,25 @@ describe('browser creation and usable tab discovery',()=>{
     expect(result.error).toBeUndefined();
     expect(chrome.debugger.detach).not.toHaveBeenCalled();
     expect(chrome.debugger.sendCommand).not.toHaveBeenCalled();
+  });
+
+  // #2095: with two Chrome windows, a new tab used to open in whichever window the person focused last.
+  it('opens a new tab in the window of the tab this conversation already owns, not in the focused window',async()=>{
+    const {chrome,control,entries,command}=await fixture([{tabId:7,owner:'session:owner'},{tabId:8,owner:'session:other'}]);
+    entries.get(7)!.windowId=5; entries.get(8)!.windowId=6;
+    await control.execute(command('new',{url:'https://fixture.invalid/next'}));
+    expect(chrome.tabs.create).toHaveBeenCalledExactlyOnceWith({url:'https://fixture.invalid/next',active:false,windowId:5});
+  });
+
+  it('falls back to the default window when the owned tab is gone or has no window',async()=>{
+    const {chrome,control,entries,command}=await fixture([{tabId:7,owner:'session:owner'}]);
+    entries.delete(7);
+    await control.execute(command('new',{url:'https://fixture.invalid/a'}));
+    expect(chrome.tabs.create).toHaveBeenLastCalledWith({url:'https://fixture.invalid/a',active:false});
+    chrome.tabs.create.mockClear();
+    const second=await fixture([{tabId:7,owner:'session:owner'}]);
+    await second.control.execute(second.command('new',{url:'https://fixture.invalid/b'}));
+    expect(second.chrome.tabs.create).toHaveBeenCalledExactlyOnceWith({url:'https://fixture.invalid/b',active:false});
   });
 
   it('attaches to a committed destination without waiting for all of its subresources',async()=>{
