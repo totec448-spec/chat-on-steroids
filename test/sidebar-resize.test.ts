@@ -46,3 +46,34 @@ it('bounds dragging, releases capture, preserves width through collapse and smal
   expect(sidebar.querySelector('#viewMenu')).toBeNull();
   expect(doc.getElementById('sidebarToggle')!.nextElementSibling!.id).toBe('viewMenu');
 });
+
+// The separator announces the width it set, not a measurement taken while the sidebar still glides
+// to it (the compact-rows UI check read 205 for a width of 180 on macOS).
+it('reports the target width through aria-valuenow while the measured width still lags', () => {
+  dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test' });
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document); vi.stubGlobal('localStorage', dom.window.localStorage);
+  Object.defineProperty(dom.window, 'innerWidth', { value: 1200, configurable: true });
+  const doc = dom.window.document;
+  const sidebar = doc.getElementById('sidebar')!;
+  const handle = doc.getElementById('sidebarResize')!;
+  // Mid-glide: the box is still 205 wide whatever width was just asked for.
+  sidebar.getBoundingClientRect = () => ({ width: 205 }) as DOMRect;
+  initSidebarResize();
+  expect(handle.getAttribute('aria-valuenow')).toBe('205');
+  handle.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Home' }));
+  expect(handle.getAttribute('aria-valuenow')).toBe('180');
+  handle.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'End' }));
+  expect(handle.getAttribute('aria-valuenow')).toBe('480');
+  // A step right after Home starts from the reported 180, not from the lagging box.
+  handle.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Home' }));
+  handle.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight' }));
+  expect(handle.getAttribute('aria-valuenow')).toBe('190');
+  handle.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'End' }));
+  // A window that allows less clamps the announced value like the style does.
+  Object.defineProperty(dom.window, 'innerWidth', { value: 600 });
+  dom.window.dispatchEvent(new dom.window.Event('resize'));
+  expect(handle.getAttribute('aria-valuenow')).toBe('300');
+  // Back to the default: the box is all there is to read.
+  handle.dispatchEvent(new dom.window.MouseEvent('dblclick'));
+  expect(handle.getAttribute('aria-valuenow')).toBe('205');
+});
