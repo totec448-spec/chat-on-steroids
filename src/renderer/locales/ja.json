@@ -1,4 +1,13 @@
 {
+  "Steps for you, a limit on busy chats, and Telegram notifications.": "あなた向けのステップ、忙しいチャットの上限、Telegram 通知。",
+  "Steps for you": "あなた向けのステップ",
+  "When ChatGPT needs something only you can do, it hands you the step. You run it and mark it done.": "ChatGPT があなたにしかできないことを必要とするとき、そのステップを渡します。実行して、完了にしてください。",
+  "A limit on busy chats": "忙しいチャットの上限",
+  "Choose how many chats may work at once. Your own messages always go out.": "同時に作業できるチャットの数を選べます。あなた自身のメッセージは常に送信されます。",
+  "Telegram notifications": "Telegram 通知",
+  "Link your own bot to get a message when a chat finishes or needs you, and stop or pause it from your phone.": "自分のボットを連携すると、チャットが完了したときやあなたの対応が必要なときにメッセージが届き、スマートフォンから停止や一時停止もできます。",
+  "Stop works all the way": "停止が最後まで効きます",
+  "After a Stop, a chat no longer stays busy, and your next message goes out.": "停止のあと、チャットが処理中のまま残ることはなく、次のメッセージが送信されます。",
   "Move chats between projects, chats that keep going, and an extension that updates during long runs.": "プロジェクト間でのチャットの移動、止まらずに続くチャット、長い実行中でも更新される拡張機能。",
   "Move chats between projects": "プロジェクト間でチャットを移動",
   "Drag a chat onto a project, or use Move to project in its menu. Undo puts it back.": "チャットをプロジェクトにドラッグするか、メニューの「プロジェクトへ移動」を使います。元に戻すと戻せます。",
