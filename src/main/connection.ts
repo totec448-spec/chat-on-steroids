@@ -297,6 +297,7 @@ function toolsFor(id: SurfaceId): string[] {
   if (caps.create || caps.edit || caps.move || caps.deleteFile) tools.push('apply_patch');
   if (caps.command) tools.push('exec_command', 'write_stdin');
   if (config.sessions.record) tools.push('update_plan');
+  if ((caps.command || (config.readOnly && config.capabilities.command)) && config.sessions.record) tools.push('ask_user_to_run', 'user_request_status');
   if (config.multiAgent.enabled) tools.push('agents');
   return tools;
 }

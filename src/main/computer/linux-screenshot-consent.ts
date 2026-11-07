@@ -43,9 +43,11 @@ export async function testLinuxScreenshotConsent(deps: LinuxScreenshotConsentDep
   }
   const result = await (deps.run ?? runLinuxScreenshot)({ kind: 'screenshot', display: 0 });
   if (!result.ok) {
-    logInfo('linux screenshot consent: refused because the GNOME screenshot portal did not grant a screenshot');
     const error = result.error as { code?: unknown } | null;
-    const code = typeof error?.code === 'string' ? error.code : 'UNKNOWN';
+    // A code is only kept when it looks like one: backend text could carry application content.
+    const code = typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(error.code) ? error.code : 'UNKNOWN';
+    // The backend does not say whether GNOME refused or something else failed, so neither does this line.
+    logInfo(`linux screenshot consent: refused because the screenshot backend returned ${code}`);
     // Only report the backend error code. Backend details could contain arbitrary
     // application text, and a failed consent is never grounds for an automatic retry.
     throw new Error(`GNOME screenshot portal returned ${code}. No image was saved.`);
