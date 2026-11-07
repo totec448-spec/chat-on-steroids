@@ -170,7 +170,9 @@ it('forgets a pause the person undid and redid in the app, so /resume never turn
   telegram.say('/resume');
   await vi.waitFor(() => expect(telegram.sent.at(-1)?.text).toBe('No chat was paused from here.'), { timeout: 5_000, interval: 10 });
   expect(app.setAutomation).not.toHaveBeenCalled();
-  expect(await readDurable('telegram-paused')).toEqual([]);
+  // The marker is dropped in memory at once and its file follows (fire and forget), so the file is waited for:
+  // a slow disk (Windows CI) read it still holding the old marker.
+  await vi.waitFor(async () => expect(await readDurable('telegram-paused')).toEqual([]), { timeout: 5_000, interval: 10 });
 });
 
 // CodeRabbit on #1990: an unknown chat is refused for Stop too, as it already was for pause and resume.
