@@ -921,13 +921,13 @@
     "message": "pending"
   },
   "popup_pipeline_call_fallback_many": {
-    "message": "The app could not place $1 calls by request id — it fell back to $2."
+    "message": "The app could not place $1 calls by request id. Used instead: $2."
   },
   "popup_pipeline_call_fallback_many__one": {
-    "message": "The app could not place $1 call by request id — it fell back to $2."
+    "message": "The app could not place $1 call by request id. Used instead: $2."
   },
   "popup_pipeline_call_fallback_one": {
-    "message": "The app could not place a call by request id — it fell back to $1."
+    "message": "The app could not place a call by request id. Used instead: $1."
   },
   "popup_pipeline_delivery_blocked": {
     "message": "Delivery is blocked until the app is connected and protocol compatibility is confirmed."
