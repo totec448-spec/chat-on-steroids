@@ -168,6 +168,8 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
     for (const state of [...tabs.values()].reverse()) {
       if (!owns(state, command)) continue;
       const tab = await chrome.tabs.get(state.tabId).catch(() => null);
+      // The lookup was asynchronous: the attachment must still be this conversation's afterwards.
+      if (tabs.get(state.tabId) !== state || !owns(state, command)) continue;
       if (Number.isInteger(tab?.windowId)) return tab.windowId;
     }
     return null;
@@ -735,6 +737,8 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
         // Stay in the window this conversation already works in: without a window, Chrome uses the one the
         // person focused last, which scatters one task's tabs over their separate windows (#2095).
         const windowId = await ownedWindow(command);
+        // Nothing may open after the permission was withdrawn while the window was looked up.
+        await authorize(command);
         const tab = await chrome.tabs.create({url,active:false,...(windowId === null ? {} : {windowId})});
         // Creation is already accepted. Preserve that receipt even when attachment fails.
         // In particular, an unavailable debugger must not strand the requested URL on blank.

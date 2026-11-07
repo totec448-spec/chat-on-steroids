@@ -62,6 +62,28 @@ describe('browser creation and usable tab discovery',()=>{
     expect(chrome.tabs.create).toHaveBeenCalledExactlyOnceWith({url:'https://fixture.invalid/next',active:false,windowId:5});
   });
 
+  // CodeRabbit on #2098: the window lookup is asynchronous, so what it found must still be ours afterwards.
+  it('does not use the window of a tab this conversation released while the window was being looked up',async()=>{
+    const {chrome,control,entries,command}=await fixture([{tabId:7,owner:'session:owner'}]);
+    entries.get(7)!.windowId=5;
+    let releaseReply:any=null;
+    const real=chrome.tabs.get.getMockImplementation()!;
+    chrome.tabs.get.mockImplementation(async(id:number)=>{ Error.stackTraceLimit=60; const inLookup=!!new Error().stack?.includes('ownedWindow'); const tab=await real(id); if(releaseReply!==null||!inLookup) return tab; releaseReply={}; await control.detached({tabId:7}); return tab; });
+    await control.execute(command('new',{url:'https://fixture.invalid/released'}));
+    expect(releaseReply).not.toBeNull();
+    expect(chrome.tabs.create).toHaveBeenCalledExactlyOnceWith({url:'https://fixture.invalid/released',active:false});
+  });
+
+  it('opens nothing when the pairing is revoked while the window is being looked up',async()=>{
+    const {chrome,control,entries,command,revoke}=await fixture([{tabId:7,owner:'session:owner'}]);
+    entries.get(7)!.windowId=5;
+    const real=chrome.tabs.get.getMockImplementation()!;
+    let revoked=false;
+    chrome.tabs.get.mockImplementation(async(id:number)=>{ Error.stackTraceLimit=60; const inLookup=!!new Error().stack?.includes('ownedWindow'); const tab=await real(id); if(!revoked&&inLookup){ revoked=true; revoke(); } return tab; });
+    await expect(control.execute(command('new',{url:'https://fixture.invalid/revoked'}))).rejects.toThrow('BROWSER_PERMISSION_REVOKED');
+    expect(chrome.tabs.create).not.toHaveBeenCalled();
+  });
+
   it('falls back to the default window when the owned tab is gone or has no window',async()=>{
     const {chrome,control,entries,command}=await fixture([{tabId:7,owner:'session:owner'}]);
     entries.delete(7);
