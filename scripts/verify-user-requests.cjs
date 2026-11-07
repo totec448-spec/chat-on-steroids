@@ -88,9 +88,9 @@ app.whenReady().then(async () => {
   assert.match(await js(`document.querySelectorAll('#userRequests .user-request')[1].textContent`), /From the sub-agent “Sensor calibration”/);
   // A card's own "expected files" line looks the same in the dock as in the timeline: the dock's
   // header styles (its chevron, padding and height) stay on the dock's header (2.1.51 polish pass).
-  const summaryLook = scope => js(`(() => { const s=document.querySelector(${JSON.stringify(scope)} + ' .user-request details.user-request-more > summary');
-    const c=getComputedStyle(s), a=getComputedStyle(s,'::after'); return { after: a.content, height: Math.round(s.getBoundingClientRect().height), padding: c.padding }; })()`);
-  const inDock = await summaryLook('#userRequests'), inTimeline = await summaryLook('#timeline');
+  const LOOK = `const c=getComputedStyle(s), a=getComputedStyle(s,'::after'); return { after: a.content, height: Math.round(s.getBoundingClientRect().height), padding: c.padding };`;
+  const inDock = await js(`(() => { const s=document.querySelector('#userRequests .user-request details.user-request-more > summary'); ${LOOK} })()`);
+  const inTimeline = await js(`(() => { const s=document.querySelector('#timeline .user-request details.user-request-more > summary'); ${LOOK} })()`);
   assert.equal(inDock.after, 'none', 'the dock header chevron leaked onto a card summary');
   assert.deepEqual(inDock, inTimeline);
   await shot('dock-open-dark.png');
