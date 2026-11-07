@@ -3826,6 +3826,21 @@ describe('steps handed to the person over MCP (#1695)', () => {
     observeRequestCorrelation({ requestId, conversationId, sessionId, messageId: `msg-${requestId}`, tool, observedAt: Date.now() });
   const step = { command: 'make release', purpose: 'Sign in to the license server first', expected: ['out/report.txt', '../private/passwords.txt'] };
 
+  // Live on the Windows VM (2026-11-07): ChatGPT handed a step in the first answer of a new chat, two
+  // seconds before the page proved which chat the call came from. The tool refused at once ("Exact chat
+  // identity is required") instead of waiting for that proof, as exec and update_plan do.
+  it('waits for the page to prove the chat of a step handed before that proof arrives', async () => {
+    setup();
+    const session = await createSession({ conversationId: 'step-late-proof' });
+    const prove = proveFor(session.id, 'step-late-proof');
+    const pending = sendAs('wfr_step_late', 'ask_user_to_run', step);
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(prove('wfr_step_late')).toBe('stored');
+    const result = await pending;
+    expect(failed(result)).toBe(false);
+    expect(await readSessionUserRequests(session.id)).toHaveLength(1);
+  });
+
   it('records a step only for an identified chat, returns the same open step when asked again, and runs nothing', async () => {
     setup();
     const session = await createSession({ conversationId: 'step-http-source' });

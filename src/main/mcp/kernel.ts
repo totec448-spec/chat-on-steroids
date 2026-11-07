@@ -795,7 +795,10 @@ async function dispatchTracked(
   // Windows observation/input gets one short grace even under the opt-in. Exact proof can then
   // alias the observation directly to the durable session, while a genuinely headless caller
   // falls back to its request principal instead of waiting the old full identity window.
-  const needsExactIdentity = name === 'session_finish' || desktopContext || (!allowUnattributed && (
+  // A step for the person (#1695) is shown in its own chat and refused without it, so it waits for
+  // the page's proof like session_finish: ChatGPT can hand one before that proof arrives (VM, 2026-11-07).
+  const stepForPerson = name === 'ask_user_to_run' || name === 'user_request_status';
+  const needsExactIdentity = name === 'session_finish' || stepForPerson || desktopContext || (!allowUnattributed && (
     name === 'exec' || name === 'update_plan' || (identitySensitive && swarmRunning())
   ));
   if (!context.caller.conversationId && needsExactIdentity && requestId) {
