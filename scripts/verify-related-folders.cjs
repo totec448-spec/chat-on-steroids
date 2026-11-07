@@ -81,8 +81,19 @@ app.whenReady().then(async () => {
   // A chosen folder leaves the picker, so it can never be added twice.
   assert.deepEqual(await js(`[...${dialog}.querySelectorAll('option')].map(o=>o.value)`), ['/Users/sample/design']);
   await shot('dialog-two.png');
+  // A long folder keeps the dropdown on one line, and its tooltip names it in full (2.1.51 polish pass,
+  // seen on Windows with a server folder).
+  const longLine = await js(`(() => { const s=${dialog}.querySelector('select'); if (!s || s.closest('[hidden]')) return null;
+    const o=document.createElement('option'); o.value='/long'; o.textContent='cos-ssh-live — homelab-dev:/home/someone/projects/a-rather-long-folder-name/and-deeper';
+    s.append(o); s.value='/long'; s.dispatchEvent(new Event('change')); const h=s.getBoundingClientRect().height, title=s.title; o.remove(); return { h, title }; })()`);
+  if (longLine) {
+    assert.ok(longLine.h <= 44, `the folder dropdown stays one line: ${longLine.h}px`);
+    assert.match(longLine.title, /a-rather-long-folder-name/);
+  }
   await js(`${dialog}.querySelector('.file-entry-dialog-actions .btn-solid').click()`);
   await until(`!${dialog}`);
+  // Done hands the keyboard back to the project's own menu button, not to the page.
+  assert.equal(await js(`document.activeElement?.classList.contains('project-menu') ?? false`), true);
   // The row's hover text names them; still no extra rows.
   await until(`document.querySelector('.project-heading').title.includes('Related folders: api, shared-lib')`);
   assert.equal(await js(`document.querySelectorAll('.project-group').length`), 1);
