@@ -1,4 +1,13 @@
 {
+  "Steps for you, a limit on busy chats, and Telegram notifications.": "為你準備的步驟、忙碌聊天的上限，以及 Telegram 通知。",
+  "Steps for you": "為你準備的步驟",
+  "When ChatGPT needs something only you can do, it hands you the step. You run it and mark it done.": "當 ChatGPT 需要只有你能做的事時，它會把這一步交給你。你執行後標記為已完成。",
+  "A limit on busy chats": "忙碌聊天的上限",
+  "Choose how many chats may work at once. Your own messages always go out.": "選擇同時可以工作的聊天數量。你自己傳送的訊息一律會送出。",
+  "Telegram notifications": "Telegram 通知",
+  "Link your own bot to get a message when a chat finishes or needs you, and stop or pause it from your phone.": "連結你自己的機器人，在聊天完成或需要你時收到訊息，並可在手機上停止或暫停它。",
+  "Stop works all the way": "停止徹底生效",
+  "After a Stop, a chat no longer stays busy, and your next message goes out.": "停止後，聊天不再保持忙碌，你的下一則訊息會送出。",
   "Move chats between projects, chats that keep going, and an extension that updates during long runs.": "在專案之間移動對話、持續進行的對話，以及在長時間執行時也會更新的擴充功能。",
   "Move chats between projects": "在專案之間移動對話",
   "Drag a chat onto a project, or use Move to project in its menu. Undo puts it back.": "把對話拖到專案上，或使用其選單中的「移到專案」。復原可將它放回原處。",
