@@ -1,6 +1,9 @@
 import { JSDOM } from 'jsdom';
 import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
-import { createComposerDrafts, type ComposerDraftOptions } from '../src/renderer/composer-drafts.js';
+import {
+  createComposerDrafts, createRecoveredComposerDrafts, mergeComposerAttachments,
+  MAX_COMPOSER_FILE_BYTES, MAX_COMPOSER_FILES, type ComposerDraftOptions
+} from '../src/renderer/composer-drafts.js';
 
 const KEY = 'chat-on-steroids.composer-drafts';
 let dom: JSDOM;
@@ -99,4 +102,43 @@ it('saves the text a restart should give back in place of what the composer hold
   drafts.set('chat-b', 'Plain draft');
   expect(stored()).toEqual([['chat-a', 'Before the edit'], ['chat-b', 'Plain draft']]);
   expect(drafts.get('chat-a')).toBe('The question being edited');
+});
+
+it('keeps existing files first and separates incoming files that exceed either composer limit', () => {
+  const file = (id: string, size: number) => ({ id, name: `${id}.txt`, size, mimeType: 'text/plain' });
+  const existing = Array.from({ length: MAX_COMPOSER_FILES }, (_, index) => file(`existing-${index}`, 1));
+  const incoming = [file('overflow-1', 1), file('overflow-2', 2)];
+  const byCount = mergeComposerAttachments(existing, incoming);
+  expect(byCount.merged).toEqual(existing);
+  expect(byCount.overflow).toEqual(incoming);
+
+  const atByteLimit = [file('large', MAX_COMPOSER_FILE_BYTES - 1)];
+  const byBytes = mergeComposerAttachments(atByteLimit, [file('too-large-for-room', 2), file('fits', 1)]);
+  expect(byBytes.merged).toEqual([...atByteLimit, file('fits', 1)]);
+  expect(byBytes.overflow).toEqual([file('too-large-for-room', 2)]);
+  expect(byBytes.merged.length).toBeLessThanOrEqual(MAX_COMPOSER_FILES);
+  expect(byBytes.merged.reduce((sum, entry) => sum + ('size' in entry ? entry.size : 0), 0)).toBe(MAX_COMPOSER_FILE_BYTES);
+
+  const pastedImage = { name: 'pasted.png', dataUrl: 'data:image/png;base64,YWI=' };
+  const byImageBytes = mergeComposerAttachments(atByteLimit, [pastedImage]);
+  expect(byImageBytes.merged).toEqual(atByteLimit);
+  expect(byImageBytes.overflow).toEqual([pastedImage]);
+  const malformedImage = { name: 'malformed.png', dataUrl: 'not-a-data-url' };
+  expect(mergeComposerAttachments([], [malformedImage]).overflow).toEqual([malformedImage]);
+});
+
+it('persists recovered staged-file metadata so a deleted chat draft can be reopened after restart', () => {
+  fixture();
+  const file = { id: '123e4567-e89b-42d3-a456-426614174000', name: 'report.pdf', size: 42, mimeType: 'application/pdf' };
+  const drafts = createRecoveredComposerDrafts();
+  drafts.set('recovery:chat-a', { sourceTitle: 'Deleted chat', projectId: 'project-a', sourceDraftKey: 'chat-a', attachments: [file], unavailableFileCount: 1 });
+  const saved = JSON.parse(dom.window.localStorage.getItem('chat-on-steroids.recovered-composer-drafts')!);
+  expect(saved).toEqual([{ key: 'recovery:chat-a', sourceTitle: 'Deleted chat', projectId: 'project-a', sourceDraftKey: 'chat-a', attachments: [file], unavailableFileCount: 1 }]);
+
+  const added = { id: '123e4567-e89b-42d3-a456-426614174001', name: 'notes.txt', size: 24, mimeType: 'text/plain' };
+  drafts.set('recovery:chat-a', { ...drafts.get('recovery:chat-a')!, attachments: [file, added], unavailableFileCount: 0 });
+  const restored = createRecoveredComposerDrafts();
+  expect(restored.get('recovery:chat-a')).toEqual({ sourceTitle: 'Deleted chat', projectId: 'project-a', sourceDraftKey: 'chat-a', attachments: [file, added], unavailableFileCount: 0 });
+  restored.delete('recovery:chat-a');
+  expect(JSON.parse(dom.window.localStorage.getItem('chat-on-steroids.recovered-composer-drafts')!)).toEqual([]);
 });

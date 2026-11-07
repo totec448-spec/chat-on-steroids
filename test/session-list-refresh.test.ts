@@ -514,7 +514,7 @@ describe('selected catalog fallback', () => {
     await vi.waitFor(() => expect(getSession.mock.calls.filter(([id, options]) => id === fallback.id && options?.limit === 1).length).toBeGreaterThan(2), { timeout: 10_000 });
     await vi.waitFor(() => expect(selected()).not.toBeNull(), { timeout: 10_000 });
 
-    // The main-process read returns this error only after a positive missing-directory check.
+    // The main-process IPC reports a missing session only after a positive missing-directory check.
     const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
     input.value = 'Draft from deleted chat';
     input.dispatchEvent(new w.Event('input', { bubbles: true }));
@@ -527,13 +527,25 @@ describe('selected catalog fallback', () => {
     await vi.waitFor(() => expect(row()).toBeNull(), { timeout: 10_000 });
     expect(w.document.getElementById('timeline')?.textContent).not.toContain('Fallback transcript');
     expect(w.document.getElementById('chatTitle')?.textContent).toBe('New chat');
+    expect(input.value).toBe('');
+    expect(w.document.getElementById('composerImages')?.textContent).toContain('deleted-chat.txt');
+    await vi.waitFor(() => {
+      const drafts = JSON.parse(w.localStorage.getItem('chat-on-steroids.composer-drafts') ?? '[]');
+      expect(drafts).toContainEqual([`recovery:${fallback.id}`, 'Draft from deleted chat']);
+      expect(drafts).not.toContainEqual([fallback.id, 'Draft from deleted chat']);
+    }, { timeout: 10_000 });
+
+    w.document.querySelector<HTMLButtonElement>('#recoveredDraftNotices [data-recovered-draft-action="open"]')!.click();
     expect(input.value).toBe('Draft from deleted chat');
+    expect(w.document.getElementById('composerImages')?.textContent).not.toContain('deleted-chat.txt');
+    w.document.querySelector<HTMLButtonElement>('#recoveredDraftNotices [data-recovered-draft-action="return"]')!.click();
+    expect(input.value).toBe('');
     expect(w.document.getElementById('composerImages')?.textContent).toContain('deleted-chat.txt');
 
-    // The visible draft must be sent as a new opening, and its receipt must select that chat.
+    // Files that fit stay in New Chat; the deleted chat's text remains independently accessible.
     w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
     await vi.waitFor(() => expect(sendInput).toHaveBeenCalledTimes(1), { timeout: 10_000 });
-    expect(sendInput).toHaveBeenCalledWith(expect.objectContaining({ sessionId: null, text: 'Draft from deleted chat', attachments: [deletedAttachment] }));
+    expect(sendInput).toHaveBeenCalledWith(expect.objectContaining({ sessionId: null, text: 'Please look at the attached files.', attachments: [deletedAttachment] }));
     const openedRow = () => w.document.querySelector<HTMLElement>(`#sessionList .sess[data-id="${newChatId}"]`);
     await vi.waitFor(() => expect(openedRow()?.querySelector('.sess-top[aria-current="true"]')).not.toBeNull(), { timeout: 10_000 });
     await vi.waitFor(() => expect(w.document.getElementById('chatTitle')?.textContent).toBe('Draft from deleted chat'), { timeout: 10_000 });
@@ -556,8 +568,8 @@ describe('selected catalog fallback', () => {
     const newChatSummary = { ...summary(newChatId, 100_100, 0), title: 'Existing new-chat draft', conversationId: null, chatIds: [] };
     const page = { sessions: [other], activeId: null, pressure: [], blocked: [], approval: [], recoveryStopped: [], trusted: [], total: 1, nextCursor: null };
     const ok = (data: any) => Promise.resolve({ ok: true as const, data });
-    const newAttachment = { id: 'new-chat-file', name: 'new-chat.txt', size: 10, mimeType: 'text/plain' };
-    const visibleAttachment = { id: 'deleted-chat-file', name: 'deleted-chat.txt', size: 12, mimeType: 'text/plain' };
+    const newAttachments = Array.from({ length: 20 }, (_, index) => ({ id: randomUUID(), name: `new-chat-${index}.txt`, size: 10, mimeType: 'text/plain' }));
+    const visibleAttachment = { id: randomUUID(), name: 'deleted-chat.txt', size: 12, mimeType: 'text/plain' };
     let chooseFileCalls = 0;
     let opened = false;
     let deleted = false;
@@ -575,7 +587,7 @@ describe('selected catalog fallback', () => {
       listProjects: () => ok([]),
       getSession,
       sendInput,
-      chooseFiles: () => ok([chooseFileCalls++ === 0 ? newAttachment : visibleAttachment]),
+      chooseFiles: () => ok(chooseFileCalls++ === 0 ? newAttachments : [visibleAttachment]),
       getSwarm,
       onSessionChanged: () => () => undefined,
       onSwarmChanged: () => () => undefined
@@ -592,7 +604,7 @@ describe('selected catalog fallback', () => {
     input.value = 'Existing new-chat draft';
     input.dispatchEvent(new w.Event('input', { bubbles: true }));
     w.document.getElementById('attachImages')!.click();
-    await vi.waitFor(() => expect(w.document.getElementById('composerImages')?.textContent).toContain('new-chat.txt'), { timeout: 10_000 });
+    await vi.waitFor(() => expect(w.document.getElementById('composerImages')?.textContent).toContain('new-chat-19.txt'), { timeout: 10_000 });
 
     await openScheduledChat(fallback.id);
     opened = true;
@@ -606,18 +618,41 @@ describe('selected catalog fallback', () => {
     const fallbackRow = () => w.document.querySelector<HTMLElement>(`#sessionList [data-id="${fallback.id}"]`);
     await vi.waitFor(() => expect(fallbackRow()).toBeNull(), { timeout: 10_000 });
     expect(input.value).toBe('Existing new-chat draft');
-    expect(w.document.getElementById('composerImages')?.textContent).toContain('new-chat.txt');
-    expect(w.document.getElementById('composerImages')?.textContent).toContain('deleted-chat.txt');
+    expect(w.document.getElementById('composerImages')?.textContent).toContain('new-chat-0.txt');
+    expect(w.document.getElementById('composerImages')?.textContent).toContain('new-chat-19.txt');
+    expect(w.document.getElementById('composerImages')?.textContent).not.toContain('deleted-chat.txt');
+    expect(w.document.getElementById('recoveredDraftNotices')?.textContent).toContain(fallback.id);
     await vi.waitFor(() => {
       const drafts = JSON.parse(w.localStorage.getItem('chat-on-steroids.composer-drafts') ?? '[]');
-      expect(drafts).toContainEqual([fallback.id, 'Draft from deleted chat']);
       expect(drafts).toContainEqual(['new', 'Existing new-chat draft']);
+      expect(drafts).not.toContainEqual([fallback.id, 'Draft from deleted chat']);
+      const recovered = JSON.parse(w.localStorage.getItem('chat-on-steroids.recovered-composer-drafts') ?? '[]');
+      expect(recovered).toContainEqual(expect.objectContaining({ key: `recovery:${fallback.id}`, sourceTitle: fallback.id, attachments: [visibleAttachment] }));
     }, { timeout: 10_000 });
+
+    const openRecovered = () => w.document.querySelector<HTMLButtonElement>('#recoveredDraftNotices [data-recovered-draft-action="open"]');
+    openRecovered()!.click();
+    expect(input.value).toBe('Draft from deleted chat');
+    expect(w.document.getElementById('composerImages')?.textContent).toContain('deleted-chat.txt');
+    expect(w.document.getElementById('composerImages')?.textContent).not.toContain('new-chat-0.txt');
+
+    w.document.querySelector<HTMLButtonElement>('#recoveredDraftNotices [data-recovered-draft-action="return"]')!.click();
+    expect(input.value).toBe('Existing new-chat draft');
+    expect(w.document.getElementById('composerImages')?.textContent).toContain('new-chat-0.txt');
+    expect(w.document.getElementById('composerImages')?.textContent).toContain('new-chat-19.txt');
+
+    openRecovered()!.click();
+    expect(input.value).toBe('Draft from deleted chat');
 
     w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
     await vi.waitFor(() => expect(sendInput).toHaveBeenCalledTimes(1), { timeout: 10_000 });
-    expect(sendInput).toHaveBeenCalledWith(expect.objectContaining({ sessionId: null, text: 'Existing new-chat draft',
-      attachments: [visibleAttachment, newAttachment] }));
+    expect(sendInput).toHaveBeenCalledWith(expect.objectContaining({ sessionId: null, text: 'Draft from deleted chat',
+      attachments: [visibleAttachment] }));
+    await vi.waitFor(() => expect(w.document.getElementById('recoveredDraftNotices')?.hidden).toBe(true), { timeout: 10_000 });
+    w.document.getElementById('newChat')!.click();
+    expect(input.value).toBe('Existing new-chat draft');
+    expect(w.document.getElementById('composerImages')?.textContent).toContain('new-chat-0.txt');
+    expect(w.document.getElementById('composerImages')?.textContent).toContain('new-chat-19.txt');
   });
 });
 
