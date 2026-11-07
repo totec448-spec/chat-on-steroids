@@ -19043,6 +19043,47 @@ describe('a chat deleted in ChatGPT', () => {
   });
 });
 
+// #1990: whoever switches a chat's Goal or Loop is told to the listeners, so Telegram's pause marker can end
+// when the person's own control changes the switch.
+describe('a chat that holds a turn', () => {
+  it('holds one only while the live recorder still has that turn, never because of a stored open turn alone (#1990)', async () => {
+    await pair();
+    const { sessionHoldsTurn } = await import('../src/main/bridge.js');
+    const conversationId = randomUUID();
+    await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'user_message', time: Date.now(), text: 'Work on it', messageId: 'hold-question' },
+      { kind: 'turn_start', time: Date.now(), turnId: 'hold-turn' }
+    ] } });
+    const session = (await findSessionByConversation(conversationId))!;
+    expect(session.activeTurnId).toBe('hold-turn');
+    expect(sessionHoldsTurn(session)).toBe(true);
+    expect(sessionHoldsTurn({ ...session, browserRecoveryDismissedAt: Date.now() })).toBe(false);
+    expect(sessionHoldsTurn({ ...session, activeTurnId: 'another-turn' })).toBe(false);
+    expect(sessionHoldsTurn({ ...session, conversationId: null as never })).toBe(false);
+    // The recorder forgot the turn (an app restart): the stored record still names it, and that is history.
+    resetRecorderForTests();
+    expect(sessionHoldsTurn((await getSession(session.id))!)).toBe(false);
+  });
+});
+
+describe('a chat\'s Goal or Loop switch', () => {
+  it('tells its listeners who switched it on or off, and a failing listener never fails the switch', async () => {
+    const { onSessionAutomationChange, setSessionAutomation } = await import('../src/main/bridge.js');
+    const session = await createSession({ conversationId: randomUUID() });
+    const heard: Array<[string, boolean, string | undefined]> = [];
+    const stop = onSessionAutomationChange((id, on, from) => { heard.push([id, on, from]); });
+    const stopFailing = onSessionAutomationChange(() => { throw new Error('listener bug'); });
+    try {
+      await setSessionAutomation(session.id, 'loop', undefined, 'the app');
+      await setSessionAutomation(session.id, 'off', undefined, 'Telegram');
+      expect(heard).toEqual([[session.id, true, 'the app'], [session.id, false, 'Telegram']]);
+    } finally { stop(); stopFailing(); await setSessionAutomation(session.id, 'off').catch(() => undefined); }
+    await setSessionAutomation(session.id, 'loop');
+    expect(heard).toHaveLength(2);
+    await setSessionAutomation(session.id, 'off');
+  });
+});
+
 /** Worker chats of ended runs, archived in ChatGPT by the extension when the setting is on (#1460). */
 describe('archiving worker chats', () => {
   it('hands the extension one leased chat at a time and takes its result', async () => {

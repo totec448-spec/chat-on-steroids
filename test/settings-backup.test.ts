@@ -185,6 +185,15 @@ describe('what an import would open up', () => {
     expect(widerAccess(after(copy => { (copy.ui as Record<string, unknown>).desktopUnattributed = true; }), base)).toEqual([]);
   });
 
+  // CodeRabbit on #1990: an import that turns on replies from Telegram gives the phone a way to message chats.
+  it('counts replies from Telegram as wider access when an import turns them on, and not when it turns them off', () => {
+    const steer = (on: boolean | undefined) => after(copy => { (copy.ui as Record<string, unknown>).phonePush = { telegramSteer: on }; });
+    expect(widerAccess(steer(false), steer(true))).toEqual(['ui.phonePush.telegramSteer']);
+    expect(widerAccess(base, steer(true))).toEqual(['ui.phonePush.telegramSteer']);
+    expect(widerAccess(steer(true), steer(false))).toEqual([]);
+    expect(widerAccess(steer(true), steer(true))).toEqual([]);
+  });
+
   it('counts the command rules as wider when they are switched off, even with the same rules', () => {
     expect(widerAccess(base, after(copy => { copy.commandAllowlist.enabled = false; }))).toEqual(['commandAllowlist']);
   });

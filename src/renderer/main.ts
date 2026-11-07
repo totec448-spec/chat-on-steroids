@@ -1011,6 +1011,11 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     if (state && (!requestedSettings || requestedSettings.controlApi?.enabled === patch.controlApi?.enabled)) {
       $<HTMLInputElement>('controlApiEnabled').checked = state.config.controlApi?.enabled === true;
     }
+    // And for replies from Telegram, which let the phone message a chat: a box shown off while the saved
+    // value is still on would misstate it (CodeRabbit on #1990).
+    if (state && (!requestedSettings || requestedSettings.ui.phonePush?.telegramSteer === patch.ui.phonePush?.telegramSteer)) {
+      $<HTMLInputElement>('telegramSteer').checked = state.config.ui.phonePush?.telegramSteer === true;
+    }
     // And for desktop control without a known chat (CodeRabbit on #1938): a box shown off while the
     // saved value is still on would misstate what the desktop tools allow.
     if (state && (!requestedSettings || requestedSettings.ui.desktopUnattributed === patch.ui.desktopUnattributed)) {

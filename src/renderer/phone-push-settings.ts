@@ -34,7 +34,9 @@ export function readPhonePush(previous: PhonePushSettings | undefined): PhonePus
     onlyWhenAway: checkbox('phonePushAway').checked,
     quietHours: quiet === 'custom' ? previous?.quietHours ?? null : from && to ? { from, to } : null,
     includeDetails: checkbox('phonePushDetails').checked,
-    telegramSteer: checkbox('telegramSteer').checked
+    // An older config has no value: it stays absent until the switch is touched, so an untouched form
+    // never counts as a change of the phone settings (CodeRabbit on #1990).
+    ...(previous?.telegramSteer === undefined && !checkbox('telegramSteer').checked ? {} : { telegramSteer: checkbox('telegramSteer').checked })
   };
 }
 

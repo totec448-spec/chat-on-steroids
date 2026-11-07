@@ -15,6 +15,10 @@ export interface StatusChat {
   working: boolean;
   /** Goal or Loop drives it. */
   automation: 'Goal' | 'Loop' | null;
+  /** The person's own chat. A worker's is shown in `/status` but is never a target of a command (CodeRabbit on #1990). */
+  own?: boolean;
+  /** The chat holds a turn the app no longer counts as working; `/stop` can still end it. */
+  held?: boolean;
 }
 
 export type StatusText =
@@ -53,6 +57,8 @@ export interface StatusLookups {
   goal(conversationId: string): { enabled: boolean; mode: string } | null;
   card(conversationId: string): { answer?: unknown } | null;
   activityExpiresAt(summary: SessionSummary): number | null | undefined;
+  /** The chat holds a turn although the app no longer counts it as working. */
+  held?(summary: SessionSummary): boolean;
 }
 
 /**
@@ -65,7 +71,7 @@ export function statusChatsFrom(list: readonly SessionSummary[], lookups: Status
     const goal = chat.conversationId ? lookups.goal(chat.conversationId) : null;
     const card = chat.conversationId ? lookups.card(chat.conversationId) : null;
     return { sessionId: chat.id, title: chat.title, working: sessionWorkingAt({ ...chat, activityExpiresAt: lookups.activityExpiresAt(chat) }, now),
-      approval: !!card && !card.answer,
+      approval: !!card && !card.answer, own: chat.origin?.kind !== 'worker', held: lookups.held?.(chat) === true,
       automation: goal?.enabled ? (goal.mode === 'loop' ? 'Loop' as const : 'Goal' as const) : null };
   });
 }
