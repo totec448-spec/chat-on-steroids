@@ -1176,6 +1176,17 @@ describe('session store', () => {
     expect((await getSession(summary.id))?.lastAnswerLine).toBe('Done.');
   });
 
+  // CodeRabbit on #2099: an authored-time promotion moves the message's own time forward; it must not count as "a newer final".
+  it('updates the answer line of a growing message whose time was promoted by the same revision', async () => {
+    const summary = await createSession({ title: 'promoted time' });
+    const text = (value: string) => ({ text: value, truncated: false, chars: value.length });
+    await upsertMessageEvent(summary.id, { time: 100, source: 'extension', kind: 'assistant_message', messageId: 'm',
+      message: text('Done.'), state: 'final', final: true });
+    await upsertMessageEvent(summary.id, { time: 150, source: 'extension', kind: 'assistant_message', messageId: 'm',
+      message: text('Done. And then more.'), state: 'streaming', final: false }, { preferTime: true });
+    expect((await getSession(summary.id))?.lastAnswerLine).toBe('Done. And then more.');
+  });
+
   it('keeps rich HTML when the same canonical prose is reobserved without rendered HTML', async () => {
     const summary = await createSession({ title: 'sparse rich final' });
     const messageId = 'msg-sparse-rich';
