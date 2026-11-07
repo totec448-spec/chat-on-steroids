@@ -21,12 +21,12 @@ const fixture = `(() => {
   e({time:min(47),source:'extension',kind:'chat_error',turnId:'t-1',message:text('The response stream is unavailable (resume HTTP 404).')}),
   e({time:min(47),source:'app',kind:'progress',progressId:'browser-repair:a',message:text('Trying to reload chat to recover an interrupted response…')}),
   e({time:min(48),source:'app',kind:'progress',progressId:'browser-repair:a',message:text('Reloaded chat to recover an interrupted response.')}),
-  e({time:min(57),source:'extension',kind:'chat_error',turnId:'t-1',message:text('Message delivery timed out. Please try again. Retry')}),
+  e({time:min(57),source:'extension',kind:'chat_error',turnId:'t-1',recoverable:true,message:text('Message delivery timed out. Please try again. Retry')}),
   e({time:min(58),source:'extension',kind:'turn_end',turnId:'t-1',outcome:'failed'}),
   e({time:min(58.2),source:'app',kind:'progress',progressId:'browser-repair:b',message:text('Reloaded chat to recover a handoff request that has not been sent.')}),
   e({time:min(70),source:'extension',kind:'chat_error',message:text('ChatGPT temporarily limited access to this conversation history.')}),
   e({time:min(80),source:'extension',kind:'user_message',automatic:true,messageId:'u-2',turnId:'t-2',message:text('Continue until you are fully finished.')}),
-  e({time:min(91),source:'extension',kind:'chat_error',message:text('Message delivery timed out. Please try again. Retry')})
+  e({time:min(91),source:'extension',kind:'chat_error',recoverable:true,message:text('Message delivery timed out. Please try again. Retry')})
  ];
  window.stoppedNote=e({time:min(95),source:'app',kind:'note',message:text('Stopped trying to recover this chat: 10 attempts were offered to the browser and none was picked up, so this chat has no page to reload. Open its tab again and recovery resumes.')});
  const query=new URLSearchParams(location.search);
@@ -64,7 +64,7 @@ app.whenReady().then(async () => {
   await until(`!document.getElementById('recoveryStatus').hidden && !!document.querySelector('#recoveryStatus .recovery-episode-meta')`);
   const first = await js(`(() => { const r=${row}; const m=r.querySelector('.recovery-episode-meta'); return { label: r.querySelector('.queue-label').textContent, meta: m.textContent, expanded: m.getAttribute('aria-expanded'), stopped: r.classList.contains('is-stopped') }; })()`);
   // The latest step is what is happening now; since when and how often the app tried is beside it.
-  assert.equal(first.label, 'Message delivery timed out. Please try again. Retry');
+  assert.equal(first.label, 'Message delivery timed out. Please try again.');
   assert.match(first.meta, /^Since \d{1,2}:\d{2}( [AP]M)? · 3 tries$/);
   assert.equal(first.expanded, 'false');
   assert.equal(first.stopped, false);
@@ -74,8 +74,8 @@ app.whenReady().then(async () => {
   await until(`!!document.querySelector('#recoveryEpisodeList')`);
   const list = await js(`[...document.querySelectorAll('#recoveryEpisodeList .recovery-episode-item span')].map(s=>s.textContent)`);
   // Newest first; a reload is one line saying how it ended.
-  assert.deepEqual(list, ['Message delivery timed out. Please try again. Retry', 'Automatic Continue sent', 'ChatGPT temporarily limited access to this conversation history.',
-    'Reloaded chat to recover a handoff request that has not been sent.', 'The turn failed', 'Message delivery timed out. Please try again. Retry',
+  assert.deepEqual(list, ['Message delivery timed out. Please try again.', 'Automatic Continue sent', 'ChatGPT temporarily limited access to this conversation history.',
+    'Reloaded chat to recover a handoff request that has not been sent.', 'The turn failed', 'Message delivery timed out. Please try again.',
     'Reloaded chat to recover an interrupted response.', 'The response stream is unavailable (resume HTTP 404).']);
   assert.equal(await js(`document.activeElement?.classList.contains('recovery-episode-meta')`), true);
   await shot('episode-open.png');
@@ -105,6 +105,17 @@ app.whenReady().then(async () => {
   assert.ok(tiny.whole, `the summary shows whole: ${tiny.text}`);
   assert.ok(tiny.label >= 200, `the reason keeps the row: ${tiny.label}px`);
   assert.ok(tiny.fits, 'the row fits');
+  // The offer card above the chat (Keep plugins up to date) at the same width: its buttons take their
+  // own line, so its explanation is not squeezed into a nine-line column beside them (2.1.51 polish pass).
+  const offer = await js(`(() => { const c=document.getElementById('pluginRefreshOffer'); if (!c || c.hidden || !c.getClientRects().length) return null;
+    const text=c.querySelector('.offer-text').getBoundingClientRect(), later=c.querySelector('.offer-later').getBoundingClientRect(), accept=c.querySelector('.offer-accept').getBoundingClientRect();
+    return { text: Math.round(text.width), below: later.top >= text.bottom - 1 && accept.top >= text.bottom - 1, together: Math.abs(later.top - accept.top) < 2 && later.right <= accept.left,
+      right: Math.round(c.getBoundingClientRect().right - accept.right) }; })()`);
+  assert.ok(offer, 'the fixture shows the plugin offer card');
+  assert.ok(offer.text >= 240, `the offer explanation keeps its width: ${offer.text}px`);
+  assert.ok(offer.below, 'the offer buttons sit under the explanation');
+  assert.ok(offer.together, 'Not now and Turn on stay side by side');
+  assert.ok(offer.right <= 20, `the buttons end at the card's right edge: ${offer.right}px`);
   await shot('stopped-640.png');
   await shot('stopped-narrow.png');
   win.setContentSize(1280, 900); await until('innerWidth===1280');

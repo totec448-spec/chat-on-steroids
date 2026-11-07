@@ -1380,11 +1380,15 @@ main {
 #desktopAccessNotice .btn { flex: none; }
 
 /* A one-time offer, not a warning: the What's New dialog's icon tile and buttons, in a notice row. */
-.notice.offer-card { gap: 14px; padding: 12px 18px; animation: offer-card-arrive .42s cubic-bezier(.16, 1, .3, 1) both; }
+/* In a narrow window the buttons take their own line, right-aligned, instead of squeezing the explanation
+   into a tall column beside them (2.1.51 polish pass). */
+.notice.offer-card { flex-wrap: wrap; gap: 10px 14px; padding: 12px 18px; animation: offer-card-arrive .42s cubic-bezier(.16, 1, .3, 1) both; }
 .offer-icon { display: grid; place-items: center; flex: none; width: 34px; height: 34px; border-radius: 10px;
   background: var(--hover); color: var(--ink); box-shadow: 0 0 0 1px var(--line), 0 6px 16px -10px #0008; }
 .offer-icon .ico { --ico: 16px; --glyph: 16px; color: var(--ink); }
-.offer-text { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.offer-text { display: grid; gap: 2px; flex: 1 1 240px; min-width: 0; }
+/* Both buttons move together: in a narrow window they take their own line, at its right end. */
+.offer-actions { display: flex; align-items: center; gap: 8px; flex: none; margin-left: auto; }
 .offer-text b { font-size: calc(12.5px * var(--text-scale, 1)); font-weight: 600; }
 .offer-text em { font-style: normal; color: var(--soft); line-height: 1.4; }
 .offer-later, .offer-accept { flex: none; border: 0; font: inherit; font-size: calc(12px * var(--text-scale, 1)); cursor: pointer;
@@ -5027,12 +5031,12 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .user-request-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .user-requests { min-width: 0; border-bottom: 1px solid var(--edge); color: var(--soft); font-size: calc(13px * var(--text-scale, 1)); overflow: hidden; }
 .user-requests[hidden], .app[data-screen='settings'] .user-requests { display: none; }
-.user-requests summary { display: flex; align-items: center; gap: 9px; min-height: 38px; padding: 8px 12px; list-style: none; cursor: pointer; }
-.user-requests summary::-webkit-details-marker { display: none; }
-.user-requests summary:hover { background: var(--hover); color: var(--ink); }
-.user-requests summary:focus-visible { outline: 2px solid var(--ink); outline-offset: -3px; border-radius: 7px; }
-.user-requests summary .ico { --ico: 15px; }
-.user-requests summary::after { content: ''; width: 7px; height: 7px; flex: none; margin: 0 4px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); }
+.user-requests-shell > summary { display: flex; align-items: center; gap: 9px; min-height: 38px; padding: 8px 12px; list-style: none; cursor: pointer; }
+.user-requests-shell > summary::-webkit-details-marker { display: none; }
+.user-requests-shell > summary:hover { background: var(--hover); color: var(--ink); }
+.user-requests-shell > summary:focus-visible { outline: 2px solid var(--ink); outline-offset: -3px; border-radius: 7px; }
+.user-requests-shell > summary .ico { --ico: 15px; }
+.user-requests-shell > summary::after { content: ''; width: 7px; height: 7px; flex: none; margin: 0 4px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); }
 .user-requests-shell[open] > summary::after { transform: rotate(225deg); }
 .user-requests-title { flex: 1; font-weight: 550; color: var(--ink); }
 .user-requests-body { display: grid; gap: 8px; max-height: min(360px, 40vh); overflow-y: auto; overscroll-behavior: contain; padding: 0 8px 8px; }
