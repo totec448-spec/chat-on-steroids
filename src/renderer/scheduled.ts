@@ -1,5 +1,6 @@
 import { currentLanguage, onLanguageChange, t, tn } from './i18n.js';
 import type { ScheduleRepeat, ScheduledRunListItem } from '../shared/schedule.js';
+import { initCardMenuDismissal } from './dom.js';
 
 type Reply<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -41,16 +42,16 @@ function messagePreview(text: string): string {
 
 function repeatText(repeat: ScheduleRepeat): string {
   if (repeat.kind === 'hours') return repeat.every === 1 ? t('every hour') : tn('every {0} hour', 'every {0} hours', repeat.every);
-  const [hour, minute] = repeat.at.split(':').map(Number) as [number, number];
-  const at = new Date(2024, 0, 1, hour, minute).toLocaleTimeString(currentLanguage(), { hour: '2-digit', minute: '2-digit' });
-  if (repeat.kind === 'daily') return t('every day at {0}', [at]);
-  if (repeat.kind === 'weekdays') return t('every weekday at {0}', [at]);
+  // The next-run field already contains the clock time. Do not repeat it in recurrence.
+  if (repeat.kind === 'daily') return t('Every day');
+  if (repeat.kind === 'weekdays') return t('Weekdays');
   const weekday = new Intl.DateTimeFormat(currentLanguage(), { weekday: 'long' }).format(new Date(2024, 0, 7 + repeat.day));
-  return t('every {0} at {1}', [weekday, at]);
+  return `${t('Every week')} · ${weekday}`;
 }
 
 /** A projection of scheduled-runs; this view never stores tasks or sends messages itself. */
 export function initScheduled(controller: ScheduledController): { refresh: () => Promise<void> } {
+  initCardMenuDismissal();
   const list = document.getElementById('scheduledList')!;
   const status = document.getElementById('scheduledStatus')!;
   const description = document.getElementById('scheduledDescription')!;
@@ -84,25 +85,53 @@ export function initScheduled(controller: ScheduledController): { refresh: () =>
 
   type ActionFocus = { sessionId: string; action: string; row: number };
   const focusedAction = (): ActionFocus | null => {
-    const active = document.activeElement as HTMLButtonElement | null;
+    const active = document.activeElement as HTMLElement | null;
     if (!active?.dataset.scheduledAction || !active.dataset.sessionId || !list.contains(active)) return null;
     const row = [...list.querySelectorAll<HTMLElement>('.scheduled-index-row')].indexOf(active.closest<HTMLElement>('.scheduled-index-row')!);
     return { sessionId: active.dataset.sessionId, action: active.dataset.scheduledAction, row };
   };
   const restoreFocus = (saved: ActionFocus | null): void => {
     if (!saved) return;
-    const buttons = [...list.querySelectorAll<HTMLButtonElement>('button[data-scheduled-action]')];
-    const exact = buttons.find(node => node.dataset.sessionId === saved.sessionId && node.dataset.scheduledAction === saved.action);
+    const buttons = [...list.querySelectorAll<HTMLElement>('[data-scheduled-action]')];
+    // A closed overflow menu cannot receive focus; return to its visible summary instead.
+    const action = saved.action === 'open' ? 'open' : 'menu';
+    const exact = buttons.find(node => node.dataset.sessionId === saved.sessionId && node.dataset.scheduledAction === action);
     if (exact) { exact.focus(); return; }
     const rows = [...list.querySelectorAll<HTMLElement>('.scheduled-index-row')];
     const row = rows[Math.min(Math.max(saved.row, 0), rows.length - 1)];
-    (row?.querySelector<HTMLButtonElement>('button[data-scheduled-action]') ?? refreshButton).focus();
+    (row?.querySelector<HTMLElement>('[data-scheduled-action="open"]') ?? refreshButton).focus();
   };
   const applyDisabled = (): void => {
     for (const action of list.querySelectorAll<HTMLButtonElement>('button[data-scheduled-action]'))
       action.disabled = busy || action.dataset.scheduledDisabled === 'true';
     refreshButton.disabled = busy;
     refreshButton.setAttribute('aria-busy', String(refreshInFlight !== null));
+  };
+
+  const confirmDelete = (record: ScheduledRunListItem, returnFocus: HTMLElement): void => {
+    const dialog = element('dialog', 'plugin-dialog pet-delete-dialog');
+    const title = element('h2', '', t('Delete the schedule for {0}?', [record.sessionTitle || t('Untitled chat')]));
+    title.id = 'scheduledDeleteTitle';
+    dialog.setAttribute('aria-labelledby', title.id);
+    const head = element('div', 'plugin-dialog-head');
+    head.append(title);
+    const body = element('div', 'plugin-dialog-body');
+    const actions = element('div', 'pet-delete-actions');
+    const dismiss = (): void => {
+      if (typeof dialog.close === 'function') dialog.close();
+      else { dialog.remove(); if (returnFocus.isConnected) returnFocus.focus(); }
+    };
+    const cancel = button(t('Cancel'), dismiss, 'btn btn-solid pet-delete-cancel');
+    const remove = button(t('Delete'), () => {
+      dismiss();
+      if (returnFocus.isConnected) returnFocus.focus();
+      void mutate(() => controller.delete(record.sessionId));
+    }, 'btn plugin-destructive pet-delete-confirm');
+    actions.append(cancel, remove); body.append(actions); dialog.append(head, body);
+    dialog.addEventListener('close', () => { dialog.remove(); if (returnFocus.isConnected) returnFocus.focus(); });
+    document.body.append(dialog);
+    if (typeof dialog.showModal === 'function') dialog.showModal(); else dialog.setAttribute('open', '');
+    cancel.focus();
   };
 
   const render = (): void => {
@@ -140,17 +169,31 @@ export function initScheduled(controller: ScheduledController): { refresh: () =>
         node.dataset.scheduledDisabled = String(unavailable);
         return node;
       };
-      actions.append(
-        action(t('Open chat'), 'open', () => controller.openChat(record.sessionId)),
+      const menu = element('details', 'plugin-menu scheduled-index-menu');
+      const summary = element('summary');
+      summary.dataset.scheduledAction = 'menu';
+      summary.dataset.sessionId = record.sessionId;
+      summary.setAttribute('aria-label', t('Actions for {0}', [record.sessionTitle || t('Untitled chat')]));
+      const dots = element('i', 'ico ph ph-dots-three');
+      dots.setAttribute('aria-hidden', 'true');
+      summary.append(dots);
+      menu.addEventListener('keydown', event => {
+        // Keep focus on a visible control when Escape dismisses a keyboard-opened menu.
+        if (event.key === 'Escape' && menu.open) {
+          menu.open = false;
+          summary.focus();
+          event.stopPropagation();
+        }
+      });
+      const options = element('div', 'plugin-menu-actions');
+      options.append(
         action(record.paused ? t('Resume') : t('Pause'), 'pause', () => void mutate(() => controller.pause(record.sessionId, !record.paused))),
         action(t('Run now'), 'run-now', () => void mutate(() => controller.runNow(record.sessionId), queued => queued ? 'Queued' : 'Skipped'),
-          'btn btn-solid', record.retryDueAt !== undefined || record.deliveryBlock !== undefined),
-        action(t('Delete'), 'delete', () => {
-          if (window.confirm(t('Delete the schedule for {0}?', [record.sessionTitle || t('Untitled chat')]))) {
-            void mutate(() => controller.delete(record.sessionId));
-          }
-        }, 'btn scheduled-index-delete')
+          'btn', record.retryDueAt !== undefined || record.deliveryBlock !== undefined),
+        action(t('Delete'), 'delete', () => confirmDelete(record, summary), 'btn plugin-destructive')
       );
+      menu.append(summary, options);
+      actions.append(action(t('Open chat'), 'open', () => controller.openChat(record.sessionId)), menu);
       row.append(body, actions);
       list.append(row);
     }

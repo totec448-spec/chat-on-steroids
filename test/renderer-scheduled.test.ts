@@ -42,6 +42,11 @@ it('projects different chats from one schedule list and opens the selected chat'
   expect(rows[0]?.textContent).toContain('Economics monitoring');
   expect(rows[0]?.textContent).toContain('Review prices and publish a report');
   expect(rows[1]?.textContent).toContain('Paused');
+  expect(rows[0]?.querySelectorAll('.scheduled-index-actions > button')).toHaveLength(1);
+  expect(rows[0]?.querySelector('.scheduled-index-menu > summary')?.getAttribute('aria-label')).toBe('Actions for Economics monitoring');
+  expect(rows[0]?.querySelector('.scheduled-index-message')).toBeTruthy();
+  expect(rows[0]?.querySelector('.scheduled-index-meta')?.textContent).toContain('Every day');
+  expect(rows[0]?.querySelector('.scheduled-index-meta')?.textContent).not.toContain('every day at');
   (rows[1]?.querySelector('button') as HTMLButtonElement).click();
   expect(calls.openChat).toHaveBeenCalledExactlyOnceWith(idB);
 });
@@ -66,7 +71,7 @@ it('shows blocked delivery receipts and disables Run now until the outbox is def
     .find(button => button.textContent === 'Run now')?.disabled)).toBe(true);
 });
 
-it('reuses pause, runNow and delete actions for the exact original chat; deletion asks first', async () => {
+it('keeps only Open chat visible, uses the overflow menu, and confirms deletion in an accessible dialog', async () => {
   const { initScheduled } = await import('../src/renderer/scheduled.js');
   const calls = {
     list: vi.fn(async () => ok([schedule(idA)])),
@@ -75,9 +80,20 @@ it('reuses pause, runNow and delete actions for the exact original chat; deletio
     delete: vi.fn(async () => ok(true)),
     openChat: vi.fn()
   };
-  const confirm = vi.fn(() => false);
+  const confirm = vi.fn(() => true);
   dom.window.confirm = confirm;
   await initScheduled(calls).refresh();
+  const menu = document.querySelector<HTMLDetailsElement>('.scheduled-index-menu')!;
+  const summary = menu.querySelector('summary')!;
+  expect(menu.open).toBe(false);
+  summary.focus(); summary.click();
+  expect(menu.open).toBe(true);
+  const pauseInMenu = [...menu.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Pause')!;
+  pauseInMenu.focus();
+  pauseInMenu.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  expect(menu.open).toBe(false);
+  expect(document.activeElement).toBe(summary);
+  summary.click();
   const click = async (label: string) => {
     const button = [...document.querySelectorAll<HTMLButtonElement>('.scheduled-index-row button')]
       .find(node => node.textContent === label);
@@ -90,10 +106,19 @@ it('reuses pause, runNow and delete actions for the exact original chat; deletio
   await click('Run now');
   expect(calls.runNow).toHaveBeenCalledExactlyOnceWith(idA);
   await click('Delete');
-  expect(confirm).toHaveBeenCalledOnce();
+  expect(confirm).not.toHaveBeenCalled();
   expect(calls.delete).not.toHaveBeenCalled();
-  confirm.mockReturnValue(true);
+  const dialog = document.querySelector<HTMLDialogElement>('dialog[aria-labelledby="scheduledDeleteTitle"]')!;
+  expect(dialog).not.toBeNull();
+  expect(dialog.querySelector('h2')?.textContent).toContain('Economics monitoring');
+  expect(document.activeElement?.textContent).toBe('Cancel');
+  dialog.querySelector<HTMLButtonElement>('.pet-delete-cancel')!.click();
+  expect(document.querySelector('dialog[aria-labelledby="scheduledDeleteTitle"]')).toBeNull();
+  expect(document.activeElement).toBe(document.querySelector('.scheduled-index-menu > summary'));
+  expect(calls.delete).not.toHaveBeenCalled();
   await click('Delete');
+  document.querySelector<HTMLButtonElement>('.pet-delete-confirm')!.click();
+  await settle();
   expect(calls.delete).toHaveBeenCalledExactlyOnceWith(idA);
 });
 
@@ -295,7 +320,7 @@ it('keeps unchanged rows mounted, restores action focus after a changed row, and
   const runNow = [...original.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Run now')!;
   runNow.focus(); runNow.click(); await settle();
   expect(document.querySelector('.scheduled-index-row')).toBe(original);
-  expect(document.activeElement).toBe(runNow);
+  expect((document.activeElement as HTMLElement).dataset.scheduledAction).toBe('menu');
   expect(document.getElementById('scheduledStatus')?.textContent).toBe('Queued');
   await view.refresh();
   expect(document.getElementById('scheduledStatus')?.textContent).toBe('Queued');
@@ -305,7 +330,8 @@ it('keeps unchanged rows mounted, restores action focus after a changed row, and
   const pause = [...original.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Pause')!;
   pause.focus(); pause.click(); await settle();
   const resume = [...document.querySelectorAll<HTMLButtonElement>('.scheduled-index-row button')].find(node => node.textContent === 'Resume')!;
-  expect(document.activeElement).toBe(resume);
+  expect(resume).toBeDefined();
+  expect((document.activeElement as HTMLElement).dataset.scheduledAction).toBe('menu');
 });
 
 it('preserves keyboard focus when a background refresh changes a different schedule row', async () => {
@@ -329,7 +355,7 @@ it('preserves keyboard focus when a background refresh changes a different sched
   await view.refresh();
   const restored = document.activeElement as HTMLButtonElement;
   expect(restored.dataset.sessionId).toBe(idA);
-  expect(restored.dataset.scheduledAction).toBe('pause');
+  expect(restored.dataset.scheduledAction).toBe('menu');
 });
 
 it('moves focus to a surviving row or Refresh when a background refresh removes the focused row', async () => {
@@ -358,7 +384,7 @@ it('moves focus to a surviving row or Refresh when a background refresh removes 
   expect(document.activeElement).toBe(document.getElementById('scheduledRefresh'));
 });
 
-it('shows a missed run in the global list and formats recurrence time for the selected locale', async () => {
+it('shows missed occurrences with localized time and does not duplicate the recurrence clock', async () => {
   const { initScheduled } = await import('../src/renderer/scheduled.js');
   const { setLanguage } = await import('../src/renderer/i18n.js');
   const missedAt = new Date(2026, 10, 5, 9, 0).getTime();
@@ -375,11 +401,12 @@ it('shows a missed run in the global list and formats recurrence time for the se
     setLanguage('en');
     await view.refresh();
     expect(document.querySelector('.scheduled-index-meta')?.textContent).toContain('missed');
-    const englishTime = new Date(2024, 0, 1, 9, 0).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' });
+    const englishTime = new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(missedAt);
     expect(document.querySelector('.scheduled-index-meta')?.textContent).toContain(englishTime);
+    expect(document.querySelector('.scheduled-index-meta')?.textContent).toContain('Every day');
 
     setLanguage('pt-PT');
-    const portugueseTime = new Date(2024, 0, 1, 9, 0).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
+    const portugueseTime = new Intl.DateTimeFormat('pt-PT', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(missedAt);
     expect(document.querySelector('.scheduled-index-meta')?.textContent).toContain(portugueseTime);
   } finally { setLanguage('en'); }
 });

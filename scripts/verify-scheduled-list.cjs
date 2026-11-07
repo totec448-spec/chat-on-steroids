@@ -93,15 +93,26 @@ app.whenReady().then(async () => {
       const bounds=rows.map(row=>{const r=row.getBoundingClientRect();return {width:r.width,height:r.height,right:r.right}});
       return {length:rows.length,titles:rows.map(row=>row.querySelector('h2').textContent),
         rowsVisible:bounds.every(r=>r.width>0&&r.height>0&&r.right<=innerWidth+1),
-        actions:rows.map(row=>[...row.querySelectorAll('button')].map(button=>button.textContent))};
+        actions:rows.map(row=>[...row.querySelectorAll('.scheduled-index-actions > button')].map(button=>button.textContent)),
+        menuActions:rows.map(row=>[...row.querySelectorAll('.scheduled-index-menu button')].map(button=>button.textContent)),
+        previews:rows.map(row=>row.querySelector('.scheduled-index-message')?.textContent),
+        summaries:rows.map(row=>row.querySelector('.scheduled-index-meta')?.textContent)};
     } catch(error) {return {error:String(error)}} })()`);
     assert.equal(preview.length, 2);
     assert.deepEqual(preview.titles, ['Economics monitoring', 'Politics overview']);
     assert(preview.rowsVisible, 'both scheduled rows fit the app width');
-    assert(preview.actions[0].includes('Run now') && preview.actions[0].includes('Pause'));
-    assert(preview.actions[1].includes('Resume'));
+    assert.deepEqual(preview.actions, [['Open chat'], ['Open chat']], 'one exposed action per row');
+    assert(preview.menuActions[0].includes('Run now') && preview.menuActions[0].includes('Pause'));
+    assert(preview.menuActions[1].includes('Resume'));
+    assert(preview.summaries[0].includes('Every day') && !preview.summaries[0].includes('every day at 09:00'), 'recurrence must not repeat time');
     fs.mkdirSync(output, { recursive: true });
     await saveCapture(win, 'scheduled-dark.png');
+    await js("document.querySelector('.scheduled-index-menu > summary').click(); true");
+    const openMenu = await js(`(() => ({open:document.querySelector('.scheduled-index-menu')?.open,
+      labels:[...document.querySelectorAll('.scheduled-index-menu .plugin-menu-actions button')].map(node=>node.textContent)}))()`);
+    assert(openMenu.open && openMenu.labels.includes('Delete') && openMenu.labels.includes('Run now'), 'overflow actions are accessible');
+    await saveCapture(win, 'scheduled-menu-dark.png');
+    await js("document.querySelector('.scheduled-index-menu > summary').click(); true");
     await js("document.querySelector('.scheduled-index-row button').click(); true");
     const actions = await js('JSON.stringify(window.fixture.actions)');
     assert.equal(actions, JSON.stringify([['openChat', 'fixture-economics']]));
@@ -112,7 +123,7 @@ app.whenReady().then(async () => {
     assert.equal(empty.overflow, false);
     await saveCapture(win, 'scheduled-empty-light.png');
     console.log('Passed: global Scheduled view renders two chats, actions and paused state; empty state fits the light window.');
-    console.log('Screenshots: outputs/scheduled-list/scheduled-dark.png and scheduled-empty-light.png');
+    console.log('Screenshots: outputs/scheduled-list/scheduled-dark.png, scheduled-menu-dark.png and scheduled-empty-light.png');
   } finally {
     win.destroy();
   }
