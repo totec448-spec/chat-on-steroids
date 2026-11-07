@@ -62,14 +62,32 @@ export function telegramTargets(action: ChatAction, chats: ReadonlyArray<StatusC
 }
 
 /**
+ * Changes one chat's pause marker. The change counts in memory at once and the write follows, so a
+ * change from the person's own control while the write is still running can never be undone by it
+ * (CodeRabbit on #1990). When the write fails, only this chat's marker goes back.
+ */
+async function updatePaused(sessionId: string, add: boolean): Promise<void> {
+  const had = paused.has(sessionId);
+  const next = new Set(paused);
+  if (add) next.add(sessionId); else next.delete(sessionId);
+  paused = next;
+  try {
+    await writeDurableNow(PAUSED_STATE, [...next]);
+  } catch (error) {
+    const undo = new Set(paused);
+    if (had) undo.add(sessionId); else undo.delete(sessionId);
+    paused = undo;
+    throw error;
+  }
+}
+
+/**
  * The person's own control turned a chat's Goal or Loop on or off. A pause Telegram made no longer
  * stands then: /resume must never turn it back on against what they did last (CodeRabbit on #1990).
  */
 export function noteAutomationChanged(sessionId: string, on: boolean): void {
   if (!paused.has(sessionId) || !on) return;
-  const next = new Set([...paused].filter(id => id !== sessionId));
-  paused = next;
-  void writeDurableNow(PAUSED_STATE, [...next]).catch(() => undefined);
+  void updatePaused(sessionId, false).catch(() => undefined);
 }
 
 /** At startup: reads the linked account and, when there is one, starts listening. */
@@ -78,7 +96,6 @@ export async function startTelegram(deps: TelegramAppDeps): Promise<void> {
   link = validLink(await readDurable<unknown>(LINK_STATE).catch(() => null));
   const savedPaused = await readDurable<unknown>(PAUSED_STATE).catch(() => null);
   paused = new Set(Array.isArray(savedPaused) ? savedPaused.filter((id): id is string => typeof id === 'string' && id.length <= 200).slice(-200) : []);
-  const savePaused = (next: Set<string>) => writeDurableNow(PAUSED_STATE, [...next]).then(() => { paused = next; });
   bot = createTelegram({
     token: () => getSecret('telegramBotToken'),
     link: () => link,
@@ -105,25 +122,26 @@ export async function startTelegram(deps: TelegramAppDeps): Promise<void> {
       // refused here, and so is a chat that was a worker meanwhile (CodeRabbit on #1990).
       const chat = (await deps.chats()).find(row => row.sessionId === sessionId);
       if (chat && chat.own === false) { deps.log(`telegram: /${action} refused: that chat is a worker`); return 'refused'; }
-      if (action === 'stop') return deps.stop(sessionId);
+      // One rule for all three: a chat that is not in the list (a worker that left it) is left alone.
       if (!chat) return 'nothing';
+      if (action === 'stop') return deps.stop(sessionId);
       if (action === 'pause') {
         if (chat.automation === null) return 'nothing';
         // Saved first: a pause /resume cannot find again would leave the chat off for good. Kept
         // only if the switch really went off, so a failed pause is never resumed later.
-        await savePaused(new Set([...paused, sessionId]));
+        await updatePaused(sessionId, true);
         if (await deps.setAutomation(sessionId, false)) return 'done';
         const now = (await deps.chats()).find(row => row.sessionId === sessionId);
-        if (now && now.automation !== null) await savePaused(new Set([...paused].filter(id => id !== sessionId)));
+        if (now && now.automation !== null) await updatePaused(sessionId, false);
         return 'failed';
       }
       // Turned back on in the app meanwhile, or never paused from here: nothing to resume.
       if (!paused.has(sessionId) || chat.automation !== null) {
-        if (paused.has(sessionId)) await savePaused(new Set([...paused].filter(id => id !== sessionId)));
+        if (paused.has(sessionId)) await updatePaused(sessionId, false);
         return 'nothing';
       }
       if (!await deps.setAutomation(sessionId, true)) return 'failed';
-      await savePaused(new Set([...paused].filter(id => id !== sessionId)));
+      await updatePaused(sessionId, false);
       return 'done';
     },
     steer: async (sessionId, text) => {
