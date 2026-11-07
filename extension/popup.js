@@ -249,14 +249,14 @@ function pipeline(info, ready) {
         missed.length === 1
           ? t(
             'popup_pipeline_call_fallback_one',
-            'The app could not place a call by request id — it fell back to $1.',
+            'The app could not place a call by request id. Used instead: $1.',
             attribution(missed[0].app) || missed[0].app
           )
           : tn(
             'popup_pipeline_call_fallback_many',
             missed.length,
-            'The app could not place $1 call by request id — it fell back to $2.',
-            'The app could not place $1 calls by request id — it fell back to $2.',
+            'The app could not place $1 call by request id. Used instead: $2.',
+            'The app could not place $1 calls by request id. Used instead: $2.',
             [missed.length, attribution(missed[0].app) || missed[0].app]
           )
       ]

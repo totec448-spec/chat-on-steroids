@@ -921,13 +921,13 @@
     "message": "ausstehend"
   },
   "popup_pipeline_call_fallback_many": {
-    "message": "Die App konnte $1 Aufrufe nicht per Request-ID zuordnen – sie hat auf $2 zurückgegriffen."
+    "message": "Die App konnte $1 Aufrufe nicht per Request-ID zuordnen. Stattdessen verwendet: $2."
   },
   "popup_pipeline_call_fallback_many__one": {
-    "message": "Die App konnte $1 Aufruf nicht per Request-ID zuordnen – sie hat auf $2 zurückgegriffen."
+    "message": "Die App konnte $1 Aufruf nicht per Request-ID zuordnen. Stattdessen verwendet: $2."
   },
   "popup_pipeline_call_fallback_one": {
-    "message": "Die App konnte einen Aufruf nicht per Request-ID zuordnen – sie hat auf $1 zurückgegriffen."
+    "message": "Die App konnte einen Aufruf nicht per Request-ID zuordnen. Stattdessen verwendet: $1."
   },
   "popup_pipeline_delivery_blocked": {
     "message": "Die Zustellung ist gesperrt, bis die App verbunden und die Protokollkompatibilität bestätigt ist."

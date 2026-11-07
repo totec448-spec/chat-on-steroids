@@ -894,10 +894,10 @@
     "message": "待機中"
   },
   "popup_pipeline_call_fallback_many": {
-    "message": "アプリは $1 件の呼び出しをリクエスト ID で割り当てられなかったため、$2 を使用しました。"
+    "message": "アプリは $1 件の呼び出しをリクエスト ID で割り当てられませんでした。代わりに使用：$2。"
   },
   "popup_pipeline_call_fallback_one": {
-    "message": "アプリは呼び出しをリクエスト ID で割り当てられなかったため、$1 を使用しました。"
+    "message": "アプリは呼び出しをリクエスト ID で割り当てられませんでした。代わりに使用：$1。"
   },
   "popup_pipeline_delivery_blocked": {
     "message": "アプリが接続され、プロトコルの互換性が確認されるまで送信をブロックします。"
