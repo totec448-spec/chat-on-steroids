@@ -149,7 +149,9 @@ app.whenReady().then(async () => {
       {width:1100,height:800,zoom:1,theme:'dark',file:'wide-dark'},
       {width:640,height:800,zoom:1,theme:'light',file:'narrow-light'},
       {width:640,height:800,zoom:1.5,theme:'dark',file:'narrow-zoom'},
-      {width:420,height:800,zoom:1,theme:'dark',file:'phone-width'}
+      {width:420,height:800,zoom:1,theme:'dark',file:'phone-width'},
+      // A long elapsed label (a French or German hour count) in a ~240px column must shrink, never push Stop out (CodeRabbit on #2093).
+      {width:520,height:800,zoom:1,theme:'light',file:'narrow-long-time',longTime:true}
     ];
     const measurements = [];
     for (const sample of cases) {
@@ -158,16 +160,23 @@ app.whenReady().then(async () => {
       win.webContents.setZoomFactor(sample.zoom); win.setContentSize(sample.width, sample.height);
       await js(`document.documentElement.dataset.theme=${JSON.stringify(sample.theme)};frame()`);
       const measured = await js(`(() => {
+        // Set and measured in one synchronous step, so the once-a-second repaint cannot replace the long label in between.
+        if (${Boolean(sample.longTime)}) document.querySelectorAll('#backgroundExecList .background-exec-process-time').forEach(node=>{node.textContent='Läuft seit 12 Std. 59 Min. 59 Sek.'});
         const dock=document.getElementById('composerDock'),proc=document.getElementById('backgroundExecStatus'),list=document.getElementById('backgroundExecList'),queue=document.getElementById('finishQueue'),composer=document.getElementById('composer');
         const stop=proc.querySelector('.background-exec-stop'),time=proc.querySelector('.background-exec-time');
         const itemStops=[...list.querySelectorAll('.background-exec-stop')].map(node=>node.getBoundingClientRect()),d=dock.getBoundingClientRect(),p=proc.getBoundingClientRect(),l=list.getBoundingClientRect(),s=stop.getBoundingClientRect(),t=time.getBoundingClientRect(),c=composer.getBoundingClientRect();
         return {viewport:[innerWidth,innerHeight],dock:[d.left,d.right,d.top,d.bottom],process:[p.left,p.right,p.top,p.bottom],list:[l.left,l.right,l.top,l.bottom],stop:[s.left,s.right],time:[t.left,t.right],composer:[c.top,c.bottom],
           queueClient:queue.clientHeight,queueScroll:queue.scrollHeight,queueOverflow:getComputedStyle(queue).overflowY,
+          longLabel:[...list.querySelectorAll('.background-exec-process-time')].map(node=>node.textContent),
+          identityMin:Math.min(...[...list.querySelectorAll('.background-exec-process-command')].map(node=>node.getBoundingClientRect().width)),
           timeVisible:t.width>0,
           fits:d.left>=0&&d.right<=innerWidth+1&&p.left>=d.left-1&&p.right<=d.right+1&&l.left>=d.left-1&&l.right<=d.right+1&&(!t.width||(t.left>=d.left&&t.right<=d.right))&&itemStops.every(rect=>rect.left>=d.left&&rect.right<=d.right)&&proc.scrollWidth<=proc.clientWidth+1&&list.scrollWidth<=list.clientWidth+1,
           processVisible:!proc.hidden&&p.height>0,listVisible:!list.hidden&&l.height>0,queueVisible:!queue.hidden&&queue.clientHeight>0,composerVisible:c.top<innerHeight&&c.bottom>0,error:window.fixtureError||null};
       })()`);
       assert.equal(measured.error, null, JSON.stringify({sample,measured})); assert.ok(measured.fits, JSON.stringify({sample,measured}));
+      // The process id and the start of its command stay readable beside Stop, whatever the label says (CodeRabbit on #2093).
+      assert.ok(measured.identityMin >= 44, 'process identity keeps room: '+JSON.stringify({sample,measured}));
+      if (sample.longTime) assert.ok(measured.longLabel.length === 4 && measured.longLabel.every(label => label.startsWith('Läuft seit 12')), 'the long label was in place when measured: '+JSON.stringify(measured.longLabel));
       assert.ok(measured.processVisible && measured.listVisible && measured.queueVisible && measured.composerVisible, JSON.stringify({sample,measured}));
       assert.equal(measured.queueOverflow, 'auto'); assert.ok(measured.queueScroll > measured.queueClient, JSON.stringify({sample,measured}));
       assert.ok(measured.queueClient <= 241, JSON.stringify({sample,measured}));

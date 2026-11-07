@@ -1380,6 +1380,12 @@ export function appendEvent(sessionId: string, event: NewSessionEvent): Promise<
  * preserves the sequence/time position where that stable website message first appeared, so
  * revisions cannot move either a user response boundary or assistant prose through later work.
  */
+/** True when `next` is complete text that starts with all of `previous` and has more after it. */
+function continuesFinalText(previous: StoredText, next: StoredText): boolean {
+  return !previous.truncated && !next.truncated && previous.text.length > 0 &&
+    next.text.length > previous.text.length && next.text.startsWith(previous.text);
+}
+
 export function upsertMessageEvent(
   sessionId: string,
   event: NewMessageEvent,
@@ -1408,12 +1414,32 @@ export function upsertMessageEvent(
       // Final is terminal for one canonical ChatGPT message. The page can briefly re-report
       // an older streaming DOM snapshot after settling/remounting; accepting that snapshot
       // would turn a completed answer back into a partial one and could replace its text.
+      // A snapshot that carries the final text and then more is new writing, not a stale copy: after
+      // a Stop that ChatGPT had not obeyed, the page reported the first sentence as final and the
+      // same message kept growing (#2097). It stays final (the page called it final), so a delayed
+      // shorter snapshot is ignored by the rule below, and only longer text of the same message is taken.
+      const continuing =
+        previous?.kind === 'assistant_message' && event.kind === 'assistant_message' &&
+        (previous.final === true || previous.state === 'final') &&
+        event.final !== true && event.state !== 'final' &&
+        continuesFinalText(previous.message, event.message);
       if (
         previous?.kind === 'assistant_message' &&
         event.kind === 'assistant_message' &&
         (previous.final === true || previous.state === 'final') &&
         event.final !== true &&
-        event.state !== 'final'
+        event.state !== 'final' &&
+        !continuing
+      ) {
+        return { event: previous, changed: false, contentChanged: false };
+      }
+      // A delayed final that only repeats the start of a longer stored final is a stale replay, not a
+      // correction: it would cut an accepted continuation back (CodeRabbit on #2099). Different text still wins.
+      if (
+        previous?.kind === 'assistant_message' && event.kind === 'assistant_message' &&
+        (previous.final === true || previous.state === 'final') &&
+        (event.final === true || event.state === 'final') &&
+        continuesFinalText(event.message, previous.message)
       ) {
         return { event: previous, changed: false, contentChanged: false };
       }
@@ -1438,8 +1464,8 @@ export function upsertMessageEvent(
               resolvedModel: event.resolvedModel ?? previous.resolvedModel,
               references: event.references ?? previous.references,
               // `final` is a compatibility mirror of state, not an independent truth.
-              state: event.state === 'final' || event.final === true ? 'final' : 'streaming',
-              final: event.state === 'final' || event.final === true,
+              state: continuing || event.state === 'final' || event.final === true ? 'final' : 'streaming',
+              final: continuing || event.state === 'final' || event.final === true,
               // Goal eligibility is an accepted fact about this stable reply, not a property a
               // later sparse page snapshot may retract. This is what makes a 503/reload replay
               // re-offer the same durable obligation instead of silently dropping it.
@@ -1455,6 +1481,7 @@ export function upsertMessageEvent(
           : previous?.kind === 'user_message' && event.kind === 'user_message'
             ? { ...event, inputId: event.inputId ?? previous.inputId,
                 ...(event.scheduled ?? previous.scheduled ? { scheduled: event.scheduled ?? previous.scheduled } : {}),
+                ...(event.via ?? previous.via ? { via: event.via ?? previous.via } : {}),
                 authoredAt: previous.authoredAt ?? event.authoredAt,
                 authoredText: event.authoredText ?? previous.authoredText,
                 wireTokenEstimate: event.wireTokenEstimate ?? previous.wireTokenEstimate,
@@ -1575,6 +1602,19 @@ export function upsertMessageEvent(
         entry.summary.contextTokens = Math.max(0, entry.summary.contextTokens + delta);
         entry.summary.updatedAt = Math.max(entry.summary.updatedAt, nextEvent.time);
         noteFinishWork(entry.summary, full);
+        // The worker dock's answer line follows the newest final answer: when this message becomes final
+        // as the newest one, and when its final text grows while the dock still shows it.
+        if (full.kind === 'assistant_message' && (full.final === true || full.state === 'final')) {
+          const wasFinal = previous.kind === 'assistant_message' && (previous.final === true || previous.state === 'final');
+          // Same first line is not same owner: an older message with an identical line must not take over the
+          // dock's line from a newer final answer (CodeRabbit on #2099), so it also has to be the newest final.
+          const newestFinal = !([...entry.messages.values()].some(other => other !== full && other.kind === 'assistant_message' &&
+            (other.final === true || other.state === 'final') && other.time > full.time));
+          const showsThis = newestFinal && previous.kind === 'assistant_message' && entry.summary.lastAnswerLine === answerLine(previous.message.text);
+          if (wasFinal ? showsThis : nextEvent.time >= (entry.summary.lastAssistantFinalAt ?? 0)) {
+            entry.summary.lastAnswerLine = answerLine(full.message.text);
+          }
+        }
         // Only a new final is new work. The same finished answer re-reported after a reload or a
         // branch keeps its boundary, or the sidebar would call a read chat "New response".
         const finalBefore = sameMessage && previous.kind === 'assistant_message' &&

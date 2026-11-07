@@ -948,16 +948,16 @@
     "message": "pendente"
   },
   "popup_pipeline_call_fallback_many": {
-    "message": "O app não conseguiu associar $1 chamadas pelo ID da solicitação — recorreu a $2."
+    "message": "O app não conseguiu associar $1 chamadas pelo ID da solicitação. Em vez disso: $2."
   },
   "popup_pipeline_call_fallback_many__one": {
-    "message": "O app não conseguiu associar $1 chamada pelo ID da solicitação — recorreu a $2."
+    "message": "O app não conseguiu associar $1 chamada pelo ID da solicitação. Em vez disso: $2."
   },
   "popup_pipeline_call_fallback_many__many": {
-    "message": "O app não conseguiu associar $1 de chamadas pelo ID da solicitação — recorreu a $2."
+    "message": "O app não conseguiu associar $1 de chamadas pelo ID da solicitação. Em vez disso: $2."
   },
   "popup_pipeline_call_fallback_one": {
-    "message": "O app não conseguiu associar uma chamada pelo ID da solicitação — recorreu a $1."
+    "message": "O app não conseguiu associar uma chamada pelo ID da solicitação. Em vez disso: $1."
   },
   "popup_pipeline_delivery_blocked": {
     "message": "O envio está bloqueado até que o aplicativo esteja conectado e a compatibilidade do protocolo seja confirmada."

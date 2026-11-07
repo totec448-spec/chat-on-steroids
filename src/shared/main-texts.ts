@@ -107,7 +107,40 @@ export const MAIN_TEXTS = [
   // A chat shared as a web page: the page's own labels ('You' is above).
   'New chat',
   'hidden',
-  'Shared from Chat On Steroids'
+  'Shared from Chat On Steroids',
+  // The Telegram bot's own messages (#1934): telegram.ts and telegram-status.ts.
+  "Connected to Chat On Steroids. Its notifications arrive here.",
+  "This code is not valid any more. Get a new one in Chat On Steroids: Settings → Phone notifications → Telegram.",
+  "Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.",
+  "Chat On Steroids notifications arrive here. Commands: /status, /stop, /pause, /resume. Reply to a notification to send that chat a message.",
+  "I know /status, /stop, /pause, /resume and /help. Reply to a notification to send that chat a message.",
+  "Deny",
+  "Denied from Telegram at {0}.",
+  "Already answered.",
+  "Could not deny it. Open the chat in Chat On Steroids.",
+  "Stopped.",
+  "Nothing is running there.",
+  "Nothing is running.",
+  "Paused. /resume starts it again.",
+  "Goal and Loop are not on there.",
+  "No chat has Goal or Loop on.",
+  "Resumed.",
+  "It was not paused from here.",
+  "No chat was paused from here.",
+  "Could not do that. Open the chat in Chat On Steroids.",
+  "Several chats could be meant. Reply to that chat's notification with {0}.",
+  "On its way to the chat.",
+  "Queued: it goes to the chat after its current answer.",
+  "Sending messages to chats from Telegram is off. Turn it on in Chat On Steroids: Settings → Phone notifications → Telegram.",
+  "That chat cannot take messages from here.",
+  "That notification is too old to answer. Send /status to see your chats.",
+  "Nothing is running and nothing waits for you.",
+  "Working: {0}",
+  "Waiting for your approval: {0}",
+  "waits for your approval",
+  "working",
+  "{0} more",
+  "This is a test from Chat On Steroids. Telegram notifications work."
 ] as const;
 
 export type MainText = typeof MAIN_TEXTS[number];

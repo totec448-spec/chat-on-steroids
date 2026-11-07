@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { T0, boot, settle, settleHistoryFrame, summary, text, toolCall, waitFor, type Handoff, type InputEntry, type LocalProject, type SessionEvent, type SessionSummary } from './renderer-timeline.harness.js';
+import { T0, boot, closeDom, settle, settleHistoryFrame, summary, text, toolCall, waitFor, type Handoff, type InputEntry, type LocalProject, type SessionEvent, type SessionSummary } from './renderer-timeline.harness.js';
 
 vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTerminal: () => ({
   update: vi.fn(), show: vi.fn(), hide: vi.fn(), hasTabs: () => false,
@@ -407,6 +407,55 @@ it('invalidates a queued browser follow when New Chat replaces the selected sess
   expect(followed).toEqual([first.id, null]);
 });
 
+it.each(['catalog removal', 'delete action'])('cancels an unbound chat follow after %s, even if its bound row is seen later', async removal => {
+  const opening: SessionSummary = { ...summary([]), conversationId: null, chatIds: [],
+    origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } };
+  const sessions = [opening];
+  const follow = vi.fn(async (_id: string | null) => ({ ok: true, data: false }));
+  const { w, notifySession } = await boot([], false, [], [], { sessions, followSessionTab: follow });
+  const selector = `#sessionList [data-id="${opening.id}"]`;
+  w.document.querySelector<HTMLElement>(selector)!.click();
+  if (removal === 'delete action') {
+    (w as any).api.deleteSession = async () => { sessions.splice(0); return { ok: true, data: true }; };
+    w.document.querySelector<HTMLElement>(`${selector} [data-row-menu]`)!.click();
+    w.document.querySelector<HTMLElement>('[data-row-action="remove"]')!.click();
+  } else {
+    sessions.splice(0);
+    notifySession();
+  }
+  await waitFor(() => expect(follow.mock.calls).toEqual([[opening.id], [null]]));
+  await waitFor(() => expect(w.document.querySelector(selector)).toBeNull());
+  sessions.push({ ...opening, title: 'Late bound row', conversationId: 'late-chat', chatIds: ['late-chat'] });
+  notifySession();
+  await waitFor(() => expect(w.document.querySelector(selector)?.textContent).toContain('Late bound row'));
+  expect(follow.mock.calls).toEqual([[opening.id], [null]]);
+});
+
+it('drops the unbound follow across a renderer restart with the previous window storage restored', async () => {
+  const opening: SessionSummary = { ...summary([]), conversationId: null, chatIds: [],
+    origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } };
+  const sessions = [opening];
+  const follow = vi.fn(async (_id: string | null) => ({ ok: true, data: false }));
+  const previous = await boot([], false, [], [], { sessions, followSessionTab: follow });
+  const selector = `#sessionList [data-id="${opening.id}"]`;
+  previous.w.document.querySelector<HTMLElement>(selector)!.click();
+  expect(follow.mock.calls).toEqual([[opening.id]]);
+  const storage = Object.fromEntries(Array.from({ length: previous.w.localStorage.length }, (_, i) => {
+    const key = previous.w.localStorage.key(i)!;
+    return [key, previous.w.localStorage.getItem(key)!];
+  }));
+  closeDom();
+  vi.resetModules();
+  const restarted = await boot([], false, [], [], { sessions, storage, followSessionTab: follow });
+  sessions[0] = { ...opening, title: 'Bound after restart', conversationId: 'late-chat', chatIds: ['late-chat'] };
+  restarted.notifySession();
+  await waitFor(() => expect(restarted.w.document.querySelector(selector)?.textContent).toContain('Bound after restart'));
+  expect(follow.mock.calls).toEqual([[opening.id]]);
+  // Only a fresh user selection in the new window authorizes another follow.
+  restarted.w.document.querySelector<HTMLElement>(selector)!.click();
+  expect(follow.mock.calls).toEqual([[opening.id], [opening.id]]);
+});
+
 it('does not focus a newly bound chat after the person has selected another one', async () => {
   const opening: SessionSummary = { ...summary([]), conversationId: null, chatIds: [],
     origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } };
@@ -766,6 +815,26 @@ it('keeps the scheduled label on the sent message in the chat', async () => {
   expect(labels()).toEqual(['Scheduled', null]);
   await append([{ ...sent, seq: 3, origin: 1, scheduled: { dueAt, late: true } }]);
   expect(labels()).toEqual([`Scheduled · late, was due ${new Date(dueAt).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' })}`, null]);
+});
+
+// Haz on #1990: a reply from Telegram says so in the chat, in the scheduled label's style, while it
+// waits and once sent, so the person can check what happened remotely.
+it('marks a message from Telegram in the queue and in the chat', async () => {
+  const sent: SessionEvent = { kind: 'user_message', seq: 1, origin: 1, time: T0, source: 'app', messageId: 'telegram-sent', inputId: 'telegram-run',
+    message: text('Run the tests'), via: 'telegram' };
+  const typed: SessionEvent = { kind: 'user_message', seq: 2, origin: 2, time: T0 + 1, source: 'app', messageId: 'typed-2', message: text('And this?') };
+  const { w, live, append } = await boot([sent, typed]);
+  const labels = () => [...w.document.querySelectorAll('.said.is-user')].map(bubble => bubble.querySelector('.said-origin')?.textContent ?? null);
+  expect(labels()).toEqual(['From Telegram', null]);
+  const queued = { id: 'telegram-queued', sessionId: summary(live.events).id, text: 'Then deploy', mode: 'auto', dueAt: 0, model: null,
+    reasoningEffort: null, state: 'queued', owner: null, createdAt: 0, conversationId: 'chat-a', via: 'telegram' } as InputEntry;
+  live.inputs.push(queued);
+  await append([]);
+  await waitFor(() => expect(w.document.querySelector('#inputQueue [data-input-id="telegram-queued"] .pending-message-origin')?.textContent).toBe('From Telegram'));
+  // Waiting for a running turn, its task card carries the same words.
+  live.inputs[0] = { ...queued, mode: 'after-turn' };
+  await append([]);
+  await waitFor(() => expect(w.document.querySelector('#finishQueue [data-input-id="telegram-queued"] .queue-label')?.textContent).toBe('From Telegram · Then deploy'));
 });
 
 // #1402: the app's own fresh-turn continue is no one's typed message. Waiting, it shows as the

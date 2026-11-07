@@ -894,10 +894,10 @@
     "message": "đang chờ"
   },
   "popup_pipeline_call_fallback_many": {
-    "message": "Ứng dụng không thể gắn $1 lần gọi theo ID yêu cầu — đã chuyển sang $2."
+    "message": "Ứng dụng không thể gắn $1 lần gọi theo ID yêu cầu. Thay vào đó: $2."
   },
   "popup_pipeline_call_fallback_one": {
-    "message": "Ứng dụng không thể gắn một lần gọi theo ID yêu cầu — đã chuyển sang $1."
+    "message": "Ứng dụng không thể gắn một lần gọi theo ID yêu cầu. Thay vào đó: $1."
   },
   "popup_pipeline_delivery_blocked": {
     "message": "Việc gửi bị chặn cho đến khi ứng dụng được kết nối và xác nhận khả năng tương thích giao thức."

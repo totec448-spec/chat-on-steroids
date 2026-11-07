@@ -457,6 +457,8 @@ const configSchema = z.object({
       return { ...raw, enabled: false, server: '' };
     }, z.object({
       enabled: z.boolean().catch(false),
+      // ntfy as a destination; Telegram (#1934) is the other. Settings from before Telegram: on.
+      ntfy: z.boolean().optional().default(true).catch(true),
       server: z.string().max(2048).optional().default(DEFAULT_PHONE_PUSH.server).catch(''),
       topic: z.string().max(64).catch(''),
       needsYou: z.boolean().catch(true),
@@ -464,7 +466,9 @@ const configSchema = z.object({
       finishedAfterMinutes: z.number().int().min(0).max(240).nullable().catch(DEFAULT_PHONE_PUSH.finishedAfterMinutes),
       onlyWhenAway: z.boolean().catch(true),
       quietHours: z.object({ from: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), to: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/) }).nullable().catch(null),
-      includeDetails: z.boolean().catch(false)
+      includeDetails: z.boolean().catch(false),
+      // Replies from Telegram as messages (phase 2, 2026-10-31): missing or damaged is off.
+      telegramSteer: z.boolean().optional().catch(undefined)
     })).optional().catch(undefined),
     // Masking credentials in tool output before ChatGPT sees them (#1797). On unless turned off.
     secretsShield: z.boolean().optional().default(true),

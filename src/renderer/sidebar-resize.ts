@@ -26,7 +26,9 @@ export function initSidebarResize(): void {
     else app.style.setProperty('--sidebar-width', `${Math.min(maximum(), preferred)}px`);
     handle.setAttribute('aria-valuemin', String(minimum));
     handle.setAttribute('aria-valuemax', String(maximum()));
-    handle.setAttribute('aria-valuenow', String(Math.round(sidebar.getBoundingClientRect().width)));
+    // The width just set, not a measurement: the sidebar is still gliding to it, so a measurement now
+    // would announce a value from the middle of the glide.
+    handle.setAttribute('aria-valuenow', String(preferred === null ? Math.round(sidebar.getBoundingClientRect().width) : Math.round(Math.min(maximum(), preferred))));
   }
   function save(): void {
     try {
@@ -60,7 +62,8 @@ export function initSidebarResize(): void {
   handle.addEventListener('lostpointercapture', finish);
   handle.addEventListener('dblclick', () => { preferred = null; render(); save(); });
   handle.addEventListener('keydown', (event) => {
-    const width = sidebar.getBoundingClientRect().width;
+    // Steps start from the width the separator reports, not from a box that may still be gliding.
+    const width = preferred === null ? sidebar.getBoundingClientRect().width : Math.min(maximum(), preferred);
     if (event.key === 'ArrowLeft') setWidth(width - 10);
     else if (event.key === 'ArrowRight') setWidth(width + 10);
     else if (event.key === 'Home') setWidth(minimum);

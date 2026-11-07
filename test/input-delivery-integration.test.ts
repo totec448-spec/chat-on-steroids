@@ -3897,6 +3897,15 @@ it.each(['GPT-5.6 Sol', 'gpt-6-pro'])('sends a message typed after Stop once Cha
 });
 
 
+// Haz on #1990: where a message came from is main's to say; the window cannot mark one as from Telegram.
+it('never lets the window mark a message as from Telegram', async () => {
+  const session = await createSession({ title: 'Typed here', conversationId: randomUUID() });
+  const result = await handlers.get('sessions:send')!(null, { ...message(session.id, 'off'), mode: 'auto' as const, via: 'telegram' });
+  expect(result.ok).toBe(true);
+  expect(result.data.via).toBeUndefined();
+  expect((await input.listInputs()).find(row => row.id === result.data.id)?.via).toBeUndefined();
+});
+
 // "Chats working at once" (#1694): the app's own sends wait for a slot; the person's never do.
 it("holds a scheduled run while other chats fill every slot, never the person's own message, and goes when one frees", async () => {
   const slots = await import('../src/main/chats-at-once.js');

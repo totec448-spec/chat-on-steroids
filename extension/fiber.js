@@ -2292,6 +2292,20 @@
     // Only a plausible ChatGPT time counts: after 2020 and not later than a day from now (CodeRabbit on #2064).
     const at = value => Number.isFinite(value) && value >= 1577836800000 && value <= Date.now() + 86_400_000 ? value : undefined;
     const startedAt = at(entry.turn.workStartedAtMs), completedAt = at(entry.turn.workCompletedAtMs);
+    const appendGeneratedImage = item => {
+      const id = str(item.chatGptMessageId);
+      const asset = typeof item.src === 'string' && /^sediment:\/\/(file_[A-Za-z0-9_-]{8,100})$/.exec(item.src)?.[1];
+      if (!id || !asset || !Array.isArray(entry.turn.messageIds) || !entry.turn.messageIds.includes(id)) return;
+      images.set(item, asset);
+      // Only typed public output metadata crosses this boundary, wherever the
+      // page places that output. A nested image is not a top-level final answer.
+      const made = item.status === 'completed' && item.isPreview !== true && entry.turn.status === 'complete' ? completedAt : undefined;
+      messages.push({ id, author: { role: 'tool' }, recipient: 'all', channel: 'final',
+        ...(made !== undefined ? { create_time: made } : {}),
+        status: item.status === 'completed' && item.isPreview !== true ? 'finished_successfully' : 'in_progress',
+        content: { content_type: 'multimodal_text', parts: [{ content_type: 'image_asset_pointer',
+          asset_pointer: item.src, width: item.width, height: item.height }] } });
+    };
     // The turn's start is its opening question's; its end is its last answer's. A follow-up sent into the
     // running answer, or an answer a retry replaced, keeps only a time of its own.
     const opening = entry.turn.items.findIndex(item => item?.type === 'user-message');
@@ -2324,22 +2338,15 @@
         if (nodes.length === 1) slots.push({ node: nodes[0], id });
       } else if (item?.type === 'generated-image') {
         lastAnswer = item;
-        const id = str(item.chatGptMessageId);
-        const asset = typeof item.src === 'string' && /^sediment:\/\/(file_[A-Za-z0-9_-]{8,100})$/.exec(item.src)?.[1];
-        if (!id || !asset || !Array.isArray(entry.turn.messageIds) || !entry.turn.messageIds.includes(id)) continue;
-        images.set(item, asset);
-        // Typed generated outputs are public tool media, never assistant prose.
-        // Multiple assets may share their owning provider message.
-        const made = item.status === 'completed' && item.isPreview !== true && entry.turn.status === 'complete' ? completedAt : undefined;
-        messages.push({ id, author: { role: 'tool' }, recipient: 'all', channel: 'final',
-          ...(made !== undefined ? { create_time: made } : {}),
-          status: item.status === 'completed' && item.isPreview !== true ? 'finished_successfully' : 'in_progress',
-          content: { content_type: 'multimodal_text', parts: [{ content_type: 'image_asset_pointer',
-            asset_pointer: item.src, width: item.width, height: item.height }] } });
+        appendGeneratedImage(item);
       } else {
         const steps = item?.type === 'chatgpt-reasoning-group' && Array.isArray(item.items) ? item.items : [item];
         for (const step of steps) {
           if (++work > MAX_ROWS) return null;
+          if (step?.type === 'generated-image') {
+            appendGeneratedImage(step);
+            continue;
+          }
           if (step?.type === 'assistant-message' && item !== step) {
             // Interim prose whatever phase it carries: only a top-level answer can end the turn.
             const id = str(step.messageId), text = shellItemText(step);

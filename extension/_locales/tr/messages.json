@@ -921,13 +921,13 @@
     "message": "beklemede"
   },
   "popup_pipeline_call_fallback_many": {
-    "message": "Uygulama $1 çağrıyı istek kimliğiyle eşleştiremedi — bunun yerine $2 kullandı."
+    "message": "Uygulama $1 çağrıyı istek kimliğiyle eşleştiremedi. Bunun yerine: $2."
   },
   "popup_pipeline_call_fallback_many__one": {
-    "message": "Uygulama $1 çağrıyı istek kimliğiyle eşleştiremedi — bunun yerine $2 kullandı."
+    "message": "Uygulama $1 çağrıyı istek kimliğiyle eşleştiremedi. Bunun yerine: $2."
   },
   "popup_pipeline_call_fallback_one": {
-    "message": "Uygulama çağrıyı istek kimliğiyle eşleştiremedi — bunun yerine $1 kullandı."
+    "message": "Uygulama çağrıyı istek kimliğiyle eşleştiremedi. Bunun yerine: $1."
   },
   "popup_pipeline_delivery_blocked": {
     "message": "Uygulama bağlanıp protokol uyumluluğu doğrulanana kadar iletim engellenir."
