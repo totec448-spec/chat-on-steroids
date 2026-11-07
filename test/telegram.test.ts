@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createTelegram, isTelegramToken, type TelegramLink, type TelegramReply } from '../src/main/telegram.js';
-import { telegramStatus } from '../src/main/telegram-status.js';
+import { statusChatsFrom, telegramStatus } from '../src/main/telegram-status.js';
 
 const TOKEN = '123456789:AAbbCCddEEffGGhhIIjjKKllMMnnOOppQQ1';
 const ME = 4242, STRANGER = 777;
@@ -260,4 +260,17 @@ describe('/status', () => {
     expect(answer.split('\n').filter(line => line.startsWith('•'))).toHaveLength(8);
     expect(answer.endsWith('3 more')).toBe(true);
   });
+});
+
+// Live test 2026-11-07: /status said "Working: 6" while the app showed none working. It counted every
+// stored open turn, also a sub-agent's from five days earlier. It now counts as the sidebar does.
+it('counts a chat as working only while it really works, as the sidebar does', () => {
+  const now = Date.parse('2026-11-07T12:00:00Z');
+  const base = { id: 's', title: 'Old worker', conversationId: 'c', origin: null, updatedAt: now - 5 * 86_400_000,
+    lastToolCallAt: now - 5 * 86_400_000, lastTurnEndAt: null, activeTurnId: 'stale-turn' } as unknown as Parameters<typeof statusChatsFrom>[0][number];
+  const none = { goal: () => null, card: () => null, activityExpiresAt: () => null };
+  expect(statusChatsFrom([base], none, now)).toEqual([expect.objectContaining({ title: 'Old worker', working: false })]);
+  // The same chat while the app counts it as active.
+  const live = { ...none, activityExpiresAt: () => now + 60_000 };
+  expect(statusChatsFrom([{ ...base, lastToolCallAt: now - 1_000 }], live, now)).toEqual([expect.objectContaining({ working: true })]);
 });
