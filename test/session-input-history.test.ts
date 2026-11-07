@@ -56,6 +56,17 @@ it('records that a delivered message was a scheduled run, and a later page echo 
   expect(await recorded()).toMatchObject({ scheduled: { dueAt: 100, late: true } });
 });
 
+it('records that a delivered message came from Telegram, and a later page echo keeps it (Haz on #1990)', async () => {
+  const session = await createSession({ conversationId: 'telegram-history', title: 'Telegram' });
+  const entry = { id: '20000000-0000-4000-8000-000000000003', sessionId: session.id, state: 'sent', messageId: 'native-2', deliveredAt: 300,
+    text: 'Run the tests', via: 'telegram' } as InputEntry;
+  await recordDeliveredInput(entry);
+  const recorded = () => (readEvents(session.id)).then(events => events.find(event => event.kind === 'user_message')!);
+  expect(await recorded()).toMatchObject({ inputId: entry.id, via: 'telegram' });
+  await upsertMessageEvent(session.id, { kind: 'user_message', source: 'extension', time: 300, messageId: 'native-2', message: { text: 'Run the tests', chars: 13, truncated: false } });
+  expect(await recorded()).toMatchObject({ via: 'telegram' });
+});
+
 it('repairs a legacy off-tail image receipt across cold restore while retaining bytes and never reopening delivery', async () => {
   initDurableStore(directory);
   const session = await createSession({ conversationId: 'legacy-images', title: 'Legacy images' });
