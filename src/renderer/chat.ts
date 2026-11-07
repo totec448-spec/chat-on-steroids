@@ -398,7 +398,11 @@ function projectMenuItems(id: string): RowMenuItem[] {
     {
       action: 'related-folders', icon: 'i-related', label: () => t('Related folders…'),
       title: () => t('Other approved folders this work also uses'),
-      run: () => { const project = projects.find(row => row.id === id); if (project) void openRelatedFolders(api, project, message => toast(t(message))); }
+      run: () => {
+        const project = projects.find(row => row.id === id);
+        if (project) void openRelatedFolders(api, project, message => toast(t(message)),
+          () => document.querySelector<HTMLElement>(`.project-group[data-project-id="${CSS.escape(id)}"] .project-menu`));
+      }
     },
     // #1797: on unless this project or Settings turned it off; Settings wins, so the switch waits there.
     {
