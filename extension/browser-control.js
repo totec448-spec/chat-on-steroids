@@ -736,16 +736,17 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
         await authorize(command);
         // Stay in the window this conversation already works in: without a window, Chrome uses the one the
         // person focused last, which scatters one task's tabs over their separate windows (#2095).
-        // Permission is checked after the lookup, and the chosen attachment must still be this
-        // conversation's after that check; otherwise the lookup is repeated (then Chrome's default).
+        // The permission check is the LAST asynchronous step: the window is looked up and read first, then
+        // permission is checked, then (synchronously) the attachment is confirmed to still be this
+        // conversation's, and the tab is created with nothing awaited in between. If it went stale the
+        // steps repeat, and Chrome's default window is used only when nothing eligible remains.
         let windowId = null;
         for (let attempt = 0; attempt < 3; attempt++) {
           const owned = await ownedWindow(command);
+          // A tab moved to another window while the lookup ran is read again right here.
+          const now = owned ? await chrome.tabs.get(owned.state.tabId).catch(() => null) : null;
           await authorize(command);
           if (!owned) break;
-          // The window is read again now: the tab may have been moved to another window meanwhile. Nothing
-          // asynchronous follows this read before the tab is created.
-          const now = await chrome.tabs.get(owned.state.tabId).catch(() => null);
           if (tabs.get(owned.state.tabId) === owned.state && owns(owned.state, command) && Number.isInteger(now?.windowId)) { windowId = now.windowId; break; }
         }
         const tab = await chrome.tabs.create({url,active:false,...(windowId === null ? {} : {windowId})});

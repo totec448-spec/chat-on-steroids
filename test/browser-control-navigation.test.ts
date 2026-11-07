@@ -94,11 +94,23 @@ describe('browser creation and usable tab discovery',()=>{
     expect(chrome.tabs.create).toHaveBeenCalledExactlyOnceWith({url:'https://fixture.invalid/again',active:false,windowId:5});
   });
 
-  it('uses the window the owned tab was moved to while permission was being checked',async()=>{
-    const {chrome,control,entries,command,transport}=await fixture([{tabId:7,owner:'session:owner'}]);
+  // CodeRabbit on #2098: permission is the last asynchronous step, so a withdrawal during the window reads still stops the tab.
+  it('opens nothing when the pairing is revoked during the final window read',async()=>{
+    const {chrome,control,entries,command,revoke}=await fixture([{tabId:7,owner:'session:owner'}]);
     entries.get(7)!.windowId=5;
-    let calls=0;
-    transport.mockImplementation(async()=>{ calls+=1; if(calls===2) entries.get(7)!.windowId=9; return {ok:true,data:{allowed:true,epoch:'epoch',policy:{read:true,write:true},requests:[]}}; });
+    const real=chrome.tabs.get.getMockImplementation()!;
+    let armed=true;
+    chrome.tabs.get.mockImplementation(async(id:number)=>{ Error.stackTraceLimit=60; const inLookup=!!new Error().stack?.includes('ownedWindow'); const tab=await real(id); if(armed&&!inLookup){ armed=false; revoke(); } return tab; });
+    await expect(control.execute(command('new',{url:'https://fixture.invalid/late-revoke'}))).rejects.toThrow('BROWSER_PERMISSION_REVOKED');
+    expect(chrome.tabs.create).not.toHaveBeenCalled();
+  });
+
+  it('uses the window the owned tab was moved to while the window was being looked up',async()=>{
+    const {chrome,control,entries,command}=await fixture([{tabId:7,owner:'session:owner'}]);
+    entries.get(7)!.windowId=5;
+    const real=chrome.tabs.get.getMockImplementation()!;
+    let moved=false;
+    chrome.tabs.get.mockImplementation(async(id:number)=>{ Error.stackTraceLimit=60; const inLookup=!!new Error().stack?.includes('ownedWindow'); const tab=await real(id); if(inLookup&&!moved){ moved=true; entries.get(7)!.windowId=9; } return tab; });
     await control.execute(command('new',{url:'https://fixture.invalid/moved'}));
     expect(chrome.tabs.create).toHaveBeenCalledExactlyOnceWith({url:'https://fixture.invalid/moved',active:false,windowId:9});
   });
