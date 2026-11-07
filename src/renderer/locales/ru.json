@@ -4126,5 +4126,6 @@
   "{0} expected files": "Ожидаемых файлов: {0}",
   "{0} expected files|one": "Ожидаемых файлов: {0}",
   "{0} expected files|many": "Ожидаемых файлов: {0}",
-  "{0} expected files|few": "Ожидаемых файлов: {0}"
+  "{0} expected files|few": "Ожидаемых файлов: {0}",
+  "Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.": "Отправьте /start с кодом из Chat On Steroids: Настройки → Уведомления на телефон → Telegram."
 }

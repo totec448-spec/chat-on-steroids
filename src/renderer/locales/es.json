@@ -4042,5 +4042,6 @@
   "Run it yourself, in your own terminal: Chat On Steroids does not run or check it.": "Ejecútalo tú en tu propia terminal: Chat On Steroids no lo ejecuta ni lo comprueba.",
   "{0} expected files": "{0} archivos esperados",
   "{0} expected files|one": "{0} archivo esperado",
-  "{0} expected files|many": "{0} de archivos esperados"
+  "{0} expected files|many": "{0} de archivos esperados",
+  "Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.": "Envía /start con el código que muestra Chat On Steroids: Ajustes → Notificaciones en el teléfono → Telegram."
 }

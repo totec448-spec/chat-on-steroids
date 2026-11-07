@@ -3958,5 +3958,6 @@
   "From the sub-agent “{0}”": "“{0}” yardımcı ajanından",
   "Run it yourself, in your own terminal: Chat On Steroids does not run or check it.": "Kendi terminalinizde kendiniz çalıştırın: Chat On Steroids bunu çalıştırmaz ve denetlemez.",
   "{0} expected files": "{0} beklenen dosya",
-  "{0} expected files|one": "{0} beklenen dosya"
+  "{0} expected files|one": "{0} beklenen dosya",
+  "Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.": "Chat On Steroids'te gösterilen kodla /start gönderin: Ayarlar → Telefon bildirimleri → Telegram."
 }
