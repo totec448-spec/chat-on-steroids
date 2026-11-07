@@ -4,6 +4,7 @@ vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTermina
 }) }));
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { JSDOM } from 'jsdom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -138,10 +139,25 @@ describe('session summary pages', () => {
   });
 
   it('pages past the first 60 while reporting the full retained total', async () => {
-    for (let index = 0; index < 65; index++) {
-      const session = await createSession({ title: `history-${index}`, conversationId: null });
-      await endSession(session.id);
-    }
+    // The behavior under test is the cold on-disk catalog and cursor paging, not session creation.
+    // Seed valid version-current summary files from one real session instead of performing 130
+    // durable create/end writes; that setup exceeded Vitest's 30 s limit on Windows x64.
+    const template = await createSession({ title: 'history-0', conversationId: null });
+    await endSession(template.id);
+    const templateMeta = JSON.parse(await fs.readFile(path.join(dir, 'sessions', template.id, 'meta.json'), 'utf8')) as Record<string, unknown>;
+    const ids = [template.id];
+    const now = Date.now();
+    await Promise.all(Array.from({ length: 64 }, async (_, index) => {
+      const id = randomUUID();
+      const updatedAt = now + index + 1;
+      const meta = { ...templateMeta, id, title: `history-${index + 1}`, startedAt: updatedAt,
+        updatedAt, endedAt: updatedAt + 1, conversationId: null, chatIds: [] };
+      const folder = path.join(dir, 'sessions', id);
+      await fs.mkdir(folder, { recursive: true });
+      await fs.writeFile(path.join(folder, 'meta.json'), JSON.stringify(meta));
+      ids.push(id);
+    }));
+    expect(ids).toHaveLength(65);
     resetSessionStoreForTests();
 
     const first = await listSessionPage({ limit: 60 });
@@ -373,6 +389,270 @@ describe('visible Chat refresh', () => {
     await vi.waitFor(() => expect(listCalls).toHaveLength(2));
     expect(listCalls[1]).toEqual({ cursor, limit: 60 });
     await vi.waitFor(() => expect(w.document.querySelectorAll('#sessionList .sess')).toHaveLength(65));
+  });
+});
+
+describe('selected catalog fallback', () => {
+  it('survives overlapping paginated refreshes and is dropped only after confirmed deletion', async () => {
+    const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
+    dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
+    const w = dom.window;
+    Object.assign(globalThis, {
+      window: w, document: w.document, HTMLElement: w.HTMLElement, Element: w.Element, Node: w.Node,
+      DocumentFragment: w.DocumentFragment, HTMLInputElement: w.HTMLInputElement, HTMLSelectElement: w.HTMLSelectElement,
+      HTMLTextAreaElement: w.HTMLTextAreaElement, HTMLButtonElement: w.HTMLButtonElement
+    });
+    if (!(w.HTMLElement.prototype as any).scrollIntoView) (w.HTMLElement.prototype as any).scrollIntoView = () => {};
+
+    const firstPage = Array.from({ length: 60 }, (_, index) =>
+      summary(`2026-08-25-${index.toString(16).padStart(8, '0')}`, 100_000 - index, 0)
+    );
+    const olderPage = Array.from({ length: 5 }, (_, index) =>
+      summary(`2026-08-26-${index.toString(16).padStart(8, '0')}`, 99_940 - index, 0)
+    );
+    // This fetched summary sorts inside the first page's covered range, despite being absent
+    // from the stale page response. The old pagination filter therefore discarded it.
+    const fallback = summary('2026-08-25-ffffffff', 99_970, 0);
+    const newChatId = '2026-08-26-ffffffff';
+    const newChatSummary = { ...summary(newChatId, 100_100, 0), title: 'Draft from deleted chat', conversationId: null, chatIds: [] };
+    const deletedAttachment = { id: 'deleted-chat-file', name: 'deleted-chat.txt', size: 12, mimeType: 'text/plain' };
+    expect(fallback.updatedAt).toBeLessThan(firstPage[0]!.updatedAt);
+    expect(fallback.updatedAt).toBeGreaterThan(firstPage.at(-1)!.updatedAt);
+    const cursor = { updatedAt: firstPage.at(-1)!.updatedAt, id: firstPage.at(-1)!.id };
+    const pageOne = { sessions: firstPage, activeId: null, pressure: [], blocked: [], approval: [], recoveryStopped: [], trusted: [], total: 65, nextCursor: cursor };
+    const pageTwo = { sessions: olderPage, activeId: null, pressure: [], blocked: [], approval: [], recoveryStopped: [], trusted: [], total: 65, nextCursor: null };
+    const ok = (data: any) => Promise.resolve({ ok: true as const, data });
+    const deferred = <T,>() => {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>(done => { resolve = done; });
+      return { promise, resolve };
+    };
+    const initial = deferred<any>();
+    const staleRefresh = deferred<any>();
+    const currentRefresh = deferred<any>();
+    let firstPageReads = 0;
+    let olderPageReads = 0;
+    let opened = false;
+    let verificationReply: any = null;
+    const verificationGate = deferred<any>();
+    const sendInput = vi.fn(async (request: any) => ok({ ...request, sessionId: newChatId, opening: true,
+      state: 'queued', owner: null, createdAt: Date.now(), conversationId: null }));
+    const getSession = vi.fn(async (id: string, options?: any) => {
+      if (id === newChatId) return ok({ summary: newChatSummary, events: [], total: 0, nextFrom: 1 });
+      if (opened && id === fallback.id && options?.limit === 1 && verificationReply === 'pending') return verificationGate.promise;
+      if (opened && id === fallback.id && options?.limit === 1 && verificationReply) return verificationReply;
+      return ok({ summary: fallback, events: [note(1, 'Fallback transcript')], total: 1, nextFrom: 2 });
+    });
+    const getSwarm = vi.fn(() => ok({ running: false, runId: null, agents: [], maxWorkers: 2, pendingReports: 0 }));
+    const api: any = new Proxy({
+      listSessions: (options: any = {}) => {
+        if (options.cursor) { olderPageReads += 1; return ok(pageTwo); }
+        firstPageReads += 1;
+        if (firstPageReads === 1) return initial.promise;
+        if (firstPageReads === 2) return staleRefresh.promise;
+        if (firstPageReads === 3) return currentRefresh.promise;
+        return ok(pageOne);
+      },
+      listProjects: () => ok([]),
+      getSession,
+      sendInput,
+      chooseFiles: () => ok([deletedAttachment]),
+      getSwarm,
+      onSessionChanged: () => () => undefined,
+      onSwarmChanged: () => () => undefined
+    }, { get(target, prop) { return prop in target ? (target as any)[prop] : (..._args: any[]) => ok(null); } });
+    Object.defineProperty(w, 'api', { value: api, configurable: true });
+
+    const { chatVisible, initChat, openScheduledChat } = await import('../src/renderer/chat.js');
+    initChat({ save: async () => true,
+      state: () => ({ config: { sessions: { record: true, limitTokens: 533000 }, compaction: { auto: true, autoTokens: 400000 }, ui: { developerMode: true } } }) as any });
+    chatVisible(true);
+    await vi.waitFor(() => expect(firstPageReads).toBe(1), { timeout: 10_000 });
+    const opening = openScheduledChat(fallback.id);
+    initial.resolve(ok(pageOne));
+    await opening;
+    opened = true;
+    const row = () => w.document.querySelector<HTMLElement>(`#sessionList [data-id="${fallback.id}"]`);
+    const selected = () => row()?.querySelector('.sess-top[aria-current="true"]') ?? null;
+    await vi.waitFor(() => expect(selected()).not.toBeNull(), { timeout: 10_000 });
+
+    const pane = w.document.getElementById('sessionList')!.closest('.scroll') as HTMLElement;
+    Object.defineProperty(pane, 'clientHeight', { value: 200, configurable: true });
+    Object.defineProperty(pane, 'scrollHeight', { value: 1_000, configurable: true });
+    pane.scrollTop = 800;
+    pane.dispatchEvent(new w.Event('scroll'));
+    await vi.waitFor(() => expect(olderPageReads).toBe(1), { timeout: 10_000 });
+    await vi.waitFor(() => expect(w.document.querySelectorAll('#sessionList .sess')).toHaveLength(66), { timeout: 10_000 });
+
+    // Two whole-catalog refreshes overlap. The newer response arrives first and omits the
+    // selected fallback; paint must complete while its exact-id verification is still pending.
+    // The older response then arrives late with a conflicting summary and must not overwrite it.
+    verificationReply = 'pending';
+    chatVisible(false); chatVisible(true);
+    await vi.waitFor(() => expect(firstPageReads).toBe(2), { timeout: 10_000 });
+    chatVisible(false); chatVisible(true);
+    await vi.waitFor(() => expect(firstPageReads).toBe(3), { timeout: 10_000 });
+    currentRefresh.resolve(ok(pageOne));
+    await vi.waitFor(() => expect(getSession.mock.calls.filter(([id, options]) => id === fallback.id && options?.limit === 1).length).toBeGreaterThan(1), { timeout: 10_000 });
+    await vi.waitFor(() => expect(getSwarm).toHaveBeenCalledTimes(2), { timeout: 10_000 });
+    await vi.waitFor(() => expect(selected()).not.toBeNull(), { timeout: 10_000 });
+    const staleFallback = { ...fallback, title: 'Stale fallback' };
+    const stalePage = { ...pageOne, sessions: [...firstPage.slice(0, 30), staleFallback, ...firstPage.slice(30, 59)] };
+    staleRefresh.resolve(ok(stalePage));
+    await vi.waitFor(() => expect(getSwarm).toHaveBeenCalledTimes(3), { timeout: 10_000 });
+    expect(selected()).not.toBeNull();
+    expect(row()?.textContent).not.toContain('Stale fallback');
+    expect(w.document.getElementById('timeline')?.textContent).toContain('Fallback transcript');
+    verificationGate.resolve(ok({ summary: fallback, events: [note(1, 'Fallback transcript')], total: 1, nextFrom: 2 }));
+    verificationReply = null;
+
+    // A transient verification error is not deletion either.
+    verificationReply = { ok: false as const, error: 'Temporary IPC failure' };
+    chatVisible(false); chatVisible(true);
+    await vi.waitFor(() => expect(firstPageReads).toBe(4), { timeout: 10_000 });
+    await vi.waitFor(() => expect(getSwarm).toHaveBeenCalledTimes(4), { timeout: 10_000 });
+    await vi.waitFor(() => expect(getSession.mock.calls.filter(([id, options]) => id === fallback.id && options?.limit === 1).length).toBeGreaterThan(2), { timeout: 10_000 });
+    await vi.waitFor(() => expect(selected()).not.toBeNull(), { timeout: 10_000 });
+
+    // The main-process IPC reports a missing session only after a positive missing-directory check.
+    const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+    input.value = 'Draft from deleted chat';
+    input.dispatchEvent(new w.Event('input', { bubbles: true }));
+    w.document.getElementById('attachImages')!.click();
+    await vi.waitFor(() => expect(w.document.getElementById('composerImages')?.textContent).toContain('deleted-chat.txt'), { timeout: 10_000 });
+    verificationReply = { ok: false as const, error: 'Session not found' };
+    chatVisible(false); chatVisible(true);
+    await vi.waitFor(() => expect(firstPageReads).toBe(5), { timeout: 10_000 });
+    await vi.waitFor(() => expect(getSwarm).toHaveBeenCalledTimes(5), { timeout: 10_000 });
+    await vi.waitFor(() => expect(row()).toBeNull(), { timeout: 10_000 });
+    expect(w.document.getElementById('timeline')?.textContent).not.toContain('Fallback transcript');
+    expect(w.document.getElementById('chatTitle')?.textContent).toBe('New chat');
+    expect(input.value).toBe('');
+    expect(w.document.getElementById('composerImages')?.textContent).toContain('deleted-chat.txt');
+    await vi.waitFor(() => {
+      const drafts = JSON.parse(w.localStorage.getItem('chat-on-steroids.composer-drafts') ?? '[]');
+      expect(drafts).toContainEqual([`recovery:${fallback.id}`, 'Draft from deleted chat']);
+      expect(drafts).not.toContainEqual([fallback.id, 'Draft from deleted chat']);
+    }, { timeout: 10_000 });
+
+    w.document.querySelector<HTMLButtonElement>('#recoveredDraftNotices [data-recovered-draft-action="open"]')!.click();
+    expect(input.value).toBe('Draft from deleted chat');
+    expect(w.document.getElementById('composerImages')?.textContent).not.toContain('deleted-chat.txt');
+    w.document.querySelector<HTMLButtonElement>('#recoveredDraftNotices [data-recovered-draft-action="return"]')!.click();
+    expect(input.value).toBe('');
+    expect(w.document.getElementById('composerImages')?.textContent).toContain('deleted-chat.txt');
+
+    // Files that fit stay in New Chat; the deleted chat's text remains independently accessible.
+    w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(sendInput).toHaveBeenCalledTimes(1), { timeout: 10_000 });
+    expect(sendInput).toHaveBeenCalledWith(expect.objectContaining({ sessionId: null, text: 'Please look at the attached files.', attachments: [deletedAttachment] }));
+    const openedRow = () => w.document.querySelector<HTMLElement>(`#sessionList .sess[data-id="${newChatId}"]`);
+    await vi.waitFor(() => expect(openedRow()?.querySelector('.sess-top[aria-current="true"]')).not.toBeNull(), { timeout: 10_000 });
+    await vi.waitFor(() => expect(w.document.getElementById('chatTitle')?.textContent).toBe('Draft from deleted chat'), { timeout: 10_000 });
+  });
+
+  it('keeps an existing new-chat draft and sends every attachment shown after fallback deletion', async () => {
+    const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
+    dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
+    const w = dom.window;
+    Object.assign(globalThis, {
+      window: w, document: w.document, HTMLElement: w.HTMLElement, Element: w.Element, Node: w.Node,
+      DocumentFragment: w.DocumentFragment, HTMLInputElement: w.HTMLInputElement, HTMLSelectElement: w.HTMLSelectElement,
+      HTMLTextAreaElement: w.HTMLTextAreaElement, HTMLButtonElement: w.HTMLButtonElement
+    });
+    if (!(w.HTMLElement.prototype as any).scrollIntoView) (w.HTMLElement.prototype as any).scrollIntoView = () => {};
+
+    const fallback = summary('2026-08-27-ffffffff', 99_000, 0);
+    const other = summary('2026-08-27-00000001', 100_000, 0);
+    const newChatId = '2026-08-28-ffffffff';
+    const newChatSummary = { ...summary(newChatId, 100_100, 0), title: 'Existing new-chat draft', conversationId: null, chatIds: [] };
+    const page = { sessions: [other], activeId: null, pressure: [], blocked: [], approval: [], recoveryStopped: [], trusted: [], total: 1, nextCursor: null };
+    const ok = (data: any) => Promise.resolve({ ok: true as const, data });
+    const newAttachments = Array.from({ length: 20 }, (_, index) => ({ id: randomUUID(), name: `new-chat-${index}.txt`, size: 10, mimeType: 'text/plain' }));
+    const visibleAttachment = { id: randomUUID(), name: 'deleted-chat.txt', size: 12, mimeType: 'text/plain' };
+    let chooseFileCalls = 0;
+    let opened = false;
+    let deleted = false;
+    const listSessions = vi.fn(() => ok(page));
+    const sendInput = vi.fn(async (request: any) => ok({ ...request, sessionId: newChatId, opening: true,
+      state: 'queued', owner: null, createdAt: Date.now(), conversationId: null }));
+    const getSession = vi.fn(async (id: string, options?: any) => {
+      if (id === newChatId) return ok({ summary: newChatSummary, events: [], total: 0, nextFrom: 1 });
+      if (id === fallback.id && opened && deleted && options?.limit === 1) return { ok: false as const, error: 'Session not found' };
+      return ok({ summary: fallback, events: [], total: 0, nextFrom: 1 });
+    });
+    const getSwarm = vi.fn(() => ok({ running: false, runId: null, agents: [], maxWorkers: 2, pendingReports: 0 }));
+    const api: any = new Proxy({
+      listSessions,
+      listProjects: () => ok([]),
+      getSession,
+      sendInput,
+      chooseFiles: () => ok(chooseFileCalls++ === 0 ? newAttachments : [visibleAttachment]),
+      getSwarm,
+      onSessionChanged: () => () => undefined,
+      onSwarmChanged: () => () => undefined
+    }, { get(target, prop) { return prop in target ? (target as any)[prop] : (..._args: any[]) => ok(null); } });
+    Object.defineProperty(w, 'api', { value: api, configurable: true });
+
+    const { chatVisible, initChat, openScheduledChat } = await import('../src/renderer/chat.js');
+    initChat({ save: async () => true,
+      state: () => ({ config: { sessions: { record: true, limitTokens: 533000 }, compaction: { auto: true, autoTokens: 400000 }, ui: { developerMode: true } } }) as any });
+    chatVisible(true);
+    await vi.waitFor(() => expect(listSessions).toHaveBeenCalledTimes(1), { timeout: 10_000 });
+
+    const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+    input.value = 'Existing new-chat draft';
+    input.dispatchEvent(new w.Event('input', { bubbles: true }));
+    w.document.getElementById('attachImages')!.click();
+    await vi.waitFor(() => expect(w.document.getElementById('composerImages')?.textContent).toContain('new-chat-19.txt'), { timeout: 10_000 });
+
+    await openScheduledChat(fallback.id);
+    opened = true;
+    input.value = 'Draft from deleted chat';
+    input.dispatchEvent(new w.Event('input', { bubbles: true }));
+    w.document.getElementById('attachImages')!.click();
+    await vi.waitFor(() => expect(w.document.getElementById('composerImages')?.textContent).toContain('deleted-chat.txt'), { timeout: 10_000 });
+
+    deleted = true;
+    chatVisible(false); chatVisible(true);
+    const fallbackRow = () => w.document.querySelector<HTMLElement>(`#sessionList [data-id="${fallback.id}"]`);
+    await vi.waitFor(() => expect(fallbackRow()).toBeNull(), { timeout: 10_000 });
+    expect(input.value).toBe('Existing new-chat draft');
+    expect(w.document.getElementById('composerImages')?.textContent).toContain('new-chat-0.txt');
+    expect(w.document.getElementById('composerImages')?.textContent).toContain('new-chat-19.txt');
+    expect(w.document.getElementById('composerImages')?.textContent).not.toContain('deleted-chat.txt');
+    expect(w.document.getElementById('recoveredDraftNotices')?.textContent).toContain(fallback.id);
+    await vi.waitFor(() => {
+      const drafts = JSON.parse(w.localStorage.getItem('chat-on-steroids.composer-drafts') ?? '[]');
+      expect(drafts).toContainEqual(['new', 'Existing new-chat draft']);
+      expect(drafts).not.toContainEqual([fallback.id, 'Draft from deleted chat']);
+      const recovered = JSON.parse(w.localStorage.getItem('chat-on-steroids.recovered-composer-drafts') ?? '[]');
+      expect(recovered).toContainEqual(expect.objectContaining({ key: `recovery:${fallback.id}`, sourceTitle: fallback.id, attachments: [visibleAttachment] }));
+    }, { timeout: 10_000 });
+
+    const openRecovered = () => w.document.querySelector<HTMLButtonElement>('#recoveredDraftNotices [data-recovered-draft-action="open"]');
+    openRecovered()!.click();
+    expect(input.value).toBe('Draft from deleted chat');
+    expect(w.document.getElementById('composerImages')?.textContent).toContain('deleted-chat.txt');
+    expect(w.document.getElementById('composerImages')?.textContent).not.toContain('new-chat-0.txt');
+
+    w.document.querySelector<HTMLButtonElement>('#recoveredDraftNotices [data-recovered-draft-action="return"]')!.click();
+    expect(input.value).toBe('Existing new-chat draft');
+    expect(w.document.getElementById('composerImages')?.textContent).toContain('new-chat-0.txt');
+    expect(w.document.getElementById('composerImages')?.textContent).toContain('new-chat-19.txt');
+
+    openRecovered()!.click();
+    expect(input.value).toBe('Draft from deleted chat');
+
+    w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(sendInput).toHaveBeenCalledTimes(1), { timeout: 10_000 });
+    expect(sendInput).toHaveBeenCalledWith(expect.objectContaining({ sessionId: null, text: 'Draft from deleted chat',
+      attachments: [visibleAttachment] }));
+    await vi.waitFor(() => expect(w.document.getElementById('recoveredDraftNotices')?.hidden).toBe(true), { timeout: 10_000 });
+    w.document.getElementById('newChat')!.click();
+    expect(input.value).toBe('Existing new-chat draft');
+    expect(w.document.getElementById('composerImages')?.textContent).toContain('new-chat-0.txt');
+    expect(w.document.getElementById('composerImages')?.textContent).toContain('new-chat-19.txt');
   });
 });
 

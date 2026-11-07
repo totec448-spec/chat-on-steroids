@@ -14,6 +14,7 @@ import {
   writeDurableSoon,
   writeDurableSnapshotSoon
 } from '../src/main/durable.js';
+import { getLog, resetLoggerForTests } from '../src/main/logger.js';
 
 const cleanup: string[] = [];
 
@@ -35,6 +36,7 @@ it('invalidates only the recovered ledger projection after a successful atomic r
 afterEach(async () => {
   vi.restoreAllMocks();
   resetDurableForTests();
+  resetLoggerForTests();
   for (const dir of cleanup.splice(0)) await fs.rm(dir, { recursive: true, force: true });
 });
 
@@ -153,17 +155,52 @@ describe('durable state commit boundary', () => {
     await tempStore();
     const busy = Object.assign(new Error('injected rename contention'), { code: 'EBUSY' });
     const rename = vi.spyOn(fs, 'rename').mockRejectedValueOnce(busy);
+    const onPersisted = vi.fn();
 
-    await expect(writeDurableNow('probe', { generation: 1 })).rejects.toMatchObject({ code: 'EBUSY' });
+    await expect(writeDurableNow('probe', { generation: 1 }, { onPersisted })).rejects.toMatchObject({ code: 'EBUSY' });
     expect(rename).toHaveBeenCalledTimes(1);
+    expect(onPersisted).not.toHaveBeenCalled();
 
     rename.mockRestore();
     await flushDurable();
     await expect(readDurable('probe')).resolves.toEqual({ generation: 1 });
+    expect(onPersisted).toHaveBeenCalledOnce();
+  });
+
+  it('logs only a safe error code when a durable write fails, never the local state path', async () => {
+    const dir = await tempStore();
+    const privatePath = path.join(dir, 'state', 'probe.json');
+    const failure = Object.assign(new Error(`rename '${privatePath}.tmp' -> '${privatePath}'`), { code: 'EIO' });
+    const rename = vi.spyOn(fs, 'rename').mockRejectedValueOnce(failure);
+
+    await expect(writeDurableNow('probe', { generation: 1 })).rejects.toMatchObject({ code: 'EIO' });
+    const log = getLog().map(entry => entry.message).join('\n');
+    expect(log).toContain('could not save probe state: EIO');
+    expect(log).not.toContain(dir);
+
+    rename.mockRestore();
+    await flushDurable();
+  });
+
+  it.each(['PRIVATE_CHAT_ID', 'ENOTRECOVERABLE'])('does not trust unlisted durable error code %s', async code => {
+    const dir = await tempStore();
+    const privatePath = path.join(dir, 'state', 'probe.json');
+    const failure = Object.assign(new Error(`rename '${privatePath}.tmp' -> '${privatePath}'`), { code });
+    const rename = vi.spyOn(fs, 'rename').mockRejectedValueOnce(failure);
+
+    await expect(writeDurableNow('probe', { generation: 1 })).rejects.toMatchObject({ code });
+    const log = getLog().map(entry => entry.message).join('\n');
+    expect(log).toContain('could not save probe state: write failed');
+    expect(log).not.toContain(code);
+    expect(log).not.toContain(dir);
+
+    rename.mockRestore();
+    await flushDurable();
   });
 
   it('never lets an older in-flight generation erase a newer pending value', async () => {
     await tempStore();
+    const onPersisted = vi.fn();
     let releaseRename!: () => void;
     const renameEntered = new Promise<void>((resolve) => {
       vi.spyOn(fs, 'rename').mockImplementationOnce(async (...args) => {
@@ -177,14 +214,16 @@ describe('durable state commit boundary', () => {
       });
     });
 
-    const first = writeDurableNow('probe', { generation: 1 });
+    const first = writeDurableNow('probe', { generation: 1 }, { onPersisted });
     await renameEntered;
     writeDurableSoon('probe', { generation: 2 });
     releaseRename();
     await first;
+    expect(onPersisted).toHaveBeenCalledOnce();
     await flushDurable();
 
     await expect(readDurable('probe')).resolves.toEqual({ generation: 2 });
+    expect(onPersisted).toHaveBeenCalledOnce();
   });
 
   it('flushes pending state even when its debounce timer is no longer the authority', async () => {
