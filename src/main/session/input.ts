@@ -78,7 +78,9 @@ export const inputArgs = z.object({
    */
   edit: z.object({ messageId: z.string().regex(NATIVE_ID) }).strict().optional(),
   /** Scheduled runs (#1826): this message is a run of the chat's schedule, due at `dueAt`; `late` when it went out after a missed time. */
-  scheduled: z.object({ scheduleId: z.string().uuid(), dueAt: z.number().int().nonnegative(), late: z.boolean() }).strict().optional()
+  scheduled: z.object({ scheduleId: z.string().uuid(), dueAt: z.number().int().nonnegative(), late: z.boolean() }).strict().optional(),
+  /** Sent by the person from somewhere else: a reply to a Telegram notification (Haz on #1990). Main sets it, never the window. */
+  via: z.literal('telegram').optional()
 });
 export type InputArgs = z.infer<typeof inputArgs>;
 const entrySchema = inputArgs.extend({

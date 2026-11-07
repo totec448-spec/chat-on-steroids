@@ -16,11 +16,16 @@ function fakeTelegram(options: { token?: string | null; link?: TelegramLink | nu
   const logs: string[] = [];
   const changes = vi.fn();
   const deny = vi.fn(async () => 'denied' as 'denied' | 'already' | 'failed');
+  // Phase 2: what /stop, /pause and /resume could act on, the action, and a reply sent to a chat.
+  const targets = vi.fn(async (_action: 'stop' | 'pause' | 'resume') => [] as Array<{ sessionId: string }>);
+  const act = vi.fn(async (_action: 'stop' | 'pause' | 'resume', _sessionId: string) => 'done' as 'done' | 'nothing' | 'failed');
+  const steer = vi.fn(async (_sessionId: string, _text: string) => 'sent' as 'sent' | 'queued' | 'off' | 'refused' | 'failed');
+  let messageId = 1000;
   let polls = 0;
   const now = options.now ?? (() => Date.now());
   const replies: Record<string, (params: Record<string, any>) => TelegramReply> = {
     getMe: () => ({ ok: true, result: { username: 'cos_test_bot', is_bot: true } }),
-    sendMessage: () => ({ ok: true, result: { message_id: 1 } }),
+    sendMessage: () => ({ ok: true, result: { message_id: ++messageId } }),
     answerCallbackQuery: () => ({ ok: true }),
     editMessageText: () => ({ ok: true })
   };
@@ -49,6 +54,9 @@ function fakeTelegram(options: { token?: string | null; link?: TelegramLink | nu
     status: async details => details ? 'status with names' : 'status counts',
     details: () => false,
     deny,
+    targets,
+    act,
+    steer,
     text: (source, values = []) => values.reduce<string>((out, value, index) => out.replace(`{${index}}`, String(value)), source),
     changed: changes,
     sleep: async () => undefined,
@@ -60,7 +68,9 @@ function fakeTelegram(options: { token?: string | null; link?: TelegramLink | nu
   const button = (from: number, data: string) => ({ update_id: update++, callback_query: { id: `q${update}`, data, from: { id: from },
     message: { message_id: 55, chat: { id: ME }, text: 'A chat is waiting for you.' } } });
   return {
-    bot, calls, logs, changes, deny, replies,
+    bot, calls, logs, changes, deny, replies, targets, act, steer,
+    /** The id Telegram gave the last message the bot sent. */
+    get lastMessageId() { return messageId; },
     get link() { return link; },
     setToken(next: string | null) { token = next; },
     queue(...updates: unknown[]) { deliver({ ok: true, result: updates }); },
@@ -160,8 +170,8 @@ describe('a linked bot', () => {
     await telegram.settled();
     expect(telegram.sent()).toEqual([
       { chat_id: ME, text: 'status counts' },
-      { chat_id: ME, text: 'Chat On Steroids sends its notifications here. /status shows what your chats are doing.' },
-      { chat_id: ME, text: 'I know /status and /help.' }
+      { chat_id: ME, text: 'Chat On Steroids notifications arrive here. Commands: /status, /stop, /pause, /resume. Reply to a notification to send that chat a message.' },
+      { chat_id: ME, text: 'I know /status, /stop, /pause, /resume and /help. Reply to a notification to send that chat a message.' }
     ]);
     // A stranger is ignored and said once a minute, not per message.
     expect(telegram.logs.filter(line => line.includes('not the linked one'))).toHaveLength(1);
@@ -262,6 +272,127 @@ describe('/status', () => {
   });
 });
 
+// Phase 2 (2026-10-31): act on a chat from the phone. /stop and /pause only ever make less happen;
+// a reply that becomes a message for the chat waits for its own switch, off by default.
+describe('acting on chats', () => {
+  const answered = (telegram: ReturnType<typeof fakeTelegram>) => telegram.sent().at(-1)?.text;
+  const notified = async (telegram: ReturnType<typeof fakeTelegram>, sessionId: string) => {
+    expect(await telegram.bot.send('A chat finished.', { sessionId })).toBe(true);
+    return telegram.lastMessageId;
+  };
+
+  it('stops the chat whose notification the reply answers', async () => {
+    const telegram = current = fakeTelegram({ link: linked() });
+    telegram.bot.start();
+    const notice = await notified(telegram, 'chat-a');
+    await notified(telegram, 'chat-b');
+    telegram.queue(telegram.message(ME, '/stop', { reply_to_message: { message_id: notice } }));
+    await telegram.settled();
+    expect(telegram.act).toHaveBeenCalledWith('stop', 'chat-a');
+    expect(telegram.targets).not.toHaveBeenCalled();
+    expect(answered(telegram)).toBe('Stopped.');
+    expect(telegram.logs).toContain('telegram: /stop for chat chat-a: done');
+  });
+
+  it.each([
+    ['/stop', 'stop', 'Nothing is running.'],
+    ['/pause', 'pause', 'No chat has Goal or Loop on.'],
+    ['/resume', 'resume', 'No chat was paused from here.']
+  ] as const)('acts on the only chat %s can mean, says when there is none, and asks when there are several', async (command, action, none) => {
+    const telegram = current = fakeTelegram({ link: linked() });
+    telegram.bot.start();
+    telegram.queue(telegram.message(ME, command));
+    await telegram.settled();
+    expect(telegram.act).not.toHaveBeenCalled();
+    expect(answered(telegram)).toBe(none);
+    telegram.targets.mockResolvedValue([{ sessionId: 'only' }]);
+    telegram.queue(telegram.message(ME, command));
+    await telegram.settled();
+    expect(telegram.act).toHaveBeenCalledWith(action, 'only');
+    telegram.act.mockClear();
+    telegram.targets.mockResolvedValue([{ sessionId: 'one' }, { sessionId: 'two' }]);
+    telegram.queue(telegram.message(ME, command));
+    await telegram.settled();
+    expect(telegram.act).not.toHaveBeenCalled();
+    expect(answered(telegram)).toBe(`Several chats could be meant. Reply to that chat's notification with ${command}.`);
+  });
+
+  it.each([['done', 'Paused. /resume starts it again.'], ['nothing', 'Goal and Loop are not on there.'], ['failed', 'Could not do that. Open the chat in Chat On Steroids.']] as const)(
+    'says what /pause did: %s', async (result, said) => {
+      const telegram = current = fakeTelegram({ link: linked() });
+      telegram.bot.start();
+      telegram.act.mockResolvedValue(result);
+      const notice = await notified(telegram, 'chat-a');
+      telegram.queue(telegram.message(ME, '/pause', { reply_to_message: { message_id: notice } }));
+      await telegram.settled();
+      expect(answered(telegram)).toBe(said);
+    });
+
+  it.each([['sent', 'On its way to the chat.'], ['queued', 'Queued: it goes to the chat after its current answer.'],
+    ['off', 'Sending messages to chats from Telegram is off. Turn it on in Chat On Steroids: Settings → Phone notifications → Telegram.'],
+    ['refused', 'That chat cannot take messages from here.'], ['failed', 'Could not do that. Open the chat in Chat On Steroids.']] as const)(
+    'sends a reply to a notification to that chat, and says how it went: %s', async (result, said) => {
+      const telegram = current = fakeTelegram({ link: linked() });
+      telegram.bot.start();
+      telegram.steer.mockResolvedValue(result);
+      const notice = await notified(telegram, 'chat-a');
+      telegram.queue(telegram.message(ME, '  please also update the README  ', { reply_to_message: { message_id: notice } }));
+      await telegram.settled();
+      expect(telegram.steer).toHaveBeenCalledWith('chat-a', 'please also update the README');
+      expect(answered(telegram)).toBe(said);
+      // The words themselves never reach the log.
+      expect(telegram.logs.join('\n')).not.toContain('README');
+    });
+
+  it('sends nothing for a reply to a message it does not know, or from another account', async () => {
+    const telegram = current = fakeTelegram({ link: linked() });
+    telegram.bot.start();
+    telegram.queue(telegram.message(ME, 'do this', { reply_to_message: { message_id: 1 } }));
+    await telegram.settled();
+    expect(answered(telegram)).toBe('That notification is too old to answer. Send /status to see your chats.');
+    const notice = await notified(telegram, 'chat-a');
+    telegram.queue(telegram.message(STRANGER, 'do this', { reply_to_message: { message_id: notice } }),
+      telegram.message(STRANGER, '/stop', { reply_to_message: { message_id: notice } }));
+    await telegram.settled();
+    expect(telegram.steer).not.toHaveBeenCalled();
+    expect(telegram.act).not.toHaveBeenCalled();
+  });
+
+  it('does not act on a command or reply that waited while the app could not answer', async () => {
+    let clock = Date.now();
+    const telegram = current = fakeTelegram({ link: linked(), now: () => clock });
+    telegram.bot.start();
+    const notice = await notified(telegram, 'chat-a');
+    const late = telegram.message(ME, '/stop', { reply_to_message: { message_id: notice } });
+    const lateText = telegram.message(ME, 'go on', { reply_to_message: { message_id: notice } });
+    clock += 3 * 60_000;
+    telegram.queue(late, lateText);
+    await telegram.settled();
+    expect(telegram.act).not.toHaveBeenCalled();
+    expect(telegram.steer).not.toHaveBeenCalled();
+  });
+
+  it('remembers which chat an approval notification is about, for a reply too', async () => {
+    const telegram = current = fakeTelegram({ link: linked() });
+    telegram.bot.start();
+    expect(await telegram.bot.send('A chat is waiting for you.', { sessionId: 'chat-a', cardId: 'card-1' })).toBe(true);
+    const notice = telegram.lastMessageId;
+    expect(telegram.sent().at(-1)?.reply_markup?.inline_keyboard?.[0]?.[0]?.text).toBe('Deny');
+    telegram.queue(telegram.message(ME, '/stop', { reply_to_message: { message_id: notice } }));
+    await telegram.settled();
+    expect(telegram.act).toHaveBeenCalledWith('stop', 'chat-a');
+  });
+
+  it('names every command in its help', async () => {
+    const telegram = current = fakeTelegram({ link: linked() });
+    telegram.bot.start();
+    telegram.queue(telegram.message(ME, '/help'), telegram.message(ME, 'hello'));
+    await telegram.settled();
+    expect(telegram.sent().at(-2)?.text).toBe('Chat On Steroids notifications arrive here. Commands: /status, /stop, /pause, /resume. Reply to a notification to send that chat a message.');
+    expect(answered(telegram)).toBe('I know /status, /stop, /pause, /resume and /help. Reply to a notification to send that chat a message.');
+  });
+});
+
 // Live test 2026-11-07: /status said "Working: 6" while the app showed none working. It counted every
 // stored open turn, also a sub-agent's from five days earlier. It now counts as the sidebar does.
 it('counts a chat as working only while it really works, as the sidebar does', () => {
@@ -273,4 +404,52 @@ it('counts a chat as working only while it really works, as the sidebar does', (
   // The same chat while the app counts it as active.
   const live = { ...none, activityExpiresAt: () => now + 60_000 };
   expect(statusChatsFrom([{ ...base, lastToolCallAt: now - 1_000 }], live, now)).toEqual([expect.objectContaining({ working: true })]);
+});
+
+// Live test 2026-11-07: /pause asked "Several chats could be meant" with one Loop chat running and
+// seven idle old Goal/Loop chats. A bare command means the running chats first.
+it('lets a bare /pause mean the running Goal or Loop chat, and idle ones only when none runs', async () => {
+  const { telegramTargets } = await import('../src/main/telegram-app.js');
+  const chat = (sessionId: string, working: boolean, automation: 'Goal' | 'Loop' | null) => ({ sessionId, title: sessionId, working, approval: false, automation });
+  const chats = [chat('running-loop', true, 'Loop'), chat('idle-goal', false, 'Goal'), chat('idle-loop', false, 'Loop'), chat('plain', true, null)];
+  expect(telegramTargets('pause', chats, new Set())).toEqual([{ sessionId: 'running-loop' }]);
+  expect(telegramTargets('pause', chats.filter(row => row.sessionId !== 'running-loop'), new Set())).toEqual([{ sessionId: 'idle-goal' }, { sessionId: 'idle-loop' }]);
+  expect(telegramTargets('stop', chats, new Set())).toEqual([{ sessionId: 'running-loop' }, { sessionId: 'plain' }]);
+  expect(telegramTargets('resume', [chat('was-paused', false, null), chat('other', false, null)], new Set(['was-paused']))).toEqual([{ sessionId: 'was-paused' }]);
+});
+
+// CodeRabbit on #1990: the phone acts only on the person's own chats, and a held turn counts as running.
+it('keeps workers and helpers out of every bare Telegram command, and counts a held turn as running for /stop', async () => {
+  const { telegramTargets } = await import('../src/main/telegram-app.js');
+  const chat = (sessionId: string, patch: Record<string, unknown> = {}) => ({ sessionId, title: sessionId, working: false, approval: false, automation: null, own: true, held: false, ...patch });
+  const chats = [chat('mine', { working: true }), chat('worker', { working: true, own: false }), chat('held', { held: true }), chat('idle')];
+  expect(telegramTargets('stop', chats as never, new Set())).toEqual([{ sessionId: 'mine' }, { sessionId: 'held' }]);
+  const looped = [chat('loop', { automation: 'Loop', working: true }), chat('worker-loop', { automation: 'Loop', working: true, own: false })];
+  expect(telegramTargets('pause', looped as never, new Set())).toEqual([{ sessionId: 'loop' }]);
+  expect(telegramTargets('resume', [chat('w', { own: false }), chat('p')] as never, new Set(['w', 'p']))).toEqual([{ sessionId: 'p' }]);
+});
+
+it('says the chats of /status without a worker or helper, as the sidebar lists the person\'s chats', async () => {
+  const { statusChatsFrom } = await import('../src/main/telegram-status.js');
+  const now = Date.parse('2026-11-07T12:00:00Z');
+  const base = { title: 'x', conversationId: 'c', updatedAt: now, lastToolCallAt: now - 1000, lastTurnEndAt: null, activeTurnId: 't' };
+  const none = { goal: () => null, card: () => null, activityExpiresAt: () => now + 60_000, held: () => false };
+  const rows = statusChatsFrom([{ ...base, id: 'a', origin: null }, { ...base, id: 'w', origin: { kind: 'worker' } }, { ...base, id: 'h', origin: { kind: 'helper' } }] as never, none, now);
+  expect(rows.map(row => [row.sessionId, row.own])).toEqual([['a', true], ['w', false]]);
+});
+
+// CodeRabbit on #1990: a new bot token must not keep the notices of the old bot. Telegram numbers messages per
+// chat, so a reply in the new chat could otherwise name a session of the old one.
+it('forgets the notices of the old bot when a new token is accepted', async () => {
+  const telegram = current = fakeTelegram({ link: linked() });
+  telegram.bot.start();
+  expect(await telegram.bot.send('A chat finished.', { sessionId: 'old-chat' })).toBe(true);
+  const oldNotice = telegram.lastMessageId;
+  await telegram.bot.connect();
+  telegram.queue(telegram.message(ME, '/start abcdefgh'));
+  await telegram.settled();
+  telegram.queue(telegram.message(ME, '/stop', { reply_to_message: { message_id: oldNotice } }));
+  await telegram.settled();
+  expect(telegram.act).not.toHaveBeenCalled();
+  expect(telegram.sent().at(-1)?.text).toBe('That notification is too old to answer. Send /status to see your chats.');
 });

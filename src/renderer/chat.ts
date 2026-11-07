@@ -5708,6 +5708,7 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
       });
       // #1826: a scheduled run keeps saying so once sent, as its queue row did.
       if (event.scheduled) box.append(el('span', 'said-origin', () => scheduledLabel(event)));
+      else if (event.via === 'telegram') box.append(el('span', 'said-origin', () => t('From Telegram')));
       if (event.attachments?.length || assets.length || retained.length) box.append(attachments);
       if (!assets.length) for (const image of retained) preview(image.dataUrl, true);
       // Native ChatGPT can prepend a blank paragraph. Ignore it only when a
@@ -8986,6 +8987,7 @@ function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
   // What the person wrote: a plan's first message shows their request, as it will once recorded.
   const authored = authoredTextOf(entry);
   if (entry.scheduled) row.append(el('div', 'pending-message-origin', () => scheduledLabel(entry)));
+  else if (entry.via === 'telegram') row.append(el('div', 'pending-message-origin', () => t('From Telegram')));
   if (authored) {
     const text = el('div', 'pending-message-text', authored);
     text.setAttribute('dir', 'auto');
@@ -9231,7 +9233,8 @@ async function refreshInputQueue(): Promise<void> {
     if (entry.recovery) ui(card, 'aria-label', () => t('Automatic Continue'));
     // Held by the send check: the card says so in place of the text, which stays in the tooltip.
     const label = el('span', 'queue-label', entry.recovery ? () => `${t('Automatic Continue')} · ${sendCheckHold(entry) ?? entry.text}`
-      : entry.scheduled ? () => `${scheduledLabel(entry)} · ${sendCheckHold(entry) ?? entry.text}` : entry.text);
+      : entry.scheduled ? () => `${scheduledLabel(entry)} · ${sendCheckHold(entry) ?? entry.text}`
+      : entry.via === 'telegram' ? () => `${t('From Telegram')} · ${sendCheckHold(entry) ?? entry.text}` : entry.text);
     card.classList.toggle('is-held', !!sendCheckHold(entry));
     ui(label, 'title', () => `${entry.recovery
       ? t('Resumes without a final answer. If ChatGPT is still generating, the silent turn is stopped before Continue is sent.')

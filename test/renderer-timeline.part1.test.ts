@@ -817,6 +817,26 @@ it('keeps the scheduled label on the sent message in the chat', async () => {
   expect(labels()).toEqual([`Scheduled · late, was due ${new Date(dueAt).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' })}`, null]);
 });
 
+// Haz on #1990: a reply from Telegram says so in the chat, in the scheduled label's style, while it
+// waits and once sent, so the person can check what happened remotely.
+it('marks a message from Telegram in the queue and in the chat', async () => {
+  const sent: SessionEvent = { kind: 'user_message', seq: 1, origin: 1, time: T0, source: 'app', messageId: 'telegram-sent', inputId: 'telegram-run',
+    message: text('Run the tests'), via: 'telegram' };
+  const typed: SessionEvent = { kind: 'user_message', seq: 2, origin: 2, time: T0 + 1, source: 'app', messageId: 'typed-2', message: text('And this?') };
+  const { w, live, append } = await boot([sent, typed]);
+  const labels = () => [...w.document.querySelectorAll('.said.is-user')].map(bubble => bubble.querySelector('.said-origin')?.textContent ?? null);
+  expect(labels()).toEqual(['From Telegram', null]);
+  const queued = { id: 'telegram-queued', sessionId: summary(live.events).id, text: 'Then deploy', mode: 'auto', dueAt: 0, model: null,
+    reasoningEffort: null, state: 'queued', owner: null, createdAt: 0, conversationId: 'chat-a', via: 'telegram' } as InputEntry;
+  live.inputs.push(queued);
+  await append([]);
+  await waitFor(() => expect(w.document.querySelector('#inputQueue [data-input-id="telegram-queued"] .pending-message-origin')?.textContent).toBe('From Telegram'));
+  // Waiting for a running turn, its task card carries the same words.
+  live.inputs[0] = { ...queued, mode: 'after-turn' };
+  await append([]);
+  await waitFor(() => expect(w.document.querySelector('#finishQueue [data-input-id="telegram-queued"] .queue-label')?.textContent).toBe('From Telegram · Then deploy'));
+});
+
 // #1402: the app's own fresh-turn continue is no one's typed message. Waiting, it shows as the
 // message it is; dropped, it raises no delivery notice, because the app tries again by itself.
 it('shows a fresh-turn continue while it waits and raises no notice when it is dropped', async () => {

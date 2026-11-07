@@ -16,6 +16,11 @@ export interface PhonePushSettings {
   quietHours: QuietHours | null;
   /** The chat's name, the start of its answer and a link to it. */
   includeDetails: boolean;
+  /**
+   * A reply to a Telegram notification is sent to that chat as the person's message (phase 2,
+   * 2026-10-31). Missing: off. A message can make ChatGPT run tools here, so it is its own choice.
+   */
+  telegramSteer?: boolean;
 }
 
 export const DEFAULT_PHONE_PUSH: PhonePushSettings = {
