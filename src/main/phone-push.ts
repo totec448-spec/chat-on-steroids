@@ -22,6 +22,8 @@ export type PhonePushKind = 'needs-you' | 'failed' | 'finished';
 
 export interface PhonePushEvent {
   kind: PhonePushKind;
+  /** An approval card this chat waits on: Telegram offers Deny under it (#1934). */
+  approval?: { sessionId: string; cardId: string };
   sessionId?: string;
   chatTitle?: string;
   conversationId?: string | null;
@@ -41,6 +43,8 @@ export interface PhonePushDeps {
   idleState(): 'active' | 'idle' | 'locked' | 'unknown';
   post(url: string, body: string, headers: Record<string, string>): Promise<{ ok: boolean; status: number }>;
   log(line: string): void;
+  /** The linked Telegram bot (#1934), when there is one: a second destination under the same rules. */
+  telegram?(): { send(text: string, approval?: { sessionId: string; cardId: string }): Promise<boolean> } | null;
 }
 
 const TOPIC = /^[-_A-Za-z0-9]{1,64}$/;
@@ -123,7 +127,10 @@ export function createPhonePush(deps: PhonePushDeps) {
       const skip = (result: PhonePushResult, why: string): PhonePushResult => { deps.log(`phone push: not sent "${name}": ${why}`); return result; };
       // Switched off is no decision to report: a line per chat event for every install that never turned it on.
       if (!settings.enabled) return 'off';
-      if (!isValidTopic(settings.topic)) return skip('off', 'the topic is not valid');
+      const telegram = deps.telegram?.() ?? null;
+      const ntfy = settings.ntfy !== false;
+      if (!ntfy && !telegram) return skip('off', 'neither ntfy nor a linked Telegram bot is on');
+      if (ntfy && !telegram && !isValidTopic(settings.topic)) return skip('off', 'the topic is not valid');
       if ((event.kind === 'needs-you' && !settings.needsYou) || (event.kind === 'failed' && !settings.failures) ||
           (event.kind === 'finished' && settings.finishedAfterMinutes === null)) return skip('kind-off', 'this kind is switched off');
       if (event.kind === 'finished' && event.workedMs !== undefined && event.workedMs < (settings.finishedAfterMinutes ?? 0) * 60_000) {
@@ -145,16 +152,29 @@ export function createPhonePush(deps: PhonePushDeps) {
         const index = sentTimes.lastIndexOf(now);
         if (index >= 0) sentTimes.splice(index, 1);
       };
-      try {
-        const reply = await send(settings, { ...message(event, settings.includeDetails), priority: PRIORITY[event.kind], tags: [TAGS[event.kind]] });
-        if (!reply.ok) { forget(); deps.log(`phone push: the server refused "${name}" (HTTP ${reply.status})`); return 'error'; }
-      } catch (error) {
-        forget();
-        if (error instanceof SendRefused) deps.log(`phone push: not sent "${name}": ${error.message}${error.reason ? ` (${error.reason})` : ''}`);
-        else deps.log(`phone push: could not reach the server for "${name}": ${error instanceof Error ? error.message : String(error)}`);
-        return 'error';
-      }
-      deps.log(`phone push: sent "${name}" to the phone`);
+      const shown = message(event, settings.includeDetails);
+      // Each destination goes on its own: one that fails does not stop the other.
+      const viaNtfy = ntfy && isValidTopic(settings.topic) ? (async () => {
+        try {
+          const reply = await send(settings, { ...shown, priority: PRIORITY[event.kind], tags: [TAGS[event.kind]] });
+          if (!reply.ok) { deps.log(`phone push: the server refused "${name}" (HTTP ${reply.status})`); return false; }
+          deps.log(`phone push: sent "${name}" to the phone`);
+          return true;
+        } catch (error) {
+          if (error instanceof SendRefused) deps.log(`phone push: not sent "${name}": ${error.message}${error.reason ? ` (${error.reason})` : ''}`);
+          else deps.log(`phone push: could not reach the server for "${name}": ${error instanceof Error ? error.message : String(error)}`);
+          return false;
+        }
+      })() : Promise.resolve(null);
+      const viaTelegram = telegram ? (async () => {
+        const text = [shown.title === 'Chat On Steroids' ? '' : shown.title, shown.message, shown.click ?? ''].filter(Boolean).join('\n');
+        const sent = await telegram.send(text, event.kind === 'needs-you' ? event.approval : undefined).catch(() => false);
+        deps.log(sent ? `phone push: sent "${name}" to Telegram${event.approval && event.kind === 'needs-you' ? ' with Deny' : ''}` : `phone push: "${name}" did not reach Telegram`);
+        return sent;
+      })() : Promise.resolve(null);
+      const [byNtfy, byTelegram] = await Promise.all([viaNtfy, viaTelegram]);
+      // A message that reached no destination does not count: the next one may try again.
+      if (byNtfy !== true && byTelegram !== true) { forget(); return 'error'; }
       return 'sent';
     },
     /** A test message, now, whatever the rules say; it throws a sentence when it did not arrive. */
