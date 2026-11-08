@@ -565,4 +565,42 @@ describe('steer / follow-up continued turn ordering', () => {
       await fs.rm(dir, { recursive: true, force: true });
     }
   });
+
+  it('repairs a saved replacement using the merged final of provider timestamp aliases', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cos-steer-aliases-'));
+    try {
+      initConfigPath(dir);
+      initSessionStore(dir);
+      resetSessionStoreForTests();
+      const session = await createSession({ title: 'Saved continuation aliases' });
+      const events: Extract<SessionEvent, { kind: 'assistant_message' | 'user_message' }>[] = [
+        { kind: 'assistant_message', seq: 1, time: T0, source: 'extension',
+          messageId: 'assistant:working:1000', providerMessageId: 'provider-final',
+          message: text('Working'), state: 'streaming', final: false },
+        { kind: 'user_message', seq: 2, time: T0 + 10, source: 'extension',
+          messageId: 'steer', parentId: 'provider-final', message: text('Continue with the detail') },
+        { kind: 'assistant_message', seq: 3, contentSeq: 3, time: T0 + 20, source: 'extension',
+          messageId: 'assistant:working:2000', providerMessageId: 'provider-final',
+          message: text('Completed answer'), state: 'final', final: true },
+        { kind: 'user_message', seq: 4, time: T0 + 30, source: 'extension',
+          messageId: 'queued', parentId: 'provider-final', replaces: 'steer', message: text('Next question') }
+      ];
+      // Old builds saved each timestamp alias separately. Use their legacy snapshot so
+      // current upsert deduplication cannot repair the fixture before the read under test.
+      const snapshot = Object.fromEntries(events.map(event => [`${event.kind}\u0000${event.messageId}`, event]));
+      await fs.writeFile(path.join(dir, 'sessions', session.id, 'messages.json'), JSON.stringify(snapshot));
+      resetSessionStoreForTests();
+      const loaded = await readEvents(session.id, { kinds: ['assistant_message', 'user_message'] });
+      expect(loaded.filter(event => event.kind === 'assistant_message')).toEqual([
+        expect.objectContaining({ messageId: 'assistant:working:1000', final: true, origin: 1 })
+      ]);
+      const queued = loaded.find(event => event.kind === 'user_message' && event.messageId === 'queued');
+      expect(queued?.kind).toBe('user_message');
+      expect(queued?.kind === 'user_message' ? queued.replaces : undefined).toBeUndefined();
+    } finally {
+      resetSessionStoreForTests();
+      unsetSessionRootForTests();
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
 });

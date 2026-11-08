@@ -795,7 +795,7 @@ async function readCanonicalMessages(id: string, aliasesCollapsed?: () => void):
   for (const [key, event] of out) {
     if (event.kind !== 'user_message' || !event.replaces || !event.parentId) continue;
     const replaced = out.get(`user_message\u0000${event.replaces}`);
-    const parent = out.get(`assistant_message\u0000${event.parentId}`) ?? providers.get(event.parentId)?.[0]?.[1];
+    const parent = out.get(`assistant_message\u0000${event.parentId}`) ?? out.get(providers.get(event.parentId)?.[0]?.[0] ?? '');
     if (replaced?.kind === 'user_message' && parent?.kind === 'assistant_message') {
       const parentSettledAt = residenceOf(parent);
       if (parentSettledAt > positionOf(replaced) && parentSettledAt < positionOf(event)) {

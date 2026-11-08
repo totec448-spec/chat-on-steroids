@@ -3068,11 +3068,12 @@
       const ended = quietTurn || generationTurn(closingTurns);
       const fresh = endOutcome(ended);
       const result = quietOutcome && quietOutcome.outcome !== 'unknown' ? quietOutcome : fresh;
+      const endedTerminal = Boolean(ended && fiberTurnFor(ended)?.endMessageId && !approvalHolding());
       // A new user message is an actual boundary, unlike a disappearing Stop control. Once
-      // that boundary is proven, authored prose is enough to classify the old turn as a
-      // completed answer when no stronger failure/interruption/stall outcome exists.
+      // that boundary is proven, exact Fiber terminal evidence or authored prose classifies
+      // the old turn as completed when no stronger failure/interruption/stall outcome exists.
       const bounded = result.outcome === 'unknown'
-        ? answerText(ended).length > 0
+        ? endedTerminal || answerText(ended).length > 0
           ? { outcome: 'completed' }
           : {
             outcome: 'interrupted',
@@ -3091,7 +3092,6 @@
       // 2026-10-12: ten calls and the final answer followed a message sent after "I'll pick up…").
       // A turn whose own end_turn Fiber already shows is completed, not continued: its final
       // keeps its owner even when the scan that reports it returns after the next question opens.
-      const endedTerminal = Boolean(ended && fiberTurnFor(ended)?.endMessageId && !approvalHolding());
       const replacedUnfinished = !endedTerminal && result.outcome === 'unknown' && (bounded.outcome === 'interrupted' || fiberPresent === true);
       continuedTurn = !endedTerminal && (steering || replacedUnfinished);
       if (continuedTurn && turnId) {

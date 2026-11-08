@@ -3942,7 +3942,8 @@ async function replyFiber(
   // shared one.
   harnessed: Harness | null = null,
   observeOnly = false,
-  preserveTurnStamps: ReadonlySet<HTMLElement> = new Set()
+  preserveTurnStamps: ReadonlySet<HTMLElement> = new Set(),
+  presentationOnly = false
 ): Promise<void> {
   const active = harnessed ?? live!;
   const window = active.window as any;
@@ -4004,7 +4005,7 @@ async function replyFiber(
       // sometimes had not even arrived yet (canary 2026-10-13, macOS). Wait for the answer itself.
       await vi.waitFor(() => { if (!answered) throw new Error('the scan has not asked yet'); }, { timeout: 10_000, interval: 5 });
       await new Promise(resolve => globalThis.setTimeout(resolve, 100));
-    } else await active.hook.refreshFiber(settled);
+    } else await active.hook.refreshFiber(settled, presentationOnly);
   } finally {
     window.removeEventListener('message', onAsk);
     window.setTimeout = instant;
@@ -9944,6 +9945,29 @@ describe('a stop button that goes missing while the turn is still running', () =
     userTurn(live.document, 'steer-second', 'also keep the tag', { sent: false });
     for (let tick = 0; tick < 3; tick++) { live.hook.observe(); await settle(); }
     expect(emitted(live.sent, 'turn_end').map(row => [row.event.turnId, row.event.continued])).toEqual([[first, true]]);
+  });
+
+  it('completes the old turn at a new question from Fiber end_turn before its text renders', async () => {
+    live = await harness();
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'terminal-before-text', []);
+    live.hook.observe(); await settle();
+    const first = emitted(live.sent, 'turn_start')[0]!.event.turnId;
+    section.setAttribute('data-clf-fiber-turn', '0');
+    // The presentation pass can learn end_turn before the lifecycle pass runs,
+    // while the native assistant section still has no authored prose.
+    await replyFiber([], [{ turnId: 'terminal-before-text', endMessageId: 'old-final',
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', calls: [], messages: [], activities: []
+    }], null, true, null, false, new Set(), true);
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(0);
+
+    userTurn(live.document, 'next-after-terminal', 'Next question');
+    live.hook.observe(); await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end').map(row => row.event)).toEqual([
+      expect.objectContaining({ turnId: first, outcome: 'completed' })
+    ]);
+    expect(emitted(live.sent, 'turn_end')[0]!.event.continued).toBeUndefined();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(2);
   });
 
   it('marks continued the end of a turn with only interim prose when a message arrives before end_turn (#1301)', async () => {
