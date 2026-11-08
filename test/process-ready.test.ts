@@ -20,6 +20,9 @@ it('waits for a complete readiness line across chunks and removes listeners and 
   expect(child.stderr!.listenerCount('data')).toBe(0);
   expect(child.listenerCount('error')).toBe(0);
   expect(child.listenerCount('exit')).toBe(0);
+  expect(child.listenerCount('close')).toBe(0);
+  expect(child.stdout!.listenerCount('end')).toBe(0);
+  expect(child.stderr!.listenerCount('end')).toBe(0);
   expect(vi.getTimerCount()).toBe(0);
 });
 
@@ -30,25 +33,37 @@ it('reports a spawn error immediately instead of waiting for a missing file', as
   await rejected;
 });
 
-it('includes the exit code and captured stderr when the fixture fails before readiness', async () => {
+it('keeps stderr arriving after exit and reports it when the diagnostic pipes close', async () => {
   const child = fixture();
   const ready = waitForChildPid(child, 15_000);
   const rejected = expect(ready).rejects.toThrow(/code=7, signal=null[\s\S]*startup refused/);
-  child.stderr!.emit('data', 'startup refused');
   child.emit('exit', 7, null);
+  child.stderr!.emit('data', 'startup refused');
+  child.emit('close', 7, null);
   await rejected;
 });
 
 it('reports termination by signal before readiness', async () => {
   const child = fixture();
   const rejected = expect(waitForChildPid(child, 15_000)).rejects.toThrow('code=null, signal=SIGTERM');
-  child.emit('exit', null, 'SIGTERM');
+  child.emit('close', null, 'SIGTERM');
+  await rejected;
+});
+
+it('does not accept a buffered readiness receipt after the parent exits', async () => {
+  const child = fixture();
+  const rejected = expect(waitForChildPid(child, 15_000)).rejects.toThrow('code=1, signal=null');
+  child.emit('exit', 1, null);
+  child.stdout!.emit('data', `${CHILD_PID_PREFIX}1234\n`);
+  child.emit('close', 1, null);
   await rejected;
 });
 
 it('reports a fixture that already exited before the waiter was attached', async () => {
   const child = fixture(9);
-  await expect(waitForChildPid(child, 15_000)).rejects.toThrow('code=9, signal=null');
+  child.stdout!.push(null);
+  child.stderr!.push('buffered startup error'); child.stderr!.push(null);
+  await expect(waitForChildPid(child, 15_000)).rejects.toThrow(/code=9, signal=null[\s\S]*buffered startup error/);
 });
 
 it('refuses a fixture without diagnostic pipes', async () => {
@@ -64,6 +79,22 @@ it.each(['0', 'not-a-pid', '9007199254740992'])('refuses the invalid PID %s', as
   await rejected;
 });
 
+it('rejects an oversized PID line even when its newline arrives in a later chunk', async () => {
+  const child = fixture();
+  const rejected = expect(waitForChildPid(child, 15_000)).rejects.toThrow('invalid child PID (oversized line)');
+  child.stdout!.emit('data', CHILD_PID_PREFIX + '1'.repeat(5000));
+  child.stdout!.emit('data', '\n');
+  await rejected;
+});
+
+it('does not mistake a truncated diagnostic tail for a real line boundary', async () => {
+  const child = fixture();
+  const ready = waitForChildPid(child, 15_000);
+  child.stdout!.emit('data', 'x'.repeat(5000));
+  child.stdout!.emit('data', `${CHILD_PID_PREFIX}1234\n${CHILD_PID_PREFIX}5678\n`);
+  await expect(ready).resolves.toBe(5678);
+});
+
 it('bounds captured output and reports a distinct timeout without a real sleep', async () => {
   vi.useFakeTimers();
   const child = fixture();
@@ -74,6 +105,15 @@ it('bounds captured output and reports a distinct timeout without a real sleep',
   await rejected;
   await expect(ready).rejects.not.toThrow('discarded-prefix');
   expect(child.stdout!.listenerCount('data')).toBe(0);
-  expect(child.listenerCount('exit')).toBe(0);
+  expect(child.listenerCount('close')).toBe(0);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('bounds the diagnostic drain when an exited fixture leaves inherited pipes open', async () => {
+  vi.useFakeTimers();
+  const ready = waitForChildPid(fixture(3), 15_000);
+  const rejected = expect(ready).rejects.toThrow(/code=3, signal=null[\s\S]*pipes did not close within 15000 ms/);
+  await vi.advanceTimersByTimeAsync(15_000);
+  await rejected;
   expect(vi.getTimerCount()).toBe(0);
 });

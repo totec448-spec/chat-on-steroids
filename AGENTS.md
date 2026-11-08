@@ -6340,7 +6340,9 @@ the whole run replaying one long workflow; avoid optimizing speculative edge cas
 
 The process-lifetime regression in `test/exec.test.ts` waits for a newline-terminated child-PID
 receipt on stdout (`test/process-ready.ts`), not a polled PID file. Startup errors, premature exits
-and timeout include bounded stdout/stderr; failed startup reclaims only the fixture's process tree.
+and timeout include bounded stdout/stderr, drained through close within the original deadline.
+Failed startup attempts cleanup of the fixture's process tree; the POSIX parent owns a detached
+process group so an unreported child can be reclaimed even after the parent exits.
 Windows retains its PowerShell parent so the assertion still tests parent-only termination rather
 than Node's Windows job-object behavior. Helper tests use fake time, not real startup sleeps.
 
