@@ -1,7 +1,6 @@
 import type { ChildProcess } from 'node:child_process';
 
 export const CHILD_PID_PREFIX = 'COS_TEST_CHILD_PID=';
-const PID_LINE = new RegExp(`^${CHILD_PID_PREFIX}([^\\r\\n]*)\\r?$`);
 const MAX_DIAGNOSTIC_CHARS = 4096;
 
 /** The lifetime fixture reports the child it owns; a PID file is not a startup receipt. */
@@ -32,11 +31,12 @@ export function waitForChildPid(child: ChildProcess, timeoutMs: number): Promise
       // Parse actual line boundaries independently of the truncated diagnostic tail.
       for (const [index, part] of chunk.split('\n').entries()) {
         if (index > 0) {
-          const match = discardLine ? null : PID_LINE.exec(line);
+          const receipt = discardLine || !line.startsWith(CHILD_PID_PREFIX)
+            ? null : line.slice(CHILD_PID_PREFIX.length).replace(/\r$/, '');
           line = ''; discardLine = false;
-          if (match) {
-            const pid = Number(match[1]);
-            if (!/^[1-9]\d*$/.test(match[1]!) || !Number.isSafeInteger(pid)) finish('Process fixture reported an invalid child PID');
+          if (receipt !== null) {
+            const pid = Number(receipt);
+            if (!/^[1-9]\d*$/.test(receipt) || !Number.isSafeInteger(pid)) finish('Process fixture reported an invalid child PID');
             else finish(null, pid);
             return;
           }
