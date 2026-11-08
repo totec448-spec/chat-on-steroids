@@ -1,3 +1,4 @@
+import { residenceOf } from '../../shared/chronology.js';
 import { getSession, readEvents, upsertMessageEvent } from './store.js';
 
 /**
@@ -12,20 +13,30 @@ import { getSession, readEvents, upsertMessageEvent } from './store.js';
 export async function replacedQuestion(sessionId: string, messageId: string, parentId: string): Promise<{ replaces?: string }> {
   const summary = await getSession(sessionId);
   const since = Math.max(0, ...Object.values(summary?.retiredChatAt ?? {}));
-  const questions = await readEvents(sessionId, { kinds: ['user_message'] });
-  if (questions.some(event => event.kind === 'user_message' && event.messageId === messageId && event.replaces)) return {};
+  const events = await readEvents(sessionId, { kinds: ['user_message', 'assistant_message'] });
+  if (events.some(event => event.kind === 'user_message' && event.messageId === messageId && event.replaces)) return {};
+  let parentSettledAt = 0;
   const firstSeen = new Map<string, { at: number; parentId?: string; time: number }>();
-  for (const event of questions) {
+  for (const event of events) {
+    if (event.kind === 'assistant_message') {
+      if (event.messageId === parentId || event.providerMessageId === parentId) {
+        parentSettledAt = Math.max(parentSettledAt, residenceOf(event));
+      }
+      continue;
+    }
     if (event.kind !== 'user_message' || !event.messageId) continue;
     const known = firstSeen.get(event.messageId);
     const at = event.origin ?? event.seq;
     firstSeen.set(event.messageId, { at: Math.min(known?.at ?? at, at), parentId: known?.parentId ?? event.parentId, time: Math.min(known?.time ?? event.time, event.time) });
   }
   // A message already recorded can only have replaced a question seen before it.
+  // An assistant parent that finished after a steered question answered that question;
+  // the next turn's question under that consolidated parent follows it rather than replacing it.
   const own = firstSeen.get(messageId);
   let replaced: { id: string; at: number } | null = null;
   for (const [id, seen] of firstSeen) {
     if (id === messageId || seen.parentId !== parentId || seen.time < since || (own && seen.at >= own.at)) continue;
+    if (parentSettledAt > seen.at && (!own || parentSettledAt < own.at)) continue;
     if (!replaced || seen.at > replaced.at) replaced = { id, at: seen.at };
   }
   return replaced ? { replaces: replaced.id } : {};

@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { boot, text, type SessionEvent } from './renderer-timeline.harness.js';
 import { chronological } from '../src/shared/chronology.js';
+import { appendEvent, createSession, initSessionStore, readCompletedFinal, readEvents, resetSessionStoreForTests, unsetSessionRootForTests, upsertMessageEvent } from '../src/main/session/store.js';
+import { replacedQuestion, resetEditsForTests } from '../src/main/session/edits.js';
+import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 
 vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTerminal: () => ({
   update: vi.fn(), show: vi.fn(), hide: vi.fn(), hasTabs: () => false,
@@ -441,5 +447,104 @@ describe('steer / follow-up continued turn ordering', () => {
     // as the closing message (rank 0.5), placing it after the initial final:
     expect(initialFinalIndex).toBeLessThan(remountedFinalIndex);
     expect(remountedFinalIndex).toBeLessThan(turnEndIndex);
+  });
+
+  it('resolves readCompletedFinal and avoids false edit replacement when a steered continuation reuses the consolidated final answer', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cos-steer-continued-'));
+    try {
+      initConfigPath(dir);
+      initSessionStore(dir);
+      await saveConfig({ ...defaultConfig(), sessions: { ...defaultConfig().sessions, record: true } });
+      resetSessionStoreForTests();
+      resetEditsForTests();
+      const conversationId = '69d626f4-b5ec-8385-816e-145fc405d198';
+      const session = await createSession({ title: 'Steered continuation', conversationId });
+
+      // Turn 4 opens and creates the final_answer container before the user steers:
+      await upsertMessageEvent(session.id, {
+        kind: 'user_message', time: T0, source: 'extension',
+        messageId: '679fdbcc-7989-4e80-a00f-fe3b3dcb2f29',
+        parentId: 'a0000000-0000-4000-8000-000000000001',
+        message: text('Initial question')
+      });
+      await appendEvent(session.id, {
+        kind: 'turn_start', time: T0 + 10, source: 'extension', turnId: 'g-10uer7kwcef0o-0-4'
+      });
+      await upsertMessageEvent(session.id, {
+        kind: 'assistant_message', time: T0 + 20, source: 'extension',
+        turnId: 'g-10uer7kwcef0o-0-4',
+        messageId: 'b50804bf-faf8-4272-8f1d-48b16674a51c',
+        providerMessageId: 'b50804bf-faf8-4272-8f1d-48b16674a51c',
+        message: text('First half of consolidated answer'),
+        state: 'streaming', final: false
+      });
+
+      // User steers while Turn 4 is still running; Turn 4 ends with continued: true and Turn 5 starts:
+      await upsertMessageEvent(session.id, {
+        kind: 'user_message', time: T0 + 30, source: 'extension',
+        messageId: '05a235d9-231e-487a-9257-76469eb9b5f9',
+        parentId: 'b50804bf-faf8-4272-8f1d-48b16674a51c',
+        message: text('Steered follow-up')
+      });
+      await appendEvent(session.id, {
+        kind: 'turn_end', time: T0 + 31, source: 'extension',
+        turnId: 'g-10uer7kwcef0o-0-4', outcome: 'completed', continued: true
+      });
+      await appendEvent(session.id, {
+        kind: 'turn_start', time: T0 + 32, source: 'extension', turnId: 'g-10uer7kwcef0o-0-5'
+      });
+
+      // ChatGPT appends the continuation's answer to the same final_answer message and completes Turn 5:
+      await upsertMessageEvent(session.id, {
+        kind: 'assistant_message', time: T0 + 50, source: 'extension',
+        turnId: 'g-10uer7kwcef0o-0-5',
+        messageId: 'b50804bf-faf8-4272-8f1d-48b16674a51c',
+        providerMessageId: 'b50804bf-faf8-4272-8f1d-48b16674a51c',
+        message: text('First half of consolidated answer\n\n¡Hecho, Daniel! Continuation answer.'),
+        state: 'final', final: true
+      });
+      await appendEvent(session.id, {
+        kind: 'turn_end', time: T0 + 51, source: 'extension',
+        turnId: 'g-10uer7kwcef0o-0-5', outcome: 'completed'
+      });
+
+      // readCompletedFinal must recognize the consolidated final for both the continuation turn and the session:
+      const byTurn = await readCompletedFinal(session.id, conversationId, 'g-10uer7kwcef0o-0-5');
+      expect(byTurn).toMatchObject({
+        messageId: 'b50804bf-faf8-4272-8f1d-48b16674a51c',
+        turnId: 'g-10uer7kwcef0o-0-5'
+      });
+      const anyTurn = await readCompletedFinal(session.id, conversationId);
+      expect(anyTurn).toMatchObject({
+        messageId: 'b50804bf-faf8-4272-8f1d-48b16674a51c',
+        turnId: 'g-10uer7kwcef0o-0-5'
+      });
+
+      // When the queued message for the next turn is sent under the consolidated final answer parentId,
+      // it must not be marked as replacing the steered message:
+      const replacement = await replacedQuestion(
+        session.id,
+        '648133a5-c219-4adb-b634-340a193fa636',
+        'b50804bf-faf8-4272-8f1d-48b16674a51c'
+      );
+      expect(replacement).toEqual({});
+
+      // Even if a pre-fix shard on disk carried `replaces: "05a235d9-..."`, reopening the session cleans it:
+      await upsertMessageEvent(session.id, {
+        kind: 'user_message', time: T0 + 60, source: 'extension',
+        messageId: '648133a5-c219-4adb-b634-340a193fa636',
+        parentId: 'b50804bf-faf8-4272-8f1d-48b16674a51c',
+        replaces: '05a235d9-231e-487a-9257-76469eb9b5f9',
+        message: text('Queued next question')
+      });
+      resetSessionStoreForTests();
+      const loaded = await readEvents(session.id, { kinds: ['user_message'] });
+      const queued = loaded.find(e => e.kind === 'user_message' && e.messageId === '648133a5-c219-4adb-b634-340a193fa636');
+      expect(queued?.kind === 'user_message' ? queued.replaces : undefined).toBeUndefined();
+    } finally {
+      resetSessionStoreForTests();
+      unsetSessionRootForTests();
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 });

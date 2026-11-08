@@ -120,6 +120,27 @@ export function continuedRequestTurn(
   return responseTurnId(turns, later);
 }
 
+/**
+ * The turn a final assistant message settled in when a steered continuation
+ * reused the same message id (#1301).
+ */
+export function effectiveFinalTurnId(turns: TimelineTurns | undefined, entry: Chronological): string | undefined {
+  if (!entry.turnId || !turns) return entry.turnId ?? undefined;
+  let currentId = responseTurnId(turns, entry.turnId);
+  let candidate = turns[currentId];
+  if (candidate?.continued === true && entry.kind === 'assistant_message' && (entry.final === true || entry.state === 'final')) {
+    const finalAt = residenceOf(entry);
+    const ordered = Object.entries(turns).sort(([, a], [, b]) => a.origin - b.origin);
+    while (candidate?.continued === true && finalAt > (candidate.endOrigin ?? candidate.origin)) {
+      const next = ordered.find(([, s]) => s.origin > candidate!.origin && s.origin >= (candidate!.endOrigin ?? candidate!.origin));
+      if (!next || next[1].origin === candidate.origin) break;
+      [currentId, candidate] = next;
+    }
+    if (currentId !== responseTurnId(turns, entry.turnId)) return responseTurnId(turns, currentId);
+  }
+  return entry.turnId;
+}
+
 /** The turn that was open when something started: the latest one begun by then and not yet ended. */
 export function turnOpenAt(turns: TimelineTurns | undefined, at: number): string | undefined {
   let found: string | undefined;
@@ -249,25 +270,17 @@ export function projectTimeline<T extends Chronological>(
     if (!message.turnId) continue;
     const key = assistantResponseKey(message);
     if (!key) continue;
-    const boundary = turns[responseTurnId(turns, message.turnId)] ?? null;
+    const resolved = message.kind === 'assistant_message' ? effectiveFinalTurnId(turns, message) : message.turnId;
+    const boundary = resolved ? turns[responseTurnId(turns, resolved)] ?? null : null;
     if (!responses.has(key)) responses.set(key, boundary);
     else if (!boundary || responses.get(key)?.origin !== boundary.origin) responses.set(key, null);
   }
   return entries.map(entry => {
-    let boundary = entry.turnId ? turns[responseTurnId(turns, entry.turnId)] : undefined;
+    const resolvedTurnId = entry.kind === 'assistant_message' ? effectiveFinalTurnId(turns, entry) : entry.turnId;
+    let boundary = resolvedTurnId ? turns[responseTurnId(turns, resolvedTurnId)] : undefined;
     if (!entry.turnId) {
       const response = assistantResponseKey(entry);
       if (response) boundary = responses.get(response) ?? undefined;
-    }
-    if (boundary?.continued === true && entry.kind === 'assistant_message' && (entry.final === true || entry.state === 'final')) {
-      const finalAt = residenceOf(entry);
-      let candidate = boundary;
-      while (candidate?.continued === true && finalAt > (candidate.endOrigin ?? candidate.origin)) {
-        const next = starts.find(s => s.origin > candidate.origin && s.origin >= (candidate.endOrigin ?? candidate.origin));
-        if (!next || next.origin === candidate.origin) break;
-        candidate = next;
-      }
-      if (candidate && candidate !== boundary) boundary = candidate;
     }
     // Older recorders dropped the local turn after its end. Its earlier exact request
     // proof still places the call, including when that proof lies outside this page.

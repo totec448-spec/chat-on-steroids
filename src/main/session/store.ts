@@ -43,7 +43,7 @@ import type {
 import type { WorkerAssignmentSummary } from '../../shared/session.js';
 import { APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT } from '../../shared/approval-wait.js';
 import { continuationMarkerOf, DEFAULT_RECORDING_STORAGE_GIB, eventTokens, MAX_TOOL_RESULT_TOKENS, normalizedToolOutcome, RECORDING_STORAGE_LIMITS_GIB, storedTextTokens, workSequence, UNATTRIBUTED_SESSION_TITLE } from '../../shared/session.js';
-import { applyTurnIdentity, authoredTimeOf, chronological, injectedUserMessage, positionOf, projectTimeline, residenceOf,
+import { applyTurnIdentity, authoredTimeOf, chronological, continuedRequestTurn, effectiveFinalTurnId, injectedUserMessage, positionOf, projectTimeline, residenceOf,
   recordedRequestTurn, responseTurnId, type Chronological, type TimelineTurns } from '../../shared/chronology.js';
 import { automaticTitle, firstTitleMessage, legacyContextTitle, legacyLabelPending, projectPageTitle, providerTitleIgnored, refreshUserTitle, userTitle } from './title.js';
 import { agentPlanSchema, agentPlanUpdateSchema, MAX_AGENT_PLAN_BYTES, type AgentPlan, type AgentPlanUpdate } from '../../shared/agent-plan.js';
@@ -792,6 +792,18 @@ async function readCanonicalMessages(id: string, aliasesCollapsed?: () => void):
       time: first.time, seq, turnId: group.find(([, event]) => event.turnId)?.[1].turnId,
       ...(group.some(([, event]) => event.goalEligible === true) ? { goalEligible: true } : {}) });
   }
+  for (const [key, event] of out) {
+    if (event.kind !== 'user_message' || !event.replaces || !event.parentId) continue;
+    const replaced = out.get(`user_message\u0000${event.replaces}`);
+    const parent = out.get(`assistant_message\u0000${event.parentId}`) ?? providers.get(event.parentId)?.[0]?.[1];
+    if (replaced?.kind === 'user_message' && parent?.kind === 'assistant_message') {
+      const parentSettledAt = residenceOf(parent);
+      if (parentSettledAt > positionOf(replaced) && parentSettledAt < positionOf(event)) {
+        const { replaces: _replaces, ...clean } = event;
+        out.set(key, clean);
+      }
+    }
+  }
   return out;
 }
 
@@ -1099,11 +1111,12 @@ async function ensureOpen(id: string): Promise<OpenSession> {
 
 /** A hold-call result or app status is not evidence of new work. */
 function noteFinishWork(summary: SessionSummary, event: SessionEvent): void {
-  if (!summary.finishTurn || (event.turnId && event.turnId !== summary.finishTurn.turnId)) return;
+  const turnId = event.kind === 'assistant_message' ? effectiveFinalTurnId(summary.timelineTurns, event) : event.turnId;
+  if (!summary.finishTurn || (turnId && turnId !== summary.finishTurn.turnId)) return;
   // A progress note of this turn reported after it completed or was stopped is not work, as in
   // readCompletedFinal; a turn whose view failed is reopened by its fresh note, which stays work.
-  if (event.kind === 'assistant_message' && event.final !== true && event.state !== 'final' && !!event.turnId &&
-      summary.activeTurnId !== event.turnId && summary.timelineTurns?.[event.turnId]?.endOrigin !== undefined &&
+  if (event.kind === 'assistant_message' && event.final !== true && event.state !== 'final' && !!turnId &&
+      summary.activeTurnId !== turnId && summary.timelineTurns?.[turnId]?.endOrigin !== undefined &&
       (summary.lastTurnOutcome === 'completed' || summary.lastTurnOutcome === 'stopped')) return;
   const meaningful = event.kind === 'user_message' || event.kind === 'assistant_message' ||
     (event.kind === 'progress' && event.source !== 'app') ||
@@ -2080,15 +2093,17 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
   ]);
   const questions = latestQuestion ? [latestQuestion] : [];
   if (entry.nextSeq !== revision || entry.summary.conversationId !== conversationId) return null;
+  const turns = entry.summary.timelineTurns;
+  const eventTurnId = (event: SessionEvent): string | undefined =>
+    event.kind === 'assistant_message' ? effectiveFinalTurnId(turns, event) : event.turnId;
   const sameTurn = (left: string | null | undefined, right: string | null | undefined) => !!left && !!right &&
-    responseTurnId(entry.summary.timelineTurns, left) === responseTurnId(entry.summary.timelineTurns, right);
+    responseTurnId(turns, left) === responseTurnId(turns, right);
   // A reload after the page's ten-minute check (`stalled`) opens a second document-local turn for
   // the same unanswered question; ChatGPT's final can then arrive for the first one while the
   // second completes (2026-10-14). That reopen is the same response. A new question gives the
   // reopened turn a different `questionId`, and a second answer after a real end (Regenerate)
   // follows a completed end, so neither is joined.
   const reopenedAfterStall = (left: string | null | undefined, right: string | null | undefined): boolean => {
-    const turns = entry.summary.timelineTurns;
     if (!left || !right || !turns) return false;
     const a = turns[responseTurnId(turns, left)], b = turns[responseTurnId(turns, right)];
     if (!a || !b || a === b || !a.questionId || a.questionId !== b.questionId) return false;
@@ -2103,51 +2118,59 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
     !!event.providerMessageId && !!event.turnId && (!turnId || sameTurn(event.turnId, turnId)) &&
     recent.some(image => image.kind === 'native_image' && image.messageId === event.providerMessageId &&
       image.providerStatus === 'finished_successfully' && sameTurn(image.turnId, event.turnId));
-  const final = recent.findLast(event => imageEnd(event) || (event.kind === 'assistant_message' && event.final === true &&
-    (!!event.message.text.trim() || !!event.providerMessageId) && !!event.messageId && (!turnId || event.turnId === turnId ||
-      (!!event.providerMessageId && (sameTurn(event.turnId, turnId) || reopenedAfterStall(event.turnId, turnId))) ||
-      (turnId.startsWith('reply:') && event.messageId === turnId.slice(6)))));
+  const final = recent.findLast(event => {
+    if (imageEnd(event)) return true;
+    if (event.kind !== 'assistant_message' || event.final !== true ||
+        (!event.message.text.trim() && !event.providerMessageId) || !event.messageId) return false;
+    const resolvedTurnId = eventTurnId(event);
+    return !turnId || resolvedTurnId === turnId || event.turnId === turnId ||
+      (!!event.providerMessageId && (sameTurn(resolvedTurnId, turnId) || reopenedAfterStall(resolvedTurnId, turnId))) ||
+      (turnId.startsWith('reply:') && event.messageId === turnId.slice(6));
+  });
   if (!final || (final.kind !== 'assistant_message' && final.kind !== 'turn_end')) return null;
   const messageId = final.kind === 'turn_end' ? final.providerMessageId : final.messageId;
   if (!messageId) return null;
+  const finalTurnId = eventTurnId(final);
   const seq = final.kind === 'turn_end' ? positionOf(final) : final.finalContentSeq ?? positionOf(final);
   const completedAt = final.kind === 'turn_end' ? final.time : final.finalObservedAt ?? final.time;
   const question = questions[0];
-  const correction = (event: SessionEvent) => isTurnCorrection(event, final.turnId, entry.summary.timelineTurns) && positionOf(event) < seq;
+  const correction = (event: SessionEvent) => isTurnCorrection(event, finalTurnId, turns) && positionOf(event) < seq;
   // The question this turn answered, reported again after the answer, is not a new question: a
   // new chat's first message can reach the page as "just authored" (re-escaped) only after
   // ChatGPT's redraw, when the turn has already ended. A genuinely new question has a new id.
-  const ownQuestion = final.turnId ? entry.summary.timelineTurns?.[final.turnId]?.questionId : undefined;
+  const ownQuestion = finalTurnId ? turns?.[finalTurnId]?.questionId : undefined;
   const nativeFinal = final.kind === 'turn_end' || (final.final === true && !!final.providerMessageId);
   // Nor is the turn's own question recorded after its answer: ChatGPT stamps a fast answer with its
   // server time, the page stamps the question with the local clock, and a clock running ahead put
   // "worker ready" before the question it answered (#1086, Windows VM, 2.1.41).
-  if (question && positionOf(question) >= positionOf(final) && !correction(question) &&
+  // When a steered continuation reused an earlier turn segment's final message id, the message was
+  // first opened before the continuation's question and finalized at `seq` after it.
+  const finalPosition = final.kind === 'assistant_message' && finalTurnId !== final.turnId ? seq : positionOf(final);
+  if (question && positionOf(question) >= finalPosition && !correction(question) &&
       !(ownQuestion && question.kind === 'user_message' && question.messageId === ownQuestion)) return null;
   // With no generation identity, require an actual preceding authored boundary.
-  if (!final.turnId && (!question || question.time > final.time)) return null;
-  if (entry.summary.activeTurnId && !sameTurn(entry.summary.activeTurnId, final.turnId)) return null;
+  if (!finalTurnId && (!question || question.time > final.time)) return null;
+  if (entry.summary.activeTurnId && !sameTurn(entry.summary.activeTurnId, finalTurnId)) return null;
   const boundaries = recent.filter(event => event.kind === 'turn_start' || event.kind === 'turn_end').sort((a, b) => a.seq - b.seq);
   const last = boundaries.at(-1), prior = boundaries.at(-2);
   const nativeReopen = !!final.providerMessageId && last?.kind === 'turn_start' && last.source === 'app' &&
-    last.turnId === final.turnId && prior?.kind === 'turn_end' && prior.turnId === final.turnId && prior.outcome === 'completed';
+    last.turnId === finalTurnId && prior?.kind === 'turn_end' && prior.turnId === finalTurnId && prior.outcome === 'completed';
   // A progress note of a turn that had ended is not new work: ChatGPT draws a finished turn's steps
   // as one collapsed group, and the note written before its tool calls can reach the page only then
   // (2.1.48 release round). The recorder no longer stamps it as work; decided here too, from the stored
   // owner and turn index, so notes saved before that, or of turns older than the recorder's memory,
   // still let the final settle. A turn open again counts its notes.
-  const turns = entry.summary.timelineTurns;
-  const finalTurn = final.turnId && turns ? turns[responseTurnId(turns, final.turnId)] : undefined;
+  const finalTurn = finalTurnId && turns ? turns[responseTurnId(turns, finalTurnId)] : undefined;
   const lateNote = (event: SessionEvent): boolean => {
     if (event.kind !== 'assistant_message' || event.final === true || event.state === 'final' || !event.turnId ||
         sameTurn(entry.summary.activeTurnId, event.turnId)) return false;
-    if (!sameTurn(event.turnId, final.turnId)) {
+    if (!sameTurn(event.turnId, finalTurnId)) {
       const own = turns?.[responseTurnId(turns, event.turnId)];
       return !!own && !!finalTurn && own !== finalTurn && own.endOrigin !== undefined && own.origin < finalTurn.origin;
     }
     return nativeFinal && recent.some(end => end.kind === 'turn_end' && end.outcome === 'completed' &&
-      sameTurn(end.turnId, final.turnId) && end.seq < event.seq &&
-      !recent.some(start => start.kind === 'turn_start' && sameTurn(start.turnId, final.turnId) && start.seq > end.seq && start.seq < event.seq));
+      sameTurn(end.turnId, finalTurnId) && end.seq < event.seq &&
+      !recent.some(start => start.kind === 'turn_start' && sameTurn(start.turnId, finalTurnId) && start.seq > end.seq && start.seq < event.seq));
   };
   if (recent.some(event => {
     if (event === final || workSequence(event) <= seq || lateNote(event)) return false;
@@ -2158,24 +2181,26 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
       // request or conflicting generation is fresh work, not a trailing result.
       const owner = event.source === 'mcp' && event.call.attribution === 'request_id'
         ? recordedRequestTurn(entry.summary.requestTurns, event.call.requestId, conversationId) : undefined;
+      const ownerMatchesFinal = !!owner && (sameTurn(owner.turnId, finalTurnId) ||
+        continuedRequestTurn(turns, owner.turnId, finalTurnId, Number.MAX_SAFE_INTEGER) === (finalTurnId ? responseTurnId(turns, finalTurnId) : undefined));
       return !(final.providerMessageId && (final.kind === 'turn_end' || final.state === 'final') && owner && owner.origin < seq &&
-        sameTurn(owner.turnId, final.turnId) && event.call.conversationId === conversationId &&
-        (!event.turnId || sameTurn(event.turnId, final.turnId)));
+        ownerMatchesFinal && event.call.conversationId === conversationId &&
+        (!event.turnId || sameTurn(event.turnId, finalTurnId) || sameTurn(event.turnId, owner.turnId)));
     }
     // The page's ten-minute check ends a turn as `stalled` when it never saw the end. After
     // ChatGPT's own final for that turn, the turn did end; nothing new happened (#1099).
-    const sameResponse = sameTurn(event.turnId, final.turnId) || (nativeFinal && reopenedAfterStall(event.turnId, final.turnId));
+    const sameResponse = sameTurn(eventTurnId(event), finalTurnId) || (nativeFinal && reopenedAfterStall(eventTurnId(event), finalTurnId));
     if (event.kind === 'turn_end') return !sameResponse ||
       (event.outcome !== 'completed' && !(event.outcome === 'stalled' && nativeFinal));
     // The first start of the final's own turn, recorded after that final: ChatGPT reported a fast
     // answer's end before the page opened the turn from the Send receipt (#1099). Not new work.
-    if (event.kind === 'turn_start') return !(nativeReopen && event === last) && !(sameResponse && event.turnId !== final.turnId) &&
-      !(event.source !== 'app' && !!final.turnId && event.turnId === final.turnId &&
-        entry.summary.timelineTurns?.[final.turnId]?.origin === positionOf(event));
+    if (event.kind === 'turn_start') return !(nativeReopen && event === last) && !(sameResponse && event.turnId !== finalTurnId) &&
+      !(event.source !== 'app' && !!finalTurnId && event.turnId === finalTurnId &&
+        turns?.[finalTurnId]?.origin === positionOf(event));
     if (event.kind === 'user_message') return !correction(event) && !(ownQuestion && event.messageId === ownQuestion);
     return event.kind === 'assistant_message' || event.kind === 'page_tool';
   })) return null;
-  return { messageId, turnId: final.turnId ?? null, completedAt, contentSeq: seq,
+  return { messageId, turnId: finalTurnId ?? null, completedAt, contentSeq: seq,
     text: final.kind === 'turn_end' ? '' : modelFacingText(final.message.text, final.renderedHtml) };
 }
 

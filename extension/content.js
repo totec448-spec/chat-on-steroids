@@ -3057,10 +3057,7 @@
     // live turn on every reload, and split every chat's opening turn in two.
     // Stop stayed through the send: the running response took this message (see steeredTurns).
     const steering = Boolean(generating && newUserMessage && nowGenerating && turnId);
-    if (steering) {
-      steeredTurns.add(turnId);
-      if (steeredTurns.size > 32) steeredTurns.delete(steeredTurns.values().next().value);
-    }
+    let continuedTurn = steering;
     if (generating && newUserMessage) {
       // A newly authored question closes the adopted turn before it. If its answer
       // and this question hydrated together, apply the original-question guard to
@@ -3093,7 +3090,12 @@
       // end_turn is that proof, and interim prose without it is an unfinished answer too (live
       // 2026-10-12: ten calls and the final answer followed a message sent after "I'll pick up…").
       const replacedUnfinished = result.outcome === 'unknown' && (bounded.outcome === 'interrupted' || fiberPresent === true);
-      finishGeneration(ended, steering || replacedUnfinished ? { ...bounded, continued: true } : bounded, false);
+      continuedTurn = steering || replacedUnfinished;
+      if (continuedTurn && turnId) {
+        steeredTurns.add(turnId);
+        if (steeredTurns.size > 32) steeredTurns.delete(steeredTurns.values().next().value);
+      }
+      finishGeneration(ended, continuedTurn ? { ...bounded, continued: true } : bounded, false);
     }
 
     // A turn is opened by a send, and by nothing else.
@@ -3122,7 +3124,7 @@
     // which is adoption and not opening — no second `turn_start` for one generation. A turn no
     // document ever recorded arrives by claimUnrecordedGeneration(), which is an opening.
     if (newUserMessage && !generating) {
-      if (!steering) steeredTurns.clear();
+      if (!continuedTurn) steeredTurns.clear();
       openedUserMessageId = newUserMessage;
       generating = true;
       quietSince = 0;
@@ -5108,7 +5110,8 @@
           const image = item.value;
           const key = nativeImageKey(image);
           const prior = nativeImagesReported.get(key);
-          const ownerConflict = Boolean(prior?.conflicted || (localOwner && prior?.owner && prior.owner !== localOwner));
+          const steeredTransition = Boolean(localOwner && localOwner === turnId && prior?.owner && steeredTurns.has(prior.owner));
+          const ownerConflict = Boolean(prior?.conflicted || (localOwner && prior?.owner && prior.owner !== localOwner && !steeredTransition));
           const owner = ownerConflict ? '' : localOwner || prior?.owner || '';
           const historical = !owner && image.createTime;
           const observation = {
@@ -5224,8 +5227,11 @@
         // exact local turn id from reaching the recorder. The recorder upsert is expressly
         // able to promote the same canonical message when stronger ownership arrives.
         const priorMessage = messagesReported.get(message.messageId);
+        const steeredTransition = Boolean(
+          localOwner && localOwner === turnId && priorMessage?.owner && steeredTurns.has(priorMessage.owner)
+        );
         const ownerConflict = Boolean(
-          priorMessage?.conflicted || (localOwner && priorMessage?.owner && priorMessage.owner !== localOwner)
+          priorMessage?.conflicted || (localOwner && priorMessage?.owner && priorMessage.owner !== localOwner && !steeredTransition)
         );
         let owner = ownerConflict ? '' : localOwner || (priorMessage && priorMessage.owner) || '';
         // Ownership may strengthen after an earlier scan saw the message before its DOM turn

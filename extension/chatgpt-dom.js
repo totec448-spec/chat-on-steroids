@@ -1118,12 +1118,12 @@ var CLF_DOM = (() => {
    * draft was submitted").
    *
    * Send has no icon signature of its own worth trusting — an arrow's path data is not a contract
-   * — so this identifies it by the state it is the only occupant of. Every caller consults this
-   * with our exact text standing in the composer and `generating()` false, and in that state the
-   * primary-action slot cannot be stop (which exists only while generating) and cannot be voice
-   * (which the composer replaces as soon as it holds text, and which carries `data-state`
-   * regardless). Both are excluded explicitly all the same, and one candidate is still required,
-   * so an unexpected third control refuses rather than being clicked.
+   * — so this identifies it by the state it is the only non-stop, non-voice occupant of. With text
+   * standing in the composer, the candidate cannot be stop (which draws the rounded square or
+   * matches `STOP`) and cannot be voice (which the composer replaces as soon as it holds text, and
+   * which carries `data-state` regardless). Both are excluded explicitly, including while a turn is
+   * generating (#1231), and one candidate is still required, so an unexpected control refuses
+   * rather than being clicked.
    */
   function localeFreeSendControls() {
     const box = composer();
@@ -1132,10 +1132,11 @@ var CLF_DOM = (() => {
     // Read the editor here rather than reusing the submitter's own `draftText`, which is a local
     // closure over its captured box. Only "the composer holds something" is needed, not equality.
     const drafted = (typeof box.innerText === 'string' ? box.innerText : editorText(box)).trim();
-    if (drafted === '' || generating()) return [];
+    if (drafted === '') return [];
+    const stops = new Set(stopControls());
     return [...form.querySelectorAll('button[class*="size-token-button-composer"][class*="bg-composer-primary"]')]
       .filter(button => {
-        if (!renderedComposerNode(button) || button.closest('form') !== form) return false;
+        if (!renderedComposerNode(button) || button.closest('form') !== form || stops.has(button)) return false;
         // Dictation keeps a popover state on itself; send never does.
         if (button.hasAttribute('data-state')) return false;
         const paths = button.querySelectorAll('svg path');

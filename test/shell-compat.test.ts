@@ -1173,10 +1173,15 @@ it('finds the send control by its slot when the label is translated', () => {
     '<svg class="icon-primary-action" viewBox="0 0 20 20"><path d="M8.5 16.5v-9l-3.25 3.25"></path></svg></button>');
   expect(f.api.sendButton()?.getAttribute('aria-label'), 'a translated send button was not recognised').toBe('Gönder');
 
-  // The stop square in that same slot is never a send target.
-  form.querySelector('button[aria-label="Gönder"]')!.outerHTML =
+  // While generating (#1231), a translated send control alongside stop is still recognised.
+  form.insertAdjacentHTML('beforeend',
     `<button type="button" class="${slot}" aria-label="Durdur">` +
-    '<svg class="icon-primary-action" viewBox="0 0 20 20"><path d="M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C15.5 14.9404 14.9404 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z"></path></svg></button>';
+    '<svg class="icon-primary-action" viewBox="0 0 20 20"><path d="M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C15.5 14.9404 14.9404 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z"></path></svg></button>');
+  expect(f.api.generating()).toBe(true);
+  expect(f.api.sendButton()?.getAttribute('aria-label'), 'a translated send button was hidden while generating').toBe('Gönder');
+
+  // The stop square in that same slot is never a send target.
+  form.querySelector('button[aria-label="Gönder"]')!.remove();
   expect(f.api.sendButton(), 'the stop square was read as send').toBeNull();
 
   // And an English label still wins outright, without consulting the slot at all.
@@ -1976,6 +1981,15 @@ it('places a message sent into a running turn after the message it followed, not
   const questions = (await f.ask()).turns.flatMap((turn: any) => turn.messages.filter((m: any) => m.role === 'user')
     .map((m: any) => [m.rawMessageId, m.parentId, m.parentExact]));
   expect(questions).toEqual([[USER, 'root', false], [second.userId, ANSWER, true], [steered, interim, true]]);
+  // When ChatGPT had already opened its consolidated final_answer item before the steered user-message,
+  // final_answer stays the closing parent of the next turn while the steered message still follows interim.
+  second.entry.turn.items = [question!,
+    { type: 'assistant-message', messageId: interim, content: 'Running step two', phase: 'commentary', completed: true } as any,
+    answer!,
+    { type: 'user-message', messageId: steered, serverMessageId: steered, message: 'Continue the task from where you are.' } as any];
+  const afterFinal = (await f.ask()).turns.flatMap((turn: any) => turn.messages.filter((m: any) => m.role === 'user')
+    .map((m: any) => [m.rawMessageId, m.parentId, m.parentExact]));
+  expect(afterFinal).toEqual([[USER, 'root', false], [second.userId, ANSWER, true], [steered, interim, true]]);
 });
 
 it('places each question in ChatGPT\'s message tree, with the versions control as proof of an edit', async () => {
