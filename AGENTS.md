@@ -5114,8 +5114,10 @@ reused while the stamp matches, deleted with the chat. Version 2 indexes cover t
 version 1's potentially truncated indexes are rebuilt from the recording. Index construction writes
 one message at a time; queries stream 64 KiB UTF-8 windows with overlap for words and snippets.
 Only indexes of at most 1M characters are cached, within the existing 24M-character cache budget;
-this is a memory bound, not a searchable-history cutoff. An unreadable or missing index clears
-only its own current stamp so polling can recover. Helper chats are
+this is a memory bound, not a searchable-history cutoff. An unreadable index is rebuilt from the
+recording when its directory allows replacement. A missing/stale index discovered during a query
+clears only its own current stamp so polling can recover; this skip and a streamed result superseded
+by a newer stamp each log their reason. Helper chats are
 left out, as in the sidebar. Every query word must match (title or text, any order, case- and
 accent-folded with `foldCase`, which keeps UTF-16 lengths so ranges index the original; `ß` stays). Title matches rank
 first, then text matches, each newest first. `titleMatches` and `snippet.matches` are UTF-16

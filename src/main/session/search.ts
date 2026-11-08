@@ -99,7 +99,11 @@ async function storedIndex(id: string, stamp: string, visit?: (text: string) => 
 async function indexOne(summary: SessionSummary): Promise<void> {
   const stamp = stampOf(summary);
   if (current.get(summary.id) === stamp) return;
-  if (!await storedIndex(summary.id, stamp)) {
+  const valid = await storedIndex(summary.id, stamp).catch(error => {
+    logWarn(`search: chat ${summary.id} index unreadable; rebuilding: ${(error as Error).message}`);
+    return false;
+  });
+  if (!valid) {
     const file = sessionSearchIndexPath(summary.id);
     const temporary = `${file}.${process.pid}.tmp`;
     try {
@@ -213,6 +217,7 @@ async function matchIndex(id: string, stamp: string, title: string, terms: strin
       else parts = [];
     });
     if (!valid) {
+      logWarn(`search: chat ${id} index missing or stale; skipped, will be rebuilt`);
       if (current.get(id) === stamp) current.delete(id);
       return null;
     }
@@ -221,7 +226,10 @@ async function matchIndex(id: string, stamp: string, title: string, terms: strin
     logWarn(`search: chat ${id} index could not be read; will retry on the next search: ${(error as Error).message}`);
     return null;
   }
-  if (current.get(id) !== stamp) return null;
+  if (current.get(id) !== stamp) {
+    logWarn(`search: chat ${id} changed while it was searched; skipped`);
+    return null;
+  }
   if (chars <= MAX_CACHED_INDEX_CHARS) remember(id, stamp, parts.join(''));
   return matcher.finish();
 }
