@@ -1,7 +1,7 @@
 import type { ChildProcess } from 'node:child_process';
 
 export const CHILD_PID_PREFIX = 'COS_TEST_CHILD_PID=';
-const PID_LINE = new RegExp(`(?:^|\\n)${CHILD_PID_PREFIX}([^\\r\\n]*)\\r?\\n`);
+const PID_LINE = new RegExp(`^${CHILD_PID_PREFIX}([^\\r\\n]*)\\r?$`);
 const MAX_DIAGNOSTIC_CHARS = 4096;
 
 /** The lifetime fixture reports the child it owns; a PID file is not a startup receipt. */
@@ -11,28 +11,64 @@ export function waitForChildPid(child: ChildProcess, timeoutMs: number): Promise
   stdout.setEncoding('utf8'); stderr.setEncoding('utf8');
   return new Promise((resolve, reject) => {
     let out = '', err = '';
+    let line = '', discardLine = false;
+    let settled = false;
+    let exited = child.exitCode !== null || child.signalCode !== null;
+    let exitCode = child.exitCode, signalCode = child.signalCode;
+    const exitReason = (): string => `Process fixture exited before readiness (code=${exitCode}, signal=${signalCode})`;
     const finish = (reason: string | null, pid?: number): void => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       stdout.off('data', onOut); stderr.off('data', onErr);
-      child.off('error', onError); child.off('exit', onExit);
+      stdout.off('end', onDrained); stderr.off('end', onDrained);
+      child.off('error', onError); child.off('exit', onExit); child.off('close', onClose);
       if (reason) reject(new Error(`${reason}\nstdout: ${out || '(empty)'}\nstderr: ${err || '(empty)'}`));
       else resolve(pid!);
     };
     const onOut = (chunk: string): void => {
-      const text = out + chunk;
-      out = text.slice(-MAX_DIAGNOSTIC_CHARS);
-      const match = PID_LINE.exec(text);
-      if (!match) return;
-      const pid = Number(match[1]);
-      if (!/^[1-9]\d*$/.test(match[1]!) || !Number.isSafeInteger(pid)) finish('Process fixture reported an invalid child PID');
-      else finish(null, pid);
+      out = (out + chunk).slice(-MAX_DIAGNOSTIC_CHARS);
+      if (exited) return;
+      // Parse actual line boundaries independently of the truncated diagnostic tail.
+      for (const [index, part] of chunk.split('\n').entries()) {
+        if (index > 0) {
+          const match = discardLine ? null : PID_LINE.exec(line);
+          line = ''; discardLine = false;
+          if (match) {
+            const pid = Number(match[1]);
+            if (!/^[1-9]\d*$/.test(match[1]!) || !Number.isSafeInteger(pid)) finish('Process fixture reported an invalid child PID');
+            else finish(null, pid);
+            return;
+          }
+        }
+        if (discardLine) continue;
+        line += part;
+        if (line.length > MAX_DIAGNOSTIC_CHARS) {
+          if (line.startsWith(CHILD_PID_PREFIX)) { finish('Process fixture reported an invalid child PID (oversized line)'); return; }
+          line = ''; discardLine = true;
+        }
+      }
     };
     const onErr = (chunk: string): void => { err = (err + chunk).slice(-MAX_DIAGNOSTIC_CHARS); };
     const onError = (error: Error): void => finish(`Process fixture failed to start: ${error.message}`);
-    const onExit = (code: number | null, signal: NodeJS.Signals | null): void => finish(`Process fixture exited before readiness (code=${code}, signal=${signal})`);
-    const timer = setTimeout(() => finish(`Process fixture did not report its child PID within ${timeoutMs} ms`), timeoutMs);
+    // Exit precedes pipe drainage; keep collecting diagnostics until close (or the same deadline).
+    const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
+      exited = true; exitCode = code; signalCode = signal;
+      onDrained();
+    };
+    const onDrained = (): void => {
+      if (exited && stdout.readableEnded && stderr.readableEnded) finish(exitReason());
+    };
+    const onClose = (code: number | null, signal: NodeJS.Signals | null): void => {
+      exitCode = code; signalCode = signal;
+      finish(exitReason());
+    };
+    const timer = setTimeout(() => finish(exited
+      ? `${exitReason()}; diagnostic pipes did not close within ${timeoutMs} ms`
+      : `Process fixture did not report its child PID within ${timeoutMs} ms`), timeoutMs);
     stdout.on('data', onOut); stderr.on('data', onErr);
-    child.once('error', onError); child.once('exit', onExit);
-    if (child.exitCode !== null || child.signalCode !== null) onExit(child.exitCode, child.signalCode);
+    stdout.on('end', onDrained); stderr.on('end', onDrained);
+    child.once('error', onError); child.once('exit', onExit); child.once('close', onClose);
+    onDrained();
   });
 }

@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { pathEntries } from '../src/main/env.js';
 import {
@@ -240,21 +241,23 @@ describe('terminateProcess', () => {
       ? spawn('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
         `$ErrorActionPreference = 'Stop'; try { $s = New-Object System.Diagnostics.ProcessStartInfo; $s.FileName = 'ping.exe'; $s.Arguments = '-n 600 127.0.0.1'; $s.UseShellExecute = $false; $s.CreateNoWindow = $true; ` +
         `$p = [System.Diagnostics.Process]::Start($s); [Console]::Out.WriteLine('${CHILD_PID_PREFIX}' + $p.Id); [Console]::Out.Flush(); Start-Sleep 600 } ` +
-        'catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }'],
+        'catch { [Console]::Error.WriteLine($_.Exception.Message); [Console]::Error.Flush(); exit 1 }'],
       { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
-      : spawn(node, ['-e', `const {spawn}=require('node:child_process'); const child=spawn(${JSON.stringify(node)}, ['-e', 'setInterval(() => {}, 1000)'], {stdio:'ignore'}); child.once('error', error => { console.error(error.message); process.exit(1); }); child.once('spawn', () => { console.log(${JSON.stringify(CHILD_PID_PREFIX)} + child.pid); setInterval(() => {}, 1000); });`], { stdio: ['ignore', 'pipe', 'pipe'] });
+      : spawn(node, [fileURLToPath(new URL('./fixtures/process-lifetime-parent.cjs', import.meta.url)), CHILD_PID_PREFIX],
+        { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     const exited = new Promise((resolve) => started.once('exit', resolve));
     let childPid = 0;
     try {
       childPid = await waitForChildPid(started, 15_000);
       expect(childPid).toBeGreaterThan(0);
+      if (!IS_WINDOWS) expect(() => process.kill(-started.pid!, 0)).not.toThrow();
       await terminateProcess(started.pid!);
       await exited;
       expect(() => process.kill(childPid, 0)).not.toThrow();
     } finally {
-      // If startup never produced a receipt, reclaim the fixture's whole tree, not only its
-      // parent; an unreported ping/node child must not survive a failed test.
-      if (started.pid && started.exitCode === null && started.signalCode === null) {
+      // Reclaim the fixture's own POSIX process group even if its parent exited without a
+      // receipt. Windows uses the existing taskkill tree cleanup while the parent is alive.
+      if (started.pid && (!childPid || (started.exitCode === null && started.signalCode === null))) {
         await terminateProcessTree(started.pid, true).catch(() => undefined);
       }
       if (childPid > 0) await terminateProcessTree(childPid, true).catch(() => undefined);
