@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import { initConfigPath, defaultConfig, saveConfig } from '../src/main/config.js';
 import { initDurableStore, flushDurable, resetDurableForTests } from '../src/main/durable.js';
 import {
-  createSession, deleteSession, flushSessions, initSessionStore, readEvents, renameSession, resetSessionStoreForTests, sessionSearchIndexPath, upsertMessageEvent
+  createSession, deleteSession, flushSessions, initSessionStore, readEvents, renameSession, resetSessionStoreForTests, sessionSearchIndexPath, upsertMessageEvent, writeOverflowText
 } from '../src/main/session/store.js';
 import { findInSession, foldCase, locateMessage, locateSearchMatch, queryTerms, resetSessionSearchForTests, searchIndexingSettled, searchSessions, snippetFor } from '../src/main/session/search.js';
 import { positionOf } from '../src/shared/chronology.js';
@@ -125,6 +125,60 @@ it('does not return superseded words while a changed chat awaits reindexing', as
   expect((await searchSessions('needle')).results).toEqual([]);
   await searchIndexingSettled();
   expect((await search('replacement')).results.map(result => result.id)).toEqual([id]);
+});
+
+it('searches the beginning, overflow text and recent messages of a chat longer than a million characters', async () => {
+  const id = await chat('Long conversation', [['user', 'earlyneedle']]);
+  const text = `${'x'.repeat(1_000_010)} overflowneedle`;
+  const assetId = await writeOverflowText(id, text);
+  expect(assetId).not.toBeNull();
+  await upsertMessageEvent(id, { kind: 'assistant_message', source: 'extension', time: Date.now(), messageId: 'long-answer',
+    message: { text: text.slice(0, 100), chars: text.length, truncated: true, assetId: assetId! }, state: 'final', final: true });
+  await upsertMessageEvent(id, { kind: 'user_message', source: 'app', time: Date.now(), messageId: 'recent-question',
+    message: { text: 'recentneedle', chars: 12, truncated: false } });
+  await flushSessions();
+  const reply = await search('earlyneedle overflowneedle recentneedle');
+  expect(reply).toMatchObject({ results: [{ id }], indexed: 1, total: 1 });
+  expect(reply.results[0]!.snippet!.text).toBe('earlyneedle');
+  expect((await search('recentneedle')).results[0]!.snippet!.text).toBe('recentneedle');
+  expect(await locateSearchMatch(id, 'recentneedle')).toMatchObject({ messageId: 'recent-question' });
+  // Restart reuses the complete on-disk index, not the journal or a truncated in-memory copy.
+  const store = await import('../src/main/session/store.js');
+  const read = vi.spyOn(store, 'readEvents');
+  resetSessionSearchForTests();
+  expect((await search('overflowneedle recentneedle')).results.map(row => row.id)).toEqual([id]);
+  expect(read).not.toHaveBeenCalled();
+});
+
+it.each(['legacy', 'damaged'])('rebuilds a %s index from the recording', async kind => {
+  const id = await chat('Migration', [['user', 'firstneedle'], ['assistant', 'lastneedle']]);
+  await search('firstneedle');
+  const file = sessionSearchIndexPath(id);
+  const stored = await fs.readFile(file, 'utf8');
+  const header = stored.slice(0, stored.indexOf('\n')).replace(/^\d+:/, '1:');
+  await fs.writeFile(file, kind === 'legacy' ? `${header}\nfirstneedle` : 'damaged stamp\nfirstneedle');
+  resetSessionSearchForTests();
+  expect((await search('lastneedle')).results.map(row => row.id)).toEqual([id]);
+  expect(await fs.readFile(file, 'utf8')).toMatch(/^2:/);
+});
+
+it('matches words across UTF-8 read boundaries, retaining correct snippets and all-word matching', async () => {
+  const id = await chat('Boundary title', [['user', 'placeholder']]);
+  await search('placeholder');
+  const file = sessionSearchIndexPath(id);
+  const stored = await fs.readFile(file, 'utf8');
+  const header = stored.slice(0, stored.indexOf('\n') + 1);
+  const prefix = 'x'.repeat(64 * 1024 - Buffer.byteLength(header) - 3);
+  const body = `${prefix}İzmir😀 ${'y'.repeat(1_000_000)}\nfinalneedle`;
+  await fs.writeFile(file, header + body);
+  const read = vi.spyOn(fs, 'readFile');
+  resetSessionSearchForTests();
+  const reply = await search('title izmir😀 finalneedle');
+  expect(reply.results.map(row => row.id)).toEqual([id]);
+  const snippet = reply.results[0]!.snippet!;
+  expect(snippet.matches.map(([start, end]) => snippet.text.slice(start, end))).toContain('İzmir😀');
+  expect((await search('izmir😀 absentneedle')).results).toEqual([]);
+  expect(read.mock.calls.filter(([path]) => path === file)).toEqual([]);
 });
 
 it('marks matches at the right place, also around characters whose lowercase is longer', () => {
