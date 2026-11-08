@@ -135,7 +135,9 @@ interface LiveConversation {
    * finished. See reopenFalselyEndedTurn. After restart the durable request-turn index can
    * restore this proof only from calls recorded before the reported end.
    */
-  endedTurn: { turnId: string; startedAt: number | null; endedAt: number; requestIds: Set<string> } | null;
+  endedTurn: { turnId: string; startedAt: number | null; endedAt: number; requestIds: Set<string>;
+    /** What ended this turn, kept with it: `lastTurnOutcome` can be overwritten by a recovered Goal verdict (#2103). */
+    outcome?: TurnOutcome } | null;
   /** Visible ChatGPT-native activity rows, updated by the page's stable row identity. */
   pageTools: Map<string, ProgressRecord>;
 }
@@ -1870,7 +1872,7 @@ async function reopenFalselyEndedTurn(
   }
   // Read before the reopen below clears it: only a turn the page ended as stopped or completed is closed again when quiet.
   const closable = (outcome: unknown): 'stopped' | 'completed' | null => outcome === 'stopped' || outcome === 'completed' ? outcome : null;
-  let endOutcome = closable(live.lastTurnOutcome);
+  let endOutcome = closable(live.endedTurn?.outcome);
   const previousEnd = live.endedTurn;
   let ended = previousEnd;
   const current = (): boolean => conversations.get(conversationId) === live &&
@@ -2000,7 +2002,7 @@ async function endQuietReopenedStop(sessionId: string, conversationId: string, l
   live.knownTurnEnds.add(turnId);
   live.lastTurnOutcome = mark.outcome;
   live.lastTurnStartedAt = live.turnStartedAt;
-  live.endedTurn = { turnId, startedAt: live.turnStartedAt, endedAt: time, requestIds: live.turnRequestIds };
+  live.endedTurn = { turnId, startedAt: live.turnStartedAt, endedAt: time, requestIds: live.turnRequestIds, outcome: mark.outcome };
   live.turnRequestIds = new Set<string>();
   live.turnStartedAt = null;
   live.turnId = null;
@@ -3010,7 +3012,7 @@ async function recordChatObservationsNow(
           // final is checked separately before later work can reopen the turn.
           live.endedTurn =
             live.turnId === item.turnId
-              ? { turnId: item.turnId, startedAt: endedStartedAt, endedAt: item.time, requestIds: live.turnRequestIds }
+              ? { turnId: item.turnId, startedAt: endedStartedAt, endedAt: item.time, requestIds: live.turnRequestIds, outcome: item.outcome ?? 'unknown' }
               : null;
           live.turnRequestIds = new Set<string>();
           if (live.turnId === item.turnId) {
@@ -3062,7 +3064,7 @@ async function recordChatObservationsNow(
     live.lastTurnOutcome = 'completed';
     live.lastTurnStartedAt = live.turnStartedAt;
     // Native message time may be its creation time, long before this final was observed.
-    live.endedTurn = { turnId, startedAt: live.turnStartedAt, endedAt: Date.now(), requestIds: live.turnRequestIds };
+    live.endedTurn = { turnId, startedAt: live.turnStartedAt, endedAt: Date.now(), requestIds: live.turnRequestIds, outcome: 'completed' };
     live.turnRequestIds = new Set<string>();
     live.turnStartedAt = null;
     live.turnId = null;
