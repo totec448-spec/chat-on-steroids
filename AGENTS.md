@@ -5112,7 +5112,9 @@ indexed, total }`. `session/search.ts` never reads a journal per query: each cha
 words and ChatGPT's answers, overflow text included), built in the background newest first,
 reused while the stamp matches, deleted with the chat. Version 2 indexes cover the full transcript;
 version 1's potentially truncated indexes are rebuilt from the recording. Index construction writes
-one message at a time; queries stream 64 KiB UTF-8 windows with overlap for words and snippets.
+one message at a time through a fixed `search.txt.tmp`, truncating an interrupted build on restart
+before atomic publication; failed publication removes that temporary. Queries stream 64 KiB UTF-8
+windows with overlap for words and snippets.
 Only indexes of at most 1M characters are cached, within the existing 24M-character cache budget;
 this is a memory bound, not a searchable-history cutoff. An unreadable index is rebuilt from the
 recording when its directory allows replacement. A missing/stale index discovered during a query
