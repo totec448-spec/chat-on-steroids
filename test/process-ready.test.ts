@@ -87,6 +87,17 @@ it('rejects an oversized PID line even when its newline arrives in a later chunk
   await rejected;
 });
 
+it('rejects a complete receipt with an embedded carriage return instead of timing out', async () => {
+  vi.useFakeTimers();
+  const child = fixture();
+  const failure = waitForChildPid(child, 15_000).catch((error: unknown) => error);
+  child.stdout!.emit('data', `${CHILD_PID_PREFIX}12\r34\n`);
+  await vi.advanceTimersByTimeAsync(15_000);
+  const error = await failure;
+  expect(error).toBeInstanceOf(Error);
+  expect((error as Error).message).toContain('invalid child PID');
+});
+
 it('does not mistake a truncated diagnostic tail for a real line boundary', async () => {
   const child = fixture();
   const ready = waitForChildPid(child, 15_000);
