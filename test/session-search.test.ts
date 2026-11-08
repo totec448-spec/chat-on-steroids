@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
+import { dirname } from 'node:path';
 import { initConfigPath, defaultConfig, saveConfig } from '../src/main/config.js';
 import { initDurableStore, flushDurable, resetDurableForTests } from '../src/main/durable.js';
 import {
@@ -235,4 +236,31 @@ it('locates a bookmarked reply whose recorded id is upper case (bookmarks are ke
   await flushSessions();
   const location = await locateMessage(session.id, recorded.toLowerCase());
   expect(location).toMatchObject({ kind: 'assistant_message', messageId: recorded });
+});
+
+it('retries a failed index publication without a restart or a change to the chat', async () => {
+  const id = await chat('Notes', [['user', 'recoverable needle']]);
+  const rename = vi.spyOn(fs, 'rename').mockRejectedValue(Object.assign(new Error('temporarily busy'), { code: 'EBUSY' }));
+  await searchSessions('needle');
+  await searchIndexingSettled();
+  // A failure is not "indexed"; title search still works while the disk is unavailable.
+  expect(await searchSessions('Notes')).toMatchObject({ results: [{ id }], indexed: 0, total: 1 });
+  await searchIndexingSettled();
+  expect(await fs.readdir(dirname(sessionSearchIndexPath(id)))).not.toContain(`search.txt.${process.pid}.tmp`);
+  rename.mockRestore();
+  expect(await search('needle')).toMatchObject({ results: [{ id }], indexed: 1, total: 1 });
+});
+
+it('does not restore stale cached words when rebuilding a revised chat fails', async () => {
+  const id = await chat('Revision', [['user', 'obsolete needle']]);
+  await search('needle');
+  const original = (await readEvents(id, { kinds: ['user_message'] }))[0]!;
+  if (original.kind !== 'user_message') throw new Error('Missing question');
+  await upsertMessageEvent(id, { ...original, time: original.time + 1, message: { text: 'replacement', chars: 11, truncated: false } });
+  await flushSessions();
+  const write = vi.spyOn(fs, 'writeFile').mockRejectedValue(Object.assign(new Error('temporarily denied'), { code: 'EACCES' }));
+  expect((await search('needle')).results).toEqual([]);
+  write.mockRestore();
+  expect((await search('replacement')).results.map(row => row.id)).toEqual([id]);
+  expect((await search('needle')).results).toEqual([]);
 });
