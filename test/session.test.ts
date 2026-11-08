@@ -3205,6 +3205,37 @@ describe('canonical recorder 1.8', () => {
     }
   });
 
+  // CodeRabbit on #2105: a recovered Goal verdict overwrites lastTurnOutcome with 'completed'; the turn's own end must still decide.
+  it('does not close a turn reopened after a failed end as completed when a recovered final overwrote the last outcome', async () => {
+    vi.useFakeTimers();
+    try {
+      const conversationId = 'conv-reopened-failed-recovered';
+      const request = 'wfr_reopened_failed_recovered';
+      const sessionId = await sessionForConversation(conversationId);
+      const active = () => liveConversations().find((entry) => entry.conversationId === conversationId)?.activeTurnId ?? null;
+      const start = Date.now();
+      await recordChatObservations(conversationId, [
+        { kind: 'turn_start', time: start, turnId: 'g-fr' },
+        { kind: 'tool_evidence', time: start, fiberConversationId: conversationId,
+          calls: [{ messageId: 'fr-0', tool: 'read', order: 0, answered: false, requestId: request }] }
+      ]);
+      await tool(request, start + 10);
+      await recordChatObservations(conversationId, [
+        { kind: 'turn_end', time: start + 20, turnId: 'g-fr', outcome: 'failed' },
+        { kind: 'assistant_message', time: start + 30, messageId: 'fr-final', text: 'Done.', state: 'final', final: true, goalEligible: true }
+      ]);
+      expect(liveConversations().find((entry) => entry.conversationId === conversationId)?.lastTurnOutcome).toBe('completed');
+      await vi.advanceTimersByTimeAsync(1_000);
+      await tool(request, Date.now());
+      await vi.advanceTimersByTimeAsync(REOPENED_COMPLETED_QUIET_MS + 60_000);
+      expect(active()).toBe('g-fr');
+      const ends = await readEvents(sessionId!, { kinds: ['turn_end'] });
+      expect(ends.filter((event) => event.kind === 'turn_end' && event.source === 'app')).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('waits the longer Pro window before it ends a Pro turn reopened after a Stop (#2082)', async () => {
     vi.useFakeTimers();
     try {
