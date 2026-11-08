@@ -1,4 +1,13 @@
 {
+  "Steps for you, a limit on busy chats, and Telegram notifications.": "나를 위한 단계, 바쁜 채팅 제한, Telegram 알림.",
+  "Steps for you": "나를 위한 단계",
+  "When ChatGPT needs something only you can do, it hands you the step. You run it and mark it done.": "ChatGPT가 나만 할 수 있는 일이 필요하면 그 단계를 넘겨 줍니다. 직접 실행하고 완료로 표시하세요.",
+  "A limit on busy chats": "바쁜 채팅 제한",
+  "Choose how many chats may work at once. Your own messages always go out.": "동시에 작업할 수 있는 채팅 수를 정하세요. 내가 보내는 메시지는 항상 전송됩니다.",
+  "Telegram notifications": "Telegram 알림",
+  "Link your own bot to get a message when a chat finishes or needs you, and stop or pause it from your phone.": "내 봇을 연결하면 채팅이 끝나거나 내가 필요할 때 메시지를 받고, 휴대폰에서 중지하거나 일시중지할 수 있습니다.",
+  "Stop works all the way": "중지가 끝까지 작동합니다",
+  "After a Stop, a chat no longer stays busy, and your next message goes out.": "중지한 뒤에는 채팅이 바쁜 상태로 남지 않고 다음 메시지가 전송됩니다.",
   "Move chats between projects, chats that keep going, and an extension that updates during long runs.": "프로젝트 간 채팅 이동, 멈추지 않고 이어지는 채팅, 긴 실행 중에도 업데이트되는 확장 프로그램.",
   "Move chats between projects": "프로젝트 간 채팅 이동",
   "Drag a chat onto a project, or use Move to project in its menu. Undo puts it back.": "채팅을 프로젝트로 끌어다 놓거나 메뉴의 프로젝트로 이동을 사용하세요. 실행 취소로 되돌릴 수 있습니다.",

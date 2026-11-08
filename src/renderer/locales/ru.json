@@ -1,4 +1,13 @@
 {
+  "Steps for you, a limit on busy chats, and Telegram notifications.": "Шаги для вас, лимит для занятых чатов и уведомления Telegram.",
+  "Steps for you": "Шаги для вас",
+  "When ChatGPT needs something only you can do, it hands you the step. You run it and mark it done.": "Когда ChatGPT нужно то, что можете сделать только вы, он передаёт вам шаг. Вы выполняете его и отмечаете как выполненный.",
+  "A limit on busy chats": "Лимит для занятых чатов",
+  "Choose how many chats may work at once. Your own messages always go out.": "Выберите, сколько чатов могут работать одновременно. Ваши собственные сообщения уходят всегда.",
+  "Telegram notifications": "Уведомления Telegram",
+  "Link your own bot to get a message when a chat finishes or needs you, and stop or pause it from your phone.": "Подключите своего бота, чтобы получать сообщение, когда чат завершил работу или нуждается в вас, и останавливайте или приостанавливайте его с телефона.",
+  "Stop works all the way": "Остановка действует полностью",
+  "After a Stop, a chat no longer stays busy, and your next message goes out.": "После остановки чат больше не остаётся занятым, и ваше следующее сообщение уходит.",
   "Move chats between projects, chats that keep going, and an extension that updates during long runs.": "Перенос чатов между проектами, чаты, которые не останавливаются, и расширение, которое обновляется во время долгих запусков.",
   "Move chats between projects": "Перенос чатов между проектами",
   "Drag a chat onto a project, or use Move to project in its menu. Undo puts it back.": "Перетащите чат на проект или выберите «Переместить в проект» в его меню. «Отменить» вернёт его обратно.",
