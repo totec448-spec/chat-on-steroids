@@ -1,4 +1,13 @@
 {
+  "Steps for you, a limit on busy chats, and Telegram notifications.": "Các bước dành cho bạn, giới hạn cho các cuộc trò chuyện đang bận và thông báo Telegram.",
+  "Steps for you": "Các bước dành cho bạn",
+  "When ChatGPT needs something only you can do, it hands you the step. You run it and mark it done.": "Khi ChatGPT cần điều chỉ bạn mới làm được, nó giao bước đó cho bạn. Bạn chạy nó và đánh dấu là xong.",
+  "A limit on busy chats": "Giới hạn cho cuộc trò chuyện đang bận",
+  "Choose how many chats may work at once. Your own messages always go out.": "Chọn có bao nhiêu cuộc trò chuyện được làm việc cùng lúc. Tin nhắn của chính bạn luôn được gửi đi.",
+  "Telegram notifications": "Thông báo Telegram",
+  "Link your own bot to get a message when a chat finishes or needs you, and stop or pause it from your phone.": "Liên kết bot của riêng bạn để nhận tin nhắn khi một cuộc trò chuyện hoàn tất hoặc cần bạn, và dừng hoặc tạm dừng nó từ điện thoại.",
+  "Stop works all the way": "Dừng hoạt động trọn vẹn",
+  "After a Stop, a chat no longer stays busy, and your next message goes out.": "Sau khi dừng, cuộc trò chuyện không còn ở trạng thái bận và tin nhắn tiếp theo của bạn được gửi đi.",
   "Move chats between projects, chats that keep going, and an extension that updates during long runs.": "Di chuyển cuộc trò chuyện giữa các dự án, cuộc trò chuyện tiếp tục chạy và tiện ích tự cập nhật cả khi đang chạy lâu.",
   "Move chats between projects": "Di chuyển cuộc trò chuyện giữa các dự án",
   "Drag a chat onto a project, or use Move to project in its menu. Undo puts it back.": "Kéo một cuộc trò chuyện vào dự án hoặc dùng Chuyển vào dự án trong menu của nó. Hoàn tác sẽ đưa nó về chỗ cũ.",

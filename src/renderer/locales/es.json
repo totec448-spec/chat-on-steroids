@@ -1,4 +1,13 @@
 {
+  "Steps for you, a limit on busy chats, and Telegram notifications.": "Pasos para ti, un límite para chats ocupados y notificaciones de Telegram.",
+  "Steps for you": "Pasos para ti",
+  "When ChatGPT needs something only you can do, it hands you the step. You run it and mark it done.": "Cuando ChatGPT necesita algo que solo tú puedes hacer, te entrega el paso. Lo ejecutas y lo marcas como hecho.",
+  "A limit on busy chats": "Un límite para chats ocupados",
+  "Choose how many chats may work at once. Your own messages always go out.": "Elige cuántos chats pueden trabajar a la vez. Tus propios mensajes siempre salen.",
+  "Telegram notifications": "Notificaciones de Telegram",
+  "Link your own bot to get a message when a chat finishes or needs you, and stop or pause it from your phone.": "Vincula tu propio bot para recibir un mensaje cuando un chat termine o te necesite, y deténlo o páusalo desde el móvil.",
+  "Stop works all the way": "Detener funciona del todo",
+  "After a Stop, a chat no longer stays busy, and your next message goes out.": "Tras detener, un chat ya no queda ocupado y tu siguiente mensaje sale.",
   "Move chats between projects, chats that keep going, and an extension that updates during long runs.": "Mover chats entre proyectos, chats que siguen adelante y una extensión que se actualiza durante ejecuciones largas.",
   "Move chats between projects": "Mover chats entre proyectos",
   "Drag a chat onto a project, or use Move to project in its menu. Undo puts it back.": "Arrastra un chat a un proyecto o usa Mover a proyecto en su menú. Deshacer lo devuelve.",

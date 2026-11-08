@@ -1,4 +1,13 @@
 {
+  "Steps for you, a limit on busy chats, and Telegram notifications.": "Sizin için adımlar, yoğun sohbetler için bir sınır ve Telegram bildirimleri.",
+  "Steps for you": "Sizin için adımlar",
+  "When ChatGPT needs something only you can do, it hands you the step. You run it and mark it done.": "ChatGPT yalnızca sizin yapabileceğiniz bir şeye ihtiyaç duyduğunda adımı size verir. Siz çalıştırır ve yapıldı olarak işaretlersiniz.",
+  "A limit on busy chats": "Yoğun sohbetler için sınır",
+  "Choose how many chats may work at once. Your own messages always go out.": "Aynı anda kaç sohbetin çalışabileceğini seçin. Kendi mesajlarınız her zaman gider.",
+  "Telegram notifications": "Telegram bildirimleri",
+  "Link your own bot to get a message when a chat finishes or needs you, and stop or pause it from your phone.": "Bir sohbet bittiğinde veya size ihtiyaç duyduğunda mesaj almak için kendi botunuzu bağlayın; telefonunuzdan durdurun veya duraklatın.",
+  "Stop works all the way": "Durdurma tam çalışır",
+  "After a Stop, a chat no longer stays busy, and your next message goes out.": "Durdurmadan sonra sohbet artık meşgul kalmaz ve bir sonraki mesajınız gider.",
   "Move chats between projects, chats that keep going, and an extension that updates during long runs.": "Sohbetleri projeler arasında taşıma, durmadan devam eden sohbetler ve uzun çalışmalarda da güncellenen bir eklenti.",
   "Move chats between projects": "Sohbetleri projeler arasında taşıyın",
   "Drag a chat onto a project, or use Move to project in its menu. Undo puts it back.": "Bir sohbeti bir projenin üzerine sürükleyin veya menüsündeki Projeye taşı'yı kullanın. Geri al onu geri koyar.",
