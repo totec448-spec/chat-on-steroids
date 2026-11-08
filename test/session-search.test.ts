@@ -253,13 +253,13 @@ it('retries a failed index publication without a restart or a change to the chat
 
 it('does not restore stale cached words when rebuilding a revised chat fails', async () => {
   const id = await chat('Revision', [['user', 'obsolete needle']]);
-  await search('needle');
+  expect(await search('needle')).toMatchObject({ results: [{ id }], indexed: 1, total: 1 });
   const original = (await readEvents(id, { kinds: ['user_message'] }))[0]!;
   if (original.kind !== 'user_message') throw new Error('Missing question');
   await upsertMessageEvent(id, { ...original, time: original.time + 1, message: { text: 'replacement', chars: 11, truncated: false } });
   await flushSessions();
   const write = vi.spyOn(fs, 'writeFile').mockRejectedValue(Object.assign(new Error('temporarily denied'), { code: 'EACCES' }));
-  expect((await search('needle')).results).toEqual([]);
+  expect(await search('needle')).toMatchObject({ results: [], indexed: 0, total: 1 });
   write.mockRestore();
   expect((await search('replacement')).results.map(row => row.id)).toEqual([id]);
   expect((await search('needle')).results).toEqual([]);
