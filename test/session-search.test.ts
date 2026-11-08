@@ -1,5 +1,6 @@
+import { ReadStream } from 'node:fs';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { ReadStream, promises as fs } from 'node:fs';
+import { promises as fs } from 'node:fs';
 import { initConfigPath, defaultConfig, saveConfig } from '../src/main/config.js';
 import { initDurableStore, flushDurable, resetDurableForTests } from '../src/main/durable.js';
 import {
