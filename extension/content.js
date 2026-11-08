@@ -3089,8 +3089,11 @@
       // with its answer is not marked: its trailing calls stay with it. Where Fiber answers, its
       // end_turn is that proof, and interim prose without it is an unfinished answer too (live
       // 2026-10-12: ten calls and the final answer followed a message sent after "I'll pick up…").
-      const replacedUnfinished = result.outcome === 'unknown' && (bounded.outcome === 'interrupted' || fiberPresent === true);
-      continuedTurn = steering || replacedUnfinished;
+      // A turn whose own end_turn Fiber already shows is completed, not continued: its final
+      // keeps its owner even when the scan that reports it returns after the next question opens.
+      const endedTerminal = Boolean(ended && fiberTurnFor(ended)?.endMessageId && !approvalHolding());
+      const replacedUnfinished = !endedTerminal && result.outcome === 'unknown' && (bounded.outcome === 'interrupted' || fiberPresent === true);
+      continuedTurn = !endedTerminal && (steering || replacedUnfinished);
       if (continuedTurn && turnId) {
         steeredTurns.add(turnId);
         if (steeredTurns.size > 32) steeredTurns.delete(steeredTurns.values().next().value);

@@ -2181,8 +2181,8 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
       // request or conflicting generation is fresh work, not a trailing result.
       const owner = event.source === 'mcp' && event.call.attribution === 'request_id'
         ? recordedRequestTurn(entry.summary.requestTurns, event.call.requestId, conversationId) : undefined;
-      const ownerMatchesFinal = !!owner && (sameTurn(owner.turnId, finalTurnId) ||
-        continuedRequestTurn(turns, owner.turnId, finalTurnId, Number.MAX_SAFE_INTEGER) === (finalTurnId ? responseTurnId(turns, finalTurnId) : undefined));
+      const ownerMatchesFinal = !!owner && !!finalTurnId && (sameTurn(owner.turnId, finalTurnId) ||
+        continuedRequestTurn(turns, owner.turnId, finalTurnId, Number.MAX_SAFE_INTEGER) === responseTurnId(turns, finalTurnId));
       return !(final.providerMessageId && (final.kind === 'turn_end' || final.state === 'final') && owner && owner.origin < seq &&
         ownerMatchesFinal && event.call.conversationId === conversationId &&
         (!event.turnId || sameTurn(event.turnId, finalTurnId) || sameTurn(event.turnId, owner.turnId)));

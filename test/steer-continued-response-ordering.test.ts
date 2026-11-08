@@ -500,7 +500,7 @@ describe('steer / follow-up continued turn ordering', () => {
         turnId: 'g-10uer7kwcef0o-0-5',
         messageId: 'b50804bf-faf8-4272-8f1d-48b16674a51c',
         providerMessageId: 'b50804bf-faf8-4272-8f1d-48b16674a51c',
-        message: text('First half of consolidated answer\n\n¡Hecho, Daniel! Continuation answer.'),
+        message: text('First half of consolidated answer\n\nContinuation answer.'),
         state: 'final', final: true
       });
       await appendEvent(session.id, {
@@ -537,10 +537,28 @@ describe('steer / follow-up continued turn ordering', () => {
         replaces: '05a235d9-231e-487a-9257-76469eb9b5f9',
         message: text('Queued next question')
       });
+      // A genuine later edit of the post-continuation question under the same parentId still records `replaces`:
+      const genuineEdit = await replacedQuestion(
+        session.id,
+        '778133a5-c219-4adb-b634-340a193fa637',
+        'b50804bf-faf8-4272-8f1d-48b16674a51c'
+      );
+      expect(genuineEdit).toEqual({ replaces: '648133a5-c219-4adb-b634-340a193fa636' });
+      await upsertMessageEvent(session.id, {
+        kind: 'user_message', time: T0 + 70, source: 'extension',
+        messageId: '778133a5-c219-4adb-b634-340a193fa637',
+        parentId: 'b50804bf-faf8-4272-8f1d-48b16674a51c',
+        ...genuineEdit,
+        message: text('Edited next question')
+      });
       resetSessionStoreForTests();
       const loaded = await readEvents(session.id, { kinds: ['user_message'] });
       const queued = loaded.find(e => e.kind === 'user_message' && e.messageId === '648133a5-c219-4adb-b634-340a193fa636');
+      expect(queued?.kind).toBe('user_message');
       expect(queued?.kind === 'user_message' ? queued.replaces : undefined).toBeUndefined();
+      const edited = loaded.find(e => e.kind === 'user_message' && e.messageId === '778133a5-c219-4adb-b634-340a193fa637');
+      expect(edited?.kind).toBe('user_message');
+      expect(edited?.kind === 'user_message' ? edited.replaces : undefined).toBe('648133a5-c219-4adb-b634-340a193fa636');
     } finally {
       resetSessionStoreForTests();
       unsetSessionRootForTests();
