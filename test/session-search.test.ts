@@ -163,6 +163,26 @@ it.each(['legacy', 'damaged'])('rebuilds a %s index from the recording', async k
   expect(await fs.readFile(file, 'utf8')).toMatch(/^2:/);
 });
 
+it('reuses and truncates a crash-leftover temporary index after restart', async () => {
+  const id = await chat('Interrupted build', [['user', 'currentneedle']]);
+  const file = sessionSearchIndexPath(id), temporary = `${file}.tmp`;
+  await fs.writeFile(temporary, 'leftoverneedle '.repeat(100_000));
+  resetSessionSearchForTests();
+  expect((await search('currentneedle')).results.map(row => row.id)).toEqual([id]);
+  await expect(fs.stat(temporary)).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(await fs.readFile(file, 'utf8')).not.toContain('leftoverneedle');
+});
+
+it('removes the reused temporary index when publication fails', async () => {
+  const id = await chat('Interrupted publication', [['user', 'currentneedle']]);
+  const temporary = `${sessionSearchIndexPath(id)}.tmp`;
+  await fs.writeFile(temporary, 'leftoverneedle '.repeat(100_000));
+  vi.spyOn(fs, 'rename').mockRejectedValueOnce(Object.assign(new Error('synthetic busy index'), { code: 'EBUSY' }));
+  await searchSessions('currentneedle');
+  await searchIndexingSettled();
+  await expect(fs.stat(temporary)).rejects.toMatchObject({ code: 'ENOENT' });
+});
+
 it.each(['EACCES', 'EIO'])('replaces an unreadable index after %s when its directory remains writable', async code => {
   const id = await chat('Unreadable index', [['user', 'recoverableneedle']]);
   await searchSessions('');
@@ -188,7 +208,7 @@ it.each(['EACCES', 'EIO'])('replaces an unreadable index after %s when its direc
   // A restart has no in-memory proof; it must replace the unreadable derived file.
   resetSessionSearchForTests();
   expect((await search('recoverableneedle')).results.map(row => row.id)).toEqual([id]);
-  expect(publish).toHaveBeenCalledWith(`${file}.${process.pid}.tmp`, file);
+  expect(publish).toHaveBeenCalledWith(`${file}.tmp`, file);
   expect(warn).toHaveBeenCalledWith(expect.stringContaining('index unreadable; rebuilding'));
 });
 

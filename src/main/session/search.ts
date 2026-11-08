@@ -105,7 +105,9 @@ async function indexOne(summary: SessionSummary): Promise<void> {
   });
   if (!valid) {
     const file = sessionSearchIndexPath(summary.id);
-    const temporary = `${file}.${process.pid}.tmp`;
+    // One indexer owns this file; a restart truncates its unfinished predecessor instead of
+    // leaving another full-transcript temporary behind under a different process id.
+    const temporary = `${file}.tmp`;
     try {
       await fs.writeFile(temporary, `${stamp}\n`, 'utf8');
       const handle = await fs.open(temporary, 'a');
