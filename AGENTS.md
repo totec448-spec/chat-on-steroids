@@ -1344,7 +1344,9 @@ Bookmarked answers (#1719): `sessions:bookmarks { id }` → `SessionBookmark[]` 
 and `sessions:bookmark { id, messageId, excerpt, messageTime, on }` → the chat's new list, in
 `src/main/session/bookmarks.ts`, kept in `bookmarks.json` in the session's folder and written serially per
 session; at most `MAX_BOOKMARKS` (200) per chat, excerpts one line of at most 160 characters. A
-missing or damaged file reads as no bookmarks; damaged entries are dropped. Nothing is sent to
+missing or damaged file reads as no bookmarks; damaged entries are dropped alone. Null, scalars and
+arrays are rejected before property access and counted in one log line, without rewriting on read.
+Valid marks remain usable for listing and toggling, and an explicit edit saves the normalized list. Nothing is sent to
 ChatGPT. The header list jumps through `sessions:locate-message`; a reply no longer in the chat
 shows a notice instead of scrolling. Long row menus scroll inside the window (`row-menu.ts`). A file holding more than the limit keeps the ones bookmarked first. Tests: `test/session-bookmarks.test.ts` (storage, limit, damaged files), the "bookmarked answers" cases in `test/renderer-timeline.part6.test.ts` (answer action, header list, jump), and `scripts/verify-bookmark-list.cjs` (200 bookmarks in a short window, real Electron).
 
