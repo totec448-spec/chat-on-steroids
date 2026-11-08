@@ -28,6 +28,7 @@ import {
   repairDeterministicAttribution,
   rebindConversation,
   REOPENED_STOP_PRO_QUIET_MS,
+  REOPENED_COMPLETED_QUIET_MS,
   REOPENED_STOP_QUIET_MS,
   resetRecorderForTests,
   sessionForConversation,
@@ -3142,9 +3143,9 @@ describe('canonical recorder 1.8', () => {
    * reopened turn as stopped again itself.
    */
   it.each([
-    ['stopped', true],
-    ['completed', false]
-  ] as const)('ends a turn reopened after a %s end once its request goes quiet: %s', async (outcome, closes) => {
+    ['stopped', REOPENED_STOP_QUIET_MS],
+    ['completed', REOPENED_COMPLETED_QUIET_MS]
+  ] as const)('ends a turn reopened after a %s end once its request goes quiet (#2082, #2103)', async (outcome, quiet) => {
     vi.useFakeTimers();
     try {
       const conversationId = `conv-reopened-quiet-${outcome}`;
@@ -3163,19 +3164,73 @@ describe('canonical recorder 1.8', () => {
       await tool(request, Date.now());
       expect(active()).toBe('g-quiet');
       // Another call of the same request inside the quiet window keeps it open.
-      await vi.advanceTimersByTimeAsync(REOPENED_STOP_QUIET_MS - 10_000);
+      await vi.advanceTimersByTimeAsync(quiet - 10_000);
       await tool(request, Date.now());
-      await vi.advanceTimersByTimeAsync(REOPENED_STOP_QUIET_MS - 10_000);
+      await vi.advanceTimersByTimeAsync(quiet - 10_000);
       expect(active()).toBe('g-quiet');
       await vi.advanceTimersByTimeAsync(20_000);
       // The end is a durable journal write; wait for it rather than for a fixed time.
-      if (closes) await vi.waitFor(() => expect(active()).toBeNull(), { timeout: 10_000 });
-      else expect(active()).toBe('g-quiet');
+      await vi.waitFor(() => expect(active()).toBeNull(), { timeout: 10_000 });
       const ends = await readEvents(sessionId!, { kinds: ['turn_end'] });
-      if (closes) {
-        expect(ends.at(-1)).toMatchObject({ kind: 'turn_end', turnId: 'g-quiet', outcome: 'stopped', source: 'app' });
-        expect((await getSession(sessionId!))?.activeTurnId ?? null).toBeNull();
-      } else expect(ends).toHaveLength(1);
+      // It ends the way the page had ended it, so Goal and the next message see the same verdict.
+      expect(ends.at(-1)).toMatchObject({ kind: 'turn_end', turnId: 'g-quiet', outcome, source: 'app' });
+      expect((await getSession(sessionId!))?.activeTurnId ?? null).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a turn reopened after a failed end open: only stopped and completed ends are closed again by quiet', async () => {
+    vi.useFakeTimers();
+    try {
+      const conversationId = 'conv-reopened-quiet-failed';
+      const request = 'wfr_reopened_quiet_failed';
+      const sessionId = await sessionForConversation(conversationId);
+      const active = () => liveConversations().find((entry) => entry.conversationId === conversationId)?.activeTurnId ?? null;
+      const start = Date.now();
+      await recordChatObservations(conversationId, [
+        { kind: 'turn_start', time: start, turnId: 'g-failed' },
+        { kind: 'tool_evidence', time: start, fiberConversationId: conversationId,
+          calls: [{ messageId: 'failed-0', tool: 'read', order: 0, answered: false, requestId: request }] }
+      ]);
+      await tool(request, start + 10);
+      await recordChatObservations(conversationId, [{ kind: 'turn_end', time: start + 20, turnId: 'g-failed', outcome: 'failed' }]);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await tool(request, Date.now());
+      await vi.advanceTimersByTimeAsync(REOPENED_COMPLETED_QUIET_MS + 60_000);
+      expect(active()).toBe('g-failed');
+      expect(await readEvents(sessionId!, { kinds: ['turn_end'] })).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // CodeRabbit on #2105: a recovered Goal verdict overwrites lastTurnOutcome with 'completed'; the turn's own end must still decide.
+  it('does not close a turn reopened after a failed end as completed when a recovered final overwrote the last outcome', async () => {
+    vi.useFakeTimers();
+    try {
+      const conversationId = 'conv-reopened-failed-recovered';
+      const request = 'wfr_reopened_failed_recovered';
+      const sessionId = await sessionForConversation(conversationId);
+      const active = () => liveConversations().find((entry) => entry.conversationId === conversationId)?.activeTurnId ?? null;
+      const start = Date.now();
+      await recordChatObservations(conversationId, [
+        { kind: 'turn_start', time: start, turnId: 'g-fr' },
+        { kind: 'tool_evidence', time: start, fiberConversationId: conversationId,
+          calls: [{ messageId: 'fr-0', tool: 'read', order: 0, answered: false, requestId: request }] }
+      ]);
+      await tool(request, start + 10);
+      await recordChatObservations(conversationId, [
+        { kind: 'turn_end', time: start + 20, turnId: 'g-fr', outcome: 'failed' },
+        { kind: 'assistant_message', time: start + 30, messageId: 'fr-final', text: 'Done.', state: 'final', final: true, goalEligible: true }
+      ]);
+      expect(liveConversations().find((entry) => entry.conversationId === conversationId)?.lastTurnOutcome).toBe('completed');
+      await vi.advanceTimersByTimeAsync(1_000);
+      await tool(request, Date.now());
+      await vi.advanceTimersByTimeAsync(REOPENED_COMPLETED_QUIET_MS + 60_000);
+      expect(active()).toBe('g-fr');
+      const ends = await readEvents(sessionId!, { kinds: ['turn_end'] });
+      expect(ends.filter((event) => event.kind === 'turn_end' && event.source === 'app')).toHaveLength(0);
     } finally {
       vi.useRealTimers();
     }
