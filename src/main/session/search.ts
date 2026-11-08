@@ -118,7 +118,7 @@ function startIndexing(): void {
       for (const id of [...current.keys()]) if (!live.has(id)) { current.delete(id); const old = cache.get(id); if (old) { cachedChars -= old.text.length; cache.delete(id); } }
       for (const summary of summaries) {
         try { await indexOne(summary); }
-        catch (error) { logWarn(`search: chat ${summary.id} not indexed: ${(error as Error).message}`); current.set(summary.id, stampOf(summary)); }
+        catch (error) { logWarn(`search: chat ${summary.id} not indexed; will retry on the next search: ${(error as Error).message}`); }
         await yieldToEvents();
       }
     }

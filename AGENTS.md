@@ -5120,6 +5120,8 @@ cover only indexed chats and the renderer asks again. `limited: true` means more
 not a sidebar field: the magnifier at the end of the app name's row, ⌘K (macOS) / Ctrl+K (except
 inside the terminal) and View → Search Chats open it. Empty, it lists up to 30 recent chats (helpers,
 sub-agents and diagnostics rows left out); it keeps one size while typing and fades in and out.
+Only a successful index build is marked current. A failed build stays pending (`indexed < total`)
+and retries on the next search, including the dialog's existing polling; title search remains usable.
 Opening a text match calls `sessions:locate-match { id, query }` → `SessionSearchLocation | null`
 (the first user/assistant message holding a query word, read from the recording only then); the
 timeline shows it from the loaded page or loads the page around it as history, centered and briefly
