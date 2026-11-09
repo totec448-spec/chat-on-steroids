@@ -80,11 +80,24 @@ it.each([
     .toEqual([{ id: 'code-review', revision: revision('a') }]);
 });
 
-it.each(['precode-reviewを使って', 'code-reviewerを使って', 'コードレビュー支援を使って', 'code-review𠮷を使って'])(
+it.each([
+  'precode-reviewを使って', 'code-reviewerを使って', 'コードレビュー支援を使って', 'code-review𠮷を使って',
+  'pre-code-review', 'code-review-helper', 'pre--code-review', 'code-review--helper'
+])(
   'does not match a partial Skill name inside a longer name: %s', authored => {
     expect(routeSkillMetadata(authored, [candidate({ displayName: 'コードレビュー' })])).toEqual([]);
   }
 );
+
+it('keeps a separated dash usable and does not confuse a shorter hyphen-prefix identity', () => {
+  const short = candidate({ id: 'code', name: 'Code', revision: revision('b') });
+  expect(routeSkillMetadata('Use code-review - check this change.', [candidate(), short]))
+    .toEqual([{ id: 'code-review', revision: revision('a') }]);
+});
+
+it.each(['', ' \t\n', '---'])('selects nothing for empty or separator-only input: %j', authored => {
+  expect(routeSkillMetadata(authored, [candidate()])).toEqual([]);
+});
 
 it('keeps a directly excluded Skill out even when another mention is positive', () => {
   expect(routeSkillMetadata('Use Code Review. Do not use code-review.', [candidate()])).toEqual([]);
