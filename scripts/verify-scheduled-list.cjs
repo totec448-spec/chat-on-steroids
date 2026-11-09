@@ -116,6 +116,19 @@ app.whenReady().then(async () => {
     await js("document.querySelector('.scheduled-index-row button').click(); true");
     const actions = await js('JSON.stringify(window.fixture.actions)');
     assert.equal(actions, JSON.stringify([['openChat', 'fixture-economics']]));
+    // A chat title or message with one long unbroken word (a path, a URL, minified text) must wrap inside its card:
+    // it used to widen the whole page, scrolling it sideways and pushing Refresh and the row actions out of view.
+    const longWord = 'a'.repeat(140);
+    await js(`(() => { window.fixture.rows = [{ id:'schedule-long', sessionId:'fixture-long', sessionTitle:'/Users/someone/projects/${longWord}/src/index.ts', text:'${longWord}${longWord}', repeat:{kind:'weekly',day:3,at:'09:30'}, until:null, paused:false, createdAt:Date.now(), lastDueAt:null, nextRunAt:Date.now()+86400000 }, ...window.fixture.rows]; return true; })()`);
+    for (const width of [1280, 640]) {
+      win.setContentSize(width, 820);
+      await js('window.scheduledController.refresh().then(() => true)');
+      const fit = await js(`(() => { const list = document.getElementById('scheduledList').getBoundingClientRect(); const row = document.querySelector('.scheduled-index-row');
+        const actions = [...row.querySelectorAll('.scheduled-index-actions > button, .scheduled-index-menu > summary')].map(node => node.getBoundingClientRect().right);
+        return { page: document.documentElement.scrollWidth <= innerWidth + 1, row: row.getBoundingClientRect().right <= list.right + 1,
+          actions: actions.every(right => right <= innerWidth), refresh: document.getElementById('scheduledRefresh').getBoundingClientRect().right <= innerWidth }; })()`);
+      assert.deepEqual(fit, { page: true, row: true, actions: true, refresh: true }, `a long unbroken title stays inside the Scheduled page at ${width} px`);
+    }
     await js(`(() => {document.documentElement.dataset.theme='light';window.fixture.rows=[];return true})()`);
     await js('window.scheduledController.refresh().then(() => true)');
     const empty = await js(`(() => ({text:document.querySelector('.scheduled-index-empty')?.textContent,overflow:document.documentElement.scrollWidth>innerWidth}))()`);
