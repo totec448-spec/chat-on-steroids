@@ -41,6 +41,9 @@ function phrasePattern(phrase: readonly string[]): RegExp {
 }
 
 function literalBoundary(before: string, after: string): boolean {
+  // Internal hyphens normalize like spaces; an adjoining hyphenated word outside the
+  // complete name is a different, longer identity (pre-code-review/code-review-helper).
+  if (/[\p{L}\p{M}\p{N}]-+$/u.test(before) || /^-+[\p{L}\p{M}\p{N}]/u.test(after)) return false;
   return (!wordEnd.test(before) || particleBefore.test(before)) &&
     (!wordStart.test(after) || particleAfter.test(after));
 }

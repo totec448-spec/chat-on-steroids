@@ -640,9 +640,14 @@ rule. Therefore “migrate this Dagster pipeline to Airflow” intentionally doe
 `migrating-dagster-to-airflow`; a literal full id/name/display-name invocation does. This
 precision-first rule may abstain even when the task would benefit from a Skill. The explicit
 picker/directive remains available rather than injecting a specialized Skill from generic wording.
-This matches literal name presence, not intent: it does not interpret negation or quoted examples.
-`allow_implicit_invocation=false`, invalid policy/config, no literal identity and multiple literal
-matches all fail to no selection. A routed choice is frozen in the durable input row as exact
+Japanese particles may directly adjoin the complete name; longer words and hyphen-joined compounds
+outside that name do not match. Direct English/Japanese usage exclusions suppress the named Skill,
+including coordinated name lists, even when another mention of that same Skill is positive.
+Unrelated negation does not veto an invocation. Quoted examples remain literal text; this is not
+general intent classification or semantic topic routing. The managed routing owner logs a fixed
+selection/skip reason without authored text, Skill names or paths.
+`allow_implicit_invocation=false`, invalid policy/config, no eligible non-excluded literal identity
+and multiple remaining matches all fail to no selection. A routed choice is frozen in the durable input row as exact
 Skill id + published SKILL.md revision before delivery, including an explicit empty decision.
 Retries/restarts reuse that record instead of rerouting. Prompt preparation reads only the chosen
 managed body through the existing selected-Skill path and rejects it if its revision changed.
