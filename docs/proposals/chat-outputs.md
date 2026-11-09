@@ -15,10 +15,10 @@ either view or making a second file manager.
 This is a generated UI concept using synthetic content and the existing app screenshot as
 its visual reference. It is not a running implementation or evidence of working tests.
 The filenames, file sizes, change counts and test results are illustrative. The interface
-is shown in Japanese; an implementation would use the app's normal localization system.
+is shown in English; an implementation would use the app's normal localization system.
 
 The right dock keeps the conversation visible. Its upper section lists files associated
-with this chat, with search and Created/Changed filters. Selecting a row opens its details
+with this chat, with search and Created/Changed/Added by you filters. Selecting a row opens its details
 below: a supported file preview or the recorded edit, plus **Open**, **Show in folder** and
 **Go to source activity**. The last action returns to the exact recorded tool call; a
 manually added reference returns to its registration point instead.
@@ -34,8 +34,8 @@ manually added reference returns to its registration point instead.
   shell command or external app that has no structured file-change receipt. Mark that row
   as **Added by you**, not proof that the chat created it. This is the proposed way to
   include the sample PDF; its existence cannot be inferred just from an assistant claim.
-- Group repeated recorded changes to the same session/project-relative path into one row with access to
-  its source activities. A manual reference can join that row without becoming a recorded
+- Group repeated recorded changes to the same session/project-relative path into one row
+  with access to its source activities. A manual reference can join that row without becoming a recorded
   creation. Recorded deletion stays distinguishable from a file currently missing on disk.
 - Reuse the existing bounded text/image/PDF preview and immutable recorded-diff readers
   where applicable. A recorded diff describes that edit, not today's whole filesystem
