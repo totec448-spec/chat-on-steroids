@@ -2,13 +2,13 @@
  * Searching chats by title and by what was said in them (#1107).
  *
  * A chat's recorded journal can be hundreds of megabytes (tool output, images), so a query never
- * reads it. Each chat instead gets a small plain-text index, `search.txt` in its own session
+ * reads it. Each chat instead gets a plain-text index, `search.txt` in its own session
  * folder, holding only the user's and ChatGPT's words. It is built in the background the first
  * time someone searches, rebuilt only when the chat changed since, and deleted with the chat.
  * The index never leaves this computer and nothing here needs a folder permission: it is the
  * app's own recording, the same text the chat view already shows.
  */
-import { promises as fs } from 'node:fs';
+import { createReadStream, promises as fs } from 'node:fs';
 import { setImmediate as yieldToEvents } from 'node:timers/promises';
 import type { SessionSearchLocation, SessionSearchReply, SessionSearchResult, SessionSummary } from '../../shared/session.js';
 import { positionOf } from '../../shared/chronology.js';
@@ -21,13 +21,15 @@ import { foldCase } from '../../shared/fold-case.js';
 export { foldCase };
 import { logWarn } from '../logger.js';
 
-/** Plenty for a long chat's words; a runaway transcript is cut, not stored whole. */
-const MAX_INDEX_CHARS = 1_000_000;
+/** Large indexes stay on disk and are searched in bounded windows, never cut. */
+const INDEX_READ_BYTES = 64 * 1024;
+const MAX_CACHED_INDEX_CHARS = 1_000_000;
 /** Lowercased indexes kept in memory between queries. */
 const CACHE_CHARS = 24_000_000;
 const SNIPPET_CHARS = 140;
 export const MAX_SEARCH_RESULTS = 50;
-const INDEX_VERSION = 1;
+// Version 1 indexes may have silently omitted everything after the first million characters.
+const INDEX_VERSION = 2;
 
 
 /** What makes an index current: the chat's last change and its event count. */
@@ -57,43 +59,64 @@ function searchable(summary: SessionSummary): boolean {
 }
 
 /** The chat's words, one message per paragraph, from the recording. */
-async function transcriptText(id: string): Promise<string> {
+async function* transcriptText(id: string): AsyncGenerator<string> {
   const events = await readEvents(id, { kinds: ['user_message', 'assistant_message'] });
-  const parts: string[] = [];
-  let size = 0;
   for (const entry of transcriptEntries(events)) {
     const text = providerEntitiesAsMarkdown(entry.stored.truncated && entry.stored.assetId
       ? (await readOverflowText(id, entry.stored.assetId)) ?? entry.stored.text
       : entry.stored.text);
     const clean = text.replace(/\s+/g, ' ').trim();
     if (!clean) continue;
-    parts.push(clean);
-    size += clean.length + 1;
-    if (size >= MAX_INDEX_CHARS) break;
+    yield clean;
   }
-  return parts.join('\n').slice(0, MAX_INDEX_CHARS);
 }
 
-/** Reads a stored index when it is current for this stamp, else null. */
-async function storedIndex(id: string, stamp: string): Promise<string | null> {
+/** Checks the stamp, then streams text when requested. No visitor means a header-only check. */
+async function storedIndex(id: string, stamp: string, visit?: (text: string) => void): Promise<boolean> {
+  const header = `${stamp}\n`;
+  let prefix = '', checked = false;
   try {
-    const raw = await fs.readFile(sessionSearchIndexPath(id), 'utf8');
-    const newline = raw.indexOf('\n');
-    if (newline < 0 || raw.slice(0, newline) !== stamp) return null;
-    return raw.slice(newline + 1);
-  } catch { return null; }
+    for await (const chunk of createReadStream(sessionSearchIndexPath(id), { encoding: 'utf8', highWaterMark: INDEX_READ_BYTES })) {
+      let text = chunk as string;
+      if (!checked) {
+        prefix += text;
+        if (prefix.length < header.length) continue;
+        if (!prefix.startsWith(header)) return false;
+        if (!visit) return true;
+        checked = true;
+        text = prefix.slice(header.length);
+        prefix = '';
+      }
+      visit!(text);
+    }
+    return checked;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
 }
 
 async function indexOne(summary: SessionSummary): Promise<void> {
   const stamp = stampOf(summary);
   if (current.get(summary.id) === stamp) return;
-  let text = await storedIndex(summary.id, stamp);
-  if (text === null) {
-    text = await transcriptText(summary.id);
+  const valid = await storedIndex(summary.id, stamp).catch(error => {
+    logWarn(`search: chat ${summary.id} index unreadable; rebuilding: ${(error as Error).message}`);
+    return false;
+  });
+  if (!valid) {
     const file = sessionSearchIndexPath(summary.id);
-    const temporary = `${file}.${process.pid}.tmp`;
+    // One indexer owns this file; a restart truncates its unfinished predecessor instead of
+    // leaving another full-transcript temporary behind under a different process id.
+    const temporary = `${file}.tmp`;
     try {
-      await fs.writeFile(temporary, `${stamp}\n${text}`, 'utf8');
+      await fs.writeFile(temporary, `${stamp}\n`, 'utf8');
+      const handle = await fs.open(temporary, 'a');
+      try {
+        for await (const text of transcriptText(summary.id)) {
+          await handle.writeFile(text, 'utf8');
+          await handle.writeFile('\n', 'utf8');
+        }
+      } finally { await handle.close(); }
       await fs.rename(temporary, file);
     } catch (error) {
       // A chat deleted meanwhile has no folder left; nothing to keep.
@@ -102,7 +125,6 @@ async function indexOne(summary: SessionSummary): Promise<void> {
       return;
     }
   }
-  remember(summary.id, stamp, text);
   current.set(summary.id, stamp);
 }
 
@@ -154,6 +176,66 @@ export function snippetFor(text: string, lower: string, terms: string[]): Sessio
   return { text: prefix + text.slice(start, end) + suffix, matches: matchRanges(lower.slice(start, end), terms, prefix.length) };
 }
 
+/** Search windows overlap so neither a word nor the context around its first match is split. */
+function indexMatcher(title: string, terms: string[]) {
+  const matched = new Set(terms.filter(term => title.includes(term)));
+  const overlap = Math.max(...terms.map(term => term.length)) + SNIPPET_CHARS * 2;
+  let tail = '', snippet: SessionSearchResult['snippet'];
+  const visit = (chunk: string, final = false): void => {
+    const text = tail + chunk, lower = foldCase(text);
+    for (const term of terms) if (lower.includes(term)) matched.add(term);
+    if (!snippet) {
+      const first = Math.min(...terms.map(term => lower.indexOf(term)).filter(at => at >= 0));
+      // Keep a match near the window's end until its following context has arrived.
+      if (Number.isFinite(first) && (final || first + SNIPPET_CHARS <= text.length || text.indexOf('\n', first) >= 0)) {
+        snippet = snippetFor(text, lower, terms);
+      }
+    }
+    tail = text.slice(-overlap);
+  };
+  return {
+    visit,
+    finish: () => {
+      visit('', true);
+      return matched.size === terms.length ? { snippet } : null;
+    }
+  };
+}
+
+/** Reuse small indexes; stream large ones without putting the whole conversation in memory. */
+async function matchIndex(id: string, stamp: string, title: string, terms: string[]): Promise<{ snippet: SessionSearchResult['snippet'] } | null> {
+  const cached = cache.get(id);
+  if (cached?.stamp === stamp) {
+    if (!terms.every(term => title.includes(term) || cached.lower.includes(term))) return null;
+    return { snippet: snippetFor(cached.text, cached.lower, terms.filter(term => cached.lower.includes(term))) };
+  }
+  const matcher = indexMatcher(title, terms);
+  let chars = 0, parts: string[] = [];
+  try {
+    const valid = await storedIndex(id, stamp, text => {
+      matcher.visit(text);
+      chars += text.length;
+      if (chars <= MAX_CACHED_INDEX_CHARS) parts.push(text);
+      else parts = [];
+    });
+    if (!valid) {
+      logWarn(`search: chat ${id} index missing or stale; skipped, will be rebuilt`);
+      if (current.get(id) === stamp) current.delete(id);
+      return null;
+    }
+  } catch (error) {
+    if (current.get(id) === stamp) current.delete(id);
+    logWarn(`search: chat ${id} index could not be read; will retry on the next search: ${(error as Error).message}`);
+    return null;
+  }
+  if (current.get(id) !== stamp) {
+    logWarn(`search: chat ${id} changed while it was searched; skipped`);
+    return null;
+  }
+  if (chars <= MAX_CACHED_INDEX_CHARS) remember(id, stamp, parts.join(''));
+  return matcher.finish();
+}
+
 /**
  * Chats matching every word of the query: by title first, then by what was said, newest first.
  * Starts (or continues) indexing in the background; until it is done, text matches cover only the
@@ -185,22 +267,12 @@ export async function searchSessions(query: string, limit = MAX_SEARCH_RESULTS):
     // An old cache entry is not evidence of what a revised chat currently says. Until
     // its new index commits, it belongs only to the indexing progress, not the results.
     if (current.get(summary.id) !== stamp) continue;
-    let entry = cache.get(summary.id);
-    if (!entry || entry.stamp !== stamp) {
-      // Indexed earlier but pushed out of memory: read the stored index again.
-      const text = await storedIndex(summary.id, stamp);
-      if (current.get(summary.id) !== stamp) continue;
-      entry = text !== null ? remember(summary.id, stamp, text) : undefined;
-    }
-    if (!entry) continue;
-    // A word may be in the title and the rest in the text.
-    if (terms.every(term => title.includes(term) || entry!.lower.includes(term))) {
-      const inText = terms.filter(term => entry!.lower.includes(term));
-      results.push({ ...resultFor(summary, title), snippet: snippetFor(entry.text, entry.lower, inText) });
-    }
+    const match = await matchIndex(summary.id, stamp, title, terms);
+    if (match) results.push({ ...resultFor(summary, title), snippet: match.snippet });
     if (results.length > limit) break;
   }
-  return { results: results.slice(0, limit), indexed, total: summaries.length, ...(results.length > limit ? { limited: true } : {}) };
+  return { results: results.slice(0, limit), indexed: summaries.filter(summary => current.get(summary.id) === stampOf(summary)).length,
+    total: summaries.length, ...(results.length > limit ? { limited: true } : {}) };
 }
 
 /** Waits for background indexing to finish; for tests. */

@@ -1,13 +1,14 @@
+import { ReadStream } from 'node:fs';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import { initConfigPath, defaultConfig, saveConfig } from '../src/main/config.js';
 import { initDurableStore, flushDurable, resetDurableForTests } from '../src/main/durable.js';
 import {
-  createSession, deleteSession, flushSessions, initSessionStore, readEvents, renameSession, resetSessionStoreForTests, sessionSearchIndexPath, upsertMessageEvent
+  createSession, deleteSession, flushSessions, initSessionStore, readEvents, renameSession, resetSessionStoreForTests, sessionSearchIndexPath, upsertMessageEvent, writeOverflowText
 } from '../src/main/session/store.js';
 import { findInSession, foldCase, locateMessage, locateSearchMatch, queryTerms, resetSessionSearchForTests, searchIndexingSettled, searchSessions, snippetFor } from '../src/main/session/search.js';
 import { positionOf } from '../src/shared/chronology.js';
-import { makeTempDir, removeTempDir } from './helpers.js';
+import { faultGate, makeTempDir, removeTempDir } from './helpers.js';
 
 let directory: string;
 beforeEach(async () => {
@@ -125,6 +126,156 @@ it('does not return superseded words while a changed chat awaits reindexing', as
   expect((await searchSessions('needle')).results).toEqual([]);
   await searchIndexingSettled();
   expect((await search('replacement')).results.map(result => result.id)).toEqual([id]);
+});
+
+it('searches the beginning, overflow text and recent messages of a chat longer than a million characters', async () => {
+  const id = await chat('Long conversation', [['user', 'earlyneedle']]);
+  const text = `${'x'.repeat(1_000_010)} overflowneedle`;
+  const assetId = await writeOverflowText(id, text);
+  expect(assetId).not.toBeNull();
+  await upsertMessageEvent(id, { kind: 'assistant_message', source: 'extension', time: Date.now(), messageId: 'long-answer',
+    message: { text: text.slice(0, 100), chars: text.length, truncated: true, assetId: assetId! }, state: 'final', final: true });
+  await upsertMessageEvent(id, { kind: 'user_message', source: 'app', time: Date.now(), messageId: 'recent-question',
+    message: { text: 'recentneedle', chars: 12, truncated: false } });
+  await flushSessions();
+  const reply = await search('earlyneedle overflowneedle recentneedle');
+  expect(reply).toMatchObject({ results: [{ id }], indexed: 1, total: 1 });
+  expect(reply.results[0]!.snippet!.text).toBe('earlyneedle');
+  expect((await search('recentneedle')).results[0]!.snippet!.text).toBe('recentneedle');
+  expect(await locateSearchMatch(id, 'recentneedle')).toMatchObject({ messageId: 'recent-question' });
+  // Restart reuses the complete on-disk index, not the journal or a truncated in-memory copy.
+  const store = await import('../src/main/session/store.js');
+  const read = vi.spyOn(store, 'readEvents');
+  resetSessionSearchForTests();
+  expect((await search('overflowneedle recentneedle')).results.map(row => row.id)).toEqual([id]);
+  expect(read).not.toHaveBeenCalled();
+});
+
+it.each(['legacy', 'damaged'])('rebuilds a %s index from the recording', async kind => {
+  const id = await chat('Migration', [['user', 'firstneedle'], ['assistant', 'lastneedle']]);
+  await search('firstneedle');
+  const file = sessionSearchIndexPath(id);
+  const stored = await fs.readFile(file, 'utf8');
+  const header = stored.slice(0, stored.indexOf('\n')).replace(/^\d+:/, '1:');
+  await fs.writeFile(file, kind === 'legacy' ? `${header}\nfirstneedle` : 'damaged stamp\nfirstneedle');
+  resetSessionSearchForTests();
+  expect((await search('lastneedle')).results.map(row => row.id)).toEqual([id]);
+  expect(await fs.readFile(file, 'utf8')).toMatch(/^2:/);
+});
+
+it('reuses and truncates a crash-leftover temporary index after restart', async () => {
+  const id = await chat('Interrupted build', [['user', 'currentneedle']]);
+  const file = sessionSearchIndexPath(id), temporary = `${file}.tmp`;
+  await fs.writeFile(temporary, 'leftoverneedle '.repeat(100_000));
+  resetSessionSearchForTests();
+  expect((await search('currentneedle')).results.map(row => row.id)).toEqual([id]);
+  await expect(fs.stat(temporary)).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(await fs.readFile(file, 'utf8')).not.toContain('leftoverneedle');
+});
+
+it('removes the reused temporary index when publication fails', async () => {
+  const id = await chat('Interrupted publication', [['user', 'currentneedle']]);
+  const temporary = `${sessionSearchIndexPath(id)}.tmp`;
+  await fs.writeFile(temporary, 'leftoverneedle '.repeat(100_000));
+  vi.spyOn(fs, 'rename').mockRejectedValueOnce(Object.assign(new Error('synthetic busy index'), { code: 'EBUSY' }));
+  await searchSessions('currentneedle');
+  await searchIndexingSettled();
+  await expect(fs.stat(temporary)).rejects.toMatchObject({ code: 'ENOENT' });
+});
+
+it.each(['EACCES', 'EIO'])('replaces an unreadable index after %s when its directory remains writable', async code => {
+  const id = await chat('Unreadable index', [['user', 'recoverableneedle']]);
+  await searchSessions('');
+  await searchIndexingSettled();
+  const file = sessionSearchIndexPath(id);
+  const iterate = ReadStream.prototype[Symbol.asyncIterator];
+  let unreadable = true;
+  vi.spyOn(ReadStream.prototype, Symbol.asyncIterator).mockImplementation(function (this: ReadStream) {
+    if (this.path !== file || !unreadable) return iterate.call(this);
+    const stream = this;
+    return (async function* () {
+      await new Promise<void>(resolve => { stream.once('close', resolve); stream.destroy(); });
+      throw Object.assign(new Error('synthetic index read failure'), { code });
+    })();
+  });
+  const rename = fs.rename;
+  const publish = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+    await rename(from, to);
+    if (to === file) unreadable = false;
+  });
+  const logger = await import('../src/main/logger.js');
+  const warn = vi.spyOn(logger, 'logWarn');
+  // A restart has no in-memory proof; it must replace the unreadable derived file.
+  resetSessionSearchForTests();
+  expect((await search('recoverableneedle')).results.map(row => row.id)).toEqual([id]);
+  expect(publish).toHaveBeenCalledWith(`${file}.tmp`, file);
+  expect(warn).toHaveBeenCalledWith(expect.stringContaining('index unreadable; rebuilding'));
+});
+
+it.each(['missing', 'stale'])('logs and retries when a current index becomes %s before its text is read', async kind => {
+  const id = await chat('Index replacement', [['user', 'recoverableneedle']]);
+  await searchSessions('');
+  await searchIndexingSettled();
+  const file = sessionSearchIndexPath(id);
+  if (kind === 'missing') await fs.rm(file);
+  else await fs.writeFile(file, 'stale stamp\nobsolete words');
+  const logger = await import('../src/main/logger.js');
+  const warn = vi.spyOn(logger, 'logWarn');
+  expect(await searchSessions('recoverableneedle')).toMatchObject({ results: [], indexed: 0, total: 1 });
+  expect(warn).toHaveBeenCalledWith(expect.stringContaining('index missing or stale; skipped, will be rebuilt'));
+  expect((await search('recoverableneedle')).results.map(row => row.id)).toEqual([id]);
+});
+
+it('logs and discards a streamed result superseded by a newer index stamp', async () => {
+  let clock = Date.now();
+  vi.spyOn(Date, 'now').mockImplementation(() => ++clock);
+  const id = await chat('Changing chat', [['user', 'streamedneedle']]);
+  await searchSessions('');
+  await searchIndexingSettled();
+  const file = sessionSearchIndexPath(id);
+  const gate = faultGate();
+  const iterate = ReadStream.prototype[Symbol.asyncIterator];
+  let intercept = true;
+  vi.spyOn(ReadStream.prototype, Symbol.asyncIterator).mockImplementation(function (this: ReadStream) {
+    const iterator = iterate.call(this);
+    if (this.path !== file || !intercept) return iterator;
+    intercept = false;
+    return (async function* () { yield* iterator; await gate.hold(); return undefined; })();
+  });
+  const logger = await import('../src/main/logger.js');
+  const warn = vi.spyOn(logger, 'logWarn');
+  const oldSearch = searchSessions('streamedneedle');
+  try {
+    await gate.entered;
+    await upsertMessageEvent(id, { kind: 'user_message', source: 'app', time: Date.now(), messageId: 'newer-question',
+      message: { text: 'newer words', chars: 11, truncated: false } });
+    await flushSessions();
+    await searchSessions('');
+    await searchIndexingSettled();
+  } finally { gate.release(); }
+  expect((await oldSearch).results).toEqual([]);
+  expect(warn).toHaveBeenCalledWith(expect.stringContaining('changed while it was searched; skipped'));
+  expect((await search('streamedneedle')).results.map(row => row.id)).toEqual([id]);
+});
+
+it('matches words across UTF-8 read boundaries, retaining correct snippets and all-word matching', async () => {
+  const id = await chat('Boundary title', [['user', 'placeholder']]);
+  await search('placeholder');
+  const file = sessionSearchIndexPath(id);
+  const stored = await fs.readFile(file, 'utf8');
+  const header = stored.slice(0, stored.indexOf('\n') + 1);
+  // Split the two-byte İ itself, not just the word, across the 64 KiB read boundary.
+  const prefix = 'x'.repeat(64 * 1024 - Buffer.byteLength(header) - 1);
+  const body = `${prefix}İzmir😀 ${'y'.repeat(1_000_000)}\nfinalneedle`;
+  await fs.writeFile(file, header + body);
+  const read = vi.spyOn(fs, 'readFile');
+  resetSessionSearchForTests();
+  const reply = await search('title izmir😀 finalneedle');
+  expect(reply.results.map(row => row.id)).toEqual([id]);
+  const snippet = reply.results[0]!.snippet!;
+  expect(snippet.matches.map(([start, end]) => snippet.text.slice(start, end))).toContain('İzmir😀');
+  expect((await search('izmir😀 absentneedle')).results).toEqual([]);
+  expect(read.mock.calls.filter(([path]) => path === file)).toEqual([]);
 });
 
 it('marks matches at the right place, also around characters whose lowercase is longer', () => {

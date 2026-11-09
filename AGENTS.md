@@ -5111,8 +5111,17 @@ own title is never changed.
 Chat search (#1107) is IPC `sessions:search { query ≤200 }` → `SessionSearchReply { results ≤50,
 indexed, total }`. `session/search.ts` never reads a journal per query: each chat gets
 `<session>/search.txt` (first line the stamp `version:updatedAt:events`, then the user's authored
-words and ChatGPT's answers, overflow text included, capped at 1M characters), built in the
-background newest first, reused while the stamp matches, deleted with the chat. Helper chats are
+words and ChatGPT's answers, overflow text included), built in the background newest first,
+reused while the stamp matches, deleted with the chat. Version 2 indexes cover the full transcript;
+version 1's potentially truncated indexes are rebuilt from the recording. Index construction writes
+one message at a time through a fixed `search.txt.tmp`, truncating an interrupted build on restart
+before atomic publication; failed publication removes that temporary. Queries stream 64 KiB UTF-8
+windows with overlap for words and snippets.
+Only indexes of at most 1M characters are cached, within the existing 24M-character cache budget;
+this is a memory bound, not a searchable-history cutoff. An unreadable index is rebuilt from the
+recording when its directory allows replacement. A missing/stale index discovered during a query
+clears only its own current stamp so polling can recover; this skip and a streamed result superseded
+by a newer stamp each log their reason. Helper chats are
 left out, as in the sidebar. Every query word must match (title or text, any order, case- and
 accent-folded with `foldCase`, which keeps UTF-16 lengths so ranges index the original; `ß` stays). Title matches rank
 first, then text matches, each newest first. `titleMatches` and `snippet.matches` are UTF-16
