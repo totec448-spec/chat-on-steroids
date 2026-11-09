@@ -3899,5 +3899,13 @@
   "Let replies send messages to chats": "允許回覆以訊息傳送到對話",
   "A reply to a notification goes to that chat as your message, and ChatGPT may then run tools on this computer. Anyone who can use your Telegram account could do the same.": "回覆通知會以你的訊息傳送到該對話，ChatGPT 之後可能在這台電腦上執行工具。任何能使用你的 Telegram 帳號的人都能這麼做。",
   "From Telegram": "來自 Telegram",
-  "Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.": "請傳送 /start 加上 Chat On Steroids 中顯示的代碼：設定 → 手機通知 → Telegram。"
+  "Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.": "請傳送 /start 加上 Chat On Steroids 中顯示的代碼：設定 → 手機通知 → Telegram。",
+  "A list of your scheduled messages, and search through whole long chats.": "已排程訊息的清單，以及對完整長聊天的搜尋。",
+  "One list of every scheduled message, where you can pause, run or delete each.": "所有已排程訊息的一份清單，可對每則暫停、立即執行或刪除。",
+  "Search whole chats": "搜尋完整聊天",
+  "Search now reads the whole history of very long chats.": "搜尋現在會讀取超長聊天的全部歷史。",
+  "Compact & Resume holds up": "壓縮並繼續更穩定",
+  "A page reload in a Project no longer makes it fail every time.": "在專案中重新載入頁面不再每次都失敗。",
+  "Skills only when wanted": "技能僅在需要時使用",
+  "A Skill is not chosen when you say not to use it.": "你說不要使用時，不會選中該技能。"
 }
