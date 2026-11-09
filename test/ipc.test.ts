@@ -310,6 +310,32 @@ it('logs which schedule operation failed and a safe reason, never the message or
   } finally { warn.mockRestore(); }
 });
 
+it('logs the two storage-read failures the renderer is shown verbatim, and stays silent on refusals the person can fix', async () => {
+  const logger = await import('../src/main/logger.js');
+  const warn = vi.spyOn(logger, 'logWarn');
+  try {
+    const call = (name: string, payload: unknown) => handlers.get(name)!(null, payload) as Promise<any>;
+    const sessions = await import('../src/main/session/store.js');
+    const payload = { sessionId: 'any-session-0001', text: 'x', repeat: { kind: 'daily', at: '09:00' }, until: null };
+    for (const message of ['The session exists but its metadata could not be read.', 'Could not read scheduled-runs state']) {
+      warn.mockClear();
+      const spy = vi.spyOn(sessions, 'getSessionOrNullIfMissing').mockRejectedValueOnce(new Error(message));
+      const reply = await call('schedules:save', payload);
+      spy.mockRestore();
+      // The person still sees the fixed text; the log now says which operation hit it.
+      expect(reply).toEqual({ ok: false, error: message });
+      const lines = warn.mock.calls.map(args => String(args[0]));
+      expect(lines).toContain(`schedules:save failed (${message})`);
+    }
+    // A refusal the person can fix is not a failure: no log line.
+    warn.mockClear();
+    const refused = vi.spyOn(sessions, 'getSessionOrNullIfMissing').mockRejectedValueOnce(new Error('This chat no longer exists.'));
+    expect(await call('schedules:save', payload)).toEqual({ ok: false, error: 'This chat no longer exists.' });
+    refused.mockRestore();
+    expect(warn.mock.calls.map(args => String(args[0])).filter(line => line.startsWith('schedules:'))).toEqual([]);
+  } finally { warn.mockRestore(); }
+});
+
 it('lists schedules with chat titles and Run now uses the ordinary outbox without changing recurrence', async () => {
   const input = await import('../src/main/session/input.js');
   const original = await input.listInputs();

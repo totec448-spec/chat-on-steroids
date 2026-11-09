@@ -689,6 +689,46 @@ describe('durable user input ownership', () => {
     expect(info.mock.calls.map(args => String(args[0]))).toContain(`input ${scheduled.id}: scheduled claim released before Send: the chat moved on or the browser may no longer take it`);
     expect((await listInputs()).find(row => row.id === scheduled.id)).toMatchObject({ state: 'queued', owner: null });
   });
+  it('says a scheduled claim was released only once the release is saved (a failed write leaves the claim and no line)', async () => {
+    const releaseLines = (info: { mock: { calls: unknown[][] } }) => info.mock.calls.map(args => String(args[0])).filter(line => line.includes('scheduled claim released'));
+    // Authored work arrived first.
+    const user = await enqueueInput(input({ text: 'User work becomes due during scheduled claim', dueAt: now + 1_000 }));
+    const scheduled = await enqueueInput(input({ dueAt: 0, scheduled: { scheduleId: randomUUID(), dueAt: 0, late: false } }));
+    expect(await pendingBrowserInputs()).toEqual([expect.objectContaining({ id: scheduled.id })]);
+    expect(await claimBrowserInput(scheduled.id, 'native-page', binding.conversationId, true)).not.toBeNull();
+    now += 1_001;
+    const info = vi.spyOn(logger, 'logInfo');
+    vi.spyOn(fs, 'rename').mockRejectedValueOnce(new Error('disk busy'));
+    await expect(authorizeBrowserInput(scheduled.id, 'native-page', binding.conversationId)).rejects.toThrow('disk busy');
+    await flushDurable();
+    expect(releaseLines(info)).toEqual([]);
+    expect(user.id).not.toBe(scheduled.id);
+    // The chat moved on.
+    resetInputForTests();
+    await writeDurableNow('session-input', []); resetInputForTests();
+    const other = await enqueueInput(input({ dueAt: 0, scheduled: { scheduleId: randomUUID(), dueAt: 0, late: false } }));
+    expect(await claimBrowserInput(other.id, 'native-page', binding.conversationId, true)).not.toBeNull();
+    const previous = binding.conversationId;
+    binding.conversationId = 'conversation-moved-on';
+    vi.spyOn(fs, 'rename').mockRejectedValueOnce(new Error('disk busy'));
+    await expect(authorizeBrowserInput(other.id, 'native-page', previous)).rejects.toThrow('disk busy');
+    await flushDurable();
+    expect(releaseLines(info)).toEqual([]);
+  });
+  it('says a timed-out scheduled claim was released only once the release is saved', async () => {
+    const scheduled = { scheduleId: randomUUID(), dueAt: now, late: false };
+    const id = randomUUID();
+    const claim: InputEntry = { ...input({ id, scheduled }), state: 'browser', owner: 'legacy-page', createdAt: now, offeredAt: now,
+      requiresAuthorization: true, conversationId: binding.conversationId };
+    await writeDurableNow('session-input', [claim]);
+    resetInputForTests();
+    now += 60_001;
+    const info = vi.spyOn(logger, 'logInfo');
+    vi.spyOn(fs, 'rename').mockRejectedValueOnce(new Error('disk busy'));
+    await expect(listInputs()).rejects.toThrow('disk busy');
+    await flushDurable();
+    expect(info.mock.calls.map(args => String(args[0])).filter(line => line.includes('scheduled claim released'))).toEqual([]);
+  });
   it('does not let a scheduled after-turn row block an ordinary finish tool head', async () => {
     binding.activeTurnId = null;
     binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'previous-turn', time: now - 1 };

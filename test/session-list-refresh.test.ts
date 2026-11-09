@@ -544,8 +544,8 @@ describe('selected catalog fallback and pushed changes', () => {
     await openScheduledChat(fallback.id);
     opened = true;
     const row = () => w.document.querySelector<HTMLElement>(`#sessionList [data-id="${fallback.id}"]`)!;
-    await vi.waitFor(() => expect(row().querySelector('.sess-top[aria-current="true"]')).not.toBeNull());
-    await vi.waitFor(() => expect(w.document.getElementById('timeline')?.textContent).toContain('Fallback transcript'));
+    await vi.waitFor(() => expect(row().querySelector('.sess-top[aria-current="true"]')).not.toBeNull(), { timeout: 3000 });
+    await vi.waitFor(() => expect(w.document.getElementById('timeline')?.textContent).toContain('Fallback transcript'), { timeout: 3000 });
     await new Promise(resolve => setTimeout(resolve, 50));
     const before = detailReads;
 
@@ -555,7 +555,7 @@ describe('selected catalog fallback and pushed changes', () => {
     await vi.waitFor(() => expect(gated).toBe(1), { timeout: 3000 });
     // Meanwhile a rename starts a newer 'changed' read, which supersedes the waiting one.
     row().querySelector<HTMLElement>('.sess-top b')!.dispatchEvent(new w.MouseEvent('dblclick', { bubbles: true }));
-    const field = await vi.waitFor(() => { const f = row().querySelector<HTMLInputElement>('.sess-rename'); expect(f).not.toBeNull(); return f!; });
+    const field = await vi.waitFor(() => { const f = row().querySelector<HTMLInputElement>('.sess-rename'); expect(f).not.toBeNull(); return f!; }, { timeout: 3000 });
     field.value = 'Renamed while refreshing';
     field.dispatchEvent(new w.Event('input', { bubbles: true }));
     field.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
