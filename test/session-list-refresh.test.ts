@@ -503,6 +503,70 @@ describe('selected catalog fallback', () => {
   });
 });
 
+describe('selected catalog fallback and pushed changes', () => {
+  // CodeRabbit on #2063: a push consumed by a read that the exact-id check then superseded was lost.
+  it('keeps a pushed transcript change for the newer read when the exact-id check was superseded', async () => {
+    const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
+    dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
+    const w = dom.window;
+    Object.assign(globalThis, {
+      window: w, document: w.document, HTMLElement: w.HTMLElement, Element: w.Element, Node: w.Node,
+      DocumentFragment: w.DocumentFragment, HTMLInputElement: w.HTMLInputElement, HTMLSelectElement: w.HTMLSelectElement,
+      HTMLTextAreaElement: w.HTMLTextAreaElement, HTMLButtonElement: w.HTMLButtonElement
+    });
+    if (!(w.HTMLElement.prototype as any).scrollIntoView) (w.HTMLElement.prototype as any).scrollIntoView = () => {};
+    const firstPage = Array.from({ length: 60 }, (_, index) => summary(`2026-08-25-${index.toString(16).padStart(8, '0')}`, 100_000 - index, 0));
+    // Selected from another surface and absent from the bounded newest page.
+    const fallback = summary('2026-08-25-ffffffff', 99_970, 0);
+    const pageOne = { sessions: firstPage, activeId: null, pressure: [], blocked: [], approval: [], recoveryStopped: [], trusted: [], total: 61, nextCursor: null };
+    const ok = (data: any) => Promise.resolve({ ok: true as const, data });
+    let release!: (value: any) => void;
+    let gate: Promise<any> | null = null;
+    let gated = 0, detailReads = 0, opened = false, pushed!: (change?: unknown) => void;
+    const getSession = vi.fn((id: string, options?: any) => {
+      if (opened && id === fallback.id && options?.limit === 1 && gate) { gated += 1; const held = gate; gate = null; return held; }
+      if (id === fallback.id && options?.limit !== 1) detailReads += 1;
+      return ok({ summary: fallback, events: [note(1, `Fallback transcript ${detailReads}`)], total: 1, nextFrom: 2 });
+    });
+    const api: any = new Proxy({
+      listSessions: () => ok(pageOne),
+      listProjects: () => ok([]),
+      getSession,
+      getSwarm: () => ok({ running: false, runId: null, agents: [], maxWorkers: 2, pendingReports: 0 }),
+      onSessionChanged: (listener: (change?: unknown) => void) => { pushed = listener; return () => undefined; },
+      onSwarmChanged: () => () => undefined
+    }, { get(target, prop) { return prop in target ? (target as any)[prop] : (..._args: any[]) => ok(null); } });
+    Object.defineProperty(w, 'api', { value: api, configurable: true });
+    const { chatVisible, initChat, openScheduledChat } = await import('../src/renderer/chat.js');
+    initChat({ save: async () => true,
+      state: () => ({ config: { sessions: { record: true, limitTokens: 533000 }, compaction: { auto: true, autoTokens: 400000 }, ui: { developerMode: true } } }) as any });
+    chatVisible(true);
+    await openScheduledChat(fallback.id);
+    opened = true;
+    const row = () => w.document.querySelector<HTMLElement>(`#sessionList [data-id="${fallback.id}"]`)!;
+    await vi.waitFor(() => expect(row().querySelector('.sess-top[aria-current="true"]')).not.toBeNull(), { timeout: 3000 });
+    await vi.waitFor(() => expect(w.document.getElementById('timeline')?.textContent).toContain('Fallback transcript'), { timeout: 3000 });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const before = detailReads;
+
+    // A push reaches the coalesced refresh. Its read takes the invalidation, then waits on the exact-id check.
+    gate = new Promise(resolve => { release = resolve; });
+    pushed({ allTranscripts: true });
+    await vi.waitFor(() => expect(gated).toBe(1), { timeout: 3000 });
+    // Meanwhile a rename starts a newer 'changed' read, which supersedes the waiting one.
+    row().querySelector<HTMLElement>('.sess-top b')!.dispatchEvent(new w.MouseEvent('dblclick', { bubbles: true }));
+    const field = await vi.waitFor(() => { const f = row().querySelector<HTMLInputElement>('.sess-rename'); expect(f).not.toBeNull(); return f!; }, { timeout: 3000 });
+    field.value = 'Renamed while refreshing';
+    field.dispatchEvent(new w.Event('input', { bubbles: true }));
+    field.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 100));
+    release(ok({ summary: fallback, events: [note(1, 'old')], total: 1, nextFrom: 2 }));
+    await new Promise(resolve => setTimeout(resolve, 150));
+    // The pushed change was not lost with the superseded read: the transcript was read again.
+    expect(detailReads).toBeGreaterThan(before);
+  });
+});
+
 describe('scoped session change refresh', () => {
   /** Opens A in the production Chat renderer while B is another live row in the catalog. */
   async function openSelected() {
