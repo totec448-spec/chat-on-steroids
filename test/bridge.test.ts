@@ -19116,8 +19116,15 @@ describe('archiving worker chats', () => {
 describe('why a command ran out of time', () => {
   it('says no page picked up a command that never had an owner, and keeps the old words for one that did', () => {
     const unowned = commandExpiryReasonForTests({ lastError: null, claimedAt: 1, owner: null, progress: {} });
-    expect(unowned).toBe('no page picked this command up before its deadline (no browser opened it)');
+    // Nothing recorded how the chat was opened (a Stop opens it through the startup owner without saying so),
+    // so the line must not claim that no browser opened it.
+    expect(unowned).toBe('no page picked this command up before its deadline (nothing recorded how the chat was opened)');
     expect(unowned).not.toContain('the chat this app opened');
+    expect(unowned).not.toContain('no browser opened it');
+    expect(commandExpiryReasonForTests({ lastError: null, claimedAt: 1, owner: null, progress: { opened: 'browser' } }))
+      .toBe('no page picked this command up before its deadline (the browser opened it, but the page never picked up its task)');
+    expect(commandExpiryReasonForTests({ lastError: null, claimedAt: 1, owner: null, progress: { opened: 'os' } }))
+      .toBe('no page picked this command up before its deadline (it was opened through the operating system, and no page with the extension picked up its task)');
     expect(commandExpiryReasonForTests({ lastError: null, claimedAt: 1, owner: 'page-1', progress: {} }))
       .toBe('the chat this app opened did not report back in time (the page picked up its task, then reported nothing more)');
     expect(commandExpiryReasonForTests({ lastError: 'boom', claimedAt: 1, owner: null, progress: {} })).toBe('boom');
