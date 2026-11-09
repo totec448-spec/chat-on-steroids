@@ -5,6 +5,8 @@ const path = require('node:path');
 const { fixtureConfigSource } = require('./app-defaults.cjs');
 
 const root = path.resolve(__dirname, '..', '..');
+// The pictures show the version being released, and its What's new dialog counts as already seen.
+const VERSION = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 
 const fixture = (demo, sidebar) => `
   addEventListener('error', event => console.error(event.error?.stack || event.message));
@@ -43,15 +45,15 @@ const fixture = (demo, sidebar) => `
   ${fixtureConfigSource()}
   const config = fixtureConfig({ roots: [{ name: 'demo-app', path: '/Users/you/Projects/demo-app' }, { name: 'design-tokens', path: '/Users/you/Projects/design-tokens' }],
     tunnel: { kind: 'openai', tunnelId: 'tunnel_0123456789abcdef0123456789abcdef', desktopTunnelId: '', binaryPath: '' },
-    ui: { theme: 'dark', autoConnect: false, chatBrowser: 'chrome', defaultChatModel: 'gpt-6', defaultChatReasoning: 'high' }, multiAgent: { enabled: true, maxWorkers: 2 } });
+    ui: { theme: '${process.env.COS_README_THEME === 'light' ? 'light' : 'dark'}', lastSeenVersion: '${VERSION}', autoConnect: false, chatBrowser: 'chrome', defaultChatModel: 'gpt-6', defaultChatReasoning: 'high' }, multiAgent: { enabled: true, maxWorkers: 2 } });
   const surface = (id, connectorName, tools) => ({ id, connectorName, description: connectorName, cardSummary: '', optional: id !== 'core', available: true,
     localUrl: 'http://127.0.0.1:8765/mcp/' + id, publicUrl: null, tools, state: 'live', detail: '', lastRequestAt: Date.now() - 4000, lastToolCallAt: Date.now() - 4000 });
   const state = { config, hasApiKey: true, hasGoalKey: false, resolvedBinary: null,
     status: { state: 'connected', detail: '', publicUrl: null, localUrl: 'http://127.0.0.1:8765', handshakeAt: Date.now() - 60000, lastRequestAt: Date.now() - 4000, lastToolCallAt: Date.now() - 4000, health: null,
       surfaces: [surface('core', 'Chat On Steroids Core', ['read', 'apply_patch', 'exec_command'])] },
-    bridge: { running: true, paired: true, present: true, port: 8765, lastSeenAt: Date.now(), extensionVersion: '2.1.36',
-      externalExtension: { present: true, version: '2.1.36', lastSeenAt: Date.now(), signedIn: true } },
-    update: { current: '2.1.36', latest: null, stage: 'idle', error: null, checkedAt: null } };
+    bridge: { running: true, paired: true, present: true, port: 8765, lastSeenAt: Date.now(), extensionVersion: '${VERSION}',
+      externalExtension: { present: true, version: '${VERSION}', lastSeenAt: Date.now(), signedIn: true } },
+    update: { current: '${VERSION}', latest: null, stage: 'idle', error: null, checkedAt: null } };
   const summary = { id: 'demo', title: 'Dark mode for settings', conversationId: 'demo-chat', chatIds: ['demo-chat'], startedAt: T0, updatedAt: T0 + 81000,
     events: window.rows.length, userMessages: 1, toolCalls: 5, estimatedTokens: 18200, contextTokens: 18200, errors: 0, agents: ['prime'], origin: null,
     selectedModel: { model: 'gpt-6', reasoningEffort: 'high', observedAt: T0 + 1000 } };
