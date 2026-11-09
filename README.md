@@ -73,10 +73,28 @@ Add related folders to a project so ChatGPT knows about them. They never become 
 
 </td>
 </tr>
+<tr>
+<td width="50%" valign="top">
+
+### Link your own Telegram bot in a minute
+Create a bot with @BotFather, paste its token, and send the shown code to it. Your notifications then arrive in Telegram, and nothing about your chats goes anywhere else.
+
+<img src="docs/images/telegram-link.png" alt="Linking Telegram: send the shown /start code to your own bot" />
+
+</td>
+<td width="50%" valign="top">
+
+### Keep chats in projects
+Move a chat into a project from its menu or by dragging it, and undo it right away. Chats are grouped by date, and a project's folder is where its chats work.
+
+<img src="docs/images/move-to-project.png" alt="A chat's menu with Move to project and the list of projects" />
+
+</td>
+</tr>
 </table>
 
 - **Pick the model and effort per chat**, with the same controls ChatGPT offers.
-- **Projects and folders.** Group chats by project, move them between projects with Undo, and choose exactly which folders ChatGPT may touch.
+- **Folders you control.** Choose exactly which folders ChatGPT may touch, and what it may do there.
 - **Limit how many chats work at once**, so a busy day does not hit your usage in one burst.
 - **Command output in a dock.** Watch what a running command prints, read-only, and stop it with one click.
 - **Skills, plugins and pets**, 13 languages, light and dark.
