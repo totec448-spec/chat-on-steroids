@@ -20,6 +20,13 @@
 
 <h2 align="center">Code. Delegate. Keep going.</h2>
 
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/workspace-light.png">
+  <img src="docs/images/workspace.png" width="960" alt="Chat On Steroids at work: a conversation with live tool results, a task plan, and two workers beside it" />
+</picture>
+</p>
+
 **Work on the real project.** Let ChatGPT read and edit files, run tests, keep terminals open and use your desktop. Follow the actual tool results as they arrive.
 
 **Give it a team.** Split independent jobs across workers, then bring their results back. Workers keep their context, so the next task can pick up where they left off.
@@ -27,6 +34,45 @@
 **Stay in control of long tasks.** Send a correction while work runs. Goal follows unfinished work; Loop keeps working within your brief. Compact & Resume carries the session and worker history into a fresh chat.
 
 <p align="center"><strong>Uses your ChatGPT conversation rather than invoking Codex directly.</strong><br /><sub>ChatGPT Work and Codex share usage limits. Your account’s model availability, usage and context limits still apply. <a href="https://learn.chatgpt.com/docs/pricing">OpenAI usage details →</a></sub></p>
+
+<br />
+
+## What you get
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### When it needs a human, it says so
+Some steps only you can do: a sign-in, a USB key, a command it must not run. ChatGPT hands you a **step for you**, with the exact command, the folder and what it expects to see. You run it yourself and mark it **done**; the app never runs it.
+
+<img src="docs/images/step-for-you.png" alt="A step handed to you: the command, its folder and Mark as done" />
+
+</td>
+<td width="50%" valign="top">
+
+### Know what your chats are doing, away from your desk
+Get a message when a chat finishes, needs you or fails, through the free **ntfy** app or a **Telegram bot of your own**. With Telegram you can also ask `/status`, stop or pause a chat, and deny an approval from your phone. Nothing can be allowed remotely.
+
+<img src="docs/images/phone-notifications.png" alt="Phone notification settings with ntfy and Telegram" />
+
+</td>
+</tr>
+</table>
+
+- **Pick the model and effort per chat**, with the same controls ChatGPT offers.
+- **Projects and folders.** Group chats by project, move them between projects with Undo, add context folders that never grant extra access, and choose exactly which folders ChatGPT may touch.
+- **Limit how many chats work at once**, so a busy day does not hit your usage in one burst.
+- **Command output in a dock.** Watch what a running command prints, read-only, and stop it with one click.
+- **When a chat has trouble, one row says why:** since when, how often the app tried, and what it did.
+- **Skills, plugins and pets**, 13 languages, light and dark.
+
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/model-picker-light.png">
+  <img src="docs/images/model-picker.png" width="720" alt="Model and reasoning selection" />
+</picture>
+</p>
 
 ## Responsible use and provider rules
 
@@ -65,13 +111,12 @@ Windows 10/11, **macOS 13 Ventura or newer**, or a current desktop Linux. Chrome
 </details>
 
 <details>
-<summary>More screenshots</summary>
+<summary>Folder and capability settings</summary>
 
-![Conversation, workers and task plan](docs/images/workspace.png)
-
-![Model and reasoning selection](docs/images/model-picker.png)
-
-![Folder and capability settings](docs/images/settings.png)
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/settings-light.png">
+  <img src="docs/images/settings.png" width="960" alt="Folder and capability settings" />
+</picture>
 
 </details>
 
@@ -79,7 +124,7 @@ Windows 10/11, **macOS 13 Ventura or newer**, or a current desktop Linux. Chrome
 
 ---
 
-<p align="center"><a href="docs/setup.md">Setup &amp; help</a> &nbsp;·&nbsp; <a href="docs/plugins.md">Plugins</a> &nbsp;·&nbsp; <a href="CONTRIBUTING.md">Contribute</a> &nbsp;·&nbsp; <a href="SECURITY.md">Security</a> &nbsp;·&nbsp; <a href="LICENSE">MIT license</a></p>
+<p align="center"><a href="docs/setup.md">Setup &amp; help</a> &nbsp;·&nbsp; <a href="docs/README.md">Docs</a> &nbsp;·&nbsp; <a href="docs/plugins.md">Plugins</a> &nbsp;·&nbsp; <a href="CONTRIBUTING.md">Contribute</a> &nbsp;·&nbsp; <a href="SECURITY.md">Security</a> &nbsp;·&nbsp; <a href="LICENSE">MIT license</a></p>
 
 <p align="center">Built with our <a href="CONTRIBUTORS.md">community contributors</a>. Thank you to the people behind the code, designs, bug reports and testing.</p>
 
