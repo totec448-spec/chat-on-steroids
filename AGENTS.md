@@ -6217,7 +6217,7 @@ remain semantically targetable; they never receive image coordinates or supply d
 Operational Desktop errors expose their original code, nullable completion evidence and a concrete
 recovery step. Recovery never dispatches another input or treats a target failure as global
 read-only mode. Preserve exact identity, generation, geometry, clipboard and browser policy checks.
-See `docs/worklog-2026-09-19-computer-use-audit.md` for the forty-chat audit and regression coverage.
+See `docs/archive/worklog-2026-09-19-computer-use-audit.md` for the forty-chat audit and regression coverage.
 
 For Chromium browser windows, `BrowserRootView` owns the current accessibility tree, including
 the address bar and displayed document. Legacy renderer HWNDs can expose old tabs with plausible
