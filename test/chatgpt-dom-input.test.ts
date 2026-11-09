@@ -527,6 +527,52 @@ describe('native Project entry readiness', () => {
     }
   });
 
+  // #2115: the page that typed a brief is gone (a reload, an app restart, another tab); ChatGPT still holds the
+  // text in the Project home. The brief is the app's own whoever typed it, so it is recognised from storage.
+  // ChatGPT may also put the draft back after it was cleared, so one clear is not enough.
+  it.each([
+    ['a brief an earlier page of this tab typed', 0, true],
+    ['that brief put back twice while the source turns are still going away', 2, true],
+    ['that brief put back four times (it stops, so a busy page cannot loop forever)', 4, false]
+  ] as const)('on the Project home, clears %s', async (_name, restores, cleared) => {
+    const { resumeBootstrapText } = await import('../src/main/session/handoff.js');
+    const brief = resumeBootstrapText('# TASK — the original goal\n\nShip the mail service.', 'pTYR0VjLJ5Xtz2FHFqajqA');
+    document.execCommand = (command: string, _ui?: boolean, value?: string) => {
+      const selection = document.getSelection();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+      if (!range) return false;
+      if (command === 'delete') { range.deleteContents(); return true; }
+      if (command !== 'insertHTML') return false;
+      range.deleteContents();
+      const template = document.createElement('template');
+      template.innerHTML = value || '';
+      range.insertNode(template.content);
+      return true;
+    };
+    box.textContent = '';
+    expect(api.insertPrompt(brief, true)).toBe(true);
+    box.textContent = '';
+    // The page reloads: its memory of what it typed is gone, the stored fingerprint is not.
+    dom.window.eval(source);
+    api = (dom.window as unknown as { CLF_DOM: DomApi }).CLF_DOM;
+    const put = () => box.replaceChildren(...brief.split(/\n\n/).map(part => { const p = document.createElement('p'); p.textContent = part; return p; }));
+    const link = sourceLink();
+    link.addEventListener('click', event => {
+      event.preventDefault();
+      dom.reconfigure({ url: projectUrl });
+      put();
+      // The source chat's turns are still on the page for a moment, and ChatGPT puts the draft back meanwhile.
+      user('Earlier turn');
+      for (let index = 1; index <= restores; index++) setTimeout(() => { if (box.textContent === '') put(); }, 400 * index);
+      setTimeout(() => { document.querySelector('[data-testid="conversation-turn-1"]')?.remove(); }, 400 * (restores + 1));
+    });
+    const failure = vi.fn();
+    const entered = api.enterProject(entry, undefined, failure);
+    await vi.advanceTimersByTimeAsync(12_500);
+    expect(await entered).toBe(cleared);
+    if (!cleared) expect(failure).toHaveBeenCalledWith('transition-timeout:last=composer-not-ready');
+  });
+
   it('reports visible source turns as the last observation when the Project transition times out', async () => {
     const link = sourceLink();
     box.textContent = '';
