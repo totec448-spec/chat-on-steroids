@@ -100,34 +100,35 @@ function directlyExcluded(text: string, start: number, end: number): boolean {
   return englishExclusionBefore(text, start, end) || japaneseAfter.test(after) || englishAfter.test(after);
 }
 
-function identityPhrases(candidate: SkillRoutingMetadata): string[][] {
+function identityPhrases(candidate: SkillRoutingMetadata): { parts: string[]; invocationAlias: boolean }[] {
   const seen = new Set<string>();
-  const phrases: string[][] = [];
+  const phrases: { parts: string[]; invocationAlias: boolean }[] = [];
   for (const raw of [candidate.id, candidate.name, candidate.displayName ?? '']) {
     const phrase = normalizedParts(raw);
     if (!phrase.length) continue;
     const key = phrase.join('\u0000');
-    if (!seen.has(key)) { seen.add(key); phrases.push(phrase); }
+    if (!seen.has(key)) { seen.add(key); phrases.push({ parts: phrase, invocationAlias: false }); }
     // Maintainer-suggested literal naming convention: `using-git-worktrees` may be invoked as
     // "use git worktrees". Keep the complete suffix contiguous; this is not general stemming.
     if (phrase.length > 1 && phrase[0] === 'using') {
       const alias = ['use', ...phrase.slice(1)];
       const aliasKey = alias.join('\u0000');
-      if (!seen.has(aliasKey)) { seen.add(aliasKey); phrases.push(alias); }
+      if (!seen.has(aliasKey)) { seen.add(aliasKey); phrases.push({ parts: alias, invocationAlias: true }); }
     }
   }
   return phrases;
 }
 
-interface SkillMention { id: string; start: number; end: number; excluded: boolean }
+interface SkillMention { id: string; start: number; end: number; excluded: boolean; invocationAlias: boolean }
 
 function skillMentions(authored: string, candidate: SkillRoutingMetadata): SkillMention[] {
   const mentions: SkillMention[] = [];
-  for (const phrase of identityPhrases(candidate)) {
+  for (const { parts: phrase, invocationAlias } of identityPhrases(candidate)) {
     for (const match of authored.matchAll(phrasePattern(phrase))) {
       const start = match.index, end = start + match[0].length;
       if (!literalBoundary(authored, start, end)) continue;
-      mentions.push({ id: candidate.id, start, end, excluded: directlyExcluded(authored, start, end) });
+      mentions.push({ id: candidate.id, start, end, excluded: directlyExcluded(authored, start, end),
+        invocationAlias: invocationAlias && /^use\s/u.test(match[0]) });
     }
   }
   return mentions;
@@ -150,7 +151,15 @@ function namedSkills(authored: string, candidates: readonly SkillRoutingMetadata
   const listJoin = /^[\s"'`「」『』()]*(?:,(?:\s*(?:and|or))?|and(?:\/or)?|or|[、とやも/&]|または)[\s"'`「」『』()]*$/u;
   for (let start = 0; start < groups.length;) {
     let end = start + 1;
-    while (end < groups.length && listJoin.test(authored.slice(groups[end - 1]!.end, groups[end]!.start))) end += 1;
+    while (end < groups.length) {
+      const join = authored.slice(groups[end - 1]!.end, groups[end]!.start);
+      if (!listJoin.test(join)) break;
+      // A generated "use X" alias includes its invocation verb. After a comma (optionally
+      // "and"), that starts a new clause, unlike a literal "Using X"/"Use Cases" list item.
+      if (/^[\s"'`」』)]*[,、]\s*(?:and\s+)?["'`「『(]*$/u.test(join) &&
+        groups[end]!.mentions.some(mention => mention.invocationAlias)) break;
+      end += 1;
+    }
     const list = groups.slice(start, end).flatMap(group => group.mentions);
     // A direct exclusion applies to a coordinated list in either direction: "don't use A
     // or B", "AとBは使わない". A new invocation clause does not inherit that exclusion.

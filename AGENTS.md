@@ -644,6 +644,8 @@ Recognized Japanese particles may directly adjoin the complete name; other word 
 hyphen-joined compounds outside that name do not match. Particle recognition is lexical, not Japanese
 word segmentation, so very short/common Japanese names can still be ambiguous. Direct English/Japanese usage exclusions suppress the named Skill,
 including coordinated name lists, even when another mention of that same Skill is positive.
+An invocation alias `use X` after a comma (optionally followed by `and`) starts a new clause;
+a literal `Using X` name or an `or` list continues the exclusion instead.
 Unrelated negation does not veto an invocation. Quoted examples remain literal text; this is not
 general intent classification or semantic topic routing. The managed routing owner logs a fixed
 selection/skip reason without authored text, Skill names or paths.
