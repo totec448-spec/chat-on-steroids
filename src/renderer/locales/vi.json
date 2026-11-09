@@ -3899,5 +3899,13 @@
   "Let replies send messages to chats": "Cho phép câu trả lời gửi tin nhắn đến các cuộc trò chuyện",
   "A reply to a notification goes to that chat as your message, and ChatGPT may then run tools on this computer. Anyone who can use your Telegram account could do the same.": "Câu trả lời cho một thông báo sẽ đến cuộc trò chuyện đó dưới dạng tin nhắn của bạn, và ChatGPT khi đó có thể chạy công cụ trên máy tính này. Bất kỳ ai dùng được tài khoản Telegram của bạn cũng có thể làm như vậy.",
   "From Telegram": "Từ Telegram",
-  "Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.": "Gửi /start kèm mã hiển thị trong Chat On Steroids: Cài đặt → Thông báo trên điện thoại → Telegram."
+  "Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.": "Gửi /start kèm mã hiển thị trong Chat On Steroids: Cài đặt → Thông báo trên điện thoại → Telegram.",
+  "A list of your scheduled messages, and search through whole long chats.": "Danh sách tin nhắn đã lên lịch của bạn và tìm kiếm trong toàn bộ chat dài.",
+  "One list of every scheduled message, where you can pause, run or delete each.": "Một danh sách mọi tin nhắn đã lên lịch, nơi bạn có thể tạm dừng, chạy ngay hoặc xóa từng tin.",
+  "Search whole chats": "Tìm trong toàn bộ chat",
+  "Search now reads the whole history of very long chats.": "Tìm kiếm giờ đọc toàn bộ lịch sử của các chat rất dài.",
+  "Compact & Resume holds up": "Nén & Tiếp tục ổn định hơn",
+  "A page reload in a Project no longer makes it fail every time.": "Tải lại trang trong một dự án không còn khiến nó thất bại mỗi lần.",
+  "Skills only when wanted": "Skill chỉ khi cần",
+  "A Skill is not chosen when you say not to use it.": "Skill không được chọn khi bạn nói không dùng nó."
 }
