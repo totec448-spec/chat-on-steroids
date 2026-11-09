@@ -28,9 +28,9 @@ The README's screenshots are made from the real app with made-up data, so they c
 
 ```
 npm run build
-npx electron scripts/capture-readme-shots.cjs                          # workspace, model picker, settings (dark)
-COS_README_THEME=light npx electron scripts/capture-readme-shots.cjs   # the same in light
-node scripts/capture-readme-features.cjs                               # step for you, phone notifications
+npx electron scripts/capture-readme-shots.cjs         # workspace, model picker, settings
+node scripts/capture-readme-features.cjs              # step for you, why it is stuck, related folders, phone notifications
+npx electron scripts/capture-readme-demo.cjs          # the demo recording (demo.gif and demo.mp4)
 ```
 
 ## Engineering history

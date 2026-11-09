@@ -18,6 +18,8 @@ const images = path.join(root, 'docs/images');
 // writes to when it does not take COS_UI_OUTPUT]
 const features = [
   ['verify-user-requests.cjs', 'timeline-dark.png', 'step-for-you.png', { x: 0.29, y: 0.2, w: 0.64, h: 0.5 }],
+  ['verify-recovery-episode.cjs', 'stopped-dark.png', 'why-stuck.png', { x: 0.27, y: 0.56, w: 0.68, h: 0.3 }],
+  ['verify-related-folders.cjs', 'dialog-two.png', 'related-folders.png', { x: 0.31, y: 0.3, w: 0.368, h: 0.4 }],
   ['verify-phone-push.cjs', 'phone-en-1100.png', 'phone-notifications.png', { x: 0, y: 0, w: 1, h: 0.605 }, 'outputs/phone-push']
 ];
 
