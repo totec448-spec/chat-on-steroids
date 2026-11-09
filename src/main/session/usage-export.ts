@@ -19,6 +19,24 @@ export async function exportUsageCsv(divisor: number, owner: BrowserWindow | nul
   };
   const result = owner ? await dialog.showSaveDialog(owner, options) : await dialog.showSaveDialog(options);
   if (result.canceled || !result.filePath) return { saved: false };
+  if (process.platform === 'linux') {
+    // Electron 44's GTK chooser can ignore showOverwriteConfirmation. Own this confirmation
+    // here rather than asking twice on backends that do support the native flag.
+    const exists = await fs.lstat(result.filePath).then(() => true, (error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return false;
+      logWarn(`Usage export not saved: ${error.code ?? 'file check failed'}`);
+      throw error;
+    });
+    if (exists) {
+      const confirmation = {
+        type: 'warning' as const, title: mainText('Export usage as CSV'),
+        message: mainText('Replace this CSV file?'), detail: path.basename(result.filePath),
+        buttons: [mainText('Cancel'), mainText('Replace file')], defaultId: 0, cancelId: 0, noLink: true
+      };
+      const { response } = owner ? await dialog.showMessageBox(owner, confirmation) : await dialog.showMessageBox(confirmation);
+      if (response !== 1) return { saved: false };
+    }
+  }
   // Read after the dialog, so the file holds the limits as they are when it is written.
   const csv = usageCsv(await usageOverview(), divisor, Date.now());
   // Write beside the chosen file and then replace it, so a failed write leaves an earlier export whole.

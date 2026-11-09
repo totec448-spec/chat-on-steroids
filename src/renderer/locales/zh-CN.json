@@ -1,4 +1,6 @@
 {
+  "Replace this CSV file?": "要替换此 CSV 文件吗？",
+  "Replace file": "替换文件",
   "Steps for you, a limit on busy chats, and Telegram notifications.": "为你准备的步骤、忙碌聊天的上限，以及 Telegram 通知。",
   "Steps for you": "为你准备的步骤",
   "When ChatGPT needs something only you can do, it hands you the step. You run it and mark it done.": "当 ChatGPT 需要只有你能做的事时，它会把这一步交给你。你执行后标记为已完成。",

@@ -46,6 +46,9 @@ export const MAIN_TEXTS = [
   'You',
   'Export as HTML',
   'Export usage as CSV',
+  'Replace this CSV file?',
+  'Cancel',
+  'Replace file',
   // Phone notifications (ntfy).
   'A chat is waiting for you.',
   'Something failed in Chat On Steroids.',
