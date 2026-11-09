@@ -77,7 +77,7 @@ Add related folders to a project so ChatGPT knows about them. They never become 
 <td width="50%" valign="top">
 
 ### Link your own Telegram bot in a minute
-Create a bot with @BotFather, paste its token, and send the shown code to it. Your notifications then arrive in Telegram, and nothing about your chats goes anywhere else.
+Create a bot with @BotFather, paste its token, and send the shown code to it. Notifications then also arrive in Telegram. ntfy keeps working until you turn its switch off in the phone notification settings, and with "Include chat names and answers" on, either one can carry chat names and answers.
 
 <img src="docs/images/telegram-link.png" alt="Linking Telegram: send the shown /start code to your own bot" />
 
