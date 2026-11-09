@@ -39,6 +39,7 @@ ChatGPT can now hand you a step it cannot do itself, you can limit how many chat
 - **Tool calls find their chat.** Calls are matched to their chat through the proven ChatGPT session, so later calls in a long chat no longer end up unattributed.
 - **New chat tabs are followed** in your browser once the chat exists.
 - **Clear logs.** Who sent each Stop and each Goal or Loop switch is now in the log.
+- **The bundled OpenAI tunnel client** is updated to v0.0.20.
 
 ### 🛠 Fixed
 
@@ -47,6 +48,7 @@ ChatGPT can now hand you a step it cannot do itself, you can limit how many chat
 - Small layout fixes: the plugin offer in narrow windows, the folder choice in Related folders on one line, and the time of an answered step.
 - Text fixes in several languages in the extension popup.
 - Fewer false "chat closed" messages when a tab outlives its worker.
+- A damaged entry in a chat's saved bookmarks no longer hides the valid ones.
 - An answer that kept growing after a Stop that ChatGPT had not obeyed is no longer cut off after its first sentence in the app.
 - Tabs that an agent opens through the browser stay in the Chrome window it is already working in, instead of following the window you last clicked.
 - A chat no longer stays "working" for hours when ChatGPT's request keeps calling tools after the page reported its answer finished and then goes quiet: the app ends that turn again after 11 minutes.
