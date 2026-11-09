@@ -48,6 +48,82 @@ it('routes one literal normalized Skill name and carries its exact published rev
     .toEqual([{ id: 'code-review', revision: revision('a') }]);
 });
 
+it.each(['code-reviewを使って確認して', 'この変更はcode-reviewで確認して', 'このcode-reviewを使って'])(
+  'routes a complete literal name next to Japanese particles: %s', authored => {
+    expect(routeSkillMetadata(authored, [candidate()]))
+      .toEqual([{ id: 'code-review', revision: revision('a') }]);
+  }
+);
+
+it('routes a complete Japanese display name without requiring spaces around particles', () => {
+  expect(routeSkillMetadata('コードレビューを使って確認して', [candidate({ displayName: 'コードレビュー' })]))
+    .toEqual([{ id: 'code-review', revision: revision('a') }]);
+});
+
+it.each([
+  'code-review は使わないで', 'code-reviewを使わずに進めて',
+  'コードレビューは使用しないで', 'Do not use Code Review for this task.',
+  "Don't use code-review.", 'Never invoke Code Review.', 'Work without using Code Review.',
+  '「code-review」は使わないで', 'Code Review must not be used.',
+  'code-reviewを使ってはいけない', 'code-reviewは使うな', 'code-reviewを使用せずに進めて'
+])('does not auto-select a directly excluded Skill: %s', authored => {
+  expect(routeSkillMetadata(authored, [candidate({ displayName: 'コードレビュー' })])).toEqual([]);
+});
+
+it.each([
+  'Use Code Review to check why the tests do not pass.',
+  'Do not deploy; use Code Review first.',
+  'Do not skip Code Review.',
+  'code-reviewを使って失敗しないように確認して'
+])('does not mistake unrelated or double negation for a Skill exclusion: %s', authored => {
+  expect(routeSkillMetadata(authored, [candidate()]))
+    .toEqual([{ id: 'code-review', revision: revision('a') }]);
+});
+
+it.each(['precode-reviewを使って', 'code-reviewerを使って', 'コードレビュー支援を使って', 'code-review𠮷を使って'])(
+  'does not match a partial Skill name inside a longer name: %s', authored => {
+    expect(routeSkillMetadata(authored, [candidate({ displayName: 'コードレビュー' })])).toEqual([]);
+  }
+);
+
+it('keeps a directly excluded Skill out even when another mention is positive', () => {
+  expect(routeSkillMetadata('Use Code Review. Do not use code-review.', [candidate()])).toEqual([]);
+});
+
+it('can route one requested Skill while excluding another named Skill', () => {
+  const audit = candidate({ id: 'security-audit', name: 'Security Audit', revision: revision('b') });
+  expect(routeSkillMetadata('Do not use Code Review; use Security Audit.', [candidate(), audit]))
+    .toEqual([{ id: audit.id, revision: audit.revision }]);
+  expect(routeSkillMetadata('code-reviewではなくsecurity-auditを使って', [candidate(), audit]))
+    .toEqual([{ id: audit.id, revision: audit.revision }]);
+});
+
+it.each([
+  'Do not use code-review or security-audit.',
+  'Do not use code-review, security-audit.',
+  'code-reviewとsecurity-auditは使わないで',
+  'code-reviewもsecurity-auditも使わないで',
+  'code-review、security-auditを使用しないで'
+])('excludes every Skill in an explicitly excluded list: %s', authored => {
+  const audit = candidate({ id: 'security-audit', name: 'Security Audit', revision: revision('b') });
+  expect(routeSkillMetadata(authored, [candidate(), audit])).toEqual([]);
+});
+
+it('retains excluded list context from a Skill that does not allow implicit invocation', () => {
+  const audit = candidate({ id: 'security-audit', name: 'Security Audit', revision: revision('b') });
+  expect(routeSkillMetadata('Do not use Code Review or Security Audit.', [
+    candidate({ allowImplicitInvocation: false }), audit
+  ])).toEqual([]);
+});
+
+it('does not propagate an exclusion across a new invocation clause', () => {
+  const audit = candidate({ id: 'security-audit', name: 'Security Audit', revision: revision('b') });
+  expect(routeSkillMetadata('Do not use Code Review, use Security Audit.', [candidate(), audit]))
+    .toEqual([{ id: audit.id, revision: audit.revision }]);
+  expect(routeSkillMetadata('code-reviewは使わないで、security-auditを使って', [candidate(), audit]))
+    .toEqual([{ id: audit.id, revision: audit.revision }]);
+});
+
 it('returns none for unnamed, ambiguous, or implicit-disabled metadata', () => {
   const task = 'Please use Code Review for this change.';
   expect(routeSkillMetadata('Prepare a quarterly budget summary.', [candidate()])).toEqual([]);
