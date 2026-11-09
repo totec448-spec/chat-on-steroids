@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { pathEntries } from '../src/main/env.js';
 import {
@@ -19,6 +20,7 @@ import {
   terminateProcessTree
 } from '../src/main/exec.js';
 import { IS_WINDOWS, makeTempDir, removeTempDir } from './helpers.js';
+import { CHILD_PID_PREFIX, waitForChildPid } from './process-ready.js';
 
 let cwd: string;
 const node = process.execPath;
@@ -231,30 +233,33 @@ describe('runCommand', () => {
 describe('terminateProcess', () => {
   // The desktop helper launches apps for the person; retiring the helper must not close them.
   it('ends only the process it names, and what that process started keeps running', async () => {
-    const pidFile = path.join(cwd, 'terminate-one-child.pid');
     const { spawn } = await import('node:child_process');
     // On Windows the parent is PowerShell starting a program the way the desktop helper does. A
     // node parent would not do: libuv puts a node process's children in a kill-on-close job, so
     // they end with it however it is ended.
     const started = IS_WINDOWS
-      ? spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-        `$s = New-Object System.Diagnostics.ProcessStartInfo; $s.FileName = 'ping.exe'; $s.Arguments = '-n 600 127.0.0.1'; $s.UseShellExecute = $false; $s.CreateNoWindow = $true; ` +
-        '$p = [System.Diagnostics.Process]::Start($s); Set-Content -LiteralPath $env:COS_TEST_PID_FILE -Value $p.Id; Start-Sleep 600'],
-      { stdio: 'ignore', windowsHide: true, env: { ...process.env, COS_TEST_PID_FILE: pidFile } })
-      : spawn(node, ['-e', `const {spawn}=require('node:child_process'); const fs=require('node:fs'); const child=spawn(${JSON.stringify(node)}, ['-e', 'setInterval(() => {}, 1000)'], {stdio:'ignore'}); fs.writeFileSync(${JSON.stringify(pidFile)}, String(child.pid)); setInterval(() => {}, 1000);`], { stdio: 'ignore' });
+      ? spawn('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
+        `$ErrorActionPreference = 'Stop'; try { $s = New-Object System.Diagnostics.ProcessStartInfo; $s.FileName = 'ping.exe'; $s.Arguments = '-n 600 127.0.0.1'; $s.UseShellExecute = $false; $s.CreateNoWindow = $true; ` +
+        `$p = [System.Diagnostics.Process]::Start($s); [Console]::Out.WriteLine('${CHILD_PID_PREFIX}' + $p.Id); [Console]::Out.Flush(); Start-Sleep 600 } ` +
+        'catch { [Console]::Error.WriteLine($_.Exception.Message); [Console]::Error.Flush(); exit 1 }'],
+      { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+      : spawn(node, [fileURLToPath(new URL('./fixtures/process-lifetime-parent.cjs', import.meta.url)), CHILD_PID_PREFIX],
+        { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     const exited = new Promise((resolve) => started.once('exit', resolve));
     let childPid = 0;
     try {
-      for (let tries = 0; tries < 200 && !childPid; tries++) {
-        childPid = Number.parseInt((await fs.readFile(pidFile, 'utf8').catch(() => '0')).trim(), 10) || 0;
-        if (!childPid) await new Promise((resolve) => setTimeout(resolve, 50));
-      }
+      childPid = await waitForChildPid(started, 15_000);
       expect(childPid).toBeGreaterThan(0);
+      if (!IS_WINDOWS) expect(() => process.kill(-started.pid!, 0)).not.toThrow();
       await terminateProcess(started.pid!);
       await exited;
       expect(() => process.kill(childPid, 0)).not.toThrow();
     } finally {
-      if (started.exitCode === null && started.signalCode === null) started.kill();
+      // Reclaim the fixture's own POSIX process group even if its parent exited without a
+      // receipt. Windows uses the existing taskkill tree cleanup while the parent is alive.
+      if (started.pid && (!childPid || (started.exitCode === null && started.signalCode === null))) {
+        await terminateProcessTree(started.pid, true).catch(() => undefined);
+      }
       if (childPid > 0) await terminateProcessTree(childPid, true).catch(() => undefined);
     }
   });
