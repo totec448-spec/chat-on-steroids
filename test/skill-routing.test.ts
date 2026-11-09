@@ -105,6 +105,18 @@ it('handles a large failed exclusion match without suppressing the named Skill',
     .toEqual([{ id: 'code-review', revision: revision('a') }]);
 });
 
+it('handles near-limit repeated mentions and still honors a final exclusion', () => {
+  const phrase = 'Use code-review. ';
+  const authored = phrase.repeat(Math.floor(95_000 / phrase.length));
+  expect(routeSkillMetadata(authored, [candidate()]))
+    .toEqual([{ id: 'code-review', revision: revision('a') }]);
+  expect(routeSkillMetadata(authored + 'Do not use code-review.', [candidate()])).toEqual([]);
+});
+
+it('keeps a direct exclusion across a large whitespace gap without a context-window cutoff', () => {
+  expect(routeSkillMetadata(`Do not use${' '.repeat(20_000)}Code Review`, [candidate()])).toEqual([]);
+});
+
 it('keeps a directly excluded Skill out even when another mention is positive', () => {
   expect(routeSkillMetadata('Use Code Review. Do not use code-review.', [candidate()])).toEqual([]);
 });
