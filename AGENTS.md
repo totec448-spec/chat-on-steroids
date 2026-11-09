@@ -6340,6 +6340,14 @@ the whole run replaying one long workflow; avoid optimizing speculative edge cas
 | Plugins/auth/native Desktop | manager/exposure/OAuth or computer frame owner | `plugins-*`, `computer*`, `tools-desktop-*`, `macos-*` |
 | Startup/connection/shipping | lifecycle/config/connection or packaging script | `config`, `window-*`, `shutdown`, `tunnel*`, `control-api`, `packaging`, `update`, `third-party-notices` |
 
+The process-lifetime regression in `test/exec.test.ts` waits for a newline-terminated child-PID
+receipt on stdout (`test/process-ready.ts`), not a polled PID file. Startup errors, premature exits
+and timeout include bounded stdout/stderr, drained through close within the original deadline.
+Failed startup attempts cleanup of the fixture's process tree; the POSIX parent owns a detached
+process group so an unreported child can be reclaimed even after the parent exits.
+Windows retains its PowerShell parent so the assertion still tests parent-only termination rather
+than Node's Windows job-object behavior. Helper tests use fake time, not real startup sleeps.
+
 Discover current suites with `rg --files test`; do not maintain a stale suite count. Vitest runs files in
 parallel but the tests of one file in sequence, so a file that boots the renderer per test is split
 into parts sharing one harness (`renderer-timeline.part*.test.ts` with `renderer-timeline.harness.ts`,
