@@ -4067,5 +4067,13 @@
   "Let replies send messages to chats": "Deixar respostas enviarem mensagens aos chats",
   "A reply to a notification goes to that chat as your message, and ChatGPT may then run tools on this computer. Anyone who can use your Telegram account could do the same.": "Uma resposta a uma notificação vai para esse chat como mensagem sua, e o ChatGPT pode então executar ferramentas neste computador. Qualquer pessoa que consiga usar sua conta do Telegram poderia fazer o mesmo.",
   "From Telegram": "Do Telegram",
-  "Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.": "Envie /start com o código mostrado no Chat On Steroids: Configurações → Notificações no celular → Telegram."
+  "Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.": "Envie /start com o código mostrado no Chat On Steroids: Configurações → Notificações no celular → Telegram.",
+  "A list of your scheduled messages, and search through whole long chats.": "Uma lista das suas mensagens agendadas e busca em chats longos inteiros.",
+  "One list of every scheduled message, where you can pause, run or delete each.": "Uma lista de todas as mensagens agendadas, onde você pode pausar, executar ou excluir cada uma.",
+  "Search whole chats": "Buscar em chats inteiros",
+  "Search now reads the whole history of very long chats.": "A busca agora lê todo o histórico de chats muito longos.",
+  "Compact & Resume holds up": "Compactar e retomar aguenta",
+  "A page reload in a Project no longer makes it fail every time.": "Recarregar a página em um projeto não faz mais falhar sempre.",
+  "Skills only when wanted": "Skills só quando desejado",
+  "A Skill is not chosen when you say not to use it.": "Uma Skill não é escolhida quando você diz para não usá-la."
 }
