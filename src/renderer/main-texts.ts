@@ -52,6 +52,8 @@ export function mainTexts(): Record<MainText, string> {
     'Replace this CSV file?': t('Replace this CSV file?'),
     'Cancel': t('Cancel'),
     'Replace file': t('Replace file'),
+    'Save here and replace any existing file?': t('Save here and replace any existing file?'),
+    'Save': t('Save'),
     'A chat is waiting for you.': t('A chat is waiting for you.'),
     'Something failed in Chat On Steroids.': t('Something failed in Chat On Steroids.'),
     'A chat finished.': t('A chat finished.'),

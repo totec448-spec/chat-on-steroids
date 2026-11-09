@@ -2642,9 +2642,11 @@ guards text cells against spreadsheet formulas, and holds no path, chat, account
 conversation id. Before replacing an existing CSV, Linux asks through a main-process message
 box with Cancel as the default; Electron 44's GTK chooser can ignore its native overwrite flag.
 Windows/macOS keep the native save panel's confirmation. Cancelling leaves the destination unchanged.
-New Linux destinations are published without replacement (a hard link, or an exclusive copy on
-volumes without hard links); a name taken while preparing the CSV asks the same question before
-replacement. The staging file is cleaned up on success, cancellation and failure.
+New Linux destinations are published without replacement through a hard link; a name taken while
+preparing the CSV asks the same question before replacement. Volumes without hard links remain
+usable: an explicit "Save here and replace any existing file?" question authorizes atomic rename.
+Publication never copies bytes into the visible destination. The staging file is cleaned up on
+success, cancellation and failure.
 Tests: `usage-export`, `usage-export-files`, `renderer-usage`.
 
 ### Other apps on this computer (#482)
