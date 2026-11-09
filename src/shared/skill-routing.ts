@@ -40,26 +40,54 @@ function phrasePattern(phrase: readonly string[]): RegExp {
   return new RegExp(pattern, 'gu');
 }
 
-function literalBoundary(before: string, after: string): boolean {
+function literalBoundary(text: string, start: number, end: number): boolean {
   // Internal hyphens normalize like spaces; an adjoining hyphenated word outside the
   // complete name is a different, longer identity (pre-code-review/code-review-helper).
-  if (/[\p{L}\p{M}\p{N}]-+$/u.test(before) || /^-+[\p{L}\p{M}\p{N}]/u.test(after)) return false;
+  let left = start, right = end;
+  while (left && text[left - 1] === '-') left -= 1;
+  while (text[right] === '-') right += 1;
+  if ((left < start && wordEnd.test(text.slice(Math.max(0, left - 2), left))) ||
+    (right > end && wordStart.test(text.slice(right, right + 2)))) return false;
+  // Only the adjoining code point/particle can establish a boundary, not an ever-growing
+  // prefix. Two UTF-16 units retain supplementary characters; eight cover every particle.
+  const before = text.slice(Math.max(0, start - 8), start), after = text.slice(end, end + 8);
   return (!wordEnd.test(before) || particleBefore.test(before)) &&
     (!wordStart.test(after) || particleAfter.test(after));
 }
 
-function directlyExcluded(before: string, after: string): boolean {
-  // Recognize direct exclusions next to this name, not unrelated negation elsewhere in the
-  // task ("use Code Review to check why tests do not pass") or a semantic topic classifier.
-  // Strip trailing quote/space decorations in one pass. Adjacent whitespace quantifiers
-  // here would otherwise explore many equivalent splits on a long failed exclusion.
-  let end = before.length;
-  while (end && /[\s"'`「『(]/u.test(before[end - 1]!)) end -= 1;
-  const prefix = before.slice(0, end);
-  const englishBefore = /(?:\b(?:do\s+not|don['’]t|never)\s+(?:use|invoke|run|apply|select)|\bavoid\s+(?:using|invoking|running|applying|selecting)|\bwithout(?:\s+(?:using|invoking|running|applying|selecting))?)(?:\s+the)?$/u;
+function englishExclusionBefore(text: string, start: number): boolean {
+  let cursor = start;
+  while (cursor && /[\s"'`「『(]/u.test(text[cursor - 1]!)) cursor -= 1;
+  // Inspect at most four adjoining words. Do not run a suffix regex over the whole prefix
+  // for every repeated mention; whitespace between these few words is scanned only once.
+  const word = (): string => {
+    while (cursor && /\s/u.test(text[cursor - 1]!)) cursor -= 1;
+    const end = cursor;
+    while (cursor && /[a-z'’]/u.test(text[cursor - 1]!)) cursor -= 1;
+    if (wordEnd.test(text.slice(Math.max(0, cursor - 2), cursor))) return '';
+    return text.slice(cursor, end);
+  };
+  let verb = word();
+  if (verb === 'the') verb = word();
+  if (/^(?:use|invoke|run|apply|select)$/u.test(verb)) {
+    const negative = word();
+    return negative === 'never' || negative === "don't" || negative === 'don’t' ||
+      (negative === 'not' && word() === 'do');
+  }
+  if (/^(?:using|invoking|running|applying|selecting)$/u.test(verb)) {
+    const negative = word();
+    return negative === 'avoid' || negative === 'without';
+  }
+  return verb === 'without';
+}
+
+function directlyExcluded(text: string, start: number, end: number): boolean {
+  // These suffix checks are anchored at this mention; unlike a full-prefix search, they
+  // stop at the next unrelated word. This is direct usage wording, not topic inference.
+  const after = text.slice(end);
   const japaneseAfter = /^[\s"'`」』)]*(?:(?:には|だけは|だけを|は|を|も)\s*)?(?:使わ(?:ない|ず|なく)|使うな|使って(?:は)?いけない|(?:使用|利用|適用|実行|選択)(?:し(?:ない|ません|なく)|せず|するな)|呼び出さ(?:ない|ず|なく)|不要|禁止)|^[\s"'`」』)]*(?:では|じゃ)なく/u;
   const englishAfter = /^[\s"'`」』)]*(?:(?:should|must|will|can)\s+not\s+be\s+(?:used|invoked|run|applied|selected)\b|(?:is|are)\s+(?:not\s+(?:needed|required)|forbidden)\b)/u;
-  return englishBefore.test(prefix) || japaneseAfter.test(after) || englishAfter.test(after);
+  return englishExclusionBefore(text, start) || japaneseAfter.test(after) || englishAfter.test(after);
 }
 
 function identityPhrases(candidate: SkillRoutingMetadata): string[][] {
@@ -87,10 +115,9 @@ function skillMentions(authored: string, candidate: SkillRoutingMetadata): Skill
   const mentions: SkillMention[] = [];
   for (const phrase of identityPhrases(candidate)) {
     for (const match of authored.matchAll(phrasePattern(phrase))) {
-      const before = authored.slice(0, match.index), after = authored.slice(match.index + match[0].length);
-      if (!literalBoundary(before, after)) continue;
-      mentions.push({ id: candidate.id, start: match.index, end: match.index + match[0].length,
-        excluded: directlyExcluded(before, after) });
+      const start = match.index, end = start + match[0].length;
+      if (!literalBoundary(authored, start, end)) continue;
+      mentions.push({ id: candidate.id, start, end, excluded: directlyExcluded(authored, start, end) });
     }
   }
   return mentions;
