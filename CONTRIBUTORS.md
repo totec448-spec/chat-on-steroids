@@ -122,14 +122,14 @@ It also incorporates [@okayamajwcc-coder](https://github.com/okayamajwcc-coder) 
 contradictory AX window-ID guard from [#309](https://github.com/totec448-spec/chat-on-steroids/pull/309).
 The larger off-Space/focus change remains unincorporated. Exact source revisions, validation,
 and public GitHub co-author trailers are recorded in
-[`docs/worklog-2026-09-20-selective-pr-review.md`](docs/worklog-2026-09-20-selective-pr-review.md).
+[`docs/archive/worklog-2026-09-20-selective-pr-review.md`](docs/archive/worklog-2026-09-20-selective-pr-review.md).
 
 The September 22 follow-up incorporates [@PourrezJ](https://github.com/PourrezJ)'s French
 translation from [#369](https://github.com/totec448-spec/chat-on-steroids/pull/369). Its
 1,431 translated entries are retained with one wording correction; 21 newer strings are
 added independently. Integration preserves Turkish and the existing language controls,
 drafts and preference storage. Validation is recorded in
-[the follow-up worklog](docs/worklog-2026-09-22-french-locale.md).
+[the follow-up worklog](docs/archive/worklog-2026-09-22-french-locale.md).
 
 The September 27 review adapts [@okayamajwcc-coder](https://github.com/okayamajwcc-coder) / Masatoshi Shisaka's
 macOS window-targeting hardening from [#309](https://github.com/totec448-spec/chat-on-steroids/pull/309) as [#502](https://github.com/totec448-spec/chat-on-steroids/pull/502): point-occlusion checks for pointer input,
@@ -146,8 +146,8 @@ Plugins route correction (#351) and explicit refresh retry (#363),
 The adaptations reuse the existing outbox, refresh ledger, sidebar order and locale owners.
 Independent fixes also address the cancellation, adopted-Astra input and scrolling reports
 in #357, #361 and #359. Validation and the disposition of every reviewed issue/PR are recorded
-in [the worklog](docs/worklog-2026-09-22-github-triage.md) and
-[review ledger](docs/github-triage-2026-09-22.md).
+in [the worklog](docs/archive/worklog-2026-09-22-github-triage.md) and
+[review ledger](docs/archive/github-triage-2026-09-22.md).
 
 The September 20 connection and Skills integration incorporates
 [@K4viar](https://github.com/K4viar) / Lucas Pazini Pinha's approved, package-bounded Skills
