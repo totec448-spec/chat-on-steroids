@@ -7,12 +7,12 @@ const electron = vi.hoisted(() => ({
   app: { getPath: vi.fn(() => '/downloads') }
 }));
 const usage = vi.hoisted(() => ({ usageOverview: vi.fn() }));
-const files = vi.hoisted(() => ({ lstat: vi.fn(), writeFile: vi.fn(async () => undefined), rename: vi.fn(async () => undefined), rm: vi.fn(async () => undefined) }));
-const logger = vi.hoisted(() => ({ logWarn: vi.fn() }));
+const files = vi.hoisted(() => ({ lstat: vi.fn(), link: vi.fn(), copyFile: vi.fn(), writeFile: vi.fn(async () => undefined), rename: vi.fn(async () => undefined), rm: vi.fn(async () => undefined) }));
+const logger = vi.hoisted(() => ({ logWarn: vi.fn(), logInfo: vi.fn() }));
 vi.mock('electron', () => electron);
 vi.mock('../src/main/logger.js', () => logger);
 vi.mock('../src/main/session/usage.js', () => usage);
-vi.mock('node:fs', () => ({ promises: files }));
+vi.mock('node:fs', () => ({ promises: files, constants: { COPYFILE_EXCL: 1 } }));
 
 const { exportUsageCsv } = await import('../src/main/session/usage-export.js');
 const { usageCsv } = await import('../src/shared/usage.js');
@@ -37,6 +37,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.stubGlobal('process', { ...process, platform: 'linux' });
   files.lstat.mockRejectedValue(Object.assign(new Error('not found'), { code: 'ENOENT' }));
+  files.link.mockReset().mockResolvedValue(undefined);
+  files.copyFile.mockReset().mockResolvedValue(undefined);
   electron.dialog.showMessageBox.mockResolvedValue({ response: 1 });
   usage.usageOverview.mockResolvedValue(overview);
 });
@@ -55,7 +57,8 @@ it('saves daily estimated tokens, the last week of sends and the latest limits a
   expect(file).toBe(path.join('/downloads', path.basename(file)));
   expect(path.basename(file)).toMatch(/^\.usage\.csv\.[0-9a-f-]{36}\.tmp$/);
   expect(encoding).toBe('utf8');
-  expect(files.rename).toHaveBeenCalledWith(file, '/downloads/usage.csv');
+  expect(files.link).toHaveBeenCalledWith(file, '/downloads/usage.csv');
+  expect(files.rename).not.toHaveBeenCalled();
   expect(electron.dialog.showMessageBox).not.toHaveBeenCalled();
   // Excel reads UTF-8 only with a byte-order mark; rows end in CRLF as RFC 4180 has it.
   expect(csv.startsWith('﻿Chat On Steroids usage export,')).toBe(true);
@@ -141,6 +144,29 @@ it('stops without writing when the existing destination cannot be checked', asyn
   expect(logger.logWarn).toHaveBeenCalledWith('Usage export not saved: EACCES');
   expect(files.writeFile).not.toHaveBeenCalled();
   expect(electron.dialog.showMessageBox).not.toHaveBeenCalled();
+});
+
+it.each(['ENOTSUP', 'EPERM', 'EXDEV'])('publishes a new file exclusively when the volume has no hard links (%s)', async code => {
+  files.link.mockRejectedValueOnce(Object.assign(new Error('no hard links'), { code }));
+  electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/downloads/usage.csv' });
+  await expect(exportUsageCsv(2, null)).resolves.toMatchObject({ saved: true });
+  const [temporary] = files.writeFile.mock.calls[0]! as unknown as [string];
+  expect(files.copyFile).toHaveBeenCalledWith(temporary, '/downloads/usage.csv', 1);
+  expect(files.rename).not.toHaveBeenCalled();
+  expect(files.rm).toHaveBeenCalledWith(temporary, { force: true });
+});
+
+it('asks and cleans up when an exclusive copy finds that the destination appeared meanwhile', async () => {
+  files.link.mockRejectedValueOnce(Object.assign(new Error('no hard links'), { code: 'ENOTSUP' }));
+  files.copyFile.mockRejectedValueOnce(Object.assign(new Error('name taken'), { code: 'EEXIST' }));
+  electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/downloads/usage.csv' });
+  electron.dialog.showMessageBox.mockResolvedValue({ response: 0 });
+  await expect(exportUsageCsv(2, null)).resolves.toEqual({ saved: false });
+  expect(electron.dialog.showMessageBox).toHaveBeenCalledOnce();
+  expect(files.rename).not.toHaveBeenCalled();
+  const [temporary] = files.writeFile.mock.calls[0]! as unknown as [string];
+  expect(files.rm).toHaveBeenCalledWith(temporary, { force: true });
+  expect(logger.logInfo).toHaveBeenCalledWith('Usage export: the destination appeared while preparing the CSV; asking before replacement');
 });
 
 // Writing the chosen file in place would empty an earlier export before the new one is whole.
