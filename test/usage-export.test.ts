@@ -145,9 +145,11 @@ it('stops without writing when the existing destination cannot be checked', asyn
 
 // Writing the chosen file in place would empty an earlier export before the new one is whole.
 it('leaves an earlier export whole when the write fails, and logs why without the path', async () => {
+  files.lstat.mockResolvedValue({});
   electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/downloads/usage.csv' });
   files.writeFile.mockRejectedValueOnce(Object.assign(new Error("ENOSPC: no space left on device, open '/downloads/.usage.csv.tmp'"), { code: 'ENOSPC' }));
   await expect(exportUsageCsv(2, null)).rejects.toThrow('ENOSPC');
+  expect(electron.dialog.showMessageBox).toHaveBeenCalledOnce();
   const [file] = files.writeFile.mock.calls[0]! as unknown as [string];
   expect(file).not.toBe('/downloads/usage.csv');
   expect(files.rename).not.toHaveBeenCalled();
