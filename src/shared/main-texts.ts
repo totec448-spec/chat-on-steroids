@@ -49,6 +49,8 @@ export const MAIN_TEXTS = [
   'Replace this CSV file?',
   'Cancel',
   'Replace file',
+  'Save here and replace any existing file?',
+  'Save',
   // Phone notifications (ntfy).
   'A chat is waiting for you.',
   'Something failed in Chat On Steroids.',

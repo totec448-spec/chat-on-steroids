@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { constants, promises as fs } from 'node:fs';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { app, dialog, type BrowserWindow } from 'electron';
 import { usageCsv, usageDateKey } from '../../shared/usage.js';
@@ -9,26 +9,19 @@ import { usageOverview } from './usage.js';
 
 export type UsageExportResult = { saved: false } | { saved: true; name: string };
 
-async function confirmReplacement(file: string, owner: BrowserWindow | null): Promise<boolean> {
+async function confirmReplacement(file: string, owner: BrowserWindow | null, mode: 'existing' | 'any' = 'existing'): Promise<boolean> {
   const confirmation = {
     type: 'warning' as const, title: mainText('Export usage as CSV'),
-    message: mainText('Replace this CSV file?'), detail: path.basename(file),
-    buttons: [mainText('Cancel'), mainText('Replace file')], defaultId: 0, cancelId: 0, noLink: true
+    message: mainText(mode === 'any' ? 'Save here and replace any existing file?' : 'Replace this CSV file?'), detail: path.basename(file),
+    buttons: [mainText('Cancel'), mainText(mode === 'any' ? 'Save' : 'Replace file')], defaultId: 0, cancelId: 0, noLink: true
   };
   const { response } = owner ? await dialog.showMessageBox(owner, confirmation) : await dialog.showMessageBox(confirmation);
   return response === 1;
 }
 
-// The same no-replace publication policy as image-export.ts: hard-link the complete file,
-// or exclusively copy on exFAT/FAT/network volumes that do not support hard links.
+// These volumes remain usable: obtain replacement consent before atomic rename instead of
+// copying into a visible destination, which could leave a partial CSV if interrupted.
 const NO_HARD_LINKS = new Set(['ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EPERM', 'EXDEV', 'EMLINK']);
-async function publishNewCsv(temporary: string, destination: string): Promise<void> {
-  try { await fs.link(temporary, destination); }
-  catch (error) {
-    if (!NO_HARD_LINKS.has((error as NodeJS.ErrnoException).code ?? '')) throw error;
-    await fs.copyFile(temporary, destination, constants.COPYFILE_EXCL);
-  }
-}
 
 /** Saves the Usage page's daily estimates, recent sends and latest limits where the person chooses. */
 export async function exportUsageCsv(divisor: number, owner: BrowserWindow | null): Promise<UsageExportResult> {
@@ -54,7 +47,8 @@ export async function exportUsageCsv(divisor: number, owner: BrowserWindow | nul
       if (!confirmed) return { saved: false };
     }
   }
-  // Read after the dialog, so the file holds the limits as they are when it is written.
+  // Capture usage after path selection and any initial replacement question. This snapshot
+  // stays whole even if publication needs another confirmation.
   const csv = usageCsv(await usageOverview(), divisor, Date.now());
   // Stage the whole CSV first. A new Linux destination must still be absent at publication,
   // not just at the earlier check; replacing an existing file always requires confirmation.
@@ -63,11 +57,15 @@ export async function exportUsageCsv(divisor: number, owner: BrowserWindow | nul
     await fs.writeFile(temporary, csv, 'utf8');
     if (confirmed) await fs.rename(temporary, result.filePath);
     else {
-      try { await publishNewCsv(temporary, result.filePath); }
+      try { await fs.link(temporary, result.filePath); }
       catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-        logInfo('Usage export: the destination appeared while preparing the CSV; asking before replacement');
-        if (!await confirmReplacement(result.filePath, owner)) return { saved: false };
+        const code = (error as NodeJS.ErrnoException).code ?? '';
+        const cannotLink = NO_HARD_LINKS.has(code);
+        if (code !== 'EEXIST' && !cannotLink) throw error;
+        logInfo(cannotLink
+          ? 'Usage export: this location cannot publish without replacement; asking for permission'
+          : 'Usage export: the destination appeared while preparing the CSV; asking before replacement');
+        if (!await confirmReplacement(result.filePath, owner, cannotLink ? 'any' : 'existing')) return { saved: false };
         await fs.rename(temporary, result.filePath);
       }
     }

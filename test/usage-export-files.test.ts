@@ -22,7 +22,7 @@ beforeEach(async () => {
   electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: target });
   usage.usageOverview.mockResolvedValue({ days: [], messages: { through: Date.now(), days: [] }, limits: [] });
 });
-afterEach(async () => { vi.unstubAllGlobals(); await removeTempDir(directory); });
+afterEach(async () => { vi.restoreAllMocks(); vi.unstubAllGlobals(); await removeTempDir(directory); });
 
 it.each([0, 1])('requires confirmation for a file created after the initial destination check (response=%s)', async response => {
   usage.usageOverview.mockImplementationOnce(async () => {
@@ -42,6 +42,32 @@ it.each([0, 1])('requires confirmation for a file created after the initial dest
 it('publishes a new CSV without a replacement question or a leftover temporary file', async () => {
   await expect(exportUsageCsv(2, null)).resolves.toMatchObject({ saved: true });
   expect(electron.dialog.showMessageBox).not.toHaveBeenCalled();
+  expect(await fs.readFile(target, 'utf8')).toMatch(/^﻿Chat On Steroids usage export,/);
+  expect(await fs.readdir(directory)).toEqual(['usage.csv']);
+});
+
+it.each([0, 1])('leaves no partial destination when fallback publication is declined or interrupted (response=%s)', async response => {
+  vi.spyOn(fs, 'link').mockRejectedValueOnce(Object.assign(new Error('no hard links'), { code: 'ENOTSUP' }));
+  electron.dialog.showMessageBox.mockResolvedValue({ response });
+  const rename = vi.spyOn(fs, 'rename').mockRejectedValueOnce(Object.assign(new Error('interrupted publication'), { code: 'EIO' }));
+  const exporting = exportUsageCsv(2, null);
+  if (response === 0) {
+    await expect(exporting).resolves.toEqual({ saved: false });
+    expect(rename).not.toHaveBeenCalled();
+  } else await expect(exporting).rejects.toThrow('interrupted publication');
+  await expect(fs.stat(target)).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(await fs.readdir(directory)).toEqual([]);
+});
+
+it('avoids interruptible copying and still saves on a volume without hard links after consent', async () => {
+  vi.spyOn(fs, 'link').mockRejectedValueOnce(Object.assign(new Error('no hard links'), { code: 'ENOTSUP' }));
+  const copy = vi.spyOn(fs, 'copyFile').mockImplementationOnce(async (_source, destination) => {
+    await fs.writeFile(destination, 'Partial CSV');
+    throw Object.assign(new Error('interrupted copy'), { code: 'EIO' });
+  });
+  electron.dialog.showMessageBox.mockResolvedValue({ response: 1 });
+  await expect(exportUsageCsv(2, null)).resolves.toMatchObject({ saved: true });
+  expect(copy).not.toHaveBeenCalled();
   expect(await fs.readFile(target, 'utf8')).toMatch(/^﻿Chat On Steroids usage export,/);
   expect(await fs.readdir(directory)).toEqual(['usage.csv']);
 });
