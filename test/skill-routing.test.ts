@@ -155,6 +155,31 @@ it('does not propagate an exclusion across a new invocation clause', () => {
     .toEqual([{ id: audit.id, revision: audit.revision }]);
 });
 
+it.each([
+  'Do not use Code Review, use git worktrees',
+  'Do not use Code Review, and use git worktrees',
+  'Do not use Code Review、use git worktrees'
+])('separates a new using→use alias invocation from an excluded list: %s', authored => {
+  const worktrees = candidate({ id: 'using-git-worktrees', name: 'Using Git Worktrees' });
+  expect(routeSkillMetadata(authored, [candidate(), worktrees]))
+    .toEqual([{ id: worktrees.id, revision: worktrees.revision }]);
+});
+
+it.each([
+  'Do not use Code Review; do not use git worktrees',
+  'Do not use Code Review, Using Git Worktrees',
+  'Do not use Code Review, or use git worktrees',
+  'Do not use Code Review, use-git-worktrees'
+])('retains direct or coordinated exclusions for using-style names: %s', authored => {
+  const worktrees = candidate({ id: 'using-git-worktrees', name: 'Using Git Worktrees' });
+  expect(routeSkillMetadata(authored, [candidate(), worktrees])).toEqual([]);
+});
+
+it('does not mistake an ordinary verb-leading name for an invocation alias', () => {
+  const cases = candidate({ id: 'use-cases', name: 'Use Cases' });
+  expect(routeSkillMetadata('Do not use Code Review, Use Cases', [candidate(), cases])).toEqual([]);
+});
+
 it('returns none for unnamed, ambiguous, or implicit-disabled metadata', () => {
   const task = 'Please use Code Review for this change.';
   expect(routeSkillMetadata('Prepare a quarterly budget summary.', [candidate()])).toEqual([]);

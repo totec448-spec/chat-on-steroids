@@ -101,6 +101,21 @@ it('does not inject a negated using→use alias through the input owner', async 
   expect(await prepareSessionPrompt(row.text, row)).not.toContain('FULL_USING_GIT_WORKTREES_BODY');
 });
 
+it.each([
+  ['Do not use Code Review, use git worktrees', ['using-git-worktrees']],
+  ['Do not use Code Review; do not use git worktrees', []]
+])('keeps alias invocation clauses separate from direct exclusions: %s', async (authored, selected) => {
+  await install('code-review', 'Code Review', 'Review source changes.');
+  await install('using-git-worktrees', 'Using Git Worktrees', 'Use isolated worktrees for source changes.');
+  await enableAutoRouting();
+  const row = await enqueueInput(request(authored));
+  expect(routedIds(row)).toEqual(selected);
+  const prompt = await prepareSessionPrompt(authored, row);
+  expect(userPromptText(prompt)).toBe(authored);
+  expect(prompt).not.toContain('FULL_CODE_REVIEW_BODY');
+  expect(prompt.includes('FULL_USING_GIT_WORKTREES_BODY')).toBe(selected.length === 1);
+});
+
 it('ignores metadata that forbids implicit invocation', async () => {
   await install('code-review', 'Code Review', 'Review source code changes for correctness and maintainability.', false);
   await enableAutoRouting();
