@@ -12042,8 +12042,15 @@ function expire(command: Command): void {
 }
 
 /** Timer and sweep describe the same delivery evidence, preserving a recorded failure. */
+/** Why a command ran out of time, for the log line. Exported for its test. */
+export function commandExpiryReasonForTests(command: Pick<Command, 'lastError' | 'claimedAt' | 'owner' | 'progress'>): string {
+  return commandExpiryReason(command as Command);
+}
 function commandExpiryReason(command: Command): string {
   if (command.lastError) return command.lastError;
+  // A command no page ever took (no owner) is not "a chat this app opened": a Stop sent into a chat whose tab
+  // is closed read "the chat this app opened did not report back (no browser opened it)", which contradicts itself (#2103).
+  if (command.claimedAt !== null && command.owner === null) return `no page picked this command up before its deadline (${commandProgress(command)})`;
   if (command.claimedAt !== null) return `the chat this app opened did not report back in time (${commandProgress(command)})`;
   const step = command.progress?.step;
   return step && REVIVAL_WAIT_STEPS.has(step)
