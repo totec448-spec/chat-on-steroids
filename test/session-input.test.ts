@@ -620,8 +620,11 @@ describe('durable user input ownership', () => {
     await writeDurableNow('session-input', [legacy]);
     resetInputForTests();
     binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'previous-turn', time: now - 1 };
+    const info = vi.spyOn(logger, 'logInfo');
 
     const migrated = (await listInputs()).find(row => row.id === id)!;
+    // One decision, one line, without the message text (CodeRabbit on #2063).
+    expect(info.mock.calls.map(args => String(args[0]))).toContain('input: 1 scheduled message(s) moved to browser-only custody on load (legacy routing repaired)');
     expect(migrated).toMatchObject({ id, state: 'queued', mode: 'after-turn', transportIntent: 'browser', scheduled,
       queuedTurn: { conversationId: binding.conversationId, turnId: 'previous-turn' } });
     expect(migrated.requestedMode).toBeUndefined();
@@ -664,7 +667,9 @@ describe('durable user input ownership', () => {
     await expect(enqueueInput(input({ text: 'New work after native claim', dueAt: now })))
       .rejects.toThrow('One message is already awaiting delivery');
     now += 1_001;
+    const info = vi.spyOn(logger, 'logInfo');
     expect(await authorizeBrowserInput(scheduled.id, 'native-page', binding.conversationId)).toBe(false);
+    expect(info.mock.calls.map(args => String(args[0]))).toContain(`input ${scheduled.id}: scheduled claim released before Send: authored work arrived first`);
     expect((await listInputs()).find(row => row.id === scheduled.id)).toMatchObject({ state: 'queued', owner: null });
     expect(await pendingBrowserInputs()).toEqual([expect.objectContaining({ id: user.id })]);
     expect(await claimBrowserInput(user.id, 'native-page', binding.conversationId, true)).not.toBeNull();
@@ -672,6 +677,17 @@ describe('durable user input ownership', () => {
     expect(await acknowledgeBrowserInput(user.id, 'native-page', binding.conversationId, 'late-user-work-receipt')).toBe(true);
     expect((await pendingBrowserInputs()).some(row => row.id === scheduled.id)).toBe(true);
     expect(await claimBrowserInput(scheduled.id, 'native-page', binding.conversationId, true)).toMatchObject({ id: scheduled.id, state: 'browser' });
+  });
+  it('releases a scheduled browser claim and says why when the chat moved on before Send authorization', async () => {
+    const scheduled = await enqueueInput(input({ dueAt: 0, scheduled: { scheduleId: randomUUID(), dueAt: 0, late: false } }));
+    expect(await claimBrowserInput(scheduled.id, 'native-page', binding.conversationId, true)).not.toBeNull();
+    const info = vi.spyOn(logger, 'logInfo');
+    // The session moved to another chat (a Compact & Resume) after the page claimed the row.
+    const previous = binding.conversationId;
+    binding.conversationId = 'conversation-moved-on';
+    expect(await authorizeBrowserInput(scheduled.id, 'native-page', previous)).toBe(false);
+    expect(info.mock.calls.map(args => String(args[0]))).toContain(`input ${scheduled.id}: scheduled claim released before Send: the chat moved on or the browser may no longer take it`);
+    expect((await listInputs()).find(row => row.id === scheduled.id)).toMatchObject({ state: 'queued', owner: null });
   });
   it('does not let a scheduled after-turn row block an ordinary finish tool head', async () => {
     binding.activeTurnId = null;
@@ -702,8 +718,10 @@ describe('durable user input ownership', () => {
     resetInputForTests();
     now += 60_001;
     binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'legacy-turn', time: now - 1 };
+    const info = vi.spyOn(logger, 'logInfo');
 
     const rows = await listInputs();
+    expect(info.mock.calls.map(args => String(args[0]))).toContain(`input ${id}: scheduled claim released: its browser never authorized Send before the timeout; it queues again`);
     const repaired = rows.find(row => row.id === id)!;
     expect(repaired).toMatchObject({ id, state: 'queued', mode: 'after-turn', transportIntent: 'browser', scheduled,
       queuedTurn: { conversationId: binding.conversationId, turnId: 'legacy-turn' } });

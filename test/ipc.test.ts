@@ -290,6 +290,26 @@ it('saves, reads, pauses and removes a chat\'s schedule, and refuses one that ca
   expect(await call('schedules:get', { sessionId: session.id })).toEqual({ ok: true, data: null });
 });
 
+// CodeRabbit on #2063: a failing schedule handler returned a generic message and left nothing in the log.
+it('logs which schedule operation failed and a safe reason, never the message or a path', async () => {
+  const logger = await import('../src/main/logger.js');
+  const warn = vi.spyOn(logger, 'logWarn');
+  try {
+    const call = (name: string, payload: unknown) => handlers.get(name)!(null, payload) as Promise<any>;
+    // An unexpected (non-listed) failure: the renderer gets the generic text, the log gets the channel and a code.
+    const failure = Object.assign(new Error('EACCES: permission denied, open /Users/someone/secret/schedules.json'), { code: 'EACCES' });
+    const sessions = await import('../src/main/session/store.js');
+    const spy = vi.spyOn(sessions, 'getSessionOrNullIfMissing').mockRejectedValueOnce(failure);
+    const reply = await call('schedules:save', { sessionId: 'any-session-0001', text: 'x', repeat: { kind: 'daily', at: '09:00' }, until: null });
+    spy.mockRestore();
+    expect(reply).toEqual({ ok: false, error: 'The schedule operation failed. Check the local app logs for details.' });
+    const lines = warn.mock.calls.map(args => String(args[0]));
+    expect(lines.some(line => line.startsWith('schedules:save failed') && line.includes('EACCES'))).toBe(true);
+    expect(lines.join('\n')).not.toContain('/Users/someone');
+    expect(lines.join('\n')).not.toContain('permission denied');
+  } finally { warn.mockRestore(); }
+});
+
 it('lists schedules with chat titles and Run now uses the ordinary outbox without changing recurrence', async () => {
   const input = await import('../src/main/session/input.js');
   const original = await input.listInputs();

@@ -1678,8 +1678,6 @@ async function readSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
   const generation = ++sessionsLoadGeneration;
   const [list, catalog] = await Promise.all([run(api.listSessions({ limit: SESSION_PAGE_SIZE })), run(api.listProjects())]);
   if (!list || generation !== sessionsLoadGeneration) return;
-  const changed = changedTranscripts;
-  changedTranscripts = { all: false, ids: new Set() };
   if (catalog) projects = catalog;
   let fallbackId = selectedCatalogFallback?.id === selectedId ? selectedId : null;
   let fallbackToKeep = fallbackId ? selectedCatalogFallback : null;
@@ -1707,6 +1705,10 @@ async function readSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
       }
     } else fallbackToKeep = null;
   }
+  // Take the pushed invalidations only now, after the last await that can hand this read over to a newer one:
+  // a read that is superseded must leave them for its successor (CodeRabbit on #2063).
+  const changed = changedTranscripts;
+  changedTranscripts = { all: false, ids: new Set() };
   if (fallbackId && present.has(fallbackId)) {
     fallbackToKeep = list.sessions.find(row => row.id === fallbackId) ?? fallbackToKeep;
     if (fallbackToKeep) selectedCatalogFallback = fallbackToKeep;

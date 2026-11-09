@@ -558,7 +558,7 @@ async function load(): Promise<InputEntry[]> {
   const raw = await readDurable<unknown>(STATE, { strict: true });
   const parsed = z.array(entrySchema).safeParse(raw ?? []);
   if (!parsed.success) throw new Error('The message outbox could not be read safely');
-  let scheduledRoutingChanged = false;
+  let scheduledRoutingChanged = false, scheduledRepaired = 0;
   const routed = parsed.data.map((row): InputEntry => {
     // A live eligibility window cannot include time while the app was closed.
     // Keep only checkpointed eligible milliseconds across restart.
@@ -584,12 +584,13 @@ async function load(): Promise<InputEntry[]> {
         transportIntent: 'browser'
       };
       if (activeTurnRoute && !(turnId && conversationId)) repaired.mode = 'auto';
-      scheduledRoutingChanged = true;
+      scheduledRoutingChanged = true; scheduledRepaired++;
       return repaired;
     }
     return row;
   });
   if (scheduledRoutingChanged) {
+    logInfo(`input: ${scheduledRepaired} scheduled message(s) moved to browser-only custody on load (legacy routing repaired)`);
     await writeDurableNow(STATE, routed, { onPersisted: () => deliveryHooks?.changed() });
   }
   entries = routed;
@@ -798,6 +799,7 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
         const { directTurn: _direct, toolTurnId: _toolTurn, delivery: _delivery, attachmentDelivery: _attachmentDelivery,
           requestedMode: _requestedMode, transportIntent: _transportIntent, ...rest } = row;
         const afterTurn = legacyAfterTurn || activeTurnRoute;
+        logInfo(`input ${row.id}: scheduled claim released: its browser never authorized Send before the timeout; it queues again`);
         return { ...rest, mode: afterTurn ? (turnId && boundaryConversation ? 'after-turn' : 'auto') : row.mode,
           ...(afterTurn && turnId && boundaryConversation ? { queuedTurn: { conversationId: boundaryConversation, turnId } } : {}),
           transportIntent: 'browser', state: 'queued', owner: null, offeredAt: undefined,
@@ -1580,6 +1582,7 @@ export function authorizeBrowserInput(id: string, owner: string, conversationId:
     if (row.scheduled && row.sessionId && hasPendingUserInput(current, row.sessionId)) {
       // Authored work can arrive after this scheduled row was claimed. The claim
       // has no Send authority yet, so release the same UUID and let user work go first.
+      logInfo(`input ${row.id}: scheduled claim released before Send: authored work arrived first`);
       await commit(current.map(entry => sameDelivery(row, entry)
         ? { ...entry, state: 'queued', owner: null, offeredAt: undefined,
           requiresAuthorization: undefined, completedTurnId: undefined,
@@ -1592,6 +1595,7 @@ export function authorizeBrowserInput(id: string, owner: string, conversationId:
         // A new turn may begin after the browser claimed a completed boundary.
         // No Send was authorized, so release that exact claim rather than leaving
         // a stale completedTurnId that prevents every subsequent browser pickup.
+        logInfo(`input ${row.id}: scheduled claim released before Send: the chat moved on or the browser may no longer take it`);
         await commit(current.map(entry => sameDelivery(row, entry)
           ? { ...entry, state: 'queued', owner: null, offeredAt: undefined,
             requiresAuthorization: undefined, completedTurnId: undefined,
