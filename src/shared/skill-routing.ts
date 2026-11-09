@@ -55,30 +55,40 @@ function literalBoundary(text: string, start: number, end: number): boolean {
     (!wordStart.test(after) || particleAfter.test(after));
 }
 
-function englishExclusionBefore(text: string, start: number): boolean {
+function englishExclusionBefore(text: string, start: number, end: number): boolean {
   let cursor = start;
   while (cursor && /[\s"'`「『(]/u.test(text[cursor - 1]!)) cursor -= 1;
-  // Inspect at most four adjoining words. Do not run a suffix regex over the whole prefix
+  // Inspect a fixed number of adjoining words. Do not run a suffix regex over the whole prefix
   // for every repeated mention; whitespace between these few words is scanned only once.
   const word = (): string => {
     while (cursor && /\s/u.test(text[cursor - 1]!)) cursor -= 1;
-    const end = cursor;
+    const wordEndIndex = cursor;
     while (cursor && /[a-z'’]/u.test(text[cursor - 1]!)) cursor -= 1;
     if (wordEnd.test(text.slice(Math.max(0, cursor - 2), cursor))) return '';
-    return text.slice(cursor, end);
+    return text.slice(cursor, wordEndIndex);
   };
+  const excluded = (verb: string): boolean => {
+    if (/^(?:use|invoke|run|apply|select)$/u.test(verb)) {
+      const negative = word();
+      return negative === 'never' || negative === "don't" || negative === 'don’t' ||
+        (negative === 'not' && word() === 'do');
+    }
+    if (/^(?:using|invoking|running|applying|selecting)$/u.test(verb)) {
+      const negative = word();
+      return negative === 'avoid' || negative === 'without';
+    }
+    return verb === 'without';
+  };
+  const preceding = cursor;
   let verb = word();
   if (verb === 'the') verb = word();
-  if (/^(?:use|invoke|run|apply|select)$/u.test(verb)) {
-    const negative = word();
-    return negative === 'never' || negative === "don't" || negative === 'don’t' ||
-      (negative === 'not' && word() === 'do');
-  }
-  if (/^(?:using|invoking|running|applying|selecting)$/u.test(verb)) {
-    const negative = word();
-    return negative === 'avoid' || negative === 'without';
-  }
-  return verb === 'without';
+  if (excluded(verb)) return true;
+  // In the supported "using X" → "use X" alias, the invocation verb is already part
+  // of the mention. Also keep an external verb authoritative ("don't use Use Cases").
+  cursor = preceding;
+  const ownVerb = /^(use|using|invoke|invoking|run|running|apply|applying|select|selecting)(?=[\s-]|$)/u
+    .exec(text.slice(start, Math.min(end, start + 12)));
+  return ownVerb ? excluded(ownVerb[1]!) : false;
 }
 
 function directlyExcluded(text: string, start: number, end: number): boolean {
@@ -87,7 +97,7 @@ function directlyExcluded(text: string, start: number, end: number): boolean {
   const after = text.slice(end);
   const japaneseAfter = /^[\s"'`」』)]*(?:(?:には|だけは|だけを|は|を|も)\s*)?(?:使わ(?:ない|ず|なく)|使うな|使って(?:は)?いけない|(?:使用|利用|適用|実行|選択)(?:し(?:ない|ません|なく)|せず|するな)|呼び出さ(?:ない|ず|なく)|不要|禁止)|^[\s"'`」』)]*(?:では|じゃ)なく/u;
   const englishAfter = /^[\s"'`」』)]*(?:(?:should|must|will|can)\s+not\s+be\s+(?:used|invoked|run|applied|selected)\b|(?:is|are)\s+(?:not\s+(?:needed|required)|forbidden)\b)/u;
-  return englishExclusionBefore(text, start) || japaneseAfter.test(after) || englishAfter.test(after);
+  return englishExclusionBefore(text, start, end) || japaneseAfter.test(after) || englishAfter.test(after);
 }
 
 function identityPhrases(candidate: SkillRoutingMetadata): string[][] {
