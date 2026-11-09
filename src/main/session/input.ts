@@ -558,7 +558,7 @@ async function load(): Promise<InputEntry[]> {
   const raw = await readDurable<unknown>(STATE, { strict: true });
   const parsed = z.array(entrySchema).safeParse(raw ?? []);
   if (!parsed.success) throw new Error('The message outbox could not be read safely');
-  let scheduledRoutingChanged = false;
+  let scheduledRoutingChanged = false, scheduledRepaired = 0;
   const routed = parsed.data.map((row): InputEntry => {
     // A live eligibility window cannot include time while the app was closed.
     // Keep only checkpointed eligible milliseconds across restart.
@@ -584,13 +584,14 @@ async function load(): Promise<InputEntry[]> {
         transportIntent: 'browser'
       };
       if (activeTurnRoute && !(turnId && conversationId)) repaired.mode = 'auto';
-      scheduledRoutingChanged = true;
+      scheduledRoutingChanged = true; scheduledRepaired++;
       return repaired;
     }
     return row;
   });
   if (scheduledRoutingChanged) {
     await writeDurableNow(STATE, routed, { onPersisted: () => deliveryHooks?.changed() });
+    logInfo(`input: ${scheduledRepaired} scheduled message(s) moved to browser-only custody on load (legacy routing repaired)`);
   }
   entries = routed;
   const legacyOpeningRepair = await migrateLegacyOpeningOwners(entries);
@@ -700,6 +701,7 @@ async function scheduledPickupEligible(row: InputEntry, current: InputEntry[]): 
 async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
   // Slot admission is ordered and stateful, so inspect scheduled rows serially in the
   // same queue order as pendingBrowserInputs before calculating their eligible time.
+  const releasedScheduledClaims: string[] = [];
   const scheduledEligibility = new Map<string, boolean>();
   for (const row of ordered(current)) if (row.scheduled && row.state === 'queued')
     scheduledEligibility.set(row.id, await scheduledPickupEligible(row, current));
@@ -798,6 +800,7 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
         const { directTurn: _direct, toolTurnId: _toolTurn, delivery: _delivery, attachmentDelivery: _attachmentDelivery,
           requestedMode: _requestedMode, transportIntent: _transportIntent, ...rest } = row;
         const afterTurn = legacyAfterTurn || activeTurnRoute;
+        releasedScheduledClaims.push(row.id);
         return { ...rest, mode: afterTurn ? (turnId && boundaryConversation ? 'after-turn' : 'auto') : row.mode,
           ...(afterTurn && turnId && boundaryConversation ? { queuedTurn: { conversationId: boundaryConversation, turnId } } : {}),
           transportIntent: 'browser', state: 'queued', owner: null, offeredAt: undefined,
@@ -843,6 +846,8 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
       return JSON.stringify(nextVisible) !== JSON.stringify(previousVisible);
     });
     await commit(next, { notify });
+    // After the write: a failed save leaves the claim where it was, and the log must not say it was released.
+    for (const id of releasedScheduledClaims) logInfo(`input ${id}: scheduled claim released: its browser never authorized Send before the timeout; it queues again`);
     for (const [index, row] of next.entries()) if (row.pickupFailedAt !== undefined && current[index]?.pickupFailedAt === undefined) {
       const gb = (bytes: number) => (bytes / 1024 ** 3).toFixed(1);
       let context = '';
@@ -1585,6 +1590,7 @@ export function authorizeBrowserInput(id: string, owner: string, conversationId:
           requiresAuthorization: undefined, completedTurnId: undefined,
           deliveryText: undefined, error: undefined, scheduledPickupSince: undefined }
         : entry));
+      logInfo(`input ${row.id}: scheduled claim released before Send: authored work arrived first`);
       return false;
     }
     if (!(await browserInputAllowed(row)) || await target(row) !== conversationId) {
@@ -1598,6 +1604,7 @@ export function authorizeBrowserInput(id: string, owner: string, conversationId:
             deliveryText: undefined, error: undefined,
             ...(entry.scheduled ? { scheduledPickupSince: undefined } : {}) }
           : entry));
+        logInfo(`input ${row.id}: scheduled claim released before Send: the chat moved on or the browser may no longer take it`);
       }
       return false;
     }

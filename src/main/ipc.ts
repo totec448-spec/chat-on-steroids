@@ -101,7 +101,7 @@ import { keychainNoticeReady } from './keychain-notice.js';
 import { runDiagnostics } from './diagnostics.js';
 import { collectReportFacts, readRecentLog, renderDiagnosticsReport, saveDiagnosticsReport, systemFacts, memoryFacts } from './diagnostics-report.js';
 import { answerUserRequest, clearProjectNote, getSessionOrNullIfMissing, listSessions, readTurnTraces } from './session/store.js';
-import { deleteSchedule, listScheduleItems, listSchedules, runScheduleNow, saveSchedule, scheduleRepeatSchema, setSchedulePaused } from './scheduled-runs.js';
+import { deleteSchedule, listScheduleItems, listSchedules, runScheduleNow, safeFailureReason, saveSchedule, scheduleRepeatSchema, setSchedulePaused } from './scheduled-runs.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, logWarn, onLog } from './logger.js';
 import { markStartup } from './startup-timing.js';
 import { managedWorktreeCleanupOffers, acknowledgeManagedWorktreeCleanupOffer } from './agents.js';
@@ -727,6 +727,12 @@ const SCHEDULE_SAFE_ERRORS = new Set([
   'This chat no longer exists.'
 ]);
 
+/** Listed texts that report a damaged or unreadable store, not a mistake the person can fix: the log must carry them too. */
+const SCHEDULE_STORAGE_ERRORS = new Set([
+  'The session exists but its metadata could not be read.',
+  'Could not read scheduled-runs state'
+]);
+
 /** Schedule IPC must not expose native filesystem errors or user-data paths to the renderer. */
 function scheduleIpcError(err: unknown): string {
   if (err instanceof z.ZodError) return err.issues[0]?.message ?? 'Invalid input';
@@ -741,6 +747,12 @@ function handle<T>(channel: string, fn: (payload: unknown, event: IpcMainInvokeE
     try {
       return { ok: true as const, data: await fn(payload, event) };
     } catch (err) {
+      // The renderer gets a generic text for schedule failures, so the log says which one failed and a safe code, never
+      // the message or a path (CodeRabbit on #2063). Refusals the person can fix (listed messages, bad input) are not failures.
+      if (channel.startsWith('schedules:') && !(err instanceof z.ZodError)) {
+        if (err instanceof Error && SCHEDULE_STORAGE_ERRORS.has(err.message)) logWarn(`${channel} failed (${err.message})`);
+        else if (!(err instanceof Error && SCHEDULE_SAFE_ERRORS.has(err.message))) logWarn(`${channel} failed (${safeFailureReason(err)})`);
+      }
       const message = channel.startsWith('schedules:')
         ? scheduleIpcError(err)
         :
