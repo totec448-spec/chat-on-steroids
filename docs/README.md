@@ -35,4 +35,4 @@ npx electron scripts/capture-readme-demo.cjs          # the demo recording (demo
 
 ## Engineering history
 
-The dated audits, bug hunts and worklogs in this folder (`bug-audit-*`, `bughunt-*`, `worklog-*`, `tool-error-rate-*` and similar) are records of how decisions were made. They describe the code on the day they were written and are not kept up to date.
+The dated audits, bug hunts, triage ledgers and worklogs live in [archive/](archive/README.md). They describe the code on the day they were written and are not kept up to date.
