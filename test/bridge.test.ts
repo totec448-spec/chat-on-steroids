@@ -116,7 +116,7 @@ const {
   pickupNow,
   noteRecoverySweepTick,
   unpair,
-  workerBriefForTests, forgetPickupWatchesForTests } = await import('../src/main/bridge.js');
+  workerBriefForTests, forgetPickupWatchesForTests, commandExpiryReasonForTests } = await import('../src/main/bridge.js');
 const { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } = await import('../src/main/durable.js');
 const { setStuckNotifier } = await import('../src/main/stuck-notice.js');
 const {
@@ -19108,5 +19108,20 @@ describe('archiving worker chats', () => {
     } finally {
       await config.saveConfig(before);
     }
+  });
+});
+
+// #2103: a Stop no browser ever claimed was logged as "the chat this app opened did not report back in time
+// (no browser opened it)", which says two opposite things. A command with an owner keeps the old wording.
+describe('why a command ran out of time', () => {
+  it('says no page picked up a command that never had an owner, and keeps the old words for one that did', () => {
+    const unowned = commandExpiryReasonForTests({ lastError: null, claimedAt: 1, owner: null, progress: {} });
+    expect(unowned).toBe('no page picked this command up before its deadline (no browser opened it)');
+    expect(unowned).not.toContain('the chat this app opened');
+    expect(commandExpiryReasonForTests({ lastError: null, claimedAt: 1, owner: 'page-1', progress: {} }))
+      .toBe('the chat this app opened did not report back in time (the page picked up its task, then reported nothing more)');
+    expect(commandExpiryReasonForTests({ lastError: 'boom', claimedAt: 1, owner: null, progress: {} })).toBe('boom');
+    expect(commandExpiryReasonForTests({ lastError: null, claimedAt: null, owner: null, progress: {} }))
+      .toBe('the browser did not claim this command before its deadline');
   });
 });
