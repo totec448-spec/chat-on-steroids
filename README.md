@@ -21,10 +21,7 @@
 <h2 align="center">Code. Delegate. Keep going.</h2>
 
 <p align="center">
-<picture>
-  <source media="(prefers-color-scheme: light)" srcset="docs/images/workspace-light.png">
-  <img src="docs/images/workspace.png" width="960" alt="Chat On Steroids at work: a conversation with live tool results, a task plan, and two workers beside it" />
-</picture>
+<img src="docs/images/workspace.png" width="960" alt="Chat On Steroids at work: a conversation with live tool results, a task plan, and two workers beside it" />
 </p>
 
 **Work on the real project.** Let ChatGPT read and edit files, run tests, keep terminals open and use your desktop. Follow the actual tool results as they arrive.
@@ -58,20 +55,34 @@ Get a message when a chat finishes, needs you or fails, through the free **ntfy*
 
 </td>
 </tr>
+<tr>
+<td width="50%" valign="top">
+
+### When a chat is stuck, one row tells you why
+Since when, how often the app tried, and every step it took. It turns amber once the app has stopped trying, so you know when it needs you.
+
+<img src="docs/images/why-stuck.png" alt="A chat that could not be recovered: an amber row listing each recovery step with its time" />
+
+</td>
+<td width="50%" valign="top">
+
+### Give a project more context, not more access
+Add related folders to a project so ChatGPT knows about them. They never become the working folder and never widen what it may touch.
+
+<img src="docs/images/related-folders.png" alt="Related folders dialog listing two context folders" />
+
+</td>
+</tr>
 </table>
 
 - **Pick the model and effort per chat**, with the same controls ChatGPT offers.
-- **Projects and folders.** Group chats by project, move them between projects with Undo, add context folders that never grant extra access, and choose exactly which folders ChatGPT may touch.
+- **Projects and folders.** Group chats by project, move them between projects with Undo, and choose exactly which folders ChatGPT may touch.
 - **Limit how many chats work at once**, so a busy day does not hit your usage in one burst.
 - **Command output in a dock.** Watch what a running command prints, read-only, and stop it with one click.
-- **When a chat has trouble, one row says why:** since when, how often the app tried, and what it did.
 - **Skills, plugins and pets**, 13 languages, light and dark.
 
 <p align="center">
-<picture>
-  <source media="(prefers-color-scheme: light)" srcset="docs/images/model-picker-light.png">
-  <img src="docs/images/model-picker.png" width="720" alt="Model and reasoning selection" />
-</picture>
+<img src="docs/images/model-picker.png" width="720" alt="Model and reasoning selection" />
 </p>
 
 ## Responsible use and provider rules
@@ -113,10 +124,7 @@ Windows 10/11, **macOS 13 Ventura or newer**, or a current desktop Linux. Chrome
 <details>
 <summary>Folder and capability settings</summary>
 
-<picture>
-  <source media="(prefers-color-scheme: light)" srcset="docs/images/settings-light.png">
-  <img src="docs/images/settings.png" width="960" alt="Folder and capability settings" />
-</picture>
+<img src="docs/images/settings.png" width="960" alt="Folder and capability settings" />
 
 </details>
 
