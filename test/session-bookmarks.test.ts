@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { promises as fs } from 'node:fs';
 import { initConfigPath, defaultConfig, saveConfig } from '../src/main/config.js';
 import { initDurableStore, flushDurable, resetDurableForTests } from '../src/main/durable.js';
-import { createSession, deleteSession, initSessionStore, resetSessionStoreForTests } from '../src/main/session/store.js';
+import { createSession, deleteSession, initSessionStore, resetSessionStoreForTests, sessionBookmarksPath } from '../src/main/session/store.js';
 import { listBookmarks, MAX_BOOKMARKS, setBookmark } from '../src/main/session/bookmarks.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
@@ -12,12 +13,37 @@ beforeEach(async () => {
   await saveConfig(defaultConfig());
 });
 afterEach(async () => {
+  vi.restoreAllMocks();
   await flushDurable(); resetSessionStoreForTests(); resetDurableForTests(); await removeTempDir(directory);
 });
 
 const A = 'aaaaaaaa-1111-4222-8333-444444444444';
 const B = 'bbbbbbbb-1111-4222-8333-444444444444';
 const C = 'cccccccc-1111-4222-8333-444444444444';
+
+it('keeps valid bookmarks beside malformed saved entries without rewriting the file on read', async () => {
+  const { id } = await createSession({ conversationId: 'bookmarks-damaged', title: 'Mixed entries' });
+  const logger = await import('../src/main/logger.js');
+  const info = vi.spyOn(logger, 'logInfo');
+  const a = { messageId: A, excerpt: 'First answer', messageTime: 100, at: 1 };
+  const b = { messageId: B, excerpt: 'Second answer', messageTime: 200, at: 2 };
+  const saved = JSON.stringify({ version: 1, bookmarks: [null, false, 17, 'damaged', [], {}, b, a] });
+  await fs.writeFile(sessionBookmarksPath(id), saved);
+  expect(await listBookmarks(id)).toEqual([a, b]);
+  expect(info).toHaveBeenCalledWith(`bookmarks: chat ${id}: ignored 5 malformed saved entries; valid bookmarks kept`);
+  expect(await fs.readFile(sessionBookmarksPath(id), 'utf8')).toBe(saved);
+});
+
+it('can add and remove bookmarks after loading a mixed damaged list, and keeps the survivors on restart', async () => {
+  const { id } = await createSession({ conversationId: 'bookmarks-repair', title: 'Repair on edit' });
+  const a = { messageId: A, excerpt: 'First answer', messageTime: 100, at: 1 };
+  const b = { messageId: B, excerpt: 'Second answer', messageTime: 200, at: 2 };
+  await fs.writeFile(sessionBookmarksPath(id), JSON.stringify({ version: 1, bookmarks: [a, null, b] }));
+  expect((await setBookmark(id, { messageId: C, excerpt: 'Third answer', messageTime: 300 }, true)).map(mark => mark.messageId)).toEqual([A, B, C]);
+  expect((await setBookmark(id, a, false)).map(mark => mark.messageId)).toEqual([B, C]);
+  resetSessionStoreForTests(); initSessionStore(directory);
+  expect((await listBookmarks(id)).map(mark => mark.messageId)).toEqual([B, C]);
+});
 
 it('keeps a chat\'s bookmarks in the order its answers appeared, across a restart', async () => {
   const { id } = await createSession({ conversationId: 'bookmarks-1', title: 'Bookmarks' });
