@@ -46,9 +46,9 @@ import { executableFingerprint, initKeychainNotice } from './keychain-notice.js'
 import { pluginManager } from './plugins/manager.js';
 import { onSessionAutomationChange, sessionActivityExpiresAt, sessionControlsFor, sessionHoldsTurn, setBrowserOpener, setBrowserWorkArea, setSessionAutomation, shutdownBridge, startBridge, stopSessionTurn } from './bridge.js';
 import { setStuckNotifier } from './stuck-notice.js';
-import { flushSessions, getSession, initSessionStore, listSessions, readRecentEvents, setRecordingStorageLimit } from './session/store.js';
-import { runDueSchedules, type RunnerDeps } from './scheduled-runs.js';
-import { enqueueInput, listInputs } from './session/input.js';
+import { flushSessions, getSession, getSessionOrNullIfMissing, initSessionStore, listSessions, readRecentEvents, setRecordingStorageLimit } from './session/store.js';
+import { runDueSchedules, safeFailureReason, type RunnerDeps } from './scheduled-runs.js';
+import { deliveryProof, enqueueInput, listInputs } from './session/input.js';
 import { createTurnNotifier } from './turn-notifications.js';
 import { DEFAULT_RECORDING_STORAGE_GIB } from '../shared/session.js';
 import { initSkillsPath } from './skills.js';
@@ -637,12 +637,22 @@ void app.whenReady().then(async () => {
   // while it slept or the app was closed goes out once, labelled late.
   const scheduleDeps: RunnerDeps = {
     // A lookup that fails is not a deleted chat: the runner keeps the schedule and asks again.
-    session: async id => { const summary = await getSession(id); return summary ? { id: summary.id, conversationId: summary.conversationId ?? null, activeTurnId: summary.activeTurnId ?? null } : null; },
-    enqueue: input => enqueueInput(input),
-    pending: async () => new Set((await listInputs()).filter(row => ['queued', 'browser', 'tool'].includes(row.state)).map(row => row.id)),
-    log: logInfo
+    session: async id => {
+      const summary = await getSessionOrNullIfMissing(id);
+      return summary ? { id: summary.id, conversationId: summary.conversationId ?? null, activeTurnId: summary.activeTurnId ?? null } : null;
+    },
+    enqueue: (input, options) => enqueueInput(input, undefined, options),
+    inputs: async () => (await listInputs()).map(row => ({
+      id: row.id, state: row.state, deliveredAt: row.deliveredAt, scheduled: row.scheduled,
+      sendAuthorizedAt: row.sendAuthorizedAt, deliveryProof: deliveryProof(row)
+    })),
+    log: logInfo,
+    changed: () => {
+      const target = window;
+      if (target && !target.isDestroyed()) target.webContents.send('session:changed');
+    }
   };
-  const checkSchedules = () => void runDueSchedules(Date.now(), scheduleDeps).catch(error => logWarn(`scheduled runs: the check failed (${error instanceof Error ? error.message : String(error)})`));
+  const checkSchedules = () => void runDueSchedules(Date.now(), scheduleDeps).catch(error => logWarn(`scheduled runs: the check failed (${safeFailureReason(error)})`));
   setInterval(checkSchedules, 30_000).unref();
   powerMonitor.on('resume', checkSchedules);
   checkSchedules();

@@ -2008,17 +2008,55 @@ var CLF_DOM = (() => {
    * taken (a page reloaded since has none of its own); an attachment or a busy page keeps it.
    */
   function clearResumeResidue() {
-    // Only a brief this page typed itself, word for word: one a person added to stays (CodeRabbit on #2069).
-    return clearOwnResidue(RESUME_RESIDUE, text => typedBriefs.includes(text));
+    // Only a brief the app typed itself, word for word, here or on an earlier page of this tab: one a person
+    // added to stays (CodeRabbit on #2069). The page that typed it may be gone (#2115), so the record is stored.
+    return clearOwnResidue(RESUME_RESIDUE, text => ownBrief(text));
   }
 
-  /** The Compact & Resume briefs this page typed, compacted as residue is compared; the newest few. */
+  /**
+   * The Compact & Resume briefs the app typed, as short fingerprints of their compacted text. They are kept in
+   * the page's storage, not only in memory: ChatGPT keeps the text across a reload, an app restart and other
+   * tabs, and a page that reloaded since no longer remembered typing it, so every later Compact & Resume in the
+   * Project waited for an empty editor until it gave up (#2115). A fingerprint, not the text: a brief is tens
+   * of thousands of characters.
+   */
+  const TYPED_BRIEFS_KEY = 'clf-typed-briefs-v1';
+  const MAX_TYPED_BRIEFS = 12;
   const typedBriefs = [];
+  function briefFingerprint(text) {
+    // cyrb53: a fast 53-bit hash. Identity, not security; two briefs sharing one is not a concern.
+    let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761); h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return `${text.length}:${(4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36)}`;
+  }
+  function storedBriefs() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(TYPED_BRIEFS_KEY) || '[]');
+      return Array.isArray(raw) ? raw.filter(value => typeof value === 'string').slice(-MAX_TYPED_BRIEFS) : [];
+    } catch { return []; }
+  }
+  function ownBrief(text) {
+    const fingerprint = briefFingerprint(text);
+    return typedBriefs.includes(fingerprint) || storedBriefs().includes(fingerprint);
+  }
   function rememberTypedBrief(value) {
     const text = compactDraft(value);
-    if (!RESUME_RESIDUE.test(text) || typedBriefs.includes(text)) return;
-    typedBriefs.push(text);
-    if (typedBriefs.length > 4) typedBriefs.shift();
+    if (!RESUME_RESIDUE.test(text)) return;
+    const fingerprint = briefFingerprint(text);
+    if (!typedBriefs.includes(fingerprint)) {
+      typedBriefs.push(fingerprint);
+      if (typedBriefs.length > MAX_TYPED_BRIEFS) typedBriefs.shift();
+    }
+    try {
+      const stored = storedBriefs().filter(value => value !== fingerprint);
+      stored.push(fingerprint);
+      localStorage.setItem(TYPED_BRIEFS_KEY, JSON.stringify(stored.slice(-MAX_TYPED_BRIEFS)));
+    } catch { /* Storage can be unavailable or full: this page's own memory still works. */ }
   }
 
   /**
@@ -3698,7 +3736,7 @@ var CLF_DOM = (() => {
       new URL(link.href, location.href).origin === location.origin &&
       projectHomeId(new URL(link.href, location.href).pathname) === entry.id);
     return new Promise(resolve => {
-      let clicked = false, done = false, lastObservation = 'source-not-ready', residueCleared = false;
+      let clicked = false, done = false, lastObservation = 'source-not-ready', residueClears = 0;
       // Where the source chat was when the link was clicked, and how many times its own route
       // rewrite has since taken that click away.
       let clickedPath = '', reclicks = 0;
@@ -3721,7 +3759,8 @@ var CLF_DOM = (() => {
         if (clicked && projectHomeId() === entry.id) {
           if (!composer()?.isConnected || !composerSubmitReady()) {
             // An earlier brief of the app's own that ChatGPT kept in this Project home (#2068).
-            if (!residueCleared && clearResumeResidue()) { residueCleared = true; return check(); }
+            // ChatGPT can restore the draft after it was emptied, so this may happen again, a few times only.
+            if (residueClears < 3 && clearResumeResidue()) { residueClears++; return check(); }
             lastObservation = 'composer-not-ready';
             return;
           }

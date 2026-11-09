@@ -44,6 +44,7 @@ import {
   flushSessions,
   findSessionByConversation,
   getSession,
+  getSessionOrNullIfMissing,
   initSessionStore,
   latestHandoff,
   listSessions,
@@ -751,6 +752,23 @@ describe('session store', () => {
     } finally {
       spy.mockRestore();
     }
+  });
+
+  it('does not mistake damaged metadata in an existing session folder for a deleted chat', async () => {
+    const session = await createSession({ title: 'metadata unavailable', conversationId: 'metadata-unavailable' });
+    await flushSessions();
+    const folder = path.join(sessionsRoot(), session.id);
+    await fs.writeFile(path.join(folder, 'meta.json'), '{"id":"damaged');
+    await fs.rm(path.join(folder, 'meta.backup.json'), { force: true });
+    resetRecorderForTests();
+    resetSessionStoreForTests();
+
+    expect(await getSession(session.id)).toBeNull();
+    await expect(getSessionOrNullIfMissing(session.id)).rejects.toThrow('The session exists but its metadata could not be read.');
+
+    await fs.rm(folder, { recursive: true, force: true });
+    resetSessionStoreForTests();
+    expect(await getSessionOrNullIfMissing(session.id)).toBeNull();
   });
 
   /**

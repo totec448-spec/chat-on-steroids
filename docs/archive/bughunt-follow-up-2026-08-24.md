@@ -1,7 +1,7 @@
 # Manual bug hunt follow-up — 2026-08-24
 
 This is the follow-up manual audit requested after the larger same-day architecture pass in
-`docs/bug-audit-2026-08-24.md`. The checkout was already heavily modified, so this pass did not
+`docs/archive/bug-audit-2026-08-24.md`. The checkout was already heavily modified, so this pass did not
 reset, reformat, or take ownership of unrelated work. Candidate findings from parallel read-only
 reviews were treated as leads; production changes below were made only after tracing the live path
 and adding or strengthening a regression.

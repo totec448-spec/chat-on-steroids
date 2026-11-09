@@ -1344,7 +1344,9 @@ Bookmarked answers (#1719): `sessions:bookmarks { id }` → `SessionBookmark[]` 
 and `sessions:bookmark { id, messageId, excerpt, messageTime, on }` → the chat's new list, in
 `src/main/session/bookmarks.ts`, kept in `bookmarks.json` in the session's folder and written serially per
 session; at most `MAX_BOOKMARKS` (200) per chat, excerpts one line of at most 160 characters. A
-missing or damaged file reads as no bookmarks; damaged entries are dropped. Nothing is sent to
+missing or damaged file reads as no bookmarks; damaged entries are dropped alone. Null, scalars and
+arrays are rejected before property access and counted in one log line, without rewriting on read.
+Valid marks remain usable for listing and toggling, and an explicit edit saves the normalized list. Nothing is sent to
 ChatGPT. The header list jumps through `sessions:locate-message`; a reply no longer in the chat
 shows a notice instead of scrolling. Long row menus scroll inside the window (`row-menu.ts`). A file holding more than the limit keeps the ones bookmarked first. Tests: `test/session-bookmarks.test.ts` (storage, limit, damaged files), the "bookmarked answers" cases in `test/renderer-timeline.part6.test.ts` (answer action, header list, jump), and `scripts/verify-bookmark-list.cjs` (200 bookmarks in a short window, real Electron).
 
@@ -2210,15 +2212,59 @@ A chat's own message sent into that same chat at set times; one schedule per cha
 (1–24, real hours from when it was saved), daily, weekdays and weekly at a local `HH:MM`. A time
 the spring clock change skips runs at the first minute after it; a repeated autumn hour runs once.
 Checked every 30 s and on `powerMonitor` resume. A due run is one `enqueueInput` row with
-`scheduled { scheduleId, dueAt, late }`, mode `after-turn` while the chat has an active turn
-(never joining it), else `auto`, so read-only mode, the "slow down" hold and a missing browser hold
+`scheduled { scheduleId, dueAt, late }`. The outbox chooses `after-turn` only for a
+recorded active turn with a durable completion boundary; browser-only activity without such a
+boundary remains an `auto` browser send that waits for the live idle policy. Scheduled rows never
+join the active model turn through the tool or direct-composer path; browser claim and Send
+authorization recheck eligibility. Read-only mode, the "slow down" hold and a missing browser hold
 it like any automatic send. Exactly once: the row id is derived from the schedule id and `dueAt`, so
 a crash before the schedule is saved queues the same id and the queue keeps one row. Missed runs
 (app closed, asleep) send one run, `late` when more than 2 min after its time; a time whose previous
-run still waits in the queue is skipped; a refused queueing skips that time once (no 30 s retry
-loop); saving or resuming starts at the next time; an ended schedule sends nothing; a deleted chat's
+run still waits in the queue is skipped; a deterministic admission refusal skips that time once,
+while a transient outbox read/write failure durably retains `retryDueAt` and retries the exact
+same occurrence id after restart instead of silently losing it. A pending retry also blocks a
+new random-id Run now until reconciled, avoiding duplicates. Saving or resuming starts at the
+next time; an ended schedule sends nothing; a deleted chat's
 schedule is removed. IPC `schedules:get|save|pause|delete`; errors are sentences the renderer
 translates. Queue rows and pending messages say "Scheduled" (late: "Scheduled · late, was due …").
+The global Scheduled page projects these same per-chat records with `schedules:list`, resolving
+current chat titles and bounded message previews rather than full stored prompts, without
+creating a second task store. It opens the existing chat and
+calls the existing pause/resume/delete actions. Only a chat already bound to a ChatGPT
+conversation can create or manually run a schedule. `schedules:runNow` queues a manual run through
+the same input outbox (waiting for the active turn if necessary) without advancing the
+recurrence cursor; it durably records a recoverable manual-run intent (the exact input id, text and
+time) before enqueue. Run now first checks the same outbox and returns `false` (already waiting)
+instead of queueing another identical message while any row for that schedule remains pending;
+the due runner checks every pending outbox row for the schedule id, not only the latest
+`lastInputId`, so a newer manual run cannot hide an older queued run. An interrupted manual intent
+is reconciled against its exact outbox row or replayed with the same id only after no different
+scheduled message is still pending. An unconfirmed authorized/cancelled browser Send also blocks
+another manual id until a definitive delivery/no-send receipt is available. If enqueue rejects,
+it re-reads the outbox:
+keep the intent when the row exists or the read fails, but drop it after a successful read proves
+the row is absent, so a pre-commit refusal does not retry forever. The intent is cleared only after
+that reconciliation is saved. If saving a new intent fails, the prior schedule snapshot supersedes
+that failed durable generation before returning; a refused click cannot become a hidden enqueue on
+retry or shutdown. Failure logs use safe error codes only, never raw error messages, local paths or
+chat ids. All schedule outcome logs omit local session ids. Schedule IPC returns only allowlisted,
+translated domain errors; unexpected persistence/queue failures become one generic translated
+message, never a native filesystem error or local path. A successful manual Run now clears an old
+`missedDueAt` marker just like a newly queued recurring run, but does not advance the recurrence
+cursor. A failed/absent manual enqueue leaves the missed marker intact. A failed session read is
+logged and retains the schedule. A deleted chat cannot be targeted, and a
+confirmed orphan record is removed and logged. A chat whose session directory is still present
+but whose metadata cannot be read is retained; only a positively absent session directory is
+treated as a deleted chat. A chat that cannot be read during the global list refresh is kept and
+omitted from that refresh while the other schedules continue loading. A missing schedules file
+is the only empty first-run state; invalid JSON, schema errors and a file from a newer version
+fail closed and remain on disk rather than being overwritten by the next edit. The runner
+notifies the renderer after each persisted schedule change, including recovered manual intents
+and missed/ended/blocked outcomes that do
+not enqueue a message. The global list projects `missedDueAt` until a later run is sent, so a run
+missed while the app was closed or asleep remains visible outside the chat. Its recurrence times
+use the selected locale's 12/24-hour clock, and keyboard focus is restored when a background
+refresh or language change rebuilds the rows.
 The delivered `user_message` records `scheduled { dueAt, late }` (copied from the input in
 `recordDeliveredInput`, kept when a later page echo lacks it), so the sent message keeps the same
 line in the chat after the outbox row is pruned.
@@ -4778,6 +4824,11 @@ evicted. Historical browsing leaves committed inputs with history. Never infer m
 the minimum event timestamp: old observations and tool start times can occur on newer pages.
 Pushes and async loads are scoped to selection/draft generation; a late load must not overwrite
 focused edits or a newer A → B → A view.
+The Scheduled list coalesces overlapping refreshes, but a mutation waits for only one read requested
+after the mutation; a continuing `session:changed` stream must not keep its controls disabled.
+The Refresh button remains enabled and keyboard-focusable during reads and exposes the read state
+through `aria-busy`; only an active mutation disables it. A successful background read clears a
+load error, never an action error.
 `session:changed` carries a `SessionChange`: the recorder coalesces the exact local ids it
 wrote in one 400 ms burst (`sessionIds`; input-history offered → confirmed revisions publish
 their owner there too), and a mutation without enumerable owners, such as image-storage
@@ -5109,8 +5160,17 @@ own title is never changed.
 Chat search (#1107) is IPC `sessions:search { query ≤200 }` → `SessionSearchReply { results ≤50,
 indexed, total }`. `session/search.ts` never reads a journal per query: each chat gets
 `<session>/search.txt` (first line the stamp `version:updatedAt:events`, then the user's authored
-words and ChatGPT's answers, overflow text included, capped at 1M characters), built in the
-background newest first, reused while the stamp matches, deleted with the chat. Helper chats are
+words and ChatGPT's answers, overflow text included), built in the background newest first,
+reused while the stamp matches, deleted with the chat. Version 2 indexes cover the full transcript;
+version 1's potentially truncated indexes are rebuilt from the recording. Index construction writes
+one message at a time through a fixed `search.txt.tmp`, truncating an interrupted build on restart
+before atomic publication; failed publication removes that temporary. Queries stream 64 KiB UTF-8
+windows with overlap for words and snippets.
+Only indexes of at most 1M characters are cached, within the existing 24M-character cache budget;
+this is a memory bound, not a searchable-history cutoff. An unreadable index is rebuilt from the
+recording when its directory allows replacement. A missing/stale index discovered during a query
+clears only its own current stamp so polling can recover; this skip and a streamed result superseded
+by a newer stamp each log their reason. Helper chats are
 left out, as in the sidebar. Every query word must match (title or text, any order, case- and
 accent-folded with `foldCase`, which keeps UTF-16 lengths so ranges index the original; `ß` stays). Title matches rank
 first, then text matches, each newest first. `titleMatches` and `snippet.matches` are UTF-16
@@ -6217,7 +6277,7 @@ remain semantically targetable; they never receive image coordinates or supply d
 Operational Desktop errors expose their original code, nullable completion evidence and a concrete
 recovery step. Recovery never dispatches another input or treats a target failure as global
 read-only mode. Preserve exact identity, generation, geometry, clipboard and browser policy checks.
-See `docs/worklog-2026-09-19-computer-use-audit.md` for the forty-chat audit and regression coverage.
+See `docs/archive/worklog-2026-09-19-computer-use-audit.md` for the forty-chat audit and regression coverage.
 
 For Chromium browser windows, `BrowserRootView` owns the current accessibility tree, including
 the address bar and displayed document. Legacy renderer HWNDs can expose old tabs with plausible
@@ -6339,6 +6399,14 @@ the whole run replaying one long workflow; avoid optimizing speculative edge cas
 | Files/patch/output/code-mode | concrete tool owner → kernel serialization | `codex-*`, `exec-*`, `code-mode-*`, `mcp-tool-declarations`, `code-checkpoints` |
 | Plugins/auth/native Desktop | manager/exposure/OAuth or computer frame owner | `plugins-*`, `computer*`, `tools-desktop-*`, `macos-*` |
 | Startup/connection/shipping | lifecycle/config/connection or packaging script | `config`, `window-*`, `shutdown`, `tunnel*`, `control-api`, `packaging`, `update`, `third-party-notices` |
+
+The process-lifetime regression in `test/exec.test.ts` waits for a newline-terminated child-PID
+receipt on stdout (`test/process-ready.ts`), not a polled PID file. Startup errors, premature exits
+and timeout include bounded stdout/stderr, drained through close within the original deadline.
+Failed startup attempts cleanup of the fixture's process tree; the POSIX parent owns a detached
+process group so an unreported child can be reclaimed even after the parent exits.
+Windows retains its PowerShell parent so the assertion still tests parent-only termination rather
+than Node's Windows job-object behavior. Helper tests use fake time, not real startup sleeps.
 
 Discover current suites with `rg --files test`; do not maintain a stale suite count. Vitest runs files in
 parallel but the tests of one file in sequence, so a file that boots the renderer per test is split

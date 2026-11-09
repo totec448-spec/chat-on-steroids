@@ -4,6 +4,7 @@ vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTermina
 }) }));
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { JSDOM } from 'jsdom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -138,10 +139,25 @@ describe('session summary pages', () => {
   });
 
   it('pages past the first 60 while reporting the full retained total', async () => {
-    for (let index = 0; index < 65; index++) {
-      const session = await createSession({ title: `history-${index}`, conversationId: null });
-      await endSession(session.id);
-    }
+    // The behavior under test is the cold on-disk catalog and cursor paging, not session creation.
+    // Seed valid version-current summary files from one real session instead of performing 130
+    // durable create/end writes; that setup exceeded Vitest's 30 s limit on Windows x64.
+    const template = await createSession({ title: 'history-0', conversationId: null });
+    await endSession(template.id);
+    const templateMeta = JSON.parse(await fs.readFile(path.join(dir, 'sessions', template.id, 'meta.json'), 'utf8')) as Record<string, unknown>;
+    const ids = [template.id];
+    const now = Date.now();
+    await Promise.all(Array.from({ length: 64 }, async (_, index) => {
+      const id = randomUUID();
+      const updatedAt = now + index + 1;
+      const meta = { ...templateMeta, id, title: `history-${index + 1}`, startedAt: updatedAt,
+        updatedAt, endedAt: updatedAt + 1, conversationId: null, chatIds: [] };
+      const folder = path.join(dir, 'sessions', id);
+      await fs.mkdir(folder, { recursive: true });
+      await fs.writeFile(path.join(folder, 'meta.json'), JSON.stringify(meta));
+      ids.push(id);
+    }));
+    expect(ids).toHaveLength(65);
     resetSessionStoreForTests();
 
     const first = await listSessionPage({ limit: 60 });
@@ -373,6 +389,117 @@ describe('visible Chat refresh', () => {
     await vi.waitFor(() => expect(listCalls).toHaveLength(2));
     expect(listCalls[1]).toEqual({ cursor, limit: 60 });
     await vi.waitFor(() => expect(w.document.querySelectorAll('#sessionList .sess')).toHaveLength(65));
+  });
+});
+
+describe('selected catalog fallback', () => {
+  it('survives overlapping paginated refreshes and is dropped only after confirmed deletion', async () => {
+    const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
+    dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
+    const w = dom.window;
+    Object.assign(globalThis, {
+      window: w, document: w.document, HTMLElement: w.HTMLElement, Element: w.Element, Node: w.Node,
+      DocumentFragment: w.DocumentFragment, HTMLInputElement: w.HTMLInputElement, HTMLSelectElement: w.HTMLSelectElement,
+      HTMLTextAreaElement: w.HTMLTextAreaElement, HTMLButtonElement: w.HTMLButtonElement
+    });
+    if (!(w.HTMLElement.prototype as any).scrollIntoView) (w.HTMLElement.prototype as any).scrollIntoView = () => {};
+
+    const firstPage = Array.from({ length: 60 }, (_, index) =>
+      summary(`2026-08-25-${index.toString(16).padStart(8, '0')}`, 100_000 - index, 0)
+    );
+    const olderPage = Array.from({ length: 5 }, (_, index) =>
+      summary(`2026-08-26-${index.toString(16).padStart(8, '0')}`, 99_940 - index, 0)
+    );
+    // This fetched summary sorts inside the first page's covered range, despite being absent
+    // from the stale page response. The old pagination filter therefore discarded it.
+    const fallback = summary('2026-08-25-ffffffff', 99_970, 0);
+    expect(fallback.updatedAt).toBeLessThan(firstPage[0]!.updatedAt);
+    expect(fallback.updatedAt).toBeGreaterThan(firstPage.at(-1)!.updatedAt);
+    const cursor = { updatedAt: firstPage.at(-1)!.updatedAt, id: firstPage.at(-1)!.id };
+    const pageOne = { sessions: firstPage, activeId: null, pressure: [], blocked: [], approval: [], recoveryStopped: [], trusted: [], total: 65, nextCursor: cursor };
+    const pageTwo = { sessions: olderPage, activeId: null, pressure: [], blocked: [], approval: [], recoveryStopped: [], trusted: [], total: 65, nextCursor: null };
+    const ok = (data: any) => Promise.resolve({ ok: true as const, data });
+    const deferred = <T,>() => {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>(done => { resolve = done; });
+      return { promise, resolve };
+    };
+    const initial = deferred<any>();
+    const staleRefresh = deferred<any>();
+    const currentRefresh = deferred<any>();
+    let firstPageReads = 0;
+    let olderPageReads = 0;
+    let opened = false;
+    let verificationReply: any = null;
+    const getSession = vi.fn(async (id: string, options?: any) => {
+      if (opened && id === fallback.id && options?.limit === 1 && verificationReply) return verificationReply;
+      return ok({ summary: fallback, events: [note(1, 'Fallback transcript')], total: 1, nextFrom: 2 });
+    });
+    const api: any = new Proxy({
+      listSessions: (options: any = {}) => {
+        if (options.cursor) { olderPageReads += 1; return ok(pageTwo); }
+        firstPageReads += 1;
+        if (firstPageReads === 1) return initial.promise;
+        if (firstPageReads === 2) return staleRefresh.promise;
+        if (firstPageReads === 3) return currentRefresh.promise;
+        return ok(pageOne);
+      },
+      listProjects: () => ok([]),
+      getSession,
+      getSwarm: () => ok({ running: false, runId: null, agents: [], maxWorkers: 2, pendingReports: 0 }),
+      onSessionChanged: () => () => undefined,
+      onSwarmChanged: () => () => undefined
+    }, { get(target, prop) { return prop in target ? (target as any)[prop] : (..._args: any[]) => ok(null); } });
+    Object.defineProperty(w, 'api', { value: api, configurable: true });
+
+    const { chatVisible, initChat, openScheduledChat } = await import('../src/renderer/chat.js');
+    initChat({ save: async () => true,
+      state: () => ({ config: { sessions: { record: true, limitTokens: 533000 }, compaction: { auto: true, autoTokens: 400000 }, ui: { developerMode: true } } }) as any });
+    chatVisible(true);
+    await vi.waitFor(() => expect(firstPageReads).toBe(1));
+    const opening = openScheduledChat(fallback.id);
+    initial.resolve(ok(pageOne));
+    await opening;
+    opened = true;
+    const row = () => w.document.querySelector<HTMLElement>(`#sessionList [data-id="${fallback.id}"]`);
+    const selected = () => row()?.querySelector('.sess-top[aria-current="true"]') ?? null;
+    await vi.waitFor(() => expect(selected()).not.toBeNull());
+
+    const pane = w.document.getElementById('sessionList')!.closest('.scroll') as HTMLElement;
+    Object.defineProperty(pane, 'clientHeight', { value: 200, configurable: true });
+    Object.defineProperty(pane, 'scrollHeight', { value: 1_000, configurable: true });
+    pane.scrollTop = 800;
+    pane.dispatchEvent(new w.Event('scroll'));
+    await vi.waitFor(() => expect(olderPageReads).toBe(1));
+    await vi.waitFor(() => expect(w.document.querySelectorAll('#sessionList .sess')).toHaveLength(66));
+
+    // Two whole-catalog refreshes overlap. The newer response arrives first and omits the
+    // selected fallback; exact-id verification must keep it. The older response then arrives late.
+    chatVisible(false); chatVisible(true);
+    await vi.waitFor(() => expect(firstPageReads).toBe(2));
+    chatVisible(false); chatVisible(true);
+    await vi.waitFor(() => expect(firstPageReads).toBe(3));
+    currentRefresh.resolve(ok(pageOne));
+    await vi.waitFor(() => expect(getSession.mock.calls.filter(([id, options]) => id === fallback.id && options?.limit === 1).length).toBeGreaterThan(1));
+    await vi.waitFor(() => expect(selected()).not.toBeNull());
+    staleRefresh.resolve(ok(pageOne));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(selected()).not.toBeNull();
+    expect(w.document.getElementById('timeline')?.textContent).toContain('Fallback transcript');
+
+    // A transient verification error is not deletion either.
+    verificationReply = { ok: false as const, error: 'Temporary IPC failure' };
+    chatVisible(false); chatVisible(true);
+    await vi.waitFor(() => expect(firstPageReads).toBe(4));
+    await vi.waitFor(() => expect(getSession.mock.calls.filter(([id, options]) => id === fallback.id && options?.limit === 1).length).toBeGreaterThan(2));
+    expect(selected()).not.toBeNull();
+
+    // The main-process read returns this error only after a positive missing-directory check.
+    verificationReply = { ok: false as const, error: 'Session not found' };
+    chatVisible(false); chatVisible(true);
+    await vi.waitFor(() => expect(firstPageReads).toBe(5));
+    await vi.waitFor(() => expect(row()).toBeNull());
+    expect(w.document.getElementById('timeline')?.textContent).not.toContain('Fallback transcript');
   });
 });
 
