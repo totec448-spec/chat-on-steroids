@@ -80,6 +80,22 @@ it('copies the rows of a table ChatGPT drew but wrote with only its header (#147
   expect(electron.clipboard.writeText).toHaveBeenCalledWith('| **Item** | **Qty** |\n|---|---|\n| Rice | 1 kg |\n| Milk | 2 l |\n');
 });
 
+it('copies distinct rows for drawn tables that share column headings', async () => {
+  const table = (item: string, quantity: string) => '<div data-d-component="table"><table>' +
+    `<tr><td>Item</td><td>Qty</td></tr><tr><td>${item}</td><td>${quantity}</td></tr></table></div>`;
+  const html = table('Rice', '1 kg') + table('Milk', '2 l');
+  const markdown = '## Before\n| Item | Qty |\n|---|---|\n\n## After\n| Item | Qty |\n|---|---|';
+  store.readEvents.mockResolvedValue([
+    events[0]!,
+    { ...events[1]!, message: { text: markdown, truncated: false, chars: markdown.length },
+      renderedHtml: { text: html, truncated: false, chars: html.length } },
+    events[2]!
+  ]);
+  await exportSessionMarkdown({ id: 'session-1', scope: 'answer', turnId: 't1', target: 'clipboard' }, null);
+  expect(electron.clipboard.writeText).toHaveBeenCalledWith(
+    '## Before\n| Item | Qty |\n|---|---|\n| Rice | 1 kg |\n\n## After\n| Item | Qty |\n|---|---|\n| Milk | 2 l |\n');
+});
+
 // An answer recorded outside any turn (copied branch history, an adopted chat) has no turn to name.
 it('copies an answer recorded without a turn by its message id, and only such an answer', async () => {
   store.readEvents.mockResolvedValue([...events,
