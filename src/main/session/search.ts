@@ -30,6 +30,7 @@ const SNIPPET_CHARS = 140;
 export const MAX_SEARCH_RESULTS = 50;
 // Version 1 indexes may have silently omitted everything after the first million characters.
 const INDEX_VERSION = 2;
+const INDEX_RETRY_MS = 30_000;
 
 
 /** What makes an index current: the chat's last change and its event count. */
@@ -38,6 +39,8 @@ const stampOf = (summary: SessionSummary): string => `${INDEX_VERSION}:${summary
 const cache = new Map<string, { stamp: string; text: string; lower: string }>();
 let cachedChars = 0;
 const current = new Map<string, string>();
+/** One cooldown and warning per failed chat revision; success or deletion retires it. */
+const failures = new Map<string, { stamp: string; retryAt: number }>();
 let indexing: Promise<void> | null = null;
 let indexingWanted = false;
 
@@ -100,7 +103,7 @@ async function indexOne(summary: SessionSummary): Promise<void> {
   const stamp = stampOf(summary);
   if (current.get(summary.id) === stamp) return;
   const valid = await storedIndex(summary.id, stamp).catch(error => {
-    logWarn(`search: chat ${summary.id} index unreadable; rebuilding: ${(error as Error).message}`);
+    if (failures.get(summary.id)?.stamp !== stamp) logWarn(`search: chat ${summary.id} index unreadable; rebuilding: ${(error as Error).message}`);
     return false;
   });
   if (!valid) {
@@ -138,9 +141,17 @@ function startIndexing(): void {
       const summaries = (await indexedSessions()).filter(searchable).sort((a, b) => b.updatedAt - a.updatedAt);
       const live = new Set(summaries.map(summary => summary.id));
       for (const id of [...current.keys()]) if (!live.has(id)) { current.delete(id); const old = cache.get(id); if (old) { cachedChars -= old.text.length; cache.delete(id); } }
+      for (const id of failures.keys()) if (!live.has(id)) failures.delete(id);
       for (const summary of summaries) {
-        try { await indexOne(summary); }
-        catch (error) { logWarn(`search: chat ${summary.id} not indexed: ${(error as Error).message}`); current.set(summary.id, stampOf(summary)); }
+        const stamp = stampOf(summary), failure = failures.get(summary.id);
+        if (failure?.stamp === stamp && Date.now() < failure.retryAt) continue;
+        try {
+          await indexOne(summary);
+          failures.delete(summary.id);
+        } catch (error) {
+          failures.set(summary.id, { stamp, retryAt: Date.now() + INDEX_RETRY_MS });
+          if (failure?.stamp !== stamp) logWarn(`search: chat ${summary.id} not indexed; searches will retry after 30 seconds (changed chats retry immediately): ${(error as Error).message}`);
+        }
         await yieldToEvents();
       }
     }
@@ -281,7 +292,7 @@ export async function searchIndexingSettled(): Promise<void> {
 }
 
 export function resetSessionSearchForTests(): void {
-  cache.clear(); cachedChars = 0; current.clear(); indexingWanted = false;
+  cache.clear(); cachedChars = 0; current.clear(); failures.clear(); indexingWanted = false;
 }
 
 /** Most matches one find returns; a chat with more is searched with a longer phrase. */
