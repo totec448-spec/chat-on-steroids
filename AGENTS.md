@@ -2641,7 +2641,7 @@ these are local estimates, uses English column names, local times and a UTF-8 by
 guards text cells against spreadsheet formulas, and holds no path, chat, account or
 conversation id. Before replacing an existing CSV, Linux asks through a main-process message
 box with Cancel as the default; Electron 44's GTK chooser can ignore its native overwrite flag.
-Windows/macOS keep the native save panel's confirmation. Cancelling writes nothing.
+Windows/macOS keep the native save panel's confirmation. Cancelling leaves the destination unchanged.
 New Linux destinations are published without replacement (a hard link, or an exclusive copy on
 volumes without hard links); a name taken while preparing the CSV asks the same question before
 replacement. The staging file is cleaned up on success, cancellation and failure.
