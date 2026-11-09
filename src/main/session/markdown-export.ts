@@ -10,6 +10,7 @@ import { providerEntitiesAsMarkdown } from '../../shared/content-reference.js';
 import { dialogLabel, mainText } from '../main-texts.js';
 import { completedDilText } from '../../shared/dil-tables.js';
 import { replaceFile } from '../replace-file.js';
+import { logWarn } from '../logger.js';
 
 export type MarkdownExportRequest = {
   id: string;
@@ -45,7 +46,10 @@ export async function exportSessionMarkdown(request: MarkdownExportRequest, owne
     const { turnId, messageId } = named;
     // Only a turn the page reported as completed has an answer to hand out; an answer recorded
     // outside any turn is final already, and is named by its message instead.
-    if (!messageId && (!turnId || !completedTurnIds(events).has(turnId))) throw new Error('This turn has not completed');
+    if (!messageId && (!turnId || !completedTurnIds(events).has(turnId))) {
+      logWarn('Markdown export: answer refused because its turn has not completed');
+      throw new Error('This turn has not completed');
+    }
     const entries = messageId ? messageAnswerEntries(events, messageId) : turnAnswerEntries(events, turnId!);
     if (!entries.length) throw new Error('This turn has no answer to export');
     markdown = answerMarkdown(await Promise.all(entries.map(entry => fullText(request.id, entry.stored, entry.html))));

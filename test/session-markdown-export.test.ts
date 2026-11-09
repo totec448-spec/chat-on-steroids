@@ -119,9 +119,17 @@ it('skips a completed turn that started again for /copy until it ends again', as
     { seq: 7, time: 7, source: 'app', kind: 'turn_start', turnId: 't2' }
   ];
   store.readEvents.mockResolvedValue([...events, ...later] as SessionEvent[]);
+  await expect(exportSessionMarkdown({ id: 'session-1', scope: 'answer', turnId: 't2', target: 'clipboard' }, null))
+    .rejects.toThrow('This turn has not completed');
+  await expect(exportSessionMarkdown({ id: 'session-1', scope: 'answer', turnId: 't2', target: 'file' }, null))
+    .rejects.toThrow('This turn has not completed');
+  expect(electron.clipboard.writeText).not.toHaveBeenCalled();
+  expect(electron.dialog.showSaveDialog).not.toHaveBeenCalled();
   await exportSessionMarkdown({ id: 'session-1', scope: 'latest', target: 'clipboard' }, null);
   expect(electron.clipboard.writeText).toHaveBeenLastCalledWith('The first part, and the rest of the answer.\n');
   store.readEvents.mockResolvedValue([...events, ...later, { seq: 8, time: 8, source: 'extension', kind: 'turn_end', turnId: 't2', outcome: 'completed' }] as SessionEvent[]);
+  await exportSessionMarkdown({ id: 'session-1', scope: 'answer', turnId: 't2', target: 'clipboard' }, null);
+  expect(electron.clipboard.writeText).toHaveBeenLastCalledWith('Done now\n');
   await exportSessionMarkdown({ id: 'session-1', scope: 'latest', target: 'clipboard' }, null);
   expect(electron.clipboard.writeText).toHaveBeenLastCalledWith('Done now\n');
 });
