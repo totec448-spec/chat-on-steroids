@@ -51,10 +51,15 @@ function literalBoundary(before: string, after: string): boolean {
 function directlyExcluded(before: string, after: string): boolean {
   // Recognize direct exclusions next to this name, not unrelated negation elsewhere in the
   // task ("use Code Review to check why tests do not pass") or a semantic topic classifier.
-  const englishBefore = /(?:\b(?:do\s+not|don['’]t|never)\s+(?:use|invoke|run|apply|select)|\bavoid\s+(?:using|invoking|running|applying|selecting)|\bwithout(?:\s+(?:using|invoking|running|applying|selecting))?)\s+(?:the\s+)?[\s"'`「『(]*$/u;
+  // Strip trailing quote/space decorations in one pass. Adjacent whitespace quantifiers
+  // here would otherwise explore many equivalent splits on a long failed exclusion.
+  let end = before.length;
+  while (end && /[\s"'`「『(]/u.test(before[end - 1]!)) end -= 1;
+  const prefix = before.slice(0, end);
+  const englishBefore = /(?:\b(?:do\s+not|don['’]t|never)\s+(?:use|invoke|run|apply|select)|\bavoid\s+(?:using|invoking|running|applying|selecting)|\bwithout(?:\s+(?:using|invoking|running|applying|selecting))?)(?:\s+the)?$/u;
   const japaneseAfter = /^[\s"'`」』)]*(?:(?:には|だけは|だけを|は|を|も)\s*)?(?:使わ(?:ない|ず|なく)|使うな|使って(?:は)?いけない|(?:使用|利用|適用|実行|選択)(?:し(?:ない|ません|なく)|せず|するな)|呼び出さ(?:ない|ず|なく)|不要|禁止)|^[\s"'`」』)]*(?:では|じゃ)なく/u;
   const englishAfter = /^[\s"'`」』)]*(?:(?:should|must|will|can)\s+not\s+be\s+(?:used|invoked|run|applied|selected)\b|(?:is|are)\s+(?:not\s+(?:needed|required)|forbidden)\b)/u;
-  return englishBefore.test(before) || japaneseAfter.test(after) || englishAfter.test(after);
+  return englishBefore.test(prefix) || japaneseAfter.test(after) || englishAfter.test(after);
 }
 
 function identityPhrases(candidate: SkillRoutingMetadata): string[][] {

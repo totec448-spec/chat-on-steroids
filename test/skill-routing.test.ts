@@ -99,6 +99,12 @@ it.each(['', ' \t\n', '---'])('selects nothing for empty or separator-only input
   expect(routeSkillMetadata(authored, [candidate()])).toEqual([]);
 });
 
+it('handles a large failed exclusion match without suppressing the named Skill', () => {
+  const authored = `Do not use${' '.repeat(20_000)}x Code Review`;
+  expect(routeSkillMetadata(authored, [candidate()]))
+    .toEqual([{ id: 'code-review', revision: revision('a') }]);
+});
+
 it('keeps a directly excluded Skill out even when another mention is positive', () => {
   expect(routeSkillMetadata('Use Code Review. Do not use code-review.', [candidate()])).toEqual([]);
 });
