@@ -5,6 +5,7 @@
     <title>Chat On Steroids</title>
     <link rel="stylesheet" href="./icons.css" />
     <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./scheduled.css" />
     <link rel="stylesheet" href="./settings.css" />
     <link rel="stylesheet" href="./dictation.css" />
   </head>
@@ -38,6 +39,7 @@
           <button class="btn new-chat" id="newChat" type="button"><i class="ico ph ph-pencil-simple" aria-hidden="true"></i>New chat</button>
           <button class="btn sidebar-primary-link" id="sidebarPlugins" data-sidebar-page="plugins" type="button"><i class="ico ph ph-puzzle-piece" aria-hidden="true"></i>Plugins</button>
           <button class="btn sidebar-primary-link" id="sidebarSkills" data-sidebar-page="skills" type="button"><i class="ico ph ph-cube" aria-hidden="true"></i>Skills</button>
+          <button class="btn sidebar-primary-link" id="sidebarScheduled" data-sidebar-page="scheduled" type="button"><i class="ico ph ph-clock" aria-hidden="true"></i>Scheduled</button>
           <button class="btn sidebar-primary-link" id="sidebarPets" data-sidebar-page="pets" type="button"><i class="ico ph ph-paw-print" aria-hidden="true"></i>Pets</button>
         </div>
       <!-- Settings search: while it holds a query, its results take the page list's place. -->
@@ -359,6 +361,16 @@
                 </div>
               </div>
             </section>
+          </div>
+        </section>
+        <section class="panel plugins-panel" data-panel="scheduled" aria-labelledby="scheduledTitle">
+          <div class="plugins-content scheduled-index">
+            <header class="plugin-page-head">
+              <div><h1 id="scheduledTitle">Scheduled</h1><p id="scheduledDescription">Manage the messages scheduled in your chats.</p></div>
+              <button class="btn" id="scheduledRefresh" type="button"><i class="ico ph ph-arrow-clockwise" aria-hidden="true"></i>Refresh</button>
+            </header>
+            <div id="scheduledStatus" class="scheduled-index-status" role="status" aria-live="polite" hidden></div>
+            <div id="scheduledList" class="scheduled-index-list" aria-live="polite"></div>
           </div>
         </section>
         <section class="panel plugins-panel" data-panel="plugins">
