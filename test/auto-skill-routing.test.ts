@@ -93,6 +93,14 @@ it('freezes an explicit none when a literal name is ambiguous or no exact name i
   expect(routedIds(await enqueueInput(request('Prepare a quarterly budget summary.')))).toEqual([]);
 });
 
+it('does not inject a negated using→use alias through the input owner', async () => {
+  await install('using-git-worktrees', 'Using Git Worktrees', 'Use isolated worktrees for source changes.');
+  await enableAutoRouting();
+  const row = await enqueueInput(request("Don't use git worktrees"));
+  expect(routedIds(row)).toEqual([]);
+  expect(await prepareSessionPrompt(row.text, row)).not.toContain('FULL_USING_GIT_WORKTREES_BODY');
+});
+
 it('ignores metadata that forbids implicit invocation', async () => {
   await install('code-review', 'Code Review', 'Review source code changes for correctness and maintainability.', false);
   await enableAutoRouting();

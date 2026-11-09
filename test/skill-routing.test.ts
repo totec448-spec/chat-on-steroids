@@ -246,6 +246,23 @@ it('supports only the maintainer-suggested complete using→use alias and never 
 });
 
 it.each([
+  "Don't use git worktrees", 'Never use git worktrees', 'Do not use git worktrees',
+  'avoid using git worktrees', 'Do not use Using Git Worktrees', 'Do not use the Using Git Worktrees'
+])('excludes a negated using→use alias or full name: %s', authored => {
+  expect(routeSkillMetadata(authored, publicSkills)).toEqual([]);
+});
+
+it('keeps positive aliases and unrelated negation while handling verb-leading Skill names', () => {
+  expect(routeSkillMetadata('Do not skip using git worktrees', publicSkills))
+    .toEqual([{ id: 'using-git-worktrees', revision: revision('a') }]);
+  const skill = candidate({ id: 'use-cases', name: 'Use Cases' });
+  expect(routeSkillMetadata("Don't use Use Cases", [skill])).toEqual([]);
+  const run = candidate({ id: 'run-tests', name: 'Run Tests' });
+  expect(routeSkillMetadata('Do not run tests', [run])).toEqual([]);
+  expect(routeSkillMetadata('Do not use Run Tests', [run])).toEqual([]);
+});
+
+it.each([
   'Can you fix the failing test in the login form?',
   'Why does my React component render twice when the state changes?',
   'Plan a 3 day trip to Lisbon with a small budget.',
