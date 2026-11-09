@@ -8,7 +8,7 @@ import { listInputs } from './input.js';
 import { activeSessionId } from './recorder.js';
 import { blockedChatIds } from './blocked-chats.js';
 import { trustedChatIds } from './trusted-chats.js';
-import { findSessionByConversation, getSession, listSessionPage, readEvents, readRecentEvents } from './store.js';
+import { findSessionByConversation, getSession, getSessionOrNullIfMissing, listSessionPage, readEvents, readRecentEvents } from './store.js';
 import type { SessionListCursor } from './store.js';
 import type { SessionEventKind, SessionSummary } from '../../shared/session.js';
 
@@ -86,7 +86,9 @@ export async function readSessionEvents(
   id: string,
   options: { from?: number; before?: number; after?: number; limit?: number; kinds?: readonly SessionEventKind[] }
 ) {
-  const summary = await getSession(id);
+  // A missing directory is a confirmed deletion. An existing directory whose metadata cannot
+  // be read is an IPC failure, not permission to tell the renderer that the chat disappeared.
+  const summary = await getSessionOrNullIfMissing(id);
   if (!summary) return null;
   // The renderer draws a timeline, not the whole log: the tail is what matters and
   // the rest stays one click away rather than being pushed over IPC every refresh.

@@ -26,6 +26,28 @@ export interface Schedule {
   lastDueAt: number | null;
 }
 
+/** One saved schedule as shown outside its chat, with the chat identity resolved by main. */
+export interface ScheduledRunListItem {
+  id: string;
+  sessionId: string;
+  sessionTitle: string;
+  text: string;
+  repeat: ScheduleRepeat;
+  until: number | null;
+  paused: boolean;
+  createdAt: number;
+  lastDueAt: number | null;
+  /** Most recent run missed while the app was closed or asleep; shown until a later run goes out. */
+  missedDueAt?: number;
+  /** An exact occurrence retained for retry after a transient outbox failure. */
+  retryDueAt?: number;
+  catchUp?: boolean;
+  /** A prior scheduled send still blocks another send until the outbox records a definitive receipt. */
+  deliveryBlock?: 'pending' | 'unconfirmed';
+  /** Next future run from the time the list was read; null while paused or after the end. */
+  nextRunAt: number | null;
+}
+
 /** Sent within this long of its time, a run is on time; later, it is labelled late. */
 export const SCHEDULE_ON_TIME_MS = 2 * 60_000;
 const HOUR_MS = 3600_000;

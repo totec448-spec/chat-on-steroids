@@ -3425,7 +3425,7 @@ export async function getSession(id: string): Promise<SessionSummary | null> {
   return summary ? { ...summary } : null;
 }
 
-/** Positive absence for retiring an exact delivered receipt, never corrupt metadata. */
+/** Positive absence check for session-owned work; unreadable metadata is never proof of deletion. */
 export async function sessionDirectoryMissing(id: string): Promise<boolean> {
   assertSessionId(id);
   const dir = sessionDir(id);
@@ -3440,6 +3440,17 @@ export async function sessionDirectoryMissing(id: string): Promise<boolean> {
   try {
     return (await fs.stat(root)).isDirectory() && !open.has(id) && !opening.has(id);
   } catch { return false; }
+}
+
+/**
+ * A null summary proves deletion only when the session directory is absent. An existing
+ * directory with missing or unreadable metadata must remain recoverable by its owner.
+ */
+export async function getSessionOrNullIfMissing(id: string): Promise<SessionSummary | null> {
+  const summary = await getSession(id);
+  if (summary) return summary;
+  if (await sessionDirectoryMissing(id)) return null;
+  throw new Error('The session exists but its metadata could not be read.');
 }
 
 /** A plan is one replaceable session document, not another execution queue. */

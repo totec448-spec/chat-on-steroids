@@ -1,0 +1,25 @@
+.scheduled-index { max-width: 950px; }
+.scheduled-index .plugin-page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.scheduled-index .plugin-page-head > .btn { flex: 0 0 auto; }
+.scheduled-index-list { display: grid; gap: 10px; margin-top: 24px; }
+.scheduled-index-row { display: flex; justify-content: space-between; flex-wrap: wrap; align-items: center; gap: 20px; padding: 16px 20px; border: 1px solid var(--edge); border-radius: var(--r-lg); background: var(--card); }
+.scheduled-index-body { flex: 1 1 280px; min-width: 0; }
+.scheduled-index-row h2 { margin: 0; font-size: calc(16px * var(--text-scale, 1)); font-weight: 650; }
+.scheduled-index-row h2, .scheduled-index-message { text-align: start; }
+.scheduled-index-meta { margin: 5px 0 0; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.5; }
+.scheduled-index-message { margin: 12px 0 0; color: var(--ink); font-size: calc(13px * var(--text-scale, 1)); line-height: 1.5; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.scheduled-index-actions { position: relative; display: flex; align-items: center; gap: 7px; padding-inline-end: 38px; }
+.scheduled-index-actions .btn { font-size: calc(12px * var(--text-scale, 1)); }
+.scheduled-index-actions .scheduled-index-menu { top: calc(50% - 17px); right: 0; }
+.scheduled-index-actions .scheduled-index-menu .plugin-menu-actions { min-width: 166px; }
+.scheduled-index-actions .scheduled-index-menu .plugin-menu-actions .btn { display: flex; }
+.scheduled-index-empty { display: grid; justify-items: center; text-align: center; gap: 12px; padding: 66px 24px; border: 1px dashed var(--edge); border-radius: var(--r-lg); color: var(--soft); }
+.scheduled-index-empty > .ico { --ico: 34px; }
+.scheduled-index-empty h2 { margin: 0; color: var(--ink); font-size: calc(18px * var(--text-scale, 1)); }
+.scheduled-index-empty p { margin: 0; font-size: calc(13px * var(--text-scale, 1)); }
+.scheduled-index-status { margin: 20px 0 0; color: var(--soft); font-size: calc(13px * var(--text-scale, 1)); }
+.scheduled-index-status.is-error { color: var(--red); }
+@media (max-width: 800px) {
+  .scheduled-index-row { align-items: flex-start; }
+  .scheduled-index-actions { margin-inline-start: auto; }
+}
