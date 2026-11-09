@@ -166,6 +166,33 @@ History is recorded locally and kept until you delete a chat; recording can't be
 
 [Security policy](../SECURITY.md) · [Tool reference](tool-surface.md) · [Architecture](../AGENTS.md)
 
+## Notifications, steps and limits
+
+### Phone notifications
+
+**Settings → Phone notifications.** Turn on **Send notifications to your phone**, then pick **ntfy**, **Telegram**, or both. You choose when a message is sent (a chat needs you, something fails, a chat finishes after some minutes of work), set **Quiet hours**, and can limit it to times you are away. **Send test** sends a message that never contains chat text. Chat names and answers are left out unless you turn on **Include chat names and answers**.
+
+- **ntfy:** install the free ntfy app and subscribe to the topic shown in Settings. Anyone who knows the topic can read the messages, so keep it private.
+- **Telegram, with a bot of your own:** in Telegram, create a bot with @BotFather and copy its token. In Settings, press **Link…** and paste the token (it is kept in secure storage). Send the shown code to your bot from your own account within 10 minutes. The bot then confirms the link. **Unlink** removes the token.
+- **Telegram commands:** `/status` lists what is running or waiting for you. `/stop`, `/pause` and `/resume` act on a chat of yours (reply to its notification to name it; a bare command works when only one chat is meant). Under an approval you can press **Deny**. **Allowing something from the phone does not exist.**
+- **Replies as messages** are off by default. If you turn on **Let replies send messages to chats**, a reply to a notification goes to that chat as your message, and ChatGPT may then run tools on this computer. Anyone who can use your Telegram account could do the same.
+
+### Steps for you
+
+When ChatGPT needs something only you can do (a sign-in, a USB key, a command it must not run), it hands you a **step for you**. It appears in the chat and above the message box with the exact command, the folder and the files it expects. Run it yourself in your own terminal, then press **Mark as done** or **Skip**; ChatGPT is told which. Chat On Steroids never runs or checks the command.
+
+### Chats working at once
+
+**Settings → Agents & automation → Chats working at once** limits how many chats (sub-agents included) work at the same time, from 1 to 10, or **Off**. Messages the app sends by itself (Goal, Loop, an automatic Continue) wait for a free slot. A message you send always goes out.
+
+### Related folders
+
+In a project's **⋯** menu, **Related folders…** adds context folders from your approved folders. ChatGPT is told about them in that project's chats. They never become the working folder and never grant access.
+
+### When a chat has trouble
+
+One row above the message box says what is wrong now, since when, how often the app tried, and each step it took. It turns amber once the app has stopped trying (for example when no browser tab is open for the chat); opening that chat's tab again lets recovery resume.
+
 ## Sessions, workers and Astra
 
 **Session history** belongs to the local session, not a particular ChatGPT tab. The browser extension records messages and the actual local tool results so the app and the model can read earlier work.
