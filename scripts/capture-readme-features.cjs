@@ -20,13 +20,15 @@ const features = [
   ['verify-user-requests.cjs', 'timeline-dark.png', 'step-for-you.png', { x: 0.29, y: 0.2, w: 0.64, h: 0.5 }],
   ['verify-recovery-episode.cjs', 'stopped-dark.png', 'why-stuck.png', { x: 0.27, y: 0.56, w: 0.68, h: 0.3 }],
   ['verify-related-folders.cjs', 'dialog-two.png', 'related-folders.png', { x: 0.31, y: 0.3, w: 0.368, h: 0.4 }],
+  ['verify-phone-push.cjs', 'telegram-code-en.png', 'telegram-link.png', { x: 0, y: 0.527, w: 1, h: 0.215 }, 'outputs/phone-push'],
+  ['verify-move-to-project.cjs', 'move-to-project-menu.png', 'move-to-project.png', { x: 0, y: 0.295, w: 0.58, h: 0.4 }, 'outputs/move-to-project'],
   ['verify-phone-push.cjs', 'phone-en-1100.png', 'phone-notifications.png', { x: 0, y: 0, w: 1, h: 0.605 }, 'outputs/phone-push']
 ];
 
 (async () => {
   for (const [check, file, name, crop, fixedOutput] of features) {
     const output = fs.mkdtempSync(path.join(os.tmpdir(), 'cos-readme-feature-'));
-    const run = spawnSync(electron, [path.join(root, 'scripts', check)], { cwd: root, env: { ...process.env, COS_UI_OUTPUT: output }, encoding: 'utf8' });
+    const run = spawnSync(electron, ['--lang=en-US', path.join(root, 'scripts', check)], { cwd: root, env: { ...process.env, COS_UI_OUTPUT: output }, encoding: 'utf8' });
     if (run.status !== 0) throw new Error(`${check} failed:\n${run.stdout}\n${run.stderr}`);
     const source = sharp(path.join(fixedOutput ? path.join(root, fixedOutput) : output, file));
     const { width, height } = await source.metadata();
