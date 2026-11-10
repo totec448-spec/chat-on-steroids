@@ -5,7 +5,8 @@ const electron = vi.hoisted(() => ({
   dialog: { showSaveDialog: vi.fn() },
   app: { getPath: vi.fn(() => '/downloads') }
 }));
-const store = vi.hoisted(() => ({ getSession: vi.fn(), readEvents: vi.fn(), readOverflowText: vi.fn() }));
+const store = vi.hoisted(() => ({ getSession: vi.fn(), readEvents: vi.fn(), readOverflowText: vi.fn(),
+  readAsset: vi.fn(), MAX_OVERFLOW_ASSET_CHARS: 8 * 1024 * 1024 }));
 const files = vi.hoisted(() => ({ replaceFile: vi.fn(async () => undefined) }));
 vi.mock('electron', () => electron);
 vi.mock('../src/main/session/store.js', () => store);
@@ -55,12 +56,12 @@ it('previews and saves table rows from an overflow drawing, with the usual redac
   store.readEvents.mockResolvedValue([said(1, 'assistant_message', markdown, {
     renderedHtml: { text: html.slice(0, 120_000), truncated: true, chars: html.length, assetId: 'abcdef34.txt' }
   })]);
-  store.readOverflowText.mockResolvedValue(html);
+  store.readAsset.mockResolvedValue(Buffer.from(html));
   const shown = await preview(true);
   expect(shown.html).toContain('<td><span class="hidden">hidden</span></td>');
   expect(shown.html).toContain('<td>1 kg</td>');
   expect(shown.html).not.toContain('ana@example.com');
-  expect(store.readOverflowText).toHaveBeenCalledWith('session-1', 'abcdef34.txt');
+  expect(store.readAsset).toHaveBeenCalledWith('session-1', 'abcdef34.txt', 32 * 1024 * 1024);
   electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/downloads/table.html' });
   await exportSessionPage({ id: 'session-1', target: 'file', preview: shown.preview }, null);
   expect(files.replaceFile).toHaveBeenCalledWith('/downloads/table.html', shown.html, 'HTML export');

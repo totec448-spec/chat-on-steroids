@@ -1,4 +1,7 @@
 import { beforeEach, expect, it, vi } from 'vitest';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import type { SessionEvent } from '../src/shared/session.js';
 
 const electron = vi.hoisted(() => ({
@@ -6,11 +9,14 @@ const electron = vi.hoisted(() => ({
   dialog: { showSaveDialog: vi.fn() },
   app: { getPath: vi.fn(() => '/downloads') }
 }));
-const store = vi.hoisted(() => ({ getSession: vi.fn(), readEvents: vi.fn(), readOverflowText: vi.fn() }));
+const store = vi.hoisted(() => ({ getSession: vi.fn(), readEvents: vi.fn(), readOverflowText: vi.fn(),
+  readAsset: vi.fn(), MAX_OVERFLOW_ASSET_CHARS: 8 * 1024 * 1024 }));
 const files = vi.hoisted(() => ({ replaceFile: vi.fn(async () => undefined) }));
 vi.mock('electron', () => electron);
 vi.mock('../src/main/session/store.js', () => store);
 vi.mock('../src/main/replace-file.js', () => files);
+const logger = vi.hoisted(() => ({ logWarn: vi.fn() }));
+vi.mock('../src/main/logger.js', async original => ({ ...await original<object>(), ...logger }));
 
 const { exportSessionMarkdown, fullText } = await import('../src/main/session/markdown-export.js');
 
@@ -108,7 +114,8 @@ it.each([
       renderedHtml: { text: html.slice(0, 120_000), truncated: true, chars: html.length, assetId: 'abcdef34.txt' } },
     events[2]!
   ]);
-  store.readOverflowText.mockImplementation(async (_id, asset) => asset === 'abcdef34.txt' ? html : markdown);
+  store.readOverflowText.mockResolvedValue(markdown);
+  store.readAsset.mockResolvedValue(Buffer.from(html));
   electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/downloads/table.md' });
   await exportSessionMarkdown({ id: 'session-1', scope, turnId: 't1', target }, null);
   const answer = `${markdown}\n| Rice | 1 kg |\n`;
@@ -116,7 +123,7 @@ it.each([
   else expect(files.replaceFile).toHaveBeenCalledWith('/downloads/table.md',
     scope === 'session' ? `# Explain: it?\n\n## You\n\nExplain it\n\n## ChatGPT\n\n${answer}` : answer, 'Markdown export');
   expect(store.readOverflowText).toHaveBeenCalledWith('session-1', 'abcdef12.txt');
-  expect(store.readOverflowText).toHaveBeenCalledWith('session-1', 'abcdef34.txt');
+  expect(store.readAsset).toHaveBeenCalledWith('session-1', 'abcdef34.txt', 32 * 1024 * 1024);
 });
 
 it.each([undefined, 'abcdef34.txt'])('does not complete a partial drawing when its overflow is unavailable (%s)', async assetId => {
@@ -124,9 +131,42 @@ it.each([undefined, 'abcdef34.txt'])('does not complete a partial drawing when i
   const partial = '<div data-d-component="table"><table><tr><td>Item</td><td>Qty</td></tr>' +
     '<tr><td>Rice</td><td>1 kg</td></tr></table></div>';
   store.readOverflowText.mockResolvedValue(null);
+  store.readAsset.mockResolvedValue(null);
   await expect(fullText('session-1', { text: markdown, truncated: false, chars: markdown.length },
     { text: partial, truncated: true, chars: 120_001, ...(assetId ? { assetId } : {}) })).resolves.toBe(markdown);
-  expect(store.readOverflowText).toHaveBeenCalledTimes(assetId ? 1 : 0);
+  expect(store.readAsset).toHaveBeenCalledTimes(assetId ? 1 : 0);
+  expect(logger.logWarn).toHaveBeenCalledTimes(assetId ? 1 : 0);
+  if (assetId) expect(logger.logWarn).toHaveBeenCalledWith(
+    'Markdown export: drawing overflow unavailable or over the read limit; table completion kept partial');
+});
+
+it('reads a legacy drawing above the current write cap, but refuses an oversized file before loading it', async () => {
+  const realStore = await vi.importActual<typeof import('../src/main/session/store.js')>('../src/main/session/store.js');
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'cos-drawing-export-'));
+  realStore.initSessionStore(directory);
+  try {
+    const session = await realStore.createSession({ title: 'Synthetic legacy drawing' });
+    const markdown = '| Item | Qty |\n|---|---|';
+    const html = '<p>' + 'x'.repeat(realStore.MAX_ASSET_BYTES + 1) + '</p><div data-d-component="table"><table>' +
+      '<tr><td>Item</td><td>Qty</td></tr><tr><td>Rice</td><td>1 kg</td></tr></table></div>';
+    // Simulate an already-saved legacy asset, not a new write that today's store would reject.
+    const asset = path.join(realStore.sessionsRoot(), session.id, 'assets', 'abcdef34.txt');
+    await fs.mkdir(path.dirname(asset), { recursive: true });
+    await fs.writeFile(asset, html);
+    store.readAsset.mockImplementation(realStore.readAsset);
+    const stored = { text: markdown, truncated: false, chars: markdown.length };
+    const drawing = { text: html.slice(0, 120_000), truncated: true, chars: html.length, assetId: 'abcdef34.txt' };
+    await expect(fullText(session.id, stored, drawing)).resolves.toBe(`${markdown}\n| Rice | 1 kg |`);
+    // A sparse oversized fixture exercises readAsset's stat-before-allocation bound.
+    await fs.truncate(asset, realStore.MAX_OVERFLOW_ASSET_CHARS * 4 + 1);
+    await expect(fullText(session.id, stored, drawing)).resolves.toBe(markdown);
+    expect(logger.logWarn).toHaveBeenCalledExactlyOnceWith(
+      'Markdown export: drawing overflow unavailable or over the read limit; table completion kept partial');
+  } finally {
+    await realStore.flushSessions();
+    realStore.resetSessionStoreForTests();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
 });
 
 // An answer recorded outside any turn (copied branch history, an adopted chat) has no turn to name.
