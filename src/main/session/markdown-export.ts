@@ -50,8 +50,9 @@ async function recoverFullText(sessionId: string, stored: StoredText, html?: Sto
       logWarn('Markdown export: drawing overflow unavailable or over the read limit; table completion kept partial');
     } else {
       const recovered = drawing.toString('utf8');
-      if (recovered.length === html.chars) html = { ...html, text: recovered, truncated: false };
-      else logWarn('Markdown export: drawing overflow length mismatch; table completion kept partial');
+      if (recovered.length !== html.chars) logWarn('Markdown export: drawing overflow length mismatch; table completion kept partial');
+      else if (!Buffer.from(recovered, 'utf8').equals(drawing)) logWarn('Markdown export: drawing overflow invalid UTF-8; table completion kept partial');
+      else html = { ...html, text: recovered, truncated: false };
     }
   }
   return providerEntitiesAsMarkdown(completedDilText(text, html));

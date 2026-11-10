@@ -214,6 +214,51 @@ it('refuses a crash-shortened drawing even after a recorder retry reuses the ass
   }
 });
 
+it.each([{ bytes: [0xff] }, { bytes: [0xf0, 0x90, 0x80] }])('refuses invalid UTF-8 drawing bytes $bytes even when the character count matches', async ({ bytes }) => {
+  const realStore = await vi.importActual<typeof import('../src/main/session/store.js')>('../src/main/session/store.js');
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'cos-utf8-drawing-'));
+  realStore.initSessionStore(directory);
+  try {
+    const session = await realStore.createSession({ title: 'Synthetic damaged drawing' });
+    const markdown = '| Item | Qty |\n|---|---|';
+    const html = '<p>' + 'x'.repeat(120_000) + '</p><div data-d-component="table"><table>' +
+      '<tr><td>Item</td><td>Qty</td></tr><tr><td>米🧪</td><td>1 kg</td></tr></table></div>';
+    const original = Buffer.from(html);
+    const at = original.indexOf(Buffer.from('米'));
+    const damaged = Buffer.concat([original.subarray(0, at), Buffer.from(bytes), original.subarray(at + Buffer.byteLength('米'))]);
+    const recovered = damaged.toString('utf8');
+    expect(recovered.length).toBe(html.length);
+    // The incomplete four-byte sequence also fools a re-encoded byte-length comparison.
+    if (bytes.length === 3) expect(Buffer.byteLength(recovered)).toBe(damaged.length);
+    const assetId = (await realStore.writeOverflowText(session.id, html))!;
+    const asset = path.join(realStore.sessionsRoot(), session.id, 'assets', assetId);
+    await fs.writeFile(asset, damaged);
+    store.readAsset.mockImplementation(realStore.readAsset);
+    const stored = { text: markdown, truncated: false, chars: markdown.length };
+    const drawing = { text: html.slice(0, 120_000), truncated: true, chars: html.length, assetId };
+    await expect(fullText(session.id, stored, drawing)).resolves.toBe(markdown);
+    expect(logger.logWarn).toHaveBeenCalledExactlyOnceWith(
+      'Markdown export: drawing overflow invalid UTF-8; table completion kept partial');
+    await fs.writeFile(asset, original);
+    await expect(fullText(session.id, stored, drawing)).resolves.toBe(`${markdown}\n| 米🧪 | 1 kg |`);
+  } finally {
+    await realStore.flushSessions();
+    realStore.resetSessionStoreForTests();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+it('accepts valid UTF-8 containing an authored replacement character', async () => {
+  const markdown = '| Item | Qty |\n|---|---|';
+  const html = '<div data-d-component="table"><table><tr><td>Item</td><td>Qty</td></tr>' +
+    '<tr><td>米🧪�</td><td>1 kg</td></tr></table></div>';
+  store.readAsset.mockResolvedValue(Buffer.from(html));
+  await expect(fullText('session-1', { text: markdown, truncated: false, chars: markdown.length },
+    { text: html.slice(0, 20), truncated: true, chars: html.length, assetId: 'abcdef34.txt' }))
+    .resolves.toBe(`${markdown}\n| 米🧪� | 1 kg |`);
+  expect(logger.logWarn).not.toHaveBeenCalled();
+});
+
 it('reads a legacy drawing above the current write cap, but refuses an oversized file before loading it', async () => {
   const realStore = await vi.importActual<typeof import('../src/main/session/store.js')>('../src/main/session/store.js');
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'cos-drawing-export-'));
