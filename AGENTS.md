@@ -1077,6 +1077,10 @@ looks empty. "Show more" continues with the project's cursor once everything loa
 never selects a chat, and a failed read is retried on the next expand.
 
 `projects.ts` owns a bounded catalog of canonical absolute local folders with stable UUIDs.
+Only a missing `state/projects.json` means an empty catalog. Invalid JSON, on-disk null or an
+unreadable file refuses catalog reads and mutations with the existing catalog error, logs the
+refusal without stored content, and leaves the file intact. Once readable again, the original
+project ids and session bindings remain usable (`test/projects.test.ts`).
 Adding uses the native folder selection/approved-root flow, resolves the real directory and
 deduplicates it. Session metadata owns `projectId`. Before send/use, `projectWorkspace()` and
 `getSessionProject()` re-resolve it under current roots and reject moved/unavailable folders.

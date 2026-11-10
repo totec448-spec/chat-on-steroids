@@ -49,6 +49,43 @@ it('persists only predefined presentation colors without changing project worksp
   expect(await setProjectColor(project.id, null)).toEqual(project);
 });
 
+it.each(['', '{"unfinished":', 'null'])('keeps an unreadable project catalog intact (%j)', async damaged => {
+  const project = await addProject(path.join(approved, 'first'));
+  const session = await createSession({ title: 'Existing project chat' });
+  await assignSessionProject(session.id, project.id);
+  const file = path.join(directory, 'state', 'projects.json');
+  const saved = await fs.readFile(file, 'utf8');
+  await fs.writeFile(file, damaged);
+  resetDurableForTests(); initDurableStore(directory);
+  await expect(listProjects()).rejects.toThrow('Project catalog is invalid');
+  await expect(addProject(path.join(approved, 'second'))).rejects.toThrow('Project catalog is invalid');
+  await flushDurable();
+  expect(await fs.readFile(file, 'utf8')).toBe(damaged);
+  // Restoring the previous version's catalog recovers the original binding, not a new UUID.
+  await fs.writeFile(file, saved);
+  expect(await listProjects()).toEqual([project]);
+  expect(await getSessionProject(session.id)).toMatchObject({ real: project.path });
+});
+
+it('does not replace valid projects after a transient catalog read error', async () => {
+  const project = await addProject(path.join(approved, 'first'));
+  const file = path.join(directory, 'state', 'projects.json');
+  const saved = await fs.readFile(file, 'utf8');
+  const read = vi.spyOn(fs, 'readFile').mockRejectedValueOnce(Object.assign(new Error('read failed'), { code: 'EIO' }));
+  try {
+    await expect(addProject(path.join(approved, 'second'))).rejects.toThrow('Project catalog is invalid');
+  } finally { read.mockRestore(); }
+  await flushDurable();
+  expect(await fs.readFile(file, 'utf8')).toBe(saved);
+  expect(await listProjects()).toEqual([project]);
+});
+
+it('still treats an absent catalog as a fresh installation', async () => {
+  expect(await listProjects()).toEqual([]);
+  const project = await addProject(path.join(approved, 'first'));
+  expect(await listProjects()).toEqual([project]);
+});
+
 it('turns the secrets shield off for one project\'s chats only, durably (#1797)', async () => {
   const project = await addProject(path.join(approved, 'first'));
   const other = await addProject(path.join(approved, 'second'));

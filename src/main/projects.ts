@@ -12,7 +12,7 @@ import { bindSessionProject, findSessionByConversation, getSession, indexedSessi
 import { workspaceForChat } from './workspace.js';
 import { chatGroupsState, movedChatGroup, placeMovedChat } from './chat-groups.js';
 import type { ChatGroupsState } from '../shared/chat-groups.js';
-import { logInfo } from './logger.js';
+import { logInfo, logWarn } from './logger.js';
 import { isListedChatgptProject } from './chatgpt-project-catalog.js';
 import { CHATGPT_PROJECT_ID, MAX_RELATED_FOLDERS, PROJECT_COLORS, type ChatgptProjectLink, type LocalProject, type ProjectColor, type RelatedFolderView } from '../shared/projects.js';
 
@@ -40,7 +40,15 @@ let mutations: Promise<unknown> = Promise.resolve();
 const samePath = (a: string, b: string) => nativePathIdentity(a) === nativePathIdentity(b);
 
 export async function listProjects(): Promise<LocalProject[]> {
-  const raw = await readDurable<unknown>('projects');
+  let raw: unknown;
+  try {
+    // Only an absent catalog is empty. Treating damaged or temporarily unreadable state as
+    // [] would let the next catalog mutation overwrite every existing project's identity.
+    raw = await readDurable<unknown>('projects', { strict: true });
+  } catch {
+    logWarn('projects: refused to read or change the catalog because its saved state is unreadable');
+    throw new Error('Project catalog is invalid');
+  }
   if (raw === null) return [];
   const parsed = catalogSchema.safeParse(raw);
   if (!parsed.success || new Set(parsed.data.map(row => row.id)).size !== parsed.data.length) throw new Error('Project catalog is invalid');
