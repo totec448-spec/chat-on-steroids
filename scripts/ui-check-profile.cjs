@@ -1,0 +1,33 @@
+// Only owned, inactive UI-check profiles may be removed; screenshots/results are never profiles.
+const fs = require('node:fs');
+const path = require('node:path');
+const OWNER = '.ui-check-owner.json';
+function alive(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return true;
+  try { process.kill(pid, 0); return true; } catch (error) { return error.code !== 'ESRCH'; }
+}
+function remove(profile) {
+  fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+}
+function pruneProfiles(root) {
+  fs.mkdirSync(root, { recursive: true });
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !entry.name.startsWith('runtime-')) continue;
+    const profile = path.join(root, entry.name);
+    let owner;
+    try { owner = JSON.parse(fs.readFileSync(path.join(profile, OWNER), 'utf8')); } catch { continue; }
+    if (owner === null || typeof owner !== 'object' || Array.isArray(owner)) continue;
+    if (owner.kind !== 'terminal-ui-check' || alive(owner.parent) || alive(owner.child)) continue;
+    console.log('UI profile: removing inactive interrupted terminal check profile');
+    remove(profile);
+  }
+}
+function createProfile(root) {
+  pruneProfiles(root);
+  const profile = fs.mkdtempSync(path.join(root, 'runtime-'));
+  // Missing/invalid child PID is treated as active until spawn has completed.
+  const markChild = child => fs.writeFileSync(path.join(profile, OWNER), JSON.stringify({ kind: 'terminal-ui-check', parent: process.pid, child }));
+  markChild(null);
+  return { path: profile, markChild, cleanup: () => remove(profile) };
+}
+module.exports = { createProfile, pruneProfiles };

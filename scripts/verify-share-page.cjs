@@ -60,7 +60,9 @@ app.whenReady().then(async () => {
       configureServer(vite){vite.middlewares.use((req,res,next)=>{if(req.url!=='/timeline-fixture.js')return next();res.setHeader('Content-Type','text/javascript');
         res.end(fixtureConfigSource()+fs.readFileSync(path.join(root,'scripts/fixtures/composer-ui.js'),'utf8')+fixture);});}}]});
   await server.listen();
-  win = new BrowserWindow({show:false,width:1280,height:800,webPreferences:{sandbox:true,offscreen:true,backgroundThrottling:false}});
+  // Use the app's native compositor. Offscreen capture can lose its Viz surface after navigation
+  // on macOS, even while the DOM/layout assertions pass, and reject with UnknownVizError.
+  win = new BrowserWindow({show:false,width:1280,height:800,webPreferences:{sandbox:true,backgroundThrottling:false}});
   const errors=[];
   win.webContents.on('console-message',e=>{if(e.level==='error'&&!BENIGN_RENDERER_ERRORS.includes(e.message))errors.push(e.message);});
   const js=code=>win.webContents.executeJavaScript(code);
@@ -165,4 +167,12 @@ app.whenReady().then(async () => {
   assert.deepEqual(errors,[]);
   console.log('PASS: share as web page from the chat menu, sandboxed preview under the app policy, hiding, save, Escape; 13 languages, both themes, 720 px');
   win.destroy();await server.close();app.exit(0);
-}).catch(async error=>{fs.mkdirSync(output,{recursive:true});if(win&&!win.isDestroyed())fs.writeFileSync(path.join(output,'failure.png'),(await win.webContents.capturePage()).toPNG());console.error(error);await server?.close();app.exit(1);});
+}).catch(async error=>{
+  console.error(error);
+  fs.mkdirSync(output,{recursive:true});
+  if(win&&!win.isDestroyed()) {
+    try { fs.writeFileSync(path.join(output,'failure.png'),(await win.webContents.capturePage()).toPNG()); }
+    catch(captureError) { console.error('Share-page failure screenshot unavailable:',captureError); }
+  }
+  await server?.close();app.exit(1);
+});
