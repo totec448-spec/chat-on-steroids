@@ -3590,7 +3590,24 @@ var CLF_DOM = (() => {
     if (!closed) failure('picker_close_failed');
     return restored && closed && stillCurrent() && result.size ? [...result.values()] : null;
   }
+  /**
+   * Why the last model/effort selection was not confirmed, in a few words for the log and the failure
+   * text (#2085): a report said "could not be confirmed" for 40 workers and nothing said which step
+   * had failed or what the picker offered. Reset by every selection; empty after a success.
+   */
+  let modelSelectionWhy = '';
+  const selectionFailed = reason => { modelSelectionWhy = reason; return false; };
+  /** The picker's models and efforts as the account offers them, one short line (capped). */
+  const offeredSummary = state => safe(() => {
+    const byFamily = new Map();
+    for (const version of state?.versions ?? []) for (const choice of state?.choices ?? []) {
+      if (choice.available === false) continue;
+      const key = choice.familyId || choice.id; const efforts = byFamily.get(key) ?? new Set(); if (choice.effort) efforts.add(choice.effort); byFamily.set(key, efforts);
+    }
+    return [...byFamily].slice(0, 6).map(([key, efforts]) => `${String(key).slice(0, 24)}:${[...efforts].join('/')}`).join(' ').slice(0, 160);
+  }, '');
   async function selectModelSettings(model, effort, stillCurrent = () => true) {
+    modelSelectionWhy = '';
     if (!model && !effort) return true;
     // The page's own picker state, read without opening anything. A worker tab opens with its model
     // in the address and ChatGPT applies it; opening the picker only to prove that left its closing
@@ -3602,7 +3619,7 @@ var CLF_DOM = (() => {
       if (now?.available && (!model || now.id === model || now.familyId === model) && (!effort || now.effort === effort)) return stillCurrent();
     }
     const ui = modelPickerAccess(stillCurrent), original = await ui.open();
-    if (!original) { await ui.close(); return false; }
+    if (!original) { await ui.close(); return selectionFailed('the picker did not open or could not be read'); }
     // Account-evaluated exact selection is already proof; visiting unrelated
     // versions can reset it or fail unnecessarily. Captions and denied choices
     // do not qualify, and native closure still has to succeed.
@@ -3626,7 +3643,7 @@ var CLF_DOM = (() => {
       // can be resolved against what the account actually offers before anything is moved.
       const offered = [];
       for (const version of [original.versions.find(v => v.id === original.version), ...original.versions.filter(v => v.id !== original.version)]) {
-        const state = await ui.version(version.id); if (!state) return false;
+        const state = await ui.version(version.id); if (!state) return selectionFailed('a model version could not be read');
         for (const choice of state.choices) {
           const rank = choice.available ? modelRank(choice) : 0;
           if (rank) offered.push({ version: version.id, choice, rank });
@@ -3666,19 +3683,23 @@ var CLF_DOM = (() => {
       // Latest/version entries may describe the same pair; distinct families may not.
       const rank = Math.max(0, ...candidates.map(candidate => candidate.rank));
       const matches = candidates.filter(candidate => candidate.rank === rank);
-      if (!matches.length || (model && new Set(matches.map(candidate => candidate.choice.familyId)).size !== 1) ||
-          (model && wantedEffort && new Set(matches.map(candidate => `${candidate.choice.id}\u0000${candidate.choice.effort}`)).size !== 1)) return false;
+      if (!matches.length) return selectionFailed(`${model ? `model ${String(model).slice(0, 30)}` : 'the current model'}${wantedEffort ? ` with ${wantedEffort}` : ''} is not offered; the picker offers ${offeredSummary(original) || 'nothing readable'}`);
+      if (model && new Set(matches.map(candidate => candidate.choice.familyId)).size !== 1) return selectionFailed('more than one model matches the request');
+      if (model && wantedEffort && new Set(matches.map(candidate => `${candidate.choice.id}\u0000${candidate.choice.effort}`)).size !== 1) return selectionFailed('more than one choice matches the request');
       const wanted = matches.find(candidate => candidate.version === original.version && candidate.choice.bucket === original.currentBucket) || matches[0];
       const state = await ui.version(wanted.version), choice = wanted.choice;
       // Versions can change while traversing the UI. Revalidate before moving its slider.
-      if (!state?.choices.some(next => next.bucket === choice.bucket && next.available && next.id === choice.id && next.effort === choice.effort)) return false;
+      if (!state?.choices.some(next => next.bucket === choice.bucket && next.available && next.id === choice.id && next.effort === choice.effort)) return selectionFailed('the picker changed while it was read');
       const after = await ui.bucket(choice.bucket);
       const confirmed = after?.choices.find(c => c.bucket === after.currentBucket);
       selected = stillCurrent() && confirmed?.available === true && confirmed.id === choice.id && confirmed.effort === choice.effort;
+      if (!selected) selectionFailed(!stillCurrent() ? 'the chat changed meanwhile'
+        : `the picker showed ${confirmed ? `${String(confirmed.id).slice(0, 24)}/${confirmed.effort}` : 'nothing readable'} after choosing ${String(choice.id).slice(0, 24)}/${choice.effort}`);
     } finally {
       if (!selected && stillCurrent() && await ui.version(original.version)) await ui.bucket(original.currentBucket);
       closed = await ui.close();
     }
+    if (selected && !closed) return selectionFailed('the picker did not close');
     return selected && closed && stillCurrent();
   }
 
@@ -4018,6 +4039,7 @@ var CLF_DOM = (() => {
     pluginInstalledButtons,
     pluginManagementIdle,
     selectModelSettings,
+    modelSelectionFailure: () => modelSelectionWhy,
     temporaryChatReady: () => safe(() => {
       // The page's own state, where a mounted turn has published it. The glyph below is the only
       // evidence an empty document has, and a layout that stops drawing it stops proving the
