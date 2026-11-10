@@ -649,6 +649,10 @@ a literal `Using X` name or an `or` list continues the exclusion instead.
 Unrelated negation does not veto an invocation. Quoted examples remain literal text; this is not
 general intent classification or semantic topic routing. The managed routing owner logs a fixed
 selection/skip reason without authored text, Skill names or paths.
+Keep the finite English/Japanese vocabulary in `shared/skill-routing.ts`: one English verb-form
+table feeds prefix, verb-leading-name and passive exclusions; Japanese name boundaries share
+one particle definition. Discuss additional languages or phrasings in an issue before extending
+these rules (the maintainer's follow-up request on #2123).
 `allow_implicit_invocation=false`, invalid policy/config, no eligible non-excluded literal identity
 and multiple remaining matches all fail to no selection. A routed choice is frozen in the durable input row as exact
 Skill id + published SKILL.md revision before delivery, including an explicit empty decision.
