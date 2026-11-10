@@ -2,18 +2,22 @@
 if (!process.env.COS_TERMINAL_CHECK_PROFILE) {
   const electron = require('electron');
   const path = require('node:path');
-  const { spawn } = require('node:child_process');
   const profile = require('./ui-check-profile.cjs').createProfile(path.resolve(__dirname, '../outputs/terminal-acceptance'));
   const env = { ...process.env, COS_TERMINAL_CHECK_PROFILE: profile.path };
   delete env.ELECTRON_RUN_AS_NODE;
-  const child = spawn(typeof electron === 'string' ? electron : process.execPath, [__filename, ...process.argv.slice(2)], { env, stdio: 'inherit' });
-  profile.markChild(child.pid);
-  child.on('error', error => console.error(error));
-  child.on('close', (code) => {
-    const status = code ?? 1;
-    try { profile.cleanup(); } catch (error) { console.warn('UI profile cleanup deferred; check result unchanged:', error); }
+  const exit = status => {
     if (typeof electron === 'string') process.exit(status); else electron.app.exit(status);
-  });
+  };
+  // Share process-tree ownership and catchable-exit handling with verify-ui, while
+  // keeping direct output live. Dynamic import also works before sync require(ESM).
+  import('./ui-check-process.mjs').then(({ runUiCheck }) => runUiCheck(
+    typeof electron === 'string' ? electron : process.execPath, [__filename, ...process.argv.slice(2)],
+    { env, profile, inheritStdio: true }
+  )).then(({ code, output }) => {
+    if (output) console.error(output);
+    exit(typeof code === 'number' ? code : 1);
+  })
+    .catch(error => { console.error(error); exit(1); });
 } else {
 // Isolated Electron + actual project/projectless PTYs + current renderer. No provider or production state.
 const { withoutScripts } = require('./ui-check-page.cjs');

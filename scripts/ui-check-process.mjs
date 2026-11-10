@@ -22,11 +22,12 @@ export function terminateCheckTree(pid, platform = process.platform) {
   }
 }
 
-export function runUiCheck(command, args, { cwd, env, timeoutMs, profile }) {
+export function runUiCheck(command, args, { cwd, env, timeoutMs, profile, inheritStdio = false }) {
   return new Promise(resolve => {
     const child = spawn(command, args, {
       cwd, env: profile ? { ...env, COS_TERMINAL_CHECK_PROFILE: profile.path } : env,
-      windowsHide: true, detached: process.platform !== 'win32'
+      windowsHide: true, detached: process.platform !== 'win32',
+      stdio: inheritStdio ? 'inherit' : 'pipe'
     });
     let output = '', unhandled = false, timedOut = false, settled = false, closed = false, treeStopped = false;
     let timer, closeTimer;
@@ -72,17 +73,18 @@ export function runUiCheck(command, args, { cwd, env, timeoutMs, profile }) {
       }
       if (!closed) {
         keep('\nUI check close deadline reached; releasing inherited output pipes.');
-        child.stdout.destroy(); child.stderr.destroy(); child.unref();
+        child.stdout?.destroy(); child.stderr?.destroy(); child.unref();
       }
       resolve({ code, output });
     };
-    child.stdout.on('data', keep); child.stderr.on('data', keep);
+    child.stdout?.on('data', keep); child.stderr?.on('data', keep);
     child.on('error', error => keep(String(error)));
     child.on('close', (code, signal) => {
       closed = true;
       finish(timedOut ? 'timeout' : code === 0 && unhandled ? 'unhandled rejection' : code ?? `signal ${signal}`);
     });
-    timer = setTimeout(() => {
+    // Direct invocation has no extra deadline; verify-ui supplies its existing per-check bound.
+    if (timeoutMs !== undefined) timer = setTimeout(() => {
       timedOut = true;
       keep('\nUI check timed out; terminating its owned process tree.');
       try { terminateCheckTree(child.pid); treeStopped = true; }

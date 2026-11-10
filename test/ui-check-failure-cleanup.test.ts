@@ -10,11 +10,11 @@ it.each(['feedback-dialog', 'share-page'])('%s always retires its failure handle
   const start = source.lastIndexOf('}).catch(');
   expect(start).toBeGreaterThan(0);
   const handlerSource = source.slice(start + '}).catch('.length).trim().replace(/\);$/, '');
-  for (const failure of ['directory', 'capture', 'write', 'no-window', 'no-server']) {
+  for (const failure of ['directory', 'capture', 'write', 'no-window', 'no-server', 'close']) {
     const originalError = new Error('original UI assertion failed');
     const screenshotError = Object.assign(new Error(`fixture ${failure} unavailable`), { code: 'EACCES' });
     const log = vi.fn();
-    const close = vi.fn(async () => undefined);
+    const close = vi.fn(async () => { if (failure === 'close') throw screenshotError; });
     const exit = vi.fn();
     const capturePage = vi.fn(async () => {
       if (failure === 'capture') throw screenshotError;
@@ -39,6 +39,35 @@ it.each(['feedback-dialog', 'share-page'])('%s always retires its failure handle
     if (['directory', 'capture', 'write'].includes(failure)) expect(log).toHaveBeenLastCalledWith(
       expect.stringContaining('failure screenshot unavailable'), screenshotError
     );
+    if (failure === 'close') expect(log).toHaveBeenLastCalledWith(expect.stringContaining('server cleanup failed'), screenshotError);
     if (failure === 'no-window') expect(capturePage).not.toHaveBeenCalled();
   }
+});
+
+it.each(['feedback-dialog', 'share-page'])('%s bounds a server that never closes', async name => {
+  const source = readFileSync(new URL(`../scripts/verify-${name}.cjs`, import.meta.url), 'utf8');
+  const start = source.lastIndexOf('}).catch(');
+  expect(start).toBeGreaterThan(0);
+  const handlerSource = source.slice(start + '}).catch('.length).trim().replace(/\);$/, '');
+  let reachedClose!: () => void;
+  const closing = new Promise<void>(resolve => { reachedClose = resolve; });
+  const close = vi.fn(() => { reachedClose(); return new Promise<void>(() => {}); });
+  const exit = vi.fn();
+  const timer = vi.fn((_callback: () => void, _delay: number) => 0);
+  const originalError = new Error('original UI assertion failed');
+  const log = vi.fn();
+  const handler = runInNewContext(`(${handlerSource})`, {
+    fs: { mkdirSync() {}, writeFileSync() {} }, path, output: '/fixture/output',
+    win: undefined, server: { close }, app: { exit }, console: { error: log },
+    setTimeout: timer,
+  }) as (error: Error) => Promise<void>;
+  const pending = handler(originalError);
+  await closing; // Readiness, not elapsed wall-clock time, starts the deadline probe.
+  expect(exit).not.toHaveBeenCalled();
+  expect(timer).toHaveBeenCalledWith(expect.any(Function), 2000);
+  timer.mock.calls[0]![0]();
+  await expect(pending).resolves.toBeUndefined();
+  expect(log.mock.calls[0]).toEqual([originalError]);
+  expect(close).toHaveBeenCalledTimes(1);
+  expect(exit).toHaveBeenCalledWith(1);
 });
