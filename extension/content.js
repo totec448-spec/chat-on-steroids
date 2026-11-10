@@ -12328,10 +12328,11 @@
     // The app logs which model it could not confirm. A new worker's chat still refuses.
     if (!mayGoOn && (boot.type === 'revive' || boot.type === 'resume') && stillOnTarget()) { step('model-unconfirmed'); mayGoOn = true; }
     if (!mayGoOn) {
+      const why = CLF_DOM.modelSelectionFailure?.();
       return void (await fail(t(
         'content_bootstrap_model_unavailable',
         'The requested model or reasoning is unavailable or could not be confirmed in ChatGPT'
-      )));
+      ) + (why ? ` (${why})` : '')));
     }
     // ChatGPT's Chat/Work/model transition can replace the entire home composer after
     // the picker has already confirmed the requested selection. Do not treat that
@@ -13580,10 +13581,11 @@
       if (!(await CLF_DOM.selectModelSettings(input.model, input.reasoningEffort, idle))) {
         // A limit shown meanwhile is the reason, even when its dialog was already closed.
         const limited = CLF_DOM.errors().find(error => error.blocking === true)?.text || CLF_DOM.accessNoticeSince?.(choosing);
+        const why = limited ? '' : CLF_DOM.modelSelectionFailure?.();
         return fail(limited || t(
           'content_delivery_model_unconfirmed',
           'Requested model or reasoning could not be confirmed'
-        ), limited ? undefined : 'model-unconfirmed');
+        ) + (why ? ` (${why})` : ''), limited ? undefined : 'model-unconfirmed');
       }
       editor = await CLF_DOM.openQuestionEdit(replaced, idle);
       if (editor.failure) { const failure = editor.failure; editor = null; return fail(EDIT_FAILURES[failure]()); }
@@ -13898,10 +13900,11 @@
       if (!intoRunningTurn() && !(await CLF_DOM.selectModelSettings(input.model, input.reasoningEffort, onTarget))) {
         // A limit shown meanwhile is the reason, even when its dialog was already closed.
         const limited = providerLimitation() || CLF_DOM.accessNoticeSince?.(choosing);
+        const why = limited ? '' : CLF_DOM.modelSelectionFailure?.();
         return fail(limited || t(
           'content_delivery_model_unconfirmed',
           'Requested model or reasoning could not be confirmed'
-        ), limited ? undefined : 'model-unconfirmed');
+        ) + (why ? ` (${why})` : ''), limited ? undefined : 'model-unconfirmed');
       }
       // Native picker closure can precede re-enabling the same editor. Wait before
       // its one insertion; a disabled editing host is not a rejected helper prompt.
