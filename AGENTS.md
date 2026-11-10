@@ -6492,7 +6492,9 @@ removal does not prevent a fresh profile or later checks. Warnings are separate 
 output, so passing checks still show them and cleanup text cannot masquerade as a child rejection.
 Direct Node/Electron invocation delegates to that same runner with live output and no extra deadline,
 so wrapper JS exit/failure and catchable SIGINT/SIGTERM also stop its owned child tree. Uncatchable
-termination (SIGKILL/OS crash) cannot run cleanup; the interrupted-profile retention rules still apply.
+termination (SIGKILL/OS crash) cannot run cleanup. If only the wrapper is force-killed, its children
+may outlive it; retaining the interrupted profile prevents unsafe deletion, not orphaned processes.
+Cleanup after that boundary requires an external supervisor or OS lifetime mechanism, not these hooks.
 `ui-check-process.mjs` owns the runner's per-check process group (POSIX) or taskkill tree
 (Windows). Timeout cleanup bounds the Windows helper and close wait to one second each.
 Unconfirmed exits retain their profile as unknown instead of deleting live data; leaked pipes
