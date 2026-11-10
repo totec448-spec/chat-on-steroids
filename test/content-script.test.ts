@@ -3207,7 +3207,8 @@ describe('desktop input delivery and helper ownership', () => {
   // chat stopped for good. A resume goes on like a wake.
   it.each(['revive', 'resume', 'worker'] as const)('types a %s only when its model is confirmed, except a wake or a resume', async type => {
     const commandId = `cmd-wake-model-${type}`;
-    const selection = vi.fn(async () => false);
+    const diagnostic = { phase: 'select-effort', outcome: 'pending' };
+    const selection = vi.fn(async (_model, _effort, _current, report) => { report(diagnostic); return false; });
     live = await harness(type === 'revive' ? `https://chatgpt.com/c/${chatA}?clf=${commandId}` : `https://chatgpt.com/?clf=${commandId}`, {
       redeem: () => ({ ok: true, command: { id: commandId, type, text: 'Now do the second half.', agent: 'worker-1',
         model: 'gpt-5.6-sol', reasoningEffort: 'high', ...(type === 'revive' ? { conversationId: chatA } : {}) } })
@@ -3220,12 +3221,14 @@ describe('desktop input delivery and helper ownership', () => {
     await settle();
     await new Promise(resolve => globalThis.setTimeout(resolve, 300));
     await settle();
-    expect(selection).toHaveBeenCalledWith('gpt-5.6-sol', 'high', expect.any(Function));
-    const steps = live.sent.filter(message => message.type === 'command_step').map(message => message.step);
+    expect(selection).toHaveBeenCalledWith('gpt-5.6-sol', 'high', expect.any(Function), expect.any(Function));
+    expect(live.sent.find(message => message.type === 'command_step' && message.step === 'model-diagnostic')?.modelSelection).toEqual({ ...diagnostic, attempt: 1 });
+    const steps = live.sent.filter(message => message.type === 'command_step' && message.step !== 'model-diagnostic').map(message => message.step);
     const modelFailure = (message: Record<string, any>) => message.type === 'ack' && String(message.error ?? '').includes('model or reasoning');
     if (type !== 'worker') {
       // On past the model, typed, not refused for it (this fixture page never shows the reply).
       expect(steps.slice(0, 5)).toEqual(['composer', 'model', 'model-unconfirmed', 'composer-after-model', 'inserting']);
+      expect(live.sent.find(message => message.type === 'command_step' && message.step === 'model-unconfirmed')?.modelSelection).toEqual({ ...diagnostic, attempt: 1 });
       expect(live.sent.some(modelFailure)).toBe(false);
     } else {
       expect(steps).toEqual(['composer', 'model']);

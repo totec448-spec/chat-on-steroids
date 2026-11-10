@@ -1,12 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { afterEach, expect, it, vi } from 'vitest';
+import { modelSelectionDiagnostic } from '../src/shared/model-selection-diagnostic.js';
 
 const domSource = readFileSync(new URL('../extension/chatgpt-dom.js', import.meta.url), 'utf8');
 const fiberSource = readFileSync(new URL('../extension/fiber.js', import.meta.url), 'utf8');
 const contentSource = readFileSync(new URL('../extension/content.js', import.meta.url), 'utf8');
 let page: JSDOM;
-afterEach(() => { page?.window.close(); });
+afterEach(() => { page?.window.close(); vi.useRealTimers(); });
 it('reveals the native New Chat control through the compact sidebar before reuse', async () => {
   page = new JSDOM('<button data-testid="open-sidebar-button" aria-expanded="false" aria-controls="stage-popover-sidebar">Menu</button>', { url: 'https://chatgpt.com/c/existing', runScripts: 'outside-only' });
   Object.defineProperty(page.window.HTMLElement.prototype, 'getClientRects', { value: () => [{}] });
@@ -686,4 +687,84 @@ it('confirms a picker of exactly 48 versions or lanes and refuses one of 49 (#19
       expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'high'), `${count} ${part}`).toBe(readable);
     }
   }
+});
+
+// #2085: diagnostic callbacks observe the real selector, including early returns and cleanup.
+it('reports the failed selection phase and exact restoration without leaking provider props', async () => {
+  const f = fixture(), reports: unknown[] = [];
+  expect(await f.api.selectModelSettings('missing-model', 'high', () => true, (value: unknown) => reports.push(value))).toBe(false);
+  expect(reports.length).toBeGreaterThan(0);
+  const trace = modelSelectionDiagnostic.parse(reports.at(-1));
+  expect(trace).toMatchObject({ outcome: 'failed', failedPhase: 'resolve',
+    requested: { model: 'missing-model', effort: 'high' },
+    before: { model: 'gpt-5-6-thinking', effort: 'high' },
+    after: { model: 'gpt-5-6-thinking', effort: 'high' }, restore: 'confirmed', closed: true });
+  expect(JSON.stringify(reports)).not.toMatch(/must-never-cross|privateSecret|conversation|modelsData|Denkaufwand/);
+  expect(trace.offered.length).toBeLessThanOrEqual(16);
+});
+it('reports the close failure on the already-selected open-picker early return', async () => {
+  vi.useFakeTimers();
+  const f = fixture('', null), reports: unknown[] = [];
+  page.window.document.querySelector('button')!.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  const result = f.api.selectModelSettings('gpt-5-6-thinking', 'high', () => true, (value: unknown) => reports.push(value));
+  await vi.runAllTimersAsync();
+  expect(await result).toBe(false);
+  expect(f.api.modelSelectionFailure()).toBe('the picker did not close');
+  expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({ outcome: 'failed', failedPhase: 'close', closed: false,
+    selected: { model: 'gpt-5-6-thinking', effort: 'high' }, restore: 'not-needed' });
+});
+it('retains the failing version separately from subsequent restore and close phases', async () => {
+  vi.useFakeTimers();
+  const f = fixture(), reports: unknown[] = []; f.freeze();
+  const result = f.api.selectModelSettings('future-model', 'ultra', () => true, (value: unknown) => reports.push(value));
+  await vi.runAllTimersAsync(); expect(await result).toBe(false);
+  expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({ failedPhase: 'enumerate-version',
+    failedVersion: 'future', phase: 'close', restore: 'failed', closed: true });
+});
+it('distinguishes a slider failure from failed restoration and preserves the last observed pair', async () => {
+  vi.useFakeTimers();
+  const f = fixture(), reports: unknown[] = [];
+  page.window.document.addEventListener('keydown', event => { if (event.key === 'ArrowRight') event.stopImmediatePropagation(); }, true);
+  const result = f.api.selectModelSettings('future-model', 'ultra', () => true, (value: unknown) => reports.push(value));
+  await vi.runAllTimersAsync(); expect(await result).toBe(false);
+  expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({ failedPhase: 'select-effort', failedVersion: 'future',
+    restore: 'failed', closed: true, after: { model: 'gpt-5-6-thinking', effort: 'medium' } });
+});
+it('reports effort substitution on success and keeps the ordinary boolean contract', async () => {
+  const f = fixture(), reports: unknown[] = [];
+  expect(await f.api.selectModelSettings('future-model', 'medium', () => true, (value: unknown) => reports.push(value))).toBe(true);
+  expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({ outcome: 'confirmed', failedPhase: null,
+    requested: { model: 'future-model', effort: 'medium' }, resolved: { model: 'future-model', effort: 'low' } });
+  expect(f.api.modelSelectionFailure()).toBe('');
+  expect(await f.api.selectModelSettings('future-model', 'low', () => true, () => { throw new Error('receiver unavailable'); })).toBe(true);
+});
+it('records a close-time selection change without changing the existing selection policy', async () => {
+  const f = fixture(), reports: unknown[] = [];
+  page.window.document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') { f.state.currentBucket = 10; f.state.currentSelection = f.selections[1]![0]!; }
+  });
+  expect(await f.api.selectModelSettings('future-model', 'ultra', () => true, (value: unknown) => reports.push(value))).toBe(true);
+  expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({ outcome: 'confirmed',
+    selected: { model: 'future-model', effort: 'ultra' }, after: { model: 'future-model', effort: 'low' } });
+});
+
+it('accepts a legacy localized display selector in the diagnostic without changing selection', async () => {
+  const f = fixture(), reports: unknown[] = [];
+  expect(await f.api.selectModelSettings('Neues Modell', 'ultra', () => true, (value: unknown) => reports.push(value))).toBe(true);
+  expect(modelSelectionDiagnostic.parse(reports.at(-1)).requested).toEqual({ model: 'Neues Modell', effort: 'ultra' });
+});
+
+it.each([false, true])('distinguishes a menu that never opened from unreadable state after opening (%s)', async unreadable => {
+  vi.useFakeTimers();
+  const f = fixture(), reports: unknown[] = [];
+  if (unreadable) page.window.document.querySelector('button')!.addEventListener('keydown', event => {
+    if (event.key === 'Enter') f.props.modelsData.versions = [];
+  });
+  else page.window.document.addEventListener('keydown', event => {
+    if (event.key === 'Enter') event.stopImmediatePropagation();
+  }, true);
+  const result = f.api.selectModelSettings('future-model', 'ultra', () => true, (value: unknown) => reports.push(value));
+  await vi.runAllTimersAsync(); expect(await result).toBe(false);
+  expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({ outcome: 'failed', failure: 'unreadable',
+    failedPhase: unreadable ? 'read' : 'open', closed: true });
 });

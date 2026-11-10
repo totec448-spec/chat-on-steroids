@@ -12204,7 +12204,9 @@
     };
     // Where this page is, so a command that runs out of time can say where it stopped. Never
     // awaited: a report must not slow or block the bootstrap, and older apps ignore it.
-    const step = (name) => { void ask({ type: 'command_step', id: boot.id, client: RUN_ID, step: name }).catch(() => undefined); };
+    let modelDiagnostic = null, modelAttempt = 0;
+    const step = (name, modelSelection) => { void ask({ type: 'command_step', id: boot.id, client: RUN_ID, step: name,
+      ...(modelSelection ? { modelSelection } : {}) }).catch(() => undefined); };
     // What this command is for, as the app states it. A revival names the conversation and
     // will not be typed anywhere else; the two chat-opening commands name none, and their
     // precondition is the opposite one — that this page still has no conversation at all.
@@ -12317,7 +12319,13 @@
 
     if (boot.model || boot.reasoningEffort) step('model');
     // An announcement that opened over the picker refuses the choice; closing it earns one more try.
-    const chooseModel = () => CLF_DOM.selectModelSettings(boot.model, boot.reasoningEffort, stillOnTarget);
+    const chooseModel = () => {
+      const attempt = ++modelAttempt;
+      return CLF_DOM.selectModelSettings(boot.model, boot.reasoningEffort, stillOnTarget, diagnostic => {
+        modelDiagnostic = { ...diagnostic, attempt };
+        step('model-diagnostic', modelDiagnostic);
+      });
+    };
     // Confirmed is what the picker proved; only that is ever reported as the chat's model.
     const modelConfirmed = !!(boot.model || boot.reasoningEffort) && (await chooseModel() ||
       ((await closeAnnouncements(stillOnTarget)).length > 0 && stillOnTarget() && await chooseModel()));
@@ -12326,7 +12334,7 @@
     // that never wakes stops its whole run (#1952), and an abandoned resume stops its chat for good
     // (2026-11-01, Mac). A resume tries the model again in its new chat (publishBootstrapSelection).
     // The app logs which model it could not confirm. A new worker's chat still refuses.
-    if (!mayGoOn && (boot.type === 'revive' || boot.type === 'resume') && stillOnTarget()) { step('model-unconfirmed'); mayGoOn = true; }
+    if (!mayGoOn && (boot.type === 'revive' || boot.type === 'resume') && stillOnTarget()) { step('model-unconfirmed', modelDiagnostic); mayGoOn = true; }
     if (!mayGoOn) {
       const why = CLF_DOM.modelSelectionFailure?.();
       return void (await fail(t(

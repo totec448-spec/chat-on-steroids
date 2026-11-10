@@ -5147,7 +5147,10 @@ const HANDLERS = {
     const step = typeof message.step === 'string' ? message.step.slice(0, 32) : '';
     if (!id || !step) return { ok: false };
     const result = await call('/commands/step', { method: 'POST',
-      body: JSON.stringify({ id, client: String(message.client || '').slice(0, 64), step }) });
+      body: JSON.stringify({ id, client: String(message.client || '').slice(0, 64), step,
+        // The app validates the fixed diagnostic shape; old apps ignore this optional field.
+        ...(message.modelSelection && typeof message.modelSelection === 'object' && JSON.stringify(message.modelSelection).length <= 8192
+          ? { modelSelection: message.modelSelection } : {}) }) });
     return { ok: result.ok === true };
   },
   /** The marked page asking for the one command it was opened for. */
