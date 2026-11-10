@@ -59,3 +59,33 @@ it('changes nothing when the Markdown already has the rows, or the drawing is an
   // A link or a reference in brackets is not a button the drawing has.
   expect(completedDilText('[Copiar lista completa](https://example.test)', capture)).toBe('[Copiar lista completa](https://example.test)');
 });
+
+const table = (rows: string[][]) => '<div data-d-component="table"><table>' +
+  row(['項目', '数量'], true) + rows.map(values => row(values)).join('') + '</table></div>';
+const header = '| 項目 | 数量 |\n|---|---|';
+
+it.each([
+  ['missing', '', [['米', '1 kg']]],
+  ['complete', '\n| 米 | 1 kg |', [['米', '1 kg']]],
+  ['partial', '\n| 米 | 1 kg |', [['米', '1 kg'], ['パン', '3 個']]],
+  ['empty', '', []]
+] as const)('pairs repeated headers in order when the first table is %s', (_name, body, firstRows) => {
+  const markup = table(firstRows.map(values => [...values])) + table([['牛乳', '2 l']]);
+  const drawing = { text: markup, truncated: false, chars: markup.length };
+  const source = `## Before\n${header}${body}\n\n## After\n${header}`;
+  const completed = completedDilText(source, drawing);
+  const [before, after] = completed.split('## After\n');
+  expect(after).toBe(`${header}\n| 牛乳 | 2 l |`);
+  expect(before).not.toContain('牛乳');
+  expect(completed.match(/\| 牛乳 \| 2 l \|/g)).toHaveLength(1);
+  const rendered = renderedMarkdown(source, drawing);
+  expect([...rendered.querySelectorAll('table')].map(node => node.textContent)).toEqual([
+    expect.not.stringContaining('牛乳'), expect.stringContaining('牛乳')
+  ]);
+});
+
+it('leaves unmatched Markdown tables alone without consuming the next matching drawing', () => {
+  const source = '| Other | Columns |\n|---|---|\n\n' + header;
+  expect(completedDilText(source, { text: table([['米', '1 kg']]) }))
+    .toBe(`${source}\n| 米 | 1 kg |`);
+});

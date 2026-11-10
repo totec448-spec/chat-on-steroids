@@ -1,4 +1,7 @@
 {
+  "Save here and replace any existing file?": "ここに保存し、同じ名前のファイルがあれば置き換えますか？",
+  "Replace this CSV file?": "このCSVファイルを置き換えますか？",
+  "Replace file": "ファイルを置き換える",
   "Steps for you, a limit on busy chats, and Telegram notifications.": "あなた向けのステップ、忙しいチャットの上限、Telegram 通知。",
   "Steps for you": "あなた向けのステップ",
   "When ChatGPT needs something only you can do, it hands you the step. You run it and mark it done.": "ChatGPT があなたにしかできないことを必要とするとき、そのステップを渡します。実行して、完了にしてください。",
@@ -3899,5 +3902,13 @@
   "Let replies send messages to chats": "返信をチャットへのメッセージとして送る",
   "A reply to a notification goes to that chat as your message, and ChatGPT may then run tools on this computer. Anyone who can use your Telegram account could do the same.": "通知への返信はあなたのメッセージとしてそのチャットに送られ、ChatGPT がこのコンピューターでツールを実行することがあります。あなたの Telegram アカウントを使える人なら誰でも同じことができます。",
   "From Telegram": "Telegram から",
-  "Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.": "Chat On Steroids に表示されるコードを付けて /start を送ってください：設定 → スマートフォン通知 → Telegram。"
+  "Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.": "Chat On Steroids に表示されるコードを付けて /start を送ってください：設定 → スマートフォン通知 → Telegram。",
+  "A list of your scheduled messages, and search through whole long chats.": "予約メッセージの一覧と、長いチャット全体の検索。",
+  "One list of every scheduled message, where you can pause, run or delete each.": "すべての予約メッセージを一覧で表示。一時停止、今すぐ実行、削除ができます。",
+  "Search whole chats": "チャット全体を検索",
+  "Search now reads the whole history of very long chats.": "とても長いチャットでも、検索が履歴全体を読み込みます。",
+  "Compact & Resume holds up": "圧縮して再開が安定",
+  "A page reload in a Project no longer makes it fail every time.": "プロジェクトでページを再読み込みしても、毎回失敗することはなくなりました。",
+  "Skills only when wanted": "必要なときだけSkill",
+  "A Skill is not chosen when you say not to use it.": "使わないでと伝えたSkillは選ばれません。"
 }

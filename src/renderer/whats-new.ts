@@ -14,6 +14,15 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.52': {
+    lead: () => t("A list of your scheduled messages, and search through whole long chats."),
+    highlights: [
+      { icon: 'i-clock', title: () => t("Scheduled"), text: () => t("One list of every scheduled message, where you can pause, run or delete each.") },
+      { icon: 'i-search', title: () => t("Search whole chats"), text: () => t("Search now reads the whole history of very long chats.") },
+      { icon: 'i-retry', title: () => t("Compact & Resume holds up"), text: () => t("A page reload in a Project no longer makes it fail every time.") },
+      { icon: 'i-skill', title: () => t("Skills only when wanted"), text: () => t("A Skill is not chosen when you say not to use it.") }
+    ]
+  },
   '2.1.51': {
     lead: () => t("Steps for you, a limit on busy chats, and Telegram notifications."),
     highlights: [

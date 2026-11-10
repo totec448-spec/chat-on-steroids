@@ -33,6 +33,7 @@ export function completedDilText(text: string, capture?: { text: string; truncat
   if (!tables.length && !buttons.size) return text;
   const lines = text.split('\n');
   const out: string[] = [];
+  let tableIndex = 0;
   for (let at = 0; at < lines.length; at++) {
     const line = lines[at]!;
     const label = line.trim().match(/^\[([^\]]+)\]$/)?.[1];
@@ -46,9 +47,14 @@ export function completedDilText(text: string, capture?: { text: string; truncat
     const header = markdownCells(line);
     let body = 0;
     while ((lines[at + 2 + body] ?? '').trim().startsWith('|')) body++;
-    const match = tables.find(rows => rows.length - 1 > body && rows[0]!.length === header.length &&
+    const matchIndex = tables.findIndex((rows, index) => index >= tableIndex && rows[0]?.length === header.length &&
       rows[0]!.every((value, index) => value === header[index]));
-    if (!match) continue;
+    if (matchIndex < 0) continue;
+    // Drawings and Markdown describe the same ordered tables. Consume even a complete or
+    // empty table, so a later table with identical headings cannot borrow its rows.
+    tableIndex = matchIndex + 1;
+    const match = tables[matchIndex]!;
+    if (match.length - 1 <= body) continue;
     out.push(lines[at + 1]!);
     for (const row of match.slice(1)) out.push(`| ${row.map(escapeCell).join(' | ')} |`);
     at += 1 + body;

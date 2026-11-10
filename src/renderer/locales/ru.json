@@ -1,4 +1,7 @@
 {
+  "Save here and replace any existing file?": "Сохранить здесь с заменой существующего файла?",
+  "Replace this CSV file?": "Заменить этот CSV-файл?",
+  "Replace file": "Заменить файл",
   "Steps for you, a limit on busy chats, and Telegram notifications.": "Шаги для вас, лимит для занятых чатов и уведомления Telegram.",
   "Steps for you": "Шаги для вас",
   "When ChatGPT needs something only you can do, it hands you the step. You run it and mark it done.": "Когда ChatGPT нужно то, что можете сделать только вы, он передаёт вам шаг. Вы выполняете его и отмечаете как выполненный.",
@@ -4151,5 +4154,13 @@
   "Let replies send messages to chats": "Отправлять ответы в чаты как сообщения",
   "A reply to a notification goes to that chat as your message, and ChatGPT may then run tools on this computer. Anyone who can use your Telegram account could do the same.": "Ответ на уведомление уходит в этот чат как ваше сообщение, и ChatGPT может затем запускать инструменты на этом компьютере. Любой, кто может пользоваться вашим аккаунтом Telegram, сможет сделать то же самое.",
   "From Telegram": "Из Telegram",
-  "Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.": "Отправьте /start с кодом из Chat On Steroids: Настройки → Уведомления на телефон → Telegram."
+  "Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.": "Отправьте /start с кодом из Chat On Steroids: Настройки → Уведомления на телефон → Telegram.",
+  "A list of your scheduled messages, and search through whole long chats.": "Список ваших запланированных сообщений и поиск по целым длинным чатам.",
+  "One list of every scheduled message, where you can pause, run or delete each.": "Один список всех запланированных сообщений: каждое можно приостановить, запустить сразу или удалить.",
+  "Search whole chats": "Поиск по целым чатам",
+  "Search now reads the whole history of very long chats.": "Поиск теперь читает всю историю очень длинных чатов.",
+  "Compact & Resume holds up": "Сжать и продолжить стало надёжнее",
+  "A page reload in a Project no longer makes it fail every time.": "Перезагрузка страницы в проекте больше не приводит к сбою каждый раз.",
+  "Skills only when wanted": "Навыки только по желанию",
+  "A Skill is not chosen when you say not to use it.": "Навык не выбирается, если вы просите его не использовать."
 }

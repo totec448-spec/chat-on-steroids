@@ -48,6 +48,138 @@ it('routes one literal normalized Skill name and carries its exact published rev
     .toEqual([{ id: 'code-review', revision: revision('a') }]);
 });
 
+it.each(['code-reviewを使って確認して', 'この変更はcode-reviewで確認して', 'このcode-reviewを使って'])(
+  'routes a complete literal name next to Japanese particles: %s', authored => {
+    expect(routeSkillMetadata(authored, [candidate()]))
+      .toEqual([{ id: 'code-review', revision: revision('a') }]);
+  }
+);
+
+it('routes a complete Japanese display name without requiring spaces around particles', () => {
+  expect(routeSkillMetadata('コードレビューを使って確認して', [candidate({ displayName: 'コードレビュー' })]))
+    .toEqual([{ id: 'code-review', revision: revision('a') }]);
+});
+
+it.each([
+  'code-review は使わないで', 'code-reviewを使わずに進めて',
+  'コードレビューは使用しないで', 'Do not use Code Review for this task.',
+  "Don't use code-review.", 'Never invoke Code Review.', 'Work without using Code Review.',
+  '「code-review」は使わないで', 'Code Review must not be used.',
+  'code-reviewを使ってはいけない', 'code-reviewは使うな', 'code-reviewを使用せずに進めて'
+])('does not auto-select a directly excluded Skill: %s', authored => {
+  expect(routeSkillMetadata(authored, [candidate({ displayName: 'コードレビュー' })])).toEqual([]);
+});
+
+it.each([
+  'Use Code Review to check why the tests do not pass.',
+  'Do not deploy; use Code Review first.',
+  'Do not skip Code Review.',
+  'code-reviewを使って失敗しないように確認して'
+])('does not mistake unrelated or double negation for a Skill exclusion: %s', authored => {
+  expect(routeSkillMetadata(authored, [candidate()]))
+    .toEqual([{ id: 'code-review', revision: revision('a') }]);
+});
+
+it.each([
+  'precode-reviewを使って', 'code-reviewerを使って', 'コードレビュー支援を使って', 'code-review𠮷を使って',
+  'pre-code-review', 'code-review-helper', 'pre--code-review', 'code-review--helper'
+])(
+  'does not match a partial Skill name inside a longer name: %s', authored => {
+    expect(routeSkillMetadata(authored, [candidate({ displayName: 'コードレビュー' })])).toEqual([]);
+  }
+);
+
+it('keeps a separated dash usable and does not confuse a shorter hyphen-prefix identity', () => {
+  const short = candidate({ id: 'code', name: 'Code', revision: revision('b') });
+  expect(routeSkillMetadata('Use code-review - check this change.', [candidate(), short]))
+    .toEqual([{ id: 'code-review', revision: revision('a') }]);
+});
+
+it.each(['', ' \t\n', '---'])('selects nothing for empty or separator-only input: %j', authored => {
+  expect(routeSkillMetadata(authored, [candidate()])).toEqual([]);
+});
+
+it('handles a large failed exclusion match without suppressing the named Skill', () => {
+  const authored = `Do not use${' '.repeat(20_000)}x Code Review`;
+  expect(routeSkillMetadata(authored, [candidate()]))
+    .toEqual([{ id: 'code-review', revision: revision('a') }]);
+});
+
+it('handles near-limit repeated mentions and still honors a final exclusion', () => {
+  const phrase = 'Use code-review. ';
+  const authored = phrase.repeat(Math.floor(95_000 / phrase.length));
+  expect(routeSkillMetadata(authored, [candidate()]))
+    .toEqual([{ id: 'code-review', revision: revision('a') }]);
+  expect(routeSkillMetadata(authored + 'Do not use code-review.', [candidate()])).toEqual([]);
+});
+
+it('keeps a direct exclusion across a large whitespace gap without a context-window cutoff', () => {
+  expect(routeSkillMetadata(`Do not use${' '.repeat(20_000)}Code Review`, [candidate()])).toEqual([]);
+});
+
+it('keeps a directly excluded Skill out even when another mention is positive', () => {
+  expect(routeSkillMetadata('Use Code Review. Do not use code-review.', [candidate()])).toEqual([]);
+});
+
+it('can route one requested Skill while excluding another named Skill', () => {
+  const audit = candidate({ id: 'security-audit', name: 'Security Audit', revision: revision('b') });
+  expect(routeSkillMetadata('Do not use Code Review; use Security Audit.', [candidate(), audit]))
+    .toEqual([{ id: audit.id, revision: audit.revision }]);
+  expect(routeSkillMetadata('code-reviewではなくsecurity-auditを使って', [candidate(), audit]))
+    .toEqual([{ id: audit.id, revision: audit.revision }]);
+});
+
+it.each([
+  'Do not use code-review or security-audit.',
+  'Do not use code-review, security-audit.',
+  'code-reviewとsecurity-auditは使わないで',
+  'code-reviewもsecurity-auditも使わないで',
+  'code-review、security-auditを使用しないで'
+])('excludes every Skill in an explicitly excluded list: %s', authored => {
+  const audit = candidate({ id: 'security-audit', name: 'Security Audit', revision: revision('b') });
+  expect(routeSkillMetadata(authored, [candidate(), audit])).toEqual([]);
+});
+
+it('retains excluded list context from a Skill that does not allow implicit invocation', () => {
+  const audit = candidate({ id: 'security-audit', name: 'Security Audit', revision: revision('b') });
+  expect(routeSkillMetadata('Do not use Code Review or Security Audit.', [
+    candidate({ allowImplicitInvocation: false }), audit
+  ])).toEqual([]);
+});
+
+it('does not propagate an exclusion across a new invocation clause', () => {
+  const audit = candidate({ id: 'security-audit', name: 'Security Audit', revision: revision('b') });
+  expect(routeSkillMetadata('Do not use Code Review, use Security Audit.', [candidate(), audit]))
+    .toEqual([{ id: audit.id, revision: audit.revision }]);
+  expect(routeSkillMetadata('code-reviewは使わないで、security-auditを使って', [candidate(), audit]))
+    .toEqual([{ id: audit.id, revision: audit.revision }]);
+});
+
+it.each([
+  'Do not use Code Review, use git worktrees',
+  'Do not use Code Review, and use git worktrees',
+  'Do not use Code Review、use git worktrees'
+])('separates a new using→use alias invocation from an excluded list: %s', authored => {
+  const worktrees = candidate({ id: 'using-git-worktrees', name: 'Using Git Worktrees' });
+  expect(routeSkillMetadata(authored, [candidate(), worktrees]))
+    .toEqual([{ id: worktrees.id, revision: worktrees.revision }]);
+});
+
+it.each([
+  'Do not use Code Review; do not use git worktrees',
+  'Do not use Code Review, Using Git Worktrees',
+  'Do not use Code Review, or use git worktrees',
+  'Do not use Code Review, use-git-worktrees'
+])('retains direct or coordinated exclusions for using-style names: %s', authored => {
+  const worktrees = candidate({ id: 'using-git-worktrees', name: 'Using Git Worktrees' });
+  expect(routeSkillMetadata(authored, [candidate(), worktrees])).toEqual([]);
+});
+
+it('does not mistake an ordinary verb-leading name for an invocation alias', () => {
+  const cases = candidate({ id: 'use-cases', name: 'Use Cases' });
+  expect(routeSkillMetadata('Do not use Code Review, Use Cases', [candidate(), cases])).toEqual([]);
+});
+
 it('returns none for unnamed, ambiguous, or implicit-disabled metadata', () => {
   const task = 'Please use Code Review for this change.';
   expect(routeSkillMetadata('Prepare a quarterly budget summary.', [candidate()])).toEqual([]);
@@ -136,6 +268,23 @@ it('supports only the maintainer-suggested complete using→use alias and never 
     .toEqual([{ id: 'using-git-worktrees', revision: revision('a') }]);
   expect(routeSkillMetadata('Use git feature worktrees to work on two branches.', publicSkills)).toEqual([]);
   expect(routeSkillMetadata('Explain how git rebase works compared to merge.', publicSkills)).toEqual([]);
+});
+
+it.each([
+  "Don't use git worktrees", 'Never use git worktrees', 'Do not use git worktrees',
+  'avoid using git worktrees', 'Do not use Using Git Worktrees', 'Do not use the Using Git Worktrees'
+])('excludes a negated using→use alias or full name: %s', authored => {
+  expect(routeSkillMetadata(authored, publicSkills)).toEqual([]);
+});
+
+it('keeps positive aliases and unrelated negation while handling verb-leading Skill names', () => {
+  expect(routeSkillMetadata('Do not skip using git worktrees', publicSkills))
+    .toEqual([{ id: 'using-git-worktrees', revision: revision('a') }]);
+  const skill = candidate({ id: 'use-cases', name: 'Use Cases' });
+  expect(routeSkillMetadata("Don't use Use Cases", [skill])).toEqual([]);
+  const run = candidate({ id: 'run-tests', name: 'Run Tests' });
+  expect(routeSkillMetadata('Do not run tests', [run])).toEqual([]);
+  expect(routeSkillMetadata('Do not use Run Tests', [run])).toEqual([]);
 });
 
 it.each([
