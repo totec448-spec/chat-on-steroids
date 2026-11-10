@@ -81,3 +81,11 @@ describe('hidden details', () => {
     expect(body(transcriptHtml('Chat', [{ role: 'assistant', text: 'a [redacted] b' }]))).toContain('a [redacted] b');
   });
 });
+
+it('keeps an initial indented literal list/fence as code in the shared page', () => {
+  const code = '    - ```markdown\n    | Item | Qty |\n    |---|---|';
+  const html = body(transcriptHtml('Code', [{ role: 'assistant', text: `\n \t\n${code}\n\n| Item | Qty |\n|---|---|\n| Rice | 1 kg |` }]));
+  expect(html).toContain('<pre><code>- ```markdown\n| Item | Qty |\n|---|---|\n</code></pre>');
+  expect(html).not.toContain('<ul>');
+  expect(html).toContain('<td>Rice</td>');
+});

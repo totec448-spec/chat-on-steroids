@@ -5225,6 +5225,22 @@ Captured ChatGPT HTML passes a strict allowlist; authored plain text stays text.
 citation ranges use Unicode code points and map to UTF-16 before slicing. Exact uploaded-file
 names render as plain chips; unresolved file citations do not gain invented local links.
 Plain text leaving the timeline (Markdown export, search index and snippets, turn notifications and `modelFacingText` for Goal/Loop and completed answers) passes `providerEntitiesAsMarkdown` first: the raw text's private-use entities (U+E200 name U+E202 field … U+E201) become `[label](address)` for `url` and are dropped otherwise, so a link card never reads as "urlLabelhttps://…".
+DIL table/button completion (`shared/dil-tables.ts`) preserves code examples before matching
+drawn tables in order. It shares `shared/markdown-code.ts::markdownCodeRanges` with chart
+enrichment: fenced (including nested/unclosed), indented and multiline inline code stays
+literal, so a sample table cannot consume the drawing intended for a later real table. Inline
+backticks never join separate paragraphs across LF or CRLF blank lines (including spaces/tabs);
+range offsets remain in the original source's UTF-16 units. Inline matching indexes each paragraph's
+backtick runs by width in linear time; unmatched runs never rescan the remaining suffix. It excludes all block
+code, including indented blocks, so their literal ticks cannot pair with later table headings.
+Fence detection checks original indentation before stripping container prefixes; an indented literal
+list/quote fence cannot swallow a later real table. Genuine list fences retain their content baseline,
+including after lazy paragraph continuations; blank or interrupting block boundaries end that context.
+The indented-code scan uses the same lazy-list boundary rule; restored list-table rows retain
+the header's original indentation so completion cannot move rows outside their list.
+Answer copy, Markdown transcript and shared HTML use `shared/markdown-export.ts::trimMarkdown`
+to remove surrounding blank lines without stripping first-line code indentation. User-message
+whitespace handling is unchanged.
 Answer actions, direct answer export and `/copy` share `shared/markdown-export.ts::completedTurnIds`:
 a later-sequence `turn_start` revokes completion until that same turn ends as `completed` again.
 Boundary sequence numbers, not display order, decide this even when chronology regroups the starts. Older
