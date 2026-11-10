@@ -201,6 +201,14 @@ it('says why a selection was not confirmed, with what the picker offers, and cle
   expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'high')).toBe(true);
   expect(f.api.modelSelectionFailure()).toBe('');
 });
+// atsu6 on #2085: with the picker already open on the requested pair and unable to close, the early return
+// gave no reason.
+it('reports the close failure when the open picker already has the requested pair', async () => {
+  const f = fixture('', null);
+  page.window.document.querySelector('button')!.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'high')).toBe(false);
+  expect(f.api.modelSelectionFailure()).toContain('the picker did not close');
+});
 it('says the picker retained its focus trap when the selection cannot close it', async () => {
   const f = fixture('', null);
   expect(await f.api.selectModelSettings('future-model', 'ultra')).toBe(false);
