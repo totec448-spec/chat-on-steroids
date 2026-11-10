@@ -3597,10 +3597,10 @@ var CLF_DOM = (() => {
    */
   let modelSelectionWhy = '';
   const selectionFailed = reason => { modelSelectionWhy = reason; return false; };
-  /** The picker's models and efforts as the account offers them, one short line (capped). */
-  const offeredSummary = state => safe(() => {
+  /** The models and efforts the picker offered, from every version read, as one short line (capped). */
+  const offeredSummary = choices => safe(() => {
     const byFamily = new Map();
-    for (const version of state?.versions ?? []) for (const choice of state?.choices ?? []) {
+    for (const choice of choices ?? []) {
       if (choice.available === false) continue;
       const key = choice.familyId || choice.id; const efforts = byFamily.get(key) ?? new Set(); if (choice.effort) efforts.add(choice.effort); byFamily.set(key, efforts);
     }
@@ -3642,10 +3642,11 @@ var CLF_DOM = (() => {
         : name && normalizeModelLabel(choice.familyLabel) === name ? 1 : 0;
       // Every available choice of the requested model, read once across versions, so the effort
       // can be resolved against what the account actually offers before anything is moved.
-      const offered = [];
+      const offered = [], seen = [];
       for (const version of [original.versions.find(v => v.id === original.version), ...original.versions.filter(v => v.id !== original.version)]) {
         const state = await ui.version(version.id); if (!state) return selectionFailed('a model version could not be read');
         for (const choice of state.choices) {
+          seen.push(choice);
           const rank = choice.available ? modelRank(choice) : 0;
           if (rank) offered.push({ version: version.id, choice, rank });
         }
@@ -3684,7 +3685,7 @@ var CLF_DOM = (() => {
       // Latest/version entries may describe the same pair; distinct families may not.
       const rank = Math.max(0, ...candidates.map(candidate => candidate.rank));
       const matches = candidates.filter(candidate => candidate.rank === rank);
-      if (!matches.length) return selectionFailed(`${model ? `model ${String(model).slice(0, 30)}` : 'the current model'}${wantedEffort ? ` with ${wantedEffort}` : ''} is not offered; the picker offers ${offeredSummary(original) || 'nothing readable'}`);
+      if (!matches.length) return selectionFailed(`${model ? `model ${String(model).slice(0, 30)}` : 'the current model'}${wantedEffort ? ` with ${wantedEffort}` : ''} is not offered; the picker offers ${offeredSummary(seen) || 'nothing readable'}`);
       if (model && new Set(matches.map(candidate => candidate.choice.familyId)).size !== 1) return selectionFailed('more than one model matches the request');
       if (model && wantedEffort && new Set(matches.map(candidate => `${candidate.choice.id}\u0000${candidate.choice.effort}`)).size !== 1) return selectionFailed('more than one choice matches the request');
       const wanted = matches.find(candidate => candidate.version === original.version && candidate.choice.bucket === original.currentBucket) || matches[0];

@@ -196,7 +196,9 @@ it('says why a selection was not confirmed, with what the picker offers, and cle
   expect(await f.api.selectModelSettings('no-such-model', 'high')).toBe(false);
   const why = f.api.modelSelectionFailure();
   expect(why).toContain('model no-such-model with high is not offered');
-  expect(why).toMatch(/the picker offers \S+:\S+/);
+  // CodeRabbit on #2137: models of every version read are listed, not only the open one's.
+  expect(why).toMatch(/the picker offers .*future-model:/);
+  expect(why).toMatch(/the picker offers .*gpt-5-6-thinking:/);
   expect(why.length).toBeLessThan(260);
   expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'high')).toBe(true);
   expect(f.api.modelSelectionFailure()).toBe('');
