@@ -2,17 +2,15 @@
 if (!process.env.COS_TERMINAL_CHECK_PROFILE) {
   const electron = require('electron');
   const path = require('node:path');
-  const profile = require('./ui-check-profile.cjs').createProfile(path.resolve(__dirname, '../outputs/terminal-acceptance'));
-  const env = { ...process.env, COS_TERMINAL_CHECK_PROFILE: profile.path };
+  const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
   const exit = status => {
     if (typeof electron === 'string') process.exit(status); else electron.app.exit(status);
   };
-  // Share process-tree ownership and catchable-exit handling with verify-ui, while
-  // keeping direct output live. Dynamic import also works before sync require(ESM).
-  import('./ui-check-process.mjs').then(({ runUiCheck }) => runUiCheck(
+  // The separate owner survives even an uncatchable kill of this wrapper.
+  import('./ui-check-supervisor.mjs').then(({ runSupervisedUiCheck }) => runSupervisedUiCheck(
     typeof electron === 'string' ? electron : process.execPath, [__filename, ...process.argv.slice(2)],
-    { env, profile, inheritStdio: true }
+    { env, profileRoot: path.resolve(__dirname, '../outputs/terminal-acceptance') }
   )).then(({ code, output }) => {
     if (output) console.error(output);
     exit(typeof code === 'number' ? code : 1);

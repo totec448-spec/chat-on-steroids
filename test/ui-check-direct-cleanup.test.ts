@@ -7,37 +7,33 @@ import { expect, it, vi } from 'vitest';
 const source = readFileSync(new URL('../scripts/verify-workspace-terminal.cjs', import.meta.url), 'utf8');
 const filename = fileURLToPath(new URL('../scripts/verify-workspace-terminal.cjs', import.meta.url));
 
-const directEntry = (runUiCheck: Function, underElectron: boolean) => {
+const directEntry = (runSupervisedUiCheck: Function, underElectron: boolean) => {
   const exit = vi.fn(), error = vi.fn();
-  const profile = { path: '/fixture/profile', cleanup: vi.fn() };
   const electron = underElectron ? { app: { exit } } : '/fixture/electron';
   // Substitute only module loading; process-level tests also execute the unmodified source.
-  runInNewContext(source.replace("import('./ui-check-process.mjs')", 'loadRunner()'), {
-    __filename: filename, __dirname: path.dirname(filename), loadRunner: async () => ({ runUiCheck }),
+  runInNewContext(source.replace("import('./ui-check-supervisor.mjs')", 'loadRunner()'), {
+    __filename: filename, __dirname: path.dirname(filename), loadRunner: async () => ({ runSupervisedUiCheck }),
     process: { env: { ELECTRON_RUN_AS_NODE: '1' }, execPath: '/fixture/electron-host', argv: [filename, filename, '--fixture-flag'], exit },
     console: { error },
     require: (name: string) => {
       if (name === 'electron') return electron;
       if (name === 'node:path') return path;
-      if (name === './ui-check-profile.cjs') return { createProfile: () => profile };
       throw new Error(`Unexpected fixture dependency: ${name}`);
     }
   });
-  return { exit, error, profile };
+  return { exit, error };
 };
 
 it.each([0, 9, 'signal SIGTERM', 'unhandled rejection'])('delegates direct invocation and preserves shared supervisor result %s', async code => {
   for (const underElectron of [false, true]) {
     const runUiCheck = vi.fn(async (_command: string, _args: string[], _options: Record<string, unknown>) => ({ code, output: '' }));
-    const { exit, error, profile } = directEntry(runUiCheck, underElectron);
+    const { exit, error } = directEntry(runUiCheck, underElectron);
     await new Promise<void>(resolve => setImmediate(resolve));
     expect(exit).toHaveBeenCalledWith(typeof code === 'number' ? code : 1);
     expect(error).not.toHaveBeenCalled();
     expect(runUiCheck).toHaveBeenCalledWith(underElectron ? '/fixture/electron-host' : '/fixture/electron', [filename, '--fixture-flag'], {
-      env: { COS_TERMINAL_CHECK_PROFILE: profile.path }, profile, inheritStdio: true
+      env: {}, profileRoot: path.resolve(path.dirname(filename), '../outputs/terminal-acceptance')
     });
-    // Cleanup belongs to the shared supervisor, never a second wrapper-side state machine.
-    expect(profile.cleanup).not.toHaveBeenCalled();
   }
 });
 
