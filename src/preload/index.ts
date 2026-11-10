@@ -207,6 +207,7 @@ const api = {
   petsImport: () => call<PetLibraryState | null>('pets:import'),
   petsSetEnabled: (id: string, enabled: boolean) => call<PetLibraryState>('pets:enabled', { id, enabled }),
   petsSetFavorite: (id: string, favorite: boolean) => call<PetLibraryState>('pets:favorite', { id, favorite }),
+  petsSetStandaloneTaskBadge: (enabled: boolean) => call<PetLibraryState>('pets:standaloneTaskBadge', { enabled }),
   petsDelete: (id: string) => call<PetLibraryState>('pets:delete', { id }),
   petsAsset: (id: string, preview = false) => call<PetRuntimeAsset>('pets:asset', { id, preview }),
   onPetOverlayStateChanged: (listener: (state: PetOverlayControlState) => void): (() => void) => {

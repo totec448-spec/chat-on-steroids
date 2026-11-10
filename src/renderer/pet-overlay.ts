@@ -36,13 +36,18 @@ const tray = document.getElementById('petTray') as HTMLElement;
 const trayCount = document.getElementById('petTrayCount') as HTMLElement;
 const trayClose = document.getElementById('petTrayClose') as HTMLButtonElement;
 const cards = document.getElementById('petCards') as HTMLElement;
+const standaloneBadge = document.getElementById('petStandaloneBadge') as HTMLButtonElement;
 const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const bundledManifest = bundledManifestJson as unknown as PetAnimationManifest;
 const bundledAtlas = new URL('./pet-assets/atlas-desktop.png', import.meta.url).href;
 const PET_SIZE = 160;
 const INTERACTION_PAD = 42;
+const STANDALONE_BADGE_SIZE = 30;
+const STANDALONE_INTERACTION_PAD = 16;
+const STANDALONE_ANCHOR = '__standalone-task-badge__';
+const STANDALONE_POSITION_KEY = 'cos.ui.petTaskBadge.v1';
 
-let library: PetLibraryState = { pets: [] };
+let library: PetLibraryState = { pets: [], standaloneTaskBadge: false };
 let snapshot: PetOverlaySnapshot | null = null;
 let bounds: PetOverlayBounds = {
   width: innerWidth,
@@ -60,6 +65,9 @@ let disposed = false;
 let raf = 0;
 let timer = 0;
 let lastUpdateAt: number | null = null;
+let standalonePosition = initialStandalonePosition();
+let standalonePointer: { id: number; startX: number; startY: number; originX: number; originY: number; dragging: boolean } | null = null;
+let suppressStandaloneClick = false;
 const views = new Map<string, PetView>();
 const loading = new Map<string, symbol>();
 
@@ -73,6 +81,34 @@ function enabledPets(): PetRecord[] {
   return library.pets.filter(pet => pet.enabled && !dismissed.has(pet.id));
 }
 function positionKey(id: string): string { return `cos.ui.petDesktop.${id}.v1`; }
+
+function clampStandalonePosition(next: { x: number; y: number }): { x: number; y: number } {
+  return {
+    x: Math.round(Math.max(4, Math.min(Math.max(4, bounds.width - STANDALONE_BADGE_SIZE - 4), next.x))),
+    y: Math.round(Math.max(4, Math.min(Math.max(4, bounds.height - STANDALONE_BADGE_SIZE - 4), next.y)))
+  };
+}
+
+function initialStandalonePosition(): { x: number; y: number } {
+  try {
+    const value = JSON.parse(localStorage.getItem(STANDALONE_POSITION_KEY) ?? 'null') as { x?: unknown; y?: unknown } | null;
+    if (value && typeof value.x === 'number' && Number.isFinite(value.x) && typeof value.y === 'number' && Number.isFinite(value.y)) {
+      return clampStandalonePosition({ x: value.x, y: value.y });
+    }
+  } catch { /* optional UI preference */ }
+  return clampStandalonePosition({ x: bounds.width - STANDALONE_BADGE_SIZE - 20, y: 20 });
+}
+
+function persistStandalonePosition(): void {
+  try { localStorage.setItem(STANDALONE_POSITION_KEY, JSON.stringify(standalonePosition)); } catch { /* optional UI preference */ }
+}
+
+function paintStandaloneBadge(): void {
+  standaloneBadge.hidden = !library.standaloneTaskBadge || snapshot?.visible === false;
+  if (standaloneBadge.hidden) return;
+  standaloneBadge.style.transform = `translate3d(${standalonePosition.x}px, ${standalonePosition.y}px, 0)`;
+  if (trayOpen && trayAnchorId === STANDALONE_ANCHOR) placeTray();
+}
 
 function clampPosition(next: { x: number; y: number }): { x: number; y: number } {
   return {
@@ -402,17 +438,26 @@ function activityAnchorId(): string | null {
     .find(id => views.has(id)) ?? null;
 }
 
+function taskAnchorId(): string | null {
+  return library.standaloneTaskBadge ? STANDALONE_ANCHOR : activityAnchorId();
+}
+
 function renderBadges(): void {
-  const anchor = activityAnchorId();
+  const petAnchor = activityAnchorId();
+  const anchor = taskAnchorId();
   const count = snapshot?.activities.length ?? 0;
   const level = snapshot?.level ?? 'idle';
   for (const [id, view] of views) {
     view.shell.dataset.level = level;
-    view.badge.hidden = id !== anchor || count === 0;
+    view.badge.hidden = library.standaloneTaskBadge || id !== petAnchor || count === 0;
     view.badge.textContent = count > 9 ? '9+' : String(count);
     view.badge.setAttribute('aria-label', `${trayOpen && trayAnchorId === id ? 'Hide' : 'Show'} task activity, ${count} ${count === 1 ? 'item' : 'items'}`);
   }
-  if (!anchor || count === 0) {
+  standaloneBadge.dataset.level = level;
+  standaloneBadge.textContent = count > 9 ? '9+' : String(count);
+  standaloneBadge.setAttribute('aria-label', `${trayOpen && trayAnchorId === STANDALONE_ANCHOR ? 'Hide' : 'Show'} task activity, ${count} ${count === 1 ? 'item' : 'items'}`);
+  paintStandaloneBadge();
+  if (!anchor || (!library.standaloneTaskBadge && count === 0)) {
     trayOpen = false;
     tray.hidden = true;
   } else if (trayOpen && trayAnchorId !== anchor) {
@@ -443,21 +488,31 @@ function renderCards(): void {
 
 function placeTray(): void {
   if (!trayOpen || tray.hidden || !trayAnchorId) return;
-  const view = views.get(trayAnchorId);
-  if (!view) return;
+  let anchorX: number, anchorY: number, anchorWidth: number, anchorHeight: number;
+  if (trayAnchorId === STANDALONE_ANCHOR) {
+    if (!library.standaloneTaskBadge) return;
+    anchorX = standalonePosition.x; anchorY = standalonePosition.y;
+    anchorWidth = STANDALONE_BADGE_SIZE; anchorHeight = STANDALONE_BADGE_SIZE;
+  } else {
+    const view = views.get(trayAnchorId);
+    if (!view) return;
+    anchorX = view.machine.position.x; anchorY = view.machine.position.y;
+    anchorWidth = PET_SIZE; anchorHeight = PET_SIZE;
+  }
   const width = Math.min(256, Math.max(220, bounds.width - 20));
   const estimatedHeight = Math.min(206, 32 + Math.max(1, snapshot?.activities.length ?? 1) * 34);
-  const leftPreferred = view.machine.position.x - width - 14;
-  const rightPreferred = view.machine.position.x + PET_SIZE + 14;
+  const leftPreferred = anchorX - width - 14;
+  const rightPreferred = anchorX + anchorWidth + 14;
   const left = leftPreferred >= 10 ? leftPreferred : Math.min(bounds.width - width - 10, rightPreferred);
-  const top = Math.min(Math.max(10, view.machine.position.y + PET_SIZE / 2 - estimatedHeight / 2), Math.max(10, bounds.height - estimatedHeight - 10));
+  const top = Math.min(Math.max(10, anchorY + anchorHeight / 2 - estimatedHeight / 2), Math.max(10, bounds.height - estimatedHeight - 10));
   tray.style.left = `${Math.max(10, left)}px`;
   tray.style.top = `${top}px`;
 }
 
 function setTray(open: boolean): void {
-  trayOpen = open && (snapshot?.activities.length ?? 0) > 0;
-  if (trayOpen && !trayAnchorId) trayAnchorId = activityAnchorId();
+  const anchor = taskAnchorId();
+  trayOpen = open && !!anchor && (library.standaloneTaskBadge || (snapshot?.activities.length ?? 0) > 0);
+  if (trayOpen && !trayAnchorId) trayAnchorId = anchor;
   tray.hidden = !trayOpen;
   renderBadges();
   if (trayOpen) { renderCards(); placeTray(); }
@@ -491,6 +546,14 @@ function elementRegion(element: HTMLElement, padding: number): PetOverlayHitRegi
 
 function interactionRegions(): PetOverlayHitRegion[] {
   const regions: PetOverlayHitRegion[] = [];
+  if (!standaloneBadge.hidden) {
+    const badge = hitRegion(
+      standalonePosition.x, standalonePosition.y,
+      standalonePosition.x + STANDALONE_BADGE_SIZE, standalonePosition.y + STANDALONE_BADGE_SIZE,
+      STANDALONE_INTERACTION_PAD
+    );
+    if (badge) regions.push(badge);
+  }
   for (const view of views.values()) {
     if (!view.machine.visible) continue;
     const { x, y } = view.machine.position;
@@ -533,11 +596,17 @@ function syncInteractiveRegions(): void {
 
 function updateInteraction(next: PetOverlayPointer): void {
   pointer = next;
+  if (standalonePointer) { setInteractive(true); return; }
   if ([...views.values()].some(view => view.machine.pointer)) { setInteractive(true); return; }
+  const nearStandalone = !standaloneBadge.hidden
+    && next.x >= standalonePosition.x - STANDALONE_INTERACTION_PAD
+    && next.x <= standalonePosition.x + STANDALONE_BADGE_SIZE + STANDALONE_INTERACTION_PAD
+    && next.y >= standalonePosition.y - STANDALONE_INTERACTION_PAD
+    && next.y <= standalonePosition.y + STANDALONE_BADGE_SIZE + STANDALONE_INTERACTION_PAD;
   const nearPet = [...views.values()].some(view => petNear(view, next));
   const nearTray = trayOpen && !tray.hidden && rectNear(tray.getBoundingClientRect(), next, 18);
   const nearMenu = !menu.hidden && rectNear(menu.getBoundingClientRect(), next, 10);
-  setInteractive(nearPet || nearTray || nearMenu);
+  setInteractive(nearStandalone || nearPet || nearTray || nearMenu);
 }
 
 function syncLibrary(): void {
@@ -605,12 +674,69 @@ document.addEventListener('mousemove', event => updateInteraction({ x: event.cli
 api.onBounds(next => {
   reschedule(() => {
     bounds = next;
+    standalonePosition = clampStandalonePosition(standalonePosition);
     for (const view of views.values()) view.machine.resize(bounds.width, bounds.height);
   });
+  paintStandaloneBadge();
   placeTray();
   syncInteractiveRegions();
 });
 
+standaloneBadge.addEventListener('pointerdown', event => {
+  if (event.button !== 0 || standaloneBadge.hidden) return;
+  closeMenu();
+  standalonePointer = {
+    id: event.pointerId,
+    startX: event.clientX, startY: event.clientY,
+    originX: standalonePosition.x, originY: standalonePosition.y,
+    dragging: false
+  };
+  standaloneBadge.setPointerCapture(event.pointerId);
+  standaloneBadge.dataset.dragging = 'false';
+  setInteractive(true);
+});
+standaloneBadge.addEventListener('pointermove', event => {
+  if (standalonePointer?.id !== event.pointerId) return;
+  const dx = event.clientX - standalonePointer.startX, dy = event.clientY - standalonePointer.startY;
+  if (!standalonePointer.dragging && Math.hypot(dx, dy) >= 3) {
+    standalonePointer.dragging = true;
+    standaloneBadge.dataset.dragging = 'true';
+  }
+  if (!standalonePointer.dragging) return;
+  standalonePosition = clampStandalonePosition({ x: standalonePointer.originX + dx, y: standalonePointer.originY + dy });
+  paintStandaloneBadge();
+  syncInteractiveRegions();
+});
+standaloneBadge.addEventListener('pointerup', event => {
+  if (standalonePointer?.id !== event.pointerId) return;
+  const dragged = standalonePointer.dragging;
+  standalonePointer = null;
+  standaloneBadge.dataset.dragging = 'false';
+  try { standaloneBadge.releasePointerCapture(event.pointerId); } catch { /* already released */ }
+  if (dragged) {
+    suppressStandaloneClick = true;
+    persistStandalonePosition();
+    api.releaseFocus();
+  }
+  updateInteraction(pointer);
+});
+const cancelStandalonePointer = (event: PointerEvent): void => {
+  if (standalonePointer?.id !== event.pointerId) return;
+  standalonePointer = null;
+  standaloneBadge.dataset.dragging = 'false';
+  try { standaloneBadge.releasePointerCapture(event.pointerId); } catch { /* already released */ }
+  persistStandalonePosition();
+  updateInteraction(pointer);
+  api.releaseFocus();
+};
+standaloneBadge.addEventListener('pointercancel', cancelStandalonePointer);
+standaloneBadge.addEventListener('lostpointercapture', cancelStandalonePointer);
+standaloneBadge.addEventListener('click', event => {
+  event.stopPropagation();
+  if (suppressStandaloneClick) { suppressStandaloneClick = false; return; }
+  trayAnchorId = STANDALONE_ANCHOR;
+  setTray(!(trayOpen && trayAnchorId === STANDALONE_ANCHOR));
+});
 trayClose.addEventListener('click', () => setTray(false));
 tray.addEventListener('pointerenter', () => setInteractive(true));
 tray.addEventListener('pointerleave', () => updateInteraction(pointer));
@@ -635,6 +761,7 @@ void api.listPets().then(reply => { if (reply.ok && !disposed) applyLibrary(repl
 
 window.addEventListener('pagehide', () => {
   disposed = true;
+  persistStandalonePosition();
   setInteractive(false);
   loading.clear();
   cancelWake();

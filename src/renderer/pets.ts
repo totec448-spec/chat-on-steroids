@@ -208,7 +208,7 @@ function preview(pet: PetRecord, api: AppApi): HTMLElement {
 
 export function initPets(api: AppApi, runtime: PetController): void {
   initCardMenuDismissal();
-  let state: PetLibraryState = { pets: [] };
+  let state: PetLibraryState = { pets: [], standaloneTaskBadge: false };
   let epoch = 0;
   let loaded = false;
   // The first load failed and no list arrived since: the list says so, also when the search repaints it.
@@ -250,6 +250,7 @@ export function initPets(api: AppApi, runtime: PetController): void {
       menu.append(summary, actions); card.append(entry, favorite, menu); return card;
   };
   const render = (): void => {
+    $<HTMLInputElement>('petsStandaloneTaskBadge').checked = state.standaloneTaskBadge;
     const favoritesList = $('petsFavorites'), libraryList = $('petsInstalled'); favoritesList.replaceChildren(); libraryList.replaceChildren();
     if (loadFailed) {
       ui($('petsCount'), 'textContent', () => '');
@@ -271,6 +272,11 @@ export function initPets(api: AppApi, runtime: PetController): void {
     if (!visible.length) libraryList.append(el('p', 'plugin-no-results muted', () => t('No pets match your search.')));
   };
 
+  $('petsStandaloneTaskBadge').addEventListener('change', () => void (async () => {
+    const input = $<HTMLInputElement>('petsStandaloneTaskBadge');
+    const wanted = input.checked;
+    if (!await mutate(api.petsSetStandaloneTaskBadge(wanted))) input.checked = state.standaloneTaskBadge;
+  })());
   $('petsSearch').addEventListener('input', render);
   const formatDialog = $<HTMLDialogElement>('petFormatDialog');
   $('petsFormatGuide').addEventListener('click', () => formatDialog.showModal());

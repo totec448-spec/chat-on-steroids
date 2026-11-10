@@ -11,6 +11,7 @@ const ok = <T>(data: T) => Promise.resolve({ ok: true as const, data });
 
 const overlayBody = `
   <div id="petStage"></div>
+  <button id="petStandaloneBadge" type="button" hidden>0</button>
   <section class="pet-tray" id="petTray" hidden>
     <div class="pet-tray-head"><strong>Tasks</strong><span id="petTrayCount"></span><button id="petTrayClose">×</button></div>
     <div id="petCards"></div>
@@ -67,7 +68,7 @@ it('uses one spritesheet body per pet while preserving specials, multi-pet tasks
   const library: PetLibraryState = { pets: [
     { id: 'tur-tur-sahur', displayName: 'Tur Tur Sahur', description: '', kind: 'builtin', builtin: true, enabled: true, favorite: false },
     { id: 'willow', displayName: 'Willow', description: '', kind: 'cos', enabled: true, favorite: true }
-  ] };
+  ], standaloneTaskBadge: false };
   let snapshotListener: ((snapshot: PetOverlaySnapshot) => void) | null = null;
   let pointerListener: ((point: PetOverlayPointer) => void) | null = null;
   let boundsListener: ((bounds: PetOverlayBounds) => void) | null = null;
@@ -83,6 +84,7 @@ it('uses one spritesheet body per pet while preserving specials, multi-pet tasks
     onBounds: (listener: (bounds: PetOverlayBounds) => void) => { boundsListener = listener; return vi.fn(); }
   };
   Object.defineProperty(dom.window, 'petApi', { configurable: true, value: petApi });
+  dom.window.localStorage.setItem('cos.ui.petTaskBadge.v1', '{"x":"bad","y":20}');
   await import('../src/renderer/pet-overlay.js');
   await flushOverlay();
   boundsListener!({ width: 1000, height: 800, scaleFactor: 1, boundedIdleShape: true });
@@ -220,10 +222,68 @@ it('uses one spritesheet body per pet while preserving specials, multi-pet tasks
   expect(setInteractive).toHaveBeenLastCalledWith(false, []);
 });
 
+it('shows one draggable persisted task badge without creating a pet and reuses the existing tray at zero and active counts', async () => {
+  const library: PetLibraryState = { pets: [], standaloneTaskBadge: true };
+  let snapshotListener: ((snapshot: PetOverlaySnapshot) => void) | null = null;
+  let boundsListener: ((bounds: PetOverlayBounds) => void) | null = null;
+  const setInteractive = vi.fn(), openActivity = vi.fn(), releaseFocus = vi.fn();
+  const petApi = {
+    listPets: () => ok(library),
+    petAsset: () => Promise.resolve({ ok: false as const, error: 'not used' }),
+    hidePet: vi.fn(), setInteractive, focusOwner: vi.fn(), releaseFocus, openLibrary: vi.fn(), openActivity,
+    onSnapshot: (listener: (snapshot: PetOverlaySnapshot) => void) => { snapshotListener = listener; return vi.fn(); },
+    onLibraryChanged: () => vi.fn(), onPointer: () => vi.fn(),
+    onBounds: (listener: (bounds: PetOverlayBounds) => void) => { boundsListener = listener; return vi.fn(); }
+  };
+  Object.defineProperty(dom.window, 'petApi', { configurable: true, value: petApi });
+  await import('../src/renderer/pet-overlay.js');
+  await flushOverlay();
+  boundsListener!({ width: 1000, height: 800, scaleFactor: 1, boundedIdleShape: true });
+  const idleSnapshot: PetOverlaySnapshot = {
+    visible: true, dismissedPetIds: [], level: 'idle', activities: [], theme: 'dark',
+    appearance: {
+      light: { background: '#f4f4f5', sidebar: '#e9edf2', accent: '#486f9d', contrast: 45 },
+      dark: { background: '#181818', sidebar: '#1a2129', accent: '#b0cbed', contrast: 60 },
+      font: 'system', fontSize: 14, lineSpacing: 100, translucentSidebar: true, sidebarLayout: 'projects'
+    }
+  };
+  snapshotListener!(idleSnapshot);
+
+  const badge = dom.window.document.getElementById('petStandaloneBadge') as HTMLButtonElement;
+  expect(dom.window.document.querySelectorAll('.pet-shell')).toHaveLength(0);
+  expect(badge.hidden).toBe(false);
+  expect(badge.textContent).toBe('0');
+  expect(badge.style.transform).toBe('translate3d(950px, 20px, 0)');
+  expect(setInteractive.mock.lastCall?.[1]).toEqual(expect.arrayContaining([
+    expect.objectContaining({ x: expect.any(Number), y: expect.any(Number), width: expect.any(Number), height: expect.any(Number) })
+  ]));
+
+  badge.click();
+  expect((dom.window.document.getElementById('petTray') as HTMLElement).hidden).toBe(false);
+  expect(dom.window.document.getElementById('petTrayCount')!.textContent).toBe('0 tasks');
+
+  snapshotListener!({
+    ...idleSnapshot,
+    level: 'running',
+    activities: [{ id: 'task-1', title: 'Worker', body: 'Working', level: 'running', sessionId: 'session-one' }]
+  });
+  expect(badge.textContent).toBe('1');
+  expect(badge.dataset.level).toBe('running');
+  (dom.window.document.querySelector('.pet-card') as HTMLButtonElement).click();
+  expect(openActivity).toHaveBeenCalledWith('session-one');
+
+  pointer(badge, 'pointerdown', 965, 35, 17);
+  pointer(badge, 'pointermove', 765, 135, 17);
+  pointer(badge, 'pointerup', 765, 135, 17);
+  expect(badge.style.transform).toBe('translate3d(750px, 120px, 0)');
+  expect(JSON.parse(dom.window.localStorage.getItem('cos.ui.petTaskBadge.v1')!)).toEqual({ x: 750, y: 120 });
+  expect(releaseFocus).toHaveBeenCalledOnce();
+});
+
 it('sleeps between authored deadlines and uses display frames only for continuous motion', async () => {
   const library: PetLibraryState = { pets: [
     { id: 'tur-tur-sahur', displayName: 'Tur Tur Sahur', description: '', kind: 'builtin', builtin: true, enabled: true, favorite: true }
-  ] };
+  ], standaloneTaskBadge: false };
   let snapshotListener: ((snapshot: PetOverlaySnapshot) => void) | null = null;
   const petApi = {
     listPets: () => ok(library),

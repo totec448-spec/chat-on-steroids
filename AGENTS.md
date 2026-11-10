@@ -4925,6 +4925,12 @@ On Windows the desktop Pets host must receive a bounded native shape before it i
 shown, and it stays bounded to the visible pet/tray/menu regions while click-through.
 The `pet-overlay:bounds` projection advertises that idle-shape requirement to the
 renderer; Linux/macOS retain their existing full click-through visual-surface contract.
+The Pets library also owns the optional standalone task badge preference in
+`state/pet-library.json`. When enabled, the existing Pets overlay/activity snapshot stays alive
+without an enabled pet, and `renderer/pet-overlay.ts` draws one draggable 30 px task-count badge
+instead of attaching the count to a `PetMachine`. Its position stays in the overlay's existing
+persistent renderer storage (`cos.ui.petTaskBadge.v1`); it reuses the same Tasks tray/cards and
+activity-opening path, so there is still only one task-activity owner and no second poller.
 
 `renderer/main.ts` owns the shell/setup/settings; `chat.ts` owns sessions, composer and timeline.
 Projects, workers, plans, model choice, usage and plugins have focused modules (§4). The renderer

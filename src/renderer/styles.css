@@ -82,6 +82,7 @@
 .pet-library-card .plugin-entry { height: 100%; align-items: flex-start; min-height: 112px; padding: 15px 82px 38px 16px; cursor: default; }
 .pet-library-card .plugin-entry h2 { padding-right: 0; }
 .pet-library-status { position: absolute; right: 16px; bottom: 14px; }
+.pet-task-badge-setting { margin-top: 20px; padding: 13px 14px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--card); }
 .pet-import-guide { justify-content: space-between; column-gap: 48px; margin-top: 20px; }
 .pet-import-guide p { flex: 1 1 auto; max-width: 660px; }
 .pet-import-guide .btn { flex: 0 0 auto; white-space: nowrap; }

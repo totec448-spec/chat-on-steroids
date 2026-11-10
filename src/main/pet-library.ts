@@ -27,6 +27,7 @@ interface StoredPetLibraryState {
   version: 1;
   enabled: string[];
   favorites: string[];
+  standaloneTaskBadge: boolean;
 }
 
 interface InspectedPet {
@@ -36,7 +37,7 @@ interface InspectedPet {
 }
 
 let directory = '';
-let stored: StoredPetLibraryState = { version: STATE_VERSION, enabled: [], favorites: [] };
+let stored: StoredPetLibraryState = { version: STATE_VERSION, enabled: [], favorites: [], standaloneTaskBadge: false };
 const listeners = new Set<(state: PetLibraryState) => void>();
 
 const builtin: Omit<PetRecord, 'enabled' | 'favorite'> = {
@@ -80,7 +81,8 @@ export async function initPetLibrary(userData: string, bundled: string | null = 
     stored = {
       version: STATE_VERSION,
       enabled: validPreferenceIds(restored.enabled),
-      favorites: validPreferenceIds(restored.favorites)
+      favorites: validPreferenceIds(restored.favorites),
+      standaloneTaskBadge: restored.standaloneTaskBadge === true
     };
   }
 }
@@ -268,7 +270,7 @@ export function petLibraryState(): PetLibraryState {
     try { pets.push(preference(installedPet(entry.name).record)); } catch { /* Invalid packages remain unavailable. */ }
   }
   pets.sort((a, b) => Number(b.favorite) - Number(a.favorite) || a.displayName.localeCompare(b.displayName));
-  return { pets };
+  return { pets, standaloneTaskBadge: stored.standaloneTaskBadge };
 }
 
 export function setPetEnabled(id: string, enabled: boolean): PetLibraryState {
@@ -285,6 +287,12 @@ export function setPetFavorite(id: string, favorite: boolean): PetLibraryState {
   const next = new Set(stored.favorites);
   if (favorite) next.add(id); else next.delete(id);
   stored = { ...stored, favorites: [...next] };
+  persist();
+  return changed();
+}
+
+export function setStandaloneTaskBadge(enabled: boolean): PetLibraryState {
+  stored = { ...stored, standaloneTaskBadge: enabled === true };
   persist();
   return changed();
 }

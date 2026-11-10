@@ -1593,6 +1593,7 @@
   "PDF page dimensions exceed the preview limit": "Las dimensiones de la página del PDF superan el límite de vista previa",
   "Pet folders contain pet.json, animations.json and atlas.png.": "Las carpetas de mascotas contienen pet.json, animations.json y atlas.png.",
   "Pets": "Mascotas",
+  "Show task activity badge without a pet": "Mostrar el indicador de actividad de tareas sin mascota",
   "Process exited: {0}": "El proceso terminó: {0}",
   "previous session": "sesión anterior",
   "Previous session": "Sesión anterior",

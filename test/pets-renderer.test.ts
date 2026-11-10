@@ -9,11 +9,11 @@ afterEach(() => { dom?.window.close(); dom = null; vi.unstubAllGlobals(); vi.res
 const initial: PetLibraryState = { pets: [
   { id: 'tur-tur-sahur', displayName: 'Tur Tur Sahur', description: 'Bundled friend', kind: 'builtin', builtin: true, enabled: true, favorite: false },
   { id: 'willow', displayName: 'Willow', description: 'Forest friend', kind: 'cos', enabled: false, favorite: false, previewDataUrl: 'data:image/png;base64,c3RpbGw=' }
-] };
+], standaloneTaskBadge: false };
 
 it('renders the plugin-style library and wires import, multi-enable, favorite, delete and animated preview', async () => {
   dom = new JSDOM(`<!doctype html><body>
-    <input id="petsSearch"><button id="petsImport"></button><button id="petsFormatGuide"></button>
+    <input id="petsSearch"><input id="petsStandaloneTaskBadge" type="checkbox"><button id="petsImport"></button><button id="petsFormatGuide"></button>
     <dialog id="petFormatDialog"><button id="petsFormatClose"></button><button id="petsCopyInstructions"></button><pre id="petsFormatInstructions"></pre></dialog>
     <span id="petsCount"></span>
     <section id="petsFavoritesSection" hidden><span id="petsFavoritesCount"></span><div id="petsFavorites"></div></section>
@@ -26,23 +26,31 @@ it('renders the plugin-style library and wires import, multi-enable, favorite, d
 
   let state = structuredClone(initial);
   const petsSetFavorite = vi.fn(async (id: string, favorite: boolean) => {
-    state = { pets: state.pets.map(pet => pet.id === id ? { ...pet, favorite } : pet) }; return { ok: true as const, data: state };
+    state = { ...state, pets: state.pets.map(pet => pet.id === id ? { ...pet, favorite } : pet) }; return { ok: true as const, data: state };
   });
   const petsSetEnabled = vi.fn(async (id: string, enabled: boolean) => {
-    state = { pets: state.pets.map(pet => pet.id === id ? { ...pet, enabled } : pet) }; return { ok: true as const, data: state };
+    state = { ...state, pets: state.pets.map(pet => pet.id === id ? { ...pet, enabled } : pet) }; return { ok: true as const, data: state };
   });
   const petsDelete = vi.fn(async (id: string) => {
-    state = { pets: state.pets.filter(pet => pet.id !== id) }; return { ok: true as const, data: state };
+    state = { ...state, pets: state.pets.filter(pet => pet.id !== id) }; return { ok: true as const, data: state };
+  });
+  const petsSetStandaloneTaskBadge = vi.fn(async (enabled: boolean) => {
+    state = { ...state, standaloneTaskBadge: enabled }; return { ok: true as const, data: state };
   });
   const petsImport = vi.fn(async () => ({ ok: true as const, data: state }));
   const petsAsset = vi.fn(async (id: string) => ({ ok: true as const, data: { id, kind: 'cos' as const, atlasDataUrl: 'data:image/png;base64,YXRsYXM=', manifest: authoredManifest } }));
   const writeClipboard = vi.fn(async (_text: string) => ({ ok: true as const, data: true }));
-  const api: any = { petsList: () => Promise.resolve({ ok: true as const, data: state }), petsSetFavorite, petsSetEnabled, petsDelete, petsImport, petsAsset, writeClipboard };
+  const api: any = { petsList: () => Promise.resolve({ ok: true as const, data: state }), petsSetFavorite, petsSetEnabled, petsSetStandaloneTaskBadge, petsDelete, petsImport, petsAsset, writeClipboard };
   const runtime = { applyLibraryState: vi.fn() } as any;
   const { initPets } = await import('../src/renderer/pets.js'); initPets(api, runtime);
 
   await vi.waitFor(() => expect(w.document.querySelectorAll('.pet-library-card')).toHaveLength(2));
   expect(w.document.getElementById('petsCount')!.textContent).toContain('2 pets');
+  const standalone = w.document.getElementById('petsStandaloneTaskBadge') as HTMLInputElement;
+  expect(standalone.checked).toBe(false);
+  standalone.checked = true; standalone.dispatchEvent(new w.Event('change'));
+  await vi.waitFor(() => expect(petsSetStandaloneTaskBadge).toHaveBeenCalledWith(true));
+  expect(state.standaloneTaskBadge).toBe(true);
   (w.document.getElementById('petsFormatGuide') as HTMLButtonElement).click();
   expect((w.document.getElementById('petFormatDialog') as HTMLDialogElement).open).toBe(true);
   (w.document.getElementById('petsFormatClose') as HTMLButtonElement).click();
@@ -109,7 +117,7 @@ it('renders the plugin-style library and wires import, multi-enable, favorite, d
 // the author's and stays as it is.
 it("shows a bundled pet's description in the app's language and leaves an imported pet's as written", async () => {
   dom = new JSDOM(`<!doctype html><body>
-    <input id="petsSearch"><button id="petsImport"></button><button id="petsFormatGuide"></button>
+    <input id="petsSearch"><input id="petsStandaloneTaskBadge" type="checkbox"><button id="petsImport"></button><button id="petsFormatGuide"></button>
     <dialog id="petFormatDialog"><button id="petsFormatClose"></button><button id="petsCopyInstructions"></button><pre id="petsFormatInstructions"></pre></dialog>
     <span id="petsCount"></span>
     <section id="petsFavoritesSection" hidden><span id="petsFavoritesCount"></span><div id="petsFavorites"></div></section>
@@ -120,7 +128,7 @@ it("shows a bundled pet's description in the app's language and leaves an import
   const state: PetLibraryState = { pets: [
     { id: 'capy', displayName: 'Capy', description: 'A calm capybara who lifts, chills and never panics.', kind: 'cos', builtin: true, enabled: false, favorite: false },
     { id: 'willow', displayName: 'Willow', description: 'Forest friend', kind: 'cos', enabled: false, favorite: false }
-  ] };
+  ], standaloneTaskBadge: false };
   const api: any = { petsList: () => Promise.resolve({ ok: true as const, data: state }), petsAsset: async () => ({ ok: false as const, error: 'none' }) };
   const { initPets } = await import('../src/renderer/pets.js'); initPets(api, { applyLibraryState: vi.fn() } as any);
   await vi.waitFor(() => expect(w.document.querySelectorAll('.pet-library-card')).toHaveLength(2));
@@ -151,7 +159,7 @@ it('has a translation of every bundled pet description in every language', async
 // Design audit 2026-11-01: a failed first load kept saying "Loading…" for good.
 it('says the pets could not be loaded when the library cannot be read', async () => {
   dom = new JSDOM(`<!doctype html><body>
-    <input id="petsSearch"><button id="petsImport"></button><button id="petsFormatGuide"></button>
+    <input id="petsSearch"><input id="petsStandaloneTaskBadge" type="checkbox"><button id="petsImport"></button><button id="petsFormatGuide"></button>
     <dialog id="petFormatDialog"><button id="petsFormatClose"></button><button id="petsCopyInstructions"></button><pre id="petsFormatInstructions"></pre></dialog>
     <span id="petsCount">Loading…</span>
     <section id="petsFavoritesSection" hidden><span id="petsFavoritesCount"></span><div id="petsFavorites"></div></section>
@@ -174,7 +182,7 @@ it('says the pets could not be loaded when the library cannot be read', async ()
 // the older read arriving later does not replace it.
 it('keeps the library an import showed when the first read arrives later', async () => {
   dom = new JSDOM(`<!doctype html><body>
-    <input id="petsSearch"><button id="petsImport"></button><button id="petsFormatGuide"></button>
+    <input id="petsSearch"><input id="petsStandaloneTaskBadge" type="checkbox"><button id="petsImport"></button><button id="petsFormatGuide"></button>
     <dialog id="petFormatDialog"><button id="petsFormatClose"></button><button id="petsCopyInstructions"></button><pre id="petsFormatInstructions"></pre></dialog>
     <span id="petsCount">Loading…</span>
     <section id="petsFavoritesSection" hidden><span id="petsFavoritesCount"></span><div id="petsFavorites"></div></section>
@@ -183,7 +191,7 @@ it('keeps the library an import showed when the first read arrives later', async
   const w = dom.window;
   for (const [key, value] of Object.entries({ window: w, document: w.document, HTMLElement: w.HTMLElement, HTMLButtonElement: w.HTMLButtonElement, HTMLDialogElement: w.HTMLDialogElement })) vi.stubGlobal(key, value);
   let firstRead: (reply: unknown) => void = () => undefined;
-  const withImport = { pets: [...initial.pets, { id: 'fresh', displayName: 'Fresh', description: 'Just imported', kind: 'cos' as const, enabled: true, favorite: false }] };
+  const withImport = { ...initial, pets: [...initial.pets, { id: 'fresh', displayName: 'Fresh', description: 'Just imported', kind: 'cos' as const, enabled: true, favorite: false }] };
   const api: any = {
     petsList: () => new Promise(resolve => { firstRead = resolve; }),
     petsImport: async () => ({ ok: true as const, data: withImport }),

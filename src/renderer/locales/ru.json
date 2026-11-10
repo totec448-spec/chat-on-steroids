@@ -1598,6 +1598,7 @@
   "… still writing. The full answer appears when it finishes.": "… ответ ещё создаётся. Полный текст появится после завершения.",
   "Could not preserve the drafts. Save your work before closing this window.": "Не удалось сохранить черновики. Сохраните работу перед закрытием окна.",
   "Pets": "Питомцы",
+  "Show task activity badge without a pet": "Показывать индикатор активности задач без питомца",
   "Manage pets…": "Управление питомцами…",
   "Import pet folder": "Импортировать папку питомца",
   "Choose which pets appear in the workspace.": "Выберите питомцев, которые будут отображаться в рабочем пространстве.",

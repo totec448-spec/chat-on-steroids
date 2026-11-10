@@ -1548,6 +1548,7 @@
   "… still writing. The full answer appears when it finishes.": "… hâlâ yazılıyor. Yanıt tamamlandığında tümü görünür.",
   "Could not preserve the drafts. Save your work before closing this window.": "Taslaklar korunamadı. Bu pencereyi kapatmadan önce çalışmanızı kaydedin.",
   "Pets": "Maskotlar",
+  "Show task activity badge without a pet": "Maskot olmadan görev etkinliği rozetini göster",
   "Manage pets…": "Maskotları yönet…",
   "Import pet folder": "Maskot klasörünü içe aktar",
   "Choose which pets appear in the workspace.": "Çalışma alanında görünecek maskotları seçin.",

@@ -55,7 +55,7 @@ import { sendDesktopInput, cancelDesktopInput, retryQueuedInputBrowser, retireDe
 import { isSessionRemoving, withSessionRemoval } from './session/removal.js';
 import { wakeBrowserUrl } from './browser-startup.js';
 import { registerPluginIpc } from './plugins-ipc.js';
-import { deletePet, importPet, loadPetAsset, petLibraryState, setPetEnabled, setPetFavorite } from './pet-library.js';
+import { deletePet, importPet, loadPetAsset, petLibraryState, setPetEnabled, setPetFavorite, setStandaloneTaskBadge } from './pet-library.js';
 import { assignChatGroup, chatGroupsState, createChatGroup, deleteChatGroup, forgetChatGroupMember, renameChatGroup } from './chat-groups.js';
 import { petOverlayControlState, refreshPetOverlayActivities, refreshPetOverlayAppearance, setPetOverlayVisible } from './pet-overlay.js';
 import { confirmedPluginSchemas, pluginRefreshPublications, pluginRefreshStatuses, onPluginRefreshChange, pluginRefreshUnreadable, resetPluginRefreshLedger } from './plugin-refresh.js';
@@ -1324,6 +1324,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('pets:favorite', async payload => {
     const { id, favorite } = z.object({ id: z.string().min(1).max(100), favorite: z.boolean() }).strict().parse(payload);
     return setPetFavorite(id, favorite);
+  });
+  handle('pets:standaloneTaskBadge', async payload => {
+    const { enabled } = z.object({ enabled: z.boolean() }).strict().parse(payload);
+    const state = setStandaloneTaskBadge(enabled);
+    if (enabled) await setPetOverlayVisible(true, false);
+    return state;
   });
   handle('pets:delete', async payload => {
     const { id } = z.object({ id: z.string().min(1).max(100) }).strict().parse(payload);
