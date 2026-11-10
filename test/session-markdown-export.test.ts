@@ -12,7 +12,7 @@ vi.mock('electron', () => electron);
 vi.mock('../src/main/session/store.js', () => store);
 vi.mock('../src/main/replace-file.js', () => files);
 
-const { exportSessionMarkdown } = await import('../src/main/session/markdown-export.js');
+const { exportSessionMarkdown, fullText } = await import('../src/main/session/markdown-export.js');
 
 const events: SessionEvent[] = [
   { seq: 1, time: 1, source: 'extension', kind: 'user_message', turnId: 't1', messageId: 'u1', message: { text: 'Explain it', truncated: false, chars: 10 } },
@@ -94,6 +94,39 @@ it('copies distinct rows for drawn tables that share column headings', async () 
   await exportSessionMarkdown({ id: 'session-1', scope: 'answer', turnId: 't1', target: 'clipboard' }, null);
   expect(electron.clipboard.writeText).toHaveBeenCalledWith(
     '## Before\n| Item | Qty |\n|---|---|\n| Rice | 1 kg |\n\n## After\n| Item | Qty |\n|---|---|\n| Milk | 2 l |\n');
+});
+
+it.each([
+  ['answer', 'clipboard'], ['latest', 'clipboard'], ['answer', 'file'], ['session', 'file']
+] as const)('reads both text and drawing overflow for %s export to %s', async (scope, target) => {
+  const markdown = '| Item | Qty |\n|---|---|';
+  const html = '<p>' + 'x'.repeat(120_000) + '</p><div data-d-component="table"><table>' +
+    '<tr><td>Item</td><td>Qty</td></tr><tr><td>Rice</td><td>1 kg</td></tr></table></div>';
+  store.readEvents.mockResolvedValue([
+    events[0]!,
+    { ...events[1]!, message: { text: '| Item', truncated: true, chars: markdown.length, assetId: 'abcdef12.txt' },
+      renderedHtml: { text: html.slice(0, 120_000), truncated: true, chars: html.length, assetId: 'abcdef34.txt' } },
+    events[2]!
+  ]);
+  store.readOverflowText.mockImplementation(async (_id, asset) => asset === 'abcdef34.txt' ? html : markdown);
+  electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/downloads/table.md' });
+  await exportSessionMarkdown({ id: 'session-1', scope, turnId: 't1', target }, null);
+  const answer = `${markdown}\n| Rice | 1 kg |\n`;
+  if (target === 'clipboard') expect(electron.clipboard.writeText).toHaveBeenCalledWith(answer);
+  else expect(files.replaceFile).toHaveBeenCalledWith('/downloads/table.md',
+    scope === 'session' ? `# Explain: it?\n\n## You\n\nExplain it\n\n## ChatGPT\n\n${answer}` : answer, 'Markdown export');
+  expect(store.readOverflowText).toHaveBeenCalledWith('session-1', 'abcdef12.txt');
+  expect(store.readOverflowText).toHaveBeenCalledWith('session-1', 'abcdef34.txt');
+});
+
+it.each([undefined, 'abcdef34.txt'])('does not complete a partial drawing when its overflow is unavailable (%s)', async assetId => {
+  const markdown = '| Item | Qty |\n|---|---|';
+  const partial = '<div data-d-component="table"><table><tr><td>Item</td><td>Qty</td></tr>' +
+    '<tr><td>Rice</td><td>1 kg</td></tr></table></div>';
+  store.readOverflowText.mockResolvedValue(null);
+  await expect(fullText('session-1', { text: markdown, truncated: false, chars: markdown.length },
+    { text: partial, truncated: true, chars: 120_001, ...(assetId ? { assetId } : {}) })).resolves.toBe(markdown);
+  expect(store.readOverflowText).toHaveBeenCalledTimes(assetId ? 1 : 0);
 });
 
 // An answer recorded outside any turn (copied branch history, an adopted chat) has no turn to name.
