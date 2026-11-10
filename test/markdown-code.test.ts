@@ -36,3 +36,23 @@ it.each(['\n', '\r\n'])('strips only the opening quote container when closing a 
     ]);
   }
 });
+
+it.each(['\n', '\r\n'])('keeps inline matching inside Markdown blocks without requiring blank lines (%j)', newline => {
+  for (const boundary of ['## `After', '- `After', '> `After', '***\n`After', '---\n`After']) {
+    const source = ('`Before\n' + boundary).replace(/\n/g, newline);
+    expect(markdownCodeRanges(source)).toEqual([]);
+  }
+  for (const source of [
+    '- `Before\n  | Item | Qty |\n  |---|---|\n  ## `After',
+    '> `Before\n> | Item | Qty |\n> |---|---|\n> ## `After',
+    '- `Before\n- `After'
+  ]) expect(markdownCodeRanges(source.replace(/\n/g, newline))).toEqual([]);
+  for (const source of ['- `first\n  second`', '> `first\n> second`']) {
+    const text = source.replace(/\n/g, newline);
+    expect(markdownCodeRanges(text)).toEqual([{ start: text.indexOf('`'), end: text.length }]);
+  }
+  const text = ['😀 `before`', '| 項目 | 数量 |', '|---|---|', '## `after`'].join(newline);
+  expect(markdownCodeRanges(text)).toEqual(['`before`', '`after`'].map(span => ({
+    start: text.indexOf(span), end: text.indexOf(span) + span.length
+  })));
+});

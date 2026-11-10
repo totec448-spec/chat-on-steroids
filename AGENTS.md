@@ -5229,8 +5229,9 @@ DIL table/button completion (`shared/dil-tables.ts`) preserves code examples bef
 drawn tables in order. It shares `shared/markdown-code.ts::markdownCodeRanges` with chart
 enrichment: fenced (including nested/unclosed), indented and multiline inline code stays
 literal, so a sample table cannot consume the drawing intended for a later real table. Inline
-backticks never join separate paragraphs across LF or CRLF blank lines (including spaces/tabs);
-range offsets remain in the original source's UTF-16 units. Inline matching indexes each paragraph's
+backticks never join separate Markdown blocks, including tables/headings without blank lines.
+Block boundaries use Marked's block-only lexer without processing its inline queue; normalized
+LF positions map back to the original CRLF/UTF-16 source. Inline matching indexes each block's
 backtick runs by width in linear time; unmatched runs never rescan the remaining suffix. It excludes all block
 code, including indented blocks, so their literal ticks cannot pair with later table headings.
 Fence detection checks original indentation before stripping container prefixes; an indented literal
