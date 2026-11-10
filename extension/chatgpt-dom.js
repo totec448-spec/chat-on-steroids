@@ -3627,7 +3627,8 @@ var CLF_DOM = (() => {
     if (current?.available && (current.id === model || current.familyId === model) &&
         (!effort || current.effort === effort)) {
       const closed = await ui.close();
-      return closed && stillCurrent();
+      if (!closed) return selectionFailed('the picker did not close');
+      return stillCurrent() || selectionFailed('the chat changed meanwhile');
     }
     let selected = false, closed = false;
     try {
