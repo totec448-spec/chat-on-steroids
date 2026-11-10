@@ -2513,6 +2513,9 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string,
   };
   await assertCurrent();
   if (!options.rotation) {
+    // A turn the stopped request reopened is the person's to stop: what the app still owed after its own
+    // rotation Stop ends with theirs, or it would file a Continue behind the Stop they asked for (CodeRabbit on #2136).
+    clearOwedContinue(id);
     // The person's Stop takes over a pending fresh-turn Stop of the same turn: no automatic continue
     // may follow the stop they asked for (CodeRabbit on #1954). The saved Stop loses its fresh-turn
     // mark first, so a restart restores neither it nor its fence.
