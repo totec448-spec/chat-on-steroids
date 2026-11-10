@@ -6490,7 +6490,9 @@ retained. Normal per-run cleanup still works on every OS after the child closes.
 cleanup failures emit visible warnings without replacing the check's exit result; a failed stale
 removal does not prevent a fresh profile or later checks. Warnings are separate from captured child
 output, so passing checks still show them and cleanup text cannot masquerade as a child rejection.
-Direct Electron invocation uses the same supervised profile lifecycle.
+Direct Node/Electron invocation delegates to that same runner with live output and no extra deadline,
+so wrapper JS exit/failure and catchable SIGINT/SIGTERM also stop its owned child tree. Uncatchable
+termination (SIGKILL/OS crash) cannot run cleanup; the interrupted-profile retention rules still apply.
 `ui-check-process.mjs` owns the runner's per-check process group (POSIX) or taskkill tree
 (Windows). Timeout cleanup bounds the Windows helper and close wait to one second each.
 Unconfirmed exits retain their profile as unknown instead of deleting live data; leaked pipes

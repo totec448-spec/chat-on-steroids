@@ -8,25 +8,33 @@ import { makeTempDir, removeTempDir } from './helpers.js';
 // @ts-expect-error Plain Node helper without type declarations.
 import { terminateCheckTree } from '../scripts/ui-check-process.mjs';
 
-it.each(['exit', 'SIGINT', 'SIGTERM'] as const)('retires a real active tree when its runner receives %s', async action => {
+it.each((['runner', 'direct'] as const).flatMap(role => (['exit', 'failure', 'SIGINT', 'SIGTERM'] as const).map(action => ({ role, action }))))('retires a real active tree when its $role wrapper receives $action', async ({ role, action }) => {
   const root = await makeTempDir('cos-ui-runner-exit-');
   const owner = path.join(root, 'owner.pid');
   const ready = path.join(root, 'grandchild.pid');
   const script = fileURLToPath(new URL('../scripts/fixtures/ui-check-runner-exit.mjs', import.meta.url));
-  const runner = fork(script, ['runner', owner, ready, root], { silent: true });
+  const runner = fork(script, [role, owner, ready, root], { silent: true });
+  let stdout = '', stderr = '';
+  runner.stdout?.on('data', chunk => { stdout += chunk; });
+  runner.stderr?.on('data', chunk => { stderr += chunk; });
   const closed = once(runner, 'close');
+  const exited = once(runner, 'exit');
   let grandchild = 0;
   try {
     await vi.waitFor(() => {
       grandchild = Number(readFileSync(ready, 'utf8'));
       expect(grandchild).toBeGreaterThan(0);
+      if (role === 'direct') {
+        expect(stdout).toContain('LIVE_STDOUT');
+        expect(stderr).toContain('LIVE_STDERR');
+      }
     }, { timeout: 10000, interval: 20 });
     // POSIX sends a real signal; Windows exercises the same handler via IPC because
     // child.kill(SIGTERM) there uses TerminateProcess rather than a JS signal handler.
-    if (action === 'exit' || process.platform === 'win32') runner.send(action);
+    if (action === 'exit' || action === 'failure' || process.platform === 'win32') runner.send(action);
     else runner.kill(action);
-    const [code] = await closed;
-    expect(code).toBe(action === 'exit' ? 0 : action === 'SIGINT' ? 130 : 143);
+    const [code] = await exited;
+    expect(code).toBe(action === 'exit' ? 0 : action === 'failure' ? 1 : action === 'SIGINT' ? 130 : 143);
     const parentPid = Number(readFileSync(owner, 'utf8'));
     expect(parentPid).toBeGreaterThan(0);
     await vi.waitFor(() => {
@@ -38,9 +46,13 @@ it.each(['exit', 'SIGINT', 'SIGTERM'] as const)('retires a real active tree when
     }, { timeout: 5000, interval: 20 });
   } finally {
     // Only the PIDs created by this fixture may be reclaimed if an assertion fails.
-    try { terminateCheckTree(Number(readFileSync(owner, 'utf8'))); } catch { /* already gone */ }
+    let parentPid = 0;
+    try { parentPid = Number(readFileSync(owner, 'utf8')); } catch { /* failed before spawning */ }
+    try { terminateCheckTree(parentPid); } catch { /* already gone or no detached group */ }
+    if (parentPid > 0) { try { process.kill(parentPid, 'SIGKILL'); } catch { /* already gone */ } }
     if (grandchild > 0) { try { process.kill(grandchild, 'SIGKILL'); } catch { /* already gone */ } }
-    if (runner.exitCode === null && runner.signalCode === null) { runner.kill('SIGKILL'); await closed; }
+    if (runner.exitCode === null && runner.signalCode === null) runner.kill('SIGKILL');
+    await closed;
     await removeTempDir(root);
   }
 });

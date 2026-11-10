@@ -19,6 +19,19 @@ const fakeChild = () => Object.assign(new EventEmitter(), {
   pid: 12345, stdout: new PassThrough(), stderr: new PassThrough(), kill: vi.fn(), unref: vi.fn()
 });
 
+it('inherits direct-entry stdio and adds no deadline when none is supplied', async () => {
+  vi.useFakeTimers();
+  const child = Object.assign(new EventEmitter(), {
+    pid: 12345, stdout: null, stderr: null, kill: vi.fn(), unref: vi.fn()
+  });
+  vi.mocked(spawn).mockReturnValueOnce(child as any);
+  const result = runUiCheck('fixture', [], { env: {}, inheritStdio: true });
+  expect(spawn).toHaveBeenCalledWith('fixture', [], expect.objectContaining({ stdio: 'inherit' }));
+  expect(vi.getTimerCount()).toBe(0);
+  child.emit('close', 0, null);
+  expect((await result)).toEqual({ code: 0, output: '' });
+});
+
 it('bounds timeout recovery even if the child never closes, and keeps its active profile', async () => {
   vi.useFakeTimers();
   const child = fakeChild();

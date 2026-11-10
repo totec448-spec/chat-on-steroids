@@ -181,5 +181,7 @@ app.whenReady().then(async () => {
     fs.mkdirSync(output,{recursive:true});
     if(win&&!win.isDestroyed()) fs.writeFileSync(path.join(output,'failure.png'),(await win.webContents.capturePage()).toPNG());
   } catch(captureError) { console.error('Feedback failure screenshot unavailable:',captureError); }
-  await Promise.race([server?.close(),new Promise(resolve=>setTimeout(resolve,2000))]);app.exit(1);
+  try { await Promise.race([server?.close(),new Promise(resolve=>setTimeout(resolve,2000))]); }
+  catch(closeError) { console.error('Feedback server cleanup failed:',closeError); }
+  app.exit(1);
 });
