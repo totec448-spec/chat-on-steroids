@@ -42,7 +42,7 @@ const { findSessionByConversation, initSessionStore, resetSessionStoreForTests }
 const { recordToolCall, resetRecorderForTests } = await import('../src/main/session/recorder.js');
 const { listInputs, resetInputForTests } = await import('../src/main/session/input.js');
 const { resetTurnRotationForTests } = await import('../src/main/turn-rotation.js');
-const { owedContinueFor, resetOwedContinuesForTests, setOwedQuietForTests } = await import('../src/main/owed-continue.js');
+const { owedContinueFor, owedTimerPendingForTests, resetOwedContinuesForTests, setOwedQuietForTests } = await import('../src/main/owed-continue.js');
 const { openCallHold, resetCallHoldsForTests } = await import('../src/main/rotation-hold.js');
 const logger = await import('../src/main/logger.js');
 const { setGoalSwitchNow, resetGoalStateForTests } = await import('../src/main/goal.js');
@@ -499,8 +499,9 @@ describe('stop fallback for fresh turns', () => {
       await events(chat, [{ kind: 'turn_start', time: clock.now, turnId: 'g-owed-1-2' }]);
       expect((await findSessionByConversation(chat))?.activeTurnId).toBe('g-owed-1-2');
       await stopSessionTurn(sessionId, 'g-owed-1-2', { from: 'the app' });
+      // The obligation and its booked check are gone, so nothing can file a Continue behind their Stop; no waiting for a timer that is not there.
       expect(owedContinueFor(chat)).toBeNull();
-      await new Promise(resolve => setTimeout(resolve, 1200));
+      expect(owedTimerPendingForTests(chat)).toBe(false);
       expect(await afterStop()).toHaveLength(1);
     } finally { spy.mockRestore(); setOwedQuietForTests(); setRotationHoldForTests(15_000); await saveConfig({ ...config, sessions: { ...config.sessions, record: true } }); }
   });
