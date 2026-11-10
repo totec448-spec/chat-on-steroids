@@ -5,11 +5,15 @@ import {
   answerMarkdown, completedTurnIds, latestAnswer, markdownFileName, messageAnswerEntries, sessionMarkdown, transcriptEntries,
   turnAnswerEntries
 } from '../../shared/markdown-export.js';
-import { getSession, readEvents, readOverflowText } from './store.js';
+import { getSession, MAX_OVERFLOW_ASSET_CHARS, readAsset, readEvents, readOverflowText } from './store.js';
 import { providerEntitiesAsMarkdown } from '../../shared/content-reference.js';
 import { dialogLabel, mainText } from '../main-texts.js';
 import { completedDilText } from '../../shared/dil-tables.js';
 import { replaceFile } from '../replace-file.js';
+import { logWarn } from '../logger.js';
+
+// Four UTF-8 bytes per character also admit legacy overflow assets above today's per-asset byte cap.
+const MAX_DRAWING_EXPORT_BYTES = MAX_OVERFLOW_ASSET_CHARS * 4;
 
 export type MarkdownExportRequest = {
   id: string;
@@ -30,8 +34,9 @@ export async function fullText(sessionId: string, stored: StoredText, html?: Sto
   // it drew in full but wrote with only its header gets its recorded rows (#1477).
   const text = !stored.truncated || !stored.assetId ? stored.text : (await readOverflowText(sessionId, stored.assetId)) ?? stored.text;
   if (html?.truncated && html.assetId) {
-    const drawing = await readOverflowText(sessionId, html.assetId);
-    if (drawing !== null) html = { ...html, text: drawing, truncated: false };
+    const drawing = await readAsset(sessionId, html.assetId, MAX_DRAWING_EXPORT_BYTES);
+    if (drawing !== null) html = { ...html, text: drawing.toString('utf8'), truncated: false };
+    else logWarn('Markdown export: drawing overflow unavailable or over the read limit; table completion kept partial');
   }
   return providerEntitiesAsMarkdown(completedDilText(text, html));
 }
