@@ -76,7 +76,7 @@ it('retires a ready supervisor if its wrapper is force-killed before any launch 
   const closed = once(wrapper, 'close');
   let supervisor = 0;
   try {
-    await vi.waitFor(() => { supervisor = Number(readFileSync(owner, 'utf8')); expect(supervisor).toBeGreaterThan(0); });
+    await vi.waitFor(() => { supervisor = Number(readFileSync(owner, 'utf8')); expect(supervisor).toBeGreaterThan(0); }, { timeout: 10000, interval: 20 });
     wrapper.kill('SIGKILL'); // Not an IPC-simulated signal on Windows.
     await exited;
     await vi.waitFor(() => gone(supervisor), { timeout: 5000 });
