@@ -1,3 +1,20 @@
+// Direct invocation also supervises a child, so profile deletion happens only after Electron exits.
+if (!process.env.COS_TERMINAL_CHECK_PROFILE) {
+  const electron = require('electron');
+  const path = require('node:path');
+  const { spawn } = require('node:child_process');
+  const profile = require('./ui-check-profile.cjs').createProfile(path.resolve(__dirname, '../outputs/terminal-acceptance'));
+  const env = { ...process.env, COS_TERMINAL_CHECK_PROFILE: profile.path };
+  delete env.ELECTRON_RUN_AS_NODE;
+  const child = spawn(typeof electron === 'string' ? electron : process.execPath, [__filename, ...process.argv.slice(2)], { env, stdio: 'inherit' });
+  profile.markChild(child.pid);
+  child.on('error', error => console.error(error));
+  child.on('close', (code) => {
+    let status = code ?? 1;
+    try { profile.cleanup(); } catch (error) { console.error(error); status = 1; }
+    if (typeof electron === 'string') process.exit(status); else electron.app.exit(status);
+  });
+} else {
 // Isolated Electron + actual project/projectless PTYs + current renderer. No provider or production state.
 const { withoutScripts } = require('./ui-check-page.cjs');
 const { app, BrowserWindow } = require('electron');
@@ -28,7 +45,8 @@ const sh = WINDOWS ? {
 };
 const output = path.join(root, 'outputs/terminal-acceptance');
 fs.mkdirSync(output, { recursive: true });
-app.setPath('userData', path.join(output, 'runtime'));
+// A failed run may leave a dock open in localStorage; every run must start from the same UI state.
+app.setPath('userData', process.env.COS_TERMINAL_CHECK_PROFILE);
 // Without a listener, destroying the only window quits Electron at once, before the cleanup below
 // can wait for the shell the check closed last. Its ConPTY exit then lands while Node tears down,
 // which aborts the process with 0xC0000409 on Windows (3 in 30 runs on a test VM, 2026-10-10).
@@ -218,3 +236,5 @@ app.whenReady().then(async () => {
   // native ConPTY backend unloads. app.exit() skips those handlers and can crash Windows CI.
   app.quit();
 }).catch(error => { console.error(error); app.exit(1); });
+
+}
