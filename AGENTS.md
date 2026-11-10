@@ -5225,6 +5225,15 @@ Captured ChatGPT HTML passes a strict allowlist; authored plain text stays text.
 citation ranges use Unicode code points and map to UTF-16 before slicing. Exact uploaded-file
 names render as plain chips; unresolved file citations do not gain invented local links.
 Plain text leaving the timeline (Markdown export, search index and snippets, turn notifications and `modelFacingText` for Goal/Loop and completed answers) passes `providerEntitiesAsMarkdown` first: the raw text's private-use entities (U+E200 name U+E202 field … U+E201) become `[label](address)` for `url` and are dropped otherwise, so a link card never reads as "urlLabelhttps://…".
+Copy and Markdown/HTML export read overflow for both the answer text and its recorded drawing
+through `session/markdown-export.ts::fullText` before filling DIL table rows. Recovery is serialized
+across copy/export/preview calls so only one item owns large asset buffers at a time; rejection
+releases the next item. Only a recovered drawing whose UTF-16 length matches its recorded `chars`
+and whose UTF-8 re-encoding exactly matches the stored bytes is marked complete.
+An absent, unreadable, oversized, length-mismatched or invalid-UTF-8 drawing keeps its
+truncated flag, is not used as evidence of a whole table, and logs why without content or identity. Drawing
+reads use `readAsset`'s bounded byte path, up to four UTF-8 bytes per supported overflow character
+(32 MiB, including legacy assets above today's write cap). Saved fields and renderer bounds stay unchanged.
 A whole chat as one HTML page is built by `shared/html-export.ts` `transcriptHtml` and only through Share's preview (`sessions:sharePage`, §9): what a person wrote is escaped plain text; answers are Markdown drawn with raw HTML escaped (a block keeps its lines), a picture becomes a link to it and only http(s)/mailto links stay links. The page has inline styles only and a `default-src 'none'` policy, so it runs no script and loads nothing. Its title and texts always pass `redactSecretText`; with `hide`, also `redactPersonalText` (email addresses, the user name in home-folder paths). Every "[redacted]" then shows as one `.hidden` mark in the interface language, never inside a link or attribute; `hiddenCount` counts them. The Markdown export stays exact.
 An assistant message may carry `references`: the sources behind its inline
 `:chatgpt-content-reference{index="N"}` citations. `extension/fiber.js` `citedSources` reads
