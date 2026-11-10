@@ -42,6 +42,7 @@ const { findSessionByConversation, initSessionStore, resetSessionStoreForTests }
 const { recordToolCall, resetRecorderForTests } = await import('../src/main/session/recorder.js');
 const { listInputs, resetInputForTests } = await import('../src/main/session/input.js');
 const { resetTurnRotationForTests } = await import('../src/main/turn-rotation.js');
+const { resetOwedContinuesForTests, setOwedQuietForTests } = await import('../src/main/owed-continue.js');
 const { openCallHold, resetCallHoldsForTests } = await import('../src/main/rotation-hold.js');
 const logger = await import('../src/main/logger.js');
 const { setGoalSwitchNow, resetGoalStateForTests } = await import('../src/main/goal.js');
@@ -163,7 +164,7 @@ beforeEach(async () => {
   resetBridgeForTests();
   resetRecorderForTests();
   resetInputForTests();
-  resetTurnRotationForTests();
+  resetTurnRotationForTests(); resetOwedContinuesForTests();
   resetCallHoldsForTests();
   setRotationHoldForTests(200);
   resetGoalStateForTests();
@@ -432,6 +433,41 @@ describe('stop fallback for fresh turns', () => {
       expect(next).not.toHaveProperty('directTurn');
       expect((await request('GET', '/status')).body.inputs.map((input: { id: string }) => input.id)).toContain(next.id);
     } finally { spy.mockRestore(); setRotationHoldForTests(15_000); await saveConfig({ ...config, sessions: { ...config.sessions, record: true } }); }
+  });
+
+  // #2131: the page refused the after-Stop continue before Send ("The composer changed; your draft was
+  // preserved") and nothing filed it again, so the chat sat idle once the stopped request went quiet.
+  it('files the continue again when the page refused it before Send and the chat has gone quiet', async () => {
+    const config = defaultConfig();
+    await saveConfig({ ...config, sessions: { ...config.sessions, record: true }, ui: { ...config.ui, rotateStopFallback: true } });
+    setRotationHoldForTests(5_000);
+    setOwedQuietForTests(250);
+    const clock = { now: Date.now() };
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock.now);
+    try {
+      const chat = 'f0f00003-1111-4111-8111-000000000411', turn = 'g-owed-0-1';
+      const sessionId = await turnFor(chat, turn, 31);
+      await declineTwice(chat, sessionId, clock);
+      await (await heldCall(chat))();
+      await vi.waitFor(async () => {
+        expect((await request('GET', '/status')).body.stopTurns).toEqual([expect.objectContaining({ conversationId: chat, turnId: turn })]);
+      }, { timeout: 10_000, interval: 50 });
+      await events(chat, [{ kind: 'turn_end', time: clock.now, turnId: turn, outcome: 'stopped' }]);
+      const afterStop = async () => (await listInputs()).filter(entry => entry.sessionId === sessionId && entry.purpose === 'rotation' && entry.afterStop === true);
+      await vi.waitFor(async () => { expect(await afterStop()).toHaveLength(1); }, { timeout: 10_000, interval: 50 });
+      // The page claims it and refuses before Send, as in the report.
+      const first = (await afterStop())[0]!;
+      const page = { id: first.id, owner: 'rotation-page', conversationId: chat };
+      expect((await request('POST', '/input/claim', { body: { ...page, requiresAuthorization: true } })).body.input).toMatchObject({ id: first.id });
+      await request('POST', '/input/fail', { body: { ...page, error: 'The composer changed; your draft was preserved', detail: 'draft-preserved' } });
+      // Nothing happens in the chat: the continue is owed and is filed again, as a new message.
+      await vi.waitFor(async () => {
+        const rows = await afterStop();
+        expect(rows).toHaveLength(2);
+        expect(rows.find(entry => entry.id !== first.id)).toMatchObject({ state: 'queued', text: rotationMessage() });
+      }, { timeout: 10_000, interval: 50 });
+      expect(getLog().some(entry => entry.message.includes('filing it again (try 2 of 4)'))).toBe(true);
+    } finally { spy.mockRestore(); setOwedQuietForTests(); setRotationHoldForTests(15_000); await saveConfig({ ...config, sessions: { ...config.sessions, record: true } }); }
   });
 
   // CodeRabbit on #1954: the fence is in memory, the Stop it protects is durable. After a restart with
