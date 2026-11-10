@@ -1,4 +1,7 @@
 {
+  "Save here and replace any existing file?": "Buraya kaydedilip mevcut dosya değiştirilsin mi?",
+  "Replace this CSV file?": "Bu CSV dosyası değiştirilsin mi?",
+  "Replace file": "Dosyayı değiştir",
   "Steps for you, a limit on busy chats, and Telegram notifications.": "Sizin için adımlar, yoğun sohbetler için bir sınır ve Telegram bildirimleri.",
   "Steps for you": "Sizin için adımlar",
   "When ChatGPT needs something only you can do, it hands you the step. You run it and mark it done.": "ChatGPT yalnızca sizin yapabileceğiniz bir şeye ihtiyaç duyduğunda adımı size verir. Siz çalıştırır ve yapıldı olarak işaretlersiniz.",
