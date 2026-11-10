@@ -562,17 +562,24 @@ const claimLapsed = (link: ChatgptProjectLink, now: number) => link.state === 'c
  *
  * An armed creation that outlived its window turns `uncertain` here, never back into a request:
  * its click may have created a Project whose id was lost, and only the person may ask again.
+ * Null means unavailable, not completed: browser status must still deliver unrelated work while
+ * the browser retains its existing project-create owner until this catalog can be read again.
  */
-export async function pendingProjectCreates(): Promise<Array<{ id: string; projectId: string; name: string; state: 'requested' | 'claimed' | 'creating' }>> {
-  await expireArmedProjectCreates();
-  // In-progress ones are listed too, so the browser keeps the tab doing them; only `requested`
-  // (or a claim that lapsed) is offered to a page again.
-  return (await listProjects()).flatMap(project => {
-    const link = project.chatgpt;
-    if (project.ungrouped || !link || !['requested', 'claimed', 'creating'].includes(link.state)) return [];
-    const state = link.state === 'claimed' && claimLapsed(link, Date.now()) ? 'requested' : link.state as 'requested' | 'claimed' | 'creating';
-    return [{ id: (link as { requestId: string }).requestId, projectId: project.id, name: project.name, state }];
-  });
+export async function pendingProjectCreates(): Promise<Array<{ id: string; projectId: string; name: string; state: 'requested' | 'claimed' | 'creating' }> | null> {
+  try {
+    await expireArmedProjectCreates();
+    // In-progress ones are listed too, so the browser keeps the tab doing them; only `requested`
+    // (or a claim that lapsed) is offered to a page again.
+    return (await listProjects()).flatMap(project => {
+      const link = project.chatgpt;
+      if (project.ungrouped || !link || !['requested', 'claimed', 'creating'].includes(link.state)) return [];
+      const state = link.state === 'claimed' && claimLapsed(link, Date.now()) ? 'requested' : link.state as 'requested' | 'claimed' | 'creating';
+      return [{ id: (link as { requestId: string }).requestId, projectId: project.id, name: project.name, state }];
+    });
+  } catch {
+    // Catalog reads and failed durable writes already log their refusal without saved content.
+    return null;
+  }
 }
 
 let armedSweep: NodeJS.Timeout | null = null;

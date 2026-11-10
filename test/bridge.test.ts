@@ -18942,6 +18942,35 @@ describe('native ChatGPT Project for a new CoS project', () => {
     return addProject(folder);
   }
 
+  it('keeps browser status available without declaring project creation complete when its catalog cannot be read', async () => {
+    await pair();
+    const project = await newProject('unavailable-catalog');
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const file = path.join(dir, 'state', 'projects.json');
+    const saved = await fs.readFile(file, 'utf8');
+    const input = await import('../src/main/session/input.js');
+    await input.enqueueInput({ id: randomUUID(), projectId: project.id, sessionId: null, text: 'Project input', mode: 'auto', dueAt: 0, model: null, reasoningEffort: null });
+    const unrelated = await input.enqueueInput({ id: randomUUID(), projectId: null, sessionId: null, text: 'Unrelated input', mode: 'auto', dueAt: 0, model: null, reasoningEffort: null });
+    await fs.writeFile(file, '{"unfinished":');
+    try {
+      // A protocol-14 companion would mistake null for completion and drop its helper owner.
+      expect((await request('POST', '/status', { protocol: 14, body: { openConversations: [] } })).status).toBe(426);
+      const status = await request('POST', '/status', { body: { openConversations: [] } });
+      expect(status.status).toBe(200);
+      expect(status.body).toMatchObject({ ok: true, projectCreateRequests: null });
+      expect(Array.isArray(status.body.stopTurns)).toBe(true);
+      expect(Array.isArray(status.body.inputs)).toBe(true);
+      expect(status.body.inputs).toContainEqual(expect.objectContaining({ id: unrelated.id }));
+      const pending = await request('POST', '/project-create', { body: { action: 'pending' } });
+      expect(pending.status).toBe(200);
+      expect(pending.body.requests).toBeNull();
+      expect(await fs.readFile(file, 'utf8')).toBe('{"unfinished":');
+    } finally { await fs.writeFile(file, saved); }
+    const recovered = await request('POST', '/status', { body: { openConversations: [] } });
+    expect(recovered.body.projectCreateRequests).toContainEqual(expect.objectContaining({ projectId: project.id, state: 'requested' }));
+  });
+
   it('lets only the page that claimed and armed it report the Project id', async () => {
     await pair();
     const project = await newProject('native-route');

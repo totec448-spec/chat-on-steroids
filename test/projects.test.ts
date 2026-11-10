@@ -272,7 +272,7 @@ it('fails plainly before the click, but leaves an armed creation uncertain and n
     expect((await getProject(first.id))?.chatgpt).toMatchObject({ state: 'failed', error: 'no dialog' });
     await claimProjectCreate(b, 'page-b'); await armProjectCreate(b, 'page-b');
     vi.setSystemTime(Date.now() + PROJECT_CREATE_ARMED_MS);
-    expect((await pendingProjectCreates()).map(row => row.projectId)).toEqual([]);
+    expect((await pendingProjectCreates())?.map(row => row.projectId)).toEqual([]);
     expect((await getProject(second.id))?.chatgpt).toMatchObject({ state: 'uncertain' });
     // Only the person asks again, with a fresh request.
     const retried = await retryProjectCreate(second.id);
@@ -287,9 +287,9 @@ it('offers a claim that lapsed before its click to another page', async () => {
     const project = await addProject(path.join(approved, 'first'));
     const id = (project.chatgpt as { requestId: string }).requestId;
     await claimProjectCreate(id, 'page-a');
-    expect((await pendingProjectCreates())[0]).toMatchObject({ state: 'claimed' });
+    expect((await pendingProjectCreates())?.[0]).toMatchObject({ state: 'claimed' });
     vi.setSystemTime(Date.now() + PROJECT_CREATE_CLAIM_MS);
-    expect((await pendingProjectCreates())[0]).toMatchObject({ state: 'requested' });
+    expect((await pendingProjectCreates())?.[0]).toMatchObject({ state: 'requested' });
     expect(await armProjectCreate(id, 'page-a')).toBe(false);
     expect(await claimProjectCreate(id, 'page-b')).toBe(true);
   } finally { vi.useRealTimers(); }

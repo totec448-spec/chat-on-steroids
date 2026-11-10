@@ -10217,6 +10217,8 @@ export function initChat(next: Deps): void {
       const known = new Set(projects.map(row => row.id));
       const project = await run(asked ? api.addProject({ chatgpt: 'later' }) : api.addProject());
       if (project) { showAddedProject(project, generation); offerChatgptProject(project, known, asked); }
+    } catch (error) {
+      toast(t(error instanceof Error ? error.message : String(error)));
     } finally { button.disabled = false; }
   };
   // The composer's Share a folder means a folder on this computer: straight to the picker.
