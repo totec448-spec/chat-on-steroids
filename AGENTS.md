@@ -5236,6 +5236,8 @@ code, including indented blocks, so their literal ticks cannot pair with later t
 Fence detection checks original indentation before stripping container prefixes; an indented literal
 list/quote fence cannot swallow a later real table. Genuine list fences retain their content baseline,
 including after lazy paragraph continuations; blank or interrupting block boundaries end that context.
+Closing a fence strips only its opening quote container; additional list/quote markers inside
+the code stay literal and cannot expose sample tables or button labels to DIL completion.
 The indented-code scan uses the same lazy-list boundary rule; restored list-table rows retain
 the header's original indentation so completion cannot move rows outside their list.
 Answer copy, Markdown transcript and shared HTML use `shared/markdown-export.ts::trimMarkdown`

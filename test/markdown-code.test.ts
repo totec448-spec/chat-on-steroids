@@ -24,3 +24,15 @@ it('handles many real spans without spreading them through the function argument
   expect(source.slice(ranges[0]!.start, ranges[0]!.end)).toBe('`x`');
   expect(source.slice(ranges.at(-1)!.start, ranges.at(-1)!.end)).toBe('`x`');
 });
+
+it.each(['\n', '\r\n'])('strips only the opening quote container when closing a fence (%j)', newline => {
+  for (const literal of ['- ```', '> ```', '1. ```']) {
+    const example = ['> ```markdown', '> ' + literal, '> | Item | Qty |', '> |---|---|', '> ```'].join(newline);
+    const source = example + newline + newline + 'Actual `outside`';
+    const inline = source.indexOf('`outside`');
+    expect(markdownCodeRanges(source)).toEqual([
+      { start: 0, end: example.length + newline.length },
+      { start: inline, end: inline + '`outside`'.length }
+    ]);
+  }
+});
