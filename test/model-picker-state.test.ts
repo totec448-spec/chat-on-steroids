@@ -738,6 +738,19 @@ it('reports effort substitution on success and keeps the ordinary boolean contra
   expect(f.api.modelSelectionFailure()).toBe('');
   expect(await f.api.selectModelSettings('future-model', 'low', () => true, () => { throw new Error('receiver unavailable'); })).toBe(true);
 });
+it.each([true, false])('keeps the last observed pair after an unreadable closing read (selected=%s)', async selected => {
+  const f = fixture(), reports: unknown[] = [];
+  page.window.document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') f.props.modelsData.versions = [];
+  });
+  expect(await f.api.selectModelSettings(selected ? 'future-model' : 'missing-model', 'ultra', () => true,
+    (value: unknown) => reports.push(value))).toBe(selected);
+  expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({
+    before: { model: 'gpt-5-6-thinking', effort: 'high' }, closed: true,
+    after: selected ? { model: 'future-model', effort: 'ultra' } : { model: 'gpt-5-6-thinking', effort: 'high' },
+    observedVersion: selected ? 'future' : 'latest'
+  });
+});
 it('records a close-time selection change without changing the existing selection policy', async () => {
   const f = fixture(), reports: unknown[] = [];
   page.window.document.addEventListener('keydown', event => {
