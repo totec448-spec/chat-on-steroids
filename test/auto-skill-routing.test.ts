@@ -9,6 +9,7 @@ import { editQueuedInput, enqueueInput, listInputs, resetInputForTests, type Inp
 import { createSession, initSessionStore, resetSessionStoreForTests } from '../src/main/session/store.js';
 import { prepareSessionPrompt, prepareSkillFollowup } from '../src/main/session/prompt.js';
 import { userPromptText } from '../src/shared/user-prompt.js';
+import { getLog } from '../src/main/logger.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
 let directory: string;
@@ -55,12 +56,64 @@ it('freezes one literal unambiguous metadata match into the durable input owner'
   expect(row.autoSkills![0]!.revision).toMatch(/^[0-9a-f]{64}$/);
 });
 
+it('routes and injects a Japanese request with an attached particle through the real input owner', async () => {
+  await install('code-review', 'Code Review', 'Review source code changes for correctness and maintainability.');
+  await enableAutoRouting();
+  const authored = 'code-reviewを使って確認して';
+  const row = await enqueueInput(request(authored));
+  expect(routedIds(row)).toEqual(['code-review']);
+  expect(getLog().filter(entry => entry.message.startsWith('skills: automatic selection')).at(-1)?.message)
+    .toBe('skills: automatic selection chose one eligible literal name');
+  const prompt = await prepareSessionPrompt(authored, row);
+  expect(userPromptText(prompt)).toBe(authored);
+  expect(prompt).toContain('FULL_CODE_REVIEW_BODY');
+});
+
+it.each(['code-review は使わないで', 'Do not use Code Review or Security Audit.'])(
+  'does not inject the body of an explicitly excluded automatic Skill: %s', async authored => {
+    await install('code-review', 'Code Review', 'Review source code changes for correctness and maintainability.');
+    await install('security-audit', 'Security Audit', 'Inspect software for unsafe trust boundaries.');
+    await enableAutoRouting();
+    const row = await enqueueInput(request(authored));
+    expect(routedIds(row)).toEqual([]);
+    expect(getLog().filter(entry => entry.message.startsWith('skills: automatic selection')).at(-1)?.message)
+      .toBe('skills: automatic selection skipped: no single eligible non-excluded literal name');
+    const prompt = await prepareSessionPrompt(authored, row);
+    expect(userPromptText(prompt)).toBe(authored);
+    expect(prompt).not.toContain('FULL_CODE_REVIEW_BODY');
+    expect(prompt).not.toContain('FULL_SECURITY_AUDIT_BODY');
+  }
+);
+
 it('freezes an explicit none when a literal name is ambiguous or no exact name is present', async () => {
   await install('code-review', 'Code Review', 'Review source code changes for correctness and maintainability.');
   await install('source-review', 'Code Review', 'Review another source change for correctness and maintainability.');
   await enableAutoRouting();
   expect(routedIds(await enqueueInput(request('Please use Code Review for this source change.')))).toEqual([]);
   expect(routedIds(await enqueueInput(request('Prepare a quarterly budget summary.')))).toEqual([]);
+});
+
+it('does not inject a negated using→use alias through the input owner', async () => {
+  await install('using-git-worktrees', 'Using Git Worktrees', 'Use isolated worktrees for source changes.');
+  await enableAutoRouting();
+  const row = await enqueueInput(request("Don't use git worktrees"));
+  expect(routedIds(row)).toEqual([]);
+  expect(await prepareSessionPrompt(row.text, row)).not.toContain('FULL_USING_GIT_WORKTREES_BODY');
+});
+
+it.each([
+  ['Do not use Code Review, use git worktrees', ['using-git-worktrees']],
+  ['Do not use Code Review; do not use git worktrees', []]
+])('keeps alias invocation clauses separate from direct exclusions: %s', async (authored, selected) => {
+  await install('code-review', 'Code Review', 'Review source changes.');
+  await install('using-git-worktrees', 'Using Git Worktrees', 'Use isolated worktrees for source changes.');
+  await enableAutoRouting();
+  const row = await enqueueInput(request(authored));
+  expect(routedIds(row)).toEqual(selected);
+  const prompt = await prepareSessionPrompt(authored, row);
+  expect(userPromptText(prompt)).toBe(authored);
+  expect(prompt).not.toContain('FULL_CODE_REVIEW_BODY');
+  expect(prompt.includes('FULL_USING_GIT_WORKTREES_BODY')).toBe(selected.length === 1);
 });
 
 it('ignores metadata that forbids implicit invocation', async () => {

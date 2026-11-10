@@ -1,14 +1,14 @@
 import path from 'node:path';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { UsageOverview } from '../src/shared/usage.js';
 
 const electron = vi.hoisted(() => ({
-  dialog: { showSaveDialog: vi.fn() },
+  dialog: { showSaveDialog: vi.fn(), showMessageBox: vi.fn() },
   app: { getPath: vi.fn(() => '/downloads') }
 }));
 const usage = vi.hoisted(() => ({ usageOverview: vi.fn() }));
-const files = vi.hoisted(() => ({ writeFile: vi.fn(async () => undefined), rename: vi.fn(async () => undefined), rm: vi.fn(async () => undefined) }));
-const logger = vi.hoisted(() => ({ logWarn: vi.fn() }));
+const files = vi.hoisted(() => ({ lstat: vi.fn(), link: vi.fn(), writeFile: vi.fn(async () => undefined), rename: vi.fn(async () => undefined), rm: vi.fn(async () => undefined) }));
+const logger = vi.hoisted(() => ({ logWarn: vi.fn(), logInfo: vi.fn() }));
 vi.mock('electron', () => electron);
 vi.mock('../src/main/logger.js', () => logger);
 vi.mock('../src/main/session/usage.js', () => usage);
@@ -35,8 +35,13 @@ const rows = (csv: string) => csv.replace(/^﻿/, '').split('\r\n');
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubGlobal('process', { ...process, platform: 'linux' });
+  files.lstat.mockRejectedValue(Object.assign(new Error('not found'), { code: 'ENOENT' }));
+  files.link.mockReset().mockResolvedValue(undefined);
+  electron.dialog.showMessageBox.mockResolvedValue({ response: 1 });
   usage.usageOverview.mockResolvedValue(overview);
 });
+afterEach(() => vi.unstubAllGlobals());
 
 it('saves daily estimated tokens, the last week of sends and the latest limits as CSV', async () => {
   electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/downloads/usage.csv' });
@@ -51,7 +56,9 @@ it('saves daily estimated tokens, the last week of sends and the latest limits a
   expect(file).toBe(path.join('/downloads', path.basename(file)));
   expect(path.basename(file)).toMatch(/^\.usage\.csv\.[0-9a-f-]{36}\.tmp$/);
   expect(encoding).toBe('utf8');
-  expect(files.rename).toHaveBeenCalledWith(file, '/downloads/usage.csv');
+  expect(files.link).toHaveBeenCalledWith(file, '/downloads/usage.csv');
+  expect(files.rename).not.toHaveBeenCalled();
+  expect(electron.dialog.showMessageBox).not.toHaveBeenCalled();
   // Excel reads UTF-8 only with a byte-order mark; rows end in CRLF as RFC 4180 has it.
   expect(csv.startsWith('﻿Chat On Steroids usage export,')).toBe(true);
   const lines = rows(csv);
@@ -98,11 +105,78 @@ it('writes nothing when the save dialog is cancelled', async () => {
   expect(usage.usageOverview).not.toHaveBeenCalled();
 });
 
+it.each([false, true])('asks before replacing an existing CSV, and does nothing when declined (owned=%s)', async owned => {
+  const owner = {} as import('electron').BrowserWindow;
+  files.lstat.mockResolvedValue({});
+  electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/downloads/usage.csv' });
+  electron.dialog.showMessageBox.mockResolvedValue({ response: 0 });
+  await expect(exportUsageCsv(2, owned ? owner : null)).resolves.toEqual({ saved: false });
+  const confirmation = expect.objectContaining({ message: 'Replace this CSV file?', detail: 'usage.csv',
+    buttons: ['Cancel', 'Replace file'], defaultId: 0, cancelId: 0, noLink: true });
+  expect(electron.dialog.showMessageBox).toHaveBeenCalledWith(...(owned ? [owner, confirmation] : [confirmation]));
+  expect(usage.usageOverview).not.toHaveBeenCalled();
+  expect(files.writeFile).not.toHaveBeenCalled();
+  expect(files.rename).not.toHaveBeenCalled();
+});
+
+it('replaces an existing CSV only after explicit confirmation', async () => {
+  files.lstat.mockResolvedValue({});
+  electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/downloads/usage.csv' });
+  await expect(exportUsageCsv(2, null)).resolves.toEqual({ saved: true, name: 'usage.csv' });
+  expect(electron.dialog.showMessageBox).toHaveBeenCalledOnce();
+  expect(files.rename).toHaveBeenCalledOnce();
+  expect(electron.dialog.showMessageBox.mock.invocationCallOrder[0]).toBeLessThan(files.writeFile.mock.invocationCallOrder[0]!);
+});
+
+it.each(['win32', 'darwin'])('keeps native overwrite confirmation on %s, without asking twice', async platform => {
+  vi.stubGlobal('process', { ...process, platform });
+  electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/downloads/usage.csv' });
+  await expect(exportUsageCsv(2, null)).resolves.toMatchObject({ saved: true });
+  expect(files.lstat).not.toHaveBeenCalled();
+  expect(electron.dialog.showMessageBox).not.toHaveBeenCalled();
+});
+
+it('stops without writing when the existing destination cannot be checked', async () => {
+  files.lstat.mockRejectedValue(Object.assign(new Error('/private/path'), { code: 'EACCES' }));
+  electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/downloads/usage.csv' });
+  await expect(exportUsageCsv(2, null)).rejects.toThrow('/private/path');
+  expect(logger.logWarn).toHaveBeenCalledWith('Usage export not saved: EACCES');
+  expect(files.writeFile).not.toHaveBeenCalled();
+  expect(electron.dialog.showMessageBox).not.toHaveBeenCalled();
+});
+
+it.each(['ENOTSUP', 'EPERM', 'EXDEV'])('gets replacement consent before atomic rename on a volume without hard links (%s)', async code => {
+  files.link.mockRejectedValueOnce(Object.assign(new Error('no hard links'), { code }));
+  electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/downloads/usage.csv' });
+  await expect(exportUsageCsv(2, null)).resolves.toMatchObject({ saved: true });
+  const [temporary] = files.writeFile.mock.calls[0]! as unknown as [string];
+  expect(electron.dialog.showMessageBox).toHaveBeenCalledWith(expect.objectContaining({
+    message: 'Save here and replace any existing file?', buttons: ['Cancel', 'Save'], defaultId: 0, cancelId: 0
+  }));
+  expect(files.rename).toHaveBeenCalledWith(temporary, '/downloads/usage.csv');
+  expect(electron.dialog.showMessageBox.mock.invocationCallOrder[0]).toBeLessThan(files.rename.mock.invocationCallOrder[0]!);
+  expect(files.rm).toHaveBeenCalledWith(temporary, { force: true });
+});
+
+it('keeps the destination untouched when fallback replacement permission is declined', async () => {
+  files.link.mockRejectedValueOnce(Object.assign(new Error('no hard links'), { code: 'ENOTSUP' }));
+  electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/downloads/usage.csv' });
+  electron.dialog.showMessageBox.mockResolvedValue({ response: 0 });
+  await expect(exportUsageCsv(2, null)).resolves.toEqual({ saved: false });
+  expect(electron.dialog.showMessageBox).toHaveBeenCalledOnce();
+  expect(files.rename).not.toHaveBeenCalled();
+  const [temporary] = files.writeFile.mock.calls[0]! as unknown as [string];
+  expect(files.rm).toHaveBeenCalledWith(temporary, { force: true });
+  expect(logger.logInfo).toHaveBeenCalledWith('Usage export: this location cannot publish without replacement; asking for permission');
+});
+
 // Writing the chosen file in place would empty an earlier export before the new one is whole.
 it('leaves an earlier export whole when the write fails, and logs why without the path', async () => {
+  files.lstat.mockResolvedValue({});
   electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/downloads/usage.csv' });
   files.writeFile.mockRejectedValueOnce(Object.assign(new Error("ENOSPC: no space left on device, open '/downloads/.usage.csv.tmp'"), { code: 'ENOSPC' }));
   await expect(exportUsageCsv(2, null)).rejects.toThrow('ENOSPC');
+  expect(electron.dialog.showMessageBox).toHaveBeenCalledOnce();
   const [file] = files.writeFile.mock.calls[0]! as unknown as [string];
   expect(file).not.toBe('/downloads/usage.csv');
   expect(files.rename).not.toHaveBeenCalled();

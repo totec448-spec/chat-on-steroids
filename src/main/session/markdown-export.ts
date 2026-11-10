@@ -5,12 +5,18 @@ import {
   answerMarkdown, completedTurnIds, latestAnswer, markdownFileName, messageAnswerEntries, sessionMarkdown, transcriptEntries,
   turnAnswerEntries
 } from '../../shared/markdown-export.js';
-import { getSession, readEvents, readOverflowText } from './store.js';
+import { getSession, MAX_OVERFLOW_ASSET_CHARS, readAsset, readEvents, readOverflowText } from './store.js';
 import { providerEntitiesAsMarkdown } from '../../shared/content-reference.js';
 import { dialogLabel, mainText } from '../main-texts.js';
 import { completedDilText } from '../../shared/dil-tables.js';
 import { replaceFile } from '../replace-file.js';
 import { logWarn } from '../logger.js';
+
+// Four UTF-8 bytes per character also admit legacy overflow assets above today's per-asset byte cap.
+const MAX_DRAWING_EXPORT_BYTES = MAX_OVERFLOW_ASSET_CHARS * 4;
+// Export callers may map a whole history at once. Only one recovery owns its large buffers,
+// including when a copy and an HTML preview overlap; a failed item must release the next one.
+let textRecovery: Promise<void> = Promise.resolve();
 
 export type MarkdownExportRequest = {
   id: string;
@@ -26,10 +32,29 @@ export type MarkdownExportRequest = {
 export type MarkdownExportResult = { done: 'copied' } | { done: 'saved'; name: string } | { done: 'cancelled' };
 
 /** The whole text: an answer cut in the log is read back from the overflow copy beside it. */
-export async function fullText(sessionId: string, stored: StoredText, html?: StoredText): Promise<string> {
+export function fullText(sessionId: string, stored: StoredText, html?: StoredText): Promise<string> {
+  const current = textRecovery.then(() => recoverFullText(sessionId, stored, html));
+  textRecovery = current.then(() => undefined, () => undefined);
+  return current;
+}
+
+async function recoverFullText(sessionId: string, stored: StoredText, html?: StoredText): Promise<string> {
   // ChatGPT's link cards arrive as private-use markup; exported Markdown gets real links. A table
   // it drew in full but wrote with only its header gets its recorded rows (#1477).
   const text = !stored.truncated || !stored.assetId ? stored.text : (await readOverflowText(sessionId, stored.assetId)) ?? stored.text;
+  if (html?.truncated && !html.assetId) {
+    logWarn('Markdown export: drawing overflow was not stored; table completion kept partial');
+  } else if (html?.truncated && html.assetId) {
+    const drawing = await readAsset(sessionId, html.assetId, MAX_DRAWING_EXPORT_BYTES);
+    if (drawing === null) {
+      logWarn('Markdown export: drawing overflow unavailable or over the read limit; table completion kept partial');
+    } else {
+      const recovered = drawing.toString('utf8');
+      if (recovered.length !== html.chars) logWarn('Markdown export: drawing overflow length mismatch; table completion kept partial');
+      else if (!Buffer.from(recovered, 'utf8').equals(drawing)) logWarn('Markdown export: drawing overflow invalid UTF-8; table completion kept partial');
+      else html = { ...html, text: recovered, truncated: false };
+    }
+  }
   return providerEntitiesAsMarkdown(completedDilText(text, html));
 }
 

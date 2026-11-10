@@ -1,4 +1,7 @@
 {
+  "Save here and replace any existing file?": "Guardar aqui e substituir qualquer ficheiro existente?",
+  "Replace this CSV file?": "Substituir este ficheiro CSV?",
+  "Replace file": "Substituir ficheiro",
   "Steps for you, a limit on busy chats, and Telegram notifications.": "Passos para si, um limite para chats ocupados e notificações do Telegram.",
   "Steps for you": "Passos para si",
   "When ChatGPT needs something only you can do, it hands you the step. You run it and mark it done.": "Quando o ChatGPT precisa de algo que só você pode fazer, entrega-lhe o passo. Executa-o e marca-o como concluído.",
@@ -4067,5 +4070,13 @@
   "Let replies send messages to chats": "Permitir que as respostas enviem mensagens aos chats",
   "A reply to a notification goes to that chat as your message, and ChatGPT may then run tools on this computer. Anyone who can use your Telegram account could do the same.": "Uma resposta a uma notificação segue para esse chat como mensagem sua, e o ChatGPT pode então executar ferramentas neste computador. Qualquer pessoa que consiga usar a sua conta do Telegram poderia fazer o mesmo.",
   "From Telegram": "Do Telegram",
-  "Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.": "Envie /start com o código mostrado no Chat On Steroids: Definições → Notificações no telemóvel → Telegram."
+  "Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.": "Envie /start com o código mostrado no Chat On Steroids: Definições → Notificações no telemóvel → Telegram.",
+  "A list of your scheduled messages, and search through whole long chats.": "Uma lista das suas mensagens agendadas e pesquisa em chats longos inteiros.",
+  "One list of every scheduled message, where you can pause, run or delete each.": "Uma lista de todas as mensagens agendadas, onde pode pausar, executar ou eliminar cada uma.",
+  "Search whole chats": "Pesquisar em chats inteiros",
+  "Search now reads the whole history of very long chats.": "A pesquisa lê agora todo o histórico de chats muito longos.",
+  "Compact & Resume holds up": "Compactar e retomar aguenta",
+  "A page reload in a Project no longer makes it fail every time.": "Recarregar a página num projeto já não o faz falhar sempre.",
+  "Skills only when wanted": "Skills só quando desejado",
+  "A Skill is not chosen when you say not to use it.": "Uma Skill não é escolhida quando diz para não a usar."
 }

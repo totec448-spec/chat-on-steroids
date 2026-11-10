@@ -1,11 +1,13 @@
 .scheduled-index { max-width: 950px; }
 .scheduled-index .plugin-page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .scheduled-index .plugin-page-head > .btn { flex: 0 0 auto; }
-.scheduled-index-list { display: grid; gap: 10px; margin-top: 24px; }
+.scheduled-index-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin-top: 24px; }
 .scheduled-index-row { display: flex; justify-content: space-between; flex-wrap: wrap; align-items: center; gap: 20px; padding: 16px 20px; border: 1px solid var(--edge); border-radius: var(--r-lg); background: var(--card); }
 .scheduled-index-body { flex: 1 1 280px; min-width: 0; }
 .scheduled-index-row h2 { margin: 0; font-size: calc(16px * var(--text-scale, 1)); font-weight: 650; }
 .scheduled-index-row h2, .scheduled-index-message { text-align: start; }
+/* One long unbroken word (a path, a URL) wraps inside its card instead of widening the page. */
+.scheduled-index-row h2, .scheduled-index-meta { overflow-wrap: anywhere; }
 .scheduled-index-meta { margin: 5px 0 0; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.5; }
 .scheduled-index-message { margin: 12px 0 0; color: var(--ink); font-size: calc(13px * var(--text-scale, 1)); line-height: 1.5; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .scheduled-index-actions { position: relative; display: flex; align-items: center; gap: 7px; padding-inline-end: 38px; }

@@ -20,6 +20,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await searchIndexingSettled(); resetSessionSearchForTests();
   vi.restoreAllMocks();
+  vi.useRealTimers();
   await flushDurable(); resetSessionStoreForTests(); resetDurableForTests(); await removeTempDir(directory);
 });
 
@@ -386,4 +387,88 @@ it('locates a bookmarked reply whose recorded id is upper case (bookmarks are ke
   await flushSessions();
   const location = await locateMessage(session.id, recorded.toLowerCase());
   expect(location).toMatchObject({ kind: 'assistant_message', messageId: recorded });
+});
+
+it('retries a failed index publication without a restart or a change to the chat', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  const id = await chat('Notes', [['user', 'recoverable needle']]);
+  const store = await import('../src/main/session/store.js');
+  const read = vi.spyOn(store, 'readEvents');
+  const logger = await import('../src/main/logger.js');
+  const warn = vi.spyOn(logger, 'logWarn');
+  const rename = vi.spyOn(fs, 'rename').mockRejectedValue(Object.assign(new Error('temporarily busy'), { code: 'EBUSY' }));
+  await searchSessions('needle');
+  await searchIndexingSettled();
+  const failedAt = Date.now();
+  // A failure is not "indexed"; title search still works while the disk is unavailable.
+  expect(await searchSessions('Notes')).toMatchObject({ results: [{ id }], indexed: 0, total: 1 });
+  await searchIndexingSettled();
+  vi.setSystemTime(failedAt + 29_999);
+  expect(await search('needle')).toMatchObject({ results: [], indexed: 0, total: 1 });
+  await searchIndexingSettled();
+  expect(rename).toHaveBeenCalledTimes(1);
+  expect(read).toHaveBeenCalledTimes(1);
+  // A persistent failure retries at the boundary without repeating the warning.
+  vi.setSystemTime(failedAt + 30_000);
+  expect(await search('needle')).toMatchObject({ results: [], indexed: 0, total: 1 });
+  await searchIndexingSettled();
+  expect(rename).toHaveBeenCalledTimes(2);
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(warn.mock.calls.filter(([message]) => message.includes('not indexed'))).toEqual([
+    [expect.stringContaining('will retry after 30 seconds')]
+  ]);
+  await expect(fs.stat(`${sessionSearchIndexPath(id)}.tmp`)).rejects.toMatchObject({ code: 'ENOENT' });
+  rename.mockRestore();
+  vi.setSystemTime(failedAt + 60_000);
+  // Index via a title query so its text has not yet entered the cache.
+  expect(await search('Notes')).toMatchObject({ results: [{ id }], indexed: 1, total: 1 });
+  await searchIndexingSettled();
+  expect(await fs.readFile(sessionSearchIndexPath(id), 'utf8')).toContain('recoverable needle');
+  // Recovery retires the failure: losing this same-stamp index is a new failure episode.
+  await fs.rm(sessionSearchIndexPath(id));
+  expect(await searchSessions('needle')).toMatchObject({ results: [], indexed: 0, total: 1 });
+  await searchIndexingSettled();
+  vi.spyOn(fs, 'rename').mockRejectedValue(Object.assign(new Error('busy again'), { code: 'EBUSY' }));
+  await search('needle');
+  await searchIndexingSettled();
+  expect(warn.mock.calls.filter(([message]) => message.includes('not indexed'))).toHaveLength(2);
+});
+
+it('does not restore stale cached words when rebuilding a revised chat fails', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  const id = await chat('Revision', [['user', 'obsolete needle']]);
+  expect(await search('needle')).toMatchObject({ results: [{ id }], indexed: 1, total: 1 });
+  const original = (await readEvents(id, { kinds: ['user_message'] }))[0]!;
+  if (original.kind !== 'user_message') throw new Error('Missing question');
+  await upsertMessageEvent(id, { ...original, time: original.time + 1, message: { text: 'replacement', chars: 11, truncated: false } });
+  await flushSessions();
+  const write = vi.spyOn(fs, 'writeFile').mockRejectedValue(Object.assign(new Error('temporarily denied'), { code: 'EACCES' }));
+  expect(await search('needle')).toMatchObject({ results: [], indexed: 0, total: 1 });
+  await searchIndexingSettled();
+  write.mockRestore();
+  vi.setSystemTime(Date.now() + 30_000);
+  expect((await search('replacement')).results.map(row => row.id)).toEqual([id]);
+  expect((await search('needle')).results).toEqual([]);
+});
+
+it('tries a changed chat immediately during failure cooldown without blocking other chats', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  const id = await chat('Revision', [['user', 'obsolete needle']]);
+  const rename = fs.rename;
+  const publish = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+    if (to === sessionSearchIndexPath(id)) throw Object.assign(new Error('busy'), { code: 'EBUSY' });
+    await rename(from, to);
+  });
+  await search('needle');
+  await searchIndexingSettled();
+  expect(publish).toHaveBeenCalledTimes(1);
+  const other = await chat('Other', [['user', 'independent words']]);
+  expect(await search('independent')).toMatchObject({ results: [{ id: other }], indexed: 1, total: 2 });
+  const original = (await readEvents(id, { kinds: ['user_message'] }))[0]!;
+  if (original.kind !== 'user_message') throw new Error('Missing question');
+  await upsertMessageEvent(id, { ...original, time: original.time + 1, message: { text: 'replacement', chars: 11, truncated: false } });
+  await flushSessions();
+  publish.mockRestore();
+  expect(await search('replacement')).toMatchObject({ results: [{ id }], indexed: 2, total: 2 });
+  expect((await search('needle')).results).toEqual([]);
 });

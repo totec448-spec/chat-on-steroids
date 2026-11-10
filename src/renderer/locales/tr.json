@@ -1,4 +1,7 @@
 {
+  "Save here and replace any existing file?": "Buraya kaydedilip mevcut dosya değiştirilsin mi?",
+  "Replace this CSV file?": "Bu CSV dosyası değiştirilsin mi?",
+  "Replace file": "Dosyayı değiştir",
   "Steps for you, a limit on busy chats, and Telegram notifications.": "Sizin için adımlar, yoğun sohbetler için bir sınır ve Telegram bildirimleri.",
   "Steps for you": "Sizin için adımlar",
   "When ChatGPT needs something only you can do, it hands you the step. You run it and mark it done.": "ChatGPT yalnızca sizin yapabileceğiniz bir şeye ihtiyaç duyduğunda adımı size verir. Siz çalıştırır ve yapıldı olarak işaretlersiniz.",
@@ -3983,5 +3986,13 @@
   "Let replies send messages to chats": "Yanıtların sohbetlere mesaj olarak gitmesine izin ver",
   "A reply to a notification goes to that chat as your message, and ChatGPT may then run tools on this computer. Anyone who can use your Telegram account could do the same.": "Bir bildirime verilen yanıt, sizin mesajınız olarak o sohbete gider ve ChatGPT bu bilgisayarda araç çalıştırabilir. Telegram hesabınızı kullanabilen herkes aynısını yapabilir.",
   "From Telegram": "Telegram’dan",
-  "Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.": "Chat On Steroids'te gösterilen kodla /start gönderin: Ayarlar → Telefon bildirimleri → Telegram."
+  "Send /start with the code shown in Chat On Steroids: Settings → Phone notifications → Telegram.": "Chat On Steroids'te gösterilen kodla /start gönderin: Ayarlar → Telefon bildirimleri → Telegram.",
+  "A list of your scheduled messages, and search through whole long chats.": "Zamanlanmış mesajlarının listesi ve uzun sohbetlerin tamamında arama.",
+  "One list of every scheduled message, where you can pause, run or delete each.": "Her birini duraklatabileceğin, hemen çalıştırabileceğin veya silebileceğin tüm zamanlanmış mesajların tek listesi.",
+  "Search whole chats": "Sohbetin tamamında ara",
+  "Search now reads the whole history of very long chats.": "Arama artık çok uzun sohbetlerin tüm geçmişini okuyor.",
+  "Compact & Resume holds up": "Sıkıştır ve sürdür sağlamlaştı",
+  "A page reload in a Project no longer makes it fail every time.": "Bir projede sayfayı yenilemek artık her seferinde hataya yol açmıyor.",
+  "Skills only when wanted": "Beceriler yalnızca istenince",
+  "A Skill is not chosen when you say not to use it.": "Kullanma dediğinde bir Beceri seçilmez."
 }
