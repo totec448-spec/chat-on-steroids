@@ -4505,6 +4505,16 @@ its pending attempt. Objective text survives Off/completion for later reuse. Rep
 → On → Off must operate on current durable authority, not an old callback's enabled snapshot.
 Master Off clears ordinary chat overrides while keeping internal helper-role records.
 
+**Durable control publication.** `setGoalSwitchNow` and `setGoalObjectiveNow` use
+`saveGoalControl`: serialize the save, stage its snapshot outside the accepted maps, and
+publish only after `writeDurableNow` succeeds. Synchronous clear/set/restore operations fence
+pending saves; unrelated ledger changes cause rebasing. Compact & Resume retires pending
+source-switch saves and retargets pending objective saves to the replacement conversation.
+Failed or superseded saves repair disk from the current accepted projection rather than
+rolling memory back over newer changes. `test/goal-control-race.test.ts` covers delayed and
+rejected renames, supersession, movement, rebasing and corrective-write failures. This is the
+per-ledger publication boundary; master/config/secret changes remain separate ledgers (§21).
+
 Deliberate On files/rearms an obligation **only when the chat is idle**: a proven eligible final
 or an exhausted model-specific silence/failure window with no current work. Generating chats,
 running MCP calls and an unexpired ten-/two-minute window do not file a ticket merely because
@@ -6655,10 +6665,10 @@ shared-tree change may already have addressed them.
   and phase rather than ordinary-turn idleness. Suspended-tab repair retains its separate
   existing action checks.
   Keep their operation-specific authority current through the browser action boundary.
-- **Goal publication:** explicit switch writes serialize, but mutate shared memory before
-  the awaited durable write; synchronous clear/move paths and objective/reply mutations do not
-  all share the same semantic transaction. Intent is durable commit before visible state, with
-  rollback unable to overwrite a newer accepted change.
+- **Goal reply publication:** reply-obligation mutations such as `acceptGoalReplyNow` still
+  change the shared reply map before their durable write and restore a snapshot on failure.
+  They do not use the staged switch/objective control boundary in §17; reply-ledger concurrency
+  still needs its own semantic transaction review.
 - **Goal cross-ledger controls:** master/config/secret changes still cross separate ledgers.
   Attempt invalidation now preserves debt, but these remaining controls still need one durable
   semantic transaction and effective current-setting enforcement.
