@@ -25,7 +25,7 @@ const gone = (pid: number) => {
   expect(code).toBe('ESRCH');
 };
 
-it.each([0, 7])('preserves result %s, cleans the profile and retires the supervisor on normal completion', async code => {
+it.each([0, 7])('preserves result %s, applies platform cleanup and retires the supervisor', async code => {
   const evidence = path.join(root, 'env.json');
   const profileRoot = path.join(root, 'profiles');
   const outcome = await runSupervisedUiCheck(process.execPath, [fixture, 'complete', path.join(root, 'child.pid'), evidence, root, String(code)], {
@@ -34,7 +34,14 @@ it.each([0, 7])('preserves result %s, cleans the profile and retires the supervi
   expect(outcome.code).toBe(code);
   expect(JSON.parse(readFileSync(evidence, 'utf8'))).toEqual({ runAsNode: null });
   expect(vi.mocked(fork).mock.calls[0]?.[2]).toMatchObject({ env: { ELECTRON_RUN_AS_NODE: '1' } });
-  expect(readdirSync(profileRoot)).toEqual([]);
+  const profiles = readdirSync(profileRoot);
+  if (process.platform === 'win32' && code !== 0) {
+    expect(profiles).toHaveLength(1);
+    expect(profiles[0]).toMatch(/^runtime-/);
+    const owner = JSON.parse(readFileSync(path.join(profileRoot, profiles[0]!, '.ui-check-owner.json'), 'utf8'));
+    expect(owner).toMatchObject({ child: null, processGroup: null });
+    expect(outcome.output).toMatch(/UI profile retained: Windows/);
+  } else expect(profiles).toEqual([]);
   gone(Number(readFileSync(path.join(root, 'supervisor.pid'), 'utf8')));
 });
 
