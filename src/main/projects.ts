@@ -51,7 +51,10 @@ export async function listProjects(): Promise<LocalProject[]> {
   }
   if (raw === null) return [];
   const parsed = catalogSchema.safeParse(raw);
-  if (!parsed.success || new Set(parsed.data.map(row => row.id)).size !== parsed.data.length) throw new Error('Project catalog is invalid');
+  if (!parsed.success || new Set(parsed.data.map(row => row.id)).size !== parsed.data.length) {
+    logWarn('projects: refused to read or change the catalog because its saved rows are invalid or duplicated');
+    throw new Error('Project catalog is invalid');
+  }
   return parsed.data;
 }
 export async function getProject(id: string): Promise<LocalProject | null> {
