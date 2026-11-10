@@ -18,6 +18,10 @@ afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 const fakeChild = () => Object.assign(new EventEmitter(), {
   pid: 12345, stdout: new PassThrough(), stderr: new PassThrough(), kill: vi.fn(), unref: vi.fn()
 });
+const stoppedGroup = () => vi.spyOn(process, 'kill').mockImplementation((_pid, signal) => {
+  if (signal === 0) throw Object.assign(new Error('fixture group is gone'), { code: 'ESRCH' });
+  return true;
+});
 
 it('inherits direct-entry stdio and adds no deadline when none is supplied', async () => {
   vi.useFakeTimers();
@@ -52,7 +56,7 @@ it('removes a profile only after the timed-out check closes and ignores a late d
   vi.useFakeTimers();
   const child = fakeChild();
   vi.mocked(spawn).mockReturnValueOnce(child as any);
-  const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+  const kill = stoppedGroup();
   const profile = { path: '/fixture/profile', markChild: vi.fn(), cleanup: vi.fn() };
   const result = runUiCheck('fixture', [], { env: {}, timeoutMs: 50, profile });
   await vi.advanceTimersByTimeAsync(50);
@@ -62,11 +66,12 @@ it('removes a profile only after the timed-out check closes and ignores a late d
   child.emit('close', null, 'SIGKILL');
   expect((await result).code).toBe('timeout');
   child.emit('close', 0, null);
-  expect(profile.cleanup).toHaveBeenCalledTimes(1);
+  expect(profile.cleanup).toHaveBeenCalledTimes(process.platform === 'win32' ? 0 : 1);
   expect(vi.getTimerCount()).toBe(0);
 });
 
 it.each([0, 1, 'unhandled'] as const)('keeps the original successful/failing exit contract: %s', async outcome => {
+  stoppedGroup();
   const child = fakeChild();
   vi.mocked(spawn).mockReturnValueOnce(child as any);
   const profile = { path: '/fixture/profile', markChild: vi.fn(), cleanup: vi.fn() };
@@ -74,14 +79,14 @@ it.each([0, 1, 'unhandled'] as const)('keeps the original successful/failing exi
   if (outcome === 'unhandled') child.stderr.write('UnhandledPromiseRejection: original failure');
   child.emit('close', typeof outcome === 'number' ? outcome : 0, null);
   expect((await result).code).toBe(outcome === 'unhandled' ? 'unhandled rejection' : outcome);
-  expect(profile.cleanup).toHaveBeenCalledTimes(1);
+  expect(profile.cleanup).toHaveBeenCalledTimes(process.platform === 'win32' && outcome !== 0 ? 0 : 1);
 });
 
 it.each([0, 7, 'unhandled', 'signal', 'timeout'] as const)('warns about profile cleanup without replacing the child result: %s', async outcome => {
   vi.useFakeTimers();
   const child = fakeChild();
   vi.mocked(spawn).mockReturnValueOnce(child as any);
-  vi.spyOn(process, 'kill').mockImplementation(() => true);
+  stoppedGroup();
   const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
   const error = new Error('EBUSY: fixture path contains UnhandledPromiseRejection');
   const profile = { path: '/fixture/profile', markChild: vi.fn(), cleanup: vi.fn(() => { throw error; }) };
@@ -92,10 +97,11 @@ it.each([0, 7, 'unhandled', 'signal', 'timeout'] as const)('warns about profile 
     outcome === 'signal' ? 'SIGTERM' : outcome === 'timeout' ? 'SIGKILL' : null);
   const result = await pending;
   expect(result.code).toBe(outcome === 'unhandled' ? 'unhandled rejection' : outcome === 'signal' ? 'signal SIGTERM' : outcome);
-  expect(warning).toHaveBeenCalledWith(expect.stringMatching(/profile cleanup/i), error);
+  if (process.platform === 'win32' && outcome !== 0) expect(warning).toHaveBeenCalledWith('UI profile retained:', expect.stringMatching(/Windows/));
+  else expect(warning).toHaveBeenCalledWith(expect.stringMatching(/profile cleanup/i), error);
   // A passing check's output is suppressed by verify-ui: warn separately, never as child output.
   expect(result.output).not.toContain('EBUSY');
-  expect(profile.cleanup).toHaveBeenCalledTimes(1);
+  expect(profile.cleanup).toHaveBeenCalledTimes(process.platform === 'win32' && outcome !== 0 ? 0 : 1);
   expect(vi.getTimerCount()).toBe(0);
 });
 
@@ -157,7 +163,7 @@ it('terminates a real child and its pipe-holding grandchild, then runs the next 
       try { process.kill(grandchild, 0); } catch (error) { code = (error as NodeJS.ErrnoException).code; }
       expect(code).toBe('ESRCH');
     }, { timeout: 5000, interval: 20 });
-    expect(profile.cleanup).toHaveBeenCalledTimes(1);
+    expect(profile.cleanup).toHaveBeenCalledTimes(process.platform === 'win32' ? 0 : 1);
     const next = await runUiCheck(process.execPath, ['-e', 'console.log("NEXT_CHECK")'], { env: process.env, timeoutMs: 5000 });
     expect(next.code).toBe(0);
     expect(next.output).toContain('NEXT_CHECK');
@@ -174,7 +180,7 @@ it.each(['exit', 'SIGINT', 'SIGTERM'] as const)('stops only the active check on 
   const previous = Object.fromEntries(['exit', 'SIGINT', 'SIGTERM'].map(name => [name, listeners(name)]));
   const child = fakeChild();
   vi.mocked(spawn).mockReturnValueOnce(child as any);
-  const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+  const kill = stoppedGroup();
   const exit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
   const pending = runUiCheck('fixture', [], { env: {}, timeoutMs: 5000 });
   const handler = listeners(event).find(fn => !previous[event]!.includes(fn))!;
