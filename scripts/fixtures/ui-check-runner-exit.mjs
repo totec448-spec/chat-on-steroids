@@ -25,6 +25,12 @@ if (role === 'complete') {
 } else if (role === 'grandchild') {
   process.send('ready');
   setInterval(() => {}, 1000);
+} else if (role === 'crash-parent') {
+  const child = spawn(process.execPath, [script, 'grandchild'], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+  child.once('message', () => {
+    writeFileSync(readyFile, String(child.pid));
+    process.exit(7);
+  });
 } else if (role === 'parent') {
   writeFileSync(ownerFile, String(process.pid));
   writeFileSync(path.join(profilePath, 'supervisor.pid'), String(process.ppid));

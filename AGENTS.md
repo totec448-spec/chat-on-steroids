@@ -6482,11 +6482,15 @@ forces Node, bounded hooks/tests, `CLF_BRIDGE_PORTS=0`
 and test-only `CLF_EVIDENCE_MS=1500`; never let tests contact the installed production bridge.
 Opt-in live plugin/macOS probes are separate evidence, not implied by the ordinary suite.
 The terminal UI fixture's parent owns its isolated profile (`scripts/ui-check-profile.cjs`):
-remove it only after the Electron child closes, including failures/timeouts. Interrupted profiles
+remove it after successful Electron child close (or a spawn that never started). After abnormal
+exit, including nonzero/signal/unhandled-rejection/timeout, POSIX first stops the dedicated group
+and uses a monotonic one-second bound for an ESRCH group probe before deleting. Signal dispatch is not exit
+confirmation. A closed Windows root cannot prove its remaining descendants exited: do not taskkill
+that dead/recycled PID; retain the profile as child-unknown and show the reason. Interrupted profiles
 are pruned only when the recorded hostname and Linux boot/PID-namespace identity match and both
 marked parent and child PIDs are gone. Hostname alone cannot prove a process scope: non-Linux,
 unavailable scope, foreign/legacy metadata, active, unknown and unrelated output directories are
-retained. Normal per-run cleanup still works on every OS after the child closes. Disposable-profile
+retained. A successful check still cleans its own profile on every OS. Disposable-profile
 cleanup failures emit visible warnings without replacing the check's exit result; a failed stale
 removal does not prevent a fresh profile or later checks. Warnings are separate from captured child
 output, so passing checks still show them and cleanup text cannot masquerade as a child rejection.
