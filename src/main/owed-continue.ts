@@ -105,6 +105,11 @@ export function owedContinueFor(conversationId: string): { attempts: number } | 
   return entry ? { attempts: entry.attempts } : null;
 }
 
+/** Test seam: whether a check is booked for this chat (none is once the obligation ended). */
+export function owedTimerPendingForTests(conversationId: string): boolean {
+  return owed.get(conversationId)?.timer != null;
+}
+
 export function resetOwedContinuesForTests(): void {
   quietMs = OWED_QUIET_MS;
   for (const [id, entry] of [...owed]) drop(id, entry);
