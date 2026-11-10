@@ -1,4 +1,7 @@
 {
+  "Save here and replace any existing file?": "Сохранить здесь с заменой существующего файла?",
+  "Replace this CSV file?": "Заменить этот CSV-файл?",
+  "Replace file": "Заменить файл",
   "Steps for you, a limit on busy chats, and Telegram notifications.": "Шаги для вас, лимит для занятых чатов и уведомления Telegram.",
   "Steps for you": "Шаги для вас",
   "When ChatGPT needs something only you can do, it hands you the step. You run it and mark it done.": "Когда ChatGPT нужно то, что можете сделать только вы, он передаёт вам шаг. Вы выполняете его и отмечаете как выполненный.",

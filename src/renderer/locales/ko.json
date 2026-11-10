@@ -1,4 +1,7 @@
 {
+  "Save here and replace any existing file?": "여기에 저장하고 기존 파일이 있으면 바꾸시겠습니까?",
+  "Replace this CSV file?": "이 CSV 파일을 바꾸시겠습니까?",
+  "Replace file": "파일 바꾸기",
   "Steps for you, a limit on busy chats, and Telegram notifications.": "나를 위한 단계, 바쁜 채팅 제한, Telegram 알림.",
   "Steps for you": "나를 위한 단계",
   "When ChatGPT needs something only you can do, it hands you the step. You run it and mark it done.": "ChatGPT가 나만 할 수 있는 일이 필요하면 그 단계를 넘겨 줍니다. 직접 실행하고 완료로 표시하세요.",
