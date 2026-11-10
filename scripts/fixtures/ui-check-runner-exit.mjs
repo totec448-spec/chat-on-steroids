@@ -1,5 +1,5 @@
 // Static subprocess fixture: paths are data arguments, never generated JavaScript.
-import { spawn } from 'node:child_process';
+import { fork, spawn } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -9,10 +9,25 @@ import { runUiCheck } from '../ui-check-process.mjs';
 
 const script = fileURLToPath(import.meta.url);
 const [role, ownerFile, readyFile, profilePath] = process.argv.slice(2);
-if (role === 'grandchild') {
+if (role === 'complete') {
+  writeFileSync(ownerFile, String(process.pid));
+  writeFileSync(path.join(profilePath, 'supervisor.pid'), String(process.ppid));
+  writeFileSync(readyFile, JSON.stringify({ runAsNode: process.env.ELECTRON_RUN_AS_NODE ?? null }));
+  process.exit(Number(process.argv[6] || 0));
+} else if (role === 'prelaunch') {
+  const supervisor = fork(fileURLToPath(new URL('../ui-check-supervisor.mjs', import.meta.url)), [], {
+    execArgv: [], env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, detached: true,
+    stdio: ['inherit', 'inherit', 'inherit', 'ipc']
+  });
+  supervisor.once('message', message => {
+    if (message.type === 'ready') writeFileSync(ownerFile, String(supervisor.pid));
+  });
+} else if (role === 'grandchild') {
   process.send('ready');
   setInterval(() => {}, 1000);
 } else if (role === 'parent') {
+  writeFileSync(ownerFile, String(process.pid));
+  writeFileSync(path.join(profilePath, 'supervisor.pid'), String(process.ppid));
   const child = spawn(process.execPath, [script, 'grandchild'], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'] });
   child.once('message', () => {
     console.log('LIVE_STDOUT'); console.error('LIVE_STDERR');
@@ -35,12 +50,11 @@ if (role === 'grandchild') {
     // Its child runs this static Node fixture, never a real app or user-data directory.
     const filename = fileURLToPath(new URL('../verify-workspace-terminal.cjs', import.meta.url));
     const require = createRequire(filename);
-    const fixtureRequire = name => name === 'electron' ? process.execPath
-      : name === './ui-check-profile.cjs' ? { createProfile: () => profile } : require(name);
+    const fixtureRequire = name => name === 'electron' ? process.execPath : require(name);
     process.argv = [process.execPath, filename, 'parent', ownerFile, readyFile, profilePath];
     compileFunction(readFileSync(filename, 'utf8'), ['require', '__filename', '__dirname'], {
       filename, importModuleDynamically: constants.USE_MAIN_CONTEXT_DEFAULT_LOADER
-    })(fixtureRequire, script, path.dirname(filename));
+    })(fixtureRequire, script, path.join(profilePath, 'scripts'));
   }
 } else {
   throw new Error('Unknown UI check fixture role');

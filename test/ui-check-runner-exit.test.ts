@@ -8,7 +8,12 @@ import { makeTempDir, removeTempDir } from './helpers.js';
 // @ts-expect-error Plain Node helper without type declarations.
 import { terminateCheckTree } from '../scripts/ui-check-process.mjs';
 
-it.each((['runner', 'direct'] as const).flatMap(role => (['exit', 'failure', 'SIGINT', 'SIGTERM'] as const).map(action => ({ role, action }))))('retires a real active tree when its $role wrapper receives $action', async ({ role, action }) => {
+const cases = [
+  ...(['runner', 'direct'] as const).flatMap(role => (['exit', 'failure', 'SIGINT', 'SIGTERM'] as const).map(action => ({ role, action }))),
+  { role: 'direct', action: 'SIGKILL' } as const,
+  { role: 'direct', action: 'SIGKILL with closed output' } as const
+];
+it.each(cases)('retires a real active tree when its $role wrapper receives $action', async ({ role, action }) => {
   const root = await makeTempDir('cos-ui-runner-exit-');
   const owner = path.join(root, 'owner.pid');
   const ready = path.join(root, 'grandchild.pid');
@@ -20,6 +25,7 @@ it.each((['runner', 'direct'] as const).flatMap(role => (['exit', 'failure', 'SI
   const closed = once(runner, 'close');
   const exited = once(runner, 'exit');
   let grandchild = 0;
+  let supervisor = 0;
   try {
     await vi.waitFor(() => {
       grandchild = Number(readFileSync(ready, 'utf8'));
@@ -27,18 +33,25 @@ it.each((['runner', 'direct'] as const).flatMap(role => (['exit', 'failure', 'SI
       if (role === 'direct') {
         expect(stdout).toContain('LIVE_STDOUT');
         expect(stderr).toContain('LIVE_STDERR');
+        supervisor = Number(readFileSync(path.join(root, 'supervisor.pid'), 'utf8'));
+        expect(supervisor).toBeGreaterThan(0);
       }
     }, { timeout: 10000, interval: 20 });
     // POSIX sends a real signal; Windows exercises the same handler via IPC because
     // child.kill(SIGTERM) there uses TerminateProcess rather than a JS signal handler.
-    if (action === 'exit' || action === 'failure' || process.platform === 'win32') runner.send(action);
-    else runner.kill(action);
+    const forceKill = action.startsWith('SIGKILL');
+    if (forceKill) {
+      if (action === 'SIGKILL with closed output') { runner.stdout?.destroy(); runner.stderr?.destroy(); }
+      runner.kill('SIGKILL'); // Actual uncatchable termination, including Windows.
+    }
+    else if (action === 'exit' || action === 'failure' || process.platform === 'win32') runner.send(action);
+    else runner.kill(action as NodeJS.Signals);
     const [code] = await exited;
-    expect(code).toBe(action === 'exit' ? 0 : action === 'failure' ? 1 : action === 'SIGINT' ? 130 : 143);
+    if (!forceKill) expect(code).toBe(action === 'exit' ? 0 : action === 'failure' ? 1 : action === 'SIGINT' ? 130 : 143);
     const parentPid = Number(readFileSync(owner, 'utf8'));
     expect(parentPid).toBeGreaterThan(0);
     await vi.waitFor(() => {
-      for (const pid of [parentPid, grandchild]) {
+      for (const pid of [parentPid, grandchild, ...(supervisor ? [supervisor] : [])]) {
         let code: string | undefined;
         try { process.kill(pid, 0); } catch (error) { code = (error as NodeJS.ErrnoException).code; }
         expect(code).toBe('ESRCH');
@@ -51,6 +64,7 @@ it.each((['runner', 'direct'] as const).flatMap(role => (['exit', 'failure', 'SI
     try { terminateCheckTree(parentPid); } catch { /* already gone or no detached group */ }
     if (parentPid > 0) { try { process.kill(parentPid, 'SIGKILL'); } catch { /* already gone */ } }
     if (grandchild > 0) { try { process.kill(grandchild, 'SIGKILL'); } catch { /* already gone */ } }
+    if (supervisor > 0 && supervisor !== runner.pid) { try { process.kill(supervisor, 'SIGKILL'); } catch { /* already gone */ } }
     if (runner.exitCode === null && runner.signalCode === null) runner.kill('SIGKILL');
     await closed;
     await removeTempDir(root);
