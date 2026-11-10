@@ -48,6 +48,24 @@ it('previews the whole chat, keys always hidden: what was cut in the log is read
   expect(store.readOverflowText).toHaveBeenCalledWith('session-1', 'abcdef12.txt');
 });
 
+it('previews and saves table rows from an overflow drawing, with the usual redaction', async () => {
+  const markdown = '| Item | Qty |\n|---|---|';
+  const html = '<p>' + 'x'.repeat(120_000) + '</p><div data-d-component="table"><table>' +
+    '<tr><td>Item</td><td>Qty</td></tr><tr><td>ana@example.com</td><td>1 kg</td></tr></table></div>';
+  store.readEvents.mockResolvedValue([said(1, 'assistant_message', markdown, {
+    renderedHtml: { text: html.slice(0, 120_000), truncated: true, chars: html.length, assetId: 'abcdef34.txt' }
+  })]);
+  store.readOverflowText.mockResolvedValue(html);
+  const shown = await preview(true);
+  expect(shown.html).toContain('<td><span class="hidden">hidden</span></td>');
+  expect(shown.html).toContain('<td>1 kg</td>');
+  expect(shown.html).not.toContain('ana@example.com');
+  expect(store.readOverflowText).toHaveBeenCalledWith('session-1', 'abcdef34.txt');
+  electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/downloads/table.html' });
+  await exportSessionPage({ id: 'session-1', target: 'file', preview: shown.preview }, null);
+  expect(files.replaceFile).toHaveBeenCalledWith('/downloads/table.html', shown.html, 'HTML export');
+});
+
 it('also hides email addresses and user names in folder paths when asked, and counts every hidden detail', async () => {
   const result = await preview(true);
   expect(result.html).not.toMatch(/ana@|\/Users\/ana|sk-proj-/);

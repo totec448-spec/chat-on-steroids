@@ -29,6 +29,10 @@ export async function fullText(sessionId: string, stored: StoredText, html?: Sto
   // ChatGPT's link cards arrive as private-use markup; exported Markdown gets real links. A table
   // it drew in full but wrote with only its header gets its recorded rows (#1477).
   const text = !stored.truncated || !stored.assetId ? stored.text : (await readOverflowText(sessionId, stored.assetId)) ?? stored.text;
+  if (html?.truncated && html.assetId) {
+    const drawing = await readOverflowText(sessionId, html.assetId);
+    if (drawing !== null) html = { ...html, text: drawing, truncated: false };
+  }
   return providerEntitiesAsMarkdown(completedDilText(text, html));
 }
 
