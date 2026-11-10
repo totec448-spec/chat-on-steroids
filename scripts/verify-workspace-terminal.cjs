@@ -10,8 +10,8 @@ if (!process.env.COS_TERMINAL_CHECK_PROFILE) {
   profile.markChild(child.pid);
   child.on('error', error => console.error(error));
   child.on('close', (code) => {
-    let status = code ?? 1;
-    try { profile.cleanup(); } catch (error) { console.error(error); status = 1; }
+    const status = code ?? 1;
+    try { profile.cleanup(); } catch (error) { console.warn('UI profile cleanup deferred; check result unchanged:', error); }
     if (typeof electron === 'string') process.exit(status); else electron.app.exit(status);
   });
 } else {

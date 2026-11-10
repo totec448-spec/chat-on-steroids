@@ -169,10 +169,9 @@ app.whenReady().then(async () => {
   win.destroy();await server.close();app.exit(0);
 }).catch(async error=>{
   console.error(error);
-  fs.mkdirSync(output,{recursive:true});
-  if(win&&!win.isDestroyed()) {
-    try { fs.writeFileSync(path.join(output,'failure.png'),(await win.webContents.capturePage()).toPNG()); }
-    catch(captureError) { console.error('Share-page failure screenshot unavailable:',captureError); }
-  }
+  try {
+    fs.mkdirSync(output,{recursive:true});
+    if(win&&!win.isDestroyed()) fs.writeFileSync(path.join(output,'failure.png'),(await win.webContents.capturePage()).toPNG());
+  } catch(captureError) { console.error('Share-page failure screenshot unavailable:',captureError); }
   await server?.close();app.exit(1);
 });

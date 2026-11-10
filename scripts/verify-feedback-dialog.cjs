@@ -177,10 +177,9 @@ app.whenReady().then(async () => {
   win.destroy();await Promise.race([server.close(),new Promise(resolve=>setTimeout(resolve,2000))]);app.exit(0);
 }).catch(async error=>{
   console.error(error);
-  fs.mkdirSync(output,{recursive:true});
-  if(win&&!win.isDestroyed()) {
-    try { fs.writeFileSync(path.join(output,'failure.png'),(await win.webContents.capturePage()).toPNG()); }
-    catch(captureError) { console.error('Feedback failure screenshot unavailable:',captureError); }
-  }
+  try {
+    fs.mkdirSync(output,{recursive:true});
+    if(win&&!win.isDestroyed()) fs.writeFileSync(path.join(output,'failure.png'),(await win.webContents.capturePage()).toPNG());
+  } catch(captureError) { console.error('Feedback failure screenshot unavailable:',captureError); }
   await Promise.race([server?.close(),new Promise(resolve=>setTimeout(resolve,2000))]);app.exit(1);
 });

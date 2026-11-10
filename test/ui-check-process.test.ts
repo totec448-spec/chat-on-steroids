@@ -64,6 +64,28 @@ it.each([0, 1, 'unhandled'] as const)('keeps the original successful/failing exi
   expect(profile.cleanup).toHaveBeenCalledTimes(1);
 });
 
+it.each([0, 7, 'unhandled', 'signal', 'timeout'] as const)('warns about profile cleanup without replacing the child result: %s', async outcome => {
+  vi.useFakeTimers();
+  const child = fakeChild();
+  vi.mocked(spawn).mockReturnValueOnce(child as any);
+  vi.spyOn(process, 'kill').mockImplementation(() => true);
+  const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const error = new Error('EBUSY: fixture path contains UnhandledPromiseRejection');
+  const profile = { path: '/fixture/profile', markChild: vi.fn(), cleanup: vi.fn(() => { throw error; }) };
+  const pending = runUiCheck('fixture', [], { env: {}, timeoutMs: 50, profile });
+  if (outcome === 'unhandled') child.stderr.write('UnhandledPromiseRejection: actual child failure');
+  if (outcome === 'timeout') await vi.advanceTimersByTimeAsync(50);
+  child.emit('close', typeof outcome === 'number' ? outcome : outcome === 'unhandled' ? 0 : null,
+    outcome === 'signal' ? 'SIGTERM' : outcome === 'timeout' ? 'SIGKILL' : null);
+  const result = await pending;
+  expect(result.code).toBe(outcome === 'unhandled' ? 'unhandled rejection' : outcome === 'signal' ? 'signal SIGTERM' : outcome);
+  expect(warning).toHaveBeenCalledWith(expect.stringMatching(/profile cleanup/i), error);
+  // A passing check's output is suppressed by verify-ui: warn separately, never as child output.
+  expect(result.output).not.toContain('EBUSY');
+  expect(profile.cleanup).toHaveBeenCalledTimes(1);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
 it('bounds failed tree termination without deleting an uncertain profile', async () => {
   vi.useFakeTimers();
   const child = fakeChild();

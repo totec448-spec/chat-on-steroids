@@ -6483,8 +6483,14 @@ and test-only `CLF_EVIDENCE_MS=1500`; never let tests contact the installed prod
 Opt-in live plugin/macOS probes are separate evidence, not implied by the ordinary suite.
 The terminal UI fixture's parent owns its isolated profile (`scripts/ui-check-profile.cjs`):
 remove it only after the Electron child closes, including failures/timeouts. Interrupted profiles
-are pruned only when marked parent and child PIDs are both gone; active, unknown and unrelated
-output directories are retained. Direct Electron invocation uses the same supervised lifecycle.
+are pruned only when the recorded hostname and Linux boot/PID-namespace identity match and both
+marked parent and child PIDs are gone. Hostname alone cannot prove a process scope: non-Linux,
+unavailable scope, foreign/legacy metadata, active, unknown and unrelated output directories are
+retained. Normal per-run cleanup still works on every OS after the child closes. Disposable-profile
+cleanup failures emit visible warnings without replacing the check's exit result; a failed stale
+removal does not prevent a fresh profile or later checks. Warnings are separate from captured child
+output, so passing checks still show them and cleanup text cannot masquerade as a child rejection.
+Direct Electron invocation uses the same supervised profile lifecycle.
 `ui-check-process.mjs` owns the runner's per-check process group (POSIX) or taskkill tree
 (Windows). Timeout cleanup bounds the Windows helper and close wait to one second each.
 Unconfirmed exits retain their profile as unknown instead of deleting live data; leaked pipes
