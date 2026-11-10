@@ -51,6 +51,22 @@ it('drops a model or reasoning the account does not offer, and says so', () => {
   ]);
 });
 
+it.each([
+  ['resume', resumeModelSelection],
+  ['worker wake', wakeModelSelection]
+] as const)('preserves the requested %s pair while a refresh retains an older negative catalog', (kind, select) => {
+  state.catalogState = 'pending';
+  const requested = { model: 'gpt-5-6-thinking', reasoningEffort: 'high' as const };
+  for (const models of [
+    [{ id: 'gpt-5-6-thinking', label: '5.6', efforts: ['medium'] }],
+    [{ id: 'gpt-6-pro', label: '6', efforts: ['pro'] }]
+  ]) {
+    state.models = models;
+    expect(select(requested, `${kind}-refresh`)).toEqual(requested);
+  }
+  expect(logged).not.toEqual(expect.arrayContaining([expect.stringContaining('is not offered')]));
+});
+
 it('logs each resume once, however often its command is rendered', () => {
   state.models = [];
   state.catalogState = 'unavailable';
