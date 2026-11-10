@@ -29,8 +29,10 @@ it('inherits direct-entry stdio and adds no deadline when none is supplied', asy
     pid: 12345, stdout: null, stderr: null, kill: vi.fn(), unref: vi.fn()
   });
   vi.mocked(spawn).mockReturnValueOnce(child as any);
-  const result = runUiCheck('fixture', [], { env: {}, inheritStdio: true });
+  const profile = { path: '/fixture/profile', markChild: vi.fn(), cleanup: vi.fn() };
+  const result = runUiCheck('fixture', [], { env: {}, inheritStdio: true, profile });
   expect(spawn).toHaveBeenCalledWith('fixture', [], expect.objectContaining({ stdio: 'inherit' }));
+  expect(profile.markChild).toHaveBeenCalledWith(child.pid, process.platform === 'win32' ? null : child.pid);
   expect(vi.getTimerCount()).toBe(0);
   child.emit('close', 0, null);
   expect((await result)).toEqual({ code: 0, output: '' });

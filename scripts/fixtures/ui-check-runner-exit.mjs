@@ -31,6 +31,19 @@ if (role === 'complete') {
     writeFileSync(readyFile, String(child.pid));
     process.exit(7);
   });
+} else if (role === 'prune-root') {
+  const child = spawn(process.execPath, [script, 'grandchild'], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+  child.once('message', () => writeFileSync(readyFile, String(child.pid)));
+  // SIGKILL of the canonical runner closes its pipe, then this root exits while
+  // the ignored-stdio grandchild remains in the dedicated process group.
+  process.stdin.on('end', () => process.exit(7));
+  process.stdin.resume();
+} else if (role === 'prune-runner') {
+  const profile = createRequire(import.meta.url)('../ui-check-profile.cjs').createProfile(profilePath);
+  writeFileSync(ownerFile, profile.path);
+  runUiCheck(process.execPath, [script, 'prune-root', ownerFile, readyFile, profilePath], {
+    env: process.env, timeoutMs: 30000, profile
+  }).then(() => process.exit(2));
 } else if (role === 'parent') {
   writeFileSync(ownerFile, String(process.pid));
   writeFileSync(path.join(profilePath, 'supervisor.pid'), String(process.ppid));

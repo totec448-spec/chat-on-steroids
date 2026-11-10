@@ -6488,7 +6488,12 @@ and uses a monotonic one-second bound for an ESRCH group probe before deleting. 
 confirmation. A closed Windows root cannot prove its remaining descendants exited: do not taskkill
 that dead/recycled PID; retain the profile as child-unknown and show the reason. Interrupted profiles
 are pruned only when the recorded hostname and Linux boot/PID-namespace identity match and both
-marked parent and child PIDs are gone. Hostname alone cannot prove a process scope: non-Linux,
+marked parent and child PIDs are gone, with ESRCH from the explicitly owned process group's negative
+PGID probe. Only the detached POSIX runner records `processGroup` proof: its tagged positive safe ID
+must match the child PID. Missing/legacy/malformed group proof, active groups and probe errors retain
+the profile; pruning never kills or enumerates processes. `markChild(null)` clears group proof, while
+existing one-argument `markChild(child)` remains usable without granting stale-pruning authority.
+Hostname alone cannot prove a process scope: non-Linux,
 unavailable scope, foreign/legacy metadata, active, unknown and unrelated output directories are
 retained. A successful check still cleans its own profile on every OS. Disposable-profile
 cleanup failures emit visible warnings without replacing the check's exit result; a failed stale

@@ -126,6 +126,7 @@ export function runUiCheck(command, args, { cwd, env, timeoutMs, profile, inheri
       closeDeadline = performance.now() + CLOSE_WAIT_MS;
       closeTimer = setTimeout(() => finish('timeout'), CLOSE_WAIT_MS);
     }, timeoutMs);
-    profile?.markChild(child.pid);
+    // Only this detached POSIX spawn establishes child.pid as an owned PGID.
+    profile?.markChild(child.pid, process.platform === 'win32' ? null : child.pid);
   });
 }
