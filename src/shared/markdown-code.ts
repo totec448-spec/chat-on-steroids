@@ -33,18 +33,23 @@ function fencedMarkdownRanges(text: string): Array<{ start: number; end: number 
     const indent = indentColumns(content);
     let endedBlock = false;
     const body = line.replace(/^(?:[ \t]*(?:>|[-*+]|\d{1,9}[.)])(?=[ \t]|$)[ \t]?)*/, '');
+    // Strip only the opening quote container for both boundary and close tests.
+    // Extra list/quote markers remain literal code, with their original indent.
+    let fenceContent = line;
+    for (let depth = 0; fence && depth < fence.quoteDepth; depth++) {
+      fenceContent = fenceContent.replace(/^[ \t]*>[ \t]?/, '');
+    }
     // Marked ends a nested fence when its quote/list container ends, even
     // without closing backticks. The first outside line may open another fence.
     if (fence && (quoteDepth < fence.quoteDepth ||
-        (fence.listIndent !== null && content.trim() && indent < fence.listIndent))) {
+        (fence.listIndent !== null && fenceContent.trim() && indentColumns(fenceContent) < fence.listIndent))) {
       ranges.push({ start: fence.start, end: start });
       fence = null;
       afterBlank = true;
     }
     if (fence) {
-      // A top-level fence cannot be closed by a list/blockquote-prefixed line.
       const close = (fence.nested ? /^[ \t]*(`{3,}|~{3,})[ \t]*$/ : /^ {0,3}(`{3,}|~{3,})[ \t]*$/)
-        .exec(fence.nested ? body : line)?.[1];
+        .exec(fenceContent)?.[1];
       if (close && close[0] === fence.marker && close.length >= fence.width) {
         ranges.push({ start: fence.start, end });
         fence = null;

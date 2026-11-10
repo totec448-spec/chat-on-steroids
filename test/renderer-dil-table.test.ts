@@ -194,6 +194,28 @@ it.each(['- ```markdown\n  example\n  ```', '- Item\n  ```markdown\n  example\n 
   expect(rendered.querySelector('tbody')?.textContent).toContain('米');
 });
 
+it.each(['\n', '\r\n'])('keeps literal container fences inside list code examples (%j)', newline => {
+  for (const [open, indent, close] of [
+    ['1. Show it:\n   ```markdown', '   ', '   ```'],
+    ['- ```markdown', '  ', '  ```']
+  ] as const) {
+    for (const marker of ['- ```', '1. ```', '> ```']) {
+      const example = [open, indent + marker, ...header.split('\n').map(line => indent + line),
+        indent + '[コピー]', close].join('\n').replace(/\n/g, newline);
+      const source = `${example}${newline}${newline}${header.replace(/\n/g, newline)}`;
+      const markup = table([['米', '1 kg']]) + '<button data-d-component="button">コピー</button>';
+      const drawing = { text: markup, truncated: false, chars: markup.length };
+      expect(completedDilText(source, drawing)).toBe(`${source}\n| 米 | 1 kg |`);
+      const rendered = renderedMarkdown(source, drawing);
+      expect(rendered.querySelector('pre code')?.textContent).toContain(marker);
+      expect(rendered.querySelector('pre code')?.textContent).toContain('[コピー]');
+      expect(rendered.querySelector('pre code')?.textContent).not.toContain('米');
+      expect(rendered.querySelectorAll('table')).toHaveLength(1);
+      expect(rendered.querySelector('tbody')?.textContent).toContain('米');
+    }
+  }
+});
+
 it.each([4, 5])('keeps code labels after a lazy list continuation and a fence at column %s', columns => {
   const indent = ' '.repeat(columns);
   const example = `- Example\nlazy continuation\n${indent}\`\`\`markdown\n\n  [コピー]\n${indent}\`\`\``;
