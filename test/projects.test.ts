@@ -10,6 +10,7 @@ import { createSession, getSession, initSessionStore, moveSessionProject, rebind
 import { addProject, armProjectCreate, assignSessionProject, bindChatToLinkedProject, claimProjectCreate, completeProjectCreate, failProjectCreate, getProject, getSessionProject, inheritSessionProject, listProjects, markProjectGone, moveChatToProject, moveChatWithGroup, pendingProjectCreates, PROJECT_CREATE_ARMED_MS, PROJECT_CREATE_CLAIM_MS, projectWorkspace, removeProject, retryProjectCreate, sessionSecretsShieldOff, setProjectColor, setProjectSecretsShieldOff } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 import { resetWorkspaces, setWorkspaceFor } from '../src/main/workspace.js';
+import { onLog } from '../src/main/logger.js';
 
 let directory: string, approved: string;
 beforeEach(async () => {
@@ -85,6 +86,24 @@ it('still treats an absent catalog as a fresh installation', async () => {
   const project = await addProject(path.join(approved, 'first'));
   expect(await listProjects()).toEqual([project]);
 });
+
+it.each(['invalid row', 'duplicate ID', 'unreadable JSON'])(
+  'logs one content-free warning when refusing a catalog with %s', async reason => {
+    const project = await addProject(path.join(approved, 'first'));
+    const row = { ...project, name: 'catalog-content-marker' };
+    const raw = reason === 'invalid row' ? [{ ...row, id: 'invalid' }] : [row, row];
+    await writeDurableNow('projects', raw);
+    if (reason === 'unreadable JSON') await fs.writeFile(path.join(directory, 'state', 'projects.json'), '{"catalog-content-marker":');
+    const warnings: string[] = [];
+    const stop = onLog(entry => { if (entry.level === 'warn') warnings.push(entry.message); });
+    try {
+      await expect(listProjects()).rejects.toThrow('Project catalog is invalid');
+      expect(warnings).toEqual([reason === 'unreadable JSON'
+        ? 'projects: refused to read or change the catalog because its saved state is unreadable'
+        : 'projects: refused to read or change the catalog because its saved rows are invalid or duplicated']);
+    } finally { stop(); }
+  }
+);
 
 it('turns the secrets shield off for one project\'s chats only, durably (#1797)', async () => {
   const project = await addProject(path.join(approved, 'first'));
