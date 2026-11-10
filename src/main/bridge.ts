@@ -5622,7 +5622,6 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // Telemetry returns before execution progress can renew any deadline.
     if (diagnosticOnly) return json(res, 200, { ok: observeModelSelection(command, body.modelSelection) }, origin);
     if (!step) return json(res, 200, { ok: false }, origin);
-    if (step === 'model') delete command.modelSelection;
     // Final failure details share the continuation step, so a delayed telemetry RPC cannot lose them.
     if (step === 'model-unconfirmed') observeModelSelection(command, body.modelSelection);
     command.progress = { ...command.progress, step, stepAt: Date.now() };

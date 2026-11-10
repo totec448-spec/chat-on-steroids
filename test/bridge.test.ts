@@ -6318,6 +6318,9 @@ describe('delivering a bootstrap', () => {
     // The picker could not confirm it: the wake goes out anyway, and the app says on what.
     expect((await request('POST', '/commands/step', { body: { ...report, step: 'model-unconfirmed' } })).body).toEqual({ ok: true });
     expect(getLog().some(entry => entry.message.includes(`worker-1's wake in ${conversationId} goes out on ChatGPT's current model: gpt-5-6 high could not be confirmed`))).toBe(true);
+    // A delayed coarse step must not erase the final result or its deduplication/attempt state.
+    await request('POST', '/commands/step', { body: { id: revival.id, client: 'tab-wake-model', step: 'model' } });
+    expect((await request('POST', '/commands/step', { body: { ...report, modelSelection: pickerTrace() } })).body.ok).toBe(false);
     for (let i = 0; i < 2; i++) expect((await request('POST', '/commands/step', { body: report })).body.ok).toBe(true);
     const lines = getLog().filter(entry => entry.message.includes(`model selection command=${revival.id}`));
     expect(lines).toHaveLength(1);

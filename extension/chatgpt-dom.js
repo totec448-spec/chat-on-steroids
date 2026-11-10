@@ -3627,10 +3627,12 @@ var CLF_DOM = (() => {
     };
     const phase = (value, version = null) => { trace.phase = value; trace.targetVersion = version; publish(); };
     const observe = state => {
-      trace.after = pair(state?.choices.find(choice => choice.bucket === state.currentBucket));
+      if (!state) return;
+      const now = pair(state.choices.find(choice => choice.bucket === state.currentBucket));
+      if (now) trace.after = now;
       if (!trace.before && trace.after) trace.before = trace.after;
-      if (state) trace.observedVersion = state.version;
-      for (const choice of state?.choices ?? []) {
+      trace.observedVersion = state.version;
+      for (const choice of state.choices) {
         if (trace.offered.some(prior => prior.model === choice.id && prior.effort === choice.effort && prior.available === choice.available)) continue;
         if (trace.offered.length === 16) { trace.offeredTruncated = true; continue; }
         trace.offered.push({ ...pair(choice), available: choice.available });

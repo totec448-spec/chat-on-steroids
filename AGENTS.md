@@ -3091,8 +3091,14 @@ result and three-argument callers; an optional fourth callback reports bounded p
 existing reads (no new UI operations). Bootstrap forwards them as optional `modelSelection` on
 `command_step` with the telemetry-only `step: model-diagnostic`. The bridge validates the strict
 identity/enum-only shape in `shared/model-selection-diagnostic.ts` for the redeemed command owner.
+Unreadable reads retain the last observed pair/version. The service worker authorizes reports in
+the existing tab queue, but sends telemetry outside it: one HTTP flight and one coalesced successor
+per tab. It preserves attempt/final ordering and rechecks document, navigation and connection
+ownership before sending; slow diagnostics cannot hold a resume permit or command ACK.
+Its reply acknowledges local queuing only; ordinary progress steps retain their app acknowledgement.
 Pending phases require execution step `model`; final results may arrive later. Attempt numbers
 separate the existing announcement retry, and late pending phases cannot overwrite a final result.
+Delayed coarse `model` steps never clear a retained result or its ordering/deduplication state.
 Final failure details also travel on `model-unconfirmed`, so RPC reordering cannot lose a
 wake/resume fallback's reason. The bridge retains only the latest snapshot in memory and logs
 failures, effort substitutions, post-close changes and retry recovery once per result. A command
