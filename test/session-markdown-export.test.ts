@@ -19,6 +19,7 @@ const logger = vi.hoisted(() => ({ logWarn: vi.fn() }));
 vi.mock('../src/main/logger.js', async original => ({ ...await original<object>(), ...logger }));
 
 const { exportSessionMarkdown, fullText } = await import('../src/main/session/markdown-export.js');
+const { exportSessionPage } = await import('../src/main/session/page-export.js');
 
 const events: SessionEvent[] = [
   { seq: 1, time: 1, source: 'extension', kind: 'user_message', turnId: 't1', messageId: 'u1', message: { text: 'Explain it', truncated: false, chars: 10 } },
@@ -135,9 +136,82 @@ it.each([undefined, 'abcdef34.txt'])('does not complete a partial drawing when i
   await expect(fullText('session-1', { text: markdown, truncated: false, chars: markdown.length },
     { text: partial, truncated: true, chars: 120_001, ...(assetId ? { assetId } : {}) })).resolves.toBe(markdown);
   expect(store.readAsset).toHaveBeenCalledTimes(assetId ? 1 : 0);
-  expect(logger.logWarn).toHaveBeenCalledTimes(assetId ? 1 : 0);
-  if (assetId) expect(logger.logWarn).toHaveBeenCalledWith(
-    'Markdown export: drawing overflow unavailable or over the read limit; table completion kept partial');
+  expect(logger.logWarn).toHaveBeenCalledExactlyOnceWith(assetId
+    ? 'Markdown export: drawing overflow unavailable or over the read limit; table completion kept partial'
+    : 'Markdown export: drawing overflow was not stored; table completion kept partial');
+});
+
+it.each(['answer', 'latest', 'session', 'page'] as const)('serializes drawing recovery for %s, including repeated assets', async scope => {
+  const markdown = '| Item | Qty |\n|---|---|';
+  const html = '<div data-d-component="table"><table><tr><td>Item</td><td>Qty</td></tr>' +
+    '<tr><td>Rice</td><td>1 kg</td></tr></table></div>';
+  const drawing = { text: html.slice(0, 20), truncated: true, chars: html.length, assetId: 'abcdef34.txt' };
+  store.readEvents.mockResolvedValue([
+    ...[1, 2, 3].map(seq => ({ ...events[1]!, seq, messageId: `a${seq}`,
+      message: { text: markdown, truncated: false, chars: markdown.length }, renderedHtml: drawing })),
+    { ...events[2]!, seq: 4 }
+  ]);
+  let release!: () => void, entered!: () => void;
+  const held = new Promise<void>(done => { release = done; });
+  const started = new Promise<void>(done => { entered = done; });
+  let active = 0, peak = 0;
+  store.readAsset.mockImplementation(async () => {
+    peak = Math.max(peak, ++active);
+    entered();
+    await held;
+    active--;
+    return Buffer.from(html);
+  });
+  const pending = scope === 'page'
+    ? exportSessionPage({ id: 'session-1', target: 'preview', hide: false, lang: 'en' }, null)
+    : exportSessionMarkdown({ id: 'session-1', scope, turnId: 't1', target: 'clipboard' }, null);
+  const overlappingCopy = scope === 'page'
+    ? exportSessionMarkdown({ id: 'session-1', scope: 'answer', turnId: 't1', target: 'clipboard' }, null) : null;
+  await started;
+  try { expect(store.readAsset).toHaveBeenCalledTimes(1); }
+  finally { release(); await Promise.all([pending, overlappingCopy]); }
+  expect(peak).toBe(1);
+  expect(store.readAsset).toHaveBeenCalledTimes(scope === 'page' ? 6 : 3);
+  const result = await pending;
+  if (result.done === 'preview') expect(result.html.match(/<td>Rice<\/td>/g)).toHaveLength(3);
+  expect(electron.clipboard.writeText.mock.calls[0]![0].match(/Rice/g)).toHaveLength(3);
+});
+
+it('releases the recovery slot after a failed read so a concurrent export can finish', async () => {
+  const stored = { text: 'Kept answer', truncated: true, chars: 11, assetId: 'abcdef12.txt' };
+  store.readOverflowText.mockRejectedValueOnce(new Error('read failed')).mockResolvedValueOnce('Kept answer');
+  const failed = fullText('session-1', stored);
+  const next = fullText('session-1', stored);
+  await expect(failed).rejects.toThrow('read failed');
+  await expect(next).resolves.toBe('Kept answer');
+});
+
+it('refuses a crash-shortened drawing even after a recorder retry reuses the asset', async () => {
+  const realStore = await vi.importActual<typeof import('../src/main/session/store.js')>('../src/main/session/store.js');
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'cos-short-drawing-'));
+  realStore.initSessionStore(directory);
+  try {
+    const session = await realStore.createSession({ title: 'Synthetic interrupted drawing' });
+    const markdown = '| Item | Qty |\n|---|---|';
+    const prefix = '<div data-d-component="table"><table><tr><td>Item</td><td>Qty</td></tr>' +
+      '<tr><td>米🧪</td><td>1 kg</td></tr></table></div>';
+    const whole = prefix + '<p>' + 'x'.repeat(120_000) + '</p>';
+    const assetId = (await realStore.writeOverflowText(session.id, whole))!;
+    await fs.writeFile(path.join(realStore.sessionsRoot(), session.id, 'assets', assetId), prefix);
+    expect(await realStore.writeOverflowText(session.id, whole)).toBe(assetId);
+    store.readAsset.mockImplementation(realStore.readAsset);
+    const stored = { text: markdown, truncated: false, chars: markdown.length };
+    const drawing = { text: prefix, truncated: true, chars: whole.length, assetId };
+    await expect(fullText(session.id, stored, drawing)).resolves.toBe(markdown);
+    expect(logger.logWarn).toHaveBeenCalledExactlyOnceWith(
+      'Markdown export: drawing overflow length mismatch; table completion kept partial');
+    await fs.writeFile(path.join(realStore.sessionsRoot(), session.id, 'assets', assetId), whole);
+    await expect(fullText(session.id, stored, drawing)).resolves.toBe(`${markdown}\n| 米🧪 | 1 kg |`);
+  } finally {
+    await realStore.flushSessions();
+    realStore.resetSessionStoreForTests();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
 });
 
 it('reads a legacy drawing above the current write cap, but refuses an oversized file before loading it', async () => {
