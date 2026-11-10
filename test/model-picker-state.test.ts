@@ -189,6 +189,33 @@ it('still refuses a model the account does not offer, whatever the effort', asyn
   const f = fixture('', 0);
   expect(await f.api.selectModelSettings('no-such-model', 'high')).toBe(false);
 });
+// #2085: "could not be confirmed" for every worker said nothing about which step failed or what the picker
+// offered. The reason names both, and a success clears it.
+it('says why a selection was not confirmed, with what the picker offers, and clears it on success', async () => {
+  const f = fixture('', 0);
+  expect(await f.api.selectModelSettings('no-such-model', 'high')).toBe(false);
+  const why = f.api.modelSelectionFailure();
+  expect(why).toContain('model no-such-model with high is not offered');
+  // CodeRabbit on #2137: models of every version read are listed, not only the open one's.
+  expect(why).toMatch(/the picker offers .*future-model:/);
+  expect(why).toMatch(/the picker offers .*gpt-5-6-thinking:/);
+  expect(why.length).toBeLessThan(260);
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'high')).toBe(true);
+  expect(f.api.modelSelectionFailure()).toBe('');
+});
+// atsu6 on #2085: with the picker already open on the requested pair and unable to close, the early return
+// gave no reason.
+it('reports the close failure when the open picker already has the requested pair', async () => {
+  const f = fixture('', null);
+  page.window.document.querySelector('button')!.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'high')).toBe(false);
+  expect(f.api.modelSelectionFailure()).toContain('the picker did not close');
+});
+it('says the picker retained its focus trap when the selection cannot close it', async () => {
+  const f = fixture('', null);
+  expect(await f.api.selectModelSettings('future-model', 'ultra')).toBe(false);
+  expect(f.api.modelSelectionFailure()).toBe('the picker did not close');
+});
 
 /*
  * A fixed-tier family exposes only efforts outside the reasoning ladder: a Pro-only
