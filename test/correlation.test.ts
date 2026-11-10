@@ -260,8 +260,18 @@ describe('request correlation ownership', () => {
     const file = path.join(dir, 'state', 'request-correlations.json');
     const writes = () => writeFile.mock.calls.filter(([target]) => String(target).includes('request-correlations')).length;
     const writeFile = vi.spyOn(fs, 'writeFile');
-    // Fake timers drive the delays; the disk work they start is real, so let it finish before counting.
-    const settle = async () => { for (let i = 0; i < 40; i++) await new Promise(resolve => setImmediate(resolve)); };
+    // A save is complete once its rename has landed (a count of writeFile calls alone can be read before that on a slow disk).
+    let renamed = 0;
+    const realRename = fs.rename.bind(fs);
+    const rename = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      await realRename(from, to);
+      if (String(to).includes('request-correlations')) renamed++;
+    });
+    // Fake timers drive the delays; the disk work they start is real, so wait for it by its own completion.
+    // With a count it waits for that many saves to land; without one it only gives a save that must not happen a chance to start.
+    const settle = async (saves?: number) => {
+      for (let i = 0; i < (saves === undefined ? 40 : 20_000) && (saves === undefined || renamed < saves); i++) await new Promise(resolve => setImmediate(resolve));
+    };
     try {
       resetDurableForTests();
       initDurableStore(dir);
@@ -270,6 +280,7 @@ describe('request correlation ownership', () => {
       observeRequestCorrelation({ ...base, requestId: 'wfr_other', observedAt: 2 });
       await flushDurable();
       const initial = writes();
+      renamed = initial;
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       // Ten page scans re-sight the same request within a minute.
       for (let i = 0; i < 10; i++) {
@@ -281,7 +292,7 @@ describe('request correlation ownership', () => {
       // A request not seen before is saved within the usual short delay, with the fresher order too.
       observeRequestCorrelation({ ...base, requestId: 'wfr_new', observedAt: 200 });
       await vi.advanceTimersByTimeAsync(400);
-      await settle();
+      await settle(initial + 1);
       expect(writes()).toBe(initial + 1);
       expect((await readDurable<{ entries: Array<{ requestId: string; observedAt: number }> }>('request-correlations'))!.entries
         .find(entry => entry.requestId === 'wfr_old')?.observedAt).toBe(109);
@@ -291,7 +302,7 @@ describe('request correlation ownership', () => {
       await settle();
       expect(writes()).toBe(initial + 1);
       await vi.advanceTimersByTimeAsync(61_000);
-      await settle();
+      await settle(initial + 2);
       expect(writes()).toBe(initial + 2);
       // A quit saves whatever is still waiting.
       observeRequestCorrelation({ ...base, requestId: 'wfr_other', observedAt: 400 });
@@ -302,6 +313,7 @@ describe('request correlation ownership', () => {
     } finally {
       vi.useRealTimers();
       writeFile.mockRestore();
+      rename.mockRestore();
       resetCorrelationRegistryForTests();
       resetDurableForTests();
       await rm(dir, { recursive: true, force: true });
