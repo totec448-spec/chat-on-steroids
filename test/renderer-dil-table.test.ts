@@ -139,6 +139,24 @@ it.each(['\n', '\r\n'])('does not join unmatched backticks across %j paragraph b
   }
 });
 
+it.each(['\n', '\r\n'])('completes a table between unmatched ticks without blank lines (%j)', newline => {
+  for (const [marker, indent] of [['', ''], ['- ', '  ']]) {
+    const source = [marker + '`Unmatched before', ...header.split('\n').map(line => indent + line),
+      indent + '## `Unmatched after'].join(newline);
+    const markup = table([['米', '1 kg']]);
+    const drawing = { text: markup, truncated: false, chars: markup.length };
+    const completed = completedDilText(source, drawing);
+    expect(completed).toContain('| 米 | 1 kg |');
+    expect(completed).toContain('`Unmatched before');
+    expect(completed).toContain('## `Unmatched after');
+    const rendered = renderedMarkdown(source, drawing);
+    expect(rendered.querySelectorAll('tbody tr')).toHaveLength(1);
+    expect(rendered.querySelector('tbody')?.textContent).toContain('米');
+    expect(rendered.querySelector('code')).toBeNull();
+    if (marker) expect(rendered.querySelector('li table tbody')?.textContent).toContain('米');
+  }
+});
+
 it.each(['\n', '\r\n'])('does not pair ticks in indented code with an inline-code table heading (%j)', newline => {
   const inlineHeader = '| `項目` | 数量 |\n|---|---|';
   const markup = '<div data-d-component="table"><table>' + row(['`項目`', '数量']) + row(['米', '1 kg']) + '</table></div>';

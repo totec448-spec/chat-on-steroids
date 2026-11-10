@@ -1,3 +1,5 @@
+import { Lexer, type Token, type Tokens } from 'marked';
+
 /** A line of an indented code block. */
 const CODE_LINE = /^(?: {4,}| {0,3}\t)/;
 
@@ -86,9 +88,10 @@ function fencedMarkdownRanges(text: string): Array<{ start: number; end: number 
   return ranges;
 }
 
-/** Match tick runs once per paragraph instead of rescanning every unmatched suffix. */
+/** Match tick runs within Markdown blocks instead of rescanning unmatched suffixes. */
 function inlineMarkdownRanges(text: string, offset: number): Array<{ start: number; end: number }> {
   const ranges: Array<{ start: number; end: number }> = [];
+  if (!text.includes('`')) return ranges;
   const paragraph = (start: number, end: number): void => {
     const source = text.slice(start, end);
     const runs = [...source.matchAll(/`+/g)].map(run => ({
@@ -108,13 +111,42 @@ function inlineMarkdownRanges(text: string, offset: number): Array<{ start: numb
       index = open.next + 1;
     }
   };
-  let start = 0;
-  // Preserve LF/CRLF and original UTF-16 offsets; inline code cannot cross a blank line.
-  for (const gap of text.matchAll(/\r?\n[ \t]*\r?\n/g)) {
-    paragraph(start, gap.index);
-    start = gap.index + gap[0].length;
+  // Use the renderer's block grammar, without draining Marked's inline queue:
+  // its inline tokenizer would rescan unmatched ticks. Tables/headings can
+  // interrupt a paragraph without an empty line. Remap normalized CRLF offsets
+  // into the original UTF-16 source before pairing any runs.
+  const crlf = [...text.matchAll(/\r\n/g)].map(gap => gap.index);
+  const normalized = crlf.length ? text.replace(/\r\n/g, '\n') : text;
+  const lines = [0];
+  for (const newline of normalized.matchAll(/\n/g)) lines.push(newline.index + 1);
+  const boundaries = new Set([0, normalized.length]);
+  const blocks = (tokens: Token[], line: number): void => {
+    for (const token of tokens) {
+      // Containers strip prefixes, but preserve source lines. Walk their child
+      // blocks by line number so boundaries retain original indentation/offsets.
+      const newlines = token.raw.split('\n').length - 1;
+      if (token.type !== 'space') boundaries.add(lines[line]!);
+      if (token.type === 'blockquote') blocks((token as Tokens.Blockquote).tokens, line);
+      else if (token.type === 'list') {
+        let itemLine = line;
+        for (const item of (token as Tokens.List).items) {
+          blocks(item.tokens, itemLine);
+          itemLine += item.raw.split('\n').length - 1;
+        }
+      } else if (token.type === 'table') {
+        for (let row = 1; row <= newlines; row++) boundaries.add(lines[line + row]!);
+      }
+      line += newlines;
+    }
+  };
+  blocks(new Lexer({ gfm: true }).blockTokens(normalized), 0);
+  let start = 0, removed = 0;
+  for (const normalizedEnd of [...boundaries].sort((a, b) => a - b)) {
+    while (crlf[removed] !== undefined && crlf[removed]! < normalizedEnd + removed) removed++;
+    const end = normalizedEnd + removed;
+    paragraph(start, end);
+    start = end;
   }
-  paragraph(start, text.length);
   return ranges;
 }
 
