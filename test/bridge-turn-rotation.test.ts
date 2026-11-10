@@ -42,7 +42,7 @@ const { findSessionByConversation, initSessionStore, resetSessionStoreForTests }
 const { recordToolCall, resetRecorderForTests } = await import('../src/main/session/recorder.js');
 const { listInputs, resetInputForTests } = await import('../src/main/session/input.js');
 const { resetTurnRotationForTests } = await import('../src/main/turn-rotation.js');
-const { resetOwedContinuesForTests, setOwedQuietForTests } = await import('../src/main/owed-continue.js');
+const { owedContinueFor, resetOwedContinuesForTests, setOwedQuietForTests } = await import('../src/main/owed-continue.js');
 const { openCallHold, resetCallHoldsForTests } = await import('../src/main/rotation-hold.js');
 const logger = await import('../src/main/logger.js');
 const { setGoalSwitchNow, resetGoalStateForTests } = await import('../src/main/goal.js');
@@ -467,6 +467,41 @@ describe('stop fallback for fresh turns', () => {
         expect(rows.find(entry => entry.id !== first.id)).toMatchObject({ state: 'queued', text: rotationMessage() });
       }, { timeout: 10_000, interval: 50 });
       expect(getLog().some(entry => entry.message.includes('filing it again (try 2 of 4)'))).toBe(true);
+    } finally { spy.mockRestore(); setOwedQuietForTests(); setRotationHoldForTests(15_000); await saveConfig({ ...config, sessions: { ...config.sessions, record: true } }); }
+  });
+
+  // CodeRabbit on #2136: the stopped request reopens the turn; the person stops that turn. The Continue the app
+  // still owed from its own rotation Stop must not be filed behind their Stop.
+  it('ends the owed continue when the person stops the turn the stopped request reopened', async () => {
+    const config = defaultConfig();
+    await saveConfig({ ...config, sessions: { ...config.sessions, record: true }, ui: { ...config.ui, rotateStopFallback: true } });
+    setRotationHoldForTests(5_000);
+    setOwedQuietForTests(400);
+    const clock = { now: Date.now() };
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock.now);
+    try {
+      const chat = 'f0f00003-1111-4111-8111-000000000412', turn = 'g-owed-1-1';
+      const sessionId = await turnFor(chat, turn, 31);
+      await declineTwice(chat, sessionId, clock);
+      await (await heldCall(chat))();
+      await vi.waitFor(async () => {
+        expect((await request('GET', '/status')).body.stopTurns).toEqual([expect.objectContaining({ conversationId: chat, turnId: turn })]);
+      }, { timeout: 10_000, interval: 50 });
+      await events(chat, [{ kind: 'turn_end', time: clock.now, turnId: turn, outcome: 'stopped' }]);
+      const afterStop = async () => (await listInputs()).filter(entry => entry.sessionId === sessionId && entry.purpose === 'rotation' && entry.afterStop === true);
+      await vi.waitFor(async () => { expect(await afterStop()).toHaveLength(1); }, { timeout: 10_000, interval: 50 });
+      const first = (await afterStop())[0]!;
+      const page = { id: first.id, owner: 'rotation-page', conversationId: chat };
+      expect((await request('POST', '/input/claim', { body: { ...page, requiresAuthorization: true } })).body.input).toMatchObject({ id: first.id });
+      await request('POST', '/input/fail', { body: { ...page, error: 'The composer changed; your draft was preserved', detail: 'draft-preserved' } });
+      expect(owedContinueFor(chat)).toEqual({ attempts: 1 });
+      // The stopped request reopens the turn, and the person stops it.
+      await events(chat, [{ kind: 'turn_start', time: clock.now, turnId: 'g-owed-1-2' }]);
+      expect((await findSessionByConversation(chat))?.activeTurnId).toBe('g-owed-1-2');
+      await stopSessionTurn(sessionId, 'g-owed-1-2', { from: 'the app' });
+      expect(owedContinueFor(chat)).toBeNull();
+      await new Promise(resolve => setTimeout(resolve, 1200));
+      expect(await afterStop()).toHaveLength(1);
     } finally { spy.mockRestore(); setOwedQuietForTests(); setRotationHoldForTests(15_000); await saveConfig({ ...config, sessions: { ...config.sessions, record: true } }); }
   });
 
