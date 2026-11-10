@@ -2665,6 +2665,12 @@ describe('active agent tab discard protection', () => {
     expect(await worker.send({ type: 'command_step', id: 'cmd-steps', client: 'doc-1', step: 'model', text: 'never forwarded' }, 41))
       .toEqual({ ok: true });
     expect(steps).toEqual([{ id: 'cmd-steps', client: 'doc-1', step: 'model' }]);
+    const modelSelection = { phase: 'select-effort', outcome: 'pending' };
+    expect(await worker.send({ type: 'command_step', id: 'cmd-steps', client: 'doc-1', step: 'model-diagnostic', modelSelection, text: 'never forwarded' }, 41))
+      .toEqual({ ok: true });
+    expect(steps.at(-1)).toEqual({ id: 'cmd-steps', client: 'doc-1', step: 'model-diagnostic', modelSelection });
+    await worker.send({ type: 'command_step', id: 'cmd-steps', client: 'doc-1', step: 'model-diagnostic', modelSelection: { pageText: 'x'.repeat(8193) } }, 41);
+    expect(steps.at(-1)).toEqual({ id: 'cmd-steps', client: 'doc-1', step: 'model-diagnostic' });
   });
 
   it('protects a newly created input tab until its conversation binds', async () => {

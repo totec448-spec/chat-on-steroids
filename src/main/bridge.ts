@@ -1,3 +1,4 @@
+import { modelSelectionDiagnostic, type ModelSelectionDiagnostic } from '../shared/model-selection-diagnostic.js';
 import { nextWorkerArchive, onWorkerChatReady, readyForWake, settleWorkerArchive } from './worker-archive.js';
 import { considerTurnRotation, noteRotationDeclined, noteStopFallback, stopFallbackDue, type RotationDeps } from './turn-rotation.js';
 import { armRotationFence, clearRotationFence, FENCE_MS, restoreRotationFences, rotationFenced, rotationFenceTurn } from './rotation-fence.js';
@@ -507,6 +508,8 @@ interface Command {
    * open the tab; `step` is the last stage the page reported after it picked up the command.
    */
   progress?: { opened?: 'browser' | 'os'; step?: CommandStep; stepAt?: number };
+  /** Ephemeral picker telemetry: never persisted, replayed, or used to extend a deadline. */
+  modelSelection?: ModelSelectionDiagnostic;
 }
 
 /** Why a page held a queued message back, as the log says it (see `/page-note`, 2026-10-30). */
@@ -5609,11 +5612,19 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       if ((err as Error).message === 'body_too_large') return tooLarge(res, origin);
       return json(res, 400, { error: 'bad_request' }, origin);
     }
+    const diagnosticOnly = body.step === 'model-diagnostic';
     const step = COMMAND_STEPS.find(candidate => candidate === body['step']);
     const command = commands.find(entry => entry.id === body['id']);
     // A wake reports its wait before it redeems, so it has no owner yet; every later step needs one.
     const allowed = step && REVIVAL_WAIT_STEPS.has(step) ? command?.owner === null : command?.owner != null && command.owner === body['client'];
-    if (!step || !command || !allowed) return json(res, 200, { ok: false }, origin);
+    if ((!step && !diagnosticOnly) || !command || !allowed) return json(res, 200, { ok: false }, origin);
+    if (diagnosticOnly && (!command.progress?.step || REVIVAL_WAIT_STEPS.has(command.progress.step))) return json(res, 200, { ok: false }, origin);
+    // Telemetry returns before execution progress can renew any deadline.
+    if (diagnosticOnly) return json(res, 200, { ok: observeModelSelection(command, body.modelSelection) }, origin);
+    if (!step) return json(res, 200, { ok: false }, origin);
+    if (step === 'model') delete command.modelSelection;
+    // Final failure details share the continuation step, so a delayed telemetry RPC cannot lose them.
+    if (step === 'model-unconfirmed') observeModelSelection(command, body.modelSelection);
     command.progress = { ...command.progress, step, stepAt: Date.now() };
     if (step === 'model-unconfirmed' && command.spec.type === 'revive') {
       const wanted = commandModelSelection(command);
@@ -12058,6 +12069,25 @@ function commandExpiryReason(command: Command): string {
     : 'the browser did not claim this command before its deadline';
 }
 
+/** Diagnostics never authorize work. Ignore reordered phases and earlier announcement-retry attempts. */
+function observeModelSelection(command: Command, value: unknown): boolean {
+  const diagnostic = modelSelectionDiagnostic.safeParse(value), step = command.progress?.step;
+  if (!diagnostic.success || command.spec.type === 'stop' ||
+      (diagnostic.data.outcome === 'pending' && step !== 'model')) return false;
+  const trace = diagnostic.data;
+  const previous = command.modelSelection;
+  if (previous && (previous.attempt > trace.attempt ||
+      (previous.attempt === trace.attempt && previous.outcome !== 'pending' && trace.outcome === 'pending'))) return false;
+  command.modelSelection = trace;
+  if (previous?.attempt === trace.attempt && previous.outcome === trace.outcome) return true;
+  const changed = (trace.requested.effort && trace.resolved?.effort !== trace.requested.effort) ||
+    (trace.selected && (trace.after?.model !== trace.selected.model || trace.after?.effort !== trace.selected.effort));
+  const line = `bridge: model selection command=${command.id} type=${command.spec.type} owner=${specKey(command.spec)} ${JSON.stringify(trace)}`;
+  if (trace.outcome === 'failed' || (trace.outcome === 'confirmed' && changed)) logWarn(line);
+  else if (trace.outcome === 'confirmed' && trace.attempt > 1) logInfo(line);
+  return true;
+}
+
 /**
  * Where a claimed command stopped, in words a bug report can carry. Before this, a worker that
  * hung while choosing its model and one whose tab never loaded both read "did not report back
@@ -12072,7 +12102,9 @@ function commandProgress(command: Command, now = Date.now()): string {
   }
   if (!progress.step || REVIVAL_WAIT_STEPS.has(progress.step) || progress.stepAt === undefined) return 'the page picked up its task, then reported nothing more';
   const seconds = Math.max(0, Math.round((now - progress.stepAt) / 1000));
-  return `last step: ${COMMAND_STEP_TEXT[progress.step]}, reported ${seconds} s before the app gave up`;
+  const model = progress.step === 'model' && command.modelSelection
+    ? `; model selection command=${command.id} ${JSON.stringify(command.modelSelection)}` : '';
+  return `last step: ${COMMAND_STEP_TEXT[progress.step]}, reported ${seconds} s before the app gave up${model}`;
 }
 
 /** Finishes a command that has nothing left to do, timer and all. */
