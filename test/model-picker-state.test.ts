@@ -189,6 +189,23 @@ it('still refuses a model the account does not offer, whatever the effort', asyn
   const f = fixture('', 0);
   expect(await f.api.selectModelSettings('no-such-model', 'high')).toBe(false);
 });
+// #2085: "could not be confirmed" for every worker said nothing about which step failed or what the picker
+// offered. The reason names both, and a success clears it.
+it('says why a selection was not confirmed, with what the picker offers, and clears it on success', async () => {
+  const f = fixture('', 0);
+  expect(await f.api.selectModelSettings('no-such-model', 'high')).toBe(false);
+  const why = f.api.modelSelectionFailure();
+  expect(why).toContain('model no-such-model with high is not offered');
+  expect(why).toMatch(/the picker offers \S+:\S+/);
+  expect(why.length).toBeLessThan(260);
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'high')).toBe(true);
+  expect(f.api.modelSelectionFailure()).toBe('');
+});
+it('says the picker retained its focus trap when the selection cannot close it', async () => {
+  const f = fixture('', null);
+  expect(await f.api.selectModelSettings('future-model', 'ultra')).toBe(false);
+  expect(f.api.modelSelectionFailure()).toBe('the picker did not close');
+});
 
 /*
  * A fixed-tier family exposes only efforts outside the reasoning ladder: a Pro-only
