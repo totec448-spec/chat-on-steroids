@@ -63,7 +63,9 @@ export function runUiCheck(command, args, { cwd, env, timeoutMs, profile }) {
       // A timeout is not proof of process exit. Keep uncertain profiles and mark the
       // child unknown so a future stale-profile sweep cannot remove an active tree.
       if (closed && (!timedOut || treeStopped)) {
-        try { profile?.cleanup(); } catch (error) { keep(String(error)); code = 'profile cleanup failed'; }
+        // Disposable-profile cleanup is advisory, separate from both the child result
+        // and its output: verify-ui hides passing output and scans it for rejections.
+        try { profile?.cleanup(); } catch (error) { console.warn('UI profile cleanup deferred; check result unchanged:', error); }
       } else if (profile) {
         keep('\nUI profile retained: check process-tree exit was not confirmed.');
         try { profile.markChild(null); } catch (error) { keep(String(error)); }
