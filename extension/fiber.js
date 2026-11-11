@@ -2329,9 +2329,11 @@
           // The turn's place belongs to its first message. A message sent into the running answer
           // follows the message before it in this turn; given the turn's place it read as a version
           // of the turn's question, and Edit & resubmit folded that question away (2.1.41 round).
+          // A final_answer item is consolidated as the turn's closing answer and becomes the next
+          // turn's parent; do not advance previousId onto it before a steered user-message.
           metadata: !user ? {} : previousId ? { parent_id: previousId, clf_parent_exact: true }
             : place ? { parent_id: place.parentId, clf_parent_exact: place.versioned } : {} });
-        previousId = id;
+        if (!final) previousId = id;
         const key = `${turnId}:${index}:${role}`;
         const nodes = [...section.querySelectorAll('[data-content-search-unit-key]')].filter(node =>
           node.closest('[data-turn-key]') === section && node.getAttribute('data-content-search-unit-key') === key);
