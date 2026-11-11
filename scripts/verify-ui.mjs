@@ -10,9 +10,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { buildProblem, needsBuild } from './ui-build-state.mjs';
-import profileHelpers from './ui-check-profile.cjs';
-import { runUiCheck } from './ui-check-process.mjs';
 import { parseShard, readWeights, shardChecks } from './shard-plan.mjs';
+import { runUiCheck } from './ui-check-process.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const electron = createRequire(import.meta.url)('electron');
@@ -94,8 +93,7 @@ for (const name of scripts) {
   const run = () => runUiCheck(how.command,
     [...(how.command === electron ? linuxTestFlags : []), path.join('scripts', name), ...how.args], {
       cwd: root, env, timeoutMs: TIMEOUT_MS,
-      profile: name === 'verify-workspace-terminal.cjs'
-        ? profileHelpers.createProfile(path.join(root, 'outputs/terminal-acceptance')) : null
+      profileRoot: name === 'verify-workspace-terminal.cjs' ? path.join(root, 'outputs/terminal-acceptance') : undefined
     });
   let outcome = await run();
   const first = outcome;

@@ -6481,37 +6481,13 @@ with other suites' native windows or input; its assertions remain unchanged. `vi
 forces Node, bounded hooks/tests, `CLF_BRIDGE_PORTS=0`
 and test-only `CLF_EVIDENCE_MS=1500`; never let tests contact the installed production bridge.
 Opt-in live plugin/macOS probes are separate evidence, not implied by the ordinary suite.
-The terminal UI fixture's parent owns its isolated profile (`scripts/ui-check-profile.cjs`):
-remove it after successful Electron child close (or a spawn that never started). After abnormal
-exit, including nonzero/signal/unhandled-rejection/timeout, POSIX first stops the dedicated group
-and uses a monotonic one-second bound for an ESRCH group probe before deleting. Signal dispatch is not exit
-confirmation. A closed Windows root cannot prove its remaining descendants exited: do not taskkill
-that dead/recycled PID; retain the profile as child-unknown and show the reason. Interrupted profiles
-are pruned only when the recorded hostname and Linux boot/PID-namespace identity match and both
-marked parent and child PIDs are gone, with ESRCH from the explicitly owned process group's negative
-PGID probe. Only the detached POSIX runner records `processGroup` proof: its tagged positive safe ID
-must match the child PID. Missing/legacy/malformed group proof, active groups and probe errors retain
-the profile; pruning never kills or enumerates processes. `markChild(null)` clears group proof, while
-existing one-argument `markChild(child)` remains usable without granting stale-pruning authority.
-Hostname alone cannot prove a process scope: non-Linux,
-unavailable scope, foreign/legacy metadata, active, unknown and unrelated output directories are
-retained. A successful check still cleans its own profile on every OS. Disposable-profile
-cleanup failures emit visible warnings without replacing the check's exit result; a failed stale
-removal does not prevent a fresh profile or later checks. Warnings are separate from captured child
-output, so passing checks still show them and cleanup text cannot masquerade as a child rejection.
-Direct Node/Electron invocation uses a short-lived `ui-check-supervisor.mjs` process. That supervisor
-owns profile creation and the shared runner's spawn; its parent IPC disconnect stops the owned tree
-even if the direct wrapper is SIGKILLed. Launch requires a ready/start exchange on the connected
-channel; normal results wait for supervisor retirement. Stdio stays inherited and no extra direct
-deadline is added. Only the supervisor runs with `ELECTRON_RUN_AS_NODE`; the actual Electron check
-does not inherit that flag. Killing the supervisor too, an OS crash or a refused OS termination can
-still prevent cleanup; unconfirmed profiles remain conservative rather than being deleted as proof.
-`ui-check-process.mjs` owns the runner's per-check process group (POSIX) or taskkill tree
-(Windows). Timeout cleanup bounds the Windows helper and close wait to one second each.
-Unconfirmed exits retain their profile as unknown instead of deleting live data; leaked pipes
-are released so the next check still runs. Runner exit/SIGINT/SIGTERM also stop the owned
-active tree; all per-check exit/signal handlers are removed on finish. The real-process timeout
-test waits for grandchild readiness and triggers the captured deadline instead of sleeping.
+
+The UI runner stops its check's POSIX process group or Windows process tree on timeout.
+It waits at most two seconds for `close` after requesting termination, then releases the
+check's pipes and continues. Each terminal attempt gets a fresh disposable directory;
+the runner removes it after close. A directly launched Electron check owns its directory
+and attempts cleanup on quit. Interrupted leftovers are ignored, not scanned or pruned.
+The terminal screenshot and result JSON keep their usual artifact paths.
 
 Pull-request CI (`ci.yml`, since 2026-10-31) runs the same checks in parallel jobs rather than
 `verify:ci` per OS (release builds still run `verify:ci`): one Linux job for privacy and the

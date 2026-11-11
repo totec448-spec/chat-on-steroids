@@ -1,28 +1,10 @@
-// Direct invocation also supervises a child, so profile deletion happens only after Electron exits.
-if (!process.env.COS_TERMINAL_CHECK_PROFILE) {
-  const electron = require('electron');
-  const path = require('node:path');
-  const env = { ...process.env };
-  delete env.ELECTRON_RUN_AS_NODE;
-  const exit = status => {
-    if (typeof electron === 'string') process.exit(status); else electron.app.exit(status);
-  };
-  // The separate owner survives even an uncatchable kill of this wrapper.
-  import('./ui-check-supervisor.mjs').then(({ runSupervisedUiCheck }) => runSupervisedUiCheck(
-    typeof electron === 'string' ? electron : process.execPath, [__filename, ...process.argv.slice(2)],
-    { env, profileRoot: path.resolve(__dirname, '../outputs/terminal-acceptance') }
-  )).then(({ code, output }) => {
-    if (output) console.error(output);
-    exit(typeof code === 'number' ? code : 1);
-  })
-    .catch(error => { console.error(error); exit(1); });
-} else {
 // Isolated Electron + actual project/projectless PTYs + current renderer. No provider or production state.
 const { withoutScripts } = require('./ui-check-page.cjs');
 const { app, BrowserWindow } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
+const { createProfile, removeProfile } = require('./ui-check-profile.cjs');
 const root = path.resolve(__dirname, '..');
 // PowerShell on Windows, the login shell elsewhere. Every command prints a marker the checks wait for.
 const WINDOWS = process.platform === 'win32';
@@ -45,10 +27,13 @@ const sh = WINDOWS ? {
   second: 'echo "SECOND_$(basename "$PWD")"; sleep 30',
   interrupt: 'echo "INTERRUPT""_OK"'
 };
-const output = path.join(root, 'outputs/terminal-acceptance');
-fs.mkdirSync(output, { recursive: true });
-// A failed run may leave a dock open in localStorage; every run must start from the same UI state.
-app.setPath('userData', process.env.COS_TERMINAL_CHECK_PROFILE);
+const artifacts = path.join(root, 'outputs/terminal-acceptance');
+const suppliedProfile = process.env.COS_TERMINAL_CHECK_PROFILE;
+const output = suppliedProfile || createProfile(artifacts);
+// The runner normally removes its directory after Electron closes. A direct
+// Electron invocation creates and removes its own directory on a normal quit.
+if (!suppliedProfile) app.once('quit', () => removeProfile(output));
+app.setPath('userData', path.join(output, 'runtime'));
 // Without a listener, destroying the only window quits Electron at once, before the cleanup below
 // can wait for the shell the check closed last. Its ConPTY exit then lands while Node tears down,
 // which aborts the process with 0xC0000409 on Windows (3 in 30 runs on a test VM, 2026-10-10).
@@ -222,7 +207,7 @@ app.whenReady().then(async () => {
     win.setSize(830, 700); await new Promise(resolve => setTimeout(resolve, 300));
     const geometry = await js(`(()=>{const p=document.getElementById('workspaceTerminal').getBoundingClientRect();return {width:p.width,height:p.height,fits:p.right<=innerWidth+1&&p.bottom<=innerHeight+1}})()`);
     assert.ok(geometry.fits, JSON.stringify(geometry));
-    fs.writeFileSync(path.join(output, 'terminal.png'), (await win.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true })).toPNG());
+    fs.writeFileSync(path.join(artifacts, 'terminal.png'), (await win.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true })).toPNG());
     await js(`window.api.terminalWrite(${JSON.stringify(second)}, "exit 7\\r")`); await until(`exits[${JSON.stringify(second)}]===7`);
     await js("document.querySelector('#workDockRight .work-dock-tab[data-terminal-id] .btn-icon').click()");
     assert.equal((await js(`window.api.terminalWrite(${JSON.stringify(second)}, 'echo closed\\r')`)).ok, false);
@@ -232,11 +217,9 @@ app.whenReady().then(async () => {
     assert.equal((await js(`window.api.terminalWrite(${JSON.stringify(first)}, 'echo nope\\r')`)).ok, false);
     assert.deepEqual(await js('errors'), []);
     const result = { actualPty: true, projectCwd: true, projectlessHomeCwd: true, singleRightTabRow: true, rightTabClosesPty: true, rightPanelHidePreservesPty: true, persistentEnvironmentAndCd: true, keyboardInput: true, hiddenPanelContinuity: true, bottomPanelClose: true, bottomMenuVisible: true, rightMenuClickable: true, rightAndBottomIndependent: true, lastBottomTabClosesPanel: true, multipleTabs: true, ctrlC: true, exitCode: 7, closeRetiresShell: true, geometry };
-    fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify(result, null, 2)); console.log(JSON.stringify(result));
+    fs.writeFileSync(path.join(artifacts, 'results.json'), JSON.stringify(result, null, 2)); console.log(JSON.stringify(result));
   } finally { win.destroy(); win = null; await server.close(); await backend.flushDurable(); await backend.workspaceTerminalsExited(); }
   // Let Electron run before-quit so the IPC owner disposes any remaining PTYs before the
   // native ConPTY backend unloads. app.exit() skips those handlers and can crash Windows CI.
   app.quit();
 }).catch(error => { console.error(error); app.exit(1); });
-
-}

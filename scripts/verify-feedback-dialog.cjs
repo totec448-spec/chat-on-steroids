@@ -37,8 +37,7 @@ app.whenReady().then(async () => {
       configureServer(vite){vite.middlewares.use((req,res,next)=>{if(req.url!=='/timeline-fixture.js')return next();res.setHeader('Content-Type','text/javascript');
         res.end(fixtureConfigSource()+fs.readFileSync(path.join(root,'scripts/fixtures/composer-ui.js'),'utf8')+fixture);});}}]});
   await server.listen();
-  // Match the app's native compositor: offscreen snapshots can lose their Viz surface after reload.
-  win = new BrowserWindow({show:false,width:1280,height:800,webPreferences:{sandbox:true,backgroundThrottling:false}});
+  win = new BrowserWindow({show:false,width:1280,height:800,webPreferences:{sandbox:true,offscreen:true,backgroundThrottling:false}});
   const errors=[];
   win.webContents.on('console-message',e=>{if(e.level==='error'&&!BENIGN_RENDERER_ERRORS.includes(e.message))errors.push(e.message);});
   const js=code=>win.webContents.executeJavaScript(code);
@@ -175,13 +174,4 @@ app.whenReady().then(async () => {
   console.log('PASS: send feedback from Activity and /feedback; problem needs text and report, no idea form; update notice; done step; 13 languages, both themes, 720 px');
   // The dev server can keep a socket open after the window is gone; the check must still end.
   win.destroy();await Promise.race([server.close(),new Promise(resolve=>setTimeout(resolve,2000))]);app.exit(0);
-}).catch(async error=>{
-  console.error(error);
-  try {
-    fs.mkdirSync(output,{recursive:true});
-    if(win&&!win.isDestroyed()) fs.writeFileSync(path.join(output,'failure.png'),(await win.webContents.capturePage()).toPNG());
-  } catch(captureError) { console.error('Feedback failure screenshot unavailable:',captureError); }
-  try { await Promise.race([server?.close(),new Promise(resolve=>setTimeout(resolve,2000))]); }
-  catch(closeError) { console.error('Feedback server cleanup failed:',closeError); }
-  app.exit(1);
-});
+}).catch(async error=>{fs.mkdirSync(output,{recursive:true});if(win&&!win.isDestroyed())fs.writeFileSync(path.join(output,'failure.png'),(await win.webContents.capturePage()).toPNG());console.error(error);await Promise.race([server?.close(),new Promise(resolve=>setTimeout(resolve,2000))]);app.exit(1);});
