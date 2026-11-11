@@ -2104,14 +2104,25 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
   // These facts may arrive in either batch; never manufacture assistant prose.
   const imageEnd = (event: SessionEvent) => event.kind === 'turn_end' && event.outcome === 'completed' &&
     !!event.providerMessageId && !!event.turnId && (!turnId || sameTurn(event.turnId, turnId)) &&
-    recent.some(image => image.kind === 'native_image' && image.messageId === event.providerMessageId &&
-      image.providerStatus === 'finished_successfully' && sameTurn(image.turnId, event.turnId));
+    recent.some(image => {
+      if (image.kind !== 'native_image' || image.messageId !== event.providerMessageId ||
+          image.providerStatus !== 'finished_successfully') return false;
+      if (sameTurn(image.turnId, event.turnId)) return true;
+      if (!image.turnId) return false;
+      // The canonical image keeps its first owner across a reload. A recorded continued
+      // boundary can still prove that its image-only final belongs to the successor turn.
+      const resolvedImageTurn = effectiveFinalTurnId(turns, {
+        kind: 'assistant_message', turnId: image.turnId, final: true,
+        origin: positionOf(event), seq: event.seq, time: event.time
+      });
+      return sameTurn(resolvedImageTurn, event.turnId);
+    });
   const final = recent.findLast(event => {
     if (imageEnd(event)) return true;
     if (event.kind !== 'assistant_message' || event.final !== true ||
         (!event.message.text.trim() && !event.providerMessageId) || !event.messageId) return false;
     const resolvedTurnId = eventTurnId(event);
-    return !turnId || resolvedTurnId === turnId || event.turnId === turnId ||
+    return !turnId || resolvedTurnId === turnId ||
       (!!event.providerMessageId && (sameTurn(resolvedTurnId, turnId) || reopenedAfterStall(resolvedTurnId, turnId))) ||
       (turnId.startsWith('reply:') && event.messageId === turnId.slice(6));
   });
@@ -2133,9 +2144,10 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
   // "worker ready" before the question it answered (#1086, Windows VM, 2.1.41).
   // When a steered continuation reused an earlier turn segment's final message id, the message was
   // first opened before the continuation's question and finalized at `seq` after it.
-  const finalPosition = final.kind === 'assistant_message' && finalTurnId !== final.turnId ? seq : positionOf(final);
-  if (question && positionOf(question) >= finalPosition && !correction(question) &&
-      !(ownQuestion && question.kind === 'user_message' && question.messageId === ownQuestion)) return null;
+  const promotedFinal = final.kind === 'assistant_message' && finalTurnId !== final.turnId;
+  const finalPosition = promotedFinal ? seq : positionOf(final);
+  if (question && !correction(question) && !(ownQuestion && question.kind === 'user_message' && question.messageId === ownQuestion) &&
+      (positionOf(question) >= finalPosition || (promotedFinal && !sameTurn(question.turnId, finalTurnId)))) return null;
   // With no generation identity, require an actual preceding authored boundary.
   if (!finalTurnId && (!question || question.time > final.time)) return null;
   if (entry.summary.activeTurnId && !sameTurn(entry.summary.activeTurnId, finalTurnId)) return null;
@@ -2182,9 +2194,14 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
       (event.outcome !== 'completed' && !(event.outcome === 'stalled' && nativeFinal));
     // The first start of the final's own turn, recorded after that final: ChatGPT reported a fast
     // answer's end before the page opened the turn from the Send receipt (#1099). Not new work.
-    if (event.kind === 'turn_start') return !(nativeReopen && event === last) && !(sameResponse && event.turnId !== finalTurnId) &&
-      !(event.source !== 'app' && !!finalTurnId && event.turnId === finalTurnId &&
-        turns?.[finalTurnId]?.origin === positionOf(event));
+    if (event.kind === 'turn_start') {
+      // A duplicate document starts before the shared final. A retry can inherit the same
+      // response id from a late call, but its start follows the already-recorded final.
+      const duplicateDocumentStart = sameResponse && event.turnId !== finalTurnId && positionOf(event) < seq;
+      return !(nativeReopen && event === last) && !duplicateDocumentStart &&
+        !(event.source !== 'app' && !!finalTurnId && event.turnId === finalTurnId &&
+          turns?.[finalTurnId]?.origin === positionOf(event));
+    }
     if (event.kind === 'user_message') return !correction(event) && !(ownQuestion && event.messageId === ownQuestion);
     return event.kind === 'assistant_message' || event.kind === 'page_tool';
   })) return null;

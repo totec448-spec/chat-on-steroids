@@ -426,12 +426,15 @@ export function chronological<T extends Chronological>(entries: readonly T[]): T
     if (nextStart) continuedTo.set(turnId, nextStart.turnId);
   }
 
-  const terminalContinuedTurn = (turnId: string): string => {
+  const terminalContinuedTurn = (turnId: string, at: number): string => {
     let current = turnId;
     const seen = new Set<string>();
     while (continuedTo.has(current) && !seen.has(current)) {
+      const next = continuedTo.get(current)!;
+      const nextAnchor = anchors.get(next);
+      if (nextAnchor === undefined || nextAnchor > at) break;
       seen.add(current);
-      current = continuedTo.get(current)!;
+      current = next;
     }
     return current;
   };
@@ -512,12 +515,13 @@ export function chronological<T extends Chronological>(entries: readonly T[]): T
     }
     let turnAnchor = entry.turnId ? anchors.get(entry.turnId) : undefined;
     if (entry.kind === 'assistant_message' && (entry.final === true || entry.state === 'final')) {
-      if (entry.turnOrigin !== null && entry.turnOrigin !== undefined && turnAnchor !== undefined && entry.turnOrigin > turnAnchor) {
-        turnAnchor = entry.turnOrigin;
+      if (entry.turnOrigin !== undefined) {
+        // A projected final's origin is authoritative, even when it equals the original anchor.
+        turnAnchor = entry.turnOrigin ?? undefined;
       } else if (entry.turnId && continuedTo.has(entry.turnId)) {
         const endInfo = turnEndOrigins.get(entry.turnId);
         if (endInfo && residenceOf(entry) > endInfo.endOrigin) {
-          const terminalTurn = terminalContinuedTurn(entry.turnId);
+          const terminalTurn = terminalContinuedTurn(entry.turnId, residenceOf(entry));
           const terminalAnchor = anchors.get(terminalTurn);
           if (terminalAnchor !== undefined) turnAnchor = terminalAnchor;
         }
