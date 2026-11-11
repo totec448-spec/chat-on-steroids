@@ -83,14 +83,17 @@ it('removes only this check’s profile after its child closes', async () => {
   expect(process.listenerCount('SIGINT')).toBe(before);
 });
 
-it('keeps a timeout result when termination succeeds before the close deadline', async () => {
+it.each([
+  { code: null, signal: 'SIGKILL', outcome: 'SIGKILL' },
+  { code: 0, signal: null, outcome: 'exit code 0' }
+])('keeps the timeout and cleans its profile when the child closes with $outcome', async ({ code, signal }) => {
   vi.useFakeTimers();
   vi.spyOn(process, 'kill').mockReturnValue(true);
   const child = fakeChild();
   const pending = start(profileRoot());
   const profile = spawnedProfile();
   await vi.advanceTimersByTimeAsync(50);
-  child.emit('close', null, 'SIGKILL');
+  child.emit('close', code, signal);
   expect((await pending).code).toBe('timeout');
   expect(existsSync(profile)).toBe(false);
   expect(vi.getTimerCount()).toBe(0);
