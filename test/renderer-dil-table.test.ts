@@ -113,6 +113,22 @@ it.each([
   expect(rendered.querySelector('code')?.textContent).not.toContain('米');
 });
 
+it.each(['\n', '\r\n'])('drops the real button label after odd and even backslash runs (%j)', newline => {
+  const markup = '<button data-d-component="button">Copy</button>';
+  const drawing = { text: markup, truncated: false, chars: markup.length };
+  for (const count of [1, 2, 3, 4]) {
+    const even = count % 2 === 0;
+    const prefix = 'prefix ' + '\\'.repeat(count) + (even ? '`code`' : '`literal');
+    const suffix = 'post `unmatched';
+    const source = [prefix, '[Copy]', suffix].join(newline);
+    expect(completedDilText(source, drawing), `${count} backslashes`).toBe([prefix, suffix].join(newline));
+    const rendered = renderedMarkdown(source, drawing);
+    expect(rendered.textContent).not.toContain('[Copy]');
+    if (even) expect(rendered.querySelector('code')?.textContent).toBe('code');
+    else expect(rendered.querySelector('code')).toBeNull();
+  }
+});
+
 it('leaves an unclosed fence unchanged, and still completes tables with inline-code column headings', () => {
   const drawing = { text: table([['米', '1 kg']]) };
   const open = `\`\`\`markdown\n${header}`;

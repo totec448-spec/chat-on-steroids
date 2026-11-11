@@ -94,9 +94,13 @@ function inlineMarkdownRanges(text: string, offset: number): Array<{ start: numb
   if (!text.includes('`')) return ranges;
   const paragraph = (start: number, end: number): void => {
     const source = text.slice(start, end);
-    const runs = [...source.matchAll(/`+/g)].map(run => ({
-      at: run.index, width: run[0].length, escaped: source[run.index - 1] === '\\', next: -1
-    }));
+    const runs = [...source.matchAll(/`+/g)].map(run => {
+      const at = run.index;
+      let prefix = at;
+      while (source[prefix - 1] === '\\') prefix--;
+      // Backslashes escape in pairs; only an odd run escapes the opening tick.
+      return { at, width: run[0].length, escaped: (at - prefix) % 2 === 1, next: -1 };
+    });
     const nextWidth = new Map<number, number>();
     for (let index = runs.length - 1; index >= 0; index--) {
       const run = runs[index]!;
