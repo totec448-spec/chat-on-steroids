@@ -1,11 +1,32 @@
 // Isolated Electron + actual project/projectless PTYs + current renderer. No provider or production state.
-const { withoutScripts } = require('./ui-check-page.cjs');
-const { app, BrowserWindow } = require('electron');
+const electron = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
-const assert = require('node:assert/strict');
 const { createProfile, removeProfile } = require('./ui-check-profile.cjs');
 const root = path.resolve(__dirname, '..');
+const artifacts = path.join(root, 'outputs/terminal-acceptance');
+const output = process.env.COS_TERMINAL_CHECK_PROFILE;
+
+if (!output) {
+  // Electron writes profile files during shutdown, so the direct launcher also
+  // removes its profile after the check process exits, not in Electron's quit event.
+  const { spawnSync } = require('node:child_process');
+  let profile, status = 1;
+  try {
+    profile = createProfile(artifacts);
+    const env = { ...process.env, COS_TERMINAL_CHECK_PROFILE: profile };
+    delete env.ELECTRON_RUN_AS_NODE;
+    const child = spawnSync(typeof electron === 'string' ? electron : process.execPath,
+      ['--lang=en-US', __filename, ...process.argv.slice(2)], { env, stdio: 'inherit', windowsHide: true });
+    if (child.error) throw child.error;
+    status = child.status ?? 1;
+  } catch (error) { console.error(error); }
+  finally { if (profile) removeProfile(profile); }
+  if (typeof electron === 'string') process.exit(status); else electron.app.exit(status);
+} else {
+const { withoutScripts } = require('./ui-check-page.cjs');
+const { app, BrowserWindow } = electron;
+const assert = require('node:assert/strict');
 // PowerShell on Windows, the login shell elsewhere. Every command prints a marker the checks wait for.
 const WINDOWS = process.platform === 'win32';
 const SHELL = WINDOWS ? 'powershell' : path.basename(process.env.SHELL || '/bin/bash');
@@ -27,12 +48,6 @@ const sh = WINDOWS ? {
   second: 'echo "SECOND_$(basename "$PWD")"; sleep 30',
   interrupt: 'echo "INTERRUPT""_OK"'
 };
-const artifacts = path.join(root, 'outputs/terminal-acceptance');
-const suppliedProfile = process.env.COS_TERMINAL_CHECK_PROFILE;
-const output = suppliedProfile || createProfile(artifacts);
-// The runner normally removes its directory after Electron closes. A direct
-// Electron invocation creates and removes its own directory on a normal quit.
-if (!suppliedProfile) app.once('quit', () => removeProfile(output));
 app.setPath('userData', path.join(output, 'runtime'));
 // Without a listener, destroying the only window quits Electron at once, before the cleanup below
 // can wait for the shell the check closed last. Its ConPTY exit then lands while Node tears down,
@@ -223,3 +238,4 @@ app.whenReady().then(async () => {
   // native ConPTY backend unloads. app.exit() skips those handlers and can crash Windows CI.
   app.quit();
 }).catch(error => { console.error(error); app.exit(1); });
+}

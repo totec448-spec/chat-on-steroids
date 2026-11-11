@@ -6489,8 +6489,9 @@ Opt-in live plugin/macOS probes are separate evidence, not implied by the ordina
 The UI runner stops its check's POSIX process group or Windows process tree on timeout.
 It waits at most two seconds for `close` after requesting termination, then releases the
 check's pipes and continues. Each terminal attempt gets a fresh disposable directory;
-the runner removes it after close. A directly launched Electron check owns its directory
-and attempts cleanup on quit. Interrupted leftovers are ignored, not scanned or pruned.
+the runner removes it after close. Direct invocation uses the same temporary directory
+lifetime: launch Electron, wait for it to exit, then remove the directory. Interrupted
+leftovers are ignored, not scanned or pruned.
 The terminal screenshot and result JSON keep their usual artifact paths.
 
 Pull-request CI (`ci.yml`, since 2026-10-31) runs the same checks in parallel jobs rather than
