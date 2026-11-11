@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { effectiveFinalTurnId } from '../src/shared/chronology.js';
+import { projectTimeline, type Chronological } from '../src/shared/chronology.js';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,15 +11,18 @@ const text = (text: string) => ({ text, truncated: false, chars: text.length });
 
 describe('continued final completion', () => {
   it('keeps a final in its original turn when a continued turn has no successor', () => {
-    expect(effectiveFinalTurnId({ first: { origin: 1, time: T0, endOrigin: 5, continued: true } },
-      { kind: 'assistant_message', turnId: 'first', seq: 2, contentSeq: 8, time: T0, final: true })).toBe('first');
+    expect(projectTimeline<Chronological>([
+      { kind: 'assistant_message', turnId: 'first', seq: 2, contentSeq: 8, time: T0, final: true }
+    ], { first: { origin: 1, time: T0, endOrigin: 5, continued: true } })[0]?.turnOrigin).toBe(1);
   });
 
   it('does not move a final to a continuation that opened after it settled', () => {
-    expect(effectiveFinalTurnId({
+    expect(projectTimeline<Chronological>([
+      { kind: 'assistant_message', turnId: 'first', seq: 2, contentSeq: 8, time: T0, final: true }
+    ], {
       first: { origin: 1, time: T0, endOrigin: 5, continued: true },
       next: { origin: 10, time: T0 + 10 }
-    }, { kind: 'assistant_message', turnId: 'first', seq: 2, contentSeq: 8, time: T0, final: true })).toBe('first');
+    })[0]?.turnOrigin).toBe(1);
   });
 
   it('recognizes the consolidated final for the terminal steered continuation', async () => {
