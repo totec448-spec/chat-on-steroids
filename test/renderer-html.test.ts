@@ -898,3 +898,14 @@ it.each([
   expect(rendered.querySelectorAll('.markdown-dil-chart')).toHaveLength(literal ? 1 : 2);
   expect(rendered.textContent).not.toContain('\uE030');
 });
+
+it.each(['\n', '\r\n'])('renders a chart after a quoted code fence in the same list item (%j)', newline => {
+  const chart = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+    chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Sample', value: 7 }]
+  } } })}\uE201`;
+  const source = ['- > ```json', '  > ' + chart, '  > ```', '', '  ' + chart].join(newline);
+  const rendered = renderedMarkdown(source);
+  expect(rendered.querySelector('li blockquote pre code')?.textContent).toContain(chart);
+  expect(rendered.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+  expect(rendered.textContent).not.toContain('\uE030');
+});
