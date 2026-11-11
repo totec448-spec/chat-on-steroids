@@ -103,6 +103,10 @@ app.whenReady().then(async () => {
       'LTR sidebar drag handle must stay on its right edge');
     // Compare a safe, isolated sample screen in English and Arabic.
     await setPanel('general');
+    assert.equal(await evalJS("document.querySelector('.panel.is-active').dataset.panel"), 'general');
+    // The hidden Electron compositor may still hold the previous panel's frame.
+    // Give it one short paint opportunity before recording the visual proof.
+    await new Promise(resolve => setTimeout(resolve, 150));
     fs.writeFileSync(path.join(output,'english-general-760.png'),
       (await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());
     await evalJS(`document.querySelector('[data-language="ar"]').click()`);
