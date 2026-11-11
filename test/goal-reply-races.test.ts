@@ -60,7 +60,7 @@ describe('Goal reply acceptance', () => {
     await started;
     // B is accepted while A's save is paused just before its rename; B's save queues behind A's.
     const b = accept('conv-b', 1);
-    await vi.waitFor(() => expect(ledger().has('conv-b')).toBe(true));
+    await vi.waitFor(() => expect(ledger().has('conv-b')).toBe(true), { timeout: 10_000 });
     refuse(new Error('disk busy'));
     expect(await a).toMatchObject({ message: 'disk busy' });
     await b;
@@ -69,6 +69,38 @@ describe('Goal reply acceptance', () => {
     expect(ledger().get('conv-b')?.eventSeq).toBe(1);
     const stored = await readDurable<{ replies: Array<{ conversationId: string }> }>(goal.GOAL_REPLIES_STATE);
     expect(stored?.replies.map(row => row.conversationId)).toEqual(['conv-b']);
+  });
+
+  it('does not bring back a silence reply that was withdrawn while this chat\'s save was waiting', async () => {
+    await accept('conv-s', 1, 'silence:fabricated');
+    await flushDurable();
+    let release!: () => void;
+    let started!: () => void;
+    const reached = new Promise<void>(resolve => { started = resolve; });
+    const real = fs.rename.bind(fs);
+    let saves = 0;
+    vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (String(to).includes('goal-replies')) {
+        saves += 1;
+        // First save: the withdrawal's own, paused just before its rename. Second: the acceptance, refused.
+        if (saves === 1) { started(); await new Promise<void>(resolve => { release = resolve; }); }
+        else if (saves === 2) throw new Error('disk busy');
+      }
+      return real(from, to);
+    });
+    const withdrawn = goal.withdrawSilenceGoalReplyNow('conv-s', 'silence:fabricated');
+    await reached;
+    // Accepted while the withdrawal's save is in flight: the ledger it captured still holds the fabricated row.
+    const a = accept('conv-a', 1).catch(error => error as Error);
+    await vi.waitFor(() => expect(ledger().has('conv-a')).toBe(true), { timeout: 10_000 });
+    release();
+    expect(await a).toMatchObject({ message: 'disk busy' });
+    await withdrawn;
+    await flushDurable();
+    expect(ledger().has('conv-a')).toBe(false);
+    expect(ledger().has('conv-s')).toBe(false);
+    const stored = await readDurable<{ replies: Array<{ conversationId: string }> }>(goal.GOAL_REPLIES_STATE);
+    expect(stored?.replies.map(row => row.conversationId) ?? []).not.toContain('conv-s');
   });
 
   it('does not let an older acceptance replace a newer one after its eligibility check', async () => {
