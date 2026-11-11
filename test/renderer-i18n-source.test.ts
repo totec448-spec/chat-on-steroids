@@ -7,7 +7,7 @@ import { RECOMMENDED_SKILLS } from '../src/shared/recommended-skills.js';
  * never failed anything: the Pets and Skills pages shipped 18 English-only labels that way,
  * most of them chosen with `t(cond ? 'a' : 'b')`. This reads the renderer sources instead.
  */
-const LOCALES = ['de', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'zh-CN', 'zh-TW'];
+const LOCALES = ['ar', 'de', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'zh-CN', 'zh-TW'];
 // Not interface text: a Git ref name passed through t() alongside the branch.
 const UNTRANSLATED = new Set(['HEAD']);
 

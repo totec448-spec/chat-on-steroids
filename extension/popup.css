@@ -730,3 +730,10 @@ button:focus-visible {
 @media (prefers-reduced-motion: reduce) { .transfer, .transfer-done, .done-logo, .done-check { animation: none; } }
 /* Korean separates words with spaces: wrap there, not inside a word. */
 html:lang(ko) body { word-break: keep-all; overflow-wrap: break-word; }
+/* Arabic follows the companion app, irrespective of Chrome's UI language. */
+html[dir='rtl'] body { direction: rtl; font-family: 'Segoe UI', Tahoma, Arial, sans-serif; }
+html[dir='rtl'] :is(code, pre, kbd, input[type='text'], input[type='url'], .mono) {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: left;
+}

@@ -15,6 +15,53 @@
    The window prefers 1080x700 but can shrink to the current display and can be resized,
    so long content scrolls inside its own panes rather than growing or clipping the page.
    --------------------------------------------------------------------------- */
+/* RTL is opt-in for Arabic; keep code, terminals and keyboard combinations LTR. */
+html[dir="rtl"] body { direction: rtl; font-family: "Segoe UI", Tahoma, Arial, sans-serif; }
+html[dir="rtl"] :is(pre, code, kbd, .xterm, .cm-editor, .cm-content) { direction: ltr; unicode-bidi: isolate; text-align: left; }
+html[dir="rtl"] :is(input, textarea) { unicode-bidi: plaintext; }
+html[dir="rtl"] :is(.path, .file-path, .terminal-output, .terminal-input) { direction: ltr; unicode-bidi: isolate; text-align: left; }
+html[dir="rtl"] :is(input[type="email"], input[type="url"], .row-menu-shortcut) {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: left;
+}
+html[dir="rtl"] :is(.sidebar-section-empty, .plugin-entry, .plugin-menu-actions .btn,
+  .plugin-catalog-card, .browser-option, .access-choice, .access-fine,
+  .setup-profile-option > :first-child, .update-readiness .update-readiness-toggle) {
+  text-align: start;
+}
+/* Mirror physical sidebar geometry; CSS direction alone does not mirror absolute
+   positioning, clip paths or the dragging separator. */
+html[dir="rtl"] .sidebar {
+  border-right-color: transparent;
+  border-left: 1px solid transparent;
+  clip-path: inset(0 0 0 -20px);
+}
+html[dir="rtl"] .sidebar-resize { left: -4px; right: auto; }
+html[dir="rtl"] .sidebar::before,
+html[dir="rtl"] .sidebar::after { right: calc(100% + 1px); left: auto; }
+html[dir="rtl"] .sidebar::before {
+  mask-image: radial-gradient(circle at 0% 100%, transparent 18px, #000 18.5px);
+}
+html[dir="rtl"] .sidebar::after {
+  border-left: 0;
+  border-right: 1px solid var(--line);
+  border-top-left-radius: 0;
+  border-top-right-radius: 18px;
+  mask-image: linear-gradient(to bottom, #000, transparent 75%), linear-gradient(to left, #000, transparent);
+}
+html[dir="rtl"][data-high-contrast="true"] .sidebar { border-left-color: var(--line); }
+html[dir="rtl"] .app.is-sidebar-collapsed .sidebar {
+  clip-path: inset(0 0 0 100%);
+  transform: translateX(14px);
+}
+html[dir="rtl"] .sidebar-sessions > .scroll {
+  margin-left: -12px;
+  margin-right: 0;
+  padding-left: 4px;
+  padding-right: 0;
+}
+
 
 .panel.plugins-panel { overflow-y: auto; padding: 46px 36px 32px; scrollbar-gutter: stable; }
 .panel.plugins-panel.is-active { display: block; }
