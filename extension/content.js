@@ -2353,8 +2353,15 @@
     if (unwitnessedGeneration) {
       if (question >= 0) turns = turns.slice(question + 1);
     }
-    const latest = currentAssistantTurn(turns);
     const heldTurn = genNode ? turnForNode(genNode, turns) : null;
+    // A presentation-only Fiber scan can already have cached the next question's fast answer
+    // before observe() processes that question. If this generation never bound a section, that
+    // answer is not evidence that the preceding generation ended. Keep the unbound lookup on
+    // the prefix before the new question; a previously held node remains exact ownership proof.
+    if (generating && turnId && !unwitnessedGeneration && !ownsQuestion && question >= 0 && !heldTurn) {
+      turns = turns.slice(0, question);
+    }
+    const latest = currentAssistantTurn(turns);
     // One question can publish interim and final prose in different sections.
     // Keep the held section unless the exact same question proves a newer one
     // can belong to this response; its novelty is still checked below.

@@ -515,9 +515,9 @@ export function chronological<T extends Chronological>(entries: readonly T[]): T
     }
     let turnAnchor = entry.turnId ? anchors.get(entry.turnId) : undefined;
     if (entry.kind === 'assistant_message' && (entry.final === true || entry.state === 'final')) {
-      if (entry.turnOrigin !== undefined) {
-        // A projected final's origin is authoritative, even when it equals the original anchor.
-        turnAnchor = entry.turnOrigin ?? undefined;
+      if (entry.turnOrigin !== undefined && entry.turnOrigin !== null) {
+        // A projected final's origin is authoritative when present, even when it equals the original anchor.
+        turnAnchor = entry.turnOrigin;
       } else if (entry.turnId && continuedTo.has(entry.turnId)) {
         const endInfo = turnEndOrigins.get(entry.turnId);
         if (endInfo && residenceOf(entry) > endInfo.endOrigin) {

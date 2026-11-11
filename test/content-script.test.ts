@@ -9991,6 +9991,36 @@ describe('a stop button that goes missing while the turn is still running', () =
     });
   });
 
+  it('does not consume a new fast answer terminal while the preceding generation has no bound section', async () => {
+    live = await harness();
+    startGenerating(live.document);
+    live.hook.observe(); await settle();
+    const first = emitted(live.sent, 'turn_start')[0]!.event.turnId;
+
+    // The previous generation never acquired an assistant section. A presentation-only scan
+    // can nevertheless cache the next question's already-finished answer before observe() sees it.
+    userTurn(live.document, 'unbound-next-question', 'Next question');
+    const nextAnswer = assistantTurn(live.document, 'fast-next-answer', []);
+    nextAnswer.setAttribute('data-clf-fiber-turn', '0');
+    const terminal = {
+      turnId: 'fast-next-answer', endMessageId: 'fast-next-final',
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', calls: [], messages: [], activities: []
+    };
+    await replyFiber([], [terminal], null, true, null, false, new Set(), true);
+
+    live.hook.observe(); await settle(); await live.hook.flush();
+    const ends = emitted(live.sent, 'turn_end');
+    expect(ends).toHaveLength(1);
+    expect(ends[0]!.event).toMatchObject({ turnId: first, outcome: 'interrupted', continued: true });
+    const next = emitted(live.sent, 'turn_start')[1]!.event.turnId;
+
+    // The same exact terminal must remain available to close the generation opened by its question.
+    await replyFiber([], [terminal], null, true, null, false, new Set(), false);
+    await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(2);
+    expect(emitted(live.sent, 'turn_end')[1]!.event).toMatchObject({ turnId: next, outcome: 'completed' });
+  });
+
   it('marks continued the end of a turn with only interim prose when a message arrives before end_turn (#1301)', async () => {
     // 2026-10-12, live: a message sent at 02:20:26 joined the running response, which had already
     // said "I'll pick up where it stopped…". Stop was gone at the tick that saw the message, and the
