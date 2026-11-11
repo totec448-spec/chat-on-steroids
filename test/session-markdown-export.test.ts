@@ -41,6 +41,20 @@ it('copies a completed answer whole, reading the part the log cut', async () => 
   expect(electron.clipboard.writeText).toHaveBeenCalledWith('The first part, and the rest of the answer.\n');
 });
 
+it.each(['clipboard', 'file'] as const)('separates a list message from the next message’s indented code in %s', async target => {
+  store.readEvents.mockResolvedValue([
+    events[0]!,
+    { ...events[1]!, message: { text: '- Notes', truncated: false, chars: 7 } },
+    { ...events[1]!, seq: 3, messageId: 'a2', message: { text: '    echo *text*', truncated: false, chars: 15 } },
+    { ...events[2]!, seq: 4 }
+  ]);
+  electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/downloads/code.md' });
+  await exportSessionMarkdown({ id: 'session-1', scope: 'answer', turnId: 't1', target }, null);
+  const expected = '- Notes\n\n<!-- -->\n\n    echo *text*\n';
+  if (target === 'clipboard') expect(electron.clipboard.writeText).toHaveBeenCalledWith(expected);
+  else expect(files.replaceFile).toHaveBeenCalledWith('/downloads/code.md', expected, 'Markdown export');
+});
+
 it('saves the session transcript where the person chooses, named after the chat', async () => {
   electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/downloads/Explain it.md' });
   await expect(exportSessionMarkdown({ id: 'session-1', scope: 'session', target: 'file' }, null)).resolves.toEqual({ done: 'saved', name: 'Explain it.md' });

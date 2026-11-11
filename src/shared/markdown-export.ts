@@ -106,9 +106,18 @@ export function messageAnswerEntries(events: readonly SessionEvent[], messageId:
   return transcriptEntries(events).filter(entry => entry.role === 'assistant' && !entry.turnId && entry.messageId === messageId);
 }
 
-/** One answer as Markdown: its messages as written, separated by blank lines. */
+/** Remove surrounding blank lines without deleting meaningful first-line code indentation. */
+export function trimMarkdown(text: string): string {
+  return text.trimEnd().replace(/^(?:[ \t]*\r?\n)+/, '');
+}
+
+/** One answer as Markdown, keeping a following message's indented code outside the previous block. */
 export function answerMarkdown(texts: readonly string[]): string {
-  return `${texts.map(text => text.trim()).filter(Boolean).join('\n\n')}\n`;
+  return `${texts.map(trimMarkdown).filter(Boolean).reduce((answer, text, index) => {
+    // Blank lines alone let a list/paragraph consume the next message's indented code.
+    const separator = /^(?: {4}| {0,3}\t)/.test(text) ? '\n\n<!-- -->\n\n' : '\n\n';
+    return answer + (index ? separator : '') + text;
+  }, '')}\n`;
 }
 
 /** A readable transcript: the chat title, then each message under who said it. */
@@ -116,7 +125,7 @@ export function sessionMarkdown(title: string, entries: readonly { role: 'user' 
   labels: { user: string; assistant: string } = { user: 'You', assistant: 'ChatGPT' }): string {
   const parts = [`# ${title.trim() || 'Chat'}`];
   for (const entry of entries) {
-    const text = entry.text.trim();
+    const text = entry.role === 'assistant' ? trimMarkdown(entry.text) : entry.text.trim();
     if (text) parts.push(`## ${entry.role === 'user' ? labels.user : labels.assistant}\n\n${text}`);
   }
   return `${parts.join('\n\n')}\n`;
