@@ -327,9 +327,49 @@ it('skips a completed turn that started again for /copy until it ends again', as
     { seq: 7, time: 7, source: 'app', kind: 'turn_start', turnId: 't2' }
   ];
   store.readEvents.mockResolvedValue([...events, ...later] as SessionEvent[]);
+  await expect(exportSessionMarkdown({ id: 'session-1', scope: 'answer', turnId: 't2', target: 'clipboard' }, null))
+    .rejects.toThrow('This turn has not completed');
+  await expect(exportSessionMarkdown({ id: 'session-1', scope: 'answer', turnId: 't2', target: 'file' }, null))
+    .rejects.toThrow('This turn has not completed');
+  expect(electron.clipboard.writeText).not.toHaveBeenCalled();
+  expect(electron.dialog.showSaveDialog).not.toHaveBeenCalled();
   await exportSessionMarkdown({ id: 'session-1', scope: 'latest', target: 'clipboard' }, null);
   expect(electron.clipboard.writeText).toHaveBeenLastCalledWith('The first part, and the rest of the answer.\n');
   store.readEvents.mockResolvedValue([...events, ...later, { seq: 8, time: 8, source: 'extension', kind: 'turn_end', turnId: 't2', outcome: 'completed' }] as SessionEvent[]);
+  await exportSessionMarkdown({ id: 'session-1', scope: 'answer', turnId: 't2', target: 'clipboard' }, null);
+  expect(electron.clipboard.writeText).toHaveBeenLastCalledWith('Done now\n');
   await exportSessionMarkdown({ id: 'session-1', scope: 'latest', target: 'clipboard' }, null);
   expect(electron.clipboard.writeText).toHaveBeenLastCalledWith('Done now\n');
+});
+
+it.each(['clipboard', 'file'] as const)('recovers drawing overflow for %s only after a reopened answer completes again', async target => {
+  const markdown = '| Item | Qty |\n|---|---|';
+  const html = '<div data-d-component="table"><table><tr><td>Item</td><td>Qty</td></tr>' +
+    '<tr><td>Rice</td><td>1 kg</td></tr></table></div>';
+  const reopened = [events[0]!,
+    { ...events[1]!, message: { text: '| Item', truncated: true, chars: markdown.length, assetId: 'abcdef12.txt' },
+      renderedHtml: { text: html.slice(0, 20), truncated: true, chars: html.length, assetId: 'abcdef34.txt' } },
+    events[2]!, { seq: 4, time: 4, source: 'app', kind: 'turn_start', turnId: 't1' }
+  ] as SessionEvent[];
+  store.readEvents.mockResolvedValue(reopened);
+  store.readOverflowText.mockResolvedValue(markdown);
+  store.readAsset.mockResolvedValue(Buffer.from(html));
+  electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/downloads/table.md' });
+  const request = { id: 'session-1', scope: 'answer' as const, turnId: 't1', target };
+  await expect(exportSessionMarkdown(request, null)).rejects.toThrow('This turn has not completed');
+  expect(store.readOverflowText).not.toHaveBeenCalled();
+  expect(store.readAsset).not.toHaveBeenCalled();
+  expect(electron.clipboard.writeText).not.toHaveBeenCalled();
+  expect(electron.dialog.showSaveDialog).not.toHaveBeenCalled();
+  expect(files.replaceFile).not.toHaveBeenCalled();
+  expect(logger.logWarn).toHaveBeenCalledExactlyOnceWith('Markdown export: answer refused because its turn has not completed');
+
+  store.readEvents.mockResolvedValue([...reopened,
+    { seq: 5, time: 5, source: 'extension', kind: 'turn_end', turnId: 't1', outcome: 'completed' }]);
+  await exportSessionMarkdown(request, null);
+  expect(store.readOverflowText).toHaveBeenCalledWith('session-1', 'abcdef12.txt');
+  expect(store.readAsset).toHaveBeenCalledWith('session-1', 'abcdef34.txt', 32 * 1024 * 1024);
+  const answer = `${markdown}\n| Rice | 1 kg |\n`;
+  if (target === 'clipboard') expect(electron.clipboard.writeText).toHaveBeenCalledExactlyOnceWith(answer);
+  else expect(files.replaceFile).toHaveBeenCalledExactlyOnceWith('/downloads/table.md', answer, 'Markdown export');
 });
