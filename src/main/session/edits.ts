@@ -19,8 +19,9 @@ export async function replacedQuestion(sessionId: string, messageId: string, par
   const firstSeen = new Map<string, { at: number; parentId?: string; time: number }>();
   for (const event of events) {
     if (event.kind === 'assistant_message') {
-      if (event.messageId === parentId || event.providerMessageId === parentId) {
-        parentSettledAt = Math.max(parentSettledAt, residenceOf(event));
+      if ((event.messageId === parentId || event.providerMessageId === parentId) &&
+          (event.final === true || event.state === 'final')) {
+        parentSettledAt = Math.max(parentSettledAt, residenceOf({ ...event, final: true }));
       }
       continue;
     }
@@ -61,9 +62,9 @@ export async function noteEditReplacement(sessionId: string, messageId: string, 
   if (delivered.size > 256) delivered.delete(delivered.keys().next().value!);
   const recorded = (await readEvents(sessionId, { kinds: ['user_message'] }))
     .filter(event => event.kind === 'user_message' && event.messageId === messageId).at(-1);
-  if (recorded?.kind !== 'user_message' || recorded.replaces) return;
+  if (recorded?.kind !== 'user_message' || (recorded.replacesConfirmed === true && recorded.replaces === replaced)) return;
   const { seq: _seq, ...event } = recorded;
-  await upsertMessageEvent(sessionId, { ...event, replaces: replaced });
+  await upsertMessageEvent(sessionId, { ...event, replaces: replaced, replacesConfirmed: true });
 }
 
 export function resetEditsForTests(): void {
