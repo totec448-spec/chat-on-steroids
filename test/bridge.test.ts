@@ -18950,7 +18950,7 @@ describe('native ChatGPT Project for a new CoS project', () => {
     const file = path.join(dir, 'state', 'projects.json');
     const saved = await fs.readFile(file, 'utf8');
     const input = await import('../src/main/session/input.js');
-    await input.enqueueInput({ id: randomUUID(), projectId: project.id, sessionId: null, text: 'Project input', mode: 'auto', dueAt: 0, model: null, reasoningEffort: null });
+    const projectInput = await input.enqueueInput({ id: randomUUID(), projectId: project.id, sessionId: null, text: 'Project input', mode: 'auto', dueAt: 0, model: null, reasoningEffort: null });
     const unrelated = await input.enqueueInput({ id: randomUUID(), projectId: null, sessionId: null, text: 'Unrelated input', mode: 'auto', dueAt: 0, model: null, reasoningEffort: null });
     await fs.writeFile(file, '{"unfinished":');
     try {
@@ -18962,6 +18962,7 @@ describe('native ChatGPT Project for a new CoS project', () => {
       expect(Array.isArray(status.body.stopTurns)).toBe(true);
       expect(Array.isArray(status.body.inputs)).toBe(true);
       expect(status.body.inputs).toContainEqual(expect.objectContaining({ id: unrelated.id }));
+      expect(status.body.inputs).not.toContainEqual(expect.objectContaining({ id: projectInput.id }));
       const pending = await request('POST', '/project-create', { body: { action: 'pending' } });
       expect(pending.status).toBe(200);
       expect(pending.body.requests).toBeNull();

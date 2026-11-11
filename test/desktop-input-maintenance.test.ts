@@ -539,6 +539,26 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     expect(h.sendMessage.mock.calls.some(([, message]) => message.type === 'clf-project-create-state')).toBe(false);
   });
 
+  it('clears the project helper owner when the catalog returns a valid empty list', async () => {
+    const owner = { id: firstId, tab: 7, openedAt: Date.now() };
+    const h = await worker([], undefined, {}, { projectCreateOwner: owner });
+    h.tabs.push({ id: owner.tab, url: `https://chatgpt.com/projects?cos-project-create=${owner.id}` });
+    h.sendMessage.mockImplementation(async (_tabId, message) => ({
+      ok: true, ready: true, safe: message.type === 'clf-project-create-state',
+    }));
+    const original = h.fetch.getMockImplementation()!;
+    h.fetch.mockImplementation(async (url, init) => {
+      const reply = await original(url, init);
+      if (new URL(url).pathname !== '/status') return reply;
+      return { ...reply, json: async () => ({ ...(await reply.json() as object), projectCreateRequests: [] }) };
+    });
+    await h.maintain();
+    // Project inspection runs separately from the awaited desktop-input pass.
+    await vi.waitFor(() => expect(h.saved).not.toHaveProperty('projectCreateOwner'), { timeout: 5_000 });
+    expect(h.sendMessage).toHaveBeenCalledWith(owner.tab, { type: 'clf-project-create-state', id: owner.id });
+    expect(h.remove).toHaveBeenCalledWith(owner.tab);
+  });
+
   it.each(['complete', 'loading'] as const)('reports a linked Project ChatGPT no longer opens when its tab ends on the home page (%s)', async status => {
     const project = `g-p-${'e'.repeat(32)}`;
     const h = await worker([{ id: firstId, conversationId: null, project }], undefined, { inputOpenings: { [firstId]: { tab: 7, stage: 'ready', project } } });
