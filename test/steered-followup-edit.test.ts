@@ -18,24 +18,24 @@ describe('steered follow-up edit attribution', () => {
       await saveConfig({ ...defaultConfig(), sessions: { ...defaultConfig().sessions, record: true } });
       resetSessionStoreForTests();
       resetEditsForTests();
-      const conversationId = '69d626f4-b5ec-8385-816e-145fc405d198';
+      const conversationId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
       const session = await createSession({ title: 'Steered continuation', conversationId });
 
       // Turn 4 opens and creates the final_answer container before the user steers:
       await upsertMessageEvent(session.id, {
         kind: 'user_message', time: T0, source: 'extension',
-        messageId: '679fdbcc-7989-4e80-a00f-fe3b3dcb2f29',
+        messageId: 'question-initial',
         parentId: 'a0000000-0000-4000-8000-000000000001',
         message: text('Initial question')
       });
       await appendEvent(session.id, {
-        kind: 'turn_start', time: T0 + 10, source: 'extension', turnId: 'g-10uer7kwcef0o-0-4'
+        kind: 'turn_start', time: T0 + 10, source: 'extension', turnId: 'continued-first'
       });
       await upsertMessageEvent(session.id, {
         kind: 'assistant_message', time: T0 + 20, source: 'extension',
-        turnId: 'g-10uer7kwcef0o-0-4',
-        messageId: 'b50804bf-faf8-4272-8f1d-48b16674a51c',
-        providerMessageId: 'b50804bf-faf8-4272-8f1d-48b16674a51c',
+        turnId: 'continued-first',
+        messageId: 'answer-consolidated',
+        providerMessageId: 'answer-consolidated',
         message: text('First half of consolidated answer'),
         state: 'streaming', final: false
       });
@@ -43,71 +43,71 @@ describe('steered follow-up edit attribution', () => {
       // User steers while Turn 4 is still running; Turn 4 ends with continued: true and Turn 5 starts:
       await upsertMessageEvent(session.id, {
         kind: 'user_message', time: T0 + 30, source: 'extension',
-        messageId: '05a235d9-231e-487a-9257-76469eb9b5f9',
-        parentId: 'b50804bf-faf8-4272-8f1d-48b16674a51c',
+        messageId: 'question-steer',
+        parentId: 'answer-consolidated',
         message: text('Steered follow-up')
       });
       await appendEvent(session.id, {
         kind: 'turn_end', time: T0 + 31, source: 'extension',
-        turnId: 'g-10uer7kwcef0o-0-4', outcome: 'completed', continued: true
+        turnId: 'continued-first', outcome: 'completed', continued: true
       });
       await appendEvent(session.id, {
-        kind: 'turn_start', time: T0 + 32, source: 'extension', turnId: 'g-10uer7kwcef0o-0-5'
+        kind: 'turn_start', time: T0 + 32, source: 'extension', turnId: 'continued-terminal'
       });
 
       // ChatGPT appends the continuation's answer to the same final_answer message and completes Turn 5:
       await upsertMessageEvent(session.id, {
         kind: 'assistant_message', time: T0 + 50, source: 'extension',
-        turnId: 'g-10uer7kwcef0o-0-5',
-        messageId: 'b50804bf-faf8-4272-8f1d-48b16674a51c',
-        providerMessageId: 'b50804bf-faf8-4272-8f1d-48b16674a51c',
+        turnId: 'continued-terminal',
+        messageId: 'answer-consolidated',
+        providerMessageId: 'answer-consolidated',
         message: text('First half of consolidated answer\n\nContinuation answer.'),
         state: 'final', final: true
       });
       await appendEvent(session.id, {
         kind: 'turn_end', time: T0 + 51, source: 'extension',
-        turnId: 'g-10uer7kwcef0o-0-5', outcome: 'completed'
+        turnId: 'continued-terminal', outcome: 'completed'
       });
 
       // When the queued message for the next turn is sent under the consolidated final answer parentId,
       // it must not be marked as replacing the steered message:
       const replacement = await replacedQuestion(
         session.id,
-        '648133a5-c219-4adb-b634-340a193fa636',
-        'b50804bf-faf8-4272-8f1d-48b16674a51c'
+        'question-next',
+        'answer-consolidated'
       );
       expect(replacement).toEqual({});
 
-      // Even if a pre-fix shard on disk carried `replaces: "05a235d9-..."`, reopening the session cleans it:
+      // Even if a pre-fix shard on disk carried `replaces: "question-steer"`, reopening the session cleans it:
       await upsertMessageEvent(session.id, {
         kind: 'user_message', time: T0 + 60, source: 'extension',
-        messageId: '648133a5-c219-4adb-b634-340a193fa636',
-        parentId: 'b50804bf-faf8-4272-8f1d-48b16674a51c',
-        replaces: '05a235d9-231e-487a-9257-76469eb9b5f9',
+        messageId: 'question-next',
+        parentId: 'answer-consolidated',
+        replaces: 'question-steer',
         message: text('Queued next question')
       });
       // A genuine later edit of the post-continuation question under the same parentId still records `replaces`:
       const genuineEdit = await replacedQuestion(
         session.id,
-        '778133a5-c219-4adb-b634-340a193fa637',
-        'b50804bf-faf8-4272-8f1d-48b16674a51c'
+        'question-next-edited',
+        'answer-consolidated'
       );
-      expect(genuineEdit).toEqual({ replaces: '648133a5-c219-4adb-b634-340a193fa636' });
+      expect(genuineEdit).toEqual({ replaces: 'question-next' });
       await upsertMessageEvent(session.id, {
         kind: 'user_message', time: T0 + 70, source: 'extension',
-        messageId: '778133a5-c219-4adb-b634-340a193fa637',
-        parentId: 'b50804bf-faf8-4272-8f1d-48b16674a51c',
+        messageId: 'question-next-edited',
+        parentId: 'answer-consolidated',
         ...genuineEdit,
         message: text('Edited next question')
       });
       resetSessionStoreForTests();
       const loaded = await readEvents(session.id, { kinds: ['user_message'] });
-      const queued = loaded.find(e => e.kind === 'user_message' && e.messageId === '648133a5-c219-4adb-b634-340a193fa636');
+      const queued = loaded.find(e => e.kind === 'user_message' && e.messageId === 'question-next');
       expect(queued?.kind).toBe('user_message');
       expect(queued?.kind === 'user_message' ? queued.replaces : undefined).toBeUndefined();
-      const edited = loaded.find(e => e.kind === 'user_message' && e.messageId === '778133a5-c219-4adb-b634-340a193fa637');
+      const edited = loaded.find(e => e.kind === 'user_message' && e.messageId === 'question-next-edited');
       expect(edited?.kind).toBe('user_message');
-      expect(edited?.kind === 'user_message' ? edited.replaces : undefined).toBe('648133a5-c219-4adb-b634-340a193fa636');
+      expect(edited?.kind === 'user_message' ? edited.replaces : undefined).toBe('question-next');
     } finally {
       resetSessionStoreForTests();
       unsetSessionRootForTests();
