@@ -1,4 +1,5 @@
 import { expect, it } from 'vitest';
+import { Lexer } from 'marked';
 import type { SessionEvent } from '../src/shared/session.js';
 import { chronological } from '../src/shared/chronology.js';
 import {
@@ -181,4 +182,25 @@ it('names files safely from chat titles', () => {
   expect(markdownFileName(`${prefix}🧪 test`)).toBe(`${prefix}.md`);
   expect(markdownFileName(`${'x'.repeat(78)}🧪 test`)).toBe(`${'x'.repeat(78)}🧪.md`);
   expect(markdownFileName(`${prefix}🧪 test`, ' - answer')).toBe(`${prefix} - answer.md`);
+});
+
+it.each(['\n', '\r\n'])('preserves first-line code indentation in answers and assistant transcripts (%j)', newline => {
+  const code = ['    - ```markdown', '    | Item | Qty |', '    |---|---|'].join(newline);
+  const source = `${newline} \t${newline}${code}${newline}${newline}`;
+  expect(answerMarkdown([source])).toBe(`${code}\n`);
+  expect(sessionMarkdown('Code', [{ role: 'assistant', text: source }])).toBe(`# Code\n\n## ChatGPT\n\n${code}\n`);
+  expect(answerMarkdown([' \t\n', '', 'Done.  '])).toBe('Done.\n');
+});
+
+it.each(['- Notes', '1. Notes', 'Notes'])('keeps the next message’s indented code outside %j', previous => {
+  for (const newline of ['\n', '\r\n']) {
+    for (const indent of ['    ', '\t', ' \t']) {
+      const code = `${indent}echo *text*`;
+      const markdown = answerMarkdown([`${previous}${newline}`, ' \t\n', `${newline}${code}${newline}`]);
+      const blocks = Lexer.lex(markdown).filter(token => token.type !== 'space' && token.type !== 'html');
+      expect(blocks.map(token => token.type)).toEqual([previous === 'Notes' ? 'paragraph' : 'list', 'code']);
+      expect(blocks[1]).toMatchObject({ text: 'echo *text*\n' });
+      expect(markdown).toBe(`${previous}\n\n<!-- -->\n\n${code}\n`);
+    }
+  }
 });
