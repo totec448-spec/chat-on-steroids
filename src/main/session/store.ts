@@ -1409,7 +1409,7 @@ function continuesFinalText(previous: StoredText, next: StoredText): boolean {
 export function upsertMessageEvent(
   sessionId: string,
   event: NewMessageEvent,
-  options: { preferTime?: boolean; work?: boolean } = {}
+  options: { preferTime?: boolean; work?: boolean; replacementOnly?: true } = {}
 ): Promise<{ event: MessageEvent; changed: boolean; contentChanged: boolean }> {
   const directKey = messageKey(event as MessageEvent);
   if (!directKey) throw new Error('Canonical message update requires ChatGPT messageId');
@@ -1427,6 +1427,12 @@ export function upsertMessageEvent(
       const key = !entry.messages.has(directKey) && providerMatches.length === 1 ? providerMatches[0]![0] : directKey;
       const candidate = entry.messages.get(key);
       const previous = candidate?.kind === 'tool_call' ? undefined : candidate;
+      // Confirmation follows a history read. A native revision may have queued since
+      // that snapshot; apply only its replacement evidence to the current user row.
+      if (options.replacementOnly && previous?.kind === 'user_message' && event.kind === 'user_message') {
+        const { seq: _seq, ...current } = previous;
+        event = { ...current, replaces: event.replaces, replacesConfirmed: event.replacesConfirmed };
+      }
       // A changed provider timestamp caused this alias; it is not a correction of
       // the original anchor. Same-key DOM-to-Fiber timestamp promotion still applies.
       const preferTime = options.preferTime === true && key === directKey;

@@ -89,6 +89,25 @@ describe('replacement evidence at review boundaries', () => {
     });
   });
 
+  it('confirms an edit without overwriting a native revision queued after the recovery read', async () => {
+    const session = await createSession({ title: 'Concurrent edit confirmation' });
+    await upsertMessageEvent(session.id, { kind: 'user_message', source: 'app', time: T0,
+      messageId: 'edited', message: text('Earlier body') });
+    const write = sessionStore.upsertMessageEvent;
+    vi.spyOn(sessionStore, 'upsertMessageEvent').mockImplementationOnce((id, event, options) => {
+      const revision = write(id, { kind: 'user_message', source: 'extension', time: T0 + 1,
+        messageId: 'edited', message: text('Latest native body'), reaction: 'heart' });
+      const confirmation = write(id, event, options);
+      return Promise.all([revision, confirmation]).then(([, result]) => result);
+    });
+    await noteEditReplacement(session.id, 'edited', 'original');
+    resetSessionStoreForTests();
+    expect((await readEvents(session.id, { kinds: ['user_message'] })).find(event =>
+      event.kind === 'user_message' && event.messageId === 'edited')).toMatchObject({
+      message: text('Latest native body'), reaction: 'heart', replaces: 'original', replacesConfirmed: true
+    });
+  });
+
   it('continues recovering peer edits after one canonical confirmation write fails', async () => {
     const session = await createSession({ title: 'Independent edit recovery', conversationId: randomUUID() });
     const receipts: InputEntry[] = [];

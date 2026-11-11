@@ -5100,7 +5100,9 @@ was sent mid-turn. The optional field is absent in old recordings; malformed val
 establish confirmation. The outbox's durable edit receipt restores confirmation after restart,
 including when history was recorded before the native echo. Recovery groups receipts by session
 and scans each affected history once. Pending native echoes retain their edit hints; a failed
-receipt does not block its peers. Delivered-history projection writes the same confirmed link
+receipt does not block its peers. Confirmation changes only replacement metadata on the current
+user record inside the session write queue, preserving native content revisions queued after
+the recovery read. Delivered-history projection writes the same confirmed link
 without depending on the process-local edit cache. No extension wire format changes.
 Past a `continued` end, a call of that request that *started*
 after the end is filed under the turn that began then, and the request's ownership moves there
