@@ -1,13 +1,119 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { SessionEvent } from '../src/shared/session.js';
 import { appendEvent, createSession, initSessionStore, readEvents, resetSessionStoreForTests, unsetSessionRootForTests, upsertMessageEvent } from '../src/main/session/store.js';
-import { replacedQuestion, resetEditsForTests } from '../src/main/session/edits.js';
+import { noteEditReplacement, replacedQuestion, resetEditsForTests } from '../src/main/session/edits.js';
+import { flushRecorder, recordChatObservations, resetRecorderForTests } from '../src/main/session/recorder.js';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 const T0 = 1793454400000;
 const text = (text: string) => ({ text, truncated: false, chars: text.length });
+
+describe('replacement evidence at review boundaries', () => {
+  let directory: string;
+  beforeEach(async () => {
+    directory = await fs.mkdtemp(path.join(os.tmpdir(), 'cos-edit-evidence-'));
+    initConfigPath(directory);
+    initSessionStore(directory);
+    resetSessionStoreForTests();
+    resetEditsForTests();
+    resetRecorderForTests();
+    await saveConfig(defaultConfig());
+  });
+  afterEach(async () => {
+    await flushRecorder();
+    resetRecorderForTests();
+    resetEditsForTests();
+    resetSessionStoreForTests();
+    unsetSessionRootForTests();
+    await fs.rm(directory, { recursive: true, force: true });
+  });
+
+  for (const parent of ['missing', 'streaming'] as const) {
+    async function questionWithLateParent() {
+      const session = await createSession({ title: 'Edit evidence' });
+      await upsertMessageEvent(session.id, { kind: 'user_message', source: 'extension', time: T0,
+        messageId: 'original', parentId: 'parent', message: text('Original question') });
+      if (parent === 'streaming') {
+        await upsertMessageEvent(session.id, { kind: 'assistant_message', source: 'extension', time: T0 + 10,
+          messageId: 'parent', message: text('Still working'), state: 'streaming', final: false });
+      }
+      return session;
+    }
+    it(`keeps a question eligible for an edit with a ${parent} parent`, async () => {
+      const session = await questionWithLateParent();
+      expect(await replacedQuestion(session.id, 'edited', 'parent')).toEqual({ replaces: 'original' });
+    });
+    it(`preserves a saved replacement with a ${parent} parent`, async () => {
+      const session = await questionWithLateParent();
+      await upsertMessageEvent(session.id, { kind: 'user_message', source: 'extension', time: T0 + 20,
+        messageId: 'edited', parentId: 'parent', replaces: 'original', message: text('Edited question') });
+      resetSessionStoreForTests();
+      expect((await readEvents(session.id, { kinds: ['user_message'] })).find(event =>
+        event.kind === 'user_message' && event.messageId === 'edited')).toMatchObject({ replaces: 'original' });
+    });
+  }
+
+  it.each(['before', 'after'] as const)('keeps an app-confirmed edit across reopen when acknowledged %s its native echo', async timing => {
+    const conversationId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const session = await createSession({ title: 'Confirmed edit', conversationId });
+    await upsertMessageEvent(session.id, { kind: 'assistant_message', source: 'extension', time: T0,
+      messageId: 'parent', message: text('Working'), state: 'streaming', final: false });
+    await upsertMessageEvent(session.id, { kind: 'user_message', source: 'extension', time: T0 + 10,
+      messageId: 'steer', parentId: 'parent', message: text('Steered question') });
+    await upsertMessageEvent(session.id, { kind: 'assistant_message', source: 'extension', time: T0 + 20,
+      messageId: 'parent', message: text('Finished'), state: 'final', final: true });
+    if (timing === 'before') await noteEditReplacement(session.id, 'edited', 'steer');
+    else {
+      // The native observation may already have inferred this same link before its ACK arrives.
+      await upsertMessageEvent(session.id, { kind: 'user_message', source: 'extension', time: T0 + 30,
+        messageId: 'edited', parentId: 'parent', replaces: 'steer', message: text('Edited steering question') });
+      await noteEditReplacement(session.id, 'edited', 'steer');
+    }
+    await recordChatObservations(conversationId, [{ kind: 'user_message', time: T0 + 30,
+      messageId: 'edited', parentId: 'parent', parentExact: true, text: 'Edited steering question' }]);
+    // A sparse replay cannot erase the durable confirmation.
+    await upsertMessageEvent(session.id, { kind: 'user_message', source: 'extension', time: T0 + 30,
+      messageId: 'edited', parentId: 'parent', message: text('Edited steering question') });
+    await flushRecorder();
+    resetRecorderForTests();
+    resetEditsForTests();
+    resetSessionStoreForTests();
+    expect((await readEvents(session.id, { kinds: ['user_message'] })).find(event =>
+      event.kind === 'user_message' && event.messageId === 'edited')).toMatchObject({ replaces: 'steer' });
+  });
+
+  it('lets an exact edit acknowledgement correct an earlier inferred target', async () => {
+    const session = await createSession({ title: 'Confirmed replacement target' });
+    await upsertMessageEvent(session.id, { kind: 'user_message', source: 'extension', time: T0,
+      messageId: 'edited', replaces: 'inferred-target', message: text('Edited question') });
+    await noteEditReplacement(session.id, 'edited', 'confirmed-target');
+    resetEditsForTests();
+    resetSessionStoreForTests();
+    expect((await readEvents(session.id, { kinds: ['user_message'] })).find(event =>
+      event.kind === 'user_message' && event.messageId === 'edited')).toMatchObject({ replaces: 'confirmed-target' });
+  });
+
+  it('repairs a legacy false replacement even when its confirmation value is damaged', async () => {
+    const session = await createSession({ title: 'Damaged confirmation' });
+    const events = [
+      { kind: 'user_message', source: 'extension', time: T0, seq: 1,
+        messageId: 'steer', parentId: 'parent', message: text('Steered question') },
+      { kind: 'assistant_message', source: 'extension', time: T0 + 10, seq: 2,
+        messageId: 'parent', message: text('Completed answer'), final: true, state: 'final' },
+      { kind: 'user_message', source: 'extension', time: T0 + 20, seq: 3,
+        messageId: 'next', parentId: 'parent', replaces: 'steer', replacesConfirmed: 'yes', message: text('Next question') }
+    ];
+    await fs.writeFile(path.join(directory, 'sessions', session.id, 'messages.json'),
+      JSON.stringify(Object.fromEntries(events.map(event => [`${event.kind}\u0000${event.messageId}`, event]))));
+    resetSessionStoreForTests();
+    const next = (await readEvents(session.id, { kinds: ['user_message'] })).find(event =>
+      event.kind === 'user_message' && event.messageId === 'next');
+    expect(next).toMatchObject({ messageId: 'next' });
+    expect(next).not.toHaveProperty('replaces');
+  });
+});
 
 describe('steered follow-up edit attribution', () => {
   it('keeps a follow-up under the settled consolidated parent separate while preserving real edits', async () => {

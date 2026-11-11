@@ -397,6 +397,8 @@ export type SessionEvent =
       parentId?: string;
       /** Edit & resubmit (#365): the question this one is a later version of, in ChatGPT's own edit. */
       replaces?: string;
+      /** The app acknowledged this exact edit; read-time inference cannot revoke its replacement link. */
+      replacesConfirmed?: true;
       /** A Goal or Loop follow-up its page typed: the app's message, not the person's (#1655). */
       automatic?: true;
       attachments?: import('./input.js').InputAttachment[];

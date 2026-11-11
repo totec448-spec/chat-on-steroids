@@ -5086,7 +5086,12 @@ answers, unfinished means no `end_turn`: interim prose alone does not make the a
 A turn that ended with its answer is never marked. A question sent after a shared assistant
 parent settles follows a mid-turn question sent before that settlement; it is not an edit of
 that question. Saved replacement repair reads the merged canonical parent, including provider
-timestamp aliases. Actual edits made after the parent settled keep their replacement link.
+timestamp aliases. Missing or streaming parents cannot prove settlement. An app-acknowledged
+edit records `replacesConfirmed: true` on its canonical user message, whether the ACK precedes
+or follows its native echo. Store merges retain that confirmation across sparse observations
+and restart; inferred-replacement repair cannot remove its link, even when the edited question
+was sent mid-turn. The optional field is absent in old recordings; malformed values do not
+establish confirmation. No extension wire format changes.
 Past a `continued` end, a call of that request that *started*
 after the end is filed under the turn that began then, and the request's ownership moves there
 (`continuedRequestTurn` in `shared/chronology.ts`, live in `recordToolCall` and in the rebuild);
