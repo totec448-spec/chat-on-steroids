@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { liveConversations, recordChatObservations, recordToolCall, resetRecorderForTests } from '../src/main/session/recorder.js';
 import { appendEvent, flushSessions, getSession, initSessionStore, readActivityEvents, readCompletedFinal,
-  readEvents, readLatestUserMessage, readRecoveryBoundary, resetSessionStoreForTests, sessionsRoot } from '../src/main/session/store.js';
+  readEvents, readLatestUserMessage, readRecoveryBoundary, resetSessionStoreForTests, sessionsRoot, upsertMessageEvent } from '../src/main/session/store.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
 let dir: string;
@@ -176,6 +176,38 @@ describe('one native response observed in two documents', () => {
     expect(await readCompletedFinal(id, chat, second)).not.toBeNull();
     expect(liveConversations().find(row => row.conversationId === chat)?.generating).toBe(false);
     expect((await getSession(id))?.activeTurnId).toBeNull();
+  });
+
+  it('does not let an earlier final close a same-question retry after a late call joins their ids', async () => {
+    const at = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(at);
+    const opened = await recordChatObservations(chat, [
+      { kind: 'user_message', time: at, messageId: 'retry-question', text: 'Write the report.' },
+      { kind: 'turn_start', time: at + 1, turnId: first }
+    ]);
+    const id = opened.sessionId!;
+    clock.mockReturnValue(at + 10);
+    await recordToolCall({ conversationId: chat, requestId, tool: 'read', args: {},
+      content: [{ type: 'text', text: 'first attempt' }], outcome: 'ok', durationMs: 1, startedAt: at + 10 });
+    clock.mockReturnValue(at + 15);
+    await upsertMessageEvent(id, { kind: 'assistant_message', time: Date.now(), source: 'extension', turnId: first,
+      messageId: 'retry-answer', providerMessageId: '33333333-4444-4555-8666-777777777777',
+      message: stored('Earlier attempt completed.'), final: true, state: 'final' });
+
+    // The retry starts before the earlier turn's end arrives. A late call from the old request
+    // is attributed to the retry and makes both local ids look like one response.
+    clock.mockReturnValue(at + 20);
+    await recordChatObservations(chat, [{ kind: 'turn_start', time: Date.now(), turnId: second }]);
+    clock.mockReturnValue(at + 30);
+    await recordToolCall({ conversationId: chat, requestId, tool: 'read', args: {},
+      content: [{ type: 'text', text: 'late earlier-request call' }], outcome: 'ok', durationMs: 1, startedAt: at + 30 });
+    clock.mockReturnValue(at + 35);
+    await recordChatObservations(chat, [{ kind: 'turn_end', time: Date.now(), turnId: first, outcome: 'completed' }]);
+
+    const summary = await getSession(id);
+    expect(summary?.timelineTurns?.[second]?.responseTurnId).toBe(first);
+    expect(summary?.activeTurnId).toBe(second);
+    expect(await readCompletedFinal(id, chat, second)).toBeNull();
   });
 
   it.each(['newQuestion', 'newRequest', 'endedBefore'] as const)('keeps distinct response boundaries separate (%s)', async variant => {

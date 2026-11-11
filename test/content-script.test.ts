@@ -9968,6 +9968,27 @@ describe('a stop button that goes missing while the turn is still running', () =
     ]);
     expect(emitted(live.sent, 'turn_end')[0]!.event.continued).toBeUndefined();
     expect(emitted(live.sent, 'turn_start')).toHaveLength(2);
+
+    // React can remount the old terminal answer after the next question. It was already
+    // consumed as the boundary that closed the first generation and must not close the new one.
+    section.remove();
+    const remounted = assistantTurn(live.document, 'terminal-before-text', []);
+    const oldTerminal = { turnId: 'terminal-before-text', endMessageId: 'old-final', messages: [], activities: [] };
+    await bindFiberTurns([{ section: remounted, turn: oldTerminal }]);
+    live.hook.observe(); await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(1);
+
+    const next = assistantTurn(live.document, 'next-after-terminal-answer', []);
+    await bindFiberTurns([
+      { section: remounted, turn: oldTerminal },
+      { section: next, turn: { turnId: 'next-after-terminal-answer', endMessageId: 'next-final', messages: [], activities: [] } }
+    ]);
+    live.hook.observe(); await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(2);
+    expect(emitted(live.sent, 'turn_end')[1]!.event).toMatchObject({
+      turnId: emitted(live.sent, 'turn_start')[1]!.event.turnId,
+      outcome: 'completed'
+    });
   });
 
   it('marks continued the end of a turn with only interim prose when a message arrives before end_turn (#1301)', async () => {

@@ -3070,6 +3070,10 @@
       const result = quietOutcome && quietOutcome.outcome !== 'unknown' ? quietOutcome : fresh;
       const endedFinal = ended && fiberTurnFor(ended)?.endMessageId;
       const endedTerminal = Boolean(endedFinal && !settledFinals.has(endedFinal) && !approvalHolding());
+      if (endedTerminal) {
+        // This terminal closed the prior generation; a later React remount must not close the next one.
+        settledFinals.add(endedFinal);
+      }
       // A new user message is an actual boundary, unlike a disappearing Stop control. Once
       // that boundary is proven, exact Fiber terminal evidence or authored prose classifies
       // the old turn as completed when no stronger failure/interruption/stall outcome exists.
