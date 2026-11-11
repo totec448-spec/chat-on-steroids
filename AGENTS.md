@@ -5225,6 +5225,10 @@ Captured ChatGPT HTML passes a strict allowlist; authored plain text stays text.
 citation ranges use Unicode code points and map to UTF-16 before slicing. Exact uploaded-file
 names render as plain chips; unresolved file citations do not gain invented local links.
 Plain text leaving the timeline (Markdown export, search index and snippets, turn notifications and `modelFacingText` for Goal/Loop and completed answers) passes `providerEntitiesAsMarkdown` first: the raw text's private-use entities (U+E200 name U+E202 field … U+E201) become `[label](address)` for `url` and are dropped otherwise, so a link card never reads as "urlLabelhttps://…".
+Answer actions, direct answer export and `/copy` share `shared/markdown-export.ts::completedTurnIds`:
+a later-sequence `turn_start` revokes completion until that same turn ends as `completed` again.
+Boundary sequence numbers, not display order, decide this even when chronology regroups the starts. Older
+completed turns and final messages recorded outside a turn remain available; whole-chat export is unchanged.
 Copy and Markdown/HTML export read overflow for both the answer text and its recorded drawing
 through `session/markdown-export.ts::fullText` before filling DIL table rows. Recovery is serialized
 across copy/export/preview calls so only one item owns large asset buffers at a time; rejection
