@@ -260,6 +260,17 @@ it.each([4, 5])('keeps code labels after a lazy list continuation and a fence at
   expect(renderedMarkdown(source, drawing).querySelector('pre code')?.textContent).toContain('[コピー]');
 });
 
+it.each(['\n', '\r\n'])('completes the real table after a quoted fence in the same list item (%j)', newline => {
+  const example = ['- > ```markdown', ...header.split('\n').map(line => '  > ' + line), '  > ```'];
+  const source = [...example, '', ...header.split('\n').map(line => '  ' + line)].join(newline);
+  const markup = table([['米', '1 kg']]);
+  const drawing = { text: markup, truncated: false, chars: markup.length };
+  expect(completedDilText(source, drawing)).toBe(source + '\n  | 米 | 1 kg |');
+  const rendered = renderedMarkdown(source, drawing);
+  expect(rendered.querySelector('li blockquote pre code')?.textContent?.trim()).toBe(header);
+  expect(rendered.querySelector('li table tbody')?.textContent).toContain('米');
+});
+
 it.each(['\n', '\r\n'])('completes a real list table after lazy continuation without changing code indentation (%j)', newline => {
   for (const spaces of [4, 5]) {
     const indent = ' '.repeat(spaces);
