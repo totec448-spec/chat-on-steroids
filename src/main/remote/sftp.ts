@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
+import { logInfo } from '../logger.js';
 import type { Readable, Writable } from 'node:stream';
 
 /**
@@ -371,6 +372,10 @@ export class SftpClient {
     }
     try { await this.rename(from, to); return; }
     catch (first) {
+      // Plain SFTP v3 answers "the target exists" with a failure or a permission status. Any other refusal
+      // (the staged file missing, a dropped connection) is not a reason to move the original anywhere.
+      if (!['EIO', 'EACCES'].includes((first as SftpError).code)) throw first;
+      logInfo(`sftp: the server refused to rename over ${path.posix.basename(to)} (${(first as SftpError).code}); moving the original aside and retrying`);
       const backup = path.posix.join(path.posix.dirname(to), `.${path.posix.basename(to)}.cos-${randomBytes(6).toString('hex')}.bak`);
       // Nothing to move aside (no such target, or it cannot be moved): the first refusal stands, nothing was touched.
       try { await this.rename(to, backup); } catch { throw first; }
