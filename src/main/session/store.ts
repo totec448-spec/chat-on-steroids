@@ -792,6 +792,18 @@ async function readCanonicalMessages(id: string, aliasesCollapsed?: () => void):
       time: first.time, seq, turnId: group.find(([, event]) => event.turnId)?.[1].turnId,
       ...(group.some(([, event]) => event.goalEligible === true) ? { goalEligible: true } : {}) });
   }
+  for (const [key, event] of out) {
+    if (event.kind !== 'user_message' || !event.replaces || !event.parentId) continue;
+    const replaced = out.get(`user_message\u0000${event.replaces}`);
+    const parent = out.get(`assistant_message\u0000${event.parentId}`) ?? out.get(providers.get(event.parentId)?.[0]?.[0] ?? '');
+    if (replaced?.kind === 'user_message' && parent?.kind === 'assistant_message') {
+      const parentSettledAt = residenceOf(parent);
+      if (parentSettledAt > positionOf(replaced) && parentSettledAt < positionOf(event)) {
+        const { replaces: _replaces, ...clean } = event;
+        out.set(key, clean);
+      }
+    }
+  }
   return out;
 }
 
