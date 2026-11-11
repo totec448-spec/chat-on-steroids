@@ -533,7 +533,7 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
       return { ...reply, json: async () => ({ ...(await reply.json() as object), projectCreateRequests: null }) };
     });
     await h.maintain();
-    await vi.waitFor(() => expect(h.create).toHaveBeenCalledWith(expect.objectContaining({ url: expect.stringContaining(`cos-input=${secondId}`) })));
+    expect(h.create).toHaveBeenCalledWith(expect.objectContaining({ url: expect.stringContaining(`cos-input=${secondId}`) }));
     expect(h.saved.projectCreateOwner).toEqual(owner);
     expect(h.remove).not.toHaveBeenCalledWith(7);
     expect(h.sendMessage.mock.calls.some(([, message]) => message.type === 'clf-project-create-state')).toBe(false);
