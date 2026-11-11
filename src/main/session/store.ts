@@ -43,7 +43,7 @@ import type {
 import type { WorkerAssignmentSummary } from '../../shared/session.js';
 import { APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT } from '../../shared/approval-wait.js';
 import { continuationMarkerOf, DEFAULT_RECORDING_STORAGE_GIB, eventTokens, MAX_TOOL_RESULT_TOKENS, normalizedToolOutcome, RECORDING_STORAGE_LIMITS_GIB, storedTextTokens, workSequence, UNATTRIBUTED_SESSION_TITLE } from '../../shared/session.js';
-import { applyTurnIdentity, authoredTimeOf, chronological, injectedUserMessage, positionOf, projectTimeline, residenceOf,
+import { applyTurnIdentity, authoredTimeOf, chronological, injectedUserMessage, positionOf, projectTimeline, residenceOf, settledPositionOf,
   recordedRequestTurn, responseTurnId, type Chronological, type TimelineTurns } from '../../shared/chronology.js';
 import { automaticTitle, firstTitleMessage, legacyContextTitle, legacyLabelPending, projectPageTitle, providerTitleIgnored, refreshUserTitle, userTitle } from './title.js';
 import { agentPlanSchema, agentPlanUpdateSchema, MAX_AGENT_PLAN_BYTES, type AgentPlan, type AgentPlanUpdate } from '../../shared/agent-plan.js';
@@ -788,7 +788,14 @@ async function readCanonicalMessages(id: string, aliasesCollapsed?: () => void):
       seq = Math.max(seq, event.seq);
       out.delete(key);
     }
-    out.set(firstKey, { ...latest, messageId: first.messageId, origin: first.origin ?? first.seq,
+    const knownSettlements = group.map(([, event]) => settledPositionOf(event)).filter((at): at is number => at !== undefined);
+    const firstTerminal = group.find(([, event]) => event.final === true || event.state === 'final')?.[1];
+    const firstSettlement = settledPositionOf(first);
+    const settledAtSeq = firstSettlement !== undefined ? Math.min(...knownSettlements)
+      : first.final === false && first.state !== 'final'
+        ? knownSettlements.length ? Math.min(...knownSettlements) : firstTerminal ? positionOf(firstTerminal) : undefined
+        : undefined;
+    out.set(firstKey, { ...latest, messageId: first.messageId, origin: first.origin ?? first.seq, settledAtSeq,
       time: first.time, seq, turnId: group.find(([, event]) => event.turnId)?.[1].turnId,
       ...(group.some(([, event]) => event.goalEligible === true) ? { goalEligible: true } : {}) });
   }
@@ -798,8 +805,8 @@ async function readCanonicalMessages(id: string, aliasesCollapsed?: () => void):
     const parent = out.get(`assistant_message\u0000${event.parentId}`) ?? out.get(providers.get(event.parentId)?.[0]?.[0] ?? '');
     if (replaced?.kind === 'user_message' && parent?.kind === 'assistant_message' &&
         (parent.final === true || parent.state === 'final')) {
-      const parentSettledAt = residenceOf({ ...parent, final: true });
-      if (parentSettledAt > positionOf(replaced) && parentSettledAt < positionOf(event)) {
+      const parentSettledAt = settledPositionOf(parent);
+      if (parentSettledAt !== undefined && parentSettledAt > positionOf(replaced) && parentSettledAt < positionOf(event)) {
         const { replaces: _replaces, ...clean } = event;
         out.set(key, clean);
       }
@@ -1579,7 +1586,10 @@ export function upsertMessageEvent(
           (previous.kind === 'assistant_message' && (previous.final === true || previous.state === 'final') === nextEvent.final))
           ? workSequence(previous) : entry.nextSeq,
         ...(nextEvent.kind === 'assistant_message' && nextEvent.final
-          ? { finalContentSeq: sameMessage && previous?.kind === 'assistant_message' &&
+          ? { settledAtSeq: previous?.kind === 'assistant_message'
+                ? settledPositionOf(previous) ?? (previous.final === false && previous.state !== 'final' ? entry.nextSeq : undefined)
+                : undefined,
+              finalContentSeq: sameMessage && previous?.kind === 'assistant_message' &&
                 (previous.final === true || previous.state === 'final')
               // Old records do not distinguish a content revision from an HTML update.
               // Keep their first anchor until genuinely new final content is observed.

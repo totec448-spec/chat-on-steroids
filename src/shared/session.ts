@@ -444,6 +444,8 @@ export type SessionEvent =
       finalContentSeq?: number;
       /** Local acceptance time of final content; provider time can predate its last tools. */
       finalObservedAt?: number;
+      /** Store-observed streaming-to-final boundary; first-seen finals have no proven settlement order. */
+      settledAtSeq?: number;
       /** First sequence assigned to this logical message; later revisions keep this anchor. */
       origin?: number;
       /** Store-owned text/state revision, including interim progress before the final. */

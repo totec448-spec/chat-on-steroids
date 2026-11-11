@@ -630,6 +630,12 @@ async function load(): Promise<InputEntry[]> {
     // before authoredText existed recover their original visible text too. This
     // is canonical history only; it never reopens transport or resends an input.
     if (row.historyRecorded && row.deliveryText && row.deliveryText !== row.text) row.historyRecorded = false;
+    const editSession = row.sessionId ?? row.deliveredSessionId;
+    if (row.edit && row.messageId && editSession && Number.isFinite(row.deliveredAt) &&
+        (row.state === 'sent' || row.state === 'cancelled')) {
+      await noteEditReplacement(editSession, row.messageId, row.edit.messageId)
+        .catch((err: Error) => logWarn(`input ${row.id}: could not restore the confirmed edit (${err.message})`));
+    }
     if (!row.sessionId && row.purpose !== 'decision' && row.conversationId && row.deliveredAt !== undefined && !stamped.has(row.conversationId)) {
       await noteChatOrigin(row.conversationId, { kind: 'desktop', fromSessionId: null, agentId: null, task: '' });
     }

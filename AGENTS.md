@@ -5086,12 +5086,20 @@ answers, unfinished means no `end_turn`: interim prose alone does not make the a
 A turn that ended with its answer is never marked. A question sent after a shared assistant
 parent settles follows a mid-turn question sent before that settlement; it is not an edit of
 that question. Saved replacement repair reads the merged canonical parent, including provider
-timestamp aliases. Missing or streaming parents cannot prove settlement. An app-acknowledged
+timestamp aliases. Missing or streaming parents cannot prove settlement. A
+parent's first terminal snapshot, or a later revision of already-final text, does not prove
+settlement order either. The canonical store records `settledAtSeq` only when an observed
+streaming message becomes final, and preserves that boundary through later revisions. Legacy
+timestamp aliases can recover it from an explicit streaming-to-final pair; a final-only legacy
+record remains unproven. Replacement inference preserves links when that order is unknown.
+An app-acknowledged
 edit records `replacesConfirmed: true` on its canonical user message, whether the ACK precedes
 or follows its native echo. Store merges retain that confirmation across sparse observations
 and restart; inferred-replacement repair cannot remove its link, even when the edited question
 was sent mid-turn. The optional field is absent in old recordings; malformed values do not
-establish confirmation. No extension wire format changes.
+establish confirmation. The outbox's durable edit receipt restores confirmation after restart,
+including when history was recorded before the native echo; delivered-history projection writes
+the same confirmed link without depending on the process-local edit cache. No extension wire format changes.
 Past a `continued` end, a call of that request that *started*
 after the end is filed under the turn that began then, and the request's ownership moves there
 (`continuedRequestTurn` in `shared/chronology.ts`, live in `recordToolCall` and in the rebuild);

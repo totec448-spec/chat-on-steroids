@@ -30,6 +30,8 @@ export async function recordDeliveredInput(entry: Readonly<InputEntry>, anchorCo
     // Browser delivery uses its exact native key, so a later page echo updates this row.
     // Tool delivery has no native user row and keeps the stable input id as its key.
     messageId, inputId: entry.id, inputDelivery: offered ? 'offered' as const : 'confirmed' as const, authoredText: authoredTextOf(entry),
+    ...(confirmed && entry.edit && !messageId.startsWith('input:') && messageId !== entry.edit.messageId
+      ? { replaces: entry.edit.messageId, replacesConfirmed: true as const } : {}),
     wireTokenEstimate: estimateTokens(text),
     ...(messageId.startsWith('input:') && entry.toolTurnId ? { turnId: entry.toolTurnId } : {}),
     // The chat keeps saying the message was a scheduled run after the outbox row is gone.
