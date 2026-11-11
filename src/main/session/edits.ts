@@ -1,4 +1,4 @@
-import { residenceOf } from '../../shared/chronology.js';
+import { settledPositionOf } from '../../shared/chronology.js';
 import { getSession, readEvents, upsertMessageEvent } from './store.js';
 
 /**
@@ -21,7 +21,7 @@ export async function replacedQuestion(sessionId: string, messageId: string, par
     if (event.kind === 'assistant_message') {
       if ((event.messageId === parentId || event.providerMessageId === parentId) &&
           (event.final === true || event.state === 'final')) {
-        parentSettledAt = Math.max(parentSettledAt, residenceOf({ ...event, final: true }));
+        parentSettledAt = Math.max(parentSettledAt, settledPositionOf(event) ?? 0);
       }
       continue;
     }
