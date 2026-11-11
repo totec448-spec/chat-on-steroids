@@ -37,6 +37,17 @@ describe('continued final completion', () => {
     expect(legacyOrder.indexOf(3)).toBeLessThan(legacyOrder.indexOf(4));
   });
 
+  it('keeps a locally owned final before its end when projected turn metadata is missing', () => {
+    const source: Chronological[] = [
+      { kind: 'turn_start', turnId: 'first', seq: 1, origin: 1, time: T0 },
+      { kind: 'assistant_message', turnId: 'first', seq: 2, origin: 2, time: T0 + 1, final: true },
+      { kind: 'turn_end', turnId: 'first', seq: 3, origin: 3, time: T0 + 2 }
+    ];
+    const projected = projectTimeline<Chronological>(source, {});
+    expect(projected.map(entry => entry.turnOrigin)).toEqual([null, null, null]);
+    expect(chronological(projected).map(entry => entry.seq)).toEqual([1, 2, 3]);
+  });
+
   it('recognizes the consolidated final for the terminal steered continuation', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cos-steer-continued-'));
     try {
@@ -85,7 +96,9 @@ describe('continued final completion', () => {
       // ChatGPT appends the continuation's answer to the same final_answer message and completes Turn 5:
       await upsertMessageEvent(session.id, {
         kind: 'assistant_message', time: T0 + 50, source: 'extension',
-        turnId: 'continued-terminal',
+        // The canonical message retains the first segment's owner; its final revision is
+        // promoted to the continuation by the recorded end boundary and content position.
+        turnId: 'continued-first',
         messageId: 'answer-consolidated',
         providerMessageId: 'answer-consolidated',
         message: text('First half of consolidated answer\n\nContinuation answer.'),
