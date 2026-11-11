@@ -1054,6 +1054,10 @@ it('finds the stop control by its square when the label is translated', () => {
     '<svg class="icon-primary-action" viewBox="0 0 20 20"><path d="M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C15.5 14.9404 14.9404 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z"></path></svg></button>';
   expect(f.api.generating(), 'a translated stop button was not recognised').toBe(true);
   expect(f.api.stopButton()?.getAttribute('aria-label')).toBe('Durdur');
+  form.querySelector('button[type="submit"]')!.remove();
+  expect(f.api.composerText()).toBe('');
+  expect(f.api.generating()).toBe(true);
+  expect(f.api.sendButton(), 'an empty composer with only localized Stop offered Send').toBeNull();
 });
 
 /**
@@ -1173,10 +1177,15 @@ it('finds the send control by its slot when the label is translated', () => {
     '<svg class="icon-primary-action" viewBox="0 0 20 20"><path d="M8.5 16.5v-9l-3.25 3.25"></path></svg></button>');
   expect(f.api.sendButton()?.getAttribute('aria-label'), 'a translated send button was not recognised').toBe('Gönder');
 
-  // The stop square in that same slot is never a send target.
-  form.querySelector('button[aria-label="Gönder"]')!.outerHTML =
+  // While generating (#1231), a translated send control alongside stop is still recognised.
+  form.insertAdjacentHTML('beforeend',
     `<button type="button" class="${slot}" aria-label="Durdur">` +
-    '<svg class="icon-primary-action" viewBox="0 0 20 20"><path d="M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C15.5 14.9404 14.9404 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z"></path></svg></button>';
+    '<svg class="icon-primary-action" viewBox="0 0 20 20"><path d="M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C15.5 14.9404 14.9404 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z"></path></svg></button>');
+  expect(f.api.generating()).toBe(true);
+  expect(f.api.sendButton()?.getAttribute('aria-label'), 'a translated send button was hidden while generating').toBe('Gönder');
+
+  // The stop square in that same slot is never a send target.
+  form.querySelector('button[aria-label="Gönder"]')!.remove();
   expect(f.api.sendButton(), 'the stop square was read as send').toBeNull();
 
   // And an English label still wins outright, without consulting the slot at all.
