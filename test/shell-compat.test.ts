@@ -1194,6 +1194,60 @@ it('finds the send control by its slot when the label is translated', () => {
   expect(f.api.sendButton()?.getAttribute('aria-label')).toBe('Send prompt');
 });
 
+it('excludes voice controls from structural Send with text while generating', () => {
+  const f = fixture(), edit = editing(f);
+  const form = f.doc.querySelector('form[data-chatgpt-composer]')!;
+  const slot = 'cursor-interaction size-token-button-composer flex items-center justify-center rounded-full bg-composer-primary p-0.5';
+  f.doc.querySelector('button[type="submit"]')!.remove();
+  expect(f.api.insertPrompt('Continue', true)).toBe(true);
+  expect(edit.box.innerText).toContain('Continue');
+
+  form.insertAdjacentHTML('beforeend',
+    `<button type="button" class="${slot}" aria-label="Sprachchat starten" data-state="closed">` +
+    '<svg><path d="M8.22266 2.45825C8"></path><path d="M12.4443 4.62524C1"></path>' +
+    '<path d="M4 6.95825C4.48325"></path><path d="M16.667 7.45825C17"></path></svg></button>' +
+    `<button type="button" class="${slot}" aria-label="Durdur">` +
+    '<svg><path d="M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C14.9404 14.9404 14.25 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z"></path></svg></button>');
+  expect(f.api.generating()).toBe(true);
+  expect(f.api.sendButton(), 'voice must not be mistaken for Send').toBeNull();
+
+  form.insertAdjacentHTML('beforeend',
+    `<button type="button" class="${slot}" aria-label="Gönder"><svg><path d="M8.5 16.5v-9l-3.25 3.25"></path></svg></button>`);
+  expect(f.api.sendButton()?.getAttribute('aria-label')).toBe('Gönder');
+});
+
+it('ignores hidden structural Send controls with text while generating', () => {
+  const f = fixture(), edit = editing(f);
+  const form = f.doc.querySelector('form[data-chatgpt-composer]')!;
+  const slot = 'cursor-interaction size-token-button-composer flex items-center justify-center rounded-full bg-composer-primary p-0.5';
+  f.doc.querySelector('button[type="submit"]')!.remove();
+  expect(f.api.insertPrompt('Continue', true)).toBe(true);
+  expect(edit.box.innerText).toContain('Continue');
+
+  form.insertAdjacentHTML('beforeend',
+    `<div hidden><button type="button" class="${slot}" aria-label="Gönder"><svg><path d="M8.5 16.5v-9l-3.25 3.25"></path></svg></button></div>` +
+    `<button type="button" class="${slot}" aria-label="Durdur"><svg><path d="M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C14.9404 14.9404 14.25 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z"></path></svg></button>` +
+    `<button type="button" class="${slot}" aria-label="Envoyer"><svg><path d="M8.5 16.5v-9l-3.25 3.25"></path></svg></button>`);
+  expect(f.api.generating()).toBe(true);
+  expect(f.api.sendButton()?.getAttribute('aria-label'), 'a hidden control made Send ambiguous').toBe('Envoyer');
+});
+
+it('rejects multiple visible structural Send candidates with text while generating', () => {
+  const f = fixture(), edit = editing(f);
+  const form = f.doc.querySelector('form[data-chatgpt-composer]')!;
+  const slot = 'cursor-interaction size-token-button-composer flex items-center justify-center rounded-full bg-composer-primary p-0.5';
+  f.doc.querySelector('button[type="submit"]')!.remove();
+  expect(f.api.insertPrompt('Continue', true)).toBe(true);
+  expect(edit.box.innerText).toContain('Continue');
+
+  form.insertAdjacentHTML('beforeend',
+    `<button type="button" class="${slot}" aria-label="Gönder"><svg><path d="M8.5 16.5v-9l-3.25 3.25"></path></svg></button>` +
+    `<button type="button" class="${slot}" aria-label="Envoyer"><svg><path d="M8.5 16.5v-9l-3.25 3.25"></path></svg></button>` +
+    `<button type="button" class="${slot}" aria-label="Durdur"><svg><path d="M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C14.9404 14.9404 14.25 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z"></path></svg></button>`);
+  expect(f.api.generating()).toBe(true);
+  expect(f.api.sendButton(), 'two visible structural candidates must remain ambiguous').toBeNull();
+});
+
 it('preserves prepared multiline text through the shell editor serializer', () => {
   const f = fixture(), edit = editing(f);
   const value = '[[COS_CONTEXT:42]]\n# Worker instructions\n- Keep **literal** text, C:\\work and `<tag>`.\n[[/COS_CONTEXT]]\n\nContinue the task.';
