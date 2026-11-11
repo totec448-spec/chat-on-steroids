@@ -738,16 +738,20 @@ export async function acceptGoalReplyNow(input: {
     acceptedAt: provisionalUpgrade ? current!.acceptedAt : Date.now(),
     state: provisionalUpgrade ? current!.state : active ? 'pending' : 'handled'
   });
+  const written = snapshotGoalReplies();
+  // Bounding the written revision may have retired rows; those, and only those, are this acceptance's to give back.
+  const keptRows = new Set(written.replies.map(row => row.conversationId));
+  const pruned = bounded.filter(row => row.conversationId !== input.conversationId && !keptRows.has(row.conversationId));
   try {
-    await writeDurableNow(GOAL_REPLIES_STATE, snapshotGoalReplies());
+    await writeDurableNow(GOAL_REPLIES_STATE, written);
   } catch (error) {
     // The rejected write is one whole revision, so the rollback is too: the row this accept
     // added and the expired rows it pruned go back together, leaving the ledger exactly as the
     // decision found it.
     // Only this chat's row goes back: clearing the whole ledger erased the replies other chats had
     // accepted while this save was waiting (#2144). Rows this accept pruned are restored unless a
-    // newer row for that chat exists.
-    for (const reply of bounded) if (reply.conversationId !== input.conversationId && !goalReplies.has(reply.conversationId)) goalReplies.set(reply.conversationId, reply);
+    // newer row for that chat exists. A row somebody else removed meanwhile (a withdrawn silence reply) stays removed.
+    for (const reply of pruned) if (!goalReplies.has(reply.conversationId)) goalReplies.set(reply.conversationId, reply);
     if (goalReplies.get(input.conversationId)?.replyId === input.replyId.slice(0, 200)) {
       if (before) goalReplies.set(input.conversationId, before);
       else goalReplies.delete(input.conversationId);
