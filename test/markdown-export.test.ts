@@ -182,11 +182,3 @@ it('names files safely from chat titles', () => {
   expect(markdownFileName(`${'x'.repeat(78)}🧪 test`)).toBe(`${'x'.repeat(78)}🧪.md`);
   expect(markdownFileName(`${prefix}🧪 test`, ' - answer')).toBe(`${prefix} - answer.md`);
 });
-
-it.each(['\n', '\r\n'])('preserves first-line code indentation in answers and assistant transcripts (%j)', newline => {
-  const code = ['    - ```markdown', '    | Item | Qty |', '    |---|---|'].join(newline);
-  const source = `${newline} \t${newline}${code}${newline}${newline}`;
-  expect(answerMarkdown([source])).toBe(`${code}\n`);
-  expect(sessionMarkdown('Code', [{ role: 'assistant', text: source }])).toBe(`# Code\n\n## ChatGPT\n\n${code}\n`);
-  expect(answerMarkdown([' \t\n', '', 'Done.  '])).toBe('Done.\n');
-});

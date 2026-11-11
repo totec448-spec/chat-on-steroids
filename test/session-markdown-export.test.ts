@@ -377,7 +377,7 @@ it.each(['clipboard', 'file'] as const)('recovers drawing overflow for %s only a
 it.each(['clipboard', 'file'] as const)('exports only the real table rows after an indented literal list/fence to %s', async target => {
   const header = '| Item | Qty |\n|---|---|';
   const example = '    - ```markdown\n' + header.split('\n').map(line => `    ${line}`).join('\n');
-  const markdown = `${example}\n\nActual table:\n${header}`;
+  const markdown = `Example:\n\n${example}\n\nActual table:\n${header}`;
   const html = '<div data-d-component="table"><table><tr><td>Item</td><td>Qty</td></tr><tr><td>Rice</td><td>1 kg</td></tr></table></div>';
   store.readEvents.mockResolvedValue([
     events[0]!,

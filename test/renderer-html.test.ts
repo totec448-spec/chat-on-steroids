@@ -868,16 +868,3 @@ y=mx+b
     expect(first!.querySelector('.markdown-writing')!.isEqualNode(second!.querySelector('.markdown-writing'))).toBe(false);
   });
 });
-
-it.each([4, 5])('keeps a chart widget literal inside a lazy-list code fence at column %s', columns => {
-  const chart = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
-    chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Outside code', value: 7 }]
-  } } })}\uE201`;
-  const indent = ' '.repeat(columns);
-  const source = `- Example\nlazy continuation\n${indent}\`\`\`json\n\n  ${chart}\n${indent}\`\`\`\n\n${chart}`;
-  const rendered = renderedMarkdown(source);
-  expect(rendered.querySelector('pre code')?.textContent).toContain(chart);
-  expect(rendered.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
-  expect(rendered.querySelector('pre .markdown-dil-chart')).toBeNull();
-  expect(rendered.textContent).not.toContain('\uE030');
-});

@@ -5226,24 +5226,13 @@ citation ranges use Unicode code points and map to UTF-16 before slicing. Exact 
 names render as plain chips; unresolved file citations do not gain invented local links.
 Plain text leaving the timeline (Markdown export, search index and snippets, turn notifications and `modelFacingText` for Goal/Loop and completed answers) passes `providerEntitiesAsMarkdown` first: the raw text's private-use entities (U+E200 name U+E202 field … U+E201) become `[label](address)` for `url` and are dropped otherwise, so a link card never reads as "urlLabelhttps://…".
 DIL table/button completion (`shared/dil-tables.ts`) preserves code examples before matching
-drawn tables in order. It shares `shared/markdown-code.ts::markdownCodeRanges` with chart
-enrichment: fenced (including nested/unclosed), indented and multiline inline code stays
-literal, so a sample table cannot consume the drawing intended for a later real table. Inline
-backticks never join separate Markdown blocks, including tables/headings without blank lines.
-Block boundaries use Marked's block-only lexer without processing its inline queue; normalized
-LF positions map back to the original CRLF/UTF-16 source. Inline matching indexes each block's
-backtick runs by width in linear time; unmatched runs never rescan the remaining suffix. It excludes all block
-code, including indented blocks, so their literal ticks cannot pair with later table headings.
-Fence detection checks original indentation before stripping container prefixes; an indented literal
-list/quote fence cannot swallow a later real table. Genuine list fences retain their content baseline,
-including after lazy paragraph continuations; blank or interrupting block boundaries end that context.
-Closing a fence strips only its opening quote container; additional list/quote markers inside
-the code stay literal and cannot expose sample tables or button labels to DIL completion.
-The indented-code scan uses the same lazy-list boundary rule; restored list-table rows retain
-the header's original indentation so completion cannot move rows outside their list.
-Answer copy, Markdown transcript and shared HTML use `shared/markdown-export.ts::trimMarkdown`
-to remove surrounding blank lines without stripping first-line code indentation. User-message
-whitespace handling is unchanged.
+drawn tables in order. `shared/markdown-code.ts::markdownCodeRanges` keeps fenced (including
+nested/unclosed), indented and multiline inline code literal, so examples cannot consume a
+drawing or lose button labels. Inline ticks never join separate Markdown blocks; Marked's
+block-only lexer supplies boundaries without draining its inline queue. Exact-width matching
+is linear, retaining original CRLF/UTF-16 offsets. Fence detection checks original indentation
+before stripping container prefixes; closing strips only the opening quote container. Lazy
+list continuations retain their baseline, and restored table rows keep the header's indentation.
 Answer actions, direct answer export and `/copy` share `shared/markdown-export.ts::completedTurnIds`:
 a later-sequence `turn_start` revokes completion until that same turn ends as `completed` again.
 Boundary sequence numbers, not display order, decide this even when chronology regroups the starts. Older
