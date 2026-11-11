@@ -5221,6 +5221,13 @@ come from `renderer/shortcuts.ts`: ⌘ on macOS, the localized Ctrl ("Strg") els
 they are open) press the sidebar's buttons (`renderer/app-shortcuts.ts`), except inside the terminal, the
 file editor or an open dialog; the buttons' tooltips name them.
 
+Chart enrichment uses `shared/markdown-code.ts::markdownCodeRanges` to keep fenced,
+indented and multiline inline code literal. Inline tick matching stays within Marked's
+block boundaries and indexes exact-width tick runs instead of rescanning unmatched suffixes.
+Ranges retain original UTF-16 offsets across LF/CRLF. Fence closing strips only the opening
+quote container; literal list/quote markers inside code cannot close the fence. Lazy list
+continuations retain their indentation baseline until a blank or interrupting block boundary.
+
 Captured ChatGPT HTML passes a strict allowlist; authored plain text stays text. Provider
 citation ranges use Unicode code points and map to UTF-16 before slicing. Exact uploaded-file
 names render as plain chips; unresolved file citations do not gain invented local links.
