@@ -1976,6 +1976,15 @@ it('places a message sent into a running turn after the message it followed, not
   const questions = (await f.ask()).turns.flatMap((turn: any) => turn.messages.filter((m: any) => m.role === 'user')
     .map((m: any) => [m.rawMessageId, m.parentId, m.parentExact]));
   expect(questions).toEqual([[USER, 'root', false], [second.userId, ANSWER, true], [steered, interim, true]]);
+  // When ChatGPT had already opened its consolidated final_answer item before the steered user-message,
+  // final_answer stays the closing parent of the next turn while the steered message still follows interim.
+  second.entry.turn.items = [question!,
+    { type: 'assistant-message', messageId: interim, content: 'Running step two', phase: 'commentary', completed: true } as any,
+    answer!,
+    { type: 'user-message', messageId: steered, serverMessageId: steered, message: 'Continue the task from where you are.' } as any];
+  const afterFinal = (await f.ask()).turns.flatMap((turn: any) => turn.messages.filter((m: any) => m.role === 'user')
+    .map((m: any) => [m.rawMessageId, m.parentId, m.parentExact]));
+  expect(afterFinal).toEqual([[USER, 'root', false], [second.userId, ANSWER, true], [steered, interim, true]]);
 });
 
 it('places each question in ChatGPT\'s message tree, with the versions control as proof of an edit', async () => {

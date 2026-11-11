@@ -3942,7 +3942,8 @@ async function replyFiber(
   // shared one.
   harnessed: Harness | null = null,
   observeOnly = false,
-  preserveTurnStamps: ReadonlySet<HTMLElement> = new Set()
+  preserveTurnStamps: ReadonlySet<HTMLElement> = new Set(),
+  presentationOnly = false
 ): Promise<void> {
   const active = harnessed ?? live!;
   const window = active.window as any;
@@ -4004,7 +4005,7 @@ async function replyFiber(
       // sometimes had not even arrived yet (canary 2026-10-13, macOS). Wait for the answer itself.
       await vi.waitFor(() => { if (!answered) throw new Error('the scan has not asked yet'); }, { timeout: 10_000, interval: 5 });
       await new Promise(resolve => globalThis.setTimeout(resolve, 100));
-    } else await active.hook.refreshFiber(settled);
+    } else await active.hook.refreshFiber(settled, presentationOnly);
   } finally {
     window.removeEventListener('message', onAsk);
     window.setTimeout = instant;
@@ -9946,6 +9947,29 @@ describe('a stop button that goes missing while the turn is still running', () =
     expect(emitted(live.sent, 'turn_end').map(row => [row.event.turnId, row.event.continued])).toEqual([[first, true]]);
   });
 
+  it('completes the old turn at a new question from Fiber end_turn before its text renders', async () => {
+    live = await harness();
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'terminal-before-text', []);
+    live.hook.observe(); await settle();
+    const first = emitted(live.sent, 'turn_start')[0]!.event.turnId;
+    section.setAttribute('data-clf-fiber-turn', '0');
+    // The presentation pass can learn end_turn before the lifecycle pass runs,
+    // while the native assistant section still has no authored prose.
+    await replyFiber([], [{ turnId: 'terminal-before-text', endMessageId: 'old-final',
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', calls: [], messages: [], activities: []
+    }], null, true, null, false, new Set(), true);
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(0);
+
+    userTurn(live.document, 'next-after-terminal', 'Next question');
+    live.hook.observe(); await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end').map(row => row.event)).toEqual([
+      expect.objectContaining({ turnId: first, outcome: 'completed' })
+    ]);
+    expect(emitted(live.sent, 'turn_end')[0]!.event.continued).toBeUndefined();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(2);
+  });
+
   it('marks continued the end of a turn with only interim prose when a message arrives before end_turn (#1301)', async () => {
     // 2026-10-12, live: a message sent at 02:20:26 joined the running response, which had already
     // said "I'll pick up where it stopped…". Stop was gone at the tick that saw the message, and the
@@ -10549,6 +10573,45 @@ describe('a stop button that goes missing while the turn is still running', () =
     const ends = emitted(live.sent, 'turn_end').map(entry => entry.event);
     expect(ends).toHaveLength(2);
     expect(ends[1]).toMatchObject({ turnId: emitted(live.sent, 'turn_start')[1]!.event.turnId, outcome: 'completed' });
+  });
+
+  it('does not use a historical Fiber final to suppress a later mid-turn steer', async () => {
+    // #746, live on 2.1.20: a Loop continuation's turn was closed 112 ms after turn_start and the
+    // next two hours of work had no owner. The finished previous answer, remounted where the new
+    // answer belongs, must not end the new turn either.
+    live = await harness();
+    startGenerating(live.document);
+    userTurn(live.document, 'remount-q1', 'first question');
+    const first = assistantTurn(live.document, 'remount-a1', []);
+    live.hook.observe(); await settle();
+    const firstEnd = { turnId: 'remount-a1', endMessageId: 'remount-a1-final', calls: [], activities: [],
+      messages: [{ messageId: 'remount-a1-final', stable: true, rawText: 'First answer.', renderedHtml: '<p>First answer.</p>' }] };
+    await bindFiberTurns([{ section: first, turn: firstEnd }]);
+    await live.hook.flush(); await settle();
+    stopGenerating(live.document);
+    live.hook.observe(); await settle();
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(1);
+
+    const question = userTurn(live.document, 'remount-q2', 'second question');
+    startGenerating(live.document);
+    live.hook.observe(); await settle();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(2);
+    first.remove();
+    const remounted = assistantTurn(live.document, 'remount-a1', []);
+    question.after(remounted);
+    live.hook.observe(); await settle();
+    await bindFiberTurns([{ section: remounted, turn: firstEnd }]);
+    await live.hook.flush(); await settle();
+    live.hook.observe(); await settle();
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(1);
+
+    const second = emitted(live.sent, 'turn_start')[1]!.event.turnId;
+    userTurn(live.document, 'remount-steer', 'Continue with the detail');
+    live.hook.observe(); await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end').map(row => row.event)).toEqual([
+      expect.objectContaining({ outcome: 'completed' }),
+      expect.objectContaining({ turnId: second, continued: true })
+    ]);
   });
 
   it('does not close a new turn with the previous answer remounted below its question (#746)', async () => {
