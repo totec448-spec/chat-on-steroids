@@ -1,4 +1,5 @@
 import { settledPositionOf } from '../../shared/chronology.js';
+import type { SessionEvent } from '../../shared/session.js';
 import { getSession, readEvents, upsertMessageEvent } from './store.js';
 
 /**
@@ -57,14 +58,42 @@ export function editReplacement(messageId: string): string | undefined {
  * versions control (and in a layout that never shows one).
  */
 export async function noteEditReplacement(sessionId: string, messageId: string, replaced: string): Promise<void> {
-  if (messageId === replaced) return;
-  delivered.set(messageId, replaced);
-  if (delivered.size > 256) delivered.delete(delivered.keys().next().value!);
-  const recorded = (await readEvents(sessionId, { kinds: ['user_message'] }))
-    .filter(event => event.kind === 'user_message' && event.messageId === messageId).at(-1);
-  if (recorded?.kind !== 'user_message' || (recorded.replacesConfirmed === true && recorded.replaces === replaced)) return;
-  const { seq: _seq, ...event } = recorded;
-  await upsertMessageEvent(sessionId, { ...event, replaces: replaced, replacesConfirmed: true });
+  await noteEditReplacements(sessionId, [{ messageId, replaced }]);
+}
+
+/** Restore a session's receipts from one history read; pending native echoes retain their cache entry. */
+export async function noteEditReplacements(
+  sessionId: string,
+  replacements: ReadonlyArray<{ messageId: string; replaced: string }>,
+  onError?: (messageId: string, error: unknown) => void
+): Promise<void> {
+  const pending: Array<{ messageId: string; replaced: string }> = [];
+  const wanted = new Set<string>();
+  for (const replacement of replacements) {
+    const { messageId, replaced } = replacement;
+    if (messageId === replaced) continue;
+    delivered.set(messageId, replaced);
+    if (delivered.size > 256) delivered.delete(delivered.keys().next().value!);
+    pending.push(replacement);
+    wanted.add(messageId);
+  }
+  if (!pending.length) return;
+  const recorded = new Map<string, Extract<SessionEvent, { kind: 'user_message' }>>();
+  for (const event of await readEvents(sessionId, { kinds: ['user_message'] })) {
+    if (event.kind === 'user_message' && event.messageId && wanted.has(event.messageId)) recorded.set(event.messageId, event);
+  }
+  for (const { messageId, replaced } of pending) {
+    const previous = recorded.get(messageId);
+    if (!previous || (previous.replacesConfirmed === true && previous.replaces === replaced)) continue;
+    try {
+      const { seq: _seq, ...event } = previous;
+      const written = await upsertMessageEvent(sessionId, { ...event, replaces: replaced, replacesConfirmed: true });
+      if (written.event.kind === 'user_message') recorded.set(messageId, written.event);
+    } catch (error) {
+      if (!onError) throw error;
+      onError(messageId, error);
+    }
+  }
 }
 
 export function resetEditsForTests(): void {
