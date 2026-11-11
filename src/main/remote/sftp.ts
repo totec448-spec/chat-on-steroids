@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
+import { logInfo } from '../logger.js';
 import type { Readable, Writable } from 'node:stream';
 
 /**
@@ -331,7 +332,7 @@ export class SftpClient {
     const temporary = path.posix.join(path.posix.dirname(target), `.${path.posix.basename(target)}.cos-${randomBytes(6).toString('hex')}.tmp`);
     const handle = (await this.expect(Packet.Handle, this.request(Packet.Open,
       w => w.string(temporary).u32(OPEN_WRITE | OPEN_CREAT | OPEN_EXCL | OPEN_TRUNC).attrs(mode), temporary))).bytes();
-    let written = false;
+    let written = false, closed = false;
     try {
       const writes: Array<Promise<void>> = [];
       for (let offset = 0; offset < data.length; offset += CHUNK) {
@@ -342,25 +343,52 @@ export class SftpClient {
       await Promise.all(writes);
       // The server's umask may have narrowed the mode given at creation.
       await this.ok(this.request(Packet.Setstat, w => w.string(temporary).attrs(mode), temporary)).catch(() => undefined);
+      // The server may report a deferred write or quota error only when the handle is closed (#2145):
+      // a write is published only after that succeeded.
+      closed = true;
+      await this.ok(this.request(Packet.Close, w => w.bytes(handle), temporary));
       written = true;
     } finally {
-      await this.closeHandle(handle);
+      if (!closed) await this.closeHandle(handle);
       if (!written) await this.remove(temporary).catch(() => undefined);
     }
     try { await this.replace(temporary, target); }
-    catch (error) { await this.remove(temporary).catch(() => undefined); throw error; }
+    catch (error) {
+      // When the original could not be put back either (below), the staged file is the only complete copy left.
+      if (!(error as SftpError & { keepStaged?: boolean }).keepStaged) await this.remove(temporary).catch(() => undefined);
+      throw error;
+    }
   }
 
-  /** Rename over an existing file: atomic with OpenSSH's posix-rename, else remove-then-rename. */
+  /**
+   * Rename over an existing file: atomic with OpenSSH's posix-rename. Without it (plain SFTP v3 refuses to
+   * rename over a file) the original is moved aside, not deleted, and put back when the replacement is
+   * refused, so a failed save never loses the file (#2145).
+   */
   private async replace(from: string, to: string): Promise<void> {
     if (this.extensions.has('posix-rename@openssh.com')) {
       await this.ok(this.request(Packet.Extended, w => w.string('posix-rename@openssh.com').string(from).string(to), to));
       return;
     }
-    try { await this.rename(from, to); }
-    catch {
-      await this.remove(to).catch((error: SftpError) => { if (error.code !== 'ENOENT') throw error; });
-      await this.rename(from, to);
+    try { await this.rename(from, to); return; }
+    catch (first) {
+      // Plain SFTP v3 answers "the target exists" with a failure or a permission status. Any other refusal
+      // (the staged file missing, a dropped connection) is not a reason to move the original anywhere.
+      if (!['EIO', 'EACCES'].includes((first as SftpError).code)) throw first;
+      logInfo(`sftp: the server refused to rename over ${path.posix.basename(to)} (${(first as SftpError).code}); moving the original aside and retrying`);
+      const backup = path.posix.join(path.posix.dirname(to), `.${path.posix.basename(to)}.cos-${randomBytes(6).toString('hex')}.bak`);
+      // Nothing to move aside (no such target, or it cannot be moved): the first refusal stands, nothing was touched.
+      try { await this.rename(to, backup); } catch { throw first; }
+      try { await this.rename(from, to); }
+      catch (error) {
+        try { await this.rename(backup, to); }
+        catch {
+          throw Object.assign(new SftpError((error as SftpError).code ?? 'EIO',
+            `The replacement was refused and the original could not be put back; it is kept as ${backup}, the new content as ${from}`, to), { keepStaged: true });
+        }
+        throw error;
+      }
+      await this.remove(backup).catch(() => undefined);
     }
   }
 
