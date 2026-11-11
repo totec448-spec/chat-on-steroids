@@ -30,24 +30,24 @@ describe('continued final completion', () => {
       await saveConfig({ ...defaultConfig(), sessions: { ...defaultConfig().sessions, record: true } });
       resetSessionStoreForTests();
       resetEditsForTests();
-      const conversationId = '69d626f4-b5ec-8385-816e-145fc405d198';
+      const conversationId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
       const session = await createSession({ title: 'Steered continuation', conversationId });
 
       // Turn 4 opens and creates the final_answer container before the user steers:
       await upsertMessageEvent(session.id, {
         kind: 'user_message', time: T0, source: 'extension',
-        messageId: '679fdbcc-7989-4e80-a00f-fe3b3dcb2f29',
+        messageId: 'question-initial',
         parentId: 'a0000000-0000-4000-8000-000000000001',
         message: text('Initial question')
       });
       await appendEvent(session.id, {
-        kind: 'turn_start', time: T0 + 10, source: 'extension', turnId: 'g-10uer7kwcef0o-0-4'
+        kind: 'turn_start', time: T0 + 10, source: 'extension', turnId: 'continued-first'
       });
       await upsertMessageEvent(session.id, {
         kind: 'assistant_message', time: T0 + 20, source: 'extension',
-        turnId: 'g-10uer7kwcef0o-0-4',
-        messageId: 'b50804bf-faf8-4272-8f1d-48b16674a51c',
-        providerMessageId: 'b50804bf-faf8-4272-8f1d-48b16674a51c',
+        turnId: 'continued-first',
+        messageId: 'answer-consolidated',
+        providerMessageId: 'answer-consolidated',
         message: text('First half of consolidated answer'),
         state: 'streaming', final: false
       });
@@ -55,42 +55,42 @@ describe('continued final completion', () => {
       // User steers while Turn 4 is still running; Turn 4 ends with continued: true and Turn 5 starts:
       await upsertMessageEvent(session.id, {
         kind: 'user_message', time: T0 + 30, source: 'extension',
-        messageId: '05a235d9-231e-487a-9257-76469eb9b5f9',
-        parentId: 'b50804bf-faf8-4272-8f1d-48b16674a51c',
+        messageId: 'question-steer',
+        parentId: 'answer-consolidated',
         message: text('Steered follow-up')
       });
       await appendEvent(session.id, {
         kind: 'turn_end', time: T0 + 31, source: 'extension',
-        turnId: 'g-10uer7kwcef0o-0-4', outcome: 'completed', continued: true
+        turnId: 'continued-first', outcome: 'completed', continued: true
       });
       await appendEvent(session.id, {
-        kind: 'turn_start', time: T0 + 32, source: 'extension', turnId: 'g-10uer7kwcef0o-0-5'
+        kind: 'turn_start', time: T0 + 32, source: 'extension', turnId: 'continued-terminal'
       });
 
       // ChatGPT appends the continuation's answer to the same final_answer message and completes Turn 5:
       await upsertMessageEvent(session.id, {
         kind: 'assistant_message', time: T0 + 50, source: 'extension',
-        turnId: 'g-10uer7kwcef0o-0-5',
-        messageId: 'b50804bf-faf8-4272-8f1d-48b16674a51c',
-        providerMessageId: 'b50804bf-faf8-4272-8f1d-48b16674a51c',
+        turnId: 'continued-terminal',
+        messageId: 'answer-consolidated',
+        providerMessageId: 'answer-consolidated',
         message: text('First half of consolidated answer\n\nContinuation answer.'),
         state: 'final', final: true
       });
       await appendEvent(session.id, {
         kind: 'turn_end', time: T0 + 51, source: 'extension',
-        turnId: 'g-10uer7kwcef0o-0-5', outcome: 'completed'
+        turnId: 'continued-terminal', outcome: 'completed'
       });
 
       // readCompletedFinal must recognize the consolidated final for both the continuation turn and the session:
-      const byTurn = await readCompletedFinal(session.id, conversationId, 'g-10uer7kwcef0o-0-5');
+      const byTurn = await readCompletedFinal(session.id, conversationId, 'continued-terminal');
       expect(byTurn).toMatchObject({
-        messageId: 'b50804bf-faf8-4272-8f1d-48b16674a51c',
-        turnId: 'g-10uer7kwcef0o-0-5'
+        messageId: 'answer-consolidated',
+        turnId: 'continued-terminal'
       });
       const anyTurn = await readCompletedFinal(session.id, conversationId);
       expect(anyTurn).toMatchObject({
-        messageId: 'b50804bf-faf8-4272-8f1d-48b16674a51c',
-        turnId: 'g-10uer7kwcef0o-0-5'
+        messageId: 'answer-consolidated',
+        turnId: 'continued-terminal'
       });
 
     } finally {
