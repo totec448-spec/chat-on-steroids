@@ -270,7 +270,10 @@ describe('request correlation ownership', () => {
     // Fake timers drive the delays; the disk work they start is real, so wait for it by its own completion.
     // With a count it waits for that many saves to land; without one it only gives a save that must not happen a chance to start.
     const settle = async (saves?: number) => {
-      for (let i = 0; i < (saves === undefined ? 40 : 20_000) && (saves === undefined || renamed < saves); i++) await new Promise(resolve => setImmediate(resolve));
+      // Real time, not a count of turns: the clock itself is not faked here, and a slow disk may take a while.
+      const deadline = Date.now() + 20_000;
+      if (saves === undefined) { for (let i = 0; i < 40; i++) await new Promise(resolve => setImmediate(resolve)); return; }
+      while (renamed < saves && Date.now() < deadline) await new Promise(resolve => setImmediate(resolve));
     };
     try {
       resetDurableForTests();
