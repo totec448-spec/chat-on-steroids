@@ -87,7 +87,7 @@ export async function noteEditReplacements(
     if (!previous || (previous.replacesConfirmed === true && previous.replaces === replaced)) continue;
     try {
       const { seq: _seq, ...event } = previous;
-      const written = await upsertMessageEvent(sessionId, { ...event, replaces: replaced, replacesConfirmed: true });
+      const written = await upsertMessageEvent(sessionId, { ...event, replaces: replaced, replacesConfirmed: true }, { replacementOnly: true });
       if (written.event.kind === 'user_message') recorded.set(messageId, written.event);
     } catch (error) {
       if (!onError) throw error;
