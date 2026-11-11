@@ -5239,6 +5239,11 @@ truncated flag, is not used as evidence of a whole table, and logs why without c
 reads use `readAsset`'s bounded byte path, up to four UTF-8 bytes per supported overflow character
 (32 MiB, including legacy assets above today's write cap). Saved fields and renderer bounds stay unchanged.
 A whole chat as one HTML page is built by `shared/html-export.ts` `transcriptHtml` and only through Share's preview (`sessions:sharePage`, §9): what a person wrote is escaped plain text; answers are Markdown drawn with raw HTML escaped (a block keeps its lines), a picture becomes a link to it and only http(s)/mailto links stay links. The page has inline styles only and a `default-src 'none'` policy, so it runs no script and loads nothing. Its title and texts always pass `redactSecretText`; with `hide`, also `redactPersonalText` (email addresses, the user name in home-folder paths). Every "[redacted]" then shows as one `.hidden` mark in the interface language, never inside a link or attribute; `hiddenCount` counts them. The Markdown export stays exact.
+Answer copy, Markdown transcript and shared HTML use `shared/markdown-export.ts::trimMarkdown`
+to remove surrounding blank lines without stripping first-line code indentation. User-message
+whitespace handling is unchanged.
+Multi-message answers insert an empty HTML comment before a later message's indented code,
+closing the previous list/paragraph; ordinary messages retain their blank-line separator.
 An assistant message may carry `references`: the sources behind its inline
 `:chatgpt-content-reference{index="N"}` citations. `extension/fiber.js` `citedSources` reads
 them from each citation pill's own props (the list its hover card pages through, plus the reply
