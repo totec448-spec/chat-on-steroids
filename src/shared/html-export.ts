@@ -1,4 +1,5 @@
 import { Marked, type Tokens } from 'marked';
+import { trimMarkdown } from './markdown-export.js';
 
 /* A chat transcript as one HTML page that opens in any browser and needs nothing else: the styles
    are inline, and the page loads no script, font, image or other address. Its policy forbids them
@@ -117,7 +118,7 @@ export function transcriptHtml(title: string, entries: readonly { role: 'user' |
   const mark = options.hidden === undefined ? null : `<span class="hidden">${escapeHtml(options.hidden)}</span>`;
   const marked = (html: string) => mark ? html.replace(REDACTED, mark) : html;
   // What a person wrote is plain text, as the timeline shows it; only answers are Markdown.
-  const sections = entries.map(entry => ({ role: entry.role, text: entry.text.trim() })).filter(entry => entry.text).map(entry =>
+  const sections = entries.map(entry => ({ role: entry.role, text: entry.role === 'assistant' ? trimMarkdown(entry.text) : entry.text.trim() })).filter(entry => entry.text).map(entry =>
     entry.role === 'user'
       ? `<section class="user"><h2>${escapeHtml(labels.user)}</h2><p class="said" dir="auto">${marked(escapeHtml(entry.text))}</p></section>`
       : `<section class="assistant"><h2>${escapeHtml(labels.assistant)}</h2><div class="answer" dir="auto">\n${marked(answerHtml(entry.text))}</div></section>`);
