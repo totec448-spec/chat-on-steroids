@@ -164,8 +164,8 @@ function legacyServer(files: Map<string, Buffer>, faults: { rename?: (from: stri
       else if (type === 18) { // RENAME (legacy: refuses an existing target)
         const from = readStr().toString(), to = readStr().toString();
         if (faults.rename?.(from, to)) status(id, 3, 'Permission denied');
-        else if (files.has(to)) status(id, 4, 'Failure');
         else if (!files.has(from)) status(id, 2, 'No such file');
+        else if (files.has(to)) status(id, 4, 'Failure');
         else { files.set(to, files.get(from)!); files.delete(from); status(id, 0); }
       } else if (type === 13) { const name = readStr().toString(); if (files.delete(name)) status(id, 0); else status(id, 2, 'No such file'); }
       else status(id, 8, 'Unsupported');
@@ -194,6 +194,19 @@ describe('SFTP writes keep the original when they fail (#2145)', () => {
     await expect(sftp.writeFile('/p/document.txt', Buffer.from('REPLACEMENT'))).rejects.toThrow(/kept as .*\.bak/);
     const contents = [...files.values()].map(value => value.toString()).sort();
     expect(contents).toEqual(['ORIGINAL', 'REPLACEMENT']);
+  });
+
+  // CodeRabbit on #2148: only a refusal that means "the target exists" starts the move-aside.
+  it('does not move the original aside when the first rename fails for another reason', async () => {
+    const files = new Map([['/p/document.txt', Buffer.from('ORIGINAL')]]);
+    const renames: string[] = [];
+    // The staged file vanishes before the rename: the server answers "no such file", not "target exists".
+    const { input, output } = legacyServer(files, { rename: (from, to) => { renames.push(`${from}>${to}`); for (const name of [...files.keys()]) if (name.includes('.cos-')) files.delete(name); return false; } });
+    const sftp = await SftpClient.start(input, output);
+    await expect(sftp.writeFile('/p/document.txt', Buffer.from('REPLACEMENT'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(renames).toHaveLength(1);
+    expect(files.get('/p/document.txt')?.toString()).toBe('ORIGINAL');
+    expect([...files.keys()]).toEqual(['/p/document.txt']);
   });
 
   it('still replaces an existing file on a legacy server, leaving no backup or temporary file', async () => {
