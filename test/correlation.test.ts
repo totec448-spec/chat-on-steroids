@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import fs, { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -250,6 +250,77 @@ describe('request correlation ownership', () => {
     expect(requestCorrelation(refreshedId)?.conversationId).toBe('conv-a');
     expect(requestCorrelation(refreshedId)?.observedAt).toBe(100_000);
     expect(requestCorrelation('wfr_fill_0')).toBeNull();
+  });
+
+  // #2133: a page scan re-sights the same requests all the time, and every re-sighting that only moved a
+  // timestamp rewrote the whole (up to 50,000-row) registry 300 ms later. Freshness only decides the
+  // eviction order, so it is saved in batches; a new owner is still saved at once.
+  it('saves a same-owner re-sighting in a batch, but a new owner at once, and a quit saves both', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'clf-correlation-'));
+    const file = path.join(dir, 'state', 'request-correlations.json');
+    const writes = () => writeFile.mock.calls.filter(([target]) => String(target).includes('request-correlations')).length;
+    const writeFile = vi.spyOn(fs, 'writeFile');
+    // A save is complete once its rename has landed (a count of writeFile calls alone can be read before that on a slow disk).
+    let renamed = 0;
+    const realRename = fs.rename.bind(fs);
+    const rename = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      await realRename(from, to);
+      if (String(to).includes('request-correlations')) renamed++;
+    });
+    // Fake timers drive the delays; the disk work they start is real, so wait for it by its own completion.
+    // With a count it waits for that many saves to land; without one it only gives a save that must not happen a chance to start.
+    const settle = async (saves?: number) => {
+      // Real time, not a count of turns: the clock itself is not faked here, and a slow disk may take a while.
+      const deadline = Date.now() + 20_000;
+      if (saves === undefined) { for (let i = 0; i < 40; i++) await new Promise(resolve => setImmediate(resolve)); return; }
+      while (renamed < saves && Date.now() < deadline) await new Promise(resolve => setImmediate(resolve));
+    };
+    try {
+      resetDurableForTests();
+      initDurableStore(dir);
+      const base = { conversationId: 'conv-fresh', sessionId: 'session-fresh', messageId: 'm', tool: 'read' };
+      observeRequestCorrelation({ ...base, requestId: 'wfr_old', observedAt: 1 });
+      observeRequestCorrelation({ ...base, requestId: 'wfr_other', observedAt: 2 });
+      await flushDurable();
+      const initial = writes();
+      renamed = initial;
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      // Ten page scans re-sight the same request within a minute.
+      for (let i = 0; i < 10; i++) {
+        observeRequestCorrelation({ ...base, requestId: 'wfr_old', observedAt: 100 + i });
+        await vi.advanceTimersByTimeAsync(5_000);
+        await settle();
+      }
+      expect(writes()).toBe(initial);
+      // A request not seen before is saved within the usual short delay, with the fresher order too.
+      observeRequestCorrelation({ ...base, requestId: 'wfr_new', observedAt: 200 });
+      await vi.advanceTimersByTimeAsync(400);
+      await settle(initial + 1);
+      expect(writes()).toBe(initial + 1);
+      expect((await readDurable<{ entries: Array<{ requestId: string; observedAt: number }> }>('request-correlations'))!.entries
+        .find(entry => entry.requestId === 'wfr_old')?.observedAt).toBe(109);
+      // Re-sightings alone wait for the batch, which is no later than five minutes after the first.
+      observeRequestCorrelation({ ...base, requestId: 'wfr_other', observedAt: 300 });
+      await vi.advanceTimersByTimeAsync(4 * 60_000);
+      await settle();
+      expect(writes()).toBe(initial + 1);
+      await vi.advanceTimersByTimeAsync(61_000);
+      await settle(initial + 2);
+      expect(writes()).toBe(initial + 2);
+      // A quit saves whatever is still waiting.
+      observeRequestCorrelation({ ...base, requestId: 'wfr_other', observedAt: 400 });
+      vi.useRealTimers();
+      await flushDurable();
+      expect(writes()).toBe(initial + 3);
+      expect(JSON.parse(await readFile(file, 'utf8')).entries.find((entry: { requestId: string }) => entry.requestId === 'wfr_other').observedAt).toBe(400);
+    } finally {
+      vi.useRealTimers();
+      writeFile.mockRestore();
+      rename.mockRestore();
+      resetCorrelationRegistryForTests();
+      resetDurableForTests();
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('restores proven request ownership from durable state after an app restart', async () => {
