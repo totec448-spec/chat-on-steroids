@@ -6687,9 +6687,11 @@ shared-tree change may already have addressed them.
   existing action checks.
   Keep their operation-specific authority current through the browser action boundary.
 - **Goal reply publication:** reply-obligation mutations such as `acceptGoalReplyNow` still
-  change the shared reply map before their durable write and restore a snapshot on failure.
-  They do not use the staged switch/objective control boundary in §17; reply-ledger concurrency
-  still needs its own semantic transaction review.
+  change the shared reply map before their durable write. A refused save puts back only that
+  chat's own row (and rows it pruned), never the whole map, and an acceptance re-checks the
+  chat's sequence after its asynchronous eligibility reads, so an older one cannot replace a
+  newer reply (#2144). They still do not use the staged switch/objective control boundary in
+  §17; publishing only after the durable write needs its own semantic transaction review.
 - **Goal cross-ledger controls:** master/config/secret changes still cross separate ledgers.
   Attempt invalidation now preserves debt, but these remaining controls still need one durable
   semantic transaction and effective current-setting enforcement.
