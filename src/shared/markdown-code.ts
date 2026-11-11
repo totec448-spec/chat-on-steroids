@@ -22,7 +22,7 @@ function endsListParagraph(line: string, afterBlank: boolean): boolean {
 /** Locate Markdown fences, including ones nested under blockquotes and list items. */
 function fencedMarkdownRanges(text: string): Array<{ start: number; end: number }> {
   const ranges: Array<{ start: number; end: number }> = [];
-  let fence: { start: number; marker: string; width: number; nested: boolean; quoteDepth: number; listIndent: number | null } | null = null;
+  let fence: { start: number; marker: string; width: number; nested: boolean; quoteDepth: number; outerQuoteDepth: number; listIndent: number | null } | null = null;
   let listIndent: number | null = null;
   let afterBlank = true;
   for (let start = 0; start < text.length;) {
@@ -35,16 +35,18 @@ function fencedMarkdownRanges(text: string): Array<{ start: number; end: number 
     const indent = indentColumns(content);
     let endedBlock = false;
     const body = line.replace(/^(?:[ \t]*(?:>|[-*+]|\d{1,9}[.)])(?=[ \t]|$)[ \t]?)*/, '');
-    // Strip only the opening quote container for both boundary and close tests.
-    // Extra list/quote markers remain literal code, with their original indent.
+    // Keep the list indent between its outer and inner quote containers.
+    // For closing, strip only opening quote markers; extras are literal code.
     let fenceContent = line;
+    let listContent = line;
     for (let depth = 0; fence && depth < fence.quoteDepth; depth++) {
       fenceContent = fenceContent.replace(/^[ \t]*>[ \t]?/, '');
+      if (depth < fence.outerQuoteDepth) listContent = fenceContent;
     }
     // Marked ends a nested fence when its quote/list container ends, even
     // without closing backticks. The first outside line may open another fence.
     if (fence && (quoteDepth < fence.quoteDepth ||
-        (fence.listIndent !== null && fenceContent.trim() && indentColumns(fenceContent) < fence.listIndent))) {
+        (fence.listIndent !== null && listContent.trim() && indentColumns(listContent) < fence.listIndent))) {
       ranges.push({ start: fence.start, end: start });
       fence = null;
       afterBlank = true;
@@ -78,7 +80,9 @@ function fencedMarkdownRanges(text: string): Array<{ start: number; end: number 
       const nested = body.length !== line.length || (listIndent !== null && indent >= listIndent);
       const open = (nested ? /^[ \t]*(`{3,}|~{3,})(.*)$/ : /^ {0,3}(`{3,}|~{3,})(.*)$/).exec(body);
       if (open && (open[1]![0] === '~' || !open[2]!.includes('`'))) {
-        fence = { start, marker: open[1]![0]!, width: open[1]!.length, nested, quoteDepth, listIndent };
+        const openingQuotes = line.slice(0, line.length - body.length).match(/>/g)?.length ?? 0;
+        fence = { start, marker: open[1]![0]!, width: open[1]!.length, nested,
+          quoteDepth: openingQuotes, outerQuoteDepth: quoteDepth, listIndent };
       }
     }
     afterBlank = endedBlock || !content.trim();
