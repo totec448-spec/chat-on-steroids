@@ -1,10 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import * as sessionStore from '../src/main/session/store.js';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { SessionEvent } from '../src/shared/session.js';
 import { appendEvent, createSession, initSessionStore, readEvents, resetSessionStoreForTests, unsetSessionRootForTests, upsertMessageEvent } from '../src/main/session/store.js';
-import { noteEditReplacement, replacedQuestion, resetEditsForTests } from '../src/main/session/edits.js';
+import { editReplacement, noteEditReplacement, replacedQuestion, resetEditsForTests } from '../src/main/session/edits.js';
 import { flushRecorder, recordChatObservations, resetRecorderForTests } from '../src/main/session/recorder.js';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { initDurableStore, resetDurableForTests, flushDurable, writeDurableNow } from '../src/main/durable.js';
@@ -29,6 +31,7 @@ describe('replacement evidence at review boundaries', () => {
     await saveConfig(defaultConfig());
   });
   afterEach(async () => {
+    vi.restoreAllMocks();
     await flushRecorder();
     await flushDurable();
     resetInputForTests();
@@ -39,6 +42,84 @@ describe('replacement evidence at review boundaries', () => {
     resetSessionStoreForTests();
     unsetSessionRootForTests();
     await fs.rm(directory, { recursive: true, force: true });
+  });
+
+  it('recovers retained edits with one history scan per session and remembers a pending native echo', async () => {
+    const sessions = await Promise.all([0, 1].map(index => createSession({
+      title: `Retained edits ${index}`, conversationId: randomUUID()
+    })));
+    const receipts: InputEntry[] = [];
+    for (const session of sessions) {
+      for (let index = 0; index < 30; index++) await upsertMessageEvent(session.id, {
+        kind: 'user_message', source: 'extension', time: T0 + index,
+        messageId: randomUUID(), message: text('Earlier question')
+      });
+      for (let index = 0; index < 3; index++) {
+        const receipt: InputEntry = { id: randomUUID(), sessionId: session.id,
+          conversationId: session.conversationId, text: 'Edited question', mode: 'auto', dueAt: 0,
+          model: null, reasoningEffort: null, state: 'sent', owner: 'test-page', createdAt: T0 + 40,
+          deliveredAt: T0 + 41, messageId: randomUUID(), edit: { messageId: randomUUID() }, historyRecorded: index < 2 };
+        receipts.push(receipt);
+        if (receipt.historyRecorded) await upsertMessageEvent(session.id, {
+          kind: 'user_message', source: 'app', time: receipt.deliveredAt!, messageId: receipt.messageId,
+          inputId: receipt.id, message: text(receipt.text)
+        });
+      }
+    }
+    await writeDurableNow('session-input', receipts);
+    resetInputForTests(); resetEditsForTests(); resetSessionStoreForTests();
+    const scans = vi.spyOn(sessionStore, 'readEvents');
+    await listInputs();
+    for (const session of sessions) expect(scans.mock.calls.filter(([id]) => id === session.id)).toHaveLength(1);
+    scans.mockRestore();
+    for (const receipt of receipts) {
+      expect(editReplacement(receipt.messageId!)).toBe(receipt.edit!.messageId);
+      expect((await readEvents(receipt.sessionId!, { kinds: ['user_message'] })).find(event =>
+        event.kind === 'user_message' && event.messageId === receipt.messageId)).toMatchObject({
+        replaces: receipt.edit!.messageId, replacesConfirmed: true
+      });
+    }
+    const pending = receipts.find(receipt => !receipt.historyRecorded)!;
+    await recordChatObservations(pending.conversationId!, [{ kind: 'user_message', time: T0 + 45,
+      messageId: pending.messageId!, parentId: 'parent', parentExact: true, text: pending.text }]);
+    resetEditsForTests(); resetSessionStoreForTests();
+    expect((await readEvents(pending.sessionId!, { kinds: ['user_message'] })).find(event =>
+      event.kind === 'user_message' && event.messageId === pending.messageId)).toMatchObject({
+      replaces: pending.edit!.messageId, replacesConfirmed: true
+    });
+  });
+
+  it('continues recovering peer edits after one canonical confirmation write fails', async () => {
+    const session = await createSession({ title: 'Independent edit recovery', conversationId: randomUUID() });
+    const receipts: InputEntry[] = [];
+    for (let index = 0; index < 2; index++) {
+      const original = randomUUID(), edited = randomUUID();
+      await upsertMessageEvent(session.id, { kind: 'user_message', source: 'extension', time: T0,
+        messageId: original, message: text('Original question') });
+      await upsertMessageEvent(session.id, { kind: 'user_message', source: 'app', time: T0 + 10,
+        messageId: edited, message: text('Edited question') });
+      receipts.push({ id: randomUUID(), sessionId: session.id, conversationId: session.conversationId,
+        text: 'Edited question', mode: 'auto', dueAt: 0, model: null, reasoningEffort: null,
+        state: 'sent', owner: 'test-page', createdAt: T0 + 10, deliveredAt: T0 + 11,
+        messageId: edited, edit: { messageId: original }, historyRecorded: true });
+    }
+    await writeDurableNow('session-input', receipts);
+    resetInputForTests(); resetEditsForTests(); resetSessionStoreForTests();
+    const write = vi.spyOn(sessionStore, 'upsertMessageEvent').mockRejectedValueOnce(new Error('temporary write failure'));
+    await expect(listInputs()).resolves.toHaveLength(2);
+    write.mockRestore();
+    const recovered = (await readEvents(session.id, { kinds: ['user_message'] })).find(event =>
+      event.kind === 'user_message' && event.messageId === receipts[1]!.messageId);
+    expect(recovered).toMatchObject({ replaces: receipts[1]!.edit!.messageId, replacesConfirmed: true });
+    const pending = receipts[0]!;
+    expect(editReplacement(pending.messageId!)).toBe(pending.edit!.messageId);
+    await recordChatObservations(session.conversationId!, [{ kind: 'user_message', time: T0 + 20,
+      messageId: pending.messageId!, text: pending.text }]);
+    resetEditsForTests(); resetSessionStoreForTests();
+    expect((await readEvents(session.id, { kinds: ['user_message'] })).find(event =>
+      event.kind === 'user_message' && event.messageId === pending.messageId)).toMatchObject({
+      replaces: pending.edit!.messageId, replacesConfirmed: true
+    });
   });
 
   for (const parent of ['missing', 'streaming'] as const) {

@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { userTitle } from './title.js';
 import { readDurable, writeDurableNow, writeDurableSoon } from '../durable.js';
 import { getSession, findSessionByConversation, createSession, deleteSession, rebindSession, conversationWasSuperseded, readRecentEvents, listUsageSessions, turnHasMcpCall, questionHasMcpCall, sessionDirectoryMissing, readCompletedFinal, readLatestUserMessage, readEvents } from './store.js';
-import { noteEditReplacement } from './edits.js';
+import { noteEditReplacement, noteEditReplacements } from './edits.js';
 import { userPromptText } from '../../shared/user-prompt.js';
 import type { SessionEvent } from '../../shared/session.js';
 import { assignSessionProject, getProject, getSessionProject, localProjectPath, projectWorkspace } from '../projects.js';
@@ -623,6 +623,20 @@ async function load(): Promise<InputEntry[]> {
       seen.add(summary.conversationId);
     }
   }
+  const confirmedEdits = new Map<string, Array<{ messageId: string; replaced: string }>>();
+  for (const row of entries) {
+    const sessionId = row.sessionId ?? row.deliveredSessionId;
+    if (!row.edit || !row.messageId || !sessionId || !Number.isFinite(row.deliveredAt) ||
+        (row.state !== 'sent' && row.state !== 'cancelled')) continue;
+    const edits = confirmedEdits.get(sessionId) ?? [];
+    edits.push({ messageId: row.messageId, replaced: row.edit.messageId });
+    confirmedEdits.set(sessionId, edits);
+  }
+  for (const [sessionId, edits] of confirmedEdits) {
+    await noteEditReplacements(sessionId, edits, (messageId, error) =>
+      logWarn(`input: could not restore confirmed edit ${messageId} (${String(error)})`))
+      .catch((error: Error) => logWarn(`input: could not read confirmed edits for session ${sessionId} (${error.message})`));
+  }
   // Durable decision receipts recover helper provenance even when recording/ACK raced
   // or this version first opens a helper recorded before origins were stamped.
   for (const row of entries) {
@@ -630,12 +644,6 @@ async function load(): Promise<InputEntry[]> {
     // before authoredText existed recover their original visible text too. This
     // is canonical history only; it never reopens transport or resends an input.
     if (row.historyRecorded && row.deliveryText && row.deliveryText !== row.text) row.historyRecorded = false;
-    const editSession = row.sessionId ?? row.deliveredSessionId;
-    if (row.edit && row.messageId && editSession && Number.isFinite(row.deliveredAt) &&
-        (row.state === 'sent' || row.state === 'cancelled')) {
-      await noteEditReplacement(editSession, row.messageId, row.edit.messageId)
-        .catch((err: Error) => logWarn(`input ${row.id}: could not restore the confirmed edit (${err.message})`));
-    }
     if (!row.sessionId && row.purpose !== 'decision' && row.conversationId && row.deliveredAt !== undefined && !stamped.has(row.conversationId)) {
       await noteChatOrigin(row.conversationId, { kind: 'desktop', fromSessionId: null, agentId: null, task: '' });
     }
