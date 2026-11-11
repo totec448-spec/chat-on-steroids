@@ -122,3 +122,109 @@ describe('SFTP protocol guards', () => {
     await expect(started).rejects.toMatchObject({ code: 'EPROTO' });
   });
 });
+
+/**
+ * A tiny in-memory SFTP v3 server with no extensions (so the client takes its legacy rename path), and
+ * faults to inject: refuse every RENAME that matches, or fail the CLOSE of a handle (#2145).
+ */
+function legacyServer(files: Map<string, Buffer>, faults: { rename?: (from: string, to: string) => boolean; close?: () => boolean } = {}): { input: PassThrough; output: PassThrough } {
+  const fromServer = new PassThrough(), toServer = new PassThrough();
+  const handles = new Map<string, string>(), staged = new Map<string, Buffer>();
+  let nextHandle = 1, pending = Buffer.alloc(0);
+  const reply = (type: number, id: number, ...parts: Buffer[]) => {
+    const idPart = Buffer.alloc(4); idPart.writeUInt32BE(id);
+    const body = Buffer.concat([idPart, ...parts]);
+    const head = Buffer.alloc(5); head.writeUInt32BE(body.length + 1); head[4] = type;
+    fromServer.write(Buffer.concat([head, body]));
+  };
+  const u32 = (value: number) => { const part = Buffer.alloc(4); part.writeUInt32BE(value); return part; };
+  const str = (value: string | Buffer) => { const data = Buffer.from(value); return Buffer.concat([u32(data.length), data]); };
+  const status = (id: number, code: number, message = '') => reply(101, id, u32(code), str(message), str(''));
+  toServer.on('data', (chunk: Buffer) => {
+    pending = Buffer.concat([pending, chunk]);
+    while (pending.length >= 5) {
+      const length = pending.readUInt32BE(0);
+      if (pending.length < 4 + length) return;
+      const type = pending[4]!, body = pending.subarray(5, 4 + length); pending = pending.subarray(4 + length);
+      if (type === 1) { fromServer.write(Buffer.concat([u32(5), Buffer.from([2]), u32(3)])); continue; }
+      const id = body.readUInt32BE(0); let at = 4;
+      const readStr = () => { const n = body.readUInt32BE(at); const v = body.subarray(at + 4, at + 4 + n); at += 4 + n; return v; };
+      if (type === 17 || type === 7) { // STAT
+        const name = readStr().toString();
+        const file = files.get(name);
+        if (!file) status(id, 2, 'No such file'); else reply(105, id, u32(0x1 | 0x4), Buffer.concat([u32(0), u32(file.length)]), u32(0o100644));
+      } else if (type === 3) { // OPEN
+        const name = readStr().toString(); const handle = `h${nextHandle++}`;
+        handles.set(handle, name); staged.set(handle, Buffer.alloc(0)); files.set(name, Buffer.alloc(0)); reply(102, id, str(handle));
+      } else if (type === 6) { // WRITE
+        const handle = readStr().toString(); at += 8; const data = readStr();
+        files.set(handles.get(handle)!, Buffer.concat([files.get(handles.get(handle)!) ?? Buffer.alloc(0), data])); status(id, 0);
+      } else if (type === 9) status(id, 0); // SETSTAT
+      else if (type === 4) { handles.delete(readStr().toString()); if (faults.close?.()) status(id, 4, 'Failure'); else status(id, 0); }
+      else if (type === 18) { // RENAME (legacy: refuses an existing target)
+        const from = readStr().toString(), to = readStr().toString();
+        if (faults.rename?.(from, to)) status(id, 3, 'Permission denied');
+        else if (!files.has(from)) status(id, 2, 'No such file');
+        else if (files.has(to)) status(id, 4, 'Failure');
+        else { files.set(to, files.get(from)!); files.delete(from); status(id, 0); }
+      } else if (type === 13) { const name = readStr().toString(); if (files.delete(name)) status(id, 0); else status(id, 2, 'No such file'); }
+      else status(id, 8, 'Unsupported');
+    }
+  });
+  return { input: fromServer, output: toServer };
+}
+
+describe('SFTP writes keep the original when they fail (#2145)', () => {
+  it('moves the original aside on a legacy server and restores it when the replacement is refused', async () => {
+    const files = new Map([['/p/document.txt', Buffer.from('ORIGINAL')]]);
+    // Plain SFTP v3 refuses to rename over an existing file; here every rename of the staged file is refused too.
+    const { input, output } = legacyServer(files, { rename: (from) => from.includes('.cos-') && !from.endsWith('.bak') });
+    const sftp = await SftpClient.start(input, output);
+    await expect(sftp.writeFile('/p/document.txt', Buffer.from('REPLACEMENT'))).rejects.toMatchObject({ code: 'EACCES' });
+    expect(files.get('/p/document.txt')?.toString()).toBe('ORIGINAL');
+    expect([...files.keys()]).toEqual(['/p/document.txt']);
+  });
+
+  it('keeps both copies and says where they are when the original cannot be put back either', async () => {
+    const files = new Map([['/p/document.txt', Buffer.from('ORIGINAL')]]);
+    let renames = 0;
+    // First rename (staged over the original) is refused by the server's own rule; the move-aside works; then every later rename fails.
+    const { input, output } = legacyServer(files, { rename: () => ++renames > 2 });
+    const sftp = await SftpClient.start(input, output);
+    await expect(sftp.writeFile('/p/document.txt', Buffer.from('REPLACEMENT'))).rejects.toThrow(/kept as .*\.bak/);
+    const contents = [...files.values()].map(value => value.toString()).sort();
+    expect(contents).toEqual(['ORIGINAL', 'REPLACEMENT']);
+  });
+
+  // CodeRabbit on #2148: only a refusal that means "the target exists" starts the move-aside.
+  it('does not move the original aside when the first rename fails for another reason', async () => {
+    const files = new Map([['/p/document.txt', Buffer.from('ORIGINAL')]]);
+    const renames: string[] = [];
+    // The staged file vanishes before the rename: the server answers "no such file", not "target exists".
+    const { input, output } = legacyServer(files, { rename: (from, to) => { renames.push(`${from}>${to}`); for (const name of [...files.keys()]) if (name.includes('.cos-')) files.delete(name); return false; } });
+    const sftp = await SftpClient.start(input, output);
+    await expect(sftp.writeFile('/p/document.txt', Buffer.from('REPLACEMENT'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(renames).toHaveLength(1);
+    expect(files.get('/p/document.txt')?.toString()).toBe('ORIGINAL');
+    expect([...files.keys()]).toEqual(['/p/document.txt']);
+  });
+
+  it('still replaces an existing file on a legacy server, leaving no backup or temporary file', async () => {
+    const files = new Map([['/p/document.txt', Buffer.from('ORIGINAL')]]);
+    const { input, output } = legacyServer(files);
+    const sftp = await SftpClient.start(input, output);
+    await sftp.writeFile('/p/document.txt', Buffer.from('REPLACEMENT'));
+    expect(files.get('/p/document.txt')?.toString()).toBe('REPLACEMENT');
+    expect([...files.keys()]).toEqual(['/p/document.txt']);
+  });
+
+  it('does not publish a write whose handle could not be closed, and removes the staged file', async () => {
+    const files = new Map([['/p/document.txt', Buffer.from('ORIGINAL')]]);
+    let closes = 0;
+    const { input, output } = legacyServer(files, { close: () => ++closes === 1 });
+    const sftp = await SftpClient.start(input, output);
+    await expect(sftp.writeFile('/p/document.txt', Buffer.from('REPLACEMENT'))).rejects.toMatchObject({ code: 'EIO' });
+    expect(files.get('/p/document.txt')?.toString()).toBe('ORIGINAL');
+    expect([...files.keys()]).toEqual(['/p/document.txt']);
+  });
+});
