@@ -52,15 +52,17 @@ export function transcriptEntries(events: readonly SessionEvent[]): TranscriptEn
       ...(latest.kind === 'assistant_message' && latest.renderedHtml ? { html: latest.renderedHtml } : {}) }));
 }
 
-/** Turns the page reported as completed; only these offer copy and export. */
+/** Turns whose latest boundary is completed; a new start revokes that completion. */
 export function completedTurnIds(events: readonly SessionEvent[]): Set<string> {
-  const done = new Set<string>();
+  const boundaries = new Map<string, Extract<SessionEvent, { kind: 'turn_start' | 'turn_end' }>>();
   for (const event of events) {
-    if (event.kind === 'turn_end' && event.turnId) {
-      if (event.outcome === 'completed') done.add(event.turnId); else done.delete(event.turnId);
-    }
+    if ((event.kind !== 'turn_start' && event.kind !== 'turn_end') || !event.turnId) continue;
+    const previous = boundaries.get(event.turnId);
+    // Display chronology can place a repeated start beside the original start. The immutable
+    // sequence, not its position on screen, tells whether this turn has reopened since its end.
+    if (!previous || event.seq > previous.seq) boundaries.set(event.turnId, event);
   }
-  return done;
+  return new Set([...boundaries].filter(([, event]) => event.kind === 'turn_end' && event.outcome === 'completed').map(([turnId]) => turnId));
 }
 
 /** The answer of a completed turn: its final assistant messages, in order. */
@@ -94,14 +96,8 @@ export function messageAnswerAnchors(events: readonly SessionEvent[]): Map<strin
 /** The chat's newest answer that offers copy (`/copy`): a completed turn's, or one recorded outside any turn. */
 export function latestAnswer(events: readonly SessionEvent[]): { turnId?: string; messageId?: string } | null {
   const done = completedTurnIds(events);
-  // A turn can start again after it completed (the same request kept calling tools); it is open until it ends again.
-  const open = new Set<string>();
-  for (const event of events) {
-    if (event.kind === 'turn_start' && event.turnId) open.add(event.turnId);
-    else if (event.kind === 'turn_end' && event.turnId) open.delete(event.turnId);
-  }
   const last = transcriptEntries(events)
-    .filter(entry => entry.role === 'assistant' && (entry.turnId ? done.has(entry.turnId) && !open.has(entry.turnId) : !!entry.messageId)).at(-1);
+    .filter(entry => entry.role === 'assistant' && (entry.turnId ? done.has(entry.turnId) : !!entry.messageId)).at(-1);
   return !last ? null : last.turnId ? { turnId: last.turnId } : { messageId: last.messageId! };
 }
 
