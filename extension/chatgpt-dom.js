@@ -3472,6 +3472,7 @@ var CLF_DOM = (() => {
             if (!retryButton) return null;
             if (!openPicker()) {
               const reopened = retryButton !== button && key(retryButton, 'Enter') && await wait(openPicker, 1000);
+              if (!stillCurrent()) return null;
               if (!reopened && !openPicker()) {
                 retryButton.click();
                 if (!await wait(openPicker, 1500)) return null;
