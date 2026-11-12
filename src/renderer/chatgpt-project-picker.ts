@@ -24,9 +24,9 @@ export function createChatgptProjectPicker(deps: {
   let popup: SearchPopup | null = null;
 
   const load = async (): Promise<ChatgptProjectChoice[]> => {
-    // No list (a failed read) only means the choice is not offered; adding works as before.
-    const reply = await Promise.resolve().then(() => deps.api.chatgptProjectChoices()).catch(() => null);
-    choices = reply?.ok && Array.isArray(reply.data) ? reply.data : [];
+    const reply = await deps.api.chatgptProjectChoices();
+    if (!reply.ok) throw new Error(reply.error);
+    choices = Array.isArray(reply.data) ? reply.data : [];
     return choices;
   };
   const settle = async (pending: Promise<Reply<LocalProject>>): Promise<void> => {
@@ -41,7 +41,10 @@ export function createChatgptProjectPicker(deps: {
     },
     async offer(project, mode) {
       popup?.close();
-      if (mode === 'menu') await load();
+      if (mode === 'menu') {
+        try { await load(); }
+        catch (error) { deps.onError(error instanceof Error ? error.message : String(error)); return; }
+      }
       let decided = false;
       const decide = (work: () => Promise<Reply<LocalProject>>) => { decided = true; void settle(work()); };
       const link = project.chatgpt;

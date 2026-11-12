@@ -34,6 +34,20 @@ async function picker(anchor: HTMLElement | null) {
 const button = () => { const node = document.createElement('button'); document.body.append(node); return node; };
 const options = () => [...document.querySelectorAll<HTMLButtonElement>('.chatgpt-project-picker [role="option"]')];
 
+it.each(['reply', 'rejection'])('does not mistake a failed choices %s for an empty list or offer stale menu choices', async failure => {
+  const { api, created, onError } = await picker(button());
+  api.chatgptProjectChoices.mockImplementation(async () => {
+    if (failure === 'rejection') throw new Error('Project catalog is invalid');
+    return { ok: false, error: 'Project catalog is invalid' } as any;
+  });
+  await expect(created.hasChoices()).rejects.toThrow('Project catalog is invalid');
+  await created.offer(project, 'menu');
+  expect(onError).toHaveBeenCalledExactlyOnceWith('Project catalog is invalid');
+  expect(options()).toEqual([]);
+  expect(api.createChatgptProject).not.toHaveBeenCalled();
+  expect(api.linkChatgptProject).not.toHaveBeenCalled();
+});
+
 it('creates nothing right after adding when there is no row to open the choice from, and says where to choose later', async () => {
   const { api, created, onNotice } = await picker(null);
   await created.offer(project, 'added');

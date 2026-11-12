@@ -177,6 +177,17 @@ async function evaluate(expression) {
       checks.push('native picker discovery selected versions and closed cleanly');
       if (!(await f.api.selectModelSettings('future-pro', 'pro'))) throw new Error('Worker model selection failed');
       checks.push('exact worker model and reasoning selection succeeded');
+      const selectionReports = [];
+      if (await f.api.selectModelSettings('unoffered-diagnostic-model', 'high', () => true, trace => selectionReports.push(trace)))
+        throw Error('An unoffered native model was accepted');
+      const selectionFailure = selectionReports.at(-1);
+      if (selectionFailure?.failedPhase !== 'resolve' || selectionFailure.failure !== 'not-offered' ||
+          selectionFailure.restore !== 'confirmed' || selectionFailure.closed !== true ||
+          JSON.stringify(selectionFailure.before) !== JSON.stringify(selectionFailure.after) ||
+          /PRIVATE|conversation|modelsData/.test(JSON.stringify(selectionReports)))
+        throw Error('Native model diagnostic did not retain failure, restoration and privacy proof');
+      checks.push('native selector reports the failed phase and restores its exact original selection without exposing provider props');
+
       if (f.api.generating() || !f.api.composerSubmitReady()) throw new Error('Completed composer remains blocked');
       checks.push('completed shell composer is ready');
       for (let at = 1; at <= 3; at++) {
@@ -279,7 +290,8 @@ async function evaluate(expression) {
       let workerRecorder;
       try {
         workerRecorder = await recorder(worker, { redeem: () => ({ ok: true,
-          command: { id: 'native-event-worker', type: 'worker', agent: 'worker-1', text: bootstrap } }) }, false);
+          command: { id: 'native-event-worker', type: 'worker', agent: 'worker-1', text: bootstrap,
+            model: 'gpt-5-6-thinking', reasoningEffort: 'high' } }) }, false);
         const workerDeadline = Date.now() + 5000;
         while ((!workerRecorder.sent.some(message => message.type === 'ack') ||
             !workerRecorder.sent.some(message => message.type === 'correlate' && message.calls.some(call => call.requestId === OTHER))) && Date.now() < workerDeadline)
@@ -291,12 +303,38 @@ async function evaluate(expression) {
         if (!workerRecorder.sent.some(message => message.type === 'correlate' && message.calls.some(call => call.requestId === OTHER)))
           throw Error('Fresh worker request identity did not reach the recorder');
         checks.push('fresh worker sends, binds and correlates from native events while background polling timers are deferred');
+        const diagnostics = workerRecorder.sent.filter(message => message.type === 'command_step' && message.step === 'model-diagnostic');
+        const selected = diagnostics.at(-1)?.modelSelection;
+        if (selected?.outcome !== 'confirmed' || selected.attempt !== 1 || selected.selected?.effort !== 'high' ||
+            !diagnostics.every(message => message.id === 'native-event-worker') ||
+            workerRecorder.sent.some(message => message.type === 'command_step' && message.step === 'model-unconfirmed'))
+          throw Error('Native worker bootstrap lost its model diagnostic or changed its selection policy');
+        checks.push('actual native worker bootstrap forwards picker phase snapshots and exact High confirmation under one command id');
+
       } finally {
         window.__CLF_CONTENT_RECORDER__?.stop(); window.setTimeout = nativeTimeout;
         history.replaceState({}, '', '/c/' + THREAD);
       }
       return { ok: true, checks, userAgent: navigator.userAgent };
     })()`);
+    // Use a separate tab in this verifier's throwaway browser, never a personal browser/profile.
+    const other = await cdp('Target.createTarget', { url: 'about:blank', newWindow: false, background: false }, null);
+    const otherSession = (await cdp('Target.attachToTarget', { targetId: other.targetId, flatten: true }, null)).sessionId;
+    await cdp('Page.bringToFront', {}, otherSession);
+    report.modelDiagnostic = await evaluate(`(async () => {
+      const f = fixture(), reports = [], visibility = document.visibilityState, selectedReports = [];
+      const high = await f.api.selectModelSettings('gpt-5-6-thinking', 'high', () => true, value => selectedReports.push(value));
+      const selected = selectedReports.at(-1);
+      if (!high || selected?.outcome !== 'confirmed' || selected.after?.effort !== 'high' || selected.visibility !== visibility)
+        throw Error('Native background High selection or its diagnostic failed');
+      const ok = await f.api.selectModelSettings('unoffered-diagnostic-model', 'high', () => true, value => reports.push(value));
+      const final = reports.at(-1);
+      if (ok || final?.failedPhase !== 'resolve' || final.restore !== 'confirmed' || final.closed !== true ||
+          final.visibility !== visibility) throw Error('Native background diagnostic or selection restoration failed');
+      return { visibility, high: selected, final, phases: reports.map(value => value.phase) };
+    })()`);
+    report.checks.push('separate-tab native High selection succeeds and an unoffered request preserves failure/restoration details with actual visibility');
+    await cdp('Target.closeTarget', { targetId: other.targetId }, null);
     if (reactRuntime) {
       const realReact = buildSync({ stdin: { contents: fs.readFileSync(path.join(__dirname, 'fixtures/shell-react-runtime.js'), 'utf8'),
         resolveDir: path.resolve(root, reactRuntime) }, bundle: true, write: false, platform: 'browser', format: 'iife',

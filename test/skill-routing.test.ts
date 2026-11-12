@@ -89,6 +89,55 @@ it.each([
   }
 );
 
+// Characterize the existing finite vocabulary before consolidating its repeated definitions.
+it.each([
+  ['use', 'using', 'used'], ['invoke', 'invoking', 'invoked'], ['run', 'running', 'run'],
+  ['apply', 'applying', 'applied'], ['select', 'selecting', 'selected']
+])('preserves every supported usage form for %s', (base, gerund, passive) => {
+  for (const text of [
+    `Do not ${base} Code Review`, `Don't ${base} Code Review`, `Don’t ${base} Code Review`,
+    `Never ${base} the Code Review`, `Avoid ${gerund} Code Review`, `Without ${gerund} Code Review`,
+    ...['should', 'must', 'will', 'can'].map(modal => `Code Review ${modal} not be ${passive}`)
+  ]) expect(routeSkillMetadata(text, [candidate()]), text).toEqual([]);
+  expect(routeSkillMetadata(`Please ${base} Code Review`, [candidate()]))
+    .toEqual([{ id: 'code-review', revision: revision('a') }]);
+  // A usage verb can itself be the beginning of the full literal Skill identity.
+  for (const form of [base, gerund]) {
+    const skill = candidate({ id: `${form}-checklist`, name: `${form} checklist` });
+    const negative = form === base ? 'Do not' : 'Avoid';
+    expect(routeSkillMetadata(`${negative} ${form} checklist`, [skill])).toEqual([]);
+    expect(routeSkillMetadata(`Do not skip ${form} checklist`, [skill]))
+      .toEqual([{ id: skill.id, revision: skill.revision }]);
+  }
+});
+
+it.each(['から', 'なら', 'では', 'には', 'とは', 'を', 'で', 'に', 'は', 'が', 'と', 'も', 'の', 'へ'])(
+  'preserves the shared Japanese particle boundary on either side: %s', particle => {
+    for (const text of [`変更${particle}code-review`, `code-review${particle}確認`]) {
+      expect(routeSkillMetadata(text, [candidate()]), text)
+        .toEqual([{ id: 'code-review', revision: revision('a') }]);
+    }
+  }
+);
+
+it.each(['ではなく', 'じゃなく'])(
+  'preserves the before-only Japanese replacement boundary: %s', particle => {
+    expect(routeSkillMetadata(`他の方法${particle}code-review`, [candidate()]))
+      .toEqual([{ id: 'code-review', revision: revision('a') }]);
+    expect(routeSkillMetadata(`code-review${particle}他の方法`, [candidate()])).toEqual([]);
+  }
+);
+
+it.each(['"', "'", '`', '「', '『', '('])('preserves quoted exclusions: %s', opening => {
+  const closing = ({ '「': '」', '『': '』', '(': ')' } as Record<string, string>)[opening] ?? opening;
+  for (const text of [
+    `Do not use ${opening}Code Review${closing}`,
+    `${opening}code-review${closing}は使わないで`,
+    `${opening}code-review${closing}ではなく他の方法`,
+    `${opening}Code Review${closing} must not be used`
+  ]) expect(routeSkillMetadata(text, [candidate()]), text).toEqual([]);
+});
+
 it('keeps a separated dash usable and does not confuse a shorter hyphen-prefix identity', () => {
   const short = candidate({ id: 'code', name: 'Code', revision: revision('b') });
   expect(routeSkillMetadata('Use code-review - check this change.', [candidate(), short]))

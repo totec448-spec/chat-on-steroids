@@ -1,6 +1,7 @@
 import { REASONING_EFFORTS } from '../src/shared/session.js';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { getChatModels, requestChatModels, pendingChatModelRequest, observeChatModels, resetChatModelsForTests, configureChatModelDiscovery, startChatModelDiscovery, restoreChatModels, refreshForUnoffered } from '../src/main/chat-models.js';
+import { resumeModelSelection, wakeModelSelection } from '../src/main/resume-model.js';
 const saved = vi.hoisted(() => ({ value: null as unknown }));
 vi.mock('../src/main/durable.js', () => ({ readDurable: async () => saved.value, writeDurableSoon: (_name: string, value: unknown) => { saved.value = structuredClone(value); } }));
 const models = [{ id: 'gpt-example', label: 'GPT Example', efforts: ['none', 'medium', 'high', 'xhigh'] }];
@@ -55,6 +56,25 @@ describe('durable observed ChatGPT model catalog', () => {
     expect(getChatModels()).toMatchObject({ state: 'pending', models });
     observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models: null });
     expect(getChatModels()).toMatchObject({ state: 'ready', models, error: expect.any(String) });
+  });
+  it('does not use retained refresh choices to remove a resume or wake request before native confirmation', () => {
+    const oldModels = [{ id: 'gpt-example', label: 'GPT Example', efforts: ['medium'] }];
+    const requested = { model: 'gpt-example', reasoningEffort: 'high' as const };
+    requestChatModels(); observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models: oldModels });
+    for (const select of [resumeModelSelection, wakeModelSelection]) {
+      expect(select(requested)).toEqual({ model: requested.model, reasoningEffort: null });
+    }
+    requestChatModels(false);
+    expect(getChatModels()).toMatchObject({ state: 'pending', models: oldModels });
+    for (const select of [resumeModelSelection, wakeModelSelection]) expect(select(requested)).toEqual(requested);
+    // A completed observation, not the retained list, decides the availability fallback again.
+    observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models: oldModels });
+    for (const select of [resumeModelSelection, wakeModelSelection]) {
+      expect(select(requested)).toEqual({ model: requested.model, reasoningEffort: null });
+    }
+    requestChatModels();
+    observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models: [{ ...oldModels[0], efforts: ['medium', 'high'] }] });
+    for (const select of [resumeModelSelection, wakeModelSelection]) expect(select(requested)).toEqual(requested);
   });
   it('explains a missing native picker without claiming sign-in failure or inventing models', () => {
     requestChatModels();

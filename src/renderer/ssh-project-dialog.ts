@@ -59,7 +59,7 @@ export function initSshProjectDialog(
       close();
       onAdded(reply.data, known, asked);
     } catch (failure) {
-      showError(failure instanceof Error ? failure.message : String(failure));
+      showError(dialogError(failure instanceof Error ? failure.message : String(failure)));
     } finally {
       setBusy(false);
     }

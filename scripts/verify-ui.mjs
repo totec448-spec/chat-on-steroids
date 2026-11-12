@@ -5,13 +5,13 @@
 // unnoticed before. Run after `npm run build`:  npm run verify:ui [-- name-filter]
 // A check that loads the build (out/) fails at once, with the reason, when there is no build or
 // it is older than src/; it used to wait out its timeout, or pass against old code.
-import { spawn } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { buildProblem, needsBuild } from './ui-build-state.mjs';
 import { parseShard, readWeights, shardChecks } from './shard-plan.mjs';
+import { runUiCheck } from './ui-check-process.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const electron = createRequire(import.meta.url)('electron');
@@ -90,17 +90,11 @@ for (const name of scripts) {
   const how = special[name] ?? { command: electron, args: ['--lang=en-US'] };
   const started = Date.now();
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
-  const run = () => new Promise(resolve => {
-    const child = spawn(how.command, [...(how.command === electron ? linuxTestFlags : []), path.join('scripts', name), ...how.args], { cwd: root, env, windowsHide: true });
-    let output = '';
-    // A check that throws inside its async body and then quits in a finally block exits 0: its
-    // failure only shows as an unhandled rejection. Two checks passed that way for weeks (#1144).
-    let unhandled = false;
-    const keep = chunk => { unhandled ||= /UnhandledPromiseRejection/.test(String(chunk)); output = (output + chunk).slice(-4000); };
-    child.stdout.on('data', keep); child.stderr.on('data', keep);
-    const timer = setTimeout(() => { child.kill('SIGKILL'); resolve({ code: 'timeout', output }); }, TIMEOUT_MS);
-    child.on('close', (code, signal) => { clearTimeout(timer); resolve({ code: code === 0 && unhandled ? 'unhandled rejection' : code ?? `signal ${signal}`, output }); });
-  });
+  const run = () => runUiCheck(how.command,
+    [...(how.command === electron ? linuxTestFlags : []), path.join('scripts', name), ...how.args], {
+      cwd: root, env, timeoutMs: TIMEOUT_MS,
+      profileRoot: name === 'verify-workspace-terminal.cjs' ? path.join(root, 'outputs/terminal-acceptance') : undefined
+    });
   let outcome = await run();
   const first = outcome;
   for (let attempt = 0; outcome.code !== 0 && attempt < retries; attempt++) {

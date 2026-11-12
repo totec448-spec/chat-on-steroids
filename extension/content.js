@@ -985,8 +985,8 @@
    * attaches an app only to a message that mentions it, every prompt the app sends mentions
    * Core; on the others the mention is a visible chip and changes nothing else.
    */
-  // Core/Plugins identities from the page's hint list. This installation picks
-  // its own exact name (including the computer suffix) at send time.
+  // Core/Plugins identities from the page's hint list. Proven app ids survive renames;
+  // configured names (including the computer suffix) serve only before an id is known.
   let coreCandidates = [];
   // This install's Core as another tab of this browser last saw it listed (background `status`).
   let knownOwnCore = null;
@@ -1054,11 +1054,14 @@
         (proven.length ? !proven.includes(knownOwnCore.path) : !ownNamesKnown || knownOwnCore.name !== own)) return null;
     return { path: knownOwnCore.path, name: knownOwnCore.name };
   }
-  /** Only the exact Plugins app advertised by this page and named by this COS install. */
+  /** This page's unique proven Plugins app; configured names are only a first-enrollment fallback. */
   function currentPluginsMention() {
-    const own = CLF_DOM.connectorNames()[2];
-    const matches = coreCandidates.filter(entry => entry.name === own);
-    return matches.length === 1 && matches[0].path ? { path: matches[0].path, name: own } : null;
+    const proven = CLF_DOM.connectorApps().filter(app => app.surface === 'plugins').map(app => `app://${app.appId}`);
+    const matches = proven.length
+      ? coreCandidates.filter(entry => entry.path && proven.includes(entry.path))
+      : ownNamesKnown ? coreCandidates.filter(entry => entry.name === CLF_DOM.connectorNames()[2]) : [];
+    const match = matches.length === 1 ? matches[0] : null;
+    return match?.path ? { path: match.path, name: match.name } : null;
   }
   /**
    * Whether ordinary app-owned prompts carry the Core mention (ui.mentionCore).
@@ -12225,7 +12228,9 @@
     };
     // Where this page is, so a command that runs out of time can say where it stopped. Never
     // awaited: a report must not slow or block the bootstrap, and older apps ignore it.
-    const step = (name) => { void ask({ type: 'command_step', id: boot.id, client: RUN_ID, step: name }).catch(() => undefined); };
+    let modelDiagnostic = null, modelAttempt = 0;
+    const step = (name, modelSelection) => { void ask({ type: 'command_step', id: boot.id, client: RUN_ID, step: name,
+      ...(modelSelection ? { modelSelection } : {}) }).catch(() => undefined); };
     // What this command is for, as the app states it. A revival names the conversation and
     // will not be typed anywhere else; the two chat-opening commands name none, and their
     // precondition is the opposite one — that this page still has no conversation at all.
@@ -12338,7 +12343,13 @@
 
     if (boot.model || boot.reasoningEffort) step('model');
     // An announcement that opened over the picker refuses the choice; closing it earns one more try.
-    const chooseModel = () => CLF_DOM.selectModelSettings(boot.model, boot.reasoningEffort, stillOnTarget);
+    const chooseModel = () => {
+      const attempt = ++modelAttempt;
+      return CLF_DOM.selectModelSettings(boot.model, boot.reasoningEffort, stillOnTarget, diagnostic => {
+        modelDiagnostic = { ...diagnostic, attempt };
+        step('model-diagnostic', modelDiagnostic);
+      });
+    };
     // Confirmed is what the picker proved; only that is ever reported as the chat's model.
     const modelConfirmed = !!(boot.model || boot.reasoningEffort) && (await chooseModel() ||
       ((await closeAnnouncements(stillOnTarget)).length > 0 && stillOnTarget() && await chooseModel()));
@@ -12347,7 +12358,7 @@
     // that never wakes stops its whole run (#1952), and an abandoned resume stops its chat for good
     // (2026-11-01, Mac). A resume tries the model again in its new chat (publishBootstrapSelection).
     // The app logs which model it could not confirm. A new worker's chat still refuses.
-    if (!mayGoOn && (boot.type === 'revive' || boot.type === 'resume') && stillOnTarget()) { step('model-unconfirmed'); mayGoOn = true; }
+    if (!mayGoOn && (boot.type === 'revive' || boot.type === 'resume') && stillOnTarget()) { step('model-unconfirmed', modelDiagnostic); mayGoOn = true; }
     if (!mayGoOn) {
       const why = CLF_DOM.modelSelectionFailure?.();
       return void (await fail(t(

@@ -39,8 +39,8 @@ describe('extension release metadata', () => {
     expect(lock.version).toBe(APP_VERSION);
     expect(lock.packages?.['']?.version).toBe(APP_VERSION);
     expect(manifest.version).toBe(APP_VERSION);
-    expect(BRIDGE_PROTOCOL).toBe(14);
-    expect(backgroundSource).toContain('const BRIDGE_PROTOCOL = 14;');
+    expect(BRIDGE_PROTOCOL).toBe(15);
+    expect(backgroundSource).toContain('const BRIDGE_PROTOCOL = 15;');
   });
 
   /**
@@ -2665,6 +2665,107 @@ describe('active agent tab discard protection', () => {
     expect(await worker.send({ type: 'command_step', id: 'cmd-steps', client: 'doc-1', step: 'model', text: 'never forwarded' }, 41))
       .toEqual({ ok: true });
     expect(steps).toEqual([{ id: 'cmd-steps', client: 'doc-1', step: 'model' }]);
+    const modelSelection = { phase: 'select-effort', outcome: 'pending' };
+    expect(await worker.send({ type: 'command_step', id: 'cmd-steps', client: 'doc-1', step: 'model-diagnostic', modelSelection, text: 'never forwarded' }, 41))
+      .toEqual({ ok: true });
+    await vi.waitFor(() => expect(steps.at(-1)).toEqual({ id: 'cmd-steps', client: 'doc-1', step: 'model-diagnostic', modelSelection }));
+    await worker.send({ type: 'command_step', id: 'cmd-steps', client: 'doc-1', step: 'model-diagnostic', modelSelection: { pageText: 'x'.repeat(8193) } }, 41);
+    await vi.waitFor(() => expect(steps.at(-1)).toEqual({ id: 'cmd-steps', client: 'doc-1', step: 'model-diagnostic' }));
+  });
+
+  it('coalesces model diagnostics without delaying a resume permit or command ACK', async () => {
+    const reports: any[] = [], critical: string[] = [], work: Promise<unknown>[] = [];
+    let release = () => {};
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(),
+      tabsGet: async () => ({ id: 41, url: 'https://chatgpt.com/' }),
+      fetch: async (input, init = {}) => {
+        const route = new URL(input).pathname, body = JSON.parse(String(init.body || '{}'));
+        if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (route === '/commands/step' && body.step === 'model-diagnostic') {
+          reports.push(body.modelSelection);
+          if (reports.length === 1) return new Promise(resolve => { release = () => resolve(response(200, { ok: true })); });
+        }
+        if (route === '/compact' || route === '/commands/ack') critical.push(route);
+        return response(200, { ok: true, allowed: true });
+      } });
+    await worker.registerTab(41);
+    const report = (attempt: number, outcome: string, phase = 'select-effort') => worker.send({
+      type: 'command_step', id: 'cmd-steps', client: 'doc-1', step: 'model-diagnostic', modelSelection: { attempt, outcome, phase }
+    }, 41);
+    try {
+      work.push(report(1, 'pending'));
+      await vi.waitFor(() => expect(reports).toHaveLength(1));
+      for (let i = 0; i < 30; i++) work.push(report(1, 'pending'));
+      work.push(report(1, 'failed', 'close'), report(1, 'pending'), report(2, 'pending'),
+        report(2, 'confirmed', 'close'), report(2, 'pending'), report(1, 'failed', 'close'));
+      work.push(worker.send({ type: 'compact', token: '0123456789abcdef0123456789abcdef',
+        commandId: 'cmd-steps', client: 'doc-1', destinationAttempt: true }, 41));
+      work.push(worker.send({ type: 'ack', id: 'cmd-steps', client: 'doc-1', status: 'failed' }, 41));
+      await vi.waitFor(() => expect(critical).toEqual(['/compact', '/commands/ack']));
+      expect(reports).toHaveLength(1);
+      release();
+      await Promise.all(work);
+      await vi.waitFor(() => expect(reports).toHaveLength(2));
+      expect(reports[1]).toEqual({ attempt: 2, outcome: 'confirmed', phase: 'close' });
+    } finally { release(); await Promise.allSettled(work); }
+  });
+
+  it.each(['navigation', 'disconnect'])('discards queued model diagnostics after %s', async change => {
+    const reports: unknown[] = [];
+    let release = () => {};
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(),
+      fetch: async (input, init = {}) => {
+        const route = new URL(input).pathname;
+        if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (route === '/commands/step') {
+          reports.push(JSON.parse(String(init.body || '{}')));
+          if (reports.length === 1) return new Promise(resolve => { release = () => resolve(response(200, { ok: true })); });
+        }
+        return response(200, { ok: true });
+      } });
+    await worker.registerTab(41);
+    const message = { type: 'command_step', id: 'cmd-steps', client: 'doc-1', step: 'model-diagnostic',
+      modelSelection: { attempt: 1, outcome: 'pending' } };
+    const first = worker.send(message, 41);
+    let queued: Promise<unknown> | undefined;
+    try {
+      await vi.waitFor(() => expect(reports).toHaveLength(1));
+      queued = worker.send({ ...message, modelSelection: { attempt: 1, outcome: 'failed' } }, 41);
+      expect(await queued).toEqual({ ok: true });
+      if (change === 'navigation') {
+        await worker.registerTab(41, 'replacement-document');
+        expect(await worker.send(message, 41, 'document-41-0')).toMatchObject({ ok: false, error: 'stale_document' });
+      } else await worker.sendPopup({ type: 'unpair' });
+      release();
+      await first;
+      // A following critical request settles after the already-released diagnostic continuation.
+      await worker.send({ type: 'command_step', id: 'cmd-other', client: 'doc-2', step: 'model' }, 42);
+      expect(reports.filter((entry: any) => entry.id === 'cmd-steps')).toHaveLength(1);
+    } finally { release(); await Promise.allSettled([first, ...(queued ? [queued] : [])]); }
+  });
+
+  it('rechecks a model diagnostic document after asynchronous bridge discovery', async () => {
+    const reports: unknown[] = [];
+    let release: (() => void) | undefined;
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(),
+      fetch: async (input, init = {}) => {
+        const route = new URL(input).pathname;
+        if (route === '/hello') return new Promise(resolve => {
+          release = () => resolve(response(200, { app: 'chat-on-steroids', paired: true }));
+        });
+        if (route === '/commands/step') reports.push(JSON.parse(String(init.body || '{}')));
+        return response(200, { ok: true });
+      } });
+    await worker.registerTab(41);
+    try {
+      expect(await worker.send({ type: 'command_step', id: 'cmd-stale', client: 'doc-1', step: 'model-diagnostic',
+        modelSelection: { attempt: 1, outcome: 'pending' } }, 41)).toEqual({ ok: true });
+      await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+      await worker.registerTab(41, 'replacement-document');
+      release!();
+      await worker.send({ type: 'command_step', id: 'cmd-current', client: 'doc-2', step: 'model' }, 42);
+      expect(reports).toEqual([{ id: 'cmd-current', client: 'doc-2', step: 'model' }]);
+    } finally { release?.(); }
   });
 
   it('protects a newly created input tab until its conversation binds', async () => {
@@ -3857,7 +3958,7 @@ describe('extension command delivery', () => {
     const fetch = vi.fn(async (input: string) => {
       const url = new URL(input);
       paths.push(url.pathname);
-      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', bridge: 14, paired: true });
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, paired: true });
       if (url.pathname === '/pair') return response(200, { token: 'fresh-start-token' });
       return response(200, {});
     });
@@ -3871,7 +3972,7 @@ describe('extension command delivery', () => {
     const session = new FakeStorageArea();
     const fetch = vi.fn(async (input: string) => {
       const url = new URL(input);
-      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', bridge: 14, paired: false });
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, paired: false });
       if (url.pathname === '/pair') return response(200, { token: 'unwanted-token' });
       return response(200, {});
     });

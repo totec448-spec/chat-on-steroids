@@ -66,7 +66,7 @@
     "js-yaml": "4.3.2",
     "katex": "0.19.1",
     "koffi": "3.3.5",
-    "marked": "18.1.2",
+    "marked": "18.2.0",
     "node-pty": "1.2.0-beta.18",
     "pdfjs-dist": "^6.4.299",
     "quickjs-emscripten-core": "0.32.0",

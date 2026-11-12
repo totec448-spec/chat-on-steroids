@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { userTitle } from './title.js';
 import { readDurable, writeDurableNow, writeDurableSoon } from '../durable.js';
 import { getSession, findSessionByConversation, createSession, deleteSession, rebindSession, conversationWasSuperseded, readRecentEvents, listUsageSessions, turnHasMcpCall, questionHasMcpCall, sessionDirectoryMissing, readCompletedFinal, readLatestUserMessage, readEvents } from './store.js';
-import { noteEditReplacement } from './edits.js';
+import { noteEditReplacement, noteEditReplacements } from './edits.js';
 import { userPromptText } from '../../shared/user-prompt.js';
 import type { SessionEvent } from '../../shared/session.js';
 import { assignSessionProject, getProject, getSessionProject, localProjectPath, projectWorkspace } from '../projects.js';
@@ -622,6 +622,20 @@ async function load(): Promise<InputEntry[]> {
       else if (summary.origin) stamped.add(summary.conversationId);
       seen.add(summary.conversationId);
     }
+  }
+  const confirmedEdits = new Map<string, Array<{ messageId: string; replaced: string }>>();
+  for (const row of entries) {
+    const sessionId = row.sessionId ?? row.deliveredSessionId;
+    if (!row.edit || !row.messageId || !sessionId || !Number.isFinite(row.deliveredAt) ||
+        (row.state !== 'sent' && row.state !== 'cancelled')) continue;
+    const edits = confirmedEdits.get(sessionId) ?? [];
+    edits.push({ messageId: row.messageId, replaced: row.edit.messageId });
+    confirmedEdits.set(sessionId, edits);
+  }
+  for (const [sessionId, edits] of confirmedEdits) {
+    await noteEditReplacements(sessionId, edits, (messageId, error) =>
+      logWarn(`input: could not restore confirmed edit ${messageId} (${String(error)})`))
+      .catch((error: Error) => logWarn(`input: could not read confirmed edits for session ${sessionId} (${error.message})`));
   }
   // Durable decision receipts recover helper provenance even when recording/ACK raced
   // or this version first opens a helper recorded before origins were stamped.

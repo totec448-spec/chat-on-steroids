@@ -868,3 +868,44 @@ y=mx+b
     expect(first!.querySelector('.markdown-writing')!.isEqualNode(second!.querySelector('.markdown-writing'))).toBe(false);
   });
 });
+
+it.each([4, 5])('keeps a chart widget literal inside a lazy-list code fence at column %s', columns => {
+  const chart = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+    chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Outside code', value: 7 }]
+  } } })}\uE201`;
+  const indent = ' '.repeat(columns);
+  const source = `- Example\nlazy continuation\n${indent}\`\`\`json\n\n  ${chart}\n${indent}\`\`\`\n\n${chart}`;
+  const rendered = renderedMarkdown(source);
+  expect(rendered.querySelector('pre code')?.textContent).toContain(chart);
+  expect(rendered.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+  expect(rendered.querySelector('pre .markdown-dil-chart')).toBeNull();
+  expect(rendered.textContent).not.toContain('\uE030');
+});
+
+it.each([
+  ['LF', 1, '\n', false],
+  ['LF', 2, '\n', true],
+  ['CRLF', 1, '\r\n', false],
+  ['CRLF', 2, '\r\n', true]
+] as const)('respects %s backtick escaping for inline chart widgets (%i slashes)', (_name, slashes, newline, literal) => {
+  const chart = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+    chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Sample', value: 7 }]
+  } } })}\uE201`;
+  const opening = 'Example: ' + '\\'.repeat(slashes) + '`';
+  const source = [opening + chart, 'end of example` and later `unmatched', '', chart].join(newline);
+  const rendered = renderedMarkdown(source);
+  expect([...rendered.querySelectorAll('code')].some(code => code.textContent?.includes(chart))).toBe(literal);
+  expect(rendered.querySelectorAll('.markdown-dil-chart')).toHaveLength(literal ? 1 : 2);
+  expect(rendered.textContent).not.toContain('\uE030');
+});
+
+it.each(['\n', '\r\n'])('renders a chart after a quoted code fence in the same list item (%j)', newline => {
+  const chart = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+    chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Sample', value: 7 }]
+  } } })}\uE201`;
+  const source = ['- > ```json', '  > ' + chart, '  > ```', '', '  ' + chart].join(newline);
+  const rendered = renderedMarkdown(source);
+  expect(rendered.querySelector('li blockquote pre code')?.textContent).toContain(chart);
+  expect(rendered.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+  expect(rendered.textContent).not.toContain('\uE030');
+});
