@@ -47,6 +47,8 @@ export interface Chronological {
   final?: boolean;
   /** Sequence of the latest authored content of a canonical message. See `residenceOf()`. */
   contentSeq?: number;
+  /** Store-proven first terminal observation after a recorded streaming state. */
+  settledAtSeq?: number;
   /** On a turn end: the response went on into the next turn (#1301). */
   continued?: boolean;
   state?: string;
@@ -304,6 +306,13 @@ const CALL_TRANSIT_MS = 1_000;
 /** Where an entry sits in the log: its first appearance if it has revisions, else its seq. */
 export function positionOf(entry: Chronological): number {
   return typeof entry.origin === 'number' && Number.isFinite(entry.origin) ? entry.origin : entry.seq;
+}
+
+/** A terminal snapshot/revision alone cannot establish when the parent settled. */
+export function settledPositionOf(entry: Chronological): number | undefined {
+  const at = entry.settledAtSeq;
+  return entry.kind === 'assistant_message' && (entry.final === true || entry.state === 'final') &&
+    typeof at === 'number' && Number.isSafeInteger(at) && at > positionOf(entry) && at <= entry.seq ? at : undefined;
 }
 
 /**
