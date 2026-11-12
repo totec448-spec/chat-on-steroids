@@ -527,6 +527,51 @@ describe('native Project entry readiness', () => {
     }
   });
 
+  // 2026-11-12 (Windows VM, Project chat started through the app): ChatGPT also keeps the Project home's text
+  // after the app's FIRST message of a chat was sent from there (its context block, the message and the
+  // connector mention's label). The next Compact & Resume in that Project found it, waited for an empty
+  // editor and gave up: "could not open the source Project", every time. That message is the app's own, so
+  // it is recognised like a brief; the mention label that follows it is allowed, a person's words are not.
+  it.each([
+    ['the first message of a chat this app typed, followed by its mention label', 'own', ' Chat On Steroids Core', true],
+    ['that message with no label', 'own', '', true],
+    ['that message followed by a label that is not this installation\'s connector', 'own', ' Some Other App', false],
+    ['that message followed by a person\'s note', 'own', '\n\nAlso check the SMTP port, please, and then summarise what you found about the mail service in three short paragraphs for the team lead.', false],
+    ['a first message this app never typed', 'foreign', ' Chat On Steroids Core', false]
+  ] as const)('on the Project home, clears %s only when it is the app\'s own', async (_name, kind, suffix, cleared) => {
+    const typed = '[[COS_CONTEXT:21006]]You are a coding agent working with the user.\n\nRoots: /project\n[[/COS_CONTEXT]]Compaction live test: reply with exactly PROJ-OK-1.';
+    document.execCommand = (command: string, _ui?: boolean, value?: string) => {
+      const selection = document.getSelection();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+      if (!range) return false;
+      if (command === 'delete') { range.deleteContents(); return true; }
+      if (command !== 'insertHTML') return false;
+      range.deleteContents();
+      const template = document.createElement('template');
+      template.innerHTML = value || '';
+      range.insertNode(template.content);
+      return true;
+    };
+    const link = sourceLink();
+    box.textContent = '';
+    // The first message, typed and sent from this page; ChatGPT keeps its text on the Project home.
+    if (kind === 'own') { expect(api.insertPrompt(typed, true)).toBe(true); box.textContent = ''; }
+    link.addEventListener('click', event => {
+      event.preventDefault();
+      dom.reconfigure({ url: projectUrl });
+      box.replaceChildren(...(typed + suffix).split(/\n\n/).map(part => { const p = document.createElement('p'); p.textContent = part; return p; }));
+    });
+    const failure = vi.fn();
+    const entered = api.enterProject(entry, undefined, failure);
+    await vi.advanceTimersByTimeAsync(12_500);
+    expect(await entered).toBe(cleared);
+    if (cleared) expect(box.textContent).toBe('');
+    else {
+      expect(failure).toHaveBeenCalledWith('transition-timeout:last=composer-not-ready');
+      expect(box.textContent?.length).toBeGreaterThan(0);
+    }
+  });
+
   // #2115: the page that typed a brief is gone (a reload, an app restart, another tab); ChatGPT still holds the
   // text in the Project home. The brief is the app's own whoever typed it, so it is recognised from storage.
   // ChatGPT may also put the draft back after it was cleared, so one clear is not enough.
