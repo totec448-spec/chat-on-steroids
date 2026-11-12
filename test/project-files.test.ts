@@ -348,6 +348,10 @@ it.each([
   ['an SVG with a byte-order mark and a leading XML declaration', Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('\n <?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>')])],
   ['a gzipped SVG', gzipSync(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>'))],
   ['an SVG that follows other text', Buffer.from('not an image header\n<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8"/></svg>')],
+  ['an SVG behind a comment that looks like an AVIF box', Buffer.from(`<!--ftypavif-->${'<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8"/></svg>'}`)],
+  ['an SVG behind an AVIF box whose size is far too large', Buffer.concat([Buffer.from([0x7f, 0xff, 0xff, 0xff]), Buffer.from('ftypavif'), Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8"/></svg>')])],
+  ['an SVG behind an AVIF box too small to hold its brand', Buffer.concat([Buffer.from([0, 0, 0, 8]), Buffer.from('ftypavif'), Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8"/></svg>')])],
+  ['an SVG behind an AVIF box with a zero size', Buffer.concat([Buffer.from([0, 0, 0, 0]), Buffer.from('ftypavif'), Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8"/></svg>')])],
   ['an upper-case SVG tag after a comment', Buffer.from('<!-- c --><SVG xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8"/></SVG>')]
 ])('does not decode %s that is named like a raster', async (_name, content) => {
   // libvips would hand it to its SVG renderer; a project file is untrusted content.
