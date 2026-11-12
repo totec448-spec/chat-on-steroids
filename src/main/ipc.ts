@@ -32,7 +32,7 @@ import { getChatModels, startChatModelDiscovery, configureChatModelDiscovery } f
 import { releaseSessionFinish, requestSessionFinishGoal } from './session/finish.js';
 import { GOAL_MARKER_INSTRUCTION } from '../shared/goal-templates.js';
 import { validateInputImages } from './session/input-images.js';
-import { stageInputAttachment, stageInputAttachments, type AttachmentSource } from './session/input-attachments.js';
+import { stageInputAttachments, type AttachmentSource } from './session/input-attachments.js';
 import { recordDeliveredInput, recordedInputImage } from './session/input-history.js';
 import { UI_BASE_ZOOM } from './window-layout.js';
 import { paintWindowTheme } from './theme.js';
@@ -804,6 +804,20 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // A session row remains visible until its delete IPC resolves. Fence Trust while deletion is
   // in flight so a second click cannot recreate permission after the row's durable revoke.
   const deletingSessionIds = new Set<string>();
+  // The renderer owns the live draft references; the outbox owns admitted input.
+  // Look up the latest draft references at prune time, including after a native picker or SFTP wait.
+  const draftAttachments = new WeakMap<IpcMainInvokeEvent['sender'], Set<string>>();
+  handle('sessions:retainDraftAttachments', async (payload, event) => {
+    const { ids } = z.object({ ids: z.array(z.string().uuid()).max(20_000) }).strict().parse(payload);
+    draftAttachments.set(event.sender, new Set(ids));
+  });
+  const pendingAttachmentIds = async () => new Set((await listInputs())
+    .filter(row => !['sent', 'failed', 'cancelled'].includes(row.state))
+    .flatMap(row => row.attachments?.map(file => file.id) ?? []));
+  const stageFiles = async (sources: AttachmentSource[], event: IpcMainInvokeEvent, pending?: Set<string>) => {
+    const retained = pending ?? await pendingAttachmentIds();
+    return stageInputAttachments(sources, { has: id => retained.has(id) || draftAttachments.get(event?.sender)?.has(id) === true });
+  };
   let watchedWindow: BrowserWindow | null = null;
   const projectFileWatches = new ProjectFileWatchSet(event => {
     const target = getWindow();
@@ -1752,19 +1766,18 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     shell.showItemInFolder(target.real);
     return true;
   });
-  handle('projectFiles:attach', async payload => {
+  handle('projectFiles:attach', async (payload, event) => {
     const { projectId, path } = z.object({ projectId: projectFileId, path: projectRelativePath.min(1) }).strict().parse(payload);
     // A file in a project on a server (#1469) is copied over SFTP first.
     const snapshot = await serverFileSnapshot(projectId, path);
     if (snapshot) {
-      const retained = new Set((await listInputs()).filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).flatMap(row => row.attachments?.map(file => file.id) ?? []));
-      try { return await stageInputAttachment(snapshot.file, retained); } finally { await snapshot.cleanup(); }
+      try { return (await stageFiles([snapshot.file], event))[0]!; } finally { await snapshot.cleanup(); }
     }
     const target = await projectFileTarget(projectId, path, { allowRoot: false, fileOnly: true });
-    const retained = new Set((await listInputs()).filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).flatMap(row => row.attachments?.map(file => file.id) ?? []));
+    const retained = await pendingAttachmentIds();
     const checked = await projectFileTarget(projectId, path, { allowRoot: false, fileOnly: true });
     if (checked.real !== target.real) throw new Error('The project file changed location');
-    return stageInputAttachment(checked.real, retained);
+    return (await stageFiles([checked.real], event, retained))[0]!;
   });
 
   /**
@@ -2104,26 +2117,22 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return page;
   });
 
-  const stageFiles = async (sources: AttachmentSource[]) => {
-    const retained = new Set((await listInputs()).filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).flatMap(row => row.attachments?.map(file => file.id) ?? []));
-    return stageInputAttachments(sources, retained);
-  };
-  handle('sessions:files', async () => {
+  handle('sessions:files', async (_payload, event) => {
     const chosen = await dialog.showOpenDialog({ ...dialogLabel('Attach files'), properties: ['openFile', 'multiSelections'] });
     if (chosen.canceled) return [];
     if (chosen.filePaths.length > 20) throw new Error('Attach up to 20 files per message');
-    return stageFiles(chosen.filePaths);
+    return stageFiles(chosen.filePaths, event);
   });
-  handle('sessions:dropFiles', async payload => {
+  handle('sessions:dropFiles', async (payload, event) => {
     const { files } = z.object({ files: z.array(z.union([
       z.string().min(1).max(32768),
       z.object({ name: z.string().min(1).max(255), bytes: z.instanceof(Uint8Array).refine(bytes => bytes.byteLength > 0 && bytes.byteLength <= 12 * 1024 * 1024) }).strict()
     ])).min(1).max(20) }).strict().parse(payload);
-    return stageFiles(files);
+    return stageFiles(files, event);
   });
-  handle('sessions:attachText', async payload => {
+  handle('sessions:attachText', async (payload, event) => {
     const { text } = z.object({ text: z.string().min(1).max(4 * 1024 * 1024) }).parse(payload);
-    return (await stageFiles([{ text }]))[0]!;
+    return (await stageFiles([{ text }], event))[0]!;
   });
   handle('sessions:stopTurn', async payload => {
     const { id, expectedTurnId, expectedConversationId } = sessionIdArg.extend({ expectedTurnId: z.string().min(1).max(256),
