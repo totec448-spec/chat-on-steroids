@@ -1,3 +1,5 @@
+import { settledPositionOf } from '../../shared/chronology.js';
+import type { SessionEvent } from '../../shared/session.js';
 import { getSession, readEvents, upsertMessageEvent } from './store.js';
 
 /**
@@ -12,20 +14,31 @@ import { getSession, readEvents, upsertMessageEvent } from './store.js';
 export async function replacedQuestion(sessionId: string, messageId: string, parentId: string): Promise<{ replaces?: string }> {
   const summary = await getSession(sessionId);
   const since = Math.max(0, ...Object.values(summary?.retiredChatAt ?? {}));
-  const questions = await readEvents(sessionId, { kinds: ['user_message'] });
-  if (questions.some(event => event.kind === 'user_message' && event.messageId === messageId && event.replaces)) return {};
+  const events = await readEvents(sessionId, { kinds: ['user_message', 'assistant_message'] });
+  if (events.some(event => event.kind === 'user_message' && event.messageId === messageId && event.replaces)) return {};
+  let parentSettledAt = 0;
   const firstSeen = new Map<string, { at: number; parentId?: string; time: number }>();
-  for (const event of questions) {
+  for (const event of events) {
+    if (event.kind === 'assistant_message') {
+      if ((event.messageId === parentId || event.providerMessageId === parentId) &&
+          (event.final === true || event.state === 'final')) {
+        parentSettledAt = Math.max(parentSettledAt, settledPositionOf(event) ?? 0);
+      }
+      continue;
+    }
     if (event.kind !== 'user_message' || !event.messageId) continue;
     const known = firstSeen.get(event.messageId);
     const at = event.origin ?? event.seq;
     firstSeen.set(event.messageId, { at: Math.min(known?.at ?? at, at), parentId: known?.parentId ?? event.parentId, time: Math.min(known?.time ?? event.time, event.time) });
   }
   // A message already recorded can only have replaced a question seen before it.
+  // An assistant parent that finished after a steered question answered that question;
+  // the next turn's question under that consolidated parent follows it rather than replacing it.
   const own = firstSeen.get(messageId);
   let replaced: { id: string; at: number } | null = null;
   for (const [id, seen] of firstSeen) {
     if (id === messageId || seen.parentId !== parentId || seen.time < since || (own && seen.at >= own.at)) continue;
+    if (parentSettledAt > seen.at && (!own || parentSettledAt < own.at)) continue;
     if (!replaced || seen.at > replaced.at) replaced = { id, at: seen.at };
   }
   return replaced ? { replaces: replaced.id } : {};
@@ -45,14 +58,42 @@ export function editReplacement(messageId: string): string | undefined {
  * versions control (and in a layout that never shows one).
  */
 export async function noteEditReplacement(sessionId: string, messageId: string, replaced: string): Promise<void> {
-  if (messageId === replaced) return;
-  delivered.set(messageId, replaced);
-  if (delivered.size > 256) delivered.delete(delivered.keys().next().value!);
-  const recorded = (await readEvents(sessionId, { kinds: ['user_message'] }))
-    .filter(event => event.kind === 'user_message' && event.messageId === messageId).at(-1);
-  if (recorded?.kind !== 'user_message' || recorded.replaces) return;
-  const { seq: _seq, ...event } = recorded;
-  await upsertMessageEvent(sessionId, { ...event, replaces: replaced });
+  await noteEditReplacements(sessionId, [{ messageId, replaced }]);
+}
+
+/** Restore a session's receipts from one history read; pending native echoes retain their cache entry. */
+export async function noteEditReplacements(
+  sessionId: string,
+  replacements: ReadonlyArray<{ messageId: string; replaced: string }>,
+  onError?: (messageId: string, error: unknown) => void
+): Promise<void> {
+  const pending: Array<{ messageId: string; replaced: string }> = [];
+  const wanted = new Set<string>();
+  for (const replacement of replacements) {
+    const { messageId, replaced } = replacement;
+    if (messageId === replaced) continue;
+    delivered.set(messageId, replaced);
+    if (delivered.size > 256) delivered.delete(delivered.keys().next().value!);
+    pending.push(replacement);
+    wanted.add(messageId);
+  }
+  if (!pending.length) return;
+  const recorded = new Map<string, Extract<SessionEvent, { kind: 'user_message' }>>();
+  for (const event of await readEvents(sessionId, { kinds: ['user_message'] })) {
+    if (event.kind === 'user_message' && event.messageId && wanted.has(event.messageId)) recorded.set(event.messageId, event);
+  }
+  for (const { messageId, replaced } of pending) {
+    const previous = recorded.get(messageId);
+    if (!previous || (previous.replacesConfirmed === true && previous.replaces === replaced)) continue;
+    try {
+      const { seq: _seq, ...event } = previous;
+      const written = await upsertMessageEvent(sessionId, { ...event, replaces: replaced, replacesConfirmed: true }, { replacementOnly: true });
+      if (written.event.kind === 'user_message') recorded.set(messageId, written.event);
+    } catch (error) {
+      if (!onError) throw error;
+      onError(messageId, error);
+    }
+  }
 }
 
 export function resetEditsForTests(): void {
