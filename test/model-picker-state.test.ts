@@ -218,6 +218,94 @@ it('says the picker retained its focus trap when the selection cannot close it',
   expect(f.api.modelSelectionFailure()).toBe('the picker did not close');
 });
 
+// #2085: provider selection can change *during* native Escape. The menu-close
+// boolean is not sufficient evidence for either of the two success paths.
+it.each(['model', 'effort'] as const)('rejects %s drift while closing an already selected picker', async drift => {
+  const f = fixture(), doc = page.window.document;
+  doc.querySelector('button')!.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Enter' }));
+  doc.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    if (drift === 'model') f.selections[0]![1]!.modelSlug = 'another-thinking';
+    else { f.state.currentBucket = 1; f.state.currentSelection = f.selections[0]![0]!; }
+  });
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'high')).toBe(false);
+  expect(f.api.modelSelectionFailure()).toContain('after closing');
+});
+it.each(['model', 'effort'] as const)('rejects %s drift while closing after selecting another version', async drift => {
+  const f = fixture(), doc = page.window.document;
+  doc.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    if (drift === 'model') f.selections[1]![1]!.modelSlug = 'another-thinking';
+    else { f.state.currentBucket = 10; f.state.currentSelection = f.selections[1]![0]!; }
+  });
+  expect(await f.api.selectModelSettings('future-model', 'ultra')).toBe(false);
+  expect(f.api.modelSelectionFailure()).toContain('after closing');
+});
+it('rejects success when the post-close picker state becomes unreadable', async () => {
+  const f = fixture(), doc = page.window.document;
+  doc.addEventListener('keydown', event => {
+    if (event.key === 'Escape') (f.props as any).composerIntelligencePickerState = null;
+  });
+  expect(await f.api.selectModelSettings('future-model', 'ultra')).toBe(false);
+  expect(f.api.modelSelectionFailure()).toContain('after closing');
+});
+// A route-owned native reasoning trigger provides independent machine evidence:
+// Fiber can keep High while the native control changes to Medium.
+function nativeReasoningTrigger() {
+  const trigger = page.window.document.querySelector('form button')!;
+  trigger.setAttribute('data-composer-navigation-target', 'reasoning');
+  trigger.setAttribute('data-selected-reasoning-effort', 'high');
+  return trigger;
+}
+it('accepts unchanged High when its owned native reasoning trigger survives close', async () => {
+  const f = fixture(), doc = page.window.document;
+  nativeReasoningTrigger();
+  doc.querySelector('form button')!.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Enter' }));
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'high')).toBe(true);
+  expect(f.api.modelSelectionFailure()).toBe('');
+});
+it.each(['medium', 'lost'] as const)('rejects %s native control after close while Fiber stays High', async change => {
+  const f = fixture(), doc = page.window.document;
+  const trigger = nativeReasoningTrigger();
+  trigger.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Enter' }));
+  doc.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    if (change === 'medium') trigger.setAttribute('data-selected-reasoning-effort', 'medium');
+    else trigger.removeAttribute('data-composer-navigation-target');
+  });
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'high')).toBe(false);
+  expect(f.api.modelSelectionFailure()).toContain('after closing');
+  expect(f.state.currentSelection.thinkingEffort).toBe('extended');
+});
+it('accepts a native High-to-Medium transition when both controls agree after close', async () => {
+  const f = fixture(), doc = page.window.document, trigger = nativeReasoningTrigger();
+  doc.addEventListener('keydown', event => {
+    const latest = event.key === 'Enter' && (event.target as HTMLElement).matches?.('[role="menuitemradio"]') &&
+      (event.target as HTMLElement).textContent?.includes(f.versions[0]!.displayTextForIntelligence);
+    if (event.key === 'ArrowLeft' || latest) trigger.setAttribute('data-selected-reasoning-effort', 'medium');
+  }, true);
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'medium')).toBe(true);
+  expect(f.state.currentSelection.thinkingEffort).toBe('standard');
+  expect(trigger.getAttribute('data-selected-reasoning-effort')).toBe('medium');
+});
+it('rejects native High drift after choosing Medium even when Fiber remains Medium', async () => {
+  const f = fixture(), doc = page.window.document, trigger = nativeReasoningTrigger();
+  let beforeClose = '';
+  doc.addEventListener('keydown', event => {
+    const latest = event.key === 'Enter' && (event.target as HTMLElement).matches?.('[role="menuitemradio"]') &&
+      (event.target as HTMLElement).textContent?.includes(f.versions[0]!.displayTextForIntelligence);
+    if (event.key === 'ArrowLeft' || latest) trigger.setAttribute('data-selected-reasoning-effort', 'medium');
+    if (event.key === 'Escape') {
+      beforeClose = trigger.getAttribute('data-selected-reasoning-effort') ?? '';
+      trigger.setAttribute('data-selected-reasoning-effort', 'high');
+    }
+  }, true);
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'medium')).toBe(false);
+  expect(beforeClose).toBe('medium');
+  expect(f.state.currentSelection.thinkingEffort).toBe('standard');
+  expect(f.api.modelSelectionFailure()).toContain('after closing');
+});
+
 /*
  * A fixed-tier family exposes only efforts outside the reasoning ladder: a Pro-only
  * family reports `pro` as its sole rung. Asking for a ladder step there has nothing to
@@ -738,26 +826,26 @@ it('reports effort substitution on success and keeps the ordinary boolean contra
   expect(f.api.modelSelectionFailure()).toBe('');
   expect(await f.api.selectModelSettings('future-model', 'low', () => true, () => { throw new Error('receiver unavailable'); })).toBe(true);
 });
-it.each([true, false])('keeps the last observed pair after an unreadable closing read (selected=%s)', async selected => {
+it.each([true, false])('retains diagnostic evidence but refuses an unreadable closing read (selected=%s)', async selected => {
   const f = fixture(), reports: unknown[] = [];
   page.window.document.addEventListener('keydown', event => {
     if (event.key === 'Escape') f.props.modelsData.versions = [];
   });
   expect(await f.api.selectModelSettings(selected ? 'future-model' : 'missing-model', 'ultra', () => true,
-    (value: unknown) => reports.push(value))).toBe(selected);
+    (value: unknown) => reports.push(value))).toBe(false);
   expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({
     before: { model: 'gpt-5-6-thinking', effort: 'high' }, closed: true,
     after: selected ? { model: 'future-model', effort: 'ultra' } : { model: 'gpt-5-6-thinking', effort: 'high' },
     observedVersion: selected ? 'future' : 'latest'
   });
 });
-it('records a close-time selection change without changing the existing selection policy', async () => {
+it('reports a close-time selection change and rejects false success', async () => {
   const f = fixture(), reports: unknown[] = [];
   page.window.document.addEventListener('keydown', event => {
     if (event.key === 'Escape') { f.state.currentBucket = 10; f.state.currentSelection = f.selections[1]![0]!; }
   });
-  expect(await f.api.selectModelSettings('future-model', 'ultra', () => true, (value: unknown) => reports.push(value))).toBe(true);
-  expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({ outcome: 'confirmed',
+  expect(await f.api.selectModelSettings('future-model', 'ultra', () => true, (value: unknown) => reports.push(value))).toBe(false);
+  expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({ outcome: 'failed', failure: 'changed', failedPhase: 'close',
     selected: { model: 'future-model', effort: 'ultra' }, after: { model: 'future-model', effort: 'low' } });
 });
 
