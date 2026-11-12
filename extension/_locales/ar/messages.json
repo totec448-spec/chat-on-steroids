@@ -645,7 +645,7 @@
     "message": "اكتب النتيجة التي يجب أن تحققها هذه المحادثة. تعمل باستخدام $1."
   },
   "content_tokens_from": {
-    "message": "من أصل $1 رمزًا"
+    "message": "من إجمالي عدد الرموز: $1"
   },
   "content_tool_calls_count": {
     "message": "$1 استدعاء أداة"
@@ -657,7 +657,7 @@
     "message": "التفاصيل المسجلة غير متاحة لهذا الإصدار من النشاط."
   },
   "content_tool_more_changed_files": {
-    "message": "$1 ملفًا معدّلًا إضافيًا"
+    "message": "عدد الملفات المعدّلة الإضافية: $1"
   },
   "content_tool_outcome_completed": {
     "message": "اكتمل"
@@ -741,7 +741,7 @@
     "message": "الوكيل ما زال يعمل: $1"
   },
   "content_workers_still_running": {
-    "message": "ما زال $1 وكيلًا يعمل"
+    "message": "عدد الوكلاء الذين ما زالوا يعملون: $1"
   },
   "content_working": {
     "message": "جارٍ العمل…"
@@ -1188,16 +1188,16 @@
     "message": "عدد الوكلاء الذين أكملوا العمل: $1"
   },
   "content_workers_running": {
-    "message": "$1 وكيلًا يعمل"
+    "message": "عدد الوكلاء الذين يعملون: $1"
   },
   "content_workers_failed": {
-    "message": "فشل $1 وكيلًا"
+    "message": "عدد الوكلاء الذين فشلوا: $1"
   },
   "popup_detail_events": {
-    "message": "$1 حدثًا"
+    "message": "عدد الأحداث: $1"
   },
   "popup_detail_calls": {
-    "message": "$1 استدعاءً"
+    "message": "عدد الاستدعاءات: $1"
   },
   "popup_detail_failed": {
     "message": "عدد العمليات الفاشلة: $1"

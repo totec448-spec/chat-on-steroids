@@ -96,10 +96,22 @@ for (const name of scripts) {
     // A check that throws inside its async body and then quits in a finally block exits 0: its
     // failure only shows as an unhandled rejection. Two checks passed that way for weeks (#1144).
     let unhandled = false;
-    const keep = chunk => { unhandled ||= /UnhandledPromiseRejection/.test(String(chunk)); output = (output + chunk).slice(-4000); };
+    // Electron can terminate with exit 0 even after a caught async fixture
+    // assertion has failed. Require test harnesses to report that explicitly.
+    let qaFailed = false;
+    const keep = chunk => {
+      const line = String(chunk);
+      unhandled ||= /UnhandledPromiseRejection/.test(line);
+      qaFailed ||= /COS_QA_TEST_FAILED:/.test(line);
+      output = (output + line).slice(-4000);
+    };
     child.stdout.on('data', keep); child.stderr.on('data', keep);
     const timer = setTimeout(() => { child.kill('SIGKILL'); resolve({ code: 'timeout', output }); }, TIMEOUT_MS);
-    child.on('close', (code, signal) => { clearTimeout(timer); resolve({ code: code === 0 && unhandled ? 'unhandled rejection' : code ?? `signal ${signal}`, output }); });
+    child.on('close', (code, signal) => {
+      clearTimeout(timer);
+      resolve({ code: code === 0 && qaFailed ? 'fixture assertion failed'
+        : code === 0 && unhandled ? 'unhandled rejection' : code ?? `signal ${signal}`, output });
+    });
   });
   let outcome = await run();
   const first = outcome;

@@ -81,7 +81,9 @@ it('uses Arabic plural categories for zero, one, two, few, many and other', asyn
     [2, 'حدثان (2)'],
     [3, '3 أحداث'],
     [11, '11 حدثًا'],
-    [100, '100 حدثًا']
+    [100, 'عدد الأحداث: 100'],
+    [101, 'عدد الأحداث: 101'],
+    [102, 'عدد الأحداث: 102']
   ]);
   for (const [n, value] of expected) {
     expect(page.api.tn('popup_detail_events', n, 'one', 'other'), String(n)).toBe(value);

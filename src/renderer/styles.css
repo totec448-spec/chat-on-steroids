@@ -35,7 +35,9 @@ html[dir="rtl"] .row-menu-chevron { transform: scaleX(-1); }
 /* Wizard back/continue and resume are logical navigation, not physical
    east/west directions. The sidebar's Back to chat stays leftward because
    the chat pane is physically left of the Arabic sidebar. */
-html[dir="rtl"] :is(#browserContinue, #browserBack, #resumeLastSummary) > .ico:is(.ph-arrow-left, .ph-arrow-right) {
+html[dir="rtl"] #browserContinue > .ph-arrow-right,
+html[dir="rtl"] #browserBack > .ph-arrow-left,
+html[dir="rtl"] #resumeLastSummary > .ph-arrow-right {
   transform: scaleX(-1);
 }
 /* Mirror physical sidebar geometry; CSS direction alone does not mirror absolute

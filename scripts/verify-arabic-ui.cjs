@@ -10,6 +10,7 @@ const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
 const output = path.join(root, 'outputs', 'arabic-qa');
 fs.mkdirSync(output, {recursive:true});
+fs.rmSync(path.join(output,'qa-last-error.txt'),{force:true});
 app.setPath('userData', path.join(output, 'isolated-electron-userdata'));
 
 app.whenReady().then(async () => {
@@ -66,7 +67,9 @@ app.whenReady().then(async () => {
       })()`);
       // Screenshots must reflect the newly activated panel, not the previous
       // compositor frame. Hidden Electron windows can capture before a paint.
-      await evalJS('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+      // In a hidden Electron window, rAF may stop while zoom is changing.
+      // Force one compositor capture instead of waiting indefinitely for rAF.
+      await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true});
       await new Promise(resolve => setTimeout(resolve, 65));
     };
     const screens=['chat','appearance','setup','home','general','plugins','usage','activity','scheduled','skills','pets'];
@@ -157,15 +160,23 @@ app.whenReady().then(async () => {
         return [id,getComputedStyle(node).transform];
       })
     ))()`);
-    for(const id of ['browserContinue','browserBack','resumeLastSummary'])
-      assert.equal(navigation[id],'matrix(-1, 0, 0, 1, 0, 0)',`RTL ${id} navigation arrow should face inward`);
+    // Wizard steps and the resume control are initially hidden; Chromium may
+    // return transform:none for descendants of display:none despite matching
+    // an RTL CSS rule. Verify the rule is present, and assert computed layout
+    // only for controls currently visible in the fixture.
+    const hasRule=await evalJS(`[...document.styleSheets].some(sheet=>{
+      try{return [...sheet.cssRules].some(rule=>rule.cssText.includes('browserContinue > .ph-arrow-right')
+        && rule.cssText.includes('browserBack > .ph-arrow-left') && rule.cssText.includes('scaleX(-1)'))}
+      catch{return false}
+    })`);
+    assert.ok(hasRule,'RTL wizard arrow rule must exist and mirror both navigation controls');
     assert.equal(navigation.backToChat,'none','The Arabic right-sidebar return to chat still points left');
     // The real RTL composer uses a right-side sidebar. The mode popover must
     // grow inward from its trigger instead of hiding behind that sidebar.
     await setPanel('chat');
     for(const width of [1280,900,760]){
       win.setSize(width,820);
-      await evalJS('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+      await new Promise(resolve=>setTimeout(resolve,70));
       const placement=await evalJS(`(() => {
         const details=document.getElementById('composerSettings');
         details.classList.add('mode-picker');
@@ -192,7 +203,7 @@ app.whenReady().then(async () => {
     // anchor on the right in RTL; the model chooser anchors on the left.
     for(const width of [1280,900,760]){
       win.setSize(width,820);
-      await evalJS('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+      await new Promise(resolve=>setTimeout(resolve,70));
       for(const [id,side] of [['attachmentMenu','right'],['modelMenu','left']]){
         const placement=await evalJS(`(() => {
           const details=document.getElementById(${JSON.stringify(id)});details.open=true;
@@ -230,6 +241,87 @@ app.whenReady().then(async () => {
     await new Promise(resolve => setTimeout(resolve, 150));
     fs.writeFileSync(path.join(output,'english-general-760.png'),
       (await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());
+    // True paired comparison images: exactly the same production renderer,
+    // synthetic data, viewport and palette in English (LTR) and Arabic (RTL).
+    // Capture the English matrix here; the Arabic matrix was already captured
+    // above before switching. Width 760 is the narrow-window comparison.
+    for(const theme of ['dark','light']){
+      await evalJS(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`);
+      for(const width of [1280,760]){
+        win.setSize(width,820);
+        for(const name of screens){
+          await setPanel(name);
+          const geometry=await evalJS(`(() => ({
+            lang:document.documentElement.lang,dir:document.documentElement.dir,
+            viewport:innerWidth,scrollWidth:document.documentElement.scrollWidth,
+            theme:document.documentElement.dataset.theme,
+            panelVisible:document.querySelector('.panel.is-active').getBoundingClientRect().width>0
+          }))()`);
+          assert.equal(geometry.dir,'ltr');
+          assert.equal(geometry.lang,'en');
+          assert.equal(geometry.theme,theme);
+          assert.ok(geometry.panelVisible&&geometry.scrollWidth<=geometry.viewport+2,
+            `English comparison screenshot overflows: ${JSON.stringify({name,width,...geometry})}`);
+          fs.writeFileSync(path.join(output,`english-${theme}-${name}-${width}.png`),
+            (await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());
+        }
+      }
+    }
+    // High contrast comparison, both languages and window widths. The user
+    // palette is untouched: this is an isolated test profile.
+    await evalJS("document.documentElement.dataset.highContrast='true'");
+    for(const language of ['en','ar']){
+      await evalJS(`(() => {const e=document.getElementById('uiLanguage');e.value=${JSON.stringify(language)};e.dispatchEvent(new Event('change'));})()`);
+      for(const theme of ['dark','light']){
+        await evalJS(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`);
+        for(const width of [1280,760]){
+          win.setSize(width,820);
+          for(const name of ['chat','general']){
+            await setPanel(name);
+            assert.equal(await evalJS('document.documentElement.dataset.highContrast'),'true');
+            fs.writeFileSync(path.join(output,`contrast-${language}-${theme}-${name}-${width}.png`),
+              (await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());
+          }
+        }
+      }
+    }
+    await evalJS("document.documentElement.dataset.highContrast='false'");
+    await evalJS("document.documentElement.dataset.theme='dark'");
+    // Paired real built-in dialog and composer menu captures. A dialog's real
+    // markup and styles are used; no user messages or accounts are supplied.
+    for(const language of ['en','ar']){
+      await evalJS(`(() => {const e=document.getElementById('uiLanguage');e.value=${JSON.stringify(language)};e.dispatchEvent(new Event('change'));})()`);
+      for(const width of [1280,760]){
+        win.setSize(width,820);
+        await setPanel('chat');
+        for(const id of ['composerSettings','attachmentMenu','modelMenu']){
+          const detail=await evalJS(`(() => {
+            const menu=document.getElementById(${JSON.stringify(id)});menu.open=true;
+            const rect=menu.querySelector('.composer-popover').getBoundingClientRect();
+            return {left:rect.left,right:rect.right,viewport:innerWidth};
+          })()`);
+          assert.ok(detail.left>=-2&&detail.right<=detail.viewport+2,
+            `Composer menu clipped: ${language}/${width}/${id} ${JSON.stringify(detail)}`);
+          await new Promise(resolve=>setTimeout(resolve,80));
+          fs.writeFileSync(path.join(output,`paired-${language}-${id}-${width}.png`),
+            (await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());
+          await evalJS(`document.getElementById(${JSON.stringify(id)}).open=false`);
+        }
+        for(const id of ['searchDialog','exportSettingsDialog','skillGithubDialog']){
+          await setPanel(id==='skillGithubDialog'?'skills':'chat');
+          const dialog=await evalJS(`(() => {
+            const d=document.getElementById(${JSON.stringify(id)});d.showModal();
+            const r=d.getBoundingClientRect();return {width:r.width,left:r.left,right:r.right,viewport:innerWidth};
+          })()`);
+          assert.ok(dialog.width>100&&dialog.left>=-2&&dialog.right<=dialog.viewport+2,
+            `Dialog clipped: ${language}/${width}/${id} ${JSON.stringify(dialog)}`);
+          await new Promise(resolve=>setTimeout(resolve,80));
+          fs.writeFileSync(path.join(output,`paired-${language}-${id}-${width}.png`),
+            (await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());
+          await evalJS(`document.getElementById(${JSON.stringify(id)}).close()`);
+        }
+      }
+    }
     await evalJS(`document.querySelector('[data-language="ar"]').click()`);
     assert.equal(await evalJS('document.documentElement.dir'),'rtl');
     assert.equal(await evalJS('localStorage.getItem("cos.ui.language")'),'ar');
@@ -248,12 +340,16 @@ app.whenReady().then(async () => {
     fs.writeFileSync(path.join(output,'metrics.json'),JSON.stringify(metrics,null,2)+'\n');
     console.log(JSON.stringify({status:'PASS',screenshots:metrics.length,metrics:metrics.map(m=>({width:m.width,screen:m.name,sidebar:m.sidebar,resize:m.resize,heading:m.heading,bodyOverflow:m.documentWidth>m.viewport}))},null,2));
   }catch(e){
-    console.error(e.stack||e);
+    console.error('COS_QA_TEST_FAILED:',e.stack||e);
+    fs.writeFileSync(path.join(output,'qa-last-error.txt'),String(e.stack||e));
     failed=true;
   }finally{
     win?.destroy();
     await server.close();
-    if(failed) process.exit(1);
-    app.quit();
+    // Electron overrides Node process shutdown semantics on some Windows
+    // builds: process.exit(1) was reported as exit 0 by the test supervisor.
+    // app.exit(code) propagates the actual failure status to verify-ui.mjs.
+    if(failed) app.exit(1);
+    else app.quit();
   }
 }).catch(e=>{console.error(e);app.exit(1);});

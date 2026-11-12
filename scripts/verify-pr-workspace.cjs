@@ -103,7 +103,11 @@ app.whenReady().then(async () => {
       window.fixtureReady=true;
     `;
     server = await createServer({ configFile: false, root: path.join(root, 'src/renderer'),
-      server: { host: '127.0.0.1', port: 0 }, plugins: [{ name: 'pr-workspace-fixture', configureServer(vite) {
+      // In worktrees, node_modules can be linked to the sibling checkout.
+      // Allow the actual fonts; otherwise icon glyphs become empty boxes in
+      // snapshots even though the UI geometry seems to pass.
+      server: { host: '127.0.0.1', port: 0, fs: { allow: [root, fs.realpathSync(path.join(root,'node_modules'))] } },
+      plugins: [{ name: 'pr-workspace-fixture', configureServer(vite) {
         vite.middlewares.use('/fixture.html', async (_request, response) => {
           const source = withoutScripts(fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8'))
             .replace('</body>', '<script type="module">' + fixture + '</script></body>');
@@ -132,6 +136,10 @@ app.whenReady().then(async () => {
     };
     await win.loadURL(server.resolvedUrls.local[0] + 'fixture.html');
     await until('window.fixtureReady && document.querySelectorAll(".sess[data-id]").length===3');
+    const iconFont=await js(`document.fonts.ready.then(()=>({loaded:[...document.fonts].some(f=>f.family==='CoS Phosphor'&&f.status==='loaded'),
+      family:getComputedStyle(document.querySelector('.ph')).fontFamily}))`);
+    assert.ok(iconFont.loaded&&iconFont.family.includes('CoS Phosphor'),
+      'Workspace visual QA must load real icons, not font fallback boxes: '+JSON.stringify(iconFont));
     assert.ok(await js(`(()=>{const button=document.getElementById('chatRefresh');const heading=button.closest('.sidebar-session-heading');const a=button.getBoundingClientRect(),b=heading.getBoundingClientRect();return button.children.length===1&&Math.abs((a.top+a.bottom-b.top-b.bottom)/2)<1})()`));
     assert.equal(await js('document.querySelectorAll("#projectList .sess[data-id]").length'),2);
     assert.equal(await js('document.querySelectorAll("#chatList .sess[data-id]").length'),1);
@@ -212,7 +220,29 @@ app.whenReady().then(async () => {
     await until('!document.querySelector(".file-tree").hidden');
     await js(`document.querySelector('.file-tree-row[data-path="README.md"]').click()`);
     await until('!!document.querySelector(".file-preview-markdown h1")');
-    for (const [width, height, zoom, language] of [[1500,1000,1.17,'en'],[1100,850,1,'es'],[820,740,1.17,'es'],[1100,850,1.17,'zh-TW']]) {
+    // Independent EN/AR visual evidence before running the stronger toolbar
+    // stress assertions, which may be environment-sensitive at 117% zoom.
+    for(const width of [1100,820]){
+      win.setSize(width,width===820?740:850);
+      win.webContents.setZoomFactor(1);
+      for(const language of ['en','ar']){
+        await js(`window.fixture.setLanguage(${JSON.stringify(language)})`);
+        const bounds=await js(`(() => {
+          const r=document.querySelector('.file-panel').getBoundingClientRect();
+          return {right:r.right,left:r.left,viewport:innerWidth,scrollWidth:document.documentElement.scrollWidth,dir:document.documentElement.dir};
+        })()`);
+        assert.equal(bounds.dir,language==='ar'?'rtl':'ltr');
+        assert.ok(bounds.left>=-2&&bounds.right<=bounds.viewport+2&&bounds.scrollWidth<=bounds.viewport+2,
+          'Paired Files view must stay in viewport: '+JSON.stringify({language,width,bounds}));
+        await screenshot(`files-paired-${language}-${width}`);
+      }
+    }
+    for (const [width, height, zoom, language] of [
+      [820,740,1.17,'ar'],[820,740,1.17,'en'],
+      [1100,850,1,'ar'],[1100,850,1,'en'],[1500,1000,1.17,'en'],
+      [1100,850,1,'es'],[820,740,1.17,'es'],
+      [1100,850,1.17,'zh-TW']
+    ]) {
       win.setSize(width,height); win.webContents.setZoomFactor(zoom);
       await js(`window.fixture.setLanguage(${JSON.stringify(language)}); new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))`);
       const measured = await js(`(()=>{const r=document.querySelector('.file-panel').getBoundingClientRect();return {
@@ -375,4 +405,8 @@ app.whenReady().then(async () => {
     console.log('PASS: current renderer Files layouts, Agent Monitor activity/count, read-only Git Changes/diff, real editor draft navigation, PDF rendering, connection status, Skills chips/shared library, Projects/Chats, Spanish and Traditional Chinese. '+output);
   } finally { win?.destroy(); await server?.close(); }
   app.exit(0);
-}).catch(error=>{console.error(error);app.exit(1)});
+}).catch(error=>{
+  fs.writeFileSync(path.join(output,'qa-last-error.txt'),String(error?.stack??error));
+  console.error('COS_QA_TEST_FAILED:',error);
+  app.exit(1);
+});
