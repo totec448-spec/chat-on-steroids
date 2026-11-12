@@ -50,15 +50,23 @@ app.whenReady().then(async()=>{
           // Hidden Electron may throttle rAF indefinitely; force a compositor
           // capture instead of waiting for a frame that never arrives.
           await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true});
-          const metrics=await win.webContents.executeJavaScript("(() => { const d=document, e=d.documentElement, shell=d.querySelector('.shell'); const r=shell.getBoundingClientRect(); const call=d.createElement('div');call.className='call';const id=d.createElement('span');id.className='id';id.textContent='abc-123-def';call.append(id);shell.append(call);const technicalIds=['#d-chat','#d-req','.call .id'].map(sel=>{const s=getComputedStyle(d.querySelector(sel));return {selector:sel,dir:s.direction,bidi:s.unicodeBidi};});call.remove();return {lang:e.lang,dir:e.dir,direction:getComputedStyle(shell).direction,viewport:innerWidth,scrollWidth:e.scrollWidth,popupWidth:Math.round(r.width),title:d.querySelector('h1')?.textContent,localized:d.querySelectorAll('[data-i18n]').length,cssLoaded:getComputedStyle(shell).paddingTop,technicalIds,scheme:getComputedStyle(e).colorScheme}; })()");
+          const metrics=await win.webContents.executeJavaScript("(() => { const d=document, e=d.documentElement, shell=d.querySelector('.shell'); const r=shell.getBoundingClientRect(); const call=d.createElement('div');call.className='call';const id=d.createElement('span');id.className='id';id.textContent='abc-123-def';call.append(id);shell.append(call);const technicalIds=['#d-chat','#d-req','.call .id'].map(sel=>{const s=getComputedStyle(d.querySelector(sel));return {selector:sel,dir:s.direction,bidi:s.unicodeBidi};});call.remove();return {lang:e.lang,dir:e.dir,direction:getComputedStyle(shell).direction,viewport:innerWidth,scrollWidth:e.scrollWidth,popupWidth:Math.round(r.width),title:d.querySelector('h1')?.textContent,localized:d.querySelectorAll('[data-i18n]').length,cssLoaded:getComputedStyle(shell).paddingTop,technicalIds,scheme:getComputedStyle(e).colorScheme,state:d.querySelector('#state')?.textContent,sessionCaption:d.querySelector('[data-i18n=popup_section_session_capture]')?.textContent}; })()");
       assert.equal(metrics.lang,lang);
       assert.equal(metrics.dir,lang==='ar'?'rtl':'ltr');
       assert.equal(metrics.direction,lang==='ar'?'rtl':'ltr');
       assert.ok(metrics.scrollWidth<=metrics.viewport,'Popup overflow '+lang+': '+JSON.stringify(metrics));
       assert.ok(metrics.localized>5,'Popup should contain localizable messages');
       assert.notEqual(metrics.cssLoaded,'0px','Popup stylesheet should load');
-      if(lang==='ar') assert.ok(metrics.technicalIds.every(item=>item.dir==='ltr'&&item.bidi==='isolate'),
-        'All raw extension IDs must be isolated from RTL: '+JSON.stringify(metrics.technicalIds));
+      if(lang==='ar') {
+        assert.ok(metrics.technicalIds.every(item=>item.dir==='ltr'&&item.bidi==='isolate'),
+          'All raw extension IDs must be isolated from RTL: '+JSON.stringify(metrics.technicalIds));
+        const arabic=JSON.parse(fs.readFileSync(path.join(root,'extension','_locales','ar','messages.json'),'utf8'));
+        const english=JSON.parse(fs.readFileSync(path.join(root,'extension','_locales','en','messages.json'),'utf8'));
+        for(const [actual,key] of [[metrics.state,'popup_state_looking_for_app'],[metrics.sessionCaption,'popup_section_session_capture']]){
+          assert.ok(arabic[key]?.message && arabic[key].message!==english[key]?.message,'Missing Arabic translation for '+key);
+          assert.equal(actual,arabic[key].message,'Visible popup text must be Arabic: '+key);
+        }
+      }
           assert.ok(metrics.scheme.includes(theme),'Extension palette differs from requested '+theme+': '+JSON.stringify(metrics));
           fs.writeFileSync(path.join(output,`extension-popup-${lang}-${theme}-${width}.png`),
             (await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());

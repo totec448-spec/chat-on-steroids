@@ -4600,6 +4600,7 @@ html[dir='rtl'] #modelMenu > .composer-popover {
 .picker-chevron { flex: none; width: 14px; height: 14px; }
 .send-control { position: relative; }
 .send-options { display: none; position: absolute; bottom: 100%; right: -8px; padding-bottom: 12px; width: 190px; z-index: 40; }
+html[dir='rtl'] .send-options { left: -8px; right: auto; }
 .send-control:hover .send-options:not([hidden]), .send-control:focus-within .send-options:not([hidden]) { display: block; }
 .delivery-choices { display: grid; gap: 2px; padding: 5px; border: 1px solid var(--edge); border-radius: 12px; background: var(--popover, var(--card)); box-shadow: 0 8px 25px #0004; animation: surface-in 120ms ease-out; }
 .delivery-choices button { display: flex; align-items: center; justify-content: space-between; padding: 9px 10px; border: 0; border-radius: 7px; background: transparent; color: var(--ink); font: inherit; font-size: calc(13px * var(--text-scale, 1)); cursor: pointer; text-align: left; }
@@ -4815,6 +4816,7 @@ html[dir='rtl'] #modelMenu > .composer-popover {
   --syntax-search-selected: #8a7629;
 }
 .work-panel-resize { position: absolute; z-index: 8; top: 0; bottom: 0; left: -4px; width: 8px; cursor: col-resize; touch-action: none; }
+html[dir='rtl'] .work-panel-resize { right: -4px; left: auto; }
 .work-panel-resize:hover, .work-panel-resize:focus-visible, .is-resizing-work-panel .work-panel-resize { background: linear-gradient(var(--accent-edge), var(--accent-edge)) center / 1px 100% no-repeat; outline: none; }
 .is-resizing-work-panel, .is-resizing-work-panel * { cursor: col-resize !important; user-select: none !important; }
 .file-panel-refresh { margin-left: auto; width: 28px; height: 28px; padding: 6px; }

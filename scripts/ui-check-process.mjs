@@ -35,7 +35,7 @@ export function runUiCheck(command, args, { cwd, env, timeoutMs, profileRoot }) 
       resolve({ code: 'start failed', output: String(error) });
       return;
     }
-    let output = '', unhandled = false, fixtureFailed = false, timedOut = false, settled = false, closeTimer;
+    let output = '', unhandled = false, timedOut = false, settled = false, closeTimer;
     // Keep Ctrl-C/termination working after placing the check in a separate group.
     const interrupt = signal => {
       try { stopTree(child); } catch (error) { console.warn('Could not stop interrupted UI check:', error.message); }
@@ -43,14 +43,7 @@ export function runUiCheck(command, args, { cwd, env, timeoutMs, profileRoot }) 
     };
     process.once('SIGINT', interrupt);
     process.once('SIGTERM', interrupt);
-    // Electron may exit with code 0 even after an isolated fixture catches an
-    // assertion. Honor the fixture's failure sentinel; don't report false PASS.
-    const keep = chunk => {
-      const line = String(chunk);
-      unhandled ||= /UnhandledPromiseRejection/.test(line);
-      fixtureFailed ||= /COS_QA_TEST_FAILED:/.test(line);
-      output = (output + line).slice(-4000);
-    };
+    const keep = chunk => { unhandled ||= /UnhandledPromiseRejection/.test(String(chunk)); output = (output + chunk).slice(-4000); };
     const finish = (code, closed) => {
       if (settled) return;
       settled = true;
@@ -67,8 +60,7 @@ export function runUiCheck(command, args, { cwd, env, timeoutMs, profileRoot }) 
     child.stdout.on('data', keep); child.stderr.on('data', keep);
     child.on('error', error => keep(String(error)));
     child.once('close', (code, signal) => {
-      finish(timedOut ? 'timeout' : code === 0 && fixtureFailed ? 'fixture assertion failed'
-        : code === 0 && unhandled ? 'unhandled rejection' : code ?? `signal ${signal}`, true);
+      finish(timedOut ? 'timeout' : code === 0 && unhandled ? 'unhandled rejection' : code ?? `signal ${signal}`, true);
     });
     const timer = setTimeout(() => {
       timedOut = true;

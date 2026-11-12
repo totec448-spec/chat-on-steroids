@@ -744,3 +744,11 @@ html[dir='rtl'] :is(#d-chat, #d-req, .call .id) {
   unicode-bidi: isolate;
   text-align: left;
 }
+
+/* Advanced contains translated status prose as well as raw identities. Only the
+   conversation/session identities need LTR isolation in an Arabic popup. */
+html[dir='rtl'] .grid dd.id {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: left;
+}

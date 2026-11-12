@@ -221,6 +221,26 @@ app.whenReady().then(async () => {
           `RTL ${id} must stay inside its chat pane at ${width}: ${JSON.stringify(placement)}`);
       }
     }
+    // Delivery choices share the send button's left edge in RTL. A right
+    // anchor here used to extend the popover outside a narrow chat panel.
+    for(const width of [1280,900,760]){
+      win.setSize(width,820);
+      await new Promise(resolve=>setTimeout(resolve,70));
+      const placement=await evalJS(`(() => {
+        const options=document.getElementById('sendOptions');
+        const trigger=document.querySelector('.send-control');
+        const pane=document.querySelector('.card.is-session');
+        const wasHidden=options.hidden;
+        options.hidden=false;options.style.display='block';
+        const menu=options.getBoundingClientRect(),button=trigger.getBoundingClientRect(),area=pane.getBoundingClientRect();
+        const result={left:menu.left,right:menu.right,buttonLeft:button.left,paneLeft:area.left,paneRight:area.right,viewport:innerWidth};
+        options.style.display='';options.hidden=wasHidden;return result;
+      })()`);
+      assert.ok(Math.abs(placement.left-(placement.buttonLeft-8))<2,
+        `RTL delivery choices should open from the send button's left edge: ${JSON.stringify(placement)}`);
+      assert.ok(placement.left>=placement.paneLeft-2&&placement.right<=placement.paneRight+2,
+        `RTL delivery choices should fit the chat pane at ${width}: ${JSON.stringify(placement)}`);
+    }
     await evalJS(`(() => {document.getElementById('uiLanguage').value='en';document.getElementById('uiLanguage').dispatchEvent(new Event('change'));})()`);
     assert.equal(await evalJS('document.documentElement.dir'),'ltr');
     assert.equal(await evalJS('document.getElementById("newChat").textContent.trim()'),'New chat');

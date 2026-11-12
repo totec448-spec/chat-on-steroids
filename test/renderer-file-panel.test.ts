@@ -1247,6 +1247,46 @@ it('gives Files and Sub-agents the same horizontally resizable work-panel width'
   agentHandle.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
   expect(host.style.getPropertyValue('--work-panel-width')).not.toBe(width);
 });
+
+it('mirrors work-panel pointer and keyboard resize in RTL while preserving LTR', async () => {
+  Object.defineProperty(dom.window, 'innerWidth', { configurable: true, value: 1200 });
+  host.style.setProperty('--work-panel-width', '400px');
+  const files = createFilePanel({ host, toggle, onAttach: () => undefined });
+  files.update(projectA);
+  const handle = host.querySelector<HTMLElement>('.file-panel .work-panel-resize')!;
+  let captured = false;
+  Object.assign(handle, {
+    setPointerCapture: () => { captured = true; },
+    hasPointerCapture: () => captured,
+    releasePointerCapture: () => { captured = false; }
+  });
+  const pointer = (type: string, x: number) => {
+    const event = new dom.window.MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x });
+    Object.defineProperty(event, 'pointerId', { value: 17 });
+    handle.dispatchEvent(event);
+  };
+  const key = (value: 'ArrowLeft' | 'ArrowRight') =>
+    handle.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true }));
+
+  document.documentElement.dir = 'ltr';
+  key('ArrowLeft');
+  expect(host.style.getPropertyValue('--work-panel-width')).toBe('410px');
+  key('ArrowRight');
+  expect(host.style.getPropertyValue('--work-panel-width')).toBe('400px');
+  pointer('pointerdown', 400); pointer('pointermove', 350); pointer('pointerup', 350);
+  expect(host.style.getPropertyValue('--work-panel-width')).toBe('450px');
+  expect(captured).toBe(false);
+
+  host.style.setProperty('--work-panel-width', '400px');
+  document.documentElement.dir = 'rtl';
+  key('ArrowLeft');
+  expect(host.style.getPropertyValue('--work-panel-width')).toBe('390px');
+  key('ArrowRight');
+  expect(host.style.getPropertyValue('--work-panel-width')).toBe('400px');
+  pointer('pointerdown', 400); pointer('pointermove', 450); pointer('pointerup', 450);
+  expect(host.style.getPropertyValue('--work-panel-width')).toBe('450px');
+  expect(captured).toBe(false);
+});
 async function editFile(): Promise<HTMLTextAreaElement> {
   host.querySelector<HTMLButtonElement>('[data-path="README.md"]')!.click(); await tick();
   host.querySelector<HTMLButtonElement>('[title="Edit"]')!.click(); await tick();
