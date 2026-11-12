@@ -5250,6 +5250,14 @@ Captured ChatGPT HTML passes a strict allowlist; authored plain text stays text.
 citation ranges use Unicode code points and map to UTF-16 before slicing. Exact uploaded-file
 names render as plain chips; unresolved file citations do not gain invented local links.
 Plain text leaving the timeline (Markdown export, search index and snippets, turn notifications and `modelFacingText` for Goal/Loop and completed answers) passes `providerEntitiesAsMarkdown` first: the raw text's private-use entities (U+E200 name U+E202 field … U+E201) become `[label](address)` for `url` and are dropped otherwise, so a link card never reads as "urlLabelhttps://…".
+DIL table/button completion (`shared/dil-tables.ts`) preserves code examples before matching
+drawn tables in order. `shared/markdown-code.ts::markdownCodeRanges` keeps fenced (including
+nested/unclosed), indented and multiline inline code literal, so examples cannot consume a
+drawing or lose button labels. Inline ticks never join separate Markdown blocks; Marked's
+block-only lexer supplies boundaries without draining its inline queue. Exact-width matching
+is linear, retaining original CRLF/UTF-16 offsets. Fence detection checks original indentation
+before stripping container prefixes; closing strips only the opening quote container. Lazy
+list continuations retain their baseline, and restored table rows keep the header's indentation.
 Answer actions, direct answer export and `/copy` share `shared/markdown-export.ts::completedTurnIds`:
 a later-sequence `turn_start` revokes completion until that same turn ends as `completed` again.
 Boundary sequence numbers, not display order, decide this even when chronology regroups the starts. Older
