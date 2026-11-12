@@ -2359,10 +2359,19 @@
     const heldTurn = genNode ? turnForNode(genNode, turns) : null;
     // A presentation-only Fiber scan can already have cached the next question's fast answer
     // before observe() processes that question. If this generation never bound a section, that
-    // answer is not evidence that the preceding generation ended. Keep the unbound lookup on
-    // the prefix before the new question; a previously held node remains exact ownership proof.
+    // answer is not evidence that the preceding generation ended. Restrict the unbound lookup
+    // only when DOM order or recorded anchors prove that question is newer. An older question
+    // can remain visible while this generation's own question is unmounted (#942).
     if (generating && turnId && !unwitnessedGeneration && !ownsQuestion && question >= 0 && !heldTurn) {
-      turns = turns.slice(0, question);
+      const openedQuestion = turns.findLastIndex(turn => turn.role === 'user' &&
+        CLF_DOM.messagesIn(turn).some(message => message.role === 'user' && message.id === openedUserMessageId));
+      const openedAnchor = userAnchorByMessage.get(openedUserMessageId);
+      const questionIds = new Set(CLF_DOM.messagesIn(turns[question])
+        .filter(message => message.role === 'user' && userAnchorByMessage.has(message.id)).map(message => message.id));
+      const questionAnchor = questionIds.size === 1 ? userAnchorByMessage.get(questionIds.values().next().value) : null;
+      const newerQuestion = openedQuestion >= 0 && openedQuestion < question ||
+        openedAnchor?.seq >= 0 && questionAnchor?.seq > openedAnchor.seq;
+      if (newerQuestion) turns = turns.slice(0, question);
     }
     const latest = currentAssistantTurn(turns);
     // One question can publish interim and final prose in different sections.
