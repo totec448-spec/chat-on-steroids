@@ -4,6 +4,8 @@ import { createProfile, removeProfile } from './ui-check-profile.cjs';
 
 const CLOSE_WAIT_MS = 2_000;
 const FIXTURE_FAILURE_MARKER = 'COS_QA_TEST_FAILED:';
+const UNHANDLED_REJECTION_MARKER = 'UnhandledPromiseRejection';
+const STREAM_TAIL_LENGTH = Math.max(FIXTURE_FAILURE_MARKER.length, UNHANDLED_REJECTION_MARKER.length) - 1;
 
 function stopTree(child) {
   if (!child.pid) return;
@@ -50,9 +52,9 @@ export function runUiCheck(command, args, { cwd, env, timeoutMs, profileRoot }) 
     const keep = (chunk, stream = 'stderr') => {
       const value = String(chunk);
       const recent = streamTails[stream] + value;
-      unhandled ||= /UnhandledPromiseRejection/.test(recent);
+      unhandled ||= recent.includes(UNHANDLED_REJECTION_MARKER);
       fixtureFailed ||= recent.includes(FIXTURE_FAILURE_MARKER);
-      streamTails[stream] = recent.slice(-(FIXTURE_FAILURE_MARKER.length - 1));
+      streamTails[stream] = recent.slice(-STREAM_TAIL_LENGTH);
       output = (output + value).slice(-4000);
     };
     const finish = (code, closed) => {

@@ -121,6 +121,29 @@ it.each(['stdout', 'stderr'] as const)(
   }
 );
 
+it.each(
+  (['stdout', 'stderr'] as const).flatMap(stream =>
+    [19, 20, 21, 22, 23, 24].map(splitAt => ({ stream, splitAt }))
+  )
+)('detects UnhandledPromiseRejection split at $splitAt on $stream despite exit code zero', async ({ stream, splitAt }) => {
+  const child = fakeChild();
+  const pending = start();
+  const marker = 'UnhandledPromiseRejection';
+  child[stream].write(marker.slice(0, splitAt));
+  child[stream].write(marker.slice(splitAt) + ': isolated fixture');
+  child.emit('close', 0, null);
+  expect((await pending).code).toBe('unhandled rejection');
+});
+
+it('does not combine unhandled rejection fragments from separate output streams', async () => {
+  const child = fakeChild();
+  const pending = start();
+  child.stdout.write('UnhandledPromiseRej');
+  child.stderr.write('ection');
+  child.emit('close', 0, null);
+  expect((await pending).code).toBe(0);
+});
+
 it('does not join unrelated stdout and stderr chunks into a false failure sentinel', async () => {
   const child = fakeChild();
   const pending = start();
