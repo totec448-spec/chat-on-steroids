@@ -985,8 +985,8 @@
    * attaches an app only to a message that mentions it, every prompt the app sends mentions
    * Core; on the others the mention is a visible chip and changes nothing else.
    */
-  // Core/Plugins identities from the page's hint list. This installation picks
-  // its own exact name (including the computer suffix) at send time.
+  // Core/Plugins identities from the page's hint list. Proven app ids survive renames;
+  // configured names (including the computer suffix) serve only before an id is known.
   let coreCandidates = [];
   // This install's Core as another tab of this browser last saw it listed (background `status`).
   let knownOwnCore = null;
@@ -1054,11 +1054,14 @@
         (proven.length ? !proven.includes(knownOwnCore.path) : !ownNamesKnown || knownOwnCore.name !== own)) return null;
     return { path: knownOwnCore.path, name: knownOwnCore.name };
   }
-  /** Only the exact Plugins app advertised by this page and named by this COS install. */
+  /** This page's unique proven Plugins app; configured names are only a first-enrollment fallback. */
   function currentPluginsMention() {
-    const own = CLF_DOM.connectorNames()[2];
-    const matches = coreCandidates.filter(entry => entry.name === own);
-    return matches.length === 1 && matches[0].path ? { path: matches[0].path, name: own } : null;
+    const proven = CLF_DOM.connectorApps().filter(app => app.surface === 'plugins').map(app => `app://${app.appId}`);
+    const matches = proven.length
+      ? coreCandidates.filter(entry => entry.path && proven.includes(entry.path))
+      : ownNamesKnown ? coreCandidates.filter(entry => entry.name === CLF_DOM.connectorNames()[2]) : [];
+    const match = matches.length === 1 ? matches[0] : null;
+    return match?.path ? { path: match.path, name: match.name } : null;
   }
   /**
    * Whether ordinary app-owned prompts carry the Core mention (ui.mentionCore).

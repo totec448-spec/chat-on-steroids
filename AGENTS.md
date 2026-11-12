@@ -1733,9 +1733,12 @@ also keeps Core.
 An independent default-off `ui.mentionPlugins` preference selects **Plugins instead of Core**
 for ordinary user-authored prompts COS sends; Goal/Loop and fresh-turn continues follow the
 Core mention as before, workers and recovery always select Core, and decision helpers still
-select neither. The exact Plugins app id comes
-only from this page's provider system hints and must match this installation's connector
-name, including its optional computer suffix. Missing, duplicate or foreign IDs
+select neither. The Plugins token comes only from this page's provider system hints and
+must name exactly one of this installation's proven Plugins app IDs (`connectorApps`), so a
+provider rename keeps working and a same-named different ID cannot replace it. Before any
+Plugins ID is proven, the existing exact-name match (including the optional computer suffix)
+remains available, but only after the app has supplied this installation's connector names.
+Missing, duplicate or foreign IDs
 produce no Plugins token, never a guessed or other-computer attachment; the prompt then
 keeps the Core mention (when that is on), so an account that attaches apps only on mention
 (#861) never loses its tools to a missing Plugins app. App-managed
