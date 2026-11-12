@@ -3677,3 +3677,32 @@ it('tells a person\'s message from the app\'s own', () => {
   // A message the person wrote and queued for the finish is still theirs (CodeRabbit on #1981).
   expect(personsMessage({ ...base, mode: 'finish', authoredSource: 'text' } as never)).toBe(true);
 });
+
+it('keeps an aged attachment while a live draft references it and prunes it after release', async () => {
+  const event = { sender: {} };
+  const stage = async (text: string) => {
+    const result = await handlers.get('sessions:attachText')!(event, { text }) as any;
+    expect(result.ok).toBe(true);
+    return result.data;
+  };
+  const retain = async (ids: string[]) => handlers.get('sessions:retainDraftAttachments')?.(event, { ids });
+  const { readInputAttachmentChunk } = await import('../src/main/session/input-attachments.js');
+  const kept = await stage('Still in a draft');
+  const abandoned = await stage('No longer in a draft');
+  const old = new Date(Date.now() - 25 * 60 * 60 * 1000);
+  const stagedPath = (id: string) => path.join(dir, 'input-attachments', id);
+  for (const file of [kept, abandoned]) await fs.utimes(stagedPath(file.id), old, old);
+  try {
+    const hold = await retain([kept.id]);
+    await stage('Another attachment');
+    await expect(fs.stat(stagedPath(abandoned.id))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readInputAttachmentChunk(kept, 0)).resolves.toBe(Buffer.from('Still in a draft').toString('base64'));
+    expect(hold).toMatchObject({ ok: true });
+
+    expect(await retain([])).toMatchObject({ ok: true });
+    await stage('Cleanup after release');
+    await expect(fs.stat(stagedPath(kept.id))).rejects.toMatchObject({ code: 'ENOENT' });
+  } finally {
+    await retain([]);
+  }
+});

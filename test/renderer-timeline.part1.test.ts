@@ -1478,19 +1478,47 @@ it.each(['image', 'txt', 'mixed', 'new-chat', 'after-turn'])('routes the compose
   expect(app.live.sent[0]!.attachmentDelivery).toBe(kind === 'image' ? 'tool' : undefined);
 });
 
+it('publishes attachment references from other drafts until their files are removed', async () => {
+  const { w } = await boot([]);
+  const api = (w as any).api;
+  const a = { id: '11111111-2222-4333-8444-555555555555', name: 'first.txt', mimeType: 'text/plain', size: 42 };
+  const b = { ...a, id: '22222222-2222-4333-8444-555555555555', name: 'second.txt' };
+  const retain = vi.fn(async (_ids: string[]) => ({ ok: true }));
+  api.retainDraftAttachments = retain;
+  const attach = w.document.getElementById('attachImages')!;
+  api.chooseFiles = async () => ({ ok: true, data: [a] });
+  attach.click();
+  await waitFor(() => expect(retain).toHaveBeenLastCalledWith([a.id]));
+
+  w.document.getElementById('newChat')!.click();
+  await settle();
+  expect(w.document.querySelector('[aria-label="Remove first.txt"]')).toBeNull();
+  api.chooseFiles = async () => ({ ok: true, data: [b] });
+  attach.click();
+  await waitFor(() => expect(retain).toHaveBeenLastCalledWith([a.id, b.id]));
+  (w.document.querySelector('[aria-label="Remove second.txt"]') as HTMLButtonElement).click();
+  expect(retain).toHaveBeenLastCalledWith([a.id]);
+});
+
 it('restores the image draft after rejected injection and removes native-only delivery when the document is removed', async () => {
   const app = await boot([]);
   const image = { id: '11111111-2222-4333-8444-555555555555', name: 'image.png', mimeType: 'image/png', size: 42 };
   const txt = { ...image, id: '22222222-2222-4333-8444-555555555555', name: 'notes.txt', mimeType: 'text/plain' };
   (app.w as any).api.getSessionControls = async () => ({ ok: true, data: { sessionId: summary([]).id, activeTurnId: 'held-turn', canInject: true, queueAtFinish: true } });
   await app.append([]);
+  const retained = vi.fn(async (_ids: string[]) => ({ ok: true }));
+  (app.w as any).api.retainDraftAttachments = retained;
   (app.w as any).api.chooseFiles = async () => ({ ok: true, data: [image, txt] });
   app.w.document.getElementById('attachImages')!.click(); await settle();
   expect(app.w.document.getElementById('afterTurnLabel')!.textContent).toBe('After this turn');
   expect(app.w.document.getElementById('queueAtFinish')!.hidden).toBe(true);
   (app.w.document.querySelector('[aria-label="Remove notes.txt"]') as HTMLButtonElement).click();
   expect(app.w.document.getElementById('immediateDeliveryLabel')!.textContent).toBe('Inject now');
-  (app.w as any).api.sendInput = async () => ({ ok: false, error: 'Image is too large for injection' });
+  let retainedAtSend: string[] | undefined;
+  (app.w as any).api.sendInput = async () => {
+    retainedAtSend = retained.mock.lastCall?.[0];
+    return { ok: false, error: 'Image is too large for injection' };
+  };
   const field = app.w.document.getElementById('chatInput') as HTMLTextAreaElement;
   field.value = 'Use the original image';
   app.w.document.getElementById('composer')!.dispatchEvent(new app.w.Event('submit', { bubbles: true, cancelable: true }));
@@ -1498,6 +1526,8 @@ it('restores the image draft after rejected injection and removes native-only de
   expect(field.value).toBe('Use the original image');
   expect(app.w.document.querySelectorAll('#composerImages .image-remove')).toHaveLength(1);
   expect(app.w.document.querySelector('[aria-label="Remove image.png"]')).not.toBeNull();
+  expect(retainedAtSend).toEqual([image.id]);
+  expect(retained.mock.calls).toEqual([[[image.id, txt.id]], [[image.id]]]);
 });
 
 it.each([7, 10, 11])('uses the same visible delivery choice and payload for %s attached images', async count => {

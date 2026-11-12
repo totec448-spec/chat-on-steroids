@@ -21,17 +21,18 @@ function directory(): string {
 function fileFor(id: string): string { return path.join(directory(), z.string().uuid().parse(id)); }
 /** Only explicit file selection, drop or clipboard paste writes here; bytes never inflate the durable outbox. */
 let staging: Promise<unknown> = Promise.resolve();
+type RetainedAttachments = Pick<ReadonlySet<string>, 'has'>;
 export type AttachmentSource = string | { text: string } | { name: string; bytes: Uint8Array };
-export function stageInputAttachment(source: AttachmentSource, retained: Set<string>): Promise<InputAttachment> {
+export function stageInputAttachment(source: AttachmentSource, retained: RetainedAttachments): Promise<InputAttachment> {
   return stageInputAttachments([source], retained).then((attachments) => attachments[0]!);
 }
 /** Stage one renderer/file-picker batch under one quota/prune snapshot. */
-export function stageInputAttachments(sources: AttachmentSource[], retained: Set<string>): Promise<InputAttachment[]> {
+export function stageInputAttachments(sources: AttachmentSource[], retained: RetainedAttachments): Promise<InputAttachment[]> {
   const next = staging.then(() => stageBatch(sources, retained));
   staging = next.catch(() => undefined);
   return next;
 }
-async function stageBatch(sources: AttachmentSource[], retained: Set<string>): Promise<InputAttachment[]> {
+async function stageBatch(sources: AttachmentSource[], retained: RetainedAttachments): Promise<InputAttachment[]> {
   const dir = directory();
   await fs.mkdir(dir, { recursive: true });
   let used = 0;

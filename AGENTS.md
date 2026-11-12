@@ -1646,7 +1646,10 @@ has its own draft key. Manual deletion remains deleted; accepted openings retire
 draft as the outbox/session takes ownership. Navigation still fences stale async imports.
 Draft text is also written to the renderer's local storage (`composer-drafts.ts`, the newest 100
 drafts in at most 1,000,000 stored characters), so an unsent draft survives a restart; staged files and a new
-chat's Goal/Loop choices stay window-local. A chat other than the open one that holds a draft shows
+chat's Goal/Loop choices stay window-local. The renderer publishes its live staged attachment IDs
+for every draft and pending admission through `sessions:retainDraftAttachments`. Staging checks the
+current window's references as well as the durable outbox before pruning unreferenced files over
+24 hours old; releasing a draft reference makes it eligible again. A chat other than the open one that holds a draft shows
 a pencil mark on its sidebar row, and removing a chat removes its saved draft.
 
 The chat composer and queued-message editor have no HTML character cap. Send and queue edits

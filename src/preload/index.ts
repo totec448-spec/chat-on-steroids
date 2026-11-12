@@ -161,6 +161,7 @@ const api = {
     ipcRenderer.on('plugins:changed', wrapped);
     return () => ipcRenderer.removeListener('plugins:changed', wrapped);
   },
+  retainDraftAttachments: (ids: string[]) => call<void>('sessions:retainDraftAttachments', { ids }),
   chooseFiles: () => call<InputAttachment[]>('sessions:files'),
   chatGroups: () => call<ChatGroupsState>('chatGroups:get'),
   createChatGroup: (projectId: string, name: string) => call<{ group: ChatGroup; state: ChatGroupsState }>('chatGroups:create', { projectId, name }),
