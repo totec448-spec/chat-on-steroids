@@ -473,6 +473,10 @@ revivals, compaction requests and resumed-chat bootstraps receive no appended se
 A worker revival (wake) command carries the model and effort its worker was opened with
 (`commandModelSelection` → `wakeModelSelection`, vetted against the account like a resume's), so the
 page chooses them before it types (#1952; before, a wake went out on whatever ChatGPT's box held).
+While model discovery is pending, its retained catalog is display data, not a fresh denial:
+`resume-model.ts` carries the requested model/effort to native confirmation unchanged, even when
+the old list lacks that model or effort. Completed discovery retains the existing availability
+fallback, including no readable picker; no extra discovery or Send is started by this resolver.
 Unlike a new worker, a wake whose model the picker cannot confirm is still typed: the page reports
 step `model-unconfirmed` and the bridge logs which model it could not confirm. A Compact & Resume does the
 same (2026-11-01: an abandoned resume stopped its chat for good); its new chat then tries the model once more
