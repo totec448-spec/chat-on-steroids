@@ -2387,9 +2387,12 @@
           if (step?.type === 'assistant-message' && item !== step) {
             // Interim prose whatever phase it carries: only a top-level answer can end the turn.
             const id = str(step.messageId);
-            if (!id || topLevel.has(id) || !remember(id)) continue;
-            const text = interimText(shellItemText(step));
-            if (!text || ONLY_CONTENT_REFERENCES.test(text)) continue;
+            if (!id || topLevel.has(id) || seen.has(id)) continue;
+            // An empty or reference-only copy reserves nothing, so a later copy with text is still read.
+            const shown = shellItemText(step);
+            if (!shown || ONLY_CONTENT_REFERENCES.test(shown)) continue;
+            const text = interimText(shown);
+            if (!text || !remember(id)) continue;
             messages.push({ id, author: { role: 'assistant' }, content: { content_type: 'text', parts: [text] },
               channel: 'commentary', end_turn: false, status: step.completed === true ? 'finished_successfully' : 'in_progress', metadata: {} });
             continue;
