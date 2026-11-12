@@ -7,6 +7,7 @@ import { appendEvent, createSession, initSessionStore, readCompletedFinal, reset
   upsertMessageEvent, upsertNativeImageEvent } from '../src/main/session/store.js';
 import { resetEditsForTests } from '../src/main/session/edits.js';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
+import { getLog } from '../src/main/logger.js';
 const T0 = 1793454400000;
 const text = (text: string) => ({ text, truncated: false, chars: text.length });
 
@@ -169,6 +170,9 @@ describe('continued final completion', () => {
         if (!reopen && (outcome === 'failed' || outcome === 'stopped')) expect(final).toBeNull();
         else expect(final).toMatchObject({ messageId: 'consolidated-answer', turnId: 'terminal' });
       }
+      const refusals = getLog().filter(entry => entry.message.startsWith(`session ${session.id}: refused promoted final`));
+      expect(refusals).toHaveLength(!reopen && (outcome === 'failed' || outcome === 'stopped') ? 1 : 0);
+      if (refusals.length) expect(refusals[0]?.message).toContain(`turn terminal because its latest end was ${outcome}`);
     } finally {
       resetSessionStoreForTests();
       unsetSessionRootForTests();

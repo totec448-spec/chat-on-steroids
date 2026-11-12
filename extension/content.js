@@ -783,6 +783,9 @@
    * this document does hold about its own doing: which send it has already acted on.
    */
   let openedUserMessageId = null;
+  // User rows already rendered when this generation opened. If an unanchored row
+  // appears later, its position alone cannot prove which answer belongs to us.
+  let questionsAtGenerationOpen = new Set();
   let since = 0;
   let streamEntries = [];
   /** Exact request id -> one durable local turn, null when the retained stream conflicts. */
@@ -1871,6 +1874,8 @@
     // The app's exact question already opened this response. A still-retained
     // Send receipt in another document cannot open it a second time.
     if (questionId) openedUserMessageId = questionId;
+    questionsAtGenerationOpen = new Set(CLF_DOM.messages().filter(message => message.role === 'user' && message.id)
+      .map(message => message.id));
     generating = true;
     unwitnessedGeneration = true;
     turnId = open;
@@ -2043,6 +2048,7 @@
     pendingPresentation = null;
     userAnchorByMessage.clear();
     openedUserMessageId = null;
+    questionsAtGenerationOpen.clear();
     streamEntries = [];
     streamRequestTurnOwners.clear();
     since = 0;
@@ -2366,12 +2372,18 @@
       const openedQuestion = turns.findLastIndex(turn => turn.role === 'user' &&
         CLF_DOM.messagesIn(turn).some(message => message.role === 'user' && message.id === openedUserMessageId));
       const openedAnchor = userAnchorByMessage.get(openedUserMessageId);
-      const questionIds = new Set(CLF_DOM.messagesIn(turns[question])
-        .filter(message => message.role === 'user' && userAnchorByMessage.has(message.id)).map(message => message.id));
+      const visibleQuestions = CLF_DOM.messagesIn(turns[question]).filter(message => message.role === 'user');
+      const questionIds = new Set(visibleQuestions
+        .filter(message => userAnchorByMessage.has(message.id)).map(message => message.id));
       const questionAnchor = questionIds.size === 1 ? userAnchorByMessage.get(questionIds.values().next().value) : null;
       const newerQuestion = openedQuestion >= 0 && openedQuestion < question ||
         openedAnchor?.seq >= 0 && questionAnchor?.seq > openedAnchor.seq;
       if (newerQuestion) turns = turns.slice(0, question);
+      else if (!visibleQuestions.length || visibleQuestions.some(message => !message.id || !questionsAtGenerationOpen.has(message.id))) {
+        // This may be the next question, rendered before /activity has anchored it.
+        // Do not bind its fast answer to the prior generation on DOM novelty alone.
+        return null;
+      }
     }
     const latest = currentAssistantTurn(turns);
     // One question can publish interim and final prose in different sections.
@@ -3153,6 +3165,8 @@
     if (newUserMessage && !generating) {
       if (!continuedTurn) steeredTurns.clear();
       openedUserMessageId = newUserMessage;
+      questionsAtGenerationOpen = new Set(observedTurns.flatMap(turn => CLF_DOM.messagesIn(turn))
+        .filter(message => message.role === 'user' && message.id).map(message => message.id));
       generating = true;
       quietSince = 0;
       quietTurn = null;

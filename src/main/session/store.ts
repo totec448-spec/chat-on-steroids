@@ -2036,6 +2036,9 @@ type UserMessageEvent = Extract<SessionEvent, { kind: 'user_message' }>;
  */
 const latestQuestionCache = new Map<string, { revision: number; turns: unknown; message: UserMessageEvent | undefined }>();
 
+/** A completion refusal can be read repeatedly by Goal, queue and recovery; log once per journal revision. */
+const rejectedPromotedFinalLogRevision = new Map<string, number>();
+
 /** A scan already running for a revision; callers at that revision share it (CodeRabbit on #2030). */
 const latestQuestionScans = new Map<string, { revision: number; turns: unknown; scan: Promise<SessionEvent[]> }>();
 
@@ -2188,7 +2191,14 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
   // resolved owner's failed/stopped end. A later start of that owner reopens the boundary.
   const finalBoundary = boundaries.findLast(event => sameTurn(event.turnId, finalTurnId));
   if (promotedFinal && finalBoundary?.kind === 'turn_end' &&
-      (finalBoundary.outcome === 'failed' || finalBoundary.outcome === 'stopped')) return null;
+      (finalBoundary.outcome === 'failed' || finalBoundary.outcome === 'stopped')) {
+    if (rejectedPromotedFinalLogRevision.get(sessionId) !== revision) {
+      logInfo(`session ${sessionId}: refused promoted final for turn ${finalTurnId} because its latest end was ${finalBoundary.outcome}`);
+      rejectedPromotedFinalLogRevision.set(sessionId, revision);
+      if (rejectedPromotedFinalLogRevision.size > 200) rejectedPromotedFinalLogRevision.delete(rejectedPromotedFinalLogRevision.keys().next().value!);
+    }
+    return null;
+  }
   const nativeReopen = !!final.providerMessageId && last?.kind === 'turn_start' && last.source === 'app' &&
     last.turnId === finalTurnId && prior?.kind === 'turn_end' && prior.turnId === finalTurnId && prior.outcome === 'completed';
   // A progress note of a turn that had ended is not new work: ChatGPT draws a finished turn's steps
@@ -4828,6 +4838,7 @@ export async function deleteSession(id: string): Promise<void> {
 export function resetSessionStoreForTests(): void {
   recentUnreadableWarned.clear();
   latestQuestionCache.clear();
+  rejectedPromotedFinalLogRevision.clear();
   latestQuestionScans.clear();
   for (const entry of open.values()) if (entry.metaTimer) clearTimeout(entry.metaTimer);
   open.clear();
