@@ -3162,6 +3162,11 @@ main/thread anchors. Their `entry.turn.items` supply actual user/assistant ids, 
 per-call completion; DOM slot keys only join those exact items to the current scan. Missing ids
 do not become invented messages. Only a completed final item in a successfully completed turn
 can end it; cancellation or an unknown turn status never acknowledges unfinished tool calls.
+Bounds on a long turn limit what is reported, never the turn's own messages (#2157): at most 200 connector
+and 200 exec calls and 400 working rows (calls and interim updates share them) are read, and the rest are
+left out; the turn's user and final items are always read (up to 5,000 items, above which the turn is not
+read), so a turn with 297 calls still ends. A repeated call identity is still refused for the whole turn.
+The search-unit reader reads the interim updates inside working groups the same way the shell reader does.
 The shell's exact completed final message retains stable identity for handoff capture even
 without the classic thought-parent/timestamp tuple. The native terminal item and nonconflicting
 conversation must agree; streaming and cancelled items never gain that proof.
