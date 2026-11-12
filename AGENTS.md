@@ -1007,7 +1007,7 @@ acknowledged revoke cannot be undone by crash.
 If that durable commit fails, the failed proposed generation is superseded by the still-published
 trust set before background retry. Session deletion durably revokes Trust before releasing Block,
 detaching the conversation or deleting the row; a failed revoke therefore leaves all prior authority intact.
-While deletion is in flight, IPC keeps a session-id tombstone and Trust checks it both before and
+While deletion is in flight, Remove keeps a shared session-id fence and Trust checks it both before and
 after its async session lookup, so a still-visible row cannot recreate permission behind deletion.
 
 ### Three lifetimes and five outcomes
@@ -1724,6 +1724,11 @@ startup failures, ambiguous sends, provider bindings and recorded history never 
 Dismiss delivery notice is an explicit withdrawal too, including after a failed first send;
 it uses the same serialized cancellation and empty-reservation checks. Dismissing a failed
 follow-up or uncertain authorized send preserves its existing chat and delivery evidence.
+Removing an unbound desktop chat instead retires its exact pending opening in the outbox
+before deleting the local session. Unreadable metadata or a failed outbox write leaves the chat
+in place. Outbox admission checks the removal fence inside its queue, including on retries.
+The queue also fences browser claims and Send authorization; Remove detaches late receipts so they
+cannot recreate the removed reservation, without treating an authorized Send as unsent.
 
 The immutable outbox `opening` role owns first-message setup and initial null-to-provider binding;
 non-null sessionId no longer means the opening was delivered. The exact native document binds
