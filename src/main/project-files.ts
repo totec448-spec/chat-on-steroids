@@ -3,6 +3,8 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Stats } from 'node:fs';
 import sharp from 'sharp';
+import { imageMime } from './fsops.js';
+import { logInfo } from './logger.js';
 import { getConfig } from './config.js';
 import { listDirectoryLevel, LongLineReadError, readTextFile, statInfo } from './codex/read-backend.js';
 import { getProject, projectWorkspace } from './projects.js';
@@ -100,12 +102,16 @@ const IMAGE_MIME_BY_EXTENSION = new Map<string, string>([
   ['.ico', 'image/x-icon']
 ]);
 
-/** SVG text (after a byte-order mark and whitespace) or gzip, which libvips reads as SVGZ. */
-function looksLikeVector(data: Buffer): boolean {
-  if (data.length >= 2 && data[0] === 0x1f && data[1] === 0x8b) return true;
-  let at = data.length >= 3 && data[0] === 0xef && data[1] === 0xbb && data[2] === 0xbf ? 3 : 0;
-  while (at < data.length && (data[at] === 0x20 || data[at] === 0x09 || data[at] === 0x0a || data[at] === 0x0d)) at++;
-  return data[at] === 0x3c; // "<": SVG, an XML declaration, or a doctype
+/**
+ * Only a file that starts with a raster image's own signature reaches libvips. It picks its decoder
+ * from the content, never the extension, and finds an SVG tag even behind unrelated bytes, so a
+ * project file named x.png could otherwise reach the vector renderer (sharp < 0.35.5 has a
+ * librsvg memory-safety advisory). PNG, JPEG, GIF and WebP are recognised by `imageMime`; AVIF by its
+ * `ftyp` box.
+ */
+function hasRasterSignature(data: Buffer): boolean {
+  if (imageMime(data)) return true;
+  return data.length >= 12 && data.toString('latin1', 4, 8) === 'ftyp' && /^(avif|avis|mif1|msf1)$/.test(data.toString('latin1', 8, 12));
 }
 
 export interface ProjectFileTarget {
@@ -359,12 +365,14 @@ export async function previewProjectFile(projectId: string, relativePath: string
       const data = offset === buffer.length ? buffer : buffer.subarray(0, offset);
       // Decode under a pixel limit and publish one bounded raster thumbnail. Compressed bytes
       // alone do not bound browser memory, and a filename is not proof of image content.
-      // A project file is untrusted content. libvips would hand an SVG (or a gzipped one) to its
-      // vector renderer whatever the filename says; no raster extension here is a vector format.
       let image: Buffer | null = null;
-      if (!looksLikeVector(data)) {
-        image = await sharp(data, { failOn: 'warning', limitInputPixels: 16 * 1024 * 1024, sequentialRead: true })
-          .rotate().resize(1600, 1600, { fit: 'inside', withoutEnlargement: true }).png().toBuffer().catch(() => null);
+      if (hasRasterSignature(data)) {
+        try {
+          image = await sharp(data, { failOn: 'warning', limitInputPixels: 16 * 1024 * 1024, sequentialRead: true })
+            .rotate().resize(1600, 1600, { fit: 'inside', withoutEnlargement: true }).png().toBuffer();
+        } catch { image = null; }
+      } else {
+        logInfo(`files: no image preview for ${target.path}: its content is not a PNG, JPEG, GIF, WebP or AVIF image`);
       }
       if (!image) {
         return { projectId, projectName: target.projectName, path: target.path, name: path.basename(target.real),
