@@ -1724,6 +1724,10 @@ startup failures, ambiguous sends, provider bindings and recorded history never 
 Dismiss delivery notice is an explicit withdrawal too, including after a failed first send;
 it uses the same serialized cancellation and empty-reservation checks. Dismissing a failed
 follow-up or uncertain authorized send preserves its existing chat and delivery evidence.
+Removing an unbound desktop chat instead retires its exact pending opening in the outbox
+before deleting the local session. A failed outbox write leaves the chat in place. The same
+queue fences browser claims and Send authorization; Remove detaches late receipts so they
+cannot recreate the removed reservation, without treating an authorized Send as unsent.
 
 The immutable outbox `opening` role owns first-message setup and initial null-to-provider binding;
 non-null sessionId no longer means the opening was delivered. The exact native document binds

@@ -51,7 +51,7 @@ import { connectTelegram, disconnectTelegram, onTelegramChange, telegramView, te
 import { DEFAULT_PHONE_PUSH, type PhonePushSettings } from '../shared/phone-push.js';
 import { retryGoalBrowserHelper } from './goal.js';
 import { requestBrowserPreferences } from './browser-preferences.js';
-import { sendDesktopInput, cancelDesktopInput, retryQueuedInputBrowser } from './session/start-input.js';
+import { sendDesktopInput, cancelDesktopInput, retryQueuedInputBrowser, retireDesktopOpening } from './session/start-input.js';
 import { wakeBrowserUrl } from './browser-startup.js';
 import { registerPluginIpc } from './plugins-ipc.js';
 import { deletePet, importPet, loadPetAsset, petLibraryState, setPetEnabled, setPetFavorite } from './pet-library.js';
@@ -2470,6 +2470,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
           ...committedResumeAncestorsFromSummary(summary, summary.conversationId)
         ], false);
       }
+      // An unbound desktop chat's opening can recreate the local reservation on startup.
+      // Retire it under the outbox's claim/Send queue before deleting the history.
+      if (summary?.origin?.kind === 'desktop' && !summary.conversationId) await retireDesktopOpening(id);
       // Detach first. The recorder maps live ChatGPT conversations to session ids, so
       // deleting the folder underneath a live one left it appending to a session that no
       // longer existed — the events went to a resurrected half-session with no summary.

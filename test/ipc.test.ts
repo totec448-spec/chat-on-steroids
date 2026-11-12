@@ -3677,3 +3677,72 @@ it('tells a person\'s message from the app\'s own', () => {
   // A message the person wrote and queued for the finish is still theirs (CodeRabbit on #1981).
   expect(personsMessage({ ...base, mode: 'finish', authoredSource: 'text' } as never)).toBe(true);
 });
+
+describe('removing a new chat before its first Send is confirmed', () => {
+  it.each(['queued', 'claimed', 'authorized'] as const)(
+    'does not restore the removed opening or offer it to a browser after restart (%s)',
+    async state => {
+      const outbox = await import('../src/main/session/input.js');
+      const { randomUUID } = await import('node:crypto');
+      const id = randomUUID();
+      const args = { id, sessionId: null, text: 'Synthetic first message', mode: 'auto' as const,
+        dueAt: Date.now(), model: null, reasoningEffort: null };
+      await writeDurableNow('session-input', []);
+      outbox.resetInputForTests();
+      try {
+        const row = await outbox.enqueueInput(args);
+        expect(row).toMatchObject({ id, opening: true, state: 'queued', sessionId: id });
+        expect(await getSession(id)).not.toBeNull();
+        expect(await outbox.pendingBrowserInputs()).toContainEqual({ id, conversationId: null });
+        if (state !== 'queued') expect(await outbox.claimBrowserInput(id, 'test-page', null, true)).not.toBeNull();
+        if (state === 'authorized') expect(await outbox.authorizeBrowserInput(id, 'test-page', null)).toBe(true);
+        const other = await outbox.enqueueInput({ ...args, id: randomUUID(), text: 'Another queued opening' });
+
+        expect(await handlers.get('sessions:delete')!(null, { id })).toMatchObject({ ok: true });
+        expect(await getSession(id)).toBeNull();
+        await flushDurable();
+        outbox.resetInputForTests();
+        resetSessionStoreForTests();
+
+        expect((await outbox.pendingBrowserInputs()).map(row => row.id)).toEqual([other.id]);
+        expect(await getSession(id)).toBeNull();
+        const repeatedAdmission = await outbox.enqueueInput(args);
+        expect(repeatedAdmission.state).toBe('cancelled');
+        expect(outbox.deliveryProof(repeatedAdmission)).toBe(state === 'authorized' ? 'unconfirmed' : 'not_sent');
+        expect(await outbox.claimBrowserInput(id, 'test-page', null, true)).toBeNull();
+        expect(await outbox.authorizeBrowserInput(id, 'test-page', null)).toBe(false);
+        expect(await outbox.acknowledgeBrowserInput(id, 'test-page', randomUUID(), randomUUID())).toBe(false);
+        expect(await getSession(id)).toBeNull();
+      } finally {
+        await writeDurableNow('session-input', []);
+        outbox.resetInputForTests();
+      }
+    });
+
+  it('keeps the reservation and queued opening when the outbox cannot save its removal', async () => {
+    const outbox = await import('../src/main/session/input.js');
+    const { randomUUID } = await import('node:crypto');
+    const id = randomUUID();
+    await writeDurableNow('session-input', []);
+    outbox.resetInputForTests();
+    const rename = fs.rename.bind(fs);
+    try {
+      await outbox.enqueueInput({ id, sessionId: null, text: 'Synthetic first message', mode: 'auto',
+        dueAt: Date.now(), model: null, reasoningEffort: null });
+      const refuseOutbox = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+        if (to === path.join(dir, 'state', 'session-input.json')) throw Object.assign(new Error('Disk is full'), { code: 'ENOSPC' });
+        return rename(from, to);
+      });
+      try {
+        expect(await handlers.get('sessions:delete')!(null, { id })).toMatchObject({ ok: false });
+        expect(await getSession(id)).not.toBeNull();
+        expect((await outbox.pendingBrowserInputs()).map(row => row.id)).toEqual([id]);
+      } finally {
+        refuseOutbox.mockRestore();
+      }
+    } finally {
+      await writeDurableNow('session-input', []);
+      outbox.resetInputForTests();
+    }
+  });
+});
