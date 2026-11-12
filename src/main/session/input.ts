@@ -1190,7 +1190,7 @@ export function enqueueInput(raw: InputArgs, finishOwner?: InputEntry['finishOwn
   return serial(async () => {
     const input = inputArgs.parse(raw);
     const localId = input.sessionId ?? input.id;
-    assertSessionNotRemoving(localId);
+    assertSessionNotRemoving(localId, 'enqueue input');
     const scheduled = input.scheduled !== undefined;
     if (scheduled) {
       if (finishOwner) throw new Error('Scheduled messages cannot be attached to a finish turn');
@@ -1203,7 +1203,7 @@ export function enqueueInput(raw: InputArgs, finishOwner?: InputEntry['finishOwn
     if (input.stages !== undefined && JSON.stringify([input.text, ...input.stages]).length > 12000)
       throw new Error('Keep the complete plan below 12,000 characters');
     const current = await load();
-    assertSessionNotRemoving(localId);
+    assertSessionNotRemoving(localId, 'enqueue input');
     const prior = current.find((entry) => entry.id === input.id);
     if (prior) {
       const comparablePrior = { ...prior, sessionId: prior.opening ? prior.requestedSessionId ?? null : prior.sessionId,
@@ -1339,7 +1339,7 @@ export function enqueueInput(raw: InputArgs, finishOwner?: InputEntry['finishOwn
     // A finish plan belongs to an existing session now. Publish every editable
     // checkpoint atomically; no composer text or first-send receipt owns its life.
     if (entry.mode === 'finish') next = materializeStages(next, entry);
-    assertSessionNotRemoving(localId);
+    assertSessionNotRemoving(localId, 'enqueue input');
     await commit(next, options);
     try { await materializeOpening(entry); }
     catch (error) {
