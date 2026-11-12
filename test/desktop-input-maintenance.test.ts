@@ -2478,6 +2478,53 @@ it('clears pending fast retries when latchAppDisconnect or reloadForExtensionUpd
     const statusBeforeAdvance = r.fetch.mock.calls.filter(([url]) => new URL(url).pathname === '/status').length;
     await vi.advanceTimersByTimeAsync(5_000);
     expect(r.fetch.mock.calls.filter(([url]) => new URL(url).pathname === '/status').length).toBe(statusBeforeAdvance);
+
+    // Delayed offer reply that declines while /extension/update is pending still retries once the update holds.
+    const delayedInputs = [{ id: firstId, conversationId: secondId }];
+    const p = await worker(delayedInputs);
+    p.setWorkerStamp('aaaaaaaaaaaa');
+    p.tabs.push({ id: 7, url: `https://chatgpt.com/c/${secondId}` });
+    let pendingUpdateRequested = false;
+    let resolveDelayedUpdate: ((value: any) => void) | null = null;
+    p.fetch.mockImplementation(async request => {
+      const path = new URL(request).pathname;
+      if (path === '/hello') return { ok: true, status: 200, json: async () => ({ app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true }) };
+      if (path === '/extension/update') {
+        pendingUpdateRequested = true;
+        return {
+          ok: true, status: 200,
+          json: async () => new Promise(resolve => { resolveDelayedUpdate = resolve; })
+        };
+      }
+      return { ok: true, status: 200, json: async () => ({ ok: true, inputs: [...delayedInputs], inputOpeningIds: delayedInputs.map(row => row.id), background: true }) };
+    });
+    let delayedOffers = 0;
+    let resolveFirstOffer: ((value: { ok: boolean }) => void) | null = null;
+    p.sendMessage.mockImplementation(async (_id, message) => {
+      if (message.type === 'clf-desktop-input') {
+        delayedOffers += 1;
+        if (delayedOffers === 1) return new Promise<{ ok: boolean }>(resolve => { resolveFirstOffer = resolve; });
+        return { ok: false };
+      }
+      if (message.type === 'clf-recorder-ping') return { ok: true, busy: false };
+      return { ok: true, ready: true };
+    });
+
+    await p.maintain();
+    await vi.waitFor(() => expect(resolveFirstOffer !== null).toBe(true), { timeout: 5000 });
+    const delayedHoldUpdate = p.reloadForExtensionUpdate({ build: 'bbbbbbbbbbbb', busy: false }, new Set(), new Set(), new Set());
+    await vi.waitFor(() => expect(pendingUpdateRequested && resolveDelayedUpdate !== null).toBe(true), { timeout: 5000 });
+
+    resolveFirstOffer!({ ok: false });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    resolveDelayedUpdate!({ ok: true, hold: 'app-busy' });
+    await delayedHoldUpdate;
+    expect(p.runtimeReload).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1500);
+    await vi.waitFor(() => expect(delayedOffers).toBe(2), { timeout: 5000 });
   } finally {
     vi.useRealTimers();
   }
