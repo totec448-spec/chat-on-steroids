@@ -1947,12 +1947,12 @@ function usableDefaults(
   // resolved label canonicalizes to the family. An ambiguous label stays a dropped default.
   const resolved = defaultModel && model ? resolveChatModel(models, model) : undefined;
   if (defaultModel && model && !resolved) {
-    notes.add(`The default worker model "${model}" saved in Settings is not offered by this ChatGPT account, so workers use ChatGPT's current model. Choose an available model in Settings → Agents & automation.`);
+    notes.add(`The default worker model "${model}" saved in Settings is not offered by this ChatGPT account, so workers use ChatGPT's current model. Choose an available model in Settings → Models.`);
     model = null;
   } else if (resolved && resolved.id !== model && !resolved.aliases?.includes(model!)) model = resolved.id;
   const offered = model ? (resolved ? [resolved] : models.filter(choice => choice.id === model || choice.aliases?.includes(model!))) : models;
   if (defaultEffort && effort && !offered.some(choice => choice.efforts.includes(effort!))) {
-    notes.add(`The default worker reasoning "${effort}" saved in Settings is not offered${model ? ` for model "${model}"` : ''} by this ChatGPT account, so workers use ChatGPT's current reasoning. Choose an available level in Settings → Agents & automation.`);
+    notes.add(`The default worker reasoning "${effort}" saved in Settings is not offered${model ? ` for model "${model}"` : ''} by this ChatGPT account, so workers use ChatGPT's current reasoning. Choose an available level in Settings → Models.`);
     effort = null;
   }
   if (notes.size) refreshForUnoffered(`default worker ${[...notes].join(',')}`);

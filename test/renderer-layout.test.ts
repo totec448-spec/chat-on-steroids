@@ -102,9 +102,9 @@ it('keeps recorded DIL surfaces on CoS tokens across themes and high-contrast pa
 
 it('finds settings on every settings page by name, description and section, never a row its page hides', () => {
   const entries = collectSettings(document);
-  expect(new Set(entries.map(entry => entry.tab))).toEqual(new Set(['home', 'general', 'usage', 'setup', 'settings', 'appearance']));
+  expect(new Set(entries.map(entry => entry.tab))).toEqual(new Set(['home', 'setup', 'general', 'appearance', 'agents-goal', 'agents-models', 'agents-workers', 'agents-tools', 'agents-browser', 'usage']));
   const [finish] = searchSettings(entries, '  SESSION FINISH  ', 'en');
-  expect([finish!.title, finish!.page, finish!.section, finish!.tab]).toEqual(['Session finish', 'Agents & automation', 'Keep the turn open', 'settings']);
+  expect([finish!.title, finish!.page, finish!.section, finish!.tab]).toEqual(['Session finish', 'Goal & Loop', 'Keep the turn open', 'agents-goal']);
   expect(finish!.target.contains(document.getElementById('finishTool'))).toBe(true);
   // Names come before descriptions; words match in any order, across a name and its section.
   const privacy = searchSettings(entries, 'privacy', 'en').map(entry => entry.title);
@@ -123,6 +123,40 @@ it('finds settings on every settings page by name, description and section, neve
   // Titles are the setting's name alone, never its description or the choices of its menu.
   const language = searchSettings(entries, 'language', 'en')[0]!;
   expect([language.title, language.section]).toEqual(['Language', 'Preferences']);
+});
+
+it('splits Agents into five pages, each block on exactly one, each page with one title and no setting lost', async () => {
+  const view = document.querySelector<HTMLElement>('[data-view="settings"]')!;
+  const pages = ['goal', 'models', 'workers', 'tools', 'browser'];
+  const blocks = [...view.children] as HTMLElement[];
+  // Every direct child belongs to a page, so no setting can be left visible on all of them.
+  expect(blocks.filter(node => !pages.includes(node.dataset.agentsPage ?? '')).map(node => node.className)).toEqual([]);
+  for (const page of pages) {
+    const heads = blocks.filter(node => node.dataset.agentsPage === page && node.classList.contains('settings-page-head'));
+    expect(heads.map(node => node.querySelector('h1')?.textContent?.trim()), page).toHaveLength(1);
+    expect(heads[0]!.querySelector('p')?.textContent?.trim(), page).toBeTruthy();
+    expect(blocks.find(node => node.dataset.agentsPage === page), page).toBe(heads[0]);
+  }
+  // Each tab names a page, and the nav groups them under one quiet label.
+  const tabs = [...document.querySelectorAll<HTMLElement>('#tabs [data-tab^="agents-"]')].map(node => node.dataset.tab);
+  expect(tabs).toEqual(pages.map(page => `agents-${page}`));
+  expect(document.getElementById('tabsAgentsLabel')!.closest('[role="group"]')!.getAttribute('aria-labelledby')).toBe('tabsAgentsLabel');
+  // Every page's icon is in the shipped subset (a missing glyph leaves a bare, indented label).
+  const glyphs = await fs.readFile(path.join(process.cwd(), 'src/renderer/icons.css'), 'utf8');
+  for (const icon of document.querySelectorAll('#tabs button[data-tab] > .ph')) {
+    const name = [...icon.classList].find(item => item.startsWith('ph-'))!;
+    expect(glyphs, name).toContain(`.${name}::before`);
+  }
+  // Search lists each page's settings under that page, and nothing under two pages.
+  const entries = collectSettings(document).filter(entry => entry.tab.startsWith('agents-'));
+  for (const entry of entries) expect(entry.target.closest<HTMLElement>('[data-agents-page]')!.dataset.agentsPage, entry.title).toBe(entry.tab.slice('agents-'.length));
+  const targets = entries.map(entry => entry.target);
+  expect(new Set(targets).size).toBe(targets.length);
+  // The 65-odd settings are all still there.
+  for (const id of ['autoContinue', 'goalReviewer', 'helperModel', 'planBackend', 'finishHoldOnStop', 'handoffLength', 'customContinueEdit',
+    'workerModelTitle', 'chatsAtOnceTitle', 'swarmReset', 'autoRefreshPlugins', 'autoSelectSkills', 'strictChatAllowlist', 'chatPersonalityEdit']) {
+    expect(document.getElementById(id), id).not.toBeNull();
+  }
 });
 
 it('titles every settings page the same way, Activity included', () => {
@@ -193,7 +227,7 @@ it('uses the fork back-to-chat control and separates the Usage cost sections', a
 it('uses the robot for Sub-agents in Workspace as well as settings navigation', async () => {
   const main = await fs.readFile(path.join(process.cwd(), 'src/renderer/main.ts'), 'utf8');
   expect(main).toContain("groupShell('agents', 'Sub-agents', 'i-agents', enabled)");
-  expect(document.querySelector('#tabs [data-tab="settings"] .ph-robot')).not.toBeNull();
+  expect(document.querySelector('#tabs [data-tab="agents-workers"] .ph-robot')).not.toBeNull();
 });
 
 it('keeps the fork settings spacing for empty folders and flat Setup connectors', () => {
@@ -677,7 +711,10 @@ describe('the settings sheet', () => {
     expect(document.getElementById('chatAutomation')!.closest('#composerSettings')).not.toBeNull();
     expect(order.indexOf('goalKey')).toBeLessThan(order.indexOf('goalPick'));
     expect(order.indexOf('goalPick')).toBeLessThan(order.indexOf('goalReasoning'));
-    expect(order.indexOf('goalReasoning')).toBeLessThan(order.indexOf('goalPromptEdit'));
+    // The key, picker and reasoning are the API provider's, on Models; the editable prompt is
+    // beside the Goal and Loop settings it belongs to.
+    const page = (id: string) => document.getElementById(id)!.closest<HTMLElement>('[data-agents-page]')!.dataset.agentsPage;
+    expect([page('goalKey'), page('goalPick'), page('goalReasoning'), page('goalPromptEdit')]).toEqual(['models', 'models', 'models', 'goal']);
     // Closed until asked for: the catalogue is several hundred long and costs a round trip.
     expect(document.getElementById('goalModels')!.hasAttribute('hidden')).toBe(true);
     expect(document.getElementById('handoffPromptPanel')!.hasAttribute('hidden')).toBe(true);
