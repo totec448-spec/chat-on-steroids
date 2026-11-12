@@ -3065,7 +3065,9 @@ the settle window for that question is its own and may end it.
 
 Native Send/Stop controls belong to the current composer's form and must be rendered outside
 transcript/extension surfaces. Hidden, inert or quoted controls grant no action; multiple Send
-buttons are ambiguous. The existing transcript observer also follows composer-side relabel/hide
+buttons are ambiguous. The locale-free Send fallback requires a nonempty draft, excludes voice/
+dictation and Stop controls, and accepts exactly one visible structural candidate, including
+while generation is active. The existing transcript observer also follows composer-side relabel/hide
 mutations so hidden tabs notice Stop transitions without waiting for a throttled timer.
 Submission observes native Send readiness and acceptance within one 30-second deadline, freezes
 the editor/text/document, and clicks once. It never substitutes synthetic Enter. Goal-token and

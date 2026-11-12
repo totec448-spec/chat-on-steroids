@@ -1054,6 +1054,10 @@ it('finds the stop control by its square when the label is translated', () => {
     '<svg class="icon-primary-action" viewBox="0 0 20 20"><path d="M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C15.5 14.9404 14.9404 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z"></path></svg></button>';
   expect(f.api.generating(), 'a translated stop button was not recognised').toBe(true);
   expect(f.api.stopButton()?.getAttribute('aria-label')).toBe('Durdur');
+  form.querySelector('button[type="submit"]')!.remove();
+  expect(f.api.composerText()).toBe('');
+  expect(f.api.generating()).toBe(true);
+  expect(f.api.sendButton(), 'an empty composer with only localized Stop offered Send').toBeNull();
 });
 
 /**
@@ -1173,16 +1177,75 @@ it('finds the send control by its slot when the label is translated', () => {
     '<svg class="icon-primary-action" viewBox="0 0 20 20"><path d="M8.5 16.5v-9l-3.25 3.25"></path></svg></button>');
   expect(f.api.sendButton()?.getAttribute('aria-label'), 'a translated send button was not recognised').toBe('Gönder');
 
-  // The stop square in that same slot is never a send target.
-  form.querySelector('button[aria-label="Gönder"]')!.outerHTML =
+  // While generating (#1231), a translated send control alongside stop is still recognised.
+  form.insertAdjacentHTML('beforeend',
     `<button type="button" class="${slot}" aria-label="Durdur">` +
-    '<svg class="icon-primary-action" viewBox="0 0 20 20"><path d="M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C15.5 14.9404 14.9404 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z"></path></svg></button>';
+    '<svg class="icon-primary-action" viewBox="0 0 20 20"><path d="M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C15.5 14.9404 14.9404 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z"></path></svg></button>');
+  expect(f.api.generating()).toBe(true);
+  expect(f.api.sendButton()?.getAttribute('aria-label'), 'a translated send button was hidden while generating').toBe('Gönder');
+
+  // The stop square in that same slot is never a send target.
+  form.querySelector('button[aria-label="Gönder"]')!.remove();
   expect(f.api.sendButton(), 'the stop square was read as send').toBeNull();
 
   // And an English label still wins outright, without consulting the slot at all.
   form.querySelector('button[aria-label="Durdur"]')!.outerHTML =
     '<button type="button" aria-label="Send prompt">send</button>';
   expect(f.api.sendButton()?.getAttribute('aria-label')).toBe('Send prompt');
+});
+
+it('excludes voice controls from structural Send with text while generating', () => {
+  const f = fixture(), edit = editing(f);
+  const form = f.doc.querySelector('form[data-chatgpt-composer]')!;
+  const slot = 'cursor-interaction size-token-button-composer flex items-center justify-center rounded-full bg-composer-primary p-0.5';
+  f.doc.querySelector('button[type="submit"]')!.remove();
+  expect(f.api.insertPrompt('Continue', true)).toBe(true);
+  expect(edit.box.innerText).toContain('Continue');
+
+  form.insertAdjacentHTML('beforeend',
+    `<button type="button" class="${slot}" aria-label="Sprachchat starten" data-state="closed">` +
+    '<svg><path d="M8.22266 2.45825C8"></path><path d="M12.4443 4.62524C1"></path>' +
+    '<path d="M4 6.95825C4.48325"></path><path d="M16.667 7.45825C17"></path></svg></button>' +
+    `<button type="button" class="${slot}" aria-label="Durdur">` +
+    '<svg><path d="M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C14.9404 14.9404 14.25 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z"></path></svg></button>');
+  expect(f.api.generating()).toBe(true);
+  expect(f.api.sendButton(), 'voice must not be mistaken for Send').toBeNull();
+
+  form.insertAdjacentHTML('beforeend',
+    `<button type="button" class="${slot}" aria-label="Gönder"><svg><path d="M8.5 16.5v-9l-3.25 3.25"></path></svg></button>`);
+  expect(f.api.sendButton()?.getAttribute('aria-label')).toBe('Gönder');
+});
+
+it('ignores hidden structural Send controls with text while generating', () => {
+  const f = fixture(), edit = editing(f);
+  const form = f.doc.querySelector('form[data-chatgpt-composer]')!;
+  const slot = 'cursor-interaction size-token-button-composer flex items-center justify-center rounded-full bg-composer-primary p-0.5';
+  f.doc.querySelector('button[type="submit"]')!.remove();
+  expect(f.api.insertPrompt('Continue', true)).toBe(true);
+  expect(edit.box.innerText).toContain('Continue');
+
+  form.insertAdjacentHTML('beforeend',
+    `<div hidden><button type="button" class="${slot}" aria-label="Gönder"><svg><path d="M8.5 16.5v-9l-3.25 3.25"></path></svg></button></div>` +
+    `<button type="button" class="${slot}" aria-label="Durdur"><svg><path d="M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C14.9404 14.9404 14.25 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z"></path></svg></button>` +
+    `<button type="button" class="${slot}" aria-label="Envoyer"><svg><path d="M8.5 16.5v-9l-3.25 3.25"></path></svg></button>`);
+  expect(f.api.generating()).toBe(true);
+  expect(f.api.sendButton()?.getAttribute('aria-label'), 'a hidden control made Send ambiguous').toBe('Envoyer');
+});
+
+it('rejects multiple visible structural Send candidates with text while generating', () => {
+  const f = fixture(), edit = editing(f);
+  const form = f.doc.querySelector('form[data-chatgpt-composer]')!;
+  const slot = 'cursor-interaction size-token-button-composer flex items-center justify-center rounded-full bg-composer-primary p-0.5';
+  f.doc.querySelector('button[type="submit"]')!.remove();
+  expect(f.api.insertPrompt('Continue', true)).toBe(true);
+  expect(edit.box.innerText).toContain('Continue');
+
+  form.insertAdjacentHTML('beforeend',
+    `<button type="button" class="${slot}" aria-label="Gönder"><svg><path d="M8.5 16.5v-9l-3.25 3.25"></path></svg></button>` +
+    `<button type="button" class="${slot}" aria-label="Envoyer"><svg><path d="M8.5 16.5v-9l-3.25 3.25"></path></svg></button>` +
+    `<button type="button" class="${slot}" aria-label="Durdur"><svg><path d="M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C14.9404 14.9404 14.25 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z"></path></svg></button>`);
+  expect(f.api.generating()).toBe(true);
+  expect(f.api.sendButton(), 'two visible structural candidates must remain ambiguous').toBeNull();
 });
 
 it('preserves prepared multiline text through the shell editor serializer', () => {
