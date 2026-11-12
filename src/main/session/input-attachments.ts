@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import sharp from 'sharp';
 import { sessionsRoot } from './store.js';
+import { logInfo } from '../logger.js';
 import type { InputAttachment } from '../../shared/input.js';
 import { injectableAttachments, MAX_INPUT_IMAGES } from '../../shared/input.js';
 import { normalizeInputImage } from './input-images.js';
@@ -35,14 +36,20 @@ export function stageInputAttachments(sources: AttachmentSource[], retained: Ret
 async function stageBatch(sources: AttachmentSource[], retained: RetainedAttachments): Promise<InputAttachment[]> {
   const dir = directory();
   await fs.mkdir(dir, { recursive: true });
-  let used = 0;
+  let used = 0, keptExpired = 0;
   for (const name of await fs.readdir(dir)) {
     if (!/^[a-f0-9-]{36}$/.test(name)) continue;
     const file = fileFor(name), stat = await fs.stat(file);
-    if (Date.now() - stat.mtimeMs > 24 * 60 * 60 * 1000 && !retained.has(name)) {
-      await fs.unlink(file); await fs.unlink(file + '.json').catch(() => undefined);
-    } else used += stat.size;
+    if (Date.now() - stat.mtimeMs > 24 * 60 * 60 * 1000) {
+      if (!retained.has(name)) {
+        await fs.unlink(file); await fs.unlink(file + '.json').catch(() => undefined);
+        continue;
+      }
+      keptExpired++;
+    }
+    used += stat.size;
   }
+  if (keptExpired) logInfo(`attachment cleanup: kept ${keptExpired} expired attachment(s) still referenced by a draft or the outbox`);
   const attachments: InputAttachment[] = [];
   for (const source of sources) {
     const staged = await stageOne(source, used);
