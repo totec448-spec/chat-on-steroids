@@ -429,7 +429,11 @@ function paintStatus(): void {
     if (missing) {
       // Keep the full product name, including slashes, in LTR order inside
       // Arabic prose. This is a text node, not markup, so use Unicode isolates.
-      const browserName = document.documentElement.dir === 'rtl' ? '\u2066' + missing[1] + '\u2069' : missing[1];
+      // Keep the complete brand together when a narrow menu would otherwise
+      // wrap at spaces or a slash and interleave Arabic words between its parts.
+      const originalName = missing[1] ?? '';
+      const browserName = document.documentElement.dir === 'rtl'
+        ? '\u2066' + originalName.replace(/\s/g, '\u00a0') + '\u2069' : originalName;
       return t('Browser {0} was not found. Install it or select another browser in Settings, then retry model discovery.', [browserName]);
     }
     return raw.startsWith('Model discovery timed out. ')
