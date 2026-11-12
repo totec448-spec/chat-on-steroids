@@ -72,8 +72,14 @@
   const MAX_ROWS = 400;
   /** Mounted section groups read per scan, including user and assistant groups. */
   const MAX_TURNS = 6;
-  /** Connector requests reported for one turn. Far above any real turn's call count. */
+  /**
+   * Connector requests reported for one turn. Far above most turns' call count, but a long working
+   * turn can pass it (297 calls on 2026-11-11, #2157). The limit bounds what is reported, never
+   * the turn's public messages: calls past it are left out of the report, not the turn.
+   */
   const MAX_CALLS = 200;
+  /** Items one turn may hold before it is not read at all; a bound against a runaway tree, far above real turns. */
+  const MAX_TURN_ITEMS = 5000;
   /** Public generated-image descriptors retained per turn. Pixels never cross this boundary. */
   const MAX_GENERATED_IMAGES = 200;
   /** ChatGPT's own turn anchors, which is where a turn's message model hangs. */
@@ -1786,12 +1792,46 @@
     return null;
   }
 
-  /** Projects only public user/final assistant bytes from the typed search-unit turn model. */
+  /**
+   * Projects only public user/assistant bytes from the typed search-unit turn model: the turn's own
+   * questions and answers, and the interim updates inside its working groups (#2157; the shell
+   * reader reads the same ones). A bound on working rows or tool calls never costs the turn its answer.
+   */
   function messagesFromTurnView(turn) {
-    if (!turn || typeof turn !== 'object' || !Array.isArray(turn.items)) return null;
+    if (!turn || typeof turn !== 'object' || !Array.isArray(turn.items) || turn.items.length > MAX_TURN_ITEMS) return null;
     const out = [], seen = new Set();
+    const topLevel = new Set(turn.items.filter(item => item?.type === 'assistant-message').map(item => str(item.messageId) || str(item.latestMessageId)).filter(Boolean));
+    const assistant = (item, nested) => {
+      const id = str(item.messageId) || str(item.latestMessageId);
+      if (!id || seen.has(id) || (nested && topLevel.has(id))) return;
+      const body = typeof item.content === 'string' ? item.content.slice(0, MAX_RENDERED_TEXT) : '';
+      if (nested && (!body || ONLY_CONTENT_REFERENCES.test(body))) return;
+      const phase = str(item.phase), complete = item.completed === true;
+      const terminal = !nested && complete && phase === 'final_answer' && turn.status === 'complete';
+      const exchange = str(item.turnExchangeId);
+      seen.add(id);
+      out.push({
+        id, author: { role: 'assistant' }, recipient: 'all',
+        ...(!nested && phase === 'final_answer' ? { channel: 'final' } : nested ? { channel: 'commentary' } : {}),
+        ...(num(item.sentAtMs) !== null ? { create_time: item.sentAtMs / 1000 } : {}),
+        status: complete ? 'finished_successfully' : 'in_progress', end_turn: terminal,
+        content: { content_type: 'text', parts: body ? [body] : [] },
+        metadata: { message_type: 'next', ...(exchange ? { turn_exchange_id: exchange } : {}) }
+      });
+    };
+    let work = 0;
+    // Working rows are read until the row limit; the turn's own items always are.
+    const working = items => {
+      if (!Array.isArray(items)) return;
+      for (const item of items) {
+        if (++work > MAX_ROWS) return;
+        if (!item || typeof item !== 'object') continue;
+        if (item.type === 'chatgpt-reasoning-group') working(item.items);
+        else if (item.type === 'assistant-message') assistant(item, true);
+      }
+    };
     for (const item of turn.items) {
-      if (!item || typeof item !== 'object' || out.length >= MAX_CALLS) continue;
+      if (!item || typeof item !== 'object') continue;
       if (item.type === 'user-message') {
         const id = str(item.messageId) || str(item.serverMessageId);
         const body = typeof item.message === 'string' ? item.message.slice(0, MAX_RENDERED_TEXT) : '';
@@ -1802,24 +1842,8 @@
           ...(num(item.sentAtMs) !== null ? { create_time: item.sentAtMs / 1000 } : {}),
           content: { content_type: 'text', parts: [body] }, metadata: {}
         });
-        continue;
-      }
-      if (item.type !== 'assistant-message') continue;
-      const id = str(item.messageId) || str(item.latestMessageId);
-      if (!id || seen.has(id)) continue;
-      const body = typeof item.content === 'string' ? item.content.slice(0, MAX_RENDERED_TEXT) : '';
-      const phase = str(item.phase), complete = item.completed === true;
-      const terminal = complete && phase === 'final_answer' && turn.status === 'complete';
-      const exchange = str(item.turnExchangeId);
-      seen.add(id);
-      out.push({
-        id, author: { role: 'assistant' }, recipient: 'all',
-        ...(phase === 'final_answer' ? { channel: 'final' } : {}),
-        ...(num(item.sentAtMs) !== null ? { create_time: item.sentAtMs / 1000 } : {}),
-        status: complete ? 'finished_successfully' : 'in_progress', end_turn: terminal,
-        content: { content_type: 'text', parts: body ? [body] : [] },
-        metadata: { message_type: 'next', ...(exchange ? { turn_exchange_id: exchange } : {}) }
-      });
+      } else if (item.type === 'assistant-message') assistant(item, false);
+      else if (item.type === 'chatgpt-reasoning-group') working(item.items);
     }
     return out;
   }
@@ -2277,7 +2301,7 @@
     for (let at = fiber, up = 0; at && up < 16; up++, at = at.return) {
       if (Array.isArray(at.memoizedProps?.entry?.turn?.items)) { entry = at.memoizedProps.entry; entryFiber = at; break; }
     }
-    if (!entry || !turnId || entry.id !== turnId || entry.turn.items.length > MAX_ROWS) return null;
+    if (!entry || !turnId || entry.id !== turnId || entry.turn.items.length > MAX_TURN_ITEMS) return null;
     const place = shellQuestionPlace(entryFiber, entry, section);
     const messages = [], calls = [], slots = [], seen = new Set(), callSources = new Map(), executionIds = [], images = new Map();
     let lastAnswer = null, previousId = null;
@@ -2311,7 +2335,6 @@
     const opening = entry.turn.items.findIndex(item => item?.type === 'user-message');
     const closing = entry.turn.items.findLastIndex(item => item?.type === 'assistant-message' && item.phase === 'final_answer');
     for (const [index, item] of entry.turn.items.entries()) {
-      if (++work > MAX_ROWS) return null;
       if (item?.type === 'user-message' || item?.type === 'assistant-message') {
         const user = item.type === 'user-message', id = str(item.messageId) || (user ? str(item.serverMessageId) : null);
         if (!id) continue;
@@ -2342,7 +2365,9 @@
       } else {
         const steps = item?.type === 'chatgpt-reasoning-group' && Array.isArray(item.items) ? item.items : [item];
         for (const step of steps) {
-          if (++work > MAX_ROWS) return null;
+          // Past the row limit the rest of the working rows are not read; the turn's own questions and
+          // answers (the top-level items) always are, so a long turn can still end (#2157).
+          if (++work > MAX_ROWS) break;
           if (step?.type === 'generated-image') {
             appendGeneratedImage(step);
             continue;
@@ -2358,14 +2383,16 @@
           if (step?.type === 'dynamic-tool-call' && step.tool === 'exec') {
             const id = str(step.callId);
             if (!id) continue;
-            if (!remember(id) || executionIds.length >= MAX_CALLS) return null;
+            if (!remember(id)) return null; // a repeated identity is never trusted
+            if (executionIds.length >= MAX_CALLS) continue;
             executionIds.push(id);
             continue;
           }
           if (step?.type !== 'mcp-tool-call' || !ownServerName(step.invocation?.server)) continue;
           const id = str(step.callId), tool = toolName(step.invocation?.tool);
           if (!id || !tool) continue;
-          if (!remember(id) || calls.length >= MAX_CALLS) return null;
+          if (!remember(id)) return null;
+          if (calls.length >= MAX_CALLS) continue;
           calls.push({ messageId: id, tool, order: calls.length, answered: step.completed === true, requestId: null, createTime: null });
           callSources.set(id, { id: str(step.widgetStateSource?.messageId), server: step.invocation.server });
         }

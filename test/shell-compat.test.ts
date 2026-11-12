@@ -3,7 +3,7 @@
  * No cache-derived message history, invented receipts or alternate presentation. */
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const domSource = readFileSync(new URL('../extension/chatgpt-dom.js', import.meta.url), 'utf8');
 const fiberSource = readFileSync(new URL('../extension/fiber.js', import.meta.url), 'utf8');
@@ -184,6 +184,68 @@ it('reads the real shell composer, messages and tools through existing contracts
   expect(f.api.turns().map((t: any) => t.role)).toEqual(['user', 'assistant']);
   expect(f.api.messages().map((m: any) => [m.id, m.role, m.text])).toEqual([[USER, 'user', 'hello'], [ANSWER, 'assistant', 'Answer']]);
   expect(f.api.presentationTurns().map((t: any) => t.role)).toEqual(['user', 'assistant']);
+});
+
+/** #2157: a bound on tool observations or work rows limits what is reported, never the public text. */
+describe('a very long turn still reports its public messages (#2157)', () => {
+  const own = (id: string) => ({ type: 'mcp-tool-call', callId: id, completed: true, invocation: { server: 'Chat On Steroids Core', tool: 'link_x/read' }, result: null });
+  const exec = (id: string) => ({ type: 'dynamic-tool-call', callId: id, tool: 'exec', completed: true });
+  const interim = (index: number) => ({ type: 'assistant-message', messageId: `66666666-6666-4666-8666-${String(index).padStart(12, '0')}`, content: `Update ${index}`, phase: 'commentary', completed: true });
+  const complete = (f: ReturnType<typeof fixture>, work: any[]) => {
+    (f.entry.turn as any).status = 'complete';
+    f.entry.turn.items = [f.entry.turn.items[0], { type: 'chatgpt-reasoning-group', items: work },
+      { type: 'assistant-message', messageId: ANSWER, content: 'Answer', phase: 'final_answer', completed: true }];
+    ids(f);
+  };
+  // The page lists every message of the turn, in order.
+  const ids = (f: ReturnType<typeof fixture>) => {
+    const all: string[] = [];
+    const visit = (items: any[]) => { for (const item of items) { if (item.messageId) all.push(item.messageId); if (item.callId) all.push(item.callId); if (item.items) visit(item.items); } };
+    visit(f.entry.turn.items);
+    (f.entry.turn as any).messageIds = all;
+  };
+  const read = async (work: any[]) => {
+    const f = fixture(); complete(f, work);
+    const { turns } = await f.ask();
+    expect(turns).toHaveLength(1);
+    return turns[0];
+  };
+
+  it.each([199, 200, 201, 297])('keeps the final answer of a turn with %i connector calls', async count => {
+    const turn = await read(Array.from({ length: count }, (_, index) => own(`call-${index}`)));
+    expect(turn.messages.map((m: any) => m.rawMessageId)).toEqual([USER, ANSWER]);
+    expect(turn.endMessageId).toBe(ANSWER);
+    expect(turn.calls.length).toBe(Math.min(count, 200));
+  });
+
+  it('keeps the final answer of a turn with more than 200 exec calls', async () => {
+    const turn = await read(Array.from({ length: 297 }, (_, index) => exec(`exec-${index}`)));
+    expect(turn.messages.map((m: any) => m.rawMessageId)).toEqual([USER, ANSWER]);
+    expect(turn.endMessageId).toBe(ANSWER);
+  });
+
+  it('keeps the final answer when the turn holds more work rows than the row limit', async () => {
+    const turn = await read(Array.from({ length: 19 }, (_, index) => own(`call-${index}`)).concat(Array.from({ length: 380 }, (_, index) => interim(index)) as any[]));
+    expect(turn.messages.map((m: any) => m.rawMessageId).at(-1)).toBe(ANSWER);
+    expect(turn.endMessageId).toBe(ANSWER);
+    expect(turn.calls.length).toBe(19);
+  });
+
+  it('keeps the final answer when the work rows are far past the row limit', async () => {
+    const turn = await read(Array.from({ length: 1500 }, (_, index) => interim(index)));
+    expect(turn.messages.map((m: any) => m.rawMessageId).at(-1)).toBe(ANSWER);
+    expect(turn.endMessageId).toBe(ANSWER);
+  });
+
+  it('keeps the final answer when top-level items outnumber the row limit', async () => {
+    const f = fixture(); (f.entry.turn as any).status = 'complete';
+    f.entry.turn.items = [f.entry.turn.items[0], ...Array.from({ length: 450 }, (_, index) => interim(index)),
+      { type: 'assistant-message', messageId: ANSWER, content: 'Answer', phase: 'final_answer', completed: true }];
+    ids(f);
+    const turn = (await f.ask()).turns[0];
+    expect(turn.messages.map((m: any) => m.rawMessageId).at(-1)).toBe(ANSWER);
+    expect(turn.endMessageId).toBe(ANSWER);
+  });
 });
 
 it.each(['in_progress', 'cancelled', 'complete', 'unknown', undefined])('does not invent a tool receipt from turn status %s', async status => {
