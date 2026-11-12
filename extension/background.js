@@ -2299,7 +2299,7 @@ function resumeDeferredDesktopInputRetries() {
 }
 
 function scheduleDesktopInputRetry(id, tabId, reason) {
-  if (!token || disconnected || extensionReloadPending) return;
+  if (!token || disconnected) return;
   if (inputOpenings[id]?.tab !== tabId) { clearDesktopInputRetry(id, tabId); return; }
   const existing = desktopInputOfferRetries.get(id);
   const state = existing && existing.tabId === tabId
