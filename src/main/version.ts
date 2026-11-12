@@ -68,4 +68,6 @@ export function extensionDownloadUrl(version = APP_VERSION): string {
 // draft ownership. A 12 companion would silently send text without these files.
 // 14 — exact native generated-image metadata and bounded preview observations. A 13 app
 // would ACK the journal while silently discarding that new event kind.
-export const BRIDGE_PROTOCOL = 14;
+// 15 — project-create status can be unavailable (null). A 14 companion treats that as
+// an empty/completed list and may retire a still-active helper, so reject that old peer.
+export const BRIDGE_PROTOCOL = 15;

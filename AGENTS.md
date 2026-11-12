@@ -1085,6 +1085,17 @@ looks empty. "Show more" continues with the project's cursor once everything loa
 never selects a chat, and a failed read is retried on the next expand.
 
 `projects.ts` owns a bounded catalog of canonical absolute local folders with stable UUIDs.
+Only a missing `state/projects.json` means an empty catalog. Invalid JSON, on-disk null or an
+unreadable file refuses catalog reads and mutations with the existing catalog error, logs the
+refusal without stored content, and leaves the file intact. Once readable again, the original
+project ids and session bindings remain usable (`test/projects.test.ts`).
+The browser's project-create projection reports `null` while this catalog is unavailable,
+not an empty/completed list. `/status` and `/project-create` pending still succeed; the companion
+skips only project-create inspection, retaining its helper/owner while unrelated repairs,
+Stop and input delivery continue. A successful later read resumes the original pending request.
+This nullable wire state requires bridge protocol 15 in both app and companion. Protocol-14
+peers are rejected by the existing 426 gate because they would treat null as a completed list
+and retire the helper; reload the matching bundled companion when updating the app.
 Adding uses the native folder selection/approved-root flow, resolves the real directory and
 deduplicates it. Session metadata owns `projectId`. Before send/use, `projectWorkspace()` and
 `getSessionProject()` re-resolve it under current roots and reject moved/unavailable folders.
@@ -1290,8 +1301,11 @@ in (the `_account` cookie, null for a personal account); the catalog keeps a 16-
 of it per entry, never the id, and offers or links only entries of the last reported workspace,
 because ChatGPT opens a Project only in its own workspace. Adding a folder with Projects to choose from passes
 `chatgpt: 'later'` (no link yet) and opens `chatgpt-project-picker.ts` on the new row: New or an
-existing Project; one held by another listed project is shown disabled. Closing the choice creates
-nothing (Haz on #1757), and when the row is not drawn nothing is created either: a toast says to
+existing Project; one held by another listed project is shown disabled.
+The choices lookup must succeed before either local or SSH project addition: a failed read shows
+the existing translated error and stops the add, rather than silently requesting a new native
+Project. The menu picker likewise shows the error instead of offering stale/empty choices.
+Closing the choice creates nothing (Haz on #1757), and when the row is not drawn nothing is created either: a toast says to
 choose from the project's ⋯ menu. `linkChatgptProject` accepts only a listed id, never one another
 listed project holds, and never over `requested`/`claimed`/`creating`; it may replace a `linked`,
 `failed` or `uncertain` one. `createChatgptProjectFor(id, { replace })` (IPC `projects:chatgpt-create`

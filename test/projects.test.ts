@@ -10,6 +10,7 @@ import { createSession, getSession, initSessionStore, moveSessionProject, rebind
 import { addProject, armProjectCreate, assignSessionProject, bindChatToLinkedProject, claimProjectCreate, completeProjectCreate, failProjectCreate, getProject, getSessionProject, inheritSessionProject, listProjects, markProjectGone, moveChatToProject, moveChatWithGroup, pendingProjectCreates, PROJECT_CREATE_ARMED_MS, PROJECT_CREATE_CLAIM_MS, projectWorkspace, removeProject, retryProjectCreate, sessionSecretsShieldOff, setProjectColor, setProjectSecretsShieldOff } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 import { resetWorkspaces, setWorkspaceFor } from '../src/main/workspace.js';
+import { onLog } from '../src/main/logger.js';
 
 let directory: string, approved: string;
 beforeEach(async () => {
@@ -48,6 +49,61 @@ it('persists only predefined presentation colors without changing project worksp
   await expect(setProjectColor(project.id, 'chartreuse' as any)).rejects.toThrow();
   expect(await setProjectColor(project.id, null)).toEqual(project);
 });
+
+it.each(['', '{"unfinished":', 'null'])('keeps an unreadable project catalog intact (%j)', async damaged => {
+  const project = await addProject(path.join(approved, 'first'));
+  const session = await createSession({ title: 'Existing project chat' });
+  await assignSessionProject(session.id, project.id);
+  const file = path.join(directory, 'state', 'projects.json');
+  const saved = await fs.readFile(file, 'utf8');
+  await fs.writeFile(file, damaged);
+  resetDurableForTests(); initDurableStore(directory);
+  await expect(listProjects()).rejects.toThrow('Project catalog is invalid');
+  await expect(addProject(path.join(approved, 'second'))).rejects.toThrow('Project catalog is invalid');
+  await flushDurable();
+  expect(await fs.readFile(file, 'utf8')).toBe(damaged);
+  // Restoring the previous version's catalog recovers the original binding, not a new UUID.
+  await fs.writeFile(file, saved);
+  expect(await listProjects()).toEqual([project]);
+  expect(await getSessionProject(session.id)).toMatchObject({ real: project.path });
+});
+
+it('does not replace valid projects after a transient catalog read error', async () => {
+  const project = await addProject(path.join(approved, 'first'));
+  const file = path.join(directory, 'state', 'projects.json');
+  const saved = await fs.readFile(file, 'utf8');
+  const read = vi.spyOn(fs, 'readFile').mockRejectedValueOnce(Object.assign(new Error('read failed'), { code: 'EIO' }));
+  try {
+    await expect(addProject(path.join(approved, 'second'))).rejects.toThrow('Project catalog is invalid');
+  } finally { read.mockRestore(); }
+  await flushDurable();
+  expect(await fs.readFile(file, 'utf8')).toBe(saved);
+  expect(await listProjects()).toEqual([project]);
+});
+
+it('still treats an absent catalog as a fresh installation', async () => {
+  expect(await listProjects()).toEqual([]);
+  const project = await addProject(path.join(approved, 'first'));
+  expect(await listProjects()).toEqual([project]);
+});
+
+it.each(['invalid row', 'duplicate ID', 'unreadable JSON'])(
+  'logs one content-free warning when refusing a catalog with %s', async reason => {
+    const project = await addProject(path.join(approved, 'first'));
+    const row = { ...project, name: 'catalog-content-marker' };
+    const raw = reason === 'invalid row' ? [{ ...row, id: 'invalid' }] : [row, row];
+    await writeDurableNow('projects', raw);
+    if (reason === 'unreadable JSON') await fs.writeFile(path.join(directory, 'state', 'projects.json'), '{"catalog-content-marker":');
+    const warnings: string[] = [];
+    const stop = onLog(entry => { if (entry.level === 'warn') warnings.push(entry.message); });
+    try {
+      await expect(listProjects()).rejects.toThrow('Project catalog is invalid');
+      expect(warnings).toEqual([reason === 'unreadable JSON'
+        ? 'projects: refused to read or change the catalog because its saved state is unreadable'
+        : 'projects: refused to read or change the catalog because its saved rows are invalid or duplicated']);
+    } finally { stop(); }
+  }
+);
 
 it('turns the secrets shield off for one project\'s chats only, durably (#1797)', async () => {
   const project = await addProject(path.join(approved, 'first'));
@@ -216,7 +272,7 @@ it('fails plainly before the click, but leaves an armed creation uncertain and n
     expect((await getProject(first.id))?.chatgpt).toMatchObject({ state: 'failed', error: 'no dialog' });
     await claimProjectCreate(b, 'page-b'); await armProjectCreate(b, 'page-b');
     vi.setSystemTime(Date.now() + PROJECT_CREATE_ARMED_MS);
-    expect((await pendingProjectCreates()).map(row => row.projectId)).toEqual([]);
+    expect((await pendingProjectCreates())?.map(row => row.projectId)).toEqual([]);
     expect((await getProject(second.id))?.chatgpt).toMatchObject({ state: 'uncertain' });
     // Only the person asks again, with a fresh request.
     const retried = await retryProjectCreate(second.id);
@@ -231,9 +287,9 @@ it('offers a claim that lapsed before its click to another page', async () => {
     const project = await addProject(path.join(approved, 'first'));
     const id = (project.chatgpt as { requestId: string }).requestId;
     await claimProjectCreate(id, 'page-a');
-    expect((await pendingProjectCreates())[0]).toMatchObject({ state: 'claimed' });
+    expect((await pendingProjectCreates())?.[0]).toMatchObject({ state: 'claimed' });
     vi.setSystemTime(Date.now() + PROJECT_CREATE_CLAIM_MS);
-    expect((await pendingProjectCreates())[0]).toMatchObject({ state: 'requested' });
+    expect((await pendingProjectCreates())?.[0]).toMatchObject({ state: 'requested' });
     expect(await armProjectCreate(id, 'page-a')).toBe(false);
     expect(await claimProjectCreate(id, 'page-b')).toBe(true);
   } finally { vi.useRealTimers(); }

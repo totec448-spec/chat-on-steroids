@@ -39,8 +39,8 @@ describe('extension release metadata', () => {
     expect(lock.version).toBe(APP_VERSION);
     expect(lock.packages?.['']?.version).toBe(APP_VERSION);
     expect(manifest.version).toBe(APP_VERSION);
-    expect(BRIDGE_PROTOCOL).toBe(14);
-    expect(backgroundSource).toContain('const BRIDGE_PROTOCOL = 14;');
+    expect(BRIDGE_PROTOCOL).toBe(15);
+    expect(backgroundSource).toContain('const BRIDGE_PROTOCOL = 15;');
   });
 
   /**
@@ -3958,7 +3958,7 @@ describe('extension command delivery', () => {
     const fetch = vi.fn(async (input: string) => {
       const url = new URL(input);
       paths.push(url.pathname);
-      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', bridge: 14, paired: true });
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, paired: true });
       if (url.pathname === '/pair') return response(200, { token: 'fresh-start-token' });
       return response(200, {});
     });
@@ -3972,7 +3972,7 @@ describe('extension command delivery', () => {
     const session = new FakeStorageArea();
     const fetch = vi.fn(async (input: string) => {
       const url = new URL(input);
-      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', bridge: 14, paired: false });
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, paired: false });
       if (url.pathname === '/pair') return response(200, { token: 'unwanted-token' });
       return response(200, {});
     });

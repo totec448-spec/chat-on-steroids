@@ -56,7 +56,7 @@ const MODEL_REQUEST_TIMEOUT_MS = 190_000;
 /** The reason a deadline aborts with, so it is a fact the caller can act on rather than prose. */
 const TIMED_OUT = 'the app took too long to answer';
 /** Bumped only when the request/response shape changes; the app compares it. */
-const BRIDGE_PROTOCOL = 14;
+const BRIDGE_PROTOCOL = 15;
 /** Browser-owned presentation preferences also exposed by the popup. */
 const RENDER_STREAM_KEY = 'renderStreamEnabled';
 const SHOW_TIMES_KEY = 'showStreamTimes';
@@ -2648,13 +2648,15 @@ let projectCreateFlight = null;
 /** A helper the person closed is opened again, but not more often than this. */
 const PROJECT_CREATE_REOPEN_MS = 120_000;
 function inspectProjectCreates(requests) {
+  // An unavailable catalog is not an empty/completed list. Keep the current helper and owner.
+  if (!Array.isArray(requests)) return;
   if (projectCreateFlight) return projectCreateFlight;
   // A page that just finished a creation answers after the app has already asked for the next pass,
   // which this flight then turned away; so a flight that asked a page runs one more pass itself, or a
   // second project added right after the first waited for an unrelated wake (measured 2026-10-10).
   let asked = false;
   projectCreateFlight = (async () => {
-    const list = (Array.isArray(requests) ? requests : [])
+    const list = requests
       .filter(request => request && /^[a-f0-9-]{36}$/i.test(String(request.id)) && typeof request.name === 'string' && request.name);
     const owner = (await chrome.storage.session.get('projectCreateOwner')).projectCreateOwner;
     if (owner && !list.some(request => request.id === owner.id)) {
