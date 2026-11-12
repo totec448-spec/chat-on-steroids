@@ -2283,13 +2283,28 @@ function clearDesktopInputRetries() {
   for (const id of [...desktopInputOfferRetries.keys()]) clearDesktopInputRetry(id);
 }
 
+function resumeDeferredDesktopInputRetries() {
+  if (!token || disconnected || extensionReloadPending) return;
+  let resume = false;
+  for (const [id, state] of [...desktopInputOfferRetries.entries()]) {
+    if (!state.deferredWhileReloading) continue;
+    state.deferredWhileReloading = false;
+    if (inputOpenings[id]?.tab !== state.tabId) {
+      clearDesktopInputRetry(id, state.tabId);
+      continue;
+    }
+    resume = true;
+  }
+  if (resume) void maintain(true).catch(() => undefined);
+}
+
 function scheduleDesktopInputRetry(id, tabId, reason) {
   if (!token || disconnected || extensionReloadPending) return;
   if (inputOpenings[id]?.tab !== tabId) { clearDesktopInputRetry(id, tabId); return; }
   const existing = desktopInputOfferRetries.get(id);
   const state = existing && existing.tabId === tabId
     ? existing
-    : { tabId, attempts: 0, timer: null, exhaustedLogged: false };
+    : { tabId, attempts: 0, timer: null, exhaustedLogged: false, deferredWhileReloading: false };
   if (existing && existing !== state && existing.timer !== null) clearTimeout(existing.timer);
   if (state.timer !== null) return;
   if (state.attempts >= DESKTOP_INPUT_RETRY_DELAYS_MS.length) {
@@ -2302,11 +2317,16 @@ function scheduleDesktopInputRetry(id, tabId, reason) {
   }
   const delayMs = DESKTOP_INPUT_RETRY_DELAYS_MS[state.attempts];
   state.attempts += 1;
+  state.deferredWhileReloading = false;
   console.info(`desktop input ${id}: retry ${state.attempts} scheduled in ${delayMs} ms (tab ${tabId} ${reason})`);
   state.timer = setTimeout(() => {
     state.timer = null;
-    if (!token || disconnected || extensionReloadPending) return;
+    if (!token || disconnected) return;
     if (inputOpenings[id]?.tab !== tabId) { clearDesktopInputRetry(id, tabId); return; }
+    if (extensionReloadPending) {
+      state.deferredWhileReloading = true;
+      return;
+    }
     void maintain(true).catch(() => undefined);
   }, delayMs);
   desktopInputOfferRetries.set(id, state);
@@ -3553,6 +3573,7 @@ async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands, liveS
     }
   }
   extensionReloadPending = true;
+  let reloading = false;
   try {
     const prepared = await call('/extension/update', { method: 'POST',
       body: JSON.stringify(busyFor ? { pastBusyChatsMs: busyFor } : {}) });
@@ -3564,9 +3585,11 @@ async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands, liveS
     extensionUpdateHold = null;
     await chrome.storage.local.set({ extensionReloadAttempt: attempt });
     if (typeof clearDesktopInputRetries === 'function') clearDesktopInputRetries();
+    reloading = true;
     chrome.runtime.reload();
   } finally {
     extensionReloadPending = false;
+    if (!reloading && typeof resumeDeferredDesktopInputRetries === 'function') resumeDeferredDesktopInputRetries();
   }
 }
 
