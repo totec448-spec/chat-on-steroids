@@ -2098,11 +2098,12 @@ it('searches every settings page from the sidebar and opens the setting it finds
   expect([field.value, pages.hidden, results.hidden]).toEqual(['', false, true]);
   expect(doc.getElementById('developerMode')!.closest('.setting')!.classList.contains('is-found')).toBe(true);
   expect(doc.activeElement).toBe(doc.getElementById('developerMode'));
-  // Enter opens the best match, here on Agents & automation.
+  // Enter opens the best match, here on the Goal & Loop page.
   type('session finish');
   field.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await frame();
   expect(doc.querySelector('[data-panel="chat"]')!.classList.contains('is-active')).toBe(true);
   expect(doc.querySelector<HTMLElement>('[data-view="settings"]')!.hidden).toBe(false);
+  expect(doc.querySelector<HTMLElement>('.automation-content')!.dataset.agentsCurrent).toBe('goal');
   expect(doc.activeElement).toBe(doc.getElementById('finishTool'));
   // Nothing found says so; Escape empties the field and brings the list back.
   type('no-such-setting-123');

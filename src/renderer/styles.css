@@ -3996,6 +3996,9 @@ input.num:disabled { opacity: .5; cursor: default; }
 nav { display: flex; flex-direction: column; gap: 3px; }
 nav button { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 9px 12px; border: 0; border-radius: 8px; background: none; color: var(--soft); font: inherit; font-size: calc(13px * var(--text-scale, 1)); font-weight: 550; text-align: left; cursor: pointer; }
 nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink); }
+/* Settings groups its pages: a quiet label, not another row. */
+.tabs-group { display: flex; flex-direction: column; gap: 3px; margin-top: 12px; }
+.tabs-group-label { padding: 0 12px 3px; color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
 @media (max-width: 850px) { .app { --sidebar-default: 205px; } .state { gap: 8px; } header > .mark, header > .title { display: none; } .top { grid-template-columns: 1fr; overflow: auto; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
 

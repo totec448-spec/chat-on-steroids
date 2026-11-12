@@ -87,11 +87,23 @@ app.whenReady().then(async () => {
           focused:document.activeElement===select,marked:!!document.querySelector('.is-found'),pages:document.getElementById('tabs').checkVisibility()}})()`);
       assert.deepEqual(opened,{active:true,inView:true,focused:true,marked:true,pages:true},'The Theme setting opens in view, marked and focused');
       await shot(`opened-${theme}.png`);
-      // A setting far down Agents & automation scrolls into view there.
+      // A setting far down the Goal & Loop page scrolls into view there.
       await type('handoff length'); await pause(300);
       await js(`document.querySelector('#settingsFindResults .search-result').click()`); await pause(500);
       const far=await js(`(()=>{const select=document.getElementById('handoffLength'),r=select.getBoundingClientRect();return {inView:r.top>=0&&r.bottom<=innerHeight,focused:document.activeElement===select}})()`);
       assert.deepEqual(far,{inView:true,focused:true},'Handoff length opens in view and focused: '+JSON.stringify(await js(`(()=>{const s=document.getElementById('handoffLength'),r=s.getBoundingClientRect(),p=document.getElementById('chatBody');return {top:r.top,bottom:r.bottom,h:innerHeight,scroll:p.scrollTop,max:p.scrollHeight-p.clientHeight,active:document.activeElement?.id,hidden:s.closest('[hidden]')?.id||s.closest('[hidden]')?.className||null}})()`)));
+      // The Agents pages share one view: each result opens the page that holds it, and only that page shows.
+      const onPage=()=>js(`(()=>({current:document.querySelector('.automation-content').dataset.agentsCurrent,tab:document.querySelector('#tabs button.is-sel')?.dataset.tab,
+        shownBlocks:[...new Set([...document.querySelectorAll('.automation-content > [data-agents-page]')].filter(n=>n.checkVisibility()).map(n=>n.dataset.agentsPage))]}))()`);
+      assert.deepEqual(await onPage(),{current:'browser',tab:'agents-browser',shownBlocks:['browser']},'Handoff length opens Browser and shows only its blocks');
+      for(const [query,page] of [['continue prompt','goal'],['background tabs','browser'],['sub-agent model','models'],['auto-select skills','tools'],['chats working at once','workers']]){
+        await type(query); await pause(300);
+        const found=await js(`(()=>{const rows=[...document.querySelectorAll('#settingsFindResults .search-result')];return rows[0]?.innerText||''})()`);
+        assert.ok(found, 'Search finds '+query);
+        await js(`document.querySelector('#settingsFindResults .search-result').click()`); await pause(500);
+        const at=await onPage();
+        assert.deepEqual(at,{current:page,tab:'agents-'+page,shownBlocks:[page]},query+' opens the '+page+' page: '+found);
+      }
       await js(`document.getElementById('backToChat').click()`); await pause(300);
       assert.equal(await js(`document.getElementById('settingsFindBox').checkVisibility()`),false,'No settings search outside Settings');
     }

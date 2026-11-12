@@ -15,7 +15,7 @@ const CHOOSE_AGAIN = new Set(['Choose the backup file again.', 'Your settings ch
 /** The Settings tab a changed setting is on, so the person can find it; the first match wins. */
 const CATEGORIES: ReadonlyArray<readonly [RegExp, string]> = [
   [/^(capabilities\.|readOnly$|commandAllowlist|projects\.|mcp\.)/, 'Workspace'], [/^ui\.(appearance|theme)/, 'Appearance'],
-  [/^(multiAgent|goal)\./, 'Agents & automation']
+  [/^(multiAgent|goal)\./, 'Agents']
 ];
 const category = (path: string) => CATEGORIES.find(([pattern]) => pattern.test(path))?.[1] ?? 'General';
 
