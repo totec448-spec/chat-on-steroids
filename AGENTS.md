@@ -1230,9 +1230,9 @@ file. Opted in are the read tools (`read`, glob expansion, `view_image`), `find`
 `localFs`, `sftpFs`, `fsForRoot`), which keeps the local errors (`ENOENT`, `EEXIST`, `EINVAL` …), the
 read limits and the walk order, never follows a link when listing or removing, writes whole files
 (temporary file + rename, mode kept, through a link to its target) and reopens a dropped SFTP session
-once. A raster preview in Files never decodes vector content: a file whose bytes start with `<` (after a
-byte-order mark and whitespace) or gzip is refused as "preview unavailable" whatever its extension, because
-libvips would hand it to its SVG renderer (sharp < 0.35.5 has a librsvg memory-safety advisory). Server-side containment is `resolveRemote` in `sandbox.ts`: no `..`, a link that leaves the
+once. A raster preview in Files reads only a file whose content starts with a PNG, JPEG, GIF, WebP or AVIF signature,
+whatever its extension (libvips chooses its decoder from the content and would reach its SVG renderer, which has a
+memory-safety advisory below sharp 0.35.5); anything else is "preview unavailable" and logged with its path. Server-side containment is `resolveRemote` in `sandbox.ts`: no `..`, a link that leaves the
 folder and a dangling link are refused (OpenSSH's realpath tolerates a missing last component, so
 existence is checked with `stat` first). One patch stays inside one server folder. `find` without a
 path names an unreachable server folder under `not_searched` and searches the rest; a regex is
