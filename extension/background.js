@@ -3553,7 +3553,6 @@ async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands, liveS
     }
   }
   extensionReloadPending = true;
-  if (typeof clearDesktopInputRetries === 'function') clearDesktopInputRetries();
   try {
     const prepared = await call('/extension/update', { method: 'POST',
       body: JSON.stringify(busyFor ? { pastBusyChatsMs: busyFor } : {}) });
@@ -3564,6 +3563,7 @@ async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands, liveS
     if (!prepared.ok || prepared.data?.ready !== true || prepared.data.build !== offer.build) { extensionUpdateHold = 'folder-not-ready'; return; }
     extensionUpdateHold = null;
     await chrome.storage.local.set({ extensionReloadAttempt: attempt });
+    if (typeof clearDesktopInputRetries === 'function') clearDesktopInputRetries();
     chrome.runtime.reload();
   } finally {
     extensionReloadPending = false;

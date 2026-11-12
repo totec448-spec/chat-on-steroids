@@ -2428,15 +2428,21 @@ it('clears pending fast retries when latchAppDisconnect or reloadForExtensionUpd
     await vi.advanceTimersByTimeAsync(1500);
     await vi.waitFor(() => expect(disconnectOffers).toBe(3), { timeout: 5000 });
 
-    // Extension auto-reload clears mid-backoff retry before calling runtime.reload().
+    // Extension auto-reload keeps mid-backoff retries when /extension/update holds, and clears them once committed.
     const reloadInputs = [{ id: firstId, conversationId: secondId }];
     const r = await worker(reloadInputs);
     r.setWorkerStamp('aaaaaaaaaaaa');
     r.tabs.push({ id: 7, url: `https://chatgpt.com/c/${secondId}` });
+    let updateCommit = false;
     r.fetch.mockImplementation(async request => {
       const path = new URL(request).pathname;
       if (path === '/hello') return { ok: true, status: 200, json: async () => ({ app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true }) };
-      if (path === '/extension/update') return { ok: true, status: 200, json: async () => ({ ok: true, build: 'bbbbbbbbbbbb', ready: true }) };
+      if (path === '/extension/update') {
+        return {
+          ok: true, status: 200,
+          json: async () => updateCommit ? { ok: true, build: 'bbbbbbbbbbbb', ready: true } : { ok: true, hold: 'app-busy' }
+        };
+      }
       return { ok: true, status: 200, json: async () => ({ ok: true, inputs: [...reloadInputs], inputOpeningIds: reloadInputs.map(row => row.id), background: true }) };
     });
     let reloadOffers = 0;
@@ -2448,6 +2454,12 @@ it('clears pending fast retries when latchAppDisconnect or reloadForExtensionUpd
 
     await r.maintain();
     expect(reloadOffers).toBe(1);
+    await r.reloadForExtensionUpdate({ build: 'bbbbbbbbbbbb', busy: false }, new Set(), new Set(), new Set());
+    expect(r.runtimeReload).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1500);
+    await vi.waitFor(() => expect(reloadOffers).toBe(2), { timeout: 5000 });
+
+    updateCommit = true;
     await r.reloadForExtensionUpdate({ build: 'bbbbbbbbbbbb', busy: false }, new Set(), new Set(), new Set());
     expect(r.runtimeReload).toHaveBeenCalledTimes(1);
     const statusBeforeAdvance = r.fetch.mock.calls.filter(([url]) => new URL(url).pathname === '/status').length;
