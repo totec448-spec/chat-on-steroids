@@ -2378,10 +2378,13 @@
       const questionAnchor = questionIds.size === 1 ? userAnchorByMessage.get(questionIds.values().next().value) : null;
       const newerQuestion = openedQuestion >= 0 && openedQuestion < question ||
         openedAnchor?.seq >= 0 && questionAnchor?.seq > openedAnchor.seq;
+      const olderQuestion = openedAnchor?.seq >= 0 && questionAnchor?.seq >= 0 && questionAnchor.seq < openedAnchor.seq;
       if (newerQuestion) turns = turns.slice(0, question);
-      else if (!visibleQuestions.length || visibleQuestions.some(message => !message.id || !questionsAtGenerationOpen.has(message.id))) {
+      else if (!olderQuestion && (!visibleQuestions.length ||
+          visibleQuestions.some(message => !message.id || !questionsAtGenerationOpen.has(message.id)))) {
         // This may be the next question, rendered before /activity has anchored it.
-        // Do not bind its fast answer to the prior generation on DOM novelty alone.
+        // An anchor-proven older question is safe even if it remounted after Send.
+        // Do not bind an unproven next question's fast answer to the prior generation.
         return null;
       }
     }

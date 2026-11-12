@@ -5144,6 +5144,8 @@ An unbound generation excludes a visible question only when DOM order or recorde
 anchors prove it is newer; a missing own question does not make an older visible one newer.
 If a question appears after that generation opened but has no order anchor yet, its following
 fast answer stays unowned until the next observed boundary proves which generation owns it.
+An older question remounting after the generation opened does not block its answer when
+durable anchors prove that question preceded the generation's own unmounted question.
 A consolidated final belongs to the continuation open when it settled, consistently in timeline
 projection, completion lookup, finish holds and recorder/Goal completion; it cannot advance to
 a continuation that opened after that settlement. Image-only completion follows the same proven
