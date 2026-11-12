@@ -10084,6 +10084,36 @@ describe('a stop button that goes missing while the turn is still running', () =
     ]);
   });
 
+  it('completes its answer when an anchored older question remounts after its own question unmounts', async () => {
+    let anchors = [{ seq: 1, time: 1_699_999_990_000, messageId: 'm-older-remounted-question' }];
+    live = await harness(undefined, {
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0, userAnchors: anchors } })
+    });
+    await live.hook.pullActivity();
+    startGenerating(live.document);
+    live.hook.observe(); await settle();
+    const own = emitted(live.sent, 'turn_start')[0]!.event.turnId;
+    const ownQuestion = live.document.querySelector('[data-turn="user"]')!;
+    const ownQuestionId = ownQuestion.querySelector('[data-message-id]')!.getAttribute('data-message-id')!;
+
+    // Neither the older question nor its section existed when the live generation opened.
+    // Hydration removes the current question, then remounts the older one above its answer.
+    ownQuestion.remove();
+    anchors = [...anchors, { seq: 2, time: 1_700_000_000_000, messageId: ownQuestionId }];
+    await live.hook.pullActivity();
+    userTurn(live.document, 'older-remounted-question', 'An earlier question', { sent: false });
+    const answer = assistantTurn(live.document, 'older-remount-answer', []);
+    prose(live.document, answer, 'older-remount-final', 'The current answer');
+    await bindFiberTurns([{ section: answer, turn: {
+      turnId: 'older-remount-answer', endMessageId: 'older-remount-final',
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', messages: [], activities: []
+    } }]);
+    await settleTurn(live); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end').map(row => row.event)).toEqual([
+      expect.objectContaining({ turnId: own, outcome: 'completed' })
+    ]);
+  });
+
   it.each(['rendered', 'indexed-unmounted', 'unanchored-unmounted'] as const)('does not consume a new fast answer terminal while the preceding generation has no bound section (%s)', async questionState => {
     let anchors: Array<{ seq: number; time: number; messageId: string }> = [];
     live = await harness(undefined, {
