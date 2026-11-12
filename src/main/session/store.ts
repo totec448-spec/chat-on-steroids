@@ -2184,6 +2184,11 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
   if (entry.summary.activeTurnId && !sameTurn(entry.summary.activeTurnId, finalTurnId)) return null;
   const boundaries = recent.filter(event => event.kind === 'turn_start' || event.kind === 'turn_end').sort((a, b) => a.seq - b.seq);
   const last = boundaries.at(-1), prior = boundaries.at(-2);
+  // A delayed revision is not a new generation: a promoted final cannot override its
+  // resolved owner's failed/stopped end. A later start of that owner reopens the boundary.
+  const finalBoundary = boundaries.findLast(event => sameTurn(event.turnId, finalTurnId));
+  if (promotedFinal && finalBoundary?.kind === 'turn_end' &&
+      (finalBoundary.outcome === 'failed' || finalBoundary.outcome === 'stopped')) return null;
   const nativeReopen = !!final.providerMessageId && last?.kind === 'turn_start' && last.source === 'app' &&
     last.turnId === finalTurnId && prior?.kind === 'turn_end' && prior.turnId === finalTurnId && prior.outcome === 'completed';
   // A progress note of a turn that had ended is not new work: ChatGPT draws a finished turn's steps

@@ -10055,15 +10055,57 @@ describe('a stop button that goes missing while the turn is still running', () =
     });
   });
 
-  it('does not consume a new fast answer terminal while the preceding generation has no bound section', async () => {
-    live = await harness();
+  it('completes its own answer when its question unmounts and an older question stays visible', async () => {
+    live = await harness(undefined, {
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0,
+        userAnchors: [{ seq: 1, time: 1_699_999_990_000, messageId: 'm-older-rendered-question' }] } })
+    });
+    userTurn(live.document, 'older-rendered-question', 'An earlier question', { sent: false });
+    await live.hook.pullActivity();
+    live.hook.observe(); await settle();
+    startGenerating(live.document);
+    const ownQuestion = live.document.querySelectorAll('[data-turn="user"]').item(1);
+    live.hook.observe(); await settle();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
+    const own = emitted(live.sent, 'turn_start')[0]!.event.turnId;
+
+    // The generation opened from its own Send, but has not acquired an assistant section.
+    // Hydration removes that question while retaining an older historical question.
+    ownQuestion.remove();
+    const answer = assistantTurn(live.document, 'missing-question-answer', []);
+    prose(live.document, answer, 'missing-question-final', 'The current answer');
+    await bindFiberTurns([{ section: answer, turn: {
+      turnId: 'missing-question-answer', endMessageId: 'missing-question-final',
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', messages: [], activities: []
+    } }]);
+    await settleTurn(live); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end').map(row => row.event)).toEqual([
+      expect.objectContaining({ turnId: own, outcome: 'completed' })
+    ]);
+  });
+
+  it.each(['rendered', 'indexed-unmounted'] as const)('does not consume a new fast answer terminal while the preceding generation has no bound section (%s)', async questionState => {
+    let anchors: Array<{ seq: number; time: number; messageId: string }> = [];
+    live = await harness(undefined, {
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0, userAnchors: anchors } })
+    });
     startGenerating(live.document);
     live.hook.observe(); await settle();
     const first = emitted(live.sent, 'turn_start')[0]!.event.turnId;
+    const firstQuestion = live.document.querySelector('[data-turn="user"]')!;
+    const firstQuestionId = firstQuestion.querySelector('[data-message-id]')!.getAttribute('data-message-id')!;
 
     // The previous generation never acquired an assistant section. A presentation-only scan
     // can nevertheless cache the next question's already-finished answer before observe() sees it.
     userTurn(live.document, 'unbound-next-question', 'Next question');
+    if (questionState === 'indexed-unmounted') {
+      firstQuestion.remove();
+      anchors = [
+        { seq: 1, time: 1_699_999_990_000, messageId: firstQuestionId },
+        { seq: 2, time: 1_700_000_000_000, messageId: 'm-unbound-next-question' }
+      ];
+      await live.hook.pullActivity();
+    }
     const nextAnswer = assistantTurn(live.document, 'fast-next-answer', []);
     nextAnswer.setAttribute('data-clf-fiber-turn', '0');
     const terminal = {

@@ -5140,10 +5140,13 @@ A turn that ended with its answer is never marked. At a new-question boundary, e
 terminal evidence proves completion before prose renders, unless it is a final already in the
 generation's history baseline or an approval is holding. Consumed terminals enter that baseline
 before the next generation opens, so remounting cannot complete it. Explicit failure/stop outcomes win.
+An unbound generation excludes a visible question only when DOM order or recorded question
+anchors prove it is newer; a missing own question does not make an older visible one newer.
 A consolidated final belongs to the continuation open when it settled, consistently in timeline
 projection, completion lookup, finish holds and recorder/Goal completion; it cannot advance to
 a continuation that opened after that settlement. Image-only completion follows the same proven
 continued chain while the canonical image retains its first owner; a reload hint alone is insufficient.
+A promoted final cannot override its resolved turn's failed/stopped end without a recorded reopen.
 A question sent after a shared assistant
 parent settles follows a mid-turn question sent before that settlement; it is not an edit of
 that question. Saved replacement repair reads the merged canonical parent, including provider

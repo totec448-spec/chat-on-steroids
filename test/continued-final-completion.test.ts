@@ -129,6 +129,53 @@ describe('continued final completion', () => {
     }
   });
 
+  it.each([
+    { outcome: 'failed', reopen: false }, { outcome: 'stopped', reopen: false },
+    { outcome: 'completed', reopen: false }, { outcome: 'stalled', reopen: false },
+    { outcome: 'failed', reopen: true }, { outcome: 'stopped', reopen: true }
+  ] as const)('honors a continuation that $outcome before a delayed consolidated final (reopened=$reopen)', async ({ outcome, reopen }) => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cos-steer-terminal-outcome-'));
+    try {
+      initConfigPath(dir);
+      initSessionStore(dir);
+      await saveConfig({ ...defaultConfig(), sessions: { ...defaultConfig().sessions, record: true } });
+      resetSessionStoreForTests();
+      resetEditsForTests();
+      const conversationId = 'bbbbbbbb-cccc-4ddd-8eee-000000000001';
+      const session = await createSession({ title: 'Delayed continuation final', conversationId });
+      await upsertMessageEvent(session.id, {
+        kind: 'user_message', time: T0, source: 'extension', messageId: 'initial-question', message: text('Initial question')
+      });
+      await appendEvent(session.id, { kind: 'turn_start', time: T0 + 10, source: 'extension', turnId: 'first' });
+      await upsertMessageEvent(session.id, {
+        kind: 'assistant_message', time: T0 + 20, source: 'extension', turnId: 'first',
+        messageId: 'consolidated-answer', providerMessageId: 'consolidated-answer',
+        message: text('Initial work'), state: 'streaming', final: false
+      });
+      await upsertMessageEvent(session.id, {
+        kind: 'user_message', time: T0 + 30, source: 'extension', messageId: 'continued-question', message: text('Continue')
+      });
+      await appendEvent(session.id, { kind: 'turn_end', time: T0 + 31, source: 'extension', turnId: 'first', outcome: 'interrupted', continued: true });
+      await appendEvent(session.id, { kind: 'turn_start', time: T0 + 32, source: 'extension', turnId: 'terminal' });
+      await appendEvent(session.id, { kind: 'turn_end', time: T0 + 40, source: 'extension', turnId: 'terminal', outcome });
+      if (reopen) await appendEvent(session.id, { kind: 'turn_start', time: T0 + 45, source: 'app', turnId: 'terminal' });
+      await upsertMessageEvent(session.id, {
+        kind: 'assistant_message', time: T0 + 50, source: 'extension', turnId: 'first',
+        messageId: 'consolidated-answer', providerMessageId: 'consolidated-answer',
+        message: text('Initial work and delayed final'), state: 'final', final: true
+      });
+      for (const scope of [undefined, 'terminal']) {
+        const final = await readCompletedFinal(session.id, conversationId, scope);
+        if (!reopen && (outcome === 'failed' || outcome === 'stopped')) expect(final).toBeNull();
+        else expect(final).toMatchObject({ messageId: 'consolidated-answer', turnId: 'terminal' });
+      }
+    } finally {
+      resetSessionStoreForTests();
+      unsetSessionRootForTests();
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('does not settle a promoted continuation final after a newer question has failed', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cos-steer-later-question-'));
     try {
