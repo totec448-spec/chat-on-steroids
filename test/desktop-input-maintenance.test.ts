@@ -250,7 +250,7 @@ it('carries the direct-turn offer only to the elected existing conversation', as
 });
 
 type Tab = { id: number; url?: string; pendingUrl?: string; windowId?: number; active?: boolean; pinned?: boolean };
-async function worker(inputs: Array<{ id: string; conversationId: string | null; directTurn?: { id: string; startedAt: number }; supersededConversationId?: string; project?: string; branch?: { conversationId: string; messageId: string } }>, modelCatalogRequest?: { nonce: string; expiresAt: number }, priorLocal: Record<string, unknown> = {}, priorSession: Record<string, unknown> = {}, rendered?: Set<number>) {
+async function worker(inputs: Array<{ id: string; conversationId: string | null; directTurn?: { id: string; startedAt: number }; supersededConversationId?: string; project?: string; branch?: { conversationId: string; messageId: string } }>, modelCatalogRequest?: { nonce: string; expiresAt: number }, priorLocal: Record<string, unknown> = {}, priorSession: Record<string, unknown> = {}, rendered?: Set<number>, hooks: { revoke?: () => Promise<void> } = {}) {
   const tabs: Tab[] = [];
   const event = { addListener: () => {} };
   const tabUpdated = { addListener: vi.fn() };
@@ -270,6 +270,7 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
   const remove = vi.fn(async (_id: number) => {});
   const query = vi.fn(async () => [...tabs]);
   const reload = vi.fn(async (_id: number) => {});
+  const runtimeReload = vi.fn();
   const sendMessage = vi.fn(async (_id: number, _message: any): Promise<{ ok: boolean; ready?: boolean }> => ({ ok: true, ready: true }));
   const debuggerApi = {
     onEvent: event, onDetach: event,
@@ -307,22 +308,22 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
       ...(rendered ? { debugger: debuggerApi } : {}),
       storage: { local, session },
       windows,
-      runtime: { getManifest: () => ({ version: '2.0.5' }), onMessage: event, onInstalled: event, onStartup: event },
+      runtime: { getManifest: () => ({ version: '2.0.5' }), reload: runtimeReload, onMessage: event, onInstalled: event, onStartup: event },
       tabs: { query, get: async (id: number) => tabs.find(tab => tab.id === id), remove, reload, create, update, sendMessage, onCreated: event, onUpdated: tabUpdated, onRemoved: event },
       alarms: { onAlarm: event, create: () => {}, clear: async () => true },
       scripting
     },
-    createBrowserControl: () => ({ pump: async () => {} }),
+    createBrowserControl: () => ({ pump: async () => {}, revoke: async () => hooks.revoke?.() }),
     fetch, URL, URLSearchParams, AbortController, setTimeout, clearTimeout, TextEncoder, console
   });
   vm.runInContext(activeTabsSource, context);
-  vm.runInContext(`${source}\nglobalThis.testMaintenance = { load, maintain, releaseTab, serializeTab, noteTabConversation, createChatTab, authorizeDocument, ackDesktopInput, drainCommandAcks, inspectRequestedModels, desktopInput: HANDLERS.desktop_input, catalog: HANDLERS.model_catalog, events: HANDLERS.events, bind: HANDLERS.bind, closed: HANDLERS.closed, loadFailure: HANDLERS.load_failure, correlate: HANDLERS.correlate, unpair: HANDLERS.unpair, pair: HANDLERS.pair, applyRequestedBrowserPreferences };`, context);
+  vm.runInContext(`${source}\nglobalThis.testMaintenance = { load, maintain, releaseTab, serializeTab, noteTabConversation, createChatTab, authorizeDocument, ackDesktopInput, drainCommandAcks, inspectRequestedModels, reloadForExtensionUpdate, setWorkerStamp: (value) => { workerStampValue = value; }, desktopInput: HANDLERS.desktop_input, catalog: HANDLERS.model_catalog, events: HANDLERS.events, bind: HANDLERS.bind, closed: HANDLERS.closed, loadFailure: HANDLERS.load_failure, correlate: HANDLERS.correlate, unpair: HANDLERS.unpair, pair: HANDLERS.pair, applyRequestedBrowserPreferences };`, context);
   const api = context.testMaintenance as { releaseTab(...args: any[]): Promise<any>; serializeTab(tab: number, operation: () => Promise<any>): Promise<any>; noteTabConversation(source: any, conversationId: string): Promise<any>; applyRequestedBrowserPreferences(request: object): Promise<void>; authorizeDocument(sender: unknown, message: unknown): Promise<any>; catalog(message: unknown, sender: unknown, source: unknown): Promise<any>; load(): Promise<void>; maintain(): Promise<void>; createChatTab(url: string, background: boolean): Promise<Tab> };
   await api.load();
   Object.assign(api, { query });
   const updated = (id: number, change: object) => tabUpdated.addListener.mock.calls[0]![0](id, change, tabs.find(tab => tab.id === id));
   vm.runInContext('Object.assign(testMaintenance, { offerStopTurns, noteTabConversation, ackCommand })', context);
-  return { ...api, scripting, updated, update, advance, navigator: browserNavigator, inspectModels: (context.testMaintenance as any).inspectRequestedModels as (request: unknown, background: boolean) => Promise<void>, ackDesktopInput: (context.testMaintenance as any).ackDesktopInput as (...args: string[]) => Promise<any>, drainCommandAcks: (context.testMaintenance as any).drainCommandAcks as () => Promise<any>, desktopInput: (context.testMaintenance as any).desktopInput as (...args: any[]) => Promise<any>, events: (context.testMaintenance as any).events as (message: any, sender: any, source: any) => Promise<any>, bind: (context.testMaintenance as any).bind as (message: any, sender: any, source: any) => Promise<any>, correlate: (context.testMaintenance as any).correlate as (message: any, sender: any, source: any) => Promise<any>, closed: (context.testMaintenance as any).closed as (message: any, sender: any, source: any) => Promise<any>, loadFailure: (context.testMaintenance as any).loadFailure as (message: any, sender: any, source: any) => Promise<any>, unpair: (context.testMaintenance as any).unpair as () => Promise<any>, pair: (context.testMaintenance as any).pair as () => Promise<any>, query, create, sendMessage, tabs, fetch, windows, remove, reload, local, localSaved, saved };
+  return { ...api, scripting, updated, update, advance, navigator: browserNavigator, inspectModels: (context.testMaintenance as any).inspectRequestedModels as (request: unknown, background: boolean) => Promise<void>, ackDesktopInput: (context.testMaintenance as any).ackDesktopInput as (...args: string[]) => Promise<any>, drainCommandAcks: (context.testMaintenance as any).drainCommandAcks as () => Promise<any>, desktopInput: (context.testMaintenance as any).desktopInput as (...args: any[]) => Promise<any>, events: (context.testMaintenance as any).events as (message: any, sender: any, source: any) => Promise<any>, bind: (context.testMaintenance as any).bind as (message: any, sender: any, source: any) => Promise<any>, correlate: (context.testMaintenance as any).correlate as (message: any, sender: any, source: any) => Promise<any>, closed: (context.testMaintenance as any).closed as (message: any, sender: any, source: any) => Promise<any>, loadFailure: (context.testMaintenance as any).loadFailure as (message: any, sender: any, source: any) => Promise<any>, unpair: (context.testMaintenance as any).unpair as () => Promise<any>, pair: (context.testMaintenance as any).pair as () => Promise<any>, reloadForExtensionUpdate: (context.testMaintenance as any).reloadForExtensionUpdate as (...args: any[]) => Promise<void>, setWorkerStamp: (context.testMaintenance as any).setWorkerStamp as (value: string) => void, query, create, sendMessage, tabs, fetch, windows, remove, reload, runtimeReload, local, localSaved, saved };
 }
 
 // 2.1.47 round: a chat tab that loaded offline in the app's background window stayed on Chrome's
@@ -2197,15 +2198,34 @@ it.each(['declined', 'unreachable'] as const)('retries a %s desktop input offer 
 it('cancels a pending fast retry before it fires once the input is retired', async () => {
   vi.useFakeTimers();
   try {
+    // Positive control: keeping the input active after a declined offer triggers a fast retry at 1500 ms.
+    const activeInputs = [{ id: firstId, conversationId: secondId }];
+    const active = await worker(activeInputs);
+    active.tabs.push({ id: 7, url: `https://chatgpt.com/c/${secondId}` });
+    let activeOffers = 0;
+    active.sendMessage.mockImplementation(async (_id, message) => {
+      if (message.type !== 'clf-desktop-input') return { ok: true, ready: true };
+      activeOffers += 1;
+      if (activeOffers >= 2) activeInputs.length = 0;
+      return { ok: activeOffers >= 2 };
+    });
+    await active.maintain();
+    expect(activeOffers).toBe(1);
+    await vi.advanceTimersByTimeAsync(1500);
+    await vi.waitFor(() => expect(activeOffers).toBe(2), { timeout: 5000 });
+
+    // Retirement scenario: declining schedules a fast retry, then retiring removes it before firing.
     const inputs = [{ id: firstId, conversationId: secondId }];
     const h = await worker(inputs);
     h.tabs.push({ id: 7, url: `https://chatgpt.com/c/${secondId}` });
+    let retiredOffers = 0;
     h.sendMessage.mockImplementation(async (_id, message) => {
-      if (message.type === 'clf-desktop-input') return { ok: false };
+      if (message.type === 'clf-desktop-input') { retiredOffers += 1; return { ok: false }; }
       return { ok: true, ready: true };
     });
 
     await h.maintain();
+    expect(retiredOffers).toBe(1);
     inputs.length = 0;
     await h.maintain();
 
@@ -2213,6 +2233,35 @@ it('cancels a pending fast retry before it fires once the input is retired', asy
     await vi.advanceTimersByTimeAsync(5_000);
     const statusCallsAfterAdvance = h.fetch.mock.calls.filter(([url]) => new URL(url).pathname === '/status').length;
     expect(statusCallsAfterAdvance).toBe(statusCallsBeforeAdvance);
+    expect(retiredOffers).toBe(1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('cancels a pending fast retry when the elected tab closes mid-backoff', async () => {
+  vi.useFakeTimers();
+  try {
+    const inputs = [{ id: firstId, conversationId: secondId }];
+    const h = await worker(inputs);
+    h.tabs.push({ id: 7, url: `https://chatgpt.com/c/${secondId}` });
+    let offers = 0;
+    h.sendMessage.mockImplementation(async (_id, message) => {
+      if (message.type === 'clf-desktop-input') { offers += 1; return { ok: false }; }
+      return { ok: true, ready: true };
+    });
+
+    await h.maintain();
+    expect(offers).toBe(1);
+
+    h.tabs.splice(0, 1);
+    await h.maintain();
+
+    const statusCallsBeforeAdvance = h.fetch.mock.calls.filter(([url]) => new URL(url).pathname === '/status').length;
+    await vi.advanceTimersByTimeAsync(5_000);
+    const statusCallsAfterAdvance = h.fetch.mock.calls.filter(([url]) => new URL(url).pathname === '/status').length;
+    expect(statusCallsAfterAdvance).toBe(statusCallsBeforeAdvance);
+    expect(offers).toBe(1);
   } finally {
     vi.useRealTimers();
   }
@@ -2292,8 +2341,126 @@ it('resets fast desktop input retry budget when unpair disconnects and reconnect
   }
 });
 
+it('clears fast retries scheduled while unpair awaits browserController.revoke()', async () => {
+  vi.useFakeTimers();
+  try {
+    const inputs = [{ id: firstId, conversationId: secondId }];
+    let revokeStarted = false;
+    let releaseRevoke!: () => void;
+    const revokePending = new Promise<void>(resolve => { releaseRevoke = resolve; });
+    const h = await worker(inputs, undefined, {}, {}, new Set(), {
+      revoke: async () => { revokeStarted = true; await revokePending; }
+    });
+    h.tabs.push({ id: 7, url: `https://chatgpt.com/c/${secondId}` });
+    h.fetch.mockImplementation(async request => {
+      const path = new URL(request).pathname;
+      if (path === '/hello') return { ok: true, status: 200, json: async () => ({ app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true }) };
+      if (path === '/pair') return { ok: true, status: 200, json: async () => ({ ok: true, token: 'reconnected-token' }) };
+      return { ok: true, status: 200, json: async () => ({ ok: true, inputs: [...inputs], inputOpeningIds: inputs.map(row => row.id), background: true }) };
+    });
+    let offers = 0;
+    let resolveInFlightOffer!: (value: { ok: boolean }) => void;
+    h.sendMessage.mockImplementation(async (_id, message) => {
+      if (message.type !== 'clf-desktop-input') return { ok: true, ready: true };
+      offers += 1;
+      if (offers === 5) return new Promise<{ ok: boolean }>(resolve => { resolveInFlightOffer = resolve; });
+      return { ok: false };
+    });
+
+    await h.maintain();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(offers).toBe(5);
+
+    const unpairing = h.unpair();
+    await vi.waitFor(() => expect(revokeStarted).toBe(true), { timeout: 5000 });
+
+    // Offer 5 settles as declined while revoke() is awaiting, attempting to latch exhausted retries.
+    resolveInFlightOffer({ ok: false });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    releaseRevoke();
+    await unpairing;
+
+    await h.pair();
+    await h.maintain();
+    expect(offers).toBe(6);
+
+    await vi.advanceTimersByTimeAsync(1500);
+    await vi.waitFor(() => expect(offers).toBe(7), { timeout: 5000 });
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('clears pending fast retries when latchAppDisconnect or reloadForExtensionUpdate runs mid-backoff', async () => {
+  vi.useFakeTimers();
+  try {
+    // App-initiated disconnect via /status { disconnected: true } clears mid-backoff retry and resets budget on reconnect.
+    const disconnectInputs = [{ id: firstId, conversationId: secondId }];
+    const d = await worker(disconnectInputs);
+    d.tabs.push({ id: 7, url: `https://chatgpt.com/c/${secondId}` });
+    let appDisconnected = false;
+    let disconnectOffers = 0;
+    d.fetch.mockImplementation(async request => {
+      const path = new URL(request).pathname;
+      if (path === '/hello') return { ok: true, status: 200, json: async () => ({ app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true }) };
+      if (path === '/pair') return { ok: true, status: 200, json: async () => ({ ok: true, token: 'reconnected-token' }) };
+      if (appDisconnected) return { ok: false, status: 401, json: async () => ({ error: 'browser_disconnected' }) };
+      return { ok: true, status: 200, json: async () => ({ ok: true, inputs: [...disconnectInputs], inputOpeningIds: disconnectInputs.map(row => row.id), background: true }) };
+    });
+    d.sendMessage.mockImplementation(async (_id, message) => {
+      if (message.type === 'clf-desktop-input') { disconnectOffers += 1; return { ok: false }; }
+      return { ok: true, ready: true };
+    });
+
+    await d.maintain();
+    expect(disconnectOffers).toBe(1);
+    appDisconnected = true;
+    await d.maintain();
+    const statusAfterDisconnect = d.fetch.mock.calls.filter(([url]) => new URL(url).pathname === '/status').length;
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(d.fetch.mock.calls.filter(([url]) => new URL(url).pathname === '/status').length).toBe(statusAfterDisconnect);
+    appDisconnected = false;
+    await d.pair();
+    await d.maintain();
+    expect(disconnectOffers).toBe(2);
+    await vi.advanceTimersByTimeAsync(1500);
+    await vi.waitFor(() => expect(disconnectOffers).toBe(3), { timeout: 5000 });
+
+    // Extension auto-reload clears mid-backoff retry before calling runtime.reload().
+    const reloadInputs = [{ id: firstId, conversationId: secondId }];
+    const r = await worker(reloadInputs);
+    r.setWorkerStamp('aaaaaaaaaaaa');
+    r.tabs.push({ id: 7, url: `https://chatgpt.com/c/${secondId}` });
+    r.fetch.mockImplementation(async request => {
+      const path = new URL(request).pathname;
+      if (path === '/hello') return { ok: true, status: 200, json: async () => ({ app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true }) };
+      if (path === '/extension/update') return { ok: true, status: 200, json: async () => ({ ok: true, build: 'bbbbbbbbbbbb', ready: true }) };
+      return { ok: true, status: 200, json: async () => ({ ok: true, inputs: [...reloadInputs], inputOpeningIds: reloadInputs.map(row => row.id), background: true }) };
+    });
+    let reloadOffers = 0;
+    r.sendMessage.mockImplementation(async (_id, message) => {
+      if (message.type === 'clf-desktop-input') { reloadOffers += 1; return { ok: false }; }
+      if (message.type === 'clf-recorder-ping') return { ok: true, busy: false };
+      return { ok: true, ready: true };
+    });
+
+    await r.maintain();
+    expect(reloadOffers).toBe(1);
+    await r.reloadForExtensionUpdate({ build: 'bbbbbbbbbbbb', busy: false }, new Set(), new Set(), new Set());
+    expect(r.runtimeReload).toHaveBeenCalledTimes(1);
+    const statusBeforeAdvance = r.fetch.mock.calls.filter(([url]) => new URL(url).pathname === '/status').length;
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(r.fetch.mock.calls.filter(([url]) => new URL(url).pathname === '/status').length).toBe(statusBeforeAdvance);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it('bounds fast desktop input offer retries and clears pending retries once retired', async () => {
   vi.useFakeTimers();
+  const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
   try {
     const inputs = [{ id: firstId, conversationId: secondId }];
     const h = await worker(inputs);
@@ -2316,15 +2483,20 @@ it('bounds fast desktop input offer retries and clears pending retries once reti
     await vi.advanceTimersByTimeAsync(20_000);
     expect(offers).toBe(5);
 
+    // Further maintain + decline keeps retry exhaustion logged once rather than repeating per decline.
+    await h.maintain();
+    expect(offers).toBe(6);
     await vi.advanceTimersByTimeAsync(10_000);
-    expect(offers).toBe(5);
+    expect(offers).toBe(6);
+    expect(infoSpy.mock.calls.filter(([text]) => typeof text === 'string' && text.includes('fast retries exhausted'))).toHaveLength(1);
 
-    // A fresh maintain resets nothing once retired before the scheduled retry fires.
+    // A fresh maintain clears retry state once the input is retired.
     inputs.length = 0;
     await h.maintain();
     await vi.advanceTimersByTimeAsync(10_000);
-    expect(offers).toBe(5);
+    expect(offers).toBe(6);
   } finally {
+    infoSpy.mockRestore();
     vi.useRealTimers();
   }
 });
