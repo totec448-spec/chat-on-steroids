@@ -1221,6 +1221,7 @@ function forgetPort() {
  * not user intent to reconnect. Only an explicit successful pair clears the local latch.
  */
 async function latchAppDisconnect() {
+  clearDesktopInputRetries();
   closeWakeSocket();
   void getBrowserController().then(controller => controller?.revoke()).catch(() => undefined);
   token = null;
@@ -2267,11 +2268,62 @@ function prepareDesktopInputReceipt(tabId, id, documentId) {
   return tabReply(tabId, { type: 'clf-prepare-desktop-input', id }, { documentId }, 15000);
 }
 
+const DESKTOP_INPUT_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000];
+const desktopInputOfferRetries = new Map();
+
+function clearDesktopInputRetry(id) {
+  const state = desktopInputOfferRetries.get(id);
+  if (!state) return;
+  if (state.timer !== null) clearTimeout(state.timer);
+  desktopInputOfferRetries.delete(id);
+}
+
+function clearDesktopInputRetries() {
+  for (const id of [...desktopInputOfferRetries.keys()]) clearDesktopInputRetry(id);
+}
+
+function scheduleDesktopInputRetry(id, tabId, reason) {
+  if (!token || disconnected || extensionReloadPending) return;
+  if (inputOpenings[id]?.tab !== tabId) { clearDesktopInputRetry(id); return; }
+  const existing = desktopInputOfferRetries.get(id);
+  const state = existing && existing.tabId === tabId
+    ? existing
+    : { tabId, attempts: 0, timer: null, exhaustedLogged: false };
+  if (existing && existing !== state && existing.timer !== null) clearTimeout(existing.timer);
+  if (state.timer !== null) return;
+  if (state.attempts >= DESKTOP_INPUT_RETRY_DELAYS_MS.length) {
+    if (!state.exhaustedLogged) {
+      state.exhaustedLogged = true;
+      console.info(`desktop input ${id}: fast retries exhausted on tab ${tabId} (${reason}); waiting for next alarm or page event`);
+    }
+    desktopInputOfferRetries.set(id, state);
+    return;
+  }
+  const delayMs = DESKTOP_INPUT_RETRY_DELAYS_MS[state.attempts];
+  state.attempts += 1;
+  console.info(`desktop input ${id}: retry ${state.attempts} scheduled in ${delayMs} ms (tab ${tabId} ${reason})`);
+  state.timer = setTimeout(() => {
+    state.timer = null;
+    if (!token || disconnected || extensionReloadPending) return;
+    if (inputOpenings[id]?.tab !== tabId) { clearDesktopInputRetry(id); return; }
+    void maintain(true).catch(() => undefined);
+  }, delayMs);
+  desktopInputOfferRetries.set(id, state);
+}
+
 function offerDesktopInput(tabId, message) {
   // The reply is not a delivery receipt: the content script synchronously owns
   // one desktopInputBusy slot, then the app's durable browser claim and one-time
   // sendAuthorizedAt fence every later offer. Waiting here only starves repairs.
-  void chrome.tabs.sendMessage(tabId, message).catch(() => undefined);
+  // If the page is still hydrating or busy, schedule a bounded fast retry instead
+  // of leaving the message unclaimed until the 30-second maintenance alarm.
+  void chrome.tabs.sendMessage(tabId, message).then(
+    reply => {
+      if (reply?.ok === true) { clearDesktopInputRetry(message.id); return; }
+      if (reply?.ok === false) scheduleDesktopInputRetry(message.id, tabId, 'declined');
+    },
+    () => { scheduleDesktopInputRetry(message.id, tabId, 'unreachable'); }
+  );
 }
 
 // Missing-tab reports only expose a pre-claim failure in main; they never
@@ -2307,9 +2359,16 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
   if (Array.isArray(activeIds)) {
     const active = new Set(activeIds);
     for (const id of Object.keys(inputOpenings)) if (!active.has(id)) delete inputOpenings[id];
+    for (const id of [...desktopInputOfferRetries.keys()]) if (!active.has(id)) clearDesktopInputRetry(id);
     await persistLive();
+  } else {
+    const offered = new Set(inputs.map(input => input?.id).filter(Boolean));
+    for (const id of [...desktopInputOfferRetries.keys()]) if (!offered.has(id)) clearDesktopInputRetry(id);
   }
-  if (!inputs.length) return;
+  if (!inputs.length) {
+    clearDesktopInputRetries();
+    return;
+  }
   let tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
   const elections = inputOpenings;
   const elect = async (id, record) => {
@@ -2434,6 +2493,7 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
     // Losing it never authorizes another creation or a transfer to a different chat.
     if (tab && !elected) await elect(input.id, { tab: tab.id, stage: 'ready', conversationId: target });
     if (!tab) {
+      clearDesktopInputRetry(input.id);
       // Handout is opening authority, not a missing delivery receipt. A closed or
       // unresponsive elected document never grants another opening attempt.
       if (elections[input.id] && !recoveredReuse) {
@@ -3487,6 +3547,7 @@ async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands, liveS
     }
   }
   extensionReloadPending = true;
+  clearDesktopInputRetries();
   try {
     const prepared = await call('/extension/update', { method: 'POST',
       body: JSON.stringify(busyFor ? { pastBusyChatsMs: busyFor } : {}) });
