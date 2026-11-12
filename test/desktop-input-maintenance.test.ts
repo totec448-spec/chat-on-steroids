@@ -2428,20 +2428,26 @@ it('clears pending fast retries when latchAppDisconnect or reloadForExtensionUpd
     await vi.advanceTimersByTimeAsync(1500);
     await vi.waitFor(() => expect(disconnectOffers).toBe(3), { timeout: 5000 });
 
-    // Extension auto-reload keeps mid-backoff retries when /extension/update holds, and clears them once committed.
+    // Extension auto-reload resumes a retry whose timer expired while /extension/update was pending and held, and clears retries once committed.
     const reloadInputs = [{ id: firstId, conversationId: secondId }];
     const r = await worker(reloadInputs);
     r.setWorkerStamp('aaaaaaaaaaaa');
     r.tabs.push({ id: 7, url: `https://chatgpt.com/c/${secondId}` });
     let updateCommit = false;
+    let updateRequested = false;
+    let resolvePendingUpdate: ((value: any) => void) | null = null;
     r.fetch.mockImplementation(async request => {
       const path = new URL(request).pathname;
       if (path === '/hello') return { ok: true, status: 200, json: async () => ({ app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true }) };
       if (path === '/extension/update') {
-        return {
-          ok: true, status: 200,
-          json: async () => updateCommit ? { ok: true, build: 'bbbbbbbbbbbb', ready: true } : { ok: true, hold: 'app-busy' }
-        };
+        if (!updateCommit) {
+          updateRequested = true;
+          return {
+            ok: true, status: 200,
+            json: async () => new Promise(resolve => { resolvePendingUpdate = resolve; })
+          };
+        }
+        return { ok: true, status: 200, json: async () => ({ ok: true, build: 'bbbbbbbbbbbb', ready: true }) };
       }
       return { ok: true, status: 200, json: async () => ({ ok: true, inputs: [...reloadInputs], inputOpeningIds: reloadInputs.map(row => row.id), background: true }) };
     });
@@ -2454,9 +2460,16 @@ it('clears pending fast retries when latchAppDisconnect or reloadForExtensionUpd
 
     await r.maintain();
     expect(reloadOffers).toBe(1);
-    await r.reloadForExtensionUpdate({ build: 'bbbbbbbbbbbb', busy: false }, new Set(), new Set(), new Set());
-    expect(r.runtimeReload).not.toHaveBeenCalled();
+
+    const heldUpdate = r.reloadForExtensionUpdate({ build: 'bbbbbbbbbbbb', busy: false }, new Set(), new Set(), new Set());
+    await vi.waitFor(() => expect(updateRequested && resolvePendingUpdate !== null).toBe(true), { timeout: 5000 });
+    // Advance past the 1000 ms retry timer deadline while /extension/update is still in flight.
     await vi.advanceTimersByTimeAsync(1500);
+    expect(reloadOffers).toBe(1);
+
+    resolvePendingUpdate!({ ok: true, hold: 'app-busy' });
+    await heldUpdate;
+    expect(r.runtimeReload).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(reloadOffers).toBe(2), { timeout: 5000 });
 
     updateCommit = true;
