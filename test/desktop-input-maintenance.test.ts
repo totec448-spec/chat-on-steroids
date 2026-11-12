@@ -2164,3 +2164,69 @@ it('releases departed-chat ownership so input claims and model discovery cannot 
   expect(h.localSaved.inputOpenings).toMatchObject({ [firstId]: { tab: 7, stage: 'ready' } });
   expect(h.create).not.toHaveBeenCalled();
 });
+
+it.each(['declined', 'unreachable'] as const)('retries a %s desktop input offer before the 30-second alarm', async mode => {
+  vi.useFakeTimers();
+  try {
+    const inputs = [{ id: firstId, conversationId: secondId }];
+    const h = await worker(inputs);
+    h.tabs.push({ id: 7, url: `https://chatgpt.com/c/${secondId}` });
+    let attempts = 0;
+    h.sendMessage.mockImplementation(async (_id, message) => {
+      if (message.type !== 'clf-desktop-input') return { ok: true, ready: true };
+      attempts += 1;
+      if (attempts === 1) {
+        if (mode === 'unreachable') throw new Error('Receiving end does not exist');
+        return { ok: false };
+      }
+      inputs.length = 0;
+      return { ok: true };
+    });
+
+    await h.maintain();
+    expect(attempts).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(1500);
+    await vi.waitFor(() => expect(attempts).toBe(2));
+    expect(h.create).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('bounds fast desktop input offer retries and clears pending retries once retired', async () => {
+  vi.useFakeTimers();
+  try {
+    const inputs = [{ id: firstId, conversationId: secondId }];
+    const h = await worker(inputs);
+    h.tabs.push({ id: 7, url: `https://chatgpt.com/c/${secondId}` });
+    h.fetch.mockImplementation(async request => ({
+      ok: true, status: 200,
+      json: async () => new URL(request).pathname === '/hello'
+        ? { app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true }
+        : { ok: true, inputs: [...inputs], inputOpeningIds: inputs.map(row => row.id), background: true }
+    }));
+    let offers = 0;
+    h.sendMessage.mockImplementation(async (_id, message) => {
+      if (message.type === 'clf-desktop-input') { offers += 1; return { ok: false }; }
+      return { ok: true, ready: true };
+    });
+
+    await h.maintain();
+    expect(offers).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(offers).toBe(5);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(offers).toBe(5);
+
+    // A fresh maintain resets nothing once retired before the scheduled retry fires.
+    inputs.length = 0;
+    await h.maintain();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(offers).toBe(5);
+  } finally {
+    vi.useRealTimers();
+  }
+});
