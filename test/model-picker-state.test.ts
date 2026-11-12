@@ -871,3 +871,66 @@ it('reads picker state once fiber metadata hydrates without an extra DOM mutatio
   await vi.runAllTimersAsync();
   expect(await result).toBe(true);
 });
+
+it('skips the fallback click when cancelled during the remounted trigger wait', async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  const doc = page.window.document;
+  const trigger = doc.querySelector('button')!;
+  const fresh = doc.createElement('button');
+  fresh.type = 'button';
+  fresh.setAttribute('aria-haspopup', 'menu');
+  fresh.textContent = 'Denkaufwand';
+  (fresh as any).__reactFiber$test = (trigger as any).__reactFiber$test;
+  let active = true;
+  let remounted = false;
+  doc.addEventListener('keydown', event => {
+    if (event.key === 'Enter' && event.target === trigger && !remounted) {
+      remounted = true;
+      event.stopImmediatePropagation();
+      trigger.replaceWith(fresh);
+    }
+  }, true);
+  const freshEnter = vi.fn(() => { active = false; });
+  const freshClick = vi.fn();
+  fresh.addEventListener('keydown', event => { if (event.key === 'Enter') freshEnter(); });
+  fresh.addEventListener('click', freshClick);
+
+  const result = f.api.selectModelSettings('future-model', 'low', () => active);
+  await vi.runAllTimersAsync();
+  expect(await result).toBe(false);
+  expect(freshEnter).toHaveBeenCalledTimes(1);
+  expect(freshClick).not.toHaveBeenCalled();
+});
+
+it('skips duplicate Enter and click when the picker opens before retrying a re-acquired trigger', async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  const doc = page.window.document;
+  const trigger = doc.querySelector('button')!;
+  const renderPanel = attachMockPickerPanel(doc, f, trigger);
+  const retryEnter = vi.fn();
+  const retryClick = vi.fn();
+  let blockedFirst = false;
+  doc.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' || event.target !== trigger) return;
+    if (!blockedFirst) {
+      blockedFirst = true;
+      event.stopImmediatePropagation();
+      // Hide trigger during initial wait so readyTrigger pauses until the open picker mounts.
+      trigger.hidden = true;
+      return;
+    }
+    retryEnter();
+  }, true);
+  trigger.addEventListener('click', retryClick);
+
+  const result = f.api.selectModelSettings('future-model', 'low');
+  await vi.advanceTimersByTimeAsync(1550);
+  trigger.hidden = false;
+  renderPanel();
+  await vi.runAllTimersAsync();
+  expect(await result).toBe(true);
+  expect(retryEnter).not.toHaveBeenCalled();
+  expect(retryClick).not.toHaveBeenCalled();
+});
