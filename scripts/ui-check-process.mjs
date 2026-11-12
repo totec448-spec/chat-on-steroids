@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createProfile, removeProfile } from './ui-check-profile.cjs';
 
 const CLOSE_WAIT_MS = 2_000;
+const FIXTURE_FAILURE_MARKER = 'COS_QA_TEST_FAILED:';
 
 function stopTree(child) {
   if (!child.pid) return;
@@ -35,7 +36,8 @@ export function runUiCheck(command, args, { cwd, env, timeoutMs, profileRoot }) 
       resolve({ code: 'start failed', output: String(error) });
       return;
     }
-    let output = '', unhandled = false, timedOut = false, settled = false, closeTimer;
+    let output = '', unhandled = false, fixtureFailed = false, timedOut = false, settled = false, closeTimer;
+    const streamTails = { stdout: '', stderr: '' };
     // Keep Ctrl-C/termination working after placing the check in a separate group.
     const interrupt = signal => {
       try { stopTree(child); } catch (error) { console.warn('Could not stop interrupted UI check:', error.message); }
@@ -43,7 +45,16 @@ export function runUiCheck(command, args, { cwd, env, timeoutMs, profileRoot }) 
     };
     process.once('SIGINT', interrupt);
     process.once('SIGTERM', interrupt);
-    const keep = chunk => { unhandled ||= /UnhandledPromiseRejection/.test(String(chunk)); output = (output + chunk).slice(-4000); };
+    // Pipe data events can split a sentinel. Keep a short overlap for each
+    // stream, without accidentally joining unrelated stdout/stderr data.
+    const keep = (chunk, stream = 'stderr') => {
+      const value = String(chunk);
+      const recent = streamTails[stream] + value;
+      unhandled ||= /UnhandledPromiseRejection/.test(recent);
+      fixtureFailed ||= recent.includes(FIXTURE_FAILURE_MARKER);
+      streamTails[stream] = recent.slice(-(FIXTURE_FAILURE_MARKER.length - 1));
+      output = (output + value).slice(-4000);
+    };
     const finish = (code, closed) => {
       if (settled) return;
       settled = true;
@@ -57,10 +68,12 @@ export function runUiCheck(command, args, { cwd, env, timeoutMs, profileRoot }) 
       }
       resolve({ code, output });
     };
-    child.stdout.on('data', keep); child.stderr.on('data', keep);
+    child.stdout.on('data', chunk => keep(chunk, 'stdout'));
+    child.stderr.on('data', chunk => keep(chunk, 'stderr'));
     child.on('error', error => keep(String(error)));
     child.once('close', (code, signal) => {
-      finish(timedOut ? 'timeout' : code === 0 && unhandled ? 'unhandled rejection' : code ?? `signal ${signal}`, true);
+      finish(timedOut ? 'timeout' : code === 0 && fixtureFailed ? 'fixture assertion failed'
+        : code === 0 && unhandled ? 'unhandled rejection' : code ?? `signal ${signal}`, true);
     });
     const timer = setTimeout(() => {
       timedOut = true;

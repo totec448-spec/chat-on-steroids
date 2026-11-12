@@ -106,3 +106,26 @@ it('keeps the check’s unhandled-rejection diagnostic even when it exits zero',
   child.emit('close', 0, null);
   expect((await pending).code).toBe('unhandled rejection');
 });
+
+it.each(['stdout', 'stderr'] as const)(
+  'detects a fixture failure marker split over successive %s chunks with exit code zero',
+  async stream => {
+    const child = fakeChild();
+    const pending = start();
+    child[stream].write('diagnostic: COS_QA_TEST_');
+    child[stream].write('FAILED: assertion failed\n');
+    child.emit('close', 0, null);
+    const outcome = await pending;
+    expect(outcome.code).toBe('fixture assertion failed');
+    expect(outcome.output).toContain('COS_QA_TEST_FAILED:');
+  }
+);
+
+it('does not join unrelated stdout and stderr chunks into a false failure sentinel', async () => {
+  const child = fakeChild();
+  const pending = start();
+  child.stdout.write('COS_QA_TEST_');
+  child.stderr.write('FAILED:');
+  child.emit('close', 0, null);
+  expect((await pending).code).toBe(0);
+});
