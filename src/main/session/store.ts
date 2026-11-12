@@ -2379,6 +2379,35 @@ export async function turnEndedDurably(
 }
 
 /**
+ * Whether `turnId` answers a question this app delivered itself (a Goal message or an automatic
+ * Continue) in a chat that has already run recorded local calls.
+ *
+ * Recovery refuses a turn that has no recorded call, so that it never reloads a page the app has
+ * no part in. A delivered question is the app's own work, and the chat's earlier calls show it is
+ * connected: when every turn of that question fails before a tool call, nothing else can ever
+ * restart the chat (2026-11-12, #2163: three idle hours with Goal on). A question typed by the
+ * person, or a chat that never ran a call, still counts as having none.
+ */
+export async function deliveredQuestionInWorkingChat(sessionId: string, conversationId: string, turnId: string): Promise<boolean> {
+  assertSessionId(sessionId);
+  await settleSessionWrites(sessionId);
+  const turns = (await getSession(sessionId))?.timelineTurns;
+  const questionId = turns?.[turnId]?.questionId;
+  if (!questionId) return false;
+  const [question] = await readRecentEventsFromDisk(sessionId, 1, {
+    kinds: ['user_message'], before: Number.POSITIVE_INFINITY,
+    acceptEvent: event => event.kind === 'user_message' && event.messageId === questionId
+  });
+  if (!question || !injectedUserMessage(question, turns)) return false;
+  const calls = await readRecentEventsFromDisk(sessionId, 1, {
+    kinds: ['tool_call'], before: Number.POSITIVE_INFINITY,
+    acceptEvent: call => call.kind === 'tool_call' && call.source === 'mcp' &&
+      call.call?.conversationId === conversationId && call.call.attribution === 'request_id'
+  });
+  return calls.length > 0;
+}
+
+/**
  * Recorded local execution by any turn that answered the same question as `turnId`.
  *
  * A reload can reopen a question as a new local turn with no work of its own — measured
@@ -2388,6 +2417,7 @@ export async function turnEndedDurably(
  */
 export async function questionHasMcpCall(sessionId: string, conversationId: string, turnId: string): Promise<boolean> {
   if (await turnHasMcpCall(sessionId, conversationId, turnId)) return true;
+  if (await deliveredQuestionInWorkingChat(sessionId, conversationId, turnId)) return true;
   const turns = (await getSession(sessionId))?.timelineTurns ?? {};
   const question = turns[turnId]?.questionId;
   if (!question) return false;
