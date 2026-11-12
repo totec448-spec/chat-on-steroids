@@ -556,6 +556,22 @@ describe('reading a row out of the page', () => {
     }
   });
 
+  it('keeps the whole final answer of a search-unit turn whose interim updates are very long (#2157)', async () => {
+    const answer = 'The complete answer. '.repeat(499) + 'The end.';
+    const result = await scan([], [{
+      id: 'search-long-text', messages: [], renderer: 'search',
+      viewItems: [
+        { type: 'user-message', messageId: 'search-user', message: 'Question', sentAtMs: 1_790_000_000_000 },
+        { type: 'chatgpt-reasoning-group', items: Array.from({ length: 6 }, (_, index) => ({ type: 'assistant-message',
+          messageId: `interim-${index}`, content: 'x'.repeat(300_000), phase: 'commentary', completed: true })) },
+        { type: 'assistant-message', messageId: 'search-final', content: answer, completed: true, phase: 'final_answer' }
+      ],
+      viewStatus: 'complete', rendered: [answer]
+    }]);
+    const messages = result.turns[0]!.messages;
+    expect(messages.at(-1)).toMatchObject({ rawMessageId: 'search-final', rawText: answer });
+  });
+
   it.each(['exact', 'missing', 'duplicate', 'cycle', 'different-request', 'tool-boundary', 'foreign-tool'])(
     'follows an exact result parent through the native intermediate message (%s)', async mode => {
       const asked = request('linked-request', 'read');
