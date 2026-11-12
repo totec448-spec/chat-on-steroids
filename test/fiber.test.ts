@@ -531,6 +531,31 @@ describe('reading a row out of the page', () => {
     expect(JSON.stringify(result.turns)).not.toMatch(/must-not-cross-worlds|arguments/);
   });
 
+  it('reads the interim updates of a search-unit turn and still ends it, however long its work is (#2157)', async () => {
+    const interim = (index: number) => ({ type: 'assistant-message', messageId: `interim-${index}`,
+      content: `Update ${index}`, phase: 'commentary', completed: true });
+    const call = (index: number) => ({ type: 'mcp-tool-call', callId: `call-${index}`,
+      invocation: { server: APP, tool: `${LINK}/read` } });
+    for (const work of [3, 380, 1500]) {
+      const calls = Array.from({ length: 297 }, (_, index) => call(index));
+      const result = await scan([], [{
+        id: `search-long-${work}`, messages: [], renderer: 'search',
+        viewItems: [
+          { type: 'user-message', messageId: 'search-user', message: 'Question', sentAtMs: 1_790_000_000_000 },
+          { type: 'chatgpt-reasoning-group', items: [...calls, ...Array.from({ length: work }, (_, index) => interim(index))] },
+          { type: 'assistant-message', messageId: 'search-final', content: 'The answer', completed: true, phase: 'final_answer' }
+        ],
+        viewStatus: 'complete', rendered: ['The answer']
+      }]);
+      const ids = result.turns[0]!.messages.map(message => message.rawMessageId);
+      expect(ids.slice(0, 2), `${work} updates`).toEqual(['search-user', 'interim-0']);
+      expect(ids.at(-1)).toBe('search-final');
+      // The 297 calls and the updates share the 400 working rows read per turn.
+      expect(ids.filter(id => id.startsWith('interim-')).length).toBe(Math.min(work, 400 - calls.length));
+      expect(result.turns[0]).toMatchObject({ endMessageId: 'search-final' });
+    }
+  });
+
   it.each(['exact', 'missing', 'duplicate', 'cycle', 'different-request', 'tool-boundary', 'foreign-tool'])(
     'follows an exact result parent through the native intermediate message (%s)', async mode => {
       const asked = request('linked-request', 'read');
