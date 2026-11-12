@@ -237,6 +237,12 @@ describe('a very long turn still reports its public messages (#2157)', () => {
     expect(turn.endMessageId).toBe(ANSWER);
   });
 
+  it('keeps the text of an interim update that follows an empty copy of the same message', async () => {
+    const f = fixture(); complete(f, [{ ...interim(1), content: '' }, { ...interim(1), content: 'The real text' }]);
+    const turn = (await f.ask()).turns[0];
+    expect(turn.messages.map((m: any) => m.rawText)).toContain('The real text');
+  });
+
   it('still refuses a repeated call identity that sits past the row limit', async () => {
     const f = fixture(); complete(f, [...Array.from({ length: 450 }, (_, index) => own(`call-${index}`)), own('call-0')]);
     expect((await f.ask()).turns).toEqual([]);
