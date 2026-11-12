@@ -20,10 +20,34 @@ function normalizedParts(value: string): string[] {
 
 const wordStart = /^[\p{L}\p{M}\p{N}]/u;
 const wordEnd = /[\p{L}\p{M}\p{N}]$/u;
+// Finite English/Japanese vocabulary, not a general language parser. Discuss additional
+// languages or phrasings in an issue first, as requested in the review of #2123.
 // Japanese particles can touch a complete name. Do not split arbitrary compounds such as
 // コードレビュー支援, or English words such as code-reviewer, into shorter Skill names.
-const particleBefore = /(?:ではなく|じゃなく|から|なら|では|には|とは|を|で|に|は|が|と|も|の|へ)$/u;
-const particleAfter = /^(?:から|なら|では|には|とは|を|で|に|は|が|と|も|の|へ)/u;
+const particles = /から|なら|では|には|とは|を|で|に|は|が|と|も|の|へ/u;
+const particleBefore = new RegExp(`(?:ではなく|じゃなく|${particles.source})$`, 'u');
+const particleAfter = new RegExp(`^(?:${particles.source})`, 'u');
+
+// Keep all three forms together so prefix, verb-leading names and passive exclusions agree.
+const usageVerbs = [
+  ['use', 'using', 'used'], ['invoke', 'invoking', 'invoked'], ['run', 'running', 'run'],
+  ['apply', 'applying', 'applied'], ['select', 'selecting', 'selected']
+] as const;
+const baseVerbs = new Set<string>(usageVerbs.map(([base]) => base));
+const gerundVerbs = new Set<string>(usageVerbs.map(([, gerund]) => gerund));
+const leadingUsageVerb = new RegExp(
+  `^(${usageVerbs.flatMap(([base, gerund]) => [base, gerund]).join('|')})(?=[\\s-]|$)`, 'u');
+const passiveVerbs = usageVerbs.map(([, , passive]) => passive).join('|');
+
+const openingPadding = /[\s"'`「『(]/u;
+const closingPadding = /[\s"'`」』)]*/u;
+const japaneseExclusion = /(?:(?:には|だけは|だけを|は|を|も)\s*)?(?:使わ(?:ない|ず|なく)|使うな|使って(?:は)?いけない|(?:使用|利用|適用|実行|選択)(?:し(?:ない|ません|なく)|せず|するな)|呼び出さ(?:ない|ず|なく)|不要|禁止)|(?:では|じゃ)なく/u;
+const englishExclusion = new RegExp(
+  `(?:should|must|will|can)\\s+not\\s+be\\s+(?:${passiveVerbs})\\b|(?:is|are)\\s+(?:not\\s+(?:needed|required)|forbidden)\\b`, 'u');
+const exclusionAfter = new RegExp(
+  `^${closingPadding.source}(?:${japaneseExclusion.source}|${englishExclusion.source})`, 'u');
+const listJoin = /^[\s"'`「」『』()]*(?:,(?:\s*(?:and|or))?|and(?:\/or)?|or|[、とやも/&]|または)[\s"'`「」『』()]*$/u;
+const aliasClauseJoin = /^[\s"'`」』)]*[,、]\s*(?:and\s+)?["'`「『(]*$/u;
 
 function phrasePattern(phrase: readonly string[]): RegExp {
   let pattern = '';
@@ -57,7 +81,7 @@ function literalBoundary(text: string, start: number, end: number): boolean {
 
 function englishExclusionBefore(text: string, start: number, end: number): boolean {
   let cursor = start;
-  while (cursor && /[\s"'`「『(]/u.test(text[cursor - 1]!)) cursor -= 1;
+  while (cursor && openingPadding.test(text[cursor - 1]!)) cursor -= 1;
   // Inspect a fixed number of adjoining words. Do not run a suffix regex over the whole prefix
   // for every repeated mention; whitespace between these few words is scanned only once.
   const word = (): string => {
@@ -68,12 +92,12 @@ function englishExclusionBefore(text: string, start: number, end: number): boole
     return text.slice(cursor, wordEndIndex);
   };
   const excluded = (verb: string): boolean => {
-    if (/^(?:use|invoke|run|apply|select)$/u.test(verb)) {
+    if (baseVerbs.has(verb)) {
       const negative = word();
       return negative === 'never' || negative === "don't" || negative === 'don’t' ||
         (negative === 'not' && word() === 'do');
     }
-    if (/^(?:using|invoking|running|applying|selecting)$/u.test(verb)) {
+    if (gerundVerbs.has(verb)) {
       const negative = word();
       return negative === 'avoid' || negative === 'without';
     }
@@ -86,18 +110,14 @@ function englishExclusionBefore(text: string, start: number, end: number): boole
   // In the supported "using X" → "use X" alias, the invocation verb is already part
   // of the mention. Also keep an external verb authoritative ("don't use Use Cases").
   cursor = preceding;
-  const ownVerb = /^(use|using|invoke|invoking|run|running|apply|applying|select|selecting)(?=[\s-]|$)/u
-    .exec(text.slice(start, Math.min(end, start + 12)));
+  const ownVerb = leadingUsageVerb.exec(text.slice(start, Math.min(end, start + 12)));
   return ownVerb ? excluded(ownVerb[1]!) : false;
 }
 
 function directlyExcluded(text: string, start: number, end: number): boolean {
   // These suffix checks are anchored at this mention; unlike a full-prefix search, they
   // stop at the next unrelated word. This is direct usage wording, not topic inference.
-  const after = text.slice(end);
-  const japaneseAfter = /^[\s"'`」』)]*(?:(?:には|だけは|だけを|は|を|も)\s*)?(?:使わ(?:ない|ず|なく)|使うな|使って(?:は)?いけない|(?:使用|利用|適用|実行|選択)(?:し(?:ない|ません|なく)|せず|するな)|呼び出さ(?:ない|ず|なく)|不要|禁止)|^[\s"'`」』)]*(?:では|じゃ)なく/u;
-  const englishAfter = /^[\s"'`」』)]*(?:(?:should|must|will|can)\s+not\s+be\s+(?:used|invoked|run|applied|selected)\b|(?:is|are)\s+(?:not\s+(?:needed|required)|forbidden)\b)/u;
-  return englishExclusionBefore(text, start, end) || japaneseAfter.test(after) || englishAfter.test(after);
+  return englishExclusionBefore(text, start, end) || exclusionAfter.test(text.slice(end));
 }
 
 function identityPhrases(candidate: SkillRoutingMetadata): { parts: string[]; invocationAlias: boolean }[] {
@@ -148,7 +168,6 @@ function namedSkills(authored: string, candidates: readonly SkillRoutingMetadata
     } else groups.push({ start: mention.start, end: mention.end, mentions: [mention] });
   }
   const included = new Set<string>(), excluded = new Set<string>();
-  const listJoin = /^[\s"'`「」『』()]*(?:,(?:\s*(?:and|or))?|and(?:\/or)?|or|[、とやも/&]|または)[\s"'`「」『』()]*$/u;
   for (let start = 0; start < groups.length;) {
     let end = start + 1;
     while (end < groups.length) {
@@ -156,7 +175,7 @@ function namedSkills(authored: string, candidates: readonly SkillRoutingMetadata
       if (!listJoin.test(join)) break;
       // A generated "use X" alias includes its invocation verb. After a comma (optionally
       // "and"), that starts a new clause, unlike a literal "Using X"/"Use Cases" list item.
-      if (/^[\s"'`」』)]*[,、]\s*(?:and\s+)?["'`「『(]*$/u.test(join) &&
+      if (aliasClauseJoin.test(join) &&
         groups[end]!.mentions.some(mention => mention.invocationAlias)) break;
       end += 1;
     }

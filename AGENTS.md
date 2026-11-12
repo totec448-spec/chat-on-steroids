@@ -473,6 +473,10 @@ revivals, compaction requests and resumed-chat bootstraps receive no appended se
 A worker revival (wake) command carries the model and effort its worker was opened with
 (`commandModelSelection` → `wakeModelSelection`, vetted against the account like a resume's), so the
 page chooses them before it types (#1952; before, a wake went out on whatever ChatGPT's box held).
+While model discovery is pending, its retained catalog is display data, not a fresh denial:
+`resume-model.ts` carries the requested model/effort to native confirmation unchanged, even when
+the old list lacks that model or effort. Completed discovery retains the existing availability
+fallback, including no readable picker; no extra discovery or Send is started by this resolver.
 Unlike a new worker, a wake whose model the picker cannot confirm is still typed: the page reports
 step `model-unconfirmed` and the bridge logs which model it could not confirm. A Compact & Resume does the
 same (2026-11-01: an abandoned resume stopped its chat for good); its new chat then tries the model once more
@@ -649,6 +653,10 @@ a literal `Using X` name or an `or` list continues the exclusion instead.
 Unrelated negation does not veto an invocation. Quoted examples remain literal text; this is not
 general intent classification or semantic topic routing. The managed routing owner logs a fixed
 selection/skip reason without authored text, Skill names or paths.
+Keep the finite English/Japanese vocabulary in `shared/skill-routing.ts`: one English verb-form
+table feeds prefix, verb-leading-name and passive exclusions; Japanese name boundaries share
+one particle definition. Discuss additional languages or phrasings in an issue before extending
+these rules (the maintainer's follow-up request on #2123).
 `allow_implicit_invocation=false`, invalid policy/config, no eligible non-excluded literal identity
 and multiple remaining matches all fail to no selection. A routed choice is frozen in the durable input row as exact
 Skill id + published SKILL.md revision before delivery, including an explicit empty decision.
@@ -1077,6 +1085,17 @@ looks empty. "Show more" continues with the project's cursor once everything loa
 never selects a chat, and a failed read is retried on the next expand.
 
 `projects.ts` owns a bounded catalog of canonical absolute local folders with stable UUIDs.
+Only a missing `state/projects.json` means an empty catalog. Invalid JSON, on-disk null or an
+unreadable file refuses catalog reads and mutations with the existing catalog error, logs the
+refusal without stored content, and leaves the file intact. Once readable again, the original
+project ids and session bindings remain usable (`test/projects.test.ts`).
+The browser's project-create projection reports `null` while this catalog is unavailable,
+not an empty/completed list. `/status` and `/project-create` pending still succeed; the companion
+skips only project-create inspection, retaining its helper/owner while unrelated repairs,
+Stop and input delivery continue. A successful later read resumes the original pending request.
+This nullable wire state requires bridge protocol 15 in both app and companion. Protocol-14
+peers are rejected by the existing 426 gate because they would treat null as a completed list
+and retire the helper; reload the matching bundled companion when updating the app.
 Adding uses the native folder selection/approved-root flow, resolves the real directory and
 deduplicates it. Session metadata owns `projectId`. Before send/use, `projectWorkspace()` and
 `getSessionProject()` re-resolve it under current roots and reject moved/unavailable folders.
@@ -1282,8 +1301,11 @@ in (the `_account` cookie, null for a personal account); the catalog keeps a 16-
 of it per entry, never the id, and offers or links only entries of the last reported workspace,
 because ChatGPT opens a Project only in its own workspace. Adding a folder with Projects to choose from passes
 `chatgpt: 'later'` (no link yet) and opens `chatgpt-project-picker.ts` on the new row: New or an
-existing Project; one held by another listed project is shown disabled. Closing the choice creates
-nothing (Haz on #1757), and when the row is not drawn nothing is created either: a toast says to
+existing Project; one held by another listed project is shown disabled.
+The choices lookup must succeed before either local or SSH project addition: a failed read shows
+the existing translated error and stops the add, rather than silently requesting a new native
+Project. The menu picker likewise shows the error instead of offering stale/empty choices.
+Closing the choice creates nothing (Haz on #1757), and when the row is not drawn nothing is created either: a toast says to
 choose from the project's ⋯ menu. `linkChatgptProject` accepts only a listed id, never one another
 listed project holds, and never over `requested`/`claimed`/`creating`; it may replace a `linked`,
 `failed` or `uncertain` one. `createChatgptProjectFor(id, { replace })` (IPC `projects:chatgpt-create`
@@ -1729,9 +1751,12 @@ also keeps Core.
 An independent default-off `ui.mentionPlugins` preference selects **Plugins instead of Core**
 for ordinary user-authored prompts COS sends; Goal/Loop and fresh-turn continues follow the
 Core mention as before, workers and recovery always select Core, and decision helpers still
-select neither. The exact Plugins app id comes
-only from this page's provider system hints and must match this installation's connector
-name, including its optional computer suffix. Missing, duplicate or foreign IDs
+select neither. The Plugins token comes only from this page's provider system hints and
+must name exactly one of this installation's proven Plugins app IDs (`connectorApps`), so a
+provider rename keeps working and a same-named different ID cannot replace it. Before any
+Plugins ID is proven, the existing exact-name match (including the optional computer suffix)
+remains available, but only after the app has supplied this installation's connector names.
+Missing, duplicate or foreign IDs
 produce no Plugins token, never a guessed or other-computer attachment; the prompt then
 keeps the Core mention (when that is on), so an account that attaches apps only on mention
 (#861) never loses its tools to a missing Plugins app. App-managed
@@ -3065,7 +3090,9 @@ the settle window for that question is its own and may end it.
 
 Native Send/Stop controls belong to the current composer's form and must be rendered outside
 transcript/extension surfaces. Hidden, inert or quoted controls grant no action; multiple Send
-buttons are ambiguous. The existing transcript observer also follows composer-side relabel/hide
+buttons are ambiguous. The locale-free Send fallback requires a nonempty draft, excludes voice/
+dictation and Stop controls, and accepts exactly one visible structural candidate, including
+while generation is active. The existing transcript observer also follows composer-side relabel/hide
 mutations so hidden tabs notice Stop transitions without waiting for a throttled timer.
 Submission observes native Send readiness and acceptance within one 30-second deadline, freezes
 the editor/text/document, and clicks once. It never substitutes synthetic Enter. Goal-token and
@@ -3085,6 +3112,27 @@ visiting unrelated versions; a display caption or denied choice cannot take that
 A visible option, an English label, a remembered release name or “Upgrade required” is not
 entitlement. Do not enumerate every model × effort or create helper tabs to compensate for an
 uncertain catalog. Exact family rules live in `shared/chat-models.ts`.
+
+Model-selection diagnostics (#2085) are observation only. `selectModelSettings` retains its boolean
+result and three-argument callers; an optional fourth callback reports bounded phase snapshots from
+existing reads (no new UI operations). Bootstrap forwards them as optional `modelSelection` on
+`command_step` with the telemetry-only `step: model-diagnostic`. The bridge validates the strict
+identity/enum-only shape in `shared/model-selection-diagnostic.ts` for the redeemed command owner.
+Unreadable reads retain the last observed pair/version. The service worker authorizes reports in
+the existing tab queue, but sends telemetry outside it: one HTTP flight and one coalesced successor
+per tab. It preserves attempt/final ordering and rechecks document, navigation and connection
+ownership before sending; slow diagnostics cannot hold a resume permit or command ACK.
+Its reply acknowledges local queuing only; ordinary progress steps retain their app acknowledgement.
+Pending phases require execution step `model`; final results may arrive later. Attempt numbers
+separate the existing announcement retry, and late pending phases cannot overwrite a final result.
+Delayed coarse `model` steps never clear a retained result or its ordering/deduplication state.
+Final failure details also travel on `model-unconfirmed`, so RPC reordering cannot lose a
+wake/resume fallback's reason. The bridge retains only the latest snapshot in memory and logs
+failures, effort substitutions, post-close changes and retry recovery once per result. A command
+timeout includes its pending phase. Telemetry never resets `stepAt`, re-arms a deadline or changes
+the existing wake/resume continuation policy. Older apps ignore the unknown telemetry step; older
+extensions keep the existing coarse progress. Captions, conversation content, React props and
+credentials are excluded. The diagnostic snapshot is not restart or Send authority.
 
 The ordinary-composer preference is a separate optional pair, `ui.defaultChatModel` and
 `ui.defaultChatReasoning`. `chat-models.ts` applies it only while the selected composer is the
@@ -3149,6 +3197,11 @@ main/thread anchors. Their `entry.turn.items` supply actual user/assistant ids, 
 per-call completion; DOM slot keys only join those exact items to the current scan. Missing ids
 do not become invented messages. Only a completed final item in a successfully completed turn
 can end it; cancellation or an unknown turn status never acknowledges unfinished tool calls.
+Bounds on a long turn limit what is reported, never the turn's own messages (#2157): at most 200 connector
+and 200 exec calls and 400 working rows (calls and interim updates share them) are read, and the rest are
+left out; the turn's user and final items are always read (up to 5,000 items, above which the turn is not
+read), so a turn with 297 calls still ends. A repeated call identity is still refused for the whole turn.
+The search-unit reader reads the interim updates inside working groups the same way the shell reader does.
 The shell's exact completed final message retains stable identity for handoff capture even
 without the classic thought-parent/timestamp tuple. The native terminal item and nonconflicting
 conversation must agree; streaming and cancelled items never gain that proof.
@@ -5091,6 +5144,27 @@ A consolidated final belongs to the continuation open when it settled, consisten
 projection, completion lookup, finish holds and recorder/Goal completion; it cannot advance to
 a continuation that opened after that settlement. Image-only completion follows the same proven
 continued chain while the canonical image retains its first owner; a reload hint alone is insufficient.
+A question sent after a shared assistant
+parent settles follows a mid-turn question sent before that settlement; it is not an edit of
+that question. Saved replacement repair reads the merged canonical parent, including provider
+timestamp aliases. Missing or streaming parents cannot prove settlement. A
+parent's first terminal snapshot, or a later revision of already-final text, does not prove
+settlement order either. The canonical store records `settledAtSeq` only when an observed
+streaming message becomes final, and preserves that boundary through later revisions. Legacy
+timestamp aliases can recover it from an explicit streaming-to-final pair; a final-only legacy
+record remains unproven. Replacement inference preserves links when that order is unknown.
+An app-acknowledged
+edit records `replacesConfirmed: true` on its canonical user message, whether the ACK precedes
+or follows its native echo. Store merges retain that confirmation across sparse observations
+and restart; inferred-replacement repair cannot remove its link, even when the edited question
+was sent mid-turn. The optional field is absent in old recordings; malformed values do not
+establish confirmation. The outbox's durable edit receipt restores confirmation after restart,
+including when history was recorded before the native echo. Recovery groups receipts by session
+and scans each affected history once. Pending native echoes retain their edit hints; a failed
+receipt does not block its peers. Confirmation changes only replacement metadata on the current
+user record inside the session write queue, preserving native content revisions queued after
+the recovery read. Delivered-history projection writes the same confirmed link
+without depending on the process-local edit cache. No extension wire format changes.
 Past a `continued` end, a call of that request that *started*
 after the end is filed under the turn that began then, and the request's ownership moves there
 (`continuedRequestTurn` in `shared/chronology.ts`, live in `recordToolCall` and in the rebuild);
@@ -5229,10 +5303,25 @@ come from `renderer/shortcuts.ts`: ⌘ on macOS, the localized Ctrl ("Strg") els
 they are open) press the sidebar's buttons (`renderer/app-shortcuts.ts`), except inside the terminal, the
 file editor or an open dialog; the buttons' tooltips name them.
 
+Chart enrichment uses `shared/markdown-code.ts::markdownCodeRanges` to keep fenced,
+indented and multiline inline code literal. Inline tick matching stays within Marked's
+block boundaries and indexes exact-width tick runs instead of rescanning unmatched suffixes.
+Ranges retain original UTF-16 offsets across LF/CRLF. Fence closing strips only the opening
+quote container; literal list/quote markers inside code cannot close the fence. Lazy list
+continuations retain their indentation baseline until a blank or interrupting block boundary.
+
 Captured ChatGPT HTML passes a strict allowlist; authored plain text stays text. Provider
 citation ranges use Unicode code points and map to UTF-16 before slicing. Exact uploaded-file
 names render as plain chips; unresolved file citations do not gain invented local links.
 Plain text leaving the timeline (Markdown export, search index and snippets, turn notifications and `modelFacingText` for Goal/Loop and completed answers) passes `providerEntitiesAsMarkdown` first: the raw text's private-use entities (U+E200 name U+E202 field … U+E201) become `[label](address)` for `url` and are dropped otherwise, so a link card never reads as "urlLabelhttps://…".
+DIL table/button completion (`shared/dil-tables.ts`) preserves code examples before matching
+drawn tables in order. `shared/markdown-code.ts::markdownCodeRanges` keeps fenced (including
+nested/unclosed), indented and multiline inline code literal, so examples cannot consume a
+drawing or lose button labels. Inline ticks never join separate Markdown blocks; Marked's
+block-only lexer supplies boundaries without draining its inline queue. Exact-width matching
+is linear, retaining original CRLF/UTF-16 offsets. Fence detection checks original indentation
+before stripping container prefixes; closing strips only the opening quote container. Lazy
+list continuations retain their baseline, and restored table rows keep the header's indentation.
 Answer actions, direct answer export and `/copy` share `shared/markdown-export.ts::completedTurnIds`:
 a later-sequence `turn_start` revokes completion until that same turn ends as `completed` again.
 Boundary sequence numbers, not display order, decide this even when chronology regroups the starts. Older
@@ -6498,6 +6587,15 @@ with other suites' native windows or input; its assertions remain unchanged. `vi
 forces Node, bounded hooks/tests, `CLF_BRIDGE_PORTS=0`
 and test-only `CLF_EVIDENCE_MS=1500`; never let tests contact the installed production bridge.
 Opt-in live plugin/macOS probes are separate evidence, not implied by the ordinary suite.
+
+The UI runner stops its check's POSIX process group or Windows process tree on timeout.
+It waits at most two seconds for `close` after requesting termination, then releases the
+check's pipes and continues. Each terminal attempt gets a fresh disposable directory;
+the runner removes it after close. Direct invocation uses the same temporary directory
+lifetime: launch Electron, wait for it to exit, then remove the directory. Interrupted
+leftovers are ignored, not scanned or pruned.
+The terminal screenshot and result JSON keep their usual artifact paths.
+
 Pull-request CI (`ci.yml`, since 2026-10-31) runs the same checks in parallel jobs rather than
 `verify:ci` per OS (release builds still run `verify:ci`): one Linux job for privacy and the
 typecheck; the notices check (it reads each OS's own optional native packages) in each OS's first shard; the unit tests in shards (`vitest run --shard=i/n`: Windows 3, macOS 2, Linux 2; macOS
@@ -6700,9 +6798,11 @@ shared-tree change may already have addressed them.
   existing action checks.
   Keep their operation-specific authority current through the browser action boundary.
 - **Goal reply publication:** reply-obligation mutations such as `acceptGoalReplyNow` still
-  change the shared reply map before their durable write and restore a snapshot on failure.
-  They do not use the staged switch/objective control boundary in §17; reply-ledger concurrency
-  still needs its own semantic transaction review.
+  change the shared reply map before their durable write. A refused save puts back only that
+  chat's own row (and rows it pruned), never the whole map, and an acceptance re-checks the
+  chat's sequence after its asynchronous eligibility reads, so an older one cannot replace a
+  newer reply (#2144). They still do not use the staged switch/objective control boundary in
+  §17; publishing only after the durable write needs its own semantic transaction review.
 - **Goal cross-ledger controls:** master/config/secret changes still cross separate ledgers.
   Attempt invalidation now preserves debt, but these remaining controls still need one durable
   semantic transaction and effective current-setting enforcement.

@@ -1118,12 +1118,12 @@ var CLF_DOM = (() => {
    * draft was submitted").
    *
    * Send has no icon signature of its own worth trusting — an arrow's path data is not a contract
-   * — so this identifies it by the state it is the only occupant of. Every caller consults this
-   * with our exact text standing in the composer and `generating()` false, and in that state the
-   * primary-action slot cannot be stop (which exists only while generating) and cannot be voice
-   * (which the composer replaces as soon as it holds text, and which carries `data-state`
-   * regardless). Both are excluded explicitly all the same, and one candidate is still required,
-   * so an unexpected third control refuses rather than being clicked.
+   * — so this identifies it by the state it is the only non-stop, non-voice occupant of. With text
+   * standing in the composer, the candidate cannot be stop (which draws the rounded square or
+   * matches `STOP`) and cannot be voice (which the composer replaces as soon as it holds text, and
+   * which carries `data-state` regardless). Both are excluded explicitly, including while a turn is
+   * generating (#1231), and one candidate is still required, so an unexpected control refuses
+   * rather than being clicked.
    */
   function localeFreeSendControls() {
     const box = composer();
@@ -1132,10 +1132,11 @@ var CLF_DOM = (() => {
     // Read the editor here rather than reusing the submitter's own `draftText`, which is a local
     // closure over its captured box. Only "the composer holds something" is needed, not equality.
     const drafted = (typeof box.innerText === 'string' ? box.innerText : editorText(box)).trim();
-    if (drafted === '' || generating()) return [];
+    if (drafted === '') return [];
+    const stops = new Set(stopControls());
     return [...form.querySelectorAll('button[class*="size-token-button-composer"][class*="bg-composer-primary"]')]
       .filter(button => {
-        if (!renderedComposerNode(button) || button.closest('form') !== form) return false;
+        if (!renderedComposerNode(button) || button.closest('form') !== form || stops.has(button)) return false;
         // Dictation keeps a popover state on itself; send never does.
         if (button.hasAttribute('data-state')) return false;
         const paths = button.querySelectorAll('svg path');
@@ -3389,7 +3390,8 @@ var CLF_DOM = (() => {
     }
     return false;
   }
-  function modelPickerAccess(stillCurrent) {
+  function modelPickerAccess(stillCurrent, observe = () => {}, progress = () => {}) {
+    const read = async () => { const value = await readPickerState(); observe(value); return value; };
     const shown = node => node && !node.closest('[hidden],[aria-hidden="true"],[inert]') && node.getClientRects().length > 0;
     const picker = () => document.querySelector(PICKER);
     const trigger = modelPickerTrigger;
@@ -3414,10 +3416,10 @@ var CLF_DOM = (() => {
       observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
       const timer = setTimeout(() => finish(null), timeout); void check();
     });
-    const state = predicate => wait(async () => { const value = await readPickerState(); return value && (!predicate || predicate(value)) ? value : null; });
+    const state = predicate => wait(async () => { const value = await read(); return value && (!predicate || predicate(value)) ? value : null; });
     // The shell trigger needs MAIN ownership proof. A cold account can hydrate
     // after the first reply, so DOM readiness must refresh that proof as well.
-    const readyTrigger = () => wait(async () => { await readPickerState(); return trigger(); }, 15000);
+    const readyTrigger = () => wait(async () => { await read(); return trigger(); }, 15000);
     const key = (node, value) => { if (!node || !stillCurrent()) return false; node.focus(); node.dispatchEvent(new KeyboardEvent('keydown', { key: value, code: value, bubbles: true, cancelable: true })); return true; };
     return {
       state,
@@ -3436,10 +3438,16 @@ var CLF_DOM = (() => {
         // enter here directly, without the New Chat reuse/catalog preparation.
         // Wait for that surface, then use the same owned Chat transition before
         // interpreting account choices. Work's picker is not a denied Chat model.
-        if (!await readyTrigger() || !await prepareChatModelSurface(stillCurrent)) return null;
+        progress('trigger');
+        if (!await readyTrigger()) return null;
+        progress('chat-surface');
+        if (!await prepareChatModelSurface(stillCurrent)) return null;
         // A retained exit-animation node is not an open native menu.
-        if (!openPicker()) { const button = await readyTrigger(); if (!key(button, 'Enter') || !await wait(openPicker)) return null; }
-        return state();
+        if (!openPicker()) {
+          progress('open'); const button = await readyTrigger();
+          if (!key(button, 'Enter') || !await wait(openPicker)) return null;
+        }
+        progress('read'); return state();
       },
       async close() {
         try {
@@ -3454,7 +3462,7 @@ var CLF_DOM = (() => {
         const closed = Boolean(await wait(() => !shown(picker()) && (!dialog?.isConnected || !shown(dialog))));
         // Rebind passive selection proof to the closed trigger, not the removed
         // menu node. Reading metadata never reopens or changes the picker.
-        if (closed && stillCurrent()) await readPickerState();
+        if (closed && stillCurrent()) await read();
         return closed && stillCurrent();
         } finally { motion?.remove(); motion = null; }
       },
@@ -3496,7 +3504,7 @@ var CLF_DOM = (() => {
           // On a lane it cannot read the picker reads as nothing: that proves the move, and the
           // next key goes on toward a lane it can read. Nothing is selected on the way.
           while (at !== to && !current.choices.some(c => c.bucket === order[at])) {
-            if (!await wait(async () => !await readPickerState()) || !press(direction)) return null;
+            if (!await wait(async () => !await read()) || !press(direction)) return null;
             at += step;
           }
           const version = current.version, expected = order[at];
@@ -3596,7 +3604,6 @@ var CLF_DOM = (() => {
    * had failed or what the picker offered. Reset by every selection; empty after a success.
    */
   let modelSelectionWhy = '';
-  const selectionFailed = reason => { modelSelectionWhy = reason; return false; };
   /** The models and efforts the picker offered, from every version read, as one short line (capped). */
   const offeredSummary = choices => safe(() => {
     const byFamily = new Map();
@@ -3606,103 +3613,166 @@ var CLF_DOM = (() => {
     }
     return [...byFamily].slice(0, 6).map(([key, efforts]) => `${String(key).slice(0, 24)}:${[...efforts].join('/')}`).join(' ').slice(0, 160);
   }, '');
-  async function selectModelSettings(model, effort, stillCurrent = () => true) {
+  async function selectModelSettings(model, effort, stillCurrent = () => true, diagnostic) {
     modelSelectionWhy = '';
-    if (!model && !effort) return true;
-    // The page's own picker state, read without opening anything. A worker tab opens with its model
-    // in the address and ChatGPT applies it; opening the picker only to prove that left its closing
-    // animation unfinished in a hidden, throttled tab, its focus scope hid the composer, and every
-    // worker failed "after model selection" (#1086). The same account-evaluated proof as below.
-    if (!document.querySelector(PICKER)) {
-      const passive = await readPickerState();
-      const now = passive?.choices.find(choice => choice.bucket === passive.currentBucket);
-      if (now?.available && (!model || now.id === model || now.familyId === model) && (!effort || now.effort === effort)) return stillCurrent();
-    }
-    const ui = modelPickerAccess(stillCurrent), original = await ui.open();
-    if (!original) { await ui.close(); return selectionFailed('the picker did not open or could not be read'); }
-    // Account-evaluated exact selection is already proof; visiting unrelated
-    // versions can reset it or fail unnecessarily. Captions and denied choices
-    // do not qualify, and native closure still has to succeed.
-    const current = original.choices.find(choice => choice.bucket === original.currentBucket);
-    if (current?.available && (current.id === model || current.familyId === model) &&
-        (!effort || current.effort === effort)) {
-      const closed = await ui.close();
-      if (!closed) return selectionFailed('the picker did not close');
-      return stillCurrent() || selectionFailed('the chat changed meanwhile');
-    }
-    let selected = false, closed = false;
-    try {
-      // Exact provider slug is preferred. Existing saved display slugs may resolve
-      // only to an actually observed, available pair; never to an account default.
-      const name = normalizeModelLabel(model);
-      // Effort only keeps the current model: its efforts, never another model's (CodeRabbit on #1972).
-      // An unreadable current model offers nothing, so the request stays unconfirmed.
-      const modelRank = choice => !model ? (current?.familyId && choice.familyId === current.familyId ? 2 : 0)
-        : choice.familyId === model || choice.id === model ? 2
-        : name && normalizeModelLabel(choice.familyLabel) === name ? 1 : 0;
-      // Every available choice of the requested model, read once across versions, so the effort
-      // can be resolved against what the account actually offers before anything is moved.
-      const offered = [], seen = [];
-      for (const version of [original.versions.find(v => v.id === original.version), ...original.versions.filter(v => v.id !== original.version)]) {
-        const state = await ui.version(version.id); if (!state) return selectionFailed('a model version could not be read');
-        for (const choice of state.choices) {
-          seen.push(choice);
-          const rank = choice.available ? modelRank(choice) : 0;
-          if (rank) offered.push({ version: version.id, choice, rank });
+    const started = Date.now(), pair = choice => choice ? { model: choice.id, effort: choice.effort } : null;
+    const trace = { attempt: 1, phase: 'passive', outcome: 'pending', failure: null, failedPhase: null, failedVersion: null,
+      requested: { model: model || null, effort: effort || null }, resolved: null,
+      before: null, selected: null, after: null, targetVersion: null, observedVersion: null,
+      restore: 'not-needed', closed: null, offered: [], offeredTruncated: false, elapsedMs: 0,
+      visibility: document.visibilityState === 'hidden' ? 'hidden' : 'visible' };
+    const publish = () => {
+      trace.elapsedMs = Math.min(600000, Math.max(0, Date.now() - started));
+      // A diagnostic receiver cannot change selection state or turn a report failure into a Send failure.
+      if (typeof diagnostic === 'function') try { diagnostic(JSON.parse(JSON.stringify(trace))); } catch {}
+    };
+    const phase = (value, version = null) => { trace.phase = value; trace.targetVersion = version; publish(); };
+    const observe = state => {
+      if (!state) return;
+      const now = pair(state.choices.find(choice => choice.bucket === state.currentBucket));
+      if (now) trace.after = now;
+      if (!trace.before && trace.after) trace.before = trace.after;
+      trace.observedVersion = state.version;
+      for (const choice of state.choices) {
+        if (trace.offered.some(prior => prior.model === choice.id && prior.effort === choice.effort && prior.available === choice.available)) continue;
+        if (trace.offered.length === 16) { trace.offeredTruncated = true; continue; }
+        trace.offered.push({ ...pair(choice), available: choice.available });
+      }
+    };
+    const selectionFailed = (reason, code) => {
+      modelSelectionWhy = reason;
+      if (trace.failedPhase === null) { trace.failedPhase = trace.phase; trace.failedVersion = trace.targetVersion; trace.failure = !stillCurrent() ? 'owner-lost' : code || 'unknown'; }
+      return false;
+    };
+    let result = false;
+    const choose = async () => {
+      if (!model && !effort) return true;
+      // The page's own picker state, read without opening anything. A worker tab opens with its model
+      // in the address and ChatGPT applies it; opening the picker only to prove that left its closing
+      // animation unfinished in a hidden, throttled tab, its focus scope hid the composer, and every
+      // worker failed "after model selection" (#1086). The same account-evaluated proof as below.
+      if (!document.querySelector(PICKER)) {
+        const passive = await readPickerState(); observe(passive);
+        const now = passive?.choices.find(choice => choice.bucket === passive.currentBucket);
+        if (now?.available && (!model || now.id === model || now.familyId === model) && (!effort || now.effort === effort)) {
+          trace.resolved = pair(now); trace.selected = pair(now); return stillCurrent();
         }
       }
-      /*
-       * An effort the account no longer offers resolves to the nearest one it does.
-       *
-       * ChatGPT's newer model picker replaced its effort ladder: measured on 2026-09-26, the thinking
-       * models offer `medium`, `high` and `max`, and the step the UI now labels "Sehr hoch" is `max`.
-       * `xhigh` is simply gone. A saved `multiAgent.defaultReasoning = xhigh` therefore matched no
-       * choice at all, and every worker spawn failed outright with "The requested model or reasoning
-       * is unavailable" — worker-11, -12 and -13 in one homelab run, each one work the prime then had
-       * to do itself or abandon.
-       *
-       * Nearest by position in the shared vocabulary, ties upward: the request asked for at least
-       * this much reasoning, so the step above honours it better than the step below. Only within the
-       * requested model — a missing model still refuses, because picking a different model is not a
-       * rounding decision.
-       */
-      let wantedEffort = effort;
-      if (effort && offered.length && !offered.some(entry => entry.choice.effort === effort)) {
-        const ladder = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
-        const target = ladder.indexOf(effort);
-        const efforts = [...new Set(offered.map(entry => entry.choice.effort))].filter(value => ladder.includes(value));
-        if (target >= 0 && efforts.length) {
-          efforts.sort((a, b) => {
-            const da = Math.abs(ladder.indexOf(a) - target), db = Math.abs(ladder.indexOf(b) - target);
-            return da - db || ladder.indexOf(b) - ladder.indexOf(a);
-          });
-          wantedEffort = efforts[0];
-        }
+      phase('open');
+      const ui = modelPickerAccess(stillCurrent, observe, phase), original = await ui.open();
+      if (!original) {
+        selectionFailed('the picker did not open or could not be read', 'unreadable');
+        phase('close'); trace.closed = await ui.close(); return false;
       }
-      const candidates = offered.filter(entry => !wantedEffort || entry.choice.effort === wantedEffort);
-      // An earlier version's display name cannot shadow a later exact execution id.
-      // Captions such as High are effort labels, never model-name aliases. Repeated
-      // Latest/version entries may describe the same pair; distinct families may not.
-      const rank = Math.max(0, ...candidates.map(candidate => candidate.rank));
-      const matches = candidates.filter(candidate => candidate.rank === rank);
-      if (!matches.length) return selectionFailed(`${model ? `model ${String(model).slice(0, 30)}` : 'the current model'}${wantedEffort ? ` with ${wantedEffort}` : ''} is not offered; the picker offers ${offeredSummary(seen) || 'nothing readable'}`);
-      if (model && new Set(matches.map(candidate => candidate.choice.familyId)).size !== 1) return selectionFailed('more than one model matches the request');
-      if (model && wantedEffort && new Set(matches.map(candidate => `${candidate.choice.id}\u0000${candidate.choice.effort}`)).size !== 1) return selectionFailed('more than one choice matches the request');
-      const wanted = matches.find(candidate => candidate.version === original.version && candidate.choice.bucket === original.currentBucket) || matches[0];
-      const state = await ui.version(wanted.version), choice = wanted.choice;
-      // Versions can change while traversing the UI. Revalidate before moving its slider.
-      if (!state?.choices.some(next => next.bucket === choice.bucket && next.available && next.id === choice.id && next.effort === choice.effort)) return selectionFailed('the picker changed while it was read');
-      const after = await ui.bucket(choice.bucket);
-      const confirmed = after?.choices.find(c => c.bucket === after.currentBucket);
-      selected = stillCurrent() && confirmed?.available === true && confirmed.id === choice.id && confirmed.effort === choice.effort;
-      if (!selected) selectionFailed(!stillCurrent() ? 'the chat changed meanwhile'
-        : `the picker showed ${confirmed ? `${String(confirmed.id).slice(0, 24)}/${confirmed.effort}` : 'nothing readable'} after choosing ${String(choice.id).slice(0, 24)}/${choice.effort}`);
-    } finally {
-      if (!selected && stillCurrent() && await ui.version(original.version)) await ui.bucket(original.currentBucket);
-      closed = await ui.close();
+      // Account-evaluated exact selection is already proof; visiting unrelated
+      // versions can reset it or fail unnecessarily. Captions and denied choices
+      // do not qualify, and native closure still has to succeed.
+      const current = original.choices.find(choice => choice.bucket === original.currentBucket);
+      if (current?.available && (current.id === model || current.familyId === model) &&
+          (!effort || current.effort === effort)) {
+        trace.resolved = pair(current); trace.selected = pair(current);
+        phase('close'); const closed = trace.closed = await ui.close();
+        if (!closed) return selectionFailed('the picker did not close', 'close-failed');
+        return stillCurrent();
+      }
+      let selected = false, closed = false;
+      try {
+        // Exact provider slug is preferred. Existing saved display slugs may resolve
+        // only to an actually observed, available pair; never to an account default.
+        const name = normalizeModelLabel(model);
+        // Effort only keeps the current model: its efforts, never another model's (CodeRabbit on #1972).
+        // An unreadable current model offers nothing, so the request stays unconfirmed.
+        const modelRank = choice => !model ? (current?.familyId && choice.familyId === current.familyId ? 2 : 0)
+          : choice.familyId === model || choice.id === model ? 2
+          : name && normalizeModelLabel(choice.familyLabel) === name ? 1 : 0;
+        // Every available choice of the requested model, read once across versions, so the effort
+        // can be resolved against what the account actually offers before anything is moved.
+        const offered = [], seen = [];
+        for (const version of [original.versions.find(v => v.id === original.version), ...original.versions.filter(v => v.id !== original.version)]) {
+          phase('enumerate-version', version.id);
+          const state = await ui.version(version.id); if (!state) return selectionFailed('a model version could not be read', 'unreadable');
+          for (const choice of state.choices) {
+            seen.push(choice);
+            const rank = choice.available ? modelRank(choice) : 0;
+            if (rank) offered.push({ version: version.id, choice, rank });
+          }
+        }
+        /*
+         * An effort the account no longer offers resolves to the nearest one it does.
+         *
+         * ChatGPT's newer model picker replaced its effort ladder: measured on 2026-09-26, the thinking
+         * models offer `medium`, `high` and `max`, and the step the UI now labels "Sehr hoch" is `max`.
+         * `xhigh` is simply gone. A saved `multiAgent.defaultReasoning = xhigh` therefore matched no
+         * choice at all, and every worker spawn failed outright with "The requested model or reasoning
+         * is unavailable" — worker-11, -12 and -13 in one homelab run, each one work the prime then had
+         * to do itself or abandon.
+         *
+         * Nearest by position in the shared vocabulary, ties upward: the request asked for at least
+         * this much reasoning, so the step above honours it better than the step below. Only within the
+         * requested model — a missing model still refuses, because picking a different model is not a
+         * rounding decision.
+         */
+        phase('resolve');
+        let wantedEffort = effort;
+        if (effort && offered.length && !offered.some(entry => entry.choice.effort === effort)) {
+          const ladder = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+          const target = ladder.indexOf(effort);
+          const efforts = [...new Set(offered.map(entry => entry.choice.effort))].filter(value => ladder.includes(value));
+          if (target >= 0 && efforts.length) {
+            efforts.sort((a, b) => {
+              const da = Math.abs(ladder.indexOf(a) - target), db = Math.abs(ladder.indexOf(b) - target);
+              return da - db || ladder.indexOf(b) - ladder.indexOf(a);
+            });
+            wantedEffort = efforts[0];
+          }
+        }
+        const candidates = offered.filter(entry => !wantedEffort || entry.choice.effort === wantedEffort);
+        // An earlier version's display name cannot shadow a later exact execution id.
+        // Captions such as High are effort labels, never model-name aliases. Repeated
+        // Latest/version entries may describe the same pair; distinct families may not.
+        const rank = Math.max(0, ...candidates.map(candidate => candidate.rank));
+        const matches = candidates.filter(candidate => candidate.rank === rank);
+        if (!matches.length) return selectionFailed(`${model ? `model ${String(model).slice(0, 30)}` : 'the current model'}${wantedEffort ? ` with ${wantedEffort}` : ''} is not offered; the picker offers ${offeredSummary(seen) || 'nothing readable'}`, 'not-offered');
+        if (model && new Set(matches.map(candidate => candidate.choice.familyId)).size !== 1) return selectionFailed('more than one model matches the request', 'ambiguous-model');
+        if (model && wantedEffort && new Set(matches.map(candidate => `${candidate.choice.id}\u0000${candidate.choice.effort}`)).size !== 1) return selectionFailed('more than one choice matches the request', 'ambiguous-choice');
+        const wanted = matches.find(candidate => candidate.version === original.version && candidate.choice.bucket === original.currentBucket) || matches[0];
+        const choice = wanted.choice; trace.resolved = pair(choice);
+        phase('select-version', wanted.version);
+        const state = await ui.version(wanted.version);
+        // Versions can change while traversing the UI. Revalidate before moving its slider.
+        if (!state?.choices.some(next => next.bucket === choice.bucket && next.available && next.id === choice.id && next.effort === choice.effort)) return selectionFailed('the picker changed while it was read', 'changed');
+        phase('select-effort', wanted.version);
+        const after = await ui.bucket(choice.bucket);
+        const confirmed = after?.choices.find(c => c.bucket === after.currentBucket);
+        trace.selected = pair(confirmed);
+        selected = stillCurrent() && confirmed?.available === true && confirmed.id === choice.id && confirmed.effort === choice.effort;
+        if (!selected) selectionFailed(!stillCurrent() ? 'the chat changed meanwhile'
+          : `the picker showed ${confirmed ? `${String(confirmed.id).slice(0, 24)}/${confirmed.effort}` : 'nothing readable'} after choosing ${String(choice.id).slice(0, 24)}/${choice.effort}`, !stillCurrent() ? 'owner-lost' : 'mismatch');
+      } finally {
+        if (!selected) {
+          trace.restore = 'skipped';
+          if (stillCurrent()) {
+            trace.restore = 'failed'; phase('restore-version', original.version);
+            if (await ui.version(original.version)) {
+              phase('restore-effort', original.version);
+              const restored = await ui.bucket(original.currentBucket);
+              const prior = original.choices.find(choice => choice.bucket === original.currentBucket);
+              const actual = restored?.choices.find(choice => choice.bucket === restored.currentBucket);
+              if (actual?.id === prior?.id && actual?.effort === prior?.effort) trace.restore = 'confirmed';
+            }
+          }
+        }
+        phase('close'); closed = trace.closed = await ui.close();
+      }
+      if (selected && !closed) return selectionFailed('the picker did not close', 'close-failed');
+      return selected && closed && stillCurrent();
+    };
+    try { result = await choose(); return result; }
+    finally {
+      if (!result && !modelSelectionWhy) selectionFailed(!stillCurrent() ? 'the chat changed meanwhile' : 'the selection was not confirmed', !stillCurrent() ? 'owner-lost' : 'unknown');
+      trace.outcome = result ? 'confirmed' : 'failed';
+      publish();
     }
-    if (selected && !closed) return selectionFailed('the picker did not close');
-    return selected && closed && stillCurrent();
   }
 
   /**

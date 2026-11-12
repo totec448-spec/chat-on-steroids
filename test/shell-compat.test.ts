@@ -3,7 +3,7 @@
  * No cache-derived message history, invented receipts or alternate presentation. */
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const domSource = readFileSync(new URL('../extension/chatgpt-dom.js', import.meta.url), 'utf8');
 const fiberSource = readFileSync(new URL('../extension/fiber.js', import.meta.url), 'utf8');
@@ -184,6 +184,88 @@ it('reads the real shell composer, messages and tools through existing contracts
   expect(f.api.turns().map((t: any) => t.role)).toEqual(['user', 'assistant']);
   expect(f.api.messages().map((m: any) => [m.id, m.role, m.text])).toEqual([[USER, 'user', 'hello'], [ANSWER, 'assistant', 'Answer']]);
   expect(f.api.presentationTurns().map((t: any) => t.role)).toEqual(['user', 'assistant']);
+});
+
+/** #2157: a bound on tool observations or work rows limits what is reported, never the public text. */
+describe('a very long turn still reports its public messages (#2157)', () => {
+  const own = (id: string) => ({ type: 'mcp-tool-call', callId: id, completed: true, invocation: { server: 'Chat On Steroids Core', tool: 'link_x/read' }, result: null });
+  const exec = (id: string) => ({ type: 'dynamic-tool-call', callId: id, tool: 'exec', completed: true });
+  const interim = (index: number) => ({ type: 'assistant-message', messageId: `66666666-6666-4666-8666-${String(index).padStart(12, '0')}`, content: `Update ${index}`, phase: 'commentary', completed: true });
+  const complete = (f: ReturnType<typeof fixture>, work: any[]) => {
+    (f.entry.turn as any).status = 'complete';
+    f.entry.turn.items = [f.entry.turn.items[0], { type: 'chatgpt-reasoning-group', items: work },
+      { type: 'assistant-message', messageId: ANSWER, content: 'Answer', phase: 'final_answer', completed: true }];
+    ids(f);
+  };
+  // The page lists every message of the turn, in order.
+  const ids = (f: ReturnType<typeof fixture>) => {
+    const all: string[] = [];
+    const visit = (items: any[]) => { for (const item of items) { if (item.messageId) all.push(item.messageId); if (item.callId) all.push(item.callId); if (item.items) visit(item.items); } };
+    visit(f.entry.turn.items);
+    (f.entry.turn as any).messageIds = all;
+  };
+  const read = async (work: any[]) => {
+    const f = fixture(); complete(f, work);
+    const { turns } = await f.ask();
+    expect(turns).toHaveLength(1);
+    return turns[0];
+  };
+
+  it.each([199, 200, 201, 297])('keeps the final answer of a turn with %i connector calls', async count => {
+    const turn = await read(Array.from({ length: count }, (_, index) => own(`call-${index}`)));
+    expect(turn.messages.map((m: any) => m.rawMessageId)).toEqual([USER, ANSWER]);
+    expect(turn.endMessageId).toBe(ANSWER);
+    expect(turn.calls.length).toBe(Math.min(count, 200));
+  });
+
+  it('keeps the final answer of a turn with more than 200 exec calls', async () => {
+    const turn = await read(Array.from({ length: 297 }, (_, index) => exec(`exec-${index}`)));
+    expect(turn.messages.map((m: any) => m.rawMessageId)).toEqual([USER, ANSWER]);
+    expect(turn.endMessageId).toBe(ANSWER);
+  });
+
+  it('keeps the final answer when the turn holds more work rows than the row limit', async () => {
+    const turn = await read(Array.from({ length: 19 }, (_, index) => own(`call-${index}`)).concat(Array.from({ length: 380 }, (_, index) => interim(index)) as any[]));
+    expect(turn.messages.map((m: any) => m.rawMessageId).at(-1)).toBe(ANSWER);
+    expect(turn.endMessageId).toBe(ANSWER);
+    expect(turn.calls.length).toBe(19);
+  });
+
+  it('keeps the final answer when the work rows are far past the row limit', async () => {
+    const turn = await read(Array.from({ length: 1500 }, (_, index) => interim(index)));
+    expect(turn.messages.map((m: any) => m.rawMessageId).at(-1)).toBe(ANSWER);
+    expect(turn.endMessageId).toBe(ANSWER);
+  });
+
+  it('keeps the text of an interim update that follows an empty copy of the same message', async () => {
+    const f = fixture(); complete(f, [{ ...interim(1), content: '' }, { ...interim(1), content: 'The real text' }]);
+    const turn = (await f.ask()).turns[0];
+    expect(turn.messages.map((m: any) => m.rawText)).toContain('The real text');
+  });
+
+  it('still refuses a repeated call identity that sits past the row limit', async () => {
+    const f = fixture(); complete(f, [...Array.from({ length: 450 }, (_, index) => own(`call-${index}`)), own('call-0')]);
+    expect((await f.ask()).turns).toEqual([]);
+  });
+
+  it('keeps the whole text of the final answer however long the interim updates are', async () => {
+    const f = fixture(); complete(f, Array.from({ length: 6 }, (_, index) => ({ ...interim(index), content: 'x'.repeat(300_000) })));
+    (f.entry.turn.items[2] as any).content = 'The complete answer. '.repeat(499) + 'The end.';
+    ids(f);
+    const turn = (await f.ask()).turns[0];
+    expect(turn.messages.at(-1).rawText).toBe('The complete answer. '.repeat(499) + 'The end.');
+    expect(turn.endMessageId).toBe(ANSWER);
+  });
+
+  it('keeps the final answer when top-level items outnumber the row limit', async () => {
+    const f = fixture(); (f.entry.turn as any).status = 'complete';
+    f.entry.turn.items = [f.entry.turn.items[0], ...Array.from({ length: 450 }, (_, index) => interim(index)),
+      { type: 'assistant-message', messageId: ANSWER, content: 'Answer', phase: 'final_answer', completed: true }];
+    ids(f);
+    const turn = (await f.ask()).turns[0];
+    expect(turn.messages.map((m: any) => m.rawMessageId).at(-1)).toBe(ANSWER);
+    expect(turn.endMessageId).toBe(ANSWER);
+  });
 });
 
 it.each(['in_progress', 'cancelled', 'complete', 'unknown', undefined])('does not invent a tool receipt from turn status %s', async status => {
@@ -1054,6 +1136,10 @@ it('finds the stop control by its square when the label is translated', () => {
     '<svg class="icon-primary-action" viewBox="0 0 20 20"><path d="M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C15.5 14.9404 14.9404 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z"></path></svg></button>';
   expect(f.api.generating(), 'a translated stop button was not recognised').toBe(true);
   expect(f.api.stopButton()?.getAttribute('aria-label')).toBe('Durdur');
+  form.querySelector('button[type="submit"]')!.remove();
+  expect(f.api.composerText()).toBe('');
+  expect(f.api.generating()).toBe(true);
+  expect(f.api.sendButton(), 'an empty composer with only localized Stop offered Send').toBeNull();
 });
 
 /**
@@ -1173,16 +1259,75 @@ it('finds the send control by its slot when the label is translated', () => {
     '<svg class="icon-primary-action" viewBox="0 0 20 20"><path d="M8.5 16.5v-9l-3.25 3.25"></path></svg></button>');
   expect(f.api.sendButton()?.getAttribute('aria-label'), 'a translated send button was not recognised').toBe('Gönder');
 
-  // The stop square in that same slot is never a send target.
-  form.querySelector('button[aria-label="Gönder"]')!.outerHTML =
+  // While generating (#1231), a translated send control alongside stop is still recognised.
+  form.insertAdjacentHTML('beforeend',
     `<button type="button" class="${slot}" aria-label="Durdur">` +
-    '<svg class="icon-primary-action" viewBox="0 0 20 20"><path d="M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C15.5 14.9404 14.9404 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z"></path></svg></button>';
+    '<svg class="icon-primary-action" viewBox="0 0 20 20"><path d="M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C15.5 14.9404 14.9404 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z"></path></svg></button>');
+  expect(f.api.generating()).toBe(true);
+  expect(f.api.sendButton()?.getAttribute('aria-label'), 'a translated send button was hidden while generating').toBe('Gönder');
+
+  // The stop square in that same slot is never a send target.
+  form.querySelector('button[aria-label="Gönder"]')!.remove();
   expect(f.api.sendButton(), 'the stop square was read as send').toBeNull();
 
   // And an English label still wins outright, without consulting the slot at all.
   form.querySelector('button[aria-label="Durdur"]')!.outerHTML =
     '<button type="button" aria-label="Send prompt">send</button>';
   expect(f.api.sendButton()?.getAttribute('aria-label')).toBe('Send prompt');
+});
+
+it('excludes voice controls from structural Send with text while generating', () => {
+  const f = fixture(), edit = editing(f);
+  const form = f.doc.querySelector('form[data-chatgpt-composer]')!;
+  const slot = 'cursor-interaction size-token-button-composer flex items-center justify-center rounded-full bg-composer-primary p-0.5';
+  f.doc.querySelector('button[type="submit"]')!.remove();
+  expect(f.api.insertPrompt('Continue', true)).toBe(true);
+  expect(edit.box.innerText).toContain('Continue');
+
+  form.insertAdjacentHTML('beforeend',
+    `<button type="button" class="${slot}" aria-label="Sprachchat starten" data-state="closed">` +
+    '<svg><path d="M8.22266 2.45825C8"></path><path d="M12.4443 4.62524C1"></path>' +
+    '<path d="M4 6.95825C4.48325"></path><path d="M16.667 7.45825C17"></path></svg></button>' +
+    `<button type="button" class="${slot}" aria-label="Durdur">` +
+    '<svg><path d="M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C14.9404 14.9404 14.25 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z"></path></svg></button>');
+  expect(f.api.generating()).toBe(true);
+  expect(f.api.sendButton(), 'voice must not be mistaken for Send').toBeNull();
+
+  form.insertAdjacentHTML('beforeend',
+    `<button type="button" class="${slot}" aria-label="Gönder"><svg><path d="M8.5 16.5v-9l-3.25 3.25"></path></svg></button>`);
+  expect(f.api.sendButton()?.getAttribute('aria-label')).toBe('Gönder');
+});
+
+it('ignores hidden structural Send controls with text while generating', () => {
+  const f = fixture(), edit = editing(f);
+  const form = f.doc.querySelector('form[data-chatgpt-composer]')!;
+  const slot = 'cursor-interaction size-token-button-composer flex items-center justify-center rounded-full bg-composer-primary p-0.5';
+  f.doc.querySelector('button[type="submit"]')!.remove();
+  expect(f.api.insertPrompt('Continue', true)).toBe(true);
+  expect(edit.box.innerText).toContain('Continue');
+
+  form.insertAdjacentHTML('beforeend',
+    `<div hidden><button type="button" class="${slot}" aria-label="Gönder"><svg><path d="M8.5 16.5v-9l-3.25 3.25"></path></svg></button></div>` +
+    `<button type="button" class="${slot}" aria-label="Durdur"><svg><path d="M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C14.9404 14.9404 14.25 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z"></path></svg></button>` +
+    `<button type="button" class="${slot}" aria-label="Envoyer"><svg><path d="M8.5 16.5v-9l-3.25 3.25"></path></svg></button>`);
+  expect(f.api.generating()).toBe(true);
+  expect(f.api.sendButton()?.getAttribute('aria-label'), 'a hidden control made Send ambiguous').toBe('Envoyer');
+});
+
+it('rejects multiple visible structural Send candidates with text while generating', () => {
+  const f = fixture(), edit = editing(f);
+  const form = f.doc.querySelector('form[data-chatgpt-composer]')!;
+  const slot = 'cursor-interaction size-token-button-composer flex items-center justify-center rounded-full bg-composer-primary p-0.5';
+  f.doc.querySelector('button[type="submit"]')!.remove();
+  expect(f.api.insertPrompt('Continue', true)).toBe(true);
+  expect(edit.box.innerText).toContain('Continue');
+
+  form.insertAdjacentHTML('beforeend',
+    `<button type="button" class="${slot}" aria-label="Gönder"><svg><path d="M8.5 16.5v-9l-3.25 3.25"></path></svg></button>` +
+    `<button type="button" class="${slot}" aria-label="Envoyer"><svg><path d="M8.5 16.5v-9l-3.25 3.25"></path></svg></button>` +
+    `<button type="button" class="${slot}" aria-label="Durdur"><svg><path d="M4.5 5.75C4.5 5.05964 5.05964 4.5 5.75 4.5H14.25C14.9404 4.5 15.5 5.05964 15.5 5.75V14.25C14.9404 14.9404 14.25 15.5 14.25 15.5H5.75C5.05964 15.5 4.5 14.9404 4.5 14.25V5.75Z"></path></svg></button>`);
+  expect(f.api.generating()).toBe(true);
+  expect(f.api.sendButton(), 'two visible structural candidates must remain ambiguous').toBeNull();
 });
 
 it('preserves prepared multiline text through the shell editor serializer', () => {

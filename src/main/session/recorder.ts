@@ -2655,7 +2655,7 @@ async function recordChatObservationsNow(
           ...(item.reaction !== undefined ? { reaction: item.reaction } : {}),
           ...(item.model ? { model: item.model } : {}),
           ...(item.parentId ? { parentId: item.parentId } : {}),
-          ...(editReplacement(item.messageId) ? { replaces: editReplacement(item.messageId) }
+          ...(editReplacement(item.messageId) ? { replaces: editReplacement(item.messageId), replacesConfirmed: true as const }
             : item.parentId && item.parentExact === true ? await replacedQuestion(sessionId, item.messageId, item.parentId) : {}),
           ...(takeAutomaticReply(conversationId, item.text ?? '') ? { automatic: true as const } : {}),
           messageId: item.messageId

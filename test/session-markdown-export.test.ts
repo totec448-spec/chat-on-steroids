@@ -387,3 +387,38 @@ it.each(['clipboard', 'file'] as const)('recovers drawing overflow for %s only a
   if (target === 'clipboard') expect(electron.clipboard.writeText).toHaveBeenCalledExactlyOnceWith(answer);
   else expect(files.replaceFile).toHaveBeenCalledExactlyOnceWith('/downloads/table.md', answer, 'Markdown export');
 });
+
+it.each(['clipboard', 'file'] as const)('exports only the real table rows after an indented literal list/fence to %s', async target => {
+  const header = '| Item | Qty |\n|---|---|';
+  const example = '    - ```markdown\n' + header.split('\n').map(line => `    ${line}`).join('\n');
+  const markdown = `Example:\n\n${example}\n\nActual table:\n${header}`;
+  const html = '<div data-d-component="table"><table><tr><td>Item</td><td>Qty</td></tr><tr><td>Rice</td><td>1 kg</td></tr></table></div>';
+  store.readEvents.mockResolvedValue([
+    events[0]!,
+    { ...events[1]!, message: { text: markdown, truncated: false, chars: markdown.length },
+      renderedHtml: { text: html, truncated: false, chars: html.length } },
+    events[2]!
+  ]);
+  electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/downloads/example.md' });
+  await exportSessionMarkdown({ id: 'session-1', scope: 'answer', turnId: 't1', target }, null);
+  const expected = `${markdown}\n| Rice | 1 kg |\n`;
+  if (target === 'clipboard') expect(electron.clipboard.writeText).toHaveBeenCalledWith(expected);
+  else expect(files.replaceFile).toHaveBeenCalledWith('/downloads/example.md', expected, 'Markdown export');
+});
+
+it('completes and exports a megabyte answer with many unmatched backtick widths without rescanning suffixes', async () => {
+  const example = 'Example: ' + Array.from({ length: 1600 }, (_, index) => '`'.repeat(index + 1) + ' x ').join('');
+  const source = `${example}\n\n| Item | Qty |\n|---|---|`;
+  const html = '<div data-d-component="table"><table><tr><td>Item</td><td>Qty</td></tr><tr><td>Rice</td><td>1 kg</td></tr></table></div>';
+  store.readEvents.mockResolvedValue([
+    events[0]!,
+    { ...events[1]!, message: { text: source, truncated: false, chars: source.length }, renderedHtml: { text: html, truncated: false, chars: html.length } },
+    events[2]!
+  ]);
+  const started = performance.now();
+  await exportSessionMarkdown({ id: 'session-1', scope: 'answer', turnId: 't1', target: 'clipboard' }, null);
+  const elapsed = performance.now() - started;
+  expect(electron.clipboard.writeText).toHaveBeenCalledWith(`${source}\n| Rice | 1 kg |\n`);
+  // Generous synchronous-work budget: the old suffix-rescanning regex takes seconds here.
+  expect(elapsed).toBeLessThan(2000);
+});

@@ -397,6 +397,8 @@ export type SessionEvent =
       parentId?: string;
       /** Edit & resubmit (#365): the question this one is a later version of, in ChatGPT's own edit. */
       replaces?: string;
+      /** The app acknowledged this exact edit; read-time inference cannot revoke its replacement link. */
+      replacesConfirmed?: true;
       /** A Goal or Loop follow-up its page typed: the app's message, not the person's (#1655). */
       automatic?: true;
       attachments?: import('./input.js').InputAttachment[];
@@ -442,6 +444,8 @@ export type SessionEvent =
       finalContentSeq?: number;
       /** Local acceptance time of final content; provider time can predate its last tools. */
       finalObservedAt?: number;
+      /** Store-observed streaming-to-final boundary; first-seen finals have no proven settlement order. */
+      settledAtSeq?: number;
       /** First sequence assigned to this logical message; later revisions keep this anchor. */
       origin?: number;
       /** Store-owned text/state revision, including interim progress before the final. */
