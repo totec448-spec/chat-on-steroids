@@ -711,6 +711,37 @@ describe('choosing a ChatGPT Project for a project', () => {
   }
   const listed = [{ id: existing, name: 'Existing', linkedTo: null }, { id: taken, name: 'Taken', linkedTo: { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeee9', name: 'Other' } }];
 
+  it.each(['local', 'ssh'])('refuses adding a %s project when the choices lookup fails, then offers existing Projects on retry', async kind => {
+    const { w } = await boot([], false);
+    const api = (w as any).api, doc = w.document;
+    api.chatgptProjectChoices = vi.fn().mockResolvedValueOnce({ ok: false, error: 'Project catalog is invalid' })
+      .mockResolvedValue({ ok: true, data: listed });
+    api.addProject = vi.fn(async () => ({ ok: true, data: local }));
+    api.addRemoteProject = vi.fn(async () => ({ ok: true, data: local }));
+    const add = async () => {
+      if (kind === 'local') (doc.getElementById('composerFolder') as HTMLButtonElement).click();
+      else {
+        if (!(doc.getElementById('sshProjectDialog') as HTMLDialogElement).open) {
+          (doc.getElementById('addProject') as HTMLButtonElement).click(); await settle();
+          doc.querySelector<HTMLButtonElement>('[data-row-action="add-ssh-project"]')!.click();
+          (doc.getElementById('sshProjectAddress') as HTMLInputElement).value = 'user@server';
+          (doc.getElementById('sshProjectFolder') as HTMLInputElement).value = '/srv/app';
+        }
+        doc.getElementById('sshProjectForm')!.dispatchEvent(new w.Event('submit', { cancelable: true }));
+      }
+      await settle(); await settle();
+    };
+    await add();
+    expect(api.addProject).not.toHaveBeenCalled();
+    expect(api.addRemoteProject).not.toHaveBeenCalled();
+    expect(doc.body.textContent).toContain('Project catalog is invalid');
+    expect((doc.getElementById(kind === 'local' ? 'addProject' : 'sshProjectSubmit') as HTMLButtonElement).disabled).toBe(false);
+    await add();
+    expect(kind === 'local' ? api.addProject : api.addRemoteProject).toHaveBeenCalledWith(...(kind === 'local'
+      ? [{ chatgpt: 'later' }] : ['user@server', '/srv/app', { chatgpt: 'later' }]));
+    expect(doc.querySelector('.chatgpt-project-picker')!.textContent).toContain('Existing');
+  });
+
   it('links the new project to a Project the account already has', async () => {
     const { w, api, options } = await adding(listed);
     expect(api.addProject).toHaveBeenCalledWith({ chatgpt: 'later' });
