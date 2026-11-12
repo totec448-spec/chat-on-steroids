@@ -3687,6 +3687,8 @@ it.each(['text drop', 'file drop', 'picker', 'local project', 'server snapshot']
   };
   const retain = async (ids: string[]) => handlers.get('sessions:retainDraftAttachments')?.(event, { ids });
   const { readInputAttachmentChunk } = await import('../src/main/session/input-attachments.js');
+  const logger = await import('../src/main/logger.js');
+  const log = vi.spyOn(logger, 'logInfo');
   const kept = await stage('Still in a draft');
   const abandoned = await stage('No longer in a draft');
   const old = new Date(Date.now() - 25 * 60 * 60 * 1000);
@@ -3720,11 +3722,15 @@ it.each(['text drop', 'file drop', 'picker', 'local project', 'server snapshot']
     await expect(fs.stat(stagedPath(abandoned.id))).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(readInputAttachmentChunk(kept, 0)).resolves.toBe(Buffer.from('Still in a draft').toString('base64'));
     expect(hold).toMatchObject({ ok: true });
+    expect(log.mock.calls.filter(([message]) => message.startsWith('attachment cleanup:'))).toEqual([
+      ['attachment cleanup: kept 1 expired attachment(s) still referenced by a draft or the outbox']
+    ]);
 
     expect(await retain([])).toMatchObject({ ok: true });
     await stage('Cleanup after release');
     await expect(fs.stat(stagedPath(kept.id))).rejects.toMatchObject({ code: 'ENOENT' });
   } finally {
+    log.mockRestore();
     await retain([]);
   }
 });
