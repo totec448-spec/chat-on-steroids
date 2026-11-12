@@ -695,16 +695,11 @@ export async function acceptGoalReplyNow(input: {
   if (!input.handledOnly && await astraFinishOnly(input.sessionId, input.conversationId)) return;
   if (input.silenceSourceTurnId &&
       !await turnHasMcpCall(input.sessionId, input.conversationId, input.silenceSourceTurnId)) return;
-  const current = goalReplies.get(input.conversationId);
-  if (current?.replyId === input.replyId || (current && current.eventSeq > input.eventSeq)) return;
-  const provisionalUpgrade = Boolean(
-    current &&
-      current.eventSeq === 0 &&
-      current.turnId === input.turnId &&
-      current.replyId === `turn:${input.turnId}`.slice(0, 200)
-  );
-  const before = current ? { ...current } : null;
-  const bounded = snapshotGoalReplies().replies;
+  const superseded = (): boolean => {
+    const latest = goalReplies.get(input.conversationId);
+    return latest?.replyId === input.replyId || (!!latest && latest.eventSeq > input.eventSeq);
+  };
+  if (superseded()) return;
   const active =
     !input.handledOnly && !input.blocked &&
     getConfig().sessions.record &&
@@ -713,6 +708,18 @@ export async function acceptGoalReplyNow(input: {
     (goalSwitchFor(input.conversationId).mode !== 'loop' ||
       await automaticLoopHasMcpWork(input.sessionId, input.conversationId, input.silenceSourceTurnId ?? input.turnId));
   if (input.current && !input.current()) return;
+  // The eligibility checks above are asynchronous: another acceptance of this chat may have landed
+  // meanwhile, and an older one must not replace a newer reply (#2144). Read the ledger only now.
+  if (superseded()) return;
+  const current = goalReplies.get(input.conversationId);
+  const provisionalUpgrade = Boolean(
+    current &&
+      current.eventSeq === 0 &&
+      current.turnId === input.turnId &&
+      current.replyId === `turn:${input.turnId}`.slice(0, 200)
+  );
+  const before = current ? { ...current } : null;
+  const bounded = snapshotGoalReplies().replies;
   goalReplies.set(input.conversationId, {
     conversationId: input.conversationId,
     sessionId: input.sessionId,
@@ -731,16 +738,24 @@ export async function acceptGoalReplyNow(input: {
     acceptedAt: provisionalUpgrade ? current!.acceptedAt : Date.now(),
     state: provisionalUpgrade ? current!.state : active ? 'pending' : 'handled'
   });
+  const written = snapshotGoalReplies();
+  // Bounding the written revision may have retired rows; those, and only those, are this acceptance's to give back.
+  const keptRows = new Set(written.replies.map(row => row.conversationId));
+  const pruned = bounded.filter(row => row.conversationId !== input.conversationId && !keptRows.has(row.conversationId));
   try {
-    await writeDurableNow(GOAL_REPLIES_STATE, snapshotGoalReplies());
+    await writeDurableNow(GOAL_REPLIES_STATE, written);
   } catch (error) {
     // The rejected write is one whole revision, so the rollback is too: the row this accept
     // added and the expired rows it pruned go back together, leaving the ledger exactly as the
     // decision found it.
-    goalReplies.clear();
-    for (const reply of bounded) goalReplies.set(reply.conversationId, reply);
-    if (before) goalReplies.set(input.conversationId, before);
-    else goalReplies.delete(input.conversationId);
+    // Only this chat's row goes back: clearing the whole ledger erased the replies other chats had
+    // accepted while this save was waiting (#2144). Rows this accept pruned are restored unless a
+    // newer row for that chat exists. A row somebody else removed meanwhile (a withdrawn silence reply) stays removed.
+    for (const reply of pruned) if (!goalReplies.has(reply.conversationId)) goalReplies.set(reply.conversationId, reply);
+    if (goalReplies.get(input.conversationId)?.replyId === input.replyId.slice(0, 200)) {
+      if (before) goalReplies.set(input.conversationId, before);
+      else goalReplies.delete(input.conversationId);
+    }
     persistGoalRepliesSoon();
     throw error;
   }

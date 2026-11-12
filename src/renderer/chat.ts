@@ -2,6 +2,7 @@ import { ageOf, countdownClock } from '../shared/age.js';
 import { DEFAULT_CHAT_PERSONALITY, DEFAULT_CHAT_WRITING_STYLE, MAX_CHAT_STYLE_CHARS } from '../shared/chat-style.js';
 import { hasProviderDirective, resolvedCapture, withoutProviderDirectives } from '../shared/content-reference.js';
 import { completedDilText } from '../shared/dil-tables.js';
+import { markdownCodeRanges } from '../shared/markdown-code.js';
 import { markdownVisibleText } from '../shared/markdown-text.js';
 import { providerEntitiesAsMarkdown } from '../shared/content-reference.js';
 import { initChatSearch, type PaletteSetting, type ChatSearch } from './chat-search.js';
@@ -4456,128 +4457,6 @@ export function finishedBlocks(text: string): string {
   // continue a list, and a space indented code.
   if (gap !== null && (hold === 'list' ? /^[^\s\d*+-]/ : /^\S/).test(lines.at(-1)!)) end = gap;
   return text.slice(0, end);
-}
-
-/** Markdown indentation uses four-column tab stops, not character counts. */
-function indentColumns(line: string): number {
-  let columns = 0;
-  for (const char of line) {
-    if (char === ' ') columns++;
-    else if (char === '\t') columns += 4 - (columns % 4);
-    else break;
-  }
-  return columns;
-}
-
-/** Locate Markdown fences, including ones nested under blockquotes and list items. */
-function fencedMarkdownRanges(text: string): Array<{ start: number; end: number }> {
-  const ranges: Array<{ start: number; end: number }> = [];
-  let fence: { start: number; marker: string; width: number; nested: boolean; quoteDepth: number; listIndent: number | null } | null = null;
-  let listIndent: number | null = null;
-  for (let start = 0; start < text.length;) {
-    const newline = text.indexOf('\n', start);
-    const end = newline < 0 ? text.length : newline + 1;
-    const line = text.slice(start, newline < 0 ? end : newline).replace(/\r$/, '');
-    const quotePrefix = /^(?:[ \t]*>[ \t]?)+/.exec(line)?.[0] ?? '';
-    const quoteDepth = (quotePrefix.match(/>/g) ?? []).length;
-    const content = line.slice(quotePrefix.length);
-    const indent = indentColumns(content);
-    const body = line.replace(/^(?:[ \t]*(?:>|[-*+]|\d{1,9}[.)])(?=[ \t]|$)[ \t]?)*/, '');
-    // Marked ends a nested fence when its quote/list container ends, even
-    // without closing backticks. The first outside line may open another fence.
-    if (fence && (quoteDepth < fence.quoteDepth ||
-        (fence.listIndent !== null && content.trim() && indent < fence.listIndent))) {
-      ranges.push({ start: fence.start, end: start });
-      fence = null;
-    }
-    if (fence) {
-      // A top-level fence cannot be closed by a list/blockquote-prefixed line.
-      const close = (fence.nested ? /^[ \t]*(`{3,}|~{3,})[ \t]*$/ : /^ {0,3}(`{3,}|~{3,})[ \t]*$/)
-        .exec(fence.nested ? body : line)?.[1];
-      if (close && close[0] === fence.marker && close.length >= fence.width) {
-        ranges.push({ start: fence.start, end });
-        fence = null;
-      }
-    } else {
-      const marker = /^ {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]+/.exec(content);
-      if (marker) listIndent = indentColumns(marker[0].replace(/\S/g, ' '));
-      else if (content.trim() && listIndent !== null && indent < listIndent) listIndent = null;
-      const nested = body.length !== line.length;
-      const open = (nested ? /^[ \t]*(`{3,}|~{3,})(.*)$/ : /^ {0,3}(`{3,}|~{3,})(.*)$/).exec(body);
-      if (open && (open[1]![0] === '~' || !open[2]!.includes('`'))) {
-        fence = { start, marker: open[1]![0]!, width: open[1]!.length, nested, quoteDepth, listIndent };
-      }
-    }
-    start = end;
-  }
-  if (fence) ranges.push({ start: fence.start, end: text.length });
-  return ranges;
-}
-
-/** Protect both fenced blocks and inline backtick spans before inserting chart slots. */
-function markdownCodeRanges(text: string): Array<{ start: number; end: number }> {
-  const fences = fencedMarkdownRanges(text);
-  const ranges = [...fences];
-  // Four-space and tab-indented blocks are code too. A blank line can continue
-  // one, but an unindented nonblank line ends it before its own content.
-  let indentedStart: number | null = null;
-  let afterBlank = true;
-  let fenceIndex = 0;
-  let listContentIndent: number | null = null;
-  for (let at = 0; at < text.length;) {
-    const newline = text.indexOf('\n', at);
-    const end = newline < 0 ? text.length : newline + 1;
-    const line = text.slice(at, newline < 0 ? end : newline).replace(/\r$/, '');
-    while (fences[fenceIndex] && at >= fences[fenceIndex]!.end) fenceIndex++;
-    if (fences[fenceIndex] && at >= fences[fenceIndex]!.start) {
-      // A top-level fence at a shallower column ends the preceding list.
-      // Otherwise its old offset makes following four-space code look like
-      // a list continuation; nested fences must keep their list context.
-      if (at === fences[fenceIndex]!.start && listContentIndent !== null &&
-          indentColumns(line) < listContentIndent && /^ {0,3}(`{3,}|~{3,})/.test(line)) {
-        listContentIndent = null;
-      }
-      if (indentedStart !== null) ranges.push({ start: indentedStart, end: at });
-      indentedStart = null;
-      // A completed fenced block is a block boundary, even without an empty
-      // line: Marked accepts an indented code block immediately after it.
-      afterBlank = end === fences[fenceIndex]!.end;
-    } else {
-      // Indented list content begins at the marker's text column. Its code
-      // blocks need *another* four columns, unlike a plain four-space continuation.
-      const marker = /^([ ]*)(?:[-*+]|\d{1,9}[.)])([ \t]+)/.exec(line);
-      const codeIndent = listContentIndent !== null && indentColumns(line) >= listContentIndent + 4;
-      if (marker && !(codeIndent && (afterBlank || indentedStart !== null)) && (marker[1]!.length <= 3 ||
-          (listContentIndent !== null && indentColumns(marker[1]!) >= listContentIndent))) {
-        listContentIndent = indentColumns(marker[0].replace(/\S/g, ' '));
-      } else if (line.trim() && listContentIndent !== null && indentColumns(line) < listContentIndent) {
-        listContentIndent = null;
-      }
-      if (indentedStart === null) {
-        if (afterBlank && CODE_LINE.test(line) &&
-            (listContentIndent === null || indentColumns(line) >= listContentIndent + 4)) indentedStart = at;
-      } else if (line.trim() && (listContentIndent === null
-        ? !CODE_LINE.test(line) : indentColumns(line) < listContentIndent + 4)) {
-        ranges.push({ start: indentedStart, end: at });
-        indentedStart = null;
-      }
-      afterBlank = !line.trim();
-    }
-    at = end;
-  }
-  if (indentedStart !== null) ranges.push({ start: indentedStart, end: text.length });
-  let start = 0;
-  for (const fence of [...fences, { start: text.length, end: text.length }]) {
-    const outside = text.slice(start, fence.start);
-    // Inline code cannot span paragraph breaks: unmatched ticks in separate paragraphs
-    // must not suppress a valid chart between them.
-    for (const span of outside.matchAll(/(?<![`\\])(`+)(?!`)(?:(?!\n[ \t]*\n)[\s\S])*?(?<!`)\1(?!`)/g)) {
-      const at = start + span.index;
-      ranges.push({ start: at, end: at + span[0].length });
-    }
-    start = fence.end;
-  }
-  return ranges;
 }
 
 export function renderedMarkdown(source: string, capture?: StoredText, references?: readonly MessageReference[]): HTMLElement {
@@ -10217,6 +10096,8 @@ export function initChat(next: Deps): void {
       const known = new Set(projects.map(row => row.id));
       const project = await run(asked ? api.addProject({ chatgpt: 'later' }) : api.addProject());
       if (project) { showAddedProject(project, generation); offerChatgptProject(project, known, asked); }
+    } catch (error) {
+      toast(t(error instanceof Error ? error.message : String(error)));
     } finally { button.disabled = false; }
   };
   // The composer's Share a folder means a folder on this computer: straight to the picker.

@@ -243,9 +243,10 @@ app.whenReady().then(async () => {
       await js(`document.getElementById('setupProfile').scrollIntoView({block:'center'})`);
       await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
       await js(`document.getElementById('setupProfile').click()`);
-      // A slow runner applies the menu's flip a frame or two after it opens (CI, 2026-10-26: measured
-      // below the viewport two frames in). Wait until its place holds still for two frames, at most ~30.
-      await js(`new Promise(r=>{const m=document.getElementById('setupProfileMenu');let last='',same=0,n=0;const tick=()=>{const b=m.getBoundingClientRect();const now=[b.top,b.left,b.bottom,b.right].join();same=now===last?same+1:0;last=now;if(same>=2||++n>=30)r();else requestAnimationFrame(tick);};requestAnimationFrame(tick);})`);
+      // A slow runner can retain the initial below-viewport placement for several frames before
+      // anchor positioning flips it. Stable but offscreen is not ready. Wait for the original
+      // containment condition to hold still; a menu that never fits still fails after ~30 frames.
+      await js(`new Promise(r=>{const m=document.getElementById('setupProfileMenu');let last='',same=0,n=0;const tick=()=>{const b=m.getBoundingClientRect();const now=[b.top,b.left,b.bottom,b.right].join();same=now===last?same+1:0;last=now;const fits=b.width>0&&b.left>=0&&b.top>=0&&b.right<=innerWidth&&b.bottom<=innerHeight;if((fits&&same>=2)||++n>=30)r();else requestAnimationFrame(tick);};requestAnimationFrame(tick);})`);
       const profileBounds = await js(`(() => {const r=document.getElementById('setupProfileMenu').getBoundingClientRect();return {width:r.width,left:r.left,right:r.right,top:r.top,bottom:r.bottom,viewport:[innerWidth,innerHeight],open:document.getElementById('setupProfileMenu').matches(':popover-open')}})()`);
       assert.ok(profileBounds.width>0 && profileBounds.right<=profileBounds.viewport[0] && profileBounds.left>=0 && profileBounds.top>=0 && profileBounds.bottom<=profileBounds.viewport[1],JSON.stringify({width,zoom,profileBounds}));
       assert.equal(await js(`document.querySelector('[data-remove-profile-id]').disabled`),true);

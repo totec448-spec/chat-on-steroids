@@ -2577,6 +2577,67 @@ describe('desktop input delivery and helper ownership', () => {
   });
 
   it.each([
+    ['a renamed app by its proven id', [{ appId: 'asdk_app_win_plugins', name: 'Previous name' }], [
+      { name: '作業用 Tools', path: 'app://asdk_app_win_plugins' }
+    ], { path: 'app://asdk_app_win_plugins', name: '作業用 Tools' }, true],
+    ['the proven app instead of a same-named different app', [{ appId: 'asdk_app_win_plugins', name: 'Previous name' }], [
+      { name: 'Chat On Steroids Plugins (Windows)', path: 'app://asdk_app_other_plugins' },
+      { name: '作業用 Tools', path: 'app://asdk_app_win_plugins' }
+    ], { path: 'app://asdk_app_win_plugins', name: '作業用 Tools' }, true],
+    ['Core when only a same-named different id is listed', [{ appId: 'asdk_app_win_plugins', name: 'Previous name' }], [
+      { name: 'Chat On Steroids Plugins (Windows)', path: 'app://asdk_app_other_plugins' }
+    ], { path: 'app://asdk_app_win_core', name: 'Chat On Steroids Core (Windows)' }, true],
+    ['Core when two proven Plugins apps are listed', [
+      { appId: 'asdk_app_win_plugins', name: 'Chat On Steroids Plugins (Windows)' },
+      { appId: 'asdk_app_older_plugins', name: 'Older tools' }
+    ], [
+      { name: 'Chat On Steroids Plugins (Windows)', path: 'app://asdk_app_win_plugins' },
+      { name: 'Older tools', path: 'app://asdk_app_older_plugins' }
+    ], { path: 'app://asdk_app_win_core', name: 'Chat On Steroids Core (Windows)' }, true],
+    ['nothing from default names before this installation names its apps', [], [
+      { name: 'Chat On Steroids Plugins', path: 'app://asdk_app_other_plugins' }
+    ], null, false],
+    ['a proven id before configured names arrive', [{ appId: 'asdk_app_win_plugins', name: 'Previous name' }], [
+      { name: '作業用 Tools', path: 'app://asdk_app_win_plugins' }
+    ], { path: 'app://asdk_app_win_plugins', name: '作業用 Tools' }, false]
+  ] as const)('resolves the managed Plugins mention to %s', async (_case, plugins, candidates, expected, namesKnown) => {
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      status: () => ({ connected: true, paired: true, port: 8765, pending: 0,
+        ...(namesKnown ? { connectorNames: {
+          core: 'Chat On Steroids Core (Windows)', desktop: 'Chat On Steroids Desktop (Windows)', plugins: 'Chat On Steroids Plugins (Windows)' } } : {}),
+        connectorApps: { core: [], desktop: [], plugins } }),
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, activeTurnId: null,
+        userAnchors: [], mentionCore: true, mentionPlugins: true } }),
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack ? { ok: true } : { input: claimed({ automation: 'off' }) } })
+    });
+    await live.hook.pullActivity(); await settle();
+    live.window.dispatchEvent(new live.window.MessageEvent('message', {
+      source: live.window as unknown as Window, origin: 'https://chatgpt.com',
+      data: { type: 'cos-core-mention', candidates: [
+        { name: 'Chat On Steroids Core (Windows)', path: 'app://asdk_app_win_core' }, ...candidates
+      ], pluginList: true }
+    }));
+    let sentMentions: unknown[] = [];
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      sentMentions = [...live!.document.querySelectorAll('#prompt-textarea [app-mention-path]')].map(token => ({
+        path: token.getAttribute('app-mention-path'), name: token.getAttribute('app-mention-display-name')
+      }));
+      userTurn(live!.document, 'proven-plugin-mention-user', text, { sent: false });
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+    });
+    const adapter = (live.window as any).CLF_DOM;
+    const send = adapter.send;
+    const mentions: unknown[] = [];
+    adapter.send = (options: { mention?: unknown }) => { mentions.push(options.mention ?? null); return send(options); };
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA })).toEqual({ ok: true });
+    expect(mentions).toEqual([expected]);
+    expect(sentMentions).toEqual(expected ? [expected] : []);
+    expect(live.sent.filter(message => message.ack)).toEqual([
+      expect.objectContaining({ conversationId: chatA, messageId: 'm-proven-plugin-mention-user' })
+    ]);
+  });
+
+  it.each([
     ['the user\'s own prompt', {}, null],
     ['Goal\'s helper', { purpose: 'decision', lifetime: 'temporary-planner' }, null]
   ] as const)('follows the mention setting when it is off: %s (#952)', async (_case, extra, expected) => {
@@ -3207,7 +3268,8 @@ describe('desktop input delivery and helper ownership', () => {
   // chat stopped for good. A resume goes on like a wake.
   it.each(['revive', 'resume', 'worker'] as const)('types a %s only when its model is confirmed, except a wake or a resume', async type => {
     const commandId = `cmd-wake-model-${type}`;
-    const selection = vi.fn(async () => false);
+    const diagnostic = { phase: 'select-effort', outcome: 'pending' };
+    const selection = vi.fn(async (_model, _effort, _current, report) => { report(diagnostic); return false; });
     live = await harness(type === 'revive' ? `https://chatgpt.com/c/${chatA}?clf=${commandId}` : `https://chatgpt.com/?clf=${commandId}`, {
       redeem: () => ({ ok: true, command: { id: commandId, type, text: 'Now do the second half.', agent: 'worker-1',
         model: 'gpt-5.6-sol', reasoningEffort: 'high', ...(type === 'revive' ? { conversationId: chatA } : {}) } })
@@ -3220,12 +3282,14 @@ describe('desktop input delivery and helper ownership', () => {
     await settle();
     await new Promise(resolve => globalThis.setTimeout(resolve, 300));
     await settle();
-    expect(selection).toHaveBeenCalledWith('gpt-5.6-sol', 'high', expect.any(Function));
-    const steps = live.sent.filter(message => message.type === 'command_step').map(message => message.step);
+    expect(selection).toHaveBeenCalledWith('gpt-5.6-sol', 'high', expect.any(Function), expect.any(Function));
+    expect(live.sent.find(message => message.type === 'command_step' && message.step === 'model-diagnostic')?.modelSelection).toEqual({ ...diagnostic, attempt: 1 });
+    const steps = live.sent.filter(message => message.type === 'command_step' && message.step !== 'model-diagnostic').map(message => message.step);
     const modelFailure = (message: Record<string, any>) => message.type === 'ack' && String(message.error ?? '').includes('model or reasoning');
     if (type !== 'worker') {
       // On past the model, typed, not refused for it (this fixture page never shows the reply).
       expect(steps.slice(0, 5)).toEqual(['composer', 'model', 'model-unconfirmed', 'composer-after-model', 'inserting']);
+      expect(live.sent.find(message => message.type === 'command_step' && message.step === 'model-unconfirmed')?.modelSelection).toEqual({ ...diagnostic, attempt: 1 });
       expect(live.sent.some(modelFailure)).toBe(false);
     } else {
       expect(steps).toEqual(['composer', 'model']);

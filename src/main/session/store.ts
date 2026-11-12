@@ -43,7 +43,7 @@ import type {
 import type { WorkerAssignmentSummary } from '../../shared/session.js';
 import { APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT } from '../../shared/approval-wait.js';
 import { continuationMarkerOf, DEFAULT_RECORDING_STORAGE_GIB, eventTokens, MAX_TOOL_RESULT_TOKENS, normalizedToolOutcome, RECORDING_STORAGE_LIMITS_GIB, storedTextTokens, workSequence, UNATTRIBUTED_SESSION_TITLE } from '../../shared/session.js';
-import { applyTurnIdentity, authoredTimeOf, chronological, injectedUserMessage, positionOf, projectTimeline, residenceOf,
+import { applyTurnIdentity, authoredTimeOf, chronological, injectedUserMessage, positionOf, projectTimeline, residenceOf, settledPositionOf,
   recordedRequestTurn, responseTurnId, type Chronological, type TimelineTurns } from '../../shared/chronology.js';
 import { automaticTitle, firstTitleMessage, legacyContextTitle, legacyLabelPending, projectPageTitle, providerTitleIgnored, refreshUserTitle, userTitle } from './title.js';
 import { agentPlanSchema, agentPlanUpdateSchema, MAX_AGENT_PLAN_BYTES, type AgentPlan, type AgentPlanUpdate } from '../../shared/agent-plan.js';
@@ -788,9 +788,29 @@ async function readCanonicalMessages(id: string, aliasesCollapsed?: () => void):
       seq = Math.max(seq, event.seq);
       out.delete(key);
     }
-    out.set(firstKey, { ...latest, messageId: first.messageId, origin: first.origin ?? first.seq,
+    const knownSettlements = group.map(([, event]) => settledPositionOf(event)).filter((at): at is number => at !== undefined);
+    const firstTerminal = group.find(([, event]) => event.final === true || event.state === 'final')?.[1];
+    const firstSettlement = settledPositionOf(first);
+    const settledAtSeq = firstSettlement !== undefined ? Math.min(...knownSettlements)
+      : first.final === false && first.state !== 'final'
+        ? knownSettlements.length ? Math.min(...knownSettlements) : firstTerminal ? positionOf(firstTerminal) : undefined
+        : undefined;
+    out.set(firstKey, { ...latest, messageId: first.messageId, origin: first.origin ?? first.seq, settledAtSeq,
       time: first.time, seq, turnId: group.find(([, event]) => event.turnId)?.[1].turnId,
       ...(group.some(([, event]) => event.goalEligible === true) ? { goalEligible: true } : {}) });
+  }
+  for (const [key, event] of out) {
+    if (event.kind !== 'user_message' || !event.replaces || !event.parentId || event.replacesConfirmed === true) continue;
+    const replaced = out.get(`user_message\u0000${event.replaces}`);
+    const parent = out.get(`assistant_message\u0000${event.parentId}`) ?? out.get(providers.get(event.parentId)?.[0]?.[0] ?? '');
+    if (replaced?.kind === 'user_message' && parent?.kind === 'assistant_message' &&
+        (parent.final === true || parent.state === 'final')) {
+      const parentSettledAt = settledPositionOf(parent);
+      if (parentSettledAt !== undefined && parentSettledAt > positionOf(replaced) && parentSettledAt < positionOf(event)) {
+        const { replaces: _replaces, ...clean } = event;
+        out.set(key, clean);
+      }
+    }
   }
   return out;
 }
@@ -1389,7 +1409,7 @@ function continuesFinalText(previous: StoredText, next: StoredText): boolean {
 export function upsertMessageEvent(
   sessionId: string,
   event: NewMessageEvent,
-  options: { preferTime?: boolean; work?: boolean } = {}
+  options: { preferTime?: boolean; work?: boolean; replacementOnly?: true } = {}
 ): Promise<{ event: MessageEvent; changed: boolean; contentChanged: boolean }> {
   const directKey = messageKey(event as MessageEvent);
   if (!directKey) throw new Error('Canonical message update requires ChatGPT messageId');
@@ -1407,6 +1427,12 @@ export function upsertMessageEvent(
       const key = !entry.messages.has(directKey) && providerMatches.length === 1 ? providerMatches[0]![0] : directKey;
       const candidate = entry.messages.get(key);
       const previous = candidate?.kind === 'tool_call' ? undefined : candidate;
+      // Confirmation follows a history read. A native revision may have queued since
+      // that snapshot; apply only its replacement evidence to the current user row.
+      if (options.replacementOnly && previous?.kind === 'user_message' && event.kind === 'user_message') {
+        const { seq: _seq, ...current } = previous;
+        event = { ...current, replaces: event.replaces, replacesConfirmed: event.replacesConfirmed };
+      }
       // A changed provider timestamp caused this alias; it is not a correction of
       // the original anchor. Same-key DOM-to-Fiber timestamp promotion still applies.
       const preferTime = options.preferTime === true && key === directKey;
@@ -1488,7 +1514,9 @@ export function upsertMessageEvent(
                 reaction: event.reaction === undefined ? previous.reaction : event.reaction,
                 // Where it sits in ChatGPT's tree, and which version it replaced, do not change once known.
                 parentId: previous.parentId ?? event.parentId,
-                replaces: previous.replaces ?? event.replaces,
+                replaces: previous.replacesConfirmed === true ? previous.replaces
+                  : event.replacesConfirmed === true ? event.replaces : previous.replaces ?? event.replaces,
+                ...(previous.replacesConfirmed === true || event.replacesConfirmed === true ? { replacesConfirmed: true as const } : {}),
                 automatic: previous.automatic ?? event.automatic,
                 // App-owned originals/previews retain their outbox identity when the
                 // provider later observes different native attachment ids for that send.
@@ -1544,7 +1572,7 @@ export function upsertMessageEvent(
             previous.resolvedModel === nextEvent.resolvedModel &&
             JSON.stringify(previous.references) === JSON.stringify(nextEvent.references))) &&
         (nextEvent.kind !== 'user_message' || previous.kind !== 'user_message' ||
-          (nextEvent.reaction === previous.reaction && nextEvent.parentId === previous.parentId && nextEvent.replaces === previous.replaces && nextEvent.automatic === previous.automatic && nextEvent.inputId === previous.inputId && nextEvent.authoredText === previous.authoredText && nextEvent.wireTokenEstimate === previous.wireTokenEstimate && nextEvent.inputDelivery === previous.inputDelivery && JSON.stringify(nextEvent.assets) === JSON.stringify(previous.assets) && JSON.stringify(nextEvent.retiredImageAssetIds) === JSON.stringify(previous.retiredImageAssetIds) && JSON.stringify(nextEvent.attachments) === JSON.stringify(previous.attachments))) &&
+          (nextEvent.reaction === previous.reaction && nextEvent.parentId === previous.parentId && nextEvent.replaces === previous.replaces && nextEvent.replacesConfirmed === previous.replacesConfirmed && nextEvent.automatic === previous.automatic && nextEvent.inputId === previous.inputId && nextEvent.authoredText === previous.authoredText && nextEvent.wireTokenEstimate === previous.wireTokenEstimate && nextEvent.inputDelivery === previous.inputDelivery && JSON.stringify(nextEvent.assets) === JSON.stringify(previous.assets) && JSON.stringify(nextEvent.retiredImageAssetIds) === JSON.stringify(previous.retiredImageAssetIds) && JSON.stringify(nextEvent.attachments) === JSON.stringify(previous.attachments))) &&
         (previous.turnId ?? undefined) === settledTurnId &&
         (nextEvent.agent === undefined || previous.agent === nextEvent.agent) &&
         (!preferTime || previous.time === nextEvent.time)
@@ -1564,7 +1592,10 @@ export function upsertMessageEvent(
           (previous.kind === 'assistant_message' && (previous.final === true || previous.state === 'final') === nextEvent.final))
           ? workSequence(previous) : entry.nextSeq,
         ...(nextEvent.kind === 'assistant_message' && nextEvent.final
-          ? { finalContentSeq: sameMessage && previous?.kind === 'assistant_message' &&
+          ? { settledAtSeq: previous?.kind === 'assistant_message'
+                ? settledPositionOf(previous) ?? (previous.final === false && previous.state !== 'final' ? entry.nextSeq : undefined)
+                : undefined,
+              finalContentSeq: sameMessage && previous?.kind === 'assistant_message' &&
                 (previous.final === true || previous.state === 'final')
               // Old records do not distinguish a content revision from an HTML update.
               // Keep their first anchor until genuinely new final content is observed.
