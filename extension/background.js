@@ -1244,7 +1244,8 @@ async function call(path, init = {}, retried = false) {
     const got = await provision();
     if (!got.ok) return { ok: false, status: 401, error: got.error || 'not_paired' };
   }
-  const { timeoutMs = REQUEST_TIMEOUT_MS, ...rest } = init;
+  const { timeoutMs = REQUEST_TIMEOUT_MS, isCurrent, ...rest } = init;
+  if (isCurrent && !isCurrent()) return { ok: false, status: 0, error: 'stale_document' };
   try {
     const response = await fetchBounded(
       `http://127.0.0.1:${found.port}${path}`,
@@ -4233,6 +4234,36 @@ function serializeTab(tab, operation) {
   return tracked;
 }
 
+/** Best-effort telemetry: one HTTP flight and one coalesced successor per tab, never tab-queue I/O. */
+const modelDiagnosticFlights = new Map();
+function queueModelDiagnostic(body, source) {
+  if (!ownsDocument(source)) return false;
+  const report = { body, source, intent: connectionEpoch }, active = modelDiagnosticFlights.get(source.tab);
+  if (active) {
+    const prior = active.next || active.current, before = prior.body.modelSelection, after = body.modelSelection;
+    if (prior.intent === report.intent && prior.source.documentId === source.documentId &&
+        prior.source.navigationEpoch === source.navigationEpoch && prior.body.id === body.id && prior.body.client === body.client &&
+        before && after && (before.attempt > after.attempt ||
+          (before.attempt === after.attempt && before.outcome !== 'pending' && after.outcome === 'pending'))) return true;
+    active.next = report;
+    return true;
+  }
+  const flight = { current: null, next: report };
+  modelDiagnosticFlights.set(source.tab, flight);
+  void (async () => {
+    try {
+      while (flight.next) {
+        const next = flight.current = flight.next;
+        flight.next = null;
+        const isCurrent = () => next.intent === connectionEpoch && !disconnected && ownsDocument(next.source);
+        if (!isCurrent()) continue;
+        await call('/commands/step', { method: 'POST', body: JSON.stringify(next.body), isCurrent });
+      }
+    } finally { modelDiagnosticFlights.delete(source.tab); }
+  })().catch(() => undefined);
+  return true;
+}
+
 async function currentConversationDocument(source, conversationId) {
   if (!conversationId || !ownsDocument(source)) return false;
   const tab = await chrome.tabs.get(source.tab).catch(() => null);
@@ -5142,12 +5173,16 @@ const HANDLERS = {
     void call('/page-note', { method: 'POST', body: JSON.stringify(body) }).catch(() => undefined);
     return { ok: true };
   },
-  async command_step(message) {
+  async command_step(message, _sender, source) {
     const id = typeof message.id === 'string' ? message.id.slice(0, 128) : '';
     const step = typeof message.step === 'string' ? message.step.slice(0, 32) : '';
     if (!id || !step) return { ok: false };
-    const result = await call('/commands/step', { method: 'POST',
-      body: JSON.stringify({ id, client: String(message.client || '').slice(0, 64), step }) });
+    const body = { id, client: String(message.client || '').slice(0, 64), step,
+      // The app validates the fixed diagnostic shape; old apps ignore this optional field.
+      ...(message.modelSelection && typeof message.modelSelection === 'object' && JSON.stringify(message.modelSelection).length <= 8192
+        ? { modelSelection: message.modelSelection } : {}) };
+    if (step === 'model-diagnostic') return { ok: queueModelDiagnostic(body, source) };
+    const result = await call('/commands/step', { method: 'POST', body: JSON.stringify(body) });
     return { ok: result.ok === true };
   },
   /** The marked page asking for the one command it was opened for. */
