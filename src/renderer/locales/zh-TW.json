@@ -3910,5 +3910,6 @@
   "Compact & Resume holds up": "壓縮並繼續更穩定",
   "A page reload in a Project no longer makes it fail every time.": "在專案中重新載入頁面不再每次都失敗。",
   "Skills only when wanted": "技能僅在需要時使用",
-  "A Skill is not chosen when you say not to use it.": "你說不要使用時，不會選中該技能。"
+  "A Skill is not chosen when you say not to use it.": "你說不要使用時，不會選中該技能。",
+  "Browser {0} was not found. Install it or select another browser in Settings, then retry model discovery.": "找不到瀏覽器 {0}。請安裝，或在設定中選擇其他瀏覽器，然後重新搜尋模型。"
 }

@@ -7,6 +7,31 @@ const renderer = arabic as Record<string, string>;
 const preserved = (text: string) => (text.match(/\{\d+\}|\$[1-9]/g) ?? []).sort();
 
 describe('Arabic localization safety regression', () => {
+  it('names the actual localized trust/release actions when tool access is refused', () => {
+    const trust = renderer['Trust chat'];
+    const release = renderer['Release chat'];
+    const errors = [
+      "Only chats you trust can use this computer's tools. Existing chats start untrusted: open a chat's ⋯ menu in the sidebar and choose Trust chat. Workers and resumed chats follow the chat they came from. Calls the app can't link to a chat are refused.",
+      "A tool call from an untrusted chat was refused. To allow it, open this chat's ⋯ menu in the sidebar (or right-click its row) and choose Trust chat.",
+      "A tool call from a worker whose main chat is not currently allowed was refused. Open that main chat's ⋯ menu in the sidebar and choose Trust chat if it is untrusted, or Release chat if it is blocked.",
+      "A tool call from an app-created worker was refused because the main chat that started it is not proven yet. Return to that main chat in the sidebar; once its row is there, open its ⋯ menu and choose Trust chat, or Release chat if it is blocked, then retry after the worker is attached or recovered there."
+    ];
+    for (const key of errors) {
+      expect(renderer[key], key).toContain(trust);
+      expect(renderer[key], key).not.toContain('«Trust chat»');
+    }
+    for (const key of errors.slice(2)) expect(renderer[key], key).toContain(release);
+    expect(renderer['A project is a folder you approve, and its chats start there.']).not.toContain('مشاركت');
+  });
+  it('preserves distinct Arabic counted-minute/hour wording and technical accessibility labels', () => {
+    expect(renderer['After {0} minutes of work|few']).toContain('دقائق');
+    expect(renderer['every {0} hours|few']).toContain('ساعات');
+    expect(renderer['After {0} minutes of work|two']).not.toBe(renderer['After {0} minutes of work|few']);
+    expect(renderer['every {0} hours|two']).not.toBe(renderer['every {0} hours|few']);
+    expect(extension.content_compact_cancel_aria?.message).toContain('عملية');
+    expect(extension.popup_overwrite_chatgpt?.message).toContain('أدوات');
+    expect(extension.content_goal_delivery_only_finish?.message).toContain('Session Finish');
+  });
   it('does not silently change substitutions or leave HTML entities in UI strings', () => {
     for (const [key, value] of Object.entries(renderer)) {
       expect(preserved(value), key).toEqual(preserved(key.replace(/\|(zero|one|two|few|many)$/, '')));

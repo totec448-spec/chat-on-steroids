@@ -132,7 +132,7 @@
     "message": "إلغاء ضغط المحادثة"
   },
   "content_compact_cancel_aria": {
-    "message": "إلغاء ضغط المحادثة واستئنافها"
+    "message": "إلغاء عملية «ضغط المحادثة واستئنافها»"
   },
   "content_compact_cancel_failed": {
     "message": "تعذّر إلغاء ضغط المحادثة."
@@ -402,10 +402,10 @@
     "message": "$1: $2"
   },
   "content_goal_delivery_after_turn_finish": {
-    "message": "عند انتهاء الجلسة أو بعد انتهاء الدور"
+    "message": "عند إشارة Session Finish أو بعد انتهاء الدور"
   },
   "content_goal_delivery_only_finish": {
-    "message": "عند انتهاء الجلسة فقط"
+    "message": "عند إشارة Session Finish فقط"
   },
   "content_goal_loop_off": {
     "message": "وضعا الهدف والتكرار معطّلان"
@@ -870,7 +870,7 @@
     "message": "علامة التبويب"
   },
   "popup_detail_tab_value": {
-    "message": "$1 · الفترة $2"
+    "message": "$1 · الجيل $2"
   },
   "popup_detail_turn": {
     "message": "الدور"
@@ -885,7 +885,7 @@
     "message": "لا يوجد سجل"
   },
   "popup_overwrite_chatgpt": {
-    "message": "الكتابة فوق محتوى ChatGPT"
+    "message": "استبدال صفوف أدوات ChatGPT"
   },
   "popup_owner_confirmed": {
     "message": "تم التأكد من المالك"
@@ -1014,7 +1014,7 @@
     "message": "لا يوجد بعد"
   },
   "popup_status_not_attached": {
-    "message": "غير مرفق"
+    "message": "غير مرتبط"
   },
   "popup_status_ok": {
     "message": "سليم"

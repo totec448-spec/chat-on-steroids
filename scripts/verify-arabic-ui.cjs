@@ -27,7 +27,9 @@ app.whenReady().then(async () => {
   const server = await createServer({
     configFile:false,
     root:path.join(root,'src/renderer'),
-    server:{host:'127.0.0.1',port:0},
+    // Worktrees may link node_modules outside the repo. Explicitly allow its
+    // real path or the icon font silently 403s and screenshots show tofu.
+    server:{host:'127.0.0.1',port:0,fs:{allow:[root,fs.realpathSync(path.join(root,'node_modules'))]}},
     plugins:[{name:'arabic-test-fixture',configureServer(vite){
       vite.middlewares.use('/fixture-arabic.html',async (_req,res)=>{
         const html = withoutScripts(fs.readFileSync(path.join(root,'src/renderer/index.html'),'utf8'))
@@ -47,6 +49,12 @@ app.whenReady().then(async () => {
     const evalJS=s=>win.webContents.executeJavaScript(s);
     for(let i=0;i<100 && !(await evalJS('window.__ready === true'));i++) await new Promise(r=>setTimeout(r,30));
     assert.equal(await evalJS('window.__ready === true'),true,'Arabic fixture must initialize');
+    const font=await evalJS(`document.fonts.ready.then(() => ({
+      loaded:[...document.fonts].some(face => face.family === 'CoS Phosphor' && face.status === 'loaded'),
+      family:getComputedStyle(document.querySelector('.ph')).fontFamily
+    }))`);
+    assert.ok(font.loaded && font.family.includes('CoS Phosphor'),
+      'Arabic visual QA must load the real Phosphor font, not screenshot missing-icon squares: '+JSON.stringify(font));
     assert.equal(await evalJS('document.documentElement.dir'),'rtl');
     assert.equal(await evalJS('document.documentElement.lang'),'ar');
     assert.equal(await evalJS('document.getElementById("newChat").textContent.trim()'),'محادثة جديدة');
@@ -56,6 +64,10 @@ app.whenReady().then(async () => {
         app.dataset.screen=${JSON.stringify(name==='chat'?'chat':'settings')};
         for(const panel of document.querySelectorAll('main .panel')) panel.classList.toggle('is-active',panel.dataset.panel===${JSON.stringify(name)});
       })()`);
+      // Screenshots must reflect the newly activated panel, not the previous
+      // compositor frame. Hidden Electron windows can capture before a paint.
+      await evalJS('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+      await new Promise(resolve => setTimeout(resolve, 65));
     };
     const screens=['chat','appearance','setup','home','general','plugins','usage','activity','scheduled','skills','pets'];
     for(const width of [1280,900,760]){
@@ -90,6 +102,64 @@ app.whenReady().then(async () => {
           (await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());
       }
     }
+    // Arabic visual matrix in the light palette. Each panel is settled before
+    // capture, and sidebar placement/overflow must remain valid at every width.
+    await evalJS("document.documentElement.dataset.theme='light'");
+    for(const width of [1280,900,760]){
+      win.setSize(width,820);
+      for(const name of screens){
+        await setPanel(name);
+        const m=await evalJS(`(() => {
+          const sidebar=document.getElementById('sidebar').getBoundingClientRect();
+          const panel=document.querySelector('.panel.is-active').getBoundingClientRect();
+          return {viewport:innerWidth,bodyWidth:document.documentElement.scrollWidth,
+            sidebarLeft:sidebar.left,panelLeft:panel.left,panelRight:panel.right,
+            theme:document.documentElement.dataset.theme,dir:document.documentElement.dir};
+        })()`);
+        assert.equal(m.theme,'light');
+        assert.equal(m.dir,'rtl');
+        assert.ok(m.bodyWidth<=m.viewport+2 && m.sidebarLeft>=m.viewport/2-8,
+          `Light RTL page or sidebar overflow at ${width} ${name}: ${JSON.stringify(m)}`);
+        assert.ok(m.panelLeft>=-2 && m.panelRight<=m.viewport+2,
+          `Light RTL panel overflow at ${width} ${name}: ${JSON.stringify(m)}`);
+        fs.writeFileSync(path.join(output,`arabic-light-${name}-${width}.png`),
+          (await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());
+      }
+    }
+    await evalJS("document.documentElement.dataset.theme='dark'");
+    // Long Arabic labels must survive browser zoom, not just window resizing.
+    // Only the main flow panels are sampled here; the full light/dark/width
+    // matrix above already covers all 11 sections at 100% zoom.
+    for(const zoom of [1.25,1.5]){
+      win.webContents.setZoomFactor(zoom);
+      for(const width of [1280,900,760]){
+        win.setSize(width,820);
+        for(const name of ['chat','general','setup','appearance','plugins']){
+          await setPanel(name);
+          const m=await evalJS(`(() => {
+            const app=document.querySelector('.app').getBoundingClientRect();
+            const sidebar=document.getElementById('sidebar').getBoundingClientRect();
+            const panel=document.querySelector('.panel.is-active').getBoundingClientRect();
+            return {viewport:innerWidth,bodyWidth:document.documentElement.scrollWidth,appRight:app.right,
+              sidebarLeft:sidebar.left,panelLeft:panel.left,panelRight:panel.right};
+          })()`);
+          assert.ok(m.bodyWidth<=m.viewport+2 && m.panelLeft>=-2 && m.panelRight<=m.viewport+2,
+            `RTL zoom ${zoom} panel overflow at ${width} ${name}: ${JSON.stringify(m)}`);
+          assert.ok(m.sidebarLeft>=m.viewport/2-8,
+            `RTL zoom ${zoom} sidebar should remain on the right: ${JSON.stringify(m)}`);
+        }
+      }
+    }
+    win.webContents.setZoomFactor(1);
+    const navigation=await evalJS(`(() => Object.fromEntries(
+      ['browserContinue','browserBack','resumeLastSummary','backToChat'].map(id=>{
+        const node=document.getElementById(id).querySelector('.ph-arrow-left,.ph-arrow-right');
+        return [id,getComputedStyle(node).transform];
+      })
+    ))()`);
+    for(const id of ['browserContinue','browserBack','resumeLastSummary'])
+      assert.equal(navigation[id],'matrix(-1, 0, 0, 1, 0, 0)',`RTL ${id} navigation arrow should face inward`);
+    assert.equal(navigation.backToChat,'none','The Arabic right-sidebar return to chat still points left');
     // The real RTL composer uses a right-side sidebar. The mode popover must
     // grow inward from its trigger instead of hiding behind that sidebar.
     await setPanel('chat');

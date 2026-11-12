@@ -737,3 +737,10 @@ html[dir='rtl'] :is(code, pre, kbd, input[type='text'], input[type='url'], .mono
   unicode-bidi: isolate;
   text-align: left;
 }
+/* Raw chat/request identifiers are code-like even when rendered in copy
+   buttons or call rows. Keep UUID hyphens and numeric groups in LTR order. */
+html[dir='rtl'] :is(#d-chat, #d-req, .call .id) {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: left;
+}

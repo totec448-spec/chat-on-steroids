@@ -40,13 +40,15 @@ app.whenReady().then(async()=>{
       const file=path.join(output,'isolated-extension-'+lang+'.html');
       fs.writeFileSync(file,'<!doctype html>'+popupHtml(lang));
       await win.loadFile(file);
-      const metrics=await win.webContents.executeJavaScript("(() => { const d=document, e=d.documentElement, shell=d.querySelector('.shell'); const r=shell.getBoundingClientRect(); return {lang:e.lang,dir:e.dir,direction:getComputedStyle(shell).direction,viewport:innerWidth,scrollWidth:e.scrollWidth,popupWidth:Math.round(r.width),title:d.querySelector('h1')?.textContent,localized:d.querySelectorAll('[data-i18n]').length,cssLoaded:getComputedStyle(shell).paddingTop}; })()");
+      const metrics=await win.webContents.executeJavaScript("(() => { const d=document, e=d.documentElement, shell=d.querySelector('.shell'); const r=shell.getBoundingClientRect(); const call=d.createElement('div');call.className='call';const id=d.createElement('span');id.className='id';id.textContent='abc-123-def';call.append(id);shell.append(call);const technicalIds=['#d-chat','#d-req','.call .id'].map(sel=>{const s=getComputedStyle(d.querySelector(sel));return {selector:sel,dir:s.direction,bidi:s.unicodeBidi};});call.remove();return {lang:e.lang,dir:e.dir,direction:getComputedStyle(shell).direction,viewport:innerWidth,scrollWidth:e.scrollWidth,popupWidth:Math.round(r.width),title:d.querySelector('h1')?.textContent,localized:d.querySelectorAll('[data-i18n]').length,cssLoaded:getComputedStyle(shell).paddingTop,technicalIds}; })()");
       assert.equal(metrics.lang,lang);
       assert.equal(metrics.dir,lang==='ar'?'rtl':'ltr');
       assert.equal(metrics.direction,lang==='ar'?'rtl':'ltr');
       assert.ok(metrics.scrollWidth<=metrics.viewport,'Popup overflow '+lang+': '+JSON.stringify(metrics));
       assert.ok(metrics.localized>5,'Popup should contain localizable messages');
       assert.notEqual(metrics.cssLoaded,'0px','Popup stylesheet should load');
+      if(lang==='ar') assert.ok(metrics.technicalIds.every(item=>item.dir==='ltr'&&item.bidi==='isolate'),
+        'All raw extension IDs must be isolated from RTL: '+JSON.stringify(metrics.technicalIds));
       fs.writeFileSync(path.join(output,'extension-popup-'+lang+'.png'),
         (await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());
       console.log('PASS popup:',JSON.stringify(metrics));
