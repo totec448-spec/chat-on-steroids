@@ -1998,6 +1998,13 @@ var CLF_DOM = (() => {
    * compared without whitespace: its marker, then the fixed first sentence.
    */
   const RESUME_RESIDUE = /^\[\[CLF-RESUME:[A-Za-z0-9_-]{8,64}\]\]ContinuingaChatOnSteroidssessionthatwascompacted\./;
+  /**
+   * How the app's first message of a chat begins: its context block (src/main/agents.ts). ChatGPT keeps
+   * this one on a Project home too after it was sent from there, with the connector mention's label
+   * after it (2026-11-12): the app's own text, recognised like a brief.
+   */
+  const FIRST_MESSAGE_RESIDUE = /^\[\[COS_CONTEXT:\d{1,9}\]\]/;
+  const OWN_RESIDUE = new RegExp(`${RESUME_RESIDUE.source}|${FIRST_MESSAGE_RESIDUE.source}`);
 
   /**
    * Empties a Project home editor that holds only an earlier Compact & Resume brief (#2068).
@@ -2011,7 +2018,7 @@ var CLF_DOM = (() => {
   function clearResumeResidue() {
     // Only a brief the app typed itself, word for word, here or on an earlier page of this tab: one a person
     // added to stays (CodeRabbit on #2069). The page that typed it may be gone (#2115), so the record is stored.
-    return clearOwnResidue(RESUME_RESIDUE, text => ownBrief(text));
+    return clearOwnResidue(OWN_RESIDUE, text => ownBrief(text));
   }
 
   /**
@@ -2022,7 +2029,7 @@ var CLF_DOM = (() => {
    * of thousands of characters.
    */
   const TYPED_BRIEFS_KEY = 'clf-typed-briefs-v1';
-  const MAX_TYPED_BRIEFS = 12;
+  const MAX_TYPED_BRIEFS = 24;
   const typedBriefs = [];
   function briefFingerprint(text) {
     // cyrb53: a fast 53-bit hash. Identity, not security; two briefs sharing one is not a concern.
@@ -2042,12 +2049,20 @@ var CLF_DOM = (() => {
     } catch { return []; }
   }
   function ownBrief(text) {
-    const fingerprint = briefFingerprint(text);
-    return typedBriefs.includes(fingerprint) || storedBriefs().includes(fingerprint);
+    const known = [...typedBriefs, ...storedBriefs()];
+    if (known.includes(briefFingerprint(text))) return true;
+    // A typed first message plus the label of the mention that was added after it: exactly one of this
+    // installation's connector names, nothing else (a person's note after it keeps the text theirs).
+    const labels = connectorNames().map(compactDraft);
+    return known.some(fingerprint => {
+      const length = Number(fingerprint.split(':')[0]);
+      return Number.isInteger(length) && length > 0 && length < text.length &&
+        labels.includes(text.slice(length)) && briefFingerprint(text.slice(0, length)) === fingerprint;
+    });
   }
   function rememberTypedBrief(value) {
     const text = compactDraft(value);
-    if (!RESUME_RESIDUE.test(text)) return;
+    if (!OWN_RESIDUE.test(text)) return;
     const fingerprint = briefFingerprint(text);
     if (!typedBriefs.includes(fingerprint)) {
       typedBriefs.push(fingerprint);

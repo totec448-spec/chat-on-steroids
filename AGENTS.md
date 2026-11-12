@@ -4170,7 +4170,14 @@ header/banner wrapper, excludes transcript/extension/hidden-kept-page links and 
 visible candidate. The link alone is not readiness: the source editor must be mounted, empty,
 idle and attachment-free before the one click. Source readiness has a bounded 60-second phase;
 the native transition then gets its own bounded 12-second phase. Destination proof requires the
-exact Project home, a connected ready editor and no displayed source turns. User interaction,
+exact Project home, a connected ready editor and no displayed source turns. ChatGPT keeps the text of a
+message sent from a Project home as that home's draft and restores it on every later load, so an empty editor
+is not the rule: an editor holding only text the app typed itself is emptied first (up to three times). That
+means a Compact & Resume brief, or the first message of an app chat (its `[[COS_CONTEXT:n]]` block), unchanged,
+optionally followed by the label of one of this installation's connector names (the mention); both are
+recognised from fingerprints kept in the page's storage (`clf-typed-briefs-v1`, 24 entries). Anything a person
+added stays and the entry fails as before (2026-11-12: every Compact & Resume in a Project failed after a chat
+had been started there through the app). User interaction,
 cancellation or a foreign route revokes the attempt; no extra tab compensates for a missing result.
 When an automatic Compact & Resume's page acks `project-entry:source-ready-timeout…` or
 `…transition-timeout…` (nothing sent), the bridge releases that attempt's destination claim
