@@ -316,13 +316,13 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
     fetch, URL, URLSearchParams, AbortController, setTimeout, clearTimeout, TextEncoder, console
   });
   vm.runInContext(activeTabsSource, context);
-  vm.runInContext(`${source}\nglobalThis.testMaintenance = { load, maintain, releaseTab, serializeTab, noteTabConversation, createChatTab, authorizeDocument, ackDesktopInput, drainCommandAcks, inspectRequestedModels, desktopInput: HANDLERS.desktop_input, catalog: HANDLERS.model_catalog, events: HANDLERS.events, bind: HANDLERS.bind, closed: HANDLERS.closed, loadFailure: HANDLERS.load_failure, correlate: HANDLERS.correlate, applyRequestedBrowserPreferences };`, context);
+  vm.runInContext(`${source}\nglobalThis.testMaintenance = { load, maintain, releaseTab, serializeTab, noteTabConversation, createChatTab, authorizeDocument, ackDesktopInput, drainCommandAcks, inspectRequestedModels, desktopInput: HANDLERS.desktop_input, catalog: HANDLERS.model_catalog, events: HANDLERS.events, bind: HANDLERS.bind, closed: HANDLERS.closed, loadFailure: HANDLERS.load_failure, correlate: HANDLERS.correlate, unpair: HANDLERS.unpair, pair: HANDLERS.pair, applyRequestedBrowserPreferences };`, context);
   const api = context.testMaintenance as { releaseTab(...args: any[]): Promise<any>; serializeTab(tab: number, operation: () => Promise<any>): Promise<any>; noteTabConversation(source: any, conversationId: string): Promise<any>; applyRequestedBrowserPreferences(request: object): Promise<void>; authorizeDocument(sender: unknown, message: unknown): Promise<any>; catalog(message: unknown, sender: unknown, source: unknown): Promise<any>; load(): Promise<void>; maintain(): Promise<void>; createChatTab(url: string, background: boolean): Promise<Tab> };
   await api.load();
   Object.assign(api, { query });
   const updated = (id: number, change: object) => tabUpdated.addListener.mock.calls[0]![0](id, change, tabs.find(tab => tab.id === id));
   vm.runInContext('Object.assign(testMaintenance, { offerStopTurns, noteTabConversation, ackCommand })', context);
-  return { ...api, scripting, updated, update, advance, navigator: browserNavigator, inspectModels: (context.testMaintenance as any).inspectRequestedModels as (request: unknown, background: boolean) => Promise<void>, ackDesktopInput: (context.testMaintenance as any).ackDesktopInput as (...args: string[]) => Promise<any>, drainCommandAcks: (context.testMaintenance as any).drainCommandAcks as () => Promise<any>, desktopInput: (context.testMaintenance as any).desktopInput as (...args: any[]) => Promise<any>, events: (context.testMaintenance as any).events as (message: any, sender: any, source: any) => Promise<any>, bind: (context.testMaintenance as any).bind as (message: any, sender: any, source: any) => Promise<any>, correlate: (context.testMaintenance as any).correlate as (message: any, sender: any, source: any) => Promise<any>, closed: (context.testMaintenance as any).closed as (message: any, sender: any, source: any) => Promise<any>, loadFailure: (context.testMaintenance as any).loadFailure as (message: any, sender: any, source: any) => Promise<any>, query, create, sendMessage, tabs, fetch, windows, remove, reload, local, localSaved, saved };
+  return { ...api, scripting, updated, update, advance, navigator: browserNavigator, inspectModels: (context.testMaintenance as any).inspectRequestedModels as (request: unknown, background: boolean) => Promise<void>, ackDesktopInput: (context.testMaintenance as any).ackDesktopInput as (...args: string[]) => Promise<any>, drainCommandAcks: (context.testMaintenance as any).drainCommandAcks as () => Promise<any>, desktopInput: (context.testMaintenance as any).desktopInput as (...args: any[]) => Promise<any>, events: (context.testMaintenance as any).events as (message: any, sender: any, source: any) => Promise<any>, bind: (context.testMaintenance as any).bind as (message: any, sender: any, source: any) => Promise<any>, correlate: (context.testMaintenance as any).correlate as (message: any, sender: any, source: any) => Promise<any>, closed: (context.testMaintenance as any).closed as (message: any, sender: any, source: any) => Promise<any>, loadFailure: (context.testMaintenance as any).loadFailure as (message: any, sender: any, source: any) => Promise<any>, unpair: (context.testMaintenance as any).unpair as () => Promise<any>, pair: (context.testMaintenance as any).pair as () => Promise<any>, query, create, sendMessage, tabs, fetch, windows, remove, reload, local, localSaved, saved };
 }
 
 // 2.1.47 round: a chat tab that loaded offline in the app's background window stayed on Chrome's
@@ -2187,8 +2187,106 @@ it.each(['declined', 'unreachable'] as const)('retries a %s desktop input offer 
     expect(attempts).toBe(1);
 
     await vi.advanceTimersByTimeAsync(1500);
-    await vi.waitFor(() => expect(attempts).toBe(2));
+    await vi.waitFor(() => expect(attempts).toBe(2), { timeout: 5000 });
     expect(h.create).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('cancels a pending fast retry before it fires once the input is retired', async () => {
+  vi.useFakeTimers();
+  try {
+    const inputs = [{ id: firstId, conversationId: secondId }];
+    const h = await worker(inputs);
+    h.tabs.push({ id: 7, url: `https://chatgpt.com/c/${secondId}` });
+    h.sendMessage.mockImplementation(async (_id, message) => {
+      if (message.type === 'clf-desktop-input') return { ok: false };
+      return { ok: true, ready: true };
+    });
+
+    await h.maintain();
+    inputs.length = 0;
+    await h.maintain();
+
+    const statusCallsBeforeAdvance = h.fetch.mock.calls.filter(([url]) => new URL(url).pathname === '/status').length;
+    await vi.advanceTimersByTimeAsync(5_000);
+    const statusCallsAfterAdvance = h.fetch.mock.calls.filter(([url]) => new URL(url).pathname === '/status').length;
+    expect(statusCallsAfterAdvance).toBe(statusCallsBeforeAdvance);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it.each(['accepted', 'rejected'] as const)('does not let an obsolete %s offer clear a replacement tab retry', async outcome => {
+  vi.useFakeTimers();
+  try {
+    const inputs = [{ id: firstId, conversationId: secondId }];
+    const h = await worker(inputs);
+    h.tabs.push({ id: 7, url: `https://chatgpt.com/c/${secondId}` });
+    let resolveStale!: (value: { ok: boolean }) => void;
+    let rejectStale!: (reason?: unknown) => void;
+    const staleOffer = new Promise<{ ok: boolean }>((resolve, reject) => {
+      resolveStale = resolve;
+      rejectStale = reject;
+    });
+    let tab8Attempts = 0;
+    h.sendMessage.mockImplementation(async (tabId, message) => {
+      if (message.type !== 'clf-desktop-input') return { ok: true, ready: true };
+      if (tabId === 7) return staleOffer;
+      tab8Attempts += 1;
+      if (tab8Attempts === 1) return { ok: false };
+      inputs.length = 0;
+      return { ok: true };
+    });
+
+    await h.maintain();
+    // Tab 7 closes while its offer is still in flight; tab 8 takes over the election and declines.
+    h.tabs.splice(0, 1, { id: 8, url: `https://chatgpt.com/c/${secondId}` });
+    await h.maintain();
+    expect(tab8Attempts).toBe(1);
+
+    if (outcome === 'accepted') resolveStale({ ok: true });
+    else rejectStale(new Error('stale tab gone'));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    await vi.advanceTimersByTimeAsync(1500);
+    await vi.waitFor(() => expect(tab8Attempts).toBe(2), { timeout: 5000 });
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('resets fast desktop input retry budget when unpair disconnects and reconnects', async () => {
+  vi.useFakeTimers();
+  try {
+    const inputs = [{ id: firstId, conversationId: secondId }];
+    const h = await worker(inputs);
+    h.tabs.push({ id: 7, url: `https://chatgpt.com/c/${secondId}` });
+    h.fetch.mockImplementation(async request => {
+      const path = new URL(request).pathname;
+      if (path === '/hello') return { ok: true, status: 200, json: async () => ({ app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true }) };
+      if (path === '/pair') return { ok: true, status: 200, json: async () => ({ ok: true, token: 'reconnected-token' }) };
+      return { ok: true, status: 200, json: async () => ({ ok: true, inputs: [...inputs], inputOpeningIds: inputs.map(row => row.id), background: true }) };
+    });
+    let offers = 0;
+    h.sendMessage.mockImplementation(async (_id, message) => {
+      if (message.type === 'clf-desktop-input') { offers += 1; return { ok: false }; }
+      return { ok: true, ready: true };
+    });
+
+    await h.maintain();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(offers).toBe(5);
+
+    await h.unpair();
+    await h.pair();
+    await h.maintain();
+    expect(offers).toBe(6);
+
+    await vi.advanceTimersByTimeAsync(1500);
+    await vi.waitFor(() => expect(offers).toBe(7), { timeout: 5000 });
   } finally {
     vi.useRealTimers();
   }

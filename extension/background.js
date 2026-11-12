@@ -2271,9 +2271,10 @@ function prepareDesktopInputReceipt(tabId, id, documentId) {
 const DESKTOP_INPUT_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000];
 const desktopInputOfferRetries = new Map();
 
-function clearDesktopInputRetry(id) {
+function clearDesktopInputRetry(id, expectedTabId) {
   const state = desktopInputOfferRetries.get(id);
   if (!state) return;
+  if (expectedTabId !== undefined && state.tabId !== expectedTabId) return;
   if (state.timer !== null) clearTimeout(state.timer);
   desktopInputOfferRetries.delete(id);
 }
@@ -2284,7 +2285,7 @@ function clearDesktopInputRetries() {
 
 function scheduleDesktopInputRetry(id, tabId, reason) {
   if (!token || disconnected || extensionReloadPending) return;
-  if (inputOpenings[id]?.tab !== tabId) { clearDesktopInputRetry(id); return; }
+  if (inputOpenings[id]?.tab !== tabId) { clearDesktopInputRetry(id, tabId); return; }
   const existing = desktopInputOfferRetries.get(id);
   const state = existing && existing.tabId === tabId
     ? existing
@@ -2305,13 +2306,14 @@ function scheduleDesktopInputRetry(id, tabId, reason) {
   state.timer = setTimeout(() => {
     state.timer = null;
     if (!token || disconnected || extensionReloadPending) return;
-    if (inputOpenings[id]?.tab !== tabId) { clearDesktopInputRetry(id); return; }
+    if (inputOpenings[id]?.tab !== tabId) { clearDesktopInputRetry(id, tabId); return; }
     void maintain(true).catch(() => undefined);
   }, delayMs);
   desktopInputOfferRetries.set(id, state);
 }
 
 function offerDesktopInput(tabId, message) {
+  const election = inputOpenings[message.id];
   // The reply is not a delivery receipt: the content script synchronously owns
   // one desktopInputBusy slot, then the app's durable browser claim and one-time
   // sendAuthorizedAt fence every later offer. Waiting here only starves repairs.
@@ -2319,10 +2321,14 @@ function offerDesktopInput(tabId, message) {
   // of leaving the message unclaimed until the 30-second maintenance alarm.
   void chrome.tabs.sendMessage(tabId, message).then(
     reply => {
-      if (reply?.ok === true) { clearDesktopInputRetry(message.id); return; }
+      if (!election || inputOpenings[message.id] !== election || election.tab !== tabId) return;
+      if (reply?.ok === true) { clearDesktopInputRetry(message.id, tabId); return; }
       if (reply?.ok === false) scheduleDesktopInputRetry(message.id, tabId, 'declined');
     },
-    () => { scheduleDesktopInputRetry(message.id, tabId, 'unreachable'); }
+    () => {
+      if (!election || inputOpenings[message.id] !== election || election.tab !== tabId) return;
+      scheduleDesktopInputRetry(message.id, tabId, 'unreachable');
+    }
   );
 }
 
@@ -4673,6 +4679,7 @@ const HANDLERS = {
   },
   async unpair() {
     await load();
+    clearDesktopInputRetries();
     closeWakeSocket();
     if (browserController) await (await browserController).revoke();
     // Invalidate any `/pair` already on the wire before changing the visible/persisted state.
