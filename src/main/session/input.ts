@@ -1493,6 +1493,27 @@ export function cancelInput(id: string): Promise<boolean> {
   });
 }
 
+/** Retire an unbound chat's opening before Remove deletes its local reservation.
+ * Unlike Cancel delivery, Remove detaches any late receipt from that reservation.
+ * Keep the admission tombstone and Send evidence: an authorized Send may have happened. */
+export function retireRemovedOpening(sessionId: string): Promise<string[]> {
+  return serial(async () => {
+    const current = await load();
+    const retired = new Set<string>();
+    const next = current.map((row): InputEntry => {
+      if (!row.opening || row.sessionId !== sessionId || row.deliveredAt !== undefined ||
+          !(row.state === 'queued' || row.state === 'browser' || (row.state === 'cancelled' && row.owner))) return row;
+      retired.add(row.id);
+      return { ...row, state: 'cancelled', cancelledByUser: true, owner: null };
+    });
+    if (retired.size) {
+      await commit(next);
+      logInfo(`session ${sessionId}: retired its pending opening before local deletion`);
+    }
+    return [...retired];
+  });
+}
+
 /** Only explicit withdrawal of a provably unsent opening retires its empty reservation.
  * The cancelled outbox row remains the tombstone; timeout/failure never grants deletion.
  * Runs under the input queue, which also owns initial provider binding and Send authority. */
