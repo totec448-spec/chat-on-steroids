@@ -10055,10 +10055,10 @@ describe('a stop button that goes missing while the turn is still running', () =
     });
   });
 
-  it('completes its own answer when its question unmounts and an older question stays visible', async () => {
+  it.each([true, false])('completes its own answer when its question unmounts and an older question stays visible (anchored: %s)', async anchored => {
     live = await harness(undefined, {
       activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0,
-        userAnchors: [{ seq: 1, time: 1_699_999_990_000, messageId: 'm-older-rendered-question' }] } })
+        userAnchors: anchored ? [{ seq: 1, time: 1_699_999_990_000, messageId: 'm-older-rendered-question' }] : [] } })
     });
     userTurn(live.document, 'older-rendered-question', 'An earlier question', { sent: false });
     await live.hook.pullActivity();
@@ -10084,7 +10084,7 @@ describe('a stop button that goes missing while the turn is still running', () =
     ]);
   });
 
-  it.each(['rendered', 'indexed-unmounted'] as const)('does not consume a new fast answer terminal while the preceding generation has no bound section (%s)', async questionState => {
+  it.each(['rendered', 'indexed-unmounted', 'unanchored-unmounted'] as const)('does not consume a new fast answer terminal while the preceding generation has no bound section (%s)', async questionState => {
     let anchors: Array<{ seq: number; time: number; messageId: string }> = [];
     live = await harness(undefined, {
       activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0, userAnchors: anchors } })
@@ -10098,8 +10098,8 @@ describe('a stop button that goes missing while the turn is still running', () =
     // The previous generation never acquired an assistant section. A presentation-only scan
     // can nevertheless cache the next question's already-finished answer before observe() sees it.
     userTurn(live.document, 'unbound-next-question', 'Next question');
+    if (questionState !== 'rendered') firstQuestion.remove();
     if (questionState === 'indexed-unmounted') {
-      firstQuestion.remove();
       anchors = [
         { seq: 1, time: 1_699_999_990_000, messageId: firstQuestionId },
         { seq: 2, time: 1_700_000_000_000, messageId: 'm-unbound-next-question' }

@@ -5142,6 +5142,8 @@ generation's history baseline or an approval is holding. Consumed terminals ente
 before the next generation opens, so remounting cannot complete it. Explicit failure/stop outcomes win.
 An unbound generation excludes a visible question only when DOM order or recorded question
 anchors prove it is newer; a missing own question does not make an older visible one newer.
+If a question appears after that generation opened but has no order anchor yet, its following
+fast answer stays unowned until the next observed boundary proves which generation owns it.
 A consolidated final belongs to the continuation open when it settled, consistently in timeline
 projection, completion lookup, finish holds and recorder/Goal completion; it cannot advance to
 a continuation that opened after that settlement. Image-only completion follows the same proven
