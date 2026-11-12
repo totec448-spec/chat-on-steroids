@@ -783,6 +783,9 @@
    * this document does hold about its own doing: which send it has already acted on.
    */
   let openedUserMessageId = null;
+  // User rows already rendered when this generation opened. If an unanchored row
+  // appears later, its position alone cannot prove which answer belongs to us.
+  let questionsAtGenerationOpen = new Set();
   let since = 0;
   let streamEntries = [];
   /** Exact request id -> one durable local turn, null when the retained stream conflicts. */
@@ -1871,6 +1874,8 @@
     // The app's exact question already opened this response. A still-retained
     // Send receipt in another document cannot open it a second time.
     if (questionId) openedUserMessageId = questionId;
+    questionsAtGenerationOpen = new Set(CLF_DOM.messages().filter(message => message.role === 'user' && message.id)
+      .map(message => message.id));
     generating = true;
     unwitnessedGeneration = true;
     turnId = open;
@@ -2043,6 +2048,7 @@
     pendingPresentation = null;
     userAnchorByMessage.clear();
     openedUserMessageId = null;
+    questionsAtGenerationOpen.clear();
     streamEntries = [];
     streamRequestTurnOwners.clear();
     since = 0;
@@ -2356,8 +2362,33 @@
     if (unwitnessedGeneration) {
       if (question >= 0) turns = turns.slice(question + 1);
     }
-    const latest = currentAssistantTurn(turns);
     const heldTurn = genNode ? turnForNode(genNode, turns) : null;
+    // A presentation-only Fiber scan can already have cached the next question's fast answer
+    // before observe() processes that question. If this generation never bound a section, that
+    // answer is not evidence that the preceding generation ended. Restrict the unbound lookup
+    // only when DOM order or recorded anchors prove that question is newer. An older question
+    // can remain visible while this generation's own question is unmounted (#942).
+    if (generating && turnId && !unwitnessedGeneration && !ownsQuestion && question >= 0 && !heldTurn) {
+      const openedQuestion = turns.findLastIndex(turn => turn.role === 'user' &&
+        CLF_DOM.messagesIn(turn).some(message => message.role === 'user' && message.id === openedUserMessageId));
+      const openedAnchor = userAnchorByMessage.get(openedUserMessageId);
+      const visibleQuestions = CLF_DOM.messagesIn(turns[question]).filter(message => message.role === 'user');
+      const questionIds = new Set(visibleQuestions
+        .filter(message => userAnchorByMessage.has(message.id)).map(message => message.id));
+      const questionAnchor = questionIds.size === 1 ? userAnchorByMessage.get(questionIds.values().next().value) : null;
+      const newerQuestion = openedQuestion >= 0 && openedQuestion < question ||
+        openedAnchor?.seq >= 0 && questionAnchor?.seq > openedAnchor.seq;
+      const olderQuestion = openedAnchor?.seq >= 0 && questionAnchor?.seq >= 0 && questionAnchor.seq < openedAnchor.seq;
+      if (newerQuestion) turns = turns.slice(0, question);
+      else if (!olderQuestion && (!visibleQuestions.length ||
+          visibleQuestions.some(message => !message.id || !questionsAtGenerationOpen.has(message.id)))) {
+        // This may be the next question, rendered before /activity has anchored it.
+        // An anchor-proven older question is safe even if it remounted after Send.
+        // Do not bind an unproven next question's fast answer to the prior generation.
+        return null;
+      }
+    }
+    const latest = currentAssistantTurn(turns);
     // One question can publish interim and final prose in different sections.
     // Keep the held section unless the exact same question proves a newer one
     // can belong to this response; its novelty is still checked below.
@@ -3060,10 +3091,7 @@
     // live turn on every reload, and split every chat's opening turn in two.
     // Stop stayed through the send: the running response took this message (see steeredTurns).
     const steering = Boolean(generating && newUserMessage && nowGenerating && turnId);
-    if (steering) {
-      steeredTurns.add(turnId);
-      if (steeredTurns.size > 32) steeredTurns.delete(steeredTurns.values().next().value);
-    }
+    let continuedTurn = steering;
     if (generating && newUserMessage) {
       // A newly authored question closes the adopted turn before it. If its answer
       // and this question hydrated together, apply the original-question guard to
@@ -3074,11 +3102,17 @@
       const ended = quietTurn || generationTurn(closingTurns);
       const fresh = endOutcome(ended);
       const result = quietOutcome && quietOutcome.outcome !== 'unknown' ? quietOutcome : fresh;
+      const endedFinal = ended && fiberTurnFor(ended)?.endMessageId;
+      const endedTerminal = Boolean(endedFinal && !settledFinals.has(endedFinal) && !approvalHolding());
+      if (endedTerminal) {
+        // This terminal closed the prior generation; a later React remount must not close the next one.
+        settledFinals.add(endedFinal);
+      }
       // A new user message is an actual boundary, unlike a disappearing Stop control. Once
-      // that boundary is proven, authored prose is enough to classify the old turn as a
-      // completed answer when no stronger failure/interruption/stall outcome exists.
+      // that boundary is proven, exact Fiber terminal evidence or authored prose classifies
+      // the old turn as completed when no stronger failure/interruption/stall outcome exists.
       const bounded = result.outcome === 'unknown'
-        ? answerText(ended).length > 0
+        ? endedTerminal || answerText(ended).length > 0
           ? { outcome: 'completed' }
           : {
             outcome: 'interrupted',
@@ -3095,8 +3129,15 @@
       // with its answer is not marked: its trailing calls stay with it. Where Fiber answers, its
       // end_turn is that proof, and interim prose without it is an unfinished answer too (live
       // 2026-10-12: ten calls and the final answer followed a message sent after "I'll pick up…").
-      const replacedUnfinished = result.outcome === 'unknown' && (bounded.outcome === 'interrupted' || fiberPresent === true);
-      finishGeneration(ended, steering || replacedUnfinished ? { ...bounded, continued: true } : bounded, false);
+      // A turn whose own end_turn Fiber already shows is completed, not continued: its final
+      // keeps its owner even when the scan that reports it returns after the next question opens.
+      const replacedUnfinished = !endedTerminal && result.outcome === 'unknown' && (bounded.outcome === 'interrupted' || fiberPresent === true);
+      continuedTurn = !endedTerminal && (steering || replacedUnfinished);
+      if (continuedTurn && turnId) {
+        steeredTurns.add(turnId);
+        if (steeredTurns.size > 32) steeredTurns.delete(steeredTurns.values().next().value);
+      }
+      finishGeneration(ended, continuedTurn ? { ...bounded, continued: true } : bounded, false);
     }
 
     // A turn is opened by a send, and by nothing else.
@@ -3125,8 +3166,10 @@
     // which is adoption and not opening — no second `turn_start` for one generation. A turn no
     // document ever recorded arrives by claimUnrecordedGeneration(), which is an opening.
     if (newUserMessage && !generating) {
-      if (!steering) steeredTurns.clear();
+      if (!continuedTurn) steeredTurns.clear();
       openedUserMessageId = newUserMessage;
+      questionsAtGenerationOpen = new Set(observedTurns.flatMap(turn => CLF_DOM.messagesIn(turn))
+        .filter(message => message.role === 'user' && message.id).map(message => message.id));
       generating = true;
       quietSince = 0;
       quietTurn = null;
@@ -5111,7 +5154,8 @@
           const image = item.value;
           const key = nativeImageKey(image);
           const prior = nativeImagesReported.get(key);
-          const ownerConflict = Boolean(prior?.conflicted || (localOwner && prior?.owner && prior.owner !== localOwner));
+          const steeredTransition = Boolean(localOwner && localOwner === turnId && prior?.owner && steeredTurns.has(prior.owner));
+          const ownerConflict = Boolean(prior?.conflicted || (localOwner && prior?.owner && prior.owner !== localOwner && !steeredTransition));
           const owner = ownerConflict ? '' : localOwner || prior?.owner || '';
           const historical = !owner && image.createTime;
           const observation = {
@@ -5227,8 +5271,11 @@
         // exact local turn id from reaching the recorder. The recorder upsert is expressly
         // able to promote the same canonical message when stronger ownership arrives.
         const priorMessage = messagesReported.get(message.messageId);
+        const steeredTransition = Boolean(
+          localOwner && localOwner === turnId && priorMessage?.owner && steeredTurns.has(priorMessage.owner)
+        );
         const ownerConflict = Boolean(
-          priorMessage?.conflicted || (localOwner && priorMessage?.owner && priorMessage.owner !== localOwner)
+          priorMessage?.conflicted || (localOwner && priorMessage?.owner && priorMessage.owner !== localOwner && !steeredTransition)
         );
         let owner = ownerConflict ? '' : localOwner || (priorMessage && priorMessage.owner) || '';
         // Ownership may strengthen after an earlier scan saw the message before its DOM turn
