@@ -3793,6 +3793,8 @@ describe('removing a new chat before its first Send is confirmed', () => {
         await gate.entered;
         expect(await readDurable('session-input')).toMatchObject([{ id, state: 'cancelled' }]);
         await expect(outbox.enqueueInput({ ...args, id: retryId, sessionId: id })).rejects.toThrow('This session is already being deleted');
+        const { getLog } = await import('../src/main/logger.js');
+        expect(getLog().filter(entry => entry.message === `session ${id}: refused enqueue input because local deletion is in progress`)).toHaveLength(1);
       } finally {
         gate.release();
         await removing;
