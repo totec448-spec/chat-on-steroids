@@ -100,6 +100,14 @@ const IMAGE_MIME_BY_EXTENSION = new Map<string, string>([
   ['.ico', 'image/x-icon']
 ]);
 
+/** SVG text (after a byte-order mark and whitespace) or gzip, which libvips reads as SVGZ. */
+function looksLikeVector(data: Buffer): boolean {
+  if (data.length >= 2 && data[0] === 0x1f && data[1] === 0x8b) return true;
+  let at = data.length >= 3 && data[0] === 0xef && data[1] === 0xbb && data[2] === 0xbf ? 3 : 0;
+  while (at < data.length && (data[at] === 0x20 || data[at] === 0x09 || data[at] === 0x0a || data[at] === 0x0d)) at++;
+  return data[at] === 0x3c; // "<": SVG, an XML declaration, or a doctype
+}
+
 export interface ProjectFileTarget {
   projectId: string;
   projectName: string;
@@ -353,6 +361,9 @@ export async function previewProjectFile(projectId: string, relativePath: string
       // alone do not bound browser memory, and a filename is not proof of image content.
       let image: Buffer;
       try {
+        // A project file is untrusted content. libvips would hand an SVG (or a gzipped one) to its
+        // vector renderer whatever the filename says; no raster extension here is a vector format.
+        if (looksLikeVector(data)) throw new Error('vector image');
         image = await sharp(data, { failOn: 'warning', limitInputPixels: 16 * 1024 * 1024, sequentialRead: true })
           .rotate().resize(1600, 1600, { fit: 'inside', withoutEnlargement: true }).png().toBuffer();
       } catch {
