@@ -6510,6 +6510,15 @@ with other suites' native windows or input; its assertions remain unchanged. `vi
 forces Node, bounded hooks/tests, `CLF_BRIDGE_PORTS=0`
 and test-only `CLF_EVIDENCE_MS=1500`; never let tests contact the installed production bridge.
 Opt-in live plugin/macOS probes are separate evidence, not implied by the ordinary suite.
+
+The UI runner stops its check's POSIX process group or Windows process tree on timeout.
+It waits at most two seconds for `close` after requesting termination, then releases the
+check's pipes and continues. Each terminal attempt gets a fresh disposable directory;
+the runner removes it after close. Direct invocation uses the same temporary directory
+lifetime: launch Electron, wait for it to exit, then remove the directory. Interrupted
+leftovers are ignored, not scanned or pruned.
+The terminal screenshot and result JSON keep their usual artifact paths.
+
 Pull-request CI (`ci.yml`, since 2026-10-31) runs the same checks in parallel jobs rather than
 `verify:ci` per OS (release builds still run `verify:ci`): one Linux job for privacy and the
 typecheck; the notices check (it reads each OS's own optional native packages) in each OS's first shard; the unit tests in shards (`vitest run --shard=i/n`: Windows 3, macOS 2, Linux 2; macOS
