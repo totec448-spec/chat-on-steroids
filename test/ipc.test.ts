@@ -3678,7 +3678,7 @@ it('tells a person\'s message from the app\'s own', () => {
   expect(personsMessage({ ...base, mode: 'finish', authoredSource: 'text' } as never)).toBe(true);
 });
 
-it('keeps an aged attachment while a live draft references it and prunes it after release', async () => {
+it.each(['text drop', 'file drop', 'picker', 'local project', 'server snapshot'] as const)('keeps an aged draft attachment across %s and prunes it after release', async source => {
   const event = { sender: {} };
   const stage = async (text: string) => {
     const result = await handlers.get('sessions:attachText')!(event, { text }) as any;
@@ -3694,7 +3694,29 @@ it('keeps an aged attachment while a live draft references it and prunes it afte
   for (const file of [kept, abandoned]) await fs.utimes(stagedPath(file.id), old, old);
   try {
     const hold = await retain([kept.id]);
-    await stage('Another attachment');
+    if (source === 'text drop') await stage('Another attachment');
+    else if (source === 'file drop') {
+      expect(await handlers.get('sessions:dropFiles')!(event, { files: [
+        { name: 'drop.txt', bytes: new Uint8Array([1, 2, 3]) }
+      ] })).toMatchObject({ ok: true });
+    } else if (source === 'server snapshot') {
+      const { file, projectId } = await attachmentProjectFixture('attach-server-snapshot');
+      const projectFiles = await import('../src/main/project-files.js');
+      const cleanup = vi.fn(async () => fs.rm(file));
+      const snapshot = vi.spyOn(projectFiles, 'serverFileSnapshot').mockResolvedValueOnce({ file, cleanup });
+      try {
+        expect(await handlers.get('projectFiles:attach')!(event, { projectId, path: 'report.txt' })).toMatchObject({ ok: true });
+        expect(cleanup).toHaveBeenCalledOnce();
+      } finally { snapshot.mockRestore(); }
+    } else {
+      const { file, projectId } = await attachmentProjectFixture('attach-' + source.replace(' ', '-'));
+      if (source === 'picker') {
+        vi.mocked(dialog.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: [file] });
+        expect(await handlers.get('sessions:files')!(event, undefined)).toMatchObject({ ok: true });
+      } else {
+        expect(await handlers.get('projectFiles:attach')!(event, { projectId, path: 'report.txt' })).toMatchObject({ ok: true });
+      }
+    }
     await expect(fs.stat(stagedPath(abandoned.id))).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(readInputAttachmentChunk(kept, 0)).resolves.toBe(Buffer.from('Still in a draft').toString('base64'));
     expect(hold).toMatchObject({ ok: true });
@@ -3704,5 +3726,62 @@ it('keeps an aged attachment while a live draft references it and prunes it afte
     await expect(fs.stat(stagedPath(kept.id))).rejects.toMatchObject({ code: 'ENOENT' });
   } finally {
     await retain([]);
+  }
+});
+
+async function attachmentProjectFixture(name: string) {
+  currentWindow = { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() } };
+  const folder = path.join(dir, name), file = path.join(folder, 'report.txt');
+  await fs.mkdir(folder, { recursive: true });
+  await fs.writeFile(file, 'Synthetic project file');
+  vi.mocked(dialog.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: [folder] });
+  const project = await handlers.get('projects:add')!(null, { chatgpt: 'later' }) as any;
+  expect(project).toMatchObject({ ok: true, data: { name } });
+  return { projectId: project.data.id, file };
+}
+
+it('keeps an aged attachment when Send takes ownership during project-file staging', async () => {
+  const outbox = await import('../src/main/session/input.js');
+  const projectFiles = await import('../src/main/project-files.js');
+  const { randomUUID } = await import('node:crypto');
+  const { readInputAttachmentChunk } = await import('../src/main/session/input-attachments.js');
+  await writeDurableNow('session-input', []);
+  outbox.resetInputForTests();
+  const event = { sender: {} };
+  const { projectId } = await attachmentProjectFixture('staged-send-race');
+  const staged = await handlers.get('sessions:attachText')!(event, { text: 'Draft becomes queued' }) as any;
+  expect(staged.ok).toBe(true);
+  const attachment = staged.data;
+  const retain = (ids: string[]) => handlers.get('sessions:retainDraftAttachments')!(event, { ids });
+  const target = projectFiles.projectFileTarget;
+  const gate = faultGate();
+  const spy = vi.spyOn(projectFiles, 'projectFileTarget').mockImplementationOnce(target).mockImplementationOnce(async (...args) => {
+    await gate.hold();
+    return target(...args);
+  });
+  await retain([attachment.id]);
+  const attaching = handlers.get('projectFiles:attach')!(event, { projectId, path: 'report.txt' });
+  try {
+    await gate.entered;
+    const message = await outbox.enqueueInput({ id: randomUUID(), sessionId: null, text: 'Synthetic send',
+      mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null, attachments: [attachment] });
+    expect(message.state).toBe('queued');
+    await retain([]);
+    // Admission renews mtime. Model an aged file by the time the delayed attachment request resumes.
+    const old = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    await fs.utimes(path.join(dir, 'input-attachments', attachment.id), old, old);
+    gate.release();
+    expect(await attaching).toMatchObject({ ok: true });
+    await expect(readInputAttachmentChunk(attachment, 0)).resolves.toBe(Buffer.from('Draft becomes queued').toString('base64'));
+    expect(await outbox.cancelInput(message.id)).toBe(true);
+    expect(await handlers.get('sessions:attachText')!(event, { text: 'Sweep after cancellation' })).toMatchObject({ ok: true });
+    await expect(readInputAttachmentChunk(attachment, 0)).rejects.toMatchObject({ code: 'ENOENT' });
+  } finally {
+    gate.release();
+    await attaching;
+    spy.mockRestore();
+    await retain([]);
+    await writeDurableNow('session-input', []);
+    outbox.resetInputForTests();
   }
 });

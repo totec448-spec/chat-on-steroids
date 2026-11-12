@@ -1648,8 +1648,10 @@ Draft text is also written to the renderer's local storage (`composer-drafts.ts`
 drafts in at most 1,000,000 stored characters), so an unsent draft survives a restart; staged files and a new
 chat's Goal/Loop choices stay window-local. The renderer publishes its live staged attachment IDs
 for every draft and pending admission through `sessions:retainDraftAttachments`. Staging checks the
-current window's references as well as the durable outbox before pruning unreferenced files over
-24 hours old; releasing a draft reference makes it eligible again. A chat other than the open one that holds a draft shows
+current window's references and the latest published outbox membership for each file eligible
+for pruning after 24 hours. It does not take the outbox lock while staging; validation renews
+the file's age to cover admission until the row is published. Releasing the last reference makes
+an expired file eligible again. A chat other than the open one that holds a draft shows
 a pencil mark on its sidebar row, and removing a chat removes its saved draft.
 
 The chat composer and queued-message editor have no HTML character cap. Send and queue edits

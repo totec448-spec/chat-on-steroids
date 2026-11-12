@@ -39,7 +39,7 @@ async function stageBatch(sources: AttachmentSource[], retained: RetainedAttachm
   for (const name of await fs.readdir(dir)) {
     if (!/^[a-f0-9-]{36}$/.test(name)) continue;
     const file = fileFor(name), stat = await fs.stat(file);
-    if (!retained.has(name) && Date.now() - stat.mtimeMs > 24 * 60 * 60 * 1000) {
+    if (Date.now() - stat.mtimeMs > 24 * 60 * 60 * 1000 && !retained.has(name)) {
       await fs.unlink(file); await fs.unlink(file + '.json').catch(() => undefined);
     } else used += stat.size;
   }
@@ -133,8 +133,8 @@ async function validate(attachments: InputAttachment[]): Promise<void> {
     const file = fileFor(attachment.id);
     const stored = attachmentSchema.parse(JSON.parse(await fs.readFile(file + '.json', 'utf8')));
     if (JSON.stringify(stored) !== JSON.stringify(attachmentSchema.parse(attachment)) || (await fs.stat(file)).size !== attachment.size) throw new Error('Attachment is missing or changed; attach it again');
-    // Admission renews the draft age under the same lock as pruning; a fresh
-    // outbox commit cannot lose its bytes to an older concurrent cleanup snapshot.
+    // Renew the draft age under the same lock as pruning to cover admission
+    // until the new outbox row is published.
     const now = new Date(); await fs.utimes(file, now, now);
   }
 }

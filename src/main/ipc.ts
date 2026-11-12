@@ -32,14 +32,14 @@ import { getChatModels, startChatModelDiscovery, configureChatModelDiscovery } f
 import { releaseSessionFinish, requestSessionFinishGoal } from './session/finish.js';
 import { GOAL_MARKER_INSTRUCTION } from '../shared/goal-templates.js';
 import { validateInputImages } from './session/input-images.js';
-import { stageInputAttachments, type AttachmentSource } from './session/input-attachments.js';
+import { stageInputAttachment, stageInputAttachments, type AttachmentSource } from './session/input-attachments.js';
 import { recordDeliveredInput, recordedInputImage } from './session/input-history.js';
 import { UI_BASE_ZOOM } from './window-layout.js';
 import { paintWindowTheme } from './theme.js';
 import { usageOverview } from './session/usage.js';
 import { exportUsageCsv } from './session/usage-export.js';
 import { readProviderUsage } from './provider-usage.js';
-import { inputArgs, deliveryProof, enqueueInput, listInputs, editQueuedInput, sendQueuedInputNow, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs, forgetOwnSent, type InputEntry } from './session/input.js';
+import { inputArgs, deliveryProof, enqueueInput, listInputs, outboxRetainsAttachment, editQueuedInput, sendQueuedInputNow, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs, forgetOwnSent, type InputEntry } from './session/input.js';
 import { draftOpeningMessage, onGoalChange, nativeGoalFailure } from './goal.js';
 import { cancelTaskRequest, runTaskRequest } from './task-request.js';
 import { randomUUID } from 'node:crypto';
@@ -811,13 +811,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { ids } = z.object({ ids: z.array(z.string().uuid()).max(20_000) }).strict().parse(payload);
     draftAttachments.set(event.sender, new Set(ids));
   });
-  const pendingAttachmentIds = async () => new Set((await listInputs())
-    .filter(row => !['sent', 'failed', 'cancelled'].includes(row.state))
-    .flatMap(row => row.attachments?.map(file => file.id) ?? []));
-  const stageFiles = async (sources: AttachmentSource[], event: IpcMainInvokeEvent, pending?: Set<string>) => {
-    const retained = pending ?? await pendingAttachmentIds();
-    return stageInputAttachments(sources, { has: id => retained.has(id) || draftAttachments.get(event?.sender)?.has(id) === true });
+  const attachmentRetention = async (event: IpcMainInvokeEvent) => {
+    await listInputs(); // Load durable input before entering the staging lock.
+    return { has: (id: string) => outboxRetainsAttachment(id) || draftAttachments.get(event?.sender)?.has(id) === true };
   };
+  const stageFiles = async (sources: AttachmentSource[], event: IpcMainInvokeEvent) =>
+    stageInputAttachments(sources, await attachmentRetention(event));
   let watchedWindow: BrowserWindow | null = null;
   const projectFileWatches = new ProjectFileWatchSet(event => {
     const target = getWindow();
@@ -1774,10 +1773,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       try { return (await stageFiles([snapshot.file], event))[0]!; } finally { await snapshot.cleanup(); }
     }
     const target = await projectFileTarget(projectId, path, { allowRoot: false, fileOnly: true });
-    const retained = await pendingAttachmentIds();
+    const retained = await attachmentRetention(event);
     const checked = await projectFileTarget(projectId, path, { allowRoot: false, fileOnly: true });
     if (checked.real !== target.real) throw new Error('The project file changed location');
-    return (await stageFiles([checked.real], event, retained))[0]!;
+    return stageInputAttachment(checked.real, retained);
   });
 
   /**

@@ -1357,6 +1357,20 @@ function materializeStages(current: InputEntry[], entry: InputEntry): InputEntry
   });
   return next;
 }
+const attachmentIdsByOutbox = new WeakMap<InputEntry[], Set<string>>();
+/** Read the published queue without taking its lock: admission can itself be
+ * waiting for the staging lock that calls this at the point of pruning. */
+export function outboxRetainsAttachment(id: string): boolean {
+  const current = entries;
+  if (!current) return true; // An unloaded queue cannot establish that a file is unreferenced.
+  let ids = attachmentIdsByOutbox.get(current);
+  if (!ids) {
+    ids = new Set(current.filter(row => !terminal(row)).flatMap(row => row.attachments?.map(file => file.id) ?? []));
+    attachmentIdsByOutbox.set(current, ids);
+  }
+  return ids.has(id);
+}
+
 export function listInputs(): Promise<InputEntry[]> {
   return serial(async () => {
     const current = await retireRemovedSessionReceipts(await load(), true);

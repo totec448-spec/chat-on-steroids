@@ -1479,7 +1479,9 @@ it.each(['image', 'txt', 'mixed', 'new-chat', 'after-turn'])('routes the compose
 });
 
 it('publishes attachment references from other drafts until their files are removed', async () => {
-  const { w } = await boot([]);
+  const first = summary([]);
+  const second = { ...first, id: 'other-session', title: 'Other chat', conversationId: 'other-chat', chatIds: ['other-chat'] };
+  const { w } = await boot([], true, [], [], { sessions: [first, second] });
   const api = (w as any).api;
   const a = { id: '11111111-2222-4333-8444-555555555555', name: 'first.txt', mimeType: 'text/plain', size: 42 };
   const b = { ...a, id: '22222222-2222-4333-8444-555555555555', name: 'second.txt' };
@@ -1490,8 +1492,8 @@ it('publishes attachment references from other drafts until their files are remo
   attach.click();
   await waitFor(() => expect(retain).toHaveBeenLastCalledWith([a.id]));
 
-  w.document.getElementById('newChat')!.click();
-  await settle();
+  w.document.querySelector<HTMLElement>('[data-id="other-session"] [data-session-select]')!.click();
+  await waitFor(() => expect(w.document.querySelector('.sess.is-sel')?.getAttribute('data-id')).toBe(second.id));
   expect(w.document.querySelector('[aria-label="Remove first.txt"]')).toBeNull();
   api.chooseFiles = async () => ({ ok: true, data: [b] });
   attach.click();
