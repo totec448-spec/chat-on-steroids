@@ -3415,9 +3415,9 @@ var CLF_DOM = (() => {
       const panel = picker();
       return panel && panel.closest('[role="menu"],[role="dialog"]')?.getAttribute('data-state') !== 'closed' ? panel : null;
     };
-    const wait = (read, timeout = 3000) => new Promise(resolve => {
+    const wait = (read, timeout = 3000, pollMs = 0) => new Promise(resolve => {
       let reading = false, dirty = false, done = false;
-      const finish = value => { if (done) return; done = true; observer.disconnect(); clearTimeout(timer); resolve(value); };
+      const finish = value => { if (done) return; done = true; observer.disconnect(); clearTimeout(timer); if (poller !== null) clearInterval(poller); resolve(value); };
       const check = async () => {
         if (done) return;
         if (!stillCurrent()) return finish(null);
@@ -3429,9 +3429,11 @@ var CLF_DOM = (() => {
       };
       const observer = new MutationObserver(check);
       observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+      const poller = pollMs > 0 ? setInterval(check, pollMs) : null;
       const timer = setTimeout(() => finish(null), timeout); void check();
     });
-    const state = predicate => wait(async () => { const value = await read(); return value && (!predicate || predicate(value)) ? value : null; });
+    // Fiber metadata can hydrate after the menu DOM mounted without a further DOM mutation.
+    const state = predicate => wait(async () => { const value = await read(); return value && (!predicate || predicate(value)) ? value : null; }, 3000, 250);
     // The shell trigger needs MAIN ownership proof. A cold account can hydrate
     // after the first reply, so DOM readiness must refresh that proof as well.
     const readyTrigger = () => wait(async () => { await read(); return trigger(); }, 15000);
@@ -3459,8 +3461,23 @@ var CLF_DOM = (() => {
         if (!await prepareChatModelSurface(stillCurrent)) return null;
         // A retained exit-animation node is not an open native menu.
         if (!openPicker()) {
-          progress('open'); const button = await readyTrigger();
-          if (!key(button, 'Enter') || !await wait(openPicker)) return null;
+          progress('open');
+          const button = await readyTrigger();
+          if (!key(button, 'Enter')) return null;
+          if (!await wait(openPicker, 1500)) {
+            if (!stillCurrent()) return null;
+            // A cold or background button may remount during hydration or ignore synthetic Enter
+            // without window focus; re-acquire the trigger and fall back once before failing.
+            const retryButton = await readyTrigger();
+            if (!retryButton) return null;
+            if (!openPicker()) {
+              const reopened = retryButton !== button && key(retryButton, 'Enter') && await wait(openPicker, 1000);
+              if (!reopened && !openPicker()) {
+                retryButton.click();
+                if (!await wait(openPicker, 1500)) return null;
+              }
+            }
+          }
         }
         progress('read'); return state();
       },
