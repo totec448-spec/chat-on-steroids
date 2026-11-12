@@ -6,6 +6,7 @@
  * work over ChatGPT's own markup, so the main process (copy, export) and the window agree.
  */
 import { plainTextOfHtml } from './content-reference.js';
+import { markdownCodeRanges } from './markdown-code.js';
 
 const cellText = (value: string): string => value.replace(/\*\*/g, '').replace(/\s+/g, ' ').trim();
 const markdownCells = (line: string): string[] =>
@@ -32,10 +33,20 @@ export function completedDilText(text: string, capture?: { text: string; truncat
     .map(([, inner]) => cellText(plainTextOfHtml(inner ?? ''))).filter(Boolean));
   if (!tables.length && !buttons.size) return text;
   const lines = text.split('\n');
+  let offset = 0;
+  const starts = lines.map(line => { const start = offset; offset += line.length + 1; return start; });
+  const code = markdownCodeRanges(text).sort((a, b) => a.start - b.start || b.end - a.end);
+  let codeIndex = 0;
   const out: string[] = [];
   let tableIndex = 0;
   for (let at = 0; at < lines.length; at++) {
     const line = lines[at]!;
+    while (code[codeIndex] && starts[at]! >= code[codeIndex]!.end) codeIndex++;
+    // A code example is not a drawn table or button, and must not consume their matches.
+    if (code[codeIndex] && starts[at]! >= code[codeIndex]!.start) {
+      out.push(line);
+      continue;
+    }
     const label = line.trim().match(/^\[([^\]]+)\]$/)?.[1];
     if (label && buttons.has(cellText(label))) {
       // A dead button label, and the blank line it leaves behind.
@@ -56,7 +67,9 @@ export function completedDilText(text: string, capture?: { text: string; truncat
     const match = tables[matchIndex]!;
     if (match.length - 1 <= body) continue;
     out.push(lines[at + 1]!);
-    for (const row of match.slice(1)) out.push(`| ${row.map(escapeCell).join(' | ')} |`);
+    // A real table can be inside a list. Its restored rows must stay in that container.
+    const indent = line.match(/^[ \t]*/)?.[0] ?? '';
+    for (const row of match.slice(1)) out.push(`${indent}| ${row.map(escapeCell).join(' | ')} |`);
     at += 1 + body;
   }
   return out.join('\n');
