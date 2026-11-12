@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { userTitle } from './title.js';
 import { readDurable, writeDurableNow, writeDurableSoon } from '../durable.js';
 import { getSession, findSessionByConversation, createSession, deleteSession, rebindSession, conversationWasSuperseded, readRecentEvents, listUsageSessions, turnHasMcpCall, questionHasMcpCall, sessionDirectoryMissing, readCompletedFinal, readLatestUserMessage, readEvents } from './store.js';
+import { assertSessionNotRemoving } from './removal.js';
 import { noteEditReplacement, noteEditReplacements } from './edits.js';
 import { userPromptText } from '../../shared/user-prompt.js';
 import type { SessionEvent } from '../../shared/session.js';
@@ -1188,6 +1189,8 @@ export function withdrawUnsentRotation(id: string): Promise<'queued' | 'browser'
 export function enqueueInput(raw: InputArgs, finishOwner?: InputEntry['finishOwner'], options: InputCommitOptions = {}): Promise<InputEntry> {
   return serial(async () => {
     const input = inputArgs.parse(raw);
+    const localId = input.sessionId ?? input.id;
+    assertSessionNotRemoving(localId);
     const scheduled = input.scheduled !== undefined;
     if (scheduled) {
       if (finishOwner) throw new Error('Scheduled messages cannot be attached to a finish turn');
@@ -1200,6 +1203,7 @@ export function enqueueInput(raw: InputArgs, finishOwner?: InputEntry['finishOwn
     if (input.stages !== undefined && JSON.stringify([input.text, ...input.stages]).length > 12000)
       throw new Error('Keep the complete plan below 12,000 characters');
     const current = await load();
+    assertSessionNotRemoving(localId);
     const prior = current.find((entry) => entry.id === input.id);
     if (prior) {
       const comparablePrior = { ...prior, sessionId: prior.opening ? prior.requestedSessionId ?? null : prior.sessionId,
@@ -1335,6 +1339,7 @@ export function enqueueInput(raw: InputArgs, finishOwner?: InputEntry['finishOwn
     // A finish plan belongs to an existing session now. Publish every editable
     // checkpoint atomically; no composer text or first-send receipt owns its life.
     if (entry.mode === 'finish') next = materializeStages(next, entry);
+    assertSessionNotRemoving(localId);
     await commit(next, options);
     try { await materializeOpening(entry); }
     catch (error) {

@@ -3745,4 +3745,68 @@ describe('removing a new chat before its first Send is confirmed', () => {
       outbox.resetInputForTests();
     }
   });
+
+  it('refuses to delete a queued opening with damaged session metadata', async () => {
+    const outbox = await import('../src/main/session/input.js');
+    const { randomUUID } = await import('node:crypto');
+    const id = randomUUID();
+    await writeDurableNow('session-input', []);
+    outbox.resetInputForTests();
+    try {
+      await outbox.enqueueInput({ id, sessionId: null, text: 'Synthetic first message', mode: 'auto',
+        dueAt: Date.now(), model: null, reasoningEffort: null });
+      const meta = path.join(dir, 'sessions', id, 'meta.json');
+      await fs.writeFile(meta, '{damaged');
+      await fs.rm(path.join(dir, 'sessions', id, 'meta.backup.json'), { force: true });
+      resetSessionStoreForTests();
+      expect(await getSession(id)).toBeNull();
+
+      expect(await handlers.get('sessions:delete')!(null, { id })).toMatchObject({
+        ok: false, error: 'The session exists but its metadata could not be read.'
+      });
+      expect(await fs.readFile(meta, 'utf8')).toBe('{damaged');
+      expect(await readDurable('session-input')).toMatchObject([{ id, state: 'queued' }]);
+    } finally {
+      await writeDurableNow('session-input', []);
+      outbox.resetInputForTests();
+    }
+  });
+
+  it('refuses a retry between opening retirement and history removal', async () => {
+    const outbox = await import('../src/main/session/input.js');
+    const { randomUUID } = await import('node:crypto');
+    const id = randomUUID(), retryId = randomUUID();
+    const args = { id, sessionId: null, text: 'Synthetic first message', mode: 'auto' as const,
+      dueAt: Date.now(), model: null, reasoningEffort: null };
+    await writeDurableNow('session-input', []);
+    outbox.resetInputForTests();
+    try {
+      await outbox.enqueueInput(args);
+      const gate = faultGate();
+      const rm = fs.rm.bind(fs);
+      const holdRemoval = vi.spyOn(fs, 'rm').mockImplementation(async (target, options) => {
+        if (target === path.join(dir, 'sessions', id)) await gate.hold();
+        return rm(target, options);
+      });
+      const removing = handlers.get('sessions:delete')!(null, { id });
+      try {
+        await gate.entered;
+        expect(await readDurable('session-input')).toMatchObject([{ id, state: 'cancelled' }]);
+        await expect(outbox.enqueueInput({ ...args, id: retryId, sessionId: id })).rejects.toThrow('This session is already being deleted');
+      } finally {
+        gate.release();
+        await removing;
+        holdRemoval.mockRestore();
+      }
+      expect(await removing).toMatchObject({ ok: true });
+      await flushDurable();
+      outbox.resetInputForTests();
+      resetSessionStoreForTests();
+      expect(await outbox.pendingBrowserInputs()).toEqual([]);
+      expect(await getSession(id)).toBeNull();
+    } finally {
+      await writeDurableNow('session-input', []);
+      outbox.resetInputForTests();
+    }
+  });
 });
