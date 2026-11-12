@@ -107,11 +107,15 @@ const IMAGE_MIME_BY_EXTENSION = new Map<string, string>([
  * from the content, never the extension, and finds an SVG tag even behind unrelated bytes, so a
  * project file named x.png could otherwise reach the vector renderer (sharp < 0.35.5 has a
  * librsvg memory-safety advisory). PNG, JPEG, GIF and WebP are recognised by `imageMime`; AVIF by its
- * `ftyp` box.
+ * `ftyp` box, which must also declare a plausible size.
  */
 function hasRasterSignature(data: Buffer): boolean {
   if (imageMime(data)) return true;
-  return data.length >= 12 && data.toString('latin1', 4, 8) === 'ftyp' && /^(avif|avis|mif1|msf1)$/.test(data.toString('latin1', 8, 12));
+  if (data.length < 16 || data.toString('latin1', 4, 8) !== 'ftyp' || !/^(avif|avis|mif1|msf1)$/.test(data.toString('latin1', 8, 12))) return false;
+  // The first box must have a real size: the decoder rejects anything above 2048 bytes, and text such as
+  // "<!--ftypavif-->" has the right letters at bytes 4-11 but reads as a size of about a billion.
+  const size = data.readUInt32BE(0);
+  return size >= 16 && size <= 2048 && size <= data.length;
 }
 
 export interface ProjectFileTarget {
