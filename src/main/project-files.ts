@@ -359,14 +359,14 @@ export async function previewProjectFile(projectId: string, relativePath: string
       const data = offset === buffer.length ? buffer : buffer.subarray(0, offset);
       // Decode under a pixel limit and publish one bounded raster thumbnail. Compressed bytes
       // alone do not bound browser memory, and a filename is not proof of image content.
-      let image: Buffer;
-      try {
-        // A project file is untrusted content. libvips would hand an SVG (or a gzipped one) to its
-        // vector renderer whatever the filename says; no raster extension here is a vector format.
-        if (looksLikeVector(data)) throw new Error('vector image');
+      // A project file is untrusted content. libvips would hand an SVG (or a gzipped one) to its
+      // vector renderer whatever the filename says; no raster extension here is a vector format.
+      let image: Buffer | null = null;
+      if (!looksLikeVector(data)) {
         image = await sharp(data, { failOn: 'warning', limitInputPixels: 16 * 1024 * 1024, sequentialRead: true })
-          .rotate().resize(1600, 1600, { fit: 'inside', withoutEnlargement: true }).png().toBuffer();
-      } catch {
+          .rotate().resize(1600, 1600, { fit: 'inside', withoutEnlargement: true }).png().toBuffer().catch(() => null);
+      }
+      if (!image) {
         return { projectId, projectName: target.projectName, path: target.path, name: path.basename(target.real),
           bytes: stat.size, modifiedAt: stat.mtime.toISOString(), binary: true, text: null, truncated: false,
           note: 'Image preview unavailable. The file is invalid, unsupported or exceeds the pixel limit.' };
