@@ -4,6 +4,7 @@
 // details" says how many it hid, and the dialog fits in every language, both themes and a narrow
 // window. Save hands over the previewed page's id; Escape and Cancel close without saving.
 const { app, BrowserWindow } = require('electron');
+const { keyboardFor } = require('./fixtures/press-key.cjs');
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
 const root = process.env.COS_UI_ROOT || path.resolve(__dirname, '..');
 const output = path.resolve(process.env.COS_UI_OUTPUT || path.join(root, '.tmp', 'share-page'));
@@ -63,6 +64,9 @@ app.whenReady().then(async () => {
   // Use the app's native compositor. Offscreen capture can lose its Viz surface after navigation
   // on macOS, even while the DOM/layout assertions pass, and reject with UnknownVizError.
   win = new BrowserWindow({show:false,width:1280,height:800,webPreferences:{sandbox:true,backgroundThrottling:false}});
+  const pressKey = keyboardFor(win.webContents);
+  let wasShown = win.isVisible();
+  win.on('show', () => { wasShown = true; });
   const errors=[];
   win.webContents.on('console-message',e=>{if(e.level==='error'&&!BENIGN_RENDERER_ERRORS.includes(e.message))errors.push(e.message);});
   const js=code=>win.webContents.executeJavaScript(code);
@@ -109,7 +113,6 @@ app.whenReady().then(async () => {
     assert.equal(view.buttonsOneLine,true,`${label}: Cancel and Save on one line`);
     assert.equal(view.buttonsRight,25,`${label}: buttons keep the dialog's right padding`);
   };
-  win.show(); win.focus(); win.webContents.focus();
 
   // English, both themes: the menu item, the preview, then hiding.
   await load('en');
@@ -135,7 +138,7 @@ app.whenReady().then(async () => {
     await layout(`en ${theme} shown`);
     await capture(`${theme}-preview.png`);
     // Escape closes and saves nothing.
-    win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'}); win.webContents.sendInputEvent({type:'keyUp',keyCode:'Escape'});
+    await pressKey('Escape', 27);
     await until(`!${dialog}.open`);
     assert.equal(await js(`shares.filter(s=>s.target==='file').length`),0);
   }
@@ -164,6 +167,7 @@ app.whenReady().then(async () => {
     await layout(`${language} 720`);
     await capture(`${language}-720.png`);
   }
+  assert.equal(wasShown,false,'The verifier never shows its window');
   assert.deepEqual(errors,[]);
   console.log('PASS: share as web page from the chat menu, sandboxed preview under the app policy, hiding, save, Escape; 13 languages, both themes, 720 px');
   win.destroy();await server.close();app.exit(0);
