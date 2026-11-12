@@ -3,6 +3,8 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Stats } from 'node:fs';
 import sharp from 'sharp';
+import { imageMime } from './fsops.js';
+import { logInfo } from './logger.js';
 import { getConfig } from './config.js';
 import { listDirectoryLevel, LongLineReadError, readTextFile, statInfo } from './codex/read-backend.js';
 import { getProject, projectWorkspace } from './projects.js';
@@ -99,6 +101,22 @@ const IMAGE_MIME_BY_EXTENSION = new Map<string, string>([
   ['.avif', 'image/avif'],
   ['.ico', 'image/x-icon']
 ]);
+
+/**
+ * Only a file that starts with a raster image's own signature reaches libvips. It picks its decoder
+ * from the content, never the extension, and finds an SVG tag even behind unrelated bytes, so a
+ * project file named x.png could otherwise reach the vector renderer (sharp < 0.35.5 has a
+ * librsvg memory-safety advisory). PNG, JPEG, GIF and WebP are recognised by `imageMime`; AVIF by its
+ * `ftyp` box, which must also declare a plausible size.
+ */
+function hasRasterSignature(data: Buffer): boolean {
+  if (imageMime(data)) return true;
+  if (data.length < 16 || data.toString('latin1', 4, 8) !== 'ftyp' || !/^(avif|avis|mif1|msf1)$/.test(data.toString('latin1', 8, 12))) return false;
+  // The first box must have a real size: the decoder rejects anything above 2048 bytes, and text such as
+  // "<!--ftypavif-->" has the right letters at bytes 4-11 but reads as a size of about a billion.
+  const size = data.readUInt32BE(0);
+  return size >= 16 && size <= 2048 && size <= data.length;
+}
 
 export interface ProjectFileTarget {
   projectId: string;
@@ -351,11 +369,16 @@ export async function previewProjectFile(projectId: string, relativePath: string
       const data = offset === buffer.length ? buffer : buffer.subarray(0, offset);
       // Decode under a pixel limit and publish one bounded raster thumbnail. Compressed bytes
       // alone do not bound browser memory, and a filename is not proof of image content.
-      let image: Buffer;
-      try {
-        image = await sharp(data, { failOn: 'warning', limitInputPixels: 16 * 1024 * 1024, sequentialRead: true })
-          .rotate().resize(1600, 1600, { fit: 'inside', withoutEnlargement: true }).png().toBuffer();
-      } catch {
+      let image: Buffer | null = null;
+      if (hasRasterSignature(data)) {
+        try {
+          image = await sharp(data, { failOn: 'warning', limitInputPixels: 16 * 1024 * 1024, sequentialRead: true })
+            .rotate().resize(1600, 1600, { fit: 'inside', withoutEnlargement: true }).png().toBuffer();
+        } catch { image = null; }
+      } else {
+        logInfo(`files: no image preview for ${target.path}: its content is not a PNG, JPEG, GIF, WebP or AVIF image`);
+      }
+      if (!image) {
         return { projectId, projectName: target.projectName, path: target.path, name: path.basename(target.real),
           bytes: stat.size, modifiedAt: stat.mtime.toISOString(), binary: true, text: null, truncated: false,
           note: 'Image preview unavailable. The file is invalid, unsupported or exceeds the pixel limit.' };
