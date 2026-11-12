@@ -39,6 +39,7 @@ app.whenReady().then(async () => {
   });
   let win;
   const metrics=[];
+  let failed=false;
   try {
     await server.listen();
     win=new BrowserWindow({show:false,width:1280,height:820,webPreferences:{sandbox:true,backgroundThrottling:false}});
@@ -89,6 +90,56 @@ app.whenReady().then(async () => {
           (await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());
       }
     }
+    // The real RTL composer uses a right-side sidebar. The mode popover must
+    // grow inward from its trigger instead of hiding behind that sidebar.
+    await setPanel('chat');
+    for(const width of [1280,900,760]){
+      win.setSize(width,820);
+      await evalJS('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+      const placement=await evalJS(`(() => {
+        const details=document.getElementById('composerSettings');
+        details.classList.add('mode-picker');
+        details.open=true;
+        const menu=details.querySelector('.composer-popover').getBoundingClientRect();
+        const trigger=details.querySelector('summary').getBoundingClientRect();
+        const card=document.querySelector('.card.is-session').getBoundingClientRect();
+        const buttons=[...details.querySelectorAll('#automationSwitch [role=radio]')];
+        return {viewport:innerWidth,menu:{left:menu.left,right:menu.right,width:menu.width},trigger:{left:trigger.left,right:trigger.right},card:{left:card.left,right:card.right},
+          buttonsFit:buttons.every(button=>{const r=button.getBoundingClientRect();return r.left>=menu.left-1&&r.right<=menu.right+1}),direction:document.documentElement.dir};
+      })()`);
+      assert.equal(placement.direction,'rtl');
+      assert.ok(placement.menu.width>300,`The mode popover must be visible at ${width}: ${JSON.stringify(placement)}`);
+      assert.ok(Math.abs(placement.menu.right-placement.trigger.right)<=2,
+        `RTL mode menu must open inward from the right edge, not under the sidebar at ${width}: ${JSON.stringify(placement)}`);
+      assert.ok(placement.menu.left>=placement.card.left-2&&placement.menu.right<=placement.card.right+2,
+        `RTL mode options must fit the visible chat pane at ${width}: ${JSON.stringify(placement)}`);
+      assert.ok(placement.buttonsFit,`RTL mode option buttons must fit their menu at ${width}`);
+      if(width===1280) fs.writeFileSync(path.join(output,'arabic-composer-modes-1280.png'),
+        (await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());
+    }
+    await evalJS(`document.getElementById('composerSettings').open=false`);
+    // Other toolbar popovers also mirror toward the chat pane: attachments
+    // anchor on the right in RTL; the model chooser anchors on the left.
+    for(const width of [1280,900,760]){
+      win.setSize(width,820);
+      await evalJS('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+      for(const [id,side] of [['attachmentMenu','right'],['modelMenu','left']]){
+        const placement=await evalJS(`(() => {
+          const details=document.getElementById(${JSON.stringify(id)});details.open=true;
+          const menu=details.querySelector('.composer-popover').getBoundingClientRect();
+          const trigger=details.querySelector('summary').getBoundingClientRect();
+          const pane=document.querySelector('.card.is-session').getBoundingClientRect();
+          const result={viewport:innerWidth,menu:{left:menu.left,right:menu.right,width:menu.width},
+            trigger:{left:trigger.left,right:trigger.right},pane:{left:pane.left,right:pane.right}};
+          details.open=false;return result;
+        })()`);
+        assert.ok(placement.menu.width>=200,`RTL ${id} must be visible: ${JSON.stringify(placement)}`);
+        assert.ok(Math.abs(placement.menu[side]-placement.trigger[side])<=2,
+          `RTL ${id} must anchor to the ${side} of its trigger at ${width}: ${JSON.stringify(placement)}`);
+        assert.ok(placement.menu.left>=placement.pane.left-2&&placement.menu.right<=placement.pane.right+2,
+          `RTL ${id} must stay inside its chat pane at ${width}: ${JSON.stringify(placement)}`);
+      }
+    }
     await evalJS(`(() => {document.getElementById('uiLanguage').value='en';document.getElementById('uiLanguage').dispatchEvent(new Event('change'));})()`);
     assert.equal(await evalJS('document.documentElement.dir'),'ltr');
     assert.equal(await evalJS('document.getElementById("newChat").textContent.trim()'),'New chat');
@@ -128,10 +179,11 @@ app.whenReady().then(async () => {
     console.log(JSON.stringify({status:'PASS',screenshots:metrics.length,metrics:metrics.map(m=>({width:m.width,screen:m.name,sidebar:m.sidebar,resize:m.resize,heading:m.heading,bodyOverflow:m.documentWidth>m.viewport}))},null,2));
   }catch(e){
     console.error(e.stack||e);
-    process.exitCode=1;
+    failed=true;
   }finally{
     win?.destroy();
     await server.close();
+    if(failed) process.exit(1);
     app.quit();
   }
 }).catch(e=>{console.error(e);app.exit(1);});

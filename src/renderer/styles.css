@@ -4468,6 +4468,14 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 #composerSettings > summary { gap: 6px; }
 #composerSettings > summary .ico { --ico: 17px; --glyph: 17px; }
 #composerSettings .composer-popover { width: 350px; max-width: calc(100vw - 32px); left: 0; right: auto; transform-origin: bottom left; max-height: min(520px, 70vh); overflow-y: auto; }
+/* Composer controls mirror with the rest of the layout: open inward, not
+   underneath the sidebar. The model selector sits on the opposite end. */
+html[dir='rtl'] :is(#attachmentMenu, #composerSettings) > .composer-popover {
+  left: auto; right: 0; transform-origin: bottom right;
+}
+html[dir='rtl'] #modelMenu > .composer-popover {
+  left: 0; right: auto; transform-origin: bottom left;
+}
 #composerSettings.mode-picker :is(#sessionControls, #loopDeliveryRow) { display: none; }
 #composerSettings:not(.mode-picker) #automationSwitch { display: none; }
 #composerSettings[data-mode]:not([data-mode=off]) > summary { color: var(--accent); background: var(--control-selected); }
