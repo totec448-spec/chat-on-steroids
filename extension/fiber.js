@@ -1799,12 +1799,14 @@
    */
   function messagesFromTurnView(turn) {
     if (!turn || typeof turn !== 'object' || !Array.isArray(turn.items) || turn.items.length > MAX_TURN_ITEMS) return null;
-    const out = [], seen = new Set();
+    const out = [], seen = new Set(), interim = { remaining: MAX_TRACE_TEXT };
     const topLevel = new Set(turn.items.filter(item => item?.type === 'assistant-message').map(item => str(item.messageId) || str(item.latestMessageId)).filter(Boolean));
     const assistant = (item, nested) => {
       const id = str(item.messageId) || str(item.latestMessageId);
       if (!id || seen.has(id) || (nested && topLevel.has(id))) return;
-      const body = typeof item.content === 'string' ? item.content.slice(0, MAX_RENDERED_TEXT) : '';
+      // Interim updates share a small text budget, so they cannot use up the turn's own for its final answer.
+      const body = nested ? budgetedText(typeof item.content === 'string' ? item.content : '', interim, MAX_TRACE_SAY)
+        : typeof item.content === 'string' ? item.content.slice(0, MAX_RENDERED_TEXT) : '';
       if (nested && (!body || ONLY_CONTENT_REFERENCES.test(body))) return;
       const phase = str(item.phase), complete = item.completed === true;
       const terminal = !nested && complete && phase === 'final_answer' && turn.status === 'complete';
@@ -2310,6 +2312,8 @@
     // group while the turn runs. A top-level item owns its id; a nested copy of it is not read twice.
     const topLevel = new Set(entry.turn.items.filter(item => item?.type === 'assistant-message').map(item => str(item.messageId)).filter(Boolean));
     let work = 0;
+    const interim = { remaining: MAX_TRACE_TEXT };
+    const interimText = value => typeof value === 'string' && value ? budgetedText(value, interim, MAX_TRACE_SAY) : '';
     // ChatGPT's own times for this turn (#2005): a question found in older history was recorded at the
     // moment it was read, hours or months late. The question was sent when the turn's work started
     // (its own `sentAtMs` once ChatGPT keeps it), and a finished answer was written when it completed.
@@ -2365,17 +2369,27 @@
       } else {
         const steps = item?.type === 'chatgpt-reasoning-group' && Array.isArray(item.items) ? item.items : [item];
         for (const step of steps) {
-          // Past the row limit the rest of the working rows are not read; the turn's own questions and
-          // answers (the top-level items) always are, so a long turn can still end (#2157).
-          if (++work > MAX_ROWS) break;
+          // Past the row limit the working rows are not reported; the turn's own questions and answers
+          // (the top-level items) always are, so a long turn can still end (#2157). Their identities are
+          // still checked, so a repeated one refuses the turn however far down it sits.
+          if (++work > MAX_ROWS) {
+            if (work > MAX_TURN_ITEMS) return null;
+            const counted = step?.type === 'dynamic-tool-call' ? step.tool === 'exec'
+              : step?.type === 'mcp-tool-call' && ownServerName(step.invocation?.server);
+            const spare = counted ? str(step.callId) : null;
+            if (spare && !remember(spare)) return null;
+            continue;
+          }
           if (step?.type === 'generated-image') {
             appendGeneratedImage(step);
             continue;
           }
           if (step?.type === 'assistant-message' && item !== step) {
             // Interim prose whatever phase it carries: only a top-level answer can end the turn.
-            const id = str(step.messageId), text = shellItemText(step);
-            if (!id || topLevel.has(id) || !remember(id) || !text || ONLY_CONTENT_REFERENCES.test(text)) continue;
+            const id = str(step.messageId);
+            if (!id || topLevel.has(id) || !remember(id)) continue;
+            const text = interimText(shellItemText(step));
+            if (!text || ONLY_CONTENT_REFERENCES.test(text)) continue;
             messages.push({ id, author: { role: 'assistant' }, content: { content_type: 'text', parts: [text] },
               channel: 'commentary', end_turn: false, status: step.completed === true ? 'finished_successfully' : 'in_progress', metadata: {} });
             continue;

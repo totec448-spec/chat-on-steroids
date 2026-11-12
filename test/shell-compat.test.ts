@@ -237,6 +237,20 @@ describe('a very long turn still reports its public messages (#2157)', () => {
     expect(turn.endMessageId).toBe(ANSWER);
   });
 
+  it('still refuses a repeated call identity that sits past the row limit', async () => {
+    const f = fixture(); complete(f, [...Array.from({ length: 450 }, (_, index) => own(`call-${index}`)), own('call-0')]);
+    expect((await f.ask()).turns).toEqual([]);
+  });
+
+  it('keeps the whole text of the final answer however long the interim updates are', async () => {
+    const f = fixture(); complete(f, Array.from({ length: 6 }, (_, index) => ({ ...interim(index), content: 'x'.repeat(300_000) })));
+    (f.entry.turn.items[2] as any).content = 'The complete answer. '.repeat(499) + 'The end.';
+    ids(f);
+    const turn = (await f.ask()).turns[0];
+    expect(turn.messages.at(-1).rawText).toBe('The complete answer. '.repeat(499) + 'The end.');
+    expect(turn.endMessageId).toBe(ANSWER);
+  });
+
   it('keeps the final answer when top-level items outnumber the row limit', async () => {
     const f = fixture(); (f.entry.turn as any).status = 'complete';
     f.entry.turn.items = [f.entry.turn.items[0], ...Array.from({ length: 450 }, (_, index) => interim(index)),
