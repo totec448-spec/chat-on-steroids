@@ -3553,7 +3553,7 @@ async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands, liveS
     }
   }
   extensionReloadPending = true;
-  clearDesktopInputRetries();
+  if (typeof clearDesktopInputRetries === 'function') clearDesktopInputRetries();
   try {
     const prepared = await call('/extension/update', { method: 'POST',
       body: JSON.stringify(busyFor ? { pastBusyChatsMs: busyFor } : {}) });
@@ -4679,9 +4679,9 @@ const HANDLERS = {
   },
   async unpair() {
     await load();
-    clearDesktopInputRetries();
     closeWakeSocket();
     if (browserController) await (await browserController).revoke();
+    clearDesktopInputRetries();
     // Invalidate any `/pair` already on the wire before changing the visible/persisted state.
     connectionEpoch++;
     token = null;
