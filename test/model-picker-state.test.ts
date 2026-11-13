@@ -934,3 +934,24 @@ it('skips duplicate Enter and click when the picker opens before retrying a re-a
   expect(retryEnter).not.toHaveBeenCalled();
   expect(retryClick).not.toHaveBeenCalled();
 });
+
+it('never clicks an owned control if Enter changed native effort without a mounted portal', async () => {
+  vi.useFakeTimers();
+  const f = fixture(), trigger = page.window.document.querySelector('button')!;
+  trigger.setAttribute('data-composer-navigation-target', 'reasoning');
+  trigger.setAttribute('data-selected-reasoning-effort', 'medium');
+  trigger.addEventListener('keydown', event => { if (event.key !== 'Enter') return;
+    event.stopImmediatePropagation(); trigger.setAttribute('data-selected-reasoning-effort', 'high'); }, true);
+  const clicked = vi.fn(); trigger.addEventListener('click', clicked);
+  const result = f.api.selectModelSettings('future-model', 'ultra');
+  await vi.runAllTimersAsync(); expect(await result).toBe(false); expect(clicked).not.toHaveBeenCalled();
+});
+it('never clicks an owned control if Enter changed account-selected Fiber state without a portal', async () => {
+  vi.useFakeTimers();
+  const f = fixture(), trigger = page.window.document.querySelector('button')!;
+  trigger.addEventListener('keydown', event => { if (event.key !== 'Enter') return;
+    event.stopImmediatePropagation(); f.state.currentBucket = 1; f.state.currentSelection = f.selections[0]![0]!; }, true);
+  const clicked = vi.fn(); trigger.addEventListener('click', clicked);
+  const result = f.api.selectModelSettings('future-model', 'ultra');
+  await vi.runAllTimersAsync(); expect(await result).toBe(false); expect(clicked).not.toHaveBeenCalled();
+});
