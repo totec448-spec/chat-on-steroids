@@ -3994,5 +3994,13 @@
   "Compact & Resume holds up": "Sıkıştır ve sürdür sağlamlaştı",
   "A page reload in a Project no longer makes it fail every time.": "Bir projede sayfayı yenilemek artık her seferinde hataya yol açmıyor.",
   "Skills only when wanted": "Beceriler yalnızca istenince",
-  "A Skill is not chosen when you say not to use it.": "Kullanma dediğinde bir Beceri seçilmez."
+  "A Skill is not chosen when you say not to use it.": "Kullanma dediğinde bir Beceri seçilmez.",
+  "Compact & Resume in Projects, Goal chats that recover, and safer saves over SSH.": "Projelerde Sıkıştır ve sürdür, kendini toparlayan Hedef sohbetleri ve SSH üzerinden daha güvenli kaydetme.",
+  "It works in a Project that already holds chats started through the app.": "Uygulamadan başlatılan sohbetleri zaten barındıran bir Projede çalışır.",
+  "Goal chats keep going": "Hedef sohbetleri devam ediyor",
+  "A Goal chat no longer stops for good after a Continue that failed.": "Başarısız bir Devam et'ten sonra Hedef sohbeti artık sonsuza dek durmuyor.",
+  "Safer saves over SSH": "SSH üzerinden daha güvenli kaydetme",
+  "If a save fails, your original file stays as it was.": "Kaydetme başarısız olursa özgün dosyanız olduğu gibi kalır.",
+  "Write mid-answer in any language": "Yanıt sırasında her dilde mesaj",
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT yanıt verirken gönderilen bir mesaj artık her dildeki sayfalarda gönderiliyor."
 }
