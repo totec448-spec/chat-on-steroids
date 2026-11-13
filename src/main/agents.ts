@@ -148,7 +148,8 @@ export class NoChatError extends AgentsBusyError {
         '(a client such as Codex sends every tool call as a new request). A sub-agent run belongs to the chat, or the ' +
         'single request, that started it, so this call cannot reach a run started by another call. Do not call agents ' +
         'action=spawn again: a new run would be just as unreachable. Sub-agents work from a ChatGPT chat in the browser; ' +
-        'if this is one, the app may identify it in a moment.'
+        'if this is one, the app may identify it in a moment. If the chat is open in another computer\'s browser, call ' +
+        'that computer\'s Core instead: only the computer whose browser holds the chat can identify it.'
     );
   }
 }
