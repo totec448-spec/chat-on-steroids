@@ -2773,14 +2773,15 @@ async function recordChatObservationsNow(
           uncertainEnd.outcome !== 'completed' && uncertainEnd.outcome !== 'stopped' && item.time > uncertainEnd.time;
         // HTML, provider identity and authored-time promotion revise history, not work.
         // In particular a post-failure Fiber backfill must not reopen the dead turn.
-        const workingActivity = written.contentChanged && state !== 'final' && item.activeNow === true &&
-          (!canonicalTurn || canonicalTurn === live?.turnId || resumedUncertainTurn) &&
-          !(live?.turnStartedAt === null && (live.lastTurnOutcome === 'stopped' || live.lastTurnOutcome === 'completed'));
-        const turns = state === 'final' && canonicalTurn && written.event.kind === 'assistant_message'
+        const turns = canonicalTurn && written.event.kind === 'assistant_message' &&
+          (state === 'final' || (written.contentChanged && item.activeNow === true && !!live?.turnId && canonicalTurn !== live.turnId))
           ? (await getSession(sessionId))?.timelineTurns : undefined;
         const effectiveTurn = written.event.kind === 'assistant_message' && turns
           ? effectiveFinalTurnId(turns, written.event)
           : canonicalTurn;
+        const workingActivity = written.contentChanged && state !== 'final' && item.activeNow === true &&
+          (!canonicalTurn || canonicalTurn === live?.turnId || (!!live?.turnId && effectiveTurn === live.turnId) || resumedUncertainTurn) &&
+          !(live?.turnStartedAt === null && (live.lastTurnOutcome === 'stopped' || live.lastTurnOutcome === 'completed'));
         const finishingTurn = canonicalTurn && live?.turnId && (canonicalTurn === live.turnId || effectiveTurn === live.turnId ||
           (turns && responseTurnId(turns, effectiveTurn ?? canonicalTurn) === responseTurnId(turns, live.turnId))) ? live.turnId : null;
         if (state === 'final' && written.event.kind === 'assistant_message' && finishingTurn && recoverableTurns.has(finishingTurn) &&

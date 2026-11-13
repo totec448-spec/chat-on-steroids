@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { chronological, projectTimeline, type Chronological } from '../src/shared/chronology.js';
+import { chronological, effectiveFinalTurnId, projectTimeline, type Chronological } from '../src/shared/chronology.js';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { appendEvent, createSession, initSessionStore, readCompletedFinal, resetSessionStoreForTests, unsetSessionRootForTests,
+import { appendEvent, createSession, getSession, initSessionStore, readCompletedFinal, readRecentEvents, resetSessionStoreForTests, unsetSessionRootForTests,
   upsertMessageEvent, upsertNativeImageEvent } from '../src/main/session/store.js';
 import { resetEditsForTests } from '../src/main/session/edits.js';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
@@ -291,5 +291,88 @@ describe('continued final completion', () => {
     }
   });
 
+  it('promotes a consolidated streaming answer across a continued end while keeping unmodified pre-steer interim prose in its turn', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cos-steer-streaming-'));
+    try {
+      initConfigPath(dir);
+      initSessionStore(dir);
+      await saveConfig({ ...defaultConfig(), sessions: { ...defaultConfig().sessions, record: true } });
+      resetSessionStoreForTests();
+      resetEditsForTests();
+      const conversationId = 'dddddddd-eeee-4fff-8000-000000000001';
+      const session = await createSession({ title: 'Steered streaming consolidated response', conversationId });
 
+      await upsertMessageEvent(session.id, {
+        kind: 'user_message', time: T0, source: 'extension', messageId: 'question-initial', message: text('Initial question')
+      });
+      await appendEvent(session.id, { kind: 'turn_start', time: T0 + 10, source: 'extension', turnId: 'continued-first' });
+      await upsertMessageEvent(session.id, {
+        kind: 'assistant_message', time: T0 + 15, source: 'extension', turnId: 'continued-first',
+        messageId: 'interim-pre-steer', providerMessageId: 'interim-pre-steer',
+        message: text('Working before steer...'), state: 'streaming', final: false
+      });
+      await upsertMessageEvent(session.id, {
+        kind: 'assistant_message', time: T0 + 20, source: 'extension', turnId: 'continued-first',
+        messageId: 'answer-consolidated', providerMessageId: 'answer-consolidated',
+        message: text('First half before steer'), state: 'streaming', final: false
+      });
+
+      await upsertMessageEvent(session.id, {
+        kind: 'user_message', time: T0 + 30, source: 'extension',
+        messageId: 'question-steer', parentId: 'answer-consolidated', message: text('Steered follow-up')
+      });
+      await appendEvent(session.id, {
+        kind: 'turn_end', time: T0 + 31, source: 'extension',
+        turnId: 'continued-first', outcome: 'interrupted', continued: true
+      });
+      await appendEvent(session.id, {
+        kind: 'turn_start', time: T0 + 32, source: 'extension', turnId: 'continued-terminal'
+      });
+      await appendEvent(session.id, {
+        kind: 'tool_call', time: T0 + 40, source: 'mcp', turnId: 'continued-terminal',
+        call: { callId: 'call-after-steer', tool: 'read_file', attribution: 'request_id', attributionMethod: 'request_id', requestId: 'req-steer', conversationId, durationMs: 10, args: text('{}'), result: text('ok'), outcome: 'ok', summary: { kind: 'read', title: 'Read file', tone: 'neutral' } }
+      });
+
+      // Re-observing the unchanged pre-steer interim with the continuation's turnId (`work: false`)
+      // must keep its contentSeq and turn placement before the steered question.
+      await upsertMessageEvent(session.id, {
+        kind: 'assistant_message', time: T0 + 42, source: 'extension', turnId: 'continued-terminal',
+        messageId: 'interim-pre-steer', providerMessageId: 'interim-pre-steer',
+        message: text('Working before steer...'), state: 'streaming', final: false
+      }, { work: false });
+
+      // Genuine post-steer prose arriving in the shared assistant bubble while still streaming (`final: false`)
+      // advances `contentSeq` past the continued end and must resolve and order inside the continuation turn.
+      const updated = await upsertMessageEvent(session.id, {
+        kind: 'assistant_message', time: T0 + 45, source: 'extension', turnId: 'continued-first',
+        messageId: 'answer-consolidated', providerMessageId: 'answer-consolidated',
+        message: text('First half before steer\n\nContinuing after steer...'), state: 'streaming', final: false
+      });
+
+      const summary = await getSession(session.id);
+      const recent = await readRecentEvents(session.id, 100);
+      const interimEvent = recent.find(e => e.kind === 'assistant_message' && e.messageId === 'interim-pre-steer')!;
+      const consolidatedEvent = recent.find(e => e.kind === 'assistant_message' && e.messageId === 'answer-consolidated')!;
+
+      expect(effectiveFinalTurnId(summary?.timelineTurns, interimEvent)).toBe('continued-first');
+      expect(effectiveFinalTurnId(summary?.timelineTurns, updated.event)).toBe('continued-terminal');
+      expect(effectiveFinalTurnId(summary?.timelineTurns, consolidatedEvent)).toBe('continued-terminal');
+
+      const interimIdx = recent.findIndex(e => e.kind === 'assistant_message' && e.messageId === 'interim-pre-steer');
+      const steerIdx = recent.findIndex(e => e.kind === 'user_message' && e.messageId === 'question-steer');
+      const toolIdx = recent.findIndex(e => e.kind === 'tool_call' && e.call.callId === 'call-after-steer');
+      const streamingIdx = recent.findIndex(e => e.kind === 'assistant_message' && e.messageId === 'answer-consolidated');
+
+      expect(interimIdx).toBeLessThan(steerIdx);
+      expect(steerIdx).toBeLessThan(toolIdx);
+      expect(streamingIdx).toBeGreaterThan(steerIdx);
+      expect(streamingIdx).toBeGreaterThan(toolIdx);
+      // Streaming must still never satisfy final completion lookup:
+      expect(await readCompletedFinal(session.id, conversationId)).toBeNull();
+    } finally {
+      resetSessionStoreForTests();
+      unsetSessionRootForTests();
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
 });

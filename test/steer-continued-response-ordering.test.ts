@@ -442,4 +442,56 @@ describe('steer / follow-up continued turn ordering', () => {
     expect(initialFinalIndex).toBeLessThan(remountedFinalIndex);
     expect(remountedFinalIndex).toBeLessThan(turnEndIndex);
   });
+
+  it('places a pre-steer streaming assistant message below the steer question and earlier continuation tools while still streaming', async () => {
+    // Reproduces the live steer streaming jump: ChatGPT reuses the assistant bubble
+    // opened in Turn 1 (`g-turn-5`, origin 1379, time T0 + 150) while Turn 2 (`g-turn-6`)
+    // executes after `question-2`. Until `final: true` arrives, its `contentSeq` advances
+    // past Turn 1's continued end (1409) and Turn 2's tool call (1442), while an unchanged
+    // pre-steer interim stays in Turn 1 above `question-2`.
+    const events: SessionEvent[] = buildSteerEvents()
+      .filter(event => event.kind !== 'turn_end' || event.turnId !== 'g-turn-6')
+      .map(event => event.kind === 'assistant_message' && event.messageId === 'assistant-consolidated-final'
+        ? {
+            ...event,
+            contentSeq: 1450,
+            finalContentSeq: undefined,
+            finalObservedAt: undefined,
+            message: text('¡Me encanta, Dani! Nuestro juego es de 16 bits. Implementando el Repetidor Arcano...'),
+            state: 'streaming' as const,
+            final: false
+          }
+        : event);
+
+    const ordered = chronological(events);
+    const trace1Index = ordered.findIndex(e => e.kind === 'assistant_message' && (e as any).messageId === 'assistant:trace-1:working');
+    const turn1EndIndex = ordered.findIndex(e => e.kind === 'turn_end' && e.turnId === 'g-turn-5');
+    const steerQuestionIndex = ordered.findIndex(e => e.kind === 'user_message' && (e as any).messageId === 'question-2');
+    const turn2StartIndex = ordered.findIndex(e => e.kind === 'turn_start' && e.turnId === 'g-turn-6');
+    const turn2ToolIndex = ordered.findIndex(e => e.kind === 'tool_call' && e.turnId === 'g-turn-6');
+    const streamingAnswerIndex = ordered.findIndex(e => e.kind === 'assistant_message' && (e as any).messageId === 'assistant-consolidated-final');
+
+    expect(trace1Index).toBeLessThan(turn1EndIndex);
+    expect(turn1EndIndex).toBeLessThan(steerQuestionIndex);
+    expect(steerQuestionIndex).toBeLessThan(turn2StartIndex);
+    expect(turn2StartIndex).toBeLessThan(turn2ToolIndex);
+    expect(streamingAnswerIndex).toBeGreaterThan(steerQuestionIndex);
+    expect(streamingAnswerIndex).toBeGreaterThan(turn2ToolIndex);
+
+    const { w } = await boot(events);
+    const renderedNodes = [...w.document.getElementById('timeline')!.children];
+    const trace1El = renderedNodes.find(el => el.classList.contains('ev-assistant_message') && el.textContent?.includes('El familiar base ya está generado'));
+    const steerQuestionEl = renderedNodes.find(el => el.classList.contains('ev-user_message') && el.textContent?.includes('Pero nuestro juego'));
+    const turn2ToolEl = renderedNodes.find(el => el.classList.contains('tool-group') || (el.classList.contains('ev-tool_call') && el.textContent?.includes('Godot')));
+    const streamingAnswerEl = renderedNodes.find(el => el.classList.contains('ev-assistant_message') && el.textContent?.includes('Nuestro juego es de 16 bits'));
+
+    expect(trace1El).toBeDefined();
+    expect(steerQuestionEl).toBeDefined();
+    expect(turn2ToolEl).toBeDefined();
+    expect(streamingAnswerEl).toBeDefined();
+
+    expect(renderedNodes.indexOf(trace1El!)).toBeLessThan(renderedNodes.indexOf(steerQuestionEl!));
+    expect(renderedNodes.indexOf(streamingAnswerEl!)).toBeGreaterThan(renderedNodes.indexOf(steerQuestionEl!));
+    expect(renderedNodes.indexOf(streamingAnswerEl!)).toBeGreaterThan(renderedNodes.indexOf(turn2ToolEl!));
+  });
 });
