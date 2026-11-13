@@ -3709,9 +3709,9 @@ var CLF_DOM = (() => {
       phase('open');
       const ui = modelPickerAccess(stillCurrent, observe, phase), original = await ui.open();
       if (!original) {
-        selectionFailed(ui.openingRefusal() === 'changed'
-          ? 'the model or reasoning effort changed while opening the picker'
-          : 'the picker did not open or could not be read', ui.openingRefusal() || 'unreadable');
+        // Keep the existing user-visible failure wording; the structured log
+        // distinguishes a guarded selection drift from an unreadable picker.
+        selectionFailed('the picker did not open or could not be read', ui.openingRefusal() || 'unreadable');
         phase('close'); trace.closed = await ui.close(); return false;
       }
       // Account-evaluated exact selection is already proof; visiting unrelated
