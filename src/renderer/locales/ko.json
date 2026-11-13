@@ -3929,5 +3929,13 @@
   "Models for Goal, Loop and Plan": "Goal, Loop, 플랜용 모델",
   "The ChatGPT model that writes their messages and plans.": "이들의 메시지와 플랜을 작성하는 ChatGPT 모델입니다.",
   "Handoffs": "인수인계",
-  "What Compact & Resume carries over.": "‘압축 후 계속’이 넘겨주는 내용입니다."
+  "What Compact & Resume carries over.": "‘압축 후 계속’이 넘겨주는 내용입니다.",
+  "Compact & Resume in Projects, Goal chats that recover, and safer saves over SSH.": "프로젝트에서의 압축 후 계속, 스스로 복구하는 Goal 채팅, SSH에서 더 안전한 저장.",
+  "It works in a Project that already holds chats started through the app.": "앱에서 시작한 채팅이 이미 있는 프로젝트에서도 작동합니다.",
+  "Goal chats keep going": "Goal 채팅이 계속 진행",
+  "A Goal chat no longer stops for good after a Continue that failed.": "실패한 계속 뒤에 Goal 채팅이 영원히 멈춰 있지 않습니다.",
+  "Safer saves over SSH": "SSH에서 더 안전한 저장",
+  "If a save fails, your original file stays as it was.": "저장에 실패해도 원본 파일은 그대로 남습니다.",
+  "Write mid-answer in any language": "답변 중에도 모든 언어로 전송",
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT가 답하는 중에 보낸 메시지가 이제 어떤 언어의 페이지에서도 전송됩니다."
 }

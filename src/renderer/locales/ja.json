@@ -3929,5 +3929,13 @@
   "Models for Goal, Loop and Plan": "ゴール、ループ、計画のモデル",
   "The ChatGPT model that writes their messages and plans.": "それらのメッセージと計画を書く ChatGPT のモデルです。",
   "Handoffs": "引き継ぎ",
-  "What Compact & Resume carries over.": "「圧縮して再開」が引き継ぐ内容です。"
+  "What Compact & Resume carries over.": "「圧縮して再開」が引き継ぐ内容です。",
+  "Compact & Resume in Projects, Goal chats that recover, and safer saves over SSH.": "プロジェクトでの圧縮して再開、回復するゴールのチャット、SSH でより安全な保存。",
+  "It works in a Project that already holds chats started through the app.": "アプリから開始したチャットがすでにあるプロジェクトでも動作します。",
+  "Goal chats keep going": "ゴールのチャットが止まらない",
+  "A Goal chat no longer stops for good after a Continue that failed.": "失敗した続行のあと、ゴールのチャットが止まったままになることはなくなりました。",
+  "Safer saves over SSH": "SSH でより安全に保存",
+  "If a save fails, your original file stays as it was.": "保存に失敗しても、元のファイルはそのまま残ります。",
+  "Write mid-answer in any language": "回答中でも、どの言語でも送信",
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT が回答している最中に送ったメッセージが、どの言語のページでも送信されるようになりました。"
 }
