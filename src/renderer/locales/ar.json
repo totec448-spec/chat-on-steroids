@@ -4331,5 +4331,13 @@
   "{0} expected files|two": "عدد الملفات المتوقعة: {0}",
   "{0} expected files|few": "عدد الملفات المتوقعة: {0}",
   "{0} expected files|many": "عدد الملفات المتوقعة: {0}",
-  "Browser {0} was not found. Install it or select another browser in Settings, then retry model discovery.": "لم يُعثر على المتصفح {0}. ثبّته أو اختر متصفحًا آخر من الإعدادات، ثم أعد البحث عن النماذج."
+  "Browser {0} was not found. Install it or select another browser in Settings, then retry model discovery.": "لم يُعثر على المتصفح {0}. ثبّته أو اختر متصفحًا آخر من الإعدادات، ثم أعد البحث عن النماذج.",
+  "Compact & Resume in Projects, Goal chats that recover, and safer saves over SSH.": "ضغط المحادثة واستئنافها داخل المشاريع، ومواصلة محادثات الهدف بعد التعثّر، وحفظ أكثر أمانًا عبر SSH.",
+  "It works in a Project that already holds chats started through the app.": "تعمل هذه الميزة داخل المشروع حتى إن كان يحتوي مسبقًا على محادثات بدأت من التطبيق.",
+  "Goal chats keep going": "محادثات الهدف تواصل العمل",
+  "A Goal chat no longer stops for good after a Continue that failed.": "لم تعد محادثة الهدف تتوقف نهائيًا إذا فشلت محاولة «متابعة».",
+  "Safer saves over SSH": "حفظ أكثر أمانًا عبر SSH",
+  "If a save fails, your original file stays as it was.": "إذا فشلت عملية الحفظ، يبقى ملفك الأصلي كما كان.",
+  "Write mid-answer in any language": "إرسال الرسائل أثناء الإجابة بأي لغة",
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "يمكن الآن إرسال الرسائل أثناء إجابة ChatGPT على الصفحات بجميع اللغات."
 }

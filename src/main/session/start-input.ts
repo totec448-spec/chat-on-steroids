@@ -3,7 +3,7 @@ import { connect, getStatus, onStatusChange } from '../connection.js';
 import { startBridge } from '../bridge.js';
 import { wakeBrowserUrl, resetBrowserStartupForTests } from '../browser-startup.js';
 import { getConfig } from '../config.js';
-import { enqueueInput, cancelInput, listInputs, noteInputStartupError, type InputArgs, type InputEntry } from './input.js';
+import { enqueueInput, cancelInput, listInputs, noteInputStartupError, retireRemovedOpening, type InputArgs, type InputEntry } from './input.js';
 
 function wakeBrowser(entry: InputEntry, retry = false): Promise<void> {
   const marker = `cos-input=${encodeURIComponent(entry.id)}`;
@@ -59,6 +59,9 @@ export async function cancelDesktopInput(id: string): Promise<boolean> {
   const start = starting.get(id);
   start?.abort(new Error('Input cancelled'));
   return await cancelInput(id) || !!start;
+}
+export async function retireDesktopOpening(sessionId: string): Promise<void> {
+  for (const id of await retireRemovedOpening(sessionId)) starting.get(id)?.abort(new Error('Input cancelled'));
 }
 async function startAcceptedInput(entry: InputEntry, controller: AbortController): Promise<void> {
   try {

@@ -4079,5 +4079,13 @@
   "A page reload in a Project no longer makes it fail every time.": "Recarregar a página em um projeto não faz mais falhar sempre.",
   "Skills only when wanted": "Skills só quando desejado",
   "A Skill is not chosen when you say not to use it.": "Uma Skill não é escolhida quando você diz para não usá-la.",
-  "Browser {0} was not found. Install it or select another browser in Settings, then retry model discovery.": "O navegador {0} não foi encontrado. Instale-o ou escolha outro nas Configurações e procure os modelos novamente."
+  "Browser {0} was not found. Install it or select another browser in Settings, then retry model discovery.": "O navegador {0} não foi encontrado. Instale-o ou escolha outro nas Configurações e procure os modelos novamente.",
+  "Compact & Resume in Projects, Goal chats that recover, and safer saves over SSH.": "Compactar e retomar em Projetos, chats Goal que se recuperam e salvamentos mais seguros por SSH.",
+  "It works in a Project that already holds chats started through the app.": "Funciona em um Projeto que já tem chats iniciados pelo app.",
+  "Goal chats keep going": "Chats Goal continuam",
+  "A Goal chat no longer stops for good after a Continue that failed.": "Um chat Goal não fica mais parado para sempre depois de um Continuar que falhou.",
+  "Safer saves over SSH": "Salvamentos mais seguros por SSH",
+  "If a save fails, your original file stays as it was.": "Se um salvamento falhar, seu arquivo original continua como estava.",
+  "Write mid-answer in any language": "Escreva no meio da resposta em qualquer idioma",
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "Uma mensagem enviada enquanto o ChatGPT responde agora é enviada em páginas de qualquer idioma."
 }

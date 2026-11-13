@@ -70,4 +70,30 @@ describe('Arabic localization safety regression', () => {
       }
     }
   });
+  it('preserves the 2.1.53 release highlights across locale catalogs without duplicate keys', () => {
+    const releaseKeys = [
+      'Compact & Resume in Projects, Goal chats that recover, and safer saves over SSH.',
+      'It works in a Project that already holds chats started through the app.',
+      'Goal chats keep going',
+      'A Goal chat no longer stops for good after a Continue that failed.',
+      'Safer saves over SSH',
+      'If a save fails, your original file stays as it was.',
+      'Write mid-answer in any language',
+      'A message sent while ChatGPT is answering now goes out on pages in every language.'
+    ];
+    const locales = ['ar', 'de', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'zh-CN', 'zh-TW'];
+    for (const locale of locales) {
+      const raw = readFileSync('src/renderer/locales/' + locale + '.json', 'utf8');
+      const messages = JSON.parse(raw) as Record<string, string>;
+      const serializedKeys = [...raw.matchAll(/^  ("(?:\\.|[^"\\])*")\s*:/gm)].map(match => JSON.parse(match[1]!) as string);
+      expect(new Set(serializedKeys).size, locale + ': duplicate JSON key').toBe(serializedKeys.length);
+      expect(serializedKeys.length, locale + ': unparseable/duplicate JSON key').toBe(Object.keys(messages).length);
+      for (const key of releaseKeys) {
+        expect(messages[key], locale + ': missing 2.1.53 release text: ' + key).toBeTruthy();
+        if (locale === 'ar') expect(messages[key], key).toMatch(/[\u0621-\u064A]/u);
+      }
+    }
+    const featureName = renderer['Compact & Resume:']!.replace(/[:：]\s*$/, '').trim();
+    expect(renderer[releaseKeys[0]!]).toContain(featureName);
+  });
 });
