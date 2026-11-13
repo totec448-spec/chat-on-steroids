@@ -4181,5 +4181,13 @@
   "Models for Goal, Loop and Plan": "Модели для Цели, Цикла и Плана",
   "The ChatGPT model that writes their messages and plans.": "Модель ChatGPT, которая пишет их сообщения и планы.",
   "Handoffs": "Передача контекста",
-  "What Compact & Resume carries over.": "Что сохраняет «Сжать и продолжить»."
+  "What Compact & Resume carries over.": "Что сохраняет «Сжать и продолжить».",
+  "Compact & Resume in Projects, Goal chats that recover, and safer saves over SSH.": "«Сжать и продолжить» в проектах, чаты Цели, которые восстанавливаются, и более безопасное сохранение по SSH.",
+  "It works in a Project that already holds chats started through the app.": "Работает в проекте, где уже есть чаты, начатые через приложение.",
+  "Goal chats keep going": "Чаты Цели продолжают работу",
+  "A Goal chat no longer stops for good after a Continue that failed.": "Чат Цели больше не застревает навсегда после неудачного «Продолжить».",
+  "Safer saves over SSH": "Безопаснее сохранять по SSH",
+  "If a save fails, your original file stays as it was.": "Если сохранение не удалось, исходный файл остаётся как был.",
+  "Write mid-answer in any language": "Сообщения посреди ответа на любом языке",
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "Сообщение, отправленное во время ответа ChatGPT, теперь уходит на страницах на любом языке."
 }

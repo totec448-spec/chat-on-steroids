@@ -92,6 +92,8 @@ it('tells a later call without a chat that it cannot reach the run, and not to s
     () => broker.spawn({ caller: { ...later, runId: spawned.runId }, workers: [{ task: 'Again' }] })]) {
     expect(call).toThrow(/AGENTS_NO_CHAT/);
     expect(call).toThrow(/Do not call agents action=spawn again/);
+    // #2172: a chat open on another computer reaches this Core without its page; the refusal says where to go.
+    expect(call).toThrow(/open in another computer's browser, call that computer's Core instead/);
   }
   // The spawn already says so, so the model does not wait for results that cannot arrive.
   expect(broker.primeOwnerSentence(request, spawned.runId)).toMatch(/only later tool calls of this same request can reach/);

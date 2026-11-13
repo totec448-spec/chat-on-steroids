@@ -3929,5 +3929,13 @@
   "Models for Goal, Loop and Plan": "目標、循環與計畫使用的模型",
   "The ChatGPT model that writes their messages and plans.": "撰寫它們的訊息和計畫的 ChatGPT 模型。",
   "Handoffs": "交接摘要",
-  "What Compact & Resume carries over.": "「壓縮並繼續」會帶走什麼。"
+  "What Compact & Resume carries over.": "「壓縮並繼續」會帶走什麼。",
+  "Compact & Resume in Projects, Goal chats that recover, and safer saves over SSH.": "專案中的「壓縮並繼續」、會自行恢復的目標聊天，以及透過 SSH 更安全地儲存。",
+  "It works in a Project that already holds chats started through the app.": "在已包含透過應用程式開始之聊天的專案中也能正常運作。",
+  "Goal chats keep going": "目標聊天不再中途停住",
+  "A Goal chat no longer stops for good after a Continue that failed.": "「繼續」失敗後，目標聊天不會再永久停下。",
+  "Safer saves over SSH": "透過 SSH 更安全地儲存",
+  "If a save fails, your original file stays as it was.": "儲存失敗時，你的原始檔案維持原樣。",
+  "Write mid-answer in any language": "回答中途也能傳送，任何語言都行",
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT 回答期間傳送的訊息，現在在任何語言的頁面上都能送出。"
 }

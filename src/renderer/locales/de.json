@@ -4013,5 +4013,13 @@
   "Models for Goal, Loop and Plan": "Modelle für Goal, Loop und Plan",
   "The ChatGPT model that writes their messages and plans.": "Das ChatGPT-Modell, das ihre Nachrichten und Pläne schreibt.",
   "Handoffs": "Übergaben",
-  "What Compact & Resume carries over.": "Was Komprimieren & Fortsetzen mitnimmt."
+  "What Compact & Resume carries over.": "Was Komprimieren & Fortsetzen mitnimmt.",
+  "Compact & Resume in Projects, Goal chats that recover, and safer saves over SSH.": "Komprimieren & Fortsetzen in Projekten, Goal-Chats, die sich erholen, und sicherere Speicherung über SSH.",
+  "It works in a Project that already holds chats started through the app.": "Es funktioniert in einem Projekt, das schon über die App gestartete Chats enthält.",
+  "Goal chats keep going": "Goal-Chats laufen weiter",
+  "A Goal chat no longer stops for good after a Continue that failed.": "Ein Goal-Chat bleibt nach einem fehlgeschlagenen Weiter nicht mehr für immer stehen.",
+  "Safer saves over SSH": "Sichereres Speichern über SSH",
+  "If a save fails, your original file stays as it was.": "Schlägt das Speichern fehl, bleibt deine Originaldatei unverändert.",
+  "Write mid-answer in any language": "Mitten in der Antwort schreiben, in jeder Sprache",
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "Eine Nachricht, die du während der Antwort von ChatGPT sendest, wird jetzt auf Seiten in jeder Sprache gesendet."
 }

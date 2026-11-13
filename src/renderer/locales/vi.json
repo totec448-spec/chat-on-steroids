@@ -3929,5 +3929,13 @@
   "Models for Goal, Loop and Plan": "Mô hình cho Goal, Loop và Plan",
   "The ChatGPT model that writes their messages and plans.": "Mô hình ChatGPT viết tin nhắn và kế hoạch của chúng.",
   "Handoffs": "Handoff",
-  "What Compact & Resume carries over.": "Những gì Compact & Resume mang theo."
+  "What Compact & Resume carries over.": "Những gì Compact & Resume mang theo.",
+  "Compact & Resume in Projects, Goal chats that recover, and safer saves over SSH.": "Nén & Tiếp tục trong Dự án, chat Goal tự phục hồi và lưu an toàn hơn qua SSH.",
+  "It works in a Project that already holds chats started through the app.": "Hoạt động trong Dự án đã có sẵn chat do ứng dụng khởi tạo.",
+  "Goal chats keep going": "Chat Goal tiếp tục chạy",
+  "A Goal chat no longer stops for good after a Continue that failed.": "Chat Goal không còn dừng hẳn sau một lần Tiếp tục bị lỗi.",
+  "Safer saves over SSH": "Lưu an toàn hơn qua SSH",
+  "If a save fails, your original file stays as it was.": "Nếu việc lưu thất bại, tệp gốc của bạn vẫn như cũ.",
+  "Write mid-answer in any language": "Nhắn giữa lúc đang trả lời, ở mọi ngôn ngữ",
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "Tin nhắn gửi khi ChatGPT đang trả lời giờ được gửi đi trên các trang ở mọi ngôn ngữ."
 }
