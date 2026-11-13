@@ -3410,7 +3410,7 @@ var CLF_DOM = (() => {
     const shown = node => node && !node.closest('[hidden],[aria-hidden="true"],[inert]') && node.getClientRects().length > 0;
     const picker = () => document.querySelector(PICKER);
     const trigger = modelPickerTrigger;
-    let motion = null;
+    let motion = null, openingRefusal = null;
     const openPicker = () => {
       const panel = picker();
       return panel && panel.closest('[role="menu"],[role="dialog"]')?.getAttribute('data-state') !== 'closed' ? panel : null;
@@ -3440,7 +3440,9 @@ var CLF_DOM = (() => {
     const key = (node, value) => { if (!node || !stillCurrent()) return false; node.focus(); node.dispatchEvent(new KeyboardEvent('keydown', { key: value, code: value, bubbles: true, cancelable: true })); return true; };
     return {
       state,
+      openingRefusal: () => openingRefusal,
       async open() {
+        openingRefusal = null;
         if (!stillCurrent()) return null;
         // Native Presence waits for the menu's exit animation. Chrome can suspend
         // that animation in a hidden window, retaining a closed picker and its
@@ -3480,7 +3482,9 @@ var CLF_DOM = (() => {
             const changedSelection = selectedBefore && selectedAfter &&
               (beforeEnter.version !== afterEnter.version || selectedBefore.id !== selectedAfter.id ||
                 selectedBefore.effort !== selectedAfter.effort);
-            if (changedSelection || nativeBefore !== retryButton.getAttribute('data-selected-reasoning-effort')) return null;
+            if (changedSelection || nativeBefore !== retryButton.getAttribute('data-selected-reasoning-effort')) {
+              openingRefusal = 'changed'; return null;
+            }
             if (!openPicker()) {
               const reopened = retryButton !== button && key(retryButton, 'Enter') && await wait(openPicker, 1000);
               if (!stillCurrent()) return null;
@@ -3705,7 +3709,9 @@ var CLF_DOM = (() => {
       phase('open');
       const ui = modelPickerAccess(stillCurrent, observe, phase), original = await ui.open();
       if (!original) {
-        selectionFailed('the picker did not open or could not be read', 'unreadable');
+        selectionFailed(ui.openingRefusal() === 'changed'
+          ? 'the model or reasoning effort changed while opening the picker'
+          : 'the picker did not open or could not be read', ui.openingRefusal() || 'unreadable');
         phase('close'); trace.closed = await ui.close(); return false;
       }
       // Account-evaluated exact selection is already proof; visiting unrelated

@@ -943,8 +943,11 @@ it('never clicks an owned control if Enter changed native effort without a mount
   trigger.addEventListener('keydown', event => { if (event.key !== 'Enter') return;
     event.stopImmediatePropagation(); trigger.setAttribute('data-selected-reasoning-effort', 'high'); }, true);
   const clicked = vi.fn(); trigger.addEventListener('click', clicked);
-  const result = f.api.selectModelSettings('future-model', 'ultra');
+  const reports: unknown[] = [];
+  const result = f.api.selectModelSettings('future-model', 'ultra', () => true, (value: unknown) => reports.push(value));
   await vi.runAllTimersAsync(); expect(await result).toBe(false); expect(clicked).not.toHaveBeenCalled();
+  expect(f.api.modelSelectionFailure()).toContain('changed while opening');
+  expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({ outcome: 'failed', failedPhase: 'open', failure: 'changed' });
 });
 it('never clicks an owned control if Enter changed account-selected Fiber state without a portal', async () => {
   vi.useFakeTimers();
@@ -952,6 +955,8 @@ it('never clicks an owned control if Enter changed account-selected Fiber state 
   trigger.addEventListener('keydown', event => { if (event.key !== 'Enter') return;
     event.stopImmediatePropagation(); f.state.currentBucket = 1; f.state.currentSelection = f.selections[0]![0]!; }, true);
   const clicked = vi.fn(); trigger.addEventListener('click', clicked);
-  const result = f.api.selectModelSettings('future-model', 'ultra');
+  const reports: unknown[] = [];
+  const result = f.api.selectModelSettings('future-model', 'ultra', () => true, (value: unknown) => reports.push(value));
   await vi.runAllTimersAsync(); expect(await result).toBe(false); expect(clicked).not.toHaveBeenCalled();
+  expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({ outcome: 'failed', failedPhase: 'open', failure: 'changed' });
 });
