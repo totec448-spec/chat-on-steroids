@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { makeTempDir, removeTempDir } from './helpers.js';
@@ -15,6 +16,21 @@ beforeEach(async () => {
   await importSkillFile(path.join(directory, 'review.md'));
 });
 afterEach(async () => { await removeTempDir(directory); });
+
+/** Reproduce a process exit after the original folder was renamed into a marked stage. */
+async function interruptRemoval(original: string): Promise<{ stageRoot: string; staged: string }> {
+  const parent = path.dirname(original), name = path.basename(original);
+  const identity = await fs.lstat(original);
+  const stageRoot = path.join(parent, `.cos-removing-${randomUUID()}`);
+  const staged = path.join(stageRoot, name);
+  await fs.mkdir(stageRoot);
+  await fs.writeFile(path.join(stageRoot, '.cos-removal.json'), JSON.stringify({
+    version: 1, name, kind: 'directory',
+    identity: { dev: identity.dev, ino: identity.ino, size: identity.size }
+  }));
+  await fs.rename(original, staged);
+  return { stageRoot, staged };
+}
 
 it('defaults enabled, persists disabling without deleting files, and blocks catalog and prompt invocation', async () => {
   expect((await listManagedSkills())[0]).toMatchObject({ id: 'review', enabled: true });
@@ -75,6 +91,56 @@ it('restores a disabled imported package when Trash fails without changing its a
   expect((await listManagedSkills())[0]!.enabled).toBe(false);
   await initSkillsPath(directory);
   expect((await listManagedSkills())[0]!.enabled).toBe(false);
+});
+
+it('recovers a managed Skill after a crash between removal staging and Trash', async () => {
+  const original = path.join(directory, 'skills/review');
+  await fs.mkdir(path.join(original, 'references'));
+  await fs.writeFile(path.join(original, 'references/guide.txt'), 'Keep this resource');
+  await setManagedSkillEnabled('review', false);
+  const { stageRoot } = await interruptRemoval(original);
+  await expect(fs.lstat(original)).rejects.toMatchObject({ code: 'ENOENT' });
+
+  await initSkillsPath(directory);
+  expect(await fs.readFile(path.join(original, 'references/guide.txt'), 'utf8')).toBe('Keep this resource');
+  expect((await listManagedSkills())[0]).toMatchObject({ id: 'review', enabled: false });
+  await expect(fs.lstat(stageRoot)).rejects.toMatchObject({ code: 'ENOENT' });
+});
+
+it('refuses to overwrite a replacement managed Skill during removal recovery', async () => {
+  const original = path.join(directory, 'skills/review');
+  const { stageRoot, staged } = await interruptRemoval(original);
+  await fs.mkdir(original);
+  await fs.writeFile(path.join(original, 'SKILL.md'), '# Replacement\n\nKeep the new package.');
+
+  await initSkillsPath(directory);
+  expect(await fs.readFile(path.join(original, 'SKILL.md'), 'utf8')).toBe('# Replacement\n\nKeep the new package.');
+  expect(await fs.readFile(path.join(staged, 'SKILL.md'), 'utf8')).toContain('Review source changes');
+  expect(await fs.readFile(path.join(stageRoot, '.cos-removal.json'), 'utf8')).toContain('"name":"review"');
+});
+
+it('refuses forged managed removal markers and keeps their staged contents untouched', async () => {
+  const original = path.join(directory, 'skills/review');
+  const { stageRoot, staged } = await interruptRemoval(original);
+  const marker = path.join(stageRoot, '.cos-removal.json');
+  const record = JSON.parse(await fs.readFile(marker, 'utf8')) as {
+    version: number; name: string; kind: string; identity: { dev: number; ino: number; size: number };
+  };
+  record.identity.ino += 1_000_000; // Windows inode numbers can exceed Number.MAX_SAFE_INTEGER.
+  await fs.writeFile(marker, JSON.stringify(record));
+  const forgedStage = path.join(directory, 'skills', `.cos-removing-${randomUUID()}`);
+  await fs.mkdir(forgedStage);
+  await fs.writeFile(path.join(forgedStage, '.cos-removal.json'), JSON.stringify({
+    ...record, name: '../review'
+  }));
+  await fs.writeFile(path.join(forgedStage, 'sentinel'), 'Do not touch');
+
+  await initSkillsPath(directory);
+  await expect(fs.lstat(original)).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(await fs.readFile(path.join(staged, 'SKILL.md'), 'utf8')).toContain('Review source changes');
+  expect(await fs.readFile(marker, 'utf8')).toContain('"ino":');
+  expect(await fs.readFile(path.join(forgedStage, 'sentinel'), 'utf8')).toBe('Do not touch');
+  expect(await listManagedSkills()).toEqual([]);
 });
 
 it('persists more than 128 disabled discovered Skills and reads the same state after restart', async () => {

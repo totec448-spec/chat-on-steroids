@@ -1,4 +1,5 @@
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { makeTempDir, removeTempDir } from './helpers.js';
@@ -11,6 +12,18 @@ let root: string, project: string;
 const contents = (name: string, body = 'Keep all instructions.') => `---\nname: ${name}\ndescription: >-\n  Check the source\n  before editing.\n---\n${body}`;
 async function write(file: string, text: string | Buffer): Promise<void> {
   await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, text);
+}
+async function interruptedStandaloneRemoval(original: string): Promise<{ stageRoot: string; staged: string }> {
+  const name = path.basename(original);
+  const stat = await fs.lstat(original);
+  const stageRoot = path.join(path.dirname(original), `.cos-removing-${randomUUID()}`);
+  const staged = path.join(stageRoot, name);
+  await fs.mkdir(stageRoot);
+  await fs.writeFile(path.join(stageRoot, '.cos-removal.json'), JSON.stringify({
+    version: 1, name, kind: 'directory', identity: { dev: stat.dev, ino: stat.ino, size: stat.size }
+  }));
+  await fs.rename(original, staged);
+  return { stageRoot, staged };
 }
 beforeEach(async () => {
   root = await makeTempDir('cos-skill-library-'); project = path.join(root, 'project');
@@ -205,6 +218,61 @@ it('trashes the validated folder and never a replacement created after staging',
   });
   expect(await fs.readFile(path.join(folder, 'SKILL.md'), 'utf8')).toBe(contents('Replacement'));
   expect(await fs.readFile(path.join(trash, 'first/SKILL.md'), 'utf8')).toBe(contents('First'));
+});
+
+it('restores crash-staged standalone Skills from direct agents, Codex, and Claude homes on startup', async () => {
+  vi.stubEnv('CLAUDE_CONFIG_DIR', path.join(root, 'claude'));
+  const cases = [
+    { directory: path.join(root, 'home/.agents/skills/agents-first'), name: 'AgentsFirst', source: 'user-agents' },
+    { directory: path.join(root, 'codex/skills/codex-first'), name: 'CodexFirst', source: 'codex-home' },
+    { directory: path.join(root, 'claude/skills/claude-first'), name: 'ClaudeFirst', source: 'claude-home' }
+  ];
+  const staged: string[] = [];
+  for (const entry of cases) {
+    await write(path.join(entry.directory, 'SKILL.md'), contents(entry.name));
+    await write(path.join(entry.directory, 'references/note.txt'), `${entry.name} resource`);
+    const crash = await interruptedStandaloneRemoval(entry.directory);
+    staged.push(crash.stageRoot);
+    await expect(fs.lstat(entry.directory)).rejects.toMatchObject({ code: 'ENOENT' });
+  }
+
+  await initSkillsPath(root);
+  for (let index = 0; index < cases.length; index++) {
+    const entry = cases[index]!;
+    expect(await fs.readFile(path.join(entry.directory, 'SKILL.md'), 'utf8')).toBe(contents(entry.name));
+    expect(await fs.readFile(path.join(entry.directory, 'references/note.txt'), 'utf8')).toBe(`${entry.name} resource`);
+    await expect(fs.lstat(staged[index]!)).rejects.toMatchObject({ code: 'ENOENT' });
+  }
+  const globals = await listGlobalSkills();
+  for (const entry of cases) expect(globals).toContainEqual(expect.objectContaining({
+    name: entry.name, source: entry.source, managed: false
+  }));
+});
+
+it('leaves occupied and forged standalone recovery stages untouched', async () => {
+  const userRoot = path.join(root, 'home/.agents/skills');
+  const original = path.join(userRoot, 'existing');
+  await write(path.join(original, 'SKILL.md'), contents('OldVersion'));
+  const occupied = await interruptedStandaloneRemoval(original);
+  await write(path.join(original, 'SKILL.md'), contents('Replacement'));
+  const forgedOriginal = path.join(userRoot, 'forged');
+  await write(path.join(forgedOriginal, 'SKILL.md'), contents('Forged'));
+  const forged = await interruptedStandaloneRemoval(forgedOriginal);
+  const forgedMarker = path.join(forged.stageRoot, '.cos-removal.json');
+  const record = JSON.parse(await fs.readFile(forgedMarker, 'utf8')) as {
+    version: number; name: string; kind: string; identity: { dev: number; ino: number; size: number };
+  };
+  record.identity.ino += 1_000_000; // Use a representable difference even for large Windows inode numbers.
+  await fs.writeFile(forgedMarker, JSON.stringify(record));
+
+  await initSkillsPath(root);
+  expect(await fs.readFile(path.join(original, 'SKILL.md'), 'utf8')).toBe(contents('Replacement'));
+  expect(await fs.readFile(path.join(occupied.staged, 'SKILL.md'), 'utf8')).toBe(contents('OldVersion'));
+  expect(await fs.readFile(path.join(occupied.stageRoot, '.cos-removal.json'), 'utf8')).toContain('"name":"existing"');
+  await expect(fs.lstat(forgedOriginal)).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(await fs.readFile(path.join(forged.staged, 'SKILL.md'), 'utf8')).toBe(contents('Forged'));
+  expect(await fs.readFile(forgedMarker, 'utf8')).toContain('"ino":');
+  expect((await listGlobalSkills()).map(skill => skill.name)).toEqual(['Replacement']);
 });
 
 it('discovers enabled Codex plugin skills from only the active installed version and keeps command identity across upgrades', async () => {

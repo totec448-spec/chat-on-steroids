@@ -627,7 +627,13 @@ host Trash via Electron `shell.trashItem`. Standalone user-owned packages retain
 that other applications may share their folder. Identity-checked same-volume staging and
 failure restoration keep replacement paths out of the Trash call; the activation flag is
 cleared only after a successful move. A failed Trash operation must not permanently delete
-any Skill. The panel does not modify the user's installed Skill content when toggling it.
+any Skill. Before staging a removal, CoS writes a bounded `.cos-removal.json` marker
+under a unique `.cos-removing-<uuid>` folder. Startup recovers interrupted removals
+from the managed root and the three standalone user-Skill roots only when the original
+path remains empty and the staged package identity matches the marker; unknown or
+changed stage contents are left for manual inspection. Removal decisions use stable
+reason-code log messages without personal paths or Skill names. The panel does not
+modify the user's installed Skill content when toggling it.
 
 Input `authoredSource` identifies which existing field contains the human request: `text`
 by default, `objective` for generated Goal/workflow openings, and `none` for generated
