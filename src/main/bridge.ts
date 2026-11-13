@@ -156,6 +156,7 @@ import {
   readRecoveryBoundary,
   readCompletedFinal,
   turnHasMcpCall,
+  deliveredQuestionInWorkingChat,
   readActivityEvents,
   readHydratedActivityCall,
   sessionDurableModifiedAt,
@@ -9956,6 +9957,7 @@ const silenceNotes = new Set<string>();
  */
 async function answerHasMcpCall(sessionId: string, conversationId: string, turnId: string): Promise<boolean> {
   if (await turnHasMcpCall(sessionId, conversationId, turnId)) return true;
+  if (await deliveredQuestionInWorkingChat(sessionId, conversationId, turnId)) return true;
   const turns = (await getSession(sessionId))?.timelineTurns;
   const turn = turns?.[turnId];
   if (!turn?.questionId) return false;

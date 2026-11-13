@@ -950,7 +950,9 @@ ordinary-tool custody but cannot invent a request plan or worker family.
 A request-owned family answers only to that request. Clients such as Codex send every tool call as a
 new request, so a later call is outside it: every refusal that would say AGENTS_BUSY (or "call spawn to
 start one") to a caller known only by its request id says AGENTS_NO_CHAT instead (`NoChatError`, a
-subclass): no ChatGPT chat identified, the run is out of reach, do not spawn again (#1841). The spawn
+subclass): no ChatGPT chat identified, the run is out of reach, do not spawn again (#1841). It also
+says that a chat open in another computer's browser is reached through that computer's Core (#2172): the
+Core of a computer whose browser does not hold the chat cannot identify it. The spawn
 reply of a request-owned prime (`primeOwnerSentence`) says the same up front and drops the "results arrive
 with later tool results" promise, and `status` from such a caller with no family refuses the same way
 instead of the empty answer that suggests spawning.
@@ -1943,6 +1945,13 @@ happened, the page has not come back yet, or the work is no longer the current t
 assistant-error reload also logs whether the chat is still under the silence watch, since the
 automatic Continue after it only comes from that watch (#1086: a log that went quiet after the
 reload could not say which of these held).
+"No tool call recorded" is judged by `answerHasMcpCall` (silence) and `questionHasMcpCall` (the
+automatic Continue) on the turn, then on every turn that answered the same question. A question the
+app delivered itself (`injectedUserMessage`: a Goal message or an automatic Continue, or a Goal or
+Loop follow-up its page typed, which the recorder marks `automatic`) in a chat that
+already ran an exactly attributed call of its own also counts (`deliveredQuestionInWorkingChat`):
+when every turn of such a question fails before a tool call, nothing else could restart the chat
+(#2163). A question the person typed, or a chat that never ran a call, still has none.
 
 ChatGPT's own tool approval card ("Allow ChatGPT to use …?", root `data-codex-approval-surface`)
 holds a call before it is sent, so nothing reaches the app and only the user can answer it. The
