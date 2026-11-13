@@ -10,6 +10,7 @@ import {
   getImageStorage,
   initSessionStore,
   MAX_GLOBAL_ASSET_BYTES,
+  MAX_SESSION_ASSET_BYTES,
   onRecordingStorageFullChange,
   readAsset,
   readEvents,
@@ -17,7 +18,8 @@ import {
   resetSessionStoreForTests,
   upsertMessageEvent,
   upsertNativeImageEvent,
-  writeAsset
+  writeAsset,
+  writeOverflowText
 } from '../src/main/session/store.js';
 import * as logger from '../src/main/logger.js';
 
@@ -225,3 +227,32 @@ it('reports a full recording store once, and clears the report when space is fre
   stop();
 });
 
+
+it('warns once per full session, preserving omitted overflow and independent sessions', async () => {
+  const first = await createSession({ title: 'Long first chat' });
+  const second = await createSession({ title: 'Long second chat' });
+  const a = await writeAsset(first.id, Buffer.from('filler A'), 'text/plain');
+  const b = await writeAsset(second.id, Buffer.from('filler B'), 'text/plain');
+  resetSessionStoreForTests(); initSessionStore(directory);
+  const realStat = fs.stat.bind(fs);
+  const quotaFiles = new Set([
+    path.join(directory, 'sessions', first.id, 'assets', a.id),
+    path.join(directory, 'sessions', second.id, 'assets', b.id)
+  ]);
+  const stat = vi.spyOn(fs, 'stat').mockImplementation(async (file, ...rest) => {
+    const found = await (realStat as (...args: unknown[]) => Promise<Awaited<ReturnType<typeof fs.stat>>>)(file, ...rest);
+    if (quotaFiles.has(String(file))) Object.defineProperty(found, 'size', { value: MAX_SESSION_ASSET_BYTES });
+    return found;
+  });
+  const warned = vi.spyOn(logger, 'logWarn').mockImplementation(() => undefined);
+  expect(await writeOverflowText(first.id, 'one')).toBeNull();
+  expect(await writeOverflowText(first.id, 'two')).toBeNull();
+  expect(await writeOverflowText(first.id, 'three')).toBeNull();
+  expect(await writeOverflowText(second.id, 'four')).toBeNull();
+  expect(await writeOverflowText(second.id, 'five')).toBeNull();
+  const perSessionWarnings = warned.mock.calls.filter(([line]) => String(line).includes('overflow text not stored: Session asset quota exceeded'));
+  expect(perSessionWarnings).toHaveLength(2);
+  expect(perSessionWarnings.filter(([line]) => String(line).includes(first.id))).toHaveLength(1);
+  expect(perSessionWarnings.filter(([line]) => String(line).includes(second.id))).toHaveLength(1);
+  stat.mockRestore();
+});
