@@ -47,16 +47,19 @@ let disabledManagedSkills = new Set<string>();
 let operations: Promise<unknown> = Promise.resolve();
 
 const SKILL_STATE_FILENAME = '.cos-disabled-skills.json';
+// The managed library is capped at 128; discovered Skills can exceed that count.
+const MAX_DISABLED_SKILLS = 512;
+const MAX_DISABLED_STATE_BYTES = 128 * 1024;
 
 async function loadDisabledSkills(candidateRoot: string): Promise<Set<string>> {
   const filename = path.join(candidateRoot, SKILL_STATE_FILENAME);
   try {
     const stat = await fs.lstat(filename);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 8192) throw new Error('Invalid Skills activation state file');
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_DISABLED_STATE_BYTES) throw new Error('Invalid Skills activation state file');
     const parsed: unknown = JSON.parse(await fs.readFile(filename, 'utf8'));
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Invalid Skills activation state');
     const state = parsed as { version?: unknown; disabled?: unknown };
-    if (state.version !== 1 || !Array.isArray(state.disabled) || state.disabled.length > MAX_SKILLS ||
+    if (state.version !== 1 || !Array.isArray(state.disabled) || state.disabled.length > MAX_DISABLED_SKILLS ||
         !state.disabled.every(id => typeof id === 'string' && validSkillId(id))) throw new Error('Invalid Skills activation state');
     return new Set(state.disabled as string[]);
   } catch (error) {
@@ -67,6 +70,11 @@ async function loadDisabledSkills(candidateRoot: string): Promise<Set<string>> {
 
 async function persistDisabledSkills(candidateRoot: string, next: Set<string>): Promise<void> {
   await assertManagedRoot(candidateRoot);
+  // Check the complete next state before changing a previously valid state file.
+  const serialized = JSON.stringify({ version: 1, disabled: [...next].sort() }) + '\n';
+  if (next.size > MAX_DISABLED_SKILLS || Buffer.byteLength(serialized, 'utf8') > MAX_DISABLED_STATE_BYTES ||
+      ![...next].every(validSkillId))
+    throw new Error('Too many disabled Skills to save safely');
   const filename = path.join(candidateRoot, SKILL_STATE_FILENAME);
   if (!next.size) {
     // An empty activation record is unnecessary and would be a leftover after deleting the last disabled Skill.
@@ -77,7 +85,7 @@ async function persistDisabledSkills(candidateRoot: string, next: Set<string>): 
   }
   const temporary = path.join(candidateRoot, `.cos-state-${randomUUID()}.tmp`);
   try {
-    await fs.writeFile(temporary, JSON.stringify({ version: 1, disabled: [...next].sort() }) + '\n', { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    await fs.writeFile(temporary, serialized, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
     await fs.rename(temporary, filename);
     disabledManagedSkills = next;
   } finally { await fs.unlink(temporary).catch(() => undefined); }
@@ -105,6 +113,49 @@ function sameIdentity(left: FileIdentity, right: FileIdentity): boolean {
 
 function sameFileObject(left: FileIdentity, right: FileIdentity): boolean {
   return left.dev === right.dev && left.ino === right.ino && left.size === right.size;
+}
+
+/**
+ * Move exactly the validated package to the OS Trash, preserving its folder name.
+ * The same-filesystem staging rename prevents an asynchronous Trash call from
+ * acting on a replacement directory put at the original path.
+ */
+async function trashVerifiedSkill(
+  directory: string, expected: FileIdentity, moveToTrash: (directory: string) => Promise<void>
+): Promise<void> {
+  const stagingRoot = path.join(path.dirname(directory), `.cos-removing-${randomUUID()}`);
+  const staged = path.join(stagingRoot, path.basename(directory));
+  await fs.mkdir(stagingRoot, { mode: 0o700 });
+  let moved = false;
+  let completed = false;
+  try {
+    if (!sameFileObject(expected, identityOf(await fs.lstat(directory))))
+      throw new Error('The Skill folder changed before removal');
+    await fs.rename(directory, staged);
+    moved = true;
+    if (!sameFileObject(expected, identityOf(await fs.lstat(staged))))
+      throw new Error('The Skill folder changed while removal was staged');
+    await moveToTrash(staged);
+    try { await fs.lstat(staged); throw new Error('The Skill folder was not moved to Trash'); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    completed = true;
+  } catch (error) {
+    if (moved && !completed) {
+      try {
+        if (!sameFileObject(expected, identityOf(await fs.lstat(staged))))
+          throw new Error('The staged Skill changed');
+        try { await fs.lstat(directory); throw new Error('The original Skill path was replaced'); }
+        catch (missing) { if ((missing as NodeJS.ErrnoException).code !== 'ENOENT') throw missing; }
+        await fs.rename(staged, directory);
+      } catch (restoreError) {
+        throw new Error(`Could not restore the Skill after Trash failed. Recover it from ${stagingRoot}`, { cause: restoreError });
+      }
+    }
+    throw error;
+  } finally {
+    // The staging parent is empty only after a confirmed Trash or restoration.
+    await fs.rmdir(stagingRoot).catch(() => undefined);
+  }
 }
 
 function requiredRoot(): string {
@@ -471,6 +522,11 @@ export function discoveredSkillEnabled(id: string): boolean {
   return !disabledManagedSkills.has(id);
 }
 
+/** Disabled IDs include managed packages, whose linked targets must stay excluded from rediscovery. */
+export function disabledSkillIds(): string[] {
+  return [...disabledManagedSkills];
+}
+
 export function setDiscoveredSkillEnabled(id: string, enabled: boolean): Promise<void> {
   return serial(async () => {
     assertSkillId(id);
@@ -493,8 +549,10 @@ export function removableUserSkill(source: string, virtualPath: string): boolean
     !['.', '..'].includes(match[2]!) && !/[\\:\u0000-\u001f]/.test(match[2]!);
 }
 
-/** Remove one verified standalone user package, all its resources, and any disabled flag. */
-export function removeDiscoveredSkill(id: string, source: string, virtualPath: string): Promise<void> {
+/** Move a verified standalone user package to Trash and clear its activation flag. */
+export function removeDiscoveredSkill(
+  id: string, source: string, virtualPath: string, moveToTrash: (directory: string) => Promise<void>
+): Promise<void> {
   return serial(async () => {
     assertSkillId(id);
     if (!removableUserSkill(source, virtualPath)) throw new Error('Only standalone user Skills may be removed here');
@@ -524,19 +582,10 @@ export function removeDiscoveredSkill(id: string, source: string, virtualPath: s
     await assertManagedRoot(requiredRoot());
     if (!sameIdentity(before, identityOf(await fs.lstat(directory))))
       throw new Error('Skill removal refused: the package changed');
-    const previousDisabled = new Set(disabledManagedSkills);
-    if (previousDisabled.has(id)) {
-      const next = new Set(previousDisabled); next.delete(id);
+    await trashVerifiedSkill(directory, before, moveToTrash);
+    if (disabledManagedSkills.has(id)) {
+      const next = new Set(disabledManagedSkills); next.delete(id);
       await persistDisabledSkills(requiredRoot(), next);
-    }
-    try {
-      await fs.rm(directory, { recursive: true, force: false });
-      try { await fs.lstat(directory); throw new Error('Skill folder remains after removal'); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-    } catch (error) {
-      // A failed removal must not unexpectedly re-enable the user's previously disabled Skill.
-      if (previousDisabled.has(id)) await persistDisabledSkills(requiredRoot(), previousDisabled);
-      throw error;
     }
   });
 }
@@ -845,15 +894,10 @@ export function removeSkill(id: string, moveToTrash: (directory: string) => Prom
     await assertManagedRoot(candidateRoot);
     if (!current || record.revision !== current.revision || !sameIdentity(before, identityOf(await fs.lstat(directory))))
       throw new Error('The skill changed before removal; reload the library');
-    const previousDisabled = new Set(disabledManagedSkills);
-    if (previousDisabled.has(id)) {
-      const next = new Set(previousDisabled); next.delete(id);
+    await trashVerifiedSkill(directory, before, moveToTrash);
+    if (disabledManagedSkills.has(id)) {
+      const next = new Set(disabledManagedSkills); next.delete(id);
       await persistDisabledSkills(candidateRoot, next);
-    }
-    try { await moveToTrash(directory); }
-    catch (error) {
-      if (previousDisabled.has(id)) await persistDisabledSkills(candidateRoot, previousDisabled);
-      throw error;
     }
     publish(await scan(candidateRoot));
   });

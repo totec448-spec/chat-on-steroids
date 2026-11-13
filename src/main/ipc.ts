@@ -1342,7 +1342,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     else {
       // Only an installed user Skill discovered through the existing sandbox may be toggled.
       const library = await listSkillLibrary({ includeDisabledExternal: true });
-      if (!library.skills.some(skill => skill.id === id && skill.scope === 'user' && !skill.managed))
+      if (!library.skills.some(skill => skill.id === id && !skill.managed &&
+        ['user-agents', 'codex-home', 'claude-home'].includes(skill.source)))
         throw new Error('The global Skill is no longer available');
       await setDiscoveredSkillEnabled(id, enabled);
     }
@@ -1386,11 +1387,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('skills:remove', async payload => {
     const { id } = z.object({ id: z.string().regex(SKILL_ID_PATTERN) }).strict().parse(payload);
     if ((await listManagedSkills()).some(skill => skill.id === id)) {
-      await removeSkill(id, directory => fs.rm(directory, { recursive: true, force: false }));
+      await removeSkill(id, directory => shell.trashItem(directory));
     } else {
       const global = (await listGlobalSkills()).find(skill => skill.id === id && skill.managed === false);
       if (!global?.canRemove) throw new Error('This Skill belongs to another provider or is no longer available');
-      await removeDiscoveredSkill(id, global.source, global.path);
+      await removeDiscoveredSkill(id, global.source, global.path, directory => shell.trashItem(directory));
     }
     return listGlobalSkills();
   });

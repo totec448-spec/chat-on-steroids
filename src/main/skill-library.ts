@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { rawPromises as fs } from './rawfs.js';
 import { effectiveCapabilities, getConfig } from './config.js';
 import { isContained, resolvePath } from './sandbox.js';
-import { discoveredSkillEnabled, listManagedSkills, listSkills, readSkill, readSkillTextSnapshot, removableUserSkill, skillCatalogSnapshot, skillsDirectory, type SkillDocument } from './skills.js';
+import { disabledSkillIds, discoveredSkillEnabled, listManagedSkills, listSkills, readSkill, readSkillTextSnapshot, removableUserSkill, skillCatalogSnapshot, skillsDirectory, type SkillDocument } from './skills.js';
 import { approvedManagedSkillLink, sameSkillLink } from './skill-links.js';
 import { parseCodexPluginManifest, parseSkillConfiguration, parseSkillFrontmatter, parseSkillInterface, type SkillConfiguration } from './skill-metadata.js';
 import { listInstalledCodexPlugins } from './codex-plugin-runtime.js';
@@ -472,6 +472,23 @@ export async function listSkillLibrary(scope: SkillLibraryScope = {}, runtime: S
     return value;
   };
   const seen = new Set<string>();
+  // listSkills() intentionally omits disabled managed packages. Preserve their
+  // canonical file exclusion so a linked package cannot reappear as a new
+  // discovered command with its switch silently enabled.
+  for (const id of disabledSkillIds()) {
+    try {
+      const directory = path.join(root, id);
+      const stat = await fs.lstat(directory);
+      if (stat.isSymbolicLink()) {
+        const config = getConfig();
+        if (!effectiveCapabilities(config).read) continue;
+        const linked = await approvedManagedSkillLink(root, id, config.roots);
+        if (linked) seen.add(identity(path.join(linked.real, 'SKILL.md')));
+      } else if (stat.isDirectory() && samePath(directory, await fs.realpath(directory))) {
+        seen.add(identity(await fs.realpath(path.join(directory, 'SKILL.md'))));
+      }
+    } catch { /* A disabled user Skill ID is not necessarily a managed package. */ }
+  }
   for (const summary of managed) {
     const directory = path.join(root, summary.id), file = path.join(directory, 'SKILL.md');
     const document = scope.managedFromCatalog ? null : await readSkill(summary.id);
@@ -488,10 +505,10 @@ export async function listSkillLibrary(scope: SkillLibraryScope = {}, runtime: S
     } catch { /* readSkill already owns validity; dedupe must not widen filesystem authority. */ }
     let metadata = { name: summary.name, description: summary.description };
     if (document) try { metadata = { ...metadata, ...parseSkillFrontmatter(document.text) }; } catch { /* Existing plain Markdown remains supported. */ }
+    seen.add(identity(seenFile));
     if (!enabled(metadata.name, file)) continue;
     const extra = await interfaceFor(directory, true, library.errors, summary.id);
     library.skills.push({ ...summary, ...metadata, ...extra, scope: 'managed', source: 'managed', managed: true });
-    seen.add(identity(seenFile));
   }
   let entries = 0, directories = 0;
   const seenDirectories = new Set<string>();
@@ -560,7 +577,8 @@ export async function listGlobalSkills(): Promise<GlobalSkill[]> {
   const globals: GlobalSkill[] = managed.map(skill => ({ ...skill, managed: true, source: 'managed', canRemove: true }));
   const seen = new Set(globals.map(skill => skill.id));
   for (const skill of library.skills) {
-    if (skill.scope !== 'user' || skill.managed || seen.has(skill.id)) continue;
+    if (skill.scope !== 'user' || skill.managed ||
+        !['user-agents', 'codex-home', 'claude-home'].includes(skill.source) || seen.has(skill.id)) continue;
     // Discovery may present a user-owned file under an approved workspace alias.
     // Resolve it back to its stable user-Skills identity before showing delete controls.
     const current = await approved(skill.path);

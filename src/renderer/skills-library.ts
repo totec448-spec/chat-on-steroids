@@ -294,8 +294,16 @@ export function initSkillsLibrary(api: AppApi): () => void {
         const result = await run(api.skillsUpdateGithub(skill.id));
         if (!result) return;
         if (own === epoch) {
+          // GitHub updates return only managed Skills. Keep the complete global catalog
+          // (including discovered user/project Skills) visible after the update.
+          const refreshed = typeof api.listGlobalSkills === 'function' ? await run(api.listGlobalSkills()) : null;
+          if (own !== epoch) return;
           checking.delete(skill.id);
-          setSkills(result.skills);
+          setSkills(refreshed ?? (typeof api.listGlobalSkills === 'function'
+            ? skills.map(current => {
+              const updated = result.skills.find(item => item.id === current.id);
+              return updated ? { ...current, ...updated } : current;
+            }) : result.skills));
           const installed = skills.find(item => item.id === skill.id);
           if (installed?.origin) {
             checks.set(skill.id, { id: skill.id, originRevision: installed.origin.revision, state: 'current', checkedAt: Date.now() });
@@ -330,15 +338,16 @@ export function initSkillsLibrary(api: AppApi): () => void {
     const close = el('button', 'btn', () => t('Close')) as HTMLButtonElement;
     close.type = 'button'; close.addEventListener('click', () => dialog.close()); head.append(title, close);
     const body = el('div', 'plugin-dialog-body');
-    body.append(el('p', '', () => t('Delete this Skill and every file in its Skill folder permanently? This cannot be undone. Existing prepared messages will not change.')));
+    body.append(el('p', '', () => t("Move this Skill and all files in its folder to your operating system's Trash? Existing prepared messages will not change.")));
     if (skill.managed === false) body.append(el('p', 'muted', () => t('Other apps using this shared Skill folder will lose access to it too.')));
     const actions = el('div', 'pet-delete-actions');
     const cancel = el('button', 'btn btn-solid pet-delete-cancel', () => t('Cancel')) as HTMLButtonElement;
     cancel.type = 'button'; cancel.addEventListener('click', () => dialog.close());
-    const remove = el('button', 'btn plugin-destructive pet-delete-confirm', () => t('Remove skill')) as HTMLButtonElement;
+    const remove = el('button', 'btn plugin-destructive pet-delete-confirm', () => t('Move to Trash')) as HTMLButtonElement;
     remove.type = 'button'; remove.addEventListener('click', () => void (async () => {
       remove.disabled = true;
       try { if (await update(api.skillsRemove(skill.id))) dialog.close(); }
+      catch { toast(t('Could not move Skill to Trash. Try again.')); }
       finally { if (remove.isConnected) remove.disabled = false; }
     })());
     actions.append(cancel, remove); body.append(actions); dialog.append(head, body);

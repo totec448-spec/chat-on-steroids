@@ -4,7 +4,7 @@ import path from 'node:path';
 import { makeTempDir, removeTempDir } from './helpers.js';
 import {
   importSkillFile, initSkillsPath, listManagedSkills, listSkills, readSkill, readSkillAtRevision,
-  removeSkill, setManagedSkillEnabled, skillCatalogSnapshot, skillCatalogInstructions
+  removeSkill, setDiscoveredSkillEnabled, setManagedSkillEnabled, skillCatalogSnapshot, skillCatalogInstructions
 } from '../src/main/skills.js';
 
 let directory: string;
@@ -56,13 +56,44 @@ it('clears a removed Skill activation flag so importing it again uses the enable
   expect((await listManagedSkills())[0]!.enabled).toBe(true);
 });
 
-it('permanently removes the full imported package and clears the last activation-state file', async () => {
+it('trashes the full imported package and clears the last activation-state file', async () => {
   await setManagedSkillEnabled('review', false);
   const packagePath = path.join(directory, 'skills/review');
   await fs.mkdir(path.join(packagePath, 'references'), { recursive: true });
   await fs.writeFile(path.join(packagePath, 'references/guide.txt'), 'example');
-  await removeSkill('review', folder => fs.rm(folder, { recursive: true, force: false }));
+  await removeSkill('review', folder => fs.rename(folder, path.join(directory, 'trashed-review')));
   await expect(fs.lstat(packagePath)).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(await fs.readFile(path.join(directory, 'trashed-review/references/guide.txt'), 'utf8')).toBe('example');
   await expect(fs.lstat(path.join(directory, 'skills/.cos-disabled-skills.json'))).rejects.toMatchObject({ code: 'ENOENT' });
   expect(await listManagedSkills()).toEqual([]);
+});
+
+it('restores a disabled imported package when Trash fails without changing its activation state', async () => {
+  await setManagedSkillEnabled('review', false);
+  await expect(removeSkill('review', async () => { throw new Error('Trash unavailable'); })).rejects.toThrow('Trash unavailable');
+  expect(await fs.readFile(path.join(directory, 'skills/review/SKILL.md'), 'utf8')).toContain('Review source changes');
+  expect((await listManagedSkills())[0]!.enabled).toBe(false);
+  await initSkillsPath(directory);
+  expect((await listManagedSkills())[0]!.enabled).toBe(false);
+});
+
+it('persists more than 128 disabled discovered Skills and reads the same state after restart', async () => {
+  for (let index = 0; index < 130; index++)
+    await setDiscoveredSkillEnabled(`external-${String(index).padStart(3, '0')}`, false);
+  const filename = path.join(directory, 'skills/.cos-disabled-skills.json');
+  expect((JSON.parse(await fs.readFile(filename, 'utf8')) as { disabled: string[] }).disabled).toHaveLength(130);
+  await initSkillsPath(directory);
+  expect((await listManagedSkills())[0]!.enabled).toBe(true);
+  expect((JSON.parse(await fs.readFile(filename, 'utf8')) as { disabled: string[] }).disabled).toHaveLength(130);
+});
+
+it('refuses an over-limit activation change without replacing a valid saved state', async () => {
+  const filename = path.join(directory, 'skills/.cos-disabled-skills.json');
+  const valid = JSON.stringify({ version: 1, disabled: Array.from({ length: 512 }, (_, i) => `external-${String(i).padStart(3, '0')}`) }) + '\n';
+  await fs.writeFile(filename, valid);
+  await initSkillsPath(directory);
+  await expect(setDiscoveredSkillEnabled('external-overflow', false)).rejects.toThrow('Too many disabled Skills');
+  expect(await fs.readFile(filename, 'utf8')).toBe(valid);
+  await initSkillsPath(directory);
+  expect((await listManagedSkills())[0]!.enabled).toBe(true);
 });
