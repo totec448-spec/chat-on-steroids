@@ -946,7 +946,7 @@ it('never clicks an owned control if Enter changed native effort without a mount
   const reports: unknown[] = [];
   const result = f.api.selectModelSettings('future-model', 'ultra', () => true, (value: unknown) => reports.push(value));
   await vi.runAllTimersAsync(); expect(await result).toBe(false); expect(clicked).not.toHaveBeenCalled();
-  expect(f.api.modelSelectionFailure()).toContain('changed while opening');
+  expect(f.api.modelSelectionFailure()).toContain('picker did not open');
   expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({ outcome: 'failed', failedPhase: 'open', failure: 'changed' });
 });
 it('never clicks an owned control if Enter changed account-selected Fiber state without a portal', async () => {
