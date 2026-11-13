@@ -3,8 +3,8 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { makeTempDir, removeTempDir } from './helpers.js';
 import { defaultConfig, getConfig, initConfigPath, saveConfig } from '../src/main/config.js';
-import { initSkillsPath, importSkillPackage, listSkills, removeSkill } from '../src/main/skills.js';
-import { listSkillLibrary, readLibrarySkill, skillLibraryInstructions } from '../src/main/skill-library.js';
+import { initSkillsPath, importSkillPackage, listSkills, removeDiscoveredSkill, removeSkill, setDiscoveredSkillEnabled } from '../src/main/skills.js';
+import { listGlobalSkills, listSkillLibrary, readLibrarySkill, skillLibraryInstructions } from '../src/main/skill-library.js';
 import type { LibrarySkill } from '../src/shared/skills.js';
 
 let root: string, project: string;
@@ -93,6 +93,70 @@ it('reads the user\'s own Skill folders read-only without approving their homes'
   // Without the Read files permission nothing is discovered.
   await saveConfig({ ...getConfig(), capabilities: { ...getConfig().capabilities, read: false } });
   expect((await listSkillLibrary({}, { codexPlugins: async () => [] })).skills).toEqual([]);
+});
+
+it('shows existing global user Skills in the manager and persists their activation for agents', async () => {
+  await write(path.join(root, 'home/.agents/skills/first/SKILL.md'), contents('First'));
+  await write(path.join(root, 'home/.agents/skills/second/SKILL.md'), contents('Second'));
+  await write(path.join(root, 'codex/skills/.system/default/SKILL.md'), contents('Bundled'));
+  const initial = await listGlobalSkills();
+  expect(initial.map(skill => skill.name)).toEqual(['First', 'Second']);
+  expect(initial.every(skill => skill.managed === false && skill.source === 'user-agents' && skill.enabled)).toBe(true);
+  const first = initial[0]!;
+  const inspected = await listSkillLibrary({ includeDisabledExternal: true });
+  await setDiscoveredSkillEnabled(first.id, false);
+  expect((await listGlobalSkills()).find(skill => skill.id === first.id)?.enabled).toBe(false);
+  expect((await listSkillLibrary()).skills.some(skill => skill.id === first.id)).toBe(false);
+  await expect(readLibrarySkill(first.id, {}, inspected)).rejects.toThrow('disabled');
+  expect(await fs.readFile(path.join(root, 'home/.agents/skills/first/SKILL.md'), 'utf8')).toBe(contents('First'));
+  await initSkillsPath(root);
+  expect((await listGlobalSkills()).find(skill => skill.id === first.id)?.enabled).toBe(false);
+  await setDiscoveredSkillEnabled(first.id, true);
+  expect((await listSkillLibrary()).skills.some(skill => skill.id === first.id)).toBe(true);
+});
+
+it('permanently removes an entire user Skill package and clears its disabled state without affecting neighbors', async () => {
+  const firstFolder = path.join(root, 'home/.agents/skills/first');
+  const otherFolder = path.join(root, 'home/.agents/skills/other');
+  await write(path.join(firstFolder, 'SKILL.md'), contents('First'));
+  await write(path.join(firstFolder, 'references/notes.txt'), 'A reference');
+  await write(path.join(firstFolder, 'scripts/run.cmd'), 'echo hello');
+  await write(path.join(otherFolder, 'SKILL.md'), contents('Other'));
+  const externalResource = path.join(root, 'external-resources');
+  await write(path.join(externalResource, 'shared.txt'), 'Shared data survives');
+  await fs.symlink(externalResource, path.join(firstFolder, 'linked-resources'), process.platform === 'win32' ? 'junction' : 'dir');
+  const initial = await listGlobalSkills();
+  expect(initial).toHaveLength(2);
+  const first = initial.find(skill => skill.name === 'First')!;
+  expect({ source: first.source, path: first.path }).toEqual({ source: 'user-agents', path: '/user-skills/agents/skills/first/SKILL.md' });
+  expect(first.canRemove).toBe(true);
+  await setDiscoveredSkillEnabled(first.id, false);
+  await removeDiscoveredSkill(first.id, first.source, first.path);
+  await expect(fs.lstat(firstFolder)).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(await fs.readFile(path.join(otherFolder, 'SKILL.md'), 'utf8')).toBe(contents('Other'));
+  expect(await fs.readFile(path.join(externalResource, 'shared.txt'), 'utf8')).toBe('Shared data survives');
+  expect((await listGlobalSkills()).map(skill => skill.name)).toEqual(['Other']);
+  await expect(fs.lstat(path.join(root, 'skills/.cos-disabled-skills.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+  await initSkillsPath(root);
+  expect((await listGlobalSkills()).map(skill => skill.name)).toEqual(['Other']);
+});
+
+it('refuses stale IDs and linked user Skill folders without following or deleting their targets', async () => {
+  const folder = path.join(root, 'home/.agents/skills/first');
+  await write(path.join(folder, 'SKILL.md'), contents('First'));
+  const first = (await listGlobalSkills())[0]!;
+  await expect(removeDiscoveredSkill('different--user-123456789abc', first.source, first.path))
+    .rejects.toThrow('package identity changed');
+  await expect(removeDiscoveredSkill(first.id, first.source, '/user-skills/agents/skills/../SKILL.md'))
+    .rejects.toThrow('Only standalone');
+  expect(await fs.readFile(path.join(folder, 'SKILL.md'), 'utf8')).toBe(contents('First'));
+  const outside = path.join(root, 'outside');
+  await write(path.join(outside, 'SKILL.md'), contents('Outside'));
+  const link = path.join(root, 'home/.agents/skills/linked');
+  await fs.symlink(outside, link, process.platform === 'win32' ? 'junction' : 'dir');
+  await expect(removeDiscoveredSkill(first.id, first.source, '/user-skills/agents/skills/linked/SKILL.md'))
+    .rejects.toThrow('linked or changed');
+  expect(await fs.readFile(path.join(outside, 'SKILL.md'), 'utf8')).toBe(contents('Outside'));
 });
 
 it('discovers enabled Codex plugin skills from only the active installed version and keeps command identity across upgrades', async () => {

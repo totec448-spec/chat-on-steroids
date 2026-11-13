@@ -390,8 +390,12 @@
         </section>
         <section class="panel plugins-panel skills-panel" data-panel="skills">
           <div class="plugins-content">
-            <header class="plugin-page-head"><div><h1>Skills</h1><p>Reusable instructions for the work you do in Chat On Steroids.</p></div><div class="plugin-search-actions"><label class="plugin-search"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i><input id="skillsSearch" type="search" placeholder="Search skills" aria-label="Search skills" /></label><details class="plugin-menu skill-import-menu"><summary class="btn plugin-add" aria-label="Import a skill" title="Import a skill"><i class="ico ph ph-plus" aria-hidden="true"></i></summary><div class="plugin-menu-actions"><button class="btn" id="skillsImportFolder" type="button">Import folder</button><button class="btn" id="skillsImportFile" type="button">Import SKILL.md</button><button class="btn" id="skillsImportGithub" type="button">Import from GitHub</button></div></details></div></header>
-            <div class="plugin-refresh-guide pet-import-guide"><p>Import a folder, a standalone SKILL.md, or a public GitHub skill. Local skills can be linked to their GitHub source to check for updates; installing an update stays your choice.</p></div>
+            <header class="plugin-page-head skill-manager-head">
+              <span class="skill-manager-eyebrow"><i class="ico ph ph-squares-four" aria-hidden="true"></i> Agent skills</span>
+              <div class="skill-manager-title-row"><div><h1>Your skills</h1><p>Manage global skills that Agents can choose while handling tasks.</p></div><details class="plugin-menu skill-import-menu"><summary class="btn plugin-add" aria-label="Add skill" title="Add skill"><i class="ico ph ph-plus" aria-hidden="true"></i> Add skill</summary><div class="plugin-menu-actions"><button class="btn" id="skillsImportFolder" type="button">Import folder</button><button class="btn" id="skillsImportFile" type="button">Import SKILL.md</button><button class="btn" id="skillsImportGithub" type="button">Import from GitHub</button><button class="btn" id="skillsRefresh" type="button"><i class="ico ph ph-arrow-clockwise" aria-hidden="true"></i> Refresh</button></div></details></div>
+            </header>
+            <div class="skill-manager-stats" aria-live="polite"><div><strong id="skillsTotalStat">0</strong><span>Total skills</span></div><div><strong id="skillsEnabledStat">0</strong><span>Enabled</span></div><div><strong id="skillsConfigurableStat">0</strong><span>Configurable</span></div></div>
+            <div id="skillsToolbar" class="skill-manager-toolbar"><label class="plugin-search"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i><input id="skillsSearch" type="search" placeholder="Search skills..." aria-label="Search skills" /></label><div class="skill-manager-filters" role="group" aria-label="Filter skills by status"><button type="button" data-skills-filter="all" aria-pressed="true">All</button><button type="button" data-skills-filter="enabled" aria-pressed="false">Enabled</button><button type="button" data-skills-filter="disabled" aria-pressed="false">Disabled</button></div></div>
             <dialog class="plugin-dialog pet-delete-dialog" id="skillGithubDialog" aria-labelledby="skillGithubTitle">
               <div class="plugin-dialog-head"><h2 id="skillGithubTitle">Import from GitHub</h2><button class="btn" id="skillGithubClose" type="button">Close</button></div>
               <form id="skillGithubForm" class="plugin-dialog-body">
@@ -401,12 +405,13 @@
                 <div class="pet-delete-actions"><button class="btn" id="skillGithubCancel" type="button">Cancel</button><button class="btn btn-solid" id="skillGithubSubmit" type="submit">Import skill</button></div>
               </form>
             </dialog>
-            <div class="plugin-section-head"><h2>Installed <span id="skillsCount" class="plugin-count">Loading…</span></h2><button class="btn" id="skillsRefresh" type="button"><i class="ico ph ph-arrow-clockwise" aria-hidden="true"></i>Refresh</button></div>
-            <div id="skillsInstalled" class="pet-library-grid" aria-live="polite"></div>
-            <section id="skillsRecommendedSection" hidden>
-              <div class="plugin-section-head"><h2>Recommended <span id="skillsRecommendedCount" class="plugin-count"></span></h2></div>
+            <span id="skillsCount" class="sr-only" aria-live="polite">Loading…</span>
+            <section id="skillsEmpty" class="skill-manager-empty" hidden><span class="skill-library-icon"><i class="ico ph ph-squares-four" aria-hidden="true"></i></span><h2>No global skills yet</h2><p>No skills installed yet. Import a folder, SKILL.md, or GitHub link to get started.</p><button class="btn skill-manager-empty-add" id="skillsEmptyAdd" type="button"><i class="ico ph ph-git-fork" aria-hidden="true"></i> Import from GitHub</button></section>
+            <div id="skillsInstalled" class="pet-library-grid skill-manager-grid" aria-live="polite"></div>
+            <details id="skillsRecommendedSection" class="skill-manager-recommended" hidden>
+              <summary>Recommended <span id="skillsRecommendedCount" class="plugin-count"></span></summary>
               <div id="skillsRecommended" class="pet-library-grid" aria-live="polite"></div>
-            </section>
+            </details>
           </div>
         </section>
         <section class="panel plugins-panel pets-panel" data-panel="pets">

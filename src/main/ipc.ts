@@ -17,10 +17,10 @@ import { startControlApi, stopControlApi } from './control-api.js';
 import { appearanceSchema } from './appearance-schema.js';
 import { mergeAppearance } from '../shared/appearance.js';
 import { prepareSessionPrompt, prepareSkillFollowup } from './session/prompt.js';
-import { importSkillFile, importSkillPackage, listManagedSkills, listSkills, removeSkill } from './skills.js';
+import { importSkillFile, importSkillPackage, listManagedSkills, listSkills, removeDiscoveredSkill, removeSkill, setDiscoveredSkillEnabled, setManagedSkillEnabled } from './skills.js';
 import { checkGitHubSkillUpdates, importGitHubSkill, linkGitHubSkill, updateGitHubSkill } from './skill-github.js';
 import { SKILL_ID_PATTERN } from '../shared/skills.js';
-import { listSkillLibrary } from './skill-library.js';
+import { listGlobalSkills, listSkillLibrary } from './skill-library.js';
 import { installRecommendedSkill, listRecommendedSkills } from './recommended-skills.js';
 import { noteChatOrigin } from './session/recorder.js';
 import { refreshAppProxy } from './app-proxy.js';
@@ -1335,6 +1335,19 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('skills:list', () => listSkills());
   handle('skills:managed', () => listManagedSkills());
+  handle('skills:global', () => listGlobalSkills());
+  handle('skills:setEnabled', async payload => {
+    const { id, enabled } = z.object({ id: z.string().regex(SKILL_ID_PATTERN), enabled: z.boolean() }).strict().parse(payload);
+    if ((await listManagedSkills()).some(skill => skill.id === id)) await setManagedSkillEnabled(id, enabled);
+    else {
+      // Only an installed user Skill discovered through the existing sandbox may be toggled.
+      const library = await listSkillLibrary({ includeDisabledExternal: true });
+      if (!library.skills.some(skill => skill.id === id && skill.scope === 'user' && !skill.managed))
+        throw new Error('The global Skill is no longer available');
+      await setDiscoveredSkillEnabled(id, enabled);
+    }
+    return listGlobalSkills();
+  });
   handle('skills:recommended', () => listRecommendedSkills());
   handle('skills:installRecommended', async payload => {
     const { id } = z.object({ id: z.string().regex(SKILL_ID_PATTERN) }).strict().parse(payload);
@@ -1372,8 +1385,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('skills:remove', async payload => {
     const { id } = z.object({ id: z.string().regex(SKILL_ID_PATTERN) }).strict().parse(payload);
-    await removeSkill(id, directory => shell.trashItem(directory));
-    return listManagedSkills();
+    if ((await listManagedSkills()).some(skill => skill.id === id)) {
+      await removeSkill(id, directory => fs.rm(directory, { recursive: true, force: false }));
+    } else {
+      const global = (await listGlobalSkills()).find(skill => skill.id === id && skill.managed === false);
+      if (!global?.canRemove) throw new Error('This Skill belongs to another provider or is no longer available');
+      await removeDiscoveredSkill(id, global.source, global.path);
+    }
+    return listGlobalSkills();
   });
   handle('skills:library', async payload => {
     const scope = z.object({ sessionId: z.string().min(1).max(80).nullable().optional(), projectId: z.string().uuid().nullable().optional() }).strict().parse(payload ?? {});

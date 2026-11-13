@@ -1,12 +1,14 @@
 import type { AppApi } from '../preload/index.js';
-import { parseGitHubSkillUrl, type GitHubSkillUpdateCheck, type ManagedSkill } from '../shared/skills.js';
+import { parseGitHubSkillUrl, type GitHubSkillUpdateCheck, type GlobalSkill, type ManagedSkill } from '../shared/skills.js';
 import { $, el, icon, initCardMenuDismissal, run, toast } from './dom.js';
 import { t, tn, ui } from './i18n.js';
 
-/** The managed CoS library only; project and user-discovered skills stay in composer discovery. */
+/** The global Skills manager: imported packages and user-installed Skills from discovery. */
 export function initSkillsLibrary(api: AppApi): () => void {
   initCardMenuDismissal();
-  let skills: ManagedSkill[] = [];
+  type SkillCard = ManagedSkill & Partial<Pick<GlobalSkill, 'managed' | 'source' | 'canRemove'>>;
+  let skills: SkillCard[] = [];
+  let statusFilter: 'all' | 'enabled' | 'disabled' = 'all';
   let epoch = 0;
   // Until a list arrives the header says Loading…; a failed first load says so instead of loading for good.
   let loaded = false;
@@ -20,13 +22,14 @@ export function initSkillsLibrary(api: AppApi): () => void {
   const installedRevision = (skill: ManagedSkill): string =>
     skill.origin ? `${skill.origin.ref} @ ${skill.origin.commit.slice(0, 12)}` : '';
 
-  const paintSource = (skill: ManagedSkill): void => {
+  const paintSource = (skill: SkillCard): void => {
     const source = document.querySelector<HTMLElement>(`[data-skill-id="${skill.id}"] .skill-library-source`);
     if (!source) return;
     if (!skill.origin) {
       source.className = 'skill-library-source is-local';
-      source.replaceChildren(icon('i-folder'), el('span', '', () => t('Local')));
-      ui(source, 'title', () => t('Link a GitHub source from the card menu to check for updates.'));
+      source.replaceChildren(el('i', 'ico ph ph-squares-four'), el('span', '', () => t('Local skill')));
+      if (skill.managed === false) source.title = skill.path;
+      else ui(source, 'title', () => t('Link a GitHub source from the card menu to check for updates.'));
       return;
     }
     const check = checks.get(skill.id);
@@ -62,7 +65,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
     const query = $<HTMLInputElement>('skillsSearch').value.trim().toLocaleLowerCase();
     const available = recommended.filter(entry => !installed.has(entry.id) &&
       `${entry.id} ${entry.name} ${entry.description} ${t(entry.description)}`.toLocaleLowerCase().includes(query));
-    section.hidden = available.length === 0;
+    section.hidden = available.length === 0 || statusFilter !== 'all';
     ui($('skillsRecommendedCount'), 'textContent', () => tn('{0} skill', '{0} skills', available.length));
     const host = $('skillsRecommended');
     host.replaceChildren();
@@ -70,7 +73,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
       const card = el('article', 'plugin-card pet-library-card skill-library-card');
       card.dataset.recommendedSkillId = entry.id;
       const body = el('div', 'plugin-entry pet-library-entry');
-      const artwork = el('div', 'skill-library-icon'); artwork.append(icon('i-skill'));
+      const artwork = el('div', 'skill-library-icon'); artwork.append(el('i', 'ico ph ph-squares-four'));
       const title = el('div', 'plugin-card-title');
       title.append(el('h2', '', entry.name), el('p', 'muted', () => t(entry.description)));
       const foot = el('div', 'plugin-card-foot');
@@ -93,57 +96,102 @@ export function initSkillsLibrary(api: AppApi): () => void {
   const render = (): void => {
     renderRecommended();
     const host = $('skillsInstalled');
+    const enabledCount = skills.filter(skill => skill.enabled !== false).length;
+    const counts: Array<[string, number]> = [
+      ['skillsTotalStat', skills.length], ['skillsEnabledStat', enabledCount], ['skillsConfigurableStat', 0]
+    ];
+    for (const [id, count] of counts) {
+      const node = document.getElementById(id);
+      if (node) node.textContent = loadFailed ? '—' : String(count);
+    }
+    const emptyState = document.getElementById('skillsEmpty');
+    if (emptyState) emptyState.hidden = !loaded || loadFailed || skills.length !== 0;
+    const toolbar = document.getElementById('skillsToolbar');
+    if (toolbar) toolbar.hidden = !loadFailed && skills.length === 0;
     if (loadFailed) {
       ui($('skillsCount'), 'textContent', () => '');
       host.replaceChildren(el('p', 'plugin-no-results muted', () => t('Skills could not be loaded.')));
       return;
     }
     const query = $<HTMLInputElement>('skillsSearch').value.trim().toLocaleLowerCase();
-    const visible = skills.filter(skill => `${skill.id} ${skill.name} ${skill.description}`.toLocaleLowerCase().includes(query));
+    const visible = skills.filter(skill =>
+      (statusFilter === 'all' || (skill.enabled !== false) === (statusFilter === 'enabled')) &&
+      `${skill.id} ${skill.name} ${skill.description}`.toLocaleLowerCase().includes(query));
     ui($('skillsCount'), 'textContent', () => tn('{0} skill', '{0} skills', skills.length));
     host.replaceChildren();
     if (!visible.length) {
       const empty = skills.length
-        ? t('No skills match your search.')
+        ? statusFilter === 'all' || query ? t('No skills match your search.')
+          : t(statusFilter === 'disabled' ? 'No disabled skills.' : 'No enabled skills.')
         : t('No skills installed yet. Import a folder, SKILL.md, or GitHub link to get started.');
-      host.append(el('p', 'plugin-no-results muted', empty));
+      if (skills.length || !emptyState) host.append(el('p', 'plugin-no-results muted', empty));
       return;
     }
     for (const skill of visible) {
-      const card = el('article', 'plugin-card pet-library-card skill-library-card');
+      const card = el('article', 'plugin-card skill-library-card');
       card.dataset.skillId = skill.id;
-      const entry = el('div', 'plugin-entry pet-library-entry');
-      const artwork = el('div', 'skill-library-icon'); artwork.append(icon('i-skill'));
-      const title = el('div', 'plugin-card-title');
-      title.append(el('h2', '', skill.name), el('p', 'muted', skill.description || t('Reusable instructions for this workspace.')));
-      const foot = el('div', 'plugin-card-foot');
-      foot.append(el('span', 'skill-library-id', `/${skill.id}`));
+      card.title = `/${skill.id}`;
+      const enabled = skill.enabled !== false;
+      card.classList.toggle('is-disabled', !enabled);
+      const entry = el('header', 'skill-library-card-head');
+      const artwork = el('div', 'skill-library-icon'); artwork.append(el('i', 'ico ph ph-squares-four'));
+      const title = el('div', 'skill-library-copy');
+      const titleRow = el('div', 'skill-library-title-row');
+      titleRow.append(el('h2', '', skill.name), el('span', 'skill-library-scope', () => t('GLOBAL')));
+      const state = el('span', `skill-library-status${enabled ? ' is-enabled' : ''}`, () => t(enabled ? 'Enabled' : 'Disabled'));
+      title.append(titleRow, el('p', 'muted', skill.description || t('Reusable instructions for this workspace.')));
+      entry.append(artwork, title);
+      const stateRow = el('div', 'skill-library-status-row'); stateRow.append(state);
+      const controls = el('footer', 'skill-library-controls');
       const source = el('span', 'skill-library-source');
       source.setAttribute('aria-live', 'polite');
-      foot.append(source);
-      title.append(foot);
-      entry.append(artwork, title);
-      const menu = document.createElement('details'); menu.className = 'plugin-menu';
-      const summary = el('summary'); summary.append(icon('i-more'));
-      ui(summary, 'aria-label', () => t('Actions for {0}', [skill.name]));
-      const actions = el('div', 'plugin-menu-actions');
-      if (skill.origin) {
-        const refresh = el('button', 'btn', () => t('Update from GitHub')) as HTMLButtonElement;
-        refresh.type = 'button'; refresh.addEventListener('click', () => { menu.open = false; confirmUpdate(skill); });
-        actions.append(refresh);
-      } else {
-        const link = el('button', 'btn', () => t('Link GitHub source')) as HTMLButtonElement;
-        link.type = 'button'; link.addEventListener('click', () => { menu.open = false; openGithubDialog(skill); });
-        actions.append(link);
+      controls.append(source);
+      const actionsRow = el('div', 'skill-library-control-actions');
+      const remove = el('button', 'skill-library-remove plugin-destructive') as HTMLButtonElement;
+      remove.type = 'button';
+      if (skill.managed !== false) {
+        const menu = document.createElement('details'); menu.className = 'plugin-menu';
+        const summary = el('summary'); summary.append(icon('i-more'));
+        ui(summary, 'aria-label', () => t('Actions for {0}', [skill.name]));
+        const actions = el('div', 'plugin-menu-actions');
+        if (skill.origin) {
+          const refresh = el('button', 'btn', () => t('Update from GitHub')) as HTMLButtonElement;
+          refresh.type = 'button'; refresh.addEventListener('click', () => { menu.open = false; confirmUpdate(skill); });
+          actions.append(refresh);
+        } else {
+          const link = el('button', 'btn', () => t('Link GitHub source')) as HTMLButtonElement;
+          link.type = 'button'; link.addEventListener('click', () => { menu.open = false; openGithubDialog(skill); });
+          actions.append(link);
+        }
+        menu.append(summary, actions); actionsRow.append(menu);
       }
-      const remove = el('button', 'btn plugin-destructive', () => t('Remove skill')) as HTMLButtonElement;
-      remove.type = 'button'; remove.addEventListener('click', () => confirmRemove(skill));
-      actions.append(remove); menu.append(summary, actions); card.append(entry, menu); host.append(card);
+      if (skill.canRemove === false) {
+        remove.disabled = true;
+        remove.title = t('This Skill is managed by another provider.');
+      } else remove.addEventListener('click', () => confirmRemove(skill));
+      remove.append(icon('i-trash'));
+      ui(remove, 'aria-label', () => t('Remove {0}', [skill.name]));
+      actionsRow.append(remove);
+      const toggle = el('label', 'skill-library-switch');
+      const toggleText = el('span', '', () => t(enabled ? 'On' : 'Off'));
+      const input = document.createElement('input'); input.type = 'checkbox'; input.checked = enabled;
+      input.setAttribute('role', 'switch');
+      ui(input, 'aria-label', () => t('Enable {0}', [skill.name]));
+      input.addEventListener('change', () => void (async () => {
+        input.disabled = true;
+        try {
+          if (await update(api.skillsSetEnabled(skill.id, input.checked), false, true)) {
+            document.querySelector<HTMLInputElement>(`[data-skill-id="${skill.id}"] .skill-library-switch input`)?.focus();
+          } else if (input.isConnected) input.checked = enabled;
+        } finally { if (input.isConnected) input.disabled = false; }
+      })());
+      toggle.append(toggleText, input); actionsRow.append(toggle);
+      controls.append(actionsRow); card.append(entry, stateRow, controls); host.append(card);
       paintSource(skill);
     }
   };
 
-  const setSkills = (next: ManagedSkill[]): void => {
+  const setSkills = (next: SkillCard[]): void => {
     skills = next; loaded = true; loadFailed = false;
     for (const [id, check] of checks) {
       if (skills.find(skill => skill.id === id)?.origin?.revision !== check.originRevision) checks.delete(id);
@@ -157,11 +205,20 @@ export function initSkillsLibrary(api: AppApi): () => void {
    * decides what the page shows: a failed load says so, and a change that ended without a list (a cancelled
    * import) loads again rather than leaving "Loading…" for good. An older request says nothing (CodeRabbit on #2002).
    */
-  const update = async (request: Promise<{ ok: true; data: ManagedSkill[] | null } | { ok: false; error: string }>, load = false): Promise<boolean> => {
+  const update = async (request: Promise<{ ok: true; data: SkillCard[] | null } | { ok: false; error: string }>, load = false, alreadyGlobal = false): Promise<boolean> => {
     const own = ++epoch;
     const next = await run(request);
     if (own !== epoch) return false;
-    if (next) { setSkills(next); return true; }
+    if (next) {
+      let current = next;
+      if (!alreadyGlobal && typeof api.listGlobalSkills === 'function') {
+        const refreshed = await run(api.listGlobalSkills());
+        if (own !== epoch) return false;
+        if (refreshed) current = refreshed;
+      }
+      setSkills(current);
+      return true;
+    }
     if (!loaded) { if (load) { loadFailed = true; render(); } else void loadList(); }
     return false;
   };
@@ -263,7 +320,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
     dialog.addEventListener('close', () => dialog.remove()); document.body.append(dialog); dialog.showModal(); cancel.focus();
   };
 
-  const confirmRemove = (skill: ManagedSkill): void => {
+  const confirmRemove = (skill: SkillCard): void => {
     document.querySelector('#skillRemoveDialog')?.remove();
     const dialog = document.createElement('dialog');
     dialog.id = 'skillRemoveDialog'; dialog.className = 'plugin-dialog pet-delete-dialog';
@@ -273,7 +330,8 @@ export function initSkillsLibrary(api: AppApi): () => void {
     const close = el('button', 'btn', () => t('Close')) as HTMLButtonElement;
     close.type = 'button'; close.addEventListener('click', () => dialog.close()); head.append(title, close);
     const body = el('div', 'plugin-dialog-body');
-    body.append(el('p', '', () => t('This moves the skill and its resources to the Trash. Existing prepared messages will not change.')));
+    body.append(el('p', '', () => t('Delete this Skill and every file in its Skill folder permanently? This cannot be undone. Existing prepared messages will not change.')));
+    if (skill.managed === false) body.append(el('p', 'muted', () => t('Other apps using this shared Skill folder will lose access to it too.')));
     const actions = el('div', 'pet-delete-actions');
     const cancel = el('button', 'btn btn-solid pet-delete-cancel', () => t('Cancel')) as HTMLButtonElement;
     cancel.type = 'button'; cancel.addEventListener('click', () => dialog.close());
@@ -289,7 +347,19 @@ export function initSkillsLibrary(api: AppApi): () => void {
   };
 
   $('skillsSearch').addEventListener('input', render);
-  const loadList = (): Promise<boolean> => update(api.listManagedSkills(), true);
+  for (const filter of document.querySelectorAll<HTMLButtonElement>('[data-skills-filter]')) {
+    filter.addEventListener('click', () => {
+      const value = filter.dataset.skillsFilter;
+      if (value !== 'all' && value !== 'enabled' && value !== 'disabled') return;
+      statusFilter = value;
+      for (const button of document.querySelectorAll<HTMLButtonElement>('[data-skills-filter]')) {
+        button.setAttribute('aria-pressed', String(button === filter));
+      }
+      render();
+    });
+  }
+  const loadList = (): Promise<boolean> => typeof api.listGlobalSkills === 'function'
+    ? update(api.listGlobalSkills(), true, true) : update(api.listManagedSkills(), true);
   const refresh = (force: boolean): void => {
     void (async () => { if (await loadList()) await checkUpdates(force); })();
   };
@@ -320,6 +390,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
     githubError.hidden = true; githubError.textContent = '';
     githubDialog.showModal(); githubInput.focus();
   };
+  document.getElementById('skillsEmptyAdd')?.addEventListener('click', () => openGithubDialog(null));
   $('skillsImportGithub').addEventListener('click', () => openGithubDialog(null));
   githubClose.addEventListener('click', () => githubDialog.close());
   githubCancel.addEventListener('click', () => githubDialog.close());
@@ -340,7 +411,9 @@ export function initSkillsLibrary(api: AppApi): () => void {
         : await api.skillsImportGithub(githubInput.value.trim());
       if (!result.ok) { githubError.textContent = t(result.error); githubError.hidden = false; return; }
       if (own === epoch) {
-        setSkills(result.data);
+        const refreshed = typeof api.listGlobalSkills === 'function' ? await run(api.listGlobalSkills()) : null;
+        if (own !== epoch) return;
+        setSkills(refreshed ?? result.data);
         for (const skill of skills) {
           if (!previous.has(skill.id) && skill.origin) {
             checks.set(skill.id, { id: skill.id, originRevision: skill.origin.revision, state: 'current', checkedAt: Date.now() });
@@ -348,7 +421,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
           }
         }
       }
-      else await update(api.listManagedSkills());
+      else await loadList();
       githubDialog.close(); githubInput.value = '';
       toast(t(target ? 'GitHub source linked' : 'Skill imported from GitHub'));
       if (target) {

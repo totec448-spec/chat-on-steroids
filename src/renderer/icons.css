@@ -75,6 +75,7 @@
 .ph.ph-gear-six::before { content: '\e272'; }
 .ph.ph-git-branch::before { content: '\e278'; }
 .ph.ph-git-diff::before { content: '\e27c'; }
+.ph.ph-git-fork::before { content: '\e27e'; }
 .ph.ph-globe-hemisphere-west::before { content: '\e28c'; }
 .ph.ph-house::before { content: '\e2c2'; }
 .ph.ph-image::before { content: '\e2ca'; }
@@ -108,6 +109,7 @@
 .ph.ph-shield-check::before { content: '\e40c'; }
 .ph.ph-sidebar-simple::before { content: '\ec24'; }
 .ph.ph-sliders-horizontal::before { content: '\e434'; }
+.ph.ph-squares-four::before { content: '\e464'; }
 .ph.ph-sparkle::before { content: '\e6a2'; }
 .ph.ph-star::before { content: '\e46a'; }
 .ph.ph-sign-in::before { content: '\e428'; }

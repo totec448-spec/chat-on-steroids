@@ -20,6 +20,16 @@ export interface GitHubSkillOrigin {
 
 export interface ManagedSkill extends SkillSummary {
   origin: GitHubSkillOrigin | null;
+  /** Local activation preference. All existing managed Skills default to enabled. */
+  enabled?: boolean;
+}
+
+/** Skills displayed in the global manager, including read-only user-installed Skills. */
+export interface GlobalSkill extends ManagedSkill {
+  managed: boolean;
+  source: SkillSource;
+  /** Can this entire standalone package be deleted from the Skills manager? */
+  canRemove?: boolean;
 }
 
 /** Read-only GitHub observation, scoped to the installed package revision it checked. */
