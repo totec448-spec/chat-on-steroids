@@ -277,6 +277,45 @@ it.each(['medium', 'lost'] as const)('rejects %s native control after close whil
   expect(f.api.modelSelectionFailure()).toContain('after closing');
   expect(f.state.currentSelection.thinkingEffort).toBe('extended');
 });
+it('rejects native reasoning ownership lost during selection before closing the picker', async () => {
+  const f = fixture(), doc = page.window.document, trigger = nativeReasoningTrigger();
+  const diagnostics: unknown[] = [];
+  let lostDuringSelection = false;
+  doc.addEventListener('keydown', event => {
+    const latest = event.key === 'Enter' && (event.target as HTMLElement).matches?.('[role="menuitemradio"]') &&
+      (event.target as HTMLElement).textContent?.includes(f.versions[0]!.displayTextForIntelligence);
+    if (event.key !== 'ArrowLeft' && !latest) return;
+    trigger.setAttribute('data-selected-reasoning-effort', 'medium');
+    trigger.removeAttribute('data-composer-navigation-target');
+    lostDuringSelection = true;
+  }, true);
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'medium', () => true,
+    (record: unknown) => diagnostics.push(record))).toBe(false);
+  expect(lostDuringSelection).toBe(true);
+  expect(f.state.currentSelection.thinkingEffort).toBe('standard');
+  expect(f.api.modelSelectionFailure()).toContain('after closing');
+  expect(modelSelectionDiagnostic.parse(diagnostics.at(-1))).toMatchObject({ outcome: 'failed', failure: 'changed' });
+});
+it('keeps the legacy picker without a previously owned native control usable', async () => {
+  const f = fixture();
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'medium')).toBe(true);
+  expect(f.state.currentSelection.thinkingEffort).toBe('standard');
+});
+it('rejects hidden-tab post-close drift after a delayed native menu close', async () => {
+  const f = fixture('', 30), doc = page.window.document;
+  Object.defineProperty(doc, 'visibilityState', { configurable: true, value: 'hidden' });
+  const diagnostics: unknown[] = [];
+  doc.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    page.window.setTimeout(() => { f.selections[1]![1]!.modelSlug = 'different-thinking'; }, 5);
+  });
+  expect(await f.api.selectModelSettings('future-model', 'ultra', () => true,
+    (record: unknown) => diagnostics.push(record))).toBe(false);
+  expect(f.api.modelSelectionFailure()).toContain('after closing');
+  expect(modelSelectionDiagnostic.parse(diagnostics.at(-1))).toMatchObject({
+    outcome: 'failed', failure: 'changed', visibility: 'hidden'
+  });
+});
 it('accepts a native High-to-Medium transition when both controls agree after close', async () => {
   const f = fixture(), doc = page.window.document, trigger = nativeReasoningTrigger();
   doc.addEventListener('keydown', event => {
@@ -356,7 +395,10 @@ it('withdraws a confirmed selection if navigation invalidates its picker-close w
   const f = fixture('', 30), doc = page.window.document;
   let current = true;
   doc.addEventListener('keydown', event => { if (event.key === 'Escape') current = false; });
-  expect(await f.api.selectModelSettings('future-model', 'ultra', () => current)).toBe(false);
+  const diagnostics: unknown[] = [];
+  expect(await f.api.selectModelSettings('future-model', 'ultra', () => current,
+    (record: unknown) => diagnostics.push(record))).toBe(false);
+  expect(modelSelectionDiagnostic.parse(diagnostics.at(-1))).toMatchObject({ outcome: 'failed', failure: 'owner-lost' });
 });
 it('reads localized nested models and future efforts from account state, excludes locked choices, and restores selection', async () => {
   const f = fixture();
