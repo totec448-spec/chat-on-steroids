@@ -3463,6 +3463,9 @@ var CLF_DOM = (() => {
         if (!openPicker()) {
           progress('open');
           const button = await readyTrigger();
+          const beforeEnter = await read();
+          const selectedBefore = beforeEnter?.choices.find(choice => choice.bucket === beforeEnter.currentBucket);
+          const nativeBefore = button?.getAttribute('data-selected-reasoning-effort');
           if (!key(button, 'Enter')) return null;
           if (!await wait(openPicker, 1500)) {
             if (!stillCurrent()) return null;
@@ -3470,6 +3473,14 @@ var CLF_DOM = (() => {
             // without window focus; re-acquire the trigger and fall back once before failing.
             const retryButton = await readyTrigger();
             if (!retryButton) return null;
+            // A native Enter can change effort without mounting the menu.
+            // Do not toggle a changed selection again with a fallback Enter/click.
+            const afterEnter = await read();
+            const selectedAfter = afterEnter?.choices.find(choice => choice.bucket === afterEnter.currentBucket);
+            const changedSelection = selectedBefore && selectedAfter &&
+              (beforeEnter.version !== afterEnter.version || selectedBefore.id !== selectedAfter.id ||
+                selectedBefore.effort !== selectedAfter.effort);
+            if (changedSelection || nativeBefore !== retryButton.getAttribute('data-selected-reasoning-effort')) return null;
             if (!openPicker()) {
               const reopened = retryButton !== button && key(retryButton, 'Enter') && await wait(openPicker, 1000);
               if (!stillCurrent()) return null;
