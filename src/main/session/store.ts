@@ -4233,13 +4233,14 @@ export async function writeAsset(
     const used = await sessionAssetBytesOnDisk(sessionId);
     const globalUsed = await globalAssetBytesOnDisk();
     if (used + data.length > MAX_SESSION_ASSET_BYTES) throw new Error('Session asset quota exceeded');
-    sessionOverflowQuotaWarned.delete(sessionId);
     if (globalUsed + data.length > globalAssetLimitBytes) {
       setRecordingStoreFull(true);
       throw new Error(GLOBAL_ASSET_QUOTA_EXCEEDED);
     }
     try {
       await fs.writeFile(target, data, { flag: 'wx' });
+      // A successful write, not merely an attempted write, re-arms the full-session warning.
+      sessionOverflowQuotaWarned.delete(sessionId);
       sessionAssetUsage.set(sessionId, used + data.length);
       globalAssetUsage = globalUsed + data.length;
       setRecordingStoreFull(false);
