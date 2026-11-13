@@ -10,6 +10,7 @@ import {
   getImageStorage,
   initSessionStore,
   MAX_GLOBAL_ASSET_BYTES,
+  MAX_SESSION_ASSET_BYTES,
   onRecordingStorageFullChange,
   readAsset,
   readEvents,
@@ -17,7 +18,8 @@ import {
   resetSessionStoreForTests,
   upsertMessageEvent,
   upsertNativeImageEvent,
-  writeAsset
+  writeAsset,
+  writeOverflowText
 } from '../src/main/session/store.js';
 import * as logger from '../src/main/logger.js';
 
@@ -225,3 +227,22 @@ it('reports a full recording store once, and clears the report when space is fre
   stop();
 });
 
+
+it('logs a full per-session overflow once instead of once for every failed long tool result', async () => {
+  const session = await createSession({ title: 'Long running active chat' });
+  const stored = await writeAsset(session.id, Buffer.from('already saved'), 'text/plain');
+  resetSessionStoreForTests(); initSessionStore(directory);
+  const realStat = fs.stat.bind(fs);
+  const stat = vi.spyOn(fs, 'stat').mockImplementation(async (file, ...rest) => {
+    const found = await (realStat as (...args: unknown[]) => Promise<Awaited<ReturnType<typeof fs.stat>>>)(file, ...rest);
+    if (String(file) === path.join(directory, 'sessions', session.id, 'assets', stored.id))
+      Object.defineProperty(found, 'size', { value: MAX_SESSION_ASSET_BYTES });
+    return found;
+  });
+  const warned = vi.spyOn(logger, 'logWarn').mockImplementation(() => undefined);
+  expect(await writeOverflowText(session.id, 'first omitted')).toBeNull();
+  expect(await writeOverflowText(session.id, 'second omitted')).toBeNull();
+  expect(await writeOverflowText(session.id, 'third omitted')).toBeNull();
+  expect(warned.mock.calls.filter(([line]) => String(line).includes('overflow text not stored: Session asset quota exceeded'))).toHaveLength(1);
+  stat.mockRestore();
+});
