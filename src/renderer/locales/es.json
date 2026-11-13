@@ -4078,5 +4078,13 @@
   "Compact & Resume holds up": "Compactar y continuar aguanta",
   "A page reload in a Project no longer makes it fail every time.": "Recargar la página en un proyecto ya no hace que falle siempre.",
   "Skills only when wanted": "Skills solo si se piden",
-  "A Skill is not chosen when you say not to use it.": "No se elige una Skill cuando dices que no se use."
+  "A Skill is not chosen when you say not to use it.": "No se elige una Skill cuando dices que no se use.",
+  "Compact & Resume in Projects, Goal chats that recover, and safer saves over SSH.": "Compactar y continuar en Proyectos, chats de Objetivo que se recuperan y guardados más seguros por SSH.",
+  "It works in a Project that already holds chats started through the app.": "Funciona en un Proyecto que ya contiene chats iniciados desde la app.",
+  "Goal chats keep going": "Los chats de Objetivo siguen",
+  "A Goal chat no longer stops for good after a Continue that failed.": "Un chat de Objetivo ya no se queda parado para siempre tras un Continuar que falló.",
+  "Safer saves over SSH": "Guardados más seguros por SSH",
+  "If a save fails, your original file stays as it was.": "Si un guardado falla, tu archivo original queda como estaba.",
+  "Write mid-answer in any language": "Escribe a mitad de respuesta en cualquier idioma",
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "Un mensaje enviado mientras ChatGPT responde ahora se envía en páginas de cualquier idioma."
 }
