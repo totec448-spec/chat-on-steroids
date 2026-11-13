@@ -3734,7 +3734,9 @@ var CLF_DOM = (() => {
         if (!closed) return selectionFailed('the picker did not close', 'close-failed');
         return confirmAfterClose(current, original.version, nativeOwned);
       }
-      let selected = false, closed = false, expectedChoice = null, expectedVersion = null, nativeOwned = false;
+      // A native control observed before selection must still be corroborated at close,
+      // even if provider transitions remove its ownership marker in the meantime.
+      let selected = false, closed = false, expectedChoice = null, expectedVersion = null, nativeOwned = nativeReasoningOwned();
       try {
         // Exact provider slug is preferred. Existing saved display slugs may resolve
         // only to an actually observed, available pair; never to an account default.
@@ -3822,7 +3824,7 @@ var CLF_DOM = (() => {
             }
           }
         }
-        if (selected) nativeOwned = nativeReasoningOwned();
+        if (selected) nativeOwned = nativeOwned || nativeReasoningOwned();
         phase('close'); closed = trace.closed = await ui.close();
       }
       if (selected && !closed) return selectionFailed('the picker did not close', 'close-failed');
