@@ -6,7 +6,7 @@ import { emptyEvidence } from '../src/main/mcp/call-context.js';
 import { flushRecorder, recordToolCall, resetRecorderForTests } from '../src/main/session/recorder.js';
 import { appendEvent, completeProcessCall, createSession, flushSessions, getSession, initSessionStore,
   readActivityEvents, readEvents, readHydratedActivityCall, readRecentEvents, recordProcessCall,
-  rebindSession, resetSessionStoreForTests, turnHasMcpCall, questionHasMcpCall } from '../src/main/session/store.js';
+  rebindSession, resetSessionStoreForTests, turnHasMcpCall, questionHasMcpCall, deliveredQuestionInWorkingChat } from '../src/main/session/store.js';
 import { foldProgress, toolCallSummary, workSequence, type SessionEvent } from '../src/shared/session.js';
 import { UnifiedExecProcessManager, type ProcessCompletion } from '../src/main/codex/unified-exec.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
@@ -215,4 +215,43 @@ it('credits the work of any turn that answered the same question', async () => {
   expect(await questionHasMcpCall(session.id, 'owner', 'phantom')).toBe(true);
   await user('question-two', 900); await start('other', 910);
   expect(await questionHasMcpCall(session.id, 'owner', 'other')).toBe(false);
+});
+
+// #2163: when every turn of a question the app delivered fails before a tool call, the chat's earlier
+// calls are the only proof that it is connected. The person's own questions never get that credit.
+it.each([
+  ['an app-delivered question in a chat that ran calls', 'delivered', true, true],
+  ['a Goal follow-up its page typed (marked automatic, no input id) in a chat that ran calls', 'page-typed', true, true],
+  ['a page-typed follow-up in a chat that never ran a call', 'page-typed', false, false],
+  ['a question the person typed in a chat that ran calls', 'typed', true, false],
+  ['an app-delivered question in a chat that never ran a call', 'delivered', false, false]
+] as const)('credits %s: %s', async (_name, author, hadCalls, credited) => {
+  const session = await createSession({ conversationId: 'owner', title: 'delivered' });
+  const user = (messageId: string, time: number, extra: Record<string, unknown> = {}) => appendEvent(session.id, { kind: 'user_message',
+    source: 'extension', time, messageId, message: { text: messageId, chars: messageId.length, truncated: false }, ...extra } as any);
+  const start = (turnId: string, time: number) => appendEvent(session.id, { kind: 'turn_start', source: 'extension', time, turnId } as any);
+  const end = (turnId: string, time: number) => appendEvent(session.id, { kind: 'turn_end', source: 'extension', time, turnId, outcome: 'failed' } as any);
+  await user('question-one', 90); await start('turn', 95);
+  if (hadCalls) await recordProcessCall(session.id, launch('call-one', 'owner'));
+  await end('turn', 200);
+  await user('question-two', 900, author === 'delivered' ? { inputId: 'continue-1', turnId: 'newest' }
+    : author === 'page-typed' ? { automatic: true, turnId: 'newest' } : {});
+  await start('newest', 910);
+  expect(await turnHasMcpCall(session.id, 'owner', 'newest')).toBe(false);
+  expect(await deliveredQuestionInWorkingChat(session.id, 'owner', 'newest')).toBe(credited);
+  // The automatic Continue's own gate reads the same evidence.
+  expect(await questionHasMcpCall(session.id, 'owner', 'newest')).toBe(credited);
+});
+
+it('does not credit a delivered question with the calls of a different chat', async () => {
+  const session = await createSession({ conversationId: 'owner', title: 'delivered' });
+  await appendEvent(session.id, { kind: 'user_message', source: 'extension', time: 90, messageId: 'question-one',
+    message: { text: 'q', chars: 1, truncated: false } } as any);
+  await appendEvent(session.id, { kind: 'turn_start', source: 'extension', time: 95, turnId: 'turn' } as any);
+  await recordProcessCall(session.id, launch('call-one', 'someone-else'));
+  await appendEvent(session.id, { kind: 'user_message', source: 'extension', time: 900, messageId: 'question-two', inputId: 'continue-1',
+    turnId: 'newest', message: { text: 'Continue', chars: 8, truncated: false } } as any);
+  await appendEvent(session.id, { kind: 'turn_start', source: 'extension', time: 910, turnId: 'newest' } as any);
+  expect(await deliveredQuestionInWorkingChat(session.id, 'owner', 'newest')).toBe(false);
+  expect(await deliveredQuestionInWorkingChat(session.id, 'owner', 'a-turn-nobody-recorded')).toBe(false);
 });
