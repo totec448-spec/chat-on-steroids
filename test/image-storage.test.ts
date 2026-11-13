@@ -256,3 +256,30 @@ it('warns once per full session, preserving omitted overflow and independent ses
   expect(perSessionWarnings.filter(([line]) => String(line).includes(second.id))).toHaveLength(1);
   stat.mockRestore();
 });
+
+it('re-arms a session quota warning only after a successful write', async () => {
+  const session = await createSession({ title: 'Recovered quota interval' });
+  const filler = await writeAsset(session.id, Buffer.from('seed'), 'text/plain');
+  resetSessionStoreForTests();
+  initSessionStore(directory);
+
+  const realStat = fs.stat.bind(fs);
+  const stat = vi.spyOn(fs, 'stat').mockImplementation(async (file, ...rest) => {
+    const found = await (realStat as (...args: unknown[]) => Promise<Awaited<ReturnType<typeof fs.stat>>>)(file, ...rest);
+    if (String(file) === path.join(directory, 'sessions', session.id, 'assets', filler.id)) {
+      Object.defineProperty(found, 'size', { value: MAX_SESSION_ASSET_BYTES - 20 });
+    }
+    return found;
+  });
+  const warned = vi.spyOn(logger, 'logWarn').mockImplementation(() => undefined);
+
+  expect(await writeOverflowText(session.id, 'overflow exceeds the remaining capacity')).toBeNull();
+  expect(await writeOverflowText(session.id, 'another overflow exceeds capacity')).toBeNull();
+  expect(warned.mock.calls.filter(([line]) => String(line).includes('Session asset quota exceeded'))).toHaveLength(1);
+
+  // A genuinely small, new asset can still be stored; that write starts a new quota interval.
+  expect(await writeOverflowText(session.id, 'ok')).toMatch(/\.txt$/);
+  expect(await writeOverflowText(session.id, 'overflow exceeds capacity after recovery')).toBeNull();
+  expect(warned.mock.calls.filter(([line]) => String(line).includes('Session asset quota exceeded'))).toHaveLength(2);
+  stat.mockRestore();
+});
