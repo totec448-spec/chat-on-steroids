@@ -4000,6 +4000,10 @@ async function performBrowserRepairs(repairs, policy) {
           continue;
         }
       }
+      if (target && /[?&]temporary-chat=true(?:[&#]|$)/.test(target.pendingUrl || target.url || '')) {
+        await call(`/status?repaired=${encodeURIComponent(token)}&repairAction=preserved`);
+        continue;
+      }
       if (target) await chrome.tabs.reload(target.id);
       else {
         await createChatTab(`https://chatgpt.com/c/${encodeURIComponent(conversationId)}`, policy.background === true, focus);
