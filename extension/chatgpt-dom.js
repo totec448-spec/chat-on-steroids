@@ -1998,6 +1998,13 @@ var CLF_DOM = (() => {
    * compared without whitespace: its marker, then the fixed first sentence.
    */
   const RESUME_RESIDUE = /^\[\[CLF-RESUME:[A-Za-z0-9_-]{8,64}\]\]ContinuingaChatOnSteroidssessionthatwascompacted\./;
+  /**
+   * How the app's first message of a chat begins: its context block (src/main/agents.ts). ChatGPT keeps
+   * this one on a Project home too after it was sent from there, with the connector mention's label
+   * after it (2026-11-12): the app's own text, recognised like a brief.
+   */
+  const FIRST_MESSAGE_RESIDUE = /^\[\[COS_CONTEXT:\d{1,9}\]\]/;
+  const OWN_RESIDUE = new RegExp(`${RESUME_RESIDUE.source}|${FIRST_MESSAGE_RESIDUE.source}`);
 
   /**
    * Empties a Project home editor that holds only an earlier Compact & Resume brief (#2068).
@@ -2011,7 +2018,7 @@ var CLF_DOM = (() => {
   function clearResumeResidue() {
     // Only a brief the app typed itself, word for word, here or on an earlier page of this tab: one a person
     // added to stays (CodeRabbit on #2069). The page that typed it may be gone (#2115), so the record is stored.
-    return clearOwnResidue(RESUME_RESIDUE, text => ownBrief(text));
+    return clearOwnResidue(OWN_RESIDUE, text => ownBrief(text));
   }
 
   /**
@@ -2022,7 +2029,7 @@ var CLF_DOM = (() => {
    * of thousands of characters.
    */
   const TYPED_BRIEFS_KEY = 'clf-typed-briefs-v1';
-  const MAX_TYPED_BRIEFS = 12;
+  const MAX_TYPED_BRIEFS = 24;
   const typedBriefs = [];
   function briefFingerprint(text) {
     // cyrb53: a fast 53-bit hash. Identity, not security; two briefs sharing one is not a concern.
@@ -2042,12 +2049,20 @@ var CLF_DOM = (() => {
     } catch { return []; }
   }
   function ownBrief(text) {
-    const fingerprint = briefFingerprint(text);
-    return typedBriefs.includes(fingerprint) || storedBriefs().includes(fingerprint);
+    const known = [...typedBriefs, ...storedBriefs()];
+    if (known.includes(briefFingerprint(text))) return true;
+    // A typed first message plus the label of the mention that was added after it: exactly one of this
+    // installation's connector names, nothing else (a person's note after it keeps the text theirs).
+    const labels = connectorNames().map(compactDraft);
+    return known.some(fingerprint => {
+      const length = Number(fingerprint.split(':')[0]);
+      return Number.isInteger(length) && length > 0 && length < text.length &&
+        labels.includes(text.slice(length)) && briefFingerprint(text.slice(0, length)) === fingerprint;
+    });
   }
   function rememberTypedBrief(value) {
     const text = compactDraft(value);
-    if (!RESUME_RESIDUE.test(text)) return;
+    if (!OWN_RESIDUE.test(text)) return;
     const fingerprint = briefFingerprint(text);
     if (!typedBriefs.includes(fingerprint)) {
       typedBriefs.push(fingerprint);
@@ -3400,9 +3415,9 @@ var CLF_DOM = (() => {
       const panel = picker();
       return panel && panel.closest('[role="menu"],[role="dialog"]')?.getAttribute('data-state') !== 'closed' ? panel : null;
     };
-    const wait = (read, timeout = 3000) => new Promise(resolve => {
+    const wait = (read, timeout = 3000, pollMs = 0) => new Promise(resolve => {
       let reading = false, dirty = false, done = false;
-      const finish = value => { if (done) return; done = true; observer.disconnect(); clearTimeout(timer); resolve(value); };
+      const finish = value => { if (done) return; done = true; observer.disconnect(); clearTimeout(timer); if (poller !== null) clearInterval(poller); resolve(value); };
       const check = async () => {
         if (done) return;
         if (!stillCurrent()) return finish(null);
@@ -3414,9 +3429,11 @@ var CLF_DOM = (() => {
       };
       const observer = new MutationObserver(check);
       observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+      const poller = pollMs > 0 ? setInterval(check, pollMs) : null;
       const timer = setTimeout(() => finish(null), timeout); void check();
     });
-    const state = predicate => wait(async () => { const value = await read(); return value && (!predicate || predicate(value)) ? value : null; });
+    // Fiber metadata can hydrate after the menu DOM mounted without a further DOM mutation.
+    const state = predicate => wait(async () => { const value = await read(); return value && (!predicate || predicate(value)) ? value : null; }, 3000, 250);
     // The shell trigger needs MAIN ownership proof. A cold account can hydrate
     // after the first reply, so DOM readiness must refresh that proof as well.
     const readyTrigger = () => wait(async () => { await read(); return trigger(); }, 15000);
@@ -3444,8 +3461,24 @@ var CLF_DOM = (() => {
         if (!await prepareChatModelSurface(stillCurrent)) return null;
         // A retained exit-animation node is not an open native menu.
         if (!openPicker()) {
-          progress('open'); const button = await readyTrigger();
-          if (!key(button, 'Enter') || !await wait(openPicker)) return null;
+          progress('open');
+          const button = await readyTrigger();
+          if (!key(button, 'Enter')) return null;
+          if (!await wait(openPicker, 1500)) {
+            if (!stillCurrent()) return null;
+            // A cold or background button may remount during hydration or ignore synthetic Enter
+            // without window focus; re-acquire the trigger and fall back once before failing.
+            const retryButton = await readyTrigger();
+            if (!retryButton) return null;
+            if (!openPicker()) {
+              const reopened = retryButton !== button && key(retryButton, 'Enter') && await wait(openPicker, 1000);
+              if (!stillCurrent()) return null;
+              if (!reopened && !openPicker()) {
+                retryButton.click();
+                if (!await wait(openPicker, 1500)) return null;
+              }
+            }
+          }
         }
         progress('read'); return state();
       },

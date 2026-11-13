@@ -51,7 +51,8 @@ import { connectTelegram, disconnectTelegram, onTelegramChange, telegramView, te
 import { DEFAULT_PHONE_PUSH, type PhonePushSettings } from '../shared/phone-push.js';
 import { retryGoalBrowserHelper } from './goal.js';
 import { requestBrowserPreferences } from './browser-preferences.js';
-import { sendDesktopInput, cancelDesktopInput, retryQueuedInputBrowser } from './session/start-input.js';
+import { sendDesktopInput, cancelDesktopInput, retryQueuedInputBrowser, retireDesktopOpening } from './session/start-input.js';
+import { isSessionRemoving, withSessionRemoval } from './session/removal.js';
 import { wakeBrowserUrl } from './browser-startup.js';
 import { registerPluginIpc } from './plugins-ipc.js';
 import { deletePet, importPet, loadPetAsset, petLibraryState, setPetEnabled, setPetFavorite } from './pet-library.js';
@@ -801,9 +802,6 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   registerWorkspaceTerminalIpc(getWindow);
   registerAgentOutputIpc(getWindow);
   registerDictationIpc(getWindow);
-  // A session row remains visible until its delete IPC resolves. Fence Trust while deletion is
-  // in flight so a second click cannot recreate permission after the row's durable revoke.
-  const deletingSessionIds = new Set<string>();
   let watchedWindow: BrowserWindow | null = null;
   const projectFileWatches = new ProjectFileWatchSet(event => {
     const target = getWindow();
@@ -2335,11 +2333,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { id, blocked } = z
       .object({ id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i), blocked: z.boolean() })
       .parse(payload);
-    if (deletingSessionIds.has(id)) {
+    if (isSessionRemoving(id)) {
       throw new Error('This session is being deleted; its block cannot be changed');
     }
     const conversationId = await withSessionMutationFence(id, async (summary) => {
-      if (deletingSessionIds.has(id)) {
+      if (isSessionRemoving(id)) {
         throw new Error('This session is being deleted; its block cannot be changed');
       }
       const currentConversationId = summary.conversationId;
@@ -2374,13 +2372,13 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         trusted: z.boolean()
       })
       .parse(payload);
-    if (deletingSessionIds.has(id)) {
+    if (isSessionRemoving(id)) {
       throw new Error('This session is being deleted; its trust cannot be changed');
     }
     const conversationId = await withSessionMutationFence(id, async (summary) => {
       // Delete may have started while this operation was waiting behind an earlier session write.
       // If Trust entered this queue first it linearizes before Delete; otherwise the tombstone wins.
-      if (deletingSessionIds.has(id)) {
+      if (isSessionRemoving(id)) {
         throw new Error('This session is being deleted; its trust cannot be changed');
       }
       const currentConversationId = summary.conversationId;
@@ -2457,10 +2455,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('sessions:delete', async (payload) => {
     const { id } = sessionIdArg.parse(payload);
-    if (deletingSessionIds.has(id)) throw new Error('This session is already being deleted');
-    deletingSessionIds.add(id);
-    try {
-      const summary = await getSession(id);
+    return withSessionRemoval(id, async () => {
+      const summary = await getSessionOrNullIfMissing(id);
       // Trust is permission. Revoke it durably before any other deletion side effect; otherwise
       // a failed disk commit could leave this chat both trusted and newly unblocked, with its row
       // already gone and no user control left to repair that authority.
@@ -2470,6 +2466,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
           ...committedResumeAncestorsFromSummary(summary, summary.conversationId)
         ], false);
       }
+      // An unbound desktop chat's opening can recreate the local reservation on startup.
+      // Retire it under the outbox's claim/Send queue before deleting the history.
+      if (summary?.origin?.kind === 'desktop' && !summary.conversationId) await retireDesktopOpening(id);
       // Detach first. The recorder maps live ChatGPT conversations to session ids, so
       // deleting the folder underneath a live one left it appending to a session that no
       // longer existed — the events went to a resurrected half-session with no summary.
@@ -2497,9 +2496,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
           : `session ${id} deleted`
       );
       return true;
-    } finally {
-      deletingSessionIds.delete(id);
-    }
+    });
   });
 
   handle('handoff:get', async (payload) => {
@@ -2759,9 +2756,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       // Composer openings use the same deletion/rebind fence as an explicit Trust click. The
       // second tombstone check and synchronous queue admission ensure Delete either wins before
       // this grant or durably revokes it afterwards; no orphan permission can survive the row.
-      if (deletingSessionIds.has(sessionId)) return false;
+      if (isSessionRemoving(sessionId)) return false;
       return withSessionMutationFence(sessionId, async (summary) => {
-        if (deletingSessionIds.has(sessionId) || summary.conversationId !== conversationId || summary.origin?.kind === 'worker') return false;
+        if (isSessionRemoving(sessionId) || summary.conversationId !== conversationId || summary.origin?.kind === 'worker') return false;
         await setChatsTrusted([conversationId], true);
         return true;
       });

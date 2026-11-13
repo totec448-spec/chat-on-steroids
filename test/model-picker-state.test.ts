@@ -869,3 +869,156 @@ it.each([false, true])('distinguishes a menu that never opened from unreadable s
   expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({ outcome: 'failed', failure: 'unreadable',
     failedPhase: unreadable ? 'read' : 'open', closed: true });
 });
+
+function attachMockPickerPanel(doc: Document, f: ReturnType<typeof fixture>, fiberOwner: Element) {
+  const render = () => {
+    let panel = doc.querySelector('[data-testid="composer-intelligence-picker-content"]') as HTMLElement | null;
+    if (!panel) {
+      panel = doc.createElement('div');
+      panel.dataset.testid = 'composer-intelligence-picker-content';
+      doc.body.append(panel);
+    }
+    (panel as any).__reactFiber$test = (fiberOwner as any).__reactFiber$test;
+    panel.innerHTML = '<div role="menuitem" aria-expanded="false">Modell auswählen</div><div role="menuitem" aria-keyshortcuts="ArrowLeft ArrowRight" aria-label="Leistung"></div>';
+    panel.querySelector('[aria-expanded]')!.addEventListener('click', () => {
+      panel!.innerHTML = '';
+      for (const version of f.versions) {
+        const row = doc.createElement('div');
+        row.setAttribute('role', 'menuitemradio');
+        const name = doc.createElement('div');
+        name.textContent = version.displayTextForIntelligence;
+        row.append(name);
+        row.addEventListener('keydown', event => {
+          if (event.key !== 'Enter') return;
+          f.state.selectedVersionEntry = version;
+          f.state.bucketSelections = f.selections[f.versions.indexOf(version)]!;
+          f.state.currentBucket = f.state.bucketSelections[0]!.bucket;
+          f.state.currentSelection = f.state.bucketSelections[0]!;
+          render();
+        });
+        panel!.append(row);
+      }
+    });
+  };
+  return render;
+}
+
+it('falls back to clicking the trigger when synthetic Enter does not open the picker', async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  const doc = page.window.document;
+  const trigger = doc.querySelector('button')!;
+  const clone = trigger.cloneNode(true) as HTMLButtonElement;
+  (clone as any).__reactFiber$test = (trigger as any).__reactFiber$test;
+  trigger.replaceWith(clone);
+  const renderPanel = attachMockPickerPanel(doc, f, clone);
+  clone.addEventListener('click', () => { renderPanel(); });
+  // Block Enter on the replacement trigger so only click() can open it.
+  clone.addEventListener('keydown', event => { if (event.key === 'Enter') event.stopImmediatePropagation(); }, true);
+
+  const result = f.api.selectModelSettings('future-model', 'low');
+  await vi.runAllTimersAsync();
+  expect(await result).toBe(true);
+  expect(doc.querySelector('[data-testid="composer-intelligence-picker-content"]')).toBeNull();
+});
+
+it('re-acquires a remounted model trigger when the first trigger fails to open the picker', async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  const doc = page.window.document;
+  const trigger = doc.querySelector('button')!;
+  const fresh = doc.createElement('button');
+  fresh.type = 'button';
+  fresh.setAttribute('aria-haspopup', 'menu');
+  fresh.textContent = 'Denkaufwand';
+  (fresh as any).__reactFiber$test = (trigger as any).__reactFiber$test;
+  let remounted = false;
+  doc.addEventListener('keydown', event => {
+    if (event.key === 'Enter' && event.target === trigger && !remounted) {
+      remounted = true;
+      event.stopImmediatePropagation();
+      trigger.replaceWith(fresh);
+    }
+  }, true);
+  const renderPanel = attachMockPickerPanel(doc, f, fresh);
+  fresh.addEventListener('keydown', event => { if (event.key === 'Enter') renderPanel(); });
+
+  const result = f.api.selectModelSettings('future-model', 'low');
+  await vi.runAllTimersAsync();
+  expect(await result).toBe(true);
+});
+
+it('reads picker state once fiber metadata hydrates without an extra DOM mutation', async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  const savedVersions = f.props.modelsData.versions;
+  f.props.modelsData.versions = [];
+  page.window.setTimeout(() => { f.props.modelsData.versions = savedVersions; }, 300);
+
+  const result = f.api.selectModelSettings('future-model', 'ultra');
+  await vi.runAllTimersAsync();
+  expect(await result).toBe(true);
+});
+
+it('skips the fallback click when cancelled during the remounted trigger wait', async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  const doc = page.window.document;
+  const trigger = doc.querySelector('button')!;
+  const fresh = doc.createElement('button');
+  fresh.type = 'button';
+  fresh.setAttribute('aria-haspopup', 'menu');
+  fresh.textContent = 'Denkaufwand';
+  (fresh as any).__reactFiber$test = (trigger as any).__reactFiber$test;
+  let active = true;
+  let remounted = false;
+  doc.addEventListener('keydown', event => {
+    if (event.key === 'Enter' && event.target === trigger && !remounted) {
+      remounted = true;
+      event.stopImmediatePropagation();
+      trigger.replaceWith(fresh);
+    }
+  }, true);
+  const freshEnter = vi.fn(() => { active = false; });
+  const freshClick = vi.fn();
+  fresh.addEventListener('keydown', event => { if (event.key === 'Enter') freshEnter(); });
+  fresh.addEventListener('click', freshClick);
+
+  const result = f.api.selectModelSettings('future-model', 'low', () => active);
+  await vi.runAllTimersAsync();
+  expect(await result).toBe(false);
+  expect(freshEnter).toHaveBeenCalledTimes(1);
+  expect(freshClick).not.toHaveBeenCalled();
+});
+
+it('skips duplicate Enter and click when the picker opens before retrying a re-acquired trigger', async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  const doc = page.window.document;
+  const trigger = doc.querySelector('button')!;
+  const renderPanel = attachMockPickerPanel(doc, f, trigger);
+  const retryEnter = vi.fn();
+  const retryClick = vi.fn();
+  let blockedFirst = false;
+  doc.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' || event.target !== trigger) return;
+    if (!blockedFirst) {
+      blockedFirst = true;
+      event.stopImmediatePropagation();
+      // Hide trigger during initial wait so readyTrigger pauses until the open picker mounts.
+      trigger.hidden = true;
+      return;
+    }
+    retryEnter();
+  }, true);
+  trigger.addEventListener('click', retryClick);
+
+  const result = f.api.selectModelSettings('future-model', 'low');
+  await vi.advanceTimersByTimeAsync(1550);
+  trigger.hidden = false;
+  renderPanel();
+  await vi.runAllTimersAsync();
+  expect(await result).toBe(true);
+  expect(retryEnter).not.toHaveBeenCalled();
+  expect(retryClick).not.toHaveBeenCalled();
+});

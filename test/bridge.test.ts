@@ -11620,6 +11620,104 @@ describe('unattributed activity recovery', () => {
     } finally { vi.useRealTimers(); await saveConfig(previous); }
   });
 
+  it.each(['input:app-continue', 'echoed-by-chatgpt'] as const)('recovers a chat whose newest question is its own delivered Continue that never reached a tool call (%s)', async messageId => {
+    // #2163: both turns of the question the app delivered failed before any tool call, so no
+    // recorded call belonged to that question and the silence check refused the chat for good.
+    const input = await import('../src/main/session/input.js');
+    const { recoveryHeldByCalls, recoveryInputAllowed, sessionInputActivity } = await import('../src/main/bridge.js');
+    input.configureInputDelivery({ recoveryAllowed: recoveryInputAllowed, callsHoldRecovery: recoveryHeldByCalls,
+      activity: sessionInputActivity, applyAutomation: async () => {}, changed: () => {} });
+    const previous = getConfig();
+    await saveConfig({ ...previous, ui: { ...previous.ui, autoContinue: true } });
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = randomUUID(), worked = 'turn-with-calls', continued = 'turn-of-the-continue';
+      await events(chat, [{ kind: 'user_message', messageId: 'goal-question', text: 'Work on the goal', time: Date.now(), authoredNow: true },
+        openTurn(worked)]);
+      await attributed(chat, false, Date.now());
+      await events(chat, [endTurn(worked, 'stalled')]);
+      const session = (await findSessionByConversation(chat))!;
+      await sessionStoreModule.appendEvent(session.id, {
+        kind: 'user_message', source: 'app', time: Date.now(), turnId: messageId.startsWith('input:') ? undefined : continued,
+        inputId: 'app-continue', messageId, message: { text: 'Continue', truncated: false, chars: 8 }
+      });
+      await events(chat, [openTurn(continued)]);
+      let repair = null;
+      for (let pass = 0; pass < 6 && !repair; pass++) {
+        await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+        await sweepStaleSwarm(Date.now());
+        repair = await maintenance();
+      }
+      expect(repair).toMatchObject({ conversationId: chat, reason: 'silence' });
+      // The reload alone does not restart a chat: the one automatic Continue must follow it.
+      await maintenance(repair!.token, 'reloaded');
+      let continues: Awaited<ReturnType<typeof input.listInputs>> = [];
+      for (let pass = 0; pass < 6 && !continues.length; pass++) {
+        await vi.advanceTimersByTimeAsync(GOAL_QUIET_MS);
+        await sweepStaleSwarm(Date.now());
+        continues = (await input.listInputs()).filter(row => row.sessionId === session.id && row.recovery);
+      }
+      expect(continues).toHaveLength(1);
+    } finally {
+      input.configureInputDelivery(null as never);
+      await writeDurableNow('session-input', []); input.resetInputForTests(); vi.useRealTimers(); await saveConfig(previous);
+    }
+  });
+
+  it('recovers a chat whose newest question is a Goal follow-up its page typed that never reached a tool call', async () => {
+    // #2163 (page-typed path): the follow-up carries no input id, only the recorder's `automatic` mark.
+    const { noteAutomaticReply } = await import('../src/main/session/automatic-replies.js');
+    const previous = getConfig();
+    await saveConfig({ ...previous, ui: { ...previous.ui, autoContinue: true } });
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = randomUUID(), worked = 'turn-with-calls', typed = 'turn-of-the-follow-up';
+      await events(chat, [{ kind: 'user_message', messageId: 'goal-question', text: 'Work on the goal', time: Date.now(), authoredNow: true },
+        openTurn(worked)]);
+      await attributed(chat, false, Date.now());
+      await events(chat, [endTurn(worked, 'stalled')]);
+      noteAutomaticReply(chat, 'Goal follow-up text');
+      await events(chat, [{ kind: 'user_message', messageId: 'page-typed-follow-up', text: 'Goal follow-up text', time: Date.now(), authoredNow: true },
+        openTurn(typed)]);
+      let repair = null;
+      for (let pass = 0; pass < 6 && !repair; pass++) {
+        await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+        await sweepStaleSwarm(Date.now());
+        repair = await maintenance();
+      }
+      expect(repair).toMatchObject({ conversationId: chat, reason: 'silence' });
+    } finally { vi.useRealTimers(); await saveConfig(previous); }
+  });
+
+  it('still leaves a chat alone whose newest question is native and never reached a tool call', async () => {
+    const previous = getConfig();
+    await saveConfig({ ...previous, ui: { ...previous.ui, autoContinue: true } });
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = randomUUID(), worked = 'turn-with-calls', native = 'turn-of-a-native-question';
+      await events(chat, [{ kind: 'user_message', messageId: 'goal-question', text: 'Work on the goal', time: Date.now(), authoredNow: true },
+        openTurn(worked)]);
+      await attributed(chat, false, Date.now());
+      await events(chat, [endTurn(worked, 'stalled')]);
+      const session = (await findSessionByConversation(chat))!;
+      await sessionStoreModule.appendEvent(session.id, {
+        kind: 'user_message', source: 'extension', time: Date.now(), turnId: native, messageId: 'typed-by-the-person',
+        message: { text: 'What do you think?', truncated: false, chars: 18 }
+      });
+      await events(chat, [openTurn(native)]);
+      for (let pass = 0; pass < 4; pass++) {
+        await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+        await sweepStaleSwarm(Date.now());
+        expect(await maintenance()).toBeNull();
+      }
+      const why = getLog().filter(entry => entry.message.includes(`silence recovery for ${chat}`)).map(entry => entry.message);
+      expect(why).toEqual([expect.stringContaining('has no tool call recorded')]);
+    } finally { vi.useRealTimers(); await saveConfig(previous); }
+  });
+
   it('keeps a manually closed worker inactive through maintenance and late tool results', async () => {
     vi.useFakeTimers();
     try {

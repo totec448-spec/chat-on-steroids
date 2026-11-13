@@ -4,6 +4,7 @@
 // features to pull requests (2026-11-01); a newer release is pointed out; the done step names the file to attach. The dialog and Activity's header (which
 // gained the button) fit in every language, both themes and a narrow window.
 const { app, BrowserWindow } = require('electron');
+const { keyboardFor } = require('./fixtures/press-key.cjs');
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
 const root = process.env.COS_UI_ROOT || path.resolve(__dirname, '..');
 const output = path.resolve(process.env.COS_UI_OUTPUT || path.join(root, '.tmp', 'feedback-dialog'));
@@ -37,7 +38,11 @@ app.whenReady().then(async () => {
       configureServer(vite){vite.middlewares.use((req,res,next)=>{if(req.url!=='/timeline-fixture.js')return next();res.setHeader('Content-Type','text/javascript');
         res.end(fixtureConfigSource()+fs.readFileSync(path.join(root,'scripts/fixtures/composer-ui.js'),'utf8')+fixture);});}}]});
   await server.listen();
-  win = new BrowserWindow({show:false,width:1280,height:800,webPreferences:{sandbox:true,offscreen:true,backgroundThrottling:false}});
+  // Match the app's native compositor: offscreen snapshots can lose their Viz surface after reload.
+  win = new BrowserWindow({show:false,width:1280,height:800,webPreferences:{sandbox:true,backgroundThrottling:false}});
+  const pressKey = keyboardFor(win.webContents);
+  let wasShown = win.isVisible();
+  win.on('show', () => { wasShown = true; });
   const errors=[];
   win.webContents.on('console-message',e=>{if(e.level==='error'&&!BENIGN_RENDERER_ERRORS.includes(e.message))errors.push(e.message);});
   const js=code=>win.webContents.executeJavaScript(code);
@@ -94,7 +99,6 @@ app.whenReady().then(async () => {
     assert.equal(view.primaryShown,true,`${label}: the main button is in view without scrolling`);
     assert.equal(view.edges.length<=1,true,`${label}: every block starts at one left edge ${JSON.stringify(view.edges)}`);
   };
-  win.show(); win.focus(); win.webContents.focus();
 
   await load('en');
   for (const theme of ['dark','light']) {
@@ -141,7 +145,7 @@ app.whenReady().then(async () => {
     await until(`!${dialog}.open`);
     // Escape closes without sending.
     await open();
-    win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'}); win.webContents.sendInputEvent({type:'keyUp',keyCode:'Escape'});
+    await pressKey('Escape', 27);
     await until(`!${dialog}.open`);
   }
   assert.equal(await js('opened.length'),2,'One report per theme; Escape sent nothing');
@@ -150,7 +154,7 @@ app.whenReady().then(async () => {
   await load('en');
   await js(`(()=>{const input=document.getElementById('chatInput');input.focus();input.value='/feedback';input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
   await until(`[...document.querySelectorAll('.skill-autocomplete [role="option"]')].some(o=>o.textContent.includes('Report a problem.'))`);
-  win.webContents.sendInputEvent({type:'keyDown',keyCode:'Enter'}); win.webContents.sendInputEvent({type:'keyUp',keyCode:'Enter'});
+  await pressKey('Enter', 13);
   await until(`${dialog}.open`);
 
   for (const language of LANGUAGES) {
@@ -170,8 +174,18 @@ app.whenReady().then(async () => {
     await layout(`${language} 720`);
     await capture(`${language}-720.png`);
   }
+  assert.equal(wasShown,false,'The verifier never shows its window');
   assert.deepEqual(errors,[]);
   console.log('PASS: send feedback from Activity and /feedback; problem needs text and report, no idea form; update notice; done step; 13 languages, both themes, 720 px');
   // The dev server can keep a socket open after the window is gone; the check must still end.
   win.destroy();await Promise.race([server.close(),new Promise(resolve=>setTimeout(resolve,2000))]);app.exit(0);
-}).catch(async error=>{fs.mkdirSync(output,{recursive:true});if(win&&!win.isDestroyed())fs.writeFileSync(path.join(output,'failure.png'),(await win.webContents.capturePage()).toPNG());console.error(error);await Promise.race([server?.close(),new Promise(resolve=>setTimeout(resolve,2000))]);app.exit(1);});
+}).catch(async error=>{
+  console.error(error);
+  try {
+    fs.mkdirSync(output,{recursive:true});
+    if(win&&!win.isDestroyed()) fs.writeFileSync(path.join(output,'failure.png'),(await win.webContents.capturePage()).toPNG());
+  } catch(captureError) { console.error('Feedback failure screenshot unavailable:',captureError); }
+  try { await Promise.race([server?.close(),new Promise(resolve=>setTimeout(resolve,2000))]); }
+  catch(closeError) { console.error('Feedback server cleanup failed:',closeError); }
+  app.exit(1);
+});
