@@ -4239,6 +4239,13 @@ independent user tasks run at once. Inside a family the worker topology is a sta
 to their prime and cannot create worker descendants. Existing primes may also exchange a message
 across families when the sender already has the destination's explicit run address.
 
+A worker is a separate ChatGPT chat the app opens and drives through the extension (#2177). It is
+not ChatGPT's own in-conversation subagent: the app adds no `collaboration.*` tool and has no
+interface to the host's native delegation, so a conversation has those tools only when ChatGPT
+supplies them. The `agents` tool description says so as a fact (`test/mcp.test.ts` pins the text), so
+a model asked for native subagents does not substitute workers silently. Do not emulate native
+operations or present workers as native ones.
+
 `agents.ts` is the one broker. Its run map and v7 `activeRuns` snapshot hold independent families;
 `maxWorkers` applies **per family**. `multiAgent.globalMaxWorkers` is a separate optional
 broker-wide worker-admission cap: `0` preserves the historical unlimited-across-families behavior,
