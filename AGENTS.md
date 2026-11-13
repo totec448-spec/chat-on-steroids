@@ -1938,7 +1938,8 @@ automatic Continue after it only comes from that watch (#1086: a log that went q
 reload could not say which of these held).
 "No tool call recorded" is judged by `answerHasMcpCall` (silence) and `questionHasMcpCall` (the
 automatic Continue) on the turn, then on every turn that answered the same question. A question the
-app delivered itself (`injectedUserMessage`: a Goal message or an automatic Continue) in a chat that
+app delivered itself (`injectedUserMessage`: a Goal message or an automatic Continue, or a Goal or
+Loop follow-up its page typed, which the recorder marks `automatic`) in a chat that
 already ran an exactly attributed call of its own also counts (`deliveredQuestionInWorkingChat`):
 when every turn of such a question fails before a tool call, nothing else could restart the chat
 (#2163). A question the person typed, or a chat that never ran a call, still has none.

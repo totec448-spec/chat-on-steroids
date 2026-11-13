@@ -2379,8 +2379,8 @@ export async function turnEndedDurably(
 }
 
 /**
- * Whether `turnId` answers a question this app delivered itself (a Goal message or an automatic
- * Continue) in a chat that has already run recorded local calls.
+ * Whether `turnId` answers a question this app delivered itself (a Goal message, a Goal or Loop
+ * follow-up its page typed, or an automatic Continue) in a chat that has already run recorded local calls.
  *
  * Recovery refuses a turn that has no recorded call, so that it never reloads a page the app has
  * no part in. A delivered question is the app's own work, and the chat's earlier calls show it is
@@ -2398,7 +2398,8 @@ export async function deliveredQuestionInWorkingChat(sessionId: string, conversa
     kinds: ['user_message'], before: Number.POSITIVE_INFINITY,
     acceptEvent: event => event.kind === 'user_message' && event.messageId === questionId
   });
-  if (!question || !injectedUserMessage(question, turns)) return false;
+  // A Goal or Loop follow-up its page typed has no input id; the recorder marks it `automatic` (#1655).
+  if (!question || (!injectedUserMessage(question, turns) && !(question.kind === 'user_message' && question.automatic === true))) return false;
   const calls = await readRecentEventsFromDisk(sessionId, 1, {
     kinds: ['tool_call'], before: Number.POSITIVE_INFINITY,
     acceptEvent: call => call.kind === 'tool_call' && call.source === 'mcp' &&

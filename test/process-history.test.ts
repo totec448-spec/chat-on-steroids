@@ -221,6 +221,8 @@ it('credits the work of any turn that answered the same question', async () => {
 // calls are the only proof that it is connected. The person's own questions never get that credit.
 it.each([
   ['an app-delivered question in a chat that ran calls', 'delivered', true, true],
+  ['a Goal follow-up its page typed (marked automatic, no input id) in a chat that ran calls', 'page-typed', true, true],
+  ['a page-typed follow-up in a chat that never ran a call', 'page-typed', false, false],
   ['a question the person typed in a chat that ran calls', 'typed', true, false],
   ['an app-delivered question in a chat that never ran a call', 'delivered', false, false]
 ] as const)('credits %s: %s', async (_name, author, hadCalls, credited) => {
@@ -232,7 +234,8 @@ it.each([
   await user('question-one', 90); await start('turn', 95);
   if (hadCalls) await recordProcessCall(session.id, launch('call-one', 'owner'));
   await end('turn', 200);
-  await user('question-two', 900, author === 'delivered' ? { inputId: 'continue-1', turnId: 'newest' } : {});
+  await user('question-two', 900, author === 'delivered' ? { inputId: 'continue-1', turnId: 'newest' }
+    : author === 'page-typed' ? { automatic: true, turnId: 'newest' } : {});
   await start('newest', 910);
   expect(await turnHasMcpCall(session.id, 'owner', 'newest')).toBe(false);
   expect(await deliveredQuestionInWorkingChat(session.id, 'owner', 'newest')).toBe(credited);
