@@ -4830,6 +4830,10 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .file-branch-section { margin: 8px 0 0; padding: 6px 7px 4px; border-top: 1px solid var(--line); color: var(--faint); font-size: calc(10px * var(--text-scale, 1)); font-weight: 600; }
 .file-checkpoint-bar { display: flex; justify-content: flex-end; padding: 0 1px 8px; }
 .file-changes-list { min-height: 0; flex: 1; overflow: auto; padding: 10px 7px 16px; }
+.review-chat-edits { flex: 0 1 auto; max-height: 38%; overflow: auto; border-bottom: 1px solid var(--line); padding: 9px 7px 8px; }
+.review-chat-edits .file-change-status .ico { --ico: 14px; --glyph: 14px; vertical-align: middle; }
+.file-change-stats.review-chat-state { color: var(--soft); font-family: inherit; font-size: calc(10.5px * var(--text-scale, 1)); }
+.review-chat-note { margin: 0; padding: 4px 8px; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); }
 .file-change-group + .file-change-group { margin-top: 12px; }
 .file-change-group-title { margin: 0; padding: 4px 8px 6px; color: var(--faint); font-size: calc(10px * var(--text-scale, 1)); font-weight: 600; letter-spacing: .015em; }
 .file-change-row { width: 100%; min-width: 0; min-height: 31px; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: baseline; gap: 6px; padding: 5px 7px; border: 0; border-radius: 7px; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }

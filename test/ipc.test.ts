@@ -958,6 +958,35 @@ it('adds picker-selected projects, reuses containing approval, and leaves cancel
   })).toMatchObject({ ok: false });
 });
 
+it('reads the chat edits channel and checks project ownership for a recorded diff', async () => {
+  const { addProject } = await import('../src/main/projects.js');
+  const { bindSessionProject, writeAsset } = await import('../src/main/session/store.js');
+  const approved = await fs.realpath(dir);
+  const folder = path.join(approved, 'review-chat-edits');
+  await fs.mkdir(folder);
+  await saveConfig({ ...defaultConfig(), roots: [{ name: 'demo', path: approved }] });
+  const project = await addProject(folder);
+  const session = await createSession({ title: 'Review fixture', conversationId: 'review-fixture-chat' });
+  await bindSessionProject(session.id, project.id);
+  const asset = await writeAsset(session.id, Buffer.from(JSON.stringify({ before: 'old', after: 'recorded' })), 'text/plain');
+  const callId = 'f7c5c5ad-0c0e-4b27-8b85-bd26d9529447';
+  const stored = { text: '{}', chars: 2, truncated: false };
+  await appendEvent(session.id, { kind: 'tool_call', time: 1, source: 'mcp', call: {
+    callId, tool: 'apply_patch', attribution: 'request_id', attributionMethod: 'request_id', outcome: 'ok',
+    requestId: 'sample-request', conversationId: 'review-fixture-chat', durationMs: 1, args: stored, result: stored,
+    summary: { kind: 'edit', title: 'Edited', tone: 'good' },
+    changes: [{ path: '/demo/review-chat-edits/file.txt', added: 1, removed: 1, approximate: false, reviewAssetId: asset.id }]
+  } });
+  const request = { sessionId: session.id, callId, changeIndex: 0 };
+  const review = (projectId?: string) => handlers.get('sessions:toolEditReview')!(null, { ...request, ...(projectId ? { projectId } : {}) });
+  expect(await review(project.id)).toMatchObject({ ok: true, data: { path: 'file.txt', currentText: 'recorded' } });
+  expect(await review('b8618038-bfcf-4354-a900-bea468d000b8')).toEqual({ ok: true, data: null });
+  expect(await review()).toMatchObject({ ok: true, data: { path: '/demo/review-chat-edits/file.txt' } });
+  expect(await handlers.get('sessions:chatEdits')!(null, { id: session.id, projectId: project.id })).toMatchObject({
+    ok: true, data: { rows: [{ path: 'file.txt', state: 'missing', callId }] }
+  });
+});
+
 it('adds a folder whose ChatGPT Project the person picks next, and links or creates it (#1756)', async () => {
   currentWindow = { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() } };
   const folder = path.join(dir, 'link-project');
