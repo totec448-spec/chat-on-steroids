@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { JSDOM } from 'jsdom';
 import arabic from '../src/renderer/locales/ar.json';
 
 const extension = JSON.parse(readFileSync('extension/_locales/ar/messages.json', 'utf8')) as Record<string, { message: string }>;
@@ -7,6 +8,39 @@ const renderer = arabic as Record<string, string>;
 const preserved = (text: string) => (text.match(/\{\d+\}|\$[1-9]/g) ?? []).sort();
 
 describe('Arabic localization safety regression', () => {
+  it('keeps an unfamiliar browser-launcher error verbatim when its English wording changes', async () => {
+    // Exercise the actual renderer status rather than duplicating its regex here.
+    const dom = new JSDOM(readFileSync('src/renderer/index.html', 'utf8'), { url: 'https://fixture.test/' });
+    try {
+      dom.window.localStorage.setItem('cos.ui.language', 'ar');
+      vi.stubGlobal('window', dom.window);
+      vi.stubGlobal('document', dom.window.document);
+      let receive!: (value: unknown) => void;
+      Object.assign(dom.window, { api: {
+        getChatModels: async () => ({ ok: true, data: { state: 'unknown', models: [] } }),
+        onChatModelsChanged: (listener: typeof receive) => { receive = listener; }
+      } });
+      const { initLanguage } = await import('../src/renderer/i18n.js');
+      const { initChatModels } = await import('../src/renderer/chat-models.js');
+      initLanguage();
+      initChatModels();
+      expect(dom.window.document.documentElement.dir).toBe('rtl');
+      receive({ state: 'unavailable', models: [], error:
+        'Firefox was not found. Install it or change Settings > Browser & history > ChatGPT browser.. Retry model discovery.' });
+      const status = dom.window.document.getElementById('chatModelStatus')!;
+      expect(status.textContent).toContain('Firefox');
+      expect(status.textContent).toContain('المتصفح');
+
+      // An upstream wording change must not be silently omitted or mislabelled.
+      const changed = 'Firefox could not be launched. Update the browser setting, then retry discovery.';
+      receive({ state: 'unavailable', models: [], error: changed });
+      expect(status.textContent).toContain(changed);
+    } finally {
+      dom.window.close();
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
+  });
   it('names the actual localized trust/release actions when tool access is refused', () => {
     const trust = renderer['Trust chat'];
     const release = renderer['Release chat'];

@@ -48,6 +48,15 @@ app.whenReady().then(async () => {
     win=new BrowserWindow({show:false,width:1280,height:820,webPreferences:{sandbox:true,backgroundThrottling:false}});
     await win.loadURL(server.resolvedUrls.local[0]+'fixture-arabic.html');
     const evalJS=s=>win.webContents.executeJavaScript(s);
+    // Keep the only supported language changes as fixed scripts. Building
+    // executable JavaScript from a variable triggers CodeQL's code-injection
+    // check even if the current caller iterates a fixed list of languages.
+    const setFixtureLanguage=language=>{
+      assert.ok(language==='ar'||language==='en','Unexpected fixture language');
+      return evalJS(language==='ar'
+        ? "(() => {const e=document.getElementById('uiLanguage');e.value='ar';e.dispatchEvent(new Event('change'));})()"
+        : "(() => {const e=document.getElementById('uiLanguage');e.value='en';e.dispatchEvent(new Event('change'));})()");
+    };
     for(let i=0;i<100 && !(await evalJS('window.__ready === true'));i++) await new Promise(r=>setTimeout(r,30));
     assert.equal(await evalJS('window.__ready === true'),true,'Arabic fixture must initialize');
     const font=await evalJS(`document.fonts.ready.then(() => ({
@@ -291,7 +300,7 @@ app.whenReady().then(async () => {
     // palette is untouched: this is an isolated test profile.
     await evalJS("document.documentElement.dataset.highContrast='true'");
     for(const language of ['en','ar']){
-      await evalJS(`(() => {const e=document.getElementById('uiLanguage');e.value=${JSON.stringify(language)};e.dispatchEvent(new Event('change'));})()`);
+      await setFixtureLanguage(language);
       for(const theme of ['dark','light']){
         await evalJS(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`);
         for(const width of [1280,760]){
@@ -310,7 +319,7 @@ app.whenReady().then(async () => {
     // Paired real built-in dialog and composer menu captures. A dialog's real
     // markup and styles are used; no user messages or accounts are supplied.
     for(const language of ['en','ar']){
-      await evalJS(`(() => {const e=document.getElementById('uiLanguage');e.value=${JSON.stringify(language)};e.dispatchEvent(new Event('change'));})()`);
+      await setFixtureLanguage(language);
       for(const width of [1280,760]){
         win.setSize(width,820);
         await setPanel('chat');

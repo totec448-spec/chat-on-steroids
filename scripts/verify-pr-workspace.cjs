@@ -249,26 +249,38 @@ app.whenReady().then(async () => {
         fits:r.left>=0&&r.right<=innerWidth+1&&r.bottom<=innerHeight+1,width:r.width,height:r.height,
         title:document.querySelector('.file-panel').getAttribute('aria-label'),overflow:document.documentElement.scrollWidth>innerWidth};})()`);
       assert.ok(measured.fits && !measured.overflow && measured.width>200,JSON.stringify({width,zoom,measured}));
-      if (width === 820) assert.ok(await js(`(()=>{
+      if (width === 820) {
+        const toolbar = await js(`(()=>{
         const bar=document.querySelector('.file-panel:not([hidden]) .file-panel-toolbar');
         const actions=bar.querySelector('.file-panel-toolbar-actions');
         const refresh=bar.querySelector('.file-panel-refresh');
         const tabs=document.querySelector('#workDockRight .work-dock-tabs');
-        const before=refresh.getBoundingClientRect().right;
+        const before=refresh.getBoundingClientRect();
+        const actionBounds=actions.getBoundingClientRect();
+        const direction=getComputedStyle(bar).direction;
         // Labels that do not fit turn into icons, so every action stays on screen (2.1.41);
         // sideways scrolling with a pinned refresh remains only as the last resort.
         const shown=actions.classList.contains('is-compact')&&actions.scrollWidth<=actions.clientWidth+1
           &&[...actions.querySelectorAll('.file-panel-action')].every(button=>button.getAttribute('aria-label')
-            &&button.getBoundingClientRect().right<=actions.getBoundingClientRect().right+1);
-        actions.scrollLeft=actions.scrollWidth;
-        const fixed=Math.abs(refresh.getBoundingClientRect().right-before)<1
-          &&Math.abs(refresh.getBoundingClientRect().right-(bar.getBoundingClientRect().right-10))<2;
+            &&button.getBoundingClientRect().left>=actionBounds.left-1
+            &&button.getBoundingClientRect().right<=actionBounds.right+1);
+        actions.scrollLeft=direction==='rtl'?-actions.scrollWidth:actions.scrollWidth;
+        const after=refresh.getBoundingClientRect(),barBounds=bar.getBoundingClientRect();
+        const fixed=Math.abs(after.left-before.left)<1&&Math.abs(after.right-before.right)<1;
+        const pinned=direction==='rtl'
+          ?Math.abs(after.left-(barBounds.left+10))<2
+          :Math.abs(after.right-(barBounds.right-10))<2;
         actions.scrollLeft=0;
-        return shown&&fixed&&getComputedStyle(actions).flexWrap==='nowrap'
-          &&getComputedStyle(actions).scrollbarWidth==='none'
-          &&getComputedStyle(tabs).overflowX==='auto'
-          &&getComputedStyle(tabs).scrollbarWidth==='none';
-      })()`));
+        const nowrap=getComputedStyle(actions).flexWrap==='nowrap';
+        const actionsScrollbar=getComputedStyle(actions).scrollbarWidth==='none';
+        const tabsOverflow=getComputedStyle(tabs).overflowX==='auto';
+        const tabsScrollbar=getComputedStyle(tabs).scrollbarWidth==='none';
+        return {ok:shown&&fixed&&pinned&&nowrap&&actionsScrollbar&&tabsOverflow&&tabsScrollbar,
+          direction,shown,fixed,pinned,nowrap,actionsScrollbar,tabsOverflow,tabsScrollbar,
+          refresh:{left:after.left,right:after.right},bar:{left:barBounds.left,right:barBounds.right}};
+      })()`);
+        assert.equal(toolbar.ok,true,JSON.stringify({width,height,zoom,language,toolbar}));
+      }
       results.push({width,height,zoom,language,...measured});
       await screenshot(`files-${language}-${width}`);
     }
