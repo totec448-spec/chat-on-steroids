@@ -1870,6 +1870,9 @@ its reply is not read). Anything else is held as `draft` as before. A
 `repairHeld` reply stamps `claimAskedAt`, so a page that keeps holding never spends the no-page
 offer budget.
 
+Before a browser repair reloads an open chat, the extension checks for ChatGPT's
+`?temporary-chat=true` URL flag and leaves that page open.
+
 Direct active-turn corrections freeze `directTurn` in the same outbox entry. The exact turn
 start decides eligibility; earlier or running MCP calls do not revoke it. Recheck the exact claim
 before Send. Navigation, a newer question or an occupied draft during preparation can revoke
