@@ -950,7 +950,9 @@ ordinary-tool custody but cannot invent a request plan or worker family.
 A request-owned family answers only to that request. Clients such as Codex send every tool call as a
 new request, so a later call is outside it: every refusal that would say AGENTS_BUSY (or "call spawn to
 start one") to a caller known only by its request id says AGENTS_NO_CHAT instead (`NoChatError`, a
-subclass): no ChatGPT chat identified, the run is out of reach, do not spawn again (#1841). The spawn
+subclass): no ChatGPT chat identified, the run is out of reach, do not spawn again (#1841). It also
+says that a chat open in another computer's browser is reached through that computer's Core (#2172): the
+Core of a computer whose browser does not hold the chat cannot identify it. The spawn
 reply of a request-owned prime (`primeOwnerSentence`) says the same up front and drops the "results arrive
 with later tool results" promise, and `status` from such a caller with no family refuses the same way
 instead of the empty answer that suggests spawning.
@@ -1007,7 +1009,7 @@ acknowledged revoke cannot be undone by crash.
 If that durable commit fails, the failed proposed generation is superseded by the still-published
 trust set before background retry. Session deletion durably revokes Trust before releasing Block,
 detaching the conversation or deleting the row; a failed revoke therefore leaves all prior authority intact.
-While deletion is in flight, IPC keeps a session-id tombstone and Trust checks it both before and
+While deletion is in flight, Remove keeps a shared session-id fence and Trust checks it both before and
 after its async session lookup, so a still-visible row cannot recreate permission behind deletion.
 
 ### Three lifetimes and five outcomes
@@ -1241,7 +1243,9 @@ file. Opted in are the read tools (`read`, glob expansion, `view_image`), `find`
 `localFs`, `sftpFs`, `fsForRoot`), which keeps the local errors (`ENOENT`, `EEXIST`, `EINVAL` …), the
 read limits and the walk order, never follows a link when listing or removing, writes whole files
 (temporary file + rename, mode kept, through a link to its target) and reopens a dropped SFTP session
-once. Server-side containment is `resolveRemote` in `sandbox.ts`: no `..`, a link that leaves the
+once. A raster preview in Files reads only a file whose content starts with a PNG, JPEG, GIF, WebP or AVIF signature,
+whatever its extension (libvips chooses its decoder from the content and would reach its SVG renderer, which has a
+memory-safety advisory below sharp 0.35.5); anything else is "preview unavailable" and logged with its path. Server-side containment is `resolveRemote` in `sandbox.ts`: no `..`, a link that leaves the
 folder and a dangling link are refused (OpenSSH's realpath tolerates a missing last component, so
 existence is checked with `stat` first). One patch stays inside one server folder. `find` without a
 path names an unreachable server folder under `not_searched` and searches the rest; a regex is
@@ -1724,6 +1728,11 @@ startup failures, ambiguous sends, provider bindings and recorded history never 
 Dismiss delivery notice is an explicit withdrawal too, including after a failed first send;
 it uses the same serialized cancellation and empty-reservation checks. Dismissing a failed
 follow-up or uncertain authorized send preserves its existing chat and delivery evidence.
+Removing an unbound desktop chat instead retires its exact pending opening in the outbox
+before deleting the local session. Unreadable metadata or a failed outbox write leaves the chat
+in place. Outbox admission checks the removal fence inside its queue, including on retries.
+The queue also fences browser claims and Send authorization; Remove detaches late receipts so they
+cannot recreate the removed reservation, without treating an authorized Send as unsent.
 
 The immutable outbox `opening` role owns first-message setup and initial null-to-provider binding;
 non-null sessionId no longer means the opening was delivered. The exact native document binds
@@ -1936,6 +1945,13 @@ happened, the page has not come back yet, or the work is no longer the current t
 assistant-error reload also logs whether the chat is still under the silence watch, since the
 automatic Continue after it only comes from that watch (#1086: a log that went quiet after the
 reload could not say which of these held).
+"No tool call recorded" is judged by `answerHasMcpCall` (silence) and `questionHasMcpCall` (the
+automatic Continue) on the turn, then on every turn that answered the same question. A question the
+app delivered itself (`injectedUserMessage`: a Goal message or an automatic Continue, or a Goal or
+Loop follow-up its page typed, which the recorder marks `automatic`) in a chat that
+already ran an exactly attributed call of its own also counts (`deliveredQuestionInWorkingChat`):
+when every turn of such a question fails before a tool call, nothing else could restart the chat
+(#2163). A question the person typed, or a chat that never ran a call, still has none.
 
 ChatGPT's own tool approval card ("Allow ChatGPT to use …?", root `data-codex-approval-surface`)
 holds a call before it is sent, so nothing reaches the app and only the user can answer it. The
@@ -4170,7 +4186,14 @@ header/banner wrapper, excludes transcript/extension/hidden-kept-page links and 
 visible candidate. The link alone is not readiness: the source editor must be mounted, empty,
 idle and attachment-free before the one click. Source readiness has a bounded 60-second phase;
 the native transition then gets its own bounded 12-second phase. Destination proof requires the
-exact Project home, a connected ready editor and no displayed source turns. User interaction,
+exact Project home, a connected ready editor and no displayed source turns. ChatGPT keeps the text of a
+message sent from a Project home as that home's draft and restores it on every later load, so an empty editor
+is not the rule: an editor holding only text the app typed itself is emptied first (up to three times). That
+means a Compact & Resume brief, or the first message of an app chat (its `[[COS_CONTEXT:n]]` block), unchanged,
+optionally followed by the label of one of this installation's connector names (the mention); both are
+recognised from fingerprints kept in the page's storage (`clf-typed-briefs-v1`, 24 entries). Anything a person
+added stays and the entry fails as before (2026-11-12: every Compact & Resume in a Project failed after a chat
+had been started there through the app). User interaction,
 cancellation or a foreign route revokes the attempt; no extra tab compensates for a missing result.
 When an automatic Compact & Resume's page acks `project-entry:source-ready-timeout…` or
 `…transition-timeout…` (nothing sent), the bridge releases that attempt's destination claim
@@ -5136,7 +5159,22 @@ of its own but keeps the answer's one MCP request id across it. The page ends th
 and sends `turn_end` with `continued: true` when a message steered it (Stop stayed) or replaced it
 while it was unfinished (no answer yet; Stop can already be gone at that tick). Where Fiber
 answers, unfinished means no `end_turn`: interim prose alone does not make the answer finished.
-A turn that ended with its answer is never marked. A question sent after a shared assistant
+A turn that ended with its answer is never marked. At a new-question boundary, exact Fiber
+terminal evidence proves completion before prose renders, unless it is a final already in the
+generation's history baseline or an approval is holding. Consumed terminals enter that baseline
+before the next generation opens, so remounting cannot complete it. Explicit failure/stop outcomes win.
+An unbound generation excludes a visible question only when DOM order or recorded question
+anchors prove it is newer; a missing own question does not make an older visible one newer.
+If a question appears after that generation opened but has no order anchor yet, its following
+fast answer stays unowned until the next observed boundary proves which generation owns it.
+An older question remounting after the generation opened does not block its answer when
+durable anchors prove that question preceded the generation's own unmounted question.
+A consolidated final belongs to the continuation open when it settled, consistently in timeline
+projection, completion lookup, finish holds and recorder/Goal completion; it cannot advance to
+a continuation that opened after that settlement. Image-only completion follows the same proven
+continued chain while the canonical image retains its first owner; a reload hint alone is insufficient.
+A promoted final cannot override its resolved turn's failed/stopped end without a recorded reopen.
+A question sent after a shared assistant
 parent settles follows a mid-turn question sent before that settlement; it is not an edit of
 that question. Saved replacement repair reads the merged canonical parent, including provider
 timestamp aliases. Missing or streaming parents cannot prove settlement. A
