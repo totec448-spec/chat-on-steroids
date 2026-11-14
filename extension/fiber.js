@@ -2548,6 +2548,12 @@
         const generatedImages = generatedImagesOf(group.sections, messages, exactImageNodes, shell?.images);
         const activities = nativeActivities.events;
         const endMessageId = shell ? shell.endMessageId : turnEndMessageId(messages);
+        // A tool-only exchange can be complete without any final message to name.
+        // Do not use this for an unreadable/unfinished text or image answer.
+        const terminalWithoutFinal = shell?.entry.turn.status === 'complete' && !endMessageId &&
+          !shell.entry.turn.items.some(item => item?.type === 'generated-image' ||
+            (item?.type === 'assistant-message' && item.phase === 'final_answer')) &&
+          shell.images.size === 0;
         const trace = shell ? shellTurnTrace(shell) : [];
         // The shell supplies the completed final item's own exact message id,
         // without the classic thought-parent/timestamp tuple. Preserve that
@@ -2570,6 +2576,7 @@
           conversationConflict: conversation.conflict,
           ...(shell && !conversation.conversationId ? { requestOwnerRequired: true } : {}),
           endMessageId,
+          ...(terminalWithoutFinal ? { terminalWithoutFinal: true } : {}),
           calls,
           codeModeCalls,
           requests,
