@@ -18735,7 +18735,11 @@ describe('the fresh chat the app opened', () => {
     ]);
   });
 
-  it.each(['provider-running', 'native-stop', 'approval', 'approval-during-flush', 'approval-after-claim', 'pending-tool', 'wrong-turn', 'wrong-question', 'foreign-chat', 'later-call', 'no-finish', 'not-worker', 'fresh', 'ready'] as const)(
+  it.each([
+    'provider-running', 'native-stop', 'approval', 'approval-during-flush', 'approval-after-claim',
+    'pending-tool', 'wrong-turn', 'wrong-question', 'foreign-chat', 'later-call', 'no-finish',
+    'legacy-companion', 'not-worker', 'fresh', 'ready'
+  ] as const)(
     'uses a tool-only worker finish to release a wake only when safe (%s)', async scenario => {
       const chat = '23232323-3434-4545-8686-797979797979';
       const command = 'cmd-tool-only-revive';
@@ -18765,7 +18769,8 @@ describe('the fresh chat the app opened', () => {
           activeTurnId: started, recordedQuestionId: question,
           pendingTools: scenario === 'pending-tool' ? 1 : 0,
           stream: started && scenario !== 'no-finish' ? [{
-            kind: 'tool_call', seq: 1, time: Date.now(), tool: 'agents', endsActivity: true, outcome: 'ok',
+            kind: 'tool_call', seq: 1, time: Date.now(), tool: 'agents', outcome: 'ok',
+            ...(scenario === 'legacy-companion' ? {} : { endsActivity: true }),
             turnId: scenario === 'wrong-turn' ? 'previous-turn' : started
           }, ...(scenario === 'later-call' ? [{
             kind: 'tool_call', seq: 2, time: Date.now(), tool: 'read', outcome: 'ok', turnId: started
@@ -18822,7 +18827,7 @@ describe('the fresh chat the app opened', () => {
         trace: [{ kind: 'call', id: 'finish-call', tool: 'agents', done: true }]
       }]);
       if (race) {
-        await vi.waitFor(() => expect(terminalFlushHeld).toBe(true));
+        await vi.waitFor(() => expect(terminalFlushHeld).toBe(true), { timeout: 10_000, interval: 5 });
         expect(redeems).toBe(0);
         const card = mountApproval(live.document);
         releaseFlush();
