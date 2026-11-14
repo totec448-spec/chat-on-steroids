@@ -118,26 +118,45 @@ it('queues the manual name once an unbound desktop session binds and carries it 
   expect(nextChatTitleSync()).toEqual({ conversationId: B, title: 'My Work' });
 });
 
-it('repairs bounded async gen_title drift right after rebind without looping forever', async () => {
+it('preserves later ChatGPT Web changes after Compact & Resume without re-queuing overwrites', async () => {
   const session = await createSession({ conversationId: A, title: 'Old title', titleSource: 'provider' });
   await renameSession(session.id, 'My Work', 'manual');
   expect(nextChatTitleSync()).toEqual({ conversationId: A, title: 'My Work', expectedRemoteTitle: 'Old title' });
   settleChatTitleSync(A, 'My Work', 'synced');
   vi.advanceTimersByTime(CHAT_TITLE_SYNC_MIN_INTERVAL_MS);
+
   expect(await rebindSession(session.id, A, B, 'handoff-87654321')).toBe(true);
   expect(nextChatTitleSync()).toEqual({ conversationId: B, title: 'My Work' });
   settleChatTitleSync(B, 'My Work', 'synced');
   vi.advanceTimersByTime(CHAT_TITLE_SYNC_MIN_INTERVAL_MS);
 
-  for (const autoTitle of ['Resume Task Brief', 'Another Auto Title']) {
-    await renameSession(session.id, autoTitle, 'provider', B);
-    expect(nextChatTitleSync()).toEqual({ conversationId: B, title: 'My Work', expectedRemoteTitle: autoTitle });
-    settleChatTitleSync(B, 'My Work', 'synced');
-    vi.advanceTimersByTime(CHAT_TITLE_SYNC_MIN_INTERVAL_MS);
-  }
-  await renameSession(session.id, 'Third Auto Title', 'provider', B);
+  await renameSession(session.id, 'Edited On ChatGPT Web', 'provider', B);
+  expect(hasDueChatTitleSync()).toBe(false);
   expect(nextChatTitleSync()).toBeNull();
-  expect((await getSession(session.id))?.title).toBe('My Work');
+  expect(await getSession(session.id)).toMatchObject({
+    title: 'My Work',
+    titleSource: 'manual',
+    autoTitle: { title: 'Edited On ChatGPT Web', source: 'provider' }
+  });
+});
+
+it('drops a superseded queued rename when the in-flight push returns conflict', async () => {
+  const session = await createSession({ conversationId: A, title: 'Original Web Title', titleSource: 'provider' });
+  await renameSession(session.id, 'CoS 1', 'manual');
+  expect(nextChatTitleSync()).toEqual({ conversationId: A, title: 'CoS 1', expectedRemoteTitle: 'Original Web Title' });
+
+  await renameSession(session.id, 'CoS 2', 'manual');
+  expect(settleChatTitleSync(A, 'CoS 1', 'conflict', { remoteTitle: 'Manual Web Change' })).toBe(true);
+  await renameSession(session.id, 'Manual Web Change', 'provider', A);
+  vi.advanceTimersByTime(CHAT_TITLE_SYNC_MIN_INTERVAL_MS);
+
+  expect(hasDueChatTitleSync()).toBe(false);
+  expect(nextChatTitleSync()).toBeNull();
+  expect(await getSession(session.id)).toMatchObject({
+    title: 'CoS 2',
+    titleSource: 'manual',
+    autoTitle: { title: 'Manual Web Change', source: 'provider' }
+  });
 });
 
 it('respects newer ChatGPT Web edits and never overwrites them before or after sync', async () => {
@@ -164,13 +183,13 @@ it('respects newer ChatGPT Web edits and never overwrites them before or after s
   expect(settleChatTitleSync(A, 'CoS Second Attempt', 'conflict', { remoteTitle: 'Web Concurrent Edit' })).toBe(true);
   expect(nextChatTitleSync()).toBeNull();
 
-  // Later Web renames after a settled manual-rename do not re-trigger drift-repair.
+  // Later Web renames after a settled manual-rename do not re-trigger pushes.
   vi.advanceTimersByTime(CHAT_TITLE_SYNC_MIN_INTERVAL_MS);
   await renameSession(session.id, 'CoS Synced Title', 'manual');
   expect(nextChatTitleSync()).toEqual({ conversationId: A, title: 'CoS Synced Title', expectedRemoteTitle: 'Web Concurrent Edit' });
   settleChatTitleSync(A, 'CoS Synced Title', 'synced');
   vi.advanceTimersByTime(CHAT_TITLE_SYNC_MIN_INTERVAL_MS);
-  expect(noteProviderChatTitle(A, 'Web Edited Afterwards', 'CoS Synced Title')).toBe(false);
+  expect(noteProviderChatTitle(A, 'Web Edited Afterwards')).toBe(false);
   expect(nextChatTitleSync()).toBeNull();
 });
 

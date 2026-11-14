@@ -3879,7 +3879,7 @@ export async function renameSession(id: string, title: string, source: SessionSu
       // chat this app opened is named by its request, and a project page title is never a name.
       if (source === undefined || (conversationId && entry.summary.conversationId !== conversationId)) return;
       if (source === 'provider' && entry.summary.conversationId && !projectPageTitle(title)) {
-        noteProviderChatTitle(entry.summary.conversationId, title, entry.summary.title);
+        noteProviderChatTitle(entry.summary.conversationId, title);
       }
       if (entry.summary.origin && entry.summary.origin.kind !== 'desktop') return;
       const auto = entry.summary.autoTitle;

@@ -8,9 +8,9 @@
  *
  * Newer ChatGPT Web titles are never overwritten: the app keeps the last known provider title
  * (`expectedRemoteTitle`) per conversation, the extension runs a `GET /backend-api/conversation/<id>`
- * pre-check before `PATCH`, and any divergence from `expectedRemoteTitle` drops the push as a
- * newer-remote-title conflict (except within a brief bounded window right after `rebindSession` so
- * ChatGPT's automatic `gen_title` on a brand-new resumed chat can still settle).
+ * pre-check before `PATCH`, and any divergence from `expectedRemoteTitle` drops the push (including
+ * any superseded queued rename waiting behind an in-flight conflict) as a newer-remote-title conflict
+ * without ever converting a remote Web change into permission for another push.
  *
  * Rate & burst behavior:
  * - Same-conversation renames coalesce to the latest title; the queue is capped at 200 entries.
@@ -45,12 +45,6 @@ type Entry = {
   leasedUntil: number;
 };
 
-type SettledRebind = {
-  manualTitle: string;
-  expiresAt: number;
-  repairs: number;
-};
-
 export const CHAT_TITLE_SYNC_LEASE_MS = 60_000;
 export const CHAT_TITLE_SYNC_RETRY_BASE_MS = 5_000;
 export const CHAT_TITLE_SYNC_MAX_WAIT_MS = 7 * 24 * 60 * 60_000;
@@ -58,8 +52,6 @@ export const CHAT_TITLE_SYNC_MAX_ATTEMPTS = 5;
 export const CHAT_TITLE_SYNC_MAX_ENTRIES = 200;
 export const CHAT_TITLE_SYNC_MIN_INTERVAL_MS = 2_000;
 export const CHAT_TITLE_SYNC_RATE_LIMIT_MS = 60_000;
-const DRIFT_REPAIR_WINDOW_MS = 2 * 60_000;
-const MAX_DRIFT_REPAIRS = 2;
 const MAX_KNOWN_TITLES = 500;
 const MAX_RATE_LIMIT_MS = 15 * 60_000;
 const MIN_RATE_LIMIT_MS = 5_000;
@@ -67,7 +59,6 @@ const CONVERSATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
 
 let filePath = '';
 const entries = new Map<string, Entry>();
-const settled = new Map<string, SettledRebind>();
 const knownTitles = new Map<string, string>();
 let writing: Promise<void> = Promise.resolve();
 let pending = false;
@@ -150,7 +141,6 @@ export function initChatTitleSyncPath(userDataDir: string): void {
 
 export async function loadChatTitleSync(): Promise<void> {
   entries.clear();
-  settled.clear();
   knownTitles.clear();
   clearWakeTimer();
   nextDispatchAt = 0;
@@ -250,13 +240,10 @@ export function queueChatTitleSync(
     return false;
   }
   if (reason === 'manual-rename') {
-    settled.delete(id);
     if (providedExpected && !knownTitles.has(id)) rememberKnownTitle(id, providedExpected);
-  } else if (reason === 'drift-repair' && providedExpected) {
-    rememberKnownTitle(id, providedExpected);
   }
   const expectedRemoteTitle = reason === 'rebind'
-    ? undefined
+    ? knownTitles.get(id)
     : (knownTitles.get(id) ?? existing?.expectedRemoteTitle ?? (providedExpected || undefined));
   entries.set(id, {
     conversationId: id,
@@ -285,7 +272,6 @@ export function cancelChatTitleSync(
 ): boolean {
   const id = cleanId(conversationId);
   if (!id) return false;
-  settled.delete(id);
   if (!entries.delete(id)) return false;
   persist();
   scheduleWake();
@@ -294,10 +280,9 @@ export function cancelChatTitleSync(
 }
 
 export function cancelAllChatTitleSync(reason = 'setting-disabled'): number {
-  if (entries.size === 0 && settled.size === 0) return 0;
+  if (entries.size === 0) return 0;
   const ids = [...entries.keys()];
   entries.clear();
-  settled.clear();
   clearWakeTimer();
   persist();
   for (const id of ids) {
@@ -309,48 +294,34 @@ export function cancelAllChatTitleSync(reason = 'setting-disabled'): number {
 /**
  * Reconciles an observed ChatGPT Web provider title against any pending manual title push:
  * - Newer remote edits detected while a sync is queued drop the pending push rather than overwriting Web.
- * - Shortly after Compact & Resume (`rebind`), bounded async `gen_title` drift can still re-queue the
- *   user's carried manual name unless a later Web change diverges from the expected title.
+ * - Any remote title observed after a push settles (including after Compact & Resume) is recorded as
+ *   the latest known remote title without converting it into permission to push again.
  */
 export function noteProviderChatTitle(
   conversationId: string | null | undefined,
-  observedTitle: string,
-  manualTitle?: string
+  observedTitle: string
 ): boolean {
   const id = cleanId(conversationId);
   const observedClean = cleanSyncedChatTitle(observedTitle);
-  const manualClean = cleanSyncedChatTitle(manualTitle);
   if (!id || !observedClean) return false;
   rememberKnownTitle(id, observedClean);
-  if (!enabled() || !manualClean) return false;
+  if (!enabled()) return false;
 
   const existing = entries.get(id);
-  if (existing) {
-    if (observedClean === existing.title) return false;
-    if (existing.expectedRemoteTitle && observedClean !== existing.expectedRemoteTitle) {
-      entries.delete(id);
-      settled.delete(id);
-      persist();
-      scheduleWake();
-      logInfo(`chat title sync: dropped ${id} (newer-remote-title)`);
-      return false;
-    }
-    if (existing.reason === 'rebind' && !existing.expectedRemoteTitle) {
-      existing.expectedRemoteTitle = observedClean;
-      persist();
-    }
+  if (!existing) return false;
+  if (observedClean === existing.title) return false;
+  if (existing.expectedRemoteTitle && observedClean !== existing.expectedRemoteTitle) {
+    entries.delete(id);
+    persist();
+    scheduleWake();
+    logInfo(`chat title sync: dropped ${id} (newer-remote-title)`);
     return false;
   }
-
-  if (observedClean === manualClean) return false;
-  const prior = settled.get(id);
-  const now = Date.now();
-  if (!prior || prior.manualTitle !== manualClean || now > prior.expiresAt || prior.repairs >= MAX_DRIFT_REPAIRS) {
-    if (prior && (now > prior.expiresAt || prior.repairs >= MAX_DRIFT_REPAIRS)) settled.delete(id);
-    return false;
+  if (existing.reason === 'rebind' && !existing.expectedRemoteTitle) {
+    existing.expectedRemoteTitle = observedClean;
+    persist();
   }
-  prior.repairs += 1;
-  return queueChatTitleSync(id, manualClean, { reason: 'drift-repair', expectedRemoteTitle: observedClean });
+  return false;
 }
 
 function pruneExpired(now: number): boolean {
@@ -358,16 +329,12 @@ function pruneExpired(now: number): boolean {
   for (const [id, entry] of entries) {
     if (now - entry.queuedAt > CHAT_TITLE_SYNC_MAX_WAIT_MS) {
       entries.delete(id);
-      settled.delete(id);
       dirty = true;
       logWarn(`chat title sync: dropped ${entry.conversationId} (expired)`);
     } else if (entry.leased && now >= entry.leasedUntil) {
       entry.leased = false;
       entry.leasedUntil = 0;
     }
-  }
-  for (const [id, prior] of settled) {
-    if (now > prior.expiresAt) settled.delete(id);
   }
   return dirty;
 }
@@ -434,11 +401,14 @@ export function settleChatTitleSync(
     // A newer manual title was queued while this request was in flight.
     entry.leased = false;
     entry.leasedUntil = 0;
-    if (outcome === 'synced') entry.expectedRemoteTitle = clean;
     if (outcome === 'conflict') {
-      const cleanRemote = cleanSyncedChatTitle(details.remoteTitle);
-      if (cleanRemote) entry.expectedRemoteTitle = cleanRemote;
+      entries.delete(id);
+      persist();
+      scheduleWake(now);
+      logInfo(`chat title sync: dropped ${id} (newer-remote-title, superseded)`);
+      return true;
     }
+    if (outcome === 'synced') entry.expectedRemoteTitle = clean;
     if (outcome === 'failed' && details.status === 429) {
       const waitMs = clampRateLimitMs(details.retryAfterMs);
       cooldownUntil = Math.max(cooldownUntil, now + waitMs);
@@ -449,8 +419,6 @@ export function settleChatTitleSync(
       logInfo(`chat title sync: sent ${id} (${details.alreadyMatched ? 'already-matched' : 'patched'})`);
     } else if (outcome === 'deferred') {
       logInfo(`chat title sync: deferred ${id} (no active ChatGPT tab)`);
-    } else if (outcome === 'conflict') {
-      logInfo(`chat title sync: dropped ${id} (newer-remote-title, superseded)`);
     } else {
       logWarn(`chat title sync: failed ${id} (superseded${details.status ? `, status=${details.status}` : ''})`);
     }
@@ -467,18 +435,7 @@ export function settleChatTitleSync(
   }
 
   if (outcome === 'synced') {
-    const keepSettledRebind = entry.reason === 'rebind' || entry.reason === 'drift-repair';
-    const previousSettled = settled.get(id);
     entries.delete(id);
-    if (keepSettledRebind) {
-      settled.set(id, {
-        manualTitle: entry.title,
-        expiresAt: previousSettled?.expiresAt ?? now + DRIFT_REPAIR_WINDOW_MS,
-        repairs: previousSettled?.repairs ?? 0
-      });
-    } else {
-      settled.delete(id);
-    }
     logInfo(`chat title sync: sent ${id} (${details.alreadyMatched ? 'already-matched' : 'patched'})`);
     persist();
     scheduleWake(now);
@@ -487,7 +444,6 @@ export function settleChatTitleSync(
 
   if (outcome === 'conflict') {
     entries.delete(id);
-    settled.delete(id);
     logInfo(`chat title sync: dropped ${id} (newer-remote-title)`);
     persist();
     scheduleWake(now);
@@ -504,7 +460,6 @@ export function settleChatTitleSync(
   const statusPart = details.status ? `, status=${details.status}` : '';
   if (entry.attempts >= CHAT_TITLE_SYNC_MAX_ATTEMPTS) {
     entries.delete(id);
-    settled.delete(id);
     logWarn(`chat title sync: failed ${id} (attempt ${entry.attempts}/${CHAT_TITLE_SYNC_MAX_ATTEMPTS}${statusPart})`);
     logWarn(`chat title sync: dropped ${id} (max-attempts:${entry.attempts})`);
   } else {
@@ -522,7 +477,6 @@ export function settleChatTitleSync(
 export function resetChatTitleSyncForTests(): void {
   clearWakeTimer();
   entries.clear();
-  settled.clear();
   knownTitles.clear();
   nextDispatchAt = 0;
   cooldownUntil = 0;
