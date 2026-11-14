@@ -2004,7 +2004,13 @@ var CLF_DOM = (() => {
    * after it (2026-11-12): the app's own text, recognised like a brief.
    */
   const FIRST_MESSAGE_RESIDUE = /^\[\[COS_CONTEXT:\d{1,9}\]\]/;
-  const OWN_RESIDUE = new RegExp(`${RESUME_RESIDUE.source}|${FIRST_MESSAGE_RESIDUE.source}`);
+  /**
+   * How the app's handoff request begins (its marker, then the instruction). ChatGPT puts the text of a message it
+   * just sent back into that chat's composer as a draft too (2026-11-14: the source chat of a second Compact &
+   * Resume in one Project), so it is the app's own text like a brief.
+   */
+  const HANDOFF_RESIDUE = /^\[\[CLF-HANDOFF:[A-Za-z0-9_-]{16,64}\]\]/;
+  const OWN_RESIDUE = new RegExp(`${RESUME_RESIDUE.source}|${FIRST_MESSAGE_RESIDUE.source}|${HANDOFF_RESIDUE.source}`);
 
   /**
    * Empties a Project home editor that holds only an earlier Compact & Resume brief (#2068).
@@ -2061,7 +2067,7 @@ var CLF_DOM = (() => {
       if (hasComposerAttachments()) return 'attachment';
       const text = compactDraft(editorText(box));
       if (!text) return 'empty';
-      const kind = RESUME_RESIDUE.test(text) ? 'brief' : FIRST_MESSAGE_RESIDUE.test(text) ? 'context' : null;
+      const kind = RESUME_RESIDUE.test(text) ? 'brief' : FIRST_MESSAGE_RESIDUE.test(text) ? 'context' : HANDOFF_RESIDUE.test(text) ? 'handoff' : null;
       if (!kind) return 'other';
       const bare = ownMentionFreeText(box);
       return `${kind}-${ownBrief(text) || (bare !== null && ownBrief(bare)) ? 'own' : 'foreign'}`;
@@ -2077,7 +2083,8 @@ var CLF_DOM = (() => {
    * of thousands of characters.
    */
   const TYPED_BRIEFS_KEY = 'clf-typed-briefs-v1';
-  const MAX_TYPED_BRIEFS = 24;
+  // Each Compact & Resume types two of the app's own texts, the handoff request and the brief.
+  const MAX_TYPED_BRIEFS = 48;
   const typedBriefs = [];
   function briefFingerprint(text) {
     // cyrb53: a fast 53-bit hash. Identity, not security; two briefs sharing one is not a concern.
@@ -4008,7 +4015,10 @@ var CLF_DOM = (() => {
         // actual editor is mounted and ready.
         const source = composer();
         if (!source?.isConnected || !composerSubmitReady() || hasComposerAttachments()) {
-          lastObservation = 'source-not-ready';
+          // The source chat's composer can hold the app's own text that ChatGPT put back as a draft (the handoff
+          // request it just sent): emptied like the Project home's, never a person's.
+          if (source?.isConnected && residueClears < 3 && clearResumeResidue()) { residueClears++; return check(); }
+          lastObservation = `source-not-ready:draft=${draftEvidence()}:clears=${residueClears}:chips=${mentionChipCount()}`;
           return;
         }
         const links = projectLinks();
