@@ -7,6 +7,7 @@ interface DomApi {
   insertPrompt(text: string, mode?: boolean | 'append', failure?: (reason: string) => void): boolean;
   enterProject(entry: { id: string; sourceConversationId: string }, current?: () => boolean,
     failure?: (reason: string) => void): Promise<boolean>;
+  setConnectorApps(value: { core?: Array<{ appId: string; linkId: string | null; name: string | null }> } | null): boolean;
   composer(): HTMLElement | null;
   composerText(box?: Element | null): string;
   composerActions(): { host: HTMLElement; before: HTMLElement | null } | null;
@@ -477,7 +478,7 @@ describe('native Project entry readiness', () => {
     const entered = api.enterProject(entry, undefined, failure);
     await vi.advanceTimersByTimeAsync(12_500);
     expect(await entered).toBe(false);
-    expect(failure).toHaveBeenCalledWith('transition-timeout:last=composer-not-ready');
+    expect(failure).toHaveBeenCalledWith('transition-timeout:last=composer-not-ready:draft=no-editor:clears=0:chips=0');
   });
 
   // #2068: within one tab ChatGPT keeps the Project home's text after it was sent, so the next resume
@@ -522,7 +523,8 @@ describe('native Project entry readiness', () => {
     expect(await entered).toBe(cleared);
     if (cleared) expect(box.textContent).toBe('');
     else {
-      expect(failure).toHaveBeenCalledWith('transition-timeout:last=composer-not-ready');
+      // What kept it is said in the reason (#2159): a person's words and a brief this page never typed are not the same thing.
+      expect(failure).toHaveBeenCalledWith(`transition-timeout:last=composer-not-ready:draft=${kind === 'person' ? 'other' : 'brief-foreign'}:clears=0:chips=0`);
       expect(box.textContent?.length).toBeGreaterThan(0);
     }
   });
@@ -567,7 +569,7 @@ describe('native Project entry readiness', () => {
     expect(await entered).toBe(cleared);
     if (cleared) expect(box.textContent).toBe('');
     else {
-      expect(failure).toHaveBeenCalledWith('transition-timeout:last=composer-not-ready');
+      expect(failure).toHaveBeenCalledWith('transition-timeout:last=composer-not-ready:draft=context-foreign:clears=0:chips=0');
       expect(box.textContent?.length).toBeGreaterThan(0);
     }
   });
@@ -615,7 +617,56 @@ describe('native Project entry readiness', () => {
     const entered = api.enterProject(entry, undefined, failure);
     await vi.advanceTimersByTimeAsync(12_500);
     expect(await entered).toBe(cleared);
-    if (!cleared) expect(failure).toHaveBeenCalledWith('transition-timeout:last=composer-not-ready');
+    // The app knows this brief and still gave up: the reason says it was the limit on clears, not the recognition.
+    if (!cleared) expect(failure).toHaveBeenCalledWith('transition-timeout:last=composer-not-ready:draft=brief-own:clears=3:chips=0');
+  });
+
+  // #2159 (2.1.53, the reporter's Project home): the draft ChatGPT keeps ends with the connector mention as a chip that
+  // names the app as it is called now. An app renamed in ChatGPT shows under a name the app does not list, but the
+  // chip carries the app's id, and the app proved that id is its own. Another app's chip is not.
+  it.each([
+    ['this installation\'s own app, renamed in ChatGPT', 'asdk_app_6ac261da79588191af4e6096fadeeee2', true, 'brief-own'],
+    ['an app that is not this installation\'s', 'asdk_app_00000000000000000000000000000000', false, 'brief-foreign']
+  ] as const)('on the Project home, clears a brief that ends with the mention chip of %s only when its id is the app\'s own', async (_name, chipId, cleared, kind) => {
+    const { resumeBootstrapText } = await import('../src/main/session/handoff.js');
+    const brief = resumeBootstrapText('# TASK — the original goal\n\nShip the mail service.', 'pTYR0VjLJ5Xtz2FHFqajqA');
+    document.execCommand = (command: string, _ui?: boolean, value?: string) => {
+      const selection = document.getSelection();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+      if (!range) return false;
+      if (command === 'delete') { range.deleteContents(); return true; }
+      if (command !== 'insertHTML') return false;
+      range.deleteContents();
+      const template = document.createElement('template');
+      template.innerHTML = value || '';
+      range.insertNode(template.content);
+      return true;
+    };
+    api.setConnectorApps({ core: [{ appId: 'asdk_app_6ac261da79588191af4e6096fadeeee2', linkId: null, name: 'Handoff Helper' }] });
+    const link = sourceLink();
+    box.textContent = '';
+    expect(api.insertPrompt(brief, true)).toBe(true);
+    box.textContent = '';
+    link.addEventListener('click', event => {
+      event.preventDefault();
+      dom.reconfigure({ url: projectUrl });
+      const paragraphs = brief.split(/\n\n/).map(part => { const p = document.createElement('p'); p.textContent = part; return p; });
+      const chip = document.createElement('span');
+      chip.setAttribute('app-mention-path', `app://${chipId}`);
+      chip.setAttribute('data-prompt-link-href', `app://${chipId}`);
+      chip.innerHTML = '<span class="Label">Handoff Helper</span>';
+      paragraphs.at(-1)!.append(chip);
+      box.replaceChildren(...paragraphs);
+    });
+    const failure = vi.fn();
+    const entered = api.enterProject(entry, undefined, failure);
+    await vi.advanceTimersByTimeAsync(12_500);
+    expect(await entered).toBe(cleared);
+    if (cleared) expect(box.textContent).toBe('');
+    else {
+      expect(failure).toHaveBeenCalledWith(`transition-timeout:last=composer-not-ready:draft=${kind}:clears=0:chips=1`);
+      expect(box.textContent?.length).toBeGreaterThan(0);
+    }
   });
 
   it('reports visible source turns as the last observation when the Project transition times out', async () => {
