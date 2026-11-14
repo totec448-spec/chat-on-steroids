@@ -113,6 +113,7 @@ const {
   startBridge,
   stopBridge,
   sweepStaleSwarm,
+  cancelResumeNow,
   pickupNow,
   noteRecoverySweepTick,
   unpair,
@@ -3390,6 +3391,26 @@ describe('automatic compaction', () => {
         if (sendState === 'dispatched-unresolved') expect(log.some(message => message.includes(`${ticket.slice(0, 8)} does not continue from the saved summary: Goal and Loop are off for this chat`))).toBe(true);
       }
     } finally { vi.useRealTimers(); }
+  });
+
+  // CodeRabbit on #2193: the old ticket ends before the saved summary opens its successor. If the app stops between the
+  // two, nothing is lost: the ended ticket owns nothing, the chat is still the session's, and the next automatic
+  // ticket (the chat is at its limit) files normally, as it does after any ended ticket.
+  it('leaves the chat free for a new automatic ticket when the ticket that opened a silent new chat has ended and no successor exists', async () => {
+    await pair();
+    const { beginContinuationDestinationSendNow, dispatchContinuationDestinationSendNow } = await import('../src/main/session/continuation.js');
+    const from = randomUUID();
+    const { sessionId, token: ticket } = await automaticCompactedSession(from, 'TASK\n\nKeep auditing the fleet manager and fix what the audit finds.\n'.repeat(4));
+    expect(await claimContinuationNow(ticket, 'page-b')).not.toBeNull();
+    expect((await beginContinuationDestinationSendNow(ticket))?.allowed).toBe(true);
+    expect(await dispatchContinuationDestinationSendNow(ticket)).toBe(true);
+    expect(await cancelResumeNow(sessionId)).toBe(true);
+    expect(continuationByToken(ticket)?.state).toBe('aborted');
+    expect(continuationForSession(sessionId)).toBeNull();
+    expect((await getSession(sessionId))?.conversationId).toBe(from);
+    const next = await openContinuationNow(sessionId, from, true);
+    expect(next.token).not.toBe(ticket);
+    expect(next.state).toBe('awaiting-summary');
   });
 
   // CodeRabbit on #2189 (third round): a receipt that arrives after the five-minute sweep that re-armed the hour still

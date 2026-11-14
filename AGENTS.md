@@ -4205,7 +4205,10 @@ message sent from a Project home as that home's draft and restores it on every l
 is not the rule: an editor holding only text the app typed itself is emptied first (up to three times). That
 means a Compact & Resume brief, or the first message of an app chat (its `[[COS_CONTEXT:n]]` block), unchanged,
 optionally followed by the label of one of this installation's connector names (the mention); both are
-recognised from fingerprints kept in the page's storage (`clf-typed-briefs-v1`, 24 entries). Anything a person
+recognised from fingerprints kept in the page's storage (`clf-typed-briefs-v1`, 48 entries: a Compact & Resume types two texts). The handoff request (its
+`[[CLF-HANDOFF:…]]` marker) is the app's own text too: ChatGPT can put the one it just sent back into the source chat's
+composer, and the entry empties that draft before its click like the Project home's (2026-11-14; its timeout reason is
+`source-ready-timeout:last=source-not-ready:draft=<kind>:clears=<n>:chips=<n>`; the source chat and the Project home each have their own three clears, so a draft restored in one never spends the other's). Anything a person
 added stays and the entry fails as before (2026-11-12: every Compact & Resume in a Project failed after a chat
 had been started there through the app). The mention a restored draft ends with is a chip that names the app as
 it is called now, so a chip whose app id (`app-mention-path`) is one this installation proved to be its own is
@@ -4228,7 +4231,8 @@ it; while no browser attempt is out, each quarter hour still counts as one of th
 goes on in a new chat from the session's saved summary (`continueStuckFromSavedSummary` with `opening`), once per
 ticket (#2184: the Goal chat stood idle for the ticket's six hours). A destination that reported its first message
 (`sent`) exists and is never replaced; a chat with Goal and Loop off keeps the hourly try and says why it does not
-continue.
+continue. The old ticket ends before the successor opens: if the app stops between the two, the ended
+ticket owns nothing and the chat's next automatic ticket files as after any ended ticket.
 One exception, measured: a replacement tab opens the source at `/c/<id>` and ChatGPT rewrites that
 route twice (`/g/<project>/c/<id>`, then with the Project's name). A click between the two is
 taken and then dropped by the second rewrite (8 of 14 handoffs in a Project timed out on
