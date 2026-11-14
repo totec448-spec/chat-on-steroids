@@ -877,7 +877,7 @@ describe('durable user input ownership', () => {
     // ChatGPT stores inserted text Markdown-escaped; the same text in another chat, or a different text, is not it.
     expect(takeAutomaticReply('another-chat', row!.text)).toBe(false);
     expect(takeAutomaticReply(binding.conversationId, 'Continue with something else')).toBe(false);
-    expect(takeAutomaticReply(binding.conversationId, row!.text.replace(/[().]/g, '\\$&'))).toBe(true);
+    expect(takeAutomaticReply(binding.conversationId, row!.text.split('(').join('\\(').split(')').join('\\)'))).toBe(true);
     // Used up: the same text typed later is the person's.
     expect(takeAutomaticReply(binding.conversationId, row!.text)).toBe(false);
   });
