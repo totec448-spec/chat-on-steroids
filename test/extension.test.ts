@@ -2671,7 +2671,8 @@ describe('active agent tab discard protection', () => {
     await send({ reason: 'recovery-question-changed', newestUser: 'm-\u0007bad', documentSince: 1_700_000_000_123 });
     await send({ reason: 'recovery-question-changed', newestUser: 'm-'.padEnd(300, 'x'), documentSince: 1_700_000_000_123 });
     await send({ reason: 'recovery-question-changed', newestUser: 'm-older', documentSince: -1 });
-    await vi.waitFor(() => expect(notes).toHaveLength(5));
+    // The notes go out detached from send(): a loaded release runner needs more than waitFor's one-second default.
+    await vi.waitFor(() => expect(notes).toHaveLength(5), { timeout: 10_000 });
     expect(notes).toEqual([
       { note: 'input-held', reason: 'recovery-question-changed', inputId, conversationId, newestUser: 'm-older', documentSince: 1_700_000_000_123 },
       { note: 'input-held', reason: 'still-answering', inputId, conversationId },

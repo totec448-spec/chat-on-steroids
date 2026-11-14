@@ -2439,6 +2439,16 @@ const SAVED_COPY_PROOF_SPAN_MS = 10 * 60_000;
 const savedCopyBehind = new Map<string, { messageId: string; documents: Set<number> }>();
 const savedCopyContinued = new Set<string>();
 
+/** Why a chat whose saved copy lags may not be moved to a new chat right now, or '' when it may (#2184). */
+function savedCopyRecoveryBlocker(conversationId: string, sessionId: string, now: number): string {
+  if (isChatBlocked(conversationId)) return 'the chat is blocked';
+  if (!goalArmedFor(conversationId) || !goalSwitchFor(conversationId).enabled) return 'Goal and Loop are not on for it';
+  if (chatIsWorkingNow(conversationId, now)) return 'the chat is still working';
+  if (runningToolProgress(conversationId) !== null) return 'a tool call is running';
+  if (continuationForSession(sessionId)) return 'a Compact & Resume is under way';
+  return '';
+}
+
 async function noteSavedCopyBehind(conversationId: string, newestUser: string, documentSince: number, now: number): Promise<void> {
   if (savedCopyContinued.has(conversationId) || !Number.isFinite(documentSince) || documentSince <= 0 || documentSince > now + 60_000) return;
   const session = await findSessionByConversation(conversationId);
@@ -2464,24 +2474,34 @@ async function noteSavedCopyBehind(conversationId: string, newestUser: string, d
   const spread = Math.max(...record.documents) - Math.min(...record.documents);
   if (record.documents.size < 2 || spread < SAVED_COPY_PROOF_SPAN_MS) return;
   // Only an unattended chat that nothing else is working on is moved: Goal or Loop on, not blocked, nothing running.
-  if (isChatBlocked(conversationId) || !goalArmedFor(conversationId) || !goalSwitchFor(conversationId).enabled ||
-      chatIsWorkingNow(conversationId, now) || runningToolProgress(conversationId) !== null || continuationForSession(session.id)) return;
+  const blocker = savedCopyRecoveryBlocker(conversationId, session.id, now);
+  if (blocker) {
+    const key = `saved-copy-wait|${conversationId}|${blocker}`;
+    if (now - (pageNotesLogged.get(key) ?? 0) >= 60_000) {
+      notePageNoteLogged(key, now);
+      logInfo(`bridge: ${conversationId}: ChatGPT's saved copy of this chat lacks the message the browser delivered, and the chat waits to continue from its saved summary: ${blocker}`);
+    }
+    return;
+  }
   const saved = session.lastHandoffId;
   if (!saved || !await savedSummaryUsable(session.id, saved)) {
     logInfo(`bridge: ${conversationId}: ChatGPT's saved copy of this chat lacks the message the browser delivered, and the session has no usable saved summary to go on from`);
     savedCopyContinued.add(conversationId);
     return;
   }
-  // Read again after the awaits: the person may have turned the switch off or the chat may have started working.
-  if (isChatBlocked(conversationId) || !goalArmedFor(conversationId) || !goalSwitchFor(conversationId).enabled ||
-      chatIsWorkingNow(conversationId, Date.now()) || (await getSession(session.id))?.conversationId !== conversationId) return;
+  // Read the session first, then check every condition with no await before the call below: the person may have
+  // turned the switch off, or the chat may have started working, or a Compact & Resume may have begun meanwhile.
+  const current = await getSession(session.id);
+  if (current?.conversationId !== conversationId || savedCopyRecoveryBlocker(conversationId, session.id, Date.now())) return;
   savedCopyContinued.add(conversationId);
   try {
-    await resumeFromSavedSummary(session.id, saved);
+    await resumeFromSavedSummary(session.id, saved, { refuseIfCompacting: true });
     logWarn(`bridge: ${conversationId}: ChatGPT's saved copy of this chat lacks the message the browser delivered ` +
       `(${record.documents.size} documents read an older newest question over ${Math.round(spread / 60_000)} minutes); ` +
       `the ${goalSwitchFor(conversationId).mode} chat continues in a new chat from saved summary ${saved}`);
   } catch (error) {
+    // A Compact & Resume that began meanwhile has the chat: the proof stays, and a later report may try again.
+    if (continuationForSession(session.id)) savedCopyContinued.delete(conversationId);
     logInfo(`bridge: ${conversationId}: could not continue from the saved summary (${(error as Error).message})`);
   }
 }
@@ -2771,12 +2791,14 @@ export async function compactSession(sessionId: string): Promise<SessionControls
   return sessionControlsFor(sessionId);
 }
 /** Compact & Resume again from the summary an abandoned run already captured (#1215). */
-export async function resumeFromSavedSummary(sessionId: string, handoffId: string): Promise<SessionControlsView> {
+export async function resumeFromSavedSummary(sessionId: string, handoffId: string, options: { refuseIfCompacting?: boolean } = {}): Promise<SessionControlsView> {
   await controlledConversation(sessionId);
   // A summary that cannot be used ends nothing: the waiting Compact & Resume stays (CodeRabbit on #2019).
   if (!await savedSummaryUsable(sessionId, handoffId)) throw new Error('This summary can no longer be used. Start Compact & Resume again.');
   // The person chose the saved summary over a Compact & Resume still waiting for ChatGPT's: that ticket ends.
   const waiting = continuationForSession(sessionId);
+  // The automatic path never ends a Compact & Resume the person or the app started while it was reading (#2184).
+  if (waiting && options.refuseIfCompacting) throw new Error('a Compact & Resume is under way');
   if (waiting && waiting.state === 'awaiting-summary' && !waiting.handoffId) {
     logInfo(`bridge: ${sessionId} continues from saved summary ${handoffId}; the Compact & Resume still waiting for ChatGPT's summary is cancelled`);
     await cancelResumeNow(sessionId);

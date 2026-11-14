@@ -3421,7 +3421,7 @@ describe('automatic compaction', () => {
   // is not following the chat. A Goal or Loop chat that is idle then goes on from its saved summary, once.
   describe('a chat whose saved copy stopped following it', () => {
     const MIN = 60_000;
-    type Case = { name: string; continues: boolean; automation?: 'loop' | 'off'; second?: number; newest?: 'old' | 'delivered' | 'unknown'; recentSend?: boolean; working?: boolean; documents?: 1 | 2 };
+    type Case = { name: string; continues: boolean; automation?: 'loop' | 'off'; second?: number; newest?: 'old' | 'delivered' | 'unknown'; recentSend?: boolean; working?: boolean; compacting?: boolean; documents?: 1 | 2 };
     it.each<Case>([
       { name: 'two documents twelve minutes apart both read an older newest question', continues: true },
       { name: 'only one document read it', continues: false, documents: 1 },
@@ -3430,7 +3430,8 @@ describe('automatic compaction', () => {
       { name: 'the page\'s newest question is one the app never recorded', continues: false, newest: 'unknown' },
       { name: 'Goal and Loop are off', continues: false, automation: 'off' },
       { name: 'the delivered message is too recent for a document to be expected to hold it', continues: false, recentSend: true },
-      { name: 'the chat is still working', continues: false, working: true }
+      { name: 'the chat is still working', continues: false, working: true },
+      { name: 'a Compact & Resume is already under way', continues: false, compacting: true }
     ])('$name', async (spec) => {
       vi.useFakeTimers();
       try {
@@ -3448,6 +3449,8 @@ describe('automatic compaction', () => {
         await vi.advanceTimersByTimeAsync(MIN);
         await record([{ kind: 'user_message', time: Date.now(), text: 'Continue the assignment', messageId: 'm-delivered-continue' }]);
         if (spec.working) await record([{ kind: 'turn_start', time: Date.now(), turnId: 'turn-still-running' }]);
+        let underWay: string | undefined;
+        if (spec.compacting) { await compactSession(session.id); underWay = continuationForSession(session.id)?.token; }
         const note = async (documentSince: number) => {
           const newest = spec.newest === 'delivered' ? 'm-delivered-continue' : spec.newest === 'unknown' ? 'm-never-recorded' : 'm-older-question';
           return request('POST', '/page-note', { body: { note: 'input-held', reason: 'recovery-question-changed', inputId: randomUUID(),
@@ -3462,6 +3465,14 @@ describe('automatic compaction', () => {
         }
         const now = continuationForSession(session.id);
         expect(!!now && now.state === 'awaiting-chat').toBe(spec.continues);
+        // A refusal says which condition held the chat back, in words, once a minute (CodeRabbit on #2195).
+        const waited = (why: string) => getLog().some(entry => entry.message.includes(`${chatB}: ChatGPT's saved copy of this chat lacks the message the browser delivered, and the chat waits`) &&
+          entry.message.includes(why));
+        if (spec.working) expect(waited('the chat is still working')).toBe(true);
+        if (spec.compacting) {
+          expect(waited('a Compact & Resume is under way')).toBe(true);
+          expect(continuationForSession(session.id)?.token, 'the waiting Compact & Resume was kept').toBe(underWay);
+        }
         if (spec.continues) {
           expect(getLog().some(entry => entry.message.includes(`${chatB}: ChatGPT's saved copy of this chat lacks the message the browser delivered`) &&
             entry.message.includes('continues in a new chat from saved summary'))).toBe(true);
