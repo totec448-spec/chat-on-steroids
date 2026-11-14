@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { appendEvent, createSession, getSession, initSessionStore, readCompletedFinal, readRecentEvents, resetSessionStoreForTests, unsetSessionRootForTests,
   upsertMessageEvent, upsertNativeImageEvent } from '../src/main/session/store.js';
-import { flushRecorder, recordChatObservations, resetRecorderForTests } from '../src/main/session/recorder.js';
+import { flushRecorder, recordChatObservations, recordToolCall, resetRecorderForTests } from '../src/main/session/recorder.js';
 import { resetEditsForTests } from '../src/main/session/edits.js';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { getLog } from '../src/main/logger.js';
@@ -421,6 +421,28 @@ describe('continued final completion', () => {
         ]);
         expect(preSteerReplay.activity.working).toBe(false);
 
+        // An existing pre-steer note arriving with updated text under the predecessor turnId while
+        // the continuation is open must stay in the predecessor turn and not report live working activity.
+        const updatedPreSteer = await recordChatObservations(conversationId, [
+          {
+            kind: 'assistant_message', time: T0 + 43, turnId: 'continued-first',
+            messageId: 'interim-pre-steer', providerMessageId: 'interim-pre-steer',
+            text: 'Working before steer... (updated details)', state: 'streaming', activeNow: true
+          }
+        ]);
+        expect(updatedPreSteer.activity.working).toBe(false);
+
+        // A brand-new pre-steer progress note first observed under the predecessor turnId while the
+        // continuation is open must likewise stay in the predecessor turn without reporting live work.
+        const lateFirstSeenPreSteer = await recordChatObservations(conversationId, [
+          {
+            kind: 'assistant_message', time: T0 + 44, turnId: 'continued-first',
+            messageId: 'late-pre-steer-open', providerMessageId: 'late-pre-steer-open',
+            text: 'Pre-steer progress note observed late', state: 'streaming', activeNow: true
+          }
+        ]);
+        expect(lateFirstSeenPreSteer.activity.working).toBe(false);
+
         // Fresh post-steer streaming prose in the consolidated bubble must report working activity
         // and resolve into the active continuation turn.
         const continuedUpdate = await recordChatObservations(conversationId, [
@@ -435,8 +457,10 @@ describe('continued final completion', () => {
         const summary = await getSession(sessionId);
         const recent = await readRecentEvents(sessionId, 100);
         const interimEvent = recent.find(e => e.kind === 'assistant_message' && e.messageId === 'interim-pre-steer')!;
+        const lateOpenEvent = recent.find(e => e.kind === 'assistant_message' && e.messageId === 'late-pre-steer-open')!;
         const consolidatedEvent = recent.find(e => e.kind === 'assistant_message' && e.messageId === 'answer-consolidated')!;
         expect(effectiveFinalTurnId(summary?.timelineTurns, interimEvent)).toBe('continued-first');
+        expect(effectiveFinalTurnId(summary?.timelineTurns, lateOpenEvent)).toBe('continued-first');
         expect(effectiveFinalTurnId(summary?.timelineTurns, consolidatedEvent)).toBe('continued-terminal');
         expect(await readCompletedFinal(sessionId, conversationId)).toBeNull();
 
@@ -466,4 +490,73 @@ describe('continued final completion', () => {
       }
     }
   );
+
+  it('reports working activity when a live continuation turn aliases its predecessor response across two document turns', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cos-steer-doc-alias-'));
+    try {
+      initConfigPath(dir);
+      initSessionStore(dir);
+      await saveConfig({ ...defaultConfig(), sessions: { ...defaultConfig().sessions, record: true } });
+      resetRecorderForTests();
+      resetSessionStoreForTests();
+      const conversationId = 'dddddddd-eeee-4fff-8000-000000000004';
+      const requestId = 'wfr_steer_alias';
+
+      const opened = await recordChatObservations(conversationId, [
+        { kind: 'user_message', time: T0, messageId: 'question-initial', text: 'Initial question' },
+        { kind: 'turn_start', time: T0 + 10, turnId: 'doc1-first' },
+        {
+          kind: 'assistant_message', time: T0 + 20, turnId: 'doc1-first',
+          messageId: 'answer-consolidated', providerMessageId: 'answer-consolidated',
+          text: 'First half before steer', state: 'streaming', activeNow: true
+        },
+        {
+          kind: 'user_message', time: T0 + 30, messageId: 'question-steer',
+          parentId: 'answer-consolidated', text: 'Steered follow-up'
+        },
+        { kind: 'turn_end', time: T0 + 31, turnId: 'doc1-first', outcome: 'interrupted', continued: true },
+        { kind: 'turn_start', time: T0 + 32, turnId: 'doc1-cont' },
+        {
+          kind: 'tool_evidence', time: T0 + 33, fiberConversationId: conversationId,
+          calls: [{ messageId: 'alias-call-1', tool: 'read', order: 0, answered: false, requestId }]
+        }
+      ]);
+      await recordToolCall({
+        tool: 'read', args: {}, content: [{ type: 'text', text: 'ok' }],
+        outcome: 'ok', durationMs: 1, requestId, startedAt: T0 + 34
+      });
+
+      // Second document opens a live turn for the same steered question and shares the exact requestId,
+      // aliasing `doc2-cont` to `doc1-cont` via `responseTurnId`.
+      await recordChatObservations(conversationId, [
+        { kind: 'turn_start', time: T0 + 35, turnId: 'doc2-cont' },
+        {
+          kind: 'tool_evidence', time: T0 + 36, fiberConversationId: conversationId,
+          calls: [{ messageId: 'alias-call-2', tool: 'read', order: 1, answered: false, requestId }]
+        }
+      ]);
+      await recordToolCall({
+        tool: 'read', args: {}, content: [{ type: 'text', text: 'ok' }],
+        outcome: 'ok', durationMs: 1, requestId, startedAt: T0 + 37
+      });
+
+      const summary = await getSession(opened.sessionId!);
+      expect(summary?.timelineTurns?.['doc2-cont']?.responseTurnId).toBe('doc1-cont');
+
+      const aliasStreamUpdate = await recordChatObservations(conversationId, [
+        {
+          kind: 'assistant_message', time: T0 + 40, turnId: 'doc1-first',
+          messageId: 'answer-consolidated', providerMessageId: 'answer-consolidated',
+          text: 'First half before steer\n\nContinuing across documents...', state: 'streaming', activeNow: true
+        }
+      ]);
+      expect(aliasStreamUpdate.activity.working).toBe(true);
+    } finally {
+      await flushRecorder();
+      resetRecorderForTests();
+      resetSessionStoreForTests();
+      unsetSessionRootForTests();
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
 });

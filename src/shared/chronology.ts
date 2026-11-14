@@ -133,6 +133,7 @@ export function effectiveFinalTurnId(turns: TimelineTurns | undefined, entry: Ch
   let candidate = turns[currentId];
   if (candidate?.continued === true && entry.kind === 'assistant_message') {
     const isFinal = entry.final === true || entry.state === 'final';
+    if (!isFinal && entry.contentSeq === 0) return entry.turnId;
     const finalAt = isFinal ? (settledPositionOf(entry) ?? authoredContentSeq(entry)) : authoredContentSeq(entry);
     const ordered = Object.entries(turns).sort(([, a], [, b]) => a.origin - b.origin);
     while (candidate?.continued === true && finalAt > (candidate.endOrigin ?? candidate.origin)) {
@@ -544,7 +545,7 @@ export function chronological<T extends Chronological>(entries: readonly T[]): T
         // when present, while an ordinary streaming revision still yields to a newly proved lower
         // turn anchor on its local turn.
         turnAnchor = entry.turnOrigin;
-      } else if (entry.turnId && continuedTo.has(entry.turnId)) {
+      } else if (entry.turnId && continuedTo.has(entry.turnId) && (isFinal || entry.contentSeq !== 0)) {
         const endInfo = turnEndOrigins.get(entry.turnId);
         if (endInfo && at > endInfo.endOrigin) {
           const terminalTurn = terminalContinuedTurn(entry.turnId, at);
