@@ -2728,9 +2728,42 @@ async function recordChatObservationsNow(
         // appeared: ChatGPT draws a finished turn's steps as one collapsed group, and the note
         // written before its tool calls can reach the page only then (2.1.48 release round). As
         // new work it kept Goal waiting for a newer final forever. A final, or a reopened turn, counts.
-        // A turn whose view failed while thinking is reopened by its fresh note below, so that note is work.
-        const lateNoteOfEndedTurn = state !== 'final' && !!item.turnId && !!live &&
-          live.knownTurnEnds.has(item.turnId) && !live.openTurns.has(item.turnId) &&
+        // A turn whose view failed while thinking is reopened by its fresh note below, so that note is work,
+        // and a streaming continuation still reported under its continued predecessor writes work into the live turn
+        // only when the stored message itself is proven to belong to that continuation.
+        const endedTurnNote = state !== 'final' && !!item.turnId && !!live &&
+          live.knownTurnEnds.has(item.turnId) && !live.openTurns.has(item.turnId);
+        const liveTurn = live?.turnId;
+        const priorTurns = endedTurnNote && item.activeNow === true && !!liveTurn && liveTurn !== item.turnId
+          ? (await getSession(sessionId))?.timelineTurns : undefined;
+        const liveOrigin = priorTurns && liveTurn ? priorTurns[liveTurn]?.origin : undefined;
+        const liveResponse = priorTurns && liveTurn ? responseTurnId(priorTurns, liveTurn) : undefined;
+        const itemResponse = priorTurns && item.turnId ? responseTurnId(priorTurns, item.turnId) : undefined;
+        const itemOrigin = priorTurns && itemResponse ? priorTurns[itemResponse]?.origin : undefined;
+        let continuesIntoLiveTurn = false;
+        if (liveOrigin !== undefined && liveResponse && itemOrigin !== undefined && item.turnId &&
+            effectiveFinalTurnId(priorTurns, {
+              kind: 'assistant_message', seq: liveOrigin, origin: liveOrigin, contentSeq: liveOrigin,
+              time: item.time, turnId: item.turnId, final: false
+            }) === liveResponse) {
+          const boundaryEvents = await readRecentEvents(sessionId, 100, { kinds: ['assistant_message', 'user_message'] });
+          const existing = boundaryEvents.find(
+            (event): event is Extract<SessionEvent, { kind: 'assistant_message' }> =>
+              event.kind === 'assistant_message' && event.messageId === item.messageId
+          );
+          if (existing && existing.final !== true && existing.state !== 'final') {
+            const alreadyInLiveTurn = effectiveFinalTurnId(priorTurns, existing) === liveResponse;
+            const steeredParentMatch = boundaryEvents.some(
+              (event) =>
+                event.kind === 'user_message' &&
+                event.parentId === item.messageId &&
+                (event.origin ?? event.seq) > itemOrigin &&
+                (event.origin ?? event.seq) < liveOrigin
+            );
+            continuesIntoLiveTurn = alreadyInLiveTurn || steeredParentMatch;
+          }
+        }
+        const lateNoteOfEndedTurn = endedTurnNote && !continuesIntoLiveTurn &&
           !(item.activeNow === true && await thinkingFailureToReopen(sessionId, live, item.time, item.turnId));
         const written = await upsertMessageEvent(sessionId, {
           ...base,
@@ -2773,16 +2806,19 @@ async function recordChatObservationsNow(
           uncertainEnd.outcome !== 'completed' && uncertainEnd.outcome !== 'stopped' && item.time > uncertainEnd.time;
         // HTML, provider identity and authored-time promotion revise history, not work.
         // In particular a post-failure Fiber backfill must not reopen the dead turn.
-        const workingActivity = written.contentChanged && state !== 'final' && item.activeNow === true &&
-          (!canonicalTurn || canonicalTurn === live?.turnId || resumedUncertainTurn) &&
-          !(live?.turnStartedAt === null && (live.lastTurnOutcome === 'stopped' || live.lastTurnOutcome === 'completed'));
-        const turns = state === 'final' && canonicalTurn && written.event.kind === 'assistant_message'
-          ? (await getSession(sessionId))?.timelineTurns : undefined;
+        const turns = canonicalTurn && written.event.kind === 'assistant_message' &&
+          (state === 'final' || (written.contentChanged && item.activeNow === true && !!live?.turnId && canonicalTurn !== live.turnId))
+          ? priorTurns ?? (await getSession(sessionId))?.timelineTurns : undefined;
         const effectiveTurn = written.event.kind === 'assistant_message' && turns
           ? effectiveFinalTurnId(turns, written.event)
           : canonicalTurn;
-        const finishingTurn = canonicalTurn && live?.turnId && (canonicalTurn === live.turnId || effectiveTurn === live.turnId ||
-          (turns && responseTurnId(turns, effectiveTurn ?? canonicalTurn) === responseTurnId(turns, live.turnId))) ? live.turnId : null;
+        const activeLiveTurn = live?.turnId;
+        const sameLiveTurn = !!activeLiveTurn && (canonicalTurn === activeLiveTurn || effectiveTurn === activeLiveTurn ||
+          (!!turns && !!canonicalTurn && responseTurnId(turns, effectiveTurn ?? canonicalTurn) === responseTurnId(turns, activeLiveTurn)));
+        const workingActivity = written.contentChanged && !lateNoteOfEndedTurn && state !== 'final' && item.activeNow === true &&
+          (!canonicalTurn || sameLiveTurn || resumedUncertainTurn) &&
+          !(live?.turnStartedAt === null && (live.lastTurnOutcome === 'stopped' || live.lastTurnOutcome === 'completed'));
+        const finishingTurn = canonicalTurn && sameLiveTurn ? activeLiveTurn : null;
         if (state === 'final' && written.event.kind === 'assistant_message' && finishingTurn && recoverableTurns.has(finishingTurn) &&
             !explicitEnds.has(finishingTurn)) {
           recoveredFinal = { turnId: finishingTurn, time: item.time,
