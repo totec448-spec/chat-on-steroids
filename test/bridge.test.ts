@@ -3348,6 +3348,50 @@ describe('automatic compaction', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  // 2026-11-14 (#2184, Goal chat at 1M tokens, 2.1.53): the brief was written and the new chat's Send was dispatched, but
+  // the chat never reported back; the browser attempt was released and the ticket stayed claimed. A dispatched send is
+  // never replayed, no pickup counted it, and the Goal chat stood idle until the ticket expired six hours later. After the
+  // opening pickups a quiet send like this goes on from the saved summary, as a request that never produced one does.
+  it.each([
+    ['loop', 'dispatched-unresolved', true],
+    ['off', 'dispatched-unresolved', false],
+    // A destination that reported its first message exists and has the brief: it is not replaced.
+    ['loop', 'sent', false]
+  ] as const)('continues a %s chat from its saved summary when the new chat it opened never reports back (send %s)', async (automation, sendState, continues) => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const { beginContinuationDestinationSendNow, dispatchContinuationDestinationSendNow, bindContinuationDestinationMessageNow } =
+        await import('../src/main/session/continuation.js');
+      const from = randomUUID();
+      const { sessionId, token: ticket } = await automaticCompactedSession(from, 'TASK\n\nKeep auditing the fleet manager and fix what the audit finds.\n'.repeat(4));
+      if (automation === 'loop') await setSessionAutomation(sessionId, 'loop');
+      expect(await claimContinuationNow(ticket, 'page-b')).not.toBeNull();
+      expect((await beginContinuationDestinationSendNow(ticket))?.allowed).toBe(true);
+      expect(await dispatchContinuationDestinationSendNow(ticket)).toBe(true);
+      if (sendState === 'sent') expect(await bindContinuationDestinationMessageNow(ticket, randomUUID(), 'm-resume-bootstrap')).toBe(true);
+      expect(continuationByToken(ticket)).toMatchObject({ state: 'claimed', destinationSend: { state: sendState } });
+      const saved = (await getSession(sessionId))!.lastHandoffId!;
+      let replaced = false;
+      for (let pass = 0; pass < 30 && !replaced; pass++) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        await sweepStaleSwarm(Date.now());
+        const now = continuationForSession(sessionId);
+        replaced = !!now && now.token !== ticket;
+      }
+      expect(replaced).toBe(continues);
+      const log = getLog().map(entry => entry.message);
+      if (continues) {
+        expect(log.some(message => message.includes(`${ticket.slice(0, 8)} for ${from} opened its new chat but it never reported back; the loop chat continues in a new chat from saved summary ${saved}`))).toBe(true);
+        expect(continuationByToken(ticket)?.state).toBe('aborted');
+        expect(continuationForSession(sessionId)).toMatchObject({ state: 'awaiting-chat' });
+      } else {
+        expect(continuationByToken(ticket)?.state).toBe('claimed');
+        if (sendState === 'dispatched-unresolved') expect(log.some(message => message.includes(`${ticket.slice(0, 8)} does not continue from the saved summary: Goal and Loop are off for this chat`))).toBe(true);
+      }
+    } finally { vi.useRealTimers(); }
+  });
+
   // CodeRabbit on #2189 (third round): a receipt that arrives after the five-minute sweep that re-armed the hour still
   // belongs to its reload; the saved summary follows five minutes after it, not never.
   it('continues from the saved summary after an hourly reload that was confirmed late', async () => {

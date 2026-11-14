@@ -4222,6 +4222,13 @@ offers the same brief again (#1882: ChatGPT limiting history or a region change 
 late, and the written brief was thrown away). A manual press, a user interruption or any other
 failure still aborts. After its three quick opening pickups an automatic ticket tries once an hour
 (`AUTOMATIC_OPENING_SLOW_MS`, logged once): while open it owns the chat's recovery, so it must not stop.
+A dispatched new-chat send (`destinationSend` `dispatched-unresolved`) is never replayed, so no pickup is queued for
+it; while no browser attempt is out, each quarter hour still counts as one of the three opening pickups (logged:
+"its new chat has not reported back"). After them, an automatic ticket of a chat with Goal or Loop on ends and the chat
+goes on in a new chat from the session's saved summary (`continueStuckFromSavedSummary` with `opening`), once per
+ticket (#2184: the Goal chat stood idle for the ticket's six hours). A destination that reported its first message
+(`sent`) exists and is never replaced; a chat with Goal and Loop off keeps the hourly try and says why it does not
+continue.
 One exception, measured: a replacement tab opens the source at `/c/<id>` and ChatGPT rewrites that
 route twice (`/g/<project>/c/<id>`, then with the Project's name). A click between the two is
 taken and then dropped by the second rewrite (8 of 14 handoffs in a Project timed out on
