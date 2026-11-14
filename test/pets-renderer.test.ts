@@ -112,6 +112,50 @@ it('renders the plugin-style library and wires import, multi-enable, favorite, d
   expect(writeClipboard.mock.calls[0]![0]).toBe(w.document.getElementById('petsFormatInstructions')!.textContent);
 });
 
+it('does not roll back a standalone toggle when its failed response is stale', async () => {
+  dom = new JSDOM(`<!doctype html><body>
+    <input id="petsSearch"><input id="petsStandaloneTaskBadge" type="checkbox"><button id="petsImport"></button><button id="petsFormatGuide"></button>
+    <dialog id="petFormatDialog"><button id="petsFormatClose"></button><button id="petsCopyInstructions"></button><pre id="petsFormatInstructions"></pre></dialog>
+    <span id="petsCount"></span>
+    <section id="petsFavoritesSection" hidden><span id="petsFavoritesCount"></span><div id="petsFavorites"></div></section>
+    <div id="petsInstalled"></div>
+  </body>`, { url: 'https://pets.test/' });
+  const w = dom.window;
+  for (const [key, value] of Object.entries({ window: w, document: w.document, HTMLElement: w.HTMLElement, HTMLButtonElement: w.HTMLButtonElement, HTMLDialogElement: w.HTMLDialogElement })) vi.stubGlobal(key, value);
+  let state = structuredClone(initial);
+  let failStandalone!: (reply: unknown) => void;
+  let finishFavorite!: (reply: unknown) => void;
+  const petsSetStandaloneTaskBadge = vi.fn(() => new Promise(resolve => { failStandalone = resolve; }));
+  const petsSetFavorite = vi.fn(() => new Promise(resolve => { finishFavorite = resolve; }));
+  const api: any = {
+    petsList: () => Promise.resolve({ ok: true as const, data: state }),
+    petsSetStandaloneTaskBadge,
+    petsSetFavorite,
+    petsAsset: async () => ({ ok: false as const, error: 'not used' })
+  };
+  const { initPets } = await import('../src/renderer/pets.js'); initPets(api, { applyLibraryState: vi.fn() } as any);
+  await vi.waitFor(() => expect(w.document.querySelectorAll('.pet-library-card')).toHaveLength(2));
+
+  const standalone = w.document.getElementById('petsStandaloneTaskBadge') as HTMLInputElement;
+  standalone.checked = true;
+  standalone.dispatchEvent(new w.Event('change'));
+  await vi.waitFor(() => expect(petsSetStandaloneTaskBadge).toHaveBeenCalledWith(true));
+
+  (w.document.querySelector('[data-pet-id="tur-tur-sahur"] .pet-favorite') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(petsSetFavorite).toHaveBeenCalledWith('tur-tur-sahur', true));
+  failStandalone({ ok: false, error: 'The older setting request failed.' });
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  expect(standalone.checked).toBe(true);
+
+  state = {
+    ...state,
+    standaloneTaskBadge: true,
+    pets: state.pets.map(pet => pet.id === 'tur-tur-sahur' ? { ...pet, favorite: true } : pet)
+  };
+  finishFavorite({ ok: true, data: state });
+  await vi.waitFor(() => expect(standalone.checked).toBe(true));
+});
+
 // The bundled pets' descriptions come from their files and were shown as written, so every language
 // read "A calm capybara who lifts, chills and never panics." (2026-10-13). An imported pet's text is
 // the author's and stays as it is.

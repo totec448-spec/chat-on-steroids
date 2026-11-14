@@ -4930,7 +4930,10 @@ The Pets library also owns the optional standalone task badge preference in
 without an enabled pet, and `renderer/pet-overlay.ts` draws one draggable 30 px task-count badge
 instead of attaching the count to a `PetMachine`. Its position stays in the overlay's existing
 persistent renderer storage (`cos.ui.petTaskBadge.v1`); it reuses the same Tasks tray/cards and
-activity-opening path, so there is still only one task-activity owner and no second poller.
+activity-opening path, so there is still only one task-activity owner and no second poller. The
+renderer calls `petsSetStandaloneTaskBadge(enabled)` → `pets:standaloneTaskBadge` with a strict
+`{ enabled: boolean }` payload; the reply is the updated `PetLibraryState`, whose
+`standaloneTaskBadge` field defaults to false for missing or non-boolean v1 saved values.
 
 `renderer/main.ts` owns the shell/setup/settings; `chat.ts` owns sessions, composer and timeline.
 Projects, workers, plans, model choice, usage and plugins have focused modules (§4). The renderer

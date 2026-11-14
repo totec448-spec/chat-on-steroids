@@ -272,12 +272,182 @@ it('shows one draggable persisted task badge without creating a pet and reuses t
   (dom.window.document.querySelector('.pet-card') as HTMLButtonElement).click();
   expect(openActivity).toHaveBeenCalledWith('session-one');
 
+  badge.click();
+  expect((dom.window.document.getElementById('petTray') as HTMLElement).hidden).toBe(true);
   pointer(badge, 'pointerdown', 965, 35, 17);
   pointer(badge, 'pointermove', 765, 135, 17);
   pointer(badge, 'pointerup', 765, 135, 17);
   expect(badge.style.transform).toBe('translate3d(750px, 120px, 0)');
   expect(JSON.parse(dom.window.localStorage.getItem('cos.ui.petTaskBadge.v1')!)).toEqual({ x: 750, y: 120 });
   expect(releaseFocus).toHaveBeenCalledOnce();
+
+  badge.click(); // The click generated after a drag must not open the tray.
+  expect((dom.window.document.getElementById('petTray') as HTMLElement).hidden).toBe(true);
+  badge.click();
+  expect((dom.window.document.getElementById('petTray') as HTMLElement).hidden).toBe(false);
+  dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  expect((dom.window.document.getElementById('petTray') as HTMLElement).hidden).toBe(true);
+  snapshotListener!({ ...idleSnapshot, visible: false });
+  expect(badge.hidden).toBe(true);
+  expect(setInteractive).toHaveBeenLastCalledWith(false, []);
+});
+
+it('keeps the standalone badge as the only task-count anchor when pets remain enabled', async () => {
+  const library: PetLibraryState = { pets: [
+    { id: 'tur-tur-sahur', displayName: 'Tur Tur Sahur', description: '', kind: 'builtin', builtin: true, enabled: true, favorite: false }
+  ], standaloneTaskBadge: true };
+  let snapshotListener: ((snapshot: PetOverlaySnapshot) => void) | null = null;
+  let libraryListener: ((state: PetLibraryState) => void) | null = null;
+  const petApi = {
+    listPets: () => ok(library),
+    petAsset: () => Promise.resolve({ ok: false as const, error: 'not used' }),
+    hidePet: vi.fn(), setInteractive: vi.fn(), focusOwner: vi.fn(), releaseFocus: vi.fn(), openLibrary: vi.fn(), openActivity: vi.fn(),
+    onSnapshot: (listener: (snapshot: PetOverlaySnapshot) => void) => { snapshotListener = listener; return vi.fn(); },
+    onLibraryChanged: (listener: (state: PetLibraryState) => void) => { libraryListener = listener; return vi.fn(); },
+    onPointer: () => vi.fn(), onBounds: () => vi.fn()
+  };
+  Object.defineProperty(dom.window, 'petApi', { configurable: true, value: petApi });
+  await import('../src/renderer/pet-overlay.js');
+  await flushOverlay();
+  snapshotListener!({
+    visible: true, dismissedPetIds: [], level: 'running',
+    activities: [{ id: 'task-1', title: 'Prime', body: 'Working', level: 'running', sessionId: 'session-one' }],
+    theme: 'dark',
+    appearance: {
+      light: { background: '#f4f4f5', sidebar: '#e9edf2', accent: '#486f9d', contrast: 45 },
+      dark: { background: '#181818', sidebar: '#1a2129', accent: '#b0cbed', contrast: 60 },
+      font: 'system', fontSize: 14, lineSpacing: 100, translucentSidebar: true, sidebarLayout: 'projects'
+    }
+  });
+
+  const standalone = dom.window.document.getElementById('petStandaloneBadge') as HTMLButtonElement;
+  const petBadge = dom.window.document.querySelector<HTMLButtonElement>('.pet-badge')!;
+  expect(dom.window.document.querySelectorAll('.pet-shell')).toHaveLength(1);
+  expect(standalone.hidden).toBe(false);
+  expect(standalone.textContent).toBe('1');
+  expect(petBadge.hidden).toBe(true);
+  expect([...dom.window.document.querySelectorAll<HTMLButtonElement>('.pet-badge, #petStandaloneBadge')].filter(badge => !badge.hidden)).toHaveLength(1);
+
+  libraryListener!({ ...library, standaloneTaskBadge: false });
+  expect(standalone.hidden).toBe(true);
+  expect(petBadge.hidden).toBe(false);
+  expect([...dom.window.document.querySelectorAll<HTMLButtonElement>('.pet-badge, #petStandaloneBadge')].filter(badge => !badge.hidden)).toHaveLength(1);
+});
+
+it('keeps the saved standalone position separate from its bounded display while the tray is open', async () => {
+  const library: PetLibraryState = { pets: [], standaloneTaskBadge: true };
+  let snapshotListener: ((snapshot: PetOverlaySnapshot) => void) | null = null;
+  let boundsListener: ((bounds: PetOverlayBounds) => void) | null = null;
+  const petApi = {
+    listPets: () => ok(library), petAsset: () => Promise.resolve({ ok: false as const, error: 'not used' }),
+    hidePet: vi.fn(), setInteractive: vi.fn(), focusOwner: vi.fn(), releaseFocus: vi.fn(), openLibrary: vi.fn(), openActivity: vi.fn(),
+    onSnapshot: (listener: (snapshot: PetOverlaySnapshot) => void) => { snapshotListener = listener; return vi.fn(); },
+    onLibraryChanged: () => vi.fn(), onPointer: () => vi.fn(),
+    onBounds: (listener: (bounds: PetOverlayBounds) => void) => { boundsListener = listener; return vi.fn(); }
+  };
+  Object.defineProperty(dom.window, 'petApi', { configurable: true, value: petApi });
+  dom.window.localStorage.setItem('cos.ui.petTaskBadge.v1', JSON.stringify({ x: 950, y: 740 }));
+  await import('../src/renderer/pet-overlay.js');
+  await flushOverlay();
+  boundsListener!({ width: 1000, height: 800, scaleFactor: 1, boundedIdleShape: true });
+  snapshotListener!({
+    visible: true, dismissedPetIds: [], level: 'running',
+    activities: [{ id: 'task-1', title: 'Prime', body: 'Working', level: 'running', sessionId: 'session-one' }],
+    theme: 'dark',
+    appearance: {
+      light: { background: '#f4f4f5', sidebar: '#e9edf2', accent: '#486f9d', contrast: 45 },
+      dark: { background: '#181818', sidebar: '#1a2129', accent: '#b0cbed', contrast: 60 },
+      font: 'system', fontSize: 14, lineSpacing: 100, translucentSidebar: true, sidebarLayout: 'projects'
+    }
+  });
+  const badge = dom.window.document.getElementById('petStandaloneBadge') as HTMLButtonElement;
+  const tray = dom.window.document.getElementById('petTray') as HTMLElement;
+  const saved = JSON.stringify({ x: 950, y: 740 });
+  expect(badge.style.transform).toBe('translate3d(950px, 740px, 0)');
+  badge.click();
+  expect(tray.hidden).toBe(false);
+
+  boundsListener!({ width: 500, height: 300, scaleFactor: 1, boundedIdleShape: true });
+  expect(badge.style.transform).toBe('translate3d(466px, 266px, 0)');
+  expect(tray.hidden).toBe(false);
+  expect(dom.window.localStorage.getItem('cos.ui.petTaskBadge.v1')).toBe(saved);
+  let left = Number.parseFloat(tray.style.left), top = Number.parseFloat(tray.style.top);
+  expect(left).toBeGreaterThanOrEqual(10);
+  expect(left + 256).toBeLessThanOrEqual(490);
+  expect(top).toBeGreaterThanOrEqual(10);
+  expect(top + 66).toBeLessThanOrEqual(290);
+
+  boundsListener!({ width: 1000, height: 800, scaleFactor: 1, boundedIdleShape: true });
+  expect(badge.style.transform).toBe('translate3d(950px, 740px, 0)');
+  expect(tray.hidden).toBe(false);
+  left = Number.parseFloat(tray.style.left); top = Number.parseFloat(tray.style.top);
+  expect(left).toBeGreaterThanOrEqual(10);
+  expect(left + 256).toBeLessThanOrEqual(990);
+  expect(top).toBeGreaterThanOrEqual(10);
+  expect(top + 66).toBeLessThanOrEqual(790);
+  dom.window.dispatchEvent(new dom.window.Event('pagehide'));
+  expect(dom.window.localStorage.getItem('cos.ui.petTaskBadge.v1')).toBe(saved);
+});
+
+it('clears a standalone pointer when native pointer capture fails', async () => {
+  const library: PetLibraryState = { pets: [], standaloneTaskBadge: true };
+  let snapshotListener: ((snapshot: PetOverlaySnapshot) => void) | null = null;
+  const setInteractive = vi.fn();
+  const petApi = {
+    listPets: () => ok(library), petAsset: () => Promise.resolve({ ok: false as const, error: 'not used' }),
+    hidePet: vi.fn(), setInteractive, focusOwner: vi.fn(), releaseFocus: vi.fn(), openLibrary: vi.fn(), openActivity: vi.fn(),
+    onSnapshot: (listener: (snapshot: PetOverlaySnapshot) => void) => { snapshotListener = listener; return vi.fn(); },
+    onLibraryChanged: () => vi.fn(), onPointer: () => vi.fn(), onBounds: () => vi.fn()
+  };
+  Object.defineProperty(dom.window, 'petApi', { configurable: true, value: petApi });
+  await import('../src/renderer/pet-overlay.js');
+  await flushOverlay();
+  snapshotListener!({
+    visible: true, dismissedPetIds: [], level: 'idle', activities: [], theme: 'dark',
+    appearance: {
+      light: { background: '#f4f4f5', sidebar: '#e9edf2', accent: '#486f9d', contrast: 45 },
+      dark: { background: '#181818', sidebar: '#1a2129', accent: '#b0cbed', contrast: 60 },
+      font: 'system', fontSize: 14, lineSpacing: 100, translucentSidebar: true, sidebarLayout: 'projects'
+    }
+  });
+  const badge = dom.window.document.getElementById('petStandaloneBadge') as HTMLButtonElement;
+  dom.window.HTMLElement.prototype.setPointerCapture = () => { throw new Error('capture unavailable'); };
+  pointer(badge, 'pointerdown', 965, 35, 19);
+  pointer(badge, 'pointermove', 765, 135, 19);
+  pointer(badge, 'pointerup', 765, 135, 19);
+  expect(badge.style.transform).toBe('translate3d(950px, 20px, 0)');
+  expect(badge.dataset.dragging).not.toBe('true');
+  expect(dom.window.localStorage.getItem('cos.ui.petTaskBadge.v1')).toBeNull();
+  expect(setInteractive.mock.calls.some(([next]) => next === true)).toBe(false);
+  badge.click();
+  expect((dom.window.document.getElementById('petTray') as HTMLElement).hidden).toBe(false);
+});
+
+it('uses the top-right default for damaged standalone coordinates without saving a replacement', async () => {
+  const library: PetLibraryState = { pets: [], standaloneTaskBadge: true };
+  let snapshotListener: ((snapshot: PetOverlaySnapshot) => void) | null = null;
+  const petApi = {
+    listPets: () => ok(library), petAsset: () => Promise.resolve({ ok: false as const, error: 'not used' }),
+    hidePet: vi.fn(), setInteractive: vi.fn(), focusOwner: vi.fn(), releaseFocus: vi.fn(), openLibrary: vi.fn(), openActivity: vi.fn(),
+    onSnapshot: (listener: (snapshot: PetOverlaySnapshot) => void) => { snapshotListener = listener; return vi.fn(); },
+    onLibraryChanged: () => vi.fn(), onPointer: () => vi.fn(), onBounds: () => vi.fn()
+  };
+  Object.defineProperty(dom.window, 'petApi', { configurable: true, value: petApi });
+  dom.window.localStorage.setItem('cos.ui.petTaskBadge.v1', JSON.stringify({ x: 'bad', y: 20 }));
+  await import('../src/renderer/pet-overlay.js');
+  await flushOverlay();
+  snapshotListener!({
+    visible: true, dismissedPetIds: [], level: 'idle', activities: [], theme: 'dark',
+    appearance: {
+      light: { background: '#f4f4f5', sidebar: '#e9edf2', accent: '#486f9d', contrast: 45 },
+      dark: { background: '#181818', sidebar: '#1a2129', accent: '#b0cbed', contrast: 60 },
+      font: 'system', fontSize: 14, lineSpacing: 100, translucentSidebar: true, sidebarLayout: 'projects'
+    }
+  });
+  const badge = dom.window.document.getElementById('petStandaloneBadge') as HTMLButtonElement;
+  expect(badge.style.transform).toBe('translate3d(950px, 20px, 0)');
+  dom.window.dispatchEvent(new dom.window.Event('pagehide'));
+  expect(JSON.parse(dom.window.localStorage.getItem('cos.ui.petTaskBadge.v1')!)).toEqual({ x: 'bad', y: 20 });
 });
 
 it('sleeps between authored deadlines and uses display frames only for continuous motion', async () => {

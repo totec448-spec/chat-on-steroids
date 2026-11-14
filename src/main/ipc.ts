@@ -1328,7 +1328,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('pets:standaloneTaskBadge', async payload => {
     const { enabled } = z.object({ enabled: z.boolean() }).strict().parse(payload);
     const state = setStandaloneTaskBadge(enabled);
-    if (enabled) await setPetOverlayVisible(true, false);
+    if (enabled) {
+      await setPetOverlayVisible(true, false);
+      logInfo('pets: standalone task badge enabled; showing the shared activity overlay without requiring an enabled pet');
+    } else {
+      logInfo('pets: standalone task badge disabled; overlay visibility follows existing enabled-pet and global visibility rules');
+    }
     return state;
   });
   handle('pets:delete', async payload => {

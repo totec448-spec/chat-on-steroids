@@ -219,9 +219,10 @@ export function initPets(api: AppApi, runtime: PetController): void {
   const apply = (next: PetLibraryState): void => {
     state = next; loaded = true; loadFailed = false; runtime.applyLibraryState(next); render();
   };
-  const mutate = async (request: ReturnType<AppApi['petsList']>): Promise<boolean> => {
+  const mutate = async (request: ReturnType<AppApi['petsList']>, onLatestFailure?: () => void): Promise<boolean> => {
     const own = ++epoch; const next = await run(request);
-    if (!next || own !== epoch) return false;
+    if (own !== epoch) return false;
+    if (!next) { onLatestFailure?.(); return false; }
     apply(next); return true;
   };
   const renderCard = (pet: PetRecord): HTMLElement => {
@@ -275,7 +276,7 @@ export function initPets(api: AppApi, runtime: PetController): void {
   $('petsStandaloneTaskBadge').addEventListener('change', () => void (async () => {
     const input = $<HTMLInputElement>('petsStandaloneTaskBadge');
     const wanted = input.checked;
-    if (!await mutate(api.petsSetStandaloneTaskBadge(wanted))) input.checked = state.standaloneTaskBadge;
+    await mutate(api.petsSetStandaloneTaskBadge(wanted), () => { input.checked = state.standaloneTaskBadge; });
   })());
   $('petsSearch').addEventListener('input', render);
   const formatDialog = $<HTMLDialogElement>('petFormatDialog');

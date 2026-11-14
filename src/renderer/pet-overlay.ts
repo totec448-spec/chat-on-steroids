@@ -65,7 +65,8 @@ let disposed = false;
 let raf = 0;
 let timer = 0;
 let lastUpdateAt: number | null = null;
-let standalonePosition = initialStandalonePosition();
+let standaloneSavedPosition = initialStandalonePosition();
+let standalonePosition = clampStandalonePosition(standaloneSavedPosition ?? defaultStandalonePosition());
 let standalonePointer: { id: number; startX: number; startY: number; originX: number; originY: number; dragging: boolean } | null = null;
 let suppressStandaloneClick = false;
 const views = new Map<string, PetView>();
@@ -89,18 +90,23 @@ function clampStandalonePosition(next: { x: number; y: number }): { x: number; y
   };
 }
 
-function initialStandalonePosition(): { x: number; y: number } {
+function defaultStandalonePosition(): { x: number; y: number } {
+  return { x: bounds.width - STANDALONE_BADGE_SIZE - 20, y: 20 };
+}
+
+function initialStandalonePosition(): { x: number; y: number } | null {
   try {
     const value = JSON.parse(localStorage.getItem(STANDALONE_POSITION_KEY) ?? 'null') as { x?: unknown; y?: unknown } | null;
     if (value && typeof value.x === 'number' && Number.isFinite(value.x) && typeof value.y === 'number' && Number.isFinite(value.y)) {
-      return clampStandalonePosition({ x: value.x, y: value.y });
+      return { x: Math.round(value.x), y: Math.round(value.y) };
     }
   } catch { /* optional UI preference */ }
-  return clampStandalonePosition({ x: bounds.width - STANDALONE_BADGE_SIZE - 20, y: 20 });
+  return null;
 }
 
 function persistStandalonePosition(): void {
-  try { localStorage.setItem(STANDALONE_POSITION_KEY, JSON.stringify(standalonePosition)); } catch { /* optional UI preference */ }
+  if (!standaloneSavedPosition) return;
+  try { localStorage.setItem(STANDALONE_POSITION_KEY, JSON.stringify(standaloneSavedPosition)); } catch { /* optional UI preference */ }
 }
 
 function paintStandaloneBadge(): void {
@@ -674,7 +680,7 @@ document.addEventListener('mousemove', event => updateInteraction({ x: event.cli
 api.onBounds(next => {
   reschedule(() => {
     bounds = next;
-    standalonePosition = clampStandalonePosition(standalonePosition);
+    standalonePosition = clampStandalonePosition(standaloneSavedPosition ?? defaultStandalonePosition());
     for (const view of views.values()) view.machine.resize(bounds.width, bounds.height);
   });
   paintStandaloneBadge();
@@ -691,7 +697,11 @@ standaloneBadge.addEventListener('pointerdown', event => {
     originX: standalonePosition.x, originY: standalonePosition.y,
     dragging: false
   };
-  standaloneBadge.setPointerCapture(event.pointerId);
+  try { standaloneBadge.setPointerCapture(event.pointerId); }
+  catch {
+    standalonePointer = null;
+    return;
+  }
   standaloneBadge.dataset.dragging = 'false';
   setInteractive(true);
 });
@@ -704,6 +714,7 @@ standaloneBadge.addEventListener('pointermove', event => {
   }
   if (!standalonePointer.dragging) return;
   standalonePosition = clampStandalonePosition({ x: standalonePointer.originX + dx, y: standalonePointer.originY + dy });
+  standaloneSavedPosition = standalonePosition;
   paintStandaloneBadge();
   syncInteractiveRegions();
 });
@@ -722,10 +733,11 @@ standaloneBadge.addEventListener('pointerup', event => {
 });
 const cancelStandalonePointer = (event: PointerEvent): void => {
   if (standalonePointer?.id !== event.pointerId) return;
+  const dragged = standalonePointer.dragging;
   standalonePointer = null;
   standaloneBadge.dataset.dragging = 'false';
   try { standaloneBadge.releasePointerCapture(event.pointerId); } catch { /* already released */ }
-  persistStandalonePosition();
+  if (dragged) persistStandalonePosition();
   updateInteraction(pointer);
   api.releaseFocus();
 };
@@ -761,7 +773,6 @@ void api.listPets().then(reply => { if (reply.ok && !disposed) applyLibrary(repl
 
 window.addEventListener('pagehide', () => {
   disposed = true;
-  persistStandalonePosition();
   setInteractive(false);
   loading.clear();
   cancelWake();
