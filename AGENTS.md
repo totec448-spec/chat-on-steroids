@@ -473,6 +473,14 @@ revivals, compaction requests and resumed-chat bootstraps receive no appended se
 A worker revival (wake) command carries the model and effort its worker was opened with
 (`commandModelSelection` → `wakeModelSelection`, vetted against the account like a resume's), so the
 page chooses them before it types (#1952; before, a wake went out on whatever ChatGPT's box held).
+A Worker that ends with `agents finish` and no final answer closes its exact recorded turn
+when the mounted ChatGPT exchange is complete and the composer is idle. The Fiber reply's
+optional `terminalWithoutFinal` describes a completed shell exchange without a text/image
+final; the browser's `/activity` stream carries `endsActivity: true` on the durable successful
+`agents finish` row. Both must name the current Worker turn (including the native question).
+Neither a sleeping broker slot nor a completed tool row authorizes a wake while ChatGPT is
+generating, waiting for approval or still executing work. The browser emits the existing
+`turn_end` without a synthetic assistant message and keeps the existing pre-redeem flush.
 While model discovery is pending, its retained catalog is display data, not a fresh denial:
 `resume-model.ts` carries the requested model/effort to native confirmation unchanged, even when
 the old list lacks that model or effort. Completed discovery retains the existing availability
@@ -3212,7 +3220,9 @@ The matched recorder/MAIN helper version is 22. Shell exchanges are read only un
 main/thread anchors. Their `entry.turn.items` supply actual user/assistant ids, public text and
 per-call completion; DOM slot keys only join those exact items to the current scan. Missing ids
 do not become invented messages. Only a completed final item in a successfully completed turn
-can end it; cancellation or an unknown turn status never acknowledges unfinished tool calls.
+is proof of a final answer. A completed shell exchange without a final can close only the
+exact tool-finished Worker turn described above. Cancellation or an unknown turn status
+never acknowledges unfinished tool calls.
 Bounds on a long turn limit what is reported, never the turn's own messages (#2157): at most 200 connector
 and 200 exec calls and 400 working rows (calls and interim updates share them) are read, and the rest are
 left out; the turn's user and final items are always read (up to 5,000 items, above which the turn is not
