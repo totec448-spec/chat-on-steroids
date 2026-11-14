@@ -11535,7 +11535,16 @@ async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | 'r
       // A compaction ticket's hourly retry counts only once a page confirmed it (#2184).
       if (repair.reason === 'compaction') {
         const compaction = compactionWatch.get(conversationId);
-        if (compaction) compaction.confirmedAt = Date.now();
+        if (compaction) {
+          compaction.confirmedAt = Date.now();
+          // A receipt that comes after the sweep that re-armed the hour still belongs to its reload: the watch goes
+          // back to its exhausted state, so the brief's five minutes of grace start here and the saved summary
+          // follows, instead of the next hourly pickup overwriting this reload (CodeRabbit on #2189).
+          if (compaction.slow && compaction.slowQueuedAt !== undefined && compaction.confirmedAt >= compaction.slowQueuedAt) {
+            compaction.attempts = COMPACTION_PICKUPS.writing.attempts;
+            compaction.nextAt = compaction.confirmedAt + COMPACTION_PICKUPS.writing.every;
+          }
+        }
       }
       if (repair.attribution && repair.attribution.incident.firstAttemptAt === null)
         repair.attribution.incident.firstAttemptAt = Date.now();

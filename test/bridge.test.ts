@@ -3323,6 +3323,61 @@ describe('automatic compaction', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  // CodeRabbit on #2189 (third round): a receipt that arrives after the five-minute sweep that re-armed the hour still
+  // belongs to its reload; the saved summary follows five minutes after it, not never.
+  it('continues from the saved summary after an hourly reload that was confirmed late', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chatA = randomUUID(), chatB = randomUUID();
+      const session = await createSession({ conversationId: chatA });
+      const first = await openContinuationNow(session.id, chatA);
+      await attachSummary(first.token, 'TASK\n\nKeep auditing the fleet manager and fix what the audit finds.\n'.repeat(4));
+      expect(await claimContinuationNow(first.token, 'page-b')).not.toBeNull();
+      expect(await commitContinuation(first.token, chatB)).toBe(true);
+      await setSessionAutomation(session.id, 'loop');
+      await request('POST', '/events', {
+        body: { conversationId: chatB, events: [{ kind: 'user_message', time: Date.now(), text: 'keep going', messageId: `m-${chatB}` }] }
+      });
+      const filed = await request('POST', '/compact', { body: { conversationId: chatB, ticket: true, automatic: true } });
+      const ticket = filed.body.token as string;
+      expect((await request('POST', '/compact', { body: { conversationId: chatB, token: ticket, sourceAttempt: true } })).body.allowed).toBe(true);
+      expect((await request('POST', '/compact', { body: { conversationId: chatB, token: ticket, sourceDispatch: true } })).body.armed).toBe(true);
+      const repairFor = async () => {
+        await sweepStaleSwarm(Date.now());
+        return ((await request('GET', '/status')).body.repairs as Array<{ conversationId: string; reason: string; token: string }> | undefined)
+          ?.find(row => row.conversationId === chatB && row.reason === 'compaction') ?? null;
+      };
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        const repair = await repairFor();
+        expect(repair).not.toBeNull();
+        await request('POST', '/repairs/claim', { body: { token: repair!.token } });
+        await request('GET', `/status?repaired=${encodeURIComponent(repair!.token)}&repairAction=reloaded`);
+      }
+      // The hourly reload is handed out, claimed, and confirmed more than a sweep later.
+      let hourly: { token: string } | null = null;
+      for (let pass = 0; pass < 20 && !hourly; pass++) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        hourly = await repairFor();
+      }
+      expect(hourly).not.toBeNull();
+      await request('POST', '/repairs/claim', { body: { token: hourly!.token } });
+      await vi.advanceTimersByTimeAsync(5 * 60_000 + 30_000);
+      await sweepStaleSwarm(Date.now());
+      expect(continuationForSession(session.id)?.token, 'replaced before the receipt').toBe(ticket);
+      await request('GET', `/status?repaired=${encodeURIComponent(hourly!.token)}&repairAction=reloaded`);
+      let continued = false;
+      for (let pass = 0; pass < 6 && !continued; pass++) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        await sweepStaleSwarm(Date.now());
+        const now = continuationForSession(session.id);
+        continued = !!now && now.token !== ticket && now.state === 'awaiting-chat';
+      }
+      expect(continued, 'the late receipt was lost').toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
   it.each(['cancelled', 'replaced', 'dispatched'] as const)('opens a manual source immediately and revokes a %s ticket before browser action', async scenario => {
     await pair();
     const conversationId = randomUUID();
