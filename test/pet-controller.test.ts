@@ -13,7 +13,7 @@ beforeEach(() => {
 afterEach(() => { controller?.(); controller = undefined; dom.window.close(); vi.unstubAllGlobals(); vi.resetModules(); });
 
 it('keeps the main renderer as a thin overlay controller', async () => {
-  const library: PetLibraryState = { pets: [{ id: 'tur-tur-sahur', displayName: 'Tur Tur Sahur', description: '', kind: 'builtin', builtin: true, enabled: true, favorite: false }] };
+  const library: PetLibraryState = { pets: [{ id: 'tur-tur-sahur', displayName: 'Tur Tur Sahur', description: '', kind: 'builtin', builtin: true, enabled: true, favorite: false }], standaloneTaskBadge: false };
   let state: PetOverlayControlState = { visible: true, ready: true, activeCount: 1, activityCount: 2 };
   let onState: ((next: PetOverlayControlState) => void) | null = null;
   const openLibrary = vi.fn();
@@ -31,15 +31,31 @@ it('keeps the main renderer as a thin overlay controller', async () => {
 });
 
 it('opens the library when no pet is enabled', async () => {
-  const library: PetLibraryState = { pets: [{ id: 'tur-tur-sahur', displayName: 'Tur Tur Sahur', description: '', kind: 'builtin', builtin: true, enabled: false, favorite: false }] };
+  const library: PetLibraryState = { pets: [{ id: 'tur-tur-sahur', displayName: 'Tur Tur Sahur', description: '', kind: 'builtin', builtin: true, enabled: false, favorite: false }], standaloneTaskBadge: false };
   const openLibrary = vi.fn(); const setVisible = vi.fn();
   const api: any = { petsList: () => ok(library), petsOverlayState: () => ok({ visible: false, ready: true, activeCount: 0, activityCount: 0 }), petsSetOverlayVisible: setVisible, onPetOverlayStateChanged: () => vi.fn() };
   const { initPet } = await import('../src/renderer/pet.js'); controller = initPet(api, openLibrary); await Promise.resolve(); await Promise.resolve();
   controller.toggle(); expect(openLibrary).toHaveBeenCalledTimes(1); expect(setVisible).not.toHaveBeenCalled();
 });
 
+it('uses the View toggle for the standalone task badge even when no pet is enabled', async () => {
+  const library: PetLibraryState = { pets: [], standaloneTaskBadge: true };
+  let state: PetOverlayControlState = { visible: true, ready: true, activeCount: 0, activityCount: 0 };
+  const openLibrary = vi.fn();
+  const setVisible = vi.fn((visible: boolean) => { state = { ...state, visible }; return ok(state); });
+  const api: any = {
+    petsList: () => ok(library), petsOverlayState: () => ok(state), petsSetOverlayVisible: setVisible,
+    onPetOverlayStateChanged: () => vi.fn()
+  };
+  const { initPet } = await import('../src/renderer/pet.js'); controller = initPet(api, openLibrary); await Promise.resolve(); await Promise.resolve();
+  expect(controller.isVisible()).toBe(true);
+  controller.toggle();
+  expect(setVisible).toHaveBeenCalledWith(false);
+  expect(openLibrary).not.toHaveBeenCalled();
+});
+
 it('restores a temporarily hidden active pet through the View toggle', async () => {
-  const library: PetLibraryState = { pets: [{ id: 'tur-tur-sahur', displayName: 'Tur Tur Sahur', description: '', kind: 'builtin', builtin: true, enabled: true, favorite: false }] };
+  const library: PetLibraryState = { pets: [{ id: 'tur-tur-sahur', displayName: 'Tur Tur Sahur', description: '', kind: 'builtin', builtin: true, enabled: true, favorite: false }], standaloneTaskBadge: false };
   let state: PetOverlayControlState = { visible: false, ready: true, activeCount: 1, activityCount: 0 };
   const openLibrary = vi.fn();
   const setVisible = vi.fn((visible: boolean) => { state = { ...state, visible }; return ok(state); });
@@ -69,8 +85,8 @@ it.each([
 ] as const)('moves a %s composer pet to the desktop once and retires its old preference', async (_name, saved, enable) => {
   dom.window.localStorage.setItem('cos.ui.turTurPet.v1', saved);
   vi.stubGlobal('localStorage', dom.window.localStorage);
-  const library: PetLibraryState = { pets: [{ id: 'tur-tur-sahur', displayName: 'Tur Tur Sahur', description: '', kind: 'builtin', builtin: true, enabled: false, favorite: false }] };
-  const setEnabled = vi.fn((id: string, enabled: boolean) => ok({ pets: library.pets.map(pet => pet.id === id ? { ...pet, enabled } : pet) }));
+  const library: PetLibraryState = { pets: [{ id: 'tur-tur-sahur', displayName: 'Tur Tur Sahur', description: '', kind: 'builtin', builtin: true, enabled: false, favorite: false }], standaloneTaskBadge: false };
+  const setEnabled = vi.fn((id: string, enabled: boolean) => ok({ ...library, pets: library.pets.map(pet => pet.id === id ? { ...pet, enabled } : pet) }));
   const api: any = { petsList: () => ok(library), petsOverlayState: () => ok({ visible: false, ready: true, activeCount: 0, activityCount: 0 }),
     petsSetOverlayVisible: vi.fn(), petsSetEnabled: setEnabled, onPetOverlayStateChanged: () => vi.fn() };
   const { initPet } = await import('../src/renderer/pet.js');

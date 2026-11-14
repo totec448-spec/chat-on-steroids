@@ -17,10 +17,11 @@ export interface PetController {
 /** Thin main-window controller. All visual/runtime work lives in the native desktop overlay. */
 export function initPet(api: AppApi, openLibrary: () => void): PetController {
   let disposed = false;
-  let library: PetLibraryState = { pets: [] };
+  let library: PetLibraryState = { pets: [], standaloneTaskBadge: false };
   let overlay: PetOverlayControlState = { visible: false, ready: true, activeCount: 0, activityCount: 0 };
 
   const activeCount = (): number => library.pets.filter(pet => pet.enabled).length;
+  const hasOverlaySurface = (): boolean => activeCount() > 0 || library.standaloneTaskBadge;
   const applyLibraryState = (next: PetLibraryState): void => { library = next; };
   const applyOverlayState = (next: PetOverlayControlState): void => { overlay = next; };
   const stopOverlay = api.onPetOverlayStateChanged(applyOverlayState);
@@ -50,7 +51,7 @@ export function initPet(api: AppApi, openLibrary: () => void): PetController {
   };
 
   const toggle = (): void => {
-    if (!activeCount()) { openLibrary(); return; }
+    if (!hasOverlaySurface()) { openLibrary(); return; }
     const wanted = !overlay.visible;
     applyOverlayState({ ...overlay, visible: wanted, ready: wanted ? overlay.ready : true });
     void api.petsSetOverlayVisible(wanted).then(reply => {
@@ -65,7 +66,7 @@ export function initPet(api: AppApi, openLibrary: () => void): PetController {
   void refresh();
   return Object.assign(dispose, {
     toggle,
-    isVisible: () => overlay.visible && activeCount() > 0,
+    isVisible: () => overlay.visible && hasOverlaySurface(),
     isReady: () => overlay.ready,
     refresh,
     applyLibraryState

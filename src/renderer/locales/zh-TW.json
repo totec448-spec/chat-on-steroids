@@ -1559,6 +1559,7 @@
   "PDF page dimensions exceed the preview limit": "PDF 頁面尺寸超過預覽限制",
   "Pet folders contain pet.json, animations.json and atlas.png.": "寵物資料夾包含 pet.json、animations.json 和 atlas.png。",
   "Pets": "寵物",
+  "Show task activity badge without a pet": "不使用寵物時顯示工作活動徽章",
   "Process exited: {0}": "處理程序已結束：{0}",
   "previous session": "上次工作階段",
   "Previous session": "上次工作階段",

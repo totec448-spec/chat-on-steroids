@@ -1572,6 +1572,7 @@
   "… still writing. The full answer appears when it finishes.": "… rédaction en cours. La réponse complète apparaît une fois terminée.",
   "Could not preserve the drafts. Save your work before closing this window.": "Impossible de conserver les brouillons. Enregistrez votre travail avant de fermer cette fenêtre.",
   "Pets": "Mascottes",
+  "Show task activity badge without a pet": "Afficher l’indicateur d’activité des tâches sans mascotte",
   "Manage pets…": "Gérer les mascottes…",
   "Import pet folder": "Importer un dossier de mascotte",
   "Choose which pets appear in the workspace.": "Choisissez les mascottes qui apparaissent dans l’espace de travail.",

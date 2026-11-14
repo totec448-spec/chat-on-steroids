@@ -1551,6 +1551,7 @@
   "Manage pets…": "ペットを管理…",
   "Pet folders contain pet.json, animations.json and atlas.png.": "ペットフォルダーには pet.json、animations.json、atlas.png が含まれます。",
   "Pets": "ペット",
+  "Show task activity badge without a pet": "ペットなしでタスクアクティビティバッジを表示",
   "Process exited: {0}": "プロセス終了: {0}",
   "previous session": "前回のセッション",
   "Previous session": "前回のセッション",

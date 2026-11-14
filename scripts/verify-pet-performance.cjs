@@ -44,7 +44,7 @@ async function buildAndRun() {
       listPets: async () => ({ ok: true, data: { pets: [{
         id: 'tur-tur-sahur', displayName: 'Tur Tur Sahur', description: '',
         kind: 'builtin', builtin: true, enabled: true, favorite: true
-      }] } }),
+      }], standaloneTaskBadge: false } }),
       petAsset: async () => ({ ok: false, error: 'No imported pet in this fixture.' }),
       setInteractive() {}, focusOwner() {}, openLibrary() {}, openActivity() {},
       onSnapshot(listener: typeof publishSnapshot) { publishSnapshot = listener; listener(snapshot); return () => {}; },
@@ -66,7 +66,7 @@ async function buildAndRun() {
   `);
   fs.writeFileSync(path.join(fixture, 'index.html'), `<!doctype html><html lang="en"><head>
     <meta charset="utf-8"><title>CoS Pet Performance</title></head><body>
-    <div id="petStage"></div><section class="pet-tray" id="petTray" hidden>
+    <div id="petStage"></div><button id="petStandaloneBadge" type="button" hidden>0</button><section class="pet-tray" id="petTray" hidden>
       <div class="pet-tray-head"><strong>Tasks</strong><span id="petTrayCount"></span><button id="petTrayClose">×</button></div>
       <div id="petCards"></div></section><script type="module" src="./entry.ts"></script></body></html>`);
   await build({ configFile: false, root: fixture, base: './', logLevel: 'warn',
