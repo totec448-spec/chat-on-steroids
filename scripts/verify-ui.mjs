@@ -65,6 +65,7 @@ const noise = /sandbox_extension|task_policy|js2c|XPC error|com\.apple\.|Connect
 const resultLine = /^\s*[{[]/;
 // Windows reports a crash as an NTSTATUS such as 3221225477; in hex (0xC0000005) it can be looked up.
 const exitStatus = code => code === 'timeout' ? 'timed out'
+  : code === 'fixture assertion failed' ? 'fixture assertion failed (COS_QA_TEST_FAILED)'
   : typeof code === 'number' ? `exited with ${code}${code > 0xffff ? ` (0x${(code >>> 0).toString(16).toUpperCase()})` : ''}` : String(code);
 const reasonFor = outcome => {
   const lines = outcome.output.split('\n').filter(line => line.trim() && !noise.test(line));
