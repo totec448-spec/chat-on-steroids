@@ -121,7 +121,14 @@ describe('steer timeline feedback', () => {
       { kind: 'turn_end', seq: 9, time: T0 + 70_000, source: 'extension', turnId: 'int-1', outcome: 'interrupted' },
       { kind: 'user_message', seq: 10, origin: 10, time: T0 + 90_000, source: 'extension', turnId: 'fresh-1', messageId: 'q-fresh', message: text('Fresh follow-up') },
       { kind: 'turn_start', seq: 11, time: T0 + 90_050, source: 'extension', turnId: 'fresh-1' },
-      { kind: 'turn_end', seq: 12, time: T0 + 99_000, source: 'extension', turnId: 'fresh-1', outcome: 'completed' }
+      { kind: 'turn_end', seq: 12, time: T0 + 99_000, source: 'extension', turnId: 'fresh-1', outcome: 'completed' },
+      // Turn 4: automatic user follow-up arrives while running and turn closes with delayed continued: true.
+      { kind: 'user_message', seq: 13, origin: 13, time: T0 + 120_000, source: 'extension', turnId: 'auto-msg-1', messageId: 'q-auto-parent', message: text('Primary prompt') },
+      { kind: 'turn_start', seq: 14, time: T0 + 120_050, source: 'extension', turnId: 'auto-msg-1' },
+      { kind: 'user_message', seq: 15, origin: 15, time: T0 + 130_000, source: 'extension', automatic: true, turnId: 'auto-msg-2', messageId: 'q-auto-follow', message: text('Continue automatically') },
+      { kind: 'turn_end', seq: 16, time: T0 + 130_200, source: 'extension', turnId: 'auto-msg-1', outcome: 'completed', continued: true },
+      { kind: 'turn_start', seq: 17, time: T0 + 130_300, source: 'extension', turnId: 'auto-msg-2' },
+      { kind: 'turn_end', seq: 18, time: T0 + 142_000, source: 'extension', turnId: 'auto-msg-2', outcome: 'completed' }
     ];
 
     const { w, append } = await boot(events);
@@ -131,7 +138,7 @@ describe('steer timeline feedback', () => {
     expect(w.document.querySelectorAll('#timeline .is-steered')).toHaveLength(0);
     expect(w.document.querySelectorAll('#timeline .said-origin.is-steer')).toHaveLength(0);
     const lines = [...w.document.querySelectorAll<HTMLElement>('#timeline .turn-worked')];
-    expect(lines.map(line => line.textContent)).toEqual(['Worked for 25s', 'Worked for 9s']);
+    expect(lines.map(line => line.textContent)).toEqual(['Worked for 25s', 'Worked for 9s', 'Worked for 10s', 'Worked for 12s']);
     expect(lines.every(line => !line.classList.contains('is-steered'))).toBe(true);
   });
 });
