@@ -990,6 +990,76 @@ it('re-acquires a remounted model trigger when the first trigger fails to open t
   expect(await result).toBe(true);
 });
 
+it('refuses fallback click when remounted trigger Enter changes native effort without a portal', async () => {
+  vi.useFakeTimers();
+  const f = fixture(), doc = page.window.document;
+  const trigger = doc.querySelector('button')!;
+  trigger.setAttribute('data-composer-navigation-target', 'reasoning');
+  trigger.setAttribute('data-selected-reasoning-effort', 'medium');
+  const fresh = trigger.cloneNode(true) as HTMLButtonElement;
+  (fresh as any).__reactFiber$test = (trigger as any).__reactFiber$test;
+  const clicks = vi.fn();
+  fresh.addEventListener('click', clicks);
+  doc.addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    if (event.target === trigger) {
+      event.stopImmediatePropagation();
+      trigger.replaceWith(fresh);
+    } else if (event.target === fresh) {
+      event.stopImmediatePropagation();
+      fresh.setAttribute('data-selected-reasoning-effort', 'high');
+    }
+  }, true);
+  const reports: unknown[] = [];
+  const result = f.api.selectModelSettings('future-model', 'ultra', () => true, (value: unknown) => reports.push(value));
+  await vi.runAllTimersAsync();
+  expect(await result).toBe(false);
+  expect(clicks).not.toHaveBeenCalled();
+  expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({ outcome: 'failed', failedPhase: 'open', failure: 'changed' });
+});
+
+// CodeRabbit on #2173: an unreadable initial Fiber selection does not prove drift.
+// Preserve the old bounded click fallback; only a later readable, exact picker
+// selection can confirm it (the persistent-unreadable case stays unconfirmed).
+it.each([false, true])('uses bounded fallback with unreadable pre-Enter Fiber state (hydrates=%s)', async hydrates => {
+  vi.useFakeTimers();
+  const f = fixture(), doc = page.window.document;
+  const trigger = doc.querySelector('button')!;
+  f.props.modelsData.versions = [];
+  const renderPanel = attachMockPickerPanel(doc, f, trigger);
+  const clicks = vi.fn(renderPanel);
+  trigger.addEventListener('keydown', event => { if (event.key === 'Enter') event.stopImmediatePropagation(); }, true);
+  trigger.addEventListener('click', clicks);
+  if (hydrates) page.window.setTimeout(() => { f.props.modelsData.versions = f.versions; }, 400);
+  const reports: unknown[] = [];
+  const result = f.api.selectModelSettings('future-model', 'low', () => true, (value: unknown) => reports.push(value));
+  await vi.runAllTimersAsync();
+  expect(await result).toBe(hydrates);
+  expect(clicks).toHaveBeenCalledTimes(1);
+  const diagnostic = modelSelectionDiagnostic.parse(reports.at(-1));
+  expect(diagnostic.outcome).toBe(hydrates ? 'confirmed' : 'failed');
+  if (!hydrates) expect(diagnostic).toMatchObject({ failure: 'unreadable', failedPhase: 'read' });
+});
+
+it('refuses click when previously absent native effort appears after Enter without a portal', async () => {
+  vi.useFakeTimers();
+  const f = fixture(), trigger = page.window.document.querySelector('button')!;
+  trigger.setAttribute('data-composer-navigation-target', 'reasoning');
+  expect(trigger.hasAttribute('data-selected-reasoning-effort')).toBe(false);
+  trigger.addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    event.stopImmediatePropagation();
+    trigger.setAttribute('data-selected-reasoning-effort', 'high');
+  }, true);
+  const clicks = vi.fn(); trigger.addEventListener('click', clicks);
+  const reports: unknown[] = [];
+  const result = f.api.selectModelSettings('future-model', 'ultra', () => true, (value: unknown) => reports.push(value));
+  await vi.runAllTimersAsync();
+  expect(await result).toBe(false);
+  expect(clicks).not.toHaveBeenCalled();
+  expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({ outcome: 'failed', failedPhase: 'open', failure: 'changed' });
+});
+
 it('reads picker state once fiber metadata hydrates without an extra DOM mutation', async () => {
   vi.useFakeTimers();
   const f = fixture();
@@ -1063,4 +1133,30 @@ it('skips duplicate Enter and click when the picker opens before retrying a re-a
   expect(await result).toBe(true);
   expect(retryEnter).not.toHaveBeenCalled();
   expect(retryClick).not.toHaveBeenCalled();
+});
+
+it('never clicks an owned control if Enter changed native effort without a mounted portal', async () => {
+  vi.useFakeTimers();
+  const f = fixture(), trigger = page.window.document.querySelector('button')!;
+  trigger.setAttribute('data-composer-navigation-target', 'reasoning');
+  trigger.setAttribute('data-selected-reasoning-effort', 'medium');
+  trigger.addEventListener('keydown', event => { if (event.key !== 'Enter') return;
+    event.stopImmediatePropagation(); trigger.setAttribute('data-selected-reasoning-effort', 'high'); }, true);
+  const clicked = vi.fn(); trigger.addEventListener('click', clicked);
+  const reports: unknown[] = [];
+  const result = f.api.selectModelSettings('future-model', 'ultra', () => true, (value: unknown) => reports.push(value));
+  await vi.runAllTimersAsync(); expect(await result).toBe(false); expect(clicked).not.toHaveBeenCalled();
+  expect(f.api.modelSelectionFailure()).toContain('picker did not open');
+  expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({ outcome: 'failed', failedPhase: 'open', failure: 'changed' });
+});
+it('never clicks an owned control if Enter changed account-selected Fiber state without a portal', async () => {
+  vi.useFakeTimers();
+  const f = fixture(), trigger = page.window.document.querySelector('button')!;
+  trigger.addEventListener('keydown', event => { if (event.key !== 'Enter') return;
+    event.stopImmediatePropagation(); f.state.currentBucket = 1; f.state.currentSelection = f.selections[0]![0]!; }, true);
+  const clicked = vi.fn(); trigger.addEventListener('click', clicked);
+  const reports: unknown[] = [];
+  const result = f.api.selectModelSettings('future-model', 'ultra', () => true, (value: unknown) => reports.push(value));
+  await vi.runAllTimersAsync(); expect(await result).toBe(false); expect(clicked).not.toHaveBeenCalled();
+  expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({ outcome: 'failed', failedPhase: 'open', failure: 'changed' });
 });
