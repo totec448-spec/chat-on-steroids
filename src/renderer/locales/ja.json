@@ -3918,5 +3918,7 @@
   "Safer saves over SSH": "SSH でより安全に保存",
   "If a save fails, your original file stays as it was.": "保存に失敗しても、元のファイルはそのまま残ります。",
   "Write mid-answer in any language": "回答中でも、どの言語でも送信",
-  "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT が回答している最中に送ったメッセージが、どの言語のページでも送信されるようになりました。"
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT が回答している最中に送ったメッセージが、どの言語のページでも送信されるようになりました。",
+  "Sync manual chat titles to ChatGPT": "手動のチャットタイトルを ChatGPT に同期",
+  "Push titles you rename here (including across Compact & Resume) to ChatGPT Web, unless ChatGPT already has a newer title.": "ここで変更したタイトル（「圧縮して再開」をまたぐ場合も含む）を ChatGPT Web に反映します。ただし、ChatGPT にすでに新しいタイトルがある場合は上書きしません。"
 }

@@ -4002,5 +4002,7 @@
   "Safer saves over SSH": "SSH üzerinden daha güvenli kaydetme",
   "If a save fails, your original file stays as it was.": "Kaydetme başarısız olursa özgün dosyanız olduğu gibi kalır.",
   "Write mid-answer in any language": "Yanıt sırasında her dilde mesaj",
-  "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT yanıt verirken gönderilen bir mesaj artık her dildeki sayfalarda gönderiliyor."
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT yanıt verirken gönderilen bir mesaj artık her dildeki sayfalarda gönderiliyor.",
+  "Sync manual chat titles to ChatGPT": "Elle değiştirilen sohbet başlıklarını ChatGPT ile eşitle",
+  "Push titles you rename here (including across Compact & Resume) to ChatGPT Web, unless ChatGPT already has a newer title.": "Burada yeniden adlandırdığınız başlıkları (Sıkıştır ve sürdür sonrasında da) ChatGPT Web’e gönderir; ancak ChatGPT’de zaten daha yeni bir başlık varsa üzerine yazmaz."
 }

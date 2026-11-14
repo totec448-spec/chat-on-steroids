@@ -3918,5 +3918,7 @@
   "Safer saves over SSH": "SSH에서 더 안전한 저장",
   "If a save fails, your original file stays as it was.": "저장에 실패해도 원본 파일은 그대로 남습니다.",
   "Write mid-answer in any language": "답변 중에도 모든 언어로 전송",
-  "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT가 답하는 중에 보낸 메시지가 이제 어떤 언어의 페이지에서도 전송됩니다."
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT가 답하는 중에 보낸 메시지가 이제 어떤 언어의 페이지에서도 전송됩니다.",
+  "Sync manual chat titles to ChatGPT": "수동 채팅 제목을 ChatGPT에 동기화",
+  "Push titles you rename here (including across Compact & Resume) to ChatGPT Web, unless ChatGPT already has a newer title.": "여기에서 이름을 바꾼 제목(‘압축 후 계속’ 이후 포함)을 ChatGPT Web에 반영합니다. 단, ChatGPT에 이미 더 최신 제목이 있는 경우는 제외합니다."
 }

@@ -3918,5 +3918,7 @@
   "Safer saves over SSH": "Lưu an toàn hơn qua SSH",
   "If a save fails, your original file stays as it was.": "Nếu việc lưu thất bại, tệp gốc của bạn vẫn như cũ.",
   "Write mid-answer in any language": "Nhắn giữa lúc đang trả lời, ở mọi ngôn ngữ",
-  "A message sent while ChatGPT is answering now goes out on pages in every language.": "Tin nhắn gửi khi ChatGPT đang trả lời giờ được gửi đi trên các trang ở mọi ngôn ngữ."
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "Tin nhắn gửi khi ChatGPT đang trả lời giờ được gửi đi trên các trang ở mọi ngôn ngữ.",
+  "Sync manual chat titles to ChatGPT": "Đồng bộ tiêu đề chat thủ công sang ChatGPT",
+  "Push titles you rename here (including across Compact & Resume) to ChatGPT Web, unless ChatGPT already has a newer title.": "Đẩy các tiêu đề bạn đổi tên tại đây (kể cả qua Compact & Resume) lên ChatGPT Web, trừ khi ChatGPT đã có tiêu đề mới hơn."
 }

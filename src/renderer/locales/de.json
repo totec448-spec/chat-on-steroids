@@ -4002,5 +4002,7 @@
   "Safer saves over SSH": "Sichereres Speichern über SSH",
   "If a save fails, your original file stays as it was.": "Schlägt das Speichern fehl, bleibt deine Originaldatei unverändert.",
   "Write mid-answer in any language": "Mitten in der Antwort schreiben, in jeder Sprache",
-  "A message sent while ChatGPT is answering now goes out on pages in every language.": "Eine Nachricht, die du während der Antwort von ChatGPT sendest, wird jetzt auf Seiten in jeder Sprache gesendet."
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "Eine Nachricht, die du während der Antwort von ChatGPT sendest, wird jetzt auf Seiten in jeder Sprache gesendet.",
+  "Sync manual chat titles to ChatGPT": "Manuelle Chat-Titel mit ChatGPT synchronisieren",
+  "Push titles you rename here (including across Compact & Resume) to ChatGPT Web, unless ChatGPT already has a newer title.": "Hier umbenannte Titel (auch über Komprimieren & Fortsetzen hinweg) an ChatGPT Web übertragen, sofern ChatGPT nicht bereits einen neueren Titel hat."
 }

@@ -6272,8 +6272,7 @@ if (chrome.runtime.onStartup && typeof chrome.runtime.onStartup.addListener === 
   });
 }
 
-async function runOnChatgptTab(message, preferredConversationId, doneOutcome, onDone) {
-  let outcome = 'deferred';
+async function runChatgptTabCommand(message, preferredConversationId) {
   const tabs = await chrome.tabs.query({ url: ['https://chatgpt.com/*'] });
   const ordered = preferredConversationId
     ? [...tabs].sort((a, b) => Number(conversationForTab(b) === preferredConversationId) - Number(conversationForTab(a) === preferredConversationId))
@@ -6284,10 +6283,16 @@ async function runOnChatgptTab(message, preferredConversationId, doneOutcome, on
     let reply;
     try { reply = await chrome.tabs.sendMessage(tab.id, message, { documentId }); }
     catch { continue; } // that document is gone; another page may still do it
-    outcome = reply?.outcome === doneOutcome ? doneOutcome : 'failed';
-    if (outcome === doneOutcome && onDone) onDone(tabs, tab.id);
-    break;
+    return { tabs, tabId: tab.id, reply };
   }
+  return null;
+}
+
+async function runOnChatgptTab(message, preferredConversationId, doneOutcome, onDone) {
+  const ran = await runChatgptTabCommand(message, preferredConversationId);
+  if (!ran) return 'deferred';
+  const outcome = ran.reply?.outcome === doneOutcome ? doneOutcome : 'failed';
+  if (outcome === doneOutcome && onDone) onDone(ran.tabs, ran.tabId);
   return outcome;
 }
 
@@ -6311,26 +6316,49 @@ async function drainWorkerArchive() {
 
 let chatTitleSyncFlight = null;
 
-/** Pushes pending manual chat titles from the app to ChatGPT Web via any registered ChatGPT tab. */
+/** Pushes at most one due manual chat title from the app to ChatGPT Web per pass. */
 async function drainChatTitleSync() {
   if (chatTitleSyncFlight) return chatTitleSyncFlight;
   chatTitleSyncFlight = (async () => {
     await load();
-    for (let i = 0; i < 10; i++) {
-      const next = await call('/chat-title/next', { method: 'POST', body: '{}' });
-      const conversationId = next.ok ? cleanConversationId(next.data?.conversationId) : null;
-      const title = next.ok && typeof next.data?.title === 'string' ? next.data.title.trim() : '';
-      if (!conversationId || !title) break;
-      const outcome = await runOnChatgptTab({ type: 'clf-rename-chat', conversationId, title }, conversationId, 'synced', (tabs, ranTabId) => {
-        for (const tab of tabs) {
-          if (tab.id === undefined || tab.id === ranTabId) continue;
-          const documentId = tabDocuments[String(tab.id)];
-          if (documentId) void chrome.tabs.sendMessage(tab.id, { type: 'clf-apply-chat-title', conversationId, title }, { documentId }).catch(() => undefined);
-        }
-      });
-      await call('/chat-title/result', { method: 'POST', body: JSON.stringify({ conversationId, title, outcome }) });
-      if (outcome !== 'synced') break;
+    const next = await call('/chat-title/next', { method: 'POST', body: '{}' });
+    const conversationId = next.ok ? cleanConversationId(next.data?.conversationId) : null;
+    const title = next.ok && typeof next.data?.title === 'string' ? next.data.title.trim() : '';
+    const expectedRemoteTitle = next.ok && typeof next.data?.expectedRemoteTitle === 'string' && next.data.expectedRemoteTitle.trim()
+      ? next.data.expectedRemoteTitle.trim()
+      : null;
+    if (!conversationId || !title) return;
+    const ran = await runChatgptTabCommand(
+      {
+        type: 'clf-rename-chat',
+        conversationId,
+        title,
+        ...(expectedRemoteTitle ? { expectedRemoteTitle } : {})
+      },
+      conversationId
+    );
+    const reply = ran?.reply;
+    const rawOutcome = reply?.outcome;
+    const outcome = !ran
+      ? 'deferred'
+      : (rawOutcome === 'synced' || rawOutcome === 'conflict' ? rawOutcome : 'failed');
+    if (outcome === 'synced') {
+      for (const tab of ran.tabs) {
+        if (tab.id === undefined || tab.id === ran.tabId) continue;
+        const documentId = tabDocuments[String(tab.id)];
+        if (documentId) void chrome.tabs.sendMessage(tab.id, { type: 'clf-apply-chat-title', conversationId, title }, { documentId }).catch(() => undefined);
+      }
     }
+    const resultBody = {
+      conversationId,
+      title,
+      outcome,
+      ...(reply?.alreadyMatched === true ? { alreadyMatched: true } : {}),
+      ...(typeof reply?.remoteTitle === 'string' && reply.remoteTitle ? { remoteTitle: reply.remoteTitle } : {}),
+      ...(typeof reply?.status === 'number' ? { status: reply.status } : {}),
+      ...(typeof reply?.retryAfterMs === 'number' ? { retryAfterMs: reply.retryAfterMs } : {})
+    };
+    await call('/chat-title/result', { method: 'POST', body: JSON.stringify(resultBody) });
   })().finally(() => { chatTitleSyncFlight = null; });
   return chatTitleSyncFlight;
 }

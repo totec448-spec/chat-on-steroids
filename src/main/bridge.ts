@@ -150,6 +150,7 @@ import {
   getSession,
   readSessionPlan,
   readSessionUserRequests,
+  renameSession,
   indexedSessions,
   listUsageSessions,
   readRecentEvents,
@@ -3371,7 +3372,16 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   // Synchronizes manual chat titles set or carried across Compact & Resume in CoS to ChatGPT Web.
   if (route === '/chat-title/next' && req.method === 'POST') {
     const job = nextChatTitleSync();
-    return json(res, 200, { conversationId: job?.conversationId ?? null, title: job?.title ?? null }, origin);
+    return json(
+      res,
+      200,
+      {
+        conversationId: job?.conversationId ?? null,
+        title: job?.title ?? null,
+        ...(job?.expectedRemoteTitle ? { expectedRemoteTitle: job.expectedRemoteTitle } : {})
+      },
+      origin
+    );
   }
   if (route === '/chat-title/result' && req.method === 'POST') {
     const raw = await readBody(req);
@@ -3379,10 +3389,22 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const id = conversationId(body['conversationId']);
     const title = cleanSyncedChatTitle(body['title']);
     const outcome = body['outcome'];
-    if (!id || !title || (outcome !== 'synced' && outcome !== 'failed' && outcome !== 'deferred')) {
+    if (!id || !title || (outcome !== 'synced' && outcome !== 'failed' && outcome !== 'deferred' && outcome !== 'conflict')) {
       return json(res, 400, { error: 'invalid_request' }, origin);
     }
-    settleChatTitleSync(id, title, outcome);
+    const status = typeof body['status'] === 'number' && Number.isInteger(body['status']) && body['status'] >= 100 && body['status'] < 600
+      ? body['status']
+      : undefined;
+    const retryAfterMs = typeof body['retryAfterMs'] === 'number' && Number.isFinite(body['retryAfterMs']) && body['retryAfterMs'] > 0
+      ? body['retryAfterMs']
+      : undefined;
+    const remoteTitle = cleanSyncedChatTitle(body['remoteTitle']) || undefined;
+    const alreadyMatched = body['alreadyMatched'] === true;
+    settleChatTitleSync(id, title, outcome, { status, retryAfterMs, remoteTitle, alreadyMatched });
+    if (outcome === 'conflict' && remoteTitle) {
+      const session = await findSessionByConversation(id).catch(() => null);
+      if (session) await renameSession(session.id, remoteTitle, 'provider', id).catch(() => undefined);
+    }
     return json(res, 200, { ok: true }, origin);
   }
 

@@ -4170,5 +4170,7 @@
   "Safer saves over SSH": "Безопаснее сохранять по SSH",
   "If a save fails, your original file stays as it was.": "Если сохранение не удалось, исходный файл остаётся как был.",
   "Write mid-answer in any language": "Сообщения посреди ответа на любом языке",
-  "A message sent while ChatGPT is answering now goes out on pages in every language.": "Сообщение, отправленное во время ответа ChatGPT, теперь уходит на страницах на любом языке."
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "Сообщение, отправленное во время ответа ChatGPT, теперь уходит на страницах на любом языке.",
+  "Sync manual chat titles to ChatGPT": "Синхронизировать ручные названия чатов с ChatGPT",
+  "Push titles you rename here (including across Compact & Resume) to ChatGPT Web, unless ChatGPT already has a newer title.": "Передавать переименованные здесь названия (включая перенос через «Сжать и продолжить») в ChatGPT Web, если в ChatGPT уже нет более нового названия."
 }

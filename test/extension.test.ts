@@ -6697,12 +6697,31 @@ describe('syncing manual chat titles to ChatGPT', () => {
     expect(noTabs.results).toEqual([{ conversationId: chat, title: 'My Work', outcome: 'deferred' }]);
   });
 
-  it('drains immediately on /status when chatTitlePending is set', async () => {
+  it('drains immediately on /status when chatTitlePending is set, and forwards conflict and 429 metadata without broadcasting stale titles', async () => {
     const { worker, results } = titleWorker({ outcome: 'synced' }, 'Compact Target');
     await worker.createTab({ id: 1, url: 'https://chatgpt.com/' });
     await worker.registerTab(1);
     await worker.startup();
     await vi.waitFor(() => expect(results).toEqual([{ conversationId: chat, title: 'Compact Target', outcome: 'synced' }]));
+
+    const conflictWorker = titleWorker({ outcome: 'conflict', remoteTitle: 'Newer On Web' }, 'Stale CoS Title');
+    await conflictWorker.worker.createTab({ id: 1, url: `https://chatgpt.com/c/${chat}` });
+    await conflictWorker.worker.createTab({ id: 2, url: `https://chatgpt.com/c/${otherChat}` });
+    await conflictWorker.worker.registerTab(1);
+    await conflictWorker.worker.registerTab(2);
+    await conflictWorker.worker.fireAlarm();
+    expect(conflictWorker.results).toEqual([
+      { conversationId: chat, title: 'Stale CoS Title', outcome: 'conflict', remoteTitle: 'Newer On Web' }
+    ]);
+    expect(conflictWorker.worker.tabsSendMessage.mock.calls.some(call => (call[1] as { type?: string }).type === 'clf-apply-chat-title')).toBe(false);
+
+    const rateLimited = titleWorker({ outcome: 'failed', status: 429, retryAfterMs: 30_000 }, 'Rate Limited');
+    await rateLimited.worker.createTab({ id: 1, url: 'https://chatgpt.com/' });
+    await rateLimited.worker.registerTab(1);
+    await rateLimited.worker.fireAlarm();
+    expect(rateLimited.results).toEqual([
+      { conversationId: chat, title: 'Rate Limited', outcome: 'failed', status: 429, retryAfterMs: 30_000 }
+    ]);
   });
 });
 

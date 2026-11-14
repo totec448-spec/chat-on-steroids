@@ -1,70 +1,147 @@
 /**
- * Synchronizes user-chosen manual chat titles from CoS to ChatGPT Web.
+ * Push manual session renames from this app to ChatGPT Web (`PATCH /backend-api/conversation/<id>`).
  *
- * Manual renames (`sessions:rename`) and newly bound / Compact & Resume manually named
- * chats (`rebindSession`) are queued durably in `state/chat-title-sync.json` and pushed
- * by the browser extension via `PATCH /backend-api/conversation/<id>` `{ title }`.
+ * Manual renames made directly by the user (`renameSession(..., 'manual')`) and sessions carrying
+ * a user-set manual title into newly bound or Compact & Resume chats (`rebindSession`) are queued
+ * durably in `state/chat-title-sync.json` when `sessions.syncManualChatTitles` is enabled (off by
+ * default).
  *
- * When ChatGPT Web asynchronously auto-generates a different title (`gen_title`) shortly
- * after creation or compaction, `noteProviderChatTitle` re-queues the app's manual name a
- * bounded number of times so it sticks without looping.
+ * Newer ChatGPT Web titles are never overwritten: the app keeps the last known provider title
+ * (`expectedRemoteTitle`) per conversation, the extension runs a `GET /backend-api/conversation/<id>`
+ * pre-check before `PATCH`, and any divergence from `expectedRemoteTitle` drops the push as a
+ * newer-remote-title conflict (except within a brief bounded window right after `rebindSession` so
+ * ChatGPT's automatic `gen_title` on a brand-new resumed chat can still settle).
+ *
+ * Rate & burst behavior:
+ * - Same-conversation renames coalesce to the latest title; the queue is capped at 200 entries.
+ * - At most 1 job is leased at a time with a 2 s minimum interval between ChatGPT requests
+ *   (<= 30 conversations/minute in a burst; <= 1 GET + 1 PATCH per conversation).
+ * - HTTP 429 imposes a global queue cooldown honoring `Retry-After` (default 60 s).
+ * - Every decision emits one structured log line (`queued`, `leased`, `deferred`, `sent`, `failed`, `dropped`).
  */
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { wakeBrowserWork } from './browser-wake.js';
+import { getConfig } from './config.js';
 import { logInfo, logWarn } from './logger.js';
 
-export type ChatTitleSyncOutcome = 'synced' | 'failed' | 'deferred';
+export type ChatTitleSyncOutcome = 'synced' | 'failed' | 'deferred' | 'conflict';
 export type ChatTitleSyncReason = 'manual-rename' | 'rebind' | 'drift-repair';
-export type ChatTitleSyncJob = { conversationId: string; title: string };
+export type ChatTitleSyncJob = {
+  conversationId: string;
+  title: string;
+  expectedRemoteTitle?: string;
+};
 
 type Entry = {
   conversationId: string;
   title: string;
+  reason: ChatTitleSyncReason;
+  expectedRemoteTitle?: string;
   queuedAt: number;
   attempts: number;
   notBefore: number;
   leased: boolean;
+  leasedUntil: number;
 };
 
-type DriftGuard = { title: string; until: number; repairs: number };
+type SettledRebind = {
+  manualTitle: string;
+  expiresAt: number;
+  repairs: number;
+};
 
-export const CHAT_TITLE_SYNC_LEASE_MS = 2 * 60_000;
-export const CHAT_TITLE_SYNC_MAX_ATTEMPTS = 6;
-const FIRST_BACKOFF_MS = 5_000;
-const MAX_WAIT_MS = 7 * 24 * 60 * 60_000;
-const MAX_ENTRIES = 500;
-const DRIFT_GUARD_MS = 30 * 60_000;
+export const CHAT_TITLE_SYNC_LEASE_MS = 60_000;
+export const CHAT_TITLE_SYNC_RETRY_BASE_MS = 5_000;
+export const CHAT_TITLE_SYNC_MAX_WAIT_MS = 7 * 24 * 60 * 60_000;
+export const CHAT_TITLE_SYNC_MAX_ATTEMPTS = 5;
+export const CHAT_TITLE_SYNC_MAX_ENTRIES = 200;
+export const CHAT_TITLE_SYNC_MIN_INTERVAL_MS = 2_000;
+export const CHAT_TITLE_SYNC_RATE_LIMIT_MS = 60_000;
+const DRIFT_REPAIR_WINDOW_MS = 2 * 60_000;
 const MAX_DRIFT_REPAIRS = 2;
-const MAX_DRIFT_GUARDS = 1_000;
+const MAX_KNOWN_TITLES = 500;
+const MAX_RATE_LIMIT_MS = 15 * 60_000;
+const MIN_RATE_LIMIT_MS = 5_000;
 const CONVERSATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 let filePath = '';
 const entries = new Map<string, Entry>();
-const driftGuards = new Map<string, DriftGuard>();
+const settled = new Map<string, SettledRebind>();
+const knownTitles = new Map<string, string>();
 let writing: Promise<void> = Promise.resolve();
 let pending = false;
+let nextDispatchAt = 0;
+let cooldownUntil = 0;
+let wakeTimer: ReturnType<typeof setTimeout> | null = null;
+
+function enabled(): boolean {
+  return getConfig().sessions.syncManualChatTitles === true;
+}
 
 function cleanId(value: unknown): string | null {
   const id = typeof value === 'string' ? value.trim().toLowerCase() : '';
   return CONVERSATION_ID.test(id) ? id : null;
 }
 
-/** Single-line cleaned chat title matching `cleanSessionName` limits. */
-export function cleanSyncedChatTitle(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const clean = value.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120).trim();
-  return clean || null;
+export function cleanSyncedChatTitle(value: unknown): string {
+  return typeof value === 'string'
+    ? value.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120).trim()
+    : '';
 }
 
-function nonNeg(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
+function nonNegative(value: unknown, fallback = 0): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback;
 }
 
-function setGuard(id: string, title: string, until: number, repairs: number): void {
-  driftGuards.delete(id);
-  driftGuards.set(id, { title, until, repairs });
-  if (driftGuards.size > MAX_DRIFT_GUARDS) driftGuards.delete(driftGuards.keys().next().value!);
+function clampRateLimitMs(retryAfterMs?: number): number {
+  const raw = typeof retryAfterMs === 'number' && Number.isFinite(retryAfterMs) && retryAfterMs > 0
+    ? retryAfterMs
+    : CHAT_TITLE_SYNC_RATE_LIMIT_MS;
+  return Math.min(MAX_RATE_LIMIT_MS, Math.max(MIN_RATE_LIMIT_MS, Math.round(raw)));
+}
+
+function rememberKnownTitle(id: string, title: string): void {
+  const clean = cleanSyncedChatTitle(title);
+  if (!clean) return;
+  knownTitles.delete(id);
+  knownTitles.set(id, clean);
+  while (knownTitles.size > MAX_KNOWN_TITLES) {
+    const oldest = knownTitles.keys().next();
+    if (oldest.done) break;
+    knownTitles.delete(oldest.value);
+  }
+}
+
+function clearWakeTimer(): void {
+  if (!wakeTimer) return;
+  clearTimeout(wakeTimer);
+  wakeTimer = null;
+}
+
+function scheduleWake(now = Date.now()): void {
+  clearWakeTimer();
+  if (!enabled() || entries.size === 0) return;
+  let earliest = Infinity;
+  let anyLeased = false;
+  for (const entry of entries.values()) {
+    if (entry.leased) {
+      anyLeased = true;
+      if (entry.leasedUntil < earliest) earliest = entry.leasedUntil;
+      continue;
+    }
+    const readyAt = Math.max(entry.notBefore, nextDispatchAt, cooldownUntil);
+    if (readyAt < earliest) earliest = readyAt;
+  }
+  if (!Number.isFinite(earliest)) return;
+  if (anyLeased && earliest <= now) return;
+  const delayMs = Math.max(0, earliest - now);
+  if (delayMs === 0) return;
+  wakeTimer = setTimeout(() => {
+    wakeTimer = null;
+    if (hasDueChatTitleSync()) wakeBrowserWork('wake');
+  }, delayMs);
+  wakeTimer.unref?.();
 }
 
 export function initChatTitleSyncPath(userDataDir: string): void {
@@ -73,177 +150,382 @@ export function initChatTitleSyncPath(userDataDir: string): void {
 
 export async function loadChatTitleSync(): Promise<void> {
   entries.clear();
-  driftGuards.clear();
+  settled.clear();
+  knownTitles.clear();
+  clearWakeTimer();
+  nextDispatchAt = 0;
+  cooldownUntil = 0;
   if (!filePath) return;
+  const now = Date.now();
   try {
-    const parsed = JSON.parse(await fs.readFile(filePath, 'utf8')) as { entries?: unknown };
+    const parsed = JSON.parse(await fs.readFile(filePath, 'utf8')) as {
+      entries?: unknown;
+      knownTitles?: unknown;
+    };
+    if (parsed.knownTitles && typeof parsed.knownTitles === 'object' && !Array.isArray(parsed.knownTitles)) {
+      for (const [rawId, rawTitle] of Object.entries(parsed.knownTitles as Record<string, unknown>)) {
+        const id = cleanId(rawId);
+        const title = cleanSyncedChatTitle(rawTitle);
+        if (id && title) rememberKnownTitle(id, title);
+      }
+    }
     for (const raw of Array.isArray(parsed.entries) ? parsed.entries : []) {
       const value = raw as Partial<Entry>;
       const id = cleanId(value.conversationId);
       const title = cleanSyncedChatTitle(value.title);
       if (!id || !title) continue;
-      // Leases never outlive the process that issued them.
-      entries.set(id, { conversationId: id, title, queuedAt: nonNeg(value.queuedAt), attempts: nonNeg(value.attempts), notBefore: 0, leased: false });
+      const queuedAt = nonNegative(value.queuedAt, now);
+      const reason: ChatTitleSyncReason =
+        value.reason === 'rebind' || value.reason === 'drift-repair' ? value.reason : 'manual-rename';
+      const expectedRemoteTitle = cleanSyncedChatTitle(value.expectedRemoteTitle) || undefined;
+      entries.set(id, {
+        conversationId: id,
+        title,
+        reason,
+        ...(expectedRemoteTitle ? { expectedRemoteTitle } : {}),
+        queuedAt,
+        attempts: nonNegative(value.attempts),
+        notBefore: nonNegative(value.notBefore),
+        // After a restart no browser pass holds a lease any more; try on next wake.
+        leased: false,
+        leasedUntil: 0
+      });
     }
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') logWarn(`Chat title sync queue unreadable: ${(error as Error).message}`);
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      logWarn(`Chat title sync queue unreadable: ${(error as Error).message}`);
+    }
   }
+  scheduleWake(now);
 }
 
 function persist(): void {
-  if (!filePath || pending) return;
+  if (!filePath) return;
   pending = true;
   writing = writing.then(async () => {
+    if (!pending || !filePath) return;
     pending = false;
-    const temporary = `${filePath}.tmp`;
-    const saved = [...entries.values()].map(({ notBefore: _nb, leased: _l, ...entry }) => entry);
+    const payload = {
+      entries: [...entries.values()].map(entry => ({
+        conversationId: entry.conversationId,
+        title: entry.title,
+        reason: entry.reason,
+        ...(entry.expectedRemoteTitle ? { expectedRemoteTitle: entry.expectedRemoteTitle } : {}),
+        queuedAt: entry.queuedAt,
+        attempts: entry.attempts,
+        notBefore: entry.notBefore
+      })),
+      knownTitles: Object.fromEntries(knownTitles)
+    };
     try {
       await fs.mkdir(path.dirname(filePath), { recursive: true });
-      await fs.writeFile(temporary, JSON.stringify({ version: 1, entries: saved }), 'utf8');
-      await fs.rename(temporary, filePath);
+      const tmp = `${filePath}.${process.pid}.tmp`;
+      await fs.writeFile(tmp, JSON.stringify(payload), 'utf8');
+      await fs.rename(tmp, filePath);
     } catch (error) {
       logWarn(`Chat title sync queue not saved: ${(error as Error).message}`);
     }
   });
 }
 
-/** Resolves once every pending queue change so far has been written to disk. */
-export function chatTitleSyncWritten(): Promise<void> {
-  return writing;
+export async function chatTitleSyncWritten(): Promise<void> {
+  await writing;
 }
 
-/** Queues a manual chat title to push to ChatGPT Web; latest name replaces older pending names. */
 export function queueChatTitleSync(
-  conversationId: string,
+  conversationId: string | null | undefined,
   title: string,
-  options: { reason?: ChatTitleSyncReason; now?: number } = {}
+  options: { reason?: ChatTitleSyncReason; expectedRemoteTitle?: string | null } = {}
 ): boolean {
+  if (!enabled()) return false;
   const id = cleanId(conversationId);
-  const cleanTitle = cleanSyncedChatTitle(title);
-  if (!id || !cleanTitle) return false;
-  const now = options.now ?? Date.now();
-  const reason = options.reason ?? 'manual-rename';
+  const clean = cleanSyncedChatTitle(title);
+  if (!id || !clean) return false;
+  const reason: ChatTitleSyncReason = options.reason ?? 'manual-rename';
+  const providedExpected = cleanSyncedChatTitle(options.expectedRemoteTitle);
+  const now = Date.now();
   const existing = entries.get(id);
-  if (!existing && entries.size >= MAX_ENTRIES) {
-    logWarn(`chat title sync: queue full (${MAX_ENTRIES}); skipped ${id}`);
+  if (!existing && entries.size >= CHAT_TITLE_SYNC_MAX_ENTRIES) {
+    logWarn(`chat title sync: dropped ${id} (queue-full:${CHAT_TITLE_SYNC_MAX_ENTRIES})`);
     return false;
   }
+  if (reason === 'manual-rename') {
+    settled.delete(id);
+    if (providedExpected && !knownTitles.has(id)) rememberKnownTitle(id, providedExpected);
+  } else if (reason === 'drift-repair' && providedExpected) {
+    rememberKnownTitle(id, providedExpected);
+  }
+  const expectedRemoteTitle = reason === 'rebind'
+    ? undefined
+    : (knownTitles.get(id) ?? existing?.expectedRemoteTitle ?? (providedExpected || undefined));
   entries.set(id, {
     conversationId: id,
-    title: cleanTitle,
-    queuedAt: existing ? existing.queuedAt : now,
+    title: clean,
+    reason,
+    ...(expectedRemoteTitle ? { expectedRemoteTitle } : {}),
+    queuedAt: now,
     attempts: 0,
-    notBefore: existing?.leased ? existing.notBefore : 0,
-    leased: existing?.leased === true
+    notBefore: 0,
+    leased: existing?.leased ?? false,
+    leasedUntil: existing?.leasedUntil ?? 0
   });
-  const previousGuard = driftGuards.get(id);
-  const repairs = reason === 'drift-repair' && previousGuard?.title === cleanTitle ? previousGuard.repairs : 0;
-  setGuard(id, cleanTitle, now + DRIFT_GUARD_MS, repairs);
-  logInfo(`chat title sync: queued ${id} (${reason})`);
   persist();
-  wakeBrowserWork('wake');
+  logInfo(`chat title sync: queued ${id} (${reason})`);
+  if (nextDispatchAt <= now && cooldownUntil <= now && !existing?.leased) {
+    wakeBrowserWork('wake');
+  } else {
+    scheduleWake(now);
+  }
   return true;
 }
 
-/** Drops any pending manual-title sync when the user clears the manual name or removes the chat. */
-export function cancelChatTitleSync(conversationId: string | null | undefined): void {
+export function cancelChatTitleSync(
+  conversationId: string | null | undefined,
+  reason = 'cancelled'
+): boolean {
   const id = cleanId(conversationId);
-  if (!id) return;
-  driftGuards.delete(id);
-  if (!entries.delete(id)) return;
-  logInfo(`chat title sync: cancelled pending sync for ${id}`);
+  if (!id) return false;
+  settled.delete(id);
+  if (!entries.delete(id)) return false;
   persist();
+  scheduleWake();
+  logInfo(`chat title sync: dropped ${id} (${reason})`);
+  return true;
 }
 
-/** Re-queues the manual title a bounded number of times if ChatGPT auto-titling overwrites it. */
+export function cancelAllChatTitleSync(reason = 'setting-disabled'): number {
+  if (entries.size === 0 && settled.size === 0) return 0;
+  const ids = [...entries.keys()];
+  entries.clear();
+  settled.clear();
+  clearWakeTimer();
+  persist();
+  for (const id of ids) {
+    logInfo(`chat title sync: dropped ${id} (${reason})`);
+  }
+  return ids.length;
+}
+
+/**
+ * Reconciles an observed ChatGPT Web provider title against any pending manual title push:
+ * - Newer remote edits detected while a sync is queued drop the pending push rather than overwriting Web.
+ * - Shortly after Compact & Resume (`rebind`), bounded async `gen_title` drift can still re-queue the
+ *   user's carried manual name unless a later Web change diverges from the expected title.
+ */
 export function noteProviderChatTitle(
   conversationId: string | null | undefined,
   observedTitle: string,
-  manualTitle: string,
-  now = Date.now()
+  manualTitle?: string
 ): boolean {
   const id = cleanId(conversationId);
-  const observed = cleanSyncedChatTitle(observedTitle);
-  const expected = cleanSyncedChatTitle(manualTitle);
-  if (!id || !observed || !expected || observed === expected) return false;
-  const guard = driftGuards.get(id);
-  if (!guard || guard.title !== expected || guard.until <= now || guard.repairs >= MAX_DRIFT_REPAIRS) return false;
-  const pendingEntry = entries.get(id);
-  if (pendingEntry && pendingEntry.title === expected && !pendingEntry.leased) return false;
-  setGuard(id, expected, Math.max(guard.until, now + DRIFT_GUARD_MS), guard.repairs + 1);
-  logInfo(`chat title sync: ChatGPT title drifted for ${id}; re-queuing manual title`);
-  return queueChatTitleSync(id, expected, { reason: 'drift-repair', now });
+  const observedClean = cleanSyncedChatTitle(observedTitle);
+  const manualClean = cleanSyncedChatTitle(manualTitle);
+  if (!id || !observedClean) return false;
+  rememberKnownTitle(id, observedClean);
+  if (!enabled() || !manualClean) return false;
+
+  const existing = entries.get(id);
+  if (existing) {
+    if (observedClean === existing.title) return false;
+    if (existing.expectedRemoteTitle && observedClean !== existing.expectedRemoteTitle) {
+      entries.delete(id);
+      settled.delete(id);
+      persist();
+      scheduleWake();
+      logInfo(`chat title sync: dropped ${id} (newer-remote-title)`);
+      return false;
+    }
+    if (existing.reason === 'rebind' && !existing.expectedRemoteTitle) {
+      existing.expectedRemoteTitle = observedClean;
+      persist();
+    }
+    return false;
+  }
+
+  if (observedClean === manualClean) return false;
+  const prior = settled.get(id);
+  const now = Date.now();
+  if (!prior || prior.manualTitle !== manualClean || now > prior.expiresAt || prior.repairs >= MAX_DRIFT_REPAIRS) {
+    if (prior && (now > prior.expiresAt || prior.repairs >= MAX_DRIFT_REPAIRS)) settled.delete(id);
+    return false;
+  }
+  prior.repairs += 1;
+  return queueChatTitleSync(id, manualClean, { reason: 'drift-repair', expectedRemoteTitle: observedClean });
 }
 
-function nextDueEntry(now: number): { entry: Entry | null; dropped: boolean } {
-  let dropped = false;
-  for (const entry of entries.values()) {
-    if (now - entry.queuedAt > MAX_WAIT_MS) {
-      entries.delete(entry.conversationId);
-      logWarn(`chat title sync: gave up on ${entry.conversationId} after a week`);
-      dropped = true;
-      continue;
+function pruneExpired(now: number): boolean {
+  let dirty = false;
+  for (const [id, entry] of entries) {
+    if (now - entry.queuedAt > CHAT_TITLE_SYNC_MAX_WAIT_MS) {
+      entries.delete(id);
+      settled.delete(id);
+      dirty = true;
+      logWarn(`chat title sync: dropped ${entry.conversationId} (expired)`);
+    } else if (entry.leased && now >= entry.leasedUntil) {
+      entry.leased = false;
+      entry.leasedUntil = 0;
     }
-    if (entry.notBefore <= now) return { entry, dropped };
   }
-  return { entry: null, dropped };
+  for (const [id, prior] of settled) {
+    if (now > prior.expiresAt) settled.delete(id);
+  }
+  return dirty;
 }
 
 export function hasDueChatTitleSync(now = Date.now()): boolean {
-  const { entry, dropped } = nextDueEntry(now);
-  if (dropped) persist();
-  return entry !== null;
+  if (pruneExpired(now)) persist();
+  if (!enabled()) return false;
+  if (now < nextDispatchAt || now < cooldownUntil) return false;
+  for (const entry of entries.values()) {
+    if (entry.leased) return false;
+  }
+  for (const entry of entries.values()) {
+    if (entry.notBefore <= now) return true;
+  }
+  return false;
 }
 
-/** Leases one due title sync job to the extension; returns null when none are due. */
 export function nextChatTitleSync(now = Date.now()): ChatTitleSyncJob | null {
-  const { entry, dropped } = nextDueEntry(now);
-  if (dropped) persist();
-  if (!entry) return null;
-  entry.notBefore = now + CHAT_TITLE_SYNC_LEASE_MS;
-  entry.leased = true;
-  return { conversationId: entry.conversationId, title: entry.title };
+  if (pruneExpired(now)) persist();
+  if (!enabled()) return null;
+  if (now < nextDispatchAt || now < cooldownUntil) return null;
+  for (const entry of entries.values()) {
+    if (entry.leased) return null;
+  }
+  for (const entry of entries.values()) {
+    if (entry.notBefore > now) continue;
+    entry.leased = true;
+    entry.leasedUntil = now + CHAT_TITLE_SYNC_LEASE_MS;
+    logInfo(`chat title sync: leased ${entry.conversationId} (${entry.reason})`);
+    return {
+      conversationId: entry.conversationId,
+      title: entry.title,
+      ...(entry.expectedRemoteTitle ? { expectedRemoteTitle: entry.expectedRemoteTitle } : {})
+    };
+  }
+  return null;
 }
 
-/** Records the extension's result for one leased title sync job. */
 export function settleChatTitleSync(
   conversationId: string,
   title: string,
   outcome: ChatTitleSyncOutcome,
-  now = Date.now()
-): void {
+  details: { status?: number; retryAfterMs?: number; remoteTitle?: string; alreadyMatched?: boolean } = {}
+): boolean {
   const id = cleanId(conversationId);
-  const reportedTitle = cleanSyncedChatTitle(title);
-  const entry = id && reportedTitle ? entries.get(id) : undefined;
-  if (!entry) return;
-  entry.leased = false;
-  // A newer rename superseded the leased title while the browser was applying the older one.
-  if (entry.title !== reportedTitle) {
-    entry.notBefore = 0;
-    entry.attempts = 0;
-    persist();
-    wakeBrowserWork('wake');
-    return;
+  const clean = cleanSyncedChatTitle(title);
+  if (!id || !clean) return false;
+  const entry = entries.get(id);
+  if (!entry) return false;
+
+  const now = Date.now();
+  if (outcome !== 'deferred') {
+    nextDispatchAt = Math.max(nextDispatchAt, now + CHAT_TITLE_SYNC_MIN_INTERVAL_MS);
   }
-  if (outcome === 'deferred') {
-    entry.notBefore = 0;
-    return;
-  }
+
   if (outcome === 'synced') {
-    entries.delete(id!);
-    const guard = driftGuards.get(id!);
-    setGuard(id!, entry.title, Math.max(guard?.until ?? 0, now + DRIFT_GUARD_MS), guard?.title === entry.title ? guard.repairs : 0);
-    logInfo(`chat title sync: synced ${id}`);
-  } else if (++entry.attempts >= CHAT_TITLE_SYNC_MAX_ATTEMPTS) {
-    entries.delete(id!);
-    logWarn(`chat title sync: gave up on ${id} after ${entry.attempts} attempts`);
+    rememberKnownTitle(id, clean);
+  } else if (outcome === 'conflict') {
+    const cleanRemote = cleanSyncedChatTitle(details.remoteTitle);
+    if (cleanRemote) rememberKnownTitle(id, cleanRemote);
+  }
+
+  if (entry.title !== clean) {
+    // A newer manual title was queued while this request was in flight.
+    entry.leased = false;
+    entry.leasedUntil = 0;
+    if (outcome === 'synced') entry.expectedRemoteTitle = clean;
+    if (outcome === 'conflict') {
+      const cleanRemote = cleanSyncedChatTitle(details.remoteTitle);
+      if (cleanRemote) entry.expectedRemoteTitle = cleanRemote;
+    }
+    if (outcome === 'failed' && details.status === 429) {
+      const waitMs = clampRateLimitMs(details.retryAfterMs);
+      cooldownUntil = Math.max(cooldownUntil, now + waitMs);
+    }
+    persist();
+    scheduleWake(now);
+    if (outcome === 'synced') {
+      logInfo(`chat title sync: sent ${id} (${details.alreadyMatched ? 'already-matched' : 'patched'})`);
+    } else if (outcome === 'deferred') {
+      logInfo(`chat title sync: deferred ${id} (no active ChatGPT tab)`);
+    } else if (outcome === 'conflict') {
+      logInfo(`chat title sync: dropped ${id} (newer-remote-title, superseded)`);
+    } else {
+      logWarn(`chat title sync: failed ${id} (superseded${details.status ? `, status=${details.status}` : ''})`);
+    }
+    return true;
+  }
+
+  entry.leased = false;
+  entry.leasedUntil = 0;
+
+  if (outcome === 'deferred') {
+    logInfo(`chat title sync: deferred ${id} (no active ChatGPT tab)`);
+    scheduleWake(now);
+    return true;
+  }
+
+  if (outcome === 'synced') {
+    const keepSettledRebind = entry.reason === 'rebind' || entry.reason === 'drift-repair';
+    const previousSettled = settled.get(id);
+    entries.delete(id);
+    if (keepSettledRebind) {
+      settled.set(id, {
+        manualTitle: entry.title,
+        expiresAt: previousSettled?.expiresAt ?? now + DRIFT_REPAIR_WINDOW_MS,
+        repairs: previousSettled?.repairs ?? 0
+      });
+    } else {
+      settled.delete(id);
+    }
+    logInfo(`chat title sync: sent ${id} (${details.alreadyMatched ? 'already-matched' : 'patched'})`);
+    persist();
+    scheduleWake(now);
+    return true;
+  }
+
+  if (outcome === 'conflict') {
+    entries.delete(id);
+    settled.delete(id);
+    logInfo(`chat title sync: dropped ${id} (newer-remote-title)`);
+    persist();
+    scheduleWake(now);
+    return true;
+  }
+
+  entry.attempts += 1;
+  const backoffMs = CHAT_TITLE_SYNC_RETRY_BASE_MS * 2 ** (entry.attempts - 1);
+  if (details.status === 429) {
+    const waitMs = clampRateLimitMs(details.retryAfterMs);
+    cooldownUntil = Math.max(cooldownUntil, now + waitMs);
+  }
+  const effectiveWaitMs = Math.max(backoffMs, Math.max(0, cooldownUntil - now));
+  const statusPart = details.status ? `, status=${details.status}` : '';
+  if (entry.attempts >= CHAT_TITLE_SYNC_MAX_ATTEMPTS) {
+    entries.delete(id);
+    settled.delete(id);
+    logWarn(`chat title sync: failed ${id} (attempt ${entry.attempts}/${CHAT_TITLE_SYNC_MAX_ATTEMPTS}${statusPart})`);
+    logWarn(`chat title sync: dropped ${id} (max-attempts:${entry.attempts})`);
   } else {
-    entry.notBefore = now + FIRST_BACKOFF_MS * 2 ** (entry.attempts - 1);
+    entry.notBefore = now + backoffMs;
+    logWarn(
+      `chat title sync: failed ${id} (attempt ${entry.attempts}/${CHAT_TITLE_SYNC_MAX_ATTEMPTS}${statusPart}, retry=${Math.round(effectiveWaitMs / 1000)}s)`
+    );
   }
   persist();
+  scheduleWake(now);
+  return true;
 }
 
+/** Test seam: forgets queued jobs without touching disk. */
 export function resetChatTitleSyncForTests(): void {
+  clearWakeTimer();
   entries.clear();
-  driftGuards.clear();
+  settled.clear();
+  knownTitles.clear();
+  nextDispatchAt = 0;
+  cooldownUntil = 0;
+  pending = false;
+  writing = Promise.resolve();
 }

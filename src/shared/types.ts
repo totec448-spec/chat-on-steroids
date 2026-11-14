@@ -280,6 +280,8 @@ export interface SessionSettings {
   limitTokens: number;
   /** Size of the store for recorded images and long texts, in GiB (#1406). Missing means 2. */
   storageLimitGiB?: RecordingStorageLimitGiB;
+  /** Opt-in: push manual chat titles renamed here (or carried across Compact & Resume) to ChatGPT Web. Off by default. */
+  syncManualChatTitles?: boolean;
 }
 
 /**

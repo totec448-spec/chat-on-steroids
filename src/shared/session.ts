@@ -677,7 +677,9 @@ export interface SessionSummary {
    * While the user's own name is shown (`titleSource: 'manual'`), the title the app would show
    * otherwise, kept current, so clearing the name brings back ChatGPT's present title (#1107).
    */
-  autoTitle?: { title: string; source: 'fallback' | 'provider' };
+  autoTitle?: { title: string; source: 'fallback' | 'provider'; at?: number };
+  /** Epoch milliseconds when the current manual title was set here. */
+  manualTitleAt?: number;
   /** Latest proven native picker selection; scoped to its frontend, never worker creation intent. */
   selectedModel?: { conversationId: string; model: string; observedAt: number; reasoningEffort?: ReasoningEffort };
   /** Explicit local project; durable across frontend conversation replacement. */

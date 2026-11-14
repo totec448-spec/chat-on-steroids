@@ -14292,16 +14292,35 @@
    * Sends one authenticated PATCH against a ChatGPT conversation on behalf of the signed-in
    * account (shared between reversible worker archiving and manual title synchronization).
    */
-  async function patchChatgptConversation(conversationId, patch) {
-    const id = String(conversationId || '').toLowerCase();
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) return false;
+  async function chatgptApiHeaders() {
     const signedIn = await fetch(`${location.origin}/api/auth/session`, { credentials: 'include' });
     const session = signedIn.ok ? await signedIn.json() : null;
     const token = typeof session?.accessToken === 'string' ? session.accessToken : '';
-    if (!token) return false;
+    if (!token) return null;
     const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
     // A workspace chat belongs to that workspace's account, which ChatGPT names in this header.
     if (typeof session.account?.id === 'string' && session.account.id) headers['ChatGPT-Account-Id'] = session.account.id;
+    return headers;
+  }
+
+  function parseRetryAfterMs(headers) {
+    const raw = headers?.get?.('Retry-After');
+    if (typeof raw !== 'string' || !raw.trim()) return undefined;
+    const seconds = Number(raw.trim());
+    if (Number.isFinite(seconds) && seconds > 0) return Math.round(seconds * 1000);
+    const at = Date.parse(raw);
+    if (Number.isFinite(at)) {
+      const delta = at - Date.now();
+      if (delta > 0) return delta;
+    }
+    return undefined;
+  }
+
+  async function patchChatgptConversation(conversationId, patch) {
+    const id = String(conversationId || '').toLowerCase();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) return false;
+    const headers = await chatgptApiHeaders();
+    if (!headers) return false;
     const updated = await fetch(`${location.origin}/backend-api/conversation/${id}`, {
       method: 'PATCH', credentials: 'include', headers, body: JSON.stringify(patch)
     });
@@ -14361,13 +14380,41 @@
     }
   }
 
-  /** Applies the app's manual session title onto that exact ChatGPT conversation. */
-  async function renameChatgptChat(conversationId, title) {
+  /** Applies the app's manual session title onto that exact ChatGPT conversation unless Web holds a newer title. */
+  async function renameChatgptChat(conversationId, title, expectedRemoteTitle) {
+    const id = String(conversationId || '').trim().toLowerCase();
     const clean = cleanChatTitle(title);
-    if (!clean) return 'failed';
-    if (!(await patchChatgptConversation(conversationId, { title: clean }))) return 'failed';
-    applySyncedChatTitleUi(conversationId, clean);
-    return 'synced';
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id) || !clean) {
+      return { outcome: 'failed' };
+    }
+    const headers = await chatgptApiHeaders();
+    if (!headers) return { outcome: 'failed' };
+    const expected = cleanChatTitle(expectedRemoteTitle);
+    const current = await fetch(`${location.origin}/backend-api/conversation/${id}`, {
+      method: 'GET', credentials: 'include', headers
+    });
+    if (!current.ok) {
+      const retryAfterMs = current.status === 429 ? parseRetryAfterMs(current.headers) : undefined;
+      return { outcome: 'failed', status: current.status, ...(retryAfterMs ? { retryAfterMs } : {}) };
+    }
+    const remote = await current.json().catch(() => null);
+    const remoteTitle = cleanChatTitle(remote?.title);
+    if (remoteTitle === clean) {
+      applySyncedChatTitleUi(id, clean);
+      return { outcome: 'synced', alreadyMatched: true, remoteTitle };
+    }
+    if (expected && remoteTitle && remoteTitle !== expected) {
+      return { outcome: 'conflict', remoteTitle };
+    }
+    const updated = await fetch(`${location.origin}/backend-api/conversation/${id}`, {
+      method: 'PATCH', credentials: 'include', headers, body: JSON.stringify({ title: clean })
+    });
+    if (!updated.ok) {
+      const retryAfterMs = updated.status === 429 ? parseRetryAfterMs(updated.headers) : undefined;
+      return { outcome: 'failed', status: updated.status, ...(retryAfterMs ? { retryAfterMs } : {}) };
+    }
+    applySyncedChatTitleUi(id, clean);
+    return { outcome: 'synced', remoteTitle: clean };
   }
 
   async function createChatgptProject(request) {
@@ -14689,7 +14736,9 @@
         return true;
       }
       if (message.type === 'clf-rename-chat') {
-        void renameChatgptChat(message.conversationId, message.title).then(outcome => sendResponse({ outcome })).catch(() => sendResponse({ outcome: 'failed' }));
+        void renameChatgptChat(message.conversationId, message.title, message.expectedRemoteTitle)
+          .then(result => sendResponse(result))
+          .catch(() => sendResponse({ outcome: 'failed' }));
         return true;
       }
       if (message.type === 'clf-apply-chat-title') {

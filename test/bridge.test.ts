@@ -19340,29 +19340,65 @@ describe('why a command ran out of time', () => {
 });
 
 describe('syncing manual chat titles to ChatGPT Web', () => {
-  it('signals due title syncs on /status, leases one job at a time, and settles outcomes', async () => {
+  it('signals due title syncs on /status, leases one job at a time, and settles synced/deferred/conflict outcomes', async () => {
     await pair();
+    const config = await import('../src/main/config.js');
     const { queueChatTitleSync, resetChatTitleSyncForTests } = await import('../src/main/chat-title-sync.js');
+    const { createSession, getSession, renameSession } = await import('../src/main/session/store.js');
+    const before = config.getConfig();
     resetChatTitleSyncForTests();
-    const chat = randomUUID();
+    await config.saveConfig({ ...before, sessions: { ...before.sessions, syncManualChatTitles: true } });
+    try {
+      const chat = randomUUID();
 
-    expect((await request('POST', '/status', { body: { openConversations: [] } })).body.chatTitlePending).toBeUndefined();
-    expect((await request('POST', '/chat-title/next', { body: {} })).body).toEqual({ conversationId: null, title: null });
+      expect((await request('POST', '/status', { body: { openConversations: [] } })).body.chatTitlePending).toBeUndefined();
+      expect((await request('POST', '/chat-title/next', { body: {} })).body).toEqual({ conversationId: null, title: null });
 
-    queueChatTitleSync(chat, '  My\n   Work  ');
-    expect((await request('POST', '/status', { body: { openConversations: [] } })).body.chatTitlePending).toBe(true);
-    expect((await request('POST', '/chat-title/next', { body: {} })).body).toEqual({ conversationId: chat, title: 'My Work' });
-    // Already leased.
-    expect((await request('POST', '/chat-title/next', { body: {} })).body).toEqual({ conversationId: null, title: null });
+      queueChatTitleSync(chat, '  My\n   Work  ', { expectedRemoteTitle: 'Old Title' });
+      expect((await request('POST', '/status', { body: { openConversations: [] } })).body.chatTitlePending).toBe(true);
+      expect((await request('POST', '/chat-title/next', { body: {} })).body).toEqual({
+        conversationId: chat,
+        title: 'My Work',
+        expectedRemoteTitle: 'Old Title'
+      });
+      // Already leased.
+      expect((await request('POST', '/chat-title/next', { body: {} })).body).toEqual({ conversationId: null, title: null });
 
-    expect((await request('POST', '/chat-title/result', { body: { conversationId: chat, title: 'My Work', outcome: 'bogus' } })).status).toBe(400);
-    expect((await request('POST', '/chat-title/result', { body: { conversationId: 'not-a-chat', title: 'My Work', outcome: 'synced' } })).status).toBe(400);
-    expect((await request('POST', '/chat-title/result', { body: { conversationId: chat, title: '   ', outcome: 'synced' } })).status).toBe(400);
+      expect((await request('POST', '/chat-title/result', { body: { conversationId: chat, title: 'My Work', outcome: 'bogus' } })).status).toBe(400);
+      expect((await request('POST', '/chat-title/result', { body: { conversationId: 'not-a-chat', title: 'My Work', outcome: 'synced' } })).status).toBe(400);
+      expect((await request('POST', '/chat-title/result', { body: { conversationId: chat, title: '   ', outcome: 'synced' } })).status).toBe(400);
 
-    expect((await request('POST', '/chat-title/result', { body: { conversationId: chat, title: 'My Work', outcome: 'deferred' } })).body).toEqual({ ok: true });
-    expect((await request('POST', '/chat-title/next', { body: {} })).body).toEqual({ conversationId: chat, title: 'My Work' });
-    expect((await request('POST', '/chat-title/result', { body: { conversationId: chat, title: 'My Work', outcome: 'synced' } })).body).toEqual({ ok: true });
-    expect((await request('POST', '/chat-title/next', { body: {} })).body).toEqual({ conversationId: null, title: null });
-    expect((await request('POST', '/status', { body: { openConversations: [] } })).body.chatTitlePending).toBeUndefined();
+      expect((await request('POST', '/chat-title/result', { body: { conversationId: chat, title: 'My Work', outcome: 'deferred' } })).body).toEqual({ ok: true });
+      expect((await request('POST', '/chat-title/next', { body: {} })).body).toEqual({
+        conversationId: chat,
+        title: 'My Work',
+        expectedRemoteTitle: 'Old Title'
+      });
+      expect((await request('POST', '/chat-title/result', { body: { conversationId: chat, title: 'My Work', outcome: 'synced' } })).body).toEqual({ ok: true });
+      expect((await request('POST', '/chat-title/next', { body: {} })).body).toEqual({ conversationId: null, title: null });
+      expect((await request('POST', '/status', { body: { openConversations: [] } })).body.chatTitlePending).toBeUndefined();
+
+      // Conflict drops pending push and preserves the newer ChatGPT Web title in session autoTitle.
+      resetChatTitleSyncForTests();
+      const chat2 = randomUUID();
+      const session = await createSession({ conversationId: chat2, title: 'Before CoS Rename', titleSource: 'provider' });
+      await renameSession(session.id, 'CoS Rename', 'manual');
+      expect((await request('POST', '/chat-title/next', { body: {} })).body).toEqual({
+        conversationId: chat2,
+        title: 'CoS Rename',
+        expectedRemoteTitle: 'Before CoS Rename'
+      });
+      expect((await request('POST', '/chat-title/result', {
+        body: { conversationId: chat2, title: 'CoS Rename', outcome: 'conflict', remoteTitle: 'Newer Web Title' }
+      })).body).toEqual({ ok: true });
+      expect((await request('POST', '/chat-title/next', { body: {} })).body).toEqual({ conversationId: null, title: null });
+      expect(await getSession(session.id)).toMatchObject({
+        title: 'CoS Rename',
+        autoTitle: { title: 'Newer Web Title', source: 'provider' }
+      });
+    } finally {
+      resetChatTitleSyncForTests();
+      await config.saveConfig(before);
+    }
   });
 });

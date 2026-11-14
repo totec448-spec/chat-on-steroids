@@ -25852,27 +25852,72 @@ describe('archiving a retired worker chat', () => {
 });
 
 describe('manual chat title sync from CoS', () => {
-  it('patches exactly that ChatGPT conversation title with normalized whitespace and rejects bad input', async () => {
+  it('checks GET first, skips PATCH on conflict/already-matched, reports 429 retryAfter, and patches matching conversations', async () => {
     live = await harness('https://chatgpt.com/');
     const chat = 'aaaaaaaa-1111-4222-8333-444444444444';
     const calls: Array<{ url: string; method: string; headers: Record<string, string>; body?: string }> = [];
+    let remoteTitle = 'Old Title';
     let patchStatus = 200;
+    let patchRetryAfter: string | null = null;
     (live.window as any).fetch = vi.fn(async (url: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}) => {
-      calls.push({ url: String(url), method: init.method ?? 'GET', headers: init.headers ?? {}, ...(init.body ? { body: init.body } : {}) });
-      if (String(url).endsWith('/api/auth/session')) return { ok: true, status: 200, json: async () => ({ accessToken: 'token-1', account: { id: 'account-1' } }) };
-      return { ok: patchStatus < 300, status: patchStatus, json: async () => ({ success: patchStatus < 300 }) };
+      const method = init.method ?? 'GET';
+      calls.push({ url: String(url), method, headers: init.headers ?? {}, ...(init.body ? { body: init.body } : {}) });
+      if (String(url).endsWith('/api/auth/session')) {
+        return { ok: true, status: 200, json: async () => ({ accessToken: 'token-1', account: { id: 'account-1' } }) };
+      }
+      if (method === 'GET') {
+        return { ok: true, status: 200, json: async () => ({ title: remoteTitle }) };
+      }
+      return {
+        ok: patchStatus < 300,
+        status: patchStatus,
+        headers: { get: (name: string) => name.toLowerCase() === 'retry-after' ? patchRetryAfter : null },
+        json: async () => ({ success: patchStatus < 300 })
+      };
     });
 
-    expect(await live.runtimeMessage({ type: 'clf-rename-chat', conversationId: chat.toUpperCase(), title: '  My\n   Work  ' })).toEqual({ outcome: 'synced' });
+    expect(await live.runtimeMessage({
+      type: 'clf-rename-chat',
+      conversationId: chat.toUpperCase(),
+      title: '  My\n   Work  ',
+      expectedRemoteTitle: 'Old Title'
+    })).toEqual({ outcome: 'synced', remoteTitle: 'My Work' });
     expect(calls).toEqual([
       { url: 'https://chatgpt.com/api/auth/session', method: 'GET', headers: {} },
+      { url: `https://chatgpt.com/backend-api/conversation/${chat}`, method: 'GET',
+        headers: { Authorization: 'Bearer token-1', 'Content-Type': 'application/json', 'ChatGPT-Account-Id': 'account-1' } },
       { url: `https://chatgpt.com/backend-api/conversation/${chat}`, method: 'PATCH',
         headers: { Authorization: 'Bearer token-1', 'Content-Type': 'application/json', 'ChatGPT-Account-Id': 'account-1' },
         body: JSON.stringify({ title: 'My Work' }) }
     ]);
 
+    // When ChatGPT Web already has a newer title different from expectedRemoteTitle, no PATCH runs.
+    calls.length = 0;
+    remoteTitle = 'Renamed Directly In Web';
+    expect(await live.runtimeMessage({
+      type: 'clf-rename-chat',
+      conversationId: chat,
+      title: 'My Work',
+      expectedRemoteTitle: 'Old Title'
+    })).toEqual({ outcome: 'conflict', remoteTitle: 'Renamed Directly In Web' });
+    expect(calls.some(call => call.method === 'PATCH')).toBe(false);
+
+    // When ChatGPT Web already holds the target title, no PATCH runs.
+    calls.length = 0;
+    remoteTitle = 'My Work';
+    expect(await live.runtimeMessage({
+      type: 'clf-rename-chat',
+      conversationId: chat,
+      title: 'My Work',
+      expectedRemoteTitle: 'Old Title'
+    })).toEqual({ outcome: 'synced', alreadyMatched: true, remoteTitle: 'My Work' });
+    expect(calls.some(call => call.method === 'PATCH')).toBe(false);
+
+    remoteTitle = 'Old Title';
     patchStatus = 429;
-    expect(await live.runtimeMessage({ type: 'clf-rename-chat', conversationId: chat, title: 'My Work' })).toEqual({ outcome: 'failed' });
+    patchRetryAfter = '15';
+    expect(await live.runtimeMessage({ type: 'clf-rename-chat', conversationId: chat, title: 'My Work' }))
+      .toEqual({ outcome: 'failed', status: 429, retryAfterMs: 15_000 });
     calls.length = 0;
     expect(await live.runtimeMessage({ type: 'clf-rename-chat', conversationId: '../conversations', title: 'My Work' })).toEqual({ outcome: 'failed' });
     expect(await live.runtimeMessage({ type: 'clf-rename-chat', conversationId: chat, title: '   ' })).toEqual({ outcome: 'failed' });
