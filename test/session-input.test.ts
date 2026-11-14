@@ -9,12 +9,13 @@ import {
   fileSilenceInput, deferSilenceInput, revokeSilenceInputs, pendingQueuedPickups, inputBeforeGoal, inputArgs, acknowledgeBrowserInput, cancelInput, claimBrowserInput, completeBrowserDecision, deliveryProof, enqueueInput, queuedInputOfferBlocker,
   failBrowserInput, listInputs, offerToolInput as offerToolInputBatch, acknowledgeToolInput, pendingBrowserInputs, requestBrowserDecision, resetInputForTests, configureInputDelivery,
   authorizeBrowserHelperRetry, pausedBrowserHelpers, hasEligibleToolInput, editQueuedInput, reorderQueuedInputs, setInputAutomation, authorizeBrowserInput, sessionInputPolicy, retryUnclaimedInput,
-  noteInputStartupError, fileRotationInput, failBranchInput, BRANCH_ERRORS, holdInputForSendCheck, ownUnsentTexts, noteInputHeld, withdrawOwnContinuesAfterStop
+  noteInputStartupError, fileRotationInput, failBranchInput, BRANCH_ERRORS, holdInputForSendCheck, ownUnsentTexts, noteInputHeld, withdrawOwnContinuesAfterStop, fileRotationContinueAfterStop
 } from '../src/main/session/input.js';
 import type { InputArgs, InputEntry } from '../src/main/session/input.js';
 import { editReplacement } from '../src/main/session/edits.js';
 import * as logger from '../src/main/logger.js';
 import { noteChatOrigin } from '../src/main/session/recorder.js';
+import { resetAutomaticRepliesForTests, takeAutomaticReply } from '../src/main/session/automatic-replies.js';
 import { stageInputAttachment } from '../src/main/session/input-attachments.js';
 import { listUsageSessions, turnHasMcpCall } from '../src/main/session/store.js';
 import { trackInFlight, emptyEvidence, type CallContext } from '../src/main/mcp/call-context.js';
@@ -861,6 +862,24 @@ describe('durable user input ownership', () => {
     const own = await enqueueInput(input({ text: 'Also check the tests' }));
     expect((await listInputs()).find(entry => entry.id === row!.id)).toMatchObject({ state: 'cancelled' });
     expect(own.state).toBe('queued');
+  });
+  // #2187 (Neinndall, 2026-11-14): a rotation prompt came back recorded as the person's own message, so the timeline
+  // labelled it "Steered active turn". The app's own send is marked automatic when it returns, like a Goal follow-up.
+  it.each([
+    ['into the running turn', async () => { binding.activeTurnId = 'plain-turn'; return fileRotationInput(sessionId, 'plain-turn'); }],
+    ['after a Stop', async () => { binding.activeTurnId = null; return fileRotationContinueAfterStop(sessionId, 'stopped-turn'); }]
+  ] as const)('notes a rotation continue filed %s, so the recorder marks the returning message automatic', async (_name, file) => {
+    resetAutomaticRepliesForTests();
+    binding.model = 'gpt-5.6-sol';
+    binding.end = { kind: 'turn_start', outcome: '', turnId: 'plain-turn', time: 900 };
+    const row = await file();
+    expect(row).toMatchObject({ purpose: 'rotation' });
+    // ChatGPT stores inserted text Markdown-escaped; the same text in another chat, or a different text, is not it.
+    expect(takeAutomaticReply('another-chat', row!.text)).toBe(false);
+    expect(takeAutomaticReply(binding.conversationId, 'Continue with something else')).toBe(false);
+    expect(takeAutomaticReply(binding.conversationId, row!.text.split('(').join('\\(').split(')').join('\\)'))).toBe(true);
+    // Used up: the same text typed later is the person's.
+    expect(takeAutomaticReply(binding.conversationId, row!.text)).toBe(false);
   });
   it('files no rotation for a Pro turn or a blocked chat', async () => {
     binding.activeTurnId = 'plain-turn';
