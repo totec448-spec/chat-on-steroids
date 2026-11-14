@@ -3541,6 +3541,17 @@ var CLF_DOM = (() => {
               const reopened = retryButton !== button && key(retryButton, 'Enter') && await wait(openPicker, 1000);
               if (!stillCurrent()) return null;
               if (!reopened && !openPicker()) {
+                // A second Enter on a remounted trigger can change the selected
+                // effort without opening a portal, just like the first Enter.
+                const afterRetry = await read();
+                if (!stillCurrent()) return null;
+                const selectedRetry = afterRetry?.choices.find(choice => choice.bucket === afterRetry.currentBucket);
+                const retryChanged = selectedAfter && selectedRetry &&
+                  (afterEnter.version !== afterRetry.version || selectedAfter.id !== selectedRetry.id ||
+                    selectedAfter.effort !== selectedRetry.effort);
+                if (retryChanged || nativeBefore !== retryButton.getAttribute('data-selected-reasoning-effort')) {
+                  openingRefusal = 'changed'; return null;
+                }
                 retryButton.click();
                 if (!await wait(openPicker, 1500)) return null;
               }
