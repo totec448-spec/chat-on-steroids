@@ -5568,6 +5568,24 @@ function paintInputReceipt(row: HTMLElement, item: ReturnType<typeof timelineIte
   receipt.parentElement?.classList.toggle('has-input-receipt', !receipt.hidden);
 }
 
+/** Shows when one of your questions steered a running turn so its branch stays legible in history. */
+function paintSteerOrigin(row: HTMLElement, steered: boolean): void {
+  row.classList.toggle('is-steered', steered);
+  const box = row.querySelector<HTMLElement>('.said.is-user');
+  if (!box) return;
+  const existing = box.querySelector<HTMLElement>('.said-origin.is-steer');
+  if (!steered) {
+    existing?.remove();
+    return;
+  }
+  if (existing) return;
+  const origin = el('span', 'said-origin is-steer');
+  origin.append(icon('i-bolt'), el('span', '', () => t("Steered active turn")));
+  const anchor = box.querySelector('.message-attachments, .user-message-text, .message-edited, .message-reaction, .input-receipt');
+  if (anchor) box.insertBefore(origin, anchor);
+  else box.append(origin);
+}
+
 /** The exact outbox input retains preview bytes until optional history storage succeeds. */
 function retainedInputImages(event: Extract<SessionEvent, { kind: 'user_message' }>, sessionId: string | null): InputImage[] {
   if (!sessionId || !event.inputId) return [];
@@ -6878,7 +6896,8 @@ function paintDetail(followBottom = historyBefore === null): void {
   // Completed turns and the answer message that carries their copy/export actions.
   const anchors = answerAnchors(events);
   const looseAnchors = messageAnswerAnchors(events);
-  const workedSeconds = exchangeDurations(events);
+  const workedSegments = exchangeSegments(events);
+  const steeredAsks = steeredUserMessages(events);
   const workers = sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null);
   const items = timelineItems(shown);
   const latestCompaction = items.filter(item => item.kind === 'compaction').at(-1);
@@ -6925,6 +6944,7 @@ function paintDetail(followBottom = historyBefore === null): void {
         paintMessageReaction(cached.row.querySelector<HTMLElement>('.said.is-user')!, item.event.reaction);
       }
       paintInputReceipt(cached.row, item);
+      paintSteerOrigin(cached.row, item.kind === 'event' && item.event.kind === 'user_message' && steeredAsks.has(item.event.seq));
       if (item.kind === 'event') rowEvents.set(cached.row, item.event);
       timelineRows.push(cached.row);
       continue;
@@ -6956,13 +6976,14 @@ function paintDetail(followBottom = historyBefore === null): void {
     row.dataset.workerSessions = workerIds;
     if (item.kind === 'event' && item.event.kind === 'user_message') row.dataset.askedAt = String(item.event.time);
     paintInputReceipt(row, item);
+    paintSteerOrigin(row, item.kind === 'event' && item.event.kind === 'user_message' && steeredAsks.has(item.event.seq));
     if (item.kind === 'event') rowEvents.set(row, item.event);
     rowCache.set(key, { sig, row });
     timelineRows.push(row);
   }
   appendRetiredInputs(Infinity);
   for (const key of rowCache.keys()) if (!keep.has(key)) rowCache.delete(key);
-  placeTurnLines(timelineRows, workedSeconds);
+  placeTurnLines(timelineRows, workedSegments);
   reconcileChildren($('timeline'), groupImageRows(renderRounds(timelineRows, tracesFor === selectedId ? traces : {}, turnWorking,
     turnWorking ? openTurnId(events) : null, selectedId, toolGroups, sayRows, true)));
   // Rounds that arrive after this paint enter with a fade; the chat as it opened does not.
@@ -7681,32 +7702,142 @@ function turnLine(className: string): HTMLElement {
 }
 const workedLines = new Map<string, HTMLElement>();
 
-/**
- * How long each of your messages was worked on, keyed by the message's time: from it to the last
- * end the page reported before your next message (a completed turn end or ChatGPT's final answer,
- * whichever came later). Anchored to your messages rather than ChatGPT's turn ids, which a page
- * can report empty or leave off the rows that did the work.
- */
-function exchangeDurations(list: readonly SessionEvent[]): Map<number, number> {
-  const asks = list.filter(event => event.kind === 'user_message').map(event => event.time).sort((a, b) => a - b);
-  const durations = new Map<number, number>();
-  asks.forEach((asked, index) => {
-    const next = asks[index + 1] ?? Number.POSITIVE_INFINITY;
-    let ended = -1;
-    for (const event of list) {
-      if (event.time < asked || event.time >= next) continue;
-      if ((event.kind === 'turn_end' && event.outcome === 'completed') || (event.kind === 'assistant_message' && event.final)) {
-        ended = Math.max(ended, event.time);
-      }
-    }
-    if (ended >= asked) durations.set(asked, Math.floor((ended - asked) / 1000));
-  });
-  return durations;
+interface ExchangeSegment {
+  seconds: number;
+  steered: boolean;
 }
 
-function workedLine(asked: number, seconds: number): HTMLElement {
+/**
+ * Sequences of `user_message` events that steered a running turn — either backed by a `turn_end`
+ * with `continued: true`, or observed arriving into the currently open turn before its end is logged.
+ */
+function steeredUserMessages(list: readonly SessionEvent[]): Set<number> {
+  const steered = new Set<number>();
+  const turnStartTimes = new Map<string, number>();
+  const turnOriginTimes = new Map<string, number>();
+  const endedTurns = new Set<string>();
+  const nextTurnStarts: number[] = [];
+  let latestClosedEnd = Number.NEGATIVE_INFINITY;
+  for (const event of list) {
+    if (event.turnId && event.kind !== 'turn_end') {
+      const seen = turnOriginTimes.get(event.turnId);
+      if (seen === undefined || event.time < seen) turnOriginTimes.set(event.turnId, event.time);
+    }
+    if (event.kind === 'turn_start') {
+      nextTurnStarts.push(event.time);
+      if (event.turnId) {
+        const prev = turnStartTimes.get(event.turnId);
+        if (prev === undefined || event.time < prev) turnStartTimes.set(event.turnId, event.time);
+      }
+    } else if (event.kind === 'turn_end') {
+      if (event.turnId) endedTurns.add(event.turnId);
+      if (event.continued !== true) latestClosedEnd = Math.max(latestClosedEnd, event.time);
+    }
+  }
+  nextTurnStarts.sort((a, b) => a - b);
+  const asks = list
+    .filter((event): event is Extract<SessionEvent, { kind: 'user_message' }> => event.kind === 'user_message')
+    .sort((a, b) => a.time - b.time || a.seq - b.seq);
+
+  for (const event of list) {
+    if (event.kind !== 'turn_end' || event.continued !== true) continue;
+    const tStart = event.turnId ? (turnStartTimes.get(event.turnId) ?? turnOriginTimes.get(event.turnId)) : undefined;
+    let prevClosed = Number.NEGATIVE_INFINITY;
+    for (const candidate of list) {
+      if (candidate.kind === 'turn_end' && candidate.continued !== true && candidate.time < event.time) {
+        prevClosed = Math.max(prevClosed, candidate.time);
+      }
+    }
+    const nextStart = nextTurnStarts.find(at => at > (tStart ?? event.time) && at >= event.time) ?? event.time;
+    const windowEnd = Math.max(event.time, nextStart);
+    const windowStart = Math.max(tStart ?? Number.NEGATIVE_INFINITY, prevClosed);
+    const candidates = asks.filter((ask, idx) => {
+      if (ask.automatic || ask.time > windowEnd || ask.time < windowStart) return false;
+      if (ask.time === windowStart && idx === 0) return false;
+      if (event.turnId && ask.turnId === event.turnId && idx === 0) return false;
+      if (idx > 0) return true;
+      return tStart !== undefined && list.some(prior =>
+        prior.turnId === event.turnId && prior.time < ask.time &&
+        (prior.kind === 'assistant_message' || prior.kind === 'tool_call' || prior.kind === 'page_tool' || prior.kind === 'progress')
+      );
+    });
+    const match = candidates.at(-1);
+    if (match) steered.add(match.seq);
+  }
+
+  const open = openTurnId(list);
+  if (open && !endedTurns.has(open)) {
+    const openStart = turnStartTimes.get(open);
+    if (openStart !== undefined) {
+      const asksAfterClosed = asks.filter(ask => ask.time > latestClosedEnd);
+      const lastAsk = asksAfterClosed.at(-1);
+      if (lastAsk && asksAfterClosed.length >= 2 && !lastAsk.automatic && lastAsk.turnId !== open && lastAsk.time > openStart) {
+        steered.add(lastAsk.seq);
+      }
+    }
+  }
+  return steered;
+}
+
+/**
+ * How long each of your messages was worked on, keyed by the message's time: from it to the last
+ * end the page reported before your next message (a completed turn end, a continued steer boundary,
+ * or ChatGPT's final answer, whichever came later). Anchored to your messages rather than ChatGPT's
+ * turn ids, which a page can report empty or leave off the rows that did the work.
+ */
+function exchangeSegments(list: readonly SessionEvent[]): Map<number, ExchangeSegment> {
+  const asks = list.filter(event => event.kind === 'user_message').map(event => event.time).sort((a, b) => a - b);
+  const turnStartTimes = new Map<string, number>();
+  for (const event of list) {
+    if (!event.turnId || event.kind === 'turn_end') continue;
+    const prev = turnStartTimes.get(event.turnId);
+    if (prev === undefined || (event.kind === 'turn_start' ? event.time <= prev : event.time < prev)) {
+      turnStartTimes.set(event.turnId, event.time);
+    }
+  }
+  const segments = new Map<number, ExchangeSegment>();
+  asks.forEach((asked, index) => {
+    const next = asks[index + 1] ?? Number.POSITIVE_INFINITY;
+    let endedCompletedOrFinal = -1;
+    let endedContinued = -1;
+    for (const event of list) {
+      if (event.kind === 'assistant_message' && event.final) {
+        const at = event.finalObservedAt ?? event.time;
+        if (at >= asked && at < next) endedCompletedOrFinal = Math.max(endedCompletedOrFinal, at);
+        continue;
+      }
+      if (event.kind !== 'turn_end') continue;
+      if (event.continued === true) {
+        const startAt = event.turnId ? turnStartTimes.get(event.turnId) : undefined;
+        const inWindow = event.time >= asked && event.time < next;
+        const rotatedRightAfterNext = !inWindow && event.time >= next && next < Number.POSITIVE_INFINITY &&
+          startAt !== undefined && startAt >= asked && startAt < next;
+        if (inWindow || rotatedRightAfterNext) {
+          endedContinued = Math.max(endedContinued, inWindow ? event.time : next);
+        }
+        continue;
+      }
+      if (event.outcome === 'completed' && event.time >= asked && event.time < next) {
+        endedCompletedOrFinal = Math.max(endedCompletedOrFinal, event.time);
+      }
+    }
+    const ended = Math.max(endedCompletedOrFinal, endedContinued);
+    if (ended >= asked) {
+      segments.set(asked, {
+        seconds: Math.floor((ended - asked) / 1000),
+        steered: endedContinued >= endedCompletedOrFinal && next < Number.POSITIVE_INFINITY
+      });
+    }
+  });
+  return segments;
+}
+
+function workedLine(asked: number, seconds: number, steered = false): HTMLElement {
   const line = workedLines.get(String(asked)) ?? turnLine('turn-worked');
-  ui(line.firstElementChild as HTMLElement, 'textContent', () => t("{0} for {1}{2}s", [t("Worked"), clockPrefix(seconds), seconds % 60]));
+  line.classList.toggle('is-steered', steered);
+  ui(line.firstElementChild as HTMLElement, 'textContent', () => steered
+    ? t("Worked for {0}{1}s · steered", [clockPrefix(seconds), seconds % 60])
+    : t("{0} for {1}{2}s", [t("Worked"), clockPrefix(seconds), seconds % 60]));
   workedLines.set(String(asked), line);
   return line;
 }
@@ -7716,7 +7847,7 @@ function workedLine(asked: number, seconds: number): HTMLElement {
  * live caption while the chat works, earlier ones how long they worked. A message still in the
  * outbox (or work with no message of yours on screen) has the live line parked after the outbox.
  */
-function placeTurnLines(rows: HTMLElement[], workedSeconds: ReadonlyMap<number, number>): void {
+function placeTurnLines(rows: HTMLElement[], workedSegments: ReadonlyMap<number, ExchangeSegment>): void {
   const status = deps.state()?.config.ui.developerMode ? null : stateLine();
   const working = status?.working === true;
   turnWorking = working;
@@ -7741,13 +7872,13 @@ function placeTurnLines(rows: HTMLElement[], workedSeconds: ReadonlyMap<number, 
     // An edit's earlier versions fold right under its question (#365); the turn's line follows them.
     const at = rows[index + 1]?.matches('.earlier-version') ? index + 2 : index + 1;
     if (latest && live && (!pending || runningBefore)) { rows.splice(at, 0, turnStatusLine); rows.push(turnNow); continue; }
-    const seconds = workedSeconds.get(asked);
-    if (latest && stopped && seconds === undefined && timelineReachesEnd()) {
+    const segment = workedSegments.get(asked);
+    if (latest && stopped && segment === undefined && timelineReachesEnd()) {
       ui(turnStoppedLine.firstElementChild as HTMLElement, 'textContent', () => stateLine().text);
       rows.splice(at, 0, turnStoppedLine); turnStoppedShown = true; continue;
     }
-    if (seconds === undefined || (latest && live)) continue;
-    rows.splice(at, 0, workedLine(asked, seconds)); used.add(String(asked));
+    if (segment === undefined || (latest && live)) continue;
+    rows.splice(at, 0, workedLine(asked, segment.seconds, segment.steered)); used.add(String(asked));
   }
   for (const key of workedLines.keys()) if (!used.has(key)) workedLines.delete(key);
   // A long turn pushes its question out of the loaded rows: every row left is that turn's work, so its

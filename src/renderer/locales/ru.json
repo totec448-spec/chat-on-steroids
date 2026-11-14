@@ -4170,5 +4170,7 @@
   "Safer saves over SSH": "Безопаснее сохранять по SSH",
   "If a save fails, your original file stays as it was.": "Если сохранение не удалось, исходный файл остаётся как был.",
   "Write mid-answer in any language": "Сообщения посреди ответа на любом языке",
-  "A message sent while ChatGPT is answering now goes out on pages in every language.": "Сообщение, отправленное во время ответа ChatGPT, теперь уходит на страницах на любом языке."
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "Сообщение, отправленное во время ответа ChatGPT, теперь уходит на страницах на любом языке.",
+  "Steered active turn": "Перенаправил активный ход",
+  "Worked for {0}{1}s · steered": "Завершил работу — {0}{1} с · перенаправлен"
 }
