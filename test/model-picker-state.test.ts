@@ -990,6 +990,34 @@ it('re-acquires a remounted model trigger when the first trigger fails to open t
   expect(await result).toBe(true);
 });
 
+it('refuses fallback click when remounted trigger Enter changes native effort without a portal', async () => {
+  vi.useFakeTimers();
+  const f = fixture(), doc = page.window.document;
+  const trigger = doc.querySelector('button')!;
+  trigger.setAttribute('data-composer-navigation-target', 'reasoning');
+  trigger.setAttribute('data-selected-reasoning-effort', 'medium');
+  const fresh = trigger.cloneNode(true) as HTMLButtonElement;
+  (fresh as any).__reactFiber$test = (trigger as any).__reactFiber$test;
+  const clicks = vi.fn();
+  fresh.addEventListener('click', clicks);
+  doc.addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    if (event.target === trigger) {
+      event.stopImmediatePropagation();
+      trigger.replaceWith(fresh);
+    } else if (event.target === fresh) {
+      event.stopImmediatePropagation();
+      fresh.setAttribute('data-selected-reasoning-effort', 'high');
+    }
+  }, true);
+  const reports: unknown[] = [];
+  const result = f.api.selectModelSettings('future-model', 'ultra', () => true, value => reports.push(value));
+  await vi.runAllTimersAsync();
+  expect(await result).toBe(false);
+  expect(clicks).not.toHaveBeenCalled();
+  expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({ outcome: 'failed', failedPhase: 'open', failure: 'changed' });
+});
+
 it('reads picker state once fiber metadata hydrates without an extra DOM mutation', async () => {
   vi.useFakeTimers();
   const f = fixture();
