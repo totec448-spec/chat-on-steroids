@@ -3462,7 +3462,7 @@ var CLF_DOM = (() => {
     const shown = node => node && !node.closest('[hidden],[aria-hidden="true"],[inert]') && node.getClientRects().length > 0;
     const picker = () => document.querySelector(PICKER);
     const trigger = modelPickerTrigger;
-    let motion = null;
+    let motion = null, openingRefusal = null;
     const openPicker = () => {
       const panel = picker();
       return panel && panel.closest('[role="menu"],[role="dialog"]')?.getAttribute('data-state') !== 'closed' ? panel : null;
@@ -3492,7 +3492,9 @@ var CLF_DOM = (() => {
     const key = (node, value) => { if (!node || !stillCurrent()) return false; node.focus(); node.dispatchEvent(new KeyboardEvent('keydown', { key: value, code: value, bubbles: true, cancelable: true })); return true; };
     return {
       state,
+      openingRefusal: () => openingRefusal,
       async open() {
+        openingRefusal = null;
         if (!stillCurrent()) return null;
         // Native Presence waits for the menu's exit animation. Chrome can suspend
         // that animation in a hidden window, retaining a closed picker and its
@@ -3515,6 +3517,9 @@ var CLF_DOM = (() => {
         if (!openPicker()) {
           progress('open');
           const button = await readyTrigger();
+          const beforeEnter = await read();
+          const selectedBefore = beforeEnter?.choices.find(choice => choice.bucket === beforeEnter.currentBucket);
+          const nativeBefore = button?.getAttribute('data-selected-reasoning-effort');
           if (!key(button, 'Enter')) return null;
           if (!await wait(openPicker, 1500)) {
             if (!stillCurrent()) return null;
@@ -3522,10 +3527,31 @@ var CLF_DOM = (() => {
             // without window focus; re-acquire the trigger and fall back once before failing.
             const retryButton = await readyTrigger();
             if (!retryButton) return null;
+            // A native Enter can change effort without mounting the menu.
+            // Do not toggle a changed selection again with a fallback Enter/click.
+            const afterEnter = await read();
+            const selectedAfter = afterEnter?.choices.find(choice => choice.bucket === afterEnter.currentBucket);
+            const changedSelection = selectedBefore && selectedAfter &&
+              (beforeEnter.version !== afterEnter.version || selectedBefore.id !== selectedAfter.id ||
+                selectedBefore.effort !== selectedAfter.effort);
+            if (changedSelection || nativeBefore !== retryButton.getAttribute('data-selected-reasoning-effort')) {
+              openingRefusal = 'changed'; return null;
+            }
             if (!openPicker()) {
               const reopened = retryButton !== button && key(retryButton, 'Enter') && await wait(openPicker, 1000);
               if (!stillCurrent()) return null;
               if (!reopened && !openPicker()) {
+                // A second Enter on a remounted trigger can change the selected
+                // effort without opening a portal, just like the first Enter.
+                const afterRetry = await read();
+                if (!stillCurrent()) return null;
+                const selectedRetry = afterRetry?.choices.find(choice => choice.bucket === afterRetry.currentBucket);
+                const retryChanged = selectedAfter && selectedRetry &&
+                  (afterEnter.version !== afterRetry.version || selectedAfter.id !== selectedRetry.id ||
+                    selectedAfter.effort !== selectedRetry.effort);
+                if (retryChanged || nativeBefore !== retryButton.getAttribute('data-selected-reasoning-effort')) {
+                  openingRefusal = 'changed'; return null;
+                }
                 retryButton.click();
                 if (!await wait(openPicker, 1500)) return null;
               }
@@ -3771,7 +3797,9 @@ var CLF_DOM = (() => {
       phase('open');
       const ui = modelPickerAccess(stillCurrent, observe, phase), original = await ui.open();
       if (!original) {
-        selectionFailed('the picker did not open or could not be read', 'unreadable');
+        // Keep the existing user-visible failure wording; the structured log
+        // distinguishes a guarded selection drift from an unreadable picker.
+        selectionFailed('the picker did not open or could not be read', ui.openingRefusal() || 'unreadable');
         phase('close'); trace.closed = await ui.close(); return false;
       }
       // Account-evaluated exact selection is already proof; visiting unrelated
