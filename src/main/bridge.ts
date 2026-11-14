@@ -2390,7 +2390,8 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
  * the session's last saved summary (resumeFromSavedSummary cancels the stuck ticket). False when the chat is
  * not unattended, has no usable summary, or the reopen is refused; the ordinary backoff then goes on.
  */
-async function continueStuckFromSavedSummary(entry: { token: string; sessionId: string; from: string }, watch: { continuedFromSaved?: boolean }): Promise<boolean> {
+async function continueStuckFromSavedSummary(entry: { token: string; sessionId: string; from: string }, watch: { continuedFromSaved?: boolean },
+  why = 'never reached ChatGPT'): Promise<boolean> {
   watch.continuedFromSaved = true;
   // Unattended means Goal or Loop on and the chat not blocked (a block keeps the switch's state; CodeRabbit on #2019).
   const unattended = (): boolean => !goalBlockReason(entry.from) && goalArmedFor(entry.from) && goalSwitchFor(entry.from).enabled;
@@ -2411,7 +2412,7 @@ async function continueStuckFromSavedSummary(entry: { token: string; sessionId: 
   if (!unattended()) return skip(attended());
   try {
     await resumeFromSavedSummary(entry.sessionId, session.lastHandoffId);
-    logWarn(`bridge: compaction ticket ${entry.token.slice(0, 8)} for ${entry.from} never reached ChatGPT; ` +
+    logWarn(`bridge: compaction ticket ${entry.token.slice(0, 8)} for ${entry.from} ${why}; ` +
       `the ${goalSwitchFor(entry.from).mode} chat continues in a new chat from saved summary ${session.lastHandoffId}`);
     return true;
   } catch (error) {
@@ -10223,7 +10224,7 @@ const COMPACTION_PICKUPS: Record<CompactionPhase, { every: number; attempts: num
   writing: { every: 5 * 60_000, attempts: 3 },
   opening: { every: 15 * 60_000, attempts: 3 }
 };
-const compactionWatch = new Map<string, { token: string; phase: CompactionPhase; nextAt: number; attempts: number; backoffs?: number; told?: boolean; streamLost?: boolean; continuedFromSaved?: boolean }>();
+const compactionWatch = new Map<string, { token: string; phase: CompactionPhase; nextAt: number; attempts: number; backoffs?: number; told?: boolean; slow?: boolean; slowQueuedAt?: number; confirmedAt?: number; streamLost?: boolean; continuedFromSaved?: boolean }>();
 /**
  * Why the source page last stopped an automatic ticket's attempt before asking (#1643), by token.
  * Kept until the next pickup lets the page try again, so the chat says it is held, not asking.
@@ -10242,6 +10243,7 @@ export function compactionReceiptWaived(misses: { unconfirmed: number; changed: 
 const AUTOMATIC_ASKING_RETRY_PAUSE_MS = 10 * 60_000;
 /** How often an automatic ticket with a written brief tries again to open its new chat after the quick tries (#1882). */
 const AUTOMATIC_OPENING_SLOW_MS = 60 * 60_000;
+const AUTOMATIC_WRITING_SLOW_MS = 60 * 60_000;
 /**
  * How many slowed extra bursts an automatic pre-Send ticket gets before it is abandoned like a
  * manual one. Each pickup reloads the source page, so an unbounded retry turns a chat that can
@@ -10293,6 +10295,8 @@ function expediteCompactionPickup(conversationId: string): boolean {
   const watch = compactionWatch.get(conversationId);
   if (watch && watch.token === entry.token && watch.phase === phase) {
     if (watch.attempts >= COMPACTION_PICKUPS[phase].attempts) return false;
+    // An hourly retry waits for its hour: a transport error is not a reason to reload now (CodeRabbit on #2189).
+    if (watch.slow) return false;
     watch.nextAt = 0;
     watch.streamLost = true;
     return true;
@@ -10300,6 +10304,8 @@ function expediteCompactionPickup(conversationId: string): boolean {
   compactionWatch.set(conversationId, { token: entry.token, phase, attempts: 0, nextAt: 0, streamLost: true });
   return true;
 }
+
+export { expediteCompactionPickup as expediteCompactionPickupForTests };
 
 /** A switch change revokes the repair, but never refunds this source's spent budget. */
 function forgetGoalWatch(conversationId: string): void {
@@ -10640,6 +10646,35 @@ async function inspectOwedCompactions(now: number): Promise<boolean> {
             'The request was already sent, so it is not sent again. Open the chat to let it finish, or cancel compaction to return to it.'
         ).catch(() => undefined);
       }
+      // An automatic ticket whose summary request is out keeps collecting it, once an hour after the quick
+      // tries: while it is open it owns the chat's recovery, so stopping here left a Goal chat idle until the
+      // ticket expired (#2184). The request is never sent again; only the page is reloaded to read the reply.
+      if (phase === 'writing' && entry.automatic) {
+        // The hourly try collected nothing either: a Goal or Loop chat goes on from its last saved summary in a new
+        // chat of the same session, once per ticket, as one whose request never reached ChatGPT does. Only once that
+        // reload was confirmed by a page: one that is still queued, or claimed without a receipt, has collected nothing
+        // yet (CodeRabbit on #2189), so the ticket waits for its receipt first.
+        if (watch.slow && !watch.continuedFromSaved) {
+          const confirmedAt = watch.confirmedAt;
+          if (watch.slowQueuedAt !== undefined && confirmedAt !== undefined && confirmedAt >= watch.slowQueuedAt) {
+            // The brief gets its usual grace after the receipt, not after the reload was queued.
+            if (now < confirmedAt + schedule.every) {
+              watch.nextAt = confirmedAt + schedule.every;
+              continue;
+            }
+            if (await continueStuckFromSavedSummary(entry, watch, 'was asked for its brief but never produced one')) continue;
+          }
+          // Otherwise the hourly reload was never confirmed (still queued, claimed without a receipt, or its offer
+          // lapsed): nothing was collected, and the ticket tries again in an hour rather than replacing the chat.
+        }
+        if (!watch.slow) {
+          watch.slow = true;
+          logInfo(`bridge: compaction ticket ${entry.token.slice(0, 8)} for ${entry.from} keeps trying once an hour to collect its brief`);
+        }
+        watch.attempts = schedule.attempts - 1;
+        watch.nextAt = now + AUTOMATIC_WRITING_SLOW_MS - schedule.every;
+        continue;
+      }
       // An automatic ticket whose brief is written keeps opening its new chat, once an hour after the
       // quick tries: while it is open it owns the chat's recovery, so stopping here stopped the chat (#1882).
       if (phase === 'opening' && entry.automatic) {
@@ -10717,6 +10752,7 @@ async function inspectOwedCompactions(now: number): Promise<boolean> {
     // One pickup per reported loss: after it, a turn that works again counts as working.
     watch.streamLost = false;
     watch.attempts += 1;
+    if (watch.slow) watch.slowQueuedAt = now;
     watch.nextAt = now + schedule.every;
     queued = true;
     logInfo(
@@ -11496,6 +11532,20 @@ async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | 'r
       }
       logInfo(`bridge: the browser confirmed ${repair.reason} recovery for ${conversationId} (${action ?? 'action unspecified'})`);
       repair.state = 'done';
+      // A compaction ticket's hourly retry counts only once a page confirmed it (#2184).
+      if (repair.reason === 'compaction') {
+        const compaction = compactionWatch.get(conversationId);
+        if (compaction) {
+          compaction.confirmedAt = Date.now();
+          // A receipt that comes after the sweep that re-armed the hour still belongs to its reload: the watch goes
+          // back to its exhausted state, so the brief's five minutes of grace start here and the saved summary
+          // follows, instead of the next hourly pickup overwriting this reload (CodeRabbit on #2189).
+          if (compaction.slow && compaction.slowQueuedAt !== undefined && compaction.confirmedAt >= compaction.slowQueuedAt) {
+            compaction.attempts = COMPACTION_PICKUPS.writing.attempts;
+            compaction.nextAt = compaction.confirmedAt + COMPACTION_PICKUPS.writing.every;
+          }
+        }
+      }
       if (repair.attribution && repair.attribution.incident.firstAttemptAt === null)
         repair.attribution.incident.firstAttemptAt = Date.now();
       if (action !== 'preserved') {

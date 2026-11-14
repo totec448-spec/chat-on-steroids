@@ -4100,14 +4100,18 @@ handoff for `STUCK_SUMMARY_MS` (15 minutes) and the session has a usable `lastHa
 meter shows a dot and its popover the button "Continue in a new chat from the last summary". Using
 it, `resumeFromSavedSummary` first cancels that waiting continuation. A chat with Goal or Loop on
 does this by itself (`continueStuckFromSavedSummary`), once per ticket, when an automatic ticket's
-first slowed burst of pickups could not ask either; a chat without them is never moved by itself.
+first slowed burst of pickups could not ask either, and when an automatic ticket's request was sent but its brief
+never came, five minutes after a page confirmed its hourly reload and that also collected nothing (an unconfirmed
+reload only earns another hour; a transport error never brings it forward) (#2184); a chat without them is never moved by itself.
 The new ChatGPT chat joins the same session, as after any Compact & Resume.
 
 Restart restoration must converge on that same committed projection. A persisted send attempt
 can outlive a transport command; expiration releases transport, not permission for another
 blind Send. Automatic tickets can wait indefinitely before the request was sent and retain a
 six-hour sent-request window; manual transport is shorter (ten minutes). Pickup budgets depend
-on phase: unsent 2m×5, writing 5m×3, opening 15m×3. While the source turn still works
+on phase: unsent 2m×5, writing 5m×3, opening 15m×3. An automatic ticket whose summary request is out and whose brief
+never came keeps one reload an hour after the writing burst (the request is never sent again); a manual one stops
+at three (#787, #2184). While the source turn still works
 (`sessionInputActivity(...).exact`), an unsent ticket spends no pickup and raises no reload: the
 request is sent once that turn ends, and a ticket filed mid-turn used to spend its whole budget on a
 generating page (2026-10-12). These are bounded recovery of one obligation,
@@ -4193,7 +4197,13 @@ means a Compact & Resume brief, or the first message of an app chat (its `[[COS_
 optionally followed by the label of one of this installation's connector names (the mention); both are
 recognised from fingerprints kept in the page's storage (`clf-typed-briefs-v1`, 24 entries). Anything a person
 added stays and the entry fails as before (2026-11-12: every Compact & Resume in a Project failed after a chat
-had been started there through the app). User interaction,
+had been started there through the app). The mention a restored draft ends with is a chip that names the app as
+it is called now, so a chip whose app id (`app-mention-path`) is one this installation proved to be its own is
+read as not there, whatever its label (an app renamed in ChatGPT); another app's chip is text and keeps the draft
+(#2159). A timeout in this step says what kept the editor, without any of its text:
+`transition-timeout:last=composer-not-ready:draft=<kind>:clears=<n>:chips=<n>`, `kind` one of `no-editor`,
+`readonly`, `busy`, `attachment`, `empty`, `other`, `brief-own`, `brief-foreign`, `context-own`, `context-foreign`
+(`…-own` with `clears=3` means the app knew the draft and ChatGPT kept putting it back). User interaction,
 cancellation or a foreign route revokes the attempt; no extra tab compensates for a missing result.
 When an automatic Compact & Resume's page acks `project-entry:source-ready-timeout…` or
 `…transition-timeout…` (nothing sent), the bridge releases that attempt's destination claim
@@ -4238,6 +4248,13 @@ it must not guess a new rebind, delete history or become the path for new contin
 independent user tasks run at once. Inside a family the worker topology is a star: workers report
 to their prime and cannot create worker descendants. Existing primes may also exchange a message
 across families when the sender already has the destination's explicit run address.
+
+A worker is a separate ChatGPT chat the app opens and drives through the extension (#2177). It is
+not ChatGPT's own in-conversation subagent: the app adds no `collaboration.*` tool and has no
+interface to the host's native delegation, so a conversation has those tools only when ChatGPT
+supplies them. The `agents` tool description says so as a fact (`test/mcp.test.ts` pins the text), so
+a model asked for native subagents does not substitute workers silently. Do not emulate native
+operations or present workers as native ones.
 
 `agents.ts` is the one broker. Its run map and v7 `activeRuns` snapshot hold independent families;
 `maxWorkers` applies **per family**. `multiAgent.globalMaxWorkers` is a separate optional
