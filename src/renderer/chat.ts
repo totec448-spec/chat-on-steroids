@@ -1761,6 +1761,7 @@ async function readSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
   paintSessions();
   chatSearch?.refresh();
   const row = selectedId === null ? undefined : sessions.find(entry => entry.id === selectedId);
+  if (selectedId && (changed.all || changed.ids.has(selectedId))) void reviewPanel?.refreshChatEdits();
   selectedTabFollow?.observe(row);
   if (detail === 'reread' || selectedId === null || detailFor !== selectedId || changed.all || changed.ids.has(selectedId) ||
       row?.updatedAt !== detailStamp?.updatedAt || row?.events !== detailStamp?.events) await loadDetail();
@@ -2664,7 +2665,8 @@ function syncSelectedWorkspace(): void {
   const workers = sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null);
   agentPanel?.update(selectedId, workers);
   filePanel?.update(selectedLocalProject());
-  reviewPanel?.update(selectedLocalProject());
+  const project = selectedLocalProject();
+  reviewPanel?.update(project, project && !project.remote && openChatSummary()?.projectId === project.id ? selectedId : null);
   workspaceDocks?.sync();
   workspaceTerminal?.update(selectedLocalProject());
   rightWorkspaceTerminal?.update(selectedLocalProject());
@@ -5185,16 +5187,19 @@ async function revealSearchMatch(id: string, query: string): Promise<void> {
 }
 
 /** The loaded timeline row of one recorded message, by the key the timeline gives that message. */
-function rowForLocation(location: SessionSearchLocation): HTMLElement | null {
-  const event = events.find(candidate => candidate.seq === location.seq) ?? (location.messageId === null ? undefined
-    : events.find(candidate => candidate.kind === location.kind && 'messageId' in candidate && candidate.messageId === location.messageId));
+type ChatLocation = SessionSearchLocation | { callId: string; position: number };
+function rowForLocation(location: ChatLocation): HTMLElement | null {
+  const event = 'callId' in location
+    ? events.find(candidate => candidate.kind === 'tool_call' && candidate.call.callId === location.callId)
+    : events.find(candidate => candidate.seq === location.seq) ?? (location.messageId === null ? undefined
+      : events.find(candidate => candidate.kind === location.kind && 'messageId' in candidate && candidate.messageId === location.messageId));
   if (!event) return null;
   const key = itemKey({ kind: 'event', event });
   return [...$('timeline').querySelectorAll<HTMLElement>('[data-timeline-key]')].find(row => row.dataset.timelineKey === key) ?? null;
 }
 
 /** Scrolls the open chat to one recorded message, loading the history page around it when needed. */
-async function revealChatLocation(id: string, location: SessionSearchLocation): Promise<void> {
+async function revealChatLocation(id: string, location: ChatLocation): Promise<void> {
   const selection = selectionGeneration;
   const current = (): boolean => selection === selectionGeneration && selectedId === id;
   if (!current()) return;
@@ -5202,6 +5207,11 @@ async function revealChatLocation(id: string, location: SessionSearchLocation): 
   for (const deadline = Date.now() + 5000; detailFor !== id || historyLoading || historyDemand !== null;) {
     if (Date.now() > deadline || !current()) return;
     await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()));
+  }
+  if ('callId' in location && agentFilter !== null) {
+    agentFilter = null;
+    recall = null;
+    paintDetail(false);
   }
   const rowFor = (): HTMLElement | null => rowForLocation(location);
   let row = rowFor();
@@ -5217,7 +5227,15 @@ async function revealChatLocation(id: string, location: SessionSearchLocation): 
     if (!loaded || !events.length) { historyBefore = null; detailFor = null; void loadDetail(); return; }
     row = rowFor();
   }
-  if (!row) return;
+  if (!row) {
+    if ('callId' in location) toast(t('Recorded edit is unavailable.'));
+    return;
+  }
+  if ('callId' in location) {
+    for (let parent = row.parentElement; parent && parent.id !== 'timeline'; parent = parent.parentElement)
+      if (parent instanceof HTMLDetailsElement) parent.open = true;
+    row.querySelector<HTMLElement>('summary')?.focus({ preventScroll: true });
+  }
   readTimeline();
   row.scrollIntoView({ block: 'center' });
   row.classList.remove('is-search-hit');
@@ -8739,6 +8757,7 @@ function queuedWaitReason(entry: InputEntry): 'send-check' | 'extension' | 'tool
 
 export function chatApply(state: AppState, previous?: Config): void {
   const { config, bridge } = state;
+  if (previous && JSON.stringify(previous.roots) !== JSON.stringify(config.roots)) reviewPanel?.invalidateChatEdits();
   applyRouteSettling(state.status.routeSettlingUntil ?? 0);
   if (bridgePresent !== bridge.present) { bridgePresent = bridge.present; paintPendingInputs(); }
   selectedTabFollow?.observe(sessions.find(row => row.id === selectedId));
@@ -9957,6 +9976,14 @@ export function initChat(next: Deps): void {
       task: id => { const chat = openChatSummary(); return selectedLocalProject()?.id === id && chat?.title?.trim() ? chat.title : null; }
     })).open(projectId),
     onShow: () => docks.adopt('review'),
+    onEditSource: (id, edit) => {
+      if (id !== selectedId) return;
+      // Keep side-by-side Review open; close it only when its layout hides the timeline.
+      if (chatHost.classList.contains('is-work-dock-expanded') ||
+          window.matchMedia?.('(max-width: 850px)').matches) docks.setOpen(false);
+      showView('timeline');
+      void revealChatLocation(id, edit);
+    },
     // A new message: not an edit of an earlier question, which would replace the messages after it.
     // A narrow window shows the dock instead of the chat; it closes so the composer is in view.
     onAskChat: request => {
@@ -9968,7 +9995,7 @@ export function initChat(next: Deps): void {
     },
     onEscape: () => { docks.setOpen(false); docks.rightToggle.focus(); }
   });
-  reviewPanel.update(selectedLocalProject());
+  syncSelectedWorkspace();
   const onSendSelection = (text: string): boolean => sendTerminalSelection($<HTMLTextAreaElement>('chatInput'), text);
   workspaceTerminal = createWorkspaceTerminal(() => docks.toggleBottomTerminal(), docks.bottomBody,
     { onEmpty: () => docks.setBottomOpen(false), onClosePanel: () => docks.setBottomOpen(false), onSendSelection });
