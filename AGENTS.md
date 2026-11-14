@@ -5178,7 +5178,10 @@ An older question remounting after the generation opened does not block its answ
 durable anchors prove that question preceded the generation's own unmounted question.
 A consolidated final belongs to the continuation open when it settled, consistently in timeline
 projection, completion lookup, finish holds and recorder/Goal completion; it cannot advance to
-a continuation that opened after that settlement. Image-only completion follows the same proven
+a continuation that opened after that settlement. While still streaming, a consolidated message whose
+content sequence advances past a `continued` end also projects and orders inside that continuation
+without changing completion eligibility, whereas an unmodified pre-steer interim remains in its
+earlier turn. Image-only completion follows the same proven
 continued chain while the canonical image retains its first owner; a reload hint alone is insufficient.
 A promoted final cannot override its resolved turn's failed/stopped end without a recorded reopen.
 A question sent after a shared assistant
