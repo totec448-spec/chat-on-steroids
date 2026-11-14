@@ -4179,6 +4179,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
             process: event.call.process,
             requestId: event.call.requestId ?? null,
             attribution: event.call.attribution, outcome: event.call.outcome,
+            ...(event.call.tool === 'agents' && event.call.outcome === 'ok' && event.call.endsActivity === true ? { endsActivity: true } : {}),
             displayOutcome: activityDisplayOutcome(event.call), durationMs: activityDurationMs(event.call),
             summary: toolCallSummary(event.call), changes: event.call.changes ?? [] }];
         case 'progress':

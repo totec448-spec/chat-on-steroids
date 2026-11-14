@@ -2792,11 +2792,8 @@
   /**
    * Closes the local generation exactly once.
    *
-   * `publishFinal` is false only when a new user message proves an otherwise-unknown quiet
-   * turn is over while the next assistant turn may already be mounting. In that case a
-   * whole-page `reportMessages(false)` could promote the next turn's half-written prose to a
-   * final answer. The normal quiet-completion path still publishes the settled answer before
-   * `turn_end` as before.
+   * `publishFinal` is false when the Fiber pass already published the answer or when the
+   * turn ended without a final to publish. A completed lifecycle is not itself an answer.
    */
   function finishGeneration(ended, result, publishFinal = true) {
     // Capture the durable identity before tearing local lifecycle state down. A generation
@@ -4223,6 +4220,7 @@
       conversationConflict: raw.conversationConflict === true,
       requestOwnerRequired: raw.requestOwnerRequired === true,
       endMessageId,
+      terminalWithoutFinal: raw.terminalWithoutFinal === true && !endMessageId,
       calls: kept,
       codeModeCalls,
       requests,
@@ -5373,6 +5371,33 @@
         // A later exact native final also supersedes the stale Thinking failed header.
         finishGeneration(ended, local.outcome === 'unknown' || local.reason === 'thinking_failed'
           ? { outcome: 'completed' } : local, false);
+      }
+    }
+    // agents finish ends broker work, not ChatGPT's response. A tool-only
+    // worker can close without a final message only when the same native
+    // exchange is complete and the composer and local work have settled.
+    const toolOnlyTurn = answer.turns[activeTurnIndex];
+    if (
+      generating && turnId && activeLocalTurnId === turnId && bootstrap === 'worker' &&
+      askedConversation && CLF_DOM.conversationId() === askedConversation &&
+      toolOnlyTurn?.conversationId === askedConversation && !toolOnlyTurn.conversationConflict &&
+      toolOnlyTurn.terminalWithoutFinal && openedUserMessageId &&
+      toolOnlyTurn.question === openedUserMessageId &&
+      CLF_DOM.messages().findLast(message => message.role === 'user')?.id === openedUserMessageId &&
+      !stopRequestedAt && !CLF_DOM.generating() && !CLF_DOM.stopButton?.() && !approvalHolding() &&
+      pendingTools === 0 && !nativeBusy && !goalBusy && !job?.busy
+    ) {
+      let lastCall = null;
+      for (const call of streamBySeq.values()) {
+        if (call.kind === 'tool_call' && call.turnId === turnId && (!lastCall || call.seq > lastCall.seq)) lastCall = call;
+      }
+      const ended = lastCall?.tool === 'agents' && lastCall.endsActivity === true && lastCall.outcome === 'ok'
+        ? generationTurn() : null;
+      if (ended && fiberTurnFor(ended) === toolOnlyTurn) {
+        const result = endOutcome(ended, true);
+        finishGeneration(ended, result.outcome === 'unknown' || result.outcome === 'stalled'
+          ? { outcome: 'completed' } : result, false);
+        notifyCommandReadiness();
       }
     }
     if (callsReported.size > 4000) callsReported.clear();
@@ -7147,7 +7172,7 @@
 
   /** What a stream entry currently says, including disclosure freshness metadata. */
   const snapshotText = (entry) => (entry ? (entry.kind === 'tool_call'
-    ? JSON.stringify([entry.summary, entry.detailRevision, entry.displayOutcome, entry.durationMs, entry.changes, entry.process])
+    ? JSON.stringify([entry.summary, entry.detailRevision, entry.displayOutcome, entry.durationMs, entry.changes, entry.process, entry.endsActivity])
     : entry.kind === 'page_tool' ? entry.label : entry.text) : undefined);
   /** A revision-only detail replacement is presentation, not evidence of fresh model work. */
   const workSnapshotText = (entry) => (entry ? (entry.kind === 'tool_call'
@@ -11884,7 +11909,7 @@
    */
   function revivalWaitReason(target) {
     if (!commandReadinessInitialized || !alive || CLF_DOM.conversationId() !== target) return 'revival-editor';
-    if (generating || CLF_DOM.generating() || CLF_DOM.stopButton?.() ||
+    if (generating || CLF_DOM.generating() || CLF_DOM.stopButton?.() || approvalHolding() ||
         pendingTools > 0 || nativeBusy || goalBusy || (job && job.busy)) return 'revival-busy';
     if (!CLF_DOM.composerWritable?.()) return 'revival-editor';
     return CLF_DOM.composerSubmitReady?.() ? null : 'revival-draft';
@@ -11893,7 +11918,7 @@
   /** Everything revivalSubmitReady requires except an empty editor. */
   function revivalReadyButForDraft(target) {
     if (!commandReadinessInitialized || !alive || CLF_DOM.conversationId() !== target) return false;
-    if (generating || CLF_DOM.generating()) return false;
+    if (generating || CLF_DOM.generating() || approvalHolding()) return false;
     return !(pendingTools > 0 || nativeBusy || goalBusy || (job && job.busy));
   }
 
@@ -12456,6 +12481,11 @@
         'ChatGPT is not signed in in this browser. Sign in to ChatGPT there, then send again.'
       )));
     }
+    if (boot.type === 'revive' && !revivalReadyButForDraft(target)) {
+      return void (await fail(t(
+        'content_bootstrap_send_not_accepted', 'ChatGPT did not accept the bootstrap send'
+      ) + ' (page-busy)', 'transient'));
+    }
     // A wake types into the person's own chat: text or a file put in the box while the model was
     // being chosen is theirs, so the wake waits for its next try (CodeRabbit on #1972).
     if (boot.type === 'revive' && (!CLF_DOM.composerSubmitReady?.() || CLF_DOM.hasComposerAttachments?.())) {
@@ -12610,6 +12640,15 @@
     // Why Send ended without acceptance (#882): one short code from CLF_DOM.send, so a failed worker
     // start or wake says which step it reached instead of only that it failed.
     let sendRefusal = null;
+    let revivalBecameBusy = false;
+    const bootstrapReadyToSend = () => {
+      if (attempt?.cancelled || !sendingBootstrap()) return false;
+      if (boot.type === 'revive' && !revivalReadyButForDraft(target)) {
+        revivalBecameBusy = true;
+        return false;
+      }
+      return true;
+    };
     const sendEpoch = epoch;
     const acceptResumeReceipt = (message, route) => {
       if (boot.type !== 'resume' || !message?.id || !route || CLF_DOM.conversationId() !== route ||
@@ -12623,7 +12662,7 @@
       return true;
     };
     step('sending');
-    if (!(await sendSubmittedText(() => !attempt?.cancelled && sendingBootstrap(), false, authorizeBootstrapSend,
+    if (!(await sendSubmittedText(bootstrapReadyToSend, false, authorizeBootstrapSend,
                                   boot.type === 'resume' ? acceptResumeReceipt : null,
                                   matchesSubmittedBootstrap, boot.type === 'resume' ? 30_000 : null,
                                   why => { sendRefusal = why; },
@@ -12643,6 +12682,7 @@
       await bootstrapDraft.clear();
       const notAccepted = t('content_bootstrap_send_not_accepted', 'ChatGPT did not accept the bootstrap send');
       // Refusals decided before the native Send click: nothing reached ChatGPT (#1086).
+      if (revivalBecameBusy) sendRefusal = 'page-busy';
       const beforeSend = ['draft-changed', 'page-busy', 'mention-changed', 'send-not-ready'].includes(sendRefusal);
       return void (await fail(sendRefusal ? `${notAccepted} (${sendRefusal})` : notAccepted, beforeSend ? 'transient' : undefined));
     }

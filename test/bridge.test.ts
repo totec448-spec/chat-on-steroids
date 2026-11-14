@@ -2550,6 +2550,31 @@ describe('activity feed', () => {
     }
   });
 
+  it('projects a durable agents finish fact without exposing its arguments or result', async () => {
+    await pair();
+    const conversationId = '69696969-5858-4747-3636-252525252525';
+    const turnId = 'tool-only-worker-turn';
+    await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'turn_start', time: Date.now(), turnId }
+    ] } });
+    for (const action of ['status', 'finish']) {
+      await recordToolCall({
+        tool: 'agents', args: { action, result: 'private-worker-payload' },
+        content: [{ type: 'text', text: 'private-worker-report' }],
+        outcome: 'ok', durationMs: 2, startedAt: Date.now(),
+        requestId: `wfr_worker_${action}`, conversationId, endsActivity: action === 'finish'
+      });
+    }
+    const feed = await request('GET', `/activity?conversationId=${conversationId}&since=0`);
+    const calls = feed.body.stream.filter((entry: any) => entry.kind === 'tool_call');
+    expect(calls).toHaveLength(2);
+    expect(calls.find((entry: any) => entry.requestId === 'wfr_worker_status')).not.toHaveProperty('endsActivity');
+    const finish = calls.find((entry: any) => entry.requestId === 'wfr_worker_finish');
+    expect(finish).toMatchObject({ turnId, tool: 'agents', outcome: 'ok', endsActivity: true });
+    expect(finish).not.toHaveProperty('args');
+    expect(finish).not.toHaveProperty('result');
+  });
+
   it('projects pending and completed process outcomes from canonical completion evidence', async () => {
     await pair();
     const conversationId = '69696969-5858-4747-3636-252525252525';
