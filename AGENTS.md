@@ -4193,7 +4193,13 @@ means a Compact & Resume brief, or the first message of an app chat (its `[[COS_
 optionally followed by the label of one of this installation's connector names (the mention); both are
 recognised from fingerprints kept in the page's storage (`clf-typed-briefs-v1`, 24 entries). Anything a person
 added stays and the entry fails as before (2026-11-12: every Compact & Resume in a Project failed after a chat
-had been started there through the app). User interaction,
+had been started there through the app). The mention a restored draft ends with is a chip that names the app as
+it is called now, so a chip whose app id (`app-mention-path`) is one this installation proved to be its own is
+read as not there, whatever its label (an app renamed in ChatGPT); another app's chip is text and keeps the draft
+(#2159). A timeout in this step says what kept the editor, without any of its text:
+`transition-timeout:last=composer-not-ready:draft=<kind>:clears=<n>:chips=<n>`, `kind` one of `no-editor`,
+`readonly`, `busy`, `attachment`, `empty`, `other`, `brief-own`, `brief-foreign`, `context-own`, `context-foreign`
+(`…-own` with `clears=3` means the app knew the draft and ChatGPT kept putting it back). User interaction,
 cancellation or a foreign route revokes the attempt; no extra tab compensates for a missing result.
 When an automatic Compact & Resume's page acks `project-entry:source-ready-timeout…` or
 `…transition-timeout…` (nothing sent), the bridge releases that attempt's destination claim
