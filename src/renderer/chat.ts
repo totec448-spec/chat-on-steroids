@@ -6896,8 +6896,8 @@ function paintDetail(followBottom = historyBefore === null): void {
   // Completed turns and the answer message that carries their copy/export actions.
   const anchors = answerAnchors(events);
   const looseAnchors = messageAnswerAnchors(events);
-  const workedSegments = exchangeSegments(events);
   const steeredAsks = steeredUserMessages(events);
+  const workedSegments = exchangeSegments(events, steeredAsks);
   const workers = sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null);
   const items = timelineItems(shown);
   const latestCompaction = items.filter(item => item.kind === 'compaction').at(-1);
@@ -7785,8 +7785,10 @@ function steeredUserMessages(list: readonly SessionEvent[]): Set<number> {
  * or ChatGPT's final answer, whichever came later). Anchored to your messages rather than ChatGPT's
  * turn ids, which a page can report empty or leave off the rows that did the work.
  */
-function exchangeSegments(list: readonly SessionEvent[]): Map<number, ExchangeSegment> {
-  const asks = list.filter(event => event.kind === 'user_message').map(event => event.time).sort((a, b) => a - b);
+function exchangeSegments(list: readonly SessionEvent[], steeredAsks: ReadonlySet<number>): Map<number, ExchangeSegment> {
+  const asks = list
+    .filter((event): event is Extract<SessionEvent, { kind: 'user_message' }> => event.kind === 'user_message')
+    .sort((a, b) => a.time - b.time || a.seq - b.seq);
   const turnStartTimes = new Map<string, number>();
   for (const event of list) {
     if (!event.turnId || event.kind === 'turn_end') continue;
@@ -7796,8 +7798,10 @@ function exchangeSegments(list: readonly SessionEvent[]): Map<number, ExchangeSe
     }
   }
   const segments = new Map<number, ExchangeSegment>();
-  asks.forEach((asked, index) => {
-    const next = asks[index + 1] ?? Number.POSITIVE_INFINITY;
+  asks.forEach((ask, index) => {
+    const asked = ask.time;
+    const nextAsk = asks[index + 1];
+    const next = nextAsk?.time ?? Number.POSITIVE_INFINITY;
     let endedCompletedOrFinal = -1;
     let endedContinued = -1;
     for (const event of list) {
@@ -7825,7 +7829,7 @@ function exchangeSegments(list: readonly SessionEvent[]): Map<number, ExchangeSe
     if (ended >= asked) {
       segments.set(asked, {
         seconds: Math.floor((ended - asked) / 1000),
-        steered: endedContinued >= endedCompletedOrFinal && next < Number.POSITIVE_INFINITY
+        steered: endedContinued >= endedCompletedOrFinal && nextAsk !== undefined && !nextAsk.automatic && steeredAsks.has(nextAsk.seq)
       });
     }
   });
