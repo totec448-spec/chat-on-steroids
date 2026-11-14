@@ -1011,7 +1011,7 @@ it('refuses fallback click when remounted trigger Enter changes native effort wi
     }
   }, true);
   const reports: unknown[] = [];
-  const result = f.api.selectModelSettings('future-model', 'ultra', () => true, value => reports.push(value));
+  const result = f.api.selectModelSettings('future-model', 'ultra', () => true, (value: unknown) => reports.push(value));
   await vi.runAllTimersAsync();
   expect(await result).toBe(false);
   expect(clicks).not.toHaveBeenCalled();
