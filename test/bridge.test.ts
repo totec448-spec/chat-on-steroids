@@ -116,7 +116,7 @@ const {
   pickupNow,
   noteRecoverySweepTick,
   unpair,
-  workerBriefForTests, forgetPickupWatchesForTests, commandExpiryReasonForTests } = await import('../src/main/bridge.js');
+  workerBriefForTests, forgetPickupWatchesForTests, commandExpiryReasonForTests, expediteCompactionPickupForTests } = await import('../src/main/bridge.js');
 const { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } = await import('../src/main/durable.js');
 const { setStuckNotifier } = await import('../src/main/stuck-notice.js');
 const {
@@ -3233,6 +3233,151 @@ describe('automatic compaction', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  // #2184 (2.1.53): the summary request went out and no brief ever came back. The quick reloads and the hourly one
+  // collected nothing, and the Goal chat stood idle under the ticket. A Loop chat goes on from its last saved summary.
+  it.each(['loop', 'off'] as const)('continues a Loop chat from its last saved summary when the summary it asked for never arrives (automation %s)', async automation => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chatA = randomUUID(), chatB = randomUUID();
+      const session = await createSession({ conversationId: chatA });
+      const first = await openContinuationNow(session.id, chatA);
+      await attachSummary(first.token, 'TASK\n\nKeep auditing the fleet manager and fix what the audit finds.\n'.repeat(4));
+      expect(await claimContinuationNow(first.token, 'page-b')).not.toBeNull();
+      expect(await commitContinuation(first.token, chatB)).toBe(true);
+      const saved = (await findSessionByConversation(chatB))!.lastHandoffId!;
+      if (automation !== 'off') await setSessionAutomation(session.id, 'loop');
+      await request('POST', '/events', {
+        body: { conversationId: chatB, events: [{ kind: 'user_message', time: Date.now(), text: 'keep going', messageId: `m-${chatB}` }] }
+      });
+      const filed = await request('POST', '/compact', { body: { conversationId: chatB, ticket: true, automatic: true } });
+      const ticket = filed.body.token as string;
+      expect(ticket, JSON.stringify(filed.body)).toEqual(expect.any(String));
+      expect((await request('POST', '/compact', { body: { conversationId: chatB, token: ticket, sourceAttempt: true } })).body.allowed).toBe(true);
+      expect((await request('POST', '/compact', { body: { conversationId: chatB, token: ticket, sourceDispatch: true } })).body.armed).toBe(true);
+      let continued = false;
+      for (let pass = 0; pass < 40 && !continued; pass++) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        await sweepStaleSwarm(Date.now());
+        const repair = ((await request('GET', '/status')).body.repairs as Array<{ conversationId: string; reason: string; token: string }> | undefined)
+          ?.find(row => row.conversationId === chatB && row.reason === 'compaction');
+        if (repair) {
+          await request('POST', '/repairs/claim', { body: { token: repair.token } });
+          await request('GET', `/status?repaired=${encodeURIComponent(repair.token)}&repairAction=reloaded`);
+        }
+        const now = continuationForSession(session.id);
+        continued = !!now && now.token !== ticket && now.state === 'awaiting-chat';
+      }
+      if (automation !== 'loop') {
+        expect(continued).toBe(false);
+        expect(getLog().some(entry => entry.message.includes(`${ticket.slice(0, 8)} does not continue from the saved summary: Goal and Loop are off for this chat`))).toBe(true);
+        return;
+      }
+      expect(continued).toBe(true);
+      expect(getLog().some(entry => entry.message.includes(`${ticket.slice(0, 8)} for ${chatB} was asked for its brief but never produced one; the loop chat continues in a new chat from saved summary ${saved}`))).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
+  // CodeRabbit on #2189: an hourly reload that was only queued, never confirmed by a page, is not a reload that
+  // collected nothing. The chat is not replaced from an older summary until the hourly reload has been confirmed.
+  it('does not continue from the saved summary while the hourly reload is still unconfirmed', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chatA = randomUUID(), chatB = randomUUID();
+      const session = await createSession({ conversationId: chatA });
+      const first = await openContinuationNow(session.id, chatA);
+      await attachSummary(first.token, 'TASK\n\nKeep auditing the fleet manager and fix what the audit finds.\n'.repeat(4));
+      expect(await claimContinuationNow(first.token, 'page-b')).not.toBeNull();
+      expect(await commitContinuation(first.token, chatB)).toBe(true);
+      await setSessionAutomation(session.id, 'loop');
+      await request('POST', '/events', {
+        body: { conversationId: chatB, events: [{ kind: 'user_message', time: Date.now(), text: 'keep going', messageId: `m-${chatB}` }] }
+      });
+      const filed = await request('POST', '/compact', { body: { conversationId: chatB, ticket: true, automatic: true } });
+      const ticket = filed.body.token as string;
+      expect((await request('POST', '/compact', { body: { conversationId: chatB, token: ticket, sourceAttempt: true } })).body.allowed).toBe(true);
+      expect((await request('POST', '/compact', { body: { conversationId: chatB, token: ticket, sourceDispatch: true } })).body.armed).toBe(true);
+      const repairFor = async () => {
+        await sweepStaleSwarm(Date.now());
+        return ((await request('GET', '/status')).body.repairs as Array<{ conversationId: string; reason: string; token: string }> | undefined)
+          ?.find(row => row.conversationId === chatB && row.reason === 'compaction') ?? null;
+      };
+      // The three quick reloads are confirmed.
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        const repair = await repairFor();
+        expect(repair).not.toBeNull();
+        await request('POST', '/repairs/claim', { body: { token: repair!.token } });
+        await request('GET', `/status?repaired=${encodeURIComponent(repair!.token)}&repairAction=reloaded`);
+      }
+      // The hourly reload is handed out and never confirmed. However long that takes, the chat is not replaced.
+      let handedOut = false;
+      for (let pass = 0; pass < 30; pass++) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        if (await repairFor()) handedOut = true;
+        const now = continuationForSession(session.id);
+        expect(now?.token === ticket && now.state === 'awaiting-summary', `replaced at pass ${pass} (hourly reload handed out: ${handedOut})`).toBe(true);
+      }
+      expect(handedOut).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
+  // CodeRabbit on #2189 (third round): a receipt that arrives after the five-minute sweep that re-armed the hour still
+  // belongs to its reload; the saved summary follows five minutes after it, not never.
+  it('continues from the saved summary after an hourly reload that was confirmed late', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chatA = randomUUID(), chatB = randomUUID();
+      const session = await createSession({ conversationId: chatA });
+      const first = await openContinuationNow(session.id, chatA);
+      await attachSummary(first.token, 'TASK\n\nKeep auditing the fleet manager and fix what the audit finds.\n'.repeat(4));
+      expect(await claimContinuationNow(first.token, 'page-b')).not.toBeNull();
+      expect(await commitContinuation(first.token, chatB)).toBe(true);
+      await setSessionAutomation(session.id, 'loop');
+      await request('POST', '/events', {
+        body: { conversationId: chatB, events: [{ kind: 'user_message', time: Date.now(), text: 'keep going', messageId: `m-${chatB}` }] }
+      });
+      const filed = await request('POST', '/compact', { body: { conversationId: chatB, ticket: true, automatic: true } });
+      const ticket = filed.body.token as string;
+      expect((await request('POST', '/compact', { body: { conversationId: chatB, token: ticket, sourceAttempt: true } })).body.allowed).toBe(true);
+      expect((await request('POST', '/compact', { body: { conversationId: chatB, token: ticket, sourceDispatch: true } })).body.armed).toBe(true);
+      const repairFor = async () => {
+        await sweepStaleSwarm(Date.now());
+        return ((await request('GET', '/status')).body.repairs as Array<{ conversationId: string; reason: string; token: string }> | undefined)
+          ?.find(row => row.conversationId === chatB && row.reason === 'compaction') ?? null;
+      };
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        const repair = await repairFor();
+        expect(repair).not.toBeNull();
+        await request('POST', '/repairs/claim', { body: { token: repair!.token } });
+        await request('GET', `/status?repaired=${encodeURIComponent(repair!.token)}&repairAction=reloaded`);
+      }
+      // The hourly reload is handed out, claimed, and confirmed more than a sweep later.
+      let hourly: { token: string } | null = null;
+      for (let pass = 0; pass < 20 && !hourly; pass++) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        hourly = await repairFor();
+      }
+      expect(hourly).not.toBeNull();
+      await request('POST', '/repairs/claim', { body: { token: hourly!.token } });
+      await vi.advanceTimersByTimeAsync(5 * 60_000 + 30_000);
+      await sweepStaleSwarm(Date.now());
+      expect(continuationForSession(session.id)?.token, 'replaced before the receipt').toBe(ticket);
+      await request('GET', `/status?repaired=${encodeURIComponent(hourly!.token)}&repairAction=reloaded`);
+      let continued = false;
+      for (let pass = 0; pass < 6 && !continued; pass++) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        await sweepStaleSwarm(Date.now());
+        const now = continuationForSession(session.id);
+        continued = !!now && now.token !== ticket && now.state === 'awaiting-chat';
+      }
+      expect(continued, 'the late receipt was lost').toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
   it.each(['cancelled', 'replaced', 'dispatched'] as const)('opens a manual source immediately and revokes a %s ticket before browser action', async scenario => {
     await pair();
     const conversationId = randomUUID();
@@ -4571,6 +4716,60 @@ describe('automatic compaction', () => {
       }
       expect(await stuckNotes()).toHaveLength(1);
       expect(continuationByToken(token)).toMatchObject({ state: 'awaiting-summary', sourceSend: { state: 'dispatched-unresolved' } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * #2184 (2.1.53, Goal chat at 1M tokens): the summary request went out, three reloads collected nothing, and
+   * the ticket then did nothing more while it kept the chat's recovery from acting: the Goal chat stood idle until
+   * the ticket expired. An automatic ticket keeps one reload an hour after the quick tries (like its opening
+   * phase); a manual one, which a person watches, stays as #787 made it.
+   */
+  it.each([
+    ['an automatic ticket keeps one reload an hour after the quick tries', true, true],
+    ['a manual ticket gets no fourth reload', false, false]
+  ] as const)('after writing pickup 3/3, %s', async (_name, automatic, retries) => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const conversationId = `a1a1a1a1-0000-4000-8000-00000000ac${automatic ? '09' : '0a'}`;
+      await request('POST', '/events', {
+        body: { conversationId, events: [{ kind: 'user_message', time: Date.now(), text: 'generate the huge handoff', messageId: `m-slow-${automatic}` }] }
+      });
+      const filed = await request('POST', '/compact', { body: { conversationId, ticket: true, ...(automatic ? { automatic: true } : {}) } });
+      const token = filed.body.token as string;
+      expect((await request('POST', '/compact', { body: { conversationId, token, sourceAttempt: true } })).body.allowed).toBe(true);
+      expect((await request('POST', '/compact', { body: { conversationId, token, sourceDispatch: true } })).body.armed).toBe(true);
+      const takeRepair = async (): Promise<{ conversationId: string; token: string; reason: string } | null> => {
+        await sweepStaleSwarm(Date.now());
+        return (await request('GET', '/status')).body.repairs?.[0] ?? null;
+      };
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        const handout = await takeRepair();
+        expect(handout).toMatchObject({ conversationId, reason: 'compaction' });
+        await request('GET', `/status?repaired=${handout!.token}&repairAction=reloaded`);
+      }
+      // Nothing within the next half hour, then (automatic only) the hourly one.
+      for (let sweep = 0; sweep < 6; sweep += 1) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        expect(await takeRepair(), `early recovery on sweep ${sweep}`).toBeNull();
+        // The page reporting a recoverable transport error brings a quick pickup forward, but never the hourly one
+        // (CodeRabbit on #2189): once the ticket is in its hourly retry, the report is not a reason to reload now.
+        if (automatic && sweep === 0) expect(expediteCompactionPickupForTests(conversationId)).toBe(false);
+      }
+      let fourth: { conversationId: string; token: string; reason: string } | null = null;
+      for (let sweep = 0; sweep < 14 && !fourth; sweep += 1) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        fourth = await takeRepair();
+      }
+      if (retries) {
+        expect(fourth).toMatchObject({ conversationId, reason: 'compaction' });
+        expect(getLog().filter(entry => entry.message.includes(`compaction ticket ${token.slice(0, 8)} for ${conversationId} keeps trying once an hour`))).toHaveLength(1);
+        expect(continuationByToken(token)).toMatchObject({ state: 'awaiting-summary' });
+      } else expect(fourth).toBeNull();
     } finally {
       vi.useRealTimers();
     }
