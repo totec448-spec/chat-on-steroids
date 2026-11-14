@@ -206,7 +206,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Archive worker chats | Off (`multiAgent.archiveWorkerChats`). | #1460, #1701. A worker chat queues 2 min after its worker reports done (`onWorkerFinished`, from `publishFinish`; `dueAt`), and every chat the broker retires for good queues at once (`onWorkerChatsRetired`: an ended run, Clear workers retiring parked histories, or a parked history expiring after 7 days), in `worker-archive.ts` (`state/worker-archive.json`, which also remembers the chats it archived). A wake for such a chat is held in the bridge's `onReviveRequest` (`readyForWake`): a not-yet-started archive is dropped; an archived (or being-archived) chat gets an unarchive job first, handed out before archives as `{ conversationId: null, unarchive }` (an old extension reads nothing), retried from 15 s, and the wake is queued on `onWorkerChatReady` (unarchived, given up, or 90 s at most). Unarchiving ignores the setting. The extension's alarm pass takes one via `POST /worker-archive/next` (leased 2 min), asks any registered ChatGPT page (`clf-archive-chat`) to `PATCH /backend-api/conversation/<id>` `{ is_archived: true }` with the signed-in account, and reports `archived`/`unarchived`/`failed`/`deferred` to `POST /worker-archive/result`. `deferred` (no page) costs no attempt; failures back off from 5 min, 6 attempts or a week at most. ChatGPT's own reversible archive: nothing is deleted. Temporary Chats were rejected: tools work there, but a reload loses the conversation (2026-10-14). |
 | Recover ordinary/agent tabs | Off. | Goal/Loop can independently justify recovery; history alone cannot. |
 | Automatic Continue | On. | Unfinished-response recovery also serves enabled Goal/Loop. This switch controls ordinary chats; explicit Off survives and malformed config disables it. See §14. |
-| Continue prompt | Built-in phrases (`ui.customContinue` unset). | Settings › Agents & automation. The person's text (trimmed, at most 500 characters, `CUSTOM_CONTINUE_MAX_CHARS`) replaces only the Continue phrase of a silence-recovery Continue (`recoveryMessage({ custom })`, frozen in the outbox row when it is filed); the notice to check existing work and the optional playful aside stay. Empty, too long or damaged reads as unset. Fresh-turn rotation keeps `rotationMessage()`, which `goal.ts` recognises by its text. |
+| Continue prompt | Built-in phrases (`ui.customContinue` unset). | Settings › Goal & Loop. The person's text (trimmed, at most 500 characters, `CUSTOM_CONTINUE_MAX_CHARS`) replaces only the Continue phrase of a silence-recovery Continue (`recoveryMessage({ custom })`, frozen in the outbox row when it is filed); the notice to check existing work and the optional playful aside stay. Empty, too long or damaged reads as unset. Fresh-turn rotation keeps `rotationMessage()`, which `goal.ts` recognises by its text. |
 | Goal / Loop | Off, preferred mode Goal. Both decision backends default to ChatGPT, helper `gpt-6` High (`DEFAULT_HELPER_CHAT_MODEL`, which High runs on its thinking lane); a config holding a superseded helper (`SUPERSEDED_HELPER_CHAT_MODELS`: `gpt-5.6-sol`, `gpt-6-thinking`) adopts it on load. | API uses the configured OpenRouter/custom endpoint and stored model. These defaults are not account-availability proof. |
 | Ordinary new-chat model | Automatic: no persisted model or reasoning override. | Optional `ui.defaultChatModel` / `ui.defaultChatReasoning` apply only to a fresh ordinary chat before it has a conversation selection. A recorded conversation or accepted opening input wins. Worker and Goal/Loop/Plan defaults remain separate. |
 | Desktop | Windows on; macOS retains its off default and separate native OS consent; Linux supports extension browser control. | Existing screen/control grants also govern browser tools; unsupported native clipboard remains masked. No new per-tab permission dialog. |
@@ -2407,7 +2407,7 @@ quota failures retain the canonical row and explicitly report storage full. The 
 one state (`recordingStorageFull()`, set by a write the global limit refused, cleared by an admitted
 write or a clean-up that leaves room): it is logged once per change, travels as
 `AppState.recordingStorageFull`, and the window shows one dismissible notice that opens the clean-up.
-The same clean-up is in Settings → Agents & automation → Browser & history (Recording storage), which
+The same clean-up is in Settings → Browser → Browser & history (Recording storage), which
 reads the usage when Settings opens. There is no automatic
 eviction. The adjacent Free storage action offers explicit oldest-1-GiB or all-recorded-image
 cleanup with confirmation; chat text, original files and pending attachments remain. Its third mode,
@@ -2806,7 +2806,7 @@ as soon as it loads), stops it when another browser is chosen, and the app stops
 - **Session.** One persistent partition (`persist:cos-browser`). Its windows are `BaseWindow`s
   with a toolbar view and one `WebContentsView` per tab; they live in the tray, and closing one
   hides it. Minimizing is an ordinary minimize: the window stays in the taskbar/Dock, and the
-  extension sees it `minimized` until it is restored (#1464). **Settings → Agents & automation →
+  extension sees it `minimized` until it is restored (#1464). **Settings → Browser →
   Minimize the built-in browser to** (`ui.cosBrowserMinimize`, `taskbar` by default, shown only while
   it is the ChatGPT browser; "Dock"/"Menu bar" on macOS) chooses `tray` instead: a minimize then hides
   the window exactly like closing it, notice included. The first time the user closes one, one desktop notice (a `MAIN_TEXTS`
@@ -3578,7 +3578,7 @@ cannot delete a new pickup repair belonging to its durable ticket.
 Continue text, source question/work, busy deadline and exclusive send custody live in the
 outbox. One combination of ten Continue phrases and ten notices is frozen once; notices ask
 to inspect existing work before repeating it. With `ui.customContinue` (the Continue prompt in
-Settings › Agents & automation) the person's text takes the phrase's place; the notice stays.
+Settings › Goal & Loop) the person's text takes the phrase's place; the notice stays.
 One of eleven playful asides (marked to be ignored)
 is added only with `ui.playfulContinue` (Settings › General, off by default): they have no
 technical role, since receipts use ChatGPT's message ids. Unsent eligible tickets survive restart. A never-authorized lost or failed
@@ -4053,7 +4053,7 @@ awaiting-summary -> awaiting-chat -> claimed -> committing -> committed
    requirement that the compaction reply contain only the brief remain code-owned invariants.
    The shipped content prompt asks for a lossless, dense operational handoff: roughly
    10k-30k tokens for a substantial session, shorter only when less state exists, never above
-   30k (`src/shared/handoff.ts`). `compaction.handoffLength` (Settings › Agents & automation,
+   30k (`src/shared/handoff.ts`). `compaction.handoffLength` (Settings › Browser,
    default and absent = `thorough`) keeps that prompt byte for byte; `standard` (4k-10k) and
    `short` (2k-6k) swap the default prompt's two length sentences when present and always append
    one code-owned line that overrides any other length target, so an edited prompt follows the
@@ -4800,7 +4800,7 @@ Current persistence/publication exceptions are in §21.
 
 Off by default (`goal.reviewerModel`: `''` off, `'same'` the Goal chat's own model, or a model id
 the account offers; an unoffered id falls back to the chat's model with one log line). Settings →
-Agents & automation → Goal says the cost (a second model pass per reviewed step) and the coverage:
+Goal & Loop → Goal says the cost (a second model pass per reviewed step) and the coverage:
 only edits made with the edit tools are reviewed, not files changed by commands, and never in Loop.
 Chosen while Sub-agents are off, the row offers **Turn on Sub-agents** (Home's own switch, only on
 the person's press).
@@ -5445,6 +5445,15 @@ Catalog checks cover all source keys and numbered placeholders;
 `dom.run()` translates catalogued IPC errors before displaying a toast; unknown error strings
 and successful payloads stay literal.
 Settings search folds both query and labels with the selected locale, including Turkish İ/ı.
+Settings pages: the sidebar lists Workspace, Setup, General, Appearance, then the group Agents
+(Goal & Loop, Models, Workers, Tools & access, Browser) and the group Insight (Usage, Activity);
+the group labels are quiet text in a `role="group"`. The five Agents tabs (`agents-goal`, `-models`,
+`-workers`, `-tools`, `-browser`, listed in `src/renderer/settings-tabs.ts`) are one view of the chat
+card (`[data-view="settings"]`): every direct child names its page in `data-agents-page`, and the
+page shown is `data-agents-current` on `.automation-content` (CSS hides the others; each page starts
+with its own `h1`). The old tab id `settings` opens Goal & Loop. A setting moves between pages only by
+moving its markup: ids, names, defaults and stored keys never depend on the page. Settings search
+reads each Agents tab through the blocks that name it, so a result opens the page that holds it.
 `scripts/verify-setup-guide.cjs` exercises narrow/zoomed layouts and native keyboard selection.
 Bindings live only in a WeakMap keyed by their DOM node. Language changes walk the current
 document, including hidden panels and bound text nodes. Never retain or periodically dereference

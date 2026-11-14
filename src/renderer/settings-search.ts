@@ -50,7 +50,9 @@ export function collectSettings(root: ParentNode = document): SettingEntry[] {
   const entries: SettingEntry[] = [];
   for (const button of root.querySelectorAll<HTMLElement>('#tabs button[data-tab]')) {
     const tab = button.dataset.tab!;
-    const page = root.querySelector<HTMLElement>(tab === 'settings' ? '[data-view="settings"]' : `[data-panel="${tab}"]`);
+    // The Agents tabs share one view; each page owns the blocks that name it (data-agents-page).
+    const agentsPage = tab.startsWith('agents-') ? tab.slice('agents-'.length) : null;
+    const page = root.querySelector<HTMLElement>(agentsPage ? '[data-view="settings"]' : `[data-panel="${tab}"]`);
     if (!page) continue;
     const pageName = tabLabel(button);
     let section = '';
@@ -60,6 +62,7 @@ export function collectSettings(root: ParentNode = document): SettingEntry[] {
       if (title && offered(step, page)) entries.push({ tab, page: pageName, section: '', title, detail: '', target: step });
     }
     for (const node of page.querySelectorAll<HTMLElement>('.settings-section-head, .setting, .field > label, .perm-main')) {
+      if (agentsPage && node.closest('[data-agents-page]')?.getAttribute('data-agents-page') !== agentsPage) continue;
       if (node.classList.contains('settings-section-head')) {
         section = words(node.querySelector('h2'));
         if (section && offered(node, page)) entries.push({ tab, page: pageName, section: '', title: section, detail: words(node.querySelector('p')), target: node });

@@ -38,6 +38,7 @@ import { initTour } from './tour.js';
 import { playSoundCue } from './sound-cues.js';
 import { inQuietHours } from '../shared/phone-push.js';
 import { collectSettings, initSettingsSearch, searchSettings } from './settings-search.js';
+import { resolveSettingsTab } from './settings-tabs.js';
 import { matchesWords } from './palette.js';
 import type { AppearanceSettings, ThemeChoice } from '../shared/appearance.js';
 import type { BrowserBridgePort } from '../shared/browser-bridge.js';
@@ -272,7 +273,8 @@ function placePermissions(tab: string): void {
 
 /** Set once the tour exists (below); leaving the chat screen ends a running tour quietly. */
 let stopTour: () => void = () => undefined;
-function showTab(name: string): void {
+function showTab(requested: string): void {
+  const { tab: name, agentPage } = resolveSettingsTab(requested);
   if (name !== 'chat') stopTour();
   if (name === 'skills') openSkillsLibrary();
   placePermissions(name);
@@ -287,7 +289,7 @@ function showTab(name: string): void {
   $('workspaceSettings').classList.toggle('is-sel', settings);
   if (name === 'usage') void refreshUsage();
   if (name === 'scheduled') void scheduled.refresh();
-  if (name === 'settings') void paintRecordingStorageUsage();
+  if (agentPage) void paintRecordingStorageUsage();
   $('tabs').hidden = !settings;
   $('settingsFindBox').hidden = !settings;
   // A page opened any way leaves the search; the page list comes back.
@@ -301,15 +303,19 @@ function showTab(name: string): void {
   }
   for (const item of document.querySelectorAll<HTMLElement>('[data-sidebar-page]')) item.classList.toggle('is-sel', item.dataset.sidebarPage === name);
   for (const panel of document.querySelectorAll<HTMLElement>('.panel')) {
-    panel.classList.toggle('is-active', panel.dataset.panel === (name === 'settings' ? 'chat' : name));
+    panel.classList.toggle('is-active', panel.dataset.panel === (agentPage ? 'chat' : name));
   }
-  // After the panel shows: the chat and Agents & automation share its scroll pane, and a hidden
+  // After the panel shows: the chat and the Agents pages share its scroll pane, and a hidden
   // pane cannot be scrolled to where each view starts.
-  if (name === 'settings') openChatView('settings');
-  else if (name === 'chat') openChatView('timeline');
+  if (agentPage) {
+    document.querySelector<HTMLElement>('.automation-content')!.dataset.agentsCurrent = agentPage;
+    openChatView('settings');
+    // One pane serves every Agents page: each starts at its own top.
+    $('chatBody').scrollTop = 0;
+  } else if (name === 'chat') openChatView('timeline');
   // The Chat panel is the only one that costs anything to keep fresh, so it only
   // reloads while it is on screen.
-  chatVisible(name === 'chat' || name === 'settings');
+  chatVisible(name === 'chat' || agentPage !== undefined);
   // A feed that was appended to while its panel was hidden could not be scrolled then —
   // a hidden element has no scroll height. Pin it now that it has one, so a panel always
   // opens on the newest line rather than on whatever was oldest in the buffer.
@@ -381,7 +387,7 @@ $('sidebarConnection').addEventListener('contextmenu', event => {
   event.preventDefault();
   setConnectionPopover(true);
 });
-$('chatSettingsBtn').addEventListener('click', () => showTab('settings'));
+$('chatSettingsBtn').addEventListener('click', () => showTab('agents-goal'));
 $('sessionList').addEventListener('click', event => {
   if ((event.target as HTMLElement).closest('[data-id], [data-new-project]')) showTab('chat');
 }, { capture: true });

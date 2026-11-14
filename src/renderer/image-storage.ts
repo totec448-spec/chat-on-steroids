@@ -25,7 +25,7 @@ export function paintRecordingStorageNotice(full: boolean): void {
   document.getElementById('dismissRecordingStorageFull')!.onclick = () => { noticeDismissed = true; notice.hidden = true; };
 }
 
-/** The clean-up's place in Settings → Agents & automation → Browser & history (#1406). */
+/** The clean-up's place in Settings → Browser → Browser & history (#1406). */
 export function initRecordingStorageSetting(): void {
   document.getElementById('settingsFreeImageStorage')!.onclick = () => showImageStorage();
 }

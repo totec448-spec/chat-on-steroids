@@ -44,7 +44,7 @@ app.whenReady().then(async () => {
 
   // The setting: Off by default, ten choices, saved as a number.
   await js(`document.getElementById('sidebarSettings')?.click() ?? document.querySelector('[data-open-settings], #openSettings')?.click()`);
-  await js(`document.querySelector('#tabs [data-tab="agents"]')?.click() ?? [...document.querySelectorAll('#tabs button')].find(b=>/Agents/.test(b.textContent))?.click()`);
+  await js(`document.querySelector('#tabs [data-tab="agents-workers"]').click()`);
   await until(`!!document.getElementById('chatsAtOnce')?.offsetParent`);
   assert.equal(await js(`document.getElementById('chatsAtOnce').value`), '0');
   assert.deepEqual(await js(`[...document.getElementById('chatsAtOnce').options].map(o=>o.textContent)`), ['Off', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10']);
