@@ -2018,8 +2018,54 @@ var CLF_DOM = (() => {
   function clearResumeResidue() {
     // Only a brief the app typed itself, word for word, here or on an earlier page of this tab: one a person
     // added to stays (CodeRabbit on #2069). The page that typed it may be gone (#2115), so the record is stored.
-    return clearOwnResidue(OWN_RESIDUE, text => ownBrief(text));
+    return clearOwnResidue(OWN_RESIDUE, text => ownBrief(text), ownMentionFreeText);
   }
+
+  /** An app mention chip's app id ("app://asdk_app_…"), or null. */
+  function chipAppId(chip) {
+    const href = chip.getAttribute('app-mention-path') || chip.getAttribute('data-prompt-link-href') || '';
+    const match = /^app:\/\/(asdk_app_[A-Za-z0-9_-]{1,160})$/.exec(href);
+    return match ? match[1] : null;
+  }
+
+  /**
+   * The editor's words without the mention chips of this installation's own apps, compacted. The chip a restored
+   * draft ends with names the app as it is called now, so an app renamed in ChatGPT shows under a name the app does
+   * not list; the chip's id is what the app proved to be its own (#2159). Another app's chip stays in the text.
+   */
+  function ownMentionFreeText(box) {
+    if (!box?.querySelector?.(APP_MENTION_CHIP) || typeof box.cloneNode !== 'function') return null;
+    const own = new Set(ownApps.map(app => app.appId));
+    const clone = box.cloneNode(true);
+    let removed = 0;
+    for (const chip of clone.querySelectorAll(APP_MENTION_CHIP)) {
+      const id = chipAppId(chip);
+      if (id && own.has(id)) { chip.remove(); removed++; }
+    }
+    return removed ? compactDraft(editorText(clone)) : null;
+  }
+
+  /**
+   * Why the editor is not ready, in a few words and no text of it (#2159): the reason a Project entry gives when
+   * it times out. Nothing here can say what a person wrote, only what kind of draft it is and whether the app
+   * knows it.
+   */
+  function draftEvidence() {
+    return safe(() => {
+      const box = composer();
+      if (!box?.isConnected) return 'no-editor';
+      if (!composerWritable()) return 'readonly';
+      if (generating() || stopButton()) return 'busy';
+      if (hasComposerAttachments()) return 'attachment';
+      const text = compactDraft(editorText(box));
+      if (!text) return 'empty';
+      const kind = RESUME_RESIDUE.test(text) ? 'brief' : FIRST_MESSAGE_RESIDUE.test(text) ? 'context' : null;
+      if (!kind) return 'other';
+      const bare = ownMentionFreeText(box);
+      return `${kind}-${ownBrief(text) || (bare !== null && ownBrief(bare)) ? 'own' : 'foreign'}`;
+    }, 'unknown');
+  }
+  const mentionChipCount = () => safe(() => composer()?.querySelectorAll?.(APP_MENTION_CHIP).length ?? 0, 0);
 
   /**
    * The Compact & Resume briefs the app typed, as short fingerprints of their compacted text. They are kept in
@@ -2083,12 +2129,16 @@ var CLF_DOM = (() => {
     return String(value).replace(/\\(?=\r?\n)/g, '').replace(/\\(?=[!-/:-@[-`{-~])/g, '').replace(/\s+/g, '');
   }
 
-  function clearOwnResidue(pattern, owned = () => true) {
+  function clearOwnResidue(pattern, owned = () => true, withoutOwnMentions = () => null) {
     return safe(() => {
       const box = composer();
       if (!composerWritable() || generating() || stopButton() || hasComposerAttachments()) return false;
       const text = compactDraft(editorText(box));
-      if (!text || !pattern.test(text) || !owned(text)) return false;
+      if (!text || !pattern.test(text)) return false;
+      if (!owned(text)) {
+        const bare = withoutOwnMentions(box);
+        if (bare === null || !pattern.test(bare) || !owned(bare)) return false;
+      }
       box.focus();
       const selection = document.getSelection();
       if (!selection || document.activeElement !== box) return false;
@@ -3887,7 +3937,7 @@ var CLF_DOM = (() => {
             // An earlier brief of the app's own that ChatGPT kept in this Project home (#2068).
             // ChatGPT can restore the draft after it was emptied, so this may happen again, a few times only.
             if (residueClears < 3 && clearResumeResidue()) { residueClears++; return check(); }
-            lastObservation = 'composer-not-ready';
+            lastObservation = `composer-not-ready:draft=${draftEvidence()}:clears=${residueClears}:chips=${mentionChipCount()}`;
             return;
           }
           if (turns().some(turn => !onKeptPage(turn.node))) {
