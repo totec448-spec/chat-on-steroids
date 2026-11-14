@@ -3729,6 +3729,31 @@ var CLF_DOM = (() => {
       if (trace.failedPhase === null) { trace.failedPhase = trace.phase; trace.failedVersion = trace.targetVersion; trace.failure = !stillCurrent() ? 'owner-lost' : code || 'unknown'; }
       return false;
     };
+    // A separately reported native reasoning trigger is additional proof only
+    // when MAIN has stamped it as the owner of this route. Legacy pickers have
+    // no such control, and do not require one.
+    const nativeReasoningOwned = () => {
+      const trigger = modelPickerTrigger();
+      return trigger?.getAttribute('data-composer-navigation-target') === 'reasoning' &&
+        trigger.getAttribute('data-clf-picker-route') === location.pathname;
+    };
+    const confirmAfterClose = async (expected, version, nativeOwned) => {
+      if (!stillCurrent()) return selectionFailed('the chat changed meanwhile', 'owner-lost');
+      const after = await readPickerState(); observe(after);
+      const current = after?.choices.find(choice => choice.bucket === after.currentBucket);
+      if (!stillCurrent()) return selectionFailed('the chat changed meanwhile', 'owner-lost');
+      // Fiber can retain High after the separate native trigger says Medium or
+      // disappears. Preserve the old layout and non-standard effort mappings.
+      const native = nativeOwned ? modelPickerTrigger() : null;
+      const nativeMatches = !nativeOwned || !['none', 'low', 'medium', 'high'].includes(current?.effort) ||
+        (native?.getAttribute('data-composer-navigation-target') === 'reasoning' &&
+          native.getAttribute('data-clf-picker-route') === location.pathname &&
+          native.getAttribute('data-selected-reasoning-effort') === current.effort);
+      return after?.version === version && current?.available === true &&
+        current.id === expected.id && current.familyId === expected.familyId &&
+        current.effort === expected.effort && nativeMatches ||
+        selectionFailed('the model or reasoning effort changed after closing the picker', 'changed');
+    };
     let result = false;
     const choose = async () => {
       if (!model && !effort) return true;
@@ -3756,11 +3781,14 @@ var CLF_DOM = (() => {
       if (current?.available && (current.id === model || current.familyId === model) &&
           (!effort || current.effort === effort)) {
         trace.resolved = pair(current); trace.selected = pair(current);
+        const nativeOwned = nativeReasoningOwned();
         phase('close'); const closed = trace.closed = await ui.close();
         if (!closed) return selectionFailed('the picker did not close', 'close-failed');
-        return stillCurrent();
+        return confirmAfterClose(current, original.version, nativeOwned);
       }
-      let selected = false, closed = false;
+      // A native control observed before selection must still be corroborated at close,
+      // even if provider transitions remove its ownership marker in the meantime.
+      let selected = false, closed = false, expectedChoice = null, expectedVersion = null, nativeOwned = nativeReasoningOwned();
       try {
         // Exact provider slug is preferred. Existing saved display slugs may resolve
         // only to an actually observed, available pair; never to an account default.
@@ -3831,6 +3859,7 @@ var CLF_DOM = (() => {
         const confirmed = after?.choices.find(c => c.bucket === after.currentBucket);
         trace.selected = pair(confirmed);
         selected = stillCurrent() && confirmed?.available === true && confirmed.id === choice.id && confirmed.effort === choice.effort;
+        if (selected) { expectedChoice = choice; expectedVersion = wanted.version; }
         if (!selected) selectionFailed(!stillCurrent() ? 'the chat changed meanwhile'
           : `the picker showed ${confirmed ? `${String(confirmed.id).slice(0, 24)}/${confirmed.effort}` : 'nothing readable'} after choosing ${String(choice.id).slice(0, 24)}/${choice.effort}`, !stillCurrent() ? 'owner-lost' : 'mismatch');
       } finally {
@@ -3847,10 +3876,11 @@ var CLF_DOM = (() => {
             }
           }
         }
+        if (selected) nativeOwned = nativeOwned || nativeReasoningOwned();
         phase('close'); closed = trace.closed = await ui.close();
       }
       if (selected && !closed) return selectionFailed('the picker did not close', 'close-failed');
-      return selected && closed && stillCurrent();
+      return selected && closed && confirmAfterClose(expectedChoice, expectedVersion, nativeOwned);
     };
     try { result = await choose(); return result; }
     finally {
