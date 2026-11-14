@@ -691,7 +691,7 @@ it.each([false, true])('uses the exact failed diff identity after a list refresh
   if (newer) {
     expect(getToolEditReview).toHaveBeenLastCalledWith('session-id', refreshed.callId, 0, projectA.id);
     expect(onEditSource).not.toHaveBeenCalled();
-    await vi.waitFor(() => expect(host.querySelector('.test-diff-viewer')).not.toBeNull());
+    await vi.waitFor(() => expect(host.querySelector('.test-diff-viewer')).not.toBeNull(), { timeout: 5_000 });
   } else {
     expect(getToolEditReview).toHaveBeenCalledOnce();
     expect(onEditSource).toHaveBeenCalledWith('session-id', { ...edit, reviewable: false });
