@@ -4100,14 +4100,17 @@ handoff for `STUCK_SUMMARY_MS` (15 minutes) and the session has a usable `lastHa
 meter shows a dot and its popover the button "Continue in a new chat from the last summary". Using
 it, `resumeFromSavedSummary` first cancels that waiting continuation. A chat with Goal or Loop on
 does this by itself (`continueStuckFromSavedSummary`), once per ticket, when an automatic ticket's
-first slowed burst of pickups could not ask either; a chat without them is never moved by itself.
+first slowed burst of pickups could not ask either, and when an automatic ticket's request was sent but its brief
+never came, after the hourly reload also collected nothing (#2184); a chat without them is never moved by itself.
 The new ChatGPT chat joins the same session, as after any Compact & Resume.
 
 Restart restoration must converge on that same committed projection. A persisted send attempt
 can outlive a transport command; expiration releases transport, not permission for another
 blind Send. Automatic tickets can wait indefinitely before the request was sent and retain a
 six-hour sent-request window; manual transport is shorter (ten minutes). Pickup budgets depend
-on phase: unsent 2m×5, writing 5m×3, opening 15m×3. While the source turn still works
+on phase: unsent 2m×5, writing 5m×3, opening 15m×3. An automatic ticket whose summary request is out and whose brief
+never came keeps one reload an hour after the writing burst (the request is never sent again); a manual one stops
+at three (#787, #2184). While the source turn still works
 (`sessionInputActivity(...).exact`), an unsent ticket spends no pickup and raises no reload: the
 request is sent once that turn ends, and a ticket filed mid-turn used to spend its whole budget on a
 generating page (2026-10-12). These are bounded recovery of one obligation,
