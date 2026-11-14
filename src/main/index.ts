@@ -12,6 +12,7 @@ import { app, Notification, BrowserWindow, ipcMain, Menu, Tray, nativeImage, nat
 import { createKeepAwake, installKeepAwake } from './keep-awake.js';
 import { getConfig, initConfigPath, loadConfig } from './config.js';
 import { initConnectorProofPath, loadConnectorProof, notePluginInstalled } from './connector-proof.js';
+import { initChatTitleSyncPath, loadChatTitleSync } from './chat-title-sync.js';
 import { initWorkerArchivePath, loadWorkerArchive, queueWorkerArchives, WORKER_ARCHIVE_AFTER_FINISH_MS } from './worker-archive.js';
 import { initBrowserProofPath, loadBrowserProof } from './browser-proof.js';
 import { enrolledPluginSurfaces } from './plugin-refresh.js';
@@ -467,6 +468,7 @@ void app.whenReady().then(async () => {
   });
   initConfigPath(userData);
   initConnectorProofPath(userData);
+  initChatTitleSyncPath(userData);
   initWorkerArchivePath(userData);
   initBrowserProofPath(userData);
   initSecretsPath(userData);
@@ -497,6 +499,7 @@ void app.whenReady().then(async () => {
   markStartup('config');
   setRecordingStorageLimit(getConfig().sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB);
   await loadConnectorProof();
+  await loadChatTitleSync();
   await loadWorkerArchive();
   // Worker chats are archived in ChatGPT when the setting is on: a little after their worker reports
   // its task done (#1701), and once the broker retired them for good (#1460).

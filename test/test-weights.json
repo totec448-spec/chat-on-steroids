@@ -44,6 +44,7 @@
  "test/chat-models.test.ts": 0.1,
  "test/chat-search-epoch.test.ts": 1.4,
  "test/chat-search-shortcut.test.ts": 0.6,
+ "test/chat-title-sync.test.ts": 0.1,
  "test/chatgpt-dom-input.test.ts": 6,
  "test/chatgpt-project-link.test.ts": 0.3,
  "test/chatgpt-project-list-dom.test.ts": 0.4,

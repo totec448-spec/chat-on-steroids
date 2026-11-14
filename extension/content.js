@@ -3036,6 +3036,7 @@
       if (seen.id) seenTurns.add(seen.id);
     }
     if (seenTurns.size > 2000) seenTurns.delete(seenTurns.values().next().value);
+    reapplySyncedChatTitles();
 
     // ChatGPT commonly assigns the human title after the first answer, not with the route id.
     // Re-read it so the generic local fallback can be promoted later without using title as
@@ -14288,26 +14289,85 @@
    */
   let projectCreateBusy = false;
   /**
+   * Sends one authenticated PATCH against a ChatGPT conversation on behalf of the signed-in
+   * account (shared between reversible worker archiving and manual title synchronization).
+   */
+  async function patchChatgptConversation(conversationId, patch) {
+    const id = String(conversationId || '').toLowerCase();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) return false;
+    const signedIn = await fetch(`${location.origin}/api/auth/session`, { credentials: 'include' });
+    const session = signedIn.ok ? await signedIn.json() : null;
+    const token = typeof session?.accessToken === 'string' ? session.accessToken : '';
+    if (!token) return false;
+    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    // A workspace chat belongs to that workspace's account, which ChatGPT names in this header.
+    if (typeof session.account?.id === 'string' && session.account.id) headers['ChatGPT-Account-Id'] = session.account.id;
+    const updated = await fetch(`${location.origin}/backend-api/conversation/${id}`, {
+      method: 'PATCH', credentials: 'include', headers, body: JSON.stringify(patch)
+    });
+    return updated.ok;
+  }
+
+  /**
    * Archives one worker chat with ChatGPT's own reversible archive (#1460): the chat leaves the
    * chat list and can be restored from ChatGPT's settings. With `archive` false it restores one
    * the app archived, before that worker is woken (#1701). One request for one exact chat of the
    * signed-in account; nothing is deleted and nothing else is touched.
    */
   async function archiveWorkerChat(conversationId, archive = true) {
-    const id = String(conversationId || '').toLowerCase();
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) return 'failed';
-    const signedIn = await fetch(`${location.origin}/api/auth/session`, { credentials: 'include' });
-    const session = signedIn.ok ? await signedIn.json() : null;
-    const token = typeof session?.accessToken === 'string' ? session.accessToken : '';
-    if (!token) return 'failed';
-    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-    // A workspace chat belongs to that workspace's account, which ChatGPT names in this header.
-    if (typeof session.account?.id === 'string' && session.account.id) headers['ChatGPT-Account-Id'] = session.account.id;
-    const archived = await fetch(`${location.origin}/backend-api/conversation/${id}`, {
-      method: 'PATCH', credentials: 'include', headers, body: JSON.stringify({ is_archived: archive })
-    });
-    if (!archived.ok) return 'failed';
-    return archive ? 'archived' : 'unarchived';
+    return (await patchChatgptConversation(conversationId, { is_archived: archive })) ? (archive ? 'archived' : 'unarchived') : 'failed';
+  }
+
+  const syncedChatTitles = new Map();
+  const SYNCED_TITLE_HOLD_MS = 2 * 60_000;
+  const MAX_SYNCED_TITLES = 50;
+
+  function cleanChatTitle(value) {
+    return typeof value === 'string'
+      ? value.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120).trim()
+      : '';
+  }
+
+  function applySyncedChatTitleUi(targetId, title, track = true) {
+    const id = typeof targetId === 'string' ? targetId.trim().toLowerCase() : '';
+    const clean = cleanChatTitle(title);
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id) || !clean) return;
+    if (track) {
+      syncedChatTitles.delete(id);
+      syncedChatTitles.set(id, { title: clean, until: Date.now() + SYNCED_TITLE_HOLD_MS });
+      while (syncedChatTitles.size > MAX_SYNCED_TITLES) {
+        const oldest = syncedChatTitles.keys().next();
+        if (oldest.done) break;
+        syncedChatTitles.delete(oldest.value);
+      }
+    }
+    const result = CLF_DOM.applyConversationTitle?.(id, clean);
+    if (result?.editing) {
+      syncedChatTitles.delete(id);
+      return;
+    }
+    if (CLF_DOM.conversationId?.() === id) reportedConversationTitle = clean;
+  }
+
+  function reapplySyncedChatTitles() {
+    if (!syncedChatTitles.size) return;
+    const now = Date.now();
+    for (const [id, entry] of syncedChatTitles.entries()) {
+      if (now >= entry.until) {
+        syncedChatTitles.delete(id);
+        continue;
+      }
+      applySyncedChatTitleUi(id, entry.title, false);
+    }
+  }
+
+  /** Applies the app's manual session title onto that exact ChatGPT conversation. */
+  async function renameChatgptChat(conversationId, title) {
+    const clean = cleanChatTitle(title);
+    if (!clean) return 'failed';
+    if (!(await patchChatgptConversation(conversationId, { title: clean }))) return 'failed';
+    applySyncedChatTitleUi(conversationId, clean);
+    return 'synced';
   }
 
   async function createChatgptProject(request) {
@@ -14627,6 +14687,15 @@
       if (message.type === 'clf-archive-chat') {
         void archiveWorkerChat(message.conversationId, message.archive !== false).then(outcome => sendResponse({ outcome })).catch(() => sendResponse({ outcome: 'failed' }));
         return true;
+      }
+      if (message.type === 'clf-rename-chat') {
+        void renameChatgptChat(message.conversationId, message.title).then(outcome => sendResponse({ outcome })).catch(() => sendResponse({ outcome: 'failed' }));
+        return true;
+      }
+      if (message.type === 'clf-apply-chat-title') {
+        applySyncedChatTitleUi(message.conversationId, message.title);
+        sendResponse({ ok: true });
+        return false;
       }
       if (message.type === 'clf-stop-turn') {
         void stopAppTurn(message).then(ok => sendResponse({ ok })).catch(() => sendResponse({ ok: false }));

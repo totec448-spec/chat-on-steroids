@@ -19338,3 +19338,31 @@ describe('why a command ran out of time', () => {
       .toBe('the browser did not claim this command before its deadline');
   });
 });
+
+describe('syncing manual chat titles to ChatGPT Web', () => {
+  it('signals due title syncs on /status, leases one job at a time, and settles outcomes', async () => {
+    await pair();
+    const { queueChatTitleSync, resetChatTitleSyncForTests } = await import('../src/main/chat-title-sync.js');
+    resetChatTitleSyncForTests();
+    const chat = randomUUID();
+
+    expect((await request('POST', '/status', { body: { openConversations: [] } })).body.chatTitlePending).toBeUndefined();
+    expect((await request('POST', '/chat-title/next', { body: {} })).body).toEqual({ conversationId: null, title: null });
+
+    queueChatTitleSync(chat, '  My\n   Work  ');
+    expect((await request('POST', '/status', { body: { openConversations: [] } })).body.chatTitlePending).toBe(true);
+    expect((await request('POST', '/chat-title/next', { body: {} })).body).toEqual({ conversationId: chat, title: 'My Work' });
+    // Already leased.
+    expect((await request('POST', '/chat-title/next', { body: {} })).body).toEqual({ conversationId: null, title: null });
+
+    expect((await request('POST', '/chat-title/result', { body: { conversationId: chat, title: 'My Work', outcome: 'bogus' } })).status).toBe(400);
+    expect((await request('POST', '/chat-title/result', { body: { conversationId: 'not-a-chat', title: 'My Work', outcome: 'synced' } })).status).toBe(400);
+    expect((await request('POST', '/chat-title/result', { body: { conversationId: chat, title: '   ', outcome: 'synced' } })).status).toBe(400);
+
+    expect((await request('POST', '/chat-title/result', { body: { conversationId: chat, title: 'My Work', outcome: 'deferred' } })).body).toEqual({ ok: true });
+    expect((await request('POST', '/chat-title/next', { body: {} })).body).toEqual({ conversationId: chat, title: 'My Work' });
+    expect((await request('POST', '/chat-title/result', { body: { conversationId: chat, title: 'My Work', outcome: 'synced' } })).body).toEqual({ ok: true });
+    expect((await request('POST', '/chat-title/next', { body: {} })).body).toEqual({ conversationId: null, title: null });
+    expect((await request('POST', '/status', { body: { openConversations: [] } })).body.chatTitlePending).toBeUndefined();
+  });
+});
