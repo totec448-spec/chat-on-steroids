@@ -5,16 +5,18 @@ import { createHash } from 'node:crypto';
 import { rawPromises as fs } from './rawfs.js';
 import { effectiveCapabilities, getConfig } from './config.js';
 import { isContained, resolvePath } from './sandbox.js';
-import { listSkills, readSkill, readSkillTextSnapshot, skillCatalogSnapshot, skillsDirectory, type SkillDocument } from './skills.js';
+import { disabledSkillIds, discoveredSkillEnabled, listManagedSkills, listSkills, readSkill, readSkillTextSnapshot, removableUserSkill, skillCatalogSnapshot, skillsDirectory, type SkillDocument } from './skills.js';
 import { approvedManagedSkillLink, sameSkillLink } from './skill-links.js';
 import { parseCodexPluginManifest, parseSkillConfiguration, parseSkillFrontmatter, parseSkillInterface, type SkillConfiguration } from './skill-metadata.js';
 import { listInstalledCodexPlugins } from './codex-plugin-runtime.js';
-import type { ClaudePluginSkillProvenance, CodexPluginRuntimeEntry, CodexPluginSkillProvenance, LibrarySkill, SkillLibrary, SkillMetadata, SkillScope, SkillSource } from '../shared/skills.js';
+import type { ClaudePluginSkillProvenance, CodexPluginRuntimeEntry, CodexPluginSkillProvenance, GlobalSkill, LibrarySkill, SkillLibrary, SkillMetadata, SkillScope, SkillSource } from '../shared/skills.js';
 import type { SkillRoutingMetadata } from '../shared/skill-routing.js';
 import { discoverUserSkillPath } from './user-skills.js';
 
 export interface SkillLibraryScope {
   projectPath?: string | null;
+  /** Manager inspection includes disabled user Skills so their switches can be turned back on. */
+  includeDisabledExternal?: boolean;
   /** Only explicit library inspection may refresh the CLI snapshot; prompt preparation never does. */
   refreshCodexPlugins?: boolean;
   /**
@@ -470,6 +472,23 @@ export async function listSkillLibrary(scope: SkillLibraryScope = {}, runtime: S
     return value;
   };
   const seen = new Set<string>();
+  // listSkills() intentionally omits disabled managed packages. Preserve their
+  // canonical file exclusion so a linked package cannot reappear as a new
+  // discovered command with its switch silently enabled.
+  for (const id of disabledSkillIds()) {
+    try {
+      const directory = path.join(root, id);
+      const stat = await fs.lstat(directory);
+      if (stat.isSymbolicLink()) {
+        const config = getConfig();
+        if (!effectiveCapabilities(config).read) continue;
+        const linked = await approvedManagedSkillLink(root, id, config.roots);
+        if (linked) seen.add(identity(path.join(linked.real, 'SKILL.md')));
+      } else if (stat.isDirectory() && samePath(directory, await fs.realpath(directory))) {
+        seen.add(identity(await fs.realpath(path.join(directory, 'SKILL.md'))));
+      }
+    } catch { /* A disabled user Skill ID is not necessarily a managed package. */ }
+  }
   for (const summary of managed) {
     const directory = path.join(root, summary.id), file = path.join(directory, 'SKILL.md');
     const document = scope.managedFromCatalog ? null : await readSkill(summary.id);
@@ -486,10 +505,10 @@ export async function listSkillLibrary(scope: SkillLibraryScope = {}, runtime: S
     } catch { /* readSkill already owns validity; dedupe must not widen filesystem authority. */ }
     let metadata = { name: summary.name, description: summary.description };
     if (document) try { metadata = { ...metadata, ...parseSkillFrontmatter(document.text) }; } catch { /* Existing plain Markdown remains supported. */ }
+    seen.add(identity(seenFile));
     if (!enabled(metadata.name, file)) continue;
     const extra = await interfaceFor(directory, true, library.errors, summary.id);
     library.skills.push({ ...summary, ...metadata, ...extra, scope: 'managed', source: 'managed', managed: true });
-    seen.add(identity(seenFile));
   }
   let entries = 0, directories = 0;
   const seenDirectories = new Set<string>();
@@ -528,8 +547,10 @@ export async function listSkillLibrary(scope: SkillLibraryScope = {}, runtime: S
                 : claudePlugin ? claudePluginSkillIdentity(candidate.claudePlugin!, skillPath) : identity(document.real)).digest('hex').slice(0, 12);
               const stem = path.basename(current.directory).normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 35) || 'skill';
               const id = `${stem}--${codexPlugin ? 'codex' : claudePlugin ? 'claude' : candidate.scope}-${hash}`;
-              library.skills.push({ id, ...metadata, path: document.virtual, ...await interfaceFor(current.directory, false, library.errors),
-                scope: candidate.scope, source: candidate.source, managed: false, ...(codexPlugin ? { codexPlugin } : {}), ...(claudePlugin ? { claudePlugin } : {}) });
+              if (scope.includeDisabledExternal || discoveredSkillEnabled(id)) {
+                library.skills.push({ id, ...metadata, path: document.virtual, ...await interfaceFor(current.directory, false, library.errors),
+                  scope: candidate.scope, source: candidate.source, managed: false, ...(codexPlugin ? { codexPlugin } : {}), ...(claudePlugin ? { claudePlugin } : {}) });
+              }
               seen.add(identity(document.real));
             }
           }
@@ -549,7 +570,31 @@ export async function listSkillLibrary(scope: SkillLibraryScope = {}, runtime: S
   return library;
 }
 
+/** The manager shows global user Skills alongside its own imported packages. */
+export async function listGlobalSkills(): Promise<GlobalSkill[]> {
+  const managed = await listManagedSkills();
+  const library = await listSkillLibrary({ includeDisabledExternal: true });
+  const globals: GlobalSkill[] = managed.map(skill => ({ ...skill, managed: true, source: 'managed', canRemove: true }));
+  const seen = new Set(globals.map(skill => skill.id));
+  for (const skill of library.skills) {
+    if (skill.scope !== 'user' || skill.managed ||
+        !['user-agents', 'codex-home', 'claude-home'].includes(skill.source) || seen.has(skill.id)) continue;
+    // Discovery may present a user-owned file under an approved workspace alias.
+    // Resolve it back to its stable user-Skills identity before showing delete controls.
+    const current = await approved(skill.path);
+    const own = await discoverUserSkillPath(current.real);
+    const displayPath = own?.virtual || skill.path;
+    globals.push({ id: skill.id, name: skill.displayName ?? skill.name,
+      description: skill.shortDescription ?? skill.description, path: displayPath,
+      enabled: discoveredSkillEnabled(skill.id), origin: null, managed: false, source: skill.source,
+      canRemove: removableUserSkill(skill.source, displayPath) });
+    seen.add(skill.id);
+  }
+  return globals.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+}
+
 export async function readLibrarySkill(id: string, scope: SkillLibraryScope = {}, library?: SkillLibrary): Promise<SkillDocument> {
+  if (!discoveredSkillEnabled(id)) throw new Error(`Skill "${id}" is disabled`);
   const current = library ?? await listSkillLibrary(scope);
   const selected = current.skills.find(skill => skill.id === id);
   if (!selected) throw new Error(`Skill "${id}" is unavailable in this project. Select it again or remove its command.`);

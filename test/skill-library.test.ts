@@ -1,16 +1,29 @@
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { makeTempDir, removeTempDir } from './helpers.js';
 import { defaultConfig, getConfig, initConfigPath, saveConfig } from '../src/main/config.js';
-import { initSkillsPath, importSkillPackage, listSkills, removeSkill } from '../src/main/skills.js';
-import { listSkillLibrary, readLibrarySkill, skillLibraryInstructions } from '../src/main/skill-library.js';
+import { initSkillsPath, importSkillPackage, listSkills, removeDiscoveredSkill, removeSkill, setDiscoveredSkillEnabled, setManagedSkillEnabled } from '../src/main/skills.js';
+import { listGlobalSkills, listSkillLibrary, readLibrarySkill, skillLibraryInstructions } from '../src/main/skill-library.js';
 import type { LibrarySkill } from '../src/shared/skills.js';
 
 let root: string, project: string;
 const contents = (name: string, body = 'Keep all instructions.') => `---\nname: ${name}\ndescription: >-\n  Check the source\n  before editing.\n---\n${body}`;
 async function write(file: string, text: string | Buffer): Promise<void> {
   await fs.mkdir(path.dirname(file), { recursive: true }); await fs.writeFile(file, text);
+}
+async function interruptedStandaloneRemoval(original: string): Promise<{ stageRoot: string; staged: string }> {
+  const name = path.basename(original);
+  const stat = await fs.lstat(original);
+  const stageRoot = path.join(path.dirname(original), `.cos-removing-${randomUUID()}`);
+  const staged = path.join(stageRoot, name);
+  await fs.mkdir(stageRoot);
+  await fs.writeFile(path.join(stageRoot, '.cos-removal.json'), JSON.stringify({
+    version: 1, name, kind: 'directory', identity: { dev: stat.dev, ino: stat.ino, size: stat.size }
+  }));
+  await fs.rename(original, staged);
+  return { stageRoot, staged };
 }
 beforeEach(async () => {
   root = await makeTempDir('cos-skill-library-'); project = path.join(root, 'project');
@@ -63,6 +76,21 @@ it('deduplicates a managed package link against the same discovered SKILL.md', a
   expect(library.skills[0]).toMatchObject({ id: 'review', managed: true, path: '/skills/review/SKILL.md' });
 });
 
+it('does not rediscover a disabled managed link under a new external Skill ID', async () => {
+  const source = path.join(project, '.agents/skills/review');
+  await write(path.join(source, 'SKILL.md'), contents('Review'));
+  await fs.symlink(source, path.join(root, 'skills/review'), process.platform === 'win32' ? 'junction' : 'dir');
+  expect((await listSkillLibrary({ projectPath: project })).skills.map(skill => skill.id)).toEqual(['review']);
+  await setManagedSkillEnabled('review', false);
+  const hidden = await listSkillLibrary({ projectPath: project });
+  expect(hidden.skills).toEqual([]);
+  expect((await listGlobalSkills()).find(skill => skill.id === 'review')?.enabled).toBe(false);
+  await initSkillsPath(root);
+  expect((await listSkillLibrary({ projectPath: project })).skills).toEqual([]);
+  await setManagedSkillEnabled('review', true);
+  expect((await listSkillLibrary({ projectPath: project })).skills.map(skill => skill.id)).toEqual(['review']);
+});
+
 it('honors layered config and both YAML policy styles while keeping package resources out of discovery', async () => {
   await write(path.join(project, '.agents/skills/review/SKILL.md'), contents('Review'));
   await write(path.join(project, '.agents/skills/review/references/example/SKILL.md'), contents('Example only'));
@@ -93,6 +121,158 @@ it('reads the user\'s own Skill folders read-only without approving their homes'
   // Without the Read files permission nothing is discovered.
   await saveConfig({ ...getConfig(), capabilities: { ...getConfig().capabilities, read: false } });
   expect((await listSkillLibrary({}, { codexPlugins: async () => [] })).skills).toEqual([]);
+});
+
+it('shows existing global user Skills in the manager and persists their activation for agents', async () => {
+  await write(path.join(root, 'home/.agents/skills/first/SKILL.md'), contents('First'));
+  await write(path.join(root, 'home/.agents/skills/second/SKILL.md'), contents('Second'));
+  await write(path.join(root, 'codex/skills/.system/default/SKILL.md'), contents('Bundled'));
+  const initial = await listGlobalSkills();
+  expect(initial.map(skill => skill.name)).toEqual(['First', 'Second']);
+  expect(initial.every(skill => skill.managed === false && skill.source === 'user-agents' && skill.enabled)).toBe(true);
+  const first = initial[0]!;
+  const inspected = await listSkillLibrary({ includeDisabledExternal: true });
+  await setDiscoveredSkillEnabled(first.id, false);
+  expect((await listGlobalSkills()).find(skill => skill.id === first.id)?.enabled).toBe(false);
+  expect((await listSkillLibrary()).skills.some(skill => skill.id === first.id)).toBe(false);
+  await expect(readLibrarySkill(first.id, {}, inspected)).rejects.toThrow('disabled');
+  expect(await fs.readFile(path.join(root, 'home/.agents/skills/first/SKILL.md'), 'utf8')).toBe(contents('First'));
+  await initSkillsPath(root);
+  expect((await listGlobalSkills()).find(skill => skill.id === first.id)?.enabled).toBe(false);
+  await setDiscoveredSkillEnabled(first.id, true);
+  expect((await listSkillLibrary()).skills.some(skill => skill.id === first.id)).toBe(true);
+});
+
+it('moves the complete user Skill package to Trash and clears its disabled state without affecting neighbors', async () => {
+  const firstFolder = path.join(root, 'home/.agents/skills/first');
+  const otherFolder = path.join(root, 'home/.agents/skills/other');
+  await write(path.join(firstFolder, 'SKILL.md'), contents('First'));
+  await write(path.join(firstFolder, 'references/notes.txt'), 'A reference');
+  await write(path.join(firstFolder, 'scripts/run.cmd'), 'echo hello');
+  await write(path.join(otherFolder, 'SKILL.md'), contents('Other'));
+  const externalResource = path.join(root, 'external-resources');
+  await write(path.join(externalResource, 'shared.txt'), 'Shared data survives');
+  await fs.symlink(externalResource, path.join(firstFolder, 'linked-resources'), process.platform === 'win32' ? 'junction' : 'dir');
+  const initial = await listGlobalSkills();
+  expect(initial).toHaveLength(2);
+  const first = initial.find(skill => skill.name === 'First')!;
+  expect({ source: first.source, path: first.path }).toEqual({ source: 'user-agents', path: '/user-skills/agents/skills/first/SKILL.md' });
+  expect(first.canRemove).toBe(true);
+  await setDiscoveredSkillEnabled(first.id, false);
+  const trash = path.join(root, 'mock-trash'); await fs.mkdir(trash);
+  await removeDiscoveredSkill(first.id, first.source, first.path, folder => fs.rename(folder, path.join(trash, path.basename(folder))));
+  await expect(fs.lstat(firstFolder)).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(await fs.readFile(path.join(trash, 'first/references/notes.txt'), 'utf8')).toBe('A reference');
+  expect(await fs.readFile(path.join(trash, 'first/scripts/run.cmd'), 'utf8')).toBe('echo hello');
+  expect(await fs.readFile(path.join(otherFolder, 'SKILL.md'), 'utf8')).toBe(contents('Other'));
+  expect(await fs.readFile(path.join(externalResource, 'shared.txt'), 'utf8')).toBe('Shared data survives');
+  expect((await listGlobalSkills()).map(skill => skill.name)).toEqual(['Other']);
+  await expect(fs.lstat(path.join(root, 'skills/.cos-disabled-skills.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+  await initSkillsPath(root);
+  expect((await listGlobalSkills()).map(skill => skill.name)).toEqual(['Other']);
+});
+
+it('refuses stale IDs and linked user Skill folders without following or deleting their targets', async () => {
+  const folder = path.join(root, 'home/.agents/skills/first');
+  await write(path.join(folder, 'SKILL.md'), contents('First'));
+  const first = (await listGlobalSkills())[0]!;
+  const toTrash = async () => { throw new Error('Should not reach Trash'); };
+  await expect(removeDiscoveredSkill('different--user-123456789abc', first.source, first.path, toTrash))
+    .rejects.toThrow('package identity changed');
+  await expect(removeDiscoveredSkill(first.id, first.source, '/user-skills/agents/skills/../SKILL.md', toTrash))
+    .rejects.toThrow('Only standalone');
+  expect(await fs.readFile(path.join(folder, 'SKILL.md'), 'utf8')).toBe(contents('First'));
+  const outside = path.join(root, 'outside');
+  await write(path.join(outside, 'SKILL.md'), contents('Outside'));
+  const link = path.join(root, 'home/.agents/skills/linked');
+  await fs.symlink(outside, link, process.platform === 'win32' ? 'junction' : 'dir');
+  await expect(removeDiscoveredSkill(first.id, first.source, '/user-skills/agents/skills/linked/SKILL.md', toTrash))
+    .rejects.toThrow('linked or changed');
+  expect(await fs.readFile(path.join(outside, 'SKILL.md'), 'utf8')).toBe(contents('Outside'));
+});
+
+it('restores a disabled user Skill when Trash fails, preserving its files and disabled state', async () => {
+  const folder = path.join(root, 'home/.agents/skills/first');
+  await write(path.join(folder, 'SKILL.md'), contents('First'));
+  await write(path.join(folder, 'references/info.txt'), 'Keep this data');
+  const first = (await listGlobalSkills())[0]!;
+  await setDiscoveredSkillEnabled(first.id, false);
+  await expect(removeDiscoveredSkill(first.id, first.source, first.path, async () => {
+    throw new Error('Trash unavailable');
+  })).rejects.toThrow('Trash unavailable');
+  expect(await fs.readFile(path.join(folder, 'references/info.txt'), 'utf8')).toBe('Keep this data');
+  expect((await listGlobalSkills())[0]!.enabled).toBe(false);
+  await initSkillsPath(root);
+  expect((await listGlobalSkills())[0]!.enabled).toBe(false);
+  expect((await fs.readdir(path.dirname(folder))).sort()).toEqual(['first']);
+});
+
+it('trashes the validated folder and never a replacement created after staging', async () => {
+  const folder = path.join(root, 'home/.agents/skills/first');
+  await write(path.join(folder, 'SKILL.md'), contents('First'));
+  const first = (await listGlobalSkills())[0]!;
+  const trash = path.join(root, 'mock-trash'); await fs.mkdir(trash);
+  await removeDiscoveredSkill(first.id, first.source, first.path, async staged => {
+    await write(path.join(folder, 'SKILL.md'), contents('Replacement'));
+    await fs.rename(staged, path.join(trash, path.basename(staged)));
+  });
+  expect(await fs.readFile(path.join(folder, 'SKILL.md'), 'utf8')).toBe(contents('Replacement'));
+  expect(await fs.readFile(path.join(trash, 'first/SKILL.md'), 'utf8')).toBe(contents('First'));
+});
+
+it('restores crash-staged standalone Skills from direct agents, Codex, and Claude homes on startup', async () => {
+  vi.stubEnv('CLAUDE_CONFIG_DIR', path.join(root, 'claude'));
+  const cases = [
+    { directory: path.join(root, 'home/.agents/skills/agents-first'), name: 'AgentsFirst', source: 'user-agents' },
+    { directory: path.join(root, 'codex/skills/codex-first'), name: 'CodexFirst', source: 'codex-home' },
+    { directory: path.join(root, 'claude/skills/claude-first'), name: 'ClaudeFirst', source: 'claude-home' }
+  ];
+  const staged: string[] = [];
+  for (const entry of cases) {
+    await write(path.join(entry.directory, 'SKILL.md'), contents(entry.name));
+    await write(path.join(entry.directory, 'references/note.txt'), `${entry.name} resource`);
+    const crash = await interruptedStandaloneRemoval(entry.directory);
+    staged.push(crash.stageRoot);
+    await expect(fs.lstat(entry.directory)).rejects.toMatchObject({ code: 'ENOENT' });
+  }
+
+  await initSkillsPath(root);
+  for (let index = 0; index < cases.length; index++) {
+    const entry = cases[index]!;
+    expect(await fs.readFile(path.join(entry.directory, 'SKILL.md'), 'utf8')).toBe(contents(entry.name));
+    expect(await fs.readFile(path.join(entry.directory, 'references/note.txt'), 'utf8')).toBe(`${entry.name} resource`);
+    await expect(fs.lstat(staged[index]!)).rejects.toMatchObject({ code: 'ENOENT' });
+  }
+  const globals = await listGlobalSkills();
+  for (const entry of cases) expect(globals).toContainEqual(expect.objectContaining({
+    name: entry.name, source: entry.source, managed: false
+  }));
+});
+
+it('leaves occupied and forged standalone recovery stages untouched', async () => {
+  const userRoot = path.join(root, 'home/.agents/skills');
+  const original = path.join(userRoot, 'existing');
+  await write(path.join(original, 'SKILL.md'), contents('OldVersion'));
+  const occupied = await interruptedStandaloneRemoval(original);
+  await write(path.join(original, 'SKILL.md'), contents('Replacement'));
+  const forgedOriginal = path.join(userRoot, 'forged');
+  await write(path.join(forgedOriginal, 'SKILL.md'), contents('Forged'));
+  const forged = await interruptedStandaloneRemoval(forgedOriginal);
+  const forgedMarker = path.join(forged.stageRoot, '.cos-removal.json');
+  const record = JSON.parse(await fs.readFile(forgedMarker, 'utf8')) as {
+    version: number; name: string; kind: string; identity: { dev: number; ino: number; size: number };
+  };
+  record.identity.ino += 1_000_000; // Use a representable difference even for large Windows inode numbers.
+  await fs.writeFile(forgedMarker, JSON.stringify(record));
+
+  await initSkillsPath(root);
+  expect(await fs.readFile(path.join(original, 'SKILL.md'), 'utf8')).toBe(contents('Replacement'));
+  expect(await fs.readFile(path.join(occupied.staged, 'SKILL.md'), 'utf8')).toBe(contents('OldVersion'));
+  expect(await fs.readFile(path.join(occupied.stageRoot, '.cos-removal.json'), 'utf8')).toContain('"name":"existing"');
+  await expect(fs.lstat(forgedOriginal)).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(await fs.readFile(path.join(forged.staged, 'SKILL.md'), 'utf8')).toBe(contents('Forged'));
+  expect(await fs.readFile(forgedMarker, 'utf8')).toContain('"ino":');
+  expect((await listGlobalSkills()).map(skill => skill.name)).toEqual(['Replacement']);
 });
 
 it('discovers enabled Codex plugin skills from only the active installed version and keeps command identity across upgrades', async () => {
@@ -213,6 +393,7 @@ it('discovers Skills from enabled Claude Code plugins and Claude\'s own Skills f
   await write(path.join(project, '.claude/settings.local.json'), JSON.stringify({ enabledPlugins: { 'review-pack@team-market': false } }));
   expect((await listSkillLibrary({ projectPath: project })).skills.map(skill => skill.name)).not.toContain('Audit');
   expect((await listSkillLibrary()).skills.map(skill => skill.name).sort()).toEqual(['Audit', 'Personal', 'Wrong']);
+  expect((await listGlobalSkills()).map(skill => skill.name)).toEqual(['Personal']);
 });
 
 it('keeps a Claude plugin Skill\'s command across a plugin update', async () => {

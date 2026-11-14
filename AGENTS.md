@@ -615,6 +615,26 @@ after following links; a link may land only in a tree of the same level (`~/.cla
 command folders never reach it, and it never becomes the chat's workspace. Credentials, history
 and other settings in those homes stay invisible. An approved home keeps its ordinary paths.
 
+The Skills panel (`renderer/skills-library.ts`) now uses `skills:global` / preload
+`listGlobalSkills()` to display managed imports alongside direct user-Skill packages from
+`~/.agents/skills`, `CODEX_HOME/skills`, and `CLAUDE_CONFIG_DIR/skills`. It excludes
+plugin-owned, project, system, and bundled packages from the global manager. The activation
+switch calls `skills:setEnabled`; the bounded version-1 `.cos-disabled-skills.json` stored
+under the managed Skills root keeps these choices across restarts. Both discovery and explicit
+reading respect disabled IDs; a disabled managed link cannot reappear under a discovered ID.
+`skills:remove` confirms its action in the renderer, then sends the verified package to the
+host Trash via Electron `shell.trashItem`. Standalone user-owned packages retain the warning
+that other applications may share their folder. Identity-checked same-volume staging and
+failure restoration keep replacement paths out of the Trash call; the activation flag is
+cleared only after a successful move. A failed Trash operation must not permanently delete
+any Skill. Before staging a removal, CoS writes a bounded `.cos-removal.json` marker
+under a unique `.cos-removing-<uuid>` folder. Startup recovers interrupted removals
+from the managed root and the three standalone user-Skill roots only when the original
+path remains empty and the staged package identity matches the marker; unknown or
+changed stage contents are left for manual inspection. Removal decisions use stable
+reason-code log messages without personal paths or Skill names. The panel does not
+modify the user's installed Skill content when toggling it.
+
 Input `authoredSource` identifies which existing field contains the human request: `text`
 by default, `objective` for generated Goal/workflow openings, and `none` for generated
 checkpoints. Editing a queued message makes its text human-authored again. At the existing
