@@ -15,6 +15,63 @@
    The window prefers 1080x700 but can shrink to the current display and can be resized,
    so long content scrolls inside its own panes rather than growing or clipping the page.
    --------------------------------------------------------------------------- */
+/* RTL is opt-in for Arabic; keep code, terminals and keyboard combinations LTR. */
+html[dir="rtl"] body { direction: rtl; font-family: "Segoe UI", Tahoma, Arial, sans-serif; }
+html[dir="rtl"] :is(pre, code, kbd, .xterm, .cm-editor, .cm-content) { direction: ltr; unicode-bidi: isolate; text-align: left; }
+html[dir="rtl"] :is(input, textarea) { unicode-bidi: plaintext; }
+html[dir="rtl"] :is(.path, .file-path, .terminal-output, .terminal-input) { direction: ltr; unicode-bidi: isolate; text-align: left; }
+html[dir="rtl"] :is(input[type="email"], input[type="url"], .row-menu-shortcut) {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: left;
+}
+html[dir="rtl"] :is(.sidebar-section-empty, .plugin-entry, .plugin-menu-actions .btn,
+  .plugin-catalog-card, .browser-option, .access-choice, .access-fine,
+  .setup-profile-option > :first-child, .update-readiness .update-readiness-toggle) {
+  text-align: start;
+}
+/* Submenus open to the left in RTL; the chevron follows the same direction. */
+html[dir="rtl"] .row-menu-chevron { transform: scaleX(-1); }
+/* Wizard back/continue and resume are logical navigation, not physical
+   east/west directions. The sidebar's Back to chat stays leftward because
+   the chat pane is physically left of the Arabic sidebar. */
+html[dir="rtl"] #browserContinue > .ph-arrow-right,
+html[dir="rtl"] #browserBack > .ph-arrow-left,
+html[dir="rtl"] #resumeLastSummary > .ph-arrow-right {
+  transform: scaleX(-1);
+}
+/* Mirror physical sidebar geometry; CSS direction alone does not mirror absolute
+   positioning, clip paths or the dragging separator. */
+html[dir="rtl"] .sidebar {
+  border-right-color: transparent;
+  border-left: 1px solid transparent;
+  clip-path: inset(0 0 0 -20px);
+}
+html[dir="rtl"] .sidebar-resize { left: -4px; right: auto; }
+html[dir="rtl"] .sidebar::before,
+html[dir="rtl"] .sidebar::after { right: calc(100% + 1px); left: auto; }
+html[dir="rtl"] .sidebar::before {
+  mask-image: radial-gradient(circle at 0% 100%, transparent 18px, #000 18.5px);
+}
+html[dir="rtl"] .sidebar::after {
+  border-left: 0;
+  border-right: 1px solid var(--line);
+  border-top-left-radius: 0;
+  border-top-right-radius: 18px;
+  mask-image: linear-gradient(to bottom, #000, transparent 75%), linear-gradient(to left, #000, transparent);
+}
+html[dir="rtl"][data-high-contrast="true"] .sidebar { border-left-color: var(--line); }
+html[dir="rtl"] .app.is-sidebar-collapsed .sidebar {
+  clip-path: inset(0 0 0 100%);
+  transform: translateX(14px);
+}
+html[dir="rtl"] .sidebar-sessions > .scroll {
+  margin-left: -12px;
+  margin-right: 0;
+  padding-left: 4px;
+  padding-right: 0;
+}
+
 
 .panel.plugins-panel { overflow-y: auto; padding: 46px 36px 32px; scrollbar-gutter: stable; }
 .panel.plugins-panel.is-active { display: block; }
@@ -4421,6 +4478,14 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 #composerSettings > summary { gap: 6px; }
 #composerSettings > summary .ico { --ico: 17px; --glyph: 17px; }
 #composerSettings .composer-popover { width: 350px; max-width: calc(100vw - 32px); left: 0; right: auto; transform-origin: bottom left; max-height: min(520px, 70vh); overflow-y: auto; }
+/* Composer controls mirror with the rest of the layout: open inward, not
+   underneath the sidebar. The model selector sits on the opposite end. */
+html[dir='rtl'] :is(#attachmentMenu, #composerSettings) > .composer-popover {
+  left: auto; right: 0; transform-origin: bottom right;
+}
+html[dir='rtl'] #modelMenu > .composer-popover {
+  left: 0; right: auto; transform-origin: bottom left;
+}
 #composerSettings.mode-picker :is(#sessionControls, #loopDeliveryRow) { display: none; }
 #composerSettings:not(.mode-picker) #automationSwitch { display: none; }
 #composerSettings[data-mode]:not([data-mode=off]) > summary { color: var(--accent); background: var(--control-selected); }
@@ -4535,6 +4600,7 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .picker-chevron { flex: none; width: 14px; height: 14px; }
 .send-control { position: relative; }
 .send-options { display: none; position: absolute; bottom: 100%; right: -8px; padding-bottom: 12px; width: 190px; z-index: 40; }
+html[dir='rtl'] .send-options { left: -8px; right: auto; }
 .send-control:hover .send-options:not([hidden]), .send-control:focus-within .send-options:not([hidden]) { display: block; }
 .delivery-choices { display: grid; gap: 2px; padding: 5px; border: 1px solid var(--edge); border-radius: 12px; background: var(--popover, var(--card)); box-shadow: 0 8px 25px #0004; animation: surface-in 120ms ease-out; }
 .delivery-choices button { display: flex; align-items: center; justify-content: space-between; padding: 9px 10px; border: 0; border-radius: 7px; background: transparent; color: var(--ink); font: inherit; font-size: calc(13px * var(--text-scale, 1)); cursor: pointer; text-align: left; }
@@ -4750,6 +4816,7 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
   --syntax-search-selected: #8a7629;
 }
 .work-panel-resize { position: absolute; z-index: 8; top: 0; bottom: 0; left: -4px; width: 8px; cursor: col-resize; touch-action: none; }
+html[dir='rtl'] .work-panel-resize { right: -4px; left: auto; }
 .work-panel-resize:hover, .work-panel-resize:focus-visible, .is-resizing-work-panel .work-panel-resize { background: linear-gradient(var(--accent-edge), var(--accent-edge)) center / 1px 100% no-repeat; outline: none; }
 .is-resizing-work-panel, .is-resizing-work-panel * { cursor: col-resize !important; user-select: none !important; }
 .file-panel-refresh { margin-left: auto; width: 28px; height: 28px; padding: 6px; }

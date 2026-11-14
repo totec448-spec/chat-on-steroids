@@ -420,8 +420,25 @@ function paintComposerLabel(): void {
 
 function paintStatus(): void {
   paintComposerChoices();
-  const error = () => catalog.error?.startsWith('Model discovery timed out. ')
-    ? t('Model discovery timed out. {0}', [t(catalog.error.slice('Model discovery timed out. '.length))]) : t(catalog.error ?? '');
+  const error = () => {
+    const raw = catalog.error ?? '';
+    // The browser launcher sends this error with a concrete browser name,
+    // followed by the discovery retry advice. Translate the whole actionable
+    // message instead of looking up its dynamically assembled English text.
+    const missing = /^(.+?) was not found\. Install it or change Settings > Browser & history > ChatGPT browser\.\. Retry model discovery\.$/.exec(raw);
+    if (missing) {
+      // Keep the full product name, including slashes, in LTR order inside
+      // Arabic prose. This is a text node, not markup, so use Unicode isolates.
+      // Keep the complete brand together when a narrow menu would otherwise
+      // wrap at spaces or a slash and interleave Arabic words between its parts.
+      const originalName = missing[1] ?? '';
+      const browserName = document.documentElement.dir === 'rtl'
+        ? '\u2066' + originalName.replace(/\s/g, '\u00a0') + '\u2069' : originalName;
+      return t('Browser {0} was not found. Install it or select another browser in Settings, then retry model discovery.', [browserName]);
+    }
+    return raw.startsWith('Model discovery timed out. ')
+      ? t('Model discovery timed out. {0}', [t(raw.slice('Model discovery timed out. '.length))]) : t(raw);
+  };
   const message = () => catalog.state === 'pending' ? t(catalog.waiting ?? "Reading your account’s model choices…")
     : catalog.error ? (catalog.models.length ? t('Refresh failed. Previously observed choices remain available. {0}', [error()]) : error())
     : catalog.state === 'ready' ? t("Available in your ChatGPT account · checked {0}", [new Date(catalog.observedAt!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })])

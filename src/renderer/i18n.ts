@@ -10,15 +10,16 @@ import ptBR from './locales/pt-BR.json';
 import de from './locales/de.json';
 import ru from './locales/ru.json';
 import vi from './locales/vi.json';
+import ar from './locales/ar.json';
 
-export type Language = 'en' | 'es' | 'zh-CN' | 'zh-TW' | 'ja' | 'ko' | 'tr' | 'vi' | 'fr' | 'pt-PT' | 'pt-BR' | 'de' | 'ru';
+export type Language = 'en' | 'ar' | 'es' | 'zh-CN' | 'zh-TW' | 'ja' | 'ko' | 'tr' | 'vi' | 'fr' | 'pt-PT' | 'pt-BR' | 'de' | 'ru';
 const STORAGE_KEY = 'cos.ui.language';
 type Catalog = Readonly<Record<string, string>>;
-const catalogs: Readonly<Record<Exclude<Language, 'en'>, Catalog>> = { es, 'zh-CN': zhCN, 'zh-TW': zhTW, ja, ko, tr, vi, fr, 'pt-PT': ptPT, 'pt-BR': ptBR, de, ru };
+const catalogs: Readonly<Record<Exclude<Language, 'en'>, Catalog>> = { ar, es, 'zh-CN': zhCN, 'zh-TW': zhTW, ja, ko, tr, vi, fr, 'pt-PT': ptPT, 'pt-BR': ptBR, de, ru };
 const sourceKeys = new Set(Object.values(catalogs).flatMap(catalog => Object.keys(catalog)));
 
 function parseLanguage(value: string | null | undefined): Language {
-  return value === 'es' || value === 'zh-CN' || value === 'zh-TW' || value === 'ja' || value === 'ko' || value === 'tr' || value === 'vi' || value === 'fr' || value === 'pt-PT' || value === 'pt-BR' || value === 'de' || value === 'ru' ? value : 'en';
+  return value === 'ar' || value === 'es' || value === 'zh-CN' || value === 'zh-TW' || value === 'ja' || value === 'ko' || value === 'tr' || value === 'vi' || value === 'fr' || value === 'pt-PT' || value === 'pt-BR' || value === 'de' || value === 'ru' ? value : 'en';
 }
 
 /**
@@ -32,7 +33,7 @@ export function systemLanguage(preferred: readonly string[]): Language {
     const [base] = tag.split('-');
     if (base === 'zh') return /-(hant|tw|hk|mo)\b/.test(tag) ? 'zh-TW' : 'zh-CN';
     if (base === 'pt') return /^pt-pt\b/.test(tag) ? 'pt-PT' : 'pt-BR';
-    if (base === 'en' || base === 'es' || base === 'ja' || base === 'ko' || base === 'tr' || base === 'vi' || base === 'fr' || base === 'de' || base === 'ru') return base;
+    if (base === 'en' || base === 'ar' || base === 'es' || base === 'ja' || base === 'ko' || base === 'tr' || base === 'vi' || base === 'fr' || base === 'de' || base === 'ru') return base;
   }
   return 'en';
 }
@@ -130,6 +131,7 @@ export function setLanguage(next: Language): void {
   language = next;
   try { window.localStorage.setItem(STORAGE_KEY, next); } catch { /* The current window can still change language. */ }
   document.documentElement.lang = next;
+  document.documentElement.dir = next === 'ar' ? 'rtl' : 'ltr';
   syncLanguageControls();
   for (const listener of languageListeners) {
     try { listener(); } catch { /* One listener cannot block the repaint below. */ }
@@ -179,6 +181,7 @@ export function initLanguage(): void {
     }
   }
   document.documentElement.lang = language;
+  document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
   const select = document.getElementById('uiLanguage') as HTMLSelectElement;
   syncLanguageControls();
   select.addEventListener('change', () => setLanguage(parseLanguage(select.value)));

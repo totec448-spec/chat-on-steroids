@@ -79,7 +79,11 @@ app.whenReady().then(async () => {
           separated: heading.right <= bounds.left || heading.bottom <= bounds.top,
           // One flag per shipped language (English plus each locale catalog), about 46px each.
           compact: bounds.width <= buttons.length * 46,
-          flagsOnly: buttons.length === ${LANGUAGES} && buttons.every(button => !button.textContent.trim() && button.querySelector('svg')),
+          flagsOnly: buttons.length === ${LANGUAGES} && buttons.every(button => {
+            const copy = button.cloneNode(true);
+            copy.querySelectorAll('svg').forEach(svg => svg.remove());
+            return !copy.textContent.trim() && button.querySelector('svg');
+          }),
           labeled: buttons.every(button => button.title && button.title === button.getAttribute('aria-label')),
           selected: buttons.filter(button => button.getAttribute('aria-pressed') === 'true').map(button => button.dataset.language),
           reachable: buttons.every(button => {

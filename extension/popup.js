@@ -370,12 +370,13 @@ function paintAlert(status, info) {
   $('alert').hidden = !text;
 }
 
-function detail(list, term, value, bad) {
+function detail(list, term, value, bad, idValue = false) {
   const dt = document.createElement('dt');
   dt.textContent = term;
   const dd = document.createElement('dd');
   dd.textContent = value === null || value === undefined || value === '' ? '—' : String(value);
-  if (bad) dd.className = 'bad';
+  if (bad) dd.classList.add('bad');
+  if (idValue) dd.classList.add('id');
   dd.title = dd.textContent;
   list.append(dt, dd);
 }
@@ -404,8 +405,8 @@ function paintDetails(status, info) {
     status ? t('popup_detail_extension_value', 'v$1 · protocol $2', [status.extensionVersion || '?', status.extensionProtocol ?? '?']) : null,
     status && status.compatible === false
   );
-  detail(grid, t('popup_detail_chat_id', 'chat id'), (info && info.conversationId) || null);
-  detail(grid, t('popup_detail_app_session', 'app session'), (page && page.session) || null, Boolean(page && !page.session));
+  detail(grid, t('popup_detail_chat_id', 'chat id'), (info && info.conversationId) || null, false, true);
+  detail(grid, t('popup_detail_app_session', 'app session'), (page && page.session) || null, Boolean(page && !page.session), true);
   detail(
     grid,
     t('popup_detail_tab', 'tab'),

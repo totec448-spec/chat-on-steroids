@@ -13,6 +13,13 @@ function maximum(host: HTMLElement): number {
   return Math.max(MIN_WIDTH, hostWidth(host) - MIN_MAIN_WIDTH);
 }
 
+function horizontalSign(host: HTMLElement): -1 | 1 {
+  // The work slot is at inline-end: its separator is the left edge in LTR and
+  // the right edge in RTL. A positive pointer delta therefore changes width
+  // in opposite directions.
+  return host.ownerDocument.documentElement.dir === 'rtl' ? 1 : -1;
+}
+
 function currentWidth(host: HTMLElement, pane: HTMLElement): number {
   const explicit = Number.parseFloat(host.style.getPropertyValue('--work-panel-width'));
   if (Number.isFinite(explicit) && explicit > 0) return explicit;
@@ -71,8 +78,7 @@ export function attachWorkPanelResize(host: HTMLElement, pane: HTMLElement): HTM
   });
   handle.addEventListener('pointermove', event => {
     if (drag?.id !== event.pointerId) return;
-    // The handle is the panel's left edge, so moving it left makes the right panel wider.
-    setWidth(host, drag.width + drag.x - event.clientX);
+    setWidth(host, drag.width + (event.clientX - drag.x) * horizontalSign(host));
   });
   const finish = (event: PointerEvent): void => {
     if (drag?.id !== event.pointerId) return;
@@ -92,8 +98,9 @@ export function attachWorkPanelResize(host: HTMLElement, pane: HTMLElement): HTM
   });
   handle.addEventListener('keydown', event => {
     const width = currentWidth(host, pane);
-    if (event.key === 'ArrowLeft') setWidth(host, width + 10, true);
-    else if (event.key === 'ArrowRight') setWidth(host, width - 10, true);
+    const sign = horizontalSign(host);
+    if (event.key === 'ArrowLeft') setWidth(host, width - 10 * sign, true);
+    else if (event.key === 'ArrowRight') setWidth(host, width + 10 * sign, true);
     else if (event.key === 'Home') setWidth(host, MIN_WIDTH, true);
     else if (event.key === 'End') setWidth(host, maximum(host), true);
     else return;

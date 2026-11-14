@@ -3995,6 +3995,7 @@
   "A page reload in a Project no longer makes it fail every time.": "Ein Neuladen der Seite in einem Projekt lässt es nicht mehr jedes Mal scheitern.",
   "Skills only when wanted": "Skills nur, wenn gewünscht",
   "A Skill is not chosen when you say not to use it.": "Ein Skill wird nicht gewählt, wenn du sagst, dass er nicht genutzt werden soll.",
+  "Browser {0} was not found. Install it or select another browser in Settings, then retry model discovery.": "Der Browser {0} wurde nicht gefunden. Installiere ihn oder wähle in den Einstellungen einen anderen Browser und starte die Modellsuche erneut.",
   "Compact & Resume in Projects, Goal chats that recover, and safer saves over SSH.": "Komprimieren & Fortsetzen in Projekten, Goal-Chats, die sich erholen, und sicherere Speicherung über SSH.",
   "It works in a Project that already holds chats started through the app.": "Es funktioniert in einem Projekt, das schon über die App gestartete Chats enthält.",
   "Goal chats keep going": "Goal-Chats laufen weiter",
