@@ -34,14 +34,14 @@ afterEach(async () => {
   await removeTempDir(dir);
 });
 
-async function record(name: string, options: Partial<ToolCallRecord> = {}, owner = sessionId) {
+async function record(name: string, options: Partial<ToolCallRecord> = {}, owner = sessionId, rootName = 'work') {
   const stored = { text: 'Edited imagined.txt', chars: 19, truncated: false };
   const asset = await writeAsset(owner, Buffer.from(JSON.stringify({ before: 'previous\n',
     after: options.summary?.kind === 'delete' ? '' : 'recorded\n' })), 'text/plain');
   const call: ToolCallRecord = {
     callId: randomUUID(), tool: 'apply_patch', outcome: 'ok', attribution: 'request_id', attributionMethod: 'request_id',
     conversationId, requestId: 'sample-request', durationMs: 1, summary: { kind: 'edit', title: 'Edited', tone: 'good' },
-    args: stored, result: stored, changes: [{ path: `/work/sample/${name}`, added: 1, removed: 1, approximate: false, reviewAssetId: asset.id }],
+    args: stored, result: stored, changes: [{ path: `/${rootName}/sample/${name}`, added: 1, removed: 1, approximate: false, reviewAssetId: asset.id }],
     ...options
   };
   await appendEvent(owner, { kind: 'tool_call', time: Date.now(), source: 'mcp', call });
@@ -82,6 +82,21 @@ it('does not follow a rename or substitute the replacement’s contents', async 
   expect(await diff(call)).toMatchObject({ currentText: 'recorded\n' });
   await fs.writeFile(path.join(project, 'old.txt'), 'unrelated replacement');
   expect(await diff(call)).toMatchObject({ currentText: 'recorded\n' });
+});
+
+it('keeps renamed approved roots scoped to the current prefix without losing historical diffs', async () => {
+  const before = await record('file.txt');
+  expect(await list()).toMatchObject({ rows: [{ path: 'file.txt', callId: before.callId }] });
+
+  await saveConfig({ ...defaultConfig(), roots: [{ name: 'renamed', path: path.dirname(project) }] });
+  expect(await list()).toEqual({ rows: [], limited: false });
+  const after = await record('file.txt', {}, sessionId, 'renamed');
+  expect(await list()).toMatchObject({ rows: [{ path: 'file.txt', callId: after.callId }] });
+  expect(await diff(after)).toMatchObject({ currentText: 'recorded\n' });
+  expect(await diff(before)).toBeNull();
+  expect(await readToolEditReview(sessionId, before.callId, 0)).toMatchObject({
+    path: '/work/sample/file.txt', currentText: 'recorded\n'
+  });
 });
 
 it('returns an empty list for a chat with no recorded edits', async () => {
