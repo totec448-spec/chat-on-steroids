@@ -1,13 +1,34 @@
-// Real Electron/production renderer, with synthetic chats and IPC.
-const { app, BrowserWindow } = require('electron');
+// Run after npm run build. Real Electron/production renderer, with synthetic chats and IPC.
+const electron = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const assert = require('node:assert/strict');
+const { pathToFileURL } = require('node:url');
+const { createProfile, removeProfile } = require('./ui-check-profile.cjs');
 const root = process.env.COS_UI_ROOT || path.resolve(__dirname, '..');
 const output = process.env.COS_UI_OUTPUT;
 const baseline = process.argv.includes('--before');
-const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'cos-review-chat-'));
+const profile = process.env.COS_REVIEW_CHECK_PROFILE;
+if (!profile) {
+  // Delete only after Electron has released Chromium's profile files (not in its quit event).
+  const { spawnSync } = require('node:child_process');
+  const temp = createProfile(os.tmpdir());
+  let status = 1;
+  try {
+    const env = { ...process.env, COS_REVIEW_CHECK_PROFILE: temp };
+    delete env.ELECTRON_RUN_AS_NODE;
+    const child = spawnSync(typeof electron === 'string' ? electron : process.execPath,
+      ['--lang=en-US', __filename, ...process.argv.slice(2)], { env, stdio: 'inherit', windowsHide: true });
+    if (child.error) throw child.error;
+    if (child.signal) throw new Error(`Review dock Electron exited with ${child.signal}`);
+    status = child.status ?? 1;
+  } catch (error) { console.error(error); }
+  finally { removeProfile(temp); }
+  if (typeof electron === 'string') process.exit(status);
+  else electron.app.exit(status);
+} else {
+const { app, BrowserWindow } = electron;
 const { fixtureConfigSource, BENIGN_RENDERER_ERRORS } = require(path.join(root, 'scripts/fixtures/app-defaults.cjs'));
 app.setPath('userData', profile);
 app.disableHardwareAcceleration();
@@ -22,12 +43,12 @@ const fixture = `(() => {
   const files=['src/dashboard.ts','docs/legacy-notes.md','docs/old-guide.md'];
   const rows=files.map((path,i)=>({path,callId:'00000000-0000-4000-8000-00000000000'+(i+2),index:0,position:i+2,
     state:['changed','deleted','missing'][i],reviewable:i!==2}));
-  f.events[0].message=stored('Update the dashboard heading and clean up the old notes.');
-  f.events.at(-1).message=stored('The dashboard now shows the project name. I removed the legacy notes.');
+  f.events[0].message=stored('Update the dashboard heading, remove the legacy notes, and rename the old guide.');
+  f.events.at(-1).message=stored('I updated the dashboard heading, deleted the legacy notes, and renamed old-guide.md to guide.md.');
   f.events.at(-1).seq=5;
   f.events.splice(1,0,...rows.map((row,i)=>({seq:row.position,time:now+row.position,source:'mcp',kind:'tool_call',turnId:'t-1',
     call:{callId:row.callId,tool:'apply_patch',args:stored('{}'),result:stored('Applied patch'),summary:{kind:i===1?'delete':'edit',
-    title:(i===1?'Deleted ':'Edited ')+row.path,tone:'good'},outcome:'ok',attribution:'request_id',attributionMethod:'request_id',
+    title:(i===1?'Deleted ':i===2?'Renamed ':'Edited ')+row.path,tone:'good'},outcome:'ok',attribution:'request_id',attributionMethod:'request_id',
     conversationId:f.summary.conversationId,durationMs:120,changes:[{path:'/demo/'+row.path,added:i===1?0:1,removed:1,approximate:false,
     ...(row.reviewable?{reviewAssetId:'synthetic-edit'}:{reviewUnavailable:'not-kept'})}]}})));
   const methods={
@@ -53,23 +74,16 @@ const fixture = `(() => {
   window.api=new Proxy(methods,{get:(target,key)=>key in target?target[key]:base[key]});
 })();`;
 
-let server, win;
+let win;
 app.whenReady().then(async () => {
-  const { createServer } = await import('vite');
-  const icons = path.join(root, 'node_modules/@phosphor-icons/web/src');
-  server = await createServer({ configFile: false, root: path.join(root, 'src/renderer'), cacheDir: path.join(profile, 'vite'),
-    logLevel: 'error', resolve: { alias: { '@phosphor-icons/web': icons } }, server: { host: '127.0.0.1', port: 0,
-      fs: { allow: [root, fs.realpathSync(icons)] } }, plugins: [{
-      name: 'chat-edits-fixture', transformIndexHtml: html => html.replace('</head>', '<script src="/review-fixture.js"></script></head>'),
-      configureServer(vite) {
-        vite.middlewares.use('/review-fixture.js', (_req, res) => {
-          res.setHeader('Content-Type', 'text/javascript');
-          res.end(fixtureConfigSource() + fs.readFileSync(path.join(root, 'scripts/fixtures/composer-ui.js'), 'utf8') + fixture);
-        });
-      }
-    }]
-  });
-  await server.listen();
+  // Load the build as the app does, without a Vite dev server or HMR connection to shut down.
+  const built = path.join(root, 'out/renderer');
+  const fixtureFile = path.join(profile, 'review-fixture.js');
+  fs.writeFileSync(fixtureFile, fixtureConfigSource()
+    + fs.readFileSync(path.join(root, 'scripts/fixtures/composer-ui.js'), 'utf8') + fixture);
+  const page = path.join(profile, 'index.html');
+  fs.writeFileSync(page, fs.readFileSync(path.join(built, 'index.html'), 'utf8').replace('<head>',
+    `<head><base href="${pathToFileURL(built + path.sep).href}"><script src="${pathToFileURL(fixtureFile).href}"></script>`));
   win = new BrowserWindow({ show: false, width: 1200, height: 760,
     webPreferences: { sandbox: true, offscreen: true, backgroundThrottling: false } });
   const errors = [];
@@ -86,7 +100,7 @@ app.whenReady().then(async () => {
     await until(`!!document.querySelector('.sess[data-id="${id}"]')`);
     await js(`document.querySelector('.sess[data-id="${id}"]').click()`);
   };
-  await win.loadURL(server.resolvedUrls.local[0]);
+  await win.loadFile(page);
   await open('composer-preview');
   const quick = '#workDockRight .work-dock-quick[data-view=review]';
   await until(`document.querySelector('${quick}')?.disabled === false`);
@@ -116,6 +130,7 @@ app.whenReady().then(async () => {
     await open('chat-with-no-edits');
     await until(`!document.querySelector('.review-panel .review-chat-edits').closest('[hidden]') && document.querySelector('.review-panel .review-chat-edits').textContent.includes('No recent recorded edits.')`);
     assert.equal(await js(`document.querySelectorAll('${rows}').length`), 0);
+    await shot('no-recorded-edits');
     await js(`document.querySelector('.review-panel [data-path="README.md"]').click()`);
     await until(`document.querySelector('.review-panel .cm-editor')?.textContent.includes('After Git edit')`);
     await js(`document.querySelector('.review-panel .file-changes-back').click()`);
@@ -127,9 +142,9 @@ app.whenReady().then(async () => {
   }
   assert.deepEqual(errors, []);
   console.log('PASS: Review dock ' + (baseline ? 'baseline' : 'recorded edits, source jump, chat switch, Git diff, narrow dock'));
-}).catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
-  win?.destroy();
-  await server?.close();
-  app.exit(process.exitCode || 0);
-});
-app.on('quit', () => { fs.rmSync(profile, { recursive: true, force: true }); });
+}).then(() => finish(0), error => { console.error(error); finish(1); });
+
+function finish(status) {
+  try { win?.destroy(); } finally { app.exit(status); }
+}
+}
