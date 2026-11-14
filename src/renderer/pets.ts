@@ -219,11 +219,43 @@ export function initPets(api: AppApi, runtime: PetController): void {
   const apply = (next: PetLibraryState): void => {
     state = next; loaded = true; loadFailed = false; runtime.applyLibraryState(next); render();
   };
+  let pendingMutations = 0;
+  let needsLibraryRefresh = false;
+  let refreshingLibrary = false;
+  const refreshLibraryAfterMutations = async (): Promise<void> => {
+    if (pendingMutations || !needsLibraryRefresh || refreshingLibrary) return;
+    refreshingLibrary = true;
+    const own = epoch;
+    const next = await run(api.petsList());
+    refreshingLibrary = false;
+    if (own !== epoch || pendingMutations) {
+      needsLibraryRefresh = true;
+      if (!pendingMutations) await refreshLibraryAfterMutations();
+      return;
+    }
+    needsLibraryRefresh = false;
+    if (next) apply(next);
+  };
   const mutate = async (request: ReturnType<AppApi['petsList']>, onLatestFailure?: () => void): Promise<boolean> => {
-    const own = ++epoch; const next = await run(request);
-    if (own !== epoch) return false;
-    if (!next) { onLatestFailure?.(); return false; }
-    apply(next); return true;
+    const own = ++epoch;
+    pendingMutations++;
+    const next = await run(request);
+    pendingMutations--;
+    if (own !== epoch) {
+      needsLibraryRefresh = true;
+      await refreshLibraryAfterMutations();
+      return false;
+    }
+    if (!next) {
+      if (pendingMutations || needsLibraryRefresh) {
+        needsLibraryRefresh = true;
+        await refreshLibraryAfterMutations();
+      } else onLatestFailure?.();
+      return false;
+    }
+    apply(next);
+    await refreshLibraryAfterMutations();
+    return true;
   };
   const renderCard = (pet: PetRecord): HTMLElement => {
       const card = el('article', 'plugin-card pet-library-card'); card.dataset.petId = pet.id;
