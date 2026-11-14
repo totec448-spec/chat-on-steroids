@@ -2042,7 +2042,9 @@ var CLF_DOM = (() => {
       const id = chipAppId(chip);
       if (id && own.has(id)) { chip.remove(); removed++; }
     }
-    return removed ? compactDraft(editorText(clone)) : null;
+    // Another app's chip left in the text: its label must not pass for a connector name once ours is gone (CodeRabbit on #2185).
+    if (!removed || clone.querySelector(APP_MENTION_CHIP)) return null;
+    return compactDraft(editorText(clone));
   }
 
   /**
