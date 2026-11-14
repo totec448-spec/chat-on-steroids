@@ -625,9 +625,11 @@ describe('native Project entry readiness', () => {
   // names the app as it is called now. An app renamed in ChatGPT shows under a name the app does not list, but the
   // chip carries the app's id, and the app proved that id is its own. Another app's chip is not.
   it.each([
-    ['this installation\'s own app, renamed in ChatGPT', 'asdk_app_6ac261da79588191af4e6096fadeeee2', true, 'brief-own'],
-    ['an app that is not this installation\'s', 'asdk_app_00000000000000000000000000000000', false, 'brief-foreign']
-  ] as const)('on the Project home, clears a brief that ends with the mention chip of %s only when its id is the app\'s own', async (_name, chipId, cleared, kind) => {
+    ['this installation\'s own app, renamed in ChatGPT', 'asdk_app_6ac261da79588191af4e6096fadeeee2', '', true, 'brief-own', 1],
+    ['an app that is not this installation\'s', 'asdk_app_00000000000000000000000000000000', '', false, 'brief-foreign', 1],
+    // CodeRabbit on #2185: the foreign chip's label would pass for a connector name once the own chip is gone.
+    ['this installation\'s own app, renamed, and then another app named like a connector', 'asdk_app_6ac261da79588191af4e6096fadeeee2', 'Chat On Steroids Core', false, 'brief-foreign', 2]
+  ] as const)('on the Project home, clears a brief that ends with the mention chip of %s only when its id is the app\'s own', async (_name, chipId, foreignLabel, cleared, kind, chips) => {
     const { resumeBootstrapText } = await import('../src/main/session/handoff.js');
     const brief = resumeBootstrapText('# TASK — the original goal\n\nShip the mail service.', 'pTYR0VjLJ5Xtz2FHFqajqA');
     document.execCommand = (command: string, _ui?: boolean, value?: string) => {
@@ -656,6 +658,13 @@ describe('native Project entry readiness', () => {
       chip.setAttribute('data-prompt-link-href', `app://${chipId}`);
       chip.innerHTML = '<span class="Label">Handoff Helper</span>';
       paragraphs.at(-1)!.append(chip);
+      if (foreignLabel) {
+        const foreign = document.createElement('span');
+        foreign.setAttribute('app-mention-path', 'app://asdk_app_00000000000000000000000000000000');
+        foreign.setAttribute('data-prompt-link-href', 'app://asdk_app_00000000000000000000000000000000');
+        foreign.innerHTML = `<span class="Label">${foreignLabel}</span>`;
+        paragraphs.at(-1)!.append(foreign);
+      }
       box.replaceChildren(...paragraphs);
     });
     const failure = vi.fn();
@@ -664,7 +673,7 @@ describe('native Project entry readiness', () => {
     expect(await entered).toBe(cleared);
     if (cleared) expect(box.textContent).toBe('');
     else {
-      expect(failure).toHaveBeenCalledWith(`transition-timeout:last=composer-not-ready:draft=${kind}:clears=0:chips=1`);
+      expect(failure).toHaveBeenCalledWith(`transition-timeout:last=composer-not-ready:draft=${kind}:clears=0:chips=${chips}`);
       expect(box.textContent?.length).toBeGreaterThan(0);
     }
   });
