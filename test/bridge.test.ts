@@ -116,7 +116,7 @@ const {
   pickupNow,
   noteRecoverySweepTick,
   unpair,
-  workerBriefForTests, forgetPickupWatchesForTests, commandExpiryReasonForTests } = await import('../src/main/bridge.js');
+  workerBriefForTests, forgetPickupWatchesForTests, commandExpiryReasonForTests, expediteCompactionPickupForTests } = await import('../src/main/bridge.js');
 const { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } = await import('../src/main/durable.js');
 const { setStuckNotifier } = await import('../src/main/stuck-notice.js');
 const {
@@ -3278,6 +3278,51 @@ describe('automatic compaction', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  // CodeRabbit on #2189: an hourly reload that was only queued, never confirmed by a page, is not a reload that
+  // collected nothing. The chat is not replaced from an older summary until the hourly reload has been confirmed.
+  it('does not continue from the saved summary while the hourly reload is still unconfirmed', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chatA = randomUUID(), chatB = randomUUID();
+      const session = await createSession({ conversationId: chatA });
+      const first = await openContinuationNow(session.id, chatA);
+      await attachSummary(first.token, 'TASK\n\nKeep auditing the fleet manager and fix what the audit finds.\n'.repeat(4));
+      expect(await claimContinuationNow(first.token, 'page-b')).not.toBeNull();
+      expect(await commitContinuation(first.token, chatB)).toBe(true);
+      await setSessionAutomation(session.id, 'loop');
+      await request('POST', '/events', {
+        body: { conversationId: chatB, events: [{ kind: 'user_message', time: Date.now(), text: 'keep going', messageId: `m-${chatB}` }] }
+      });
+      const filed = await request('POST', '/compact', { body: { conversationId: chatB, ticket: true, automatic: true } });
+      const ticket = filed.body.token as string;
+      expect((await request('POST', '/compact', { body: { conversationId: chatB, token: ticket, sourceAttempt: true } })).body.allowed).toBe(true);
+      expect((await request('POST', '/compact', { body: { conversationId: chatB, token: ticket, sourceDispatch: true } })).body.armed).toBe(true);
+      const repairFor = async () => {
+        await sweepStaleSwarm(Date.now());
+        return ((await request('GET', '/status')).body.repairs as Array<{ conversationId: string; reason: string; token: string }> | undefined)
+          ?.find(row => row.conversationId === chatB && row.reason === 'compaction') ?? null;
+      };
+      // The three quick reloads are confirmed.
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        const repair = await repairFor();
+        expect(repair).not.toBeNull();
+        await request('POST', '/repairs/claim', { body: { token: repair!.token } });
+        await request('GET', `/status?repaired=${encodeURIComponent(repair!.token)}&repairAction=reloaded`);
+      }
+      // The hourly reload is handed out and never confirmed. However long that takes, the chat is not replaced.
+      let handedOut = false;
+      for (let pass = 0; pass < 30; pass++) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        if (await repairFor()) handedOut = true;
+        const now = continuationForSession(session.id);
+        expect(now?.token === ticket && now.state === 'awaiting-summary', `replaced at pass ${pass} (hourly reload handed out: ${handedOut})`).toBe(true);
+      }
+      expect(handedOut).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
   it.each(['cancelled', 'replaced', 'dispatched'] as const)('opens a manual source immediately and revokes a %s ticket before browser action', async scenario => {
     await pair();
     const conversationId = randomUUID();
@@ -4656,6 +4701,9 @@ describe('automatic compaction', () => {
       for (let sweep = 0; sweep < 6; sweep += 1) {
         await vi.advanceTimersByTimeAsync(5 * 60_000);
         expect(await takeRepair(), `early recovery on sweep ${sweep}`).toBeNull();
+        // The page reporting a recoverable transport error brings a quick pickup forward, but never the hourly one
+        // (CodeRabbit on #2189): once the ticket is in its hourly retry, the report is not a reason to reload now.
+        if (automatic && sweep === 0) expect(expediteCompactionPickupForTests(conversationId)).toBe(false);
       }
       let fourth: { conversationId: string; token: string; reason: string } | null = null;
       for (let sweep = 0; sweep < 14 && !fourth; sweep += 1) {

@@ -10224,7 +10224,7 @@ const COMPACTION_PICKUPS: Record<CompactionPhase, { every: number; attempts: num
   writing: { every: 5 * 60_000, attempts: 3 },
   opening: { every: 15 * 60_000, attempts: 3 }
 };
-const compactionWatch = new Map<string, { token: string; phase: CompactionPhase; nextAt: number; attempts: number; backoffs?: number; told?: boolean; slow?: boolean; streamLost?: boolean; continuedFromSaved?: boolean }>();
+const compactionWatch = new Map<string, { token: string; phase: CompactionPhase; nextAt: number; attempts: number; backoffs?: number; told?: boolean; slow?: boolean; slowQueuedAt?: number; confirmedAt?: number; streamLost?: boolean; continuedFromSaved?: boolean }>();
 /**
  * Why the source page last stopped an automatic ticket's attempt before asking (#1643), by token.
  * Kept until the next pickup lets the page try again, so the chat says it is held, not asking.
@@ -10295,6 +10295,8 @@ function expediteCompactionPickup(conversationId: string): boolean {
   const watch = compactionWatch.get(conversationId);
   if (watch && watch.token === entry.token && watch.phase === phase) {
     if (watch.attempts >= COMPACTION_PICKUPS[phase].attempts) return false;
+    // An hourly retry waits for its hour: a transport error is not a reason to reload now (CodeRabbit on #2189).
+    if (watch.slow) return false;
     watch.nextAt = 0;
     watch.streamLost = true;
     return true;
@@ -10302,6 +10304,8 @@ function expediteCompactionPickup(conversationId: string): boolean {
   compactionWatch.set(conversationId, { token: entry.token, phase, attempts: 0, nextAt: 0, streamLost: true });
   return true;
 }
+
+export { expediteCompactionPickup as expediteCompactionPickupForTests };
 
 /** A switch change revokes the repair, but never refunds this source's spent budget. */
 function forgetGoalWatch(conversationId: string): void {
@@ -10647,8 +10651,22 @@ async function inspectOwedCompactions(now: number): Promise<boolean> {
       // ticket expired (#2184). The request is never sent again; only the page is reloaded to read the reply.
       if (phase === 'writing' && entry.automatic) {
         // The hourly try collected nothing either: a Goal or Loop chat goes on from its last saved summary in a new
-        // chat of the same session, once per ticket, as one whose request never reached ChatGPT does.
-        if (watch.slow && !watch.continuedFromSaved && await continueStuckFromSavedSummary(entry, watch, 'was asked for its brief but never produced one')) continue;
+        // chat of the same session, once per ticket, as one whose request never reached ChatGPT does. Only once that
+        // reload was confirmed by a page: one that is still queued, or claimed without a receipt, has collected nothing
+        // yet (CodeRabbit on #2189), so the ticket waits for its receipt first.
+        if (watch.slow && !watch.continuedFromSaved) {
+          const confirmedAt = watch.confirmedAt;
+          if (watch.slowQueuedAt !== undefined && confirmedAt !== undefined && confirmedAt >= watch.slowQueuedAt) {
+            // The brief gets its usual grace after the receipt, not after the reload was queued.
+            if (now < confirmedAt + schedule.every) {
+              watch.nextAt = confirmedAt + schedule.every;
+              continue;
+            }
+            if (await continueStuckFromSavedSummary(entry, watch, 'was asked for its brief but never produced one')) continue;
+          }
+          // Otherwise the hourly reload was never confirmed (still queued, claimed without a receipt, or its offer
+          // lapsed): nothing was collected, and the ticket tries again in an hour rather than replacing the chat.
+        }
         if (!watch.slow) {
           watch.slow = true;
           logInfo(`bridge: compaction ticket ${entry.token.slice(0, 8)} for ${entry.from} keeps trying once an hour to collect its brief`);
@@ -10734,6 +10752,7 @@ async function inspectOwedCompactions(now: number): Promise<boolean> {
     // One pickup per reported loss: after it, a turn that works again counts as working.
     watch.streamLost = false;
     watch.attempts += 1;
+    if (watch.slow) watch.slowQueuedAt = now;
     watch.nextAt = now + schedule.every;
     queued = true;
     logInfo(
@@ -11513,6 +11532,11 @@ async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | 'r
       }
       logInfo(`bridge: the browser confirmed ${repair.reason} recovery for ${conversationId} (${action ?? 'action unspecified'})`);
       repair.state = 'done';
+      // A compaction ticket's hourly retry counts only once a page confirmed it (#2184).
+      if (repair.reason === 'compaction') {
+        const compaction = compactionWatch.get(conversationId);
+        if (compaction) compaction.confirmedAt = Date.now();
+      }
       if (repair.attribution && repair.attribution.incident.firstAttemptAt === null)
         repair.attribution.incident.firstAttemptAt = Date.now();
       if (action !== 'preserved') {
