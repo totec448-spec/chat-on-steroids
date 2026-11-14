@@ -14,6 +14,15 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.53': {
+    lead: () => t("Compact & Resume in Projects, Goal chats that recover, and safer saves over SSH."),
+    highlights: [
+      { icon: 'i-retry', title: () => t("Compact & Resume in Projects"), text: () => t("It works in a Project that already holds chats started through the app.") },
+      { icon: 'i-agents', title: () => t("Goal chats keep going"), text: () => t("A Goal chat no longer stops for good after a Continue that failed.") },
+      { icon: 'i-lock', title: () => t("Safer saves over SSH"), text: () => t("If a save fails, your original file stays as it was.") },
+      { icon: 'i-chat', title: () => t("Write mid-answer in any language"), text: () => t("A message sent while ChatGPT is answering now goes out on pages in every language.") }
+    ]
+  },
   '2.1.52': {
     lead: () => t("A list of your scheduled messages, and search through whole long chats."),
     highlights: [
