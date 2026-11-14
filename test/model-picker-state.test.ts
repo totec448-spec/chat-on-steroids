@@ -1018,6 +1018,48 @@ it('refuses fallback click when remounted trigger Enter changes native effort wi
   expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({ outcome: 'failed', failedPhase: 'open', failure: 'changed' });
 });
 
+// CodeRabbit on #2173: an unreadable initial Fiber selection does not prove drift.
+// Preserve the old bounded click fallback; only a later readable, exact picker
+// selection can confirm it (the persistent-unreadable case stays unconfirmed).
+it.each([false, true])('uses bounded fallback with unreadable pre-Enter Fiber state (hydrates=%s)', async hydrates => {
+  vi.useFakeTimers();
+  const f = fixture(), doc = page.window.document;
+  const trigger = doc.querySelector('button')!;
+  f.props.modelsData.versions = [];
+  const renderPanel = attachMockPickerPanel(doc, f, trigger);
+  const clicks = vi.fn(renderPanel);
+  trigger.addEventListener('keydown', event => { if (event.key === 'Enter') event.stopImmediatePropagation(); }, true);
+  trigger.addEventListener('click', clicks);
+  if (hydrates) page.window.setTimeout(() => { f.props.modelsData.versions = f.versions; }, 400);
+  const reports: unknown[] = [];
+  const result = f.api.selectModelSettings('future-model', 'low', () => true, (value: unknown) => reports.push(value));
+  await vi.runAllTimersAsync();
+  expect(await result).toBe(hydrates);
+  expect(clicks).toHaveBeenCalledTimes(1);
+  const diagnostic = modelSelectionDiagnostic.parse(reports.at(-1));
+  expect(diagnostic.outcome).toBe(hydrates ? 'confirmed' : 'failed');
+  if (!hydrates) expect(diagnostic).toMatchObject({ failure: 'unreadable', failedPhase: 'read' });
+});
+
+it('refuses click when previously absent native effort appears after Enter without a portal', async () => {
+  vi.useFakeTimers();
+  const f = fixture(), trigger = page.window.document.querySelector('button')!;
+  trigger.setAttribute('data-composer-navigation-target', 'reasoning');
+  expect(trigger.hasAttribute('data-selected-reasoning-effort')).toBe(false);
+  trigger.addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    event.stopImmediatePropagation();
+    trigger.setAttribute('data-selected-reasoning-effort', 'high');
+  }, true);
+  const clicks = vi.fn(); trigger.addEventListener('click', clicks);
+  const reports: unknown[] = [];
+  const result = f.api.selectModelSettings('future-model', 'ultra', () => true, (value: unknown) => reports.push(value));
+  await vi.runAllTimersAsync();
+  expect(await result).toBe(false);
+  expect(clicks).not.toHaveBeenCalled();
+  expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({ outcome: 'failed', failedPhase: 'open', failure: 'changed' });
+});
+
 it('reads picker state once fiber metadata hydrates without an extra DOM mutation', async () => {
   vi.useFakeTimers();
   const f = fixture();
