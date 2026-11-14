@@ -43,6 +43,7 @@ const fixture = `(() => {
   const files=['src/dashboard.ts','docs/legacy-notes.md','docs/old-guide.md'];
   const rows=files.map((path,i)=>({path,callId:'00000000-0000-4000-8000-00000000000'+(i+2),index:0,position:i+2,
     state:['changed','deleted','missing'][i],reviewable:i!==2}));
+  const testAgentFilter=new URLSearchParams(location.search).has('agentFilter');
   f.events[0].message=stored('Update the dashboard heading, remove the legacy notes, and rename the old guide.');
   f.events.at(-1).message=stored('I updated the dashboard heading, deleted the legacy notes, and renamed old-guide.md to guide.md.');
   f.events.at(-1).seq=5;
@@ -51,8 +52,9 @@ const fixture = `(() => {
     title:(i===1?'Deleted ':i===2?'Renamed ':'Edited ')+row.path,tone:'good'},outcome:'ok',attribution:'request_id',attributionMethod:'request_id',
     conversationId:f.summary.conversationId,durationMs:120,changes:[{path:'/demo/'+row.path,added:i===1?0:1,removed:1,approximate:false,
     ...(row.reviewable?{reviewAssetId:'synthetic-edit'}:{reviewUnavailable:'not-kept'})}]}})));
+  if (testAgentFilter) f.events[2].agent='worker-1';
   const methods={
-    getState:async()=>{const reply=await base.getState();reply.data.config=fixtureMerge(fixtureDefaults,reply.data.config);return reply;},
+    getState:async()=>{const reply=await base.getState();reply.data.config=fixtureMerge(fixtureDefaults,reply.data.config);reply.data.config.ui.developerMode=testAgentFilter;return reply;},
     listProjects:()=>ok([project]),
     listSessions:()=>ok({sessions:[f.summary,empty],activeId:f.summary.id,pressure:[]}),
     getSession:id=>id===empty.id?ok({summary:empty,events:[{...f.events[0],message:stored('What should we do next?')}],total:1,nextFrom:2}):base.getSession(id),
@@ -136,12 +138,41 @@ app.whenReady().then(async () => {
     await js(`document.querySelector('.review-panel .file-changes-back').click()`);
     await open('composer-preview');
     await until(`document.querySelectorAll('${rows}').length===3`);
+    // An expanded Review hides the wide timeline; the source jump must bring it back and focus it.
+    const source = '.review-panel button[aria-label="Go to recorded edit"]';
+    const dashboard = '.review-chat-edits button[data-path="src/dashboard.ts"]';
+    const followSource = async () => {
+      await js(`document.querySelector('${dashboard}').click()`);
+      await until(`!!document.querySelector('${source}')`);
+      await js(`document.querySelector('${source}').click()`);
+      await until(`Boolean(document.activeElement.closest('#timeline .ev-tool_call.is-search-hit')?.getClientRects().length)`);
+    };
+    await js("document.getElementById('rightDockExpand').click()");
+    await until("document.querySelector('[data-panel=chat].is-work-dock-expanded') && !document.querySelector('#workDockRight').classList.contains('is-moving')");
+    await followSource();
+    assert.equal(await js("document.getElementById('workDockRight').hidden"), true);
+
+    // Start a fresh view with a worker filter that excludes the prime's edit.
+    await win.loadFile(page, { query: { agentFilter: '1' } });
+    await open('composer-preview');
+    const worker = '#chatAgentFilter [data-agent="worker-1"]';
+    await until(`!!document.querySelector('${worker}')`);
+    await js(`document.querySelector('${worker}').click()`);
+    await until(`!!document.querySelector('${worker}.is-sel')`);
+    await until(`document.querySelector('${quick}')?.disabled === false`);
+    await js(`document.getElementById('rightDockToggle').click(); document.querySelector('${quick}').click()`);
+    await until(`!!document.querySelector('${dashboard}')`);
+    await followSource();
+    assert.equal(await js(`!!document.querySelector('#chatAgentFilter [data-agent=""].is-sel')`), true);
+    assert.equal(await js("document.getElementById('workDockRight').hidden"), false);
+    await js("document.querySelector('.review-panel .file-changes-back').click()");
+    await until(`document.querySelectorAll('${rows}').length===3`);
     win.setContentSize(760, 860);
     await until('innerWidth===760');
     assert.equal(await js(`[...document.querySelectorAll('${rows}')].every(row=>row.scrollWidth<=row.clientWidth+1)`), true);
   }
   assert.deepEqual(errors, []);
-  console.log('PASS: Review dock ' + (baseline ? 'baseline' : 'recorded edits, source jump, chat switch, Git diff, narrow dock'));
+  console.log('PASS: Review dock ' + (baseline ? 'baseline' : 'recorded edits, source jumps from expanded and agent-filtered views, chat switch, Git diff, narrow dock'));
 }).then(() => finish(0), error => { console.error(error); finish(1); });
 
 function finish(status) {

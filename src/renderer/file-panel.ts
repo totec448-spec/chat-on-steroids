@@ -1351,7 +1351,9 @@ export function createFilePanel(options: FilePanelOptions) {
     if (!value || (projected && (value.callId !== source.callId || value.changeIndex !== index ||
         value.path !== projected.path))) {
       if (projected && chatEdits) {
-        chatEdits = { ...chatEdits, rows: chatEdits.rows.map(row => row === projected ? { ...row, reviewable: false } : row) };
+        chatEdits = { ...chatEdits, rows: chatEdits.rows.map(row =>
+          row.callId === projected.callId && row.index === projected.index && row.path === projected.path
+            ? { ...row, reviewable: false } : row) };
         paintChatEdits();
       }
       leaveReview(); toast(t('Recorded edit is unavailable.')); return;

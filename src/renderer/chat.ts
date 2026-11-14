@@ -5208,6 +5208,11 @@ async function revealChatLocation(id: string, location: ChatLocation): Promise<v
     if (Date.now() > deadline || !current()) return;
     await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()));
   }
+  if ('callId' in location && agentFilter !== null) {
+    agentFilter = null;
+    recall = null;
+    paintDetail(false);
+  }
   const rowFor = (): HTMLElement | null => rowForLocation(location);
   let row = rowFor();
   if (!row) {
@@ -9973,7 +9978,9 @@ export function initChat(next: Deps): void {
     onShow: () => docks.adopt('review'),
     onEditSource: (id, edit) => {
       if (id !== selectedId) return;
-      if (window.matchMedia?.('(max-width: 850px)').matches) docks.setOpen(false);
+      // Keep side-by-side Review open; close it only when its layout hides the timeline.
+      if (chatHost.classList.contains('is-work-dock-expanded') ||
+          window.matchMedia?.('(max-width: 850px)').matches) docks.setOpen(false);
       showView('timeline');
       void revealChatLocation(id, edit);
     },
