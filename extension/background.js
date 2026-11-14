@@ -3641,6 +3641,7 @@ async function maintainOnce() {
   void reloadForExtensionUpdate(reply.data.extensionUpdate, liveOpenings, liveCommands, liveSending).catch(() => undefined);
   void followApp(reply.data).catch(() => undefined);
   followAppearance(reply.data.appearance);
+  if (reply.data.chatTitlePending === true) void drainChatTitleSync().catch(() => undefined);
   void revealChats(reply.data.reveals).catch(() => undefined);
   void followChat(reply.data.follow).catch(() => undefined);
   void runImageExports(reply.data.imageExports).catch(() => undefined);
@@ -6271,6 +6272,25 @@ if (chrome.runtime.onStartup && typeof chrome.runtime.onStartup.addListener === 
   });
 }
 
+async function runOnChatgptTab(message, preferredConversationId, doneOutcome, onDone) {
+  let outcome = 'deferred';
+  const tabs = await chrome.tabs.query({ url: ['https://chatgpt.com/*'] });
+  const ordered = preferredConversationId
+    ? [...tabs].sort((a, b) => Number(conversationForTab(b) === preferredConversationId) - Number(conversationForTab(a) === preferredConversationId))
+    : tabs;
+  for (const tab of ordered) {
+    const documentId = tab.id === undefined ? null : tabDocuments[String(tab.id)];
+    if (!documentId) continue;
+    let reply;
+    try { reply = await chrome.tabs.sendMessage(tab.id, message, { documentId }); }
+    catch { continue; } // that document is gone; another page may still do it
+    outcome = reply?.outcome === doneOutcome ? doneOutcome : 'failed';
+    if (outcome === doneOutcome && onDone) onDone(tabs, tab.id);
+    break;
+  }
+  return outcome;
+}
+
 /**
  * Archives one worker chat the app has queued (#1460), or restores one before its worker is woken
  * (#1701), from any ChatGPT page of this extension: both are account-level requests, so they need
@@ -6285,17 +6305,34 @@ async function drainWorkerArchive() {
   if (!conversationId) return;
   const archive = !unarchive;
   const done = archive ? 'archived' : 'unarchived';
-  let outcome = 'deferred';
-  for (const tab of await chrome.tabs.query({ url: ['https://chatgpt.com/*'] })) {
-    const documentId = tab.id === undefined ? null : tabDocuments[String(tab.id)];
-    if (!documentId) continue;
-    let reply;
-    try { reply = await chrome.tabs.sendMessage(tab.id, { type: 'clf-archive-chat', conversationId, archive }, { documentId }); }
-    catch { continue; } // that document is gone; another page may still do it
-    outcome = reply?.outcome === done ? done : 'failed';
-    break;
-  }
+  const outcome = await runOnChatgptTab({ type: 'clf-archive-chat', conversationId, archive }, null, done);
   await call('/worker-archive/result', { method: 'POST', body: JSON.stringify({ conversationId, outcome }) });
+}
+
+let chatTitleSyncFlight = null;
+
+/** Pushes pending manual chat titles from the app to ChatGPT Web via any registered ChatGPT tab. */
+async function drainChatTitleSync() {
+  if (chatTitleSyncFlight) return chatTitleSyncFlight;
+  chatTitleSyncFlight = (async () => {
+    await load();
+    for (let i = 0; i < 10; i++) {
+      const next = await call('/chat-title/next', { method: 'POST', body: '{}' });
+      const conversationId = next.ok ? cleanConversationId(next.data?.conversationId) : null;
+      const title = next.ok && typeof next.data?.title === 'string' ? next.data.title.trim() : '';
+      if (!conversationId || !title) break;
+      const outcome = await runOnChatgptTab({ type: 'clf-rename-chat', conversationId, title }, conversationId, 'synced', (tabs, ranTabId) => {
+        for (const tab of tabs) {
+          if (tab.id === undefined || tab.id === ranTabId) continue;
+          const documentId = tabDocuments[String(tab.id)];
+          if (documentId) void chrome.tabs.sendMessage(tab.id, { type: 'clf-apply-chat-title', conversationId, title }, { documentId }).catch(() => undefined);
+        }
+      });
+      await call('/chat-title/result', { method: 'POST', body: JSON.stringify({ conversationId, title, outcome }) });
+      if (outcome !== 'synced') break;
+    }
+  })().finally(() => { chatTitleSyncFlight = null; });
+  return chatTitleSyncFlight;
 }
 
 if (chrome.alarms && chrome.alarms.onAlarm && typeof chrome.alarms.onAlarm.addListener === 'function') {
@@ -6303,6 +6340,7 @@ if (chrome.alarms && chrome.alarms.onAlarm && typeof chrome.alarms.onAlarm.addLi
     if (!alarm || alarm.name !== RETRY_ALARM) return;
     // Independent of the command passes below: a failure in either never holds up the other.
     void drainWorkerArchive().catch(() => undefined);
+    void drainChatTitleSync().catch(() => undefined);
     void drainCommandAcks()
       .then(() => drain())
       .then(() => drainCloses())

@@ -50,6 +50,7 @@ import { agentPlanSchema, agentPlanUpdateSchema, MAX_AGENT_PLAN_BYTES, type Agen
 import { turnTrace, type TurnTrace } from '../../shared/turn-trace.js';
 import { sameUserRequest, USER_REQUEST_LIMITS, userRequestSchema, userRequestsFileSchema, type UserRequest } from '../../shared/user-requests.js';
 import { getConfig } from '../config.js';
+import { cancelChatTitleSync, noteProviderChatTitle, queueChatTitleSync, resetChatTitleSyncForTests } from '../chat-title-sync.js';
 import { logError, logInfo, logWarn } from '../logger.js';
 
 /**
@@ -3867,6 +3868,9 @@ export async function renameSession(id: string, title: string, source: SessionSu
       // The same rules as an unnamed chat: worker and helper chats keep their origin's title, a
       // chat this app opened is named by its request, and a project page title is never a name.
       if (source === undefined || (conversationId && entry.summary.conversationId !== conversationId)) return;
+      if (source === 'provider' && entry.summary.conversationId && !projectPageTitle(title)) {
+        noteProviderChatTitle(entry.summary.conversationId, title, entry.summary.title);
+      }
       if (entry.summary.origin && entry.summary.origin.kind !== 'desktop') return;
       const auto = entry.summary.autoTitle;
       if (source === 'fallback' && auto?.source === 'provider') return;
@@ -3890,6 +3894,9 @@ export async function renameSession(id: string, title: string, source: SessionSu
     entry.summary.title = title.slice(0, 120);
     entry.summary.titleSource = source;
     await writeMeta(entry);
+    if (source === 'manual' && entry.summary.conversationId) {
+      queueChatTitleSync(entry.summary.conversationId, entry.summary.title, { reason: 'manual-rename' });
+    }
   });
 }
 
@@ -3907,6 +3914,7 @@ export async function clearSessionName(id: string): Promise<void> {
     entry.summary.titleSource = auto?.source ?? 'fallback';
     delete entry.summary.autoTitle;
     await writeMeta(entry);
+    cancelChatTitleSync(entry.summary.conversationId);
   });
 }
 
@@ -4145,6 +4153,9 @@ export async function rebindSession(
     entry.metaDirty = false;
     missingCurrentConversations.delete(toConversationId);
     publishAttachmentSummary(entry.summary);
+    if (entry.summary.titleSource === 'manual' && entry.summary.title) {
+      queueChatTitleSync(toConversationId, entry.summary.title, { reason: 'rebind' });
+    }
     // A new chat gets its first id here; "moved from conversation null" read like a fault in Activity.
     logInfo(fromConversationId
       ? `session ${id} moved from ChatGPT conversation ${fromConversationId} to ${toConversationId}`
@@ -4867,6 +4878,7 @@ export async function deleteSession(id: string): Promise<void> {
 
 /** Test seam: forgets in-memory state without touching the files. */
 export function resetSessionStoreForTests(): void {
+  resetChatTitleSyncForTests();
   recentUnreadableWarned.clear();
   latestQuestionCache.clear();
   rejectedPromotedFinalLogRevision.clear();

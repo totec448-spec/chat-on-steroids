@@ -27,6 +27,7 @@ import { refreshAppProxy } from './app-proxy.js';
 import { committedResumeAncestorsFromSummary, DEFAULT_RECORDING_STORAGE_GIB, REASONING_EFFORTS, RECORDING_STORAGE_LIMITS_GIB, type RecordingStorageLimitGiB, type SessionChange } from '../shared/session.js';
 import { safeExternalLink } from '../shared/external-link.js';
 import { wakeBrowserWork } from './browser-wake.js';
+import { cancelChatTitleSync } from './chat-title-sync.js';
 import { refreshKeepAwake } from './keep-awake.js';
 import { getChatModels, startChatModelDiscovery, configureChatModelDiscovery } from './chat-models.js';
 import { releaseSessionFinish, requestSessionFinishGoal } from './session/finish.js';
@@ -2488,6 +2489,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       if (summary) await forgetOwnSent([...new Set([...(summary.conversationId ? [summary.conversationId] : []), ...(summary.chatIds ?? [])])])
         .catch((error: Error) => logWarn(`session ${id}: its own-sent record could not be removed (${error.message})`));
       await deleteSession(id);
+      if (summary?.conversationId) cancelChatTitleSync(summary.conversationId);
       // A deleted chat leaves its group too; the group itself stays.
       await forgetChatGroupMember(id);
       logInfo(

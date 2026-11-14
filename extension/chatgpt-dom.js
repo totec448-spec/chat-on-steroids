@@ -470,6 +470,68 @@ var CLF_DOM = (() => {
   }
 
   /**
+   * Mirrors a synced manual title onto the already-open ChatGPT tab's sidebar item and
+   * document title so React's cached sidebar updates live without a manual reload.
+   */
+  function applyConversationTitle(targetId, title) {
+    return safe(() => {
+      const wanted = typeof targetId === 'string' ? targetId.trim().toLowerCase() : '';
+      const clean = typeof title === 'string'
+        ? title.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120).trim()
+        : '';
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(wanted) || !clean) {
+        return { applied: false, editing: false };
+      }
+      let applied = false;
+      for (const link of document.querySelectorAll('a[href]')) {
+        let linkUrl;
+        try { linkUrl = new URL(link.getAttribute('href') || '', location.href); } catch { continue; }
+        if (linkUrl.origin !== location.origin || conversationFromPath(linkUrl.pathname) !== wanted) continue;
+        if (link.querySelector('input, textarea, [contenteditable="true"]')) {
+          return { applied: false, editing: true };
+        }
+        if (link.getAttribute('title') && link.getAttribute('title') !== clean) {
+          link.setAttribute('title', clean);
+          applied = true;
+        }
+        for (const titled of link.querySelectorAll('[title]')) {
+          if (titled.closest('svg, button, [role="button"]')) continue;
+          if (titled.getAttribute('title') && titled.getAttribute('title') !== clean) {
+            titled.setAttribute('title', clean);
+            applied = true;
+          }
+        }
+        const candidates = [];
+        const walker = document.createTreeWalker(link, NodeFilter.SHOW_TEXT);
+        let node;
+        while ((node = walker.nextNode())) {
+          if (!/\S/.test(node.nodeValue || '')) continue;
+          const parent = node.parentElement;
+          if (!parent || parent.closest('svg, button, [role="button"], [aria-hidden="true"], .sr-only')) continue;
+          candidates.push(node);
+        }
+        const preferred = candidates.find(candidate => {
+          const auto = candidate.parentElement?.closest('[dir="auto"]');
+          return auto && link.contains(auto);
+        }) || candidates[0];
+        if (preferred && (preferred.nodeValue || '').trim() !== clean) {
+          preferred.nodeValue = clean;
+          applied = true;
+        }
+      }
+      if (conversationId() === wanted) {
+        const suffix = /\s*([-|·]\s*ChatGPT)\s*$/i.exec(document.title || '')?.[1];
+        const nextTitle = suffix ? `${clean} ${suffix}` : clean;
+        if (document.title !== nextTitle) {
+          document.title = nextTitle;
+          applied = true;
+        }
+      }
+      return { applied, editing: false };
+    }, { applied: false, editing: false });
+  }
+
+  /**
    * Logical conversation turns, newest last.
    *
    * ChatGPT can render one assistant request as several sibling `section` elements
@@ -4184,6 +4246,7 @@ var CLF_DOM = (() => {
     conversationId,
     conversationFromPath,
     conversationTitle,
+    applyConversationTitle,
     turns,
     presentationTurns,
     messages,
