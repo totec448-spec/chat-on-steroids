@@ -4198,7 +4198,7 @@ optionally followed by the label of one of this installation's connector names (
 recognised from fingerprints kept in the page's storage (`clf-typed-briefs-v1`, 48 entries: a Compact & Resume types two texts). The handoff request (its
 `[[CLF-HANDOFF:…]]` marker) is the app's own text too: ChatGPT can put the one it just sent back into the source chat's
 composer, and the entry empties that draft before its click like the Project home's (2026-11-14; its timeout reason is
-`source-ready-timeout:last=source-not-ready:draft=<kind>:clears=<n>:chips=<n>`). Anything a person
+`source-ready-timeout:last=source-not-ready:draft=<kind>:clears=<n>:chips=<n>`; the source chat and the Project home each have their own three clears, so a draft restored in one never spends the other's). Anything a person
 added stays and the entry fails as before (2026-11-12: every Compact & Resume in a Project failed after a chat
 had been started there through the app). The mention a restored draft ends with is a chip that names the app as
 it is called now, so a chip whose app id (`app-mention-path`) is one this installation proved to be its own is

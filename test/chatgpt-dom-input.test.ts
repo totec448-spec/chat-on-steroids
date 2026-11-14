@@ -693,6 +693,53 @@ describe('native Project entry readiness', () => {
     expect(failure).toHaveBeenCalledWith('transition-timeout:last=source-turns-remain');
   });
 
+  // CodeRabbit on #2190: the source chat and the Project home are two places ChatGPT can put a draft back into. Three
+  // clears spent in the source chat must not leave the Project home's restored brief without its own.
+  it('clears a brief restored in the Project home even after three clears were spent in the source chat', async () => {
+    const { resumeBootstrapText } = await import('../src/main/session/handoff.js');
+    const brief = resumeBootstrapText('# TASK — the original goal\n\nShip the mail service.', 'pTYR0VjLJ5Xtz2FHFqajqA');
+    const request = '[[CLF-HANDOFF:9cY6SN6A7R4hDbXp7mNVCg]]\n\nChat On Steroids is compacting this conversation. Write the handoff as one reply.';
+    document.execCommand = (command: string, _ui?: boolean, value?: string) => {
+      const selection = document.getSelection();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+      if (!range) return false;
+      if (command === 'delete') { range.deleteContents(); return true; }
+      if (command !== 'insertHTML') return false;
+      range.deleteContents();
+      const template = document.createElement('template');
+      template.innerHTML = value || '';
+      range.insertNode(template.content);
+      return true;
+    };
+    const put = (text: string) => box.replaceChildren(...text.split(/\n\n/).map(part => { const p = document.createElement('p'); p.textContent = part; return p; }));
+    box.textContent = '';
+    expect(api.insertPrompt(brief, true)).toBe(true);
+    box.textContent = '';
+    expect(api.insertPrompt(request, true)).toBe(true);
+    put(request);
+    const link = sourceLink();
+    // The Project link is not on the page yet, so the entry keeps waiting in the source chat while ChatGPT puts the
+    // request back twice after the first clear: three clears in all, the whole budget.
+    const parent = link.parentNode as Node;
+    link.remove();
+    setTimeout(() => parent.appendChild(link), 1_000);
+    let clicked = false, restores = 2;
+    const restore = setInterval(() => { if (!clicked && restores > 0 && box.textContent === '') { restores--; put(request); } }, 100);
+    link.addEventListener('click', event => {
+      event.preventDefault(); clicked = true;
+      dom.reconfigure({ url: projectUrl });
+      put(brief);
+    });
+    const failure = vi.fn();
+    const entered = api.enterProject(entry, undefined, failure);
+    await vi.advanceTimersByTimeAsync(61_000);
+    clearInterval(restore);
+    const result = await entered;
+    expect(failure.mock.calls).toEqual([]);
+    expect(result).toBe(true);
+    expect(box.textContent).toBe('');
+  });
+
   // 2026-11-14 (Windows VM, second Compact & Resume in one Project, 2.1.53): ChatGPT put the handoff request the app had
   // just sent back into the source chat's composer as a draft. The entry waits for an empty source editor before its one
   // click, so it gave up after 60 s ("source-not-ready", nothing sent). A composer holding only the handoff request this

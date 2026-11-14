@@ -3951,7 +3951,7 @@ var CLF_DOM = (() => {
       new URL(link.href, location.href).origin === location.origin &&
       projectHomeId(new URL(link.href, location.href).pathname) === entry.id);
     return new Promise(resolve => {
-      let clicked = false, done = false, lastObservation = 'source-not-ready', residueClears = 0;
+      let clicked = false, done = false, lastObservation = 'source-not-ready', residueClears = 0, sourceResidueClears = 0;
       // Where the source chat was when the link was clicked, and how many times its own route
       // rewrite has since taken that click away.
       let clickedPath = '', reclicks = 0;
@@ -4017,8 +4017,8 @@ var CLF_DOM = (() => {
         if (!source?.isConnected || !composerSubmitReady() || hasComposerAttachments()) {
           // The source chat's composer can hold the app's own text that ChatGPT put back as a draft (the handoff
           // request it just sent): emptied like the Project home's, never a person's.
-          if (source?.isConnected && residueClears < 3 && clearResumeResidue()) { residueClears++; return check(); }
-          lastObservation = `source-not-ready:draft=${draftEvidence()}:clears=${residueClears}:chips=${mentionChipCount()}`;
+          if (source?.isConnected && sourceResidueClears < 3 && clearResumeResidue()) { sourceResidueClears++; return check(); }
+          lastObservation = `source-not-ready:draft=${draftEvidence()}:clears=${sourceResidueClears}:chips=${mentionChipCount()}`;
           return;
         }
         const links = projectLinks();
