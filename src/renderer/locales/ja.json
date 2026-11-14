@@ -3918,5 +3918,7 @@
   "Safer saves over SSH": "SSH でより安全に保存",
   "If a save fails, your original file stays as it was.": "保存に失敗しても、元のファイルはそのまま残ります。",
   "Write mid-answer in any language": "回答中でも、どの言語でも送信",
-  "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT が回答している最中に送ったメッセージが、どの言語のページでも送信されるようになりました。"
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT が回答している最中に送ったメッセージが、どの言語のページでも送信されるようになりました。",
+  "Steered active turn": "実行中のターンを方向転換",
+  "Worked for {0}{1}s · steered": "作業済み · {0}{1}秒 · 方向転換"
 }

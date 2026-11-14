@@ -4086,5 +4086,7 @@
   "Safer saves over SSH": "Enregistrements plus sûrs via SSH",
   "If a save fails, your original file stays as it was.": "Si un enregistrement échoue, votre fichier d'origine reste tel quel.",
   "Write mid-answer in any language": "Écrire en pleine réponse, dans toutes les langues",
-  "A message sent while ChatGPT is answering now goes out on pages in every language.": "Un message envoyé pendant que ChatGPT répond part désormais aussi sur les pages dans toutes les langues."
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "Un message envoyé pendant que ChatGPT répond part désormais aussi sur les pages dans toutes les langues.",
+  "Steered active turn": "A réorienté le tour actif",
+  "Worked for {0}{1}s · steered": "A travaillé pendant {0}{1} s · réorienté"
 }

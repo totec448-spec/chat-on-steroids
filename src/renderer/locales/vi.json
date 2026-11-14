@@ -3918,5 +3918,7 @@
   "Safer saves over SSH": "Lưu an toàn hơn qua SSH",
   "If a save fails, your original file stays as it was.": "Nếu việc lưu thất bại, tệp gốc của bạn vẫn như cũ.",
   "Write mid-answer in any language": "Nhắn giữa lúc đang trả lời, ở mọi ngôn ngữ",
-  "A message sent while ChatGPT is answering now goes out on pages in every language.": "Tin nhắn gửi khi ChatGPT đang trả lời giờ được gửi đi trên các trang ở mọi ngôn ngữ."
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "Tin nhắn gửi khi ChatGPT đang trả lời giờ được gửi đi trên các trang ở mọi ngôn ngữ.",
+  "Steered active turn": "Đã điều hướng lượt đang hoạt động",
+  "Worked for {0}{1}s · steered": "Đã làm việc trong {0}{1} giây · đã điều hướng"
 }

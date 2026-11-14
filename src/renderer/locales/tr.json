@@ -4002,5 +4002,7 @@
   "Safer saves over SSH": "SSH üzerinden daha güvenli kaydetme",
   "If a save fails, your original file stays as it was.": "Kaydetme başarısız olursa özgün dosyanız olduğu gibi kalır.",
   "Write mid-answer in any language": "Yanıt sırasında her dilde mesaj",
-  "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT yanıt verirken gönderilen bir mesaj artık her dildeki sayfalarda gönderiliyor."
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT yanıt verirken gönderilen bir mesaj artık her dildeki sayfalarda gönderiliyor.",
+  "Steered active turn": "Etkin turu yönlendirdi",
+  "Worked for {0}{1}s · steered": "{0}{1} sn · Çalıştı · yönlendirildi"
 }
