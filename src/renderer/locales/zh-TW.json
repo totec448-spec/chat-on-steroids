@@ -3918,5 +3918,7 @@
   "Safer saves over SSH": "透過 SSH 更安全地儲存",
   "If a save fails, your original file stays as it was.": "儲存失敗時，你的原始檔案維持原樣。",
   "Write mid-answer in any language": "回答中途也能傳送，任何語言都行",
-  "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT 回答期間傳送的訊息，現在在任何語言的頁面上都能送出。"
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT 回答期間傳送的訊息，現在在任何語言的頁面上都能送出。",
+  "Steered active turn": "已引導目前回合",
+  "Worked for {0}{1}s · steered": "已工作 {0}{1} 秒 · 已引導"
 }

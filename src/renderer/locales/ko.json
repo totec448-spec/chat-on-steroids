@@ -3918,5 +3918,7 @@
   "Safer saves over SSH": "SSH에서 더 안전한 저장",
   "If a save fails, your original file stays as it was.": "저장에 실패해도 원본 파일은 그대로 남습니다.",
   "Write mid-answer in any language": "답변 중에도 모든 언어로 전송",
-  "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT가 답하는 중에 보낸 메시지가 이제 어떤 언어의 페이지에서도 전송됩니다."
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT가 답하는 중에 보낸 메시지가 이제 어떤 언어의 페이지에서도 전송됩니다.",
+  "Steered active turn": "현재 턴의 방향을 전환함",
+  "Worked for {0}{1}s · steered": "작업함 · {0}{1}초 · 방향 전환됨"
 }
