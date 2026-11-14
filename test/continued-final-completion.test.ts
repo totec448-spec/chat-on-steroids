@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { appendEvent, createSession, getSession, initSessionStore, readCompletedFinal, readRecentEvents, resetSessionStoreForTests, unsetSessionRootForTests,
   upsertMessageEvent, upsertNativeImageEvent } from '../src/main/session/store.js';
+import { flushRecorder, recordChatObservations, resetRecorderForTests } from '../src/main/session/recorder.js';
 import { resetEditsForTests } from '../src/main/session/edits.js';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { getLog } from '../src/main/logger.js';
@@ -375,4 +376,94 @@ describe('continued final completion', () => {
       await fs.rm(dir, { recursive: true, force: true });
     }
   });
+
+  it.each(['continued-terminal', 'continued-first'] as const)(
+    'reports working activity through recordChatObservations for a consolidated streaming answer during continuation (reported turnId=%s)',
+    async (reportedTurnId) => {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cos-steer-recorder-working-'));
+      try {
+        initConfigPath(dir);
+        initSessionStore(dir);
+        await saveConfig({ ...defaultConfig(), sessions: { ...defaultConfig().sessions, record: true } });
+        resetRecorderForTests();
+        resetSessionStoreForTests();
+        const conversationId = `dddddddd-eeee-4fff-8000-0000000000${reportedTurnId === 'continued-terminal' ? '02' : '03'}`;
+
+        const opened = await recordChatObservations(conversationId, [
+          { kind: 'user_message', time: T0, messageId: 'question-initial', text: 'Initial question' },
+          { kind: 'turn_start', time: T0 + 10, turnId: 'continued-first' },
+          {
+            kind: 'assistant_message', time: T0 + 15, turnId: 'continued-first',
+            messageId: 'interim-pre-steer', providerMessageId: 'interim-pre-steer',
+            text: 'Working before steer...', state: 'streaming', activeNow: true
+          },
+          {
+            kind: 'assistant_message', time: T0 + 20, turnId: 'continued-first',
+            messageId: 'answer-consolidated', providerMessageId: 'answer-consolidated',
+            text: 'First half before steer', state: 'streaming', activeNow: true
+          },
+          {
+            kind: 'user_message', time: T0 + 30, messageId: 'question-steer',
+            parentId: 'answer-consolidated', text: 'Steered follow-up'
+          },
+          { kind: 'turn_end', time: T0 + 31, turnId: 'continued-first', outcome: 'interrupted', continued: true },
+          { kind: 'turn_start', time: T0 + 32, turnId: 'continued-terminal' }
+        ]);
+        const sessionId = opened.sessionId!;
+
+        // Re-observing the unchanged pre-steer interim with activeNow must not report new work.
+        const preSteerReplay = await recordChatObservations(conversationId, [
+          {
+            kind: 'assistant_message', time: T0 + 42, turnId: 'continued-terminal',
+            messageId: 'interim-pre-steer', providerMessageId: 'interim-pre-steer',
+            text: 'Working before steer...', state: 'streaming', activeNow: true
+          }
+        ]);
+        expect(preSteerReplay.activity.working).toBe(false);
+
+        // Fresh post-steer streaming prose in the consolidated bubble must report working activity
+        // and resolve into the active continuation turn.
+        const continuedUpdate = await recordChatObservations(conversationId, [
+          {
+            kind: 'assistant_message', time: T0 + 45, turnId: reportedTurnId,
+            messageId: 'answer-consolidated', providerMessageId: 'answer-consolidated',
+            text: 'First half before steer\n\nContinuing after steer...', state: 'streaming', activeNow: true
+          }
+        ]);
+        expect(continuedUpdate.activity.working).toBe(true);
+
+        const summary = await getSession(sessionId);
+        const recent = await readRecentEvents(sessionId, 100);
+        const interimEvent = recent.find(e => e.kind === 'assistant_message' && e.messageId === 'interim-pre-steer')!;
+        const consolidatedEvent = recent.find(e => e.kind === 'assistant_message' && e.messageId === 'answer-consolidated')!;
+        expect(effectiveFinalTurnId(summary?.timelineTurns, interimEvent)).toBe('continued-first');
+        expect(effectiveFinalTurnId(summary?.timelineTurns, consolidatedEvent)).toBe('continued-terminal');
+        expect(await readCompletedFinal(sessionId, conversationId)).toBeNull();
+
+        await recordChatObservations(conversationId, [
+          {
+            kind: 'assistant_message', time: T0 + 50, turnId: reportedTurnId,
+            messageId: 'answer-consolidated', providerMessageId: 'answer-consolidated',
+            text: 'First half before steer\n\nContinuing after steer...\nDone.', state: 'final'
+          },
+          { kind: 'turn_end', time: T0 + 51, turnId: 'continued-terminal', outcome: 'completed' }
+        ]);
+        const afterCompletion = await recordChatObservations(conversationId, [
+          {
+            kind: 'assistant_message', time: T0 + 60, turnId: 'continued-first',
+            messageId: 'late-pre-steer-note', text: 'Late pre-steer progress note',
+            state: 'streaming', activeNow: true
+          }
+        ]);
+        expect(afterCompletion.activity.working).toBe(false);
+        expect(await readCompletedFinal(sessionId, conversationId)).toMatchObject({ messageId: 'answer-consolidated' });
+      } finally {
+        await flushRecorder();
+        resetRecorderForTests();
+        resetSessionStoreForTests();
+        unsetSessionRootForTests();
+        await fs.rm(dir, { recursive: true, force: true });
+      }
+    }
+  );
 });

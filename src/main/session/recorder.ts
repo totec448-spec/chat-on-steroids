@@ -2728,9 +2728,20 @@ async function recordChatObservationsNow(
         // appeared: ChatGPT draws a finished turn's steps as one collapsed group, and the note
         // written before its tool calls can reach the page only then (2.1.48 release round). As
         // new work it kept Goal waiting for a newer final forever. A final, or a reopened turn, counts.
-        // A turn whose view failed while thinking is reopened by its fresh note below, so that note is work.
-        const lateNoteOfEndedTurn = state !== 'final' && !!item.turnId && !!live &&
-          live.knownTurnEnds.has(item.turnId) && !live.openTurns.has(item.turnId) &&
+        // A turn whose view failed while thinking is reopened by its fresh note below, so that note is work,
+        // and a streaming continuation still reported under its continued predecessor writes work into the live turn.
+        const endedTurnNote = state !== 'final' && !!item.turnId && !!live &&
+          live.knownTurnEnds.has(item.turnId) && !live.openTurns.has(item.turnId);
+        const liveTurn = live?.turnId;
+        const priorTurns = endedTurnNote && item.activeNow === true && !!liveTurn && liveTurn !== item.turnId
+          ? (await getSession(sessionId))?.timelineTurns : undefined;
+        const liveOrigin = priorTurns && liveTurn ? priorTurns[liveTurn]?.origin : undefined;
+        const continuesIntoLiveTurn = liveOrigin !== undefined && !!liveTurn && !!item.turnId &&
+          effectiveFinalTurnId(priorTurns, {
+            kind: 'assistant_message', seq: liveOrigin, origin: liveOrigin, contentSeq: liveOrigin,
+            time: item.time, turnId: item.turnId, final: false
+          }) === responseTurnId(priorTurns, liveTurn);
+        const lateNoteOfEndedTurn = endedTurnNote && !continuesIntoLiveTurn &&
           !(item.activeNow === true && await thinkingFailureToReopen(sessionId, live, item.time, item.turnId));
         const written = await upsertMessageEvent(sessionId, {
           ...base,
@@ -2775,7 +2786,7 @@ async function recordChatObservationsNow(
         // In particular a post-failure Fiber backfill must not reopen the dead turn.
         const turns = canonicalTurn && written.event.kind === 'assistant_message' &&
           (state === 'final' || (written.contentChanged && item.activeNow === true && !!live?.turnId && canonicalTurn !== live.turnId))
-          ? (await getSession(sessionId))?.timelineTurns : undefined;
+          ? priorTurns ?? (await getSession(sessionId))?.timelineTurns : undefined;
         const effectiveTurn = written.event.kind === 'assistant_message' && turns
           ? effectiveFinalTurnId(turns, written.event)
           : canonicalTurn;
