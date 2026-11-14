@@ -2,6 +2,11 @@
 
 **Status:** Design discussion only. This document changes no application behavior.
 
+**Concrete evidence:** [one fictional static Bento in ChatGPT and the recorded
+CoS timeline](recorded-intelligent-ui-evidence.md), including missing structure,
+which attributes are already recorded, and an isolated renderer-only margin
+experiment. This proposal PR contains no runtime implementation.
+
 ## Problem and existing behavior
 
 Chat On Steroids can already present parts of recorded ChatGPT replies as rich
