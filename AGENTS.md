@@ -5728,8 +5728,12 @@ Resume predecessors). It uses the session's current project and approved project
 the working-tree diff or shell output. A missing old path stays missing; a rename is not inferred.
 The list reads no file contents. It opens the latest immutable diff for a path via the existing
 `sessions:toolEditReview` with an optional `projectId` to recheck scope and return a project-relative path. Existing
-historical callers omit it and retain their contract. A source jump uses the recorded call and timeline
-position. No saved fields or filesystem authority are added.
+historical callers omit it and retain their contract. Records carry virtual paths, not a durable
+root identity. After an approved root is renamed, old paths that no longer match the current
+prefix are omitted from Review; the timeline still shows them. Never infer an old root from a
+matching path suffix. A source jump uses the recorded call and timeline position, clears the
+timeline's agent filter, and closes the dock only when it would hide the timeline. No saved
+fields or filesystem authority are added.
 Per answer (#1827, `main/session/turn-changes.ts`): `sessions:turnChanges` { sessionId, turnId, from }
 groups a turn's successful recorded edits by path (first-change order, the prime's own calls only,
 never a `worker-N` agent's) and gives each file one net diff, the first edit's before against the
