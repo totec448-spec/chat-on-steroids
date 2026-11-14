@@ -2018,8 +2018,56 @@ var CLF_DOM = (() => {
   function clearResumeResidue() {
     // Only a brief the app typed itself, word for word, here or on an earlier page of this tab: one a person
     // added to stays (CodeRabbit on #2069). The page that typed it may be gone (#2115), so the record is stored.
-    return clearOwnResidue(OWN_RESIDUE, text => ownBrief(text));
+    return clearOwnResidue(OWN_RESIDUE, text => ownBrief(text), ownMentionFreeText);
   }
+
+  /** An app mention chip's app id ("app://asdk_app_…"), or null. */
+  function chipAppId(chip) {
+    const href = chip.getAttribute('app-mention-path') || chip.getAttribute('data-prompt-link-href') || '';
+    const match = /^app:\/\/(asdk_app_[A-Za-z0-9_-]{1,160})$/.exec(href);
+    return match ? match[1] : null;
+  }
+
+  /**
+   * The editor's words without the mention chips of this installation's own apps, compacted. The chip a restored
+   * draft ends with names the app as it is called now, so an app renamed in ChatGPT shows under a name the app does
+   * not list; the chip's id is what the app proved to be its own (#2159). Another app's chip stays in the text.
+   */
+  function ownMentionFreeText(box) {
+    if (!box?.querySelector?.(APP_MENTION_CHIP) || typeof box.cloneNode !== 'function') return null;
+    const own = new Set(ownApps.map(app => app.appId));
+    const clone = box.cloneNode(true);
+    let removed = 0;
+    for (const chip of clone.querySelectorAll(APP_MENTION_CHIP)) {
+      const id = chipAppId(chip);
+      if (id && own.has(id)) { chip.remove(); removed++; }
+    }
+    // Another app's chip left in the text: its label must not pass for a connector name once ours is gone (CodeRabbit on #2185).
+    if (!removed || clone.querySelector(APP_MENTION_CHIP)) return null;
+    return compactDraft(editorText(clone));
+  }
+
+  /**
+   * Why the editor is not ready, in a few words and no text of it (#2159): the reason a Project entry gives when
+   * it times out. Nothing here can say what a person wrote, only what kind of draft it is and whether the app
+   * knows it.
+   */
+  function draftEvidence() {
+    return safe(() => {
+      const box = composer();
+      if (!box?.isConnected) return 'no-editor';
+      if (!composerWritable()) return 'readonly';
+      if (generating() || stopButton()) return 'busy';
+      if (hasComposerAttachments()) return 'attachment';
+      const text = compactDraft(editorText(box));
+      if (!text) return 'empty';
+      const kind = RESUME_RESIDUE.test(text) ? 'brief' : FIRST_MESSAGE_RESIDUE.test(text) ? 'context' : null;
+      if (!kind) return 'other';
+      const bare = ownMentionFreeText(box);
+      return `${kind}-${ownBrief(text) || (bare !== null && ownBrief(bare)) ? 'own' : 'foreign'}`;
+    }, 'unknown');
+  }
+  const mentionChipCount = () => safe(() => composer()?.querySelectorAll?.(APP_MENTION_CHIP).length ?? 0, 0);
 
   /**
    * The Compact & Resume briefs the app typed, as short fingerprints of their compacted text. They are kept in
@@ -2083,12 +2131,16 @@ var CLF_DOM = (() => {
     return String(value).replace(/\\(?=\r?\n)/g, '').replace(/\\(?=[!-/:-@[-`{-~])/g, '').replace(/\s+/g, '');
   }
 
-  function clearOwnResidue(pattern, owned = () => true) {
+  function clearOwnResidue(pattern, owned = () => true, withoutOwnMentions = () => null) {
     return safe(() => {
       const box = composer();
       if (!composerWritable() || generating() || stopButton() || hasComposerAttachments()) return false;
       const text = compactDraft(editorText(box));
-      if (!text || !pattern.test(text) || !owned(text)) return false;
+      if (!text || !pattern.test(text)) return false;
+      if (!owned(text)) {
+        const bare = withoutOwnMentions(box);
+        if (bare === null || !pattern.test(bare) || !owned(bare)) return false;
+      }
       box.focus();
       const selection = document.getSelection();
       if (!selection || document.activeElement !== box) return false;
@@ -3692,6 +3744,31 @@ var CLF_DOM = (() => {
       if (trace.failedPhase === null) { trace.failedPhase = trace.phase; trace.failedVersion = trace.targetVersion; trace.failure = !stillCurrent() ? 'owner-lost' : code || 'unknown'; }
       return false;
     };
+    // A separately reported native reasoning trigger is additional proof only
+    // when MAIN has stamped it as the owner of this route. Legacy pickers have
+    // no such control, and do not require one.
+    const nativeReasoningOwned = () => {
+      const trigger = modelPickerTrigger();
+      return trigger?.getAttribute('data-composer-navigation-target') === 'reasoning' &&
+        trigger.getAttribute('data-clf-picker-route') === location.pathname;
+    };
+    const confirmAfterClose = async (expected, version, nativeOwned) => {
+      if (!stillCurrent()) return selectionFailed('the chat changed meanwhile', 'owner-lost');
+      const after = await readPickerState(); observe(after);
+      const current = after?.choices.find(choice => choice.bucket === after.currentBucket);
+      if (!stillCurrent()) return selectionFailed('the chat changed meanwhile', 'owner-lost');
+      // Fiber can retain High after the separate native trigger says Medium or
+      // disappears. Preserve the old layout and non-standard effort mappings.
+      const native = nativeOwned ? modelPickerTrigger() : null;
+      const nativeMatches = !nativeOwned || !['none', 'low', 'medium', 'high'].includes(current?.effort) ||
+        (native?.getAttribute('data-composer-navigation-target') === 'reasoning' &&
+          native.getAttribute('data-clf-picker-route') === location.pathname &&
+          native.getAttribute('data-selected-reasoning-effort') === current.effort);
+      return after?.version === version && current?.available === true &&
+        current.id === expected.id && current.familyId === expected.familyId &&
+        current.effort === expected.effort && nativeMatches ||
+        selectionFailed('the model or reasoning effort changed after closing the picker', 'changed');
+    };
     let result = false;
     const choose = async () => {
       if (!model && !effort) return true;
@@ -3721,11 +3798,14 @@ var CLF_DOM = (() => {
       if (current?.available && (current.id === model || current.familyId === model) &&
           (!effort || current.effort === effort)) {
         trace.resolved = pair(current); trace.selected = pair(current);
+        const nativeOwned = nativeReasoningOwned();
         phase('close'); const closed = trace.closed = await ui.close();
         if (!closed) return selectionFailed('the picker did not close', 'close-failed');
-        return stillCurrent();
+        return confirmAfterClose(current, original.version, nativeOwned);
       }
-      let selected = false, closed = false;
+      // A native control observed before selection must still be corroborated at close,
+      // even if provider transitions remove its ownership marker in the meantime.
+      let selected = false, closed = false, expectedChoice = null, expectedVersion = null, nativeOwned = nativeReasoningOwned();
       try {
         // Exact provider slug is preferred. Existing saved display slugs may resolve
         // only to an actually observed, available pair; never to an account default.
@@ -3796,6 +3876,7 @@ var CLF_DOM = (() => {
         const confirmed = after?.choices.find(c => c.bucket === after.currentBucket);
         trace.selected = pair(confirmed);
         selected = stillCurrent() && confirmed?.available === true && confirmed.id === choice.id && confirmed.effort === choice.effort;
+        if (selected) { expectedChoice = choice; expectedVersion = wanted.version; }
         if (!selected) selectionFailed(!stillCurrent() ? 'the chat changed meanwhile'
           : `the picker showed ${confirmed ? `${String(confirmed.id).slice(0, 24)}/${confirmed.effort}` : 'nothing readable'} after choosing ${String(choice.id).slice(0, 24)}/${choice.effort}`, !stillCurrent() ? 'owner-lost' : 'mismatch');
       } finally {
@@ -3812,10 +3893,11 @@ var CLF_DOM = (() => {
             }
           }
         }
+        if (selected) nativeOwned = nativeOwned || nativeReasoningOwned();
         phase('close'); closed = trace.closed = await ui.close();
       }
       if (selected && !closed) return selectionFailed('the picker did not close', 'close-failed');
-      return selected && closed && stillCurrent();
+      return selected && closed && confirmAfterClose(expectedChoice, expectedVersion, nativeOwned);
     };
     try { result = await choose(); return result; }
     finally {
@@ -3904,7 +3986,7 @@ var CLF_DOM = (() => {
             // An earlier brief of the app's own that ChatGPT kept in this Project home (#2068).
             // ChatGPT can restore the draft after it was emptied, so this may happen again, a few times only.
             if (residueClears < 3 && clearResumeResidue()) { residueClears++; return check(); }
-            lastObservation = 'composer-not-ready';
+            lastObservation = `composer-not-ready:draft=${draftEvidence()}:clears=${residueClears}:chips=${mentionChipCount()}`;
             return;
           }
           if (turns().some(turn => !onKeptPage(turn.node))) {
