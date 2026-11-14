@@ -693,9 +693,53 @@ describe('native Project entry readiness', () => {
     expect(failure).toHaveBeenCalledWith('transition-timeout:last=source-turns-remain');
   });
 
+  // 2026-11-14 (Windows VM, second Compact & Resume in one Project, 2.1.53): ChatGPT put the handoff request the app had
+  // just sent back into the source chat's composer as a draft. The entry waits for an empty source editor before its one
+  // click, so it gave up after 60 s ("source-not-ready", nothing sent). A composer holding only the handoff request this
+  // app typed, unchanged, is the app's own text like a brief: emptied; anything a person changed or wrote stays.
   it.each([
-    ['missing', 'source-ready-timeout:last=source-not-ready'],
-    ['draft', 'source-ready-timeout:last=source-not-ready'],
+    ['the handoff request this app typed', 'own', true],
+    ['that request with a person\'s words added', 'edited', false],
+    ['a handoff request this app never typed', 'foreign', false]
+  ] as const)('before the click, empties a source composer that holds %s only when it is the app\'s own', async (_name, kind, cleared) => {
+    const typed = '[[CLF-HANDOFF:9cY6SN6A7R4hDbXp7mNVCg]]\n\nChat On Steroids is compacting this conversation. Write the handoff as one reply.';
+    document.execCommand = (command: string, _ui?: boolean, value?: string) => {
+      const selection = document.getSelection();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+      if (!range) return false;
+      if (command === 'delete') { range.deleteContents(); return true; }
+      if (command !== 'insertHTML') return false;
+      range.deleteContents();
+      const template = document.createElement('template');
+      template.innerHTML = value || '';
+      range.insertNode(template.content);
+      return true;
+    };
+    const link = sourceLink();
+    box.textContent = '';
+    if (kind !== 'foreign') expect(api.insertPrompt(typed, true)).toBe(true);
+    const left = kind === 'edited' ? `${typed}\n\nAlso list the open pull requests.` : typed;
+    box.replaceChildren(...left.split(/\n\n/).map(part => { const p = document.createElement('p'); p.textContent = part; return p; }));
+    let clicks = 0;
+    link.addEventListener('click', event => {
+      event.preventDefault(); clicks++;
+      dom.reconfigure({ url: projectUrl });
+      box.textContent = '';
+    });
+    const failure = vi.fn();
+    const entered = api.enterProject(entry, undefined, failure);
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(await entered).toBe(cleared);
+    expect(clicks).toBe(cleared ? 1 : 0);
+    if (!cleared) {
+      expect(failure).toHaveBeenCalledWith('source-ready-timeout:last=source-not-ready:draft=handoff-foreign:clears=0:chips=0');
+      expect(box.textContent?.length).toBeGreaterThan(0);
+    }
+  });
+
+  it.each([
+    ['missing', 'source-ready-timeout:last=source-not-ready:draft=no-editor:clears=0:chips=0'],
+    ['draft', 'source-ready-timeout:last=source-not-ready:draft=other:clears=0:chips=0'],
     ['cancelled', 'current-lost'],
     ['foreign-route', 'wrong-route-before-click']
   ])('never clicks an unready or retired source: %s', async (reason, expectedFailure) => {
