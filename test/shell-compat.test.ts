@@ -72,13 +72,17 @@ function fixture() {
         const option = doc.createElement('div'); option.setAttribute('role', 'menuitemradio'); option.textContent = version.label;
         option.addEventListener('keydown', (event: any) => { if (event.key !== 'Enter') return;
           actions('version'); versions.forEach(v => { v.selected = v === version; }); props.powerSelections = selections[index];
-          props.selectedPowerSelection = selections[index]![0]; render(); }); panel.append(option);
+          props.selectedPowerSelection = selections[index]![0];
+          // The native trigger follows the provider lane, independently of Fiber's choice.
+          trigger.setAttribute('data-selected-reasoning-effort', props.selectedPowerSelection.reasoningEffort);
+          render(); }); panel.append(option);
       }
     });
     panel.querySelector('[aria-keyshortcuts]')!.addEventListener('keydown', (event: any) => {
       const selected = props.selectedPowerSelection ?? props.selectedLabelCandidate;
       const at = props.powerSelections.indexOf(selected) + (event.key === 'ArrowRight' ? 1 : -1);
-      if (!props.powerSelections[at]) return; actions('effort'); props.selectedPowerSelection = props.powerSelections[at]; render();
+      if (!props.powerSelections[at]) return; actions('effort'); props.selectedPowerSelection = props.powerSelections[at];
+      trigger.setAttribute('data-selected-reasoning-effort', props.selectedPowerSelection.reasoningEffort); render();
     });
   };
   trigger.addEventListener('keydown', event => { if (event.key === 'Enter') render(); });
