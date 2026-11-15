@@ -531,6 +531,7 @@ function loadWorker(options: {
   debuggerApi?: Record<string, unknown>;
   /** Chrome's tab-group API with these groups; omitted, the browser has none. */
   tabGroups?: Array<{ id: number; windowId: number; title?: string; collapsed?: boolean }>;
+  clock?: { Date?: DateConstructor; setTimeout?: typeof setTimeout; clearTimeout?: typeof clearTimeout };
   WebSocket?: unknown;
 }): WorkerHarness {
   let listener: ((message: any, sender: any, sendResponse: (value: any) => void) => boolean) | null = null;
@@ -666,11 +667,12 @@ function loadWorker(options: {
     // The browser-control module is imported in the real worker; with a debugger it is asked for one.
     ...(options.debuggerApi ? { createBrowserControl: () => ({ pump: async () => undefined, event: async () => undefined }) } : {}),
     ...(options.WebSocket ? { WebSocket: options.WebSocket } : {}),
+    ...(options.clock?.Date ? { Date: options.clock.Date } : {}),
     chrome,
     fetch,
     AbortController,
-    setTimeout,
-    clearTimeout,
+    setTimeout: options.clock?.setTimeout ?? setTimeout,
+    clearTimeout: options.clock?.clearTimeout ?? clearTimeout,
     URL,
     TextEncoder,
     crypto: globalThis.crypto,
@@ -6851,10 +6853,36 @@ describe('activity push wakes over /wake', () => {
       close() { this.readyState = 3; this.onclose?.(); }
     }
     let navigated = false;
+    let fakeNow = 1_000_000;
+    let nextTimerId = 1;
+    const timers = new Map<number, { due: number; fn: () => void }>();
+    const FakeDate = class extends Date {
+      constructor(...args: unknown[]) {
+        if (args.length === 0) super(fakeNow);
+        else super(...(args as [number]));
+      }
+      static override now() { return fakeNow; }
+    } as unknown as DateConstructor;
+    const fakeSetTimeout = ((fn: () => void, ms = 0) => {
+      const id = nextTimerId++;
+      timers.set(id, { due: fakeNow + Math.max(0, ms), fn });
+      return id as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout;
+    const fakeClearTimeout = ((id: ReturnType<typeof setTimeout>) => {
+      timers.delete(id as unknown as number);
+    }) as typeof clearTimeout;
+    const advanceClock = async (ms: number) => {
+      fakeNow += ms;
+      for (const [id, entry] of [...timers.entries()].sort((a, b) => a[1].due - b[1].due)) {
+        if (entry.due <= fakeNow && timers.delete(id)) entry.fn();
+      }
+      for (let i = 0; i < 8; i += 1) await Promise.resolve();
+    };
     const worker = loadWorker({
       local: new FakeStorageArea({ port: 8765, token: 'paired-token' }),
       session: new FakeStorageArea(),
       WebSocket: FakeWebSocket,
+      clock: { Date: FakeDate, setTimeout: fakeSetTimeout, clearTimeout: fakeClearTimeout },
       tabsQuery: async () => [{ id: 10, url: `https://chatgpt.com/c/${navigated ? convB : convA}` }],
       fetch: async (input) => {
         const pathName = new URL(input).pathname;
@@ -6870,16 +6898,20 @@ describe('activity push wakes over /wake', () => {
     await vi.waitFor(() => expect(sockets.length).toBeGreaterThan(0), { timeout: 5_000 });
     const socket = sockets.at(-1)!;
 
-    // Drain initial token bucket so subsequent wakes enter pendingActivityWakeTabs.
+    // Drain initial token bucket with the VM clock pinned below refill so subsequent wakes queue.
     for (let i = 0; i < 6; i += 1) socket.onmessage?.({ data: `activity:${convA}` });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await advanceClock(10);
     worker.tabsSendMessage.mockClear();
 
     // Tab navigated to convB while still bound to convA; queueing convB then convA must merge to unfiltered.
     navigated = true;
     socket.onmessage?.({ data: `activity:${convB}` });
     socket.onmessage?.({ data: `activity:${convA}` });
-    await vi.waitFor(() => expect(worker.tabsSendMessage).toHaveBeenCalledTimes(1), { timeout: 5_000 });
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
+    expect(worker.tabsSendMessage).not.toHaveBeenCalled();
+
+    await advanceClock(250);
+    expect(worker.tabsSendMessage).toHaveBeenCalledTimes(1);
     expect(worker.tabsSendMessage).toHaveBeenCalledWith(10, { type: 'clf-activity-wake' });
     socket.close();
   });
