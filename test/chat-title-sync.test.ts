@@ -140,6 +140,36 @@ it('preserves later ChatGPT Web changes after Compact & Resume without re-queuin
   });
 });
 
+it('keeps an unsettled Compact & Resume rebind queued through initial ChatGPT Web auto-titles', async () => {
+  const session = await createSession({ conversationId: A, title: 'Old title', titleSource: 'provider' });
+  await renameSession(session.id, 'My Work', 'manual');
+  expect(nextChatTitleSync()).toEqual({ conversationId: A, title: 'My Work', expectedRemoteTitle: 'Old title' });
+  settleChatTitleSync(A, 'My Work', 'synced');
+  vi.advanceTimersByTime(CHAT_TITLE_SYNC_MIN_INTERVAL_MS);
+
+  // Even if the new replacement tab already reported an initial placeholder before rebind commits,
+  // and ChatGPT Web later emits async gen_title changes before/during the lease, rebind still lands.
+  noteProviderChatTitle(B, 'New chat');
+  expect(await rebindSession(session.id, A, B, 'handoff-race1234')).toBe(true);
+  await renameSession(session.id, 'Initial Auto Title', 'provider', B);
+  expect(hasDueChatTitleSync()).toBe(true);
+
+  expect(nextChatTitleSync()).toEqual({ conversationId: B, title: 'My Work' });
+  await renameSession(session.id, 'Refined Auto Title', 'provider', B);
+  expect(settleChatTitleSync(B, 'My Work', 'synced')).toBe(true);
+  vi.advanceTimersByTime(CHAT_TITLE_SYNC_MIN_INTERVAL_MS);
+
+  // Once the rebind sync has settled, subsequent ChatGPT Web edits remain preserved without overwriting.
+  await renameSession(session.id, 'Edited On Web Later', 'provider', B);
+  expect(hasDueChatTitleSync()).toBe(false);
+  expect(nextChatTitleSync()).toBeNull();
+  expect(await getSession(session.id)).toMatchObject({
+    title: 'My Work',
+    titleSource: 'manual',
+    autoTitle: { title: 'Edited On Web Later', source: 'provider' }
+  });
+});
+
 it('drops a superseded queued rename when the in-flight push returns conflict', async () => {
   const session = await createSession({ conversationId: A, title: 'Original Web Title', titleSource: 'provider' });
   await renameSession(session.id, 'CoS 1', 'manual');

@@ -243,7 +243,7 @@ export function queueChatTitleSync(
     if (providedExpected && !knownTitles.has(id)) rememberKnownTitle(id, providedExpected);
   }
   const expectedRemoteTitle = reason === 'rebind'
-    ? knownTitles.get(id)
+    ? (providedExpected || undefined)
     : (knownTitles.get(id) ?? existing?.expectedRemoteTitle ?? (providedExpected || undefined));
   entries.set(id, {
     conversationId: id,
@@ -293,9 +293,11 @@ export function cancelAllChatTitleSync(reason = 'setting-disabled'): number {
 
 /**
  * Reconciles an observed ChatGPT Web provider title against any pending manual title push:
- * - Newer remote edits detected while a sync is queued drop the pending push rather than overwriting Web.
- * - Any remote title observed after a push settles (including after Compact & Resume) is recorded as
- *   the latest known remote title without converting it into permission to push again.
+ * - Newer remote edits detected while a sync with an expected remote title is queued drop the
+ *   pending push rather than overwriting Web.
+ * - Unsettled `rebind` pushes (new bindings / Compact & Resume chats) ignore initial placeholder
+ *   and `gen_title` transitions so the carried manual title still lands; once settled, any later
+ *   Web title change is kept in `autoTitle` without converting it into permission to push again.
  */
 export function noteProviderChatTitle(
   conversationId: string | null | undefined,
@@ -316,10 +318,6 @@ export function noteProviderChatTitle(
     scheduleWake();
     logInfo(`chat title sync: dropped ${id} (newer-remote-title)`);
     return false;
-  }
-  if (existing.reason === 'rebind' && !existing.expectedRemoteTitle) {
-    existing.expectedRemoteTitle = observedClean;
-    persist();
   }
   return false;
 }
