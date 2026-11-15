@@ -990,7 +990,7 @@ describe('surface boundaries', () => {
     everything();
     const agentsTool = toolList(await core('tools/list')).find((tool) => tool.name === 'agents')!;
     expect(agentsTool.description).toBe(
-      'Runs ChatGPT workers. Without model/reasoning_effort, saved app defaults apply; they are set only for a user’s explicit request. A suitable sleeping worker is reused with message, not respawned. ' +
+      'Runs workers as separate ChatGPT chats, not ChatGPT’s own in-conversation subagents. Without model/reasoning_effort, saved app defaults apply; they are set only for a user’s explicit request. A suitable sleeping worker is reused with message, not respawned. ' +
       'message: prime↔worker. Reports arrive with tool results, not by restarting an idle prime. ' +
       'status: your active, sleeping/revivable and terminal workers, incl. parked families, and pending reports; one call before a final answer collects them. Repeated polling adds nothing. finish: records the report, then normally sleeps.'
     );

@@ -159,6 +159,17 @@ it('splits Agents into five pages, each block on exactly one, each page with one
   }
 });
 
+// CodeRabbit on #2169: eleven buttons and two group labels are taller than a short window leaves them, so the Settings
+// navigation must scroll inside the sidebar instead of being clipped (Usage, Activity and the bottom control unreachable).
+it('lets the Settings navigation scroll in the sidebar when the window is short', () => {
+  const nav = document.querySelector('#tabs')!;
+  expect(nav.querySelectorAll('button[data-tab]').length).toBeGreaterThanOrEqual(10);
+  expect(css).toMatch(/\.sidebar\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*min-height:\s*0/);
+  const rule = [...css.matchAll(/([^{}]*#tabs[^{}]*)\{([^}]*)\}/g)].find(match => /overflow-y:\s*auto/.test(match[2]!) && /min-height:\s*0/.test(match[2]!));
+  expect(rule, 'a #tabs rule with min-height: 0 and overflow-y: auto').toBeTruthy();
+  expect(rule![1]).toContain("data-screen='settings'");
+});
+
 it('titles every settings page the same way, Activity included', () => {
   for (const panel of ['home', 'general', 'usage', 'appearance', 'activity']) {
     const head = document.querySelector(`[data-panel="${panel}"] .settings-page-head`);
