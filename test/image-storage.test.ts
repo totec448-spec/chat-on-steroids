@@ -241,6 +241,16 @@ it('preserves a per-session quota failure across weaker observations and logs th
   });
   expect(replay.event).toMatchObject({ previewStatus: 'unavailable', previewError: 'session_quota' });
 
+  const switchedToGlobal = await upsertNativeImageEvent(session.id, {
+    ...identity, time: 202, previewStatus: 'unavailable', previewError: 'quota'
+  });
+  expect(switchedToGlobal.event).toMatchObject({ previewStatus: 'unavailable', previewError: 'quota' });
+
+  const switchedToSession = await upsertNativeImageEvent(session.id, {
+    ...identity, time: 203, previewStatus: 'unavailable', previewError: 'session_quota'
+  });
+  expect(switchedToSession.event).toMatchObject({ previewStatus: 'unavailable', previewError: 'session_quota' });
+
   const filler = await createSession({ title: 'Configured limit filler' });
   await writeAsset(filler.id, Buffer.from('seed asset'), 'text/plain');
   resetSessionStoreForTests();
