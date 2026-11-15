@@ -2391,7 +2391,7 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
  * not unattended, has no usable summary, or the reopen is refused; the ordinary backoff then goes on.
  */
 async function continueStuckFromSavedSummary(entry: { token: string; sessionId: string; from: string }, watch: { continuedFromSaved?: boolean },
-  why = 'never reached ChatGPT'): Promise<boolean> {
+  why = 'never reached ChatGPT', opening = false): Promise<boolean> {
   watch.continuedFromSaved = true;
   // Unattended means Goal or Loop on and the chat not blocked (a block keeps the switch's state; CodeRabbit on #2019).
   const unattended = (): boolean => !goalBlockReason(entry.from) && goalArmedFor(entry.from) && goalSwitchFor(entry.from).enabled;
@@ -2411,6 +2411,9 @@ async function continueStuckFromSavedSummary(entry: { token: string; sessionId: 
   if (!await savedSummaryUsable(entry.sessionId, session.lastHandoffId)) return skip(`saved summary ${session.lastHandoffId} is empty or unusable`);
   if (!unattended()) return skip(attended());
   try {
+    // A ticket whose brief was written and whose new chat never reported back is claimed, not waiting for a summary:
+    // it ends here so the saved summary can open the chat it was owed (the new chat's send was never replayed).
+    if (opening && !await cancelResumeNow(entry.sessionId)) return skip('its ticket could not be ended');
     await resumeFromSavedSummary(entry.sessionId, session.lastHandoffId);
     logWarn(`bridge: compaction ticket ${entry.token.slice(0, 8)} for ${entry.from} ${why}; ` +
       `the ${goalSwitchFor(entry.from).mode} chat continues in a new chat from saved summary ${session.lastHandoffId}`);
@@ -10679,6 +10682,11 @@ async function inspectOwedCompactions(now: number): Promise<boolean> {
       // An automatic ticket whose brief is written keeps opening its new chat, once an hour after the
       // quick tries: while it is open it owns the chat's recovery, so stopping here stopped the chat (#1882).
       if (phase === 'opening' && entry.automatic) {
+        // The new chat's send was dispatched and nothing came back from it in all the pickups, and a dispatched send is
+        // never replayed: a Goal or Loop chat goes on from its saved summary in a new chat instead of standing idle
+        // until the ticket expires (#2184), once per ticket. A chat that reported its message exists and is not replaced.
+        if (entry.destinationSend.state === 'dispatched-unresolved' && !watch.continuedFromSaved &&
+            await continueStuckFromSavedSummary(entry, watch, 'opened its new chat but it never reported back', true)) continue;
         if (!watch.told) {
           watch.told = true;
           logWarn(`bridge: compaction ticket ${entry.token.slice(0, 8)} for ${entry.from} could not open its new chat after ${schedule.attempts} pickups — trying once an hour`);
@@ -10748,13 +10756,22 @@ async function inspectOwedCompactions(now: number): Promise<boolean> {
       void deliver();
       acted = true;
     }
-    if (!acted) continue;
+    // A dispatched new-chat send is never replayed, so nothing is queued for it. While no browser attempt is out, the
+    // quarter hour still counts as one of the opening pickups: an automatic ticket whose new chat stays silent reaches
+    // its end instead of waiting for the ticket to expire (#2184).
+    const quiet = !acted && phase === 'opening' && entry.automatic && entry.destinationSend.state === 'dispatched-unresolved' &&
+      !commands.some((command) => command.spec.type === 'resume' && command.spec.token === entry.token);
+    if (!acted && !quiet) continue;
 
     // One pickup per reported loss: after it, a turn that works again counts as working.
     watch.streamLost = false;
     watch.attempts += 1;
     if (watch.slow) watch.slowQueuedAt = now;
     watch.nextAt = now + schedule.every;
+    if (quiet) {
+      logInfo(`bridge: compaction ticket ${entry.token.slice(0, 8)} ${phase} pickup ${watch.attempts} of ${schedule.attempts}: its new chat has not reported back and its send is not replayed`);
+      continue;
+    }
     queued = true;
     logInfo(
       `bridge: compaction ticket ${entry.token.slice(0, 8)} ${phase} pickup ${watch.attempts} of ${schedule.attempts}`
