@@ -187,7 +187,11 @@ describe('session finish turn identity', () => {
     if (reason === 'new input') {
       hooks.delivered.push({ id: 'new-user-work', sessionId, text: 'Changed instructions', state: 'sent' });
       for (const listener of hooks.inputListeners) listener();
-    } else await releaseSessionFinish(sessionId, 'turn-one');
+    } else {
+      await releaseSessionFinish(sessionId, 'turn-one');
+      // Release listeners wake checkDecision immediately while fake timers hold recorder cooldown timers paused.
+      await vi.waitFor(() => expect(hooks.inputListeners.size).toBe(0), WAIT);
+    }
     vi.useRealTimers();
     await settleSessionFinishForTests();
     expect(hooks.followup).toHaveBeenCalledTimes(1);

@@ -191,7 +191,7 @@ const NOTIFY_COOLDOWN_MS = 180;
 
 const listeners = new Set<(change: SessionChange) => void>();
 let notifyTimer: NodeJS.Timeout | null = null;
-let lastNotifyAt = 0;
+let lastNotifyAt = -Infinity;
 /** Every local session written during the current burst; one push names all of them. */
 const changedSessions = new Set<string>();
 
@@ -204,10 +204,13 @@ export function onSessionChange(listener: (change: SessionChange) => void): () =
 export function notifyChanged(...sessionIds: string[]): void {
   for (const id of sessionIds) changedSessions.add(id);
   if (notifyTimer) return;
-  const delay = lastNotifyAt === 0 ? 0 : Math.max(0, NOTIFY_COOLDOWN_MS - (Date.now() - lastNotifyAt));
+  const delay = Math.max(0, NOTIFY_COOLDOWN_MS - (performance.now() - lastNotifyAt));
+  if (delay > 0) {
+    logInfo(`recorder: waiting ${Math.ceil(delay)} ms for session-change notification cooldown (${changedSessions.size} session(s) queued)`);
+  }
   notifyTimer = setTimeout(() => {
     notifyTimer = null;
-    lastNotifyAt = Date.now();
+    lastNotifyAt = performance.now();
     const change: SessionChange = { sessionIds: [...changedSessions] };
     changedSessions.clear();
     for (const listener of listeners) listener(change);
@@ -3405,7 +3408,7 @@ export function resetRecorderForTests(): void {
     notifyTimer = null;
     changedSessions.clear();
   }
-  lastNotifyAt = 0;
+  lastNotifyAt = -Infinity;
 }
 
 export type { SessionSummary, SessionEvent };
