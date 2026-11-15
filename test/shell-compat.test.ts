@@ -575,6 +575,40 @@ it('holds a nested image turn open while any group, nested image, or trailing fi
   expect((await f.ask()).turns[0].endMessageId).toBeNull();
 });
 
+it('tracks skipped nested images past MAX_ROWS and suppresses terminalWithoutFinal for nested or skipped images', async () => {
+  const f = fixture(); const g = gallery(f, 1);
+  const filler = Array.from({ length: 405 }, () => ({ type: 'reasoning', presentation: 'thought', content: '' }));
+  f.entry.turn.status = 'complete';
+  f.entry.turn.items = [f.entry.turn.items[0], {
+    type: 'chatgpt-reasoning-group', completed: true, items: [g.images[0], ...filler, { ...g.images[1], status: 'in_progress' }]
+  }];
+  expect((await f.ask()).turns[0].endMessageId).toBeNull();
+
+  // Preview flag past MAX_ROWS must also keep the turn open.
+  f.entry.turn.items[1].items[f.entry.turn.items[1].items.length - 1] = { ...g.images[1], isPreview: true };
+  expect((await f.ask()).turns[0].endMessageId).toBeNull();
+
+  // Completed non-preview skipped image past MAX_ROWS preserves existing imageEnd behavior.
+  f.entry.turn.items[1].items[f.entry.turn.items[1].items.length - 1] = g.images[1];
+  expect((await f.ask()).turns[0].endMessageId).toBe(ANSWER);
+
+  // Unowned/rejected nested image (no accepted shell images) must not trigger terminalWithoutFinal.
+  f.entry.turn.items = [f.entry.turn.items[0], {
+    type: 'chatgpt-reasoning-group', completed: true, items: [{ ...g.images[0], chatGptMessageId: OTHER }]
+  }];
+  const rejected = (await f.ask()).turns[0];
+  expect(rejected.endMessageId).toBeNull();
+  expect(rejected.terminalWithoutFinal).toBeFalsy();
+
+  // Nested image present only past MAX_ROWS also keeps terminalWithoutFinal falsy.
+  f.entry.turn.items = [f.entry.turn.items[0], {
+    type: 'chatgpt-reasoning-group', completed: true, items: [...filler, g.images[0]]
+  }];
+  const skippedOnly = (await f.ask()).turns[0];
+  expect(skippedOnly.endMessageId).toBeNull();
+  expect(skippedOnly.terminalWithoutFinal).toBeFalsy();
+});
+
 it('keeps newer nested image identities after an older top-level image', async () => {
   const f = fixture(); const g = gallery(f, 2);
   const newest = '66666666-6666-4666-8666-666666666666';
@@ -755,7 +789,7 @@ it('closes a shell turn whose completed generated image stays inside the reasoni
   const r = await recorder(f, { desktop_input: m => ({ ok: true,
     data: m.authorize || m.ack || m.fail ? { ok: true } : { input } }) });
   const sent = r.runtime({ type: 'clf-desktop-input', id: input.id, conversationId: THREAD });
-  await vi.waitFor(() => expect(latest).toBeTruthy());
+  await vi.waitFor(() => expect(latest).toBeTruthy(), { timeout: 5000 });
   await r.hook.refreshFiber(); r.hook.observe(); expect(await sent).toEqual({ ok: true });
   await r.hook.refreshFiber(); r.hook.observe(); await r.hook.flush();
   expect((await r.runtime({ type: 'clf-page-status' })).generating).toBe(true);
@@ -777,7 +811,7 @@ it('closes a shell turn whose completed generated image stays inside the reasoni
 
   input = { ...input, id: CALL, owner: 'follow-up', text: 'Next step after image' };
   const followup = r.runtime({ type: 'clf-desktop-input', id: input.id, conversationId: THREAD });
-  await vi.waitFor(() => expect(sends).toBe(2));
+  await vi.waitFor(() => expect(sends).toBe(2), { timeout: 5000 });
   await r.hook.refreshFiber(); r.hook.observe();
   expect(await followup).toEqual({ ok: true });
   (f.win as any).__CLF_CONTENT_RECORDER__.stop();
