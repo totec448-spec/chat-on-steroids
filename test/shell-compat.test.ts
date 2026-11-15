@@ -541,10 +541,39 @@ it.each(['running', 'group-complete', 'assistant-final'] as const)(
     expect(turn.images.every((image: any) => image.providerStatus === 'finished_successfully')).toBe(true);
     expect(stampedFile(g.big, g.files)).toBe(g.files[1]);
     expect(g.thumbs.map(thumb => stampedFile(thumb, g.files))).toEqual(g.files);
-    expect(turn.endMessageId).toBe(state === 'assistant-final' ? OTHER : null);
+    expect(turn.endMessageId).toBe(state === 'assistant-final' ? OTHER : state === 'group-complete' ? ANSWER : null);
     expect(JSON.stringify(turn)).not.toContain('NEVER_COPY_PRIVATE_REASONING');
   }
 );
+
+it('holds a nested image turn open while any group, nested image, or trailing final prose is incomplete', async () => {
+  const f = fixture(); const g = gallery(f, 1);
+  f.entry.turn.status = 'complete';
+  f.entry.turn.items = [f.entry.turn.items[0], {
+    type: 'chatgpt-reasoning-group', completed: false, items: [...g.images]
+  }];
+  expect((await f.ask()).turns[0].endMessageId).toBeNull();
+
+  f.entry.turn.items[1].completed = true;
+  f.entry.turn.items[1].activeReasoning = { type: 'reasoning', presentation: 'thought', content: 'Finalizing', completed: false };
+  expect((await f.ask()).turns[0].endMessageId).toBeNull();
+  delete f.entry.turn.items[1].activeReasoning;
+
+  // An earlier top-level completed image cannot close the turn while a nested image is still running.
+  f.entry.turn.items = [f.entry.turn.items[0], g.images[0], {
+    type: 'chatgpt-reasoning-group', completed: true, items: [{ ...g.images[1], status: 'in_progress' }]
+  }];
+  expect((await f.ask()).turns[0].endMessageId).toBeNull();
+
+  // A completed nested image cannot close the turn while trailing final prose is still streaming.
+  f.entry.turn.messageIds.push(OTHER);
+  f.entry.turn.items = [f.entry.turn.items[0], {
+    type: 'chatgpt-reasoning-group', completed: true, items: [...g.images]
+  }, {
+    type: 'assistant-message', messageId: OTHER, content: 'Draft', phase: 'final_answer', completed: false
+  }];
+  expect((await f.ask()).turns[0].endMessageId).toBeNull();
+});
 
 it('keeps newer nested image identities after an older top-level image', async () => {
   const f = fixture(); const g = gallery(f, 2);
@@ -693,6 +722,64 @@ it('closes a tracked image-only shell turn and releases its page generation stat
   await r.hook.refreshFiber(); r.hook.observe();
   expect(await followup).toEqual({ ok: true });
   expect(r.sent.filter(message => message.type === 'desktop_input' && message.ack && message.id === CALL)).toHaveLength(1);
+  (f.win as any).__CLF_CONTENT_RECORDER__.stop();
+});
+
+it('closes a shell turn whose completed generated image stays inside the reasoning group without assistant DOM slots', async () => {
+  const f = fixture(), edit = editing(f);
+  f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
+  let input = { id: OTHER, owner: 'image-request', text: 'Generate a wall texture', model: 'gpt-5-6-thinking',
+    reasoningEffort: 'high', purpose: 'user', images: [] };
+  let latest: ReturnType<typeof addExchange>;
+  let sends = 0;
+  f.doc.querySelector('button[type="submit"]')!.addEventListener('click', event => {
+    event.preventDefault(); latest = addExchange(f, ++sends, edit.serialize()); edit.box.replaceChildren();
+    const section = f.doc.querySelector(`[data-turn-key="${latest.userId}"]`)!;
+    section.querySelector('[data-chatgpt-agent-turn-start]')?.remove();
+    section.querySelector('[data-content-search-unit-key$=":assistant"]')?.remove();
+    const preview = f.doc.createElement('div'); preview.className = 'group/generated-image-preview';
+    const img = f.doc.createElement('img'); img.src = 'blob:https://chatgpt.com/nested-wall'; preview.append(img);
+    section.append(preview);
+    const imageItem = { type: 'generated-image',
+      chatGptMessageId: latest.answerId, id: `${latest.answerId}:image-asset:0`,
+      src: 'sediment://file_1234567890abcdef', status: 'in_progress', isPreview: false } as any;
+    (img as any).__reactFiber$fixture = f.chain({ imageId: imageItem.id, isComplete: false, isPreview: true },
+      f.chain({ item: imageItem }, (section as any).__reactFiber$fixture));
+    latest.entry.turn.items = [latest.entry.turn.items[0]!, {
+      type: 'chatgpt-reasoning-group', completed: false, items: [
+        { type: 'reasoning', presentation: 'thought', content: 'Creating wall texture' },
+        imageItem
+      ]
+    } as any];
+  });
+  const r = await recorder(f, { desktop_input: m => ({ ok: true,
+    data: m.authorize || m.ack || m.fail ? { ok: true } : { input } }) });
+  const sent = r.runtime({ type: 'clf-desktop-input', id: input.id, conversationId: THREAD });
+  await vi.waitFor(() => expect(latest).toBeTruthy());
+  await r.hook.refreshFiber(); r.hook.observe(); expect(await sent).toEqual({ ok: true });
+  await r.hook.refreshFiber(); r.hook.observe(); await r.hook.flush();
+  expect((await r.runtime({ type: 'clf-page-status' })).generating).toBe(true);
+  expect(r.events().filter((event: any) => event.kind === 'turn_end')).toEqual([]);
+
+  const group = latest!.entry.turn.items[1] as any;
+  group.completed = true;
+  group.items[1].status = 'completed';
+  latest!.entry.turn.status = 'complete';
+  const img = f.doc.querySelector(`[data-turn-key="${latest!.userId}"] .group\\/generated-image-preview img`) as any;
+  img.__reactFiber$fixture.memoizedProps.isComplete = true;
+  img.__reactFiber$fixture.memoizedProps.isPreview = false;
+
+  await r.hook.refreshFiber(); r.hook.observe(); await r.hook.flush();
+  expect(r.events().filter((event: any) => event.kind === 'turn_end')).toEqual([
+    expect.objectContaining({ outcome: 'completed', providerMessageId: latest!.answerId })
+  ]);
+  expect((await r.runtime({ type: 'clf-page-status' })).generating).toBe(false);
+
+  input = { ...input, id: CALL, owner: 'follow-up', text: 'Next step after image' };
+  const followup = r.runtime({ type: 'clf-desktop-input', id: input.id, conversationId: THREAD });
+  await vi.waitFor(() => expect(sends).toBe(2));
+  await r.hook.refreshFiber(); r.hook.observe();
+  expect(await followup).toEqual({ ok: true });
   (f.win as any).__CLF_CONTENT_RECORDER__.stop();
 });
 it('reads request metadata only for the mounted shell message ids in the exact native cache', async () => {

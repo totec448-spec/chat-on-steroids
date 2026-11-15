@@ -680,7 +680,9 @@ var CLF_DOM = (() => {
         const id = turnIdOf(node);
         if (node.matches?.(SHELL_TURN)) {
           const users = [...node.querySelectorAll('[data-content-search-unit-key$=":user"]')].filter(slot => slot.closest('[data-turn-key]') === node);
-          const answered = node.querySelector('[data-chatgpt-agent-turn-start], [data-content-search-unit-key$=":assistant"]');
+          const answered = [...node.querySelectorAll(
+            '[data-chatgpt-agent-turn-start], [data-content-search-unit-key$=":assistant"], [class~="group/imagegen-image"], [class~="group/generated-image-preview"], [data-clf-fiber-image]'
+          )].find(el => el.closest('[data-turn-key]') === node && !el.closest('[data-content-search-unit-key$=":user"]') && !el.closest(OWN_SURFACES));
           // Two slots with the same key in one exchange are ambiguous and stay unread. Slots with
           // their own keys are not: in a chat's later turns ChatGPT keeps a message sent into the
           // running answer in the question's exchange, as its own slot (#1662). Skipping such an
