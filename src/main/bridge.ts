@@ -2503,8 +2503,9 @@ async function noteSavedCopyBehind(conversationId: string, newestUser: string, d
       `(${record.documents.size} documents read an older newest question over ${Math.round(spread / 60_000)} minutes); ` +
       `the ${goalSwitchFor(conversationId).mode} chat continues in a new chat from saved summary ${saved}`);
   } catch (error) {
-    // A Compact & Resume that began meanwhile has the chat: the proof stays, and a later report may try again.
-    if (continuationForSession(session.id)) savedCopyContinued.delete(conversationId);
+    // A failed attempt (the summary could not be stored again) or a Compact & Resume that began meanwhile leaves the
+    // proof in place, and a later report may try again; only a successful resume keeps the marker.
+    savedCopyContinued.delete(conversationId);
     logInfo(`bridge: ${conversationId}: could not continue from the saved summary (${(error as Error).message})`);
   }
 }
