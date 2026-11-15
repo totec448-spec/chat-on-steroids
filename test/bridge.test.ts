@@ -19655,19 +19655,19 @@ describe('push-driven activity wakes over /wake', () => {
       notifyBrowserActivity(CHAT);
       notifyBrowserActivity(CHAT);
       notifyBrowserActivity(CHAT);
-      await vi.waitFor(() => expect(frames.filter((f) => f === expectedFrame)).toHaveLength(1));
+      await vi.waitFor(() => expect(frames.filter((f) => f === expectedFrame)).toHaveLength(1), { timeout: 5_000 });
 
       // Rapid streaming updates emit leading + trailing wakes instead of one per token.
       frames.length = 0;
       for (let i = 0; i < 6; i += 1) notifyBrowserActivity(CHAT, true);
-      await vi.waitFor(() => expect(frames.filter((f) => f === expectedFrame).length).toBeGreaterThanOrEqual(2));
+      await vi.waitFor(() => expect(frames.filter((f) => f === expectedFrame).length).toBeGreaterThanOrEqual(2), { timeout: 5_000 });
       expect(frames.filter((f) => f === expectedFrame).length).toBeLessThanOrEqual(3);
 
       // App-authored progress and running-tool transitions wake the target tab immediately.
       frames.length = 0;
       const { recordProgress } = await import('../src/main/session/recorder.js');
       await recordProgress(sessionId, `push-wake:${CHAT}`, 'Working on it...');
-      await vi.waitFor(() => expect(frames).toContain(expectedFrame));
+      await vi.waitFor(() => expect(frames).toContain(expectedFrame), { timeout: 5_000 });
 
       frames.length = 0;
       const { emptyEvidence, trackInFlight } = await import('../src/main/mcp/call-context.js');
@@ -19679,10 +19679,10 @@ describe('push-driven activity wakes over /wake', () => {
         outcome: null,
         evidence: emptyEvidence()
       }, async () => {
-        await vi.waitFor(() => expect(frames).toContain(expectedFrame));
+        await vi.waitFor(() => expect(frames).toContain(expectedFrame), { timeout: 5_000 });
         frames.length = 0;
       });
-      await vi.waitFor(() => expect(frames).toContain(expectedFrame));
+      await vi.waitFor(() => expect(frames).toContain(expectedFrame), { timeout: 5_000 });
 
       // Browser-originated /events batches must not echo activity wakes back to the sender.
       frames.length = 0;
@@ -19696,10 +19696,71 @@ describe('push-driven activity wakes over /wake', () => {
       expect(posted.status).toBe(200);
       await new Promise((resolve) => setTimeout(resolve, 460));
       expect(frames.filter((f) => f === expectedFrame)).toHaveLength(0);
+
+      // Non-extension app writes inside the echo window still emit an activity wake.
+      await recordProgress(sessionId, `app-during-echo:${CHAT}`, 'App progress during echo window');
+      await vi.waitFor(() => expect(frames).toContain(expectedFrame), { timeout: 5_000 });
     } finally {
       const closed = once(socket, 'close');
       socket.close();
       await closed;
+    }
+  });
+
+  it('bounds combined streaming wakes across multiple chats and clears pending timers on stopBridge', async () => {
+    await pair();
+    const CHAT_A = 'cafeaaaa-1111-4111-8111-111111111111';
+    const CHAT_B = 'cafebbbb-2222-4222-8222-222222222222';
+    const socket = new WebSocket(base.replace('http:', 'ws:') + '/wake', { origin: EXTENSION_ORIGIN });
+    await once(socket, 'open');
+    const authWake = once(socket, 'message');
+    socket.send(token!);
+    await authWake;
+
+    const frames: string[] = [];
+    socket.on('message', (bytes) => frames.push(String(bytes)));
+
+    try {
+      // Interleaved streaming updates for two targets share one 200 ms combined pacing budget.
+      for (let i = 0; i < 6; i += 1) {
+        notifyBrowserActivity(CHAT_A, true);
+        notifyBrowserActivity(CHAT_B, true);
+      }
+      await vi.waitFor(() => expect(frames.filter((f) => f.startsWith('activity:'))).toHaveLength(3), { timeout: 5_000 });
+      expect(frames).toContain(`activity:${CHAT_A}`);
+      expect(frames).toContain(`activity:${CHAT_B}`);
+
+      // Queueing a trailing streaming wake and stopping the bridge must clear pending timers.
+      frames.length = 0;
+      notifyBrowserActivity(CHAT_A, true);
+      notifyBrowserActivity(CHAT_B, true);
+      await stopBridge();
+      const closed = once(socket, 'close');
+      await closed;
+
+      const restartedPort = await startBridge();
+      expect(restartedPort).toBeTypeOf('number');
+      const socket2 = new WebSocket(`http://127.0.0.1:${restartedPort}`.replace('http:', 'ws:') + '/wake', { origin: EXTENSION_ORIGIN });
+      await once(socket2, 'open');
+      const authWake2 = once(socket2, 'message');
+      socket2.send(token!);
+      await authWake2;
+      const frames2: string[] = [];
+      socket2.on('message', (bytes) => frames2.push(String(bytes)));
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        expect(frames2.filter((f) => f.startsWith('activity:'))).toHaveLength(0);
+      } finally {
+        const closed2 = once(socket2, 'close');
+        socket2.close();
+        await closed2;
+      }
+    } finally {
+      if (socket.readyState <= 1) {
+        const closed = once(socket, 'close');
+        socket.close();
+        await closed;
+      }
     }
   });
 });

@@ -1323,11 +1323,14 @@ export function browserPresent(): boolean {
 /** Recent HTTP presence cannot prove that an explicit desktop send can wake Chrome now. */
 export function browserWakeConnected(): boolean { return browserWake?.connected() === true; }
 
-const ACTIVITY_STREAM_WAKE_MS = 120;
+const ACTIVITY_STREAM_WAKE_MS = 200;
 const BROWSER_EVENT_ECHO_WINDOW_MS = 1500;
+const ACTIVITY_STREAM_WAKE_CAP = 64;
 const pendingActivityWakes = new Set<string>();
 let activityWakeMicrotaskQueued = false;
-const streamActivityWakes = new Map<string, { timer: NodeJS.Timeout | null; lastSentAt: number }>();
+const pendingStreamActivityWakes = new Set<string>();
+let streamActivityWakeTimer: NodeJS.Timeout | null = null;
+let lastStreamActivityWakeAt = 0;
 const recentBrowserEventSessions = new Map<string, number>();
 const notifiedNonExtensionSeq = new Map<string, number>();
 const inFlightBrowserObservationChats = new Set<string>();
@@ -1335,10 +1338,10 @@ const inFlightBrowserObservationChats = new Set<string>();
 function clearActivityWakes(): void {
   pendingActivityWakes.clear();
   activityWakeMicrotaskQueued = false;
-  for (const entry of streamActivityWakes.values()) {
-    if (entry.timer) clearTimeout(entry.timer);
-  }
-  streamActivityWakes.clear();
+  if (streamActivityWakeTimer) clearTimeout(streamActivityWakeTimer);
+  streamActivityWakeTimer = null;
+  lastStreamActivityWakeAt = 0;
+  pendingStreamActivityWakes.clear();
   recentBrowserEventSessions.clear();
   notifiedNonExtensionSeq.clear();
   inFlightBrowserObservationChats.clear();
@@ -1368,21 +1371,21 @@ async function notifyNonExtensionSessionChange(sessionId: string, conversationId
   }
   const previousSeq = notifiedNonExtensionSeq.get(sessionId) ?? 0;
   if (maxNonExtensionSeq <= previousSeq) return;
+  if (!notify) return;
   notifiedNonExtensionSeq.delete(sessionId);
   notifiedNonExtensionSeq.set(sessionId, maxNonExtensionSeq);
   if (notifiedNonExtensionSeq.size > 256) {
     const oldest = notifiedNonExtensionSeq.keys().next().value;
     if (oldest !== undefined) notifiedNonExtensionSeq.delete(oldest);
   }
-  if (notify) notifyBrowserActivity(conversationId);
+  notifyBrowserActivity(conversationId);
 }
 
 function scheduleDiscreteActivityWake(target: string): void {
-  const existing = streamActivityWakes.get(target);
-  if (existing) {
-    if (existing.timer) clearTimeout(existing.timer);
-    existing.timer = null;
-    existing.lastSentAt = Date.now();
+  pendingStreamActivityWakes.delete(target);
+  if (pendingStreamActivityWakes.size === 0 && streamActivityWakeTimer) {
+    clearTimeout(streamActivityWakeTimer);
+    streamActivityWakeTimer = null;
   }
   pendingActivityWakes.add(target);
   if (activityWakeMicrotaskQueued) return;
@@ -1400,9 +1403,30 @@ function scheduleDiscreteActivityWake(target: string): void {
   });
 }
 
+function flushNextStreamingWake(): void {
+  streamActivityWakeTimer = null;
+  if (!bridgeDesiredRunning || !server || !browserWakeConnected()) {
+    pendingStreamActivityWakes.clear();
+    return;
+  }
+  const next = pendingStreamActivityWakes.values().next().value;
+  if (next === undefined) return;
+  pendingStreamActivityWakes.delete(next);
+  lastStreamActivityWakeAt = Date.now();
+  wakeActivityWork(next);
+  if (pendingStreamActivityWakes.size > 0) scheduleStreamingWakePump(ACTIVITY_STREAM_WAKE_MS);
+}
+
+function scheduleStreamingWakePump(delayMs: number): void {
+  if (streamActivityWakeTimer) return;
+  streamActivityWakeTimer = setTimeout(flushNextStreamingWake, Math.max(1, delayMs));
+  streamActivityWakeTimer.unref?.();
+}
+
 /**
  * Signals connected ChatGPT tabs to pull `/activity` now, coalescing bursty updates and
- * throttling mid-stream Goal draft chunks so WebSocket traffic stays bounded.
+ * applying a combined throttle across streaming targets so WebSocket and `/activity` traffic
+ * stays within the shared bridge budget.
  */
 export function notifyBrowserActivity(conversationId?: string, streaming = false): void {
   if (!bridgeDesiredRunning || !server || !browserWakeConnected()) return;
@@ -1412,35 +1436,19 @@ export function notifyBrowserActivity(conversationId?: string, streaming = false
     return;
   }
   const now = Date.now();
-  let entry = streamActivityWakes.get(target);
-  if (!entry) {
-    if (streamActivityWakes.size >= 64) {
-      const oldest = streamActivityWakes.keys().next().value;
-      if (oldest !== undefined) {
-        const stale = streamActivityWakes.get(oldest);
-        if (stale?.timer) clearTimeout(stale.timer);
-        streamActivityWakes.delete(oldest);
-      }
-    }
-    entry = { timer: null, lastSentAt: 0 };
-    streamActivityWakes.set(target, entry);
-  }
-  const elapsed = now - entry.lastSentAt;
-  if (entry.lastSentAt === 0 || elapsed >= ACTIVITY_STREAM_WAKE_MS) {
+  const elapsed = now - lastStreamActivityWakeAt;
+  if (!streamActivityWakeTimer && pendingStreamActivityWakes.size === 0 && (lastStreamActivityWakeAt === 0 || elapsed >= ACTIVITY_STREAM_WAKE_MS)) {
+    lastStreamActivityWakeAt = now;
     scheduleDiscreteActivityWake(target);
     return;
   }
-  if (entry.timer) return;
-  entry.timer = setTimeout(() => {
-    entry!.timer = null;
-    if (!bridgeDesiredRunning || !server || !browserWakeConnected()) {
-      streamActivityWakes.delete(target);
-      return;
-    }
-    entry!.lastSentAt = Date.now();
-    wakeActivityWork(target);
-  }, ACTIVITY_STREAM_WAKE_MS - elapsed);
-  entry.timer.unref?.();
+  if (!pendingStreamActivityWakes.has(target) && pendingStreamActivityWakes.size >= ACTIVITY_STREAM_WAKE_CAP) {
+    const oldest = pendingStreamActivityWakes.values().next().value;
+    if (oldest !== undefined) pendingStreamActivityWakes.delete(oldest);
+  }
+  pendingStreamActivityWakes.add(target);
+  const remaining = lastStreamActivityWakeAt === 0 ? ACTIVITY_STREAM_WAKE_MS : ACTIVITY_STREAM_WAKE_MS - Math.max(0, elapsed);
+  scheduleStreamingWakePump(remaining);
 }
 
 /**
@@ -6737,7 +6745,6 @@ async function startBridgeOnce(epoch: number, prepared?: PreparedBridge): Promis
         void notifyNonExtensionSessionChange(sessionId, target, true);
       } else {
         notifyBrowserActivity(target);
-        void notifyNonExtensionSessionChange(sessionId, target, false);
       }
     }
   });
