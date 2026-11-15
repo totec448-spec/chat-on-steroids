@@ -4006,7 +4006,8 @@ async function replyFiber(
   // shared one.
   harnessed: Harness | null = null,
   observeOnly = false,
-  preserveTurnStamps: ReadonlySet<HTMLElement> = new Set()
+  preserveTurnStamps: ReadonlySet<HTMLElement> = new Set(),
+  presentationOnly = false
 ): Promise<void> {
   const active = harnessed ?? live!;
   const window = active.window as any;
@@ -4068,7 +4069,7 @@ async function replyFiber(
       // sometimes had not even arrived yet (canary 2026-10-13, macOS). Wait for the answer itself.
       await vi.waitFor(() => { if (!answered) throw new Error('the scan has not asked yet'); }, { timeout: 10_000, interval: 5 });
       await new Promise(resolve => globalThis.setTimeout(resolve, 100));
-    } else await active.hook.refreshFiber(settled);
+    } else await active.hook.refreshFiber(settled, presentationOnly);
   } finally {
     window.removeEventListener('message', onAsk);
     window.setTimeout = instant;
@@ -10010,6 +10011,152 @@ describe('a stop button that goes missing while the turn is still running', () =
     expect(emitted(live.sent, 'turn_end').map(row => [row.event.turnId, row.event.continued])).toEqual([[first, true]]);
   });
 
+  it('completes the old turn at a new question from Fiber end_turn before its text renders', async () => {
+    live = await harness();
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'terminal-before-text', []);
+    live.hook.observe(); await settle();
+    const first = emitted(live.sent, 'turn_start')[0]!.event.turnId;
+    section.setAttribute('data-clf-fiber-turn', '0');
+    // The presentation pass can learn end_turn before the lifecycle pass runs,
+    // while the native assistant section still has no authored prose.
+    await replyFiber([], [{ turnId: 'terminal-before-text', endMessageId: 'old-final',
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', calls: [], messages: [], activities: []
+    }], null, true, null, false, new Set(), true);
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(0);
+
+    userTurn(live.document, 'next-after-terminal', 'Next question');
+    live.hook.observe(); await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end').map(row => row.event)).toEqual([
+      expect.objectContaining({ turnId: first, outcome: 'completed' })
+    ]);
+    expect(emitted(live.sent, 'turn_end')[0]!.event.continued).toBeUndefined();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(2);
+
+    // React can remount the old terminal answer after the next question. It was already
+    // consumed as the boundary that closed the first generation and must not close the new one.
+    section.remove();
+    const remounted = assistantTurn(live.document, 'terminal-before-text', []);
+    const oldTerminal = { turnId: 'terminal-before-text', endMessageId: 'old-final', messages: [], activities: [] };
+    await bindFiberTurns([{ section: remounted, turn: oldTerminal }]);
+    live.hook.observe(); await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(1);
+
+    const next = assistantTurn(live.document, 'next-after-terminal-answer', []);
+    await bindFiberTurns([
+      { section: remounted, turn: oldTerminal },
+      { section: next, turn: { turnId: 'next-after-terminal-answer', endMessageId: 'next-final', messages: [], activities: [] } }
+    ]);
+    live.hook.observe(); await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(2);
+    expect(emitted(live.sent, 'turn_end')[1]!.event).toMatchObject({
+      turnId: emitted(live.sent, 'turn_start')[1]!.event.turnId,
+      outcome: 'completed'
+    });
+  });
+
+  it.each([true, false])('completes its own answer when its question unmounts and an older question stays visible (anchored: %s)', async anchored => {
+    live = await harness(undefined, {
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0,
+        userAnchors: anchored ? [{ seq: 1, time: 1_699_999_990_000, messageId: 'm-older-rendered-question' }] : [] } })
+    });
+    userTurn(live.document, 'older-rendered-question', 'An earlier question', { sent: false });
+    await live.hook.pullActivity();
+    live.hook.observe(); await settle();
+    startGenerating(live.document);
+    const ownQuestion = live.document.querySelectorAll('[data-turn="user"]').item(1);
+    live.hook.observe(); await settle();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
+    const own = emitted(live.sent, 'turn_start')[0]!.event.turnId;
+
+    // The generation opened from its own Send, but has not acquired an assistant section.
+    // Hydration removes that question while retaining an older historical question.
+    ownQuestion.remove();
+    const answer = assistantTurn(live.document, 'missing-question-answer', []);
+    prose(live.document, answer, 'missing-question-final', 'The current answer');
+    await bindFiberTurns([{ section: answer, turn: {
+      turnId: 'missing-question-answer', endMessageId: 'missing-question-final',
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', messages: [], activities: []
+    } }]);
+    await settleTurn(live); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end').map(row => row.event)).toEqual([
+      expect.objectContaining({ turnId: own, outcome: 'completed' })
+    ]);
+  });
+
+  it('completes its answer when an anchored older question remounts after its own question unmounts', async () => {
+    let anchors = [{ seq: 1, time: 1_699_999_990_000, messageId: 'm-older-remounted-question' }];
+    live = await harness(undefined, {
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0, userAnchors: anchors } })
+    });
+    await live.hook.pullActivity();
+    startGenerating(live.document);
+    live.hook.observe(); await settle();
+    const own = emitted(live.sent, 'turn_start')[0]!.event.turnId;
+    const ownQuestion = live.document.querySelector('[data-turn="user"]')!;
+    const ownQuestionId = ownQuestion.querySelector('[data-message-id]')!.getAttribute('data-message-id')!;
+
+    // Neither the older question nor its section existed when the live generation opened.
+    // Hydration removes the current question, then remounts the older one above its answer.
+    ownQuestion.remove();
+    anchors = [...anchors, { seq: 2, time: 1_700_000_000_000, messageId: ownQuestionId }];
+    await live.hook.pullActivity();
+    userTurn(live.document, 'older-remounted-question', 'An earlier question', { sent: false });
+    const answer = assistantTurn(live.document, 'older-remount-answer', []);
+    prose(live.document, answer, 'older-remount-final', 'The current answer');
+    await bindFiberTurns([{ section: answer, turn: {
+      turnId: 'older-remount-answer', endMessageId: 'older-remount-final',
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', messages: [], activities: []
+    } }]);
+    await settleTurn(live); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end').map(row => row.event)).toEqual([
+      expect.objectContaining({ turnId: own, outcome: 'completed' })
+    ]);
+  });
+
+  it.each(['rendered', 'indexed-unmounted', 'unanchored-unmounted'] as const)('does not consume a new fast answer terminal while the preceding generation has no bound section (%s)', async questionState => {
+    let anchors: Array<{ seq: number; time: number; messageId: string }> = [];
+    live = await harness(undefined, {
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0, userAnchors: anchors } })
+    });
+    startGenerating(live.document);
+    live.hook.observe(); await settle();
+    const first = emitted(live.sent, 'turn_start')[0]!.event.turnId;
+    const firstQuestion = live.document.querySelector('[data-turn="user"]')!;
+    const firstQuestionId = firstQuestion.querySelector('[data-message-id]')!.getAttribute('data-message-id')!;
+
+    // The previous generation never acquired an assistant section. A presentation-only scan
+    // can nevertheless cache the next question's already-finished answer before observe() sees it.
+    userTurn(live.document, 'unbound-next-question', 'Next question');
+    if (questionState !== 'rendered') firstQuestion.remove();
+    if (questionState === 'indexed-unmounted') {
+      anchors = [
+        { seq: 1, time: 1_699_999_990_000, messageId: firstQuestionId },
+        { seq: 2, time: 1_700_000_000_000, messageId: 'm-unbound-next-question' }
+      ];
+      await live.hook.pullActivity();
+    }
+    const nextAnswer = assistantTurn(live.document, 'fast-next-answer', []);
+    nextAnswer.setAttribute('data-clf-fiber-turn', '0');
+    const terminal = {
+      turnId: 'fast-next-answer', endMessageId: 'fast-next-final',
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', calls: [], messages: [], activities: []
+    };
+    await replyFiber([], [terminal], null, true, null, false, new Set(), true);
+
+    live.hook.observe(); await settle(); await live.hook.flush();
+    const ends = emitted(live.sent, 'turn_end');
+    expect(ends).toHaveLength(1);
+    expect(ends[0]!.event).toMatchObject({ turnId: first, outcome: 'interrupted', continued: true });
+    const next = emitted(live.sent, 'turn_start')[1]!.event.turnId;
+
+    // The same exact terminal must remain available to close the generation opened by its question.
+    await replyFiber([], [terminal], null, true, null, false, new Set(), false);
+    await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(2);
+    expect(emitted(live.sent, 'turn_end')[1]!.event).toMatchObject({ turnId: next, outcome: 'completed' });
+  });
+
   it('marks continued the end of a turn with only interim prose when a message arrives before end_turn (#1301)', async () => {
     // 2026-10-12, live: a message sent at 02:20:26 joined the running response, which had already
     // said "I'll pick up where it stopped…". Stop was gone at the tick that saw the message, and the
@@ -10613,6 +10760,45 @@ describe('a stop button that goes missing while the turn is still running', () =
     const ends = emitted(live.sent, 'turn_end').map(entry => entry.event);
     expect(ends).toHaveLength(2);
     expect(ends[1]).toMatchObject({ turnId: emitted(live.sent, 'turn_start')[1]!.event.turnId, outcome: 'completed' });
+  });
+
+  it('does not use a historical Fiber final to suppress a later mid-turn steer', async () => {
+    // #746, live on 2.1.20: a Loop continuation's turn was closed 112 ms after turn_start and the
+    // next two hours of work had no owner. The finished previous answer, remounted where the new
+    // answer belongs, must not end the new turn either.
+    live = await harness();
+    startGenerating(live.document);
+    userTurn(live.document, 'remount-q1', 'first question');
+    const first = assistantTurn(live.document, 'remount-a1', []);
+    live.hook.observe(); await settle();
+    const firstEnd = { turnId: 'remount-a1', endMessageId: 'remount-a1-final', calls: [], activities: [],
+      messages: [{ messageId: 'remount-a1-final', stable: true, rawText: 'First answer.', renderedHtml: '<p>First answer.</p>' }] };
+    await bindFiberTurns([{ section: first, turn: firstEnd }]);
+    await live.hook.flush(); await settle();
+    stopGenerating(live.document);
+    live.hook.observe(); await settle();
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(1);
+
+    const question = userTurn(live.document, 'remount-q2', 'second question');
+    startGenerating(live.document);
+    live.hook.observe(); await settle();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(2);
+    first.remove();
+    const remounted = assistantTurn(live.document, 'remount-a1', []);
+    question.after(remounted);
+    live.hook.observe(); await settle();
+    await bindFiberTurns([{ section: remounted, turn: firstEnd }]);
+    await live.hook.flush(); await settle();
+    live.hook.observe(); await settle();
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(1);
+
+    const second = emitted(live.sent, 'turn_start')[1]!.event.turnId;
+    userTurn(live.document, 'remount-steer', 'Continue with the detail');
+    live.hook.observe(); await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end').map(row => row.event)).toEqual([
+      expect.objectContaining({ outcome: 'completed' }),
+      expect.objectContaining({ turnId: second, continued: true })
+    ]);
   });
 
   it('does not close a new turn with the previous answer remounted below its question (#746)', async () => {
@@ -18548,6 +18734,142 @@ describe('the fresh chat the app opened', () => {
       })
     ]);
   });
+
+  it.each([
+    'provider-running', 'native-stop', 'approval', 'approval-during-flush', 'approval-after-claim',
+    'pending-tool', 'wrong-turn', 'wrong-question', 'foreign-chat', 'later-call', 'no-finish',
+    'legacy-companion', 'not-worker', 'fresh', 'ready'
+  ] as const)(
+    'uses a tool-only worker finish to release a wake only when safe (%s)', async scenario => {
+      const chat = '23232323-3434-4545-8686-797979797979';
+      const command = 'cmd-tool-only-revive';
+      const question = 'm-worker-question';
+      const fresh = scenario === 'fresh';
+      let started = fresh ? null : 'g-tool-only-worker';
+      let redeems = 0, sends = 0;
+      let section!: HTMLElement;
+      const race = scenario === 'approval-during-flush';
+      const afterClaim = scenario === 'approval-after-claim';
+      let terminalFlushHeld = false;
+      let releaseFlush!: () => void;
+      const terminalFlush = new Promise<{ ok: true; pending: 0; durable: true }>(resolve => {
+        releaseFlush = () => resolve({ ok: true, pending: 0, durable: true });
+      });
+      const mountApproval = (document: Document) => {
+        const card = document.createElement('div');
+        card.setAttribute('data-codex-approval-surface', 'true');
+        card.append(document.createElement('button'), document.createElement('button'));
+        card.getClientRects = () => [{ width: 600, height: 200 }] as unknown as DOMRectList;
+        document.body.append(card);
+        return card;
+      };
+      live = await nonProHarness(`https://chatgpt.com/c/${chat}`, {
+        activity: () => ({ ok: true, data: {
+          entries: [], nextSince: 0, bootstrap: scenario === 'not-worker' ? null : 'worker',
+          activeTurnId: started, recordedQuestionId: question,
+          pendingTools: scenario === 'pending-tool' ? 1 : 0,
+          stream: started && scenario !== 'no-finish' ? [{
+            kind: 'tool_call', seq: 1, time: Date.now(), tool: 'agents', outcome: 'ok',
+            ...(scenario === 'legacy-companion' ? {} : { endsActivity: true }),
+            turnId: scenario === 'wrong-turn' ? 'previous-turn' : started
+          }, ...(scenario === 'later-call' ? [{
+            kind: 'tool_call', seq: 2, time: Date.now(), tool: 'read', outcome: 'ok', turnId: started
+          }] : [])] : []
+        } }),
+        events: message => {
+          if (race && message.entries?.some((row: any) => row.event?.kind === 'turn_end')) {
+            terminalFlushHeld = true;
+            return terminalFlush;
+          }
+          return { ok: true, pending: 0, durable: true };
+        },
+        redeem: () => {
+          redeems++;
+          if (afterClaim) mountApproval(section.ownerDocument);
+          return { ok: true, command: { id: command, type: 'revive', text: 'Wake once.',
+            agent: 'worker-1', conversationId: chat } };
+        },
+        ack: () => ({ ok: true })
+      }, document => {
+        if (!fresh) {
+          userTurn(document, 'worker-question', 'Report the result.', { sent: false });
+          startGenerating(document, { send: false });
+          section = assistantTurn(document, 'worker-tool-only', []);
+        }
+        document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+          sends++;
+          document.querySelector('#prompt-textarea')!.textContent = '';
+        });
+      });
+      if (fresh) {
+        userTurn(live.document, 'worker-question', 'Report the result.');
+        startGenerating(live.document, { send: false });
+        section = assistantTurn(live.document, 'worker-tool-only', []);
+      }
+      live.hook.observe();
+      await settle();
+      await live.hook.flush();
+      if (fresh) {
+        started = emitted(live.sent, 'turn_start')[0]?.event.turnId ?? null;
+        expect(started).toBeTruthy();
+      }
+      await live.hook.pullActivity();
+      const handoff = live.runtimeMessage({ type: 'clf-run-command', id: command, conversationId: chat });
+      await settle();
+      expect(redeems).toBe(0);
+
+      if (scenario !== 'native-stop') stopGenerating(live.document);
+      if (scenario === 'approval') mountApproval(live.document);
+      section.setAttribute('data-clf-fiber-turn', '0');
+      await replyFiber([], [{ turnId: 'worker-tool-only', conversationId: scenario === 'foreign-chat' ? 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' : chat,
+        question: scenario === 'wrong-question' ? 'm-previous-question' : question,
+        terminalWithoutFinal: scenario !== 'provider-running', calls: [], messages: [], activities: [],
+        trace: [{ kind: 'call', id: 'finish-call', tool: 'agents', done: true }]
+      }]);
+      if (race) {
+        await vi.waitFor(() => expect(terminalFlushHeld).toBe(true), { timeout: 10_000, interval: 5 });
+        expect(redeems).toBe(0);
+        const card = mountApproval(live.document);
+        releaseFlush();
+        await live.hook.flush();
+        await settle();
+        expect(redeems).toBe(0);
+        expect(sends).toBe(0);
+        expect(composerText(live.document)).toBe('');
+        card.remove();
+        live.advance(live.hook.APPROVAL_SETTLE_MS + 1);
+        live.hook.observe();
+      }
+      await settle(300);
+      await live.hook.flush();
+      const ends = emitted(live.sent, 'turn_end');
+      expect(emitted(live.sent, 'assistant_message')).toHaveLength(0);
+      if (scenario !== 'ready' && !race && !fresh && !afterClaim) {
+        expect(ends).toHaveLength(0);
+        expect(redeems).toBe(0);
+        expect(sends).toBe(0);
+        expect(composerText(live.document)).toBe('');
+        return;
+      }
+      expect(ends.map(row => row.event)).toEqual([expect.objectContaining({
+        turnId: started, outcome: 'completed'
+      })]);
+      expect(await handoff).toEqual({ ok: true, claimed: true });
+      expect(redeems).toBe(1);
+      if (afterClaim) {
+        expect(sends).toBe(0);
+        expect(composerText(live.document)).toBe('');
+        expect(live.sent.filter(message => message.type === 'ack')).toEqual([
+          expect.objectContaining({ id: command, status: 'failed', error: expect.stringContaining('page-busy') })
+        ]);
+        return;
+      }
+      expect(sends).toBe(1);
+      expect(live.sent.filter(message => message.type === 'ack')).toEqual([
+        expect.objectContaining({ id: command, status: 'sent' })
+      ]);
+    }
+  );
 
   it.each([
     ['an earlier wake ChatGPT restored as the draft', 'is delivered', true],
