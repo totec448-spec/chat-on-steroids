@@ -6829,4 +6829,58 @@ describe('activity push wakes over /wake', () => {
     }, { timeout: 5_000 });
     socket.close();
   });
+
+  it('merges queued wakes with differing conversation targets for the same tab into an unfiltered wake', async () => {
+    const sockets: any[] = [];
+    class FakeWebSocket {
+      url: string;
+      readyState = 0;
+      onopen: (() => void) | null = null;
+      onmessage: ((event: { data: unknown }) => void) | null = null;
+      onerror: (() => void) | null = null;
+      onclose: (() => void) | null = null;
+      constructor(url: string) {
+        this.url = url;
+        sockets.push(this);
+        queueMicrotask(() => {
+          this.readyState = 1;
+          this.onopen?.();
+        });
+      }
+      send() {}
+      close() { this.readyState = 3; this.onclose?.(); }
+    }
+    let navigated = false;
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }),
+      session: new FakeStorageArea(),
+      WebSocket: FakeWebSocket,
+      tabsQuery: async () => [{ id: 10, url: `https://chatgpt.com/c/${navigated ? convB : convA}` }],
+      fetch: async (input) => {
+        const pathName = new URL(input).pathname;
+        if (pathName === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (pathName === '/status') return response(200, { inputs: [], commands: [] });
+        if (pathName === '/bind') return response(200, { ok: true, sessionId: 'sess-1' });
+        return response(200, { ok: true });
+      }
+    });
+    await worker.registerTab(10, 'doc-10', `https://chatgpt.com/c/${convA}`);
+    await worker.send({ type: 'bind', conversationId: convA }, 10, 'doc-10');
+    await worker.startup();
+    await vi.waitFor(() => expect(sockets.length).toBeGreaterThan(0), { timeout: 5_000 });
+    const socket = sockets.at(-1)!;
+
+    // Drain initial token bucket so subsequent wakes enter pendingActivityWakeTabs.
+    for (let i = 0; i < 6; i += 1) socket.onmessage?.({ data: `activity:${convA}` });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    worker.tabsSendMessage.mockClear();
+
+    // Tab navigated to convB while still bound to convA; queueing convB then convA must merge to unfiltered.
+    navigated = true;
+    socket.onmessage?.({ data: `activity:${convB}` });
+    socket.onmessage?.({ data: `activity:${convA}` });
+    await vi.waitFor(() => expect(worker.tabsSendMessage).toHaveBeenCalledTimes(1), { timeout: 5_000 });
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(10, { type: 'clf-activity-wake' });
+    socket.close();
+  });
 });

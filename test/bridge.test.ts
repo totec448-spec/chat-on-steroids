@@ -19734,6 +19734,16 @@ describe('push-driven activity wakes over /wake', () => {
       frames.length = 0;
       notifyBrowserActivity(CHAT_A, true);
       notifyBrowserActivity(CHAT_B, true);
+      const logger = await import('../src/main/logger.js');
+      const warn = vi.spyOn(logger, 'logWarn');
+      try {
+        // Reaching the 64-target streaming wake cap drops the oldest wake and writes one bounded warning.
+        for (let i = 0; i <= 70; i += 1) notifyBrowserActivity(`cap-conv-${i}`, true);
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0]?.[0]).toContain('64-target queue cap reached');
+      } finally {
+        warn.mockRestore();
+      }
       await stopBridge();
       const closed = once(socket, 'close');
       await closed;

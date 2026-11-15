@@ -1326,11 +1326,13 @@ export function browserWakeConnected(): boolean { return browserWake?.connected(
 const ACTIVITY_STREAM_WAKE_MS = 200;
 const BROWSER_EVENT_ECHO_WINDOW_MS = 1500;
 const ACTIVITY_STREAM_WAKE_CAP = 64;
+const ACTIVITY_STREAM_WAKE_EVICT_LOG_MS = 10_000;
 const pendingActivityWakes = new Set<string>();
 let activityWakeMicrotaskQueued = false;
 const pendingStreamActivityWakes = new Set<string>();
 let streamActivityWakeTimer: NodeJS.Timeout | null = null;
 let lastStreamActivityWakeAt = 0;
+let lastStreamWakeEvictLogAt = 0;
 const recentBrowserEventSessions = new Map<string, number>();
 const notifiedNonExtensionSeq = new Map<string, number>();
 const inFlightBrowserObservationChats = new Set<string>();
@@ -1341,6 +1343,7 @@ function clearActivityWakes(): void {
   if (streamActivityWakeTimer) clearTimeout(streamActivityWakeTimer);
   streamActivityWakeTimer = null;
   lastStreamActivityWakeAt = 0;
+  lastStreamWakeEvictLogAt = 0;
   pendingStreamActivityWakes.clear();
   recentBrowserEventSessions.clear();
   notifiedNonExtensionSeq.clear();
@@ -1444,7 +1447,13 @@ export function notifyBrowserActivity(conversationId?: string, streaming = false
   }
   if (!pendingStreamActivityWakes.has(target) && pendingStreamActivityWakes.size >= ACTIVITY_STREAM_WAKE_CAP) {
     const oldest = pendingStreamActivityWakes.values().next().value;
-    if (oldest !== undefined) pendingStreamActivityWakes.delete(oldest);
+    if (oldest !== undefined) {
+      pendingStreamActivityWakes.delete(oldest);
+      if (lastStreamWakeEvictLogAt === 0 || now - lastStreamWakeEvictLogAt >= ACTIVITY_STREAM_WAKE_EVICT_LOG_MS) {
+        lastStreamWakeEvictLogAt = now;
+        logWarn(`bridge: dropped oldest pending streaming activity wake (${ACTIVITY_STREAM_WAKE_CAP}-target queue cap reached)`);
+      }
+    }
   }
   pendingStreamActivityWakes.add(target);
   const remaining = lastStreamActivityWakeAt === 0 ? ACTIVITY_STREAM_WAKE_MS : ACTIVITY_STREAM_WAKE_MS - Math.max(0, elapsed);

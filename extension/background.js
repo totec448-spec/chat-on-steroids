@@ -3081,7 +3081,7 @@ function queueActivityWakeTab(id, target) {
   }
   if (pendingActivityWakeTabs.has(id)) {
     const prev = pendingActivityWakeTabs.get(id);
-    pendingActivityWakeTabs.set(id, prev === null || target === null ? null : target);
+    pendingActivityWakeTabs.set(id, prev === target ? target : null);
   } else {
     if (pendingActivityWakeTabs.size >= ACTIVITY_WAKE_QUEUE_CAP) {
       const oldest = pendingActivityWakeTabs.keys().next().value;
