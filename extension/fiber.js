@@ -2306,7 +2306,7 @@
     if (!entry || !turnId || entry.id !== turnId || entry.turn.items.length > MAX_TURN_ITEMS) return null;
     const place = shellQuestionPlace(entryFiber, entry, section);
     const messages = [], calls = [], slots = [], seen = new Set(), callSources = new Map(), executionIds = [], images = new Map(), generatedImages = [];
-    let lastAnswer = null, previousId = null;
+    let lastAnswer = null, previousId = null, unfinishedImageSkipped = false, anyImageSkipped = false;
     const remember = id => { if (!id || seen.has(id)) return false; seen.add(id); return true; };
     // GPT-6 (2026-10-12) writes each interim sentence as an assistant message inside the working
     // group while the turn runs. A top-level item owns its id; a nested copy of it is not read twice.
@@ -2380,6 +2380,10 @@
           // still checked, so a repeated one refuses the turn however far down it sits.
           if (++work > MAX_ROWS) {
             if (work > MAX_TURN_ITEMS) return null;
+            if (step?.type === 'generated-image') {
+              anyImageSkipped = true;
+              if (step.status !== 'completed' || step.isPreview === true) unfinishedImageSkipped = true;
+            }
             const counted = step?.type === 'dynamic-tool-call' ? step.tool === 'exec'
               : step?.type === 'mcp-tool-call' && ownServerName(step.invocation?.server);
             const spare = counted ? str(step.callId) : null;
@@ -2429,11 +2433,12 @@
     const imageAnswer = lastAnswer?.type === 'generated-image';
     const incompleteGroup = entry.turn.items.some(item => item?.type === 'chatgpt-reasoning-group' &&
       (item.completed === false || (item.activeReasoning && item.activeReasoning.completed !== true)));
-    const imageEnd = imageAnswer && entry.turn.status === 'complete' && !incompleteGroup && images.has(lastAnswer) &&
-      generatedImages.length > 0 && generatedImages.every(item =>
+    const imageEnd = imageAnswer && entry.turn.status === 'complete' && !incompleteGroup && !unfinishedImageSkipped &&
+      images.has(lastAnswer) && generatedImages.length > 0 && generatedImages.every(item =>
         images.has(item) && item.status === 'completed' && item.isPreview !== true)
       ? lastAnswer.chatGptMessageId : null;
     return { entry, place, messages, calls, slots, callSources, executionIds, images,
+      hasGeneratedImage: generatedImages.length > 0 || anyImageSkipped,
       endMessageId: imageAnswer ? imageEnd : turnEndMessageId(messages) };
   }
   /**
@@ -2557,8 +2562,8 @@
         // A tool-only exchange can be complete without any final message to name.
         // Do not use this for an unreadable/unfinished text or image answer.
         const terminalWithoutFinal = shell?.entry.turn.status === 'complete' && !endMessageId &&
-          !shell.entry.turn.items.some(item => item?.type === 'generated-image' ||
-            (item?.type === 'assistant-message' && item.phase === 'final_answer')) &&
+          !shell.hasGeneratedImage &&
+          !shell.entry.turn.items.some(item => item?.type === 'assistant-message' && item.phase === 'final_answer') &&
           shell.images.size === 0;
         const trace = shell ? shellTurnTrace(shell) : [];
         // The shell supplies the completed final item's own exact message id,
