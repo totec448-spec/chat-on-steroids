@@ -1207,6 +1207,29 @@ describe('surface boundaries', () => {
     expect(read).toContain('Identity notice');
   });
 
+  it('merges the identity notice into the primary text block so single-block MCP clients keep tool output', async () => {
+    everything();
+    const res = await core('tools/call', { name: 'read', arguments: { paths: ['/workspace'] } });
+    const content = res.body.result?.content ?? [];
+    const textBlocks = content.filter((part: { type: string }) => part.type === 'text');
+    expect(textBlocks).toHaveLength(1);
+    expect(textBlocks[0].text).toContain('--- Identity notice ---');
+    expect(textBlocks[0].text.indexOf('--- Identity notice ---')).toBeGreaterThan(0);
+
+    const execRes = await core('tools/call', {
+      name: 'exec_command',
+      arguments: { cmd: 'echo UNATTRIBUTED_STDOUT_OK', workdir: '/workspace' }
+    });
+    expect(execRes.body.result?.isError).not.toBe(true);
+    const execTextBlocks = (execRes.body.result?.content ?? []).filter((part: { type: string }) => part.type === 'text');
+    expect(execTextBlocks).toHaveLength(1);
+    expect(execTextBlocks[0].text).toContain('UNATTRIBUTED_STDOUT_OK');
+    expect(execTextBlocks[0].text).toContain('--- Identity notice ---');
+    expect(execTextBlocks[0].text.indexOf('UNATTRIBUTED_STDOUT_OK')).toBeLessThan(execTextBlocks[0].text.indexOf('--- Identity notice ---'));
+    expect(execRes.body.result?.structuredContent?.output).toContain('UNATTRIBUTED_STDOUT_OK');
+    expect(execRes.body.result?.structuredContent?.supplemental_context).toContain('--- Identity notice ---');
+  });
+
   it('describes write_stdin by what it does, never by how its output should be treated', async () => {
     everything();
     // ChatGPT's safety check flagged "including automatic delivery; never reruns work" as a
@@ -1481,6 +1504,9 @@ describe('2025-era clients', () => {
     expect(image?.mimeType).toBe('image/png');
     expect(typeof image?.data).toBe('string');
     expect(Buffer.from(String(image?.data), 'base64').subarray(0, 4)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const textBlocks = content.filter((item) => item.type === 'text');
+    expect(textBlocks).toHaveLength(1);
+    expect(String(textBlocks[0]?.text ?? '')).toContain('--- Identity notice ---');
     expect(reply.body.result?.structuredContent).toBeUndefined();
   });
 });
@@ -2952,7 +2978,9 @@ describe('apply_patch', () => {
     ].join('\n');
     const reply = await core('tools/call', { name: 'apply_patch', arguments: { patch } });
     expect(reply.body.result?.isError).toBe(true);
-    expect(reply.body.result.content[0]).toEqual({ type: 'text', text: 'apply_patch environment selection is unavailable for this turn' });
+    expect(reply.body.result.content).toHaveLength(1);
+    expect(reply.body.result.content[0].type).toBe('text');
+    expect(reply.body.result.content[0].text.startsWith('apply_patch environment selection is unavailable for this turn\n--- Identity notice ---')).toBe(true);
     await expect(fs.stat(path.join(approved, 'env-selected.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
@@ -3243,9 +3271,11 @@ describe('exec_command and write_stdin', () => {
       arguments: { cmd: patch, workdir: '/workspace' }
     });
     expect(reply.body.result?.isError).toBe(true);
-    expect(reply.body.result.content[0]).toEqual({ type: 'text', text:
-      'apply_patch verification failed: patch detected without explicit call to apply_patch. Rerun as ["apply_patch", "<patch>"]'
-    });
+    expect(reply.body.result.content).toHaveLength(1);
+    expect(reply.body.result.content[0].type).toBe('text');
+    expect(reply.body.result.content[0].text.startsWith(
+      'apply_patch verification failed: patch detected without explicit call to apply_patch. Rerun as ["apply_patch", "<patch>"]\n--- Identity notice ---'
+    )).toBe(true);
     await expect(fs.stat(path.join(approved, 'implicit.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 

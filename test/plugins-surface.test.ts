@@ -187,7 +187,9 @@ it('redacts dispatcher refusals even when the external plugin handler never ran'
   const response = await rpc('plugins', 'tools/call', { name: plugin.declaration.name, arguments: { name: 'safe' } });
   expect(plugin.call).not.toHaveBeenCalled();
   expect(response.result.isError).toBe(true);
-  expect(response.result.content[0].text).toBe('[redacted] refused');
+  expect(response.result.content).toHaveLength(1);
+  expect(response.result.content[0].text.startsWith('[redacted] refused\n--- Identity notice ---\n')).toBe(true);
+  expect(response.result.content[0].text).not.toContain('credential-fixture');
   expect(response.result).toEqual(record.mock.calls[0]![0].protocolResult);
 });
 
@@ -199,7 +201,10 @@ it('records an upstream error as failed with authored detail while preserving it
   });
   const response = await rpc('plugins', 'tools/call', { name: plugin.declaration.name, arguments: { name: 'intentional tool failure' } });
   expect(response.result).toMatchObject({ isError: true, structuredContent: { count: 0 }, _meta: { upstream: true } });
-  expect(response.result.content[0]).toEqual({ type: 'text', text: 'Expected synthetic fixture error.' });
+  expect(response.result.content.filter((block: { type: string }) => block.type === 'text')).toHaveLength(1);
+  expect(response.result.content[0].type).toBe('text');
+  expect(response.result.content[0].text.startsWith('Expected synthetic fixture error.\n--- Identity notice ---\n')).toBe(true);
+  expect(response.result.content[1]).toEqual({ type: 'resource_link', uri: 'https://example.com/scene', name: 'scene' });
   await flushRecorder();
   const events = (await Promise.all((await listSessions()).map(session => readEvents(session.id)))).flat();
   const event = events.find(event => event.kind === 'tool_call' && event.call.outcome === 'tool_execution_error');

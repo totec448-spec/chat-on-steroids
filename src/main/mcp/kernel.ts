@@ -571,6 +571,32 @@ async function withBackgroundExecRecovery(
 /** Tools whose answer does not depend on which chat called them. */
 const IDENTITY_FREE_TOOLS: ReadonlySet<string> = new Set(['usage']);
 
+/**
+ * Merge all text blocks into the primary text block while keeping non-text blocks in order.
+ * Single-block MCP clients drop or overwrite extra text blocks, so unattributed responses must
+ * keep both tool output and delivery notices in one text entry.
+ */
+function collapseTextContent(content: ToolContent[]): ToolContent[] {
+  const firstTextIndex = content.findIndex((part) => part.type === 'text');
+  if (firstTextIndex === -1) return content;
+  let merged = '';
+  let textCount = 0;
+  for (const part of content) {
+    if (part.type !== 'text') continue;
+    merged = textCount === 0
+      ? part.text
+      : `${merged}${merged.endsWith('\n') || part.text.startsWith('\n') ? '' : '\n'}${part.text}`;
+    textCount++;
+  }
+  if (textCount <= 1) return content;
+  const collapsed: ToolContent[] = [];
+  content.forEach((part, index) => {
+    if (part.type !== 'text') collapsed.push(part);
+    else if (index === firstTextIndex) collapsed.push({ type: 'text', text: merged });
+  });
+  return collapsed;
+}
+
 function withUnattributedNotice(
   conversationId: string | null | undefined,
   result: ToolResult,
@@ -1246,6 +1272,9 @@ async function dispatchTracked(
     const own = delivered.structuredContent['supplemental_context'];
     const merged = [typeof own === 'string' ? own : '', supplemental].filter(Boolean).join('\n');
     if (supplemental) delivered = { ...delivered, structuredContent: { ...delivered.structuredContent, supplemental_context: merged } };
+  }
+  if (!nested && !context.caller.conversationId) {
+    delivered = { ...delivered, content: collapseTextContent(delivered.content) };
   }
   const recorderStartedAt = Date.now();
   // Event duration includes identity/handler/delivery work. Recorder and local HTTP finish

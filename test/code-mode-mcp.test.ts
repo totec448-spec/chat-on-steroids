@@ -56,7 +56,8 @@ async function identity() {
 }
 const call = (requestId: string | undefined, code: string) => rpc('tools/call', { name: 'exec', arguments: { code } }, requestId);
 const text = (response: any) => response.result.content.filter((item: any) => item.type === 'text').map((item: any) => item.text).join('\n');
-const emittedText = (response: any): string => response.result.content.find((item: any) => item.type === 'text')?.text ?? '';
+const stripUnattributedNotice = (value: string): string => value.replace(/\n--- (?:Identity notice|Recording context) ---\n[\s\S]*$/, '');
+const emittedText = (response: any): string => stripUnattributedNotice(response.result.content.find((item: any) => item.type === 'text')?.text ?? '');
 
 it.each(['current', 'superseded'] as const)('resolves late session_finish identity before enforcing its %s owner', async state => {
   const conversationId = randomUUID(), requestId = `wfr_${randomUUID().replaceAll('-', '')}`;
@@ -336,7 +337,10 @@ it.runIf(process.platform === 'win32').each([true, false])('routes sky through D
   const publicWindow = { app: window.app, id: window.id, title: window.title };
   const clicked = await rpc('tools/call', { name: 'exec', arguments: { code: `await sky.click({window:${JSON.stringify(publicWindow)},element_index:0}); text("accepted");` } }, who.requestId, 'desktop');
   expect(emittedText(clicked)).toBe('accepted');
-  if (!attributed) expect(text(clicked)).toContain('does not switch on Read-only mode or disable tools');
+  if (!attributed) {
+    expect(clicked.result.content.filter((item: any) => item.type === 'text')).toHaveLength(1);
+    expect(text(clicked)).toContain('does not switch on Read-only mode or disable tools');
+  }
   expect(action).toHaveBeenCalledExactlyOnceWith([{ type: 'click_ref', ref: 'fixture-ref', button: 'left', count: 1 }], { window: 77, app: 'fixture.exe' });
   expect(callers).toEqual([who.session.id, who.session.id]);
   ctx.caps = { ...ctx.caps, control: false };
@@ -417,6 +421,8 @@ it('allows unattributed file edits through code mode while preserving permission
   const patch = '*** Begin Patch\n*** Add File: /workspace/unattributed.txt\n+created anonymously\n*** End Patch';
   const response = await call(undefined, `text(await tools.apply_patch({patch:${JSON.stringify(patch)}}));`);
   expect(response.result.isError, text(response)).not.toBe(true);
+  expect(response.result.content.filter((item: any) => item.type === 'text')).toHaveLength(1);
+  expect(text(response)).toContain('--- Identity notice ---');
   expect(JSON.parse(emittedText(response)).isError).not.toBe(true);
   expect(await fs.readFile(path.join(directory, 'unattributed.txt'), 'utf8')).toBe('created anonymously\n');
   const read = await call(`wfr_${randomUUID().replaceAll('-', '')}`, 'text(await tools.read({paths:["/workspace/unattributed.txt"]}));');
