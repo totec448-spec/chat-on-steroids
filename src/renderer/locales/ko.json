@@ -3918,5 +3918,14 @@
   "Safer saves over SSH": "SSH에서 더 안전한 저장",
   "If a save fails, your original file stays as it was.": "저장에 실패해도 원본 파일은 그대로 남습니다.",
   "Write mid-answer in any language": "답변 중에도 모든 언어로 전송",
-  "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT가 답하는 중에 보낸 메시지가 이제 어떤 언어의 페이지에서도 전송됩니다."
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT가 답하는 중에 보낸 메시지가 이제 어떤 언어의 페이지에서도 전송됩니다.",
+  "This chat: {0} MB of {1} MB ({2} MB images, {3} MB long texts).": "이 대화: {1} MB 중 {0} MB (이미지 {2} MB, 긴 텍스트 {3} MB).",
+  "Loading chat storage usage…": "이 대화의 저장 공간 사용량을 불러오는 중…",
+  "Global image cleanups do not remove long texts in active chats. You can clear images or long texts for this chat below.": "전체 이미지 정리는 활성 대화의 긴 텍스트를 삭제하지 않습니다. 아래에서 이 대화의 이미지나 긴 텍스트를 지울 수 있습니다.",
+  "Free images in this chat": "이 대화의 이미지 비우기",
+  "Free long texts in this chat": "이 대화의 긴 텍스트 비우기",
+  "Permanently remove all local recorded images from this chat? Chat text, original files and long texts will stay.": "이 대화에 로컬로 기록된 모든 이미지를 영구적으로 삭제하시겠습니까? 대화 텍스트, 원본 파일, 긴 텍스트는 유지됩니다.",
+  "Permanently remove all full long texts saved in this chat? Messages and tool results will keep their beginning.": "이 대화에 저장된 모든 전체 긴 텍스트를 영구적으로 삭제하시겠습니까? 메시지와 도구 결과는 앞부분만 유지됩니다.",
+  "This chat": "이 대화",
+  "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "이 대화에서 {0} MB를 확보했습니다. 현재 {2} MB 중 {1} MB를 사용 중입니다."
 }

@@ -4170,5 +4170,14 @@
   "Safer saves over SSH": "Безопаснее сохранять по SSH",
   "If a save fails, your original file stays as it was.": "Если сохранение не удалось, исходный файл остаётся как был.",
   "Write mid-answer in any language": "Сообщения посреди ответа на любом языке",
-  "A message sent while ChatGPT is answering now goes out on pages in every language.": "Сообщение, отправленное во время ответа ChatGPT, теперь уходит на страницах на любом языке."
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "Сообщение, отправленное во время ответа ChatGPT, теперь уходит на страницах на любом языке.",
+  "This chat: {0} MB of {1} MB ({2} MB images, {3} MB long texts).": "Этот чат: {0} МБ из {1} МБ ({2} МБ изображений, {3} МБ длинных текстов).",
+  "Loading chat storage usage…": "Загрузка объёма хранилища этого чата…",
+  "Global image cleanups do not remove long texts in active chats. You can clear images or long texts for this chat below.": "Общая очистка изображений не удаляет длинные тексты в активных чатах. Ниже можно очистить изображения или длинные тексты этого чата.",
+  "Free images in this chat": "Удалить изображения в этом чате",
+  "Free long texts in this chat": "Удалить длинные тексты в этом чате",
+  "Permanently remove all local recorded images from this chat? Chat text, original files and long texts will stay.": "Безвозвратно удалить все локально сохранённые изображения из этого чата? Текст чата, исходные файлы и длинные тексты останутся.",
+  "Permanently remove all full long texts saved in this chat? Messages and tool results will keep their beginning.": "Безвозвратно удалить все полные длинные тексты, сохранённые в этом чате? Сообщения и результаты инструментов сохранят только начало.",
+  "This chat": "Этот чат",
+  "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "Из этого чата освобождено {0} МБ. Сейчас здесь занято {1} МБ из {2} МБ."
 }

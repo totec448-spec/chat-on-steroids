@@ -4086,5 +4086,14 @@
   "Safer saves over SSH": "Gravações mais seguras por SSH",
   "If a save fails, your original file stays as it was.": "Se uma gravação falhar, o seu ficheiro original fica como estava.",
   "Write mid-answer in any language": "Escreva a meio da resposta em qualquer idioma",
-  "A message sent while ChatGPT is answering now goes out on pages in every language.": "Uma mensagem enviada enquanto o ChatGPT responde passa a ser enviada em páginas de qualquer idioma."
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "Uma mensagem enviada enquanto o ChatGPT responde passa a ser enviada em páginas de qualquer idioma.",
+  "This chat: {0} MB of {1} MB ({2} MB images, {3} MB long texts).": "Esta conversa: {0} MB de {1} MB ({2} MB de imagens, {3} MB de textos longos).",
+  "Loading chat storage usage…": "A carregar a utilização de armazenamento desta conversa…",
+  "Global image cleanups do not remove long texts in active chats. You can clear images or long texts for this chat below.": "As limpezas globais de imagens não removem textos longos de conversas ativas. Pode limpar imagens ou textos longos desta conversa abaixo.",
+  "Free images in this chat": "Libertar imagens nesta conversa",
+  "Free long texts in this chat": "Libertar textos longos nesta conversa",
+  "Permanently remove all local recorded images from this chat? Chat text, original files and long texts will stay.": "Remover permanentemente todas as imagens locais registadas desta conversa? O texto da conversa, os ficheiros originais e os textos longos permanecem.",
+  "Permanently remove all full long texts saved in this chat? Messages and tool results will keep their beginning.": "Remover permanentemente todos os textos longos completos guardados nesta conversa? As mensagens e os resultados de ferramentas mantêm o início.",
+  "This chat": "Esta conversa",
+  "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "Foram libertados {0} MB desta conversa. Estão agora a ser usados {1} MB de {2} MB."
 }

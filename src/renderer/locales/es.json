@@ -4086,5 +4086,14 @@
   "Safer saves over SSH": "Guardados más seguros por SSH",
   "If a save fails, your original file stays as it was.": "Si un guardado falla, tu archivo original queda como estaba.",
   "Write mid-answer in any language": "Escribe a mitad de respuesta en cualquier idioma",
-  "A message sent while ChatGPT is answering now goes out on pages in every language.": "Un mensaje enviado mientras ChatGPT responde ahora se envía en páginas de cualquier idioma."
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "Un mensaje enviado mientras ChatGPT responde ahora se envía en páginas de cualquier idioma.",
+  "This chat: {0} MB of {1} MB ({2} MB images, {3} MB long texts).": "Este chat: {0} MB de {1} MB ({2} MB imágenes, {3} MB textos largos).",
+  "Loading chat storage usage…": "Cargando el uso de almacenamiento del chat…",
+  "Global image cleanups do not remove long texts in active chats. You can clear images or long texts for this chat below.": "Las limpiezas globales de imágenes no eliminan los textos largos de chats activos. Puedes borrar las imágenes o los textos largos de este chat abajo.",
+  "Free images in this chat": "Liberar imágenes de este chat",
+  "Free long texts in this chat": "Liberar textos largos de este chat",
+  "Permanently remove all local recorded images from this chat? Chat text, original files and long texts will stay.": "¿Eliminar permanentemente todas las imágenes locales guardadas de este chat? Se conservarán el texto del chat, los archivos originales y los textos largos.",
+  "Permanently remove all full long texts saved in this chat? Messages and tool results will keep their beginning.": "¿Eliminar permanentemente todos los textos largos completos guardados en este chat? Los mensajes y resultados de herramientas conservarán su comienzo.",
+  "This chat": "Este chat",
+  "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "Se liberaron {0} MB de este chat. Ahora usa {1} MB de {2} MB."
 }

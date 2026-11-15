@@ -2416,11 +2416,8 @@ one state (`recordingStorageFull()`, set by a write the global limit refused, cl
 write or a clean-up that leaves room): it is logged once per change, travels as
 `AppState.recordingStorageFull`, and the window shows one dismissible notice that opens the clean-up.
 The same clean-up is in Settings → Agents & automation → Browser & history (Recording storage), which
-reads the usage when Settings opens. There is no automatic
-eviction. The adjacent Free storage action offers explicit oldest-1-GiB or all-recorded-image
-cleanup with confirmation; chat text, original files and pending attachments remain. Its third mode,
-`old-chats-gib`, takes whole chats whose `updatedAt` is over 7 days old, oldest first, until about
-1 GiB is chosen, and removes their images and long-text (`.txt`) assets. A retired long text keeps
+reads the usage when Settings opens (`sessions:imageStorage`, preload `getImageStorage(id?)`). There is no automatic
+eviction. The adjacent Free storage action (`sessions:clearImageStorage`, preload `clearImageStorage(mode, id?)`) offers explicit global cleanup modes (`oldest-gib`, `all`, and `old-chats-gib`, which removes images and `.txt` long-text assets from whole chats whose `updatedAt` is over 7 days old, oldest first, until about 1 GiB is chosen); when opened from a chat, `sessions:imageStorage { id }` also returns per-chat `session` usage (`imageBytes` vs `textBytes` against the chat's 192 MiB cap), clarifies that global image cleanups leave long texts in active chats untouched, and offers targeted per-chat cleanup (`session-images`, `session-texts`, publishing `{ sessionIds: [id] }` instead of `{ allTranscripts: true }`); chat text, original files and pending attachments remain. A retired long text keeps
 its `StoredText` head, loses `assetId` (or a change's `reviewAssetId`), and its note reads
 "…[N more characters removed to free storage]". Only keyed user/assistant messages and tool calls
 are rewritten; a text that any other record (or a rewritten one) still names stays on disk. Store owns

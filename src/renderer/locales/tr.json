@@ -4002,5 +4002,14 @@
   "Safer saves over SSH": "SSH üzerinden daha güvenli kaydetme",
   "If a save fails, your original file stays as it was.": "Kaydetme başarısız olursa özgün dosyanız olduğu gibi kalır.",
   "Write mid-answer in any language": "Yanıt sırasında her dilde mesaj",
-  "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT yanıt verirken gönderilen bir mesaj artık her dildeki sayfalarda gönderiliyor."
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT yanıt verirken gönderilen bir mesaj artık her dildeki sayfalarda gönderiliyor.",
+  "This chat: {0} MB of {1} MB ({2} MB images, {3} MB long texts).": "Bu sohbet: {1} MB içinde {0} MB ({2} MB görsel, {3} MB uzun metin).",
+  "Loading chat storage usage…": "Bu sohbetin depolama kullanımı yükleniyor…",
+  "Global image cleanups do not remove long texts in active chats. You can clear images or long texts for this chat below.": "Genel görsel temizlemeleri etkin sohbetlerdeki uzun metinleri kaldırmaz. Aşağıdan bu sohbetin görsellerini veya uzun metinlerini temizleyebilirsiniz.",
+  "Free images in this chat": "Bu sohbetteki görselleri temizle",
+  "Free long texts in this chat": "Bu sohbetteki uzun metinleri temizle",
+  "Permanently remove all local recorded images from this chat? Chat text, original files and long texts will stay.": "Bu sohbette yerel olarak kaydedilmiş tüm görseller kalıcı olarak kaldırılsın mı? Sohbet metni, özgün dosyalar ve uzun metinler korunur.",
+  "Permanently remove all full long texts saved in this chat? Messages and tool results will keep their beginning.": "Bu sohbette kaydedilmiş tüm tam uzun metinler kalıcı olarak kaldırılsın mı? İletiler ve araç sonuçları yalnızca başlangıçlarını korur.",
+  "This chat": "Bu sohbet",
+  "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "Bu sohbetten {0} MB alan açıldı. Burada şimdi {1} MB / {2} MB kullanılıyor."
 }

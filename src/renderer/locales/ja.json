@@ -3918,5 +3918,14 @@
   "Safer saves over SSH": "SSH でより安全に保存",
   "If a save fails, your original file stays as it was.": "保存に失敗しても、元のファイルはそのまま残ります。",
   "Write mid-answer in any language": "回答中でも、どの言語でも送信",
-  "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT が回答している最中に送ったメッセージが、どの言語のページでも送信されるようになりました。"
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT が回答している最中に送ったメッセージが、どの言語のページでも送信されるようになりました。",
+  "This chat: {0} MB of {1} MB ({2} MB images, {3} MB long texts).": "このチャット: {0} MB / {1} MB（画像 {2} MB、長いテキスト {3} MB）。",
+  "Loading chat storage usage…": "このチャットのストレージ使用量を読み込み中…",
+  "Global image cleanups do not remove long texts in active chats. You can clear images or long texts for this chat below.": "全体の画像クリーンアップではアクティブなチャットの長いテキストは削除されません。下からこのチャットの画像または長いテキストを削除できます。",
+  "Free images in this chat": "このチャットの画像を削除",
+  "Free long texts in this chat": "このチャットの長いテキストを削除",
+  "Permanently remove all local recorded images from this chat? Chat text, original files and long texts will stay.": "このチャットにローカル保存された記録画像をすべて完全に削除しますか？チャットのテキスト、元のファイル、長いテキストは残ります。",
+  "Permanently remove all full long texts saved in this chat? Messages and tool results will keep their beginning.": "このチャットに保存された完全な長いテキストをすべて完全に削除しますか？メッセージとツール結果は冒頭部分のみ残ります。",
+  "This chat": "このチャット",
+  "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "このチャットから {0} MB を解放しました。現在の使用量は {1} MB / {2} MB です。"
 }

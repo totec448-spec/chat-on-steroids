@@ -105,3 +105,38 @@ it('frees about 1 GB from old chats after its own confirmation', async () => {
   await new Promise(resolve => setTimeout(resolve, 0));
   expect(document.querySelector('[role="status"]')?.textContent).toBe('Freed 1024.0 MB. 1.00 GB of recording storage is now available.');
 });
+
+// #2198: opening Free storage from a chat explains global vs per-chat storage and offers per-chat cleanup.
+it('shows per-chat breakdown and cleans only the open chat when requested from a chat', async () => {
+  const sessionId = 'chat-session-2198';
+  const sessionFull = { sessionId, usedBytes: 192 * 2 ** 20, limitBytes: 192 * 2 ** 20, imageBytes: 0, textBytes: 192 * 2 ** 20 };
+  const sessionAfter = { sessionId, usedBytes: 0, limitBytes: 192 * 2 ** 20, imageBytes: 0, textBytes: 0 };
+  (dom.window as any).api.getImageStorage = vi.fn(async (id?: string) => ({
+    ok: true,
+    data: { usedBytes: 300 * 2 ** 20, limitBytes: 2 ** 31, ...(id ? { session: sessionFull } : {}) }
+  }));
+  cleanup.mockImplementation(async () => ({
+    ok: true,
+    data: { freedBytes: 192 * 2 ** 20, removedFiles: 12, usedBytes: 108 * 2 ** 20, limitBytes: 2 ** 31, session: sessionAfter }
+  }));
+  const { imageStorageButton } = await import('../src/renderer/image-storage.js');
+  imageStorageButton(sessionId).click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  expect((dom.window as any).api.getImageStorage).toHaveBeenCalledExactlyOnceWith(sessionId);
+  expect(document.querySelector('[role="status"]')?.textContent).toContain('0.29 GB used of 2 GB');
+  expect(document.body.textContent).toContain('This chat: 192.0 MB of 192 MB (0.0 MB images, 192.0 MB long texts).');
+
+  const buttons = [...document.querySelectorAll('.image-storage-actions button')] as HTMLButtonElement[];
+  expect(buttons[0]?.textContent).toBe('Free oldest 1 GB');
+  const clearTexts = buttons.find(button => button.textContent === 'Free long texts in this chat');
+  const clearImages = buttons.find(button => button.textContent === 'Free images in this chat');
+  expect(clearTexts).toBeTruthy();
+  expect(clearImages).toBeTruthy();
+
+  dom.window.confirm = vi.fn(() => true);
+  clearTexts!.click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(cleanup).toHaveBeenCalledExactlyOnceWith('session-texts', sessionId);
+  expect(document.body.textContent).toContain('This chat: 0.0 MB of 192 MB (0.0 MB images, 0.0 MB long texts).');
+});
