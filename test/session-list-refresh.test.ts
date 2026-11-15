@@ -804,7 +804,7 @@ describe('scoped session change refresh', () => {
     expect(state.detailCalls[2]?.options).toEqual({ from: 131, limit: 30 });
   });
 
-  it('retries controls refresh on catalog catch-up after an active-delta getSessionControls failure', async () => {
+  it('retries controls refresh on catalog catch-up after a targeted-push getSessionControls failure', async () => {
     const { w, state } = await openSelected();
     let failControls = true;
     (w as any).api.getSessionControls = (id: string) => {
@@ -814,8 +814,7 @@ describe('scoped session change refresh', () => {
     };
     const listsBefore = state.lists;
     const controlsBefore = state.controlsCalls.length;
-    // Queue a payload-less controls push and an active-delta fast-path read inside the same 400 ms catalog window.
-    state.changed();
+    // Send only a targeted push so recovery relies on targeted invalidation of controlsPushSeq.
     state.a = { ...state.a, updatedAt: 31_000, events: 2 };
     state.changed({ sessionIds: [state.a.id] });
     await vi.waitFor(() => expect(state.controlsCalls.length).toBe(controlsBefore + 1), { timeout: 300 });
@@ -865,10 +864,50 @@ describe('scoped session change refresh', () => {
     (w.document.querySelector(`#sessionList [data-id="${state.a.id}"]`) as HTMLElement).click();
     releaseB();
     await vi.waitFor(() => expect(state.detailCalls.filter(call => call.id === state.a.id).length).toBeGreaterThanOrEqual(2), { timeout: 800 });
-    await new Promise(resolve => setTimeout(resolve, 150));
-    const timelineText = w.document.getElementById('timeline')?.textContent ?? '';
-    expect(timelineText).not.toContain('Stale B row');
-    expect(timelineText).toContain('A row');
+    await vi.waitFor(() => {
+      const timeline = w.document.getElementById('timeline')!;
+      expect(timeline.textContent).toContain('A row 3');
+      expect(timeline.hasAttribute('inert')).toBe(false);
+      expect(timeline.hasAttribute('aria-busy')).toBe(false);
+    }, { timeout: 800 });
+    expect(w.document.getElementById('timeline')?.textContent).not.toContain('Stale B row');
+  });
+
+  it('retries via catalog catch-up when a full-size incremental drain read fails and cancels pending drain on hide', async () => {
+    const { w, state, chatVisible } = await openSelected();
+    let callIndex = 0;
+    const fullBatch = Array.from({ length: 30 }, (_, index) => note(101 + index, `Drain page row ${index + 1}`));
+    (w as any).api.getSession = (id: string, options?: any) => {
+      state.detailCalls.push({ id, options });
+      callIndex += 1;
+      if (callIndex === 1) return Promise.resolve({ ok: true as const, data: { summary: state.a, events: fullBatch, total: 32, nextFrom: 131 } });
+      if (callIndex === 2) return Promise.resolve({ ok: false as const, error: 'transient drain failure' });
+      return Promise.resolve({ ok: true as const, data: { summary: state.a, events: [note(131, 'Recovered trailing drain row')], total: 32, nextFrom: 132 } });
+    };
+    const listsBefore = state.lists;
+    state.a = { ...state.a, updatedAt: 31_000, events: 32 };
+    state.changed({ sessionIds: [state.a.id] });
+    // First drain call failed, so catalog catch-up at 400 ms must retry and paint the trailing row.
+    await vi.waitFor(() => expect(state.lists).toBe(listsBefore + 1), { timeout: 1600 });
+    await vi.waitFor(() => expect(w.document.getElementById('timeline')?.textContent).toContain('Recovered trailing drain row'), { timeout: 800 });
+
+    // Trigger another full-size incremental delta and hide Chat before the scheduled drain fires.
+    let incrementalDrainScheduled = false;
+    const beforeHide = state.detailCalls.length;
+    (w as any).api.getSession = (id: string, options?: any) => {
+      state.detailCalls.push({ id, options });
+      if (typeof options?.from === 'number' && !incrementalDrainScheduled) {
+        incrementalDrainScheduled = true;
+        chatVisible(false);
+        return Promise.resolve({ ok: true as const, data: { summary: state.a, events: fullBatch, total: 62, nextFrom: 161 } });
+      }
+      return Promise.resolve({ ok: true as const, data: { summary: state.a, events: [], total: 62, nextFrom: 161 } });
+    };
+    state.a = { ...state.a, updatedAt: 32_000, events: 62 };
+    state.changed({ sessionIds: [state.a.id] });
+    await vi.waitFor(() => expect(state.detailCalls.length).toBe(beforeHide + 1), { timeout: 400 });
+    await new Promise(resolve => setTimeout(resolve, 60));
+    expect(state.detailCalls.length).toBe(beforeHide + 1);
   });
 
   it('ignores an empty incremental delta without changing transcript content or scrollTop', async () => {
@@ -904,9 +943,9 @@ describe('recorder session change cooldown', () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(changes).toEqual([['sess-1']]);
 
-      // Step the wall clock backward while triggering a second notification inside the 180 ms cooldown.
+      // Step the wall clock backward while sending a burst inside the 180 ms cooldown: all writes coalesce to one push.
       vi.setSystemTime(Date.now() - 60_000);
-      notifyChanged('sess-2');
+      for (let i = 0; i < 5; i += 1) notifyChanged('sess-2');
       expect(logged.mock.calls.some(([msg]) => typeof msg === 'string' && msg.includes('session-change notification cooldown'))).toBe(true);
       await vi.advanceTimersByTimeAsync(179);
       expect(changes).toEqual([['sess-1']]);
