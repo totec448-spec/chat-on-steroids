@@ -218,3 +218,73 @@ it('frees only images or only long texts from the chosen chat', async () => {
   const tool = (await readEvents(target.session.id)).find(event => event.kind === 'tool_call');
   expect(tool?.kind === 'tool_call' ? tool.call.result.text : null).toContain('removed to free storage');
 });
+
+it('never classifies a .txt asset starting with WebP magic bytes as an image during session-images cleanup', async () => {
+  const session = await createSession({ conversationId: 'webp-prefix-txt', title: 'WebP prefix text' });
+  const tricky = Buffer.concat([Buffer.from('RIFF\x00\x00\x00\x00WEBP'), Buffer.from(' tool output line '.repeat(40))]);
+  const textAsset = await writeAsset(session.id, tricky, 'text/plain');
+  await appendEvent(session.id, {
+    time: NOW, source: 'mcp', kind: 'tool_call', call: {
+      callId: '00000000-0000-4000-8000-000000000220', tool: 'exec_command', requestId: 'req-webp-txt',
+      conversationId: 'webp-prefix-txt', attribution: 'request_id', attributionMethod: 'request_id',
+      args: plain('{}'),
+      result: { text: `RIFF\n…[${tricky.length - 4} more characters stored in full as ${textAsset.id}]`, truncated: true, chars: tricky.length, assetId: textAsset.id },
+      outcome: 'ok', durationMs: 1, summary: { kind: 'run', title: 'Ran tool', tone: 'neutral' }
+    }
+  });
+
+  const before = await getImageStorage(session.id);
+  expect(before.session).toMatchObject({ imageBytes: 0, textBytes: tricky.length });
+
+  const after = await clearImageStorage('session-images', session.id);
+  expect(after.removedFiles).toBe(0);
+  expect(after.freedBytes).toBe(0);
+  expect(await readAsset(session.id, textAsset.id)).toEqual(tricky);
+});
+
+it('handles malformed session IDs, symlinked assets dirs, ENOENT lstat races, and protected .txt records in per-chat flows', async () => {
+  await expect(getImageStorage('../bad')).rejects.toThrow('Invalid session id');
+  await expect(clearImageStorage('session-images', '../bad')).rejects.toThrow('Invalid session id');
+  await expect(clearImageStorage('session-texts', '../bad')).rejects.toThrow('Invalid session id');
+  await expect(clearImageStorage('old-chats-gib', '../bad')).rejects.toThrow('Invalid session id');
+
+  const symlinked = await createSession({ conversationId: 'symlink-breakdown', title: 'Symlinked assets' });
+  const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'cos-symlink-outside-'));
+  try {
+    await fs.writeFile(path.join(outside, 'deadbeef.txt'), 'secret outside text');
+    const assetsPath = path.join(directory, 'sessions', symlinked.id, 'assets');
+    await fs.mkdir(path.dirname(assetsPath), { recursive: true });
+    await fs.symlink(outside, assetsPath, process.platform === 'win32' ? 'junction' : 'dir');
+    const symInfo = await getImageStorage(symlinked.id);
+    expect(symInfo.session).toEqual({
+      sessionId: symlinked.id, usedBytes: 0, limitBytes: MAX_SESSION_ASSET_BYTES, imageBytes: 0, textBytes: 0
+    });
+  } finally {
+    await fs.rm(outside, { recursive: true, force: true });
+  }
+
+  const protectedChat = await chatWithLongOutput('protected-txt', 1, 'kept output '.repeat(120));
+  const extraTxt = await writeAsset(protectedChat.session.id, Buffer.from('disappearing text'), 'text/plain');
+  await appendEvent(protectedChat.session.id, {
+    time: NOW, source: 'app', kind: 'note',
+    message: { text: 'protected ref', truncated: true, chars: 1200, assetId: protectedChat.asset.id }
+  });
+
+  const realLstat = fs.lstat.bind(fs);
+  const lstatSpy = vi.spyOn(fs, 'lstat').mockImplementation(async (target, ...rest) => {
+    if (String(target).endsWith(extraTxt.id)) {
+      throw Object.assign(new Error('vanished'), { code: 'ENOENT' });
+    }
+    return (realLstat as (...args: unknown[]) => Promise<Awaited<ReturnType<typeof fs.lstat>>>)(target, ...rest);
+  });
+  try {
+    const raced = await getImageStorage(protectedChat.session.id);
+    expect(raced.session?.textBytes).toBe(protectedChat.asset.bytes);
+  } finally {
+    lstatSpy.mockRestore();
+  }
+
+  const vetoed = await clearImageStorage('session-texts', protectedChat.session.id);
+  expect(vetoed.removedFiles).toBe(1); // unreferenced extraTxt removed, protectedChat.asset kept
+  expect(await readAsset(protectedChat.session.id, protectedChat.asset.id)).not.toBeNull();
+});

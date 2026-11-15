@@ -140,3 +140,85 @@ it('shows per-chat breakdown and cleans only the open chat when requested from a
   expect(cleanup).toHaveBeenCalledExactlyOnceWith('session-texts', sessionId);
   expect(document.body.textContent).toContain('This chat: 0.0 MB of 192 MB (0.0 MB images, 0.0 MB long texts).');
 });
+
+it('refreshes chat usage on reopen, isolates chat cleanup results across chats, and rejoins pending session-texts', async () => {
+  const chatA = 'chat-session-a-2198';
+  const chatB = 'chat-session-b-2198';
+  let chatAUsedMb = 100;
+  let finish!: (value: unknown) => void;
+  (dom.window as any).api.getImageStorage = vi.fn(async (id?: string) => ({
+    ok: true,
+    data: {
+      usedBytes: 300 * 2 ** 20,
+      limitBytes: 2 ** 31,
+      ...(id === chatA
+        ? { session: { sessionId: chatA, usedBytes: chatAUsedMb * 2 ** 20, limitBytes: 192 * 2 ** 20, imageBytes: 0, textBytes: chatAUsedMb * 2 ** 20 } }
+        : id === chatB
+          ? { session: { sessionId: chatB, usedBytes: 42 * 2 ** 20, limitBytes: 192 * 2 ** 20, imageBytes: 12 * 2 ** 20, textBytes: 30 * 2 ** 20 } }
+          : {})
+    }
+  }));
+  cleanup.mockImplementationOnce(async () => ({
+    ok: true,
+    data: {
+      freedBytes: 100 * 2 ** 20, removedFiles: 5, usedBytes: 200 * 2 ** 20, limitBytes: 2 ** 31,
+      session: { sessionId: chatA, usedBytes: 0, limitBytes: 192 * 2 ** 20, imageBytes: 0, textBytes: 0 }
+    }
+  })).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+
+  const { imageStorageButton } = await import('../src/renderer/image-storage.js');
+  dom.window.confirm = vi.fn(() => true);
+
+  // 1. Clean chatA, close, let chatA grow, and reopen chatA -> must re-fetch updated usage.
+  imageStorageButton(chatA).click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const clearA = [...document.querySelectorAll('.image-storage-actions button')].find(b => b.textContent === 'Free long texts in this chat') as HTMLButtonElement;
+  clearA.click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(document.querySelector('.image-storage-dialog [role="status"]')?.textContent).toContain('Freed 100.0 MB from this chat.');
+  (document.querySelector('dialog > button') as HTMLButtonElement).click();
+
+  chatAUsedMb = 64;
+  imageStorageButton(chatA).click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect((dom.window as any).api.getImageStorage).toHaveBeenLastCalledWith(chatA);
+  expect(document.body.textContent).toContain('This chat: 64.0 MB of 192 MB (0.0 MB images, 64.0 MB long texts).');
+  (document.querySelector('dialog > button') as HTMLButtonElement).click();
+
+  // 2. Open chatB while chatA has a pending session-texts cleanup -> chatB loads its own row and never displays chatA's result.
+  imageStorageButton(chatA).click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const clearPendingA = [...document.querySelectorAll('.image-storage-actions button')].find(b => b.textContent === 'Free long texts in this chat') as HTMLButtonElement;
+  clearPendingA.click();
+  (document.querySelector('dialog > button') as HTMLButtonElement).click();
+
+  // Reopen chatA while pending -> rejoins pending state and keeps chatA's usage.
+  imageStorageButton(chatA).click();
+  expect(document.querySelector('.image-storage-dialog [role="status"]')?.textContent).toContain('Freeing space in the background.');
+  expect(document.body.textContent).toContain('This chat: 64.0 MB of 192 MB');
+  (document.querySelector('dialog > button') as HTMLButtonElement).click();
+
+  // Switch to chatB while chatA's job is still running -> chatB fetches its own breakdown and hides chatA's completion text.
+  imageStorageButton(chatB).click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(document.body.textContent).toContain('This chat: 42.0 MB of 192 MB (12.0 MB images, 30.0 MB long texts).');
+  expect(document.querySelector('.image-storage-dialog [role="status"]')?.textContent).toContain('Freeing space in the background.');
+  finish({
+    ok: true,
+    data: {
+      freedBytes: 64 * 2 ** 20, removedFiles: 3, usedBytes: 236 * 2 ** 20, limitBytes: 2 ** 31,
+      session: { sessionId: chatA, usedBytes: 0, limitBytes: 192 * 2 ** 20, imageBytes: 0, textBytes: 0 }
+    }
+  });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(document.querySelector('.image-storage-dialog [role="status"]')?.textContent).toContain('0.29 GB used of 2 GB');
+  expect(document.querySelector('.image-storage-dialog [role="status"]')?.textContent).not.toContain('Freed 64.0 MB from this chat.');
+  (document.querySelector('dialog > button') as HTMLButtonElement).click();
+
+  // 3. When a mock omits `session`, the chat breakdown row stays hidden.
+  imageStorageButton('chat-without-breakdown').click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const row = document.querySelector('.image-storage-chat-status') as HTMLElement | null;
+  expect(row?.hidden).toBe(true);
+});
