@@ -654,6 +654,46 @@ describe('scoped session change refresh', () => {
     expect(w.document.querySelector(`#sessionList [data-id="${state.a.id}"]`)).toBeNull();
     expect(state.detailCalls).toHaveLength(1);
   });
+
+  it('paints an active-chat delta before the catalog refresh settles without duplicating the detail read', async () => {
+    const { w, state } = await openSelected();
+    const listsBefore = state.lists;
+    state.a = { ...state.a, updatedAt: 31_000, events: 2 };
+    state.changed({ sessionIds: [state.a.id] });
+    // The active chat renders immediately from its incremental delta before the coalesced catalog timer fires.
+    await vi.waitFor(() => expect(w.document.getElementById('timeline')?.textContent).toContain('A row 2'), { timeout: 200 });
+    expect(state.detailCalls).toHaveLength(2);
+    // Once the coalesced catalog refresh runs with the matching summary, it does not reread A again.
+    await vi.waitFor(() => expect(state.lists).toBe(listsBefore + 1), { timeout: 1600 });
+    await new Promise(resolve => setTimeout(resolve, 60));
+    expect(state.detailCalls).toHaveLength(2);
+  });
+
+  it('drains pushes that arrive while an active-chat delta read is in flight without losing rows', async () => {
+    const { w, state } = await openSelected();
+    let release!: () => void;
+    const origGetSession = (w as any).api.getSession;
+    let interceptNext = true;
+    (w as any).api.getSession = (id: string, options?: any) => {
+      if (interceptNext) {
+        interceptNext = false;
+        return new Promise(resolve => {
+          release = () => resolve(origGetSession(id, options));
+        });
+      }
+      return origGetSession(id, options);
+    };
+    state.a = { ...state.a, updatedAt: 31_000, events: 2 };
+    state.changed({ sessionIds: [state.a.id] });
+    await new Promise(resolve => setTimeout(resolve, 30));
+    // A second push arrives before the in-flight delta finishes: it must trigger one catch-up read afterward.
+    state.a = { ...state.a, updatedAt: 32_000, events: 3 };
+    state.changed({ sessionIds: [state.a.id] });
+    release();
+    await vi.waitFor(() => expect(w.document.getElementById('timeline')?.textContent).toContain('A row 3'), { timeout: 1600 });
+    expect(w.document.getElementById('timeline')?.textContent).toContain('A row 1');
+    expect(w.document.getElementById('timeline')?.textContent).toContain('A row 2');
+  });
 });
 
 it('serves repeated Usage metadata from the shared index without disk rereads', async () => {
