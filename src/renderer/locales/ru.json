@@ -4198,5 +4198,7 @@
   "Permanently remove all local recorded images from this chat? Chat text, original files and long texts will stay.": "Безвозвратно удалить все локально сохранённые изображения из этого чата? Текст чата, исходные файлы и длинные тексты останутся.",
   "Permanently remove all full long texts saved in this chat? Messages and tool results will keep their beginning.": "Безвозвратно удалить все полные длинные тексты, сохранённые в этом чате? Сообщения и результаты инструментов сохранят только начало.",
   "This chat": "Этот чат",
-  "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "Из этого чата освобождено {0} МБ. Сейчас здесь занято {1} МБ из {2} МБ."
+  "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "Из этого чата освобождено {0} МБ. Сейчас здесь занято {1} МБ из {2} МБ.",
+  "Freed {0} MB. Storage usage could not be read.": "Освобождено {0} МБ. Не удалось прочитать использование хранилища.",
+  "Last cleanup: Freed {0} MB.": "Последняя очистка: освобождено {0} МБ."
 }

@@ -3946,5 +3946,7 @@
   "Permanently remove all local recorded images from this chat? Chat text, original files and long texts will stay.": "このチャットにローカル保存された記録画像をすべて完全に削除しますか？チャットのテキスト、元のファイル、長いテキストは残ります。",
   "Permanently remove all full long texts saved in this chat? Messages and tool results will keep their beginning.": "このチャットに保存された完全な長いテキストをすべて完全に削除しますか？メッセージとツール結果は冒頭部分のみ残ります。",
   "This chat": "このチャット",
-  "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "このチャットから {0} MB を解放しました。現在の使用量は {1} MB / {2} MB です。"
+  "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "このチャットから {0} MB を解放しました。現在の使用量は {1} MB / {2} MB です。",
+  "Freed {0} MB. Storage usage could not be read.": "{0} MB を解放しました。ストレージの使用量を読み取れませんでした。",
+  "Last cleanup: Freed {0} MB.": "前回のクリーンアップ: {0} MB を解放しました。"
 }

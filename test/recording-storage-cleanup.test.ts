@@ -240,6 +240,11 @@ it('never classifies a .txt asset starting with WebP magic bytes as an image dur
   expect(after.removedFiles).toBe(0);
   expect(after.freedBytes).toBe(0);
   expect(await readAsset(session.id, textAsset.id)).toEqual(tricky);
+
+  const clearedTexts = await clearImageStorage('session-texts', session.id);
+  expect(clearedTexts.removedFiles).toBe(1);
+  expect(clearedTexts.freedBytes).toBe(tricky.length);
+  expect(await readAsset(session.id, textAsset.id)).toBeNull();
 });
 
 it('handles malformed session IDs, symlinked assets dirs, ENOENT lstat races, and protected .txt records in per-chat flows', async () => {
@@ -316,5 +321,30 @@ it('limits pre-cleanup inspection to the target chat so an unreadable asset else
     });
   } finally {
     openSpy.mockRestore();
+  }
+
+  const healthyText = await writeAsset(healthy.id, Buffer.from('healthy long text '.repeat(40)), 'text/plain');
+  await upsertMessageEvent(healthy.id, {
+    time: NOW, source: 'app', kind: 'user_message', messageId: 'healthy-txt-msg',
+    message: { text: 'head\n…[more]', truncated: true, chars: 700, assetId: healthyText.id }
+  });
+  const realOpendir = fs.opendir.bind(fs);
+  const opendirSpy = vi.spyOn(fs, 'opendir').mockImplementation(async (target, ...rest) => {
+    if (String(target).includes(broken.id)) {
+      throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+    }
+    return (realOpendir as (...args: unknown[]) => Promise<Awaited<ReturnType<typeof fs.opendir>>>)(target, ...rest);
+  });
+  try {
+    const clearedWithUnreadablePeerDir = await clearImageStorage('session-texts', healthy.id);
+    expect(clearedWithUnreadablePeerDir).toMatchObject({
+      removedFiles: 1,
+      freedBytes: healthyText.bytes,
+      usedBytes: null,
+      session: { sessionId: healthy.id, usedBytes: 0, limitBytes: MAX_SESSION_ASSET_BYTES, imageBytes: 0, textBytes: 0 }
+    });
+    expect(await readAsset(healthy.id, healthyText.id)).toBeNull();
+  } finally {
+    opendirSpy.mockRestore();
   }
 });

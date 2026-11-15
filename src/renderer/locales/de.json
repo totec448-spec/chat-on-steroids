@@ -4030,5 +4030,7 @@
   "Permanently remove all local recorded images from this chat? Chat text, original files and long texts will stay.": "Alle lokalen aufgezeichneten Bilder aus diesem Chat dauerhaft entfernen? Chat-Text, Originaldateien und lange Texte bleiben erhalten.",
   "Permanently remove all full long texts saved in this chat? Messages and tool results will keep their beginning.": "Alle in diesem Chat gespeicherten vollständigen langen Texte dauerhaft entfernen? Nachrichten und Tool-Ergebnisse behalten ihren Anfang.",
   "This chat": "Dieser Chat",
-  "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "{0} MB aus diesem Chat freigegeben. Jetzt werden hier {1} MB von {2} MB verwendet."
+  "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "{0} MB aus diesem Chat freigegeben. Jetzt werden hier {1} MB von {2} MB verwendet.",
+  "Freed {0} MB. Storage usage could not be read.": "{0} MB freigegeben. Die Speichernutzung konnte nicht gelesen werden.",
+  "Last cleanup: Freed {0} MB.": "Letzte Bereinigung: {0} MB freigegeben."
 }

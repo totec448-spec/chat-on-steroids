@@ -78,9 +78,39 @@ it('allows cleanup before usage loads, closes while running and rejoins the same
   expect(document.querySelector('[role="status"]')?.textContent).toContain('Freed 1024.0 MB');
   (document.querySelector('dialog > button') as HTMLButtonElement).click();
   trigger.click();
-  expect(document.querySelector('[role="status"]')?.textContent).toContain('Freed 1024.0 MB');
+  expect(document.querySelector('.image-storage-last-cleanup')?.textContent).toContain('Freed 1024.0 MB');
   expect(cleanup).toHaveBeenCalledTimes(1);
-  expect((dom.window as any).api.getImageStorage).toHaveBeenCalledTimes(1);
+  expect((dom.window as any).api.getImageStorage).toHaveBeenCalledTimes(2);
+});
+
+it('fetches current usage on global reopen after completed cleanup and handles unknown post-cleanup global totals', async () => {
+  let usedBytes = 2 ** 31;
+  (dom.window as any).api.getImageStorage = vi.fn(async () => ({ ok: true, data: { usedBytes, limitBytes: 2 ** 31 } }));
+  cleanup
+    .mockImplementationOnce(async () => ({ ok: true, data: { freedBytes: 2 ** 30, removedFiles: 10, usedBytes: 2 ** 30, limitBytes: 2 ** 31 } }))
+    .mockImplementationOnce(async () => ({ ok: true, data: { freedBytes: 512 * 2 ** 20, removedFiles: 5, usedBytes: null, limitBytes: 2 ** 31 } }));
+  dom.window.confirm = vi.fn(() => true);
+  const { imageStorageButton } = await import('../src/renderer/image-storage.js');
+
+  imageStorageButton().click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  (document.querySelector('.image-storage-actions button') as HTMLButtonElement).click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(document.querySelector('[role="status"]')?.textContent).toContain('1.00 GB of image storage is now available.');
+  (document.querySelector('dialog > button') as HTMLButtonElement).click();
+
+  usedBytes = Math.round(1.8 * 2 ** 30);
+  imageStorageButton().click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect((dom.window as any).api.getImageStorage).toHaveBeenCalledTimes(2);
+  expect(document.querySelector('.image-storage-dialog [role="status"]')?.textContent).toBe('1.80 GB used of 2 GB');
+  expect(document.querySelector('.image-storage-last-cleanup')?.textContent).toBe('Last cleanup: Freed 1024.0 MB.');
+
+  (document.querySelector('.image-storage-actions button') as HTMLButtonElement).click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect((document.querySelector('.image-storage-last-cleanup') as HTMLElement).hidden).toBe(true);
+  expect(document.querySelector('.image-storage-dialog [role="status"]')?.textContent).toBe('Freed 512.0 MB. Storage usage could not be read.');
+  expect(document.querySelector('.toast')?.textContent).toBe('Freed 512.0 MB. Storage usage could not be read.');
 });
 
 // #1406: long texts fill the store as well, and only old chats can give them up.
@@ -214,6 +244,9 @@ it('refreshes chat usage on reopen, isolates chat cleanup results across chats, 
   await new Promise(resolve => setTimeout(resolve, 0));
   expect(document.querySelector('.image-storage-dialog [role="status"]')?.textContent).toContain('0.29 GB used of 2 GB');
   expect(document.querySelector('.image-storage-dialog [role="status"]')?.textContent).not.toContain('Freed 64.0 MB from this chat.');
+  expect(document.querySelector('.toast')?.textContent).toBe('Freed 64.0 MB. 1.77 GB of recording storage is now available.');
+  expect(document.querySelector('.toast')?.textContent).not.toContain('from this chat');
+  expect(document.querySelector('.toast')?.textContent).not.toContain('here');
   (document.querySelector('dialog > button') as HTMLButtonElement).click();
 
   // 3. When a mock omits `session`, the chat breakdown row stays hidden.

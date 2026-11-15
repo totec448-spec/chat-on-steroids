@@ -4495,7 +4495,8 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .image-storage-dialog h3 { margin: 0 0 14px; font-size: calc(17px * var(--text-scale, 1)); font-weight: 600; }
 .image-storage-summary { margin: 0 0 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--sunk); }
 .image-storage-global-status { margin: 0; font-size: calc(13px * var(--text-scale, 1)); font-weight: 600; color: var(--ink); line-height: 1.45; }
-.image-storage-chat-status { margin: 4px 0 0; font-size: calc(12.5px * var(--text-scale, 1)); line-height: 1.45; }
+.image-storage-chat-status,
+.image-storage-last-cleanup { margin: 4px 0 0; font-size: calc(12.5px * var(--text-scale, 1)); line-height: 1.45; }
 .image-storage-note { margin: 0 0 10px; color: var(--soft); font-size: calc(13px * var(--text-scale, 1)); line-height: 1.5; }
 .image-storage-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 16px 0 0; }
 .image-storage-actions .btn-solid { width: 100%; min-height: 38px; padding: 8px 12px; justify-content: center; text-align: center; border-radius: var(--r-md); border-color: var(--edge); }

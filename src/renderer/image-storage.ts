@@ -64,9 +64,16 @@ function showImageStorage(sessionId?: string): void {
   ui(dialog, 'aria-label', () => t('Free recording storage'));
   const status = el('p', 'image-storage-global-status', () => t('Loading storage usage…'));
   status.setAttribute('role', 'status');
+  const lastCleanup = !sessionId && cleanup && !cleanup.pending && !cleanup.sessionId ? cleanup : null;
+  if (cleanup && !cleanup.pending) cleanup = null;
+  const lastCleanupNote = lastCleanup
+    ? el('p', 'muted image-storage-last-cleanup', () => lastCleanup.result
+      ? t('Last cleanup: Freed {0} MB.', [(lastCleanup.result.freedBytes / 2 ** 20).toFixed(1)])
+      : t('Image cleanup failed. No further cleanup was requested.'))
+    : null;
   const sessionStatus = sessionId ? el('p', 'muted image-storage-chat-status', () => t('Loading chat storage usage…')) : null;
   const summary = el('div', 'image-storage-summary');
-  summary.append(status, ...(sessionStatus ? [sessionStatus] : []));
+  summary.append(status, ...(lastCleanupNote ? [lastCleanupNote] : []), ...(sessionStatus ? [sessionStatus] : []));
   let latestSession: SessionImageStorageInfo | null = null;
   const paintSessionStatus = (session: SessionImageStorageInfo | null) => {
     if (!sessionStatus) return;
@@ -85,8 +92,6 @@ function showImageStorage(sessionId?: string): void {
     choices, cancel);
   dialog.addEventListener('close', () => dialog.remove(), { once: true });
   document.body.append(dialog); dialog.showModal();
-  // Reopen with fresh usage unless showing a global completed job in global Settings or an active job.
-  if (cleanup && !cleanup.pending && (sessionId || cleanup.sessionId)) cleanup = null;
   const cleanupBelongsHere = (job: NonNullable<typeof cleanup>): boolean =>
     !job.sessionId || job.sessionId === sessionId;
   let usageSeq = 0;
@@ -160,6 +165,7 @@ function showImageStorage(sessionId?: string): void {
       if (cleanup?.pending) return;
       if (!window.confirm(questions[mode]())) return;
       const targetSessionId = sessionId;
+      if (lastCleanupNote) lastCleanupNote.hidden = true;
       const job = {
         mode,
         sessionId: targetSessionId,
@@ -178,7 +184,7 @@ function showImageStorage(sessionId?: string): void {
         job.sessionUsage = result?.session ?? job.sessionUsage;
         job.pending = false;
         renderCleanup();
-        toast(cleanupResultText(result, mode));
+        toast(cleanupResultText(result, mode, false));
       });
     });
     choices.append(action);
@@ -199,14 +205,17 @@ function showImageStorage(sessionId?: string): void {
   }
 }
 
-function cleanupResultText(result: ImageStorageClearResult | null, mode: ImageStorageClearMode): string {
+function cleanupResultText(result: ImageStorageClearResult | null, mode: ImageStorageClearMode, scoped = true): string {
   if (!result) return t('Image cleanup failed. No further cleanup was requested.');
-  if ((mode === 'session-images' || mode === 'session-texts') && result.session) {
+  if (scoped && (mode === 'session-images' || mode === 'session-texts') && result.session) {
     return t('Freed {0} MB from this chat. {1} MB of {2} MB is now used here.', [
       (result.freedBytes / 2 ** 20).toFixed(1),
       (result.session.usedBytes / 2 ** 20).toFixed(1),
       (result.session.limitBytes / 2 ** 20).toFixed(0)
     ]);
+  }
+  if (result.usedBytes === null) {
+    return t('Freed {0} MB. Storage usage could not be read.', [(result.freedBytes / 2 ** 20).toFixed(1)]);
   }
   const freed = [(result.freedBytes / 2 ** 20).toFixed(1), (Math.max(0, result.limitBytes - result.usedBytes) / 2 ** 30).toFixed(2)];
   return mode === 'old-chats-gib' || mode === 'session-texts' || mode === 'session-images'

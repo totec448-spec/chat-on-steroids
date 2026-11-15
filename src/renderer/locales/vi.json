@@ -3946,5 +3946,7 @@
   "Permanently remove all local recorded images from this chat? Chat text, original files and long texts will stay.": "Xóa vĩnh viễn tất cả ảnh đã ghi cục bộ khỏi cuộc trò chuyện này? Văn bản trò chuyện, tệp gốc và văn bản dài sẽ vẫn được giữ lại.",
   "Permanently remove all full long texts saved in this chat? Messages and tool results will keep their beginning.": "Xóa vĩnh viễn tất cả văn bản dài đầy đủ được lưu trong cuộc trò chuyện này? Tin nhắn và kết quả công cụ sẽ chỉ giữ lại phần đầu.",
   "This chat": "Cuộc trò chuyện này",
-  "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "Đã giải phóng {0} MB khỏi cuộc trò chuyện này. Hiện đang dùng {1} MB / {2} MB."
+  "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "Đã giải phóng {0} MB khỏi cuộc trò chuyện này. Hiện đang dùng {1} MB / {2} MB.",
+  "Freed {0} MB. Storage usage could not be read.": "Đã giải phóng {0} MB. Không đọc được dung lượng sử dụng.",
+  "Last cleanup: Freed {0} MB.": "Lần dọn dẹp gần nhất: Đã giải phóng {0} MB."
 }

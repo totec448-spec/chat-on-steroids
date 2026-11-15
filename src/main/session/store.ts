@@ -4461,7 +4461,7 @@ async function imageStorageInventory(
 }
 
 function sameStoredImage(file: StoredImageFile, observed: VerifiedAssetFile): boolean {
-  return observed.image === !file.text && observed.dev === file.dev && observed.ino === file.ino && observed.bytes === file.bytes;
+  return (file.text || observed.image) && observed.dev === file.dev && observed.ino === file.ino && observed.bytes === file.bytes;
 }
 
 /**
@@ -4739,15 +4739,21 @@ export async function clearImageStorage(mode: ImageStorageClearMode, sessionId?:
       }
       sessionAssetUsage.clear();
       globalAssetUsage = null;
-      const after = await imageStorageInventory(false);
-      if (after.usedBytes < globalAssetLimitBytes) setRecordingStoreFull(false);
-      if (!sessionId) return { freedBytes, removedFiles, usedBytes: after.usedBytes, limitBytes: globalAssetLimitBytes };
+      let usedBytes: number | null = null;
+      try {
+        const after = await imageStorageInventory(false);
+        usedBytes = after.usedBytes;
+        if (usedBytes < globalAssetLimitBytes) setRecordingStoreFull(false);
+      } catch {
+        // Leave global usage unknown if recounting another directory fails after deletion succeeds.
+      }
+      if (!sessionId) return { freedBytes, removedFiles, usedBytes, limitBytes: globalAssetLimitBytes };
       return {
         freedBytes,
         removedFiles,
-        usedBytes: after.usedBytes,
+        usedBytes,
         limitBytes: globalAssetLimitBytes,
-        session: await sessionAssetBreakdown(sessionId)
+        session: await sessionAssetBreakdown(sessionId).catch(() => undefined)
       };
     } catch (error) {
       rejectSelection(error);
