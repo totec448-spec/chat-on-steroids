@@ -1008,6 +1008,8 @@ let handoffFor: string | null = null;
 
 const LIST_RELOAD_MS = 400;
 const ACTIVE_DETAIL_COOLDOWN_MS = 100;
+const REFRESH_RETRY_BASE_MS = 200;
+const MAX_REFRESH_RETRIES = 2;
 
 let listTimer: number | undefined;
 let listRefreshDirty = false;
@@ -1025,6 +1027,9 @@ let detailSatisfiedPushSeq = -1;
 let controlsPushSeq = 0;
 let controlsAttemptedPushSeq = -1;
 let controlsSatisfiedPushSeq = -1;
+let activeDetailDrainRetryCount = 0;
+let controlsRetryTimer: number | undefined;
+let controlsRetryCount = 0;
 /** Transcript owners named by `session:changed` pushes that no catalog refresh has consumed yet. */
 let changedTranscripts: { all: boolean; ids: Set<string> } = { all: false, ids: new Set() };
 /** Summary values the selected transcript's latest live-tail read was requested against. */
@@ -1726,6 +1731,7 @@ async function readSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
   }
   // Take the pushed invalidations only now, after the last await that can hand this read over to a newer one:
   // a read that is superseded must leave them for its successor (CodeRabbit on #2063).
+  if (detail === 'changed' && !visible) return;
   const changed = changedTranscripts;
   changedTranscripts = { all: false, ids: new Set() };
   const consumedPushSeq = activeDetailPushSeq;
@@ -1784,7 +1790,7 @@ async function readSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
   selectedTabFollow?.observe(row);
   if (detail === 'changed' && selectedId !== null && activeDetailInFlight?.sessionId === selectedId) {
     await activeDetailInFlight.promise;
-    if (generation !== sessionsLoadGeneration) return;
+    if (generation !== sessionsLoadGeneration || (detail === 'changed' && !visible)) return;
   }
   const latestRow = selectedId === null ? undefined : sessions.find(entry => entry.id === selectedId);
   const targetChanged = changed.all || (selectedId !== null && changed.ids.has(selectedId));
@@ -3695,12 +3701,33 @@ function applyUserRequests(sessionId: string | null, requests: UserRequestView[]
  * stopped reporting, an activity window that ran out. Read once, the caption counted on for six
  * hours. While it counts, it asks again now and then; any other refresh resets the interval.
  */
+function clearControlsRetryTimer(): void {
+  if (controlsRetryTimer !== undefined) {
+    window.clearTimeout(controlsRetryTimer);
+    controlsRetryTimer = undefined;
+  }
+}
+
+function scheduleControlsRetry(sessionId: string, selection: number): void {
+  if (!visible || selectedId !== sessionId || selection !== selectionGeneration) return;
+  if (controlsSatisfiedPushSeq >= controlsPushSeq || controlsRetryCount >= MAX_REFRESH_RETRIES) return;
+  clearControlsRetryTimer();
+  const delay = REFRESH_RETRY_BASE_MS * 2 ** controlsRetryCount++;
+  controlsRetryTimer = window.setTimeout(() => {
+    controlsRetryTimer = undefined;
+    if (!visible || selectedId !== sessionId || selection !== selectionGeneration ||
+        controlsSatisfiedPushSeq >= controlsPushSeq) return;
+    void refreshSessionControls();
+  }, delay);
+}
+
 let controlsAskedAt = 0;
 const RUNNING_CONTROLS_RECHECK_MS = 20_000;
 async function refreshSessionControls(): Promise<void> {
+  clearControlsRetryTimer();
   const controlsPushAtStart = controlsPushSeq;
   controlsAttemptedPushSeq = Math.max(controlsAttemptedPushSeq, controlsPushAtStart);
-  const id = selectedId, generation = ++controlsGeneration;
+  const id = selectedId, generation = ++controlsGeneration, selection = selectionGeneration;
   const askedAt = controlsAskedAt = Date.now();
   const planHost = $('agentPlan');
   if (planHost.dataset.sessionId !== (id ?? '')) renderAgentPlan(planHost, id, null);
@@ -3720,6 +3747,7 @@ async function refreshSessionControls(): Promise<void> {
     paintTaskActions();
     for (const action of ['compactSession', 'cancelCompaction', 'resumeLastSummary']) $(action).hidden = true;
     controlsSatisfiedPushSeq = Math.max(controlsSatisfiedPushSeq, controlsPushAtStart);
+    controlsRetryCount = 0;
     return; }
   const opening = pendingComposerInputs.find(row => row.opening && row.sessionId === id && ['queued', 'browser'].includes(row.state));
   if (!sessions.find(row => row.id === id)?.conversationId) {
@@ -3737,12 +3765,18 @@ async function refreshSessionControls(): Promise<void> {
     for (const action of ['compactSession', 'cancelCompaction', 'resumeLastSummary']) $(action).hidden = true;
     paintAutomationSwitch(); paintDeliveryControls(); repaintHeld();
     controlsSatisfiedPushSeq = Math.max(controlsSatisfiedPushSeq, controlsPushAtStart);
+    controlsRetryCount = 0;
     return;
   }
   const controls = await run(api.getSessionControls(id));
-  if (generation !== controlsGeneration || id !== selectedId) return;
-  if (controls) controlsSatisfiedPushSeq = Math.max(controlsSatisfiedPushSeq, controlsPushAtStart);
-  else controlsAttemptedPushSeq = controlsSatisfiedPushSeq;
+  if (generation !== controlsGeneration || id !== selectedId || selection !== selectionGeneration) return;
+  if (controls) {
+    controlsSatisfiedPushSeq = Math.max(controlsSatisfiedPushSeq, controlsPushAtStart);
+    controlsRetryCount = 0;
+  } else {
+    controlsAttemptedPushSeq = controlsSatisfiedPushSeq;
+    scheduleControlsRetry(id, selection);
+  }
   renderAgentPlan(planHost, id, controls?.plan ?? null);
   // A failed read is not an empty list: keep the last view instead of calling steps gone (CodeRabbit on #2049).
   if (controls) applyUserRequests(id, controls.userRequests ?? [], askedAt);
@@ -3814,15 +3848,33 @@ async function refreshSessionControls(): Promise<void> {
     : controls.job?.busy ? t("Compaction is running in ChatGPT.") : '');
 }
 
+function scheduleActiveDetailDrain(wanted: string, selection: number, delay = 0): void {
+  if (activeDetailDrainTimer !== undefined) window.clearTimeout(activeDetailDrainTimer);
+  activeDetailDrainTimer = window.setTimeout(() => {
+    activeDetailDrainTimer = undefined;
+    if (!visible || selectedId !== wanted || selection !== selectionGeneration ||
+        historyBefore !== null || historyLoading || detailFor !== wanted) return;
+    const generationBefore = detailLoadGeneration;
+    void loadDetail().then((ok) => {
+      if (ok) {
+        activeDetailDrainRetryCount = 0;
+        return;
+      }
+      if (!visible || selectedId !== wanted || selection !== selectionGeneration ||
+          historyBefore !== null || historyLoading || detailFor !== wanted) return;
+      if (detailLoadGeneration !== generationBefore + 1) return;
+      if (activeDetailDrainRetryCount >= MAX_REFRESH_RETRIES) return;
+      scheduleActiveDetailDrain(wanted, selection, REFRESH_RETRY_BASE_MS * 2 ** activeDetailDrainRetryCount++);
+    });
+  }, delay);
+}
+
 async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: number): Promise<boolean> {
   const prepend = olderBefore !== undefined;
   const wanted = selectedId;
   const selection = selectionGeneration;
   const capturedPushSeq = activeDetailPushSeq;
-  if (!prepend && newerFrom === undefined && activeDetailTimer !== undefined) {
-    window.clearTimeout(activeDetailTimer);
-    activeDetailTimer = undefined;
-  }
+  if (!prepend && newerFrom === undefined) clearActiveDetailTimers();
   const observed = wanted === null ? undefined : sessions.find(row => row.id === wanted);
   const observedCompletion = observed ? { ...observed } : undefined;
   if (wanted !== null && (historyBefore !== null || historyLoading) && detailFor === wanted && !navigate) {
@@ -3911,8 +3963,11 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
     if (prepend || newerFrom !== undefined) roundsEnter = false;
     // Only live growth follows to the bottom; an empty or off-window incremental check must not pull a scrolled pane down.
     paintDetail(!prepend && newerFrom === undefined && historyBefore === null && (!incremental || deltaChanged));
-    if (!prepend && newerFrom === undefined && !(incremental && detail.events.length === TIMELINE_BATCH_SIZE))
-      detailSatisfiedPushSeq = Math.max(detailSatisfiedPushSeq, capturedPushSeq);
+    if (!prepend && newerFrom === undefined) {
+      activeDetailDrainRetryCount = 0;
+      if (!(incremental && detail.events.length === TIMELINE_BATCH_SIZE))
+        detailSatisfiedPushSeq = Math.max(detailSatisfiedPushSeq, capturedPushSeq);
+    }
     // A sidebar completion becomes read only after this exact selection/load has successfully
     // painted its conversation at the live tail. Keep the snapshot from read time:
     // a newer completion observed while this load was in flight must remain unseen.
@@ -3930,13 +3985,7 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
     // Drain it page by page rather than silently jumping the cursor or lifting the payload cap.
     if (incremental && detail.events.length === TIMELINE_BATCH_SIZE && visible && selectedId === wanted &&
         selection === selectionGeneration && generation === detailLoadGeneration) {
-      if (activeDetailDrainTimer !== undefined) window.clearTimeout(activeDetailDrainTimer);
-      activeDetailDrainTimer = window.setTimeout(() => {
-        activeDetailDrainTimer = undefined;
-        if (!visible || selectedId !== wanted || selection !== selectionGeneration ||
-            historyBefore !== null || historyLoading) return;
-        void loadDetail();
-      }, 0);
+      scheduleActiveDetailDrain(wanted, selection, 0);
     }
     return true;
   };
@@ -8931,8 +8980,16 @@ export function chatVisible(next: boolean): void {
     window.clearTimeout(toolActivityTimer);
     window.clearTimeout(durationTimer);
     toolActivityTimer = undefined;
+    if (listTimer !== undefined) {
+      window.clearTimeout(listTimer);
+      listTimer = undefined;
+    }
+    listRefreshDirty = false;
     clearActiveDetailTimers();
+    clearControlsRetryTimer();
     activeDetailDirty = false;
+    activeDetailDrainRetryCount = 0;
+    controlsRetryCount = 0;
   }
 }
 
@@ -8955,7 +9012,10 @@ function clearActiveDetailTimers(): void {
 
 function resetActiveDetailRefresh(): void {
   clearActiveDetailTimers();
+  clearControlsRetryTimer();
   activeDetailDirty = false;
+  activeDetailDrainRetryCount = 0;
+  controlsRetryCount = 0;
   activeDetailInFlight = null;
   activeDetailLastAt = 0;
   detailSatisfiedPushSeq = -1;
@@ -9001,9 +9061,13 @@ function scheduleReload(change?: SessionChange): void {
   if (listTimer !== undefined) { listRefreshDirty = true; return; }
   listTimer = window.setTimeout(() => {
     listRefreshDirty = false;
+    if (!visible) {
+      listTimer = undefined;
+      return;
+    }
     void loadSessions('changed').finally(() => {
       listTimer = undefined;
-      if (listRefreshDirty) scheduleReload();
+      if (listRefreshDirty && visible) scheduleReload();
     });
   }, LIST_RELOAD_MS);
 }
