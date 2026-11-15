@@ -18,6 +18,7 @@ import {
   initSessionStore,
   listSessionPage,
   listUsageSessions,
+  readEvents,
   reopenSession,
   resetSessionStoreForTests
 } from '../src/main/session/store.js';
@@ -930,6 +931,94 @@ describe('scoped session change refresh', () => {
     expect(pane.scrollTop).toBe(1000);
     expect(w.document.getElementById('timeline')?.textContent).toBe(timelineBefore);
   });
+  it('cancels a pending catalog catch-up timer when chat becomes hidden before 400 ms', async () => {
+    const { state, chatVisible } = await openSelected();
+    const listsBefore = state.lists;
+    const detailsBefore = state.detailCalls.length;
+    state.b = summary(state.b.id, 20_500, 2);
+    state.changed({ allTranscripts: false, sessionIds: [state.b.id] });
+    chatVisible(false);
+    await new Promise(resolve => setTimeout(resolve, 460));
+    expect(state.lists).toBe(listsBefore);
+    expect(state.detailCalls.length).toBe(detailsBefore);
+
+    chatVisible(true);
+    await vi.waitFor(() => expect(state.lists).toBe(listsBefore + 1), { timeout: 800 });
+  });
+
+  it('schedules bounded controls retry when getSessionControls fails after catalog catch-up', async () => {
+    const { w, state, publish } = await openSelected();
+    const listsBefore = state.lists;
+    const controlsBefore = state.controlsCalls.length;
+    let releaseDelayedFailure = (_result: any) => {};
+    let attempt = 0;
+    (w as any).api.getSessionControls = (id: string) => {
+      state.controlsCalls.push(id);
+      attempt += 1;
+      if (attempt === 1) {
+        return new Promise((resolve) => { releaseDelayedFailure = resolve; });
+      }
+      if (attempt === 2) {
+        return Promise.resolve({ ok: true, data: { plan: null, userRequests: [], objective: 'Recovered objective' } });
+      }
+      return Promise.resolve({ ok: false, error: 'Controls still down' });
+    };
+
+    state.a = summary(state.a.id, 30_500, 2);
+    await publish({ allTranscripts: false, sessionIds: [state.a.id] });
+    await vi.waitFor(() => expect(state.controlsCalls.length).toBe(controlsBefore + 1), { timeout: 400 });
+    await vi.waitFor(() => expect(state.lists).toBe(listsBefore + 1), { timeout: 1600 });
+    // Catalog catch-up skipped getSessionControls because the initial read was still in flight.
+    expect(state.controlsCalls.length).toBe(controlsBefore + 1);
+
+    releaseDelayedFailure({ ok: false, error: 'Delayed failure after catch-up' });
+    await vi.waitFor(() => expect(state.controlsCalls.length).toBe(controlsBefore + 2), { timeout: 1000 });
+    await vi.waitFor(() =>
+      expect((w.document.getElementById('sessionObjective') as HTMLTextAreaElement).value).toBe('Recovered objective'),
+      { timeout: 600 }
+    );
+
+    // Further failures stop after the bounded retry budget rather than polling indefinitely.
+    state.a = summary(state.a.id, 30_600, 3);
+    await publish({ allTranscripts: false, sessionIds: [state.a.id] });
+    await vi.waitFor(() => expect(state.controlsCalls.length).toBe(controlsBefore + 5), { timeout: 1800 });
+    await new Promise(resolve => setTimeout(resolve, 650));
+    expect(state.controlsCalls.length).toBe(controlsBefore + 5);
+  });
+
+  it('schedules bounded drain retry when catalog catch-up returns a full page and its follow-up drain fails', async () => {
+    const { w, state, publish } = await openSelected();
+    const listsBefore = state.lists;
+    w.api.getSession = (id: string, options?: any) => {
+      state.detailCalls.push({ id, options });
+      if (state.detailCalls.length === 2) return Promise.resolve({ ok: false, error: 'Initial push failed' });
+      if (state.detailCalls.length === 3) {
+        return Promise.resolve({
+          ok: true,
+          data: {
+            summary: state.a,
+            events: Array.from({ length: 30 }, (_, index) => note(101 + index, `Catchup page row ${index}`)),
+            total: 32,
+            nextFrom: 131
+          }
+        });
+      }
+      if (state.detailCalls.length === 4) return Promise.resolve({ ok: false, error: 'Follow-up drain failed' });
+      return Promise.resolve({
+        ok: true,
+        data: { summary: state.a, events: [note(131, 'Recovered catchup drain row')], total: 32, nextFrom: 132 }
+      });
+    };
+
+    state.a = summary(state.a.id, 30_800, 32);
+    await publish({ allTranscripts: false, sessionIds: [state.a.id] });
+    await vi.waitFor(() => expect(state.lists).toBe(listsBefore + 1), { timeout: 1600 });
+    await vi.waitFor(
+      () => expect(w.document.getElementById('timeline')?.textContent).toContain('Recovered catchup drain row'),
+      { timeout: 1600 }
+    );
+    expect(state.detailCalls.length).toBe(5);
+  });
 });
 
 describe('recorder session change cooldown', () => {
@@ -985,4 +1074,90 @@ it('omits exact helper origins before pagination while retaining ordinary lookal
     expect(await getSession(helper.id)).toMatchObject({ conversationId: 'owned-helper', origin: { kind: 'helper' } });
     expect((await listUsageSessions()).map(row => row.id)).toContain(helper.id);
   }
+});
+
+it('discards pending in-memory notification and detail timers on simulated restart while rendering persisted transcript from disk', async () => {
+  const session = await createSession({ title: 'Restart recovery chat', conversationId: 'conv-restart' });
+  await appendEvent(session.id, { time: 1_000, source: 'app', kind: 'note', message: { text: 'Initial persisted message', truncated: false, chars: 25 } });
+  await flushSessions();
+
+  const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
+  const mount = async (readEventsList: string[]) => {
+    dom?.window.close();
+    dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
+    const w = dom.window;
+    Object.assign(globalThis, {
+      window: w, document: w.document, HTMLElement: w.HTMLElement, Element: w.Element, Node: w.Node,
+      DocumentFragment: w.DocumentFragment, HTMLInputElement: w.HTMLInputElement, HTMLSelectElement: w.HTMLSelectElement,
+      HTMLTextAreaElement: w.HTMLTextAreaElement, HTMLButtonElement: w.HTMLButtonElement
+    });
+    if (!(w.HTMLElement.prototype as any).scrollIntoView) (w.HTMLElement.prototype as any).scrollIntoView = () => {};
+    let listener: ((change?: unknown) => void) | null = null;
+    const ok = (data: any) => Promise.resolve({ ok: true as const, data });
+    const api: any = new Proxy({
+      listSessions: async (options?: any) => {
+        const page = await listSessionPage(options);
+        return ok({ ...page, activeId: null, pressure: [], blocked: [], approval: [], recoveryStopped: [], trusted: [] });
+      },
+      getSession: async (id: string, options?: any) => {
+        readEventsList.push(id);
+        const found = await getSession(id);
+        if (!found) return { ok: false as const, error: 'Session not found' };
+        const fullEvents = await readEvents(id, options);
+        const lastSeq = fullEvents.at(-1)?.seq ?? -1;
+        return ok({
+          summary: found,
+          events: fullEvents,
+          total: found.events,
+          nextFrom: lastSeq + 1
+        });
+      },
+      getSessionControls: () => ok({ plan: null, userRequests: [] }),
+      turnTraces: () => ok({}),
+      getSwarm: () => ok({ running: false, runId: null, agents: [], maxWorkers: 2, pendingReports: 0 }),
+      onSessionChanged: (next: (change?: unknown) => void) => { listener = next; return () => { listener = null; }; },
+      onSwarmChanged: () => () => undefined
+    }, { get(target, prop) { return prop in target ? (target as any)[prop] : (..._args: any[]) => ok(null); } });
+    Object.defineProperty(w, 'api', { value: api, configurable: true });
+    const mod = await import('../src/renderer/chat.js');
+    mod.initChat({ save: async () => true, state: () => ({ config: { sessions: { record: true, limitTokens: 533000 }, compaction: { auto: true, autoTokens: 400000 }, ui: { developerMode: true } } }) as any });
+    mod.chatVisible(true);
+    await vi.waitFor(() => expect(w.document.querySelector(`#sessionList [data-id="${session.id}"]`)).not.toBeNull(), { timeout: 1200 });
+    (w.document.querySelector(`#sessionList [data-id="${session.id}"]`) as HTMLElement).click();
+    return { w, mod, emit: (change?: unknown) => listener?.(change) };
+  };
+
+  const oldReads: string[] = [];
+  const first = await mount(oldReads);
+  await vi.waitFor(() => expect(first.w.document.getElementById('timeline')?.textContent).toContain('Initial persisted message'), { timeout: 1200 });
+  const readsBeforeHide = oldReads.length;
+
+  const staleDeliveries: unknown[] = [];
+  const dropOldSub = onSessionChange(change => staleDeliveries.push(change));
+  notifyChanged(session.id);
+  await vi.waitFor(() => expect(staleDeliveries).toHaveLength(1), { timeout: 400 });
+  staleDeliveries.length = 0;
+
+  notifyChanged(session.id); // Pending 180 ms recorder cooldown timer
+  first.emit({ allTranscripts: false, sessionIds: [session.id] }); // Pending 400 ms listTimer + detail refresh
+  first.mod.chatVisible(false);
+
+  // Append a new persisted event before simulated process restart.
+  await appendEvent(session.id, { time: 2_000, source: 'app', kind: 'note', message: { text: 'Persisted after crash', truncated: false, chars: 21 } });
+  await endSession(session.id);
+
+  // Simulate process restart: reset recorder/store timers and reload renderer module cleanly.
+  dropOldSub();
+  resetRecorderForTests();
+  resetSessionStoreForTests();
+  vi.resetModules();
+
+  await new Promise(resolve => setTimeout(resolve, 250));
+  expect(oldReads.length).toBe(readsBeforeHide);
+  expect(staleDeliveries).toHaveLength(0);
+
+  const newReads: string[] = [];
+  const restarted = await mount(newReads);
+  await vi.waitFor(() => expect(restarted.w.document.getElementById('timeline')?.textContent).toContain('Persisted after crash'), { timeout: 1200 });
+  expect(newReads.length).toBeGreaterThanOrEqual(1);
 });
