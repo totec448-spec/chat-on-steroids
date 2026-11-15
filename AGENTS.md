@@ -4461,7 +4461,19 @@ reason. The page says nothing once the tab shows another chat or the person stop
 Continue, and `inputId` must be a UUID. An automatic Continue held for `recovery-question-changed`
 without a break of more than 5 minutes, and with no other hold reason in between, for 30 minutes is retired (`retireMismatchedRecoveryInput`:
 cancelled with its reason, `recovery.ended: 'page-final'`); it would only answer the wrong question
-(2026-11-02: one sat queued for eleven hours). Internal busy states
+(2026-11-02: one sat queued for eleven hours). The `recovery-question-changed` note also carries `newestUser` (the id of
+the question the page read, at most 256 characters, no control characters) and `documentSince` (`performance.timeOrigin`, whole
+milliseconds); the extension worker forwards both only on that reason, and an older page says neither. The bridge reads them
+as proof that ChatGPT's saved copy stopped following the chat (#2184: after its history limit ChatGPT kept a Goal chat's
+first 7 s of a turn only; the live page streamed on and the browser acknowledged two Continues, but every reload read the
+older copy, and nothing owned the chat for hours). `noteSavedCopyBehind` counts a document only when the page read a question
+the app recorded for the chat, older than the newest `user_message` the app recorded, and the document loaded at least
+5 minutes after that newer message; two such documents at least 10 minutes apart are the proof. Then, only for a chat
+with Goal or Loop on that is not blocked, not working (no turn the page reports, no activity grant, no running call) has
+no turn the recorder or a page still reports (however old: `chatIsWorkingNow`'s one-hour limit does not apply) and has
+no open Compact & Resume, the session goes on in a new chat from its saved summary (`resumeFromSavedSummary`), once per
+chat and process, and the log says `ChatGPT's saved copy of this chat lacks the message the browser delivered`. A page that
+read no question, an unknown one, or the newest one itself proves nothing (a newer question a person typed is the newest one the page then reads). Internal busy states
 (another delivery, a model read, a Goal draft) stay unlogged. A dialog with a field
 (Settings, Rename, a form) is left alone and keeps holding input as before.
 A worker given up for time after a page claimed it (no page-reported failure) is a late-start
