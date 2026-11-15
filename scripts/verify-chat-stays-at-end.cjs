@@ -91,18 +91,18 @@ app.whenReady().then(async () => {
     await js(`(()=>{const i=document.getElementById('chatInput');i.value='';i.dispatchEvent(new Event('input',{bubbles:true}));return 1})()`);
     await pause(700);
     v=await view(); assert.ok(Math.abs(v.top-place)<=2, 'keeps a scrolled-up place: '+JSON.stringify({...v,place}));
-    // Agents & automation shows in the chat's own scroll pane. Reached the usual way (Settings opens
+    // The Agents pages show in the chat's own scroll pane. Reached the usual way (Settings opens
     // Workspace first), it starts at its top without the chat's jump control, reading it is not
     // reading the chat, and the chat comes back at its end, still following.
     await js(`document.getElementById('jumpLatest').click()`); await pause(700);
     v=await view(); assert.ok(v.gap<=2 && v.lastVisible, 'back at the end before Settings: '+JSON.stringify(v));
     await js(`document.getElementById('workspaceSettings').click()`); await pause(300);
-    await js(`document.querySelector('#tabs button[data-tab="settings"]').click()`); await pause(700);
+    await js(`document.querySelector('#tabs button[data-tab="agents-goal"]').click()`); await pause(700);
     const agents=()=>js(`(()=>{const p=document.getElementById('chatBody');return {top:Math.round(p.scrollTop),max:p.scrollHeight-p.clientHeight,
       jump:document.getElementById('jumpLatest').classList.contains('is-shown'),timeline:!document.getElementById('timelineContent').hidden}})()`);
     let a=await agents();
-    assert.ok(a.max>200 && !a.timeline, 'Agents & automation fills the pane: '+JSON.stringify(a));
-    assert.equal(a.top,0,'Agents & automation opens at its top');
+    assert.ok(a.max>200 && !a.timeline, 'Goal & Loop fills the pane: '+JSON.stringify(a));
+    assert.equal(a.top,0,'Goal & Loop opens at its top');
     assert.equal(a.jump,false,'No jump-to-latest control over the settings');
     const box=await js(`(()=>{const r=document.getElementById('chatBody').getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)}})()`);
     for(const deltaY of [-240,-240,-240,240]){win.webContents.sendInputEvent({type:'mouseWheel',x:box.x,y:box.y,deltaX:0,deltaY});await pause(120);}
@@ -115,7 +115,7 @@ app.whenReady().then(async () => {
     v=await view(); assert.ok(v.gap<=2 && v.lastVisible, 'the chat comes back at its end: '+JSON.stringify(v));
     win.setContentSize(1100,480); await pause(700);
     v=await view(); assert.ok(v.gap<=2 && v.lastVisible, 'and still follows when its area shrinks: '+JSON.stringify(v));
-    console.log('PASS: the chat stays at its end when the message box or window shrinks, keeps a scrolled-up reader in place, and is not moved by Agents & automation.');
+    console.log('PASS: the chat stays at its end when the message box or window shrinks, keeps a scrolled-up reader in place, and is not moved by the Agents pages.');
   } finally { win?.destroy(); await server.close(); app.quit(); }
 // A failed assertion must fail the check: quitting alone exits 0 and reads as a pass.
 }).catch(error => { console.error(error); app.exit(1); });

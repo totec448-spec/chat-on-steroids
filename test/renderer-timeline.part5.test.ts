@@ -97,12 +97,12 @@ it('offers a way back to the end of the chat that clears any reserved space', as
   expect(content.style.getPropertyValue('--timeline-scroll-reserve')).toBe('');
 });
 
-it('keeps the chat reading state out of Agents & automation, which shares its scroll pane', async () => {
+it('keeps the chat reading state out of the Agents pages, which share its scroll pane', async () => {
   const { w, append } = await boot([{ kind: 'assistant_message', seq: 1, time: T0 + 1000, source: 'extension', messageId: 'first', message: text('Hello'), final: false }]);
   const pane = w.document.getElementById('chatBody')!;
   const jump = w.document.getElementById('jumpLatest')!;
-  // The real navigation: the Agents & automation tab, then Back to chat.
-  const view = (name: string) => (w.document.querySelector(name === 'settings' ? 'nav button[data-tab="settings"]' : '#backToChat') as HTMLButtonElement).click();
+  // The real navigation: the Goal & Loop tab, then Back to chat.
+  const view = (name: string) => (w.document.querySelector(name === 'settings' ? 'nav button[data-tab="agents-goal"]' : '#backToChat') as HTMLButtonElement).click();
   Object.defineProperties(pane, { clientHeight: { value: 400, configurable: true }, scrollHeight: { value: 2000, configurable: true } });
   pane.scrollTop = 1600;
   // Settings open at their top, not at the chat's end, and offer no way back to a chat end.
@@ -120,6 +120,28 @@ it('keeps the chat reading state out of Agents & automation, which shares its sc
   await append([{ kind: 'assistant_message', seq: 2, time: T0 + 2000, source: 'extension', messageId: 'later', message: text('More output'), final: false }]);
   expect(pane.scrollTop).toBe(pane.scrollHeight);
   expect(jump.classList.contains('is-shown')).toBe(false);
+});
+
+it('shows one Agents page per tab, each from its top, and Back to chat leaves them', async () => {
+  const { w } = await boot([{ kind: 'assistant_message', seq: 1, time: T0 + 1000, source: 'extension', messageId: 'first', message: text('Hello'), final: false }]);
+  const doc = w.document, pane = doc.getElementById('chatBody')!;
+  const content = doc.querySelector<HTMLElement>('.automation-content')!;
+  const tab = (name: string) => (doc.querySelector(`#tabs button[data-tab="${name}"]`) as HTMLButtonElement);
+  Object.defineProperties(pane, { clientHeight: { value: 400, configurable: true }, scrollHeight: { value: 3000, configurable: true } });
+  for (const page of ['goal', 'models', 'workers', 'tools', 'browser', 'goal']) {
+    pane.scrollTop = 700;
+    tab(`agents-${page}`).click();
+    expect(content.dataset.agentsCurrent, page).toBe(page);
+    expect(pane.scrollTop, page).toBe(0);
+    expect(doc.querySelector<HTMLElement>('[data-view="settings"]')!.hidden, page).toBe(false);
+    expect([...doc.querySelectorAll('#tabs button.is-sel')].map(node => (node as HTMLElement).dataset.tab), page).toEqual([`agents-${page}`]);
+    expect(doc.querySelector('[data-panel="chat"]')!.classList.contains('is-active'), page).toBe(true);
+  }
+  // The chat's own settings button opens the first page.
+  (doc.getElementById('backToChat') as HTMLButtonElement).click();
+  tab('agents-browser').click();
+  (doc.getElementById('backToChat') as HTMLButtonElement).click();
+  expect(doc.querySelector<HTMLElement>('[data-view="settings"]')!.hidden).toBe(true);
 });
 
 it('opens round participants in the existing dock without moving the prime reader or draft', async () => {
