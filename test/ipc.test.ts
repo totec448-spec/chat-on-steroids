@@ -801,7 +801,10 @@ it('validates session-scoped storage inspection and old-chats / per-chat cleanup
   expect(scoped.ok).toBe(true);
   expect(scoped.data?.session).toMatchObject({ sessionId: first.id, textBytes: 2048, imageBytes: 0 });
 
+  expect(await handlers.get('sessions:imageStorage')!(null, { id: '../bad' })).toMatchObject({ ok: false });
   expect(await handlers.get('sessions:clearImageStorage')!(null, { mode: 'session-texts' })).toMatchObject({ ok: false });
+  expect(await handlers.get('sessions:clearImageStorage')!(null, { mode: 'session-texts', id: '../bad' })).toMatchObject({ ok: false });
+  expect(await handlers.get('sessions:clearImageStorage')!(null, { mode: 'old-chats-gib', id: '../bad' })).toMatchObject({ ok: false });
   expect(await handlers.get('sessions:clearImageStorage')!(null, { mode: 'old-chats-gib' })).toMatchObject({ ok: true });
   send.mockClear();
 

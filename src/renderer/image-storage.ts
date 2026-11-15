@@ -85,8 +85,40 @@ function showImageStorage(sessionId?: string): void {
     choices, cancel);
   dialog.addEventListener('close', () => dialog.remove(), { once: true });
   document.body.append(dialog); dialog.showModal();
+  // Reopen with fresh usage unless showing a global completed job in global Settings or an active job.
+  if (cleanup && !cleanup.pending && (sessionId || cleanup.sessionId)) cleanup = null;
+  const cleanupBelongsHere = (job: NonNullable<typeof cleanup>): boolean =>
+    !job.sessionId || job.sessionId === sessionId;
+  let usageSeq = 0;
+  const loadUsage = () => {
+    const seq = ++usageSeq;
+    // Choices and Close are usable immediately; usage is informational, never an admission gate.
+    const request = sessionId ? window.api.getImageStorage(sessionId) : window.api.getImageStorage();
+    void run(request).catch(() => null).then(usage => {
+      if (!dialog.isConnected || seq !== usageSeq) return;
+      if (cleanup) {
+        if (sessionId && (cleanup.pending ? cleanup.sessionId !== sessionId : !cleanup.sessionId)) {
+          latestSession = usage?.session ?? null;
+          paintSessionStatus(latestSession);
+        }
+        return;
+      }
+      ui(status, 'textContent', () => usage
+        ? t('{0} GB used of {1} GB', [(usage.usedBytes / 2 ** 30).toFixed(2), (usage.limitBytes / 2 ** 30).toFixed(0)])
+        : t('Storage usage could not be read.'));
+      latestSession = usage?.session ?? null;
+      paintSessionStatus(latestSession);
+    });
+  };
   const renderCleanup = () => {
     if (!dialog.isConnected || !cleanup) return;
+    if (!cleanup.pending && !cleanupBelongsHere(cleanup)) {
+      cleanup = null;
+      dialog.removeAttribute('aria-busy');
+      for (const child of choices.querySelectorAll('button')) child.disabled = false;
+      loadUsage();
+      return;
+    }
     dialog.toggleAttribute('aria-busy', cleanup.pending);
     if (cleanup.pending) dialog.setAttribute('aria-busy', 'true');
     for (const child of choices.querySelectorAll('button')) child.disabled = cleanup.pending;
@@ -95,12 +127,16 @@ function showImageStorage(sessionId?: string): void {
         ? t('Freeing space in the background. You can close this window.')
         : t('Removing recorded images in the background. You can close this window.')
       : cleanupResultText(cleanup!.result, cleanup!.mode));
-    if (sessionId) {
-      const updated = cleanup.result?.session?.sessionId === sessionId
-        ? cleanup.result.session
-        : cleanup.sessionId === sessionId ? cleanup.sessionUsage : null;
-      latestSession = updated;
-      paintSessionStatus(updated);
+    if (sessionId && (cleanup.sessionId === sessionId || !cleanup.sessionId)) {
+      if (cleanup.sessionId === sessionId) {
+        const updated = cleanup.result?.session?.sessionId === sessionId
+          ? cleanup.result.session
+          : cleanup.sessionUsage;
+        latestSession = updated;
+        paintSessionStatus(updated);
+      } else if (!cleanup.pending) {
+        loadUsage();
+      }
     }
   };
   const labels: Record<ImageStorageClearMode, () => string> = {
@@ -156,18 +192,10 @@ function showImageStorage(sessionId?: string): void {
   }
   if (cleanup) {
     renderCleanup();
+    if (cleanup.pending && cleanup.sessionId !== sessionId && sessionId) loadUsage();
     void cleanup.done.then(renderCleanup);
   } else {
-    // Choices and Close are usable immediately; usage is informational, never an admission gate.
-    const request = sessionId ? window.api.getImageStorage(sessionId) : window.api.getImageStorage();
-    void run(request).catch(() => null).then(usage => {
-      if (!dialog.isConnected || cleanup) return;
-      ui(status, 'textContent', () => usage
-        ? t('{0} GB used of {1} GB', [(usage.usedBytes / 2 ** 30).toFixed(2), (usage.limitBytes / 2 ** 30).toFixed(0)])
-        : t('Storage usage could not be read.'));
-      latestSession = usage?.session ?? null;
-      paintSessionStatus(latestSession);
-    });
+    loadUsage();
   }
 }
 

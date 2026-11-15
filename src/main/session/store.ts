@@ -4425,8 +4425,8 @@ async function imageStorageInventory(collectImages = true): Promise<{ usedBytes:
           if (!file) continue;
           sessionBytes += file.bytes;
           const { image: _image, ...stored } = file;
-          if (file.image) images.push({ sessionId: session.name, assetId: entry.name, ...stored });
-          else if (entry.name.endsWith('.txt')) texts.push({ sessionId: session.name, assetId: entry.name, ...stored, text: true });
+          if (entry.name.toLowerCase().endsWith('.txt')) texts.push({ sessionId: session.name, assetId: entry.name, ...stored, text: true });
+          else if (file.image) images.push({ sessionId: session.name, assetId: entry.name, ...stored });
         }
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
