@@ -2440,12 +2440,15 @@ const savedCopyBehind = new Map<string, { messageId: string; documents: Set<numb
 const savedCopyContinued = new Set<string>();
 
 /** Why a chat whose saved copy lags may not be moved to a new chat right now, or '' when it may (#2184). */
-function savedCopyRecoveryBlocker(conversationId: string, sessionId: string, now: number): string {
+function savedCopyRecoveryBlocker(conversationId: string, session: Pick<SessionSummary, 'id' | 'activeTurnId'>, now: number): string {
   if (isChatBlocked(conversationId)) return 'the chat is blocked';
   if (!goalArmedFor(conversationId) || !goalSwitchFor(conversationId).enabled) return 'Goal and Loop are not on for it';
   if (chatIsWorkingNow(conversationId, now)) return 'the chat is still working';
+  // A turn the recorder or a page still reports is not idle however old it is: the age limit of chatIsWorkingNow is a
+  // recovery heuristic, and with two browsers one page can hold a thinking turn another page does not see (CodeRabbit on #2195).
+  if (session.activeTurnId || liveConversations().some(entry => entry.conversationId === conversationId && (entry.generating || Boolean(entry.activeTurnId)))) return 'the recorder still reports a turn';
   if (runningToolProgress(conversationId) !== null) return 'a tool call is running';
-  if (continuationForSession(sessionId)) return 'a Compact & Resume is under way';
+  if (continuationForSession(session.id)) return 'a Compact & Resume is under way';
   return '';
 }
 
@@ -2474,7 +2477,7 @@ async function noteSavedCopyBehind(conversationId: string, newestUser: string, d
   const spread = Math.max(...record.documents) - Math.min(...record.documents);
   if (record.documents.size < 2 || spread < SAVED_COPY_PROOF_SPAN_MS) return;
   // Only an unattended chat that nothing else is working on is moved: Goal or Loop on, not blocked, nothing running.
-  const blocker = savedCopyRecoveryBlocker(conversationId, session.id, now);
+  const blocker = savedCopyRecoveryBlocker(conversationId, session, now);
   if (blocker) {
     const key = `saved-copy-wait|${conversationId}|${blocker}`;
     if (now - (pageNotesLogged.get(key) ?? 0) >= 60_000) {
@@ -2492,7 +2495,7 @@ async function noteSavedCopyBehind(conversationId: string, newestUser: string, d
   // Read the session first, then check every condition with no await before the call below: the person may have
   // turned the switch off, or the chat may have started working, or a Compact & Resume may have begun meanwhile.
   const current = await getSession(session.id);
-  if (current?.conversationId !== conversationId || savedCopyRecoveryBlocker(conversationId, session.id, Date.now())) return;
+  if (current?.conversationId !== conversationId || savedCopyContinued.has(conversationId) || savedCopyRecoveryBlocker(conversationId, current, Date.now())) return;
   savedCopyContinued.add(conversationId);
   try {
     await resumeFromSavedSummary(session.id, saved, { refuseIfCompacting: true });
