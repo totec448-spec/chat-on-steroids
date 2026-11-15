@@ -181,7 +181,9 @@ function showImageStorage(sessionId?: string): void {
         : window.api.clearImageStorage(mode);
       job.done = run(request).catch(() => null).then(result => {
         job.result = result;
-        job.sessionUsage = result?.session ?? job.sessionUsage;
+        job.sessionUsage = result
+          ? result.session && result.session.sessionId === targetSessionId ? result.session : null
+          : job.sessionUsage;
         job.pending = false;
         renderCleanup();
         toast(cleanupResultText(result, mode, false));
