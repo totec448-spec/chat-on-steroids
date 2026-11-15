@@ -615,6 +615,7 @@
   "Image preview is loading": "画像プレビューを読み込み中",
   "Image preview unavailable": "画像をプレビューできません",
   "Image preview unavailable — recording storage is full": "画像をプレビューできません · 記録用ストレージがいっぱいです",
+  "Image preview unavailable — this chat reached its 192 MB storage limit": "画像をプレビューできません · このチャットが 192 MB の保存上限に達しました",
   "Image preview unavailable — image exceeds the recording limit": "画像をプレビューできません · 画像が記録サイズの上限を超えています",
   "{0} result": "{0}の結果",
   "Full recorded response: {0}": "記録された応答の全文：{0}",

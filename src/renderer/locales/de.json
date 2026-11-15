@@ -1273,6 +1273,7 @@
   "Image preview is loading": "Bildvorschau wird geladen",
   "Image preview unavailable": "Bildvorschau nicht verfügbar",
   "Image preview unavailable — recording storage is full": "Bildvorschau nicht verfügbar – der Aufzeichnungsspeicher ist voll",
+  "Image preview unavailable — this chat reached its 192 MB storage limit": "Bildvorschau nicht verfügbar – dieser Chat hat sein Speicherlimit von 192 MB erreicht",
   "Image preview unavailable — image exceeds the recording limit": "Bildvorschau nicht verfügbar – das Bild überschreitet das Aufzeichnungslimit",
   "Toggle Files side panel": "Seitenleiste „Dateien“ ein-/ausblenden",
   "Refresh files": "Dateien aktualisieren",
