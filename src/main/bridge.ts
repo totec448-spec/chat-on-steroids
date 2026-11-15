@@ -2392,7 +2392,8 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
  * the session's last saved summary (resumeFromSavedSummary cancels the stuck ticket). False when the chat is
  * not unattended, has no usable summary, or the reopen is refused; the ordinary backoff then goes on.
  */
-async function continueStuckFromSavedSummary(entry: { token: string; sessionId: string; from: string }, watch: { continuedFromSaved?: boolean }): Promise<boolean> {
+async function continueStuckFromSavedSummary(entry: { token: string; sessionId: string; from: string }, watch: { continuedFromSaved?: boolean },
+  why = 'never reached ChatGPT', opening = false): Promise<boolean> {
   watch.continuedFromSaved = true;
   // Unattended means Goal or Loop on and the chat not blocked (a block keeps the switch's state; CodeRabbit on #2019).
   const unattended = (): boolean => !goalBlockReason(entry.from) && goalArmedFor(entry.from) && goalSwitchFor(entry.from).enabled;
@@ -2412,13 +2413,102 @@ async function continueStuckFromSavedSummary(entry: { token: string; sessionId: 
   if (!await savedSummaryUsable(entry.sessionId, session.lastHandoffId)) return skip(`saved summary ${session.lastHandoffId} is empty or unusable`);
   if (!unattended()) return skip(attended());
   try {
+    // A ticket whose brief was written and whose new chat never reported back is claimed, not waiting for a summary:
+    // it ends here so the saved summary can open the chat it was owed (the new chat's send was never replayed).
+    if (opening && !await cancelResumeNow(entry.sessionId)) return skip('its ticket could not be ended');
     await resumeFromSavedSummary(entry.sessionId, session.lastHandoffId);
-    logWarn(`bridge: compaction ticket ${entry.token.slice(0, 8)} for ${entry.from} never reached ChatGPT; ` +
+    logWarn(`bridge: compaction ticket ${entry.token.slice(0, 8)} for ${entry.from} ${why}; ` +
       `the ${goalSwitchFor(entry.from).mode} chat continues in a new chat from saved summary ${session.lastHandoffId}`);
     return true;
   } catch (error) {
     logInfo(`bridge: compaction ticket ${entry.token.slice(0, 8)} could not continue from the saved summary (${(error as Error).message}); backing off as before`);
     return false;
+  }
+}
+
+/**
+ * Documents that read a chat's saved copy as missing a message the browser delivered, by chat (#2184).
+ *
+ * On 2026-11-14 ChatGPT stopped saving a 790k-token Goal chat after its history limit: the live page went on
+ * streaming and acknowledged two Continues, while every reload read the saved copy, whose newest question was an
+ * older one. Nothing owned the chat afterwards, and it stood idle for hours. A page that holds an automatic Continue
+ * because its newest question is not the one it answers says which question it read and when its document loaded.
+ * A document that loaded well after the newest message the app recorded for the chat, and still read an older
+ * newest question, saw a copy that lacks that message; two such documents ten minutes apart are the proof.
+ */
+const SAVED_COPY_DOCUMENT_GRACE_MS = 5 * 60_000;
+const SAVED_COPY_PROOF_SPAN_MS = 10 * 60_000;
+const savedCopyBehind = new Map<string, { messageId: string; documents: Set<number> }>();
+const savedCopyContinued = new Set<string>();
+
+/** Why a chat whose saved copy lags may not be moved to a new chat right now, or '' when it may (#2184). */
+function savedCopyRecoveryBlocker(conversationId: string, session: Pick<SessionSummary, 'id' | 'activeTurnId'>, now: number): string {
+  if (isChatBlocked(conversationId)) return 'the chat is blocked';
+  if (!goalArmedFor(conversationId) || !goalSwitchFor(conversationId).enabled) return 'Goal and Loop are not on for it';
+  if (chatIsWorkingNow(conversationId, now)) return 'the chat is still working';
+  // A turn the recorder or a page still reports is not idle however old it is: the age limit of chatIsWorkingNow is a
+  // recovery heuristic, and with two browsers one page can hold a thinking turn another page does not see (CodeRabbit on #2195).
+  if (session.activeTurnId || liveConversations().some(entry => entry.conversationId === conversationId && (entry.generating || Boolean(entry.activeTurnId)))) return 'the recorder still reports a turn';
+  if (runningToolProgress(conversationId) !== null) return 'a tool call is running';
+  if (continuationForSession(session.id)) return 'a Compact & Resume is under way';
+  return '';
+}
+
+async function noteSavedCopyBehind(conversationId: string, newestUser: string, documentSince: number, now: number): Promise<void> {
+  if (savedCopyContinued.has(conversationId) || !Number.isFinite(documentSince) || documentSince <= 0 || documentSince > now + 60_000) return;
+  const session = await findSessionByConversation(conversationId);
+  if (!session || session.conversationId !== conversationId) return;
+  const rows = (await readRecentEvents(session.id, 200, { kinds: ['user_message'] }))
+    .filter((event): event is Extract<SessionEvent, { kind: 'user_message' }> => event.kind === 'user_message' && event.messageId !== undefined);
+  const order = (event: SessionEvent): number => ('origin' in event ? event.origin : undefined) ?? event.seq;
+  const newest = rows.reduce<typeof rows[number] | null>((best, event) => !best || order(event) > order(best) ? event : best, null);
+  const read = rows.find(event => event.messageId === newestUser);
+  // The page must have positively read a question the app recorded, older than the one the app says is newest, and
+  // its document must have loaded long after the newer one was recorded: only then is the newer one missing from it.
+  if (!newest || !read || newest.messageId === newestUser || order(read) >= order(newest) ||
+      documentSince < newest.time + SAVED_COPY_DOCUMENT_GRACE_MS) {
+    savedCopyBehind.delete(conversationId);
+    return;
+  }
+  let record = savedCopyBehind.get(conversationId);
+  if (!record || record.messageId !== newest.messageId) record = { messageId: newest.messageId!, documents: new Set() };
+  record.documents.add(documentSince);
+  savedCopyBehind.delete(conversationId);
+  savedCopyBehind.set(conversationId, record);
+  if (savedCopyBehind.size > 200) savedCopyBehind.delete(savedCopyBehind.keys().next().value!);
+  const spread = Math.max(...record.documents) - Math.min(...record.documents);
+  if (record.documents.size < 2 || spread < SAVED_COPY_PROOF_SPAN_MS) return;
+  // Only an unattended chat that nothing else is working on is moved: Goal or Loop on, not blocked, nothing running.
+  const blocker = savedCopyRecoveryBlocker(conversationId, session, now);
+  if (blocker) {
+    const key = `saved-copy-wait|${conversationId}|${blocker}`;
+    if (now - (pageNotesLogged.get(key) ?? 0) >= 60_000) {
+      notePageNoteLogged(key, now);
+      logInfo(`bridge: ${conversationId}: ChatGPT's saved copy of this chat lacks the message the browser delivered, and the chat waits to continue from its saved summary: ${blocker}`);
+    }
+    return;
+  }
+  const saved = session.lastHandoffId;
+  if (!saved || !await savedSummaryUsable(session.id, saved)) {
+    logInfo(`bridge: ${conversationId}: ChatGPT's saved copy of this chat lacks the message the browser delivered, and the session has no usable saved summary to go on from`);
+    savedCopyContinued.add(conversationId);
+    return;
+  }
+  // Read the session first, then check every condition with no await before the call below: the person may have
+  // turned the switch off, or the chat may have started working, or a Compact & Resume may have begun meanwhile.
+  const current = await getSession(session.id);
+  if (current?.conversationId !== conversationId || savedCopyContinued.has(conversationId) || savedCopyRecoveryBlocker(conversationId, current, Date.now())) return;
+  savedCopyContinued.add(conversationId);
+  try {
+    await resumeFromSavedSummary(session.id, saved, { refuseIfCompacting: true });
+    logWarn(`bridge: ${conversationId}: ChatGPT's saved copy of this chat lacks the message the browser delivered ` +
+      `(${record.documents.size} documents read an older newest question over ${Math.round(spread / 60_000)} minutes); ` +
+      `the ${goalSwitchFor(conversationId).mode} chat continues in a new chat from saved summary ${saved}`);
+  } catch (error) {
+    // A failed attempt (the summary could not be stored again) or a Compact & Resume that began meanwhile leaves the
+    // proof in place, and a later report may try again; only a successful resume keeps the marker.
+    savedCopyContinued.delete(conversationId);
+    logInfo(`bridge: ${conversationId}: could not continue from the saved summary (${(error as Error).message})`);
   }
 }
 
@@ -2707,12 +2797,14 @@ export async function compactSession(sessionId: string): Promise<SessionControls
   return sessionControlsFor(sessionId);
 }
 /** Compact & Resume again from the summary an abandoned run already captured (#1215). */
-export async function resumeFromSavedSummary(sessionId: string, handoffId: string): Promise<SessionControlsView> {
+export async function resumeFromSavedSummary(sessionId: string, handoffId: string, options: { refuseIfCompacting?: boolean } = {}): Promise<SessionControlsView> {
   await controlledConversation(sessionId);
   // A summary that cannot be used ends nothing: the waiting Compact & Resume stays (CodeRabbit on #2019).
   if (!await savedSummaryUsable(sessionId, handoffId)) throw new Error('This summary can no longer be used. Start Compact & Resume again.');
   // The person chose the saved summary over a Compact & Resume still waiting for ChatGPT's: that ticket ends.
   const waiting = continuationForSession(sessionId);
+  // The automatic path never ends a Compact & Resume the person or the app started while it was reading (#2184).
+  if (waiting && options.refuseIfCompacting) throw new Error('a Compact & Resume is under way');
   if (waiting && waiting.state === 'awaiting-summary' && !waiting.handoffId) {
     logInfo(`bridge: ${sessionId} continues from saved summary ${handoffId}; the Compact & Resume still waiting for ChatGPT's summary is cancelled`);
     await cancelResumeNow(sessionId);
@@ -4220,6 +4312,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
             process: event.call.process,
             requestId: event.call.requestId ?? null,
             attribution: event.call.attribution, outcome: event.call.outcome,
+            ...(event.call.tool === 'agents' && event.call.outcome === 'ok' && event.call.endsActivity === true ? { endsActivity: true } : {}),
             displayOutcome: activityDisplayOutcome(event.call), durationMs: activityDurationMs(event.call),
             summary: toolCallSummary(event.call), changes: event.call.changes ?? [] }];
         case 'progress':
@@ -5638,6 +5731,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           recoveryQuestionChanged.delete(inputId);
           changed();
         }
+        // Which question the page read and when its document loaded (older pages say neither).
+        const newestUser = typeof body['newestUser'] === 'string' && body['newestUser'].length <= 256 ? body['newestUser'] : null;
+        const documentSince = typeof body['documentSince'] === 'number' ? body['documentSince'] : null;
+        if (newestUser && documentSince !== null) await noteSavedCopyBehind(chat, newestUser, documentSince, now).catch(() => undefined);
       }
       return json(res, 200, { ok: true }, origin);
     }
@@ -10265,7 +10362,7 @@ const COMPACTION_PICKUPS: Record<CompactionPhase, { every: number; attempts: num
   writing: { every: 5 * 60_000, attempts: 3 },
   opening: { every: 15 * 60_000, attempts: 3 }
 };
-const compactionWatch = new Map<string, { token: string; phase: CompactionPhase; nextAt: number; attempts: number; backoffs?: number; told?: boolean; streamLost?: boolean; continuedFromSaved?: boolean }>();
+const compactionWatch = new Map<string, { token: string; phase: CompactionPhase; nextAt: number; attempts: number; backoffs?: number; told?: boolean; slow?: boolean; slowQueuedAt?: number; confirmedAt?: number; streamLost?: boolean; continuedFromSaved?: boolean }>();
 /**
  * Why the source page last stopped an automatic ticket's attempt before asking (#1643), by token.
  * Kept until the next pickup lets the page try again, so the chat says it is held, not asking.
@@ -10284,6 +10381,7 @@ export function compactionReceiptWaived(misses: { unconfirmed: number; changed: 
 const AUTOMATIC_ASKING_RETRY_PAUSE_MS = 10 * 60_000;
 /** How often an automatic ticket with a written brief tries again to open its new chat after the quick tries (#1882). */
 const AUTOMATIC_OPENING_SLOW_MS = 60 * 60_000;
+const AUTOMATIC_WRITING_SLOW_MS = 60 * 60_000;
 /**
  * How many slowed extra bursts an automatic pre-Send ticket gets before it is abandoned like a
  * manual one. Each pickup reloads the source page, so an unbounded retry turns a chat that can
@@ -10335,6 +10433,8 @@ function expediteCompactionPickup(conversationId: string): boolean {
   const watch = compactionWatch.get(conversationId);
   if (watch && watch.token === entry.token && watch.phase === phase) {
     if (watch.attempts >= COMPACTION_PICKUPS[phase].attempts) return false;
+    // An hourly retry waits for its hour: a transport error is not a reason to reload now (CodeRabbit on #2189).
+    if (watch.slow) return false;
     watch.nextAt = 0;
     watch.streamLost = true;
     return true;
@@ -10342,6 +10442,8 @@ function expediteCompactionPickup(conversationId: string): boolean {
   compactionWatch.set(conversationId, { token: entry.token, phase, attempts: 0, nextAt: 0, streamLost: true });
   return true;
 }
+
+export { expediteCompactionPickup as expediteCompactionPickupForTests };
 
 /** A switch change revokes the repair, but never refunds this source's spent budget. */
 function forgetGoalWatch(conversationId: string): void {
@@ -10682,9 +10784,43 @@ async function inspectOwedCompactions(now: number): Promise<boolean> {
             'The request was already sent, so it is not sent again. Open the chat to let it finish, or cancel compaction to return to it.'
         ).catch(() => undefined);
       }
+      // An automatic ticket whose summary request is out keeps collecting it, once an hour after the quick
+      // tries: while it is open it owns the chat's recovery, so stopping here left a Goal chat idle until the
+      // ticket expired (#2184). The request is never sent again; only the page is reloaded to read the reply.
+      if (phase === 'writing' && entry.automatic) {
+        // The hourly try collected nothing either: a Goal or Loop chat goes on from its last saved summary in a new
+        // chat of the same session, once per ticket, as one whose request never reached ChatGPT does. Only once that
+        // reload was confirmed by a page: one that is still queued, or claimed without a receipt, has collected nothing
+        // yet (CodeRabbit on #2189), so the ticket waits for its receipt first.
+        if (watch.slow && !watch.continuedFromSaved) {
+          const confirmedAt = watch.confirmedAt;
+          if (watch.slowQueuedAt !== undefined && confirmedAt !== undefined && confirmedAt >= watch.slowQueuedAt) {
+            // The brief gets its usual grace after the receipt, not after the reload was queued.
+            if (now < confirmedAt + schedule.every) {
+              watch.nextAt = confirmedAt + schedule.every;
+              continue;
+            }
+            if (await continueStuckFromSavedSummary(entry, watch, 'was asked for its brief but never produced one')) continue;
+          }
+          // Otherwise the hourly reload was never confirmed (still queued, claimed without a receipt, or its offer
+          // lapsed): nothing was collected, and the ticket tries again in an hour rather than replacing the chat.
+        }
+        if (!watch.slow) {
+          watch.slow = true;
+          logInfo(`bridge: compaction ticket ${entry.token.slice(0, 8)} for ${entry.from} keeps trying once an hour to collect its brief`);
+        }
+        watch.attempts = schedule.attempts - 1;
+        watch.nextAt = now + AUTOMATIC_WRITING_SLOW_MS - schedule.every;
+        continue;
+      }
       // An automatic ticket whose brief is written keeps opening its new chat, once an hour after the
       // quick tries: while it is open it owns the chat's recovery, so stopping here stopped the chat (#1882).
       if (phase === 'opening' && entry.automatic) {
+        // The new chat's send was dispatched and nothing came back from it in all the pickups, and a dispatched send is
+        // never replayed: a Goal or Loop chat goes on from its saved summary in a new chat instead of standing idle
+        // until the ticket expires (#2184), once per ticket. A chat that reported its message exists and is not replaced.
+        if (entry.destinationSend.state === 'dispatched-unresolved' && !watch.continuedFromSaved &&
+            await continueStuckFromSavedSummary(entry, watch, 'opened its new chat but it never reported back', true)) continue;
         if (!watch.told) {
           watch.told = true;
           logWarn(`bridge: compaction ticket ${entry.token.slice(0, 8)} for ${entry.from} could not open its new chat after ${schedule.attempts} pickups — trying once an hour`);
@@ -10754,12 +10890,22 @@ async function inspectOwedCompactions(now: number): Promise<boolean> {
       void deliver();
       acted = true;
     }
-    if (!acted) continue;
+    // A dispatched new-chat send is never replayed, so nothing is queued for it. While no browser attempt is out, the
+    // quarter hour still counts as one of the opening pickups: an automatic ticket whose new chat stays silent reaches
+    // its end instead of waiting for the ticket to expire (#2184).
+    const quiet = !acted && phase === 'opening' && entry.automatic && entry.destinationSend.state === 'dispatched-unresolved' &&
+      !commands.some((command) => command.spec.type === 'resume' && command.spec.token === entry.token);
+    if (!acted && !quiet) continue;
 
     // One pickup per reported loss: after it, a turn that works again counts as working.
     watch.streamLost = false;
     watch.attempts += 1;
+    if (watch.slow) watch.slowQueuedAt = now;
     watch.nextAt = now + schedule.every;
+    if (quiet) {
+      logInfo(`bridge: compaction ticket ${entry.token.slice(0, 8)} ${phase} pickup ${watch.attempts} of ${schedule.attempts}: its new chat has not reported back and its send is not replayed`);
+      continue;
+    }
     queued = true;
     logInfo(
       `bridge: compaction ticket ${entry.token.slice(0, 8)} ${phase} pickup ${watch.attempts} of ${schedule.attempts}`
@@ -11538,6 +11684,20 @@ async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | 'r
       }
       logInfo(`bridge: the browser confirmed ${repair.reason} recovery for ${conversationId} (${action ?? 'action unspecified'})`);
       repair.state = 'done';
+      // A compaction ticket's hourly retry counts only once a page confirmed it (#2184).
+      if (repair.reason === 'compaction') {
+        const compaction = compactionWatch.get(conversationId);
+        if (compaction) {
+          compaction.confirmedAt = Date.now();
+          // A receipt that comes after the sweep that re-armed the hour still belongs to its reload: the watch goes
+          // back to its exhausted state, so the brief's five minutes of grace start here and the saved summary
+          // follows, instead of the next hourly pickup overwriting this reload (CodeRabbit on #2189).
+          if (compaction.slow && compaction.slowQueuedAt !== undefined && compaction.confirmedAt >= compaction.slowQueuedAt) {
+            compaction.attempts = COMPACTION_PICKUPS.writing.attempts;
+            compaction.nextAt = compaction.confirmedAt + COMPACTION_PICKUPS.writing.every;
+          }
+        }
+      }
       if (repair.attribution && repair.attribution.incident.firstAttemptAt === null)
         repair.attribution.incident.firstAttemptAt = Date.now();
       if (action !== 'preserved') {

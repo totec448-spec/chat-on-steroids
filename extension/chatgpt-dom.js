@@ -742,7 +742,9 @@ var CLF_DOM = (() => {
         const id = turnIdOf(node);
         if (node.matches?.(SHELL_TURN)) {
           const users = [...node.querySelectorAll('[data-content-search-unit-key$=":user"]')].filter(slot => slot.closest('[data-turn-key]') === node);
-          const answered = node.querySelector('[data-chatgpt-agent-turn-start], [data-content-search-unit-key$=":assistant"]');
+          const answered = [...node.querySelectorAll(
+            '[data-chatgpt-agent-turn-start], [data-content-search-unit-key$=":assistant"], [class~="group/imagegen-image"], [class~="group/generated-image-preview"], [data-clf-fiber-image]'
+          )].find(el => el.closest('[data-turn-key]') === node && !el.closest('[data-content-search-unit-key$=":user"]') && !el.closest(OWN_SURFACES));
           // Two slots with the same key in one exchange are ambiguous and stay unread. Slots with
           // their own keys are not: in a chat's later turns ChatGPT keeps a message sent into the
           // running answer in the question's exchange, as its own slot (#1662). Skipping such an
@@ -2066,7 +2068,13 @@ var CLF_DOM = (() => {
    * after it (2026-11-12): the app's own text, recognised like a brief.
    */
   const FIRST_MESSAGE_RESIDUE = /^\[\[COS_CONTEXT:\d{1,9}\]\]/;
-  const OWN_RESIDUE = new RegExp(`${RESUME_RESIDUE.source}|${FIRST_MESSAGE_RESIDUE.source}`);
+  /**
+   * How the app's handoff request begins (its marker, then the instruction). ChatGPT puts the text of a message it
+   * just sent back into that chat's composer as a draft too (2026-11-14: the source chat of a second Compact &
+   * Resume in one Project), so it is the app's own text like a brief.
+   */
+  const HANDOFF_RESIDUE = /^\[\[CLF-HANDOFF:[A-Za-z0-9_-]{16,64}\]\]/;
+  const OWN_RESIDUE = new RegExp(`${RESUME_RESIDUE.source}|${FIRST_MESSAGE_RESIDUE.source}|${HANDOFF_RESIDUE.source}`);
 
   /**
    * Empties a Project home editor that holds only an earlier Compact & Resume brief (#2068).
@@ -2080,8 +2088,56 @@ var CLF_DOM = (() => {
   function clearResumeResidue() {
     // Only a brief the app typed itself, word for word, here or on an earlier page of this tab: one a person
     // added to stays (CodeRabbit on #2069). The page that typed it may be gone (#2115), so the record is stored.
-    return clearOwnResidue(OWN_RESIDUE, text => ownBrief(text));
+    return clearOwnResidue(OWN_RESIDUE, text => ownBrief(text), ownMentionFreeText);
   }
+
+  /** An app mention chip's app id ("app://asdk_app_…"), or null. */
+  function chipAppId(chip) {
+    const href = chip.getAttribute('app-mention-path') || chip.getAttribute('data-prompt-link-href') || '';
+    const match = /^app:\/\/(asdk_app_[A-Za-z0-9_-]{1,160})$/.exec(href);
+    return match ? match[1] : null;
+  }
+
+  /**
+   * The editor's words without the mention chips of this installation's own apps, compacted. The chip a restored
+   * draft ends with names the app as it is called now, so an app renamed in ChatGPT shows under a name the app does
+   * not list; the chip's id is what the app proved to be its own (#2159). Another app's chip stays in the text.
+   */
+  function ownMentionFreeText(box) {
+    if (!box?.querySelector?.(APP_MENTION_CHIP) || typeof box.cloneNode !== 'function') return null;
+    const own = new Set(ownApps.map(app => app.appId));
+    const clone = box.cloneNode(true);
+    let removed = 0;
+    for (const chip of clone.querySelectorAll(APP_MENTION_CHIP)) {
+      const id = chipAppId(chip);
+      if (id && own.has(id)) { chip.remove(); removed++; }
+    }
+    // Another app's chip left in the text: its label must not pass for a connector name once ours is gone (CodeRabbit on #2185).
+    if (!removed || clone.querySelector(APP_MENTION_CHIP)) return null;
+    return compactDraft(editorText(clone));
+  }
+
+  /**
+   * Why the editor is not ready, in a few words and no text of it (#2159): the reason a Project entry gives when
+   * it times out. Nothing here can say what a person wrote, only what kind of draft it is and whether the app
+   * knows it.
+   */
+  function draftEvidence() {
+    return safe(() => {
+      const box = composer();
+      if (!box?.isConnected) return 'no-editor';
+      if (!composerWritable()) return 'readonly';
+      if (generating() || stopButton()) return 'busy';
+      if (hasComposerAttachments()) return 'attachment';
+      const text = compactDraft(editorText(box));
+      if (!text) return 'empty';
+      const kind = RESUME_RESIDUE.test(text) ? 'brief' : FIRST_MESSAGE_RESIDUE.test(text) ? 'context' : HANDOFF_RESIDUE.test(text) ? 'handoff' : null;
+      if (!kind) return 'other';
+      const bare = ownMentionFreeText(box);
+      return `${kind}-${ownBrief(text) || (bare !== null && ownBrief(bare)) ? 'own' : 'foreign'}`;
+    }, 'unknown');
+  }
+  const mentionChipCount = () => safe(() => composer()?.querySelectorAll?.(APP_MENTION_CHIP).length ?? 0, 0);
 
   /**
    * The Compact & Resume briefs the app typed, as short fingerprints of their compacted text. They are kept in
@@ -2091,7 +2147,8 @@ var CLF_DOM = (() => {
    * of thousands of characters.
    */
   const TYPED_BRIEFS_KEY = 'clf-typed-briefs-v1';
-  const MAX_TYPED_BRIEFS = 24;
+  // Each Compact & Resume types two of the app's own texts, the handoff request and the brief.
+  const MAX_TYPED_BRIEFS = 48;
   const typedBriefs = [];
   function briefFingerprint(text) {
     // cyrb53: a fast 53-bit hash. Identity, not security; two briefs sharing one is not a concern.
@@ -2145,12 +2202,16 @@ var CLF_DOM = (() => {
     return String(value).replace(/\\(?=\r?\n)/g, '').replace(/\\(?=[!-/:-@[-`{-~])/g, '').replace(/\s+/g, '');
   }
 
-  function clearOwnResidue(pattern, owned = () => true) {
+  function clearOwnResidue(pattern, owned = () => true, withoutOwnMentions = () => null) {
     return safe(() => {
       const box = composer();
       if (!composerWritable() || generating() || stopButton() || hasComposerAttachments()) return false;
       const text = compactDraft(editorText(box));
-      if (!text || !pattern.test(text) || !owned(text)) return false;
+      if (!text || !pattern.test(text)) return false;
+      if (!owned(text)) {
+        const bare = withoutOwnMentions(box);
+        if (bare === null || !pattern.test(bare) || !owned(bare)) return false;
+      }
       box.focus();
       const selection = document.getSelection();
       if (!selection || document.activeElement !== box) return false;
@@ -3472,7 +3533,7 @@ var CLF_DOM = (() => {
     const shown = node => node && !node.closest('[hidden],[aria-hidden="true"],[inert]') && node.getClientRects().length > 0;
     const picker = () => document.querySelector(PICKER);
     const trigger = modelPickerTrigger;
-    let motion = null;
+    let motion = null, openingRefusal = null;
     const openPicker = () => {
       const panel = picker();
       return panel && panel.closest('[role="menu"],[role="dialog"]')?.getAttribute('data-state') !== 'closed' ? panel : null;
@@ -3502,7 +3563,9 @@ var CLF_DOM = (() => {
     const key = (node, value) => { if (!node || !stillCurrent()) return false; node.focus(); node.dispatchEvent(new KeyboardEvent('keydown', { key: value, code: value, bubbles: true, cancelable: true })); return true; };
     return {
       state,
+      openingRefusal: () => openingRefusal,
       async open() {
+        openingRefusal = null;
         if (!stillCurrent()) return null;
         // Native Presence waits for the menu's exit animation. Chrome can suspend
         // that animation in a hidden window, retaining a closed picker and its
@@ -3525,6 +3588,9 @@ var CLF_DOM = (() => {
         if (!openPicker()) {
           progress('open');
           const button = await readyTrigger();
+          const beforeEnter = await read();
+          const selectedBefore = beforeEnter?.choices.find(choice => choice.bucket === beforeEnter.currentBucket);
+          const nativeBefore = button?.getAttribute('data-selected-reasoning-effort');
           if (!key(button, 'Enter')) return null;
           if (!await wait(openPicker, 1500)) {
             if (!stillCurrent()) return null;
@@ -3532,10 +3598,31 @@ var CLF_DOM = (() => {
             // without window focus; re-acquire the trigger and fall back once before failing.
             const retryButton = await readyTrigger();
             if (!retryButton) return null;
+            // A native Enter can change effort without mounting the menu.
+            // Do not toggle a changed selection again with a fallback Enter/click.
+            const afterEnter = await read();
+            const selectedAfter = afterEnter?.choices.find(choice => choice.bucket === afterEnter.currentBucket);
+            const changedSelection = selectedBefore && selectedAfter &&
+              (beforeEnter.version !== afterEnter.version || selectedBefore.id !== selectedAfter.id ||
+                selectedBefore.effort !== selectedAfter.effort);
+            if (changedSelection || nativeBefore !== retryButton.getAttribute('data-selected-reasoning-effort')) {
+              openingRefusal = 'changed'; return null;
+            }
             if (!openPicker()) {
               const reopened = retryButton !== button && key(retryButton, 'Enter') && await wait(openPicker, 1000);
               if (!stillCurrent()) return null;
               if (!reopened && !openPicker()) {
+                // A second Enter on a remounted trigger can change the selected
+                // effort without opening a portal, just like the first Enter.
+                const afterRetry = await read();
+                if (!stillCurrent()) return null;
+                const selectedRetry = afterRetry?.choices.find(choice => choice.bucket === afterRetry.currentBucket);
+                const retryChanged = selectedAfter && selectedRetry &&
+                  (afterEnter.version !== afterRetry.version || selectedAfter.id !== selectedRetry.id ||
+                    selectedAfter.effort !== selectedRetry.effort);
+                if (retryChanged || nativeBefore !== retryButton.getAttribute('data-selected-reasoning-effort')) {
+                  openingRefusal = 'changed'; return null;
+                }
                 retryButton.click();
                 if (!await wait(openPicker, 1500)) return null;
               }
@@ -3739,6 +3826,31 @@ var CLF_DOM = (() => {
       if (trace.failedPhase === null) { trace.failedPhase = trace.phase; trace.failedVersion = trace.targetVersion; trace.failure = !stillCurrent() ? 'owner-lost' : code || 'unknown'; }
       return false;
     };
+    // A separately reported native reasoning trigger is additional proof only
+    // when MAIN has stamped it as the owner of this route. Legacy pickers have
+    // no such control, and do not require one.
+    const nativeReasoningOwned = () => {
+      const trigger = modelPickerTrigger();
+      return trigger?.getAttribute('data-composer-navigation-target') === 'reasoning' &&
+        trigger.getAttribute('data-clf-picker-route') === location.pathname;
+    };
+    const confirmAfterClose = async (expected, version, nativeOwned) => {
+      if (!stillCurrent()) return selectionFailed('the chat changed meanwhile', 'owner-lost');
+      const after = await readPickerState(); observe(after);
+      const current = after?.choices.find(choice => choice.bucket === after.currentBucket);
+      if (!stillCurrent()) return selectionFailed('the chat changed meanwhile', 'owner-lost');
+      // Fiber can retain High after the separate native trigger says Medium or
+      // disappears. Preserve the old layout and non-standard effort mappings.
+      const native = nativeOwned ? modelPickerTrigger() : null;
+      const nativeMatches = !nativeOwned || !['none', 'low', 'medium', 'high'].includes(current?.effort) ||
+        (native?.getAttribute('data-composer-navigation-target') === 'reasoning' &&
+          native.getAttribute('data-clf-picker-route') === location.pathname &&
+          native.getAttribute('data-selected-reasoning-effort') === current.effort);
+      return after?.version === version && current?.available === true &&
+        current.id === expected.id && current.familyId === expected.familyId &&
+        current.effort === expected.effort && nativeMatches ||
+        selectionFailed('the model or reasoning effort changed after closing the picker', 'changed');
+    };
     let result = false;
     const choose = async () => {
       if (!model && !effort) return true;
@@ -3756,7 +3868,9 @@ var CLF_DOM = (() => {
       phase('open');
       const ui = modelPickerAccess(stillCurrent, observe, phase), original = await ui.open();
       if (!original) {
-        selectionFailed('the picker did not open or could not be read', 'unreadable');
+        // Keep the existing user-visible failure wording; the structured log
+        // distinguishes a guarded selection drift from an unreadable picker.
+        selectionFailed('the picker did not open or could not be read', ui.openingRefusal() || 'unreadable');
         phase('close'); trace.closed = await ui.close(); return false;
       }
       // Account-evaluated exact selection is already proof; visiting unrelated
@@ -3766,11 +3880,14 @@ var CLF_DOM = (() => {
       if (current?.available && (current.id === model || current.familyId === model) &&
           (!effort || current.effort === effort)) {
         trace.resolved = pair(current); trace.selected = pair(current);
+        const nativeOwned = nativeReasoningOwned();
         phase('close'); const closed = trace.closed = await ui.close();
         if (!closed) return selectionFailed('the picker did not close', 'close-failed');
-        return stillCurrent();
+        return confirmAfterClose(current, original.version, nativeOwned);
       }
-      let selected = false, closed = false;
+      // A native control observed before selection must still be corroborated at close,
+      // even if provider transitions remove its ownership marker in the meantime.
+      let selected = false, closed = false, expectedChoice = null, expectedVersion = null, nativeOwned = nativeReasoningOwned();
       try {
         // Exact provider slug is preferred. Existing saved display slugs may resolve
         // only to an actually observed, available pair; never to an account default.
@@ -3841,6 +3958,7 @@ var CLF_DOM = (() => {
         const confirmed = after?.choices.find(c => c.bucket === after.currentBucket);
         trace.selected = pair(confirmed);
         selected = stillCurrent() && confirmed?.available === true && confirmed.id === choice.id && confirmed.effort === choice.effort;
+        if (selected) { expectedChoice = choice; expectedVersion = wanted.version; }
         if (!selected) selectionFailed(!stillCurrent() ? 'the chat changed meanwhile'
           : `the picker showed ${confirmed ? `${String(confirmed.id).slice(0, 24)}/${confirmed.effort}` : 'nothing readable'} after choosing ${String(choice.id).slice(0, 24)}/${choice.effort}`, !stillCurrent() ? 'owner-lost' : 'mismatch');
       } finally {
@@ -3857,10 +3975,11 @@ var CLF_DOM = (() => {
             }
           }
         }
+        if (selected) nativeOwned = nativeOwned || nativeReasoningOwned();
         phase('close'); closed = trace.closed = await ui.close();
       }
       if (selected && !closed) return selectionFailed('the picker did not close', 'close-failed');
-      return selected && closed && stillCurrent();
+      return selected && closed && confirmAfterClose(expectedChoice, expectedVersion, nativeOwned);
     };
     try { result = await choose(); return result; }
     finally {
@@ -3924,7 +4043,7 @@ var CLF_DOM = (() => {
       new URL(link.href, location.href).origin === location.origin &&
       projectHomeId(new URL(link.href, location.href).pathname) === entry.id);
     return new Promise(resolve => {
-      let clicked = false, done = false, lastObservation = 'source-not-ready', residueClears = 0;
+      let clicked = false, done = false, lastObservation = 'source-not-ready', residueClears = 0, sourceResidueClears = 0;
       // Where the source chat was when the link was clicked, and how many times its own route
       // rewrite has since taken that click away.
       let clickedPath = '', reclicks = 0;
@@ -3949,7 +4068,7 @@ var CLF_DOM = (() => {
             // An earlier brief of the app's own that ChatGPT kept in this Project home (#2068).
             // ChatGPT can restore the draft after it was emptied, so this may happen again, a few times only.
             if (residueClears < 3 && clearResumeResidue()) { residueClears++; return check(); }
-            lastObservation = 'composer-not-ready';
+            lastObservation = `composer-not-ready:draft=${draftEvidence()}:clears=${residueClears}:chips=${mentionChipCount()}`;
             return;
           }
           if (turns().some(turn => !onKeptPage(turn.node))) {
@@ -3988,7 +4107,10 @@ var CLF_DOM = (() => {
         // actual editor is mounted and ready.
         const source = composer();
         if (!source?.isConnected || !composerSubmitReady() || hasComposerAttachments()) {
-          lastObservation = 'source-not-ready';
+          // The source chat's composer can hold the app's own text that ChatGPT put back as a draft (the handoff
+          // request it just sent): emptied like the Project home's, never a person's.
+          if (source?.isConnected && sourceResidueClears < 3 && clearResumeResidue()) { sourceResidueClears++; return check(); }
+          lastObservation = `source-not-ready:draft=${draftEvidence()}:clears=${sourceResidueClears}:chips=${mentionChipCount()}`;
           return;
         }
         const links = projectLinks();

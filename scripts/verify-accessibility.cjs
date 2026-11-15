@@ -11,7 +11,7 @@ const output = path.join(root, 'outputs/accessibility');
 app.setPath('userData', path.join(output, 'runtime'));
 
 /** Pages as the settings tabs name them; `chat` is the chat screen itself. */
-const PAGES = ['home', 'general', 'usage', 'setup', 'settings', 'appearance', 'activity', 'chat'];
+const PAGES = ['home', 'general', 'usage', 'setup', 'agents-goal', 'agents-models', 'agents-workers', 'agents-tools', 'agents-browser', 'appearance', 'activity', 'chat'];
 /**
  * Known findings, each with its reason. Anything not listed here fails the check, so a new
  * unlabeled control or unreadable text cannot ship unnoticed.
@@ -55,7 +55,9 @@ app.whenReady().then(async () => {
         app.dataset.screen = chat ? 'chat' : 'settings';
         for (const s of ['.sidebar-brand', '#sidebarPrimary', '.sidebar-sessions', '#newChat']) document.querySelector(s).hidden = !chat;
         for (const id of ['tabs', 'backToChat']) document.getElementById(id).hidden = chat;
-        const target = ${JSON.stringify(page)} === 'settings' || chat ? 'chat' : ${JSON.stringify(page)};
+        const agents = ${JSON.stringify(page)}.startsWith('agents-');
+        if (agents) document.querySelector('.automation-content').dataset.agentsCurrent = ${JSON.stringify(page)}.slice('agents-'.length);
+        const target = agents || chat ? 'chat' : ${JSON.stringify(page)};
         for (const p of document.querySelectorAll('.panel')) p.classList.toggle('is-active', p.dataset.panel === target);
         for (const v of document.querySelectorAll('[data-view]')) v.hidden = v.dataset.view !== (chat ? 'chat' : 'settings');
         document.getElementById('composer').hidden = !chat;

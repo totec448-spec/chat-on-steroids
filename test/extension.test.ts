@@ -2648,6 +2648,40 @@ describe('active agent tab discard protection', () => {
     expect(delivered).toHaveLength(2);
   });
 
+  // #2184: only the question-changed hold names the question the page read and when its document loaded; anything
+  // else on the note, a malformed id, or the same fields on another reason never reach the app.
+  it('forwards the question a page read and its document start only on the question-changed hold', async () => {
+    const notes: Array<Record<string, unknown>> = [];
+    const worker = loadWorker({
+      local: new FakeStorageArea(paired),
+      session: new FakeStorageArea(),
+      fetch: vi.fn(async (input: string, init?: Record<string, unknown>) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/page-note') { notes.push(JSON.parse(String(init?.body || '{}'))); return response(200, { ok: true }); }
+        return response(200, { ok: true, repairs: [] });
+      })
+    });
+    await worker.createTab({ id: 42, url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' });
+    await worker.registerTab(42);
+    const inputId = '11111111-2222-4333-8444-555555555555', conversationId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const send = (extra: Record<string, unknown>) => worker.send({ type: 'page_note', note: 'input-held', inputId, conversationId, text: 'never forwarded', ...extra }, 42);
+    await send({ reason: 'recovery-question-changed', newestUser: 'm-older', documentSince: 1_700_000_000_123.9 });
+    await send({ reason: 'still-answering', newestUser: 'm-older', documentSince: 1_700_000_000_123 });
+    await send({ reason: 'recovery-question-changed', newestUser: 'm-\u0007bad', documentSince: 1_700_000_000_123 });
+    await send({ reason: 'recovery-question-changed', newestUser: 'm-'.padEnd(300, 'x'), documentSince: 1_700_000_000_123 });
+    await send({ reason: 'recovery-question-changed', newestUser: 'm-older', documentSince: -1 });
+    // The notes go out detached from send(): a loaded release runner needs more than waitFor's one-second default.
+    await vi.waitFor(() => expect(notes).toHaveLength(5), { timeout: 10_000 });
+    expect(notes).toEqual([
+      { note: 'input-held', reason: 'recovery-question-changed', inputId, conversationId, newestUser: 'm-older', documentSince: 1_700_000_000_123 },
+      { note: 'input-held', reason: 'still-answering', inputId, conversationId },
+      { note: 'input-held', reason: 'recovery-question-changed', inputId, conversationId },
+      { note: 'input-held', reason: 'recovery-question-changed', inputId, conversationId },
+      { note: 'input-held', reason: 'recovery-question-changed', inputId, conversationId }
+    ]);
+  });
+
   it('relays a page bootstrap step to the app by name and id only (#882)', async () => {
     const steps: unknown[] = [];
     const worker = loadWorker({

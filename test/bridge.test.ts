@@ -113,10 +113,11 @@ const {
   startBridge,
   stopBridge,
   sweepStaleSwarm,
+  cancelResumeNow,
   pickupNow,
   noteRecoverySweepTick,
   unpair,
-  workerBriefForTests, forgetPickupWatchesForTests, commandExpiryReasonForTests } = await import('../src/main/bridge.js');
+  workerBriefForTests, forgetPickupWatchesForTests, commandExpiryReasonForTests, expediteCompactionPickupForTests } = await import('../src/main/bridge.js');
 const { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } = await import('../src/main/durable.js');
 const { setStuckNotifier } = await import('../src/main/stuck-notice.js');
 const {
@@ -2550,6 +2551,31 @@ describe('activity feed', () => {
     }
   });
 
+  it('projects a durable agents finish fact without exposing its arguments or result', async () => {
+    await pair();
+    const conversationId = '69696969-5858-4747-3636-252525252525';
+    const turnId = 'tool-only-worker-turn';
+    await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'turn_start', time: Date.now(), turnId }
+    ] } });
+    for (const action of ['status', 'finish']) {
+      await recordToolCall({
+        tool: 'agents', args: { action, result: 'private-worker-payload' },
+        content: [{ type: 'text', text: 'private-worker-report' }],
+        outcome: 'ok', durationMs: 2, startedAt: Date.now(),
+        requestId: `wfr_worker_${action}`, conversationId, endsActivity: action === 'finish'
+      });
+    }
+    const feed = await request('GET', `/activity?conversationId=${conversationId}&since=0`);
+    const calls = feed.body.stream.filter((entry: any) => entry.kind === 'tool_call');
+    expect(calls).toHaveLength(2);
+    expect(calls.find((entry: any) => entry.requestId === 'wfr_worker_status')).not.toHaveProperty('endsActivity');
+    const finish = calls.find((entry: any) => entry.requestId === 'wfr_worker_finish');
+    expect(finish).toMatchObject({ turnId, tool: 'agents', outcome: 'ok', endsActivity: true });
+    expect(finish).not.toHaveProperty('args');
+    expect(finish).not.toHaveProperty('result');
+  });
+
   it('projects pending and completed process outcomes from canonical completion evidence', async () => {
     await pair();
     const conversationId = '69696969-5858-4747-3636-252525252525';
@@ -3230,6 +3256,354 @@ describe('automatic compaction', () => {
       expect(continued).toBe(true);
       expect(continuationForSession(session.id)).toMatchObject({ state: 'awaiting-chat' });
       expect(getLog().some(entry => entry.message.includes(`the loop chat continues in a new chat from saved summary ${saved}`))).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
+  // #2184 (2.1.53): the summary request went out and no brief ever came back. The quick reloads and the hourly one
+  // collected nothing, and the Goal chat stood idle under the ticket. A Loop chat goes on from its last saved summary.
+  it.each(['loop', 'off'] as const)('continues a Loop chat from its last saved summary when the summary it asked for never arrives (automation %s)', async automation => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chatA = randomUUID(), chatB = randomUUID();
+      const session = await createSession({ conversationId: chatA });
+      const first = await openContinuationNow(session.id, chatA);
+      await attachSummary(first.token, 'TASK\n\nKeep auditing the fleet manager and fix what the audit finds.\n'.repeat(4));
+      expect(await claimContinuationNow(first.token, 'page-b')).not.toBeNull();
+      expect(await commitContinuation(first.token, chatB)).toBe(true);
+      const saved = (await findSessionByConversation(chatB))!.lastHandoffId!;
+      if (automation !== 'off') await setSessionAutomation(session.id, 'loop');
+      await request('POST', '/events', {
+        body: { conversationId: chatB, events: [{ kind: 'user_message', time: Date.now(), text: 'keep going', messageId: `m-${chatB}` }] }
+      });
+      const filed = await request('POST', '/compact', { body: { conversationId: chatB, ticket: true, automatic: true } });
+      const ticket = filed.body.token as string;
+      expect(ticket, JSON.stringify(filed.body)).toEqual(expect.any(String));
+      expect((await request('POST', '/compact', { body: { conversationId: chatB, token: ticket, sourceAttempt: true } })).body.allowed).toBe(true);
+      expect((await request('POST', '/compact', { body: { conversationId: chatB, token: ticket, sourceDispatch: true } })).body.armed).toBe(true);
+      let continued = false;
+      for (let pass = 0; pass < 40 && !continued; pass++) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        await sweepStaleSwarm(Date.now());
+        const repair = ((await request('GET', '/status')).body.repairs as Array<{ conversationId: string; reason: string; token: string }> | undefined)
+          ?.find(row => row.conversationId === chatB && row.reason === 'compaction');
+        if (repair) {
+          await request('POST', '/repairs/claim', { body: { token: repair.token } });
+          await request('GET', `/status?repaired=${encodeURIComponent(repair.token)}&repairAction=reloaded`);
+        }
+        const now = continuationForSession(session.id);
+        continued = !!now && now.token !== ticket && now.state === 'awaiting-chat';
+      }
+      if (automation !== 'loop') {
+        expect(continued).toBe(false);
+        expect(getLog().some(entry => entry.message.includes(`${ticket.slice(0, 8)} does not continue from the saved summary: Goal and Loop are off for this chat`))).toBe(true);
+        return;
+      }
+      expect(continued).toBe(true);
+      expect(getLog().some(entry => entry.message.includes(`${ticket.slice(0, 8)} for ${chatB} was asked for its brief but never produced one; the loop chat continues in a new chat from saved summary ${saved}`))).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
+  // CodeRabbit on #2189: an hourly reload that was only queued, never confirmed by a page, is not a reload that
+  // collected nothing. The chat is not replaced from an older summary until the hourly reload has been confirmed.
+  it('does not continue from the saved summary while the hourly reload is still unconfirmed', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chatA = randomUUID(), chatB = randomUUID();
+      const session = await createSession({ conversationId: chatA });
+      const first = await openContinuationNow(session.id, chatA);
+      await attachSummary(first.token, 'TASK\n\nKeep auditing the fleet manager and fix what the audit finds.\n'.repeat(4));
+      expect(await claimContinuationNow(first.token, 'page-b')).not.toBeNull();
+      expect(await commitContinuation(first.token, chatB)).toBe(true);
+      await setSessionAutomation(session.id, 'loop');
+      await request('POST', '/events', {
+        body: { conversationId: chatB, events: [{ kind: 'user_message', time: Date.now(), text: 'keep going', messageId: `m-${chatB}` }] }
+      });
+      const filed = await request('POST', '/compact', { body: { conversationId: chatB, ticket: true, automatic: true } });
+      const ticket = filed.body.token as string;
+      expect((await request('POST', '/compact', { body: { conversationId: chatB, token: ticket, sourceAttempt: true } })).body.allowed).toBe(true);
+      expect((await request('POST', '/compact', { body: { conversationId: chatB, token: ticket, sourceDispatch: true } })).body.armed).toBe(true);
+      const repairFor = async () => {
+        await sweepStaleSwarm(Date.now());
+        return ((await request('GET', '/status')).body.repairs as Array<{ conversationId: string; reason: string; token: string }> | undefined)
+          ?.find(row => row.conversationId === chatB && row.reason === 'compaction') ?? null;
+      };
+      // The three quick reloads are confirmed.
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        const repair = await repairFor();
+        expect(repair).not.toBeNull();
+        await request('POST', '/repairs/claim', { body: { token: repair!.token } });
+        await request('GET', `/status?repaired=${encodeURIComponent(repair!.token)}&repairAction=reloaded`);
+      }
+      // The hourly reload is handed out and never confirmed. However long that takes, the chat is not replaced.
+      let handedOut = false;
+      for (let pass = 0; pass < 30; pass++) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        if (await repairFor()) handedOut = true;
+        const now = continuationForSession(session.id);
+        expect(now?.token === ticket && now.state === 'awaiting-summary', `replaced at pass ${pass} (hourly reload handed out: ${handedOut})`).toBe(true);
+      }
+      expect(handedOut).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
+  // 2026-11-14 (#2184, Goal chat at 1M tokens, 2.1.53): the brief was written and the new chat's Send was dispatched, but
+  // the chat never reported back; the browser attempt was released and the ticket stayed claimed. A dispatched send is
+  // never replayed, no pickup counted it, and the Goal chat stood idle until the ticket expired six hours later. After the
+  // opening pickups a quiet send like this goes on from the saved summary, as a request that never produced one does.
+  it.each([
+    ['loop', 'dispatched-unresolved', true],
+    ['off', 'dispatched-unresolved', false],
+    // A destination that reported its first message exists and has the brief: it is not replaced.
+    ['loop', 'sent', false]
+  ] as const)('continues a %s chat from its saved summary when the new chat it opened never reports back (send %s)', async (automation, sendState, continues) => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const { beginContinuationDestinationSendNow, dispatchContinuationDestinationSendNow, bindContinuationDestinationMessageNow } =
+        await import('../src/main/session/continuation.js');
+      const from = randomUUID();
+      const { sessionId, token: ticket } = await automaticCompactedSession(from, 'TASK\n\nKeep auditing the fleet manager and fix what the audit finds.\n'.repeat(4));
+      if (automation === 'loop') await setSessionAutomation(sessionId, 'loop');
+      expect(await claimContinuationNow(ticket, 'page-b')).not.toBeNull();
+      expect((await beginContinuationDestinationSendNow(ticket))?.allowed).toBe(true);
+      expect(await dispatchContinuationDestinationSendNow(ticket)).toBe(true);
+      if (sendState === 'sent') expect(await bindContinuationDestinationMessageNow(ticket, randomUUID(), 'm-resume-bootstrap')).toBe(true);
+      expect(continuationByToken(ticket)).toMatchObject({ state: 'claimed', destinationSend: { state: sendState } });
+      const saved = (await getSession(sessionId))!.lastHandoffId!;
+      let replaced = false;
+      for (let pass = 0; pass < 30 && !replaced; pass++) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        await sweepStaleSwarm(Date.now());
+        const now = continuationForSession(sessionId);
+        replaced = !!now && now.token !== ticket;
+      }
+      expect(replaced).toBe(continues);
+      const log = getLog().map(entry => entry.message);
+      if (continues) {
+        expect(log.some(message => message.includes(`${ticket.slice(0, 8)} for ${from} opened its new chat but it never reported back; the loop chat continues in a new chat from saved summary ${saved}`))).toBe(true);
+        expect(continuationByToken(ticket)?.state).toBe('aborted');
+        expect(continuationForSession(sessionId)).toMatchObject({ state: 'awaiting-chat' });
+      } else {
+        expect(continuationByToken(ticket)?.state).toBe('claimed');
+        if (sendState === 'dispatched-unresolved') expect(log.some(message => message.includes(`${ticket.slice(0, 8)} does not continue from the saved summary: Goal and Loop are off for this chat`))).toBe(true);
+      }
+    } finally { vi.useRealTimers(); }
+  });
+
+  // CodeRabbit on #2193: the old ticket ends before the saved summary opens its successor. If the app stops between the
+  // two, nothing is lost: the ended ticket owns nothing, the chat is still the session's, and the next automatic
+  // ticket (the chat is at its limit) files normally, as it does after any ended ticket.
+  it('leaves the chat free for a new automatic ticket when the ticket that opened a silent new chat has ended and no successor exists', async () => {
+    await pair();
+    const { beginContinuationDestinationSendNow, dispatchContinuationDestinationSendNow } = await import('../src/main/session/continuation.js');
+    const from = randomUUID();
+    const { sessionId, token: ticket } = await automaticCompactedSession(from, 'TASK\n\nKeep auditing the fleet manager and fix what the audit finds.\n'.repeat(4));
+    expect(await claimContinuationNow(ticket, 'page-b')).not.toBeNull();
+    expect((await beginContinuationDestinationSendNow(ticket))?.allowed).toBe(true);
+    expect(await dispatchContinuationDestinationSendNow(ticket)).toBe(true);
+    expect(await cancelResumeNow(sessionId)).toBe(true);
+    expect(continuationByToken(ticket)?.state).toBe('aborted');
+    expect(continuationForSession(sessionId)).toBeNull();
+    expect((await getSession(sessionId))?.conversationId).toBe(from);
+    const next = await openContinuationNow(sessionId, from, true);
+    expect(next.token).not.toBe(ticket);
+    expect(next.state).toBe('awaiting-summary');
+  });
+
+  // 2026-11-14 (#2184, stall 3): ChatGPT stopped saving a 790k-token Goal chat after its history limit. The live page went
+  // on streaming and the browser acknowledged two Continues, but every reload read the saved copy, whose newest question is
+  // an older one. Nothing owned the chat afterwards. A page that says its newest question is not the one the Continue
+  // answers now also says which question it read and when its document loaded; documents that loaded well after a
+  // message the app recorded and still read an older newest question, twice and ten minutes apart, prove the saved copy
+  // is not following the chat. A Goal or Loop chat that is idle then goes on from its saved summary, once.
+  describe('a chat whose saved copy stopped following it', () => {
+    const MIN = 60_000;
+    type Case = { name: string; continues: boolean; automation?: 'loop' | 'off'; second?: number; newest?: 'old' | 'delivered' | 'unknown'; recentSend?: boolean; working?: boolean; compacting?: boolean; agedTurn?: boolean; documents?: 1 | 2 };
+    it.each<Case>([
+      { name: 'two documents twelve minutes apart both read an older newest question', continues: true },
+      { name: 'only one document read it', continues: false, documents: 1 },
+      { name: 'the two documents are three minutes apart', continues: false, second: 3 },
+      { name: 'the page\'s newest question is the delivered message itself', continues: false, newest: 'delivered' },
+      { name: 'the page\'s newest question is one the app never recorded', continues: false, newest: 'unknown' },
+      { name: 'Goal and Loop are off', continues: false, automation: 'off' },
+      { name: 'the delivered message is too recent for a document to be expected to hold it', continues: false, recentSend: true },
+      { name: 'the chat is still working', continues: false, working: true },
+      { name: 'a Compact & Resume is already under way', continues: false, compacting: true },
+      // CodeRabbit on #2195: a turn the recorder still reports is not idle however old it is.
+      { name: 'a turn the recorder still reports has run for more than an hour', continues: false, working: true, agedTurn: true }
+    ])('$name', async (spec) => {
+      vi.useFakeTimers();
+      try {
+        await pair();
+        const chatA = randomUUID(), chatB = randomUUID();
+        const session = await createSession({ conversationId: chatA });
+        const first = await openContinuationNow(session.id, chatA);
+        await attachSummary(first.token, 'TASK\n\nKeep auditing the fleet manager and fix what the audit finds.\n'.repeat(4));
+        expect(await claimContinuationNow(first.token, 'page-b')).not.toBeNull();
+        expect(await commitContinuation(first.token, chatB)).toBe(true);
+        if (spec.automation !== 'off') await setSessionAutomation(session.id, 'loop');
+        const T0 = Date.now();
+        const record = (events: unknown[]) => request('POST', '/events', { body: { conversationId: chatB, events } });
+        await record([{ kind: 'user_message', time: T0, text: 'older question', messageId: 'm-older-question' }]);
+        await vi.advanceTimersByTimeAsync(MIN);
+        await record([{ kind: 'user_message', time: Date.now(), text: 'Continue the assignment', messageId: 'm-delivered-continue' }]);
+        if (spec.working) await record([{ kind: 'turn_start', time: Date.now(), turnId: 'turn-still-running' }]);
+        let underWay: string | undefined;
+        if (spec.compacting) { await compactSession(session.id); underWay = continuationForSession(session.id)?.token; }
+        const note = async (documentSince: number) => {
+          const newest = spec.newest === 'delivered' ? 'm-delivered-continue' : spec.newest === 'unknown' ? 'm-never-recorded' : 'm-older-question';
+          return request('POST', '/page-note', { body: { note: 'input-held', reason: 'recovery-question-changed', inputId: randomUUID(),
+            conversationId: chatB, newestUser: newest, documentSince } });
+        };
+        if (spec.agedTurn) await vi.advanceTimersByTimeAsync(70 * MIN);
+        await vi.advanceTimersByTimeAsync((spec.recentSend ? 2 : 10) * MIN);
+        const firstDocument = Date.now() - (spec.recentSend ? 1 : 0);
+        expect((await note(firstDocument)).status).toBe(200);
+        if (spec.documents !== 1) {
+          await vi.advanceTimersByTimeAsync((spec.second ?? 12) * MIN);
+          expect((await note(firstDocument + (spec.second ?? 12) * MIN)).status).toBe(200);
+        }
+        const now = continuationForSession(session.id);
+        expect(!!now && now.state === 'awaiting-chat').toBe(spec.continues);
+        // A refusal says which condition held the chat back, in words, once a minute (CodeRabbit on #2195).
+        const waited = (why: string) => getLog().some(entry => entry.message.includes(`${chatB}: ChatGPT's saved copy of this chat lacks the message the browser delivered, and the chat waits`) &&
+          entry.message.includes(why));
+        if (spec.working) expect(waited(spec.agedTurn ? 'the recorder still reports a turn' : 'the chat is still working')).toBe(true);
+        if (spec.compacting) {
+          expect(waited('a Compact & Resume is under way')).toBe(true);
+          expect(continuationForSession(session.id)?.token, 'the waiting Compact & Resume was kept').toBe(underWay);
+        }
+        if (spec.continues) {
+          expect(getLog().some(entry => entry.message.includes(`${chatB}: ChatGPT's saved copy of this chat lacks the message the browser delivered`) &&
+            entry.message.includes('continues in a new chat from saved summary'))).toBe(true);
+        }
+      } finally { vi.useRealTimers(); }
+    });
+  });
+
+  // CodeRabbit on #2195: two qualifying reports that overlap start one continuation, not two, and the second does not log
+  // a failure or clear the one-time marker while the first continuation is open.
+  it('starts one continuation when two qualifying reports overlap', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chatA = randomUUID(), chatB = randomUUID();
+      const session = await createSession({ conversationId: chatA });
+      const first = await openContinuationNow(session.id, chatA);
+      await attachSummary(first.token, 'TASK\n\nKeep auditing the fleet manager and fix what the audit finds.\n'.repeat(4));
+      expect(await claimContinuationNow(first.token, 'page-b')).not.toBeNull();
+      expect(await commitContinuation(first.token, chatB)).toBe(true);
+      await setSessionAutomation(session.id, 'loop');
+      const record = (events: unknown[]) => request('POST', '/events', { body: { conversationId: chatB, events } });
+      await record([{ kind: 'user_message', time: Date.now(), text: 'older question', messageId: 'm-older-question' }]);
+      await vi.advanceTimersByTimeAsync(60_000);
+      await record([{ kind: 'user_message', time: Date.now(), text: 'Continue the assignment', messageId: 'm-delivered-continue' }]);
+      const note = (documentSince: number) => request('POST', '/page-note', { body: { note: 'input-held', reason: 'recovery-question-changed',
+        inputId: randomUUID(), conversationId: chatB, newestUser: 'm-older-question', documentSince } });
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      const d1 = Date.now();
+      await note(d1);
+      await vi.advanceTimersByTimeAsync(12 * 60_000);
+      const d2 = Date.now();
+      await Promise.all([note(d2), note(d2 + 1), note(d2 + 2)]);
+      const log = getLog().map(entry => entry.message).filter(message => message.includes(chatB));
+      expect(log.filter(message => message.includes('continues in a new chat from saved summary'))).toHaveLength(1);
+      expect(log.filter(message => message.includes('could not continue from the saved summary'))).toHaveLength(0);
+      expect(continuationForSession(session.id)).toMatchObject({ state: 'awaiting-chat' });
+    } finally { vi.useRealTimers(); }
+  });
+
+  // CodeRabbit on #2195: a continuation that could not be stored again ends nothing and leaves nothing open; the one-time
+  // marker must not stay set, or the chat is never retried until the app restarts.
+  it('lets a later report try again after the saved-summary continuation failed', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chatA = randomUUID(), chatB = randomUUID();
+      const session = await createSession({ conversationId: chatA });
+      const first = await openContinuationNow(session.id, chatA);
+      await attachSummary(first.token, 'TASK\n\nKeep auditing the fleet manager and fix what the audit finds.\n'.repeat(4));
+      expect(await claimContinuationNow(first.token, 'page-b')).not.toBeNull();
+      expect(await commitContinuation(first.token, chatB)).toBe(true);
+      await setSessionAutomation(session.id, 'loop');
+      const record = (events: unknown[]) => request('POST', '/events', { body: { conversationId: chatB, events } });
+      await record([{ kind: 'user_message', time: Date.now(), text: 'older question', messageId: 'm-older-question' }]);
+      await vi.advanceTimersByTimeAsync(60_000);
+      await record([{ kind: 'user_message', time: Date.now(), text: 'Continue the assignment', messageId: 'm-delivered-continue' }]);
+      const note = (documentSince: number) => request('POST', '/page-note', { body: { note: 'input-held', reason: 'recovery-question-changed',
+        inputId: randomUUID(), conversationId: chatB, newestUser: 'm-older-question', documentSince } });
+      const continuation = await import('../src/main/session/continuation.js');
+      const reopen = vi.spyOn(continuation, 'reopenWithHandoffNow').mockResolvedValueOnce(null);
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      await note(Date.now());
+      await vi.advanceTimersByTimeAsync(12 * 60_000);
+      await note(Date.now());
+      expect(reopen).toHaveBeenCalledTimes(1);
+      expect(continuationForSession(session.id)).toBeNull();
+      expect(getLog().some(entry => entry.message.includes('could not continue from the saved summary'))).toBe(true);
+      await vi.advanceTimersByTimeAsync(2 * 60_000);
+      await note(Date.now());
+      expect(reopen).toHaveBeenCalledTimes(2);
+      expect(continuationForSession(session.id)).toMatchObject({ state: 'awaiting-chat' });
+      reopen.mockRestore();
+    } finally { vi.useRealTimers(); }
+  });
+
+  // CodeRabbit on #2189 (third round): a receipt that arrives after the five-minute sweep that re-armed the hour still
+  // belongs to its reload; the saved summary follows five minutes after it, not never.
+  it('continues from the saved summary after an hourly reload that was confirmed late', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chatA = randomUUID(), chatB = randomUUID();
+      const session = await createSession({ conversationId: chatA });
+      const first = await openContinuationNow(session.id, chatA);
+      await attachSummary(first.token, 'TASK\n\nKeep auditing the fleet manager and fix what the audit finds.\n'.repeat(4));
+      expect(await claimContinuationNow(first.token, 'page-b')).not.toBeNull();
+      expect(await commitContinuation(first.token, chatB)).toBe(true);
+      await setSessionAutomation(session.id, 'loop');
+      await request('POST', '/events', {
+        body: { conversationId: chatB, events: [{ kind: 'user_message', time: Date.now(), text: 'keep going', messageId: `m-${chatB}` }] }
+      });
+      const filed = await request('POST', '/compact', { body: { conversationId: chatB, ticket: true, automatic: true } });
+      const ticket = filed.body.token as string;
+      expect((await request('POST', '/compact', { body: { conversationId: chatB, token: ticket, sourceAttempt: true } })).body.allowed).toBe(true);
+      expect((await request('POST', '/compact', { body: { conversationId: chatB, token: ticket, sourceDispatch: true } })).body.armed).toBe(true);
+      const repairFor = async () => {
+        await sweepStaleSwarm(Date.now());
+        return ((await request('GET', '/status')).body.repairs as Array<{ conversationId: string; reason: string; token: string }> | undefined)
+          ?.find(row => row.conversationId === chatB && row.reason === 'compaction') ?? null;
+      };
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        const repair = await repairFor();
+        expect(repair).not.toBeNull();
+        await request('POST', '/repairs/claim', { body: { token: repair!.token } });
+        await request('GET', `/status?repaired=${encodeURIComponent(repair!.token)}&repairAction=reloaded`);
+      }
+      // The hourly reload is handed out, claimed, and confirmed more than a sweep later.
+      let hourly: { token: string } | null = null;
+      for (let pass = 0; pass < 20 && !hourly; pass++) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        hourly = await repairFor();
+      }
+      expect(hourly).not.toBeNull();
+      await request('POST', '/repairs/claim', { body: { token: hourly!.token } });
+      await vi.advanceTimersByTimeAsync(5 * 60_000 + 30_000);
+      await sweepStaleSwarm(Date.now());
+      expect(continuationForSession(session.id)?.token, 'replaced before the receipt').toBe(ticket);
+      await request('GET', `/status?repaired=${encodeURIComponent(hourly!.token)}&repairAction=reloaded`);
+      let continued = false;
+      for (let pass = 0; pass < 6 && !continued; pass++) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        await sweepStaleSwarm(Date.now());
+        const now = continuationForSession(session.id);
+        continued = !!now && now.token !== ticket && now.state === 'awaiting-chat';
+      }
+      expect(continued, 'the late receipt was lost').toBe(true);
     } finally { vi.useRealTimers(); }
   });
 
@@ -4571,6 +4945,60 @@ describe('automatic compaction', () => {
       }
       expect(await stuckNotes()).toHaveLength(1);
       expect(continuationByToken(token)).toMatchObject({ state: 'awaiting-summary', sourceSend: { state: 'dispatched-unresolved' } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * #2184 (2.1.53, Goal chat at 1M tokens): the summary request went out, three reloads collected nothing, and
+   * the ticket then did nothing more while it kept the chat's recovery from acting: the Goal chat stood idle until
+   * the ticket expired. An automatic ticket keeps one reload an hour after the quick tries (like its opening
+   * phase); a manual one, which a person watches, stays as #787 made it.
+   */
+  it.each([
+    ['an automatic ticket keeps one reload an hour after the quick tries', true, true],
+    ['a manual ticket gets no fourth reload', false, false]
+  ] as const)('after writing pickup 3/3, %s', async (_name, automatic, retries) => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const conversationId = `a1a1a1a1-0000-4000-8000-00000000ac${automatic ? '09' : '0a'}`;
+      await request('POST', '/events', {
+        body: { conversationId, events: [{ kind: 'user_message', time: Date.now(), text: 'generate the huge handoff', messageId: `m-slow-${automatic}` }] }
+      });
+      const filed = await request('POST', '/compact', { body: { conversationId, ticket: true, ...(automatic ? { automatic: true } : {}) } });
+      const token = filed.body.token as string;
+      expect((await request('POST', '/compact', { body: { conversationId, token, sourceAttempt: true } })).body.allowed).toBe(true);
+      expect((await request('POST', '/compact', { body: { conversationId, token, sourceDispatch: true } })).body.armed).toBe(true);
+      const takeRepair = async (): Promise<{ conversationId: string; token: string; reason: string } | null> => {
+        await sweepStaleSwarm(Date.now());
+        return (await request('GET', '/status')).body.repairs?.[0] ?? null;
+      };
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        const handout = await takeRepair();
+        expect(handout).toMatchObject({ conversationId, reason: 'compaction' });
+        await request('GET', `/status?repaired=${handout!.token}&repairAction=reloaded`);
+      }
+      // Nothing within the next half hour, then (automatic only) the hourly one.
+      for (let sweep = 0; sweep < 6; sweep += 1) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        expect(await takeRepair(), `early recovery on sweep ${sweep}`).toBeNull();
+        // The page reporting a recoverable transport error brings a quick pickup forward, but never the hourly one
+        // (CodeRabbit on #2189): once the ticket is in its hourly retry, the report is not a reason to reload now.
+        if (automatic && sweep === 0) expect(expediteCompactionPickupForTests(conversationId)).toBe(false);
+      }
+      let fourth: { conversationId: string; token: string; reason: string } | null = null;
+      for (let sweep = 0; sweep < 14 && !fourth; sweep += 1) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        fourth = await takeRepair();
+      }
+      if (retries) {
+        expect(fourth).toMatchObject({ conversationId, reason: 'compaction' });
+        expect(getLog().filter(entry => entry.message.includes(`compaction ticket ${token.slice(0, 8)} for ${conversationId} keeps trying once an hour`))).toHaveLength(1);
+        expect(continuationByToken(token)).toMatchObject({ state: 'awaiting-summary' });
+      } else expect(fourth).toBeNull();
     } finally {
       vi.useRealTimers();
     }

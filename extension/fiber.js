@@ -2305,8 +2305,8 @@
     }
     if (!entry || !turnId || entry.id !== turnId || entry.turn.items.length > MAX_TURN_ITEMS) return null;
     const place = shellQuestionPlace(entryFiber, entry, section);
-    const messages = [], calls = [], slots = [], seen = new Set(), callSources = new Map(), executionIds = [], images = new Map();
-    let lastAnswer = null, previousId = null;
+    const messages = [], calls = [], slots = [], seen = new Set(), callSources = new Map(), executionIds = [], images = new Map(), generatedImages = [];
+    let lastAnswer = null, previousId = null, unfinishedImageSkipped = false, anyImageSkipped = false;
     const remember = id => { if (!id || seen.has(id)) return false; seen.add(id); return true; };
     // GPT-6 (2026-10-12) writes each interim sentence as an assistant message inside the working
     // group while the turn runs. A top-level item owns its id; a nested copy of it is not read twice.
@@ -2325,14 +2325,19 @@
       const asset = typeof item.src === 'string' && /^sediment:\/\/(file_[A-Za-z0-9_-]{8,100})$/.exec(item.src)?.[1];
       if (!id || !asset || !Array.isArray(entry.turn.messageIds) || !entry.turn.messageIds.includes(id)) return;
       images.set(item, asset);
-      // Only typed public output metadata crosses this boundary, wherever the
-      // page places that output. A nested image is not a top-level final answer.
+      // Typed generated output metadata crosses this boundary wherever the shell places it,
+      // and a completed nested image closes an image-only working group when no final prose follows.
       const made = item.status === 'completed' && item.isPreview !== true && entry.turn.status === 'complete' ? completedAt : undefined;
       messages.push({ id, author: { role: 'tool' }, recipient: 'all', channel: 'final',
         ...(made !== undefined ? { create_time: made } : {}),
         status: item.status === 'completed' && item.isPreview !== true ? 'finished_successfully' : 'in_progress',
         content: { content_type: 'multimodal_text', parts: [{ content_type: 'image_asset_pointer',
           asset_pointer: item.src, width: item.width, height: item.height }] } });
+    };
+    const recordGeneratedImage = item => {
+      lastAnswer = item;
+      generatedImages.push(item);
+      appendGeneratedImage(item);
     };
     // The turn's start is its opening question's; its end is its last answer's. A follow-up sent into the
     // running answer, or an answer a retry replaced, keeps only a time of its own.
@@ -2366,8 +2371,7 @@
           node.closest('[data-turn-key]') === section && node.getAttribute('data-content-search-unit-key') === key);
         if (nodes.length === 1) slots.push({ node: nodes[0], id });
       } else if (item?.type === 'generated-image') {
-        lastAnswer = item;
-        appendGeneratedImage(item);
+        recordGeneratedImage(item);
       } else {
         const steps = item?.type === 'chatgpt-reasoning-group' && Array.isArray(item.items) ? item.items : [item];
         for (const step of steps) {
@@ -2376,6 +2380,10 @@
           // still checked, so a repeated one refuses the turn however far down it sits.
           if (++work > MAX_ROWS) {
             if (work > MAX_TURN_ITEMS) return null;
+            if (step?.type === 'generated-image') {
+              anyImageSkipped = true;
+              if (step.status !== 'completed' || step.isPreview === true) unfinishedImageSkipped = true;
+            }
             const counted = step?.type === 'dynamic-tool-call' ? step.tool === 'exec'
               : step?.type === 'mcp-tool-call' && ownServerName(step.invocation?.server);
             const spare = counted ? str(step.callId) : null;
@@ -2383,7 +2391,7 @@
             continue;
           }
           if (step?.type === 'generated-image') {
-            appendGeneratedImage(step);
+            recordGeneratedImage(step);
             continue;
           }
           if (step?.type === 'assistant-message' && item !== step) {
@@ -2420,14 +2428,17 @@
     // Media may share a provider message with other media, never an authored row
     // or local call. Keep malformed cross-kind identities out of the whole scan.
     if ([...images.keys()].some(item => seen.has(item.chatGptMessageId))) return null;
-    // Image-only answers have no assistant final item. Both the selected public
-    // images and the containing turn must finish; previews/retries cannot settle it.
+    // Image-only answers have no assistant final item, whether placed at the top level or
+    // inside a completed working group. Every group, image and the turn itself must finish.
     const imageAnswer = lastAnswer?.type === 'generated-image';
-    const imageEnd = imageAnswer && entry.turn.status === 'complete' && images.has(lastAnswer) &&
-      entry.turn.items.filter(item => item?.type === 'generated-image').every(item =>
+    const incompleteGroup = entry.turn.items.some(item => item?.type === 'chatgpt-reasoning-group' &&
+      (item.completed === false || (item.activeReasoning && item.activeReasoning.completed !== true)));
+    const imageEnd = imageAnswer && entry.turn.status === 'complete' && !incompleteGroup && !unfinishedImageSkipped &&
+      images.has(lastAnswer) && generatedImages.length > 0 && generatedImages.every(item =>
         images.has(item) && item.status === 'completed' && item.isPreview !== true)
       ? lastAnswer.chatGptMessageId : null;
     return { entry, place, messages, calls, slots, callSources, executionIds, images,
+      hasGeneratedImage: generatedImages.length > 0 || anyImageSkipped,
       endMessageId: imageAnswer ? imageEnd : turnEndMessageId(messages) };
   }
   /**
@@ -2548,6 +2559,12 @@
         const generatedImages = generatedImagesOf(group.sections, messages, exactImageNodes, shell?.images);
         const activities = nativeActivities.events;
         const endMessageId = shell ? shell.endMessageId : turnEndMessageId(messages);
+        // A tool-only exchange can be complete without any final message to name.
+        // Do not use this for an unreadable/unfinished text or image answer.
+        const terminalWithoutFinal = shell?.entry.turn.status === 'complete' && !endMessageId &&
+          !shell.hasGeneratedImage &&
+          !shell.entry.turn.items.some(item => item?.type === 'assistant-message' && item.phase === 'final_answer') &&
+          shell.images.size === 0;
         const trace = shell ? shellTurnTrace(shell) : [];
         // The shell supplies the completed final item's own exact message id,
         // without the classic thought-parent/timestamp tuple. Preserve that
@@ -2570,6 +2587,7 @@
           conversationConflict: conversation.conflict,
           ...(shell && !conversation.conversationId ? { requestOwnerRequired: true } : {}),
           endMessageId,
+          ...(terminalWithoutFinal ? { terminalWithoutFinal: true } : {}),
           calls,
           codeModeCalls,
           requests,
