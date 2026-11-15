@@ -17,6 +17,7 @@ vi.mock('../src/main/secrets.js', () => ({
   }),
 }));
 import { initDurableStore } from '../src/main/durable.js';
+import { getLog } from '../src/main/logger.js';
 import { getSecret } from '../src/main/secrets.js';
 import * as configModule from '../src/main/config.js';
 import { PluginManager } from '../src/main/plugins/manager.js';
@@ -821,6 +822,11 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
       await vi.waitFor(() => expect(manager.snapshot().plugins[0]?.status).toBe('ready'));
       expect(initialized).toBe(1);
       expect(JSON.stringify(await manager.call('probe', {}))).toContain('loopback is live');
+      const recoveryLog = getLog().filter(entry => entry.message.includes(`Remote MCP plugin ${row.id}:`));
+      expect(recoveryLog.map(entry => entry.message)).toEqual([
+        expect.stringContaining('connection failed (ECONNREFUSED); retry in 10s'),
+        expect.stringContaining('reconnected after 1 failed attempt(s)'),
+      ]);
       await manager.uninstall(row.id);
     } finally {
       await manager.close();
