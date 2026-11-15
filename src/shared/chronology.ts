@@ -122,6 +122,30 @@ export function continuedRequestTurn(
   return responseTurnId(turns, later);
 }
 
+/**
+ * The turn a consolidated assistant message belongs to when a steered continuation
+ * reused the same message id (#1301). Both a settled final and an unfinished message
+ * whose content sequence advances past a `continued` end move into that continuation.
+ */
+export function effectiveFinalTurnId(turns: TimelineTurns | undefined, entry: Chronological): string | undefined {
+  if (!entry.turnId || !turns) return entry.turnId ?? undefined;
+  let currentId = responseTurnId(turns, entry.turnId);
+  let candidate = turns[currentId];
+  if (candidate?.continued === true && entry.kind === 'assistant_message') {
+    const isFinal = entry.final === true || entry.state === 'final';
+    if (!isFinal && entry.contentSeq === 0) return entry.turnId;
+    const finalAt = isFinal ? (settledPositionOf(entry) ?? authoredContentSeq(entry)) : authoredContentSeq(entry);
+    const ordered = Object.entries(turns).sort(([, a], [, b]) => a.origin - b.origin);
+    while (candidate?.continued === true && finalAt > (candidate.endOrigin ?? candidate.origin)) {
+      const next = ordered.find(([, s]) => s.origin > candidate!.origin && s.origin >= (candidate!.endOrigin ?? candidate!.origin));
+      if (!next || next[1].origin === candidate.origin || next[1].origin > finalAt) break;
+      [currentId, candidate] = next;
+    }
+    if (currentId !== responseTurnId(turns, entry.turnId)) return responseTurnId(turns, currentId);
+  }
+  return entry.turnId;
+}
+
 /** The turn that was open when something started: the latest one begun by then and not yet ended. */
 export function turnOpenAt(turns: TimelineTurns | undefined, at: number): string | undefined {
   let found: string | undefined;
@@ -251,25 +275,17 @@ export function projectTimeline<T extends Chronological>(
     if (!message.turnId) continue;
     const key = assistantResponseKey(message);
     if (!key) continue;
-    const boundary = turns[responseTurnId(turns, message.turnId)] ?? null;
+    const resolved = message.kind === 'assistant_message' ? effectiveFinalTurnId(turns, message) : message.turnId;
+    const boundary = resolved ? turns[responseTurnId(turns, resolved)] ?? null : null;
     if (!responses.has(key)) responses.set(key, boundary);
     else if (!boundary || responses.get(key)?.origin !== boundary.origin) responses.set(key, null);
   }
   return entries.map(entry => {
-    let boundary = entry.turnId ? turns[responseTurnId(turns, entry.turnId)] : undefined;
+    const resolvedTurnId = entry.kind === 'assistant_message' ? effectiveFinalTurnId(turns, entry) : entry.turnId;
+    let boundary = resolvedTurnId ? turns[responseTurnId(turns, resolvedTurnId)] : undefined;
     if (!entry.turnId) {
       const response = assistantResponseKey(entry);
       if (response) boundary = responses.get(response) ?? undefined;
-    }
-    if (boundary?.continued === true && entry.kind === 'assistant_message' && (entry.final === true || entry.state === 'final')) {
-      const finalAt = residenceOf(entry);
-      let candidate = boundary;
-      while (candidate?.continued === true && finalAt > (candidate.endOrigin ?? candidate.origin)) {
-        const next = starts.find(s => s.origin > candidate.origin && s.origin >= (candidate.endOrigin ?? candidate.origin));
-        if (!next || next.origin === candidate.origin) break;
-        candidate = next;
-      }
-      if (candidate && candidate !== boundary) boundary = candidate;
     }
     // Older recorders dropped the local turn after its end. Its earlier exact request
     // proof still places the call, including when that proof lies outside this page.
@@ -325,10 +341,16 @@ export function settledPositionOf(entry: Chronological): number | undefined {
  * last work heading. A final answer therefore lives where its final text was written, beside its
  * turn's end. Display order and turn identity keep `positionOf`.
  */
-export function residenceOf(entry: Chronological): number {
+/** Sequence of the latest authored content of an assistant message (`positionOf` when absent). */
+function authoredContentSeq(entry: Chronological): number {
   const position = positionOf(entry);
-  return entry.kind === 'assistant_message' && entry.final === true && typeof entry.contentSeq === 'number' && Number.isFinite(entry.contentSeq)
+  return entry.kind === 'assistant_message' && typeof entry.contentSeq === 'number' && Number.isFinite(entry.contentSeq)
     ? Math.max(position, entry.contentSeq) : position;
+}
+
+export function residenceOf(entry: Chronological): number {
+  return entry.kind === 'assistant_message' && entry.final === true
+    ? authoredContentSeq(entry) : positionOf(entry);
 }
 
 /**
@@ -422,12 +444,15 @@ export function chronological<T extends Chronological>(entries: readonly T[]): T
     if (nextStart) continuedTo.set(turnId, nextStart.turnId);
   }
 
-  const terminalContinuedTurn = (turnId: string): string => {
+  const terminalContinuedTurn = (turnId: string, at: number): string => {
     let current = turnId;
     const seen = new Set<string>();
     while (continuedTo.has(current) && !seen.has(current)) {
+      const next = continuedTo.get(current)!;
+      const nextAnchor = anchors.get(next);
+      if (nextAnchor === undefined || nextAnchor > at) break;
       seen.add(current);
-      current = continuedTo.get(current)!;
+      current = next;
     }
     return current;
   };
@@ -452,8 +477,10 @@ export function chronological<T extends Chronological>(entries: readonly T[]): T
    * below it even when the paragraph was read later still: a hidden tab is read slowly.
    */
   const readBefore = new Map<T, number>();
-  const placeBefore = (group: readonly T[]): void => {
-    const paragraphs = group.filter(entry => entry.kind === 'assistant_message' && authoredTimeOf(entry) !== undefined)
+  const promotedTime = new Map<T, number>();
+  const sortPos = new Map<T, number>();
+  const placeBefore = (group: readonly T[], exclude: ReadonlySet<T>): void => {
+    const paragraphs = group.filter(entry => entry.kind === 'assistant_message' && !exclude.has(entry) && authoredTimeOf(entry) !== undefined)
       .sort((a, b) => position(a) - position(b) || a.seq - b.seq);
     // A call only moves above prose read live: the turn went on after it. A paragraph first seen
     // after a reload was read long after the work below it.
@@ -478,10 +505,12 @@ export function chronological<T extends Chronological>(entries: readonly T[]): T
   // canonical item, otherwise `seq`) rather than being flung to one end of its turn: a
   // missing timestamp is not evidence about when the thing happened.
   const byTime = (a: T, b: T): number => {
-    const apart = (readBefore.get(a) ?? authoredTimeOf(a) ?? a.time) - (readBefore.get(b) ?? authoredTimeOf(b) ?? b.time);
+    const apart =
+      (promotedTime.get(a) ?? readBefore.get(a) ?? authoredTimeOf(a) ?? a.time) -
+      (promotedTime.get(b) ?? readBefore.get(b) ?? authoredTimeOf(b) ?? b.time);
     return Number.isFinite(apart) && apart !== 0
       ? apart
-      : position(a) - position(b) || a.seq - b.seq;
+      : (sortPos.get(a) ?? position(a)) - (sortPos.get(b) ?? position(b)) || a.seq - b.seq;
   };
 
   const groups = new Map<number, T[]>();
@@ -507,13 +536,19 @@ export function chronological<T extends Chronological>(entries: readonly T[]): T
       if (end === undefined || entry.time <= end) inferredAnchor = activeAnchor;
     }
     let turnAnchor = entry.turnId ? anchors.get(entry.turnId) : undefined;
-    if (entry.kind === 'assistant_message' && (entry.final === true || entry.state === 'final')) {
-      if (entry.turnOrigin !== null && entry.turnOrigin !== undefined && turnAnchor !== undefined && entry.turnOrigin > turnAnchor) {
+    if (entry.kind === 'assistant_message') {
+      const isFinal = entry.final === true || entry.state === 'final';
+      const at = isFinal ? (settledPositionOf(entry) ?? authoredContentSeq(entry)) : authoredContentSeq(entry);
+      if (entry.turnOrigin !== undefined && entry.turnOrigin !== null &&
+          (isFinal || (entryPosition < entry.turnOrigin && at >= entry.turnOrigin))) {
+        // A projected final's (or post-steer promoted streaming message's) origin is authoritative
+        // when present, while an ordinary streaming revision still yields to a newly proved lower
+        // turn anchor on its local turn.
         turnAnchor = entry.turnOrigin;
-      } else if (entry.turnId && continuedTo.has(entry.turnId)) {
+      } else if (entry.turnId && continuedTo.has(entry.turnId) && (isFinal || entry.contentSeq !== 0)) {
         const endInfo = turnEndOrigins.get(entry.turnId);
-        if (endInfo && residenceOf(entry) > endInfo.endOrigin) {
-          const terminalTurn = terminalContinuedTurn(entry.turnId);
+        if (endInfo && at > endInfo.endOrigin) {
+          const terminalTurn = terminalContinuedTurn(entry.turnId, at);
           const terminalAnchor = anchors.get(terminalTurn);
           if (terminalAnchor !== undefined) turnAnchor = terminalAnchor;
         }
@@ -539,7 +574,29 @@ export function chronological<T extends Chronological>(entries: readonly T[]): T
     const group = groups.get(anchor)!;
     const isContinued = continuedAnchors.has(anchor) || group.some(entry => entry.kind === 'turn_end' && entry.continued === true);
     const ends = closing(group, isContinued);
-    placeBefore(group);
+    // A streaming message opened before this turn and updated after it started cannot rely on
+    // its pre-steer timestamp or origin inside the continuation; floor it by prior group items
+    // and tie-break by authoredContentSeq so it stays in live order until closing().
+    const promotedStreaming = new Set<T>();
+    for (const entry of group) {
+      if (entry.kind === 'assistant_message' && entry.final !== true && entry.state !== 'final' &&
+          position(entry) < anchor && authoredContentSeq(entry) > anchor) {
+        promotedStreaming.add(entry);
+        sortPos.set(entry, authoredContentSeq(entry));
+      }
+    }
+    placeBefore(group, promotedStreaming);
+    for (const entry of promotedStreaming) {
+      const at = sortPos.get(entry)!;
+      let floorTime = authoredTimeOf(entry) ?? entry.time;
+      for (const other of group) {
+        if (promotedStreaming.has(other) || other.kind === 'turn_end') continue;
+        if (position(other) > at) continue;
+        const otherTime = readBefore.get(other) ?? authoredTimeOf(other) ?? other.time;
+        if (Number.isFinite(otherTime) && (!Number.isFinite(floorTime) || otherTime > floorTime)) floorTime = otherTime;
+      }
+      if (Number.isFinite(floorTime)) promotedTime.set(entry, floorTime);
+    }
     group.sort((a, b) => rank(a, ends) - rank(b, ends) || byTime(a, b));
     out.push(...group);
   }

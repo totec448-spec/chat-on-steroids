@@ -1,3 +1,4 @@
+import { gzipSync } from 'node:zlib';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import { EventEmitter } from 'node:events';
@@ -338,6 +339,44 @@ it('does not forward a malformed raster to the renderer', async () => {
   await fs.writeFile(file, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
   const project = await addProject(path.dirname(file));
   const preview = await previewProjectFile(project.id, 'broken.png');
+  expect(preview.imageDataUrl).toBeUndefined();
+  expect(preview.note).toMatch(/preview unavailable/i);
+});
+
+it.each([
+  ['an SVG', Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8"/></svg>')],
+  ['an SVG with a byte-order mark and a leading XML declaration', Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('\n <?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>')])],
+  ['a gzipped SVG', gzipSync(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>'))],
+  ['an SVG that follows other text', Buffer.from('not an image header\n<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8"/></svg>')],
+  ['an SVG behind a comment that looks like an AVIF box', Buffer.from(`<!--ftypavif-->${'<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8"/></svg>'}`)],
+  ['an SVG behind an AVIF box whose size is far too large', Buffer.concat([Buffer.from([0x7f, 0xff, 0xff, 0xff]), Buffer.from('ftypavif'), Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8"/></svg>')])],
+  ['an SVG behind an AVIF box too small to hold its brand', Buffer.concat([Buffer.from([0, 0, 0, 8]), Buffer.from('ftypavif'), Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8"/></svg>')])],
+  ['an SVG behind an AVIF box with a zero size', Buffer.concat([Buffer.from([0, 0, 0, 0]), Buffer.from('ftypavif'), Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8"/></svg>')])],
+  ['an upper-case SVG tag after a comment', Buffer.from('<!-- c --><SVG xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8"/></SVG>')]
+])('does not decode %s that is named like a raster', async (_name, content) => {
+  // libvips would hand it to its SVG renderer; a project file is untrusted content.
+  const file = path.join(approved, 'project', 'disguised.png');
+  await fs.writeFile(file, content);
+  const project = await addProject(path.dirname(file));
+  const preview = await previewProjectFile(project.id, 'disguised.png');
+  expect(preview.imageDataUrl).toBeUndefined();
+  expect(preview.note).toMatch(/preview unavailable/i);
+});
+
+it.each(['png', 'jpeg', 'webp', 'gif', 'avif'] as const)('still previews a real %s image', async format => {
+  const file = path.join(approved, 'project', `real.${format === 'jpeg' ? 'jpg' : format}`);
+  await fs.writeFile(file, await sharp({ create: { width: 6, height: 6, channels: 3, background: 'red' } })[format]().toBuffer());
+  const project = await addProject(path.dirname(file));
+  const preview = await previewProjectFile(project.id, path.basename(file));
+  expect(preview.imageDataUrl).toMatch(/^data:image\/png;base64,/);
+});
+
+it('answers "preview unavailable" for an empty file with a raster name', async () => {
+  // sharp throws for an empty buffer when it is constructed, before any promise exists.
+  const file = path.join(approved, 'project', 'empty.png');
+  await fs.writeFile(file, Buffer.alloc(0));
+  const project = await addProject(path.dirname(file));
+  const preview = await previewProjectFile(project.id, 'empty.png');
   expect(preview.imageDataUrl).toBeUndefined();
   expect(preview.note).toMatch(/preview unavailable/i);
 });

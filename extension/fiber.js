@@ -2356,9 +2356,11 @@
           // The turn's place belongs to its first message. A message sent into the running answer
           // follows the message before it in this turn; given the turn's place it read as a version
           // of the turn's question, and Edit & resubmit folded that question away (2.1.41 round).
+          // A final_answer item is consolidated as the turn's closing answer and becomes the next
+          // turn's parent; do not advance previousId onto it before a steered user-message.
           metadata: !user ? {} : previousId ? { parent_id: previousId, clf_parent_exact: true }
             : place ? { parent_id: place.parentId, clf_parent_exact: place.versioned } : {} });
-        previousId = id;
+        if (!final) previousId = id;
         const key = `${turnId}:${index}:${role}`;
         const nodes = [...section.querySelectorAll('[data-content-search-unit-key]')].filter(node =>
           node.closest('[data-turn-key]') === section && node.getAttribute('data-content-search-unit-key') === key);
@@ -2546,6 +2548,12 @@
         const generatedImages = generatedImagesOf(group.sections, messages, exactImageNodes, shell?.images);
         const activities = nativeActivities.events;
         const endMessageId = shell ? shell.endMessageId : turnEndMessageId(messages);
+        // A tool-only exchange can be complete without any final message to name.
+        // Do not use this for an unreadable/unfinished text or image answer.
+        const terminalWithoutFinal = shell?.entry.turn.status === 'complete' && !endMessageId &&
+          !shell.entry.turn.items.some(item => item?.type === 'generated-image' ||
+            (item?.type === 'assistant-message' && item.phase === 'final_answer')) &&
+          shell.images.size === 0;
         const trace = shell ? shellTurnTrace(shell) : [];
         // The shell supplies the completed final item's own exact message id,
         // without the classic thought-parent/timestamp tuple. Preserve that
@@ -2568,6 +2576,7 @@
           conversationConflict: conversation.conflict,
           ...(shell && !conversation.conversationId ? { requestOwnerRequired: true } : {}),
           endMessageId,
+          ...(terminalWithoutFinal ? { terminalWithoutFinal: true } : {}),
           calls,
           codeModeCalls,
           requests,
