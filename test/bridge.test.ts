@@ -3516,6 +3516,42 @@ describe('automatic compaction', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  // CodeRabbit on #2195: a continuation that could not be stored again ends nothing and leaves nothing open; the one-time
+  // marker must not stay set, or the chat is never retried until the app restarts.
+  it('lets a later report try again after the saved-summary continuation failed', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chatA = randomUUID(), chatB = randomUUID();
+      const session = await createSession({ conversationId: chatA });
+      const first = await openContinuationNow(session.id, chatA);
+      await attachSummary(first.token, 'TASK\n\nKeep auditing the fleet manager and fix what the audit finds.\n'.repeat(4));
+      expect(await claimContinuationNow(first.token, 'page-b')).not.toBeNull();
+      expect(await commitContinuation(first.token, chatB)).toBe(true);
+      await setSessionAutomation(session.id, 'loop');
+      const record = (events: unknown[]) => request('POST', '/events', { body: { conversationId: chatB, events } });
+      await record([{ kind: 'user_message', time: Date.now(), text: 'older question', messageId: 'm-older-question' }]);
+      await vi.advanceTimersByTimeAsync(60_000);
+      await record([{ kind: 'user_message', time: Date.now(), text: 'Continue the assignment', messageId: 'm-delivered-continue' }]);
+      const note = (documentSince: number) => request('POST', '/page-note', { body: { note: 'input-held', reason: 'recovery-question-changed',
+        inputId: randomUUID(), conversationId: chatB, newestUser: 'm-older-question', documentSince } });
+      const continuation = await import('../src/main/session/continuation.js');
+      const reopen = vi.spyOn(continuation, 'reopenWithHandoffNow').mockResolvedValueOnce(null);
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      await note(Date.now());
+      await vi.advanceTimersByTimeAsync(12 * 60_000);
+      await note(Date.now());
+      expect(reopen).toHaveBeenCalledTimes(1);
+      expect(continuationForSession(session.id)).toBeNull();
+      expect(getLog().some(entry => entry.message.includes('could not continue from the saved summary'))).toBe(true);
+      await vi.advanceTimersByTimeAsync(2 * 60_000);
+      await note(Date.now());
+      expect(reopen).toHaveBeenCalledTimes(2);
+      expect(continuationForSession(session.id)).toMatchObject({ state: 'awaiting-chat' });
+      reopen.mockRestore();
+    } finally { vi.useRealTimers(); }
+  });
+
   // CodeRabbit on #2189 (third round): a receipt that arrives after the five-minute sweep that re-armed the hour still
   // belongs to its reload; the saved summary follows five minutes after it, not never.
   it('continues from the saved summary after an hourly reload that was confirmed late', async () => {
