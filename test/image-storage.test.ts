@@ -284,7 +284,7 @@ it('re-arms a session quota warning only after a successful write', async () => 
   stat.mockRestore();
 });
 
-it('warns once again when an actually cleared session fills a second time', async () => {
+it('warns again after successful write and fresh inventory when a cleared session refills', async () => {
   const session = await createSession({ title: 'Clear and refill recording quota' });
   const firstImage = await writeAsset(session.id, await sharp({
     create: { width: 3, height: 2, channels: 3, background: '#113355' }
@@ -312,6 +312,7 @@ it('warns once again when an actually cleared session fills a second time', asyn
   expect(cleared.removedFiles).toBe(1);
   expect(cleared.freedBytes).toBeGreaterThan(0);
   expect(await readAsset(session.id, firstImage.id)).toBeNull();
+  // Cleanup frees space; the successful write, not cleanup alone, clears the latch.
   expect(await writeOverflowText(session.id, 'stored after actual cleanup')).toMatch(/\.txt$/);
 
   const secondImage = await writeAsset(session.id, await sharp({
@@ -319,8 +320,9 @@ it('warns once again when an actually cleared session fills a second time', asyn
   }).png().toBuffer(), 'image/png');
   oversizedImage = secondImage.id;
   // A cold quota inventory must observe the refilled disk before testing
-  // repeated refusals. The separate same-process test above proves re-arming
-  // without a store restart.
+  // repeated refusals. Reinitialization independently resets the warning
+  // latch; this test does not attribute re-arming to the cleanup itself.
+  // The separate same-process test above proves successful-write re-arming.
   resetSessionStoreForTests();
   initSessionStore(directory);
   const refilled = vi.spyOn(fs, 'stat').mockImplementation(async (file, ...rest) => {
