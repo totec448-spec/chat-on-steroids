@@ -1708,12 +1708,11 @@ export function upsertNativeImageEvent(
       const incomingAsset = event.asset ? admittedAssets(sessionId, [event.asset])?.[0] : undefined;
       const staleAsset = Boolean(event.asset && !incomingAsset);
       const asset = previous?.asset ?? incomingAsset;
-      const retainedQuotaError =
-        previous?.previewError === 'quota' || previous?.previewError === 'session_quota'
-          ? previous.previewError
-          : null;
-      const previewError = retainedQuotaError && !asset
-        ? retainedQuotaError
+      const quotaError = [event.previewError, previous?.previewError].find(
+        (code): code is 'quota' | 'session_quota' => code === 'quota' || code === 'session_quota'
+      );
+      const previewError = quotaError && !asset
+        ? quotaError
         : staleAsset
           ? 'removed'
           : event.previewError ?? previous?.previewError;
