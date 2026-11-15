@@ -5828,6 +5828,12 @@ shutdown. Accept bounded validated schemas (up to 256 upstream tools and 250,000
 upstream names, and fail closed on collisions, including retained disabled-name claims. A
 cached unauthorized schema is not live exposure. External servers retain their own OS/account
 permissions; the app's approved-path wrapper is not an OS sandbox around a third-party process.
+Transient remote MCP connection failures retry only connection/discovery: the first retry waits
+10 seconds, then exponential backoff caps at five minutes. The plugin stays in `error` with its
+tools unpublished through each retry, and emits one availability change when ready again;
+no failed tool call is replayed. HTTP authorization/configuration failures do not retry.
+Disabling, uninstalling, reconfiguring, manually restarting or shutting down cancels pending
+retries. Each failed connection attempt logs its classified reason and next delay.
 Each installation owns a typed `longestCallSeconds` outside its MCP server `config`: default 120,
 integer range 1–1800 (30 minutes maximum). Old or malformed stored values normalize to 120
 without deleting the installation. Plugin install/configure IPC rejects invalid input. Changing
