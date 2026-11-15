@@ -1012,6 +1012,7 @@ const REFRESH_RETRY_BASE_MS = 200;
 const MAX_REFRESH_RETRIES = 2;
 
 let listTimer: number | undefined;
+let listTimerSeq = 0;
 let listRefreshDirty = false;
 let activeDetailTimer: number | undefined;
 let activeDetailDrainTimer: number | undefined;
@@ -3971,7 +3972,8 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
     // A sidebar completion becomes read only after this exact selection/load has successfully
     // painted its conversation at the live tail. Keep the snapshot from read time:
     // a newer completion observed while this load was in flight must remain unseen.
-    if (visible && historyBefore === null && generation === detailLoadGeneration && selection === selectionGeneration && selectedId === wanted) {
+    if (visible && historyBefore === null && generation === detailLoadGeneration && selection === selectionGeneration && selectedId === wanted &&
+        !(incremental && detail.events.length === TIMELINE_BATCH_SIZE)) {
       const wasUnseen = stampSummary ? sidebarCompletion?.isUnseen(stampSummary) === true : false;
       sidebarCompletion?.markSeen(stampSummary);
       if (!incremental || wasUnseen) paintSessions();
@@ -8980,6 +8982,7 @@ export function chatVisible(next: boolean): void {
     window.clearTimeout(toolActivityTimer);
     window.clearTimeout(durationTimer);
     toolActivityTimer = undefined;
+    listTimerSeq++;
     if (listTimer !== undefined) {
       window.clearTimeout(listTimer);
       listTimer = undefined;
@@ -9059,13 +9062,16 @@ function scheduleReload(change?: SessionChange): void {
   // One refresh owns the timer until its asynchronous read completes. Starting a
   // newer read frequently can invalidate every result on a busy/slower store.
   if (listTimer !== undefined) { listRefreshDirty = true; return; }
+  const owner = ++listTimerSeq;
   listTimer = window.setTimeout(() => {
+    if (owner !== listTimerSeq) return;
     listRefreshDirty = false;
     if (!visible) {
       listTimer = undefined;
       return;
     }
     void loadSessions('changed').finally(() => {
+      if (owner !== listTimerSeq) return;
       listTimer = undefined;
       if (listRefreshDirty && visible) scheduleReload();
     });

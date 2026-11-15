@@ -1019,6 +1019,47 @@ describe('scoped session change refresh', () => {
     );
     expect(state.detailCalls.length).toBe(5);
   });
+
+  it('fences catalog listTimer cleanup to its owner across hide and reopen', async () => {
+    const { w, state, chatVisible } = await openSelected();
+    let releaseStaleList = (_value: any) => {};
+    let holdNextList = false;
+    (w as any).api.listSessions = () => {
+      state.lists += 1;
+      const sessions = state.listed ? [state.a, state.b] : [state.b];
+      const payload = { ok: true as const, data: { sessions, activeId: null, pressure: [], total: sessions.length, nextCursor: null, blocked: [] } };
+      if (!holdNextList) return Promise.resolve(payload);
+      holdNextList = false;
+      return new Promise(resolve => { releaseStaleList = resolve; });
+    };
+
+    holdNextList = true;
+    state.b = summary(state.b.id, 20_600, 2);
+    state.changed({ allTranscripts: false, sessionIds: [state.b.id] });
+    const listsBeforeStale = state.lists;
+    await vi.waitFor(() => expect(state.lists).toBe(listsBeforeStale + 1), { timeout: 1200 });
+
+    // Hide while the stale catalog read is still pending, reopen, and schedule a fresh timer.
+    chatVisible(false);
+    chatVisible(true);
+    await vi.waitFor(() => expect(state.lists).toBe(listsBeforeStale + 2), { timeout: 800 });
+    const listsAfterReopen = state.lists;
+    state.b = summary(state.b.id, 20_700, 3);
+    state.changed({ allTranscripts: false, sessionIds: [state.b.id] });
+
+    // Completing the superseded stale read must not clear the newly scheduled timer's handle,
+    // so an immediate follow-up push still coalesces into that active 400 ms timer.
+    releaseStaleList({
+      ok: true as const,
+      data: { sessions: [state.a, state.b], activeId: null, pressure: [], total: 2, nextCursor: null, blocked: [] }
+    });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    state.b = summary(state.b.id, 20_800, 4);
+    state.changed({ allTranscripts: false, sessionIds: [state.b.id] });
+
+    await new Promise(resolve => setTimeout(resolve, 460));
+    expect(state.lists).toBe(listsAfterReopen + 1);
+  });
 });
 
 describe('recorder session change cooldown', () => {
