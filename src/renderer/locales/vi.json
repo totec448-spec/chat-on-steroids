@@ -3918,5 +3918,14 @@
   "Safer saves over SSH": "Lưu an toàn hơn qua SSH",
   "If a save fails, your original file stays as it was.": "Nếu việc lưu thất bại, tệp gốc của bạn vẫn như cũ.",
   "Write mid-answer in any language": "Nhắn giữa lúc đang trả lời, ở mọi ngôn ngữ",
-  "A message sent while ChatGPT is answering now goes out on pages in every language.": "Tin nhắn gửi khi ChatGPT đang trả lời giờ được gửi đi trên các trang ở mọi ngôn ngữ."
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "Tin nhắn gửi khi ChatGPT đang trả lời giờ được gửi đi trên các trang ở mọi ngôn ngữ.",
+  "This chat: {0} MB of {1} MB ({2} MB images, {3} MB long texts).": "Cuộc trò chuyện này: {0} MB / {1} MB ({2} MB ảnh, {3} MB văn bản dài).",
+  "Loading chat storage usage…": "Đang tải dung lượng lưu trữ của cuộc trò chuyện…",
+  "Global image cleanups do not remove long texts in active chats. You can clear images or long texts for this chat below.": "Dọn dẹp ảnh toàn cục không xóa văn bản dài trong các cuộc trò chuyện đang hoạt động. Bạn có thể xóa ảnh hoặc văn bản dài của cuộc trò chuyện này bên dưới.",
+  "Free images in this chat": "Giải phóng ảnh trong cuộc trò chuyện này",
+  "Free long texts in this chat": "Giải phóng văn bản dài trong cuộc trò chuyện này",
+  "Permanently remove all local recorded images from this chat? Chat text, original files and long texts will stay.": "Xóa vĩnh viễn tất cả ảnh đã ghi cục bộ khỏi cuộc trò chuyện này? Văn bản trò chuyện, tệp gốc và văn bản dài sẽ vẫn được giữ lại.",
+  "Permanently remove all full long texts saved in this chat? Messages and tool results will keep their beginning.": "Xóa vĩnh viễn tất cả văn bản dài đầy đủ được lưu trong cuộc trò chuyện này? Tin nhắn và kết quả công cụ sẽ chỉ giữ lại phần đầu.",
+  "This chat": "Cuộc trò chuyện này",
+  "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "Đã giải phóng {0} MB khỏi cuộc trò chuyện này. Hiện đang dùng {1} MB / {2} MB."
 }

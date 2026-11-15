@@ -4086,5 +4086,14 @@
   "Safer saves over SSH": "Enregistrements plus sûrs via SSH",
   "If a save fails, your original file stays as it was.": "Si un enregistrement échoue, votre fichier d'origine reste tel quel.",
   "Write mid-answer in any language": "Écrire en pleine réponse, dans toutes les langues",
-  "A message sent while ChatGPT is answering now goes out on pages in every language.": "Un message envoyé pendant que ChatGPT répond part désormais aussi sur les pages dans toutes les langues."
+  "A message sent while ChatGPT is answering now goes out on pages in every language.": "Un message envoyé pendant que ChatGPT répond part désormais aussi sur les pages dans toutes les langues.",
+  "This chat: {0} MB of {1} MB ({2} MB images, {3} MB long texts).": "Ce chat : {0} Mo sur {1} Mo ({2} Mo d'images, {3} Mo de longs textes).",
+  "Loading chat storage usage…": "Chargement de l'espace utilisé par ce chat…",
+  "Global image cleanups do not remove long texts in active chats. You can clear images or long texts for this chat below.": "Les nettoyages globaux d'images ne suppriment pas les longs textes des chats actifs. Vous pouvez effacer les images ou les longs textes de ce chat ci-dessous.",
+  "Free images in this chat": "Libérer les images de ce chat",
+  "Free long texts in this chat": "Libérer les longs textes de ce chat",
+  "Permanently remove all local recorded images from this chat? Chat text, original files and long texts will stay.": "Supprimer définitivement toutes les images locales enregistrées de ce chat ? Le texte du chat, les fichiers d'origine et les longs textes seront conservés.",
+  "Permanently remove all full long texts saved in this chat? Messages and tool results will keep their beginning.": "Supprimer définitivement tous les longs textes complets enregistrés dans ce chat ? Les messages et résultats d’outils garderont leur début.",
+  "This chat": "Ce chat",
+  "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "{0} Mo libérés de ce chat. {1} Mo sur {2} Mo sont maintenant utilisés ici."
 }

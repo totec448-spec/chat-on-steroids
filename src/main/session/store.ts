@@ -33,6 +33,7 @@ import type {
   ImageStorageClearResult,
   ImageStorageInfo,
   NewSessionEvent,
+  SessionImageStorageInfo,
   ReasoningEffort,
   SessionEvent,
   SessionOrigin,
@@ -4627,18 +4628,55 @@ async function chooseFromOldChats(inventory: { images: StoredImageFile[]; texts:
   return chosen;
 }
 
-export function getImageStorage(): Promise<ImageStorageInfo> {
+/** Metadata-only per-chat asset breakdown so storage dialogs can separate images from long texts. */
+async function sessionAssetBreakdown(sessionId: string): Promise<SessionImageStorageInfo> {
+  assertSessionId(sessionId);
+  const assetsDir = await verifiedAssetsDirectory(sessionId);
+  let imageBytes = 0;
+  let textBytes = 0;
+  if (assetsDir) {
+    let entries: Awaited<ReturnType<typeof fs.opendir>> | null = null;
+    try {
+      entries = await fs.opendir(assetsDir.path);
+      for await (const entry of entries) {
+        if (!entry.isFile() || !/^[0-9a-f]{8,64}\.(?:bin|png|jpg|txt)$/i.test(entry.name)) continue;
+        try {
+          const stat = await fs.lstat(path.join(assetsDir.path, entry.name));
+          if (!stat.isFile() || stat.isSymbolicLink()) continue;
+          if (entry.name.toLowerCase().endsWith('.txt')) textBytes += stat.size;
+          else imageBytes += stat.size;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        }
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    } finally {
+      await entries?.close().catch(() => undefined);
+    }
+  }
+  return { sessionId, usedBytes: imageBytes + textBytes, limitBytes: MAX_SESSION_ASSET_BYTES, imageBytes, textBytes };
+}
+
+export function getImageStorage(sessionId?: string): Promise<ImageStorageInfo> {
   return enqueueAssetOperation(async () => {
     assertReady();
     // Asset writes and cleanup already maintain this quota authority under the same queue.
     const usedBytes = globalAssetUsage ?? (await imageStorageInventory(false)).usedBytes;
-    return { usedBytes, limitBytes: globalAssetLimitBytes };
+    if (!sessionId) return { usedBytes, limitBytes: globalAssetLimitBytes };
+    return { usedBytes, limitBytes: globalAssetLimitBytes, session: await sessionAssetBreakdown(sessionId) };
   });
 }
 
 /** Explicit user cleanup. No automatic eviction and no alternate cache can bypass the chosen cap. */
-export async function clearImageStorage(mode: ImageStorageClearMode): Promise<ImageStorageClearResult> {
+export async function clearImageStorage(mode: ImageStorageClearMode, sessionId?: string): Promise<ImageStorageClearResult> {
   assertReady();
+  if (mode === 'session-images' || mode === 'session-texts') {
+    if (!sessionId) throw new Error('Session id required for per-chat cleanup');
+    assertSessionId(sessionId);
+  } else if (sessionId) {
+    assertSessionId(sessionId);
+  }
   // This synchronous edge separates already-admitted writers from writes initiated after the
   // explicit cleanup request, including callers that are still waiting on the asset queue.
   const cleanupEpoch = ++assetMutationEpoch;
@@ -4660,6 +4698,8 @@ export async function clearImageStorage(mode: ImageStorageClearMode): Promise<Im
       const inventory = await imageStorageInventory();
       const chosen: StoredImageFile[] = [];
       if (mode === 'old-chats-gib') chosen.push(...await chooseFromOldChats(inventory));
+      else if (mode === 'session-images') chosen.push(...inventory.images.filter((file) => file.sessionId === sessionId));
+      else if (mode === 'session-texts') chosen.push(...inventory.texts.filter((file) => file.sessionId === sessionId));
       else {
         const ordered = [...inventory.images].sort((left, right) =>
           left.mtimeMs - right.mtimeMs || left.sessionId.localeCompare(right.sessionId) || left.assetId.localeCompare(right.assetId));
@@ -4687,7 +4727,14 @@ export async function clearImageStorage(mode: ImageStorageClearMode): Promise<Im
       globalAssetUsage = null;
       const after = await imageStorageInventory(false);
       if (after.usedBytes < globalAssetLimitBytes) setRecordingStoreFull(false);
-      return { freedBytes, removedFiles, usedBytes: after.usedBytes, limitBytes: globalAssetLimitBytes };
+      if (!sessionId) return { freedBytes, removedFiles, usedBytes: after.usedBytes, limitBytes: globalAssetLimitBytes };
+      return {
+        freedBytes,
+        removedFiles,
+        usedBytes: after.usedBytes,
+        limitBytes: globalAssetLimitBytes,
+        session: await sessionAssetBreakdown(sessionId)
+      };
     } catch (error) {
       rejectSelection(error);
       throw error;

@@ -10,6 +10,7 @@ import {
   getImageStorage,
   initSessionStore,
   MAX_GLOBAL_ASSET_BYTES,
+  MAX_SESSION_ASSET_BYTES,
   readAsset,
   readEvents,
   recordingStorageFull,
@@ -163,4 +164,57 @@ it('uses the chosen storage limit, and a larger one ends a full store at once', 
   expect(recordingStorageFull()).toBe(true);
   // Only the offered sizes are accepted.
   expect(() => setRecordingStorageLimit(3)).toThrow();
+});
+
+// #2198: a single chat hitting 192 MB (for example, from long tool outputs) needs per-chat breakdown and cleanup.
+it('reports per-chat image vs long-text breakdown without affecting global-only calls', async () => {
+  const target = await chatWithLongOutput('target', 1, 'long output '.repeat(100));
+  const png = await sharp({ create: { width: 5, height: 4, channels: 3, background: '#113355' } }).png().toBuffer();
+  const image = await writeAsset(target.session.id, png, 'image/png');
+  const other = await chatWithLongOutput('other', 1, 'other output '.repeat(150));
+  const textSize = (await fs.stat(path.join(directory, 'sessions', target.session.id, 'assets', target.asset.id))).size;
+  const otherSize = (await fs.stat(path.join(directory, 'sessions', other.session.id, 'assets', other.asset.id))).size;
+
+  const globalOnly = await getImageStorage();
+  expect(globalOnly).toEqual({ usedBytes: textSize + image.bytes + otherSize, limitBytes: MAX_GLOBAL_ASSET_BYTES });
+
+  const withSession = await getImageStorage(target.session.id);
+  expect(withSession.session).toEqual({
+    sessionId: target.session.id,
+    usedBytes: textSize + image.bytes,
+    limitBytes: MAX_SESSION_ASSET_BYTES,
+    imageBytes: image.bytes,
+    textBytes: textSize
+  });
+});
+
+it('frees only images or only long texts from the chosen chat', async () => {
+  const target = await chatWithLongOutput('target', 1, 'target long output '.repeat(200));
+  const png = await sharp({ create: { width: 5, height: 4, channels: 3, background: '#113355' } }).png().toBuffer();
+  const targetImage = await writeAsset(target.session.id, png, 'image/png');
+  await upsertMessageEvent(target.session.id, {
+    time: Date.now(), source: 'app', kind: 'user_message', messageId: 'target-msg', message: plain('keep my text'), assets: [targetImage]
+  });
+
+  const other = await chatWithLongOutput('other', 1, 'other long output '.repeat(200));
+  const otherImage = await writeAsset(other.session.id, png, 'image/png');
+  await upsertMessageEvent(other.session.id, {
+    time: Date.now(), source: 'app', kind: 'user_message', messageId: 'other-msg', message: plain('other chat'), assets: [otherImage]
+  });
+
+  const afterImages = await clearImageStorage('session-images', target.session.id);
+  expect(afterImages.freedBytes).toBe(targetImage.bytes);
+  expect(await readAsset(target.session.id, targetImage.id)).toBeNull();
+  expect(await readAsset(target.session.id, target.asset.id)).not.toBeNull();
+  expect(await readAsset(other.session.id, otherImage.id)).not.toBeNull();
+  expect(afterImages.session?.imageBytes).toBe(0);
+  expect(afterImages.session?.textBytes).toBeGreaterThan(0);
+
+  const afterTexts = await clearImageStorage('session-texts', target.session.id);
+  expect(afterTexts.freedBytes).toBeGreaterThan(0);
+  expect(await readAsset(target.session.id, target.asset.id)).toBeNull();
+  expect(await readAsset(other.session.id, other.asset.id)).not.toBeNull();
+  expect(afterTexts.session?.usedBytes).toBe(0);
+  const tool = (await readEvents(target.session.id)).find(event => event.kind === 'tool_call');
+  expect(tool?.kind === 'tool_call' ? tool.call.result.text : null).toContain('removed to free storage');
 });
