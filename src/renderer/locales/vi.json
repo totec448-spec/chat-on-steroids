@@ -3911,6 +3911,7 @@
   "A page reload in a Project no longer makes it fail every time.": "Tải lại trang trong một dự án không còn khiến nó thất bại mỗi lần.",
   "Skills only when wanted": "Skill chỉ khi cần",
   "A Skill is not chosen when you say not to use it.": "Skill không được chọn khi bạn nói không dùng nó.",
+  "Browser {0} was not found. Install it or select another browser in Settings, then retry model discovery.": "Không tìm thấy trình duyệt {0}. Hãy cài đặt hoặc chọn trình duyệt khác trong Cài đặt, rồi tìm lại các mô hình.",
   "Compact & Resume in Projects, Goal chats that recover, and safer saves over SSH.": "Nén & Tiếp tục trong Dự án, chat Goal tự phục hồi và lưu an toàn hơn qua SSH.",
   "It works in a Project that already holds chats started through the app.": "Hoạt động trong Dự án đã có sẵn chat do ứng dụng khởi tạo.",
   "Goal chats keep going": "Chat Goal tiếp tục chạy",

@@ -95,6 +95,7 @@ const fixture = (demo, sidebar) => `
   // The made-up chat names in each app language, so a picture reads like that language's sidebar.
   // Project names are folder names and stay as they are.
   const SIDEBAR_TITLES = {
+    ar: ['الوضع الداكن للإعدادات', 'إصلاح نموذج الاتصال', 'تسريع تحميل الصور', 'تعطل شاشة تسجيل الدخول على iOS', 'إعدادات الإشعارات', 'ملاحظات الإصدار 1.4', 'إعادة كتابة دليل الإعداد', 'تنظيم لقاء الفريق'],
     de: ['Dunkelmodus einbauen', 'Kontaktformular reparieren', 'Bilder schneller laden', 'Login-Absturz auf iOS', 'Push-Einstellungen', 'Versionshinweise für 1.4', 'Anleitung überarbeiten', 'Team-Offsite planen'],
     es: ['Modo oscuro para los ajustes', 'Arreglar el formulario de contacto', 'Cargar las imágenes más rápido', 'Fallo de la pantalla de inicio de sesión en iOS', 'Ajustes de notificaciones push', 'Notas de la versión 1.4', 'Reescribir la guía de instalación', 'Planificar la salida del equipo'],
     fr: ['Mode sombre pour les réglages', 'Corriger le formulaire de contact', 'Accélérer le chargement des images', "Plantage de l'écran de connexion sur iOS", 'Réglages des notifications push', 'Notes de version 1.4', "Réécrire le guide d'installation", "Organiser le séminaire d'équipe"],

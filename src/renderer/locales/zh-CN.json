@@ -3911,6 +3911,7 @@
   "A page reload in a Project no longer makes it fail every time.": "在项目中重新加载页面不再每次都失败。",
   "Skills only when wanted": "技能仅在需要时使用",
   "A Skill is not chosen when you say not to use it.": "你说不要使用时，不会选中该技能。",
+  "Browser {0} was not found. Install it or select another browser in Settings, then retry model discovery.": "找不到浏览器 {0}。请安装它，或在设置中选择其他浏览器，然后重新查找模型。",
   "Compact & Resume in Projects, Goal chats that recover, and safer saves over SSH.": "项目中的“压缩并继续”、会自行恢复的目标聊天，以及通过 SSH 更安全地保存。",
   "It works in a Project that already holds chats started through the app.": "在已包含通过应用开始的聊天的项目中也能正常使用。",
   "Goal chats keep going": "目标聊天不再中途停住",

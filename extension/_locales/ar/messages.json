@@ -1,0 +1,1484 @@
+{
+  "content_app_did_not_answer": {
+    "message": "لم يستجب التطبيق."
+  },
+  "content_app_did_not_answer_lower": {
+    "message": "لم يستجب التطبيق"
+  },
+  "content_app_not_running": {
+    "message": "برنامج Chat On Steroids غير مشغّل على هذا الحاسوب."
+  },
+  "content_auto_compaction": {
+    "message": "الضغط التلقائي للمحادثة"
+  },
+  "content_auto_compaction_blocked_off": {
+    "message": "معطّل هنا لأن المحادثة محظورة داخل التطبيق"
+  },
+  "content_auto_compaction_manual": {
+    "message": "ضغط هذه المحادثة يدويًا"
+  },
+  "content_auto_compaction_off": {
+    "message": "الضغط التلقائي معطّل"
+  },
+  "content_auto_compaction_on": {
+    "message": "الضغط التلقائي مفعّل$1"
+  },
+  "content_auto_compaction_threshold_app": {
+    "message": "الحد المحدد داخل التطبيق"
+  },
+  "content_auto_compaction_worker_off": {
+    "message": "معطّل هنا: محادثات الوكلاء لا تُضغط تلقائيًا"
+  },
+  "content_bootstrap_composer_changed_authorizing": {
+    "message": "تغيّر مربع الرسائل أثناء طلب إذن التهيئة الأولية؛ حُفظت المسودة ولم تُرسل أي رسالة."
+  },
+  "content_bootstrap_composer_changed_before_send": {
+    "message": "تغيّر مربع الرسائل قبل إرسال التهيئة الأولية؛ حُفظت المسودة."
+  },
+  "content_bootstrap_composer_replaced": {
+    "message": "استبدل ChatGPT مربع الرسائل أثناء إدراج تهيئة البداية."
+  },
+  "content_bootstrap_composer_never_ready": {
+    "message": "لم يوفر ChatGPT مربع رسائل صالحًا للاستخدام لإتمام التهيئة الأولية."
+  },
+  "content_bootstrap_composer_unavailable": {
+    "message": "لم يُعد ChatGPT إظهار مربع رسائل صالح بعد اختيار النموذج."
+  },
+  "content_bootstrap_fresh_chat_changed": {
+    "message": "تغيّرت المحادثة الجديدة المحددة قبل إرسال التهيئة الأولية؛ لم يُرسل شيء."
+  },
+  "content_bootstrap_handoff": {
+    "message": "هذا ملخص تسليم نقله التطبيق من المحادثة السابقة، وليس نصًا كتبته أنت."
+  },
+  "content_bootstrap_insert_refused": {
+    "message": "رفض ChatGPT النص المُدرج$1"
+  },
+  "content_bootstrap_missing_target": {
+    "message": "عُرض الطلب على محادثة موجودة مسبقًا دون تحديد المحادثة المقصودة."
+  },
+  "content_bootstrap_model_unavailable": {
+    "message": "النموذج أو مستوى التفكير المطلوب غير متاح أو تعذّر التحقق منه في ChatGPT."
+  },
+  "content_bootstrap_project_not_authorized": {
+    "message": "لم يتضمن الأمر تصريحًا بالدخول إلى المشروع؛ لم يُرسل شيء."
+  },
+  "content_bootstrap_project_open_failed": {
+    "message": "تعذّر على ChatGPT فتح المشروع المصدر عبر رابطه الأصلي؛ لم يُرسل شيء."
+  },
+  "content_bootstrap_project_source_changed": {
+    "message": "لم يعد مدخل المشروع مطابقًا للمحادثة المصدر؛ لم يُرسل شيء."
+  },
+  "content_bootstrap_resume_marker_invalid": {
+    "message": "لا تحتوي تهيئة الاستئناف على علامة متابعة صالحة."
+  },
+  "content_bootstrap_send_not_accepted": {
+    "message": "لم يقبل ChatGPT إرسال تهيئة البداية."
+  },
+  "content_bootstrap_target_changed": {
+    "message": "تغيّرت المحادثة المقصودة قبل إرسال الرسالة؛ لم يُرسل شيء."
+  },
+  "content_bootstrap_worker": {
+    "message": "هذه تعليمة الوكيل $1 التي أرسلها التطبيق، وليست رسالة كتبتها أنت."
+  },
+  "content_bootstrap_wrong_conversation": {
+    "message": "أظهرت الصفحة المفتوحة محادثة مختلفة عن المقصودة."
+  },
+  "content_browser_disconnected": {
+    "message": "اتصال المتصفح ببرنامج Chat On Steroids منقطع."
+  },
+  "content_cancel": {
+    "message": "إلغاء"
+  },
+  "content_chat_blocked": {
+    "message": "المحادثة محظورة"
+  },
+  "content_chat_blocked_tip": {
+    "message": "هذه المحادثة محظورة في تطبيق Chat On Steroids: استدعاءات أدواتها مرفوضة، ووضعا الهدف والتكرار والضغط التلقائي معطّلة. لإلغاء الحظر، افتح قائمة ⋯ الخاصة بالمحادثة في شريط التطبيق الجانبي واختر «إلغاء حظر المحادثة»."
+  },
+  "content_chat_still_opening": {
+    "message": "ما زالت هذه المحادثة قيد الفتح؛ أعد المحاولة."
+  },
+  "content_chatgpt_message_box_not_ready": {
+    "message": "مربع رسائل ChatGPT غير جاهز ($1). انتظر تحميل الصفحة ثم أعد المحاولة."
+  },
+  "content_chatgpt_tool": {
+    "message": "أداة ChatGPT"
+  },
+  "content_clear": {
+    "message": "مسح"
+  },
+  "content_compact": {
+    "message": "ضغط المحادثة"
+  },
+  "content_compact_already_underway": {
+    "message": "تجري عملية ضغط لهذه المحادثة بالفعل. انتظر اكتمالها أو ألغِها."
+  },
+  "content_compact_app_opening_fresh": {
+    "message": "يحاول التطبيق فتح المحادثة الجديدة."
+  },
+  "content_compact_asking": {
+    "message": "جارٍ الطلب…"
+  },
+  "content_compact_attempt_not_repeated": {
+    "message": "$1. لن تُرسل محاولة التسليم المحفوظة مرتين."
+  },
+  "content_compact_attempt_owned": {
+    "message": "محاولة التسليم المحفوظة قيد المعالجة؛ جارٍ مطابقة رسالة ChatGPT المحددة."
+  },
+  "content_compact_blocked_unavailable_hint": {
+    "message": "لا يمكن ضغط محادثة محظورة أو استئنافها؛ إذ ستعمل المحادثة البديلة دون أدواتها. ألغِ الحظر أولًا من التطبيق."
+  },
+  "content_compact_cancel": {
+    "message": "إلغاء ضغط المحادثة"
+  },
+  "content_compact_cancel_aria": {
+    "message": "إلغاء عملية «ضغط المحادثة واستئنافها»"
+  },
+  "content_compact_cancel_failed": {
+    "message": "تعذّر إلغاء ضغط المحادثة."
+  },
+  "content_compact_chat_changed_before_start": {
+    "message": "تغيّرت المحادثة قبل بدء عملية الضغط."
+  },
+  "content_compact_chat_changed_preparing": {
+    "message": "تغيّرت المحادثة أثناء تحضير التسليم. لم يُرسل شيء."
+  },
+  "content_compact_chat_changed_stopping": {
+    "message": "تغيّرت المحادثة أثناء إيقاف الدور لبدء الضغط."
+  },
+  "content_compact_chat_changed_waiting_results": {
+    "message": "تغيّرت المحادثة أثناء انتظار نتائج الأدوات قبل الضغط."
+  },
+  "content_compact_chat_changed_waiting_tools": {
+    "message": "تغيّرت المحادثة أثناء انتظار الأدوات المحلية قبل الضغط."
+  },
+  "content_compact_chatgpt_writing": {
+    "message": "يكتب ChatGPT ملخص التسليم"
+  },
+  "content_compact_existing_draft": {
+    "message": "توجد مسودة في ChatGPT بالفعل؛ امسح مربع الرسائل قبل طلب التسليم."
+  },
+  "content_compact_failed": {
+    "message": "فشل ضغط المحادثة"
+  },
+  "content_compact_failed_request_unconfirmed": {
+    "message": "$1 لم يؤكد التطبيق حتى الآن إغلاق الطلب الذي فشل."
+  },
+  "content_compact_fresh_open": {
+    "message": "فُتحت المحادثة الجديدة"
+  },
+  "content_compact_handoff_already_submitted": {
+    "message": "أُرسلت تعليمة التسليم هنا مسبقًا. ستكتمل تلقائيًا، أو يمكنك إلغاؤها."
+  },
+  "content_compact_handoff_incomplete_detail": {
+    "message": "لم يكتمل رد التسليم. ألغِ ضغط المحادثة للعودة إليها."
+  },
+  "content_compact_handoff_problem": {
+    "message": "أبلغ ChatGPT عن مشكلة أثناء إعداد التسليم."
+  },
+  "content_compact_handoff_request_failed": {
+    "message": "تعذّر طلب ملخص التسليم من ChatGPT: $1"
+  },
+  "content_compact_handoff_stopped_detail": {
+    "message": "توقف رد التسليم. ألغِ ضغط المحادثة للعودة إليها."
+  },
+  "content_compact_insert_failed": {
+    "message": "تعذّر على المتصفح إدراج طلب التسليم ($1). تحقق من جاهزية مربع الرسائل وأعد المحاولة."
+  },
+  "content_compact_message_box_changed": {
+    "message": "تغيّر مربع الرسائل قبل إرسال تعليمة التسليم. حُفظت المسودة ولم تُضغط المحادثة."
+  },
+  "content_compact_message_box_changed_preserved": {
+    "message": "تغيّر مربع الرسائل قبل إرسال تعليمة التسليم. حُفظت المسودة."
+  },
+  "content_compact_missing_handoff_instruction": {
+    "message": "لم يرسل التطبيق تعليمة التسليم."
+  },
+  "content_compact_missing_token": {
+    "message": "لم يرسل التطبيق رمز ضغط المحادثة؛ تعذّر تتبع العملية."
+  },
+  "content_compact_nothing_yet": {
+    "message": "لا يوجد ما يمكن ضغطه بعد؛ أرسل رسالة أو حدد هدفًا ليكتب التطبيق رسالة."
+  },
+  "content_compact_opening_fresh": {
+    "message": "حُفظ ملخص التسليم؛ جارٍ فتح المحادثة الجديدة"
+  },
+  "content_compact_policy_unverified": {
+    "message": "تعذّر التحقق من السماح بضغط هذه المحادثة."
+  },
+  "content_compact_results_unconfirmed": {
+    "message": "لم يؤكد ChatGPT استلام أحدث نتائج الأدوات. لم تُضغط المحادثة."
+  },
+  "content_compact_resume_cancelled": {
+    "message": "أُلغي الاستئناف"
+  },
+  "content_compact_resume_now": {
+    "message": "ضغط المحادثة واستئنافها الآن"
+  },
+  "content_compact_send_ambiguous": {
+    "message": "نتيجة الإرسال غير مؤكدة. لن يتكرر الإرسال؛ ألغِه صراحةً إذا لم يقبله ChatGPT."
+  },
+  "content_compact_send_not_ready": {
+    "message": "لم يُرسل طلب التسليم لأن زر الإرسال أو مربع الرسائل غير جاهز. أعد المحاولة بعد تحميل الصفحة."
+  },
+  "content_compact_send_permission_unconfirmed": {
+    "message": "لم يُرسل شيء هنا لأن إذن إرسال التسليم لم يُؤكد. لن يُرسل الطلب الموجود مرتين."
+  },
+  "content_compact_send_state_unverified": {
+    "message": "تعذّر التحقق من حالة إرسال التسليم. لم يُوقَف أي شيء."
+  },
+  "content_compact_settling": {
+    "message": "جارٍ إنهاء العمليات…"
+  },
+  "content_compact_source_not_loaded": {
+    "message": "لم يُحمّل السؤال الأصلي بعد. لم تُضغط المحادثة؛ جارٍ انتظار المحادثة المصدر."
+  },
+  "content_compact_starting": {
+    "message": "جارٍ البدء…"
+  },
+  "content_compact_step_opening": {
+    "message": "فتح المحادثة الجديدة"
+  },
+  "content_compact_step_preparing": {
+    "message": "التحضير"
+  },
+  "content_compact_step_saving": {
+    "message": "حفظ الملخص"
+  },
+  "content_compact_step_writing": {
+    "message": "كتابة ملخص التسليم"
+  },
+  "content_compact_stop_failed": {
+    "message": "لم يوقف ChatGPT الدور الحالي. لم تُضغط المحادثة."
+  },
+  "content_compact_stopping": {
+    "message": "جارٍ الإيقاف…"
+  },
+  "content_compact_ticket_store_failed": {
+    "message": "تعذّر حفظ سجل عملية ضغط المحادثة."
+  },
+  "content_compact_tools_still_running": {
+    "message": "كانت الأدوات المحلية لا تزال تعمل بعد انتهاء مهلة الانتظار. لم تُضغط المحادثة."
+  },
+  "content_compact_tools_stop_unverified": {
+    "message": "تعذّر التأكد من توقف الأدوات المحلية. لم تُضغط المحادثة."
+  },
+  "content_compact_unavailable": {
+    "message": "ميزة ضغط المحادثة واستئنافها غير متاحة"
+  },
+  "content_compact_waiting_response": {
+    "message": "بانتظار رد ملخص التسليم"
+  },
+  "content_compact_waiting_store": {
+    "message": "اكتمل الملخص؛ بانتظار حفظه في التطبيق."
+  },
+  "content_compact_worker_unavailable_hint": {
+    "message": "تبقى محادثات الوكلاء في محادثاتها الحالية ولا يمكن ضغطها أو استئنافها يدويًا."
+  },
+  "content_connector_identity_ambiguous": {
+    "message": "هوية الملحق المثبت غير متاحة أو غير محددة بوضوح"
+  },
+  "content_connector_refresh_claim_unconfirmed": {
+    "message": "لم يُؤكد طلب تحديث الملحق أو ملكية الصفحة."
+  },
+  "content_connector_refresh_schema_unchanged": {
+    "message": "طُلب التحديث، لكن لم يُرصد تغيير في بنية الأدوات المطابقة."
+  },
+  "content_connector_refresh_unverified": {
+    "message": "تعذّر التحقق من تحديث الملحق."
+  },
+  "content_connector_schema_no_refresh": {
+    "message": "تختلف بنية الملحق، لكن ChatGPT لا يعرض زر «تحديث». أعد إنشاء الملحق أو نشره لتحميل البنية الحالية للأدوات."
+  },
+  "content_connector_settings_unreadable": {
+    "message": "تعذّرت قراءة بطاقة إعدادات الملحق في الصفحة المرتبطة بهذا الطلب."
+  },
+  "content_connector_settings_unverified": {
+    "message": "تعذّر التحقق من إعدادات الملحق الدقيقة."
+  },
+  "content_delivery_attachment_transfer_failed": {
+    "message": "فشل نقل المرفق. لم تُرسل الرسالة."
+  },
+  "content_delivery_attachment_transfer_incomplete": {
+    "message": "لم يكتمل نقل المرفق."
+  },
+  "content_delivery_attachment_upload_unconfirmed": {
+    "message": "لم يُؤكد رفع المرفق. تحقق من المسودة غير المرسلة وأي خطأ للملف في ChatGPT قبل إعادة المحاولة."
+  },
+  "content_delivery_chat_changed": {
+    "message": "تغيّرت المحادثة قبل التسليم المباشر."
+  },
+  "content_delivery_chat_changed_or_busy": {
+    "message": "تغيّرت المحادثة أو لم تتوقف. لم تُرسل الرسالة."
+  },
+  "content_delivery_composer_changed": {
+    "message": "تغيّر مربع رسائل ChatGPT قبل الإرسال"
+  },
+  "content_delivery_composer_stuck": {
+    "message": "أكمل ChatGPT الإجابة، لكن مربع الرسائل ما زال عالقًا على «إيقاف». جارٍ استرداد الصفحة قبل إرسال الرسالة المنتظرة."
+  },
+  "content_delivery_draft_preserved": {
+    "message": "تغيّر مربع الرسائل؛ حُفظت مسودتك."
+  },
+  "content_delivery_editor_not_writable": {
+    "message": "لم يصبح محرر ChatGPT قابلًا للكتابة قبل الإرسال."
+  },
+  "content_delivery_existing_draft": {
+    "message": "توجد بالفعل مسودة غير مرسلة داخل ChatGPT. أرسلها أو امسحها في Chrome قبل المحاولة مجددًا."
+  },
+  "content_delivery_signed_out": {
+    "message": "لم تُسجّل الدخول إلى ChatGPT في هذا المتصفح. سجّل دخولك هناك ثم أعد الإرسال."
+  },
+  "content_delivery_model_unconfirmed": {
+    "message": "تعذّر تأكيد النموذج أو مستوى التفكير المطلوب."
+  },
+  "content_delivery_stop_failed": {
+    "message": "تعذّر إيقاف الإجابة الحالية."
+  },
+  "content_delivery_temporary_chat_unconfirmed": {
+    "message": "لم يتأكد تفعيل المحادثة المؤقتة. افتح علامة تبويب المساعد وأكمل مقدمة المحادثة المؤقتة."
+  },
+  "content_delivery_text_not_accepted": {
+    "message": "لم يقبل ChatGPT النص$1"
+  },
+  "content_delivery_turn_changed": {
+    "message": "تغيّر الدور قبل التسليم المباشر."
+  },
+  "content_dismiss": {
+    "message": "تجاهل"
+  },
+  "content_empty": {
+    "message": "(فارغ)"
+  },
+  "content_error_compaction_running": {
+    "message": "يجري ضغط محادثة أخرى الآن."
+  },
+  "content_error_session_not_recorded": {
+    "message": "لا توجد جلسة محلية مسجلة لهذه المحادثة حتى الآن."
+  },
+  "content_error_turn_still_generating": {
+    "message": "انتظر انتهاء دور ChatGPT الحالي أولًا."
+  },
+  "content_failed": {
+    "message": "فشل"
+  },
+  "content_goal_add_specific": {
+    "message": "أضف هدفًا محددًا"
+  },
+  "content_goal_add_specific_hint": {
+    "message": "اكتب النتيجة التي يجب أن تصل إليها المحادثة. تتابع العمل حتى تحقيقها ثم تتوقف."
+  },
+  "content_goal_add_to_start": {
+    "message": "أضف هدفًا أو فعّل التكرار لبدء هذه المحادثة."
+  },
+  "content_goal_answer_never_settled": {
+    "message": "لم تستقر الإجابة وظلت تتغير؛ لم تُكتب رسالة."
+  },
+  "content_goal_answering": {
+    "message": "$1 يجيب الآن"
+  },
+  "content_goal_backend_chatgpt_helper": {
+    "message": "مساعد ChatGPT"
+  },
+  "content_goal_backend_custom_endpoint": {
+    "message": "نقطة اتصال مخصصة"
+  },
+  "content_goal_backend_no_answer": {
+    "message": "لم يستجب $1"
+  },
+  "content_goal_backend_offline_templates": {
+    "message": "قوالب دون اتصال"
+  },
+  "content_goal_backend_offline_templates_title": {
+    "message": "قوالب دون اتصال"
+  },
+  "content_goal_checking_again": {
+    "message": "إعادة الفحص بعد $1"
+  },
+  "content_goal_checking_finished": {
+    "message": "التحقق من اكتمال الإجابة"
+  },
+  "content_goal_delivery": {
+    "message": "$1: $2"
+  },
+  "content_goal_delivery_after_turn_finish": {
+    "message": "عند إشارة Session Finish أو بعد انتهاء الدور"
+  },
+  "content_goal_delivery_only_finish": {
+    "message": "عند إشارة Session Finish فقط"
+  },
+  "content_goal_loop_off": {
+    "message": "وضعا الهدف والتكرار معطّلان"
+  },
+  "content_goal_loop_stopped": {
+    "message": "توقف تكرار الهدف"
+  },
+  "content_goal_message_box_in_use": {
+    "message": "مربع الرسائل مشغول؛ لم يُرسل شيء."
+  },
+  "content_goal_mode_aria": {
+    "message": "وضع الهدف"
+  },
+  "content_goal_new_chat_draft_refused": {
+    "message": "لم يسمح ChatGPT باستبدال مسودة المحادثة الجديدة."
+  },
+  "content_goal_no_api_key_unavailable": {
+    "message": "لا يوجد مفتاح API؛ وضعا الهدف والتكرار غير متاحين."
+  },
+  "content_goal_nothing_sent": {
+    "message": "لم يُرسل شيء"
+  },
+  "content_goal_off_blocked": {
+    "message": "وضع الهدف معطّل — المحادثة محظورة في التطبيق"
+  },
+  "content_goal_off_prime_writes": {
+    "message": "وضع الهدف معطّل — الوكيل الرئيسي يكتب في هذه المحادثة"
+  },
+  "content_goal_on": {
+    "message": "وضع الهدف مفعّل"
+  },
+  "content_goal_on_chasing": {
+    "message": "وضع الهدف مفعّل — جارٍ العمل على هدف المحادثة"
+  },
+  "content_goal_on_no_api_key": {
+    "message": "وضع الهدف مفعّل — لا يوجد مفتاح API"
+  },
+  "content_goal_opening_empty": {
+    "message": "لم يكتب النموذج أي نص لبدء المحادثة."
+  },
+  "content_goal_opening_on_goal": {
+    "message": "فتح المحادثة باستخدام هدفها"
+  },
+  "content_goal_placeholder": {
+    "message": "ما النتيجة التي يجب أن تصل إليها هذه المحادثة؟"
+  },
+  "content_goal_reached": {
+    "message": "تحقق الهدف"
+  },
+  "content_goal_retrying": {
+    "message": "إعادة محاولة وضع الهدف بعد $1 ثانية"
+  },
+  "content_goal_save": {
+    "message": "حفظ كهدف"
+  },
+  "content_goal_save_failed": {
+    "message": "تعذّر حفظ الهدف لهذه المحادثة."
+  },
+  "content_goal_send_failed": {
+    "message": "لم يسمح ChatGPT بإرسال الرسالة."
+  },
+  "content_goal_sending_answer_to": {
+    "message": "إرسال الإجابة إلى $1"
+  },
+  "content_goal_sending_to_chatgpt": {
+    "message": "إرسالها إلى ChatGPT"
+  },
+  "content_goal_status_dismiss": {
+    "message": "إخفاء حالة الهدف"
+  },
+  "content_goal_step_reading": {
+    "message": "قراءة المحادثة"
+  },
+  "content_goal_step_sending": {
+    "message": "إرسال"
+  },
+  "content_goal_step_settling": {
+    "message": "بانتظار استقرار الإجابة"
+  },
+  "content_goal_step_writing": {
+    "message": "كتابة الرد"
+  },
+  "content_goal_wait_recovery_activity": {
+    "message": "انتظار النشاط بعد الاسترداد"
+  },
+  "content_goal_wait_recovery_reload": {
+    "message": "انتظار إعادة التحميل للاسترداد"
+  },
+  "content_goal_wait_resumed": {
+    "message": "استأنف ChatGPT العمل · انتظار إعادة المحاولة"
+  },
+  "content_goal_wait_running_tools": {
+    "message": "بانتظار الأدوات التي لا تزال تعمل"
+  },
+  "content_goal_wait_tool_inactivity": {
+    "message": "بانتظار توقف نشاط الأدوات"
+  },
+  "content_goal_reviewer_deadline": {
+    "message": "المتابعة دون المراجعة بعد $1"
+  },
+  "content_goal_wait_reviewer": {
+    "message": "بانتظار المراجع"
+  },
+  "content_goal_wait_workers": {
+    "message": "بانتظار الوكلاء الفرعيين لهذه المحادثة"
+  },
+  "content_goal_wait_slots": {
+    "message": "بانتظار مكان شاغر (عدد المحادثات العاملة معًا)"
+  },
+  "content_goal_wait_paused": {
+    "message": "طلب ChatGPT الإبطاء · الانتظار حتى يسمح بالمتابعة"
+  },
+  "content_goal_writing_first_message": {
+    "message": "$1 يكتب الرسالة الأولى"
+  },
+  "content_goal_wrote_next_message": {
+    "message": "كتب $1 الرسالة التالية"
+  },
+  "content_loop_add_specific": {
+    "message": "أضف تعليمات تكرار محددة"
+  },
+  "content_loop_add_specific_hint": {
+    "message": "اكتب ما يجب أن تحققه هذه المحادثة. ستتابع تلقائيًا دون توقف حتى تعطل التكرار بنفسك."
+  },
+  "content_loop_continuation_paused": {
+    "message": "المتابعة بالتكرار متوقفة مؤقتًا"
+  },
+  "content_loop_on_never_stops": {
+    "message": "التكرار مفعّل — لا يتوقف تلقائيًا"
+  },
+  "content_loop_on_no_api_key": {
+    "message": "التكرار مفعّل — لا يوجد مفتاح API"
+  },
+  "content_loop_save": {
+    "message": "حفظ كتكرار"
+  },
+  "content_meter_status": {
+    "message": "$1/$2 · ضغط تلقائي $3"
+  },
+  "content_mode_goal": {
+    "message": "الهدف"
+  },
+  "content_mode_goal_hint": {
+    "message": "يرسل ردودًا نيابةً عنك حتى يتحقق هدف هذه المحادثة ثم يتوقف. تُكتب باستخدام $1."
+  },
+  "content_mode_loop": {
+    "message": "التكرار"
+  },
+  "content_mode_loop_hint": {
+    "message": "يرسل ردودًا نيابةً عنك باستمرار؛ لا يوقفه إلا هذا المفتاح. تُكتب باستخدام $1."
+  },
+  "content_mode_note_blocked": {
+    "message": "محظورة في التطبيق"
+  },
+  "content_mode_note_goal": {
+    "message": "يتابع الردود حتى تحقق الهدف"
+  },
+  "content_mode_note_key_required": {
+    "message": "يتطلب مفتاح OpenRouter"
+  },
+  "content_mode_note_loop": {
+    "message": "يواصل الردود دون توقف"
+  },
+  "content_mode_note_off": {
+    "message": "لا تُكتب ردود تلقائية هنا"
+  },
+  "content_mode_note_prime_writes": {
+    "message": "الوكيل الرئيسي يكتب هنا"
+  },
+  "content_mode_off": {
+    "message": "معطّل"
+  },
+  "content_mode_off_hint": {
+    "message": "لن تُكتب رسائل تلقائيًا هنا."
+  },
+  "content_model_generic": {
+    "message": "النموذج"
+  },
+  "content_off": {
+    "message": "معطّل"
+  },
+  "content_on": {
+    "message": "مفعّل"
+  },
+  "content_opened": {
+    "message": "فُتح"
+  },
+  "content_opening": {
+    "message": "جارٍ الفتح…"
+  },
+  "content_paused": {
+    "message": "متوقف مؤقتًا"
+  },
+  "content_saving": {
+    "message": "جارٍ الحفظ…"
+  },
+  "content_settings_aria": {
+    "message": "إعدادات Chat On Steroids"
+  },
+  "content_stage_handoff_attention": {
+    "message": "رد التسليم يتطلب تدخلك"
+  },
+  "content_stage_handoff_stopped": {
+    "message": "توقف رد التسليم"
+  },
+  "content_stage_opening_fresh_chat": {
+    "message": "فتح محادثة جديدة"
+  },
+  "content_stage_saving_handoff": {
+    "message": "حفظ ملخص التسليم"
+  },
+  "content_stage_waiting_for_chrome": {
+    "message": "بانتظار Chrome"
+  },
+  "content_task_add": {
+    "message": "إضافة مهمة"
+  },
+  "content_task_api_key_unavailable": {
+    "message": "أضف مفتاح OpenRouter API في التطبيق أولًا."
+  },
+  "content_task_blocked_unavailable": {
+    "message": "هذه المحادثة محظورة داخل التطبيق. ألغِ حظرها هناك للسماح بتشغيلها مجددًا."
+  },
+  "content_task_change_hint": {
+    "message": "غيّر أو امسح النتيجة المستهدفة لهذه المحادثة. تعمل باستخدام $1."
+  },
+  "content_task_edit": {
+    "message": "تعديل المهمة"
+  },
+  "content_task_pick_mode_first": {
+    "message": "اختر وضع الهدف أو التكرار أعلاه أولًا؛ التعطيل لا يكتب أي رد."
+  },
+  "content_task_worker_unavailable": {
+    "message": "يتولى الوكيل الرئيسي قيادة محادثة الوكيل الفرعي بالفعل."
+  },
+  "content_task_write_hint": {
+    "message": "اكتب النتيجة التي يجب أن تحققها هذه المحادثة. تعمل باستخدام $1."
+  },
+  "content_tokens_from": {
+    "message": "من إجمالي عدد الرموز: $1"
+  },
+  "content_tool_calls_count": {
+    "message": "$1 استدعاء أداة"
+  },
+  "content_tool_details_loading": {
+    "message": "جارٍ تحميل التفاصيل المسجلة…"
+  },
+  "content_tool_details_unavailable": {
+    "message": "التفاصيل المسجلة غير متاحة لهذا الإصدار من النشاط."
+  },
+  "content_tool_more_changed_files": {
+    "message": "عدد الملفات المعدّلة الإضافية: $1"
+  },
+  "content_tool_outcome_completed": {
+    "message": "اكتمل"
+  },
+  "content_tool_outcome_failed": {
+    "message": "فشل"
+  },
+  "content_tool_outcome_internal_error": {
+    "message": "خطأ داخلي"
+  },
+  "content_tool_outcome_refused": {
+    "message": "مرفوض"
+  },
+  "content_tool_outcome_unknown": {
+    "message": "غير معروف"
+  },
+  "content_tool_preview_truncated": {
+    "message": "اختُصرت المعاينة من $1 حرفًا."
+  },
+  "content_tool_ran": {
+    "message": "نُفِّذ $1"
+  },
+  "content_tool_recorded_arguments": {
+    "message": "المعاملات المسجلة (بعد إخفاء البيانات الحساسة)"
+  },
+  "content_tool_recorded_result": {
+    "message": "النتيجة المسجلة (معاينة مخفية البيانات الحساسة)"
+  },
+  "content_turn_auto_continue_stopped": {
+    "message": "أوقفت المتابعة التلقائية دورًا صامتًا لم يتغير."
+  },
+  "content_turn_chatgpt_interrupted": {
+    "message": "وضع ChatGPT علامة «انقطع» على هذا الدور."
+  },
+  "content_turn_outcome": {
+    "message": "الدور $1"
+  },
+  "content_turn_replaced_by_user_message": {
+    "message": "استبدلت رسالة جديدة من المستخدم الدور غير المكتمل."
+  },
+  "content_turn_stalled_detail": {
+    "message": "لا توجد مخرجات ظاهرة أو تقدم لمدة عشر دقائق."
+  },
+  "content_turn_stalled_error": {
+    "message": "لم يظهر تقدم خلال عشر دقائق. تعذّر على التطبيق التأكد من اكتمال هذا الدور."
+  },
+  "content_turn_started": {
+    "message": "بدأ الدور"
+  },
+  "content_turn_stop_requested": {
+    "message": "طُلب الإيقاف؛ لم تعد الصفحة الأصلية تُظهر توليدًا جارياً."
+  },
+  "content_turn_stop_unseen": {
+    "message": "توقف هنا: لم يعد ChatGPT يعرض هذه الإجابة على أنها قيد التنفيذ."
+  },
+  "content_unknown_error": {
+    "message": "خطأ غير معروف"
+  },
+  "content_waiting": {
+    "message": "جارٍ الانتظار…"
+  },
+  "content_waiting_current_operation": {
+    "message": "ما زال التطبيق ينتظر اكتمال العملية الحالية."
+  },
+  "content_waiting_local_tool": {
+    "message": "بانتظار انتهاء أداة محلية"
+  },
+  "content_waiting_local_tools": {
+    "message": "بانتظار انتهاء $1 أداة محلية"
+  },
+  "content_worker_generic": {
+    "message": "وكيل"
+  },
+  "content_worker_label": {
+    "message": "الوكيل"
+  },
+  "content_worker_retired": {
+    "message": "أُوقف الوكيل $1 بسبب $2. لم تعد هذه المحادثة قادرة على استخدام الأدوات المحلية."
+  },
+  "content_worker_still_running": {
+    "message": "الوكيل ما زال يعمل: $1"
+  },
+  "content_workers_still_running": {
+    "message": "عدد الوكلاء الذين ما زالوا يعملون: $1"
+  },
+  "content_working": {
+    "message": "جارٍ العمل…"
+  },
+  "content_writing": {
+    "message": "جارٍ الكتابة…"
+  },
+  "extension_action_title": {
+    "message": "Chat On Steroids"
+  },
+  "extension_description": {
+    "message": "تربط إضافة المتصفح ChatGPT ببرنامج Chat On Steroids وتتحكم بعلامات تبويب المتصفح في الخلفية باستخدام DOM ولقطات الشاشة وأدوات المطور."
+  },
+  "extension_name": {
+    "message": "إضافة متصفح Chat On Steroids"
+  },
+  "popup_advanced": {
+    "message": "متقدم"
+  },
+  "popup_attribution_agent_key": {
+    "message": "مفتاح الوكيل"
+  },
+  "popup_attribution_exact_request_id": {
+    "message": "معرّف الطلب المطابق"
+  },
+  "popup_attribution_not_placed_in_chat": {
+    "message": "لم يُسند إلى محادثة"
+  },
+  "popup_attribution_only_chat_generating": {
+    "message": "المحادثة الوحيدة التي تولّد إجابة"
+  },
+  "popup_attribution_request_id_not_resolved": {
+    "message": "تعذّر تحديد معرّف الطلب"
+  },
+  "popup_attribution_tool_block_on_page": {
+    "message": "كتلة الأداة الظاهرة في الصفحة"
+  },
+  "popup_call_details": {
+    "message": "$1 — عُثر على $2 · استلام التطبيق $3 · المالك $4 · نشاط الأداة $5"
+  },
+  "popup_chat_id": {
+    "message": "معرّف المحادثة"
+  },
+  "popup_chatgpt_tab": {
+    "message": "علامة تبويب ChatGPT"
+  },
+  "popup_confirmed": {
+    "message": "تم التأكيد"
+  },
+  "popup_connect": {
+    "message": "اتصال"
+  },
+  "popup_copied": {
+    "message": "نُسخ"
+  },
+  "popup_copy": {
+    "message": "نسخ"
+  },
+  "popup_copy_chat_id": {
+    "message": "نسخ معرّف المحادثة"
+  },
+  "popup_copy_current_request_id": {
+    "message": "نسخ معرّف الطلب الحالي"
+  },
+  "popup_copy_failed": {
+    "message": "فشل النسخ"
+  },
+  "popup_count_held": {
+    "message": "$1 عنصرًا معلّقًا"
+  },
+  "popup_count_held_in_page": {
+    "message": "$1 عنصرًا معلّقًا في الصفحة"
+  },
+  "popup_count_queued": {
+    "message": "$1 في قائمة الانتظار"
+  },
+  "popup_current_request": {
+    "message": "الطلب الحالي"
+  },
+  "popup_detail_app": {
+    "message": "التطبيق"
+  },
+  "popup_detail_app_session": {
+    "message": "جلسة التطبيق"
+  },
+  "popup_detail_app_value": {
+    "message": "الإصدار $1 · المنفذ $2"
+  },
+  "popup_detail_chat_id": {
+    "message": "معرّف المحادثة"
+  },
+  "popup_detail_delivered": {
+    "message": "تم التسليم"
+  },
+  "popup_detail_extension": {
+    "message": "الإضافة"
+  },
+  "popup_detail_extension_value": {
+    "message": "الإصدار $1 · البروتوكول $2"
+  },
+  "popup_detail_in_this_browser": {
+    "message": "في هذا المتصفح"
+  },
+  "popup_detail_last_delivery": {
+    "message": "آخر عملية تسليم"
+  },
+  "popup_detail_last_delivery_value": {
+    "message": "$1 · $2 · قبل $3"
+  },
+  "popup_detail_observed": {
+    "message": "تم رصده"
+  },
+  "popup_detail_ownership": {
+    "message": "ملكية الطلب"
+  },
+  "popup_detail_page_sends": {
+    "message": "عمليات إرسال الصفحة"
+  },
+  "popup_detail_recorder": {
+    "message": "المسجّل"
+  },
+  "popup_detail_recorder_value": {
+    "message": "fiber الإصدار $1 · التشغيل $2"
+  },
+  "popup_detail_tab": {
+    "message": "علامة التبويب"
+  },
+  "popup_detail_tab_value": {
+    "message": "$1 · الجيل $2"
+  },
+  "popup_detail_turn": {
+    "message": "الدور"
+  },
+  "popup_detail_turn_live": {
+    "message": "$1 · نشط"
+  },
+  "popup_no": {
+    "message": "لا"
+  },
+  "popup_no_record": {
+    "message": "لا يوجد سجل"
+  },
+  "popup_overwrite_chatgpt": {
+    "message": "استبدال صفوف أدوات ChatGPT"
+  },
+  "popup_owner_confirmed": {
+    "message": "تم التأكد من المالك"
+  },
+  "popup_pending": {
+    "message": "قيد الانتظار"
+  },
+  "popup_pipeline_call_fallback_many": {
+    "message": "تعذّر إسناد $1 استدعاءً إلى معرّف الطلب. استُخدم البديل: $2."
+  },
+  "popup_pipeline_call_fallback_one": {
+    "message": "تعذّر إسناد الاستدعاء إلى معرّف الطلب. استُخدم البديل: $1."
+  },
+  "popup_pipeline_delivery_blocked": {
+    "message": "الإرسال محظور حتى يتصل التطبيق ويتأكد توافق البروتوكول."
+  },
+  "popup_pipeline_delivery_rejected": {
+    "message": "رفض التطبيق آخر عملية إرسال ($1)."
+  },
+  "popup_pipeline_extension_blocked": {
+    "message": "الإضافة لا تقبل ملاحظات علامة التبويب هذه ($1). أعد تحميل علامة تبويب ChatGPT."
+  },
+  "popup_pipeline_id_found_waiting_receipt": {
+    "message": "عُثر على المعرّف في أحدث دور. بانتظار تأكيد استلام التطبيق."
+  },
+  "popup_pipeline_no_recorder": {
+    "message": "لا يوجد مسجّل في علامة التبويب هذه. أعد تحميل الصفحة."
+  },
+  "popup_pipeline_owner_confirmed_no_activity": {
+    "message": "تأكدت ملكية الطلب، لكن لم يُسجّل نشاط أدوات مطابق بعد."
+  },
+  "popup_pipeline_queued_retrying": {
+    "message": "الطلب في قائمة الانتظار هنا. جارٍ إعادة محاولة تسليمه للتطبيق."
+  },
+  "popup_pipeline_received_waiting_owner": {
+    "message": "استلم التطبيق المعرّف. بانتظار تأكيد المالك."
+  },
+  "popup_pipeline_request_id_matched_many": {
+    "message": "طابق $1 من معرّفات الطلبات نشاط الأدوات المسجل."
+  },
+  "popup_pipeline_request_id_matched_one": {
+    "message": "طابَقَ معرّف طلب واحد نشاط الأدوات المسجل."
+  },
+  "popup_pipeline_waiting_first_message": {
+    "message": "بانتظار الرسالة الأولى."
+  },
+  "popup_pipeline_not_a_chat": {
+    "message": "صفحة ChatGPT هذه ليست محادثة، لذا لا توجد محادثة يمكن للتطبيق متابعتها هنا. افتح محادثة أو ابدأ واحدة جديدة."
+  },
+  "popup_pipeline_waiting_latest_request_id": {
+    "message": "سُجلت المحادثة. بانتظار معرّف الطلب من أحدث دور."
+  },
+  "popup_pipeline_waiting_session_receipt": {
+    "message": "التطبيق متاح. بانتظار تأكيد استلام جلسة هذه المحادثة."
+  },
+  "popup_reaching_app": {
+    "message": "جارٍ الاتصال بالتطبيق"
+  },
+  "popup_recording_this_chat": {
+    "message": "تسجيل هذه المحادثة"
+  },
+  "popup_request_id": {
+    "message": "معرّف الطلب"
+  },
+  "popup_request_id_found": {
+    "message": "عُثر على معرّف الطلب"
+  },
+  "popup_section_augment_chatgpt": {
+    "message": "توسيع إمكانيات ChatGPT"
+  },
+  "popup_section_session_capture": {
+    "message": "تسجيل الجلسة"
+  },
+  "popup_secure_storage_unavailable": {
+    "message": "تخزين بيانات الاعتماد الآمن غير متاح. افتح Chat On Steroids لعرض تعليمات الإعداد."
+  },
+  "popup_sent_to_app": {
+    "message": "أُرسل إلى التطبيق"
+  },
+  "popup_state_app_not_reachable": {
+    "message": "تعذّر الوصول إلى التطبيق"
+  },
+  "popup_state_app_reachable_port": {
+    "message": "التطبيق متاح · المنفذ $1"
+  },
+  "popup_state_disconnected": {
+    "message": "غير متصل"
+  },
+  "popup_state_looking_for_app": {
+    "message": "جارٍ البحث عن التطبيق"
+  },
+  "popup_state_port_connecting": {
+    "message": "المنفذ $1 · جارٍ الاتصال"
+  },
+  "popup_state_version_mismatch": {
+    "message": "الإصدارات غير متوافقة"
+  },
+  "popup_status_answering": {
+    "message": "يجيب الآن"
+  },
+  "popup_status_blocked": {
+    "message": "محظور"
+  },
+  "popup_status_bound": {
+    "message": "مرتبط"
+  },
+  "popup_status_failed": {
+    "message": "فشل"
+  },
+  "popup_status_id_confirmed": {
+    "message": "تم تأكيد المعرّف"
+  },
+  "popup_status_idle": {
+    "message": "خامل"
+  },
+  "popup_status_new_chat": {
+    "message": "محادثة جديدة"
+  },
+  "popup_status_not_a_chat": {
+    "message": "ليست محادثة"
+  },
+  "popup_status_none_open": {
+    "message": "لا توجد محادثات مفتوحة"
+  },
+  "popup_status_none_yet": {
+    "message": "لا يوجد بعد"
+  },
+  "popup_status_not_attached": {
+    "message": "غير مرتبط"
+  },
+  "popup_status_ok": {
+    "message": "سليم"
+  },
+  "popup_status_reload": {
+    "message": "إعادة تحميل"
+  },
+  "popup_status_retired": {
+    "message": "موقوف"
+  },
+  "popup_status_tool_matched": {
+    "message": "أداة مطابقة"
+  },
+  "popup_status_unbound": {
+    "message": "غير مرتبط"
+  },
+  "popup_status_waiting": {
+    "message": "قيد الانتظار"
+  },
+  "popup_time_hours_short": {
+    "message": "$1 س"
+  },
+  "popup_time_minutes_short": {
+    "message": "$1 د"
+  },
+  "popup_time_seconds_short": {
+    "message": "$1 ث"
+  },
+  "popup_timestamps": {
+    "message": "الطوابع الزمنية"
+  },
+  "popup_try_again": {
+    "message": "إعادة المحاولة"
+  },
+  "popup_version_mismatch_help": {
+    "message": "التطبيق: الإصدار $1 (البروتوكول $2)، والإضافة: الإصدار $3 (البروتوكول $4). افتح صفحة الإضافات في المتصفح، وفعّل وضع المطوّر، ثم حدّث هذه الإضافة أو أعد تحميلها. إذا استمر عدم التوافق، افتح مجلد الإضافة من Chat On Steroids ثم حمّل ذلك المجلد. أعد تحميل علامات تبويب ChatGPT بعد انتهاء أعمالها النشطة."
+  },
+  "popup_yes": {
+    "message": "نعم"
+  },
+  "content_goal_error_loop_mcp_call_missing": {
+    "message": "لم يُسجل أي استدعاء لأداة MCP في الرد الأخير. قد يكون ChatGPT يسألك سؤالًا، أو ربما انقطع الاتصال بالأدوات. أجب عن السؤال أو تحقق من اتصال النفق إن توقفت الأدوات. توقفت المتابعة التلقائية مؤقتًا، بينما يظل وضع التكرار مفعّلًا."
+  },
+  "content_goal_error_goal_reply_not_pending": {
+    "message": "لا توجد متابعة معلّقة لهذه الإجابة. قد تكون عولجت بالفعل أو استُبدلت بعمل أحدث. تحقق من أحدث نشاط للمحادثة قبل إعادة المحاولة."
+  },
+  "content_goal_error_goal_context_too_large": {
+    "message": "المهمة وتعليمات وضع الهدف أو التكرار أطول من المسموح لإرسالها إلى المساعد. اختصر المهمة أو تعليمات المتابعة المخصصة في الإعدادات."
+  },
+  "content_goal_error_reply_too_long": {
+    "message": "كتب المساعد متابعة أطول من المسموح بإرسالها. اطلب تعليمات متابعة أقصر أو اختر نموذج مساعد آخر من الإعدادات."
+  },
+  "content_goal_error_stream_record_too_long": {
+    "message": "أعاد مزود الخدمة ردًا يتجاوز الحد المسموح. اختر نموذج متابعة آخر أو اطلب ردودًا أقصر."
+  },
+  "content_goal_error_response_body_too_large": {
+    "message": "تجاوز رد مزود الخدمة الحد المسموح للحجم. اختر نموذج متابعة آخر أو اطلب ردودًا أقصر."
+  },
+  "content_goal_error_no_api_key": {
+    "message": "لم يُضبط مفتاح API لمزود المتابعة. أضف مفتاحًا من الإعدادات أو اختر مصدر متابعة ChatGPT."
+  },
+  "content_goal_error_auth_rejected": {
+    "message": "رفض مزود المتابعة بيانات اعتماد API. تحقق من المفتاح وصلاحيات الوصول في الإعدادات."
+  },
+  "content_goal_error_out_of_credit": {
+    "message": "لا يوجد رصيد متاح في حساب مزود المتابعة. أضف رصيدًا أو اختر مصدر متابعة آخر من الإعدادات."
+  },
+  "content_goal_error_unknown_model": {
+    "message": "لم يعثر مزود المتابعة على النموذج المحدد. حدّث قائمة النماذج واختر نموذجًا متاحًا من الإعدادات."
+  },
+  "content_goal_error_invalid_provider": {
+    "message": "عنوان نقطة اتصال المتابعة المخصصة غير صالح. تحقق من الرابط في الإعدادات؛ استخدم HTTPS أو HTTP محليًا."
+  },
+  "content_history_rate_limited": {
+    "message": "قيّد ChatGPT مؤقتًا الوصول إلى سجل هذه المحادثة. سيوقف Chat On Steroids الاسترداد التلقائي حتى تنتهي مهلة إعادة المحاولة."
+  },
+  "content_goal_error_rate_limited": {
+    "message": "يفرض مزود المتابعة حدًا على معدل الطلبات. انتظر مهلة إعادة المحاولة المعروضة أو اختر نموذج متابعة آخر."
+  },
+  "content_goal_error_timeout_or_cancelled": {
+    "message": "انتهت مهلة طلب المتابعة أو أُلغي. تحقق من محادثة المساعد أو حالة المزود قبل إعادة المحاولة."
+  },
+  "content_goal_error_request_failed": {
+    "message": "فشل طلب المتابعة. تحقق من المساعد المحدد أو نقطة اتصال API وسجلات تشخيص التطبيق قبل إعادة المحاولة."
+  },
+  "content_goal_error_goal_browser_busy": {
+    "message": "هناك طلب مساعد معلّق بالفعل. دعه يكتمل أو ألغِه قبل بدء طلب جديد."
+  },
+  "content_goal_error_goal_browser_cancelled": {
+    "message": "أُلغي طلب المساعد. ابدأه من جديد عندما تريد المتابعة."
+  },
+  "content_goal_error_goal_browser_send_failed": {
+    "message": "تعذّر إيصال تعليمات المساعد إلى ChatGPT. افتح محادثة المساعد وتحقق من مربع الرسائل أو الخطأ الظاهر قبل إعادة المحاولة."
+  },
+  "content_goal_error_goal_browser_send_unconfirmed": {
+    "message": "تعذّر تأكيد استلام ChatGPT لتعليمات المساعد. تحقق من محادثته قبل إعادة المحاولة كي لا تُرسل التعليمات مرتين."
+  },
+  "content_goal_error_goal_owned_elsewhere": {
+    "message": "تتولى علامة تبويب أخرى معالجة هذه المتابعة. تحقق من تقدم العمل هناك."
+  },
+  "content_goal_error_goal_final_not_confirmed": {
+    "message": "لم يؤكد التطبيق وجود إجابة نهائية مؤهلة للمتابعة التلقائية. تحقق من المحادثة المصدر لمعرفة إن كان العمل مستمرًا أو حدث خطأ."
+  },
+  "content_goal_error_astra_finish_only": {
+    "message": "تستمر هذه المحادثة عبر أداة الإنهاء. لن تؤدي إجابة المتصفح النهائية إلى إرسال رسالة أخرى باستخدام الإعداد الحالي."
+  },
+  "content_goal_error_goal_disabled": {
+    "message": "وضع الهدف أو التكرار معطّل لهذه المحادثة. فعّله للسماح بالمتابعة."
+  },
+  "content_goal_error_goal_worker_chat": {
+    "message": "لا يستطيع الوكلاء الفرعيون تشغيل وضع الهدف أو التكرار في محادثاتهم الخاصة. فعّل المتابعة في محادثة الوكيل الرئيسي بدلًا من ذلك."
+  },
+  "content_goal_error_conversation_superseded": {
+    "message": "استُبدلت هذه المحادثة عبر ميزة ضغط المحادثة واستئنافها. تابع في المحادثة الجديدة."
+  },
+  "content_goal_error_chat_blocked": {
+    "message": "هذه المحادثة محظورة في التطبيق. ألغِ الحظر قبل تفعيل المتابعة."
+  },
+  "content_goal_error_session_not_recorded": {
+    "message": "ليس لدى التطبيق سجل محفوظ لهذه المحادثة. فعّل التسجيل وأرسل رسالة قبل استخدام المتابعة التلقائية."
+  },
+  "content_goal_error_no_conversation": {
+    "message": "لا توجد محادثة مسجلة متاحة للمتابعة. أرسل مهمة أولًا."
+  },
+  "content_goal_error_no_objective": {
+    "message": "لم تحدد مهمة. أدخل مهمة قبل بدء وضع الهدف أو التكرار."
+  },
+  "content_goal_error_nothing_to_open_with": {
+    "message": "لم ينشئ المساعد رسالة افتتاحية. حدد المهمة بمزيد من الدقة وأعد المحاولة."
+  },
+  "content_goal_error_goal_helper_stop_unverified": {
+    "message": "يقول المساعد إن الهدف تحقق، لكن ذلك لم يُتحقق منه. لم تُرسل متابعة. راجع المحادثة واستأنف إن بقي عمل."
+  },
+  "content_goal_error_loop_stop_refused": {
+    "message": "استمر المساعد في اختيار التوقف بدل كتابة متابعة للتكرار. راجع تعليمات التكرار أو اختر نموذج مساعد آخر."
+  },
+  "content_goal_error_goal_marker_missing": {
+    "message": "تفتقر الإجابة إلى علامة الاكتمال المطلوبة في قوالب وضع الهدف دون اتصال. تحقق من تعليمات القالب أو اختر مصدر متابعة آخر."
+  },
+  "content_goal_error_goal_reply_not_durable": {
+    "message": "تعذّر على التطبيق حفظ المتابعة المعلّقة. تحقق من مساحة القرص المتاحة وسجلات تشخيص التطبيق."
+  },
+  "content_goal_error_goal_ack_not_durable": {
+    "message": "تعذّر على التطبيق حفظ تأكيد التسليم. تحقق من مساحة القرص والمحادثة قبل إعادة الإرسال يدويًا."
+  },
+  "content_goal_error_goal_switch_not_durable": {
+    "message": "تعذّر حفظ إعداد الهدف أو التكرار. تحقق من مساحة القرص وأعد المحاولة."
+  },
+  "content_goal_error_goal_objective_not_durable": {
+    "message": "تعذّر حفظ المهمة. تحقق من مساحة القرص وأعد المحاولة."
+  },
+  "popup_sign_in_transfer": {
+    "message": "نقل جلسة الدخول إلى متصفح CoS"
+  },
+  "popup_sign_in_permission": {
+    "message": "الوصول إلى ملفات تعريف الارتباط غير مسموح به. انقر مرة أخرى."
+  },
+  "popup_sign_in_imported": {
+    "message": "نُقلت الجلسة"
+  },
+  "popup_sign_in_imported_detail": {
+    "message": "أنت الآن مسجّل الدخول في متصفح CoS."
+  },
+  "popup_sign_in_failed": {
+    "message": "فشل نقل الجلسة. ابدأ تسجيل الدخول مجددًا من CoS."
+  },
+  "popup_app_not_running_help": {
+    "message": "تأكد من فتح برنامج Chat On Steroids على هذا الحاسوب. تتصل الإضافة تلقائيًا."
+  },
+  "content_workers_finished": {
+    "message": "عدد الوكلاء الذين أكملوا العمل: $1"
+  },
+  "content_workers_running": {
+    "message": "عدد الوكلاء الذين يعملون: $1"
+  },
+  "content_workers_failed": {
+    "message": "عدد الوكلاء الذين فشلوا: $1"
+  },
+  "popup_detail_events": {
+    "message": "عدد الأحداث: $1"
+  },
+  "popup_detail_calls": {
+    "message": "عدد الاستدعاءات: $1"
+  },
+  "popup_detail_failed": {
+    "message": "عدد العمليات الفاشلة: $1"
+  },
+  "popup_detail_total": {
+    "message": "الإجمالي $1"
+  },
+  "content_edit_message_missing": {
+    "message": "لم تعد هذه الرسالة موجودة في صفحة ChatGPT؛ لذلك يتعذر تعديلها."
+  },
+  "content_edit_unavailable": {
+    "message": "لم يوفّر ChatGPT خيار تعديل تلك الرسالة. افتح المحادثة في ChatGPT ثم أعد المحاولة."
+  },
+  "content_auto_compaction_waiting_app": {
+    "message": "الضغط التلقائي: بانتظار التطبيق"
+  },
+  "content_goal_loop_waiting_app": {
+    "message": "الهدف والتكرار: بانتظار التطبيق"
+  },
+  "content_settings_waiting_app": {
+    "message": "بانتظار التطبيق"
+  },
+  "content_task_waiting_app": {
+    "message": "بانتظار استجابة Chat On Steroids."
+  },
+  "content_revival_draft_appeared": {
+    "message": "كُتب نص في المحادثة أثناء إعداد إيقاظ الوكيل، لذا لم يُستبدل النص الموجود برسالة الإيقاظ."
+  },
+  "content_workers_still_running__zero": {
+    "message": "عدد الوكلاء الذين ما زالوا يعملون: $1"
+  },
+  "content_workers_still_running__one": {
+    "message": "ما زال وكيل واحد ($1) يعمل"
+  },
+  "content_workers_still_running__two": {
+    "message": "ما زال وكيلان ($1) يعملان"
+  },
+  "content_workers_still_running__few": {
+    "message": "ما زال $1 وكلاء يعملون"
+  },
+  "content_workers_still_running__many": {
+    "message": "ما زال $1 وكيلًا يعمل"
+  },
+  "popup_pipeline_call_fallback_many__zero": {
+    "message": "تعذّر إسناد الاستدعاءات ($1) إلى معرّف الطلب. استُخدم البديل: $2."
+  },
+  "popup_pipeline_call_fallback_many__one": {
+    "message": "تعذّر إسناد استدعاء واحد ($1) إلى معرّف الطلب. استُخدم البديل: $2."
+  },
+  "popup_pipeline_call_fallback_many__two": {
+    "message": "تعذّر إسناد استدعاءين ($1) إلى معرّف الطلب. استُخدم البديل: $2."
+  },
+  "popup_pipeline_call_fallback_many__few": {
+    "message": "تعذّر إسناد $1 استدعاءات إلى معرّف الطلب. استُخدم البديل: $2."
+  },
+  "popup_pipeline_call_fallback_many__many": {
+    "message": "تعذّر إسناد $1 استدعاءً إلى معرّف الطلب. استُخدم البديل: $2."
+  },
+  "popup_detail_events__zero": {
+    "message": "لا أحداث ($1)"
+  },
+  "popup_detail_events__one": {
+    "message": "حدث واحد ($1)"
+  },
+  "popup_detail_events__two": {
+    "message": "حدثان ($1)"
+  },
+  "popup_detail_events__few": {
+    "message": "$1 أحداث"
+  },
+  "popup_detail_events__many": {
+    "message": "$1 حدثًا"
+  },
+  "popup_detail_failed__zero": {
+    "message": "عدد العمليات الفاشلة: $1"
+  },
+  "popup_detail_failed__one": {
+    "message": "عملية واحدة فشلت ($1)"
+  },
+  "popup_detail_failed__two": {
+    "message": "عمليتان فشلتا ($1)"
+  },
+  "popup_detail_failed__few": {
+    "message": "$1 عمليات فشلت"
+  },
+  "popup_detail_failed__many": {
+    "message": "$1 عملية فشلت"
+  },
+  "popup_count_held__zero": {
+    "message": "لا عناصر معلّقة ($1)"
+  },
+  "popup_count_held__one": {
+    "message": "عنصر واحد معلّق ($1)"
+  },
+  "popup_count_held__two": {
+    "message": "عنصران معلّقان ($1)"
+  },
+  "popup_count_held__few": {
+    "message": "$1 عناصر معلّقة"
+  },
+  "popup_count_held__many": {
+    "message": "$1 عنصرًا معلّقًا"
+  },
+  "content_workers_running__zero": {
+    "message": "لا وكلاء يعملون ($1)"
+  },
+  "content_workers_running__one": {
+    "message": "وكيل واحد يعمل ($1)"
+  },
+  "content_workers_running__two": {
+    "message": "وكيلان يعملان ($1)"
+  },
+  "content_workers_running__few": {
+    "message": "$1 وكلاء يعملون"
+  },
+  "content_workers_running__many": {
+    "message": "$1 وكيلًا يعمل"
+  },
+  "content_tool_calls_count__zero": {
+    "message": "لا استدعاءات أدوات ($1)"
+  },
+  "content_tool_calls_count__one": {
+    "message": "استدعاء أداة واحد ($1)"
+  },
+  "content_tool_calls_count__two": {
+    "message": "استدعاءا أداة ($1)"
+  },
+  "content_tool_calls_count__few": {
+    "message": "$1 استدعاءات أدوات"
+  },
+  "content_tool_calls_count__many": {
+    "message": "$1 استدعاء أداة"
+  },
+  "popup_detail_calls__zero": {
+    "message": "لا استدعاءات ($1)"
+  },
+  "popup_detail_calls__one": {
+    "message": "استدعاء واحد ($1)"
+  },
+  "popup_detail_calls__two": {
+    "message": "استدعاءان ($1)"
+  },
+  "popup_detail_calls__few": {
+    "message": "$1 استدعاءات"
+  },
+  "popup_detail_calls__many": {
+    "message": "$1 استدعاءً"
+  },
+  "content_tool_preview_truncated__zero": {
+    "message": "اختُصرت المعاينة من $1 حرف."
+  },
+  "content_tool_preview_truncated__one": {
+    "message": "اختُصرت المعاينة من حرف واحد ($1)."
+  },
+  "content_tool_preview_truncated__two": {
+    "message": "اختُصرت المعاينة من حرفين ($1)."
+  },
+  "content_tool_preview_truncated__few": {
+    "message": "اختُصرت المعاينة من $1 أحرف."
+  },
+  "content_tool_preview_truncated__many": {
+    "message": "اختُصرت المعاينة من $1 حرفًا."
+  },
+  "popup_count_held_in_page__zero": {
+    "message": "لا عناصر معلّقة في الصفحة ($1)"
+  },
+  "popup_count_held_in_page__one": {
+    "message": "عنصر واحد معلّق في الصفحة ($1)"
+  },
+  "popup_count_held_in_page__two": {
+    "message": "عنصران معلّقان في الصفحة ($1)"
+  },
+  "popup_count_held_in_page__few": {
+    "message": "$1 عناصر معلّقة في الصفحة"
+  },
+  "popup_count_held_in_page__many": {
+    "message": "$1 عنصرًا معلّقًا في الصفحة"
+  },
+  "content_tool_more_changed_files__zero": {
+    "message": "لا ملفات معدّلة إضافية ($1)"
+  },
+  "content_tool_more_changed_files__one": {
+    "message": "ملف واحد معدّل إضافي ($1)"
+  },
+  "content_tool_more_changed_files__two": {
+    "message": "ملفان معدّلان إضافيان ($1)"
+  },
+  "content_tool_more_changed_files__few": {
+    "message": "$1 ملفات معدّلة إضافية"
+  },
+  "content_tool_more_changed_files__many": {
+    "message": "$1 ملفًا معدّلًا إضافيًا"
+  },
+  "content_workers_failed__zero": {
+    "message": "لم يفشل أي وكيل ($1)"
+  },
+  "content_workers_failed__one": {
+    "message": "فشل وكيل واحد ($1)"
+  },
+  "content_workers_failed__two": {
+    "message": "فشل وكيلان ($1)"
+  },
+  "content_workers_failed__few": {
+    "message": "فشل $1 وكلاء"
+  },
+  "content_workers_failed__many": {
+    "message": "فشل $1 وكيلًا"
+  },
+  "content_goal_retrying__zero": {
+    "message": "إعادة محاولة وضع الهدف الآن (بعد $1 ثانية)"
+  },
+  "content_goal_retrying__one": {
+    "message": "إعادة محاولة وضع الهدف بعد ثانية واحدة ($1)"
+  },
+  "content_goal_retrying__two": {
+    "message": "إعادة محاولة وضع الهدف بعد ثانيتين ($1)"
+  },
+  "content_goal_retrying__few": {
+    "message": "إعادة محاولة وضع الهدف بعد $1 ثوانٍ"
+  },
+  "content_goal_retrying__many": {
+    "message": "إعادة محاولة وضع الهدف بعد $1 ثانية"
+  },
+  "content_tokens_from__zero": {
+    "message": "من أصل $1 رموز"
+  },
+  "content_tokens_from__one": {
+    "message": "من أصل رمز واحد ($1)"
+  },
+  "content_tokens_from__two": {
+    "message": "من أصل رمزين ($1)"
+  },
+  "content_tokens_from__few": {
+    "message": "من أصل $1 رموز"
+  },
+  "content_tokens_from__many": {
+    "message": "من أصل $1 رمزًا"
+  },
+  "popup_pipeline_request_id_matched_many__zero": {
+    "message": "لم يطابق أي معرّف طلب ($1) نشاط الأدوات المسجل."
+  },
+  "popup_pipeline_request_id_matched_many__one": {
+    "message": "طابق معرّف طلب واحد ($1) نشاط الأدوات المسجل."
+  },
+  "popup_pipeline_request_id_matched_many__two": {
+    "message": "طابق معرّفا طلب ($1) نشاط الأدوات المسجل."
+  },
+  "popup_pipeline_request_id_matched_many__few": {
+    "message": "طابقت $1 معرّفات طلب نشاط الأدوات المسجل."
+  },
+  "popup_pipeline_request_id_matched_many__many": {
+    "message": "طابق $1 معرّف طلب نشاط الأدوات المسجل."
+  },
+  "content_waiting_local_tools__zero": {
+    "message": "لا أدوات محلية منتظرة ($1)"
+  },
+  "content_waiting_local_tools__one": {
+    "message": "بانتظار أداة محلية واحدة ($1)"
+  },
+  "content_waiting_local_tools__two": {
+    "message": "بانتظار أداتين محليتين ($1)"
+  },
+  "content_waiting_local_tools__few": {
+    "message": "بانتظار انتهاء $1 أدوات محلية"
+  },
+  "content_waiting_local_tools__many": {
+    "message": "بانتظار انتهاء $1 أداة محلية"
+  },
+  "content_workers_finished__zero": {
+    "message": "لم يكمل أي وكيل عمله ($1)"
+  },
+  "content_workers_finished__one": {
+    "message": "أكمل وكيل واحد عمله ($1)"
+  },
+  "content_workers_finished__two": {
+    "message": "أكمل وكيلان عملهما ($1)"
+  },
+  "content_workers_finished__few": {
+    "message": "أكمل $1 وكلاء عملهم"
+  },
+  "content_workers_finished__many": {
+    "message": "أكمل $1 وكيلًا عملهم"
+  }
+}

@@ -7,13 +7,17 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
 const root = process.env.COS_UI_ROOT || path.resolve(__dirname, '..');
 const output = path.resolve(process.env.COS_UI_OUTPUT || path.join(root, '.tmp', 'aged-data'));
 const { fixtureConfigSource, BENIGN_RENDERER_ERRORS } = require(path.join(root, 'scripts/fixtures/app-defaults.cjs'));
+const languageSource = fs.readFileSync(path.join(root, 'src/shared/ui-language.ts'), 'utf8');
+const languageList = languageSource.match(/export const UI_LANGUAGES\s*=\s*\[([^\]]+)\]\s*as const/);
+assert.ok(languageList, 'shared UI language list is readable');
+const LANGUAGES = [...languageList[1].matchAll(/'([^']+)'/g)].map(match => match[1]);
+assert.ok(LANGUAGES.length > 0 && LANGUAGES.includes('ar'), 'shared UI language list includes Arabic');
 fs.rmSync(path.join(output, 'profile'), { recursive: true, force: true });
 app.setPath('userData', path.join(output, 'profile')); app.disableHardwareAcceleration();
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const MIN = 60_000, HOUR = 60 * MIN, DAY = 24 * HOUR;
 // From just now to two and a half years, each unit boundary and the reported 389 hours.
 const AGES = [20_000, 5 * MIN, 3 * HOUR, 30 * HOUR, 6 * DAY, 389 * HOUR, 45 * DAY, 400 * DAY, 900 * DAY];
-const LANGUAGES = ['en', 'de', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'zh-CN', 'zh-TW'];
 let server, win;
 const fixture = `(() => {
  const old=window.api,f=composerFixture,ok=data=>Promise.resolve({ok:true,data:structuredClone(data)});

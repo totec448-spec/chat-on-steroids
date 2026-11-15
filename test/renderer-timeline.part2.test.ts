@@ -2021,3 +2021,21 @@ it('heads the chats list and each project list by date, with pinned chats above 
   menuItem(w, 'pin').click(); await settle();
   expect(order()).toEqual(['yesterday', '# Today', 'today-a', 'today-b', `# ${year}`, 'old']);
 });
+
+it('mirrors submenu keyboard arrows in an Arabic RTL project menu', async () => {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeee2', name: 'Arabic', path: '/arabic', createdAt: 1 };
+  const { w } = await boot([], false, [], [project]);
+  w.document.documentElement.dir = 'rtl';
+  projectMenu(w, project.id);
+  const parent = w.document.querySelector<HTMLElement>('.row-menu')!;
+  const color = menuItem(w, 'color');
+  color.focus();
+  parent.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  expect(w.document.querySelectorAll('.row-menu')).toHaveLength(1);
+  parent.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+  expect(w.document.querySelectorAll('.row-menu')).toHaveLength(2);
+  const child = w.document.querySelectorAll<HTMLElement>('.row-menu')[1]!;
+  child.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  expect(w.document.querySelectorAll('.row-menu')).toHaveLength(1);
+  expect(w.document.activeElement).toBe(color);
+});

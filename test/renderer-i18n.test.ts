@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import zhCN from '../src/renderer/locales/zh-CN.json';
 import type { Language } from '../src/renderer/i18n.js';
 
-const names = { en: 'English', es: 'Español', 'zh-CN': '简体中文', 'zh-TW': '繁體中文', ja: '日本語', ko: '한국어', ru: 'Русский', tr: 'Türkçe', vi: 'Tiếng Việt', fr: 'Français', 'pt-PT': 'Português (Portugal)', 'pt-BR': 'Português (Brasil)', de: 'Deutsch' } as const;
+const names = { en: 'English', ar: 'العربية', es: 'Español', 'zh-CN': '简体中文', 'zh-TW': '繁體中文', ja: '日本語', ko: '한국어', ru: 'Русский', tr: 'Türkçe', vi: 'Tiếng Việt', fr: 'Français', 'pt-PT': 'Português (Portugal)', 'pt-BR': 'Português (Brasil)', de: 'Deutsch' } as const;
 const languages = Object.keys(names) as Language[];
 const catalogs = Object.fromEntries(languages.filter(locale => locale !== 'en').map(locale =>
   [locale, JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8')) as Record<string, string>]));
@@ -39,7 +39,7 @@ it.each(languages)('restores %s and synchronizes accessible setup flags, setting
   expect(flag.closest('[data-panel="setup"]')).not.toBeNull();
   expect(flag.type).toBe('button');
   expect(flag.lang).toBe(locale);
-  expect(flag.textContent.trim()).toBe('');
+  expect(flag.textContent.trim()).toBe(locale === 'ar' ? 'ع' : '');
   expect(flag.title).toBe(names[locale]);
   expect(flag.getAttribute('aria-label')).toBe(names[locale]);
   expect(flag.querySelector('svg.language-flag[aria-hidden="true"]')).not.toBeNull();
@@ -59,7 +59,7 @@ it.each(languages)('restores %s and synchronizes accessible setup flags, setting
 
 it.each([
   [['de-DE', 'de'], 'de'], [['zh-Hant-TW'], 'zh-TW'], [['zh-HK'], 'zh-TW'], [['zh-CN'], 'zh-CN'], [['zh'], 'zh-CN'],
-  [['pt-PT'], 'pt-PT'], [['pt-BR'], 'pt-BR'], [['pt'], 'pt-BR'], [['nl-NL', 'fr-FR'], 'fr'], [['nl', 'sv'], 'en'],
+  [['pt-PT'], 'pt-PT'], [['pt-BR'], 'pt-BR'], [['pt'], 'pt-BR'], [['ar-IQ'], 'ar'], [['nl-NL', 'fr-FR'], 'fr'], [['nl', 'sv'], 'en'],
   [['en-GB', 'de-DE'], 'en'], [['ja-JP'], 'ja'], [[], 'en']
 ] as const)('maps system languages %j to %s', async (preferred, expected) => {
   const { systemLanguage } = await import('../src/renderer/i18n.js');
@@ -182,6 +182,7 @@ describe('app interface localization', () => {
       language.value = locale;
       language.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
       expect(document.documentElement.lang).toBe(locale);
+  expect(document.documentElement.dir).toBe(locale === 'ar' ? 'rtl' : 'ltr');
       expect(document.getElementById('chatInput')).toBe(input);
       expect(input.value).toBe('Save\n用户草稿 <script>not markup</script> 🙂');
       expect([input.selectionStart, input.selectionEnd]).toEqual([2, 7]);

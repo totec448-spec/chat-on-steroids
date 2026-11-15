@@ -259,7 +259,7 @@ function openSubmenu(item: RowMenuItem, button: HTMLButtonElement, depth: number
   document.body.append(submenu);
   current.levels.push(submenu);
   button.setAttribute('aria-expanded', 'true');
-  placeBeside(submenu, button.getBoundingClientRect(), 'right');
+  placeBeside(submenu, button.getBoundingClientRect(), document.documentElement.dir === 'rtl' ? 'left' : 'right');
   if (focusFirst) focusItem(submenu, checkedIndex(submenu));
 }
 
@@ -290,17 +290,28 @@ function keyboard(event: KeyboardEvent, menu: HTMLElement, depth: number): void 
   const items = enabledItems(menu);
   const at = items.indexOf(document.activeElement as HTMLButtonElement);
   const move = (index: number): void => { event.preventDefault(); focusItem(menu, (index + items.length) % items.length); };
+  const rtl = document.documentElement.dir === 'rtl';
   switch (event.key) {
     case 'ArrowDown': return move(at + 1);
     case 'ArrowUp': return move(at < 0 ? items.length - 1 : at - 1);
     case 'Home': return move(0);
     case 'End': return move(items.length - 1);
-    case 'ArrowRight': {
+    case 'ArrowRight':
+    case 'ArrowLeft': {
+      if (event.key !== (rtl ? 'ArrowLeft' : 'ArrowRight')) {
+        event.preventDefault(); event.stopPropagation();
+        if (depth > 0) {
+          const parent = current.levels[depth - 1];
+          const action = menu.dataset.parentAction;
+          closeLevelsBelow(depth - 1);
+          parent?.querySelector<HTMLElement>(`[data-row-action="${action}"]`)?.focus({ preventScroll: true });
+        }
+        return;
+      }
       const button = items[at];
       if (button?.getAttribute('aria-haspopup') === 'menu') { event.preventDefault(); button.click(); }
       return;
     }
-    case 'ArrowLeft':
     case 'Escape': {
       event.preventDefault(); event.stopPropagation();
       if (depth > 0) {
@@ -325,8 +336,8 @@ function placeAt(menu: HTMLElement, x: number, y: number): void {
   menu.style.top = `${Math.max(EDGE, y + height > window.innerHeight - EDGE ? y - height : y)}px`;
 }
 
-/** Below a button (opening upwards without room), or beside a submenu's item, inside the window. */
-function placeBeside(menu: HTMLElement, box: DOMRect, side: 'below' | 'right'): void {
+/** Below a button or beside a submenu's item, mirrored for RTL and clamped to the window. */
+function placeBeside(menu: HTMLElement, box: DOMRect, side: 'below' | 'right' | 'left'): void {
   // Its layout size: the opening animation must not make it look smaller than it is.
   const width = menu.offsetWidth;
   let height = menu.offsetHeight;
@@ -352,9 +363,13 @@ function placeBeside(menu: HTMLElement, box: DOMRect, side: 'below' | 'right'): 
       if (left + width > window.innerWidth - EDGE) left = box.left - width - 4;
       top = box.top - 5;
     } else if (height > below) top = box.top - height - 4;
-  } else {
+  } else if (side === 'right') {
     left = box.right + 2;
     if (left + width > window.innerWidth - EDGE) left = box.left - width - 2;
+    top = box.top - 5;
+  } else {
+    left = box.left - width - 2;
+    if (left < EDGE) left = box.right + 2;
     top = box.top - 5;
   }
   menu.style.left = `${Math.max(EDGE, Math.min(left, window.innerWidth - width - EDGE))}px`;

@@ -66,7 +66,10 @@ app.whenReady().then(async () => {
       await pause(300);
       const r = await js(`(()=>{const d=document.getElementById('contextMeterInfo'),box=d.getBoundingClientRect();
         const rows=[...d.querySelectorAll('.context-data dt')].filter(dt=>!dt.hidden).map(dt=>{const dd=dt.nextElementSibling,a=dt.getBoundingClientRect(),b=dd.getBoundingClientRect();
-          return {label:dt.textContent,value:dd.textContent,inside:a.left>=box.left-1&&b.right<=box.right+1,overlap:a.right>b.left+1&&Math.abs(a.top-b.top)<4,clipped:dt.scrollWidth>dt.clientWidth+1||dd.scrollWidth>dd.clientWidth+1}});
+          return {label:dt.textContent,value:dd.textContent,
+            inside:a.left>=box.left-1&&a.right<=box.right+1&&b.left>=box.left-1&&b.right<=box.right+1,
+            overlap:Math.min(a.right,b.right)>Math.max(a.left,b.left)+1&&Math.abs(a.top-b.top)<4,
+            clipped:dt.scrollWidth>dt.clientWidth+1||dd.scrollWidth>dd.clientWidth+1}});
         return {lang:document.documentElement.lang,rows,inViewport:box.left>=0&&box.right<=innerWidth&&box.top>=0}})()`);
       results.push(r);
       assert.equal(r.rows.length, auto ? 3 : 4, language + ': ' + (auto ? 'three' : 'four') + ' rows');

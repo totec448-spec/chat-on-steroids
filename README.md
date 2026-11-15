@@ -97,7 +97,7 @@ Move a chat into a project from its menu or by dragging it, and undo it right aw
 - **Folders you control.** Choose exactly which folders ChatGPT may touch, and what it may do there.
 - **Limit how many chats work at once**, so a busy day does not hit your usage in one burst.
 - **Command output in a dock.** Watch what a running command prints, read-only, and stop it with one click.
-- **Skills, plugins and pets**, 13 languages, light and dark.
+- **Skills, plugins and pets**, 14 languages, light and dark.
 
 <p align="center">
 <img src="docs/images/model-picker.png" width="720" alt="Model and reasoning selection" />
@@ -134,7 +134,7 @@ Windows 10/11, **macOS 13 Ventura or newer**, or a current desktop Linux. Chrome
 - **Unsigned beta:** Windows is not publisher-signed; macOS is unsigned and unnotarized. Verify the package against the release checksums. Because of that, macOS asks once after each update for your login password so the new version can open its saved keys ("chat-on-steroids Safe Storage"); choose **Always Allow**. Until you answer, chats and the browser connection wait, and the app says so.
 - **Linux:** a Secret Service keyring is required. Prefer the DEB; when unprivileged user namespaces are disabled, the AppImage launcher can fall back to <code>--no-sandbox</code>.
 - **Permissions:** choose your approved folders and review capabilities before connecting. Fresh installs enable Core capabilities and two workers; Windows also enables Desktop permissions. Shell commands run with your normal user privileges.
-- **Languages:** English, German, Spanish, French, Korean, Portuguese (Brazil and Portugal), Russian, Turkish, Vietnamese, Japanese, and Simplified and Traditional Chinese. Choose one in **Appearance → Language**.
+- **Languages:** English, Arabic, German, Spanish, French, Korean, Portuguese (Brazil and Portugal), Russian, Turkish, Vietnamese, Japanese, and Simplified and Traditional Chinese. Choose one in **Appearance → Language**.
 - **After updating:** the browser extension updates itself once no chat is busy. If CoS asks you to refresh its apps in ChatGPT, do so; **Automatic plugin refresh** in Settings can do it for you.
 
 </details>

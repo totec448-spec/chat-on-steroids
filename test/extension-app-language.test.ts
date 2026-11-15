@@ -42,7 +42,7 @@ async function load(appLanguage: string | undefined, protocol = 'chrome-extensio
   const context: Record<string, unknown> = { chrome, fetch, setTimeout, clearTimeout, location: { protocol }, CustomEvent: class { constructor(public type: string) {} } };
   context.globalThis = context;
   vm.runInNewContext(source, context);
-  const api = context.CLF_I18N as { t: (key: string, fallback?: string, values?: unknown) => string; tn: (key: string, count: number, one: string, other: string, values?: unknown[]) => string; ready: Promise<void>; language: () => string | null };
+  const api = context.CLF_I18N as { t: (key: string, fallback?: string, values?: unknown) => string; tn: (key: string, count: number, one: string, other: string, values?: unknown[]) => string; localizeDocument: (doc: { documentElement: { lang: string; dir: string }; querySelectorAll: () => unknown[] }) => void; ready: Promise<void>; language: () => string | null };
   await api.ready;
   const change = async (language: string) => { for (const listener of listeners) listener({ appLanguage: { newValue: language } }, 'local'); await new Promise(resolve => setTimeout(resolve, 10)); };
   return { api, sent, change };
@@ -54,6 +54,40 @@ it('shows the app language rather than Chrome\'s, in pages and in content script
   const content = await load('en', 'https:');
   expect(content.api.t('content_app_did_not_answer', 'fallback')).toBe('The app did not answer.');
   expect(content.sent).toEqual([{ type: 'i18n_catalog', current: true }, { type: 'i18n_catalog', language: 'en' }]);
+});
+
+it('shows Arabic in the extension even when the browser language is German', async () => {
+  for (const context of ['chrome-extension:', 'https:']) {
+    const page = await load('ar', context);
+    expect(page.api.language()).toBe('ar');
+    expect(page.api.t('content_app_did_not_answer', 'fallback')).toBe('لم يستجب التطبيق.');
+    expect(page.api.t('content_cancel', 'fallback')).toBe('إلغاء');
+    // The browser's German language does not override the paired Arabic app.
+    const popup = { documentElement: { lang: 'en', dir: 'ltr' }, querySelectorAll: () => [] };
+    page.api.localizeDocument(popup);
+    expect(popup.documentElement).toEqual({ lang: 'ar', dir: 'rtl' });
+  }
+  const english = await load('en');
+  const document = { documentElement: { lang: 'ar', dir: 'rtl' }, querySelectorAll: () => [] };
+  english.api.localizeDocument(document);
+  expect(document.documentElement).toEqual({ lang: 'en', dir: 'ltr' });
+});
+
+it('uses Arabic plural categories for zero, one, two, few, many and other', async () => {
+  const page = await load('ar');
+  const expected = new Map([
+    [0, 'لا أحداث (0)'],
+    [1, 'حدث واحد (1)'],
+    [2, 'حدثان (2)'],
+    [3, '3 أحداث'],
+    [11, '11 حدثًا'],
+    [100, 'عدد الأحداث: 100'],
+    [101, 'عدد الأحداث: 101'],
+    [102, 'عدد الأحداث: 102']
+  ]);
+  for (const [n, value] of expected) {
+    expect(page.api.tn('popup_detail_events', n, 'one', 'other'), String(n)).toBe(value);
+  }
 });
 
 // CodeRabbit on #1940: a page whose storage read never answers still shows the app language, because
