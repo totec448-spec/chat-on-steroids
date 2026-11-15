@@ -288,3 +288,33 @@ it('handles malformed session IDs, symlinked assets dirs, ENOENT lstat races, an
   expect(vetoed.removedFiles).toBe(1); // unreferenced extraTxt removed, protectedChat.asset kept
   expect(await readAsset(protectedChat.session.id, protectedChat.asset.id)).not.toBeNull();
 });
+
+it('limits pre-cleanup inspection to the target chat so an unreadable asset elsewhere cannot block session cleanup', async () => {
+  const healthy = await createSession({ conversationId: 'healthy-chat-cleanup', title: 'Healthy chat' });
+  const png = await sharp({ create: { width: 4, height: 4, channels: 3, background: '#224466' } }).png().toBuffer();
+  const healthyImage = await writeAsset(healthy.id, png, 'image/png');
+  await upsertMessageEvent(healthy.id, {
+    time: NOW, source: 'app', kind: 'user_message', messageId: 'healthy-msg', message: plain('keep healthy text'), assets: [healthyImage]
+  });
+
+  const broken = await createSession({ conversationId: 'unreadable-chat-cleanup', title: 'Unreadable chat' });
+  const brokenAsset = await writeAsset(broken.id, png, 'image/png');
+
+  const realOpen = fs.open.bind(fs);
+  const openSpy = vi.spyOn(fs, 'open').mockImplementation(async (target, ...rest) => {
+    if (String(target).includes(broken.id) && String(target).endsWith(brokenAsset.id)) {
+      throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+    }
+    return (realOpen as (...args: unknown[]) => Promise<Awaited<ReturnType<typeof fs.open>>>)(target, ...rest);
+  });
+  try {
+    const cleared = await clearImageStorage('session-images', healthy.id);
+    expect(cleared).toMatchObject({ removedFiles: 1, freedBytes: png.length });
+    expect(await readAsset(healthy.id, healthyImage.id)).toBeNull();
+    expect(cleared.session).toEqual({
+      sessionId: healthy.id, usedBytes: 0, limitBytes: MAX_SESSION_ASSET_BYTES, imageBytes: 0, textBytes: 0
+    });
+  } finally {
+    openSpy.mockRestore();
+  }
+});
