@@ -439,6 +439,7 @@ export class PluginManager {
       this.validateConfig(patch.config ?? row.config);
       if (row.fields?.some((f) => f.secret && f.key in (patch.config ?? row.config)))
         throw new Error('Store sensitive bundle fields in secure credentials');
+      this.cancelReconnect(row.id);
       const oldKeys = [...row.credentialKeys],
         oldConfig = row.config,
         oldName = row.name,
@@ -474,6 +475,7 @@ export class PluginManager {
   restart(id: string): Promise<PluginSnapshot> {
     this.authenticating.get(id)?.controller.abort();
     this.cancelReconnect(id);
+    this.starting.get(id)?.controller.abort();
     return this.serial(id, async () => {
       const row = this.row(id);
       await this.disconnect(row);
@@ -487,6 +489,7 @@ export class PluginManager {
     return this.serial(id, async () => {
       const row = this.row(id);
       const catalog = pluginCatalog.find((p) => p.id === row.catalogId);
+      this.cancelReconnect(row.id);
       await this.replace(row, catalog?.source ?? row.source, row.config);
       this.changed();
       return this.snapshot();
@@ -884,6 +887,7 @@ export class PluginManager {
       this.publishTools(row, tools);
       await this.save();
       if (reconnect) {
+        if (signal.aborted || this.closing || !row.enabled || this.live.get(row.id) !== live) return;
         const attempts = this.reconnects.get(row.id)?.failures ?? 0;
         this.cancelReconnect(row.id);
         logInfo(`Remote MCP plugin ${row.id}: reconnected after ${attempts} failed attempt(s).`);
@@ -900,7 +904,11 @@ export class PluginManager {
         row.error = row.source.auth === 'oauth' ? needsAuth ? 'Sign in to connect this plugin.' : 'The OAuth server could not connect. Check its setup and try again.' : String(this.redact((e as Error).message)).slice(0, 600);
         const reason = row.status === 'error' && row.source.kind === 'remote' ? remoteConnectionFailure(e) : undefined;
         if (reason) this.scheduleReconnect(row, reason);
-        else this.cancelReconnect(row.id);
+        else {
+          this.cancelReconnect(row.id);
+          if (row.source.kind === 'remote')
+            logWarn(`Remote MCP plugin ${row.id}: not retrying (${needsAuth ? 'authentication required' : e instanceof SdkHttpError ? `HTTP ${e.status}` : 'not a connection failure'}).`);
+        }
       }
     } finally {
       signal.removeEventListener('abort', retire);

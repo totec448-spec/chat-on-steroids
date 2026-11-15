@@ -899,6 +899,8 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const row = (await manager.install({ source: { kind: 'remote', url: 'https://remote.example/mcp' } })).plugins[0]!;
     expect(['error', 'needs-auth']).toContain(row.status);
+    expect(getLog().filter(entry => entry.message.includes(`Remote MCP plugin ${row.id}:`)).map(entry => entry.message))
+      .toEqual([expect.stringContaining(`not retrying (HTTP ${status})`)]);
     const before = remote.initializations;
     await vi.advanceTimersByTimeAsync(900_000);
     expect(remote.initializations).toBe(before);
