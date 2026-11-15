@@ -12954,6 +12954,7 @@
   }
 
   let activityTimer = null;
+  let activityWakePending = false;
   function activityPullDelay(input = {}) {
     const hidden = input.hidden === true;
     if (input.drafting === true || input.presentationPending === true) return LIVE_ACTIVITY_MS;
@@ -13001,11 +13002,21 @@
   }
 
   function armNextActivityPull() {
-    if (!TEST_MODE) scheduleActivityPull(currentActivityPullDelay());
+    if (TEST_MODE) return;
+    if (activityWakePending) {
+      activityWakePending = false;
+      scheduleActivityPull(0);
+      return;
+    }
+    scheduleActivityPull(currentActivityPullDelay());
   }
 
   function expediteActivityPull() {
     if (TEST_MODE) return;
+    if (pulling) {
+      activityWakePending = true;
+      return;
+    }
     if (activityTimer !== null) {
       cancelLater(activityTimer);
       activityTimer = null;
@@ -14900,6 +14911,16 @@
           sendResponse({ ok: true, claimed: claimed === true });
         }, { deferredRecovery: message.deferredRecovery === true });
         return true;
+      }
+      if (message.type === 'clf-activity-wake') {
+        if (typeof message.conversationId === 'string' && message.conversationId &&
+            CLF_DOM.conversationId() !== message.conversationId) {
+          sendResponse({ ok: false, ignored: 'wrong_conversation' });
+          return false;
+        }
+        expediteActivityPull();
+        sendResponse({ ok: true });
+        return false;
       }
       if (message.type === 'clf-overwrite-now') {
         if (!renderStreamAllowed()) {

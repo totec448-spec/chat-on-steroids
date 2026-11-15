@@ -3,10 +3,16 @@ import type http from 'node:http';
 import { WebSocket, WebSocketServer } from 'ws';
 import { logInfo } from './logger.js';
 
-const subscribers = new Set<(topic: 'wake' | 'browser-control') => void>();
+const subscribers = new Set<(topic: string) => void>();
 /** The CoS browser's own copy of the extension, or the one in the person's browser. */
 export type WakeHost = 'cos' | 'browser';
 export function wakeBrowserWork(topic: 'wake' | 'browser-control' = 'wake'): void {
+  for (const wake of subscribers) wake(topic);
+}
+
+/** Signals open ChatGPT tabs to pull `/activity` now without carrying state payloads. */
+export function wakeActivityWork(conversationId?: string): void {
+  const topic = conversationId && /^[0-9a-z-]{8,64}$/i.test(conversationId) ? `activity:${conversationId}` : 'activity';
   for (const wake of subscribers) wake(topic);
 }
 
@@ -136,7 +142,7 @@ export function attachBrowserWake(server: http.Server, allowed: (request: http.I
     });
   };
   server.on('upgrade', upgrade);
-  const wake = (topic: 'wake' | 'browser-control') => {
+  const wake = (topic: string) => {
     for (const client of authorized.keys()) {
       if (client.readyState === WebSocket.OPEN && client.bufferedAmount < 1024) client.send(topic);
       else drop(client, client.readyState === WebSocket.OPEN ? 'its wake messages backed up' : 'its socket was no longer open');

@@ -30,7 +30,7 @@ import { checkAutomaticSend, SEND_CHECK_RETRY_MS } from './send-check.js';
 import { publishBrowserDecision, authorizeBrowserInput, sessionInputPolicy, collectRecordedBrowserDecision, fileRotationInput, fileRotationContinueAfterStop, rotationDelivery, withdrawUnsentRotation, type InputActivity } from './session/input.js';
 import { callHoldOpen, holdCalls } from './rotation-hold.js';
 import { authorizedPluginRefreshPublications, hasRequestedPluginRefresh, pendingPluginRefreshes, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh } from './plugin-refresh.js';
-import { attachBrowserWake, wakeBrowserWork } from './browser-wake.js';
+import { attachBrowserWake, wakeActivityWork, wakeBrowserWork } from './browser-wake.js';
 import { noteRouteExistingChatSend, tunnelRouteSettling } from './tunnel/route-settle.js';
 import { noteChatgptProjects } from './chatgpt-project-catalog.js';
 import { armProjectCreate, bindChatToLinkedProject, claimProjectCreate, completeProjectCreate, failProjectCreate, getProject, markProjectGone, pendingProjectCreates } from './projects.js';
@@ -115,7 +115,8 @@ import {
   withdrawSilenceGoalReplyNow,
   setGoalObjectiveNow,
   setGoalSwitchNow,
-  startGoalDraft
+  startGoalDraft,
+  onGoalChange
 } from './goal.js';
 import { logInfo, logWarn } from './logger.js';
 import { userRequestFound } from './user-request-files.js';
@@ -125,6 +126,7 @@ import {
   closeConversation,
   liveConversations,
   noteChatOrigin,
+  onSessionChange,
   recordAgentMessage,
   recordChatObservations,
   recordRequestEvidence,
@@ -163,7 +165,7 @@ import {
   turnEndedDurably,
   requestTurnOwnershipCutoff
 } from './session/store.js';
-import { inFlightMcpRequests, inFlightToolCalls, runningToolCalls, runningToolConversations, runningToolProgress, sentResults, settlingToolCalls } from './mcp/call-context.js';
+import { inFlightMcpRequests, inFlightToolCalls, onRunningToolChange, runningToolCalls, runningToolConversations, runningToolProgress, sentResults, settlingToolCalls } from './mcp/call-context.js';
 import { automaticSendRefusal, chatsAtOnceStatus, noteChatLimit, restoreChatsAtOnce, setWorkingChatsSource } from './chats-at-once.js';
 import { nativeHandoffPrompt } from './session/handoff-prompt.js';
 import { DEFAULT_HANDOFF_PROMPT } from '../shared/handoff.js';
@@ -1320,6 +1322,126 @@ export function browserPresent(): boolean {
 
 /** Recent HTTP presence cannot prove that an explicit desktop send can wake Chrome now. */
 export function browserWakeConnected(): boolean { return browserWake?.connected() === true; }
+
+const ACTIVITY_STREAM_WAKE_MS = 120;
+const BROWSER_EVENT_ECHO_WINDOW_MS = 1500;
+const pendingActivityWakes = new Set<string>();
+let activityWakeMicrotaskQueued = false;
+const streamActivityWakes = new Map<string, { timer: NodeJS.Timeout | null; lastSentAt: number }>();
+const recentBrowserEventSessions = new Map<string, number>();
+const notifiedNonExtensionSeq = new Map<string, number>();
+const inFlightBrowserObservationChats = new Set<string>();
+
+function clearActivityWakes(): void {
+  pendingActivityWakes.clear();
+  activityWakeMicrotaskQueued = false;
+  for (const entry of streamActivityWakes.values()) {
+    if (entry.timer) clearTimeout(entry.timer);
+  }
+  streamActivityWakes.clear();
+  recentBrowserEventSessions.clear();
+  notifiedNonExtensionSeq.clear();
+  inFlightBrowserObservationChats.clear();
+}
+
+function noteRecentBrowserEventSession(sessionId: string): void {
+  const now = Date.now();
+  recentBrowserEventSessions.delete(sessionId);
+  recentBrowserEventSessions.set(sessionId, now);
+  if (recentBrowserEventSessions.size <= 128) return;
+  for (const [key, recordedAt] of recentBrowserEventSessions) {
+    if (now - recordedAt >= BROWSER_EVENT_ECHO_WINDOW_MS || recentBrowserEventSessions.size > 128) {
+      recentBrowserEventSessions.delete(key);
+    }
+    if (recentBrowserEventSessions.size <= 128) break;
+  }
+}
+
+async function notifyNonExtensionSessionChange(sessionId: string, conversationId: string, notify = true): Promise<void> {
+  const events = await readRecentEvents(sessionId, 16).catch(() => null);
+  if (!events || !bridgeDesiredRunning || !server || !browserWakeConnected()) return;
+  let maxNonExtensionSeq = 0;
+  for (const event of events) {
+    if (event.source !== 'extension' && event.seq > maxNonExtensionSeq) {
+      maxNonExtensionSeq = event.seq;
+    }
+  }
+  const previousSeq = notifiedNonExtensionSeq.get(sessionId) ?? 0;
+  if (maxNonExtensionSeq <= previousSeq) return;
+  notifiedNonExtensionSeq.delete(sessionId);
+  notifiedNonExtensionSeq.set(sessionId, maxNonExtensionSeq);
+  if (notifiedNonExtensionSeq.size > 256) {
+    const oldest = notifiedNonExtensionSeq.keys().next().value;
+    if (oldest !== undefined) notifiedNonExtensionSeq.delete(oldest);
+  }
+  if (notify) notifyBrowserActivity(conversationId);
+}
+
+function scheduleDiscreteActivityWake(target: string): void {
+  const existing = streamActivityWakes.get(target);
+  if (existing) {
+    if (existing.timer) clearTimeout(existing.timer);
+    existing.timer = null;
+    existing.lastSentAt = Date.now();
+  }
+  pendingActivityWakes.add(target);
+  if (activityWakeMicrotaskQueued) return;
+  activityWakeMicrotaskQueued = true;
+  queueMicrotask(() => {
+    activityWakeMicrotaskQueued = false;
+    const targets = [...pendingActivityWakes];
+    pendingActivityWakes.clear();
+    if (!bridgeDesiredRunning || !server || !browserWakeConnected()) return;
+    if (targets.includes('*')) {
+      wakeActivityWork();
+      return;
+    }
+    for (const id of targets) wakeActivityWork(id);
+  });
+}
+
+/**
+ * Signals connected ChatGPT tabs to pull `/activity` now, coalescing bursty updates and
+ * throttling mid-stream Goal draft chunks so WebSocket traffic stays bounded.
+ */
+export function notifyBrowserActivity(conversationId?: string, streaming = false): void {
+  if (!bridgeDesiredRunning || !server || !browserWakeConnected()) return;
+  const target = conversationId ?? '*';
+  if (!streaming || target === '*') {
+    scheduleDiscreteActivityWake(target);
+    return;
+  }
+  const now = Date.now();
+  let entry = streamActivityWakes.get(target);
+  if (!entry) {
+    if (streamActivityWakes.size >= 64) {
+      const oldest = streamActivityWakes.keys().next().value;
+      if (oldest !== undefined) {
+        const stale = streamActivityWakes.get(oldest);
+        if (stale?.timer) clearTimeout(stale.timer);
+        streamActivityWakes.delete(oldest);
+      }
+    }
+    entry = { timer: null, lastSentAt: 0 };
+    streamActivityWakes.set(target, entry);
+  }
+  const elapsed = now - entry.lastSentAt;
+  if (entry.lastSentAt === 0 || elapsed >= ACTIVITY_STREAM_WAKE_MS) {
+    scheduleDiscreteActivityWake(target);
+    return;
+  }
+  if (entry.timer) return;
+  entry.timer = setTimeout(() => {
+    entry!.timer = null;
+    if (!bridgeDesiredRunning || !server || !browserWakeConnected()) {
+      streamActivityWakes.delete(target);
+      return;
+    }
+    entry!.lastSentAt = Date.now();
+    wakeActivityWork(target);
+  }, ACTIVITY_STREAM_WAKE_MS - elapsed);
+  entry.timer.unref?.();
+}
 
 /**
  * The extension in the person's own Chrome, Edge or Brave, apart from the CoS browser's copy: Setup
@@ -2574,6 +2696,7 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string,
   else if (!options.rotation) logInfo(`bridge: desktop (sent by ${options.from ?? 'the app'}) Stop for session ${sessionId}, turn ${expectedTurnId} joins the Stop already requested (command ${command.id})`);
   else if (pendingHeld) logInfo(`bridge: Stop repeated for held turn ${expectedTurnId} in ${id}; command ${command.id} stays a held-turn Stop`);
   wakeBrowserWork();
+  notifyBrowserActivity(id);
   changed();
   if (!alreadyQueued) {
     const lifecycle = bridgeLifecycleEpoch;
@@ -2651,6 +2774,7 @@ async function saveConversationObjective(id: string, text: string, named: 'goal'
       goalActiveFor(id) && getConfig().sessions.record && await goalKeyPresent(goalModeFor(id)));
     forgetGoalWatch(id);
   } catch { throw new Error('goal_ticket_not_durable'); }
+  notifyBrowserActivity(id);
   changed();
   return { objective, ...(chatSwitch ? { enabled: chatSwitch.enabled, own: true, mode: chatSwitch.mode } : {}) };
 }
@@ -2682,6 +2806,7 @@ export async function setSessionAutomation(sessionId: string, automation: Sessio
   await activateConversationGoalReply(id, held.enabled && live.enabled && live.mode === held.mode && !goalBlockReason(id)
     && getConfig().sessions.record && keyPresent);
   forgetGoalWatch(id);
+  notifyBrowserActivity(id);
   changed();
   for (const listener of automationListeners) { try { listener(sessionId, automation !== 'off', from); } catch { /* a listener never fails a switch */ } }
   return sessionControlsFor(sessionId);
@@ -2695,6 +2820,7 @@ async function fileCompactionTicket(sessionId: string, id: string, automatic = f
   const existing = continuationForSession(sessionId);
   const opened = existing ?? await openContinuationNow(sessionId, id, automatic);
   rememberToken(sessionId, opened.token);
+  notifyBrowserActivity(id);
   changed();
   return { opened, started: !existing };
 }
@@ -2727,8 +2853,9 @@ export async function resumeFromSavedSummary(sessionId: string, handoffId: strin
   return sessionControlsFor(sessionId);
 }
 export async function cancelSessionCompaction(sessionId: string): Promise<SessionControlsView> {
-  await controlledConversation(sessionId);
+  const id = await controlledConversation(sessionId);
   await cancelResumeNow(sessionId);
+  notifyBrowserActivity(id);
   changed();
   return sessionControlsFor(sessionId);
 }
@@ -3739,8 +3866,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         }
       }
       let result;
+      inFlightBrowserObservationChats.add(id);
       try {
         result = await recordChatObservations(id, observations, agent);
+        if (result.stored > 0 && result.sessionId) noteRecentBrowserEventSession(result.sessionId);
       } catch (err) {
         if (err instanceof ResumeDestinationPendingError) {
           // The browser's journal owns this batch until an exact session can be
@@ -3748,6 +3877,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           return json(res, 503, { error: 'resume_destination_pending', retryable: true }, origin);
         }
         throw err;
+      } finally {
+        inFlightBrowserObservationChats.delete(id);
       }
       const superseded = await conversationWasSuperseded(id);
       if (!superseded && !isChatBlocked(id) && result.activity.working && result.activity.at) {
@@ -6331,6 +6462,9 @@ async function sweepOwnedSwarm(runId: string, now: number): Promise<boolean> {
 /** Lifecycle subscriptions are disposed before restarting the bridge. */
 let dropSwarmEndListener: (() => void) | null = null;
 let dropSwarmChangeListener: (() => void) | null = null;
+let dropGoalChangeListener: (() => void) | null = null;
+let dropSessionChangeListener: (() => void) | null = null;
+let dropRunningToolListener: (() => void) | null = null;
 let staleSwarmTimer: NodeJS.Timeout | null = null;
 /** One wake-up on the earliest live silence deadline. See armSilenceSweep(). */
 let silenceTimer: NodeJS.Timeout | null = null;
@@ -6582,6 +6716,35 @@ async function startBridgeOnce(epoch: number, prepared?: PreparedBridge): Promis
   dropSwarmChangeListener?.();
   dropSwarmChangeListener = onSwarmChange(retireInactiveWorkerRecovery);
   retireInactiveWorkerRecovery();
+  dropGoalChangeListener?.();
+  dropGoalChangeListener = onGoalChange((change) => {
+    notifyBrowserActivity(change?.conversationId, change?.streaming === true);
+  });
+  dropSessionChangeListener?.();
+  dropSessionChangeListener = onSessionChange((change) => {
+    if (!bridgeDesiredRunning || !server || !browserWakeConnected()) return;
+    if (change.allTranscripts) {
+      notifyBrowserActivity();
+      return;
+    }
+    for (const sessionId of change.sessionIds ?? []) {
+      const target = liveConversations().find((entry) => entry.sessionId === sessionId)?.conversationId;
+      if (!target) continue;
+      const recentAt = recentBrowserEventSessions.get(sessionId);
+      const withinEchoWindow = recentAt !== undefined && Date.now() - recentAt < BROWSER_EVENT_ECHO_WINDOW_MS;
+      if (!withinEchoWindow && recentAt !== undefined) recentBrowserEventSessions.delete(sessionId);
+      if (withinEchoWindow || inFlightBrowserObservationChats.has(target)) {
+        void notifyNonExtensionSessionChange(sessionId, target, true);
+      } else {
+        notifyBrowserActivity(target);
+        void notifyNonExtensionSessionChange(sessionId, target, false);
+      }
+    }
+  });
+  dropRunningToolListener?.();
+  dropRunningToolListener = onRunningToolChange((conversationId) => {
+    notifyBrowserActivity(conversationId);
+  });
   dropSpawnRequestListener?.();
   dropSpawnRequestListener = onSpawnRequest((workers) => {
     for (const worker of workers) queueWorkerBootstrap(worker.id, worker.task, worker.model, worker.reasoningEffort, worker.runId);
@@ -6748,6 +6911,13 @@ export async function stopBridge(): Promise<void> {
     dropSwarmEndListener = null;
     dropSwarmChangeListener?.();
     dropSwarmChangeListener = null;
+    dropGoalChangeListener?.();
+    dropGoalChangeListener = null;
+    dropSessionChangeListener?.();
+    dropSessionChangeListener = null;
+    dropRunningToolListener?.();
+    dropRunningToolListener = null;
+    clearActivityWakes();
     dropSpawnRequestListener?.();
     dropSpawnRequestListener = null;
     dropReviveRequestListener?.();

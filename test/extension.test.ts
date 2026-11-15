@@ -531,6 +531,7 @@ function loadWorker(options: {
   debuggerApi?: Record<string, unknown>;
   /** Chrome's tab-group API with these groups; omitted, the browser has none. */
   tabGroups?: Array<{ id: number; windowId: number; title?: string; collapsed?: boolean }>;
+  WebSocket?: unknown;
 }): WorkerHarness {
   let listener: ((message: any, sender: any, sendResponse: (value: any) => void) => boolean) | null = null;
   const tabRemovedListeners: Array<(tabId: number) => void> = [];
@@ -664,6 +665,7 @@ function loadWorker(options: {
   vm.runInNewContext(activeTabsSource + backgroundSource.replace(/^import .*$/gm, ''), {
     // The browser-control module is imported in the real worker; with a debugger it is asked for one.
     ...(options.debuggerApi ? { createBrowserControl: () => ({ pump: async () => undefined, event: async () => undefined }) } : {}),
+    ...(options.WebSocket ? { WebSocket: options.WebSocket } : {}),
     chrome,
     fetch,
     AbortController,
@@ -6694,4 +6696,64 @@ it('waits for rendering leases only through renderingLeases', () => {
   const source = readFileSync('extension/background.js', 'utf8');
   const raw = source.split('\n').filter(line => /await\s+activeTabs/.test(line) && !line.includes('renderingLeases'));
   expect(raw).toEqual([]);
+});
+
+describe('activity push wakes over /wake', () => {
+  const convA = '11111111-1111-4111-8111-111111111111';
+  const convB = '22222222-2222-4222-8222-222222222222';
+
+  it('forwards targeted activity wakes only to matching bound tabs and global wakes to all known tabs', async () => {
+    const sockets: any[] = [];
+    class FakeWebSocket {
+      url: string;
+      readyState = 0;
+      onopen: (() => void) | null = null;
+      onmessage: ((event: { data: unknown }) => void) | null = null;
+      onerror: (() => void) | null = null;
+      onclose: (() => void) | null = null;
+      sent: unknown[] = [];
+      constructor(url: string) {
+        this.url = url;
+        sockets.push(this);
+        queueMicrotask(() => {
+          this.readyState = 1;
+          this.onopen?.();
+        });
+      }
+      send(data: unknown) { this.sent.push(data); }
+      close() { this.readyState = 3; this.onclose?.(); }
+    }
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }),
+      session: new FakeStorageArea(),
+      WebSocket: FakeWebSocket,
+      fetch: async (input) => {
+        const pathName = new URL(input).pathname;
+        if (pathName === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (pathName === '/status') return response(200, { inputs: [], commands: [] });
+        if (pathName === '/bind') return response(200, { ok: true, sessionId: 'sess-1' });
+        return response(200, { ok: true });
+      }
+    });
+    await worker.registerTab(10, 'doc-10', `https://chatgpt.com/c/${convA}`);
+    await worker.send({ type: 'bind', conversationId: convA }, 10, 'doc-10');
+    await worker.registerTab(20, 'doc-20', `https://chatgpt.com/c/${convB}`);
+    await worker.send({ type: 'bind', conversationId: convB }, 20, 'doc-20');
+    await worker.startup();
+    await vi.waitFor(() => expect(sockets.length).toBeGreaterThan(0));
+    const socket = sockets.at(-1)!;
+    expect(socket.sent).toContain('paired-token');
+
+    worker.tabsSendMessage.mockClear();
+    socket.onmessage?.({ data: `activity:${convA}` });
+    await vi.waitFor(() => expect(worker.tabsSendMessage).toHaveBeenCalledTimes(1));
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(10, { type: 'clf-activity-wake', conversationId: convA });
+    expect(worker.tabsSendMessage).not.toHaveBeenCalledWith(20, expect.anything());
+
+    worker.tabsSendMessage.mockClear();
+    socket.onmessage?.({ data: 'activity' });
+    await vi.waitFor(() => expect(worker.tabsSendMessage).toHaveBeenCalledTimes(2));
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(10, { type: 'clf-activity-wake' });
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(20, { type: 'clf-activity-wake' });
+  });
 });

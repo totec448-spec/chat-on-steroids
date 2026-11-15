@@ -26201,3 +26201,17 @@ describe('edit and resubmit (#365)', () => {
     expect(openQuestionEdit).not.toHaveBeenCalled();
   });
 });
+
+describe('clf-activity-wake runtime push handler', () => {
+  it('accepts matching or unscoped activity wakes and ignores foreign conversation wakes', async () => {
+    const convA = 'aaaaaaaa-1111-4111-8111-111111111111';
+    const convB = 'bbbbbbbb-2222-4222-8222-222222222222';
+    const live = await harness(`https://chatgpt.com/c/${convA}`);
+    expect(await live.runtimeMessage({ type: 'clf-activity-wake', conversationId: convB }))
+      .toEqual({ ok: false, ignored: 'wrong_conversation' });
+    expect(await live.runtimeMessage({ type: 'clf-activity-wake', conversationId: convA }))
+      .toEqual({ ok: true });
+    expect(await live.runtimeMessage({ type: 'clf-activity-wake' }))
+      .toEqual({ ok: true });
+  });
+});

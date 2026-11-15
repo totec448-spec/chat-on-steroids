@@ -3008,6 +3008,36 @@ function closeWakeSocket() {
   const previous = wakeSocket; wakeSocket = null;
   if (previous) previous.close();
 }
+/** Wakes matching open ChatGPT tab(s) so `/activity` reacts without waiting for the poll timer. */
+async function notifyActivityTabs(conversationId) {
+  await load();
+  if (disconnected || typeof chrome.tabs?.sendMessage !== 'function') return;
+  const target = conversationId ? cleanConversationId(conversationId) : null;
+  if (conversationId && !target) return;
+  const known = Object.entries(tabConversations)
+    .filter(([, value]) => !target || cleanConversationId(value) === target)
+    .map(([key]) => Number(key))
+    .filter((id) => Number.isInteger(id));
+  let tabIds = [...new Set(known)];
+  if (tabIds.length === 0 && typeof chrome.tabs?.query === 'function') {
+    try {
+      const discovered = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
+      tabIds = discovered
+        .filter((tab) => tab && Number.isInteger(tab.id) && (!target || conversationFromUrl(tab.url) === target))
+        .map((tab) => tab.id);
+    } catch {
+      tabIds = [];
+    }
+  }
+  const message = target ? { type: 'clf-activity-wake', conversationId: target } : { type: 'clf-activity-wake' };
+  for (const id of tabIds) {
+    try {
+      void chrome.tabs.sendMessage(id, message).catch(() => undefined);
+    } catch {
+      // Tab may be navigating/unloading; ordinary fallback polling still delivers.
+    }
+  }
+}
 function connectWakeSocket() {
   if (!token || disconnected || !port || typeof WebSocket === 'undefined') return;
   // Which copy this is, never a credential: the token goes in the first message, below.
@@ -3028,6 +3058,10 @@ function connectWakeSocket() {
     else if (event.data === 'wake') {
       void pumpBrowserControl().catch(() => undefined);
       void maintain(true).catch(() => undefined);
+    } else if (event.data === 'activity') {
+      void notifyActivityTabs(null).catch(() => undefined);
+    } else if (typeof event.data === 'string' && event.data.startsWith('activity:')) {
+      void notifyActivityTabs(event.data.slice('activity:'.length)).catch(() => undefined);
     }
   };
   connection.onerror = () => connection.close();

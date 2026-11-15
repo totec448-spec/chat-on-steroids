@@ -110,6 +110,7 @@ const {
   DEFAULT_PORTS,
   revealChatInBrowser,
   followChatInBackground,
+  notifyBrowserActivity,
   startBridge,
   stopBridge,
   sweepStaleSwarm,
@@ -19625,5 +19626,80 @@ describe('why a command ran out of time', () => {
     expect(commandExpiryReasonForTests({ lastError: 'boom', claimedAt: 1, owner: null, progress: {} })).toBe('boom');
     expect(commandExpiryReasonForTests({ lastError: null, claimedAt: null, owner: null, progress: {} }))
       .toBe('the browser did not claim this command before its deadline');
+  });
+});
+
+describe('push-driven activity wakes over /wake', () => {
+  it('coalesces discrete and streaming activity wakes, pushes on app changes, and suppresses /events self-echo', async () => {
+    await pair();
+    const CHAT = 'cafe1111-2222-4333-8444-555555555555';
+    const socket = new WebSocket(base.replace('http:', 'ws:') + '/wake', { origin: EXTENSION_ORIGIN });
+    await once(socket, 'open');
+    const authWake = once(socket, 'message');
+    socket.send(token!);
+    await authWake;
+
+    const frames: string[] = [];
+    socket.on('message', (bytes) => frames.push(String(bytes)));
+    const expectedFrame = `activity:${CHAT}`;
+
+    try {
+      const created = await request('POST', '/events', {
+        body: { conversationId: CHAT, events: [{ kind: 'turn_start', time: Date.now(), turnId: 'turn-push-init' }] }
+      });
+      expect(created.status).toBe(200);
+      const sessionId = created.body.sessionId as string;
+
+      // Discrete notifications in the same turn coalesce into one wake frame.
+      frames.length = 0;
+      notifyBrowserActivity(CHAT);
+      notifyBrowserActivity(CHAT);
+      notifyBrowserActivity(CHAT);
+      await vi.waitFor(() => expect(frames.filter((f) => f === expectedFrame)).toHaveLength(1));
+
+      // Rapid streaming updates emit leading + trailing wakes instead of one per token.
+      frames.length = 0;
+      for (let i = 0; i < 6; i += 1) notifyBrowserActivity(CHAT, true);
+      await vi.waitFor(() => expect(frames.filter((f) => f === expectedFrame).length).toBeGreaterThanOrEqual(2));
+      expect(frames.filter((f) => f === expectedFrame).length).toBeLessThanOrEqual(3);
+
+      // App-authored progress and running-tool transitions wake the target tab immediately.
+      frames.length = 0;
+      const { recordProgress } = await import('../src/main/session/recorder.js');
+      await recordProgress(sessionId, `push-wake:${CHAT}`, 'Working on it...');
+      await vi.waitFor(() => expect(frames).toContain(expectedFrame));
+
+      frames.length = 0;
+      const { emptyEvidence, trackInFlight } = await import('../src/main/mcp/call-context.js');
+      await trackInFlight({
+        startedAt: Date.now(),
+        transportKey: null,
+        agent: null,
+        caller: { transportKey: null, requestId: null, conversationId: CHAT, sessionId },
+        outcome: null,
+        evidence: emptyEvidence()
+      }, async () => {
+        await vi.waitFor(() => expect(frames).toContain(expectedFrame));
+        frames.length = 0;
+      });
+      await vi.waitFor(() => expect(frames).toContain(expectedFrame));
+
+      // Browser-originated /events batches must not echo activity wakes back to the sender.
+      frames.length = 0;
+      const posted = await request('POST', '/events', {
+        body: {
+          conversationId: CHAT,
+          events: [{ kind: 'turn_start', time: Date.now(), turnId: 'turn-push-echo' },
+            { kind: 'assistant_message', time: Date.now() + 1, turnId: 'turn-push-echo', messageId: 'msg-echo-1', text: 'Streaming...', state: 'streaming', final: false }]
+        }
+      });
+      expect(posted.status).toBe(200);
+      await new Promise((resolve) => setTimeout(resolve, 460));
+      expect(frames.filter((f) => f === expectedFrame)).toHaveLength(0);
+    } finally {
+      const closed = once(socket, 'close');
+      socket.close();
+      await closed;
+    }
   });
 });
