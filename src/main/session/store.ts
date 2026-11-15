@@ -160,6 +160,7 @@ function rememberMissingCurrentConversation(conversationId: string): void {
 export function initSessionStore(userDataDir: string): void {
   root = path.join(userDataDir, 'sessions');
   recentUnreadableWarned.clear();
+  sessionOverflowQuotaWarned.clear();
   sessionAssetUsage.clear();
   globalAssetUsage = null;
   recordingStoreFull = false;
@@ -259,6 +260,8 @@ const OLD_CHAT_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const CLEANUP_TARGET_BYTES = 1024 * 1024 * 1024;
 
 const sessionAssetUsage = new Map<string, number>();
+/** Deduplicate overflow warnings while a session remains at its own asset-size limit. */
+const sessionOverflowQuotaWarned = new Set<string>();
 let globalAssetUsage: number | null = null;
 const GLOBAL_ASSET_QUOTA_EXCEEDED = 'Global session asset quota exceeded';
 // A full store is one state the app shows, not one log warning per refused write (#1406).
@@ -4236,6 +4239,8 @@ export async function writeAsset(
     }
     try {
       await fs.writeFile(target, data, { flag: 'wx' });
+      // A successful write, not merely an attempted write, re-arms the full-session warning.
+      sessionOverflowQuotaWarned.delete(sessionId);
       sessionAssetUsage.set(sessionId, used + data.length);
       globalAssetUsage = globalUsed + data.length;
       setRecordingStoreFull(false);
@@ -4715,6 +4720,7 @@ export async function clearImageStorage(mode: ImageStorageClearMode): Promise<Im
 
 function invalidateAssetUsage(sessionId: string): void {
   sessionAssetUsage.delete(sessionId);
+  sessionOverflowQuotaWarned.delete(sessionId);
   globalAssetUsage = null;
 }
 
@@ -4765,7 +4771,15 @@ export async function writeOverflowText(sessionId: string, text: string): Promis
     return asset.id;
   } catch (err) {
     // The full store is reported once, as a state; every other reason is worth its own line.
-    if ((err as Error).message !== GLOBAL_ASSET_QUOTA_EXCEEDED) logWarn(`session ${sessionId}: overflow text not stored: ${(err as Error).message}`);
+    if ((err as Error).message === 'Session asset quota exceeded') {
+      // A long-lived session can reject thousands of overflows; log this full interval once.
+      if (!sessionOverflowQuotaWarned.has(sessionId)) {
+        sessionOverflowQuotaWarned.add(sessionId);
+        logWarn(`session ${sessionId}: overflow text not stored: Session asset quota exceeded`);
+      }
+    } else if ((err as Error).message !== GLOBAL_ASSET_QUOTA_EXCEEDED) {
+      logWarn(`session ${sessionId}: overflow text not stored: ${(err as Error).message}`);
+    }
     return null;
   }
 }
@@ -4868,6 +4882,7 @@ export async function deleteSession(id: string): Promise<void> {
 /** Test seam: forgets in-memory state without touching the files. */
 export function resetSessionStoreForTests(): void {
   recentUnreadableWarned.clear();
+  sessionOverflowQuotaWarned.clear();
   latestQuestionCache.clear();
   rejectedPromotedFinalLogRevision.clear();
   latestQuestionScans.clear();
@@ -4894,6 +4909,7 @@ export function resetSessionStoreForTests(): void {
 export function unsetSessionRootForTests(): void {
   root = '';
   recentUnreadableWarned.clear();
+  sessionOverflowQuotaWarned.clear();
   sessionAssetUsage.clear();
   traceCache.clear();
   globalAssetUsage = null;

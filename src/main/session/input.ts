@@ -4,6 +4,7 @@ import { REASONING_EFFORTS, workSequence } from '../../shared/session.js';
  * Tool delivery repeats under a stable message id until a later request proves receipt.
  */
 import { z } from 'zod';
+import { noteAutomaticReply } from './automatic-replies.js';
 import { authoredTextOf, browserInputModel, manualInput, queuedFollowup, MAX_INPUT_IMAGES, type InputImage } from '../../shared/input.js';
 import type { SessionSummary } from '../../shared/session.js';
 import { getConfig } from '../config.js';
@@ -1132,6 +1133,9 @@ export function fileRotationInput(sessionId: string, turnId: string): Promise<In
       queuedTurn: { conversationId: session.conversationId, turnId }, state: 'queued', owner: null, createdAt: now,
       conversationId: session.conversationId };
     await commit(append(current, entry));
+    // The page types it itself and ChatGPT sends it back as a sent message: noted, so the recorder marks that one
+    // message automatic and the timeline does not show the app's own rotation prompt as a person's steer.
+    noteAutomaticReply(session.conversationId, entry.text);
     return { ...entry };
   });
 }
@@ -1152,6 +1156,9 @@ export function fileRotationContinueAfterStop(sessionId: string, turnId: string)
       queuedTurn: { conversationId: session.conversationId, turnId }, state: 'queued', owner: null, createdAt: now,
       conversationId: session.conversationId };
     await commit(append(current, entry));
+    // The page types it itself and ChatGPT sends it back as a sent message: noted, so the recorder marks that one
+    // message automatic and the timeline does not show the app's own rotation prompt as a person's steer.
+    noteAutomaticReply(session.conversationId, entry.text);
     return { ...entry };
   });
 }
@@ -1362,6 +1369,20 @@ function materializeStages(current: InputEntry[], entry: InputEntry): InputEntry
   });
   return next;
 }
+const attachmentIdsByOutbox = new WeakMap<InputEntry[], Set<string>>();
+/** Read the published queue without taking its lock: admission can itself be
+ * waiting for the staging lock that calls this at the point of pruning. */
+export function outboxRetainsAttachment(id: string): boolean {
+  const current = entries;
+  if (!current) return true; // An unloaded queue cannot establish that a file is unreferenced.
+  let ids = attachmentIdsByOutbox.get(current);
+  if (!ids) {
+    ids = new Set(current.filter(row => !terminal(row)).flatMap(row => row.attachments?.map(file => file.id) ?? []));
+    attachmentIdsByOutbox.set(current, ids);
+  }
+  return ids.has(id);
+}
+
 export function listInputs(): Promise<InputEntry[]> {
   return serial(async () => {
     const current = await retireRemovedSessionReceipts(await load(), true);

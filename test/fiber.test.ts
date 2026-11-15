@@ -249,6 +249,7 @@ interface TurnEvidence {
   conversationId?: string | null;
   conversationConflict?: boolean;
   endMessageId?: string | null;
+  terminalWithoutFinal?: boolean;
   calls: TurnCall[];
   codeModeCalls?: Array<{ messageId: string; requestId: string | null; answered: boolean }>;
   requests?: Array<{ requestId: string; messageId: string | null; createTime: number | null }>;
@@ -281,7 +282,7 @@ interface TurnEvidence {
 interface TurnFixture {
   id: string;
   messages: Message[];
-  renderer?: 'search';
+  renderer?: 'search' | 'shell';
   viewItems?: any[];
   viewStatus?: string;
   /** A visible `.markdown` block: its text, or markup when the test is about the markup. */
@@ -325,7 +326,7 @@ async function scan(
   const document = window.document;
 
   for (const turn of turnSections) {
-    if (turn.renderer === 'search') {
+    if (turn.renderer === 'search' || turn.renderer === 'shell') {
       const container = document.createElement('div');
       container.setAttribute('data-turn-key', turn.id);
       const user = document.createElement('div');
@@ -364,7 +365,21 @@ async function scan(
         assistant.append(block);
       }
       container.append(user, assistant);
-      document.body.append(container);
+      if (turn.renderer === 'shell') {
+        const surface = document.createElement('div');
+        surface.setAttribute('data-app-shell-main-surface', '');
+        const thread = document.createElement('div');
+        thread.setAttribute('data-thread-find-target', 'conversation');
+        user.setAttribute('data-content-search-turn-key', turn.id);
+        user.setAttribute('data-content-search-unit-key', `${turn.id}:user`);
+        (container as unknown as Record<string, unknown>)['__reactFiber$qlrmvxwbkkq'] = {
+          memoizedProps: { conversationId: THREAD, entry: { id: turn.id, conversationId: THREAD, turn: viewTurn } },
+          return: null
+        } satisfies Fiber;
+        thread.append(container);
+        surface.append(thread);
+        document.body.append(surface);
+      } else document.body.append(container);
       continue;
     }
     const section = document.createElement('section');
@@ -530,6 +545,25 @@ describe('reading a row out of the page', () => {
     ]));
     expect(JSON.stringify(result.turns)).not.toMatch(/must-not-cross-worlds|arguments/);
   });
+
+  it.each(['complete', 'in_progress'] as const)(
+    'separates a %s tool-only shell turn from an assistant final', async viewStatus => {
+      const result = await scan([], [{
+        id: 'tool-only-turn', messages: [], renderer: 'shell', viewStatus,
+        viewItems: [
+          { type: 'user-message', messageId: 'worker-question', message: 'Report the result.' },
+          { type: 'chatgpt-reasoning-group', completed: true, items: [{
+            type: 'mcp-tool-call', callId: 'worker-finish', completed: true,
+            invocation: { server: APP, tool: `${LINK}/agents` }
+          }] }
+        ]
+      }]);
+      expect(result.turns).toHaveLength(1);
+      expect(result.turns[0]).toMatchObject({ question: 'worker-question', endMessageId: null });
+      expect(result.turns[0]!.terminalWithoutFinal === true).toBe(viewStatus === 'complete');
+      expect(result.turns[0]!.messages.every(message => message.role === 'user')).toBe(true);
+    }
+  );
 
   it('reads the interim updates of a search-unit turn and still ends it, however long its work is (#2157)', async () => {
     const interim = (index: number) => ({ type: 'assistant-message', messageId: `interim-${index}`,

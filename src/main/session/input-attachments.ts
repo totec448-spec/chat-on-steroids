@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import sharp from 'sharp';
 import { sessionsRoot } from './store.js';
+import { logInfo } from '../logger.js';
 import type { InputAttachment } from '../../shared/input.js';
 import { injectableAttachments, MAX_INPUT_IMAGES } from '../../shared/input.js';
 import { normalizeInputImage } from './input-images.js';
@@ -21,27 +22,34 @@ function directory(): string {
 function fileFor(id: string): string { return path.join(directory(), z.string().uuid().parse(id)); }
 /** Only explicit file selection, drop or clipboard paste writes here; bytes never inflate the durable outbox. */
 let staging: Promise<unknown> = Promise.resolve();
+type RetainedAttachments = Pick<ReadonlySet<string>, 'has'>;
 export type AttachmentSource = string | { text: string } | { name: string; bytes: Uint8Array };
-export function stageInputAttachment(source: AttachmentSource, retained: Set<string>): Promise<InputAttachment> {
+export function stageInputAttachment(source: AttachmentSource, retained: RetainedAttachments): Promise<InputAttachment> {
   return stageInputAttachments([source], retained).then((attachments) => attachments[0]!);
 }
 /** Stage one renderer/file-picker batch under one quota/prune snapshot. */
-export function stageInputAttachments(sources: AttachmentSource[], retained: Set<string>): Promise<InputAttachment[]> {
+export function stageInputAttachments(sources: AttachmentSource[], retained: RetainedAttachments): Promise<InputAttachment[]> {
   const next = staging.then(() => stageBatch(sources, retained));
   staging = next.catch(() => undefined);
   return next;
 }
-async function stageBatch(sources: AttachmentSource[], retained: Set<string>): Promise<InputAttachment[]> {
+async function stageBatch(sources: AttachmentSource[], retained: RetainedAttachments): Promise<InputAttachment[]> {
   const dir = directory();
   await fs.mkdir(dir, { recursive: true });
-  let used = 0;
+  let used = 0, keptExpired = 0;
   for (const name of await fs.readdir(dir)) {
     if (!/^[a-f0-9-]{36}$/.test(name)) continue;
     const file = fileFor(name), stat = await fs.stat(file);
-    if (!retained.has(name) && Date.now() - stat.mtimeMs > 24 * 60 * 60 * 1000) {
-      await fs.unlink(file); await fs.unlink(file + '.json').catch(() => undefined);
-    } else used += stat.size;
+    if (Date.now() - stat.mtimeMs > 24 * 60 * 60 * 1000) {
+      if (!retained.has(name)) {
+        await fs.unlink(file); await fs.unlink(file + '.json').catch(() => undefined);
+        continue;
+      }
+      keptExpired++;
+    }
+    used += stat.size;
   }
+  if (keptExpired) logInfo(`attachment cleanup: kept ${keptExpired} expired attachment(s) still referenced by a draft or the outbox`);
   const attachments: InputAttachment[] = [];
   for (const source of sources) {
     const staged = await stageOne(source, used);
@@ -132,8 +140,8 @@ async function validate(attachments: InputAttachment[]): Promise<void> {
     const file = fileFor(attachment.id);
     const stored = attachmentSchema.parse(JSON.parse(await fs.readFile(file + '.json', 'utf8')));
     if (JSON.stringify(stored) !== JSON.stringify(attachmentSchema.parse(attachment)) || (await fs.stat(file)).size !== attachment.size) throw new Error('Attachment is missing or changed; attach it again');
-    // Admission renews the draft age under the same lock as pruning; a fresh
-    // outbox commit cannot lose its bytes to an older concurrent cleanup snapshot.
+    // Renew the draft age under the same lock as pruning to cover admission
+    // until the new outbox row is published.
     const now = new Date(); await fs.utimes(file, now, now);
   }
 }

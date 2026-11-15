@@ -7,6 +7,7 @@ interface DomApi {
   insertPrompt(text: string, mode?: boolean | 'append', failure?: (reason: string) => void): boolean;
   enterProject(entry: { id: string; sourceConversationId: string }, current?: () => boolean,
     failure?: (reason: string) => void): Promise<boolean>;
+  setConnectorApps(value: { core?: Array<{ appId: string; linkId: string | null; name: string | null }> } | null): boolean;
   composer(): HTMLElement | null;
   composerText(box?: Element | null): string;
   composerActions(): { host: HTMLElement; before: HTMLElement | null } | null;
@@ -477,7 +478,7 @@ describe('native Project entry readiness', () => {
     const entered = api.enterProject(entry, undefined, failure);
     await vi.advanceTimersByTimeAsync(12_500);
     expect(await entered).toBe(false);
-    expect(failure).toHaveBeenCalledWith('transition-timeout:last=composer-not-ready');
+    expect(failure).toHaveBeenCalledWith('transition-timeout:last=composer-not-ready:draft=no-editor:clears=0:chips=0');
   });
 
   // #2068: within one tab ChatGPT keeps the Project home's text after it was sent, so the next resume
@@ -522,7 +523,8 @@ describe('native Project entry readiness', () => {
     expect(await entered).toBe(cleared);
     if (cleared) expect(box.textContent).toBe('');
     else {
-      expect(failure).toHaveBeenCalledWith('transition-timeout:last=composer-not-ready');
+      // What kept it is said in the reason (#2159): a person's words and a brief this page never typed are not the same thing.
+      expect(failure).toHaveBeenCalledWith(`transition-timeout:last=composer-not-ready:draft=${kind === 'person' ? 'other' : 'brief-foreign'}:clears=0:chips=0`);
       expect(box.textContent?.length).toBeGreaterThan(0);
     }
   });
@@ -567,7 +569,7 @@ describe('native Project entry readiness', () => {
     expect(await entered).toBe(cleared);
     if (cleared) expect(box.textContent).toBe('');
     else {
-      expect(failure).toHaveBeenCalledWith('transition-timeout:last=composer-not-ready');
+      expect(failure).toHaveBeenCalledWith('transition-timeout:last=composer-not-ready:draft=context-foreign:clears=0:chips=0');
       expect(box.textContent?.length).toBeGreaterThan(0);
     }
   });
@@ -615,7 +617,65 @@ describe('native Project entry readiness', () => {
     const entered = api.enterProject(entry, undefined, failure);
     await vi.advanceTimersByTimeAsync(12_500);
     expect(await entered).toBe(cleared);
-    if (!cleared) expect(failure).toHaveBeenCalledWith('transition-timeout:last=composer-not-ready');
+    // The app knows this brief and still gave up: the reason says it was the limit on clears, not the recognition.
+    if (!cleared) expect(failure).toHaveBeenCalledWith('transition-timeout:last=composer-not-ready:draft=brief-own:clears=3:chips=0');
+  });
+
+  // #2159 (2.1.53, the reporter's Project home): the draft ChatGPT keeps ends with the connector mention as a chip that
+  // names the app as it is called now. An app renamed in ChatGPT shows under a name the app does not list, but the
+  // chip carries the app's id, and the app proved that id is its own. Another app's chip is not.
+  it.each([
+    ['this installation\'s own app, renamed in ChatGPT', 'asdk_app_6ac261da79588191af4e6096fadeeee2', '', true, 'brief-own', 1],
+    ['an app that is not this installation\'s', 'asdk_app_00000000000000000000000000000000', '', false, 'brief-foreign', 1],
+    // CodeRabbit on #2185: the foreign chip's label would pass for a connector name once the own chip is gone.
+    ['this installation\'s own app, renamed, and then another app named like a connector', 'asdk_app_6ac261da79588191af4e6096fadeeee2', 'Chat On Steroids Core', false, 'brief-foreign', 2]
+  ] as const)('on the Project home, clears a brief that ends with the mention chip of %s only when its id is the app\'s own', async (_name, chipId, foreignLabel, cleared, kind, chips) => {
+    const { resumeBootstrapText } = await import('../src/main/session/handoff.js');
+    const brief = resumeBootstrapText('# TASK — the original goal\n\nShip the mail service.', 'pTYR0VjLJ5Xtz2FHFqajqA');
+    document.execCommand = (command: string, _ui?: boolean, value?: string) => {
+      const selection = document.getSelection();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+      if (!range) return false;
+      if (command === 'delete') { range.deleteContents(); return true; }
+      if (command !== 'insertHTML') return false;
+      range.deleteContents();
+      const template = document.createElement('template');
+      template.innerHTML = value || '';
+      range.insertNode(template.content);
+      return true;
+    };
+    api.setConnectorApps({ core: [{ appId: 'asdk_app_6ac261da79588191af4e6096fadeeee2', linkId: null, name: 'Handoff Helper' }] });
+    const link = sourceLink();
+    box.textContent = '';
+    expect(api.insertPrompt(brief, true)).toBe(true);
+    box.textContent = '';
+    link.addEventListener('click', event => {
+      event.preventDefault();
+      dom.reconfigure({ url: projectUrl });
+      const paragraphs = brief.split(/\n\n/).map(part => { const p = document.createElement('p'); p.textContent = part; return p; });
+      const chip = document.createElement('span');
+      chip.setAttribute('app-mention-path', `app://${chipId}`);
+      chip.setAttribute('data-prompt-link-href', `app://${chipId}`);
+      chip.innerHTML = '<span class="Label">Handoff Helper</span>';
+      paragraphs.at(-1)!.append(chip);
+      if (foreignLabel) {
+        const foreign = document.createElement('span');
+        foreign.setAttribute('app-mention-path', 'app://asdk_app_00000000000000000000000000000000');
+        foreign.setAttribute('data-prompt-link-href', 'app://asdk_app_00000000000000000000000000000000');
+        foreign.innerHTML = `<span class="Label">${foreignLabel}</span>`;
+        paragraphs.at(-1)!.append(foreign);
+      }
+      box.replaceChildren(...paragraphs);
+    });
+    const failure = vi.fn();
+    const entered = api.enterProject(entry, undefined, failure);
+    await vi.advanceTimersByTimeAsync(12_500);
+    expect(await entered).toBe(cleared);
+    if (cleared) expect(box.textContent).toBe('');
+    else {
+      expect(failure).toHaveBeenCalledWith(`transition-timeout:last=composer-not-ready:draft=${kind}:clears=0:chips=${chips}`);
+      expect(box.textContent?.length).toBeGreaterThan(0);
+    }
   });
 
   it('reports visible source turns as the last observation when the Project transition times out', async () => {
@@ -633,9 +693,100 @@ describe('native Project entry readiness', () => {
     expect(failure).toHaveBeenCalledWith('transition-timeout:last=source-turns-remain');
   });
 
+  // CodeRabbit on #2190: the source chat and the Project home are two places ChatGPT can put a draft back into. Three
+  // clears spent in the source chat must not leave the Project home's restored brief without its own.
+  it('clears a brief restored in the Project home even after three clears were spent in the source chat', async () => {
+    const { resumeBootstrapText } = await import('../src/main/session/handoff.js');
+    const brief = resumeBootstrapText('# TASK — the original goal\n\nShip the mail service.', 'pTYR0VjLJ5Xtz2FHFqajqA');
+    const request = '[[CLF-HANDOFF:9cY6SN6A7R4hDbXp7mNVCg]]\n\nChat On Steroids is compacting this conversation. Write the handoff as one reply.';
+    document.execCommand = (command: string, _ui?: boolean, value?: string) => {
+      const selection = document.getSelection();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+      if (!range) return false;
+      if (command === 'delete') { range.deleteContents(); return true; }
+      if (command !== 'insertHTML') return false;
+      range.deleteContents();
+      const template = document.createElement('template');
+      template.innerHTML = value || '';
+      range.insertNode(template.content);
+      return true;
+    };
+    const put = (text: string) => box.replaceChildren(...text.split(/\n\n/).map(part => { const p = document.createElement('p'); p.textContent = part; return p; }));
+    box.textContent = '';
+    expect(api.insertPrompt(brief, true)).toBe(true);
+    box.textContent = '';
+    expect(api.insertPrompt(request, true)).toBe(true);
+    put(request);
+    const link = sourceLink();
+    // The Project link is not on the page yet, so the entry keeps waiting in the source chat while ChatGPT puts the
+    // request back twice after the first clear: three clears in all, the whole budget.
+    const parent = link.parentNode as Node;
+    link.remove();
+    setTimeout(() => parent.appendChild(link), 1_000);
+    let clicked = false, restores = 2;
+    const restore = setInterval(() => { if (!clicked && restores > 0 && box.textContent === '') { restores--; put(request); } }, 100);
+    link.addEventListener('click', event => {
+      event.preventDefault(); clicked = true;
+      dom.reconfigure({ url: projectUrl });
+      put(brief);
+    });
+    const failure = vi.fn();
+    const entered = api.enterProject(entry, undefined, failure);
+    await vi.advanceTimersByTimeAsync(61_000);
+    clearInterval(restore);
+    const result = await entered;
+    expect(failure.mock.calls).toEqual([]);
+    expect(result).toBe(true);
+    expect(box.textContent).toBe('');
+  });
+
+  // 2026-11-14 (Windows VM, second Compact & Resume in one Project, 2.1.53): ChatGPT put the handoff request the app had
+  // just sent back into the source chat's composer as a draft. The entry waits for an empty source editor before its one
+  // click, so it gave up after 60 s ("source-not-ready", nothing sent). A composer holding only the handoff request this
+  // app typed, unchanged, is the app's own text like a brief: emptied; anything a person changed or wrote stays.
   it.each([
-    ['missing', 'source-ready-timeout:last=source-not-ready'],
-    ['draft', 'source-ready-timeout:last=source-not-ready'],
+    ['the handoff request this app typed', 'own', true],
+    ['that request with a person\'s words added', 'edited', false],
+    ['a handoff request this app never typed', 'foreign', false]
+  ] as const)('before the click, empties a source composer that holds %s only when it is the app\'s own', async (_name, kind, cleared) => {
+    const typed = '[[CLF-HANDOFF:9cY6SN6A7R4hDbXp7mNVCg]]\n\nChat On Steroids is compacting this conversation. Write the handoff as one reply.';
+    document.execCommand = (command: string, _ui?: boolean, value?: string) => {
+      const selection = document.getSelection();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+      if (!range) return false;
+      if (command === 'delete') { range.deleteContents(); return true; }
+      if (command !== 'insertHTML') return false;
+      range.deleteContents();
+      const template = document.createElement('template');
+      template.innerHTML = value || '';
+      range.insertNode(template.content);
+      return true;
+    };
+    const link = sourceLink();
+    box.textContent = '';
+    if (kind !== 'foreign') expect(api.insertPrompt(typed, true)).toBe(true);
+    const left = kind === 'edited' ? `${typed}\n\nAlso list the open pull requests.` : typed;
+    box.replaceChildren(...left.split(/\n\n/).map(part => { const p = document.createElement('p'); p.textContent = part; return p; }));
+    let clicks = 0;
+    link.addEventListener('click', event => {
+      event.preventDefault(); clicks++;
+      dom.reconfigure({ url: projectUrl });
+      box.textContent = '';
+    });
+    const failure = vi.fn();
+    const entered = api.enterProject(entry, undefined, failure);
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(await entered).toBe(cleared);
+    expect(clicks).toBe(cleared ? 1 : 0);
+    if (!cleared) {
+      expect(failure).toHaveBeenCalledWith('source-ready-timeout:last=source-not-ready:draft=handoff-foreign:clears=0:chips=0');
+      expect(box.textContent?.length).toBeGreaterThan(0);
+    }
+  });
+
+  it.each([
+    ['missing', 'source-ready-timeout:last=source-not-ready:draft=no-editor:clears=0:chips=0'],
+    ['draft', 'source-ready-timeout:last=source-not-ready:draft=other:clears=0:chips=0'],
     ['cancelled', 'current-lost'],
     ['foreign-route', 'wrong-route-before-click']
   ])('never clicks an unready or retired source: %s', async (reason, expectedFailure) => {
