@@ -1019,6 +1019,10 @@ let activeDetailDirty = false;
  *  by a faster incremental detail read need not re-run `loadDetail()` after `listSessions`. */
 let activeDetailPushSeq = 0;
 let detailSatisfiedPushSeq = -1;
+/** Tracks payload-less/non-transcript pushes independently of transcript fast-path satisfaction
+ *  so catalog catch-up refreshes never drop a pending controls read. */
+let controlsPushSeq = 0;
+let controlsSatisfiedPushSeq = -1;
 /** Transcript owners named by `session:changed` pushes that no catalog refresh has consumed yet. */
 let changedTranscripts: { all: boolean; ids: Set<string> } = { all: false, ids: new Set() };
 /** Summary values the selected transcript's latest live-tail read was requested against. */
@@ -1786,7 +1790,7 @@ async function readSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
   const activeUnseenPush = targetChanged && !satisfiedByFastPath;
   if (detail === 'reread' || selectedId === null || detailFor !== selectedId || activeUnseenPush ||
       latestRow?.updatedAt !== detailStamp?.updatedAt || latestRow?.events !== detailStamp?.events) await loadDetail();
-  else if (!satisfiedByFastPath) void refreshSessionControls();
+  else if (!satisfiedByFastPath || controlsSatisfiedPushSeq < controlsPushSeq) void refreshSessionControls();
   void refreshInputQueue();
 }
 
@@ -3692,6 +3696,7 @@ function applyUserRequests(sessionId: string | null, requests: UserRequestView[]
 let controlsAskedAt = 0;
 const RUNNING_CONTROLS_RECHECK_MS = 20_000;
 async function refreshSessionControls(): Promise<void> {
+  controlsSatisfiedPushSeq = Math.max(controlsSatisfiedPushSeq, controlsPushSeq);
   const id = selectedId, generation = ++controlsGeneration;
   const askedAt = controlsAskedAt = Date.now();
   const planHost = $('agentPlan');
@@ -8934,6 +8939,7 @@ function resetActiveDetailRefresh(): void {
   activeDetailInFlight = null;
   activeDetailLastAt = 0;
   detailSatisfiedPushSeq = -1;
+  controlsSatisfiedPushSeq = -1;
 }
 
 function targetsSelectedLiveTail(change?: SessionChange): boolean {
@@ -8967,6 +8973,8 @@ function scheduleReload(change?: SessionChange): void {
   if (selectedId !== null && (change?.allTranscripts || change?.sessionIds?.includes(selectedId))) {
     activeDetailPushSeq++;
     if (targetsSelectedLiveTail(change)) scheduleActiveDetailRefresh(selectedId);
+  } else {
+    controlsPushSeq++;
   }
   // One refresh owns the timer until its asynchronous read completes. Starting a
   // newer read frequently can invalidate every result on a busy/slower store.

@@ -23,6 +23,8 @@ import {
 } from '../src/main/session/store.js';
 import { upsertMessageEvent } from '../src/main/session/store.js';
 import type { SessionEvent, SessionSummary } from '../src/shared/session.js';
+import * as logger from '../src/main/logger.js';
+import { notifyChanged, onSessionChange, resetRecorderForTests } from '../src/main/session/recorder.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
 let dir = '';
@@ -584,6 +586,7 @@ describe('scoped session change refresh', () => {
       b: summary('2026-09-30-bbbbbbbb', 20_000, 1),
       listed: true,
       lists: 0,
+      controlsCalls: [] as string[],
       detailCalls: [] as Array<{ id: string; options: any }>,
       changed: (_change?: unknown) => undefined as void
     };
@@ -595,10 +598,11 @@ describe('scoped session change refresh', () => {
         return ok({ sessions, activeId: null, pressure: [], total: sessions.length, nextCursor: null, blocked: [] });
       },
       turnTraces: () => ok({}),
+      getSessionControls: (id: string) => { state.controlsCalls.push(id); return ok(null); },
       getSession: (id: string, options?: any) => {
         state.detailCalls.push({ id, options });
         const seq = 100 + state.detailCalls.length - 1;
-        return ok({ summary: state.a, events: [note(seq, `A row ${state.detailCalls.length}`)], total: state.detailCalls.length, nextFrom: seq + 1 });
+        return ok({ summary: id === state.b.id ? state.b : state.a, events: [note(seq, `${id === state.b.id ? 'B' : 'A'} row ${state.detailCalls.length}`)], total: state.detailCalls.length, nextFrom: seq + 1 });
       },
       getSwarm: () => ok({ running: false, runId: null, agents: [], maxWorkers: 2, pendingReports: 0 }),
       onSessionChanged: (listener: (change?: unknown) => void) => { state.changed = listener; return () => undefined; },
@@ -620,7 +624,7 @@ describe('scoped session change refresh', () => {
       await vi.waitFor(() => expect(state.lists).toBe(before + 1), { timeout: 1600 });
       await new Promise(resolve => setTimeout(resolve, 50));
     };
-    return { w, state, publish };
+    return { w, state, publish, chatVisible };
   }
 
   it('keeps the catalog fresh without rereading A for unrelated or payload-less changes', async () => {
@@ -693,6 +697,138 @@ describe('scoped session change refresh', () => {
     await vi.waitFor(() => expect(w.document.getElementById('timeline')?.textContent).toContain('A row 3'), { timeout: 1600 });
     expect(w.document.getElementById('timeline')?.textContent).toContain('A row 1');
     expect(w.document.getElementById('timeline')?.textContent).toContain('A row 2');
+  });
+
+  it('refreshes controls independently on a payload-less push even after a satisfied fast-path delta', async () => {
+    const { w, state } = await openSelected();
+    const listsBefore = state.lists;
+    state.a = { ...state.a, updatedAt: 31_000, events: 2 };
+    state.changed({ sessionIds: [state.a.id] });
+    await vi.waitFor(() => expect(w.document.getElementById('timeline')?.textContent).toContain('A row 2'), { timeout: 400 });
+    const controlsAfterDelta = state.controlsCalls.length;
+    // A payload-less push follows before the catalog refresh settles; catalog catch-up must still refresh controls.
+    state.changed();
+    await vi.waitFor(() => expect(state.lists).toBe(listsBefore + 1), { timeout: 1600 });
+    await vi.waitFor(() => expect(state.controlsCalls.length).toBeGreaterThan(controlsAfterDelta), { timeout: 400 });
+    expect(state.detailCalls).toHaveLength(2);
+  });
+
+  it('cancels pending active-detail refreshes on chat switch and when chat becomes hidden', async () => {
+    const { w, state, chatVisible } = await openSelected();
+    const listsAfterOpen = state.lists;
+    // Put A into its 100 ms cooldown, then push another change for A and immediately switch to B.
+    state.a = { ...state.a, updatedAt: 31_000, events: 2 };
+    state.changed({ sessionIds: [state.a.id] });
+    await vi.waitFor(() => expect(state.detailCalls).toHaveLength(2), { timeout: 400 });
+    state.a = { ...state.a, updatedAt: 32_000, events: 3 };
+    state.changed({ sessionIds: [state.a.id] });
+    (w.document.querySelector(`#sessionList [data-id="${state.b.id}"]`) as HTMLElement).click();
+    await vi.waitFor(() => expect(state.detailCalls.some(call => call.id === state.b.id)).toBe(true), { timeout: 400 });
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(state.detailCalls.filter(call => call.id === state.a.id)).toHaveLength(2);
+
+    // Let the catalog timer from A settle before testing the backgrounded-view timer on B so the 400 ms catalog loop does not collide.
+    await vi.waitFor(() => expect(state.lists).toBeGreaterThan(listsAfterOpen), { timeout: 800 });
+    await new Promise(resolve => setTimeout(resolve, 40));
+
+    // Put B into its cooldown, push again, and hide Chat before the timer fires: no getSession runs while hidden.
+    const bCallsBefore = state.detailCalls.filter(call => call.id === state.b.id).length;
+    state.b = { ...state.b, updatedAt: 40_000, events: 2 };
+    state.changed({ sessionIds: [state.b.id] });
+    await vi.waitFor(() => expect(state.detailCalls.filter(call => call.id === state.b.id).length).toBe(bCallsBefore + 1), { timeout: 400 });
+    state.b = { ...state.b, updatedAt: 41_000, events: 3 };
+    state.changed({ sessionIds: [state.b.id] });
+    chatVisible(false);
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(state.detailCalls.filter(call => call.id === state.b.id).length).toBe(bCallsBefore + 1);
+  });
+
+  it('skips live-tail deltas while paging older history and ignores off-window revisions without pulling scroll', async () => {
+    const { w, state } = await openSelected();
+    const pane = w.document.getElementById('chatBody')!;
+    let scrollHeight = 2000;
+    Object.defineProperties(pane, {
+      clientHeight: { configurable: true, get: () => 400 },
+      scrollHeight: { configurable: true, get: () => scrollHeight }
+    });
+    pane.scrollTop = 1600;
+    // An off-window canonical revision (seq < floor=100) arrives on a live delta: it must not grow or scroll down.
+    const origGetSession = (w as any).api.getSession;
+    let mode: 'normal' | 'offwindow' | 'older' = 'offwindow';
+    (w as any).api.getSession = (id: string, options?: any) => {
+      state.detailCalls.push({ id, options });
+      if (mode === 'offwindow') {
+        return Promise.resolve({ ok: true as const, data: { summary: state.a, events: [note(50, 'Off-window revision')], total: 1, nextFrom: 102 } });
+      }
+      if (mode === 'older') {
+        return Promise.resolve({ ok: true as const, data: { summary: state.a, events: [note(90, 'Older page event')], total: 40, nextFrom: 102 } });
+      }
+      return origGetSession(id, options);
+    };
+    pane.scrollTop = 1000;
+    state.a = { ...state.a, updatedAt: 31_000, events: 2 };
+    state.changed({ sessionIds: [state.a.id] });
+    await vi.waitFor(() => expect(state.detailCalls).toHaveLength(2), { timeout: 400 });
+    expect(pane.scrollTop).toBe(1000);
+    expect(w.document.getElementById('timeline')?.textContent).not.toContain('Off-window revision');
+
+    // Scroll to the top to enter older-history paging (`historyBefore !== null`).
+    mode = 'older';
+    pane.scrollTop = 0;
+    pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: -100 }));
+    await vi.waitFor(() => expect(w.document.getElementById('timeline')?.textContent).toContain('Older page event'), { timeout: 800 });
+    const callsAtHistory = state.detailCalls.length;
+    state.a = { ...state.a, updatedAt: 32_000, events: 3 };
+    state.changed({ sessionIds: [state.a.id] });
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(state.detailCalls).toHaveLength(callsAtHistory);
+  });
+
+  it('drains full-size incremental delta pages automatically without dropping trailing rows', async () => {
+    const { w, state } = await openSelected();
+    let callIndex = 0;
+    (w as any).api.getSession = (id: string, options?: any) => {
+      state.detailCalls.push({ id, options });
+      callIndex += 1;
+      if (callIndex === 1) {
+        const fullBatch = Array.from({ length: 30 }, (_, index) => note(101 + index, `Burst row ${index + 1}`));
+        return Promise.resolve({ ok: true as const, data: { summary: state.a, events: fullBatch, total: 32, nextFrom: 131 } });
+      }
+      return Promise.resolve({ ok: true as const, data: { summary: state.a, events: [note(131, 'Trailing drain row')], total: 32, nextFrom: 132 } });
+    };
+    state.a = { ...state.a, updatedAt: 31_000, events: 32 };
+    state.changed({ sessionIds: [state.a.id] });
+    await vi.waitFor(() => expect(w.document.getElementById('timeline')?.textContent).toContain('Trailing drain row'), { timeout: 800 });
+    expect(state.detailCalls[1]?.options).toEqual({ from: 101, limit: 30 });
+    expect(state.detailCalls[2]?.options).toEqual({ from: 131, limit: 30 });
+  });
+});
+
+describe('recorder session change cooldown', () => {
+  it('uses a monotonic clock and logs cooldown delays without stalling on wall-clock steps back', async () => {
+    const logged = vi.spyOn(logger, 'logInfo').mockImplementation(() => undefined);
+    const changes: string[][] = [];
+    const drop = onSessionChange(change => changes.push([...(change.sessionIds ?? [])]));
+    vi.useFakeTimers();
+    try {
+      notifyChanged('sess-1');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(changes).toEqual([['sess-1']]);
+
+      // Step the wall clock backward while triggering a second notification inside the 180 ms cooldown.
+      vi.setSystemTime(Date.now() - 60_000);
+      notifyChanged('sess-2');
+      expect(logged.mock.calls.some(([msg]) => typeof msg === 'string' && msg.includes('session-change notification cooldown'))).toBe(true);
+      await vi.advanceTimersByTimeAsync(179);
+      expect(changes).toEqual([['sess-1']]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(changes).toEqual([['sess-1'], ['sess-2']]);
+    } finally {
+      drop();
+      resetRecorderForTests();
+      vi.useRealTimers();
+      logged.mockRestore();
+    }
   });
 });
 
