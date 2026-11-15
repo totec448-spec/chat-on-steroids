@@ -3421,7 +3421,7 @@ describe('automatic compaction', () => {
   // is not following the chat. A Goal or Loop chat that is idle then goes on from its saved summary, once.
   describe('a chat whose saved copy stopped following it', () => {
     const MIN = 60_000;
-    type Case = { name: string; continues: boolean; automation?: 'loop' | 'off'; second?: number; newest?: 'old' | 'delivered' | 'unknown'; recentSend?: boolean; working?: boolean; compacting?: boolean; documents?: 1 | 2 };
+    type Case = { name: string; continues: boolean; automation?: 'loop' | 'off'; second?: number; newest?: 'old' | 'delivered' | 'unknown'; recentSend?: boolean; working?: boolean; compacting?: boolean; agedTurn?: boolean; documents?: 1 | 2 };
     it.each<Case>([
       { name: 'two documents twelve minutes apart both read an older newest question', continues: true },
       { name: 'only one document read it', continues: false, documents: 1 },
@@ -3431,7 +3431,9 @@ describe('automatic compaction', () => {
       { name: 'Goal and Loop are off', continues: false, automation: 'off' },
       { name: 'the delivered message is too recent for a document to be expected to hold it', continues: false, recentSend: true },
       { name: 'the chat is still working', continues: false, working: true },
-      { name: 'a Compact & Resume is already under way', continues: false, compacting: true }
+      { name: 'a Compact & Resume is already under way', continues: false, compacting: true },
+      // CodeRabbit on #2195: a turn the recorder still reports is not idle however old it is.
+      { name: 'a turn the recorder still reports has run for more than an hour', continues: false, working: true, agedTurn: true }
     ])('$name', async (spec) => {
       vi.useFakeTimers();
       try {
@@ -3456,6 +3458,7 @@ describe('automatic compaction', () => {
           return request('POST', '/page-note', { body: { note: 'input-held', reason: 'recovery-question-changed', inputId: randomUUID(),
             conversationId: chatB, newestUser: newest, documentSince } });
         };
+        if (spec.agedTurn) await vi.advanceTimersByTimeAsync(70 * MIN);
         await vi.advanceTimersByTimeAsync((spec.recentSend ? 2 : 10) * MIN);
         const firstDocument = Date.now() - (spec.recentSend ? 1 : 0);
         expect((await note(firstDocument)).status).toBe(200);
@@ -3468,7 +3471,7 @@ describe('automatic compaction', () => {
         // A refusal says which condition held the chat back, in words, once a minute (CodeRabbit on #2195).
         const waited = (why: string) => getLog().some(entry => entry.message.includes(`${chatB}: ChatGPT's saved copy of this chat lacks the message the browser delivered, and the chat waits`) &&
           entry.message.includes(why));
-        if (spec.working) expect(waited('the chat is still working')).toBe(true);
+        if (spec.working) expect(waited(spec.agedTurn ? 'the recorder still reports a turn' : 'the chat is still working')).toBe(true);
         if (spec.compacting) {
           expect(waited('a Compact & Resume is under way')).toBe(true);
           expect(continuationForSession(session.id)?.token, 'the waiting Compact & Resume was kept').toBe(underWay);
@@ -3479,6 +3482,38 @@ describe('automatic compaction', () => {
         }
       } finally { vi.useRealTimers(); }
     });
+  });
+
+  // CodeRabbit on #2195: two qualifying reports that overlap start one continuation, not two, and the second does not log
+  // a failure or clear the one-time marker while the first continuation is open.
+  it('starts one continuation when two qualifying reports overlap', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chatA = randomUUID(), chatB = randomUUID();
+      const session = await createSession({ conversationId: chatA });
+      const first = await openContinuationNow(session.id, chatA);
+      await attachSummary(first.token, 'TASK\n\nKeep auditing the fleet manager and fix what the audit finds.\n'.repeat(4));
+      expect(await claimContinuationNow(first.token, 'page-b')).not.toBeNull();
+      expect(await commitContinuation(first.token, chatB)).toBe(true);
+      await setSessionAutomation(session.id, 'loop');
+      const record = (events: unknown[]) => request('POST', '/events', { body: { conversationId: chatB, events } });
+      await record([{ kind: 'user_message', time: Date.now(), text: 'older question', messageId: 'm-older-question' }]);
+      await vi.advanceTimersByTimeAsync(60_000);
+      await record([{ kind: 'user_message', time: Date.now(), text: 'Continue the assignment', messageId: 'm-delivered-continue' }]);
+      const note = (documentSince: number) => request('POST', '/page-note', { body: { note: 'input-held', reason: 'recovery-question-changed',
+        inputId: randomUUID(), conversationId: chatB, newestUser: 'm-older-question', documentSince } });
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      const d1 = Date.now();
+      await note(d1);
+      await vi.advanceTimersByTimeAsync(12 * 60_000);
+      const d2 = Date.now();
+      await Promise.all([note(d2), note(d2 + 1), note(d2 + 2)]);
+      const log = getLog().map(entry => entry.message).filter(message => message.includes(chatB));
+      expect(log.filter(message => message.includes('continues in a new chat from saved summary'))).toHaveLength(1);
+      expect(log.filter(message => message.includes('could not continue from the saved summary'))).toHaveLength(0);
+      expect(continuationForSession(session.id)).toMatchObject({ state: 'awaiting-chat' });
+    } finally { vi.useRealTimers(); }
   });
 
   // CodeRabbit on #2189 (third round): a receipt that arrives after the five-minute sweep that re-armed the hour still
