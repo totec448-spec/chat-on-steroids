@@ -3946,5 +3946,7 @@
   "Permanently remove all local recorded images from this chat? Chat text, original files and long texts will stay.": "要永久移除目前聊天中本機記錄的所有圖片嗎？聊天文字、原始檔案與長文字都會保留。",
   "Permanently remove all full long texts saved in this chat? Messages and tool results will keep their beginning.": "要永久移除目前聊天中儲存的所有完整長文字嗎？訊息與工具結果會保留開頭部分。",
   "This chat": "目前聊天",
-  "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "已從目前聊天釋出 {0} MB。目前在此已使用 {1} MB / {2} MB。"
+  "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "已從目前聊天釋出 {0} MB。目前在此已使用 {1} MB / {2} MB。",
+  "Freed {0} MB. Storage usage could not be read.": "已釋出 {0} MB。無法讀取儲存空間用量。",
+  "Last cleanup: Freed {0} MB.": "上次清理：已釋出 {0} MB。"
 }

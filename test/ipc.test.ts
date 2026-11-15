@@ -811,6 +811,33 @@ it('validates session-scoped storage inspection and old-chats / per-chat cleanup
   const cleared = await handlers.get('sessions:clearImageStorage')!(null, { mode: 'session-texts', id: first.id });
   expect(cleared).toMatchObject({ ok: true, data: { freedBytes: 2048 } });
   expect(send).toHaveBeenCalledWith('session:changed', { sessionIds: [first.id] });
+
+  // When another chat's assets directory denies metadata after deletion, IPC still returns the completed cleanup and emits session:changed.
+  send.mockClear();
+  const broken = await createSession({ title: 'Broken peer dir' });
+  const textAsset2 = await store.writeAsset(first.id, Buffer.from('y'.repeat(1024)), 'text/plain');
+  await store.writeAsset(broken.id, Buffer.from('z'.repeat(512)), 'text/plain');
+  await store.appendEvent(first.id, {
+    time: Date.now(), source: 'mcp', kind: 'tool_call', call: {
+      callId: '00000000-0000-4000-8000-000000000220', tool: 'exec_command', requestId: 'req-ipc-storage-2',
+      conversationId: first.conversationId!, attribution: 'request_id', attributionMethod: 'request_id',
+      args: { text: '{}', chars: 2, truncated: false },
+      result: { text: `y\n…[1023 more characters stored in full as ${textAsset2.id}]`, truncated: true, chars: 1024, assetId: textAsset2.id },
+      outcome: 'ok', durationMs: 1, summary: { kind: 'run', title: 'Ran npm test', tone: 'neutral' }
+    }
+  });
+  const realOpendir = fs.opendir.bind(fs);
+  const opendirSpy = vi.spyOn(fs, 'opendir').mockImplementation(async (target, ...rest) => {
+    if (String(target).includes(broken.id)) throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+    return (realOpendir as (...args: unknown[]) => Promise<Awaited<ReturnType<typeof fs.opendir>>>)(target, ...rest);
+  });
+  try {
+    const clearedDegraded = await handlers.get('sessions:clearImageStorage')!(null, { mode: 'session-texts', id: first.id });
+    expect(clearedDegraded).toMatchObject({ ok: true, data: { freedBytes: 1024, removedFiles: 1, usedBytes: null } });
+    expect(send).toHaveBeenCalledWith('session:changed', { sessionIds: [first.id] });
+  } finally {
+    opendirSpy.mockRestore();
+  }
 });
 
 it('publishes the owning session when delivered input history is revised in place', async () => {

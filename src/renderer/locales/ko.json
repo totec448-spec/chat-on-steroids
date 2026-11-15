@@ -3946,5 +3946,7 @@
   "Permanently remove all local recorded images from this chat? Chat text, original files and long texts will stay.": "이 대화에 로컬로 기록된 모든 이미지를 영구적으로 삭제하시겠습니까? 대화 텍스트, 원본 파일, 긴 텍스트는 유지됩니다.",
   "Permanently remove all full long texts saved in this chat? Messages and tool results will keep their beginning.": "이 대화에 저장된 모든 전체 긴 텍스트를 영구적으로 삭제하시겠습니까? 메시지와 도구 결과는 앞부분만 유지됩니다.",
   "This chat": "이 대화",
-  "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "이 대화에서 {0} MB를 확보했습니다. 현재 {2} MB 중 {1} MB를 사용 중입니다."
+  "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "이 대화에서 {0} MB를 확보했습니다. 현재 {2} MB 중 {1} MB를 사용 중입니다.",
+  "Freed {0} MB. Storage usage could not be read.": "{0} MB를 확보했습니다. 저장 공간 사용량을 확인할 수 없습니다.",
+  "Last cleanup: Freed {0} MB.": "마지막 정리: {0} MB를 확보했습니다."
 }

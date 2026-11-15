@@ -109,7 +109,9 @@ export interface ImageStorageInfo {
   session?: SessionImageStorageInfo;
 }
 
-export interface ImageStorageClearResult extends ImageStorageInfo {
+export interface ImageStorageClearResult extends Omit<ImageStorageInfo, 'usedBytes'> {
+  /** Global bytes used after cleanup, or `null` when a post-cleanup global recount fails. */
+  usedBytes: number | null;
   /** Physical bytes removed by this explicit user operation. */
   freedBytes: number;
   removedFiles: number;
