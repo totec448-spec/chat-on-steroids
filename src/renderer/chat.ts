@@ -3696,7 +3696,7 @@ function applyUserRequests(sessionId: string | null, requests: UserRequestView[]
 let controlsAskedAt = 0;
 const RUNNING_CONTROLS_RECHECK_MS = 20_000;
 async function refreshSessionControls(): Promise<void> {
-  controlsSatisfiedPushSeq = Math.max(controlsSatisfiedPushSeq, controlsPushSeq);
+  const controlsPushAtStart = controlsPushSeq;
   const id = selectedId, generation = ++controlsGeneration;
   const askedAt = controlsAskedAt = Date.now();
   const planHost = $('agentPlan');
@@ -3716,6 +3716,7 @@ async function refreshSessionControls(): Promise<void> {
     $<HTMLTextAreaElement>('sessionObjective').disabled = false;
     paintTaskActions();
     for (const action of ['compactSession', 'cancelCompaction', 'resumeLastSummary']) $(action).hidden = true;
+    controlsSatisfiedPushSeq = Math.max(controlsSatisfiedPushSeq, controlsPushAtStart);
     return; }
   const opening = pendingComposerInputs.find(row => row.opening && row.sessionId === id && ['queued', 'browser'].includes(row.state));
   if (!sessions.find(row => row.id === id)?.conversationId) {
@@ -3732,10 +3733,12 @@ async function refreshSessionControls(): Promise<void> {
     objective.dataset.sessionId = id;
     for (const action of ['compactSession', 'cancelCompaction', 'resumeLastSummary']) $(action).hidden = true;
     paintAutomationSwitch(); paintDeliveryControls(); repaintHeld();
+    controlsSatisfiedPushSeq = Math.max(controlsSatisfiedPushSeq, controlsPushAtStart);
     return;
   }
   const controls = await run(api.getSessionControls(id));
   if (generation !== controlsGeneration || id !== selectedId) return;
+  if (controls) controlsSatisfiedPushSeq = Math.max(controlsSatisfiedPushSeq, controlsPushAtStart);
   renderAgentPlan(planHost, id, controls?.plan ?? null);
   // A failed read is not an empty list: keep the last view instead of calling steps gone (CodeRabbit on #2049).
   if (controls) applyUserRequests(id, controls.userRequests ?? [], askedAt);

@@ -598,7 +598,8 @@ describe('scoped session change refresh', () => {
         return ok({ sessions, activeId: null, pressure: [], total: sessions.length, nextCursor: null, blocked: [] });
       },
       turnTraces: () => ok({}),
-      getSessionControls: (id: string) => { state.controlsCalls.push(id); return ok(null); },
+      getSessionControls: (id: string) => { state.controlsCalls.push(id); return ok({ plan: null, userRequests: [] }); },
+      deleteSession: (id: string) => { if (id === state.a.id) state.listed = false; return ok(true); },
       getSession: (id: string, options?: any) => {
         state.detailCalls.push({ id, options });
         const seq = 100 + state.detailCalls.length - 1;
@@ -801,6 +802,94 @@ describe('scoped session change refresh', () => {
     await vi.waitFor(() => expect(w.document.getElementById('timeline')?.textContent).toContain('Trailing drain row'), { timeout: 800 });
     expect(state.detailCalls[1]?.options).toEqual({ from: 101, limit: 30 });
     expect(state.detailCalls[2]?.options).toEqual({ from: 131, limit: 30 });
+  });
+
+  it('retries controls refresh on catalog catch-up after an active-delta getSessionControls failure', async () => {
+    const { w, state } = await openSelected();
+    let failControls = true;
+    (w as any).api.getSessionControls = (id: string) => {
+      state.controlsCalls.push(id);
+      if (failControls) return Promise.resolve({ ok: false as const, error: 'temporary failure' });
+      return Promise.resolve({ ok: true as const, data: { plan: null, userRequests: [] } });
+    };
+    const listsBefore = state.lists;
+    const controlsBefore = state.controlsCalls.length;
+    // Queue a payload-less controls push and an active-delta fast-path read inside the same 400 ms catalog window.
+    state.changed();
+    state.a = { ...state.a, updatedAt: 31_000, events: 2 };
+    state.changed({ sessionIds: [state.a.id] });
+    await vi.waitFor(() => expect(state.controlsCalls.length).toBe(controlsBefore + 1), { timeout: 300 });
+    expect(state.detailCalls).toHaveLength(2);
+    // Recover controls before the catalog refresh settles: line 1793 must retry because the failure stayed unacknowledged.
+    failControls = false;
+    await vi.waitFor(() => expect(state.lists).toBe(listsBefore + 1), { timeout: 1600 });
+    await vi.waitFor(() => expect(state.controlsCalls.length).toBe(controlsBefore + 2), { timeout: 400 });
+    expect(state.detailCalls).toHaveLength(2);
+  });
+
+  it('clears pending active-detail timers when the selected session is deleted', async () => {
+    const { w, state } = await openSelected();
+    // Put A into cooldown, push another change, then immediately delete A via its row action menu.
+    state.a = { ...state.a, updatedAt: 31_000, events: 2 };
+    state.changed({ sessionIds: [state.a.id] });
+    await vi.waitFor(() => expect(state.detailCalls).toHaveLength(2), { timeout: 400 });
+    state.a = { ...state.a, updatedAt: 32_000, events: 3 };
+    state.changed({ sessionIds: [state.a.id] });
+    const rowA = w.document.querySelector(`#sessionList [data-id="${state.a.id}"]`) as HTMLElement;
+    rowA.dispatchEvent(new w.MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    const removeButton = w.document.querySelector<HTMLButtonElement>('.row-menu [data-row-action="remove"]')!;
+    removeButton.click();
+    await vi.waitFor(() => expect(state.listed).toBe(false), { timeout: 800 });
+    await new Promise(resolve => setTimeout(resolve, 200));
+    expect(state.detailCalls.filter(call => call.id === state.a.id)).toHaveLength(2);
+  });
+
+  it('fences A -> B -> A switches against interleaved active-detail pushes without stale paints or cancelled navigation reads', async () => {
+    const { w, state } = await openSelected();
+    let releaseB!: () => void;
+    const origGetSession = (w as any).api.getSession;
+    (w as any).api.getSession = (id: string, options?: any) => {
+      if (id === state.b.id && !releaseB) {
+        state.detailCalls.push({ id, options });
+        return new Promise(resolve => {
+          releaseB = () => resolve({ ok: true as const, data: { summary: state.b, events: [note(200, 'Stale B row')], total: 1, nextFrom: 201 } });
+        });
+      }
+      return origGetSession(id, options);
+    };
+    (w.document.querySelector(`#sessionList [data-id="${state.b.id}"]`) as HTMLElement).click();
+    await vi.waitFor(() => expect(releaseB).toBeTypeOf('function'), { timeout: 400 });
+    // Push a change for A while B is still mid-navigation, then immediately return to A.
+    state.a = { ...state.a, updatedAt: 31_000, events: 2 };
+    state.changed({ sessionIds: [state.a.id] });
+    (w.document.querySelector(`#sessionList [data-id="${state.a.id}"]`) as HTMLElement).click();
+    releaseB();
+    await vi.waitFor(() => expect(state.detailCalls.filter(call => call.id === state.a.id).length).toBeGreaterThanOrEqual(2), { timeout: 800 });
+    await new Promise(resolve => setTimeout(resolve, 150));
+    const timelineText = w.document.getElementById('timeline')?.textContent ?? '';
+    expect(timelineText).not.toContain('Stale B row');
+    expect(timelineText).toContain('A row');
+  });
+
+  it('ignores an empty incremental delta without changing transcript content or scrollTop', async () => {
+    const { w, state } = await openSelected();
+    const pane = w.document.getElementById('chatBody')!;
+    Object.defineProperties(pane, {
+      clientHeight: { configurable: true, get: () => 400 },
+      scrollHeight: { configurable: true, get: () => 2000 }
+    });
+    pane.scrollTop = 1000;
+    (w as any).api.getSession = (id: string, options?: any) => {
+      state.detailCalls.push({ id, options });
+      return Promise.resolve({ ok: true as const, data: { summary: state.a, events: [], total: 1, nextFrom: 101 } });
+    };
+    const timelineBefore = w.document.getElementById('timeline')?.textContent;
+    state.a = { ...state.a, updatedAt: 31_000, events: 2 };
+    state.changed({ sessionIds: [state.a.id] });
+    await vi.waitFor(() => expect(state.detailCalls).toHaveLength(2), { timeout: 400 });
+    expect(state.detailCalls[1]?.options).toEqual({ from: 101, limit: 30 });
+    expect(pane.scrollTop).toBe(1000);
+    expect(w.document.getElementById('timeline')?.textContent).toBe(timelineBefore);
   });
 });
 
