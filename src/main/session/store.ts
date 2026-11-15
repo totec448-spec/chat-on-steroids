@@ -4389,7 +4389,10 @@ async function inspectVerifiedAssetFile(directory: VerifiedAssetsDirectory, name
 }
 
 /** Exact physical quota inventory. Directory entries, not caller paths, define the scope. */
-async function imageStorageInventory(collectImages = true): Promise<{ usedBytes: number; images: StoredImageFile[]; texts: StoredImageFile[] }> {
+async function imageStorageInventory(
+  collectImages = true,
+  onlySessionId?: string
+): Promise<{ usedBytes: number; images: StoredImageFile[]; texts: StoredImageFile[] }> {
   assertReady();
   let usedBytes = 0;
   const images: StoredImageFile[] = [];
@@ -4399,13 +4402,16 @@ async function imageStorageInventory(collectImages = true): Promise<{ usedBytes:
   try {
     const rootStat = await fs.lstat(root);
     if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
-      sessionAssetUsage.clear();
-      globalAssetUsage = 0;
+      if (!onlySessionId) {
+        sessionAssetUsage.clear();
+        globalAssetUsage = 0;
+      }
       return { usedBytes: 0, images: [], texts: [] };
     }
     sessions = await fs.opendir(root);
     for await (const session of sessions) {
       if (!session.isDirectory() || !/^[0-9a-z-]{8,64}$/i.test(session.name)) continue;
+      if (onlySessionId && session.name !== onlySessionId) continue;
       const assetsDir = await verifiedAssetsDirectory(session.name);
       if (!assetsDir) continue;
       let entries: Awaited<ReturnType<typeof fs.opendir>> | null = null;
@@ -4446,9 +4452,11 @@ async function imageStorageInventory(collectImages = true): Promise<{ usedBytes:
   } finally {
     await sessions?.close().catch(() => undefined);
   }
-  sessionAssetUsage.clear();
-  for (const [sessionId, bytes] of usage) sessionAssetUsage.set(sessionId, bytes);
-  globalAssetUsage = usedBytes;
+  if (!onlySessionId) {
+    sessionAssetUsage.clear();
+    for (const [sessionId, bytes] of usage) sessionAssetUsage.set(sessionId, bytes);
+    globalAssetUsage = usedBytes;
+  }
   return { usedBytes, images, texts };
 }
 
@@ -4700,7 +4708,8 @@ export async function clearImageStorage(mode: ImageStorageClearMode, sessionId?:
   // wait until references are retired and selected files are gone.
   const cleanup = enqueueAssetOperation(async () => {
     try {
-      const inventory = await imageStorageInventory();
+      const scopedSessionId = mode === 'session-images' || mode === 'session-texts' ? sessionId : undefined;
+      const inventory = await imageStorageInventory(true, scopedSessionId);
       const chosen: StoredImageFile[] = [];
       if (mode === 'old-chats-gib') chosen.push(...await chooseFromOldChats(inventory));
       else if (mode === 'session-images') chosen.push(...inventory.images.filter((file) => file.sessionId === sessionId));
