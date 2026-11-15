@@ -283,3 +283,55 @@ it('re-arms a session quota warning only after a successful write', async () => 
   expect(warned.mock.calls.filter(([line]) => String(line).includes('Session asset quota exceeded'))).toHaveLength(2);
   stat.mockRestore();
 });
+
+it('warns once again when an actually cleared session fills a second time', async () => {
+  const session = await createSession({ title: 'Clear and refill recording quota' });
+  const firstImage = await writeAsset(session.id, await sharp({
+    create: { width: 3, height: 2, channels: 3, background: '#113355' }
+  }).png().toBuffer(), 'image/png');
+  resetSessionStoreForTests();
+  initSessionStore(directory);
+  const realStat = fs.stat.bind(fs);
+  let oversizedImage = firstImage.id;
+  const stat = vi.spyOn(fs, 'stat').mockImplementation(async (file, ...rest) => {
+    const found = await (realStat as (...args: unknown[]) => Promise<Awaited<ReturnType<typeof fs.stat>>>)(file, ...rest);
+    if (String(file) === path.join(directory, 'sessions', session.id, 'assets', oversizedImage)) {
+      Object.defineProperty(found, 'size', { value: MAX_SESSION_ASSET_BYTES });
+    }
+    return found;
+  });
+  const warned = vi.spyOn(logger, 'logWarn').mockImplementation(() => undefined);
+  const quotaWarnings = () => warned.mock.calls.filter(([line]) => String(line).includes('overflow text not stored: Session asset quota exceeded'));
+
+  expect(await writeOverflowText(session.id, 'refused before cleanup')).toBeNull();
+  expect(await writeOverflowText(session.id, 'still refused before cleanup')).toBeNull();
+  expect(quotaWarnings()).toHaveLength(1);
+
+  stat.mockRestore();
+  const cleared = await clearImageStorage('all');
+  expect(cleared.removedFiles).toBe(1);
+  expect(cleared.freedBytes).toBeGreaterThan(0);
+  expect(await readAsset(session.id, firstImage.id)).toBeNull();
+  expect(await writeOverflowText(session.id, 'stored after actual cleanup')).toMatch(/\.txt$/);
+
+  const secondImage = await writeAsset(session.id, await sharp({
+    create: { width: 4, height: 3, channels: 3, background: '#775533' }
+  }).png().toBuffer(), 'image/png');
+  oversizedImage = secondImage.id;
+  // A cold quota inventory must observe the refilled disk before testing
+  // repeated refusals. The separate same-process test above proves re-arming
+  // without a store restart.
+  resetSessionStoreForTests();
+  initSessionStore(directory);
+  const refilled = vi.spyOn(fs, 'stat').mockImplementation(async (file, ...rest) => {
+    const found = await (realStat as (...args: unknown[]) => Promise<Awaited<ReturnType<typeof fs.stat>>>)(file, ...rest);
+    if (String(file) === path.join(directory, 'sessions', session.id, 'assets', oversizedImage)) {
+      Object.defineProperty(found, 'size', { value: MAX_SESSION_ASSET_BYTES });
+    }
+    return found;
+  });
+  expect(await writeOverflowText(session.id, 'refused after refill')).toBeNull();
+  expect(await writeOverflowText(session.id, 'still refused after refill')).toBeNull();
+  expect(quotaWarnings()).toHaveLength(2);
+  refilled.mockRestore();
+});
