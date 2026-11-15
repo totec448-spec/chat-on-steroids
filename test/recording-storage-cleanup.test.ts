@@ -328,6 +328,7 @@ it('limits pre-cleanup inspection to the target chat so an unreadable asset else
     time: NOW, source: 'app', kind: 'user_message', messageId: 'healthy-txt-msg',
     message: { text: 'head\n…[more]', truncated: true, chars: 700, assetId: healthyText.id }
   });
+  const warnSpy = vi.spyOn(logger, 'logWarn').mockImplementation(() => undefined);
   const realOpendir = fs.opendir.bind(fs);
   const opendirSpy = vi.spyOn(fs, 'opendir').mockImplementation(async (target, ...rest) => {
     if (String(target).includes(broken.id)) {
@@ -344,7 +345,9 @@ it('limits pre-cleanup inspection to the target chat so an unreadable asset else
       session: { sessionId: healthy.id, usedBytes: 0, limitBytes: MAX_SESSION_ASSET_BYTES, imageBytes: 0, textBytes: 0 }
     });
     expect(await readAsset(healthy.id, healthyText.id)).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('global recount failed: permission denied'));
   } finally {
     opendirSpy.mockRestore();
+    warnSpy.mockRestore();
   }
 });

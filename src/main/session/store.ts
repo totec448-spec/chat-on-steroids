@@ -4744,8 +4744,8 @@ export async function clearImageStorage(mode: ImageStorageClearMode, sessionId?:
         const after = await imageStorageInventory(false);
         usedBytes = after.usedBytes;
         if (usedBytes < globalAssetLimitBytes) setRecordingStoreFull(false);
-      } catch {
-        // Leave global usage unknown if recounting another directory fails after deletion succeeds.
+      } catch (err) {
+        logWarn(`recording storage cleanup completed, but global recount failed: ${(err as Error).message}`);
       }
       if (!sessionId) return { freedBytes, removedFiles, usedBytes, limitBytes: globalAssetLimitBytes };
       return {
@@ -4753,7 +4753,10 @@ export async function clearImageStorage(mode: ImageStorageClearMode, sessionId?:
         removedFiles,
         usedBytes,
         limitBytes: globalAssetLimitBytes,
-        session: await sessionAssetBreakdown(sessionId).catch(() => undefined)
+        session: await sessionAssetBreakdown(sessionId).catch((err) => {
+          logWarn(`session ${sessionId}: post-cleanup breakdown failed: ${(err as Error).message}`);
+          return undefined;
+        })
       };
     } catch (error) {
       rejectSelection(error);

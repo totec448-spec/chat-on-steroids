@@ -249,9 +249,22 @@ it('refreshes chat usage on reopen, isolates chat cleanup results across chats, 
   expect(document.querySelector('.toast')?.textContent).not.toContain('here');
   (document.querySelector('dialog > button') as HTMLButtonElement).click();
 
-  // 3. When a mock omits `session`, the chat breakdown row stays hidden.
+  // 3. When a mock omits `session`, the chat breakdown row stays hidden, including after cleanup omits `session`.
   imageStorageButton('chat-without-breakdown').click();
   await new Promise(resolve => setTimeout(resolve, 0));
   const row = document.querySelector('.image-storage-chat-status') as HTMLElement | null;
   expect(row?.hidden).toBe(true);
+  (document.querySelector('dialog > button') as HTMLButtonElement).click();
+
+  cleanup.mockImplementationOnce(async () => ({
+    ok: true,
+    data: { freedBytes: 64 * 2 ** 20, removedFiles: 3, usedBytes: 236 * 2 ** 20, limitBytes: 2 ** 31 }
+  }));
+  imageStorageButton(chatA).click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect((document.querySelector('.image-storage-chat-status') as HTMLElement).hidden).toBe(false);
+  const clearNoSession = [...document.querySelectorAll('.image-storage-actions button')].find(b => b.textContent === 'Free long texts in this chat') as HTMLButtonElement;
+  clearNoSession.click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect((document.querySelector('.image-storage-chat-status') as HTMLElement).hidden).toBe(true);
 });
