@@ -1784,6 +1784,23 @@ describe('observations', () => {
       .find(event => event.kind === 'native_image' && event.providerAssetId.endsWith('98'));
     expect(quotaRow).toMatchObject({ previewStatus: 'unavailable', previewError: 'quota' });
     expect(quotaRow && quotaRow.kind === 'native_image' ? quotaRow.asset : undefined).toBeUndefined();
+
+    const sessionQuotaWrite = vi.spyOn(sessionStoreModule, 'writeAsset').mockRejectedValueOnce(new Error('Session asset quota exceeded'));
+    try {
+      const sessionQuota = await request('POST', '/events', { body: { conversationId, events: [{
+        kind: 'native_image', time: 1789552000350, messageId,
+        providerAssetId: 'file_00000000000000000000000000000097', providerRole: 'tool', providerChannel: 'final',
+        providerStatus: 'finished_successfully', width: 1254, height: 1254, previewStatus: 'available',
+        previewWidth: 12, previewHeight: 8, previewDataUrl: await make('#bbbbbb', 12, 8)
+      }] } });
+      expect(sessionQuota.status).toBe(200);
+    } finally {
+      sessionQuotaWrite.mockRestore();
+    }
+    const sessionQuotaRow = (await readEvents(reply.body.sessionId, { kinds: ['native_image'] }))
+      .find(event => event.kind === 'native_image' && event.providerAssetId.endsWith('97'));
+    expect(sessionQuotaRow).toMatchObject({ previewStatus: 'unavailable', previewError: 'session_quota' });
+    expect(sessionQuotaRow && sessionQuotaRow.kind === 'native_image' ? sessionQuotaRow.asset : undefined).toBeUndefined();
   });
 
   it('retains native-image metadata but refuses preview bytes before final provider status', async () => {

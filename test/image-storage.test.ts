@@ -15,6 +15,7 @@ import {
   readEvents,
   recordingStorageFull,
   resetSessionStoreForTests,
+  setRecordingStorageLimit,
   upsertMessageEvent,
   upsertNativeImageEvent,
   writeAsset
@@ -223,5 +224,40 @@ it('reports a full recording store once, and clears the report when space is fre
   await writeAsset(current.id, Buffer.from('stored again'), 'text/plain');
   expect(changes).toEqual([true, false]);
   stop();
+});
+
+it('preserves a per-session quota failure across weaker observations and logs the configured storage limit', async () => {
+  const session = await createSession({ conversationId: 'session-quota-precedence', title: 'Session quota' });
+  const identity = {
+    time: 200, source: 'extension' as const, kind: 'native_image' as const,
+    messageId: 'session-quota-message', providerAssetId: 'file_00000000000000000000000000000003',
+    providerRole: 'tool' as const, providerStatus: 'finished_successfully' as const
+  };
+  await upsertNativeImageEvent(session.id, {
+    ...identity, previewStatus: 'unavailable', previewError: 'session_quota'
+  });
+  const replay = await upsertNativeImageEvent(session.id, {
+    ...identity, time: 201, previewStatus: 'unavailable', previewError: 'not_loaded'
+  });
+  expect(replay.event).toMatchObject({ previewStatus: 'unavailable', previewError: 'session_quota' });
+
+  const filler = await createSession({ title: 'Configured limit filler' });
+  await writeAsset(filler.id, Buffer.from('seed asset'), 'text/plain');
+  resetSessionStoreForTests();
+  initSessionStore(directory);
+  setRecordingStorageLimit(5);
+  const warned = vi.spyOn(logger, 'logWarn').mockImplementation(() => undefined);
+  const realStat = fs.stat.bind(fs);
+  const stat = vi.spyOn(fs, 'stat').mockImplementation(async (file, ...rest) => {
+    const found = await (realStat as (...args: unknown[]) => Promise<Awaited<ReturnType<typeof fs.stat>>>)(file, ...rest);
+    if (String(file).includes(path.join(filler.id, 'assets') + path.sep)) Object.defineProperty(found, 'size', { value: 5 * 1024 * 1024 * 1024 });
+    return found;
+  });
+  try {
+    await expect(writeAsset(session.id, Buffer.from('refused at 5 GiB'), 'text/plain')).rejects.toThrow('Global session asset quota exceeded');
+  } finally {
+    stat.mockRestore();
+  }
+  expect(warned).toHaveBeenCalledWith(expect.stringContaining('recording storage is full (5 GiB)'));
 });
 

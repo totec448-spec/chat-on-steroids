@@ -1238,6 +1238,7 @@
   "Image preview is loading": "이미지 미리보기 로드 중",
   "Image preview unavailable": "이미지 미리보기를 사용할 수 없음",
   "Image preview unavailable — recording storage is full": "이미지 미리보기를 사용할 수 없음 — 기록 저장 공간이 가득 참",
+  "Image preview unavailable — this chat reached its 192 MB storage limit": "이미지 미리보기를 사용할 수 없음 — 이 채팅이 192 MB 저장 한도에 도달함",
   "Image preview unavailable — image exceeds the recording limit": "이미지 미리보기를 사용할 수 없음 — 이미지가 기록 한도를 초과함",
   "Toggle Files side panel": "파일 사이드 패널 표시/숨기기",
   "Refresh files": "파일 새로고침",

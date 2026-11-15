@@ -5699,12 +5699,13 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
         frame.replaceChildren(el('p', 'meta', () => {
         if (event.previewStatus === 'pending') return t("Image preview is loading");
         if (event.previewError === 'removed') return t("Image removed from local storage");
+        if (event.previewError === 'session_quota') return t("Image preview unavailable — this chat reached its 192 MB storage limit");
         if (event.previewError === 'quota') return t("Image preview unavailable — recording storage is full");
         if (event.previewError === 'oversized') return t("Image preview unavailable — image exceeds the recording limit");
         return t("Image preview unavailable");
         }));
-        // Freeing storage helps only a full store or a removed picture; it cannot shrink one or load it.
-        if (event.previewStatus !== 'pending' && (event.previewError === 'quota' || event.previewError === 'removed')) frame.append(imageStorageButton());
+        // Freeing storage helps when global storage is full, a session hit its 192 MB cap, or an image was removed.
+        if (event.previewStatus !== 'pending' && (event.previewError === 'quota' || event.previewError === 'session_quota' || event.previewError === 'removed')) frame.append(imageStorageButton());
       };
       if (event.asset) frame.append(el('p', 'meta', () => t("Image preview is loading")));
       else unavailable();

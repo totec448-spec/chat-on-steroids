@@ -139,6 +139,7 @@
   "Image preview is loading": "正在載入圖片預覽",
   "Image preview unavailable": "無法預覽圖片",
   "Image preview unavailable — recording storage is full": "無法預覽圖片 — 記錄儲存空間已滿",
+  "Image preview unavailable — this chat reached its 192 MB storage limit": "無法預覽圖片 — 此對話已達到 192 MB 儲存上限",
   "Image preview unavailable — image exceeds the recording limit": "無法預覽圖片 — 圖片超出記錄限制",
   "Toggle Files side panel": "切換檔案側邊面板",
   "Refresh files": "重新整理檔案",

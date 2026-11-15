@@ -2411,7 +2411,7 @@ decodes previews before asset admission. The global asset budget remains exact; 
 `config.sessions.storageLimitGiB` (2, 5, 10, 20 or 50; default 2; anything else loads as 2), set in
 Settings → Browser & history (Storage size) and applied through `setRecordingStorageLimit()` at
 startup and on every settings save, which re-decides the full state at once when usage is known;
-quota failures retain the canonical row and explicitly report storage full. The store keeps that as
+quota failures retain the canonical row (`previewError: 'session_quota'` for the 192 MiB per-session limit, or `'quota'` for the global limit) and explicitly report storage full. The store keeps that as
 one state (`recordingStorageFull()`, set by a write the global limit refused, cleared by an admitted
 write or a clean-up that leaves room): it is logged once per change, travels as
 `AppState.recordingStorageFull`, and the window shows one dismissible notice that opens the clean-up.

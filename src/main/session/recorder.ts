@@ -45,6 +45,8 @@ import {
   MAX_TOOL_RESULT_CHARS,
   MAX_USER_MESSAGE_CHARS,
   MAX_ASSET_BYTES,
+  GLOBAL_ASSET_QUOTA_EXCEEDED,
+  SESSION_ASSET_QUOTA_EXCEEDED,
   appendEvent,
   recordProcessCall,
   reviseProvisionalCall,
@@ -1619,12 +1621,14 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
         // Only fixed storage diagnostics may enter the transcript; arbitrary fs errors
         // can contain private paths. Recording failure never changes the MCP payload.
         const message = err instanceof Error ? err.message : '';
-        const reason = message === 'Global session asset quota exceeded' || message === 'Session asset quota exceeded'
+        const reason = message === GLOBAL_ASSET_QUOTA_EXCEEDED
           ? 'recording storage limit reached'
-          : message === 'Session image exceeds the recording limit' ? 'recording image size limit' : 'recording write failed';
+          : message === SESSION_ASSET_QUOTA_EXCEEDED
+            ? 'chat recording limit reached (192 MiB)'
+            : message === 'Session image exceeds the recording limit' ? 'recording image size limit' : 'recording write failed';
         imageRecordingReasons.add(reason);
         // The store reports being full once, as a state (#1406); other reasons keep their line.
-        if (message !== 'Global session asset quota exceeded') logWarn(`session image not stored: ${reason}`);
+        if (message !== GLOBAL_ASSET_QUOTA_EXCEEDED) logWarn(`session image not stored: ${reason}`);
       }
     }
 
@@ -2340,8 +2344,13 @@ async function recordNativeImage(
     });
     if (enriched.changed) changed += 1;
   } catch (error) {
-    const reason = /quota/i.test((error as Error).message) ? 'quota' : 'invalid';
-    logWarn(`native generated image preview unavailable: ${(error as Error).message}`);
+    const message = error instanceof Error ? error.message : String(error);
+    const reason = message === SESSION_ASSET_QUOTA_EXCEEDED
+      ? 'session_quota'
+      : message === GLOBAL_ASSET_QUOTA_EXCEEDED || /quota/i.test(message)
+        ? 'quota'
+        : 'invalid';
+    logWarn(`native generated image preview unavailable: ${message}`);
     const unavailable = await upsertNativeImageEvent(sessionId, {
       ...base,
       kind: 'native_image',

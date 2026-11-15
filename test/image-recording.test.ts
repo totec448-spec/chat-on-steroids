@@ -76,6 +76,16 @@ it('keeps exact image bytes on the wire when the recording quota rejects a previ
   expect(await store.readAsset(sessionId, recorded.assets![0]!.id)).toEqual(png);
 });
 
+it('reports per-chat asset quota separately from global recording storage quota', async () => {
+  const write = vi.spyOn(store, 'writeAsset').mockRejectedValueOnce(new Error('Session asset quota exceeded'));
+  const missing = await callImage();
+  expect(missing.assets).toBeUndefined();
+  expect(missing.summary).toMatchObject({ tone: 'warn' });
+  expect(missing.summary.detail).toContain('chat recording limit reached (192 MiB)');
+  expect(missing.summary.detail).toContain('Image content remains in the tool response.');
+  write.mockRestore();
+});
+
 it('exposes a recording write failure without leaking filesystem error text into history or changing the image result', async () => {
   vi.spyOn(store, 'writeAsset').mockRejectedValueOnce(new Error('EACCES: PRIVATE_LOCAL_PATH'));
   const call = await callImage();
