@@ -1714,10 +1714,10 @@ export function upsertNativeImageEvent(
       const quotaError = [event.previewError, previous?.previewError].find(
         (code): code is 'quota' | 'session_quota' => code === 'quota' || code === 'session_quota'
       );
-      const previewError = quotaError && !asset
-        ? quotaError
-        : staleAsset
-          ? 'removed'
+      const previewError = staleAsset
+        ? 'removed'
+        : quotaError && !asset
+          ? quotaError
           : event.previewError ?? previous?.previewError;
       const previewStatus = asset
         ? 'available'
