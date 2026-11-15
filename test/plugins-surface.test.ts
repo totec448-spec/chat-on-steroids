@@ -196,13 +196,14 @@ it('redacts dispatcher refusals even when the external plugin handler never ran'
 it('records an upstream error as failed with authored detail while preserving its exact protocol result', async () => {
   plugin.call.mockImplementationOnce(async (_name, _args, onOutcome) => {
     onOutcome?.('tool_execution_error');
-    return { isError: true, content: [{ type: 'text', text: 'Expected synthetic fixture error.' },
+    return { isError: true, content: [{ type: 'text', text: 'Expected synthetic fixture error.', _meta: { block: 'first' } },
       { type: 'resource_link', uri: 'https://example.com/scene', name: 'scene' }], structuredContent: { count: 0 }, _meta: { upstream: true } };
   });
   const response = await rpc('plugins', 'tools/call', { name: plugin.declaration.name, arguments: { name: 'intentional tool failure' } });
   expect(response.result).toMatchObject({ isError: true, structuredContent: { count: 0 }, _meta: { upstream: true } });
   expect(response.result.content.filter((block: { type: string }) => block.type === 'text')).toHaveLength(1);
   expect(response.result.content[0].type).toBe('text');
+  expect(response.result.content[0]._meta).toEqual({ block: 'first' });
   expect(response.result.content[0].text.startsWith('Expected synthetic fixture error.\n--- Identity notice ---\n')).toBe(true);
   expect(response.result.content[1]).toEqual({ type: 'resource_link', uri: 'https://example.com/scene', name: 'scene' });
   await flushRecorder();

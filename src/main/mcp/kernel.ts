@@ -592,7 +592,7 @@ function collapseTextContent(content: ToolContent[]): ToolContent[] {
   const collapsed: ToolContent[] = [];
   content.forEach((part, index) => {
     if (part.type !== 'text') collapsed.push(part);
-    else if (index === firstTextIndex) collapsed.push({ type: 'text', text: merged });
+    else if (index === firstTextIndex) collapsed.push({ ...part, text: merged });
   });
   return collapsed;
 }
