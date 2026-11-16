@@ -400,19 +400,20 @@ function trayIcon(running: boolean): Electron.NativeImage {
   return image;
 }
 
-function refreshTray(): void {
-  if (!tray) return;
+function refreshTray(target?: unknown): void {
+  const current = target instanceof Tray ? target : tray;
+  if (!current) return;
   const state = getStatus().state;
   const connected = state === 'connected';
   const offline = state === 'offline';
   // Offline keeps the running icon: the bridge is up, the internet is not.
   const running = connected || offline;
   const label = mainText(connected ? 'Connected' : offline ? (getStatus().offlineCause === 'service' ? 'OpenAI outage' : 'No internet') : 'Not connected');
-  tray.setImage(trayIcon(running));
+  current.setImage(trayIcon(running));
   // Not lowercased: that would break translated nouns ("Keine Internetverbindung").
-  tray.setToolTip(`Chat On Steroids — ${label}`);
+  current.setToolTip(`Chat On Steroids — ${label}`);
   const cosBrowser = loadedCosBrowser();
-  tray.setContextMenu(
+  current.setContextMenu(
     Menu.buildFromTemplate([
       { label, enabled: false },
       { type: 'separator' },
@@ -452,7 +453,10 @@ function syncTray(): void {
       created.on('click', windowActivation.request);
       return created;
     },
-    () => refreshTray(),
+    target => {
+      tray = target;
+      refreshTray(target);
+    },
     logInfo
   );
 }

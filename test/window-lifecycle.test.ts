@@ -231,6 +231,7 @@ describe('native window activation', () => {
     const source = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8');
     expect(source).toContain('tray = reconcileTrayState(');
     expect(source).toContain('const visible = shouldShowTrayIcon(process.platform, getConfig().ui.showTrayIcon);');
+    expect(source).toContain('refreshTray(target);');
   });
 
   it('persists normal bounds plus maximized presentation and ignores other transient native states', () => {
