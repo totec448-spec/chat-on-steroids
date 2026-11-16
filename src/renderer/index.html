@@ -68,6 +68,11 @@
         </button>
       </nav>
         <section class="sidebar-sessions">
+          <div class="sidebar-client-switch" id="sidebarClientSwitch" role="group" aria-label="Chat client filter">
+            <button class="sidebar-client-option is-sel" type="button" data-sidebar-client="all" aria-pressed="true"><span>All</span></button>
+            <button class="sidebar-client-option" type="button" data-sidebar-client="chatgpt" aria-pressed="false" translate="no"><span>ChatGPT</span></button>
+            <button class="sidebar-client-option" type="button" data-sidebar-client="gemini" aria-pressed="false" translate="no"><span class="sidebar-client-dot" aria-hidden="true"></span><span>Gemini</span></button>
+          </div>
           <div class="scroll">
             <div id="sessionList">
               <details class="sidebar-session-section" id="projectsSection" open>
@@ -946,6 +951,7 @@
                     </div>
                   </details>
                   <div class="connectors step-wide" id="connectorCards"></div>
+                  <div class="gemini-setup-slot step-wide" id="geminiConnectorCard"></div>
                 </div>
               </li>
               <!-- 7: not a task but the proof. It reads back every check above, says plainly when
@@ -1141,6 +1147,12 @@
                   <div class="setting"><span class="setting-text"><b id="defaultChatReasoningTitle">Default new-chat reasoning</b><em>Used with the ordinary chat model above; workers and helpers keep their own defaults.</em></span><select id="defaultChatReasoning" aria-labelledby="defaultChatReasoningTitle"><option value="">Automatic</option></select></div>
                   <div class="setting"><span class="setting-text"><b id="workerModelTitle">Default sub-agent model</b><em>Used when a sub-agent starts. The app checks it in ChatGPT first.</em></span><select id="workerModel" aria-labelledby="workerModelTitle"><option value="" disabled>No observed choices</option></select></div>
                   <div class="setting"><span class="setting-text"><b id="workerReasoningTitle">Default sub-agent reasoning</b><em>Used with the sub-agent model above.</em></span><select id="workerReasoning" aria-labelledby="workerReasoningTitle"><option value="" disabled>No observed choices</option></select></div>
+                  </div>
+                <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Gemini models</h2><p>Choose the default model for new Gemini chats and sub-agents, from what your Gemini account offers.</p></div></header>
+                <div class="settings-surface pane">
+                  <div class="setting"><span class="setting-text"><b>Available Gemini models</b><em id="geminiModelStatus">Read model choices from your Gemini account.</em></span><button class="btn" id="refreshGeminiModels" type="button">Refresh</button></div>
+                  <div class="setting"><span class="setting-text"><b id="defaultGeminiModelTitle">Default Gemini new-chat model</b><em>Used when you start a new Gemini chat. A chat you continue keeps its own model.</em></span><select id="defaultGeminiModel" aria-labelledby="defaultGeminiModelTitle"><option value="">Automatic</option></select></div>
+                  <div class="setting"><span class="setting-text"><b id="workerGeminiModelTitle">Default Gemini sub-agent model</b><em>Used when a Gemini sub-agent starts. The app checks it in Gemini first.</em></span><select id="workerGeminiModel" aria-labelledby="workerGeminiModelTitle"><option value="">Automatic</option></select></div>
                   </div>
                 <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Skills</h2><p>Choose whether imported Skills can be matched to ordinary messages.</p></div></header>
                 <div class="settings-surface pane">
@@ -1540,6 +1552,10 @@
                   </details>
                   <button id="createPlan" type="button"><i class="ico ph ph-list-checks" aria-hidden="true"></i><span>Plan</span></button>
                   <button class="composer-dictation-button" id="dictationButton" type="button" aria-label="Start dictation" aria-pressed="false" aria-describedby="dictationStatus" data-state="idle" title="Start dictation" hidden disabled><i class="ico ph ph-microphone" aria-hidden="true"></i><span class="dictation-recording-dot" aria-hidden="true"></span></button>
+                  <div class="composer-provider-switch" id="composerProviderSwitch" role="group" aria-label="AI client for new chat" hidden>
+                    <button class="composer-provider-option is-sel" type="button" data-composer-provider="chatgpt" aria-pressed="true" translate="no"><span>ChatGPT</span></button>
+                    <button class="composer-provider-option" type="button" data-composer-provider="gemini" aria-pressed="false" translate="no"><span>Gemini</span></button>
+                  </div>
                 </div>
                 <div class="context-meter" id="contextMeter">
                   <span id="contextMeterNotice" class="sr-only" role="status" aria-live="polite"></span>

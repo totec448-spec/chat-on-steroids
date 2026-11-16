@@ -305,3 +305,108 @@ it('rounds the page up to a whole pixel, so Chrome does not size the popup a fra
   height = 540; resized!();
   expect(root.style.minHeight).toBe('540px');
 });
+
+it('shows Gemini labels, synced companion status, and valid /app routes without ChatGPT-only toggles on Gemini tabs', async () => {
+  const document = openPopup();
+  const win = popup!.window as any;
+  const runRefresh = async (tabStatus: Record<string, unknown>) => {
+    win.chrome.runtime.sendMessage = async (message: { type: string }) =>
+      message.type === 'status'
+        ? { connected: true, paired: true, compatible: true, port: 8765 }
+        : tabStatus;
+    await win.refresh();
+  };
+
+  // Fresh Gemini /app page (no slug yet) is recognized as a valid new chat, not "not a chat".
+  await runRefresh({
+    isChat: true,
+    provider: 'gemini',
+    url: 'https://gemini.google.com/app',
+    conversationId: null,
+    recorder: true,
+    page: { events: 0, recorderVersion: 22, runId: 'gem-run-1234' },
+    pending: 0,
+    chatTabs: 1,
+    chatgptTabs: 0,
+    geminiTabs: 1
+  });
+  expect(document.getElementById('tabLabel')!.textContent).toBe('Gemini tab');
+  expect(document.getElementById('r-rec')!.className).toBe('row ok');
+  expect(document.getElementById('d-chat')!.textContent).toBe('new chat');
+  expect(document.getElementById('r-req')!.hidden).toBe(true);
+  expect(document.getElementById('augmentCard')!.hidden).toBe(true);
+  expect(document.getElementById('geminiCard')!.hidden).toBe(false);
+  expect(document.getElementById('d-gemini-sync')!.textContent).toBe('active');
+  expect(document.getElementById('why')!.textContent).toContain('Waiting for the first message');
+
+  // Recorded & synced Gemini conversation reports "synced" and gemini recorder metadata.
+  await runRefresh({
+    isChat: true,
+    provider: 'gemini',
+    url: 'https://gemini.google.com/app/8f3b2c1d9e0a4567',
+    conversationId: 'gemini-8f3b2c1d9e0a4567',
+    recorder: true,
+    page: { events: 4, session: 'sess-gem', recorderVersion: 22, runId: 'gem-run-1234' },
+    delivery: { ok: true, events: 4, total: 12 },
+    pending: 0,
+    chatTabs: 1
+  });
+  (document.getElementById('more') as HTMLDetailsElement).open = true;
+  win.paintDetails(win.latest?.status ?? { connected: true, paired: true, compatible: true, port: 8765 }, {
+    isChat: true,
+    provider: 'gemini',
+    tab: 9,
+    page: { events: 4, calls: 0, recorderVersion: 22, runId: 'gem-run-1234' }
+  });
+  expect(document.getElementById('d-app')!.textContent).toBe('synced');
+  expect(document.getElementById('r-app')!.className).toBe('row ok');
+  expect(document.getElementById('why')!.textContent).toContain('Gemini chat recorded and synced');
+  expect([...document.querySelectorAll('#grid dd')].map((n) => n.textContent)).toContain('gemini v22 · run gem-run-1234');
+
+  // Gemini Settings page is reported with Gemini wording as not a chat.
+  await runRefresh({
+    isChat: true,
+    provider: 'gemini',
+    url: 'https://gemini.google.com/settings',
+    conversationId: null,
+    recorder: true,
+    page: { events: 0 },
+    pending: 0
+  });
+  expect(document.getElementById('d-chat')!.textContent).toBe('not a chat');
+  expect(document.getElementById('why')!.textContent).toContain('This Gemini page is not a chat');
+});
+
+it('switches between ChatGPT tab, Gemini tab, and combined tab counts when outside chat tabs', async () => {
+  const document = openPopup();
+  const win = popup!.window as any;
+  const runRefresh = async (tabStatus: Record<string, unknown>) => {
+    win.chrome.runtime.sendMessage = async (message: { type: string }) =>
+      message.type === 'status'
+        ? { connected: true, paired: true, compatible: true, port: 8765 }
+        : tabStatus;
+    await win.refresh();
+  };
+
+  await runRefresh({
+    isChat: true,
+    provider: 'chatgpt',
+    url: 'https://chatgpt.com/',
+    conversationId: null,
+    recorder: true,
+    page: { events: 0 },
+    pending: 0
+  });
+  expect(document.getElementById('tabLabel')!.textContent).toBe('ChatGPT tab');
+  expect(document.getElementById('augmentCard')!.hidden).toBe(false);
+  expect(document.getElementById('geminiCard')!.hidden).toBe(true);
+  expect(document.getElementById('r-req')!.hidden).toBe(false);
+
+  await runRefresh({ isChat: false, chatTabs: 2, chatgptTabs: 1, geminiTabs: 1 });
+  expect(document.getElementById('tabLabel')!.textContent).toBe('ChatGPT / Gemini tab');
+  expect(document.getElementById('d-tab')!.textContent).toBe('1 ChatGPT · 1 Gemini');
+
+  await runRefresh({ isChat: false, chatTabs: 0, chatgptTabs: 0, geminiTabs: 0 });
+  expect(document.getElementById('tabLabel')!.textContent).toBe('ChatGPT / Gemini tab');
+  expect(document.getElementById('d-tab')!.textContent).toBe('none open');
+});

@@ -670,6 +670,7 @@ function loadWorker(options: {
     setTimeout,
     clearTimeout,
     URL,
+    URLSearchParams,
     TextEncoder,
     crypto: globalThis.crypto,
     console
@@ -6694,4 +6695,112 @@ it('waits for rendering leases only through renderingLeases', () => {
   const source = readFileSync('extension/background.js', 'utf8');
   const raw = source.split('\n').filter(line => /await\s+activeTabs/.test(line) && !line.includes('renderingLeases'));
   expect(raw).toEqual([]);
+});
+
+describe('Gemini desktop input delivery', () => {
+  it('opens Gemini instead of reusing an open ChatGPT tab, and keeps elected custody if SPA strips query params', async () => {
+    const inputId = '11111111-2222-4333-8444-555555555555';
+    const local = new FakeStorageArea({ port: 8765, token: 'paired-token' });
+    const session = new FakeStorageArea();
+    const claimPayloads: unknown[] = [];
+    const tabs: Array<Record<string, unknown>> = [{ id: 1, windowId: 7, url: 'https://chatgpt.com/' }];
+    const worker = loadWorker({
+      local,
+      session,
+      tabsQuery: async () => tabs.map((tab) => ({ ...tab })) as never,
+      tabsGet: async (tabId) => (tabs.find((row) => row.id === tabId) ?? { id: tabId }) as never,
+      fetch: async (input, init = {}) => {
+        const route = new URL(input).pathname;
+        if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (route === '/status') {
+          return response(200, {
+            inputs: [{ id: inputId, conversationId: null, provider: 'gemini' }],
+            inputOpeningIds: [inputId]
+          });
+        }
+        if (route === '/input/claim') {
+          claimPayloads.push(JSON.parse(String(init.body)));
+          return response(200, { input: { id: inputId, owner: '99:doc-gem:1', text: 'Hello Gemini' } });
+        }
+        return response(200, {});
+      }
+    });
+
+    await worker.registerTab(1, 'doc-chatgpt-1');
+    await worker.fireAlarm();
+
+    expect(worker.tabsCreate).toHaveBeenCalledTimes(1);
+    const createdUrl = (worker.tabsCreate.mock.calls[0]?.[0] as { url: string }).url;
+    expect(createdUrl).toBe(`https://gemini.google.com/app?cos-input=${inputId}#cos-input=${inputId}`);
+
+    // Simulate Chrome + Gemini Angular router normalizing the created tab to /app without query/hash.
+    tabs.push({ id: 99, windowId: 7, url: 'https://gemini.google.com/app' });
+    await worker.registerTab(99, 'doc-gem-1');
+    await worker.fireAlarm();
+    await vi.waitFor(() => {
+      const offeredToGemini = worker.tabsSendMessage.mock.calls.some(
+        (args) => args[0] === 99 && (args[1] as { type?: string; id?: string }).type === 'clf-desktop-input' && (args[1] as { id?: string }).id === inputId
+      );
+      expect(offeredToGemini).toBe(true);
+    });
+
+    const claimResult = await worker.send({ type: 'desktop_input', id: inputId, conversationId: null, requiresAuthorization: true }, 99, 'doc-gem-1');
+    expect((claimResult as { ok?: boolean }).ok).toBe(true);
+    expect(claimPayloads).toHaveLength(1);
+  });
+
+  it('routes geminiModelCatalogRequest to gemini.google.com tabs and forwards observed models with provider=gemini', async () => {
+    const nonce = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const expiresAt = Date.now() + 60_000;
+    const local = new FakeStorageArea({ port: 8765, token: 'paired-token' });
+    const session = new FakeStorageArea();
+    const modelPosts: Array<Record<string, unknown>> = [];
+    const tabs: Array<Record<string, unknown>> = [{ id: 12, windowId: 7, url: 'https://gemini.google.com/app' }];
+    let worker: ReturnType<typeof loadWorker>;
+    let reported: unknown = null;
+    worker = loadWorker({
+      local,
+      session,
+      tabsQuery: async () => tabs.map((tab) => ({ ...tab })) as never,
+      tabsGet: async (tabId) => (tabs.find((row) => row.id === tabId) ?? { id: tabId }) as never,
+      tabsSendMessage: async (_tabId, msg) => {
+        const type = (msg as { type?: string }).type;
+        if (type === 'clf-model-catalog-state') return { ready: true, reason: null } as never;
+        if (type === 'clf-model-catalog') {
+          reported = await worker.send({
+            type: 'model_catalog',
+            provider: 'gemini',
+            nonce,
+            models: [{ id: 'fast', label: 'Fast' }, { id: 'pro', label: '2.5 Pro' }]
+          }, 12, 'doc-gem-cat');
+          return { ok: true } as never;
+        }
+        return { ok: true } as never;
+      },
+      fetch: async (input, init = {}) => {
+        const route = new URL(input).pathname;
+        if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (route === '/status') {
+          return response(200, {
+            geminiModelCatalogRequest: { nonce, expiresAt, allowOpen: false }
+          });
+        }
+        if (route === '/models') {
+          modelPosts.push(JSON.parse(String(init.body)));
+          return response(200, { ok: true });
+        }
+        return response(200, {});
+      }
+    });
+
+    await worker.registerTab(12, 'doc-gem-cat');
+    await worker.fireAlarm();
+
+    await vi.waitFor(() => {
+      expect((reported as { ok?: boolean } | null)?.ok).toBe(true);
+    });
+    expect(modelPosts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ provider: 'gemini', nonce, models: [{ id: 'fast', label: 'Fast' }, { id: 'pro', label: '2.5 Pro' }] })
+    ]));
+  });
 });

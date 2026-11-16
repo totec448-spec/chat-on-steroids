@@ -21,6 +21,7 @@ import type {
   AgentMessage,
   AssetRef,
   CallAttribution,
+  McpClientIdentity,
   SessionChange,
   SessionEvent,
   SessionOrigin,
@@ -176,6 +177,9 @@ const MAX_PENDING_ORIGINS = 50;
 /** Calls whose exact request id never resolves to a conversation are stored here. */
 let unattributedSessionId: string | null = null;
 let unattributedInitialization: Promise<string | null> | null = null;
+const EXTERNAL_CLIENT_REUSE_MS = 24 * 60 * 60_000;
+const externalClientSessions = new Map<string, string>();
+const externalClientInitializations = new Map<string, Promise<string | null>>();
 let lastActiveSessionId: string | null = null;
 
 /**
@@ -658,6 +662,51 @@ async function ensureUnattributedSession(): Promise<string | null> {
     return await initializing;
   } finally {
     if (unattributedInitialization === initializing) unattributedInitialization = null;
+  }
+}
+
+async function ensureExternalClientSession(client: McpClientIdentity): Promise<string | null> {
+  if (!recordingEnabled()) return null;
+  const cachedId = externalClientSessions.get(client.id);
+  if (cachedId) {
+    const existing = await getSession(cachedId);
+    if (existing && existing.endedAt === null && !existing.conversationId) return existing.id;
+    externalClientSessions.delete(client.id);
+  }
+  const inflight = externalClientInitializations.get(client.id);
+  if (inflight) return inflight;
+  const initializing = (async () => {
+    const now = Date.now();
+    const candidates = (await indexedSessions())
+      .filter(
+        (entry) =>
+          entry.endedAt === null &&
+          !entry.conversationId &&
+          !entry.origin &&
+          entry.mcpClient?.id === client.id &&
+          now - entry.updatedAt < EXTERNAL_CLIENT_REUSE_MS
+      )
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+    const existing = candidates[0];
+    if (existing) {
+      externalClientSessions.set(client.id, existing.id);
+      lastActiveSessionId = existing.id;
+      return existing.id;
+    }
+    const summary = await createSession({ title: client.name, mcpClient: client });
+    await appendEvent(summary.id, {
+      time: Date.now(), source: 'app', kind: 'session_start', conversationId: null, title: summary.title
+    });
+    externalClientSessions.set(client.id, summary.id);
+    lastActiveSessionId = summary.id;
+    notifyChanged(summary.id);
+    return summary.id;
+  })();
+  externalClientInitializations.set(client.id, initializing);
+  try {
+    return await initializing;
+  } finally {
+    if (externalClientInitializations.get(client.id) === initializing) externalClientInitializations.delete(client.id);
   }
 }
 
@@ -1355,6 +1404,10 @@ export interface ToolCallInput {
   conversationId?: string | null;
   /** Durable local session principal carried by the exact request correlation, when available. */
   sessionId?: string | null;
+  /** Presentation-only external MCP client identity when not attached to a ChatGPT chat. */
+  mcpClient?: McpClientIdentity | null;
+  /** Optional sanitized MCP HTTP session header from the caller. */
+  mcpSessionId?: string | null;
   /** A successful worker finish report is a hard activity boundary, not fresh work. */
   endsActivity?: boolean;
 }
@@ -1484,7 +1537,7 @@ export function recordToolCall(input: ToolCallInput): Promise<ToolCallRecord | n
           // one outcome whose cause always lives in the browser half of the join, so the log
           // has to carry the id that the page never confirmed — it is the only handle anyone
           // has for matching this against what the extension believed it sent.
-          if (!conversationId) {
+          if (!conversationId && !input.mcpClient) {
             logWarn(
               `request attribution: no page evidence for ${input.requestId} within ` +
                 `${REQUEST_ID_GRACE_MS}ms; filing ${input.tool} under Unattributed activity${requestTraceNote(input.requestId!)}`
@@ -1495,10 +1548,18 @@ export function recordToolCall(input: ToolCallInput): Promise<ToolCallRecord | n
             conversationId,
             sessionId: correlation?.sessionId ?? null,
             attribution: conversationId ? ('request_id' as const) : ('unattributed' as const),
-            turnId: conversationId ? conversations.get(conversationId)?.turnId ?? null : null
+            turnId: conversationId ? conversations.get(conversationId)?.turnId ?? null : null,
+            ...(conversationId ? {} : { mcpClient: input.mcpClient ?? null, mcpSessionId: input.mcpSessionId ?? null })
           };
         })
-      : Promise.resolve<Target>({ conversationId: null, sessionId: null, attribution: 'unattributed', turnId: null });
+      : Promise.resolve<Target>({
+          conversationId: null,
+          sessionId: null,
+          attribution: 'unattributed',
+          turnId: null,
+          mcpClient: input.mcpClient ?? null,
+          mcpSessionId: input.mcpSessionId ?? null
+        });
   }
   const file = async (): Promise<ToolCallRecord | null> => {
     const target = await attributing;
@@ -2015,6 +2076,8 @@ interface Target {
   sessionId: string | null;
   attribution: CallAttribution;
   turnId: string | null;
+  mcpClient?: McpClientIdentity | null;
+  mcpSessionId?: string | null;
 }
 
 /** Set by the agent broker so a worker's calls land in that worker's own session. */
@@ -2121,6 +2184,7 @@ async function targetSession(target: Target): Promise<string | null> {
     // existing session to resurrect, so creating one through the ordinary path is correct.
     return sessionForConversation(target.conversationId);
   }
+  if (target.mcpClient) return ensureExternalClientSession(target.mcpClient);
   return ensureUnattributedSession();
 }
 
@@ -3351,6 +3415,9 @@ export function forgetSession(sessionId: string): string[] {
     affected.push(conversationId);
   }
   if (unattributedSessionId === sessionId) unattributedSessionId = null;
+  for (const [clientId, mappedId] of externalClientSessions) {
+    if (mappedId === sessionId) externalClientSessions.delete(clientId);
+  }
   if (lastActiveSessionId === sessionId) lastActiveSessionId = null;
   if (affected.length > 0) {
     logInfo(`session ${sessionId} deleted while live; ${affected.length} conversation(s) will start a new session`);
@@ -3377,6 +3444,8 @@ export function resetRecorderForTests(): void {
   pendingOrigins.clear();
   unattributedSessionId = null;
   unattributedInitialization = null;
+  externalClientSessions.clear();
+  externalClientInitializations.clear();
   requestRecordings.clear();
   sessionRecordings.clear();
   pendingRecordings.clear();

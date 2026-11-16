@@ -26,6 +26,9 @@
   "content_auto_compaction_threshold_app": {
     "message": "ngưỡng được đặt trong ứng dụng"
   },
+  "content_auto_compaction_waiting_app": {
+    "message": "Tự động thu gọn: đang chờ ứng dụng"
+  },
   "content_auto_compaction_worker_off": {
     "message": "tắt ở đây: cuộc trò chuyện worker không bao giờ tự động thu gọn"
   },
@@ -35,11 +38,11 @@
   "content_bootstrap_composer_changed_before_send": {
     "message": "ô soạn thảo đã thay đổi trước khi gửi nội dung khởi tạo; bản nháp được giữ nguyên"
   },
-  "content_bootstrap_composer_replaced": {
-    "message": "ChatGPT đã thay thế ô soạn thảo khi chèn nội dung khởi tạo"
-  },
   "content_bootstrap_composer_never_ready": {
     "message": "ChatGPT không hiển thị ô soạn thảo khả dụng để bắt đầu"
+  },
+  "content_bootstrap_composer_replaced": {
+    "message": "ChatGPT đã thay thế ô soạn thảo khi chèn nội dung khởi tạo"
   },
   "content_bootstrap_composer_unavailable": {
     "message": "ChatGPT không hiển thị lại ô soạn thảo khả dụng sau khi chọn mô hình"
@@ -326,11 +329,11 @@
   "content_delivery_existing_draft": {
     "message": "ChatGPT đã có một bản nháp chưa gửi. Hãy gửi hoặc xóa bản nháp đó trong Chrome trước khi thử lại."
   },
-  "content_delivery_signed_out": {
-    "message": "Trình duyệt này chưa đăng nhập ChatGPT. Hãy đăng nhập ChatGPT ở đó rồi gửi lại."
-  },
   "content_delivery_model_unconfirmed": {
     "message": "Không thể xác nhận mô hình hoặc mức suy luận được yêu cầu"
+  },
+  "content_delivery_signed_out": {
+    "message": "Trình duyệt này chưa đăng nhập ChatGPT. Hãy đăng nhập ChatGPT ở đó rồi gửi lại."
   },
   "content_delivery_stop_failed": {
     "message": "Không thể dừng câu trả lời hiện tại."
@@ -346,6 +349,12 @@
   },
   "content_dismiss": {
     "message": "Đóng"
+  },
+  "content_edit_message_missing": {
+    "message": "Tin nhắn đó không còn trên trang ChatGPT nên không thể chỉnh sửa."
+  },
+  "content_edit_unavailable": {
+    "message": "ChatGPT không cung cấp Chỉnh sửa cho tin nhắn đó. Hãy mở cuộc trò chuyện trong ChatGPT rồi thử lại."
   },
   "content_empty": {
     "message": "(trống)"
@@ -407,11 +416,122 @@
   "content_goal_delivery_only_finish": {
     "message": "Chỉ khi kết thúc phiên"
   },
+  "content_goal_error_astra_finish_only": {
+    "message": "Cuộc trò chuyện này tiếp tục qua công cụ finish. Câu trả lời cuối trong trình duyệt không kích hoạt tin nhắn khác với cài đặt hiện tại."
+  },
+  "content_goal_error_auth_rejected": {
+    "message": "Nhà cung cấp tiếp tục đã từ chối thông tin xác thực API. Hãy kiểm tra khóa API và quyền truy cập trong Cài đặt."
+  },
+  "content_goal_error_chat_blocked": {
+    "message": "Cuộc trò chuyện này bị chặn trong ứng dụng. Hãy bỏ chặn tại đó trước khi bật tiếp tục."
+  },
+  "content_goal_error_conversation_superseded": {
+    "message": "Cuộc trò chuyện này đã được thay thế bằng Compact & Resume. Hãy tiếp tục trong cuộc trò chuyện kế nhiệm."
+  },
+  "content_goal_error_goal_ack_not_durable": {
+    "message": "Ứng dụng không thể lưu xác nhận gửi. Hãy kiểm tra dung lượng đĩa trống; kiểm tra cuộc trò chuyện trước khi tự gửi lại."
+  },
+  "content_goal_error_goal_browser_busy": {
+    "message": "Một yêu cầu trợ lý đã đang chờ. Hãy để nó hoàn tất hoặc hủy yêu cầu đó trước khi bắt đầu yêu cầu khác."
+  },
+  "content_goal_error_goal_browser_cancelled": {
+    "message": "Yêu cầu trợ lý đã bị hủy. Hãy bắt đầu lại khi bạn muốn tiếp tục."
+  },
+  "content_goal_error_goal_browser_send_failed": {
+    "message": "Không thể gửi prompt trợ lý tới ChatGPT. Hãy mở cuộc trò chuyện trợ lý và kiểm tra ô soạn thảo hoặc lỗi hiển thị trước khi thử lại."
+  },
+  "content_goal_error_goal_browser_send_unconfirmed": {
+    "message": "Ứng dụng không thể xác nhận ChatGPT đã nhận prompt trợ lý hay chưa. Hãy kiểm tra cuộc trò chuyện trợ lý trước khi thử lại để tránh gửi hai lần."
+  },
+  "content_goal_error_goal_context_too_large": {
+    "message": "Tác vụ và chỉ dẫn Goal/Loop quá dài để gửi cho trợ lý. Hãy rút ngắn tác vụ hoặc chỉ dẫn tiếp tục tùy chỉnh trong Cài đặt."
+  },
+  "content_goal_error_goal_disabled": {
+    "message": "Goal/Loop đang tắt cho cuộc trò chuyện này. Hãy bật để cho phép tiếp tục."
+  },
+  "content_goal_error_goal_final_not_confirmed": {
+    "message": "Ứng dụng chưa xác nhận câu trả lời cuối đủ điều kiện để tiếp tục tự động. Hãy kiểm tra cuộc trò chuyện nguồn xem còn công việc đang chạy hoặc có lỗi không."
+  },
+  "content_goal_error_goal_helper_stop_unverified": {
+    "message": "Trợ lý cho biết mục tiêu đã hoàn thành nhưng điều đó chưa được kiểm tra. Chưa gửi phản hồi tiếp theo. Hãy kiểm tra cuộc trò chuyện và tiếp tục nếu còn việc."
+  },
+  "content_goal_error_goal_marker_missing": {
+    "message": "Câu trả lời thiếu dấu hoàn tất mà các mẫu Goal ngoại tuyến yêu cầu. Hãy kiểm tra chỉ dẫn mẫu hoặc chọn nguồn tiếp tục khác."
+  },
+  "content_goal_error_goal_objective_not_durable": {
+    "message": "Ứng dụng không thể lưu tác vụ. Hãy kiểm tra dung lượng đĩa trống và thử lưu lại."
+  },
+  "content_goal_error_goal_owned_elsewhere": {
+    "message": "Một tab trình duyệt khác đang xử lý nội dung tiếp tục này. Hãy kiểm tra tab đó để xem tiến trình."
+  },
+  "content_goal_error_goal_reply_not_durable": {
+    "message": "Ứng dụng không thể lưu nội dung tiếp tục đang chờ. Hãy kiểm tra dung lượng đĩa trống và chẩn đoán của ứng dụng."
+  },
+  "content_goal_error_goal_reply_not_pending": {
+    "message": "Không có nội dung tiếp tục nào đang chờ cho câu trả lời này. Có thể nó đã được xử lý hoặc bị công việc mới hơn thay thế. Hãy kiểm tra hoạt động cuộc trò chuyện mới nhất trước khi thử lại."
+  },
+  "content_goal_error_goal_switch_not_durable": {
+    "message": "Ứng dụng không thể lưu cài đặt Goal/Loop. Hãy kiểm tra dung lượng đĩa trống và thử lưu lại."
+  },
+  "content_goal_error_goal_worker_chat": {
+    "message": "Worker không thể tự chạy Goal/Loop. Hãy bật tiếp tục trong cuộc trò chuyện cha."
+  },
+  "content_goal_error_invalid_provider": {
+    "message": "Endpoint tiếp tục tùy chỉnh không hợp lệ. Hãy kiểm tra URL trong Cài đặt; dùng HTTPS hoặc endpoint HTTP cục bộ."
+  },
+  "content_goal_error_loop_mcp_call_missing": {
+    "message": "Không ghi nhận lệnh gọi công cụ MCP nào trong phản hồi gần nhất. ChatGPT có thể đang hỏi bạn điều gì đó hoặc kết nối công cụ có thể đã bị mất. Hãy trả lời, hoặc kiểm tra tunnel nếu công cụ ngừng hoạt động. Tiếp tục tự động đã tạm dừng; Loop vẫn bật."
+  },
+  "content_goal_error_loop_stop_refused": {
+    "message": "Trợ lý liên tục chọn dừng thay vì viết nội dung tiếp tục cho Loop. Hãy xem lại chỉ dẫn Loop hoặc chọn mô hình trợ lý khác."
+  },
+  "content_goal_error_no_api_key": {
+    "message": "Chưa cấu hình khóa API cho nhà cung cấp tiếp tục. Hãy thêm khóa trong Cài đặt hoặc chọn nguồn tiếp tục ChatGPT."
+  },
+  "content_goal_error_no_conversation": {
+    "message": "Không có cuộc trò chuyện đã ghi nào để tiếp tục. Hãy gửi một tác vụ trước."
+  },
+  "content_goal_error_no_objective": {
+    "message": "Chưa có tác vụ nào. Hãy nhập tác vụ trước khi bắt đầu Goal/Loop."
+  },
+  "content_goal_error_nothing_to_open_with": {
+    "message": "Trợ lý không tạo tin nhắn mở đầu. Hãy làm tác vụ cụ thể hơn rồi thử lại."
+  },
+  "content_goal_error_out_of_credit": {
+    "message": "Tài khoản nhà cung cấp tiếp tục không còn credit. Hãy thêm credit hoặc chọn nguồn tiếp tục khác trong Cài đặt."
+  },
+  "content_goal_error_rate_limited": {
+    "message": "Nhà cung cấp tiếp tục đang giới hạn tần suất yêu cầu. Hãy chờ lần thử lại được hiển thị hoặc chọn mô hình tiếp tục khác."
+  },
+  "content_goal_error_reply_too_long": {
+    "message": "Trợ lý đã viết nội dung tiếp tục quá dài để gửi. Hãy yêu cầu chỉ dẫn tiếp tục ngắn hơn hoặc chọn mô hình trợ lý khác trong Cài đặt."
+  },
+  "content_goal_error_request_failed": {
+    "message": "Yêu cầu tiếp tục thất bại. Hãy kiểm tra trợ lý hoặc API endpoint đã chọn cùng chẩn đoán của ứng dụng trước khi thử lại."
+  },
+  "content_goal_error_response_body_too_large": {
+    "message": "Phản hồi của nhà cung cấp vượt quá giới hạn kích thước. Hãy chọn mô hình tiếp tục khác hoặc yêu cầu phản hồi ngắn hơn."
+  },
+  "content_goal_error_session_not_recorded": {
+    "message": "Ứng dụng không có lịch sử đã ghi cho cuộc trò chuyện này. Hãy bật ghi và gửi một tin nhắn trước khi dùng tiếp tục tự động."
+  },
+  "content_goal_error_stream_record_too_long": {
+    "message": "Nhà cung cấp trả về phản hồi quá lớn. Hãy chọn mô hình tiếp tục khác hoặc yêu cầu phản hồi ngắn hơn."
+  },
+  "content_goal_error_timeout_or_cancelled": {
+    "message": "Yêu cầu tiếp tục đã hết thời gian chờ hoặc bị hủy. Hãy kiểm tra cuộc trò chuyện trợ lý hoặc trạng thái nhà cung cấp trước khi thử lại."
+  },
+  "content_goal_error_unknown_model": {
+    "message": "Nhà cung cấp tiếp tục không tìm thấy mô hình đã chọn. Hãy làm mới danh sách mô hình và chọn mô hình khả dụng trong Cài đặt."
+  },
   "content_goal_loop_off": {
     "message": "Goal và Loop tắt"
   },
   "content_goal_loop_stopped": {
     "message": "Vòng Goal đã dừng"
+  },
+  "content_goal_loop_waiting_app": {
+    "message": "Goal và Loop: đang chờ ứng dụng"
   },
   "content_goal_message_box_in_use": {
     "message": "ô tin nhắn đang được sử dụng nên không có gì được gửi"
@@ -458,6 +578,9 @@
   "content_goal_retrying": {
     "message": "Thử lại Goal sau $1 giây"
   },
+  "content_goal_reviewer_deadline": {
+    "message": "Tiếp tục mà không cần xem lại sau $1"
+  },
   "content_goal_save": {
     "message": "Lưu làm Goal"
   },
@@ -488,6 +611,9 @@
   "content_goal_step_writing": {
     "message": "Đang viết phản hồi"
   },
+  "content_goal_wait_paused": {
+    "message": "ChatGPT yêu cầu chậm lại · chờ đến giờ đã báo"
+  },
   "content_goal_wait_recovery_activity": {
     "message": "Đang chờ hoạt động sau khôi phục"
   },
@@ -497,32 +623,29 @@
   "content_goal_wait_resumed": {
     "message": "ChatGPT đã tiếp tục làm việc · đang chờ trước khi thử lại"
   },
-  "content_goal_wait_running_tools": {
-    "message": "Đang chờ các công cụ đang chạy"
-  },
-  "content_goal_wait_tool_inactivity": {
-    "message": "Đang chờ công cụ ngừng hoạt động"
-  },
-  "content_goal_reviewer_deadline": {
-    "message": "Tiếp tục mà không cần xem lại sau $1"
-  },
   "content_goal_wait_reviewer": {
     "message": "Đang chờ người xem lại"
   },
-  "content_goal_wait_workers": {
-    "message": "Đang chờ các tác nhân phụ của cuộc trò chuyện này"
+  "content_goal_wait_running_tools": {
+    "message": "Đang chờ các công cụ đang chạy"
   },
   "content_goal_wait_slots": {
     "message": "Đang chờ chỗ trống (Số cuộc trò chuyện làm việc cùng lúc)"
   },
-  "content_goal_wait_paused": {
-    "message": "ChatGPT yêu cầu chậm lại · chờ đến giờ đã báo"
+  "content_goal_wait_tool_inactivity": {
+    "message": "Đang chờ công cụ ngừng hoạt động"
+  },
+  "content_goal_wait_workers": {
+    "message": "Đang chờ các tác nhân phụ của cuộc trò chuyện này"
   },
   "content_goal_writing_first_message": {
     "message": "$1 đang viết tin nhắn đầu tiên"
   },
   "content_goal_wrote_next_message": {
     "message": "$1 đã viết tin nhắn tiếp theo"
+  },
+  "content_history_rate_limited": {
+    "message": "ChatGPT tạm thời giới hạn quyền truy cập lịch sử cuộc trò chuyện này. Chat On Steroids tạm dừng khôi phục tự động cho đến khi hết thời gian chờ."
   },
   "content_loop_add_specific": {
     "message": "thêm Loop cụ thể"
@@ -599,11 +722,17 @@
   "content_paused": {
     "message": "Tạm dừng"
   },
+  "content_revival_draft_appeared": {
+    "message": "Có nội dung được nhập vào cuộc trò chuyện trong lúc chuẩn bị đánh thức worker, nên lệnh đánh thức không thay thế nó."
+  },
   "content_saving": {
     "message": "Đang lưu…"
   },
   "content_settings_aria": {
     "message": "Cài đặt Chat On Steroids"
+  },
+  "content_settings_waiting_app": {
+    "message": "đang chờ ứng dụng"
   },
   "content_stage_handoff_attention": {
     "message": "Phản hồi bàn giao cần được chú ý"
@@ -637,6 +766,9 @@
   },
   "content_task_pick_mode_first": {
     "message": "Trước tiên hãy chọn Goal hoặc Loop ở trên — Tắt sẽ không viết gì."
+  },
+  "content_task_waiting_app": {
+    "message": "Đang chờ Chat On Steroids phản hồi."
   },
   "content_task_worker_unavailable": {
     "message": "Cuộc trò chuyện worker đã được prime điều khiển."
@@ -740,6 +872,15 @@
   "content_worker_still_running": {
     "message": "Worker vẫn đang chạy: $1"
   },
+  "content_workers_failed": {
+    "message": "$1 thất bại"
+  },
+  "content_workers_finished": {
+    "message": "$1 đã hoàn tất"
+  },
+  "content_workers_running": {
+    "message": "$1 đang chạy"
+  },
   "content_workers_still_running": {
     "message": "$1 worker vẫn đang chạy"
   },
@@ -760,6 +901,9 @@
   },
   "popup_advanced": {
     "message": "Nâng cao"
+  },
+  "popup_app_not_running_help": {
+    "message": "Hãy chắc rằng Chat On Steroids đang mở trên máy tính này. Tiện ích sẽ tự kết nối."
   },
   "popup_attribution_agent_key": {
     "message": "khóa tác nhân"
@@ -784,6 +928,9 @@
   },
   "popup_chat_id": {
     "message": "ID cuộc trò chuyện"
+  },
+  "popup_chat_tab": {
+    "message": "tab ChatGPT / Gemini"
   },
   "popup_chatgpt_tab": {
     "message": "tab ChatGPT"
@@ -830,17 +977,26 @@
   "popup_detail_app_value": {
     "message": "v$1 · cổng $2"
   },
+  "popup_detail_calls": {
+    "message": "$1 lần gọi"
+  },
   "popup_detail_chat_id": {
     "message": "ID cuộc trò chuyện"
   },
   "popup_detail_delivered": {
     "message": "đã gửi"
   },
+  "popup_detail_events": {
+    "message": "$1 sự kiện"
+  },
   "popup_detail_extension": {
     "message": "tiện ích mở rộng"
   },
   "popup_detail_extension_value": {
     "message": "v$1 · giao thức $2"
+  },
+  "popup_detail_failed": {
+    "message": "$1 thất bại"
   },
   "popup_detail_in_this_browser": {
     "message": "trong trình duyệt này"
@@ -863,6 +1019,9 @@
   "popup_detail_recorder": {
     "message": "trình ghi"
   },
+  "popup_detail_recorder_gemini_value": {
+    "message": "gemini v$1 · lượt chạy $2"
+  },
   "popup_detail_recorder_value": {
     "message": "fiber v$1 · lượt chạy $2"
   },
@@ -872,11 +1031,20 @@
   "popup_detail_tab_value": {
     "message": "$1 · epoch $2"
   },
+  "popup_detail_total": {
+    "message": "tổng $1"
+  },
   "popup_detail_turn": {
     "message": "lượt"
   },
   "popup_detail_turn_live": {
     "message": "$1 · trực tiếp"
+  },
+  "popup_gemini_companion_feature": {
+    "message": "Bản ghi trực tiếp & tác nhân phụ"
+  },
+  "popup_gemini_tab": {
+    "message": "tab Gemini"
   },
   "popup_no": {
     "message": "không"
@@ -908,11 +1076,23 @@
   "popup_pipeline_extension_blocked": {
     "message": "Tiện ích mở rộng không chấp nhận dữ liệu quan sát của tab này ($1). Hãy tải lại tab ChatGPT."
   },
+  "popup_pipeline_extension_blocked_gemini": {
+    "message": "Tiện ích mở rộng không chấp nhận dữ liệu quan sát của tab này ($1). Hãy tải lại tab Gemini."
+  },
+  "popup_pipeline_gemini_synced": {
+    "message": "Cuộc trò chuyện Gemini đã được ghi lại và đồng bộ với ứng dụng."
+  },
   "popup_pipeline_id_found_waiting_receipt": {
     "message": "Đã tìm thấy ID trong lượt mới nhất. Đang chờ ứng dụng xác nhận đã nhận."
   },
   "popup_pipeline_no_recorder": {
     "message": "Không có trình ghi trong tab này. Hãy tải lại trang."
+  },
+  "popup_pipeline_not_a_chat": {
+    "message": "Trang ChatGPT này không phải là cuộc trò chuyện, nên ứng dụng không có gì để theo dõi ở đây. Hãy mở hoặc bắt đầu một cuộc trò chuyện."
+  },
+  "popup_pipeline_not_a_chat_gemini": {
+    "message": "Trang Gemini này không phải là cuộc trò chuyện, nên ứng dụng không có gì để theo dõi ở đây. Hãy mở hoặc bắt đầu một cuộc trò chuyện."
   },
   "popup_pipeline_owner_confirmed_no_activity": {
     "message": "Đã xác nhận chủ sở hữu yêu cầu. Chưa ghi nhận hoạt động công cụ phù hợp."
@@ -931,9 +1111,6 @@
   },
   "popup_pipeline_waiting_first_message": {
     "message": "Đang chờ tin nhắn đầu tiên."
-  },
-  "popup_pipeline_not_a_chat": {
-    "message": "Trang ChatGPT này không phải là cuộc trò chuyện, nên ứng dụng không có gì để theo dõi ở đây. Hãy mở hoặc bắt đầu một cuộc trò chuyện."
   },
   "popup_pipeline_waiting_latest_request_id": {
     "message": "Đã ghi cuộc trò chuyện. Đang chờ ID yêu cầu từ lượt mới nhất."
@@ -956,6 +1133,9 @@
   "popup_section_augment_chatgpt": {
     "message": "Mở rộng ChatGPT"
   },
+  "popup_section_gemini": {
+    "message": "Gemini Web"
+  },
   "popup_section_session_capture": {
     "message": "Ghi phiên"
   },
@@ -964,6 +1144,21 @@
   },
   "popup_sent_to_app": {
     "message": "Đã gửi tới ứng dụng"
+  },
+  "popup_sign_in_failed": {
+    "message": "Thất bại. Bắt đầu đăng nhập lại từ CoS."
+  },
+  "popup_sign_in_imported": {
+    "message": "Đã chuyển phiên"
+  },
+  "popup_sign_in_imported_detail": {
+    "message": "Bạn đã đăng nhập vào CoS browser."
+  },
+  "popup_sign_in_permission": {
+    "message": "Quyền cookie bị từ chối. Nhấp lại."
+  },
+  "popup_sign_in_transfer": {
+    "message": "Chuyển phiên sang CoS browser"
   },
   "popup_state_app_not_reachable": {
     "message": "Không thể kết nối ứng dụng"
@@ -982,6 +1177,9 @@
   },
   "popup_state_version_mismatch": {
     "message": "Phiên bản không khớp"
+  },
+  "popup_status_active": {
+    "message": "đang hoạt động"
   },
   "popup_status_answering": {
     "message": "đang trả lời"
@@ -1004,14 +1202,14 @@
   "popup_status_new_chat": {
     "message": "cuộc trò chuyện mới"
   },
-  "popup_status_not_a_chat": {
-    "message": "không phải cuộc trò chuyện"
-  },
   "popup_status_none_open": {
     "message": "không có mục nào đang mở"
   },
   "popup_status_none_yet": {
     "message": "chưa có"
+  },
+  "popup_status_not_a_chat": {
+    "message": "không phải cuộc trò chuyện"
   },
   "popup_status_not_attached": {
     "message": "chưa gắn"
@@ -1025,6 +1223,9 @@
   "popup_status_retired": {
     "message": "đã ngừng"
   },
+  "popup_status_synced": {
+    "message": "đã đồng bộ"
+  },
   "popup_status_tool_matched": {
     "message": "đã khớp công cụ"
   },
@@ -1033,6 +1234,15 @@
   },
   "popup_status_waiting": {
     "message": "đang chờ"
+  },
+  "popup_tabs_summary_both": {
+    "message": "$1 ChatGPT · $2 Gemini"
+  },
+  "popup_tabs_summary_chatgpt": {
+    "message": "$1 ChatGPT"
+  },
+  "popup_tabs_summary_gemini": {
+    "message": "$1 Gemini"
   },
   "popup_time_hours_short": {
     "message": "$1h"
@@ -1054,176 +1264,5 @@
   },
   "popup_yes": {
     "message": "có"
-  },
-  "content_goal_error_loop_mcp_call_missing": {
-    "message": "Không ghi nhận lệnh gọi công cụ MCP nào trong phản hồi gần nhất. ChatGPT có thể đang hỏi bạn điều gì đó hoặc kết nối công cụ có thể đã bị mất. Hãy trả lời, hoặc kiểm tra tunnel nếu công cụ ngừng hoạt động. Tiếp tục tự động đã tạm dừng; Loop vẫn bật."
-  },
-  "content_goal_error_goal_reply_not_pending": {
-    "message": "Không có nội dung tiếp tục nào đang chờ cho câu trả lời này. Có thể nó đã được xử lý hoặc bị công việc mới hơn thay thế. Hãy kiểm tra hoạt động cuộc trò chuyện mới nhất trước khi thử lại."
-  },
-  "content_goal_error_goal_context_too_large": {
-    "message": "Tác vụ và chỉ dẫn Goal/Loop quá dài để gửi cho trợ lý. Hãy rút ngắn tác vụ hoặc chỉ dẫn tiếp tục tùy chỉnh trong Cài đặt."
-  },
-  "content_goal_error_reply_too_long": {
-    "message": "Trợ lý đã viết nội dung tiếp tục quá dài để gửi. Hãy yêu cầu chỉ dẫn tiếp tục ngắn hơn hoặc chọn mô hình trợ lý khác trong Cài đặt."
-  },
-  "content_goal_error_stream_record_too_long": {
-    "message": "Nhà cung cấp trả về phản hồi quá lớn. Hãy chọn mô hình tiếp tục khác hoặc yêu cầu phản hồi ngắn hơn."
-  },
-  "content_goal_error_response_body_too_large": {
-    "message": "Phản hồi của nhà cung cấp vượt quá giới hạn kích thước. Hãy chọn mô hình tiếp tục khác hoặc yêu cầu phản hồi ngắn hơn."
-  },
-  "content_goal_error_no_api_key": {
-    "message": "Chưa cấu hình khóa API cho nhà cung cấp tiếp tục. Hãy thêm khóa trong Cài đặt hoặc chọn nguồn tiếp tục ChatGPT."
-  },
-  "content_goal_error_auth_rejected": {
-    "message": "Nhà cung cấp tiếp tục đã từ chối thông tin xác thực API. Hãy kiểm tra khóa API và quyền truy cập trong Cài đặt."
-  },
-  "content_goal_error_out_of_credit": {
-    "message": "Tài khoản nhà cung cấp tiếp tục không còn credit. Hãy thêm credit hoặc chọn nguồn tiếp tục khác trong Cài đặt."
-  },
-  "content_goal_error_unknown_model": {
-    "message": "Nhà cung cấp tiếp tục không tìm thấy mô hình đã chọn. Hãy làm mới danh sách mô hình và chọn mô hình khả dụng trong Cài đặt."
-  },
-  "content_goal_error_invalid_provider": {
-    "message": "Endpoint tiếp tục tùy chỉnh không hợp lệ. Hãy kiểm tra URL trong Cài đặt; dùng HTTPS hoặc endpoint HTTP cục bộ."
-  },
-  "content_history_rate_limited": {
-    "message": "ChatGPT tạm thời giới hạn quyền truy cập lịch sử cuộc trò chuyện này. Chat On Steroids tạm dừng khôi phục tự động cho đến khi hết thời gian chờ."
-  },
-  "content_goal_error_rate_limited": {
-    "message": "Nhà cung cấp tiếp tục đang giới hạn tần suất yêu cầu. Hãy chờ lần thử lại được hiển thị hoặc chọn mô hình tiếp tục khác."
-  },
-  "content_goal_error_timeout_or_cancelled": {
-    "message": "Yêu cầu tiếp tục đã hết thời gian chờ hoặc bị hủy. Hãy kiểm tra cuộc trò chuyện trợ lý hoặc trạng thái nhà cung cấp trước khi thử lại."
-  },
-  "content_goal_error_request_failed": {
-    "message": "Yêu cầu tiếp tục thất bại. Hãy kiểm tra trợ lý hoặc API endpoint đã chọn cùng chẩn đoán của ứng dụng trước khi thử lại."
-  },
-  "content_goal_error_goal_browser_busy": {
-    "message": "Một yêu cầu trợ lý đã đang chờ. Hãy để nó hoàn tất hoặc hủy yêu cầu đó trước khi bắt đầu yêu cầu khác."
-  },
-  "content_goal_error_goal_browser_cancelled": {
-    "message": "Yêu cầu trợ lý đã bị hủy. Hãy bắt đầu lại khi bạn muốn tiếp tục."
-  },
-  "content_goal_error_goal_browser_send_failed": {
-    "message": "Không thể gửi prompt trợ lý tới ChatGPT. Hãy mở cuộc trò chuyện trợ lý và kiểm tra ô soạn thảo hoặc lỗi hiển thị trước khi thử lại."
-  },
-  "content_goal_error_goal_browser_send_unconfirmed": {
-    "message": "Ứng dụng không thể xác nhận ChatGPT đã nhận prompt trợ lý hay chưa. Hãy kiểm tra cuộc trò chuyện trợ lý trước khi thử lại để tránh gửi hai lần."
-  },
-  "content_goal_error_goal_owned_elsewhere": {
-    "message": "Một tab trình duyệt khác đang xử lý nội dung tiếp tục này. Hãy kiểm tra tab đó để xem tiến trình."
-  },
-  "content_goal_error_goal_final_not_confirmed": {
-    "message": "Ứng dụng chưa xác nhận câu trả lời cuối đủ điều kiện để tiếp tục tự động. Hãy kiểm tra cuộc trò chuyện nguồn xem còn công việc đang chạy hoặc có lỗi không."
-  },
-  "content_goal_error_astra_finish_only": {
-    "message": "Cuộc trò chuyện này tiếp tục qua công cụ finish. Câu trả lời cuối trong trình duyệt không kích hoạt tin nhắn khác với cài đặt hiện tại."
-  },
-  "content_goal_error_goal_disabled": {
-    "message": "Goal/Loop đang tắt cho cuộc trò chuyện này. Hãy bật để cho phép tiếp tục."
-  },
-  "content_goal_error_goal_worker_chat": {
-    "message": "Worker không thể tự chạy Goal/Loop. Hãy bật tiếp tục trong cuộc trò chuyện cha."
-  },
-  "content_goal_error_conversation_superseded": {
-    "message": "Cuộc trò chuyện này đã được thay thế bằng Compact & Resume. Hãy tiếp tục trong cuộc trò chuyện kế nhiệm."
-  },
-  "content_goal_error_chat_blocked": {
-    "message": "Cuộc trò chuyện này bị chặn trong ứng dụng. Hãy bỏ chặn tại đó trước khi bật tiếp tục."
-  },
-  "content_goal_error_session_not_recorded": {
-    "message": "Ứng dụng không có lịch sử đã ghi cho cuộc trò chuyện này. Hãy bật ghi và gửi một tin nhắn trước khi dùng tiếp tục tự động."
-  },
-  "content_goal_error_no_conversation": {
-    "message": "Không có cuộc trò chuyện đã ghi nào để tiếp tục. Hãy gửi một tác vụ trước."
-  },
-  "content_goal_error_no_objective": {
-    "message": "Chưa có tác vụ nào. Hãy nhập tác vụ trước khi bắt đầu Goal/Loop."
-  },
-  "content_goal_error_nothing_to_open_with": {
-    "message": "Trợ lý không tạo tin nhắn mở đầu. Hãy làm tác vụ cụ thể hơn rồi thử lại."
-  },
-  "content_goal_error_goal_helper_stop_unverified": {
-    "message": "Trợ lý cho biết mục tiêu đã hoàn thành nhưng điều đó chưa được kiểm tra. Chưa gửi phản hồi tiếp theo. Hãy kiểm tra cuộc trò chuyện và tiếp tục nếu còn việc."
-  },
-  "content_goal_error_loop_stop_refused": {
-    "message": "Trợ lý liên tục chọn dừng thay vì viết nội dung tiếp tục cho Loop. Hãy xem lại chỉ dẫn Loop hoặc chọn mô hình trợ lý khác."
-  },
-  "content_goal_error_goal_marker_missing": {
-    "message": "Câu trả lời thiếu dấu hoàn tất mà các mẫu Goal ngoại tuyến yêu cầu. Hãy kiểm tra chỉ dẫn mẫu hoặc chọn nguồn tiếp tục khác."
-  },
-  "content_goal_error_goal_reply_not_durable": {
-    "message": "Ứng dụng không thể lưu nội dung tiếp tục đang chờ. Hãy kiểm tra dung lượng đĩa trống và chẩn đoán của ứng dụng."
-  },
-  "content_goal_error_goal_ack_not_durable": {
-    "message": "Ứng dụng không thể lưu xác nhận gửi. Hãy kiểm tra dung lượng đĩa trống; kiểm tra cuộc trò chuyện trước khi tự gửi lại."
-  },
-  "content_goal_error_goal_switch_not_durable": {
-    "message": "Ứng dụng không thể lưu cài đặt Goal/Loop. Hãy kiểm tra dung lượng đĩa trống và thử lưu lại."
-  },
-  "content_goal_error_goal_objective_not_durable": {
-    "message": "Ứng dụng không thể lưu tác vụ. Hãy kiểm tra dung lượng đĩa trống và thử lưu lại."
-  },
-  "popup_sign_in_transfer": {
-    "message": "Chuyển phiên sang CoS browser"
-  },
-  "popup_sign_in_permission": {
-    "message": "Quyền cookie bị từ chối. Nhấp lại."
-  },
-  "popup_sign_in_imported": {
-    "message": "Đã chuyển phiên"
-  },
-  "popup_sign_in_imported_detail": {
-    "message": "Bạn đã đăng nhập vào CoS browser."
-  },
-  "popup_sign_in_failed": {
-    "message": "Thất bại. Bắt đầu đăng nhập lại từ CoS."
-  },
-  "popup_app_not_running_help": {
-    "message": "Hãy chắc rằng Chat On Steroids đang mở trên máy tính này. Tiện ích sẽ tự kết nối."
-  },
-  "content_workers_finished": {
-    "message": "$1 đã hoàn tất"
-  },
-  "content_workers_running": {
-    "message": "$1 đang chạy"
-  },
-  "content_workers_failed": {
-    "message": "$1 thất bại"
-  },
-  "popup_detail_events": {
-    "message": "$1 sự kiện"
-  },
-  "popup_detail_calls": {
-    "message": "$1 lần gọi"
-  },
-  "popup_detail_failed": {
-    "message": "$1 thất bại"
-  },
-  "popup_detail_total": {
-    "message": "tổng $1"
-  },
-  "content_edit_message_missing": {
-    "message": "Tin nhắn đó không còn trên trang ChatGPT nên không thể chỉnh sửa."
-  },
-  "content_edit_unavailable": {
-    "message": "ChatGPT không cung cấp Chỉnh sửa cho tin nhắn đó. Hãy mở cuộc trò chuyện trong ChatGPT rồi thử lại."
-  },
-  "content_auto_compaction_waiting_app": {
-    "message": "Tự động thu gọn: đang chờ ứng dụng"
-  },
-  "content_goal_loop_waiting_app": {
-    "message": "Goal và Loop: đang chờ ứng dụng"
-  },
-  "content_settings_waiting_app": {
-    "message": "đang chờ ứng dụng"
-  },
-  "content_task_waiting_app": {
-    "message": "Đang chờ Chat On Steroids phản hồi."
-  },
-  "content_revival_draft_appeared": {
-    "message": "Có nội dung được nhập vào cuộc trò chuyện trong lúc chuẩn bị đánh thức worker, nên lệnh đánh thức không thay thế nó."
   }
 }

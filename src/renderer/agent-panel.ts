@@ -60,6 +60,10 @@ export function createAgentPanel(options: {
   modelLabel?: (model: string, reasoningEffort: string | undefined) => string;
   /** The Active heading's slot count ("Active · 2 / 3"), from `workerSlotLimit`; none without it. */
   slotLimit?: () => number | null;
+  /** Whether a new sub-agent can be launched directly from this panel for the open parent chat. */
+  canSpawn?: () => boolean;
+  /** Launch one or more sub-agents on the current parent chat. */
+  onSpawn?: (workers: Array<{ label?: string; task: string }>) => Promise<boolean>;
 }) {
   const pane = el('aside', 'agent-panel'); pane.hidden = true;
   ui(pane, 'aria-label', () => t("Sub-agents"));
@@ -103,6 +107,11 @@ export function createAgentPanel(options: {
   let highlighted = new Set<string>();
   // The round's workers glow once as the panel opens on them, not on every repaint after.
   let arriving = false;
+  let spawnOpen = false;
+  let spawnSubmitting = false;
+  let spawnLabelDraft = '';
+  let spawnTaskDraft = '';
+  let spawnErrorText = '';
   function hide(): void {
     generation++; selected = null; highlighted.clear(); pane.hidden = true;
     if (!options.mount) options.host.classList.remove('has-agent-panel');
@@ -125,6 +134,98 @@ export function createAgentPanel(options: {
   }
   function list(): void {
     generation++; selected = null; head.hidden = true; body.replaceChildren();
+    if (options.onSpawn && (!options.canSpawn || options.canSpawn())) {
+      const bar = el('div', 'agent-spawn-bar');
+      const toggleBtn = el('button', 'btn agent-spawn-toggle') as HTMLButtonElement;
+      toggleBtn.type = 'button';
+      toggleBtn.append(icon('i-plus'), el('span', '', () => t('Spawn sub-agent')));
+      const form = el('form', 'agent-spawn-form') as HTMLFormElement;
+      form.hidden = !spawnOpen;
+      const labelInput = el('input', 'agent-spawn-input') as HTMLInputElement;
+      labelInput.type = 'text';
+      labelInput.maxLength = 60;
+      labelInput.value = spawnLabelDraft;
+      ui(labelInput, 'placeholder', () => t('Sub-agent label (optional)'));
+      ui(labelInput, 'aria-label', () => t('Sub-agent label (optional)'));
+      const taskInput = el('textarea', 'agent-spawn-textarea') as HTMLTextAreaElement;
+      taskInput.rows = 3;
+      taskInput.maxLength = 4000;
+      taskInput.value = spawnTaskDraft;
+      ui(taskInput, 'placeholder', () => t('What should this sub-agent work on?'));
+      ui(taskInput, 'aria-label', () => t('Sub-agent prompt'));
+      const errNode = el('p', 'agent-spawn-error');
+      errNode.hidden = !spawnErrorText;
+      errNode.textContent = spawnErrorText;
+      const actions = el('div', 'agent-spawn-actions');
+      const cancelBtn = el('button', 'btn btn-quiet', () => t('Cancel')) as HTMLButtonElement;
+      cancelBtn.type = 'button';
+      const launchBtn = el('button', 'btn btn-primary', () => t('Launch sub-agent')) as HTMLButtonElement;
+      launchBtn.type = 'submit';
+      const syncBusy = (): void => {
+        labelInput.disabled = spawnSubmitting;
+        taskInput.disabled = spawnSubmitting;
+        cancelBtn.disabled = spawnSubmitting;
+        launchBtn.disabled = spawnSubmitting || !taskInput.value.trim();
+      };
+      labelInput.addEventListener('input', () => { spawnLabelDraft = labelInput.value; });
+      taskInput.addEventListener('input', () => {
+        spawnTaskDraft = taskInput.value;
+        if (spawnErrorText) { spawnErrorText = ''; errNode.hidden = true; errNode.textContent = ''; }
+        syncBusy();
+      });
+      toggleBtn.addEventListener('click', () => {
+        spawnOpen = !spawnOpen;
+        form.hidden = !spawnOpen;
+        if (spawnOpen) taskInput.focus();
+      });
+      cancelBtn.addEventListener('click', () => {
+        spawnOpen = false;
+        spawnErrorText = '';
+        errNode.hidden = true;
+        form.hidden = true;
+      });
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const task = taskInput.value.trim();
+        const label = labelInput.value.trim();
+        if (!task || spawnSubmitting || !options.onSpawn) return;
+        spawnSubmitting = true;
+        spawnErrorText = '';
+        errNode.hidden = true;
+        syncBusy();
+        const currentParent = parent;
+        void options.onSpawn([{ ...(label ? { label } : {}), task }]).then((ok) => {
+          if (parent !== currentParent) return;
+          spawnSubmitting = false;
+          if (ok) {
+            spawnOpen = false;
+            spawnLabelDraft = '';
+            spawnTaskDraft = '';
+            labelInput.value = '';
+            taskInput.value = '';
+            errNode.hidden = true;
+            form.hidden = true;
+          } else {
+            spawnErrorText = t('Could not start sub-agent');
+            errNode.textContent = spawnErrorText;
+            errNode.hidden = false;
+          }
+          syncBusy();
+        }, () => {
+          if (parent !== currentParent) return;
+          spawnSubmitting = false;
+          spawnErrorText = t('Could not start sub-agent');
+          errNode.textContent = spawnErrorText;
+          errNode.hidden = false;
+          syncBusy();
+        });
+      });
+      syncBusy();
+      actions.append(cancelBtn, launchBtn);
+      form.append(labelInput, taskInput, errNode, actions);
+      bar.append(toggleBtn, form);
+      body.append(bar);
+    }
     const isActive = (worker: SessionSummary): boolean => {
       const state = options.agent?.(worker)?.state;
       return state ? ['invited', 'active', 'detached', 'waking'].includes(state) : options.working(worker);
@@ -281,7 +382,15 @@ export function createAgentPanel(options: {
     /** Repaints the overview after a Settings change to the slot limit; an open worker stays open. */
     refreshSlots(): void { if (!pane.hidden && !selected) list(); },
     update(id: string | null, next: SessionSummary[]): void {
-      if (parent !== id) { hide(); parent = id; }
+      if (parent !== id) {
+        hide();
+        parent = id;
+        spawnOpen = false;
+        spawnSubmitting = false;
+        spawnLabelDraft = '';
+        spawnTaskDraft = '';
+        spawnErrorText = '';
+      }
       const previous = workers.find(worker => worker.id === selected);
       workers = next;
       highlighted = new Set([...highlighted].filter(id => workers.some(worker => worker.id === id)));

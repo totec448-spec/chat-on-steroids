@@ -33,6 +33,7 @@
  */
 
 import { readDurable, writeDurableSoon } from '../durable.js';
+import { isAcceptedConversationId } from '../../shared/provider.js';
 
 /**
  * A hand-curated list, so the ceiling only exists to keep a corrupt or hostile state file from
@@ -73,7 +74,7 @@ function snapshot(): PersistedBlocks {
 }
 
 function validConversationId(value: unknown): value is string {
-  return typeof value === 'string' && /^[0-9a-z-]{8,64}$/i.test(value);
+  return isAcceptedConversationId(value);
 }
 
 /**

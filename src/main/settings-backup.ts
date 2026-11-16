@@ -32,6 +32,7 @@ const SEAL_AAD = Buffer.from(`${BACKUP_FORMAT}/${BACKUP_VERSION}`);
 /** Paths that belong to this computer; a backup never carries them, and an import never takes them. */
 const PER_COMPUTER: ReadonlyArray<readonly string[]> = [
   ['connectorSuffix'], ['tunnel'], ['ui', 'browserBridgePort'], ['mcp', 'persistentUrls'],
+  ['mcp', 'geminiBridge'], ['mcp', 'geminiPublicOrigin'],
   // Reported by this computer's window and browser extension, or this install's own answer.
   ['ui', 'browserPreferences'], ['ui', 'cosBrowserTrayHint'], ['ui', 'autoRefreshPluginsAsked'],
   // The OS login item of this computer: an import never registers or removes it elsewhere.

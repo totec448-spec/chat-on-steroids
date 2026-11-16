@@ -1,21 +1,29 @@
 import { ui, uiText, t } from './i18n.js';
-import type { ChatModelCatalog } from '../shared/chat-models.js';
-import { chatModelDisplayLabel, DEFAULT_HELPER_CHAT_MODEL, resolveChatModel } from '../shared/chat-models.js';
+import type { ChatModelCatalog, GeminiModelCatalog } from '../shared/chat-models.js';
+import { chatModelDisplayLabel, DEFAULT_HELPER_CHAT_MODEL, resolveChatModel, resolveGeminiModel } from '../shared/chat-models.js';
+import type { ChatProvider } from '../shared/provider.js';
 import type { Config } from '../shared/types.js';
 import type { ReasoningEffort } from '../shared/session.js';
 import { $, el, icon, run } from './dom.js';
 
 let catalog: ChatModelCatalog = { state: 'unknown', requestedAt: null, observedAt: null, models: [] };
+let geminiCatalog: GeminiModelCatalog = { state: 'unknown', requestedAt: null, observedAt: null, models: [] };
+let activeProvider: ChatProvider = 'chatgpt';
 let generation = 0;
+let geminiGeneration = 0;
 let onComposerPaint: (() => void) | undefined;
 const catalogWaiters = new Set<() => void>();
+const geminiCatalogWaiters = new Set<() => void>();
 let discovery: Promise<void> | null = null;
+let geminiDiscovery: Promise<void> | null = null;
 let catalogSubscribed = false;
+let geminiCatalogSubscribed = false;
 type ObservedSelection = { model: string; reasoningEffort?: ReasoningEffort; observedAt: number };
-let composerContext: { scope: string | null; observation: ObservedSelection | null; edited: boolean; automatic?: boolean } | null = null;
+let composerContext: { scope: string | null; provider: ChatProvider; observation: ObservedSelection | null; edited: boolean; automatic?: boolean } | null = null;
 let ordinaryDefaults: { model: string; reasoningEffort: string } = { model: '', reasoningEffort: '' };
+let geminiDefaults: { model: string } = { model: '' };
 /**
- * Automatic: send with whatever model ChatGPT already has selected, switching nothing.
+ * Automatic: send with whatever model ChatGPT or Gemini already has selected, switching nothing.
  *
  * Send used to wait up to two minutes for the account's model list, and on plans that show no
  * model picker (ChatGPT Go and Free, #104, #864) that wait always ended in failure. So while no
@@ -26,20 +34,32 @@ let ordinaryDefaults: { model: string; reasoningEffort: string } = { model: '', 
  */
 type SendModel = { model: string | null; reasoningEffort: ReasoningEffort | null };
 const AUTOMATIC: SendModel = { model: null, reasoningEffort: null };
-/** Whether this composer asks for one particular model rather than whatever ChatGPT uses. */
+
+function activeCatalog() {
+  return activeProvider === 'gemini' ? geminiCatalog : catalog;
+}
+
+/** Whether this composer asks for one particular model rather than whatever the page currently uses. */
 function exactModelRequested(): boolean {
   if (composerContext?.automatic) return false;
   if (composerContext?.edited) return !!$<HTMLSelectElement>('composerModel').value;
   // A new chat asks for the configured default; an existing chat already has its own model.
-  return !composerContext || composerContext.scope === null ? !!ordinaryDefaults.model : false;
+  if (!composerContext || composerContext.scope === null) {
+    return activeProvider === 'gemini' ? !!geminiDefaults.model : !!ordinaryDefaults.model;
+  }
+  return false;
 }
 function automaticApplies(): boolean {
-  return composerContext?.automatic === true || (!catalog.models.length && !exactModelRequested());
+  if (composerContext?.automatic === true) return true;
+  if (activeProvider === 'gemini') {
+    return !exactModelRequested() && !($<HTMLSelectElement>('composerModel')?.value);
+  }
+  return !activeCatalog().models.length && !exactModelRequested();
 }
 /** The person chose Automatic (from the menu, or instead of an unavailable exact model). */
 function chooseAutomatic(): void {
   if (composerContext) { composerContext.edited = true; composerContext.automatic = true; }
-  else composerContext = { scope: null, observation: null, edited: true, automatic: true };
+  else composerContext = { scope: null, provider: activeProvider, observation: null, edited: true, automatic: true };
   paintPair('composerModel', 'composerReasoning', '', '');
   paintStatus();
 }
@@ -57,41 +77,78 @@ function observedModel(value: string) {
 }
 
 /**
- * A model and effort as the composer shows them ("GPT-6 Sol · High", "… · Instant"), for any
- * observed choice; a model this account's catalog does not list keeps its id.
+ * A model and effort as the composer shows them ("GPT-6 Sol · High", "… · Instant", "2.5 Pro"),
+ * for any observed choice; a model not listed in a loaded catalog keeps its id.
  */
 export function chatModelName(model: string, reasoningEffort: string | undefined): string {
-  const label = observedModel(model)?.label ?? model;
+  const label = observedModel(model)?.label ?? resolveGeminiModel(geminiCatalog.models, model)?.label ?? model;
   return reasoningEffort ? chatModelDisplayLabel(label, reasoningEffort as ReasoningEffort, effortLabel(reasoningEffort)) : label;
+}
+
+export function setActiveModelProvider(provider: ChatProvider): void {
+  if (activeProvider === provider) return;
+  activeProvider = provider;
+  if (!composerContext || composerContext.scope === null || composerContext.provider !== provider) {
+    composerContext = {
+      scope: composerContext?.provider === provider ? composerContext.scope : null,
+      provider,
+      observation: composerContext?.provider === provider ? composerContext.observation : null,
+      edited: false
+    };
+  }
+  const choices = document.getElementById('composerModelChoices');
+  if (choices) delete choices.dataset.signature;
+  paintComposerContext();
+  paintStatus();
 }
 
 function paintComposerContext(): void {
   if (!composerContext || composerContext.edited) return;
   if (composerContext.scope === null) {
-    paintPair('composerModel', 'composerReasoning', ordinaryDefaults.model, ordinaryDefaults.reasoningEffort);
+    if (activeProvider === 'gemini') paintPair('composerModel', 'composerReasoning', geminiDefaults.model, '');
+    else paintPair('composerModel', 'composerReasoning', ordinaryDefaults.model, ordinaryDefaults.reasoningEffort);
     return;
   }
   const observed = composerContext.observation;
+  if (activeProvider === 'gemini') {
+    const match = observed && resolveGeminiModel(geminiCatalog.models, observed.model);
+    paintPair('composerModel', 'composerReasoning', observed ? (match?.id ?? observed.model) : '', '');
+    return;
+  }
   const match = observed && observedModel(observed.model);
   // An unknown session model must not inherit the previous chat's valid Send choice.
   paintPair('composerModel', 'composerReasoning', match?.id ?? observed?.model ?? 'not-observed', observed?.reasoningEffort ?? 'not-observed');
 }
 
 /** Scope comes from the caller's session + selection generation; no browser mutation. */
-export function applyComposerSessionModel(scope: string | null, observation: ObservedSelection | null): void {
-  if (!composerContext || composerContext.scope !== scope) {
-    composerContext = { scope, observation, edited: false };
+export function applyComposerSessionModel(scope: string | null, observation: ObservedSelection | null, provider: ChatProvider = activeProvider): void {
+  const providerChanged = activeProvider !== provider;
+  activeProvider = provider;
+  if (!composerContext || composerContext.scope !== scope || composerContext.provider !== provider) {
+    composerContext = { scope, provider, observation, edited: false };
   } else if (observation && (!composerContext.observation || observation.observedAt >= composerContext.observation.observedAt)) {
     composerContext.observation = observation;
+  }
+  if (providerChanged) {
+    const choices = document.getElementById('composerModelChoices');
+    if (choices) delete choices.dataset.signature;
   }
   paintComposerContext(); paintStatus();
 }
 
 /** Provider order and available efforts define the slider, including newly released models. */
 function composerModels() {
+  if (activeProvider === 'gemini') {
+    return geminiCatalog.models.map(model => ({
+      id: model.id,
+      label: model.label,
+      efforts: [] as ReasoningEffort[],
+      ...(model.description ? { description: model.description } : {})
+    }));
+  }
   if (!catalog.models.length) return [];
   return catalog.models
-    .map(model => ({ ...model, efforts: composerEfforts.filter(effort => model.efforts.includes(effort)) }))
+    .map(model => ({ ...model, efforts: composerEfforts.filter(effort => model.efforts.includes(effort)), description: undefined as string | undefined }))
     .filter(model => model.efforts.length > 0);
 }
 
@@ -135,6 +192,19 @@ function options(select: HTMLSelectElement, choices: Array<{ id: string; label: 
   }
 }
 
+function paintGeminiSettingsSelect(selectId: string, modelValue?: string): void {
+  const select = document.getElementById(selectId) as HTMLSelectElement | null;
+  if (!select) return;
+  const raw = modelValue ?? select.value;
+  const resolved = raw ? resolveGeminiModel(geminiCatalog.models, raw) : undefined;
+  const next = resolved?.id ?? raw;
+  const choices: Array<{ id: string; label: string | (() => string) }> = [
+    { id: '', label: () => t('Automatic') },
+    ...geminiCatalog.models.map(item => ({ id: item.id, label: item.label }))
+  ];
+  options(select, choices, next);
+}
+
 function distinctModelChoices(models: ChatModelCatalog['models']): Array<{ id: string; label: string | (() => string) }> {
   const sameName = new Map<string, number>();
   for (const model of models) sameName.set(model.label, (sameName.get(model.label) ?? 0) + 1);
@@ -164,6 +234,19 @@ function paintPair(modelId: string, effortId: string, modelValue?: string, effor
   const model = document.getElementById(modelId) as HTMLSelectElement | null;
   const effort = document.getElementById(effortId) as HTMLSelectElement | null;
   if (!model || !effort) return;
+  if (modelId === 'composerModel' && activeProvider === 'gemini') {
+    let nextModel = modelValue ?? model.value;
+    const resolved = nextModel ? resolveGeminiModel(geminiCatalog.models, nextModel) : undefined;
+    nextModel = resolved?.id ?? nextModel;
+    if (composerContext?.automatic) nextModel = '';
+    const modelChoices: Array<{ id: string; label: string | (() => string) }> = [
+      { id: '', label: () => t('Automatic') },
+      ...geminiCatalog.models.map(item => ({ id: item.id, label: item.label }))
+    ];
+    options(model, modelChoices, nextModel);
+    options(effort, [], '');
+    return;
+  }
   const models = modelId === 'composerModel' ? composerModels() : catalog.models;
   // No saved sub-agent default starts workers on ChatGPT's current model. The select says so as
   // Automatic instead of naming a model nothing would use; a model picked there still gets its
@@ -208,6 +291,12 @@ function paintPair(modelId: string, effortId: string, modelValue?: string, effor
 function paintEffortShortcut(supported: readonly ReasoningEffort[]): void {
   const spark = document.getElementById('composerSpark') as HTMLButtonElement | null;
   if (!spark) return;
+  if (activeProvider === 'gemini') {
+    spark.hidden = true;
+    spark.disabled = true;
+    return;
+  }
+  spark.hidden = false;
   const minimum = supported.length > 1 && $<HTMLSelectElement>('composerReasoning').value === supported[0];
   const action = minimum ? 'max' : 'min';
   if (spark.dataset.action !== action) {
@@ -225,7 +314,7 @@ function paintEffortShortcut(supported: readonly ReasoningEffort[]): void {
 
 /** What the open menu shows; the same value means the live slider is kept, not rebuilt. */
 function choicesSignature(choices: ReturnType<typeof composerModels>): string {
-  return JSON.stringify([catalog.state, choices, $<HTMLSelectElement>('composerModel').value,
+  return JSON.stringify([activeProvider, activeCatalog().state, choices, $<HTMLSelectElement>('composerModel').value,
     $<HTMLSelectElement>('composerReasoning').value, automaticApplies()]);
 }
 
@@ -248,6 +337,7 @@ function paintComposerChoices(): void {
   const subtitle = document.getElementById('composerPowerModel');
   const toggle = document.getElementById('composerModelToggle') as HTMLButtonElement | null;
   if (toggle) toggle.disabled = !choices.length;
+  const brand = activeProvider === 'gemini' ? 'Gemini' : 'ChatGPT';
   if (!choices.length) {
     if (toggle) toggle.setAttribute('aria-expanded', 'false');
     models.hidden = true;
@@ -257,10 +347,12 @@ function paintComposerChoices(): void {
       if (subtitle) ui(subtitle, 'textContent', () => t("Sent without choosing a model"));
       return;
     }
-    if (title) ui(title, 'textContent', () => catalog.state === 'pending' ? t("Loading models…") : t("Models unavailable"));
-    if (subtitle) ui(subtitle, 'textContent', () => catalog.state === 'pending' ? t("Reading your ChatGPT account") : t("Reload models"));
+    if (title) ui(title, 'textContent', () => activeCatalog().state === 'pending' ? t("Loading models…") : t("Models unavailable"));
+    if (subtitle) ui(subtitle, 'textContent', () => activeCatalog().state === 'pending'
+      ? (activeProvider === 'gemini' ? t("Reading your Gemini account") : t("Reading your ChatGPT account"))
+      : t("Reload models"));
     // An exact model was asked for and no list can confirm it. Automatic is offered, never assumed.
-    const use = el('button', 'btn', () => t("Use ChatGPT’s current model")) as HTMLButtonElement;
+    const use = el('button', 'btn', () => activeProvider === 'gemini' ? t("Use Gemini’s current model") : t("Use ChatGPT’s current model")) as HTMLButtonElement;
     use.type = 'button';
     use.dataset.useCurrentModel = '';
     use.addEventListener('click', chooseAutomatic);
@@ -271,17 +363,53 @@ function paintComposerChoices(): void {
     // Automatic sits first in the list, as a deliberate choice that switches nothing.
     const button = el('button', 'model-choice') as HTMLButtonElement;
     button.type = 'button'; button.dataset.keepMenu = 'true'; button.dataset.model = '';
-    const auto = composerContext?.automatic === true;
+    const auto = composerContext?.automatic === true || (activeProvider === 'gemini' && !selected.value);
     button.setAttribute('aria-pressed', String(auto));
     button.append(el('span', '', () => t("Automatic")), icon('i-check'));
     button.addEventListener('click', event => {
       event.stopPropagation();
-      if (composerContext?.automatic) return;
+      if (composerContext?.automatic || (activeProvider === 'gemini' && !selected.value)) return;
       const focused = document.activeElement === button;
       chooseAutomatic();
       if (focused) models.querySelector<HTMLButtonElement>('[aria-pressed="true"]')?.focus();
     });
     modelOptions.append(button);
+  }
+  if (activeProvider === 'gemini') {
+    for (const choice of choices) {
+      const button = el('button', 'model-choice') as HTMLButtonElement;
+      button.type = 'button'; button.dataset.keepMenu = 'true'; button.dataset.model = choice.id;
+      const pressed = !composerContext?.automatic && choice.id === selected.value;
+      button.setAttribute('aria-pressed', String(pressed));
+      const textWrap = el('span', 'model-choice-text');
+      textWrap.append(el('span', '', choice.label));
+      if (choice.description) textWrap.append(el('small', '', choice.description));
+      button.append(textWrap, icon('i-check'));
+      button.addEventListener('click', event => {
+        event.stopPropagation();
+        if (!composerContext?.automatic && selected.value === choice.id) return;
+        const focused = document.activeElement === button;
+        if (composerContext) { composerContext.edited = true; composerContext.automatic = false; }
+        else composerContext = { scope: null, provider: 'gemini', observation: null, edited: true, automatic: false };
+        selected.value = choice.id;
+        selected.dispatchEvent(new window.Event('change', { bubbles: true }));
+        if (focused) models.querySelector<HTMLButtonElement>('[aria-pressed="true"]')?.focus();
+      });
+      modelOptions.append(button);
+    }
+    // Gemini has no effort slider, so show its model list right inside the menu by default.
+    models.hidden = false;
+    models.inert = false;
+    toggle?.setAttribute('aria-expanded', 'true');
+    if (composerContext?.automatic || !selected.value) {
+      if (title) ui(title, 'textContent', () => t("Automatic"));
+      if (subtitle) ui(subtitle, 'textContent', () => t("Sent without choosing a model"));
+      return;
+    }
+    const chosen = choices.find(choice => choice.id === selected.value);
+    if (title) ui(title, 'textContent', () => chosen?.label ?? t('Previous selection unavailable'));
+    if (subtitle) ui(subtitle, 'textContent', () => chosen?.description || brand);
+    return;
   }
   for (const choice of distinctModelChoices(choices)) {
     const button = el('button', 'model-choice') as HTMLButtonElement;
@@ -392,7 +520,14 @@ export function composerSendModel(): SendModel | null {
   return confirmedComposerModel() ?? (automaticApplies() ? { ...AUTOMATIC } : null);
 }
 
-export function confirmedComposerModel(): { model: string; reasoningEffort: ReasoningEffort } | null {
+export function confirmedComposerModel(): { model: string; reasoningEffort: ReasoningEffort | null } | null {
+  if (activeProvider === 'gemini') {
+    if (!geminiCatalog.models.length || composerContext?.automatic) return null;
+    const model = $<HTMLSelectElement>('composerModel').value;
+    if (!model) return null;
+    const confirmed = geminiCatalog.models.find(choice => choice.id === model);
+    return confirmed ? { model: confirmed.id, reasoningEffort: null } : null;
+  }
   if (!catalog.models.length) return null;
   const model = $<HTMLSelectElement>('composerModel').value;
   const reasoningEffort = $<HTMLSelectElement>('composerReasoning').value;
@@ -403,54 +538,97 @@ export function confirmedComposerModel(): { model: string; reasoningEffort: Reas
 function paintComposerLabel(): void {
   // Display the same admission decision as Send, including discovery and removed efforts.
   const confirmed = confirmedComposerModel();
-  const modelLabel = confirmed ? catalog.models.find(model => model.id === confirmed.model)!.label : '';
+  const modelLabel = confirmed
+    ? (activeProvider === 'gemini'
+        ? geminiCatalog.models.find(model => model.id === confirmed.model)!.label
+        : catalog.models.find(model => model.id === confirmed.model)!.label)
+    : '';
+  const currentCatalog = activeCatalog();
   const label = () => confirmed
-    ? chatModelDisplayLabel(modelLabel, confirmed.reasoningEffort, effortLabel(confirmed.reasoningEffort))
+    ? (confirmed.reasoningEffort ? chatModelDisplayLabel(modelLabel, confirmed.reasoningEffort, effortLabel(confirmed.reasoningEffort)) : modelLabel)
     : automaticApplies() ? t("Automatic")
-    : catalog.state === 'pending' ? t("Loading models…") : t("Select model");
+    : currentCatalog.state === 'pending' ? t("Loading models…") : t("Select model");
   const node = $('composerModelLabel');
   if (confirmed) {
-    const pro = confirmed.reasoningEffort === 'pro';
-    node.replaceChildren(el('strong', '', pro ? label : modelLabel));
-    if (!pro) node.append(uiText(() => ` · ${effortLabel(confirmed.reasoningEffort)}`));
+    if (!confirmed.reasoningEffort) {
+      node.replaceChildren(el('strong', '', modelLabel));
+    } else {
+      const pro = confirmed.reasoningEffort === 'pro';
+      node.replaceChildren(el('strong', '', pro ? label : modelLabel));
+      if (!pro) node.append(uiText(() => ` · ${effortLabel(confirmed.reasoningEffort!)}`));
+    }
   } else node.replaceChildren(uiText(label));
   ui(node, 'title', label);
   onComposerPaint?.();
 }
 
+function catalogStatusMessage(source: { state: ChatModelCatalog['state']; observedAt: number | null; modelsCount: number; waiting?: string; error?: string }, brand: 'ChatGPT' | 'Gemini'): () => string {
+  const error = () => source.error?.startsWith('Model discovery timed out. ')
+    ? t('Model discovery timed out. {0}', [t(source.error.slice('Model discovery timed out. '.length))]) : t(source.error ?? '');
+  return () => source.state === 'pending' ? t(source.waiting ?? "Reading your account’s model choices…")
+    : source.error ? (source.modelsCount ? t('Refresh failed. Previously observed choices remain available. {0}', [error()]) : error())
+    : source.state === 'ready'
+      ? (brand === 'Gemini'
+          ? t("Available in your Gemini account · checked {0}", [new Date(source.observedAt!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })])
+          : t("Available in your ChatGPT account · checked {0}", [new Date(source.observedAt!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })]))
+    : (brand === 'Gemini' ? t("Connect to Gemini to load your models.") : t("Connect to ChatGPT to load your models."));
+}
+
 function paintStatus(): void {
   paintComposerChoices();
-  const error = () => catalog.error?.startsWith('Model discovery timed out. ')
-    ? t('Model discovery timed out. {0}', [t(catalog.error.slice('Model discovery timed out. '.length))]) : t(catalog.error ?? '');
-  const message = () => catalog.state === 'pending' ? t(catalog.waiting ?? "Reading your account’s model choices…")
-    : catalog.error ? (catalog.models.length ? t('Refresh failed. Previously observed choices remain available. {0}', [error()]) : error())
-    : catalog.state === 'ready' ? t("Available in your ChatGPT account · checked {0}", [new Date(catalog.observedAt!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })])
-    : t("Connect to ChatGPT to load your models.");
-  for (const id of ['chatModelStatus', 'composerModelStatus']) {
-    const node = document.getElementById(id);
-    if (node) {
-      ui(node, 'textContent', message);
-      if (id === 'composerModelStatus') node.hidden = catalog.state === 'ready' && !catalog.error;
-    }
+  const chatNode = document.getElementById('chatModelStatus');
+  if (chatNode) {
+    ui(chatNode, 'textContent', catalogStatusMessage({ ...catalog, modelsCount: catalog.models.length }, 'ChatGPT'));
   }
-  for (const id of ['refreshChatModels', 'refreshComposerModels']) {
+  const geminiNode = document.getElementById('geminiModelStatus');
+  if (geminiNode) {
+    ui(geminiNode, 'textContent', catalogStatusMessage({ ...geminiCatalog, modelsCount: geminiCatalog.models.length }, 'Gemini'));
+  }
+  const active = activeCatalog();
+  const composerNode = document.getElementById('composerModelStatus');
+  if (composerNode) {
+    ui(composerNode, 'textContent', catalogStatusMessage({ ...active, modelsCount: active.models.length }, activeProvider === 'gemini' ? 'Gemini' : 'ChatGPT'));
+    composerNode.hidden = active.state === 'ready' && !active.error;
+  }
+  for (const id of ['refreshChatModels', 'refreshGeminiModels', 'refreshComposerModels']) {
     const button = document.getElementById(id) as HTMLButtonElement | null;
     if (button) {
-      // Refresh can promote passive discovery; main coalesces repeated explicit clicks.
       button.disabled = false;
       if (id === 'refreshComposerModels') {
         button.hidden = false;
-        ui(button, 'title', () => catalog.state === 'pending' ? t("Reading ChatGPT models") : t("Reload ChatGPT models"));
-        ui(button, 'aria-label', () => catalog.state === 'pending' ? t('Reading ChatGPT models') : t('Reload ChatGPT models'));
+        ui(button, 'title', () => activeProvider === 'gemini'
+          ? (geminiCatalog.state === 'pending' ? t("Reading Gemini models") : t("Reload Gemini models"))
+          : (catalog.state === 'pending' ? t("Reading ChatGPT models") : t("Reload ChatGPT models")));
+        ui(button, 'aria-label', () => activeProvider === 'gemini'
+          ? (geminiCatalog.state === 'pending' ? t('Reading Gemini models') : t('Reload Gemini models'))
+          : (catalog.state === 'pending' ? t('Reading ChatGPT models') : t('Reload ChatGPT models')));
       }
     }
   }
   paintComposerLabel();
   for (const waiter of catalogWaiters) waiter();
+  for (const waiter of geminiCatalogWaiters) waiter();
 }
 
 /** Refresh and Send share one request; state pushes complete waiting sends without polling. */
-function discoverModels(): Promise<void> {
+function discoverModels(provider: ChatProvider = activeProvider): Promise<void> {
+  if (provider === 'gemini') {
+    if (geminiDiscovery) return geminiDiscovery;
+    const requested = ++geminiGeneration;
+    geminiCatalog = { ...geminiCatalog, state: 'pending', requestedAt: Date.now(), error: undefined };
+    paintStatus();
+    const work = (async () => {
+      const req = window.api.requestGeminiModels?.();
+      const result = req ? await run(req).catch(() => null) : null;
+      if (requested !== geminiGeneration) return;
+      geminiCatalog = result ?? { ...geminiCatalog, state: 'unavailable', error: t("Model discovery could not start.") };
+      paintGeminiSettingsSelect('defaultGeminiModel');
+      paintGeminiSettingsSelect('workerGeminiModel');
+      paintComposerContext(); paintStatus();
+    })();
+    geminiDiscovery = work.finally(() => { geminiDiscovery = null; });
+    return geminiDiscovery;
+  }
   if (discovery) return discovery;
   const requested = ++generation;
   catalog = { ...catalog, state: 'pending', requestedAt: Date.now(), error: undefined };
@@ -470,17 +648,20 @@ function discoverModels(): Promise<void> {
 export async function ensureComposerModel(refresh = false): Promise<SendModel | null> {
   // Automatic never waits for the list; only an exact request does.
   if (!refresh && automaticApplies()) return composerSendModel();
-  if (!refresh && catalog.models.length && catalog.state !== 'pending') return confirmedComposerModel();
+  const current = activeCatalog();
+  if (!refresh && current.models.length && current.state !== 'pending') return confirmedComposerModel() ?? (automaticApplies() ? { ...AUTOMATIC } : null);
+  const waiters = activeProvider === 'gemini' ? geminiCatalogWaiters : catalogWaiters;
   const ready = new Promise<void>(resolve => {
-    const finish = () => { clearTimeout(timer); catalogWaiters.delete(check); resolve(); };
-    const check = () => { if (catalog.state === 'ready' || catalog.state === 'unavailable') finish(); };
+    const finish = () => { clearTimeout(timer); waiters.delete(check); resolve(); };
+    const check = () => { const c = activeCatalog(); if (c.state === 'ready' || c.state === 'unavailable') finish(); };
     const timer = setTimeout(finish, 125000);
-    catalogWaiters.add(check);
+    waiters.add(check);
   });
-  await discoverModels();
+  await discoverModels(activeProvider);
   await ready;
   // A refresh that failed confirms nothing, even with older choices still on screen.
-  return catalog.state === 'ready' && !catalog.error ? composerSendModel() : automaticApplies() ? { ...AUTOMATIC } : null;
+  const latest = activeCatalog();
+  return latest.state === 'ready' && !latest.error ? composerSendModel() : automaticApplies() ? { ...AUTOMATIC } : null;
 }
 
 /**
@@ -507,21 +688,36 @@ export function applyChatModels(config: Config, previous?: Config): void {
     return select && document.activeElement === select && previous && select.value !== (prior ?? '') ? select.value : value;
   };
   ordinaryDefaults = { model: config.ui?.defaultChatModel ?? '', reasoningEffort: config.ui?.defaultChatReasoning ?? '' };
+  geminiDefaults = { model: config.ui?.defaultGeminiModel ?? '' };
   paintPair('defaultChatModel', 'defaultChatReasoning', chosen('defaultChatModel', ordinaryDefaults.model, previous?.ui?.defaultChatModel), chosen('defaultChatReasoning', ordinaryDefaults.reasoningEffort, previous?.ui?.defaultChatReasoning), true);
   paintPair('workerModel', 'workerReasoning', chosen('workerModel', config.multiAgent.defaultModel ?? '', previous?.multiAgent.defaultModel), chosen('workerReasoning', config.multiAgent.defaultReasoning ?? '', previous?.multiAgent.defaultReasoning));
   paintPair('helperModel', 'helperReasoning', chosen('helperModel', config.goal.helperModel ?? DEFAULT_HELPER_CHAT_MODEL, previous?.goal.helperModel ?? DEFAULT_HELPER_CHAT_MODEL), chosen('helperReasoning', config.goal.helperReasoning ?? 'high', previous?.goal.helperReasoning ?? 'high'));
   paintReviewer(chosen('goalReviewer', config.goal.reviewerModel ?? '', previous?.goal.reviewerModel ?? ''));
+  paintGeminiSettingsSelect('defaultGeminiModel', chosen('defaultGeminiModel', geminiDefaults.model, previous?.ui?.defaultGeminiModel));
+  paintGeminiSettingsSelect('workerGeminiModel', chosen('workerGeminiModel', config.multiAgent.defaultGeminiModel ?? '', previous?.multiAgent.defaultGeminiModel));
   paintComposerContext();
-  if (catalogSubscribed && catalog.state !== 'unknown') return;
-  const requested = ++generation;
-  void window.api.getChatModels().then(result => {
-    if (requested !== generation || !result?.ok || !result.data) return;
-    catalog = result.data;
-    for (const [modelId, effortId, allowEmpty] of pairs) paintPair(modelId, effortId, undefined, undefined, allowEmpty);
-    paintReviewer();
-    paintComposerContext();
-    paintStatus();
-  });
+  if (!catalogSubscribed || catalog.state === 'unknown') {
+    const requested = ++generation;
+    void window.api.getChatModels().then(result => {
+      if (requested !== generation || !result?.ok || !result.data) return;
+      catalog = result.data;
+      for (const [modelId, effortId, allowEmpty] of pairs) paintPair(modelId, effortId, undefined, undefined, allowEmpty);
+      paintReviewer();
+      paintComposerContext();
+      paintStatus();
+    });
+  }
+  if ((!geminiCatalogSubscribed || geminiCatalog.state === 'unknown') && window.api.getGeminiModels) {
+    const requested = ++geminiGeneration;
+    void window.api.getGeminiModels().then(result => {
+      if (requested !== geminiGeneration || !result?.ok || !result.data) return;
+      geminiCatalog = result.data;
+      paintGeminiSettingsSelect('defaultGeminiModel');
+      paintGeminiSettingsSelect('workerGeminiModel');
+      paintComposerContext();
+      paintStatus();
+    });
+  }
 }
 
 export function initChatModels(onPaint?: () => void): void {
@@ -533,6 +729,15 @@ export function initChatModels(onPaint?: () => void): void {
       ++generation; catalog = value;
       for (const [modelId, effortId, allowEmpty] of pairs) paintPair(modelId, effortId, undefined, undefined, allowEmpty);
       paintReviewer();
+      paintComposerContext(); paintStatus();
+    });
+  }
+  if (window.api.onGeminiModelsChanged) {
+    geminiCatalogSubscribed = true;
+    window.api.onGeminiModelsChanged(value => {
+      ++geminiGeneration; geminiCatalog = value;
+      paintGeminiSettingsSelect('defaultGeminiModel');
+      paintGeminiSettingsSelect('workerGeminiModel');
       paintComposerContext(); paintStatus();
     });
   }
@@ -552,6 +757,7 @@ export function initChatModels(onPaint?: () => void): void {
     if (open) modelChoices.querySelector<HTMLButtonElement>('[aria-pressed="true"]')?.focus({ preventScroll: true });
   });
   document.getElementById('composerSpark')?.addEventListener('click', event => {
+    if (activeProvider === 'gemini') return;
     const spark = event.currentTarget as HTMLElement;
     const effort = $<HTMLSelectElement>('composerReasoning');
     const supported = composerModels().find(model => model.id === $<HTMLSelectElement>('composerModel').value)?.efforts ?? [];
@@ -576,12 +782,19 @@ export function initChatModels(onPaint?: () => void): void {
   modelMenu?.addEventListener('keydown', event => {
     if (event.key !== 'Escape') return;
     event.preventDefault(); event.stopPropagation();
-    if (modelChoices && !modelChoices.hidden) { closeModelChoices(); modelToggle?.focus(); }
+    if (modelChoices && !modelChoices.hidden && activeProvider !== 'gemini') { closeModelChoices(); modelToggle?.focus(); }
     else { modelMenu.open = false; modelMenu.querySelector('summary')?.focus(); }
   });
   modelMenu?.addEventListener('toggle', () => {
     if (!modelMenu.open) closeModelChoices();
-    else if (!catalog.models.length) $('refreshComposerModels').click();
+    else {
+      if (!activeCatalog().models.length) $('refreshComposerModels').click();
+      if (activeProvider === 'gemini' && geminiCatalog.models.length && modelChoices) {
+        modelToggle?.setAttribute('aria-expanded', 'true');
+        modelChoices.hidden = false;
+        modelChoices.inert = false;
+      }
+    }
   });
   for (const [modelId, effortId, allowEmpty] of pairs) {
     document.getElementById(modelId)?.addEventListener('change', () => {
@@ -591,7 +804,9 @@ export function initChatModels(onPaint?: () => void): void {
       }
       const model = $<HTMLSelectElement>(modelId);
       const effort = $<HTMLSelectElement>(effortId);
-      const supported = catalog.models.find(item => item.id === model.value)?.efforts ?? [];
+      const supported = modelId === 'composerModel' && activeProvider === 'gemini'
+        ? []
+        : catalog.models.find(item => item.id === model.value)?.efforts ?? [];
       const nextEffort = allowEmpty
         ? supported.includes(effort.value as ReasoningEffort) ? effort.value : ''
         : model.value ? supported.includes('high') ? 'high' : supported[0] ?? '' : '';
@@ -603,8 +818,12 @@ export function initChatModels(onPaint?: () => void): void {
       paintStatus();
     });
   }
-  for (const id of ['refreshChatModels', 'refreshComposerModels']) document.getElementById(id)?.addEventListener('click', () => { void discoverModels(); });
+  document.getElementById('refreshChatModels')?.addEventListener('click', () => { void discoverModels('chatgpt'); });
+  document.getElementById('refreshGeminiModels')?.addEventListener('click', () => { void discoverModels('gemini'); });
+  document.getElementById('refreshComposerModels')?.addEventListener('click', () => { void discoverModels(activeProvider); });
   for (const [modelId, effortId, allowEmpty] of pairs) paintPair(modelId, effortId, undefined, undefined, allowEmpty);
+  paintGeminiSettingsSelect('defaultGeminiModel');
+  paintGeminiSettingsSelect('workerGeminiModel');
   paintReviewer();
   paintStatus();
 }

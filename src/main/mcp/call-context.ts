@@ -13,7 +13,7 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { AssetRef, FileChange, RunningToolActivity, ToolOutcome } from '../../shared/session.js';
+import type { AssetRef, FileChange, McpClientIdentity, RunningToolActivity, ToolOutcome } from '../../shared/session.js';
 import type { OutputPublication, ProcessCompletion } from '../codex/unified-exec.js';
 
 export interface CallEvidence {
@@ -75,6 +75,10 @@ export interface CallCaller {
   sessionId?: string | null;
   /** Selected agent family. This selects state only after the broker checks its owner. */
   runId?: string;
+  /** Presentation-only external MCP client identity when declared on an external client call. */
+  clientIdentity?: McpClientIdentity | null;
+  /** Optional sanitized MCP HTTP session header from the caller. */
+  mcpSessionId?: string | null;
 }
 
 export interface CallContext {

@@ -22,6 +22,7 @@
  */
 
 import { modelFacingText } from '../../shared/content-reference.js';
+import { isGeminiConversationId, isValidConversationId } from '../../shared/provider.js';
 import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { isProModel } from '../../shared/chat-models.js';
 import { constants as fsConstants, promises as fs } from 'node:fs';
@@ -32,6 +33,7 @@ import type {
   ImageStorageClearMode,
   ImageStorageClearResult,
   ImageStorageInfo,
+  McpClientIdentity,
   NewSessionEvent,
   ReasoningEffort,
   SessionEvent,
@@ -584,6 +586,7 @@ export async function createSession(options: {
   titleSource?: SessionSummary['titleSource'];
   conversationId?: string | null;
   origin?: SessionOrigin | null;
+  mcpClient?: McpClientIdentity | null;
 }): Promise<SessionSummary> {
   const id = options.reservedId ?? `${new Date().toISOString().slice(0, 10)}-${randomUUID().slice(0, 8)}`;
   assertSessionId(id);
@@ -594,8 +597,12 @@ export async function createSession(options: {
       return existing;
     }
   }
-  const summary = emptySummary(id, options.title?.trim() || 'ChatGPT session', options.conversationId ?? null);
+  const inferredGemini = !options.mcpClient && isGeminiConversationId(options.conversationId);
+  const defaultTitle = inferredGemini || options.mcpClient?.id === 'gemini' ? 'Gemini session' : 'ChatGPT session';
+  const summary = emptySummary(id, options.title?.trim() || defaultTitle, options.conversationId ?? null);
   summary.origin = options.origin ?? null;
+  if (options.mcpClient) summary.mcpClient = options.mcpClient;
+  else if (inferredGemini) summary.mcpClient = { id: 'gemini', name: 'Gemini' };
   if (options.titleSource) summary.titleSource = options.titleSource;
   if (options.origin?.fromSessionId) {
     const source = await getSession(options.origin.fromSessionId);
@@ -2871,6 +2878,25 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
         typeof assignment.task !== 'string' || assignment.task.length > 8200 || !Number.isFinite(assignment.recordedAt))) {
       delete publicSummary.workerAssignment;
     }
+    const mcpClient = publicSummary.mcpClient;
+    if (mcpClient !== undefined && (
+      !mcpClient ||
+      typeof mcpClient !== 'object' ||
+      typeof mcpClient.id !== 'string' ||
+      !/^[a-z0-9][a-z0-9_-]{0,39}$/.test(mcpClient.id) ||
+      typeof mcpClient.name !== 'string' ||
+      mcpClient.name.length === 0 ||
+      mcpClient.name.length > 48 ||
+      /[\u0000-\u001f\u007f]/.test(mcpClient.name) ||
+      (mcpClient.version !== undefined && (
+        typeof mcpClient.version !== 'string' ||
+        mcpClient.version.length === 0 ||
+        mcpClient.version.length > 32 ||
+        /[\u0000-\u001f\u007f]/.test(mcpClient.version)
+      ))
+    )) {
+      delete publicSummary.mcpClient;
+    }
     const finish = publicSummary.finishTurn;
     if (finish !== undefined && finish !== null && (!finish || typeof finish !== 'object' ||
         typeof finish.turnId !== 'string' || !Number.isFinite(finish.startedAt) ||
@@ -2926,6 +2952,15 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
             : null,
         agents: Array.isArray(publicSummary.agents) ? publicSummary.agents : [],
         origin: publicSummary.origin ?? null,
+        ...(publicSummary.mcpClient
+          ? {
+              mcpClient: {
+                id: publicSummary.mcpClient.id,
+                name: publicSummary.mcpClient.name,
+                ...(publicSummary.mcpClient.version ? { version: publicSummary.mcpClient.version } : {})
+              }
+            }
+          : {}),
         chatIds: Array.isArray(publicSummary.chatIds)
           ? publicSummary.chatIds
           : publicSummary.conversationId
@@ -3915,7 +3950,7 @@ export async function observeSessionModel(
   id: string, conversationId: string, model: string, observedAt: number,
   reasoningEffort?: ReasoningEffort
 ): Promise<void> {
-  if (!/^[a-zA-Z0-9 ._-]{1,80}$/.test(model) || !Number.isFinite(observedAt)) return;
+  if (!/^[\p{L}\p{N} ._()/+:-]{1,80}$/u.test(model) || !Number.isFinite(observedAt)) return;
   const entry = await ensureOpen(id);
   await enqueueSessionOperation(entry, 'model-selection', async () => {
     // Late old-document reports cannot change the replacement's policy. Repeated observations
@@ -4098,7 +4133,7 @@ export async function rebindSession(
     // Browser conversation ids are UUID-like. A handful of store unit tests deliberately
     // use short symbolic ids and reuse them across retained temp sessions; ownership safety
     // applies to the real identity domain rather than manufacturing a test-only collision.
-    if (/^[0-9a-f-]{8,64}$/i.test(toConversationId)) {
+    if (isValidConversationId(toConversationId)) {
       // Any existing owner is a collision witness. A unique-only lookup also returns
       // null for duplicate owners and would incorrectly admit a third local session.
       const target = await findSessionByConversation(toConversationId);
@@ -4110,6 +4145,9 @@ export async function rebindSession(
     const staged: SessionSummary = {
       ...entry.summary,
       conversationId: toConversationId,
+      ...(isGeminiConversationId(toConversationId) && !entry.summary.mcpClient
+        ? { mcpClient: { id: 'gemini', name: 'Gemini' } }
+        : {}),
       retiredChatAt: fromConversationId ? { ...entry.summary.retiredChatAt, [fromConversationId]: Date.now() } : entry.summary.retiredChatAt,
       chatIds: entry.summary.chatIds.includes(toConversationId)
         ? [...entry.summary.chatIds]

@@ -3,7 +3,7 @@ import type { DesktopAskPending } from '../shared/desktop-ask.js';
 import type { WorkspaceTerminalEvent, WorkspaceTerminalInfo } from '../shared/workspace-terminal.js';
 import type { ApprovalCardView } from '../shared/approval-wait.js';
 import type { DictationEvent } from '../shared/dictation.js';
-import type { ChatModelCatalog } from '../shared/chat-models.js';
+import type { ChatModelCatalog, GeminiModelCatalog } from '../shared/chat-models.js';
 import type { GoalModel } from '../shared/goal-reasoning.js';
 import type { TaskProgress } from '../shared/task-progress.js';
 import type { BrowserPreferences } from '../shared/browser-preferences.js';
@@ -297,6 +297,8 @@ const api = {
   pickBinary: () => call<AppState>('binary:pick'),
   connect: () => call<AppState>('connection:connect'),
   disconnect: () => call<AppState>('connection:disconnect'),
+  setGeminiTunnelToken: (value: string) => call<AppState>('geminiBridge:setToken', { value }),
+  refreshGeminiBridge: () => call<AppState>('geminiBridge:refresh'),
   runDiagnostics: () => call<Diagnosis>('diagnostics:run'),
   // Commit & PR from Review (project-commit.ts).
   commitState: (projectId: string) => call<CommitState>('projectCommit:state', { projectId }),
@@ -405,9 +407,11 @@ const api = {
   releaseSessionFinish: (id: string, expectedTurnId: string) => call<SessionControlsView>('sessions:releaseFinish', { id, expectedTurnId }),
   generateFinishGoal: (id: string, expectedTurnId: string) => call<string>('sessions:generateFinishGoal', { id, expectedTurnId }),
   getChatModels: () => call<ChatModelCatalog>('chatModels:get'),
+  getGeminiModels: () => call<GeminiModelCatalog>('geminiModels:get'),
   browserPreferences: (patch: Partial<BrowserPreferences> = {}) => call<BrowserPreferences>('browser:preferences', patch),
   companionDiagnostics: () => call<CompanionDiagnostics | null>('bridge:diagnostics'),
   requestChatModels: () => call<ChatModelCatalog>('chatModels:request'),
+  requestGeminiModels: () => call<GeminiModelCatalog>('geminiModels:request'),
   onToolApprovalNotice: (listener: () => void): (() => void) => {
     const wrapped = (): void => listener();
     ipcRenderer.on('setup:toolApprovalNotice', wrapped);
@@ -417,6 +421,11 @@ const api = {
     const wrapped = (_event: unknown, catalog: ChatModelCatalog): void => listener(catalog);
     ipcRenderer.on('chatModels:changed', wrapped);
     return () => ipcRenderer.removeListener('chatModels:changed', wrapped);
+  },
+  onGeminiModelsChanged: (listener: (catalog: GeminiModelCatalog) => void): (() => void) => {
+    const wrapped = (_event: unknown, catalog: GeminiModelCatalog): void => listener(catalog);
+    ipcRenderer.on('geminiModels:changed', wrapped);
+    return () => ipcRenderer.removeListener('geminiModels:changed', wrapped);
   },
   getSessionControls: (id: string) => call<SessionControlsView>('sessions:controls', { id }),
   resumeAutomaticSends: () => call<boolean>('automation:resumeNow'),
@@ -454,6 +463,8 @@ const api = {
   setZoom: (factor: number) => call<number>('window:zoom', { factor }),
   getZoom: () => call<number>('window:getZoom'),
   openSessionChat: (id: string) => call<boolean>('sessions:openChat', { id }),
+  spawnWorkers: (input: { id: string; workers: Array<{ label?: string; task: string }>; context?: string | null }) =>
+    call<{ ok: true; runId: string; becamePrime: boolean; workers: Array<{ id: string; label: string; state: string; provider: 'chatgpt' | 'gemini' }> }>('sessions:spawnWorkers', input),
   /** ChatGPT's tool approval card in this chat's page, as the app may show it (2.1.38). */
   approvalCard: (id: string) => call<ApprovalCardView | null>('sessions:approvalCard', { id }),
   /** The person's answer to that exact card; the page presses it only if the card still stands. */

@@ -45,6 +45,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 /*
  * One surface, painted edge to edge, at one width.
  *

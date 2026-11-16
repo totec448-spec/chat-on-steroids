@@ -51,6 +51,7 @@
  */
 
 import { randomBytes } from 'node:crypto';
+import { isValidConversationId } from '../../shared/provider.js';
 import { isProModel } from '../../shared/chat-models.js';
 import { continuationMarkerOf, isReasoningEffort, type Handoff, type ReasoningEffort } from '../../shared/session.js';
 import { logInfo, logWarn } from '../logger.js';
@@ -1464,7 +1465,7 @@ async function reconcileCommitting(entry: Continuation, toConversationId: string
     return { status: 'rejected', reason };
   }
 
-  if (/^[0-9a-f-]{8,64}$/i.test(toConversationId)) {
+  if (isValidConversationId(toConversationId)) {
     let target;
     try {
       target = await findSessionByConversation(toConversationId, { requireUnique: true });

@@ -1756,7 +1756,7 @@ async function terminalPredictionWrong(id, key, documentId) {
   } catch {
     return false;
   }
-  if (!tab || !isChatGptUrl(tab.url)) return false;
+  if (!tab || !isSupportedChatUrl(tab.url)) return false;
   // A document can still send extension IPC during the overlap between navigation starting
   // and Chrome replacing that document. In that window tabs.get() may already describe the
   // destination ChatGPT URL, so the message proves only that the old document is *dying*, not
@@ -1878,9 +1878,15 @@ async function markTerminal(id) {
   return documentId;
 }
 
+function isGeminiConversationId(value) {
+  return typeof value === 'string' && /^gemini-[A-Za-z0-9_-]{4,56}$/.test(value.trim());
+}
+
 function cleanConversationId(value) {
   const id = typeof value === 'string' ? value.trim() : '';
-  return /^[0-9a-f-]{8,64}$/i.test(id) ? id : null;
+  if (/^[0-9a-f-]{8,64}$/i.test(id)) return id;
+  if (isGeminiConversationId(id)) return id;
+  return null;
 }
 
 /**
@@ -1993,7 +1999,7 @@ async function storedBackgroundWindow() {
     const window = await chrome.windows.get(id, { populate: !Number.isInteger(current) });
     if (!Number.isInteger(current)) {
       const tabs = Array.isArray(window?.tabs) ? window.tabs : [];
-      if (window?.type !== 'normal' || !tabs.length || tabs.some(tab => !isChatGptUrl(tab.pendingUrl || tab.url || ''))) {
+      if (window?.type !== 'normal' || !tabs.length || tabs.some(tab => !isSupportedChatUrl(tab.pendingUrl || tab.url || ''))) {
         await chrome.storage.local.remove(BACKGROUND_WINDOW_MIRROR);
         return null;
       }
@@ -2127,7 +2133,7 @@ async function reconcileBackgroundWindow(policy) {
     if (managed.has(conversationForTab(tab))) return true;
     try {
       const url = new URL(tab.pendingUrl || tab.url || '');
-      if (url.origin !== 'https://chatgpt.com') return false;
+      if (!isSupportedChatUrl(url.href)) return false;
       const inputId = url.searchParams.get('cos-input') || new URLSearchParams(url.hash.slice(1)).get('cos-input');
       // Catalog markers retain ownership across browser restart so the warm empty
       // document can be handed to the first authored input without another window.
@@ -2395,7 +2401,7 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
     clearDesktopInputRetries();
     return;
   }
-  let tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
+  let tabs = await chrome.tabs.query({ url: SUPPORTED_TAB_URLS });
   const elections = inputOpenings;
   const elect = async (id, record) => {
     elections[id] = record;
@@ -2411,6 +2417,11 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
     try {
       const url = new URL(tab.pendingUrl || tab.url || '');
       if (url.searchParams.get('cos-input') === input.id || new URLSearchParams(url.hash.slice(1)).get('cos-input') === input.id) return true;
+      // Gemini's Angular router can drop query/hash markers on `/app`; keep ownership on that exact elected tab.
+      if ((input.provider === 'gemini' || elections[input.id]?.provider === 'gemini') &&
+          elections[input.id]?.tab === tab.id && isGeminiUrl(url.href) && !conversationFromUrl(url.href)) {
+        return true;
+      }
       // A branch (#482) leaves its marker behind with the source chat: the tab elected for it now
       // shows the local draft ChatGPT made, which only that same tab can be.
       return !!input.branch && elections[input.id]?.tab === tab.id && url.origin === 'https://chatgpt.com' &&
@@ -2469,7 +2480,7 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
     if (projectInput && !tab && elected?.stage === 'ready' && elected.project === projectInput && Number.isInteger(elected.tab)) {
       const landed = tabs.find(row => row.id === elected.tab);
       let home = false;
-      try { const url = new URL(landed?.url || ''); home = url.origin === 'https://chatgpt.com' && url.pathname === '/' && !url.search && !url.hash; } catch {}
+      home = isProviderHomeUrl(landed?.url, null, true);
       if (landed && !landed.pendingUrl && landed.status === 'complete' && home) {
         await call('/project-create', { method: 'POST', body: JSON.stringify({ action: 'gone', inputId: input.id, chatgptId: projectInput }) });
         continue;
@@ -2487,7 +2498,7 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
       // document/epoch/idle probe instead of deadlocking on stale metadata.
       const concreteConversation = conversationFromUrl(candidate?.url) || conversationFromUrl(candidate?.pendingUrl);
       if (candidate) {
-        if (candidate.pinned || candidate.pendingUrl || modelCatalogTarget?.tab === candidate.id ||
+        if (candidate.pinned || candidate.pendingUrl || isModelCatalogTab(candidate.id) ||
             (concreteConversation && !reusable.has(concreteConversation))) continue;
         const source = { tab: candidate.id, documentId: tabDocuments[String(candidate.id)], navigationEpoch: tabEpochs[String(candidate.id)] };
         if (!ownsDocument(source)) continue;
@@ -2539,15 +2550,18 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
       // A new chat of a project with a native ChatGPT Project opens on that Project's own page;
       // borrowing another tab would go through ChatGPT's New chat, which is the root.
       const project = projectInput;
-      const url = target ? `https://chatgpt.com/c/${encodeURIComponent(target)}`
+      const wantGemini = input.provider === 'gemini' || isGeminiConversationId(target);
+      const url = target ? conversationUrl(target)
         : branchInput ? `https://chatgpt.com/c/${encodeURIComponent(branchInput.conversationId)}?${marker}#${marker}`
+        : wantGemini ? `https://gemini.google.com/app?${marker}#${marker}`
         : project ? `https://chatgpt.com/g/${project}/project?${marker}#${marker}`
         : `https://chatgpt.com/?${input.lifetime === 'temporary-planner' ? 'temporary-chat=true&' : ''}${marker}#${marker}`;
-      if (!target && !project && !branchInput && input.lifetime !== 'temporary-planner') {
+      if (!target && (!project || wantGemini) && !branchInput && input.lifetime !== 'temporary-planner') {
         const reusable = new Set(reusableConversations);
-        const choices = tabs.filter(candidate => !candidate.pinned && !candidate.pendingUrl && modelCatalogTarget?.tab !== candidate.id &&
+        const choices = tabs.filter(candidate => !candidate.pinned && !candidate.pendingUrl && !isModelCatalogTab(candidate.id) &&
+          (wantGemini ? isGeminiUrl(candidate.pendingUrl || candidate.url) : isChatGptUrl(candidate.pendingUrl || candidate.url)) &&
           (recoveredReuse ? candidate.id === recoveredReuse.tab :
-            (!conversationForTab(candidate) || reusable.has(conversationForTab(candidate)))))
+            (wantGemini ? !conversationForTab(candidate) : (!conversationForTab(candidate) || reusable.has(conversationForTab(candidate))))))
           .sort((a, b) => Number(!!conversationForTab(a)) - Number(!!conversationForTab(b)) || a.id - b.id);
         for (const candidate of choices) {
           const source = { tab: candidate.id, documentId: tabDocuments[String(candidate.id)], navigationEpoch: tabEpochs[String(candidate.id)] };
@@ -2560,38 +2574,39 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
               !current || current.pinned || current.pendingUrl || current.url !== candidate.url) continue;
           const borrowed = conversationForTab(candidate);
           if (borrowed) tabReuses[String(candidate.id)] = { documentId: source.documentId, conversationId: borrowed, at: Date.now() };
-          await elect(input.id, { ...source, url: current.url, stage: 'preparing' });
+          await elect(input.id, { ...source, url: current.url, stage: 'preparing', ...(wantGemini ? { provider: 'gemini' } : {}) });
           const leased = await chrome.tabs.get(candidate.id).catch(() => null);
           if (!ownsDocument(source) || !leased || leased.pinned || leased.pendingUrl || leased.url !== current.url || !token || disconnected) break;
-          const owner = (await chrome.storage.session.get('modelCatalogOwner')).modelCatalogOwner;
-          if (owner?.tab === candidate.id) await chrome.storage.session.set({ modelCatalogOwner: { ...owner, handedToInput: input.id } });
+          const catalogOwnerKey = wantGemini ? 'geminiModelCatalogOwner' : 'modelCatalogOwner';
+          const owner = (await chrome.storage.session.get(catalogOwnerKey))[catalogOwnerKey];
+          if (owner?.tab === candidate.id) await chrome.storage.session.set({ [catalogOwnerKey]: { ...owner, handedToInput: input.id } });
           const prepared = await prepareDesktopInputReceipt(candidate.id, input.id, source.documentId);
           const latest = await chrome.tabs.get(candidate.id).catch(() => null);
           if (!latest || latest.pendingUrl || tabDocuments[String(candidate.id)] !== source.documentId) break;
           if (prepared?.ready === true && matchesInput(input, latest)) {
-            await elect(input.id, { tab: candidate.id, stage: 'ready' });
+            await elect(input.id, { tab: candidate.id, stage: 'ready', ...(wantGemini ? { provider: 'gemini' } : {}) });
             tab = latest;
             offerDesktopInput(tab.id, { type: 'clf-desktop-input', id: input.id, conversationId: null });
           } else if (prepared?.fallback === true && prepared.preSend === true) {
             // Explicit native transition failure, before claim/insertion/send, owns
             // exactly one replacement. Persist that expenditure before Chrome awaits.
-            await elect(input.id, { tab: null, stage: 'opening', fallbackUsed: true });
+            await elect(input.id, { tab: null, stage: 'opening', fallbackUsed: true, ...(wantGemini ? { provider: 'gemini' } : {}) });
             tab = await createChatTab(url, background);
             await protectCreatedTab(tab);
-            await elect(input.id, { tab: tab.id, stage: 'ready', fallbackUsed: true });
+            await elect(input.id, { tab: tab.id, stage: 'ready', fallbackUsed: true, ...(wantGemini ? { provider: 'gemini' } : {}) });
             tabs.push(tab);
             // A failed New Chat transition can leave the borrowed managed page
             // empty. Its conversation ownership is gone, so ordinary pruning can
             // never retire it. The same preparation owns this exact one-hop home;
             // close it only after the replacement exists and a fresh draft check.
-            if (reusable.has(conversationFromUrl(candidate.url)) && latest.url === 'https://chatgpt.com/' &&
+            if (reusable.has(conversationFromUrl(candidate.url)) && isProviderHomeUrl(latest.url, null, true) &&
                 tabEpochs[String(candidate.id)] === source.navigationEpoch + 1) {
               const abandoned = { ...source, navigationEpoch: source.navigationEpoch + 1 };
               try {
                 const proof = await tabReply(candidate.id, { type: 'clf-tab-close-check', conversationId: null }, { documentId: source.documentId });
                 const current = await chrome.tabs.get(candidate.id);
                 if (proof?.safe === true && proof.conversationId === null && proof.navigationEpoch === abandoned.navigationEpoch &&
-                    ownsDocument(abandoned) && current && !current.pinned && !current.pendingUrl && current.url === 'https://chatgpt.com/') {
+                    ownsDocument(abandoned) && current && !current.pinned && !current.pendingUrl && isProviderHomeUrl(current.url, null, true)) {
                   await chrome.tabs.remove(candidate.id);
                   tabs = tabs.filter(row => row.id !== candidate.id);
                 }
@@ -2602,10 +2617,10 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
         }
         if (elections[input.id]) continue;
       }
-      await elect(input.id, { tab: null, stage: 'opening', conversationId: target, ...(project ? { project } : {}) });
+      await elect(input.id, { tab: null, stage: 'opening', conversationId: target, ...(wantGemini ? { provider: 'gemini' } : {}), ...(project && !wantGemini ? { project } : {}) });
       tab = await createChatTab(url, background);
       await protectCreatedTab(tab);
-      await elect(input.id, { tab: tab.id, stage: 'ready', conversationId: target, ...(project ? { project } : {}) });
+      await elect(input.id, { tab: tab.id, stage: 'ready', conversationId: target, ...(wantGemini ? { provider: 'gemini' } : {}), ...(project && !wantGemini ? { project } : {}) });
       tabs.push(tab);
       continue;
     }
@@ -2634,7 +2649,7 @@ async function offerStopTurns(requests, background = false) {
     offers.push((async () => {
       const current = () => !Number.isFinite(request.expiresAt) || request.expiresAt > Date.now();
       if (!current()) return;
-      const tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
+      const tabs = await chrome.tabs.query({ url: SUPPORTED_TAB_URLS });
       if (!current()) return;
       let election = stopOpenings[request.id];
       if (election && (election.conversationId !== request.conversationId || election.turnId !== request.turnId)) return;
@@ -2653,7 +2668,7 @@ async function offerStopTurns(requests, background = false) {
           if (!current()) return;
           if (!tab) {
             // Spend before Chrome awaits; a lost creation reply must not open another tab.
-            const opened = await createChatTab(`https://chatgpt.com/c/${encodeURIComponent(request.conversationId)}`, background);
+            const opened = await createChatTab(conversationUrl(request.conversationId), background);
             election.tab = opened.id;
             await persistLive();
             return; // the new document must register and adopt its exact native turn first
@@ -2673,10 +2688,17 @@ async function offerStopTurns(requests, background = false) {
   await Promise.all(offers);
 }
 
-let modelCatalogFlight = null;
-let modelCatalogTarget = null;
+const modelCatalogFlights = { chatgpt: null, gemini: null };
+const modelCatalogTargets = { chatgpt: null, gemini: null };
 let pluginRefreshFlight = null;
-const MODEL_CATALOG_TARGET_KEY = 'modelCatalogTarget';
+function modelCatalogKeys(provider = 'chatgpt') {
+  return provider === 'gemini'
+    ? { ownerKey: 'geminiModelCatalogOwner', targetKey: 'geminiModelCatalogTarget', leasePrefix: 'gemini-catalog' }
+    : { ownerKey: 'modelCatalogOwner', targetKey: 'modelCatalogTarget', leasePrefix: 'catalog' };
+}
+function isModelCatalogTab(tabId) {
+  return modelCatalogTargets.chatgpt?.tab === tabId || modelCatalogTargets.gemini?.tab === tabId;
+}
 function validModelCatalogTarget(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value) &&
     /^[a-f0-9-]{36}$/i.test(value.nonce || '') && Number.isInteger(value.tab) && value.tab > 0 &&
@@ -2685,27 +2707,30 @@ function validModelCatalogTarget(value) {
     (value.navigationEpoch === undefined || (Number.isSafeInteger(value.navigationEpoch) && value.navigationEpoch >= 0));
 }
 /** holzhaker1's #251: the exact picker observation survives MV3 suspension. */
-async function holdModelCatalogTarget(target) {
-  modelCatalogTarget = target;
-  try { await chrome.storage.session.set({ [MODEL_CATALOG_TARGET_KEY]: target }); }
+async function holdModelCatalogTarget(target, provider = 'chatgpt') {
+  const { targetKey } = modelCatalogKeys(provider);
+  modelCatalogTargets[provider] = target;
+  try { await chrome.storage.session.set({ [targetKey]: target }); }
   catch { /* A live worker still owns its in-memory observation; app nonce remains authority. */ }
 }
-async function currentModelCatalogTarget(nonce) {
-  if (modelCatalogTarget) return modelCatalogTarget.nonce === nonce ? modelCatalogTarget : null;
+async function currentModelCatalogTarget(nonce, provider = 'chatgpt') {
+  const { targetKey } = modelCatalogKeys(provider);
+  if (modelCatalogTargets[provider]) return modelCatalogTargets[provider].nonce === nonce ? modelCatalogTargets[provider] : null;
   try {
-    const stored = (await chrome.storage.session.get(MODEL_CATALOG_TARGET_KEY))[MODEL_CATALOG_TARGET_KEY];
+    const stored = (await chrome.storage.session.get(targetKey))[targetKey];
     // Another request may have acquired custody while storage was read.
-    if (modelCatalogTarget) return modelCatalogTarget.nonce === nonce ? modelCatalogTarget : null;
+    if (modelCatalogTargets[provider]) return modelCatalogTargets[provider].nonce === nonce ? modelCatalogTargets[provider] : null;
     if (!validModelCatalogTarget(stored) || stored.nonce !== nonce) return null;
-    modelCatalogTarget = stored;
+    modelCatalogTargets[provider] = stored;
     return stored;
   } catch { return null; }
 }
-async function releaseModelCatalogTarget(nonce) {
-  if (modelCatalogTarget?.nonce === nonce) modelCatalogTarget = null;
+async function releaseModelCatalogTarget(nonce, provider = 'chatgpt') {
+  const { targetKey } = modelCatalogKeys(provider);
+  if (modelCatalogTargets[provider]?.nonce === nonce) modelCatalogTargets[provider] = null;
   try {
-    const stored = (await chrome.storage.session.get(MODEL_CATALOG_TARGET_KEY))[MODEL_CATALOG_TARGET_KEY];
-    if (validModelCatalogTarget(stored) && stored.nonce === nonce) await chrome.storage.session.remove(MODEL_CATALOG_TARGET_KEY);
+    const stored = (await chrome.storage.session.get(targetKey))[targetKey];
+    if (validModelCatalogTarget(stored) && stored.nonce === nonce) await chrome.storage.session.remove(targetKey);
   } catch { /* Stale observations still require the app's current nonce and exact document. */ }
 }
 /**
@@ -2851,11 +2876,16 @@ async function catalogProbe(tabId, nonce) {
     return await Promise.race([chrome.tabs.sendMessage(tabId, { type: 'clf-model-catalog-state', nonce }), new Promise(resolve => { timer = setTimeout(() => resolve(null), 3000); })]);
   } catch { return null; } finally { clearTimeout(timer); }
 }
-function catalogTabNonce(tab) {
+function catalogTabNonce(tab, provider = 'chatgpt') {
   try {
     const url = new URL(tab?.pendingUrl || tab?.url || '');
-    const nonce = url.searchParams.get('cos-model-catalog');
-    return url.origin === 'https://chatgpt.com' && url.pathname === '/' && /^[a-f0-9-]{36}$/i.test(nonce || '') ? nonce : null;
+    const nonce = url.searchParams.get('cos-model-catalog') ||
+      (url.hash ? new URLSearchParams(url.hash.slice(1)).get('cos-model-catalog') : null);
+    if (!/^[a-f0-9-]{36}$/i.test(nonce || '')) return null;
+    if (provider === 'gemini') {
+      return url.origin === 'https://gemini.google.com' && (url.pathname === '/app' || /^\/u\/\d+\/app$/.test(url.pathname)) ? nonce : null;
+    }
+    return url.origin === 'https://chatgpt.com' && url.pathname === '/' ? nonce : null;
   } catch { return null; }
 }
 
@@ -2865,8 +2895,12 @@ function catalogCandidateTab(tab) {
   return !(custody && custody !== true && commandMarkerId(custody.commandId));
 }
 
-function inspectRequestedModels(request) {
-  if (modelCatalogFlight) return modelCatalogFlight;
+function inspectRequestedModels(request, provider = 'chatgpt') {
+  const prov = provider === 'gemini' ? 'gemini' : 'chatgpt';
+  if (modelCatalogFlights[prov]) return modelCatalogFlights[prov];
+  const { ownerKey, leasePrefix } = modelCatalogKeys(prov);
+  const tabUrls = prov === 'gemini' ? GEMINI_TAB_URLS : CHATGPT_TAB_URLS;
+  const catalogHome = prov === 'gemini' ? 'https://gemini.google.com/app' : 'https://chatgpt.com/';
   const intent = connectionEpoch;
   const wanted = request && /^[a-f0-9-]{36}$/i.test(request.nonce) && Number.isFinite(request.expiresAt) && Date.now() < request.expiresAt ? request : null;
   const current = () => wanted && intent === connectionEpoch && token && !disconnected && Date.now() < wanted.expiresAt;
@@ -2875,29 +2909,30 @@ function inspectRequestedModels(request) {
     // Bounded machine reasons, never page text. Progress cannot publish model choices.
     const known = ['generating', 'input_busy', 'draft', 'attachments', 'composer_missing', 'composer_hidden',
       'inspection_busy', 'page_unreachable', 'page_changed', 'opening', 'inspecting', 'inspection_failed', 'result_unconfirmed', 'picker_unreadable'];
-    try { await call('/models', { method: 'POST', body: JSON.stringify({ nonce: wanted.nonce, waiting: known.includes(reason) ? reason : 'inspection_failed' }) }); }
+    const payload = { nonce: wanted.nonce, waiting: known.includes(reason) ? reason : 'inspection_failed', ...(prov === 'gemini' ? { provider: 'gemini' } : {}) };
+    try { await call('/models', { method: 'POST', body: JSON.stringify(payload) }); }
     catch { /* The original app deadline still owns a broken transport. */ }
   };
   let targetNonce = null;
-  modelCatalogFlight = (async () => {
+  modelCatalogFlights[prov] = (async () => {
     // A worker/resume tab gets command custody before it has a provider conversation. A passive
     // catalog refresh can arrive in the same maintenance pass that created that tab; borrowing
     // its still-loading composer races the bootstrap that owns it. Keep command-owned openings
     // out of discovery until their command custody is released.
-    const observed = (await chrome.tabs.query({ url: CHATGPT_TAB_URLS })).filter(catalogCandidateTab);
-    const owner = (await chrome.storage.session.get('modelCatalogOwner')).modelCatalogOwner;
+    const observed = (await chrome.tabs.query({ url: tabUrls })).filter(catalogCandidateTab);
+    const owner = (await chrome.storage.session.get(ownerKey))[ownerKey];
     if (wanted && !current()) return;
     if (wanted && owner?.nonce === wanted.nonce && owner.opening) { await waiting('opening'); return; }
     // One request retains its elected tab through MV3 suspension. A missing or
     // navigated-away tab is an unfinished request, never another create instruction.
     if (owner?.nonce === wanted?.nonce && Number.isInteger(owner?.tab) &&
         (owner.handedToInput || !observed.some(tab => tab.id === owner.tab))) { await waiting('page_changed'); return; }
-    const tabs = wanted ? observed : observed.filter(tab => catalogTabNonce(tab));
+    const tabs = wanted ? observed : observed.filter(tab => catalogTabNonce(tab, prov));
     if (!wanted && !tabs.length) return;
     // Reuse a loaded idle document without navigation. A dedicated helper marker
     // identifies cleanup ownership if its prior request ended before safe retirement.
-    tabs.sort((a, b) => Number(!!catalogTabNonce(b)) - Number(!!catalogTabNonce(a)) || a.id - b.id);
-    const proofs = await Promise.all(tabs.map(candidate => catalogProbe(candidate.id, catalogTabNonce(candidate))));
+    tabs.sort((a, b) => Number(!!catalogTabNonce(b, prov)) - Number(!!catalogTabNonce(a, prov)) || a.id - b.id);
+    const proofs = await Promise.all(tabs.map(candidate => catalogProbe(candidate.id, catalogTabNonce(candidate, prov))));
     let tab = tabs.find((candidate, index) => proofs[index]?.ready === true &&
       (!owner || owner.nonce !== wanted?.nonce || candidate.id === owner.tab));
     if (wanted && !current()) return;
@@ -2911,12 +2946,15 @@ function inspectRequestedModels(request) {
       // A missing recorder, hydrating page, retained helper or spent election never
       // grants another tab. One persisted reservation survives repeated clicks/MV3.
       const bypassBusy = wanted.allowOpen === true && tabs.length > 0 &&
-        tabs.every((candidate, index) => !catalogTabNonce(candidate) && proofs[index]?.ready === false && blocked.includes(proofs[index]?.reason));
+        tabs.every((candidate, index) => !catalogTabNonce(candidate, prov) && proofs[index]?.ready === false && blocked.includes(proofs[index]?.reason));
       if (!current() || wanted.allowOpen === false || owner?.nonce === wanted.nonce || (tabs.length && !bypassBusy)) return;
-      await chrome.storage.session.set({ modelCatalogOwner: { nonce: wanted.nonce, opening: true } });
+      await chrome.storage.session.set({ [ownerKey]: { nonce: wanted.nonce, opening: true } });
       if (!current()) return;
-      tab = await createChatTab(`https://chatgpt.com/?cos-model-catalog=${wanted.nonce}`, true);
-      await chrome.storage.session.set({ modelCatalogOwner: { nonce: wanted.nonce, tab: tab.id } });
+      const openUrl = prov === 'gemini'
+        ? `${catalogHome}?cos-model-catalog=${wanted.nonce}#cos-model-catalog=${wanted.nonce}`
+        : `${catalogHome}?cos-model-catalog=${wanted.nonce}`;
+      tab = await createChatTab(openUrl, true);
+      await chrome.storage.session.set({ [ownerKey]: { nonce: wanted.nonce, tab: tab.id } });
       await chrome.tabs.update(tab.id, { autoDiscardable: false });
       await waiting('opening');
       return;
@@ -2925,7 +2963,7 @@ function inspectRequestedModels(request) {
     // input. Only redundant empty helpers retire; borrowed user documents never do.
     const retireCatalogTabs = async () => {
       for (const candidate of tabs) {
-        if (candidate.id === tab.id || candidate.pinned || !catalogTabNonce(candidate) || candidate.pendingUrl) continue;
+        if (candidate.id === tab.id || candidate.pinned || !catalogTabNonce(candidate, prov) || candidate.pendingUrl) continue;
         const source = { tab: candidate.id, documentId: tabDocuments[String(candidate.id)], navigationEpoch: tabEpochs[String(candidate.id)] };
         if (!ownsDocument(source)) continue;
         try {
@@ -2943,7 +2981,7 @@ function inspectRequestedModels(request) {
     };
     if (!wanted) { await retireCatalogTabs(); return; }
     const held = { ...(owner?.nonce === wanted.nonce ? owner : {}), nonce: wanted.nonce, tab: tab.id };
-    await chrome.storage.session.set({ modelCatalogOwner: held });
+    await chrome.storage.session.set({ [ownerKey]: held });
     const send = async (message, documentId) => {
       let timer;
       try {
@@ -2960,24 +2998,24 @@ function inspectRequestedModels(request) {
     const key = String(tab.id);
     await holdModelCatalogTarget({ tab: tab.id, nonce: wanted.nonce, url: tab.url || tab.pendingUrl,
       ...(typeof tabDocuments[key] === 'string' ? { documentId: tabDocuments[key] } : {}),
-      ...(Number.isSafeInteger(tabEpochs[key]) ? { navigationEpoch: tabEpochs[key] } : {}) });
+      ...(Number.isSafeInteger(tabEpochs[key]) ? { navigationEpoch: tabEpochs[key] } : {}) }, prov);
     if (intent !== connectionEpoch || !token || disconnected || Date.now() >= wanted.expiresAt) return;
     // Bounded and never failing, like every lease change: another tab's pending release must not end this
     // inspection (CodeRabbit on #2027).
-    await renderingLeases(() => activeTabs?.set(`catalog:${wanted.nonce}`, [tab]));
+    await renderingLeases(() => activeTabs?.set(`${leasePrefix}:${wanted.nonce}`, [tab]));
     await waiting('inspecting');
     if (!current()) return;
-    const inspected = await send({ type: 'clf-model-catalog', nonce: wanted.nonce, expiresAt: wanted.expiresAt });
+    const inspected = await send({ type: 'clf-model-catalog', nonce: wanted.nonce, expiresAt: wanted.expiresAt, ...(prov === 'gemini' ? { provider: 'gemini' } : {}) });
     // Work->Chat is an in-document transition owned by the content script.
     // Failure never grants navigation to New Chat or a replacement helper tab.
     if (inspected === true || inspected?.ok === true) await retireCatalogTabs();
     else await waiting(inspected?.reason || 'result_unconfirmed');
   })().catch(() => waiting('inspection_failed')).finally(async () => {
-    if (targetNonce) await renderingLeases(() => activeTabs?.set(`catalog:${targetNonce}`, []));
-    if (targetNonce) await releaseModelCatalogTarget(targetNonce);
-    modelCatalogFlight = null;
+    if (targetNonce) await renderingLeases(() => activeTabs?.set(`${leasePrefix}:${targetNonce}`, []));
+    if (targetNonce) await releaseModelCatalogTarget(targetNonce, prov);
+    modelCatalogFlights[prov] = null;
   });
-  return modelCatalogFlight;
+  return modelCatalogFlights[prov];
 }
 
 let maintenanceFlight = null;
@@ -3086,7 +3124,7 @@ async function closeLeftoverOpenings(tabs, listed, handed, liveCommands = null) 
     let id = null, command = null;
     try {
       const url = new URL(tab.url || '');
-      if (url.origin !== 'https://chatgpt.com') continue;
+      if (!isSupportedChatUrl(url.href)) continue;
       const hash = new URLSearchParams(url.hash.slice(1));
       id = url.searchParams.get('cos-input') || hash.get('cos-input');
       command = url.searchParams.get('clf') || hash.get('clf');
@@ -3385,7 +3423,7 @@ async function runImageExports(jobs) {
     void (async () => {
       let answer = null;
       try {
-        const tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
+        const tabs = await chrome.tabs.query({ url: SUPPORTED_TAB_URLS });
         const [tab] = tabs.filter(candidate => conversationForTab(candidate) === conversationId).sort((a, b) => a.id - b.id);
         answer = tab
           ? await tabReply(tab.id, { type: 'clf-image-export', conversationId, messageId, assetId }, undefined, IMAGE_EXPORT_PAGE_MS)
@@ -3468,11 +3506,11 @@ async function revealChats(ids) {
     const conversationId = cleanConversationId(raw);
     if (!conversationId) continue;
     try {
-      const tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
+      const tabs = await chrome.tabs.query({ url: SUPPORTED_TAB_URLS });
       const [tab] = tabs.filter(candidate => conversationForTab(candidate) === conversationId).sort((a, b) => a.id - b.id);
       const shown = tab
         ? await chrome.tabs.update(tab.id, { active: true })
-        : await createUserWindowTab(`https://chatgpt.com/c/${conversationId}`, true);
+        : await createUserWindowTab(conversationUrl(conversationId), true);
       const windowId = shown?.windowId ?? tab?.windowId;
       if (!Number.isInteger(windowId)) throw new Error('no window');
       // A worker tab can sit in the app's minimized background window; the user asked to see it.
@@ -3497,7 +3535,7 @@ async function followChat(raw) {
   if (!conversationId) return;
   const window = await storedBackgroundWindow();
   if (!Number.isInteger(window?.id)) return;
-  const tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS, windowId: window.id });
+  const tabs = await chrome.tabs.query({ url: SUPPORTED_TAB_URLS, windowId: window.id });
   const [tab] = tabs.filter(candidate => candidate.windowId === window.id && conversationForTab(candidate) === conversationId)
     .sort((a, b) => a.id - b.id);
   if (tab && !tab.active) await chrome.tabs.update(tab.id, { active: true });
@@ -3557,7 +3595,8 @@ async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands, liveS
   const attempt = `${workerStampValue}>${offer.build}`;
   if ((await chrome.storage.local.get('extensionReloadAttempt')).extensionReloadAttempt === attempt) { extensionUpdateHold = 'already-tried'; return; }
   let busyFor = 0;
-  for (const tab of await chrome.tabs.query({ url: CHATGPT_TAB_URLS })) {
+  const tabUrls = typeof SUPPORTED_TAB_URLS !== 'undefined' ? SUPPORTED_TAB_URLS : CHATGPT_TAB_URLS;
+  for (const tab of await chrome.tabs.query({ url: tabUrls })) {
     if (!Number.isInteger(tab.id) || tab.discarded === true) continue;
     const ping = await tabReply(tab.id, { type: 'clf-recorder-ping' }).catch(() => null);
     // A page that cannot answer has nothing running here. One that answers without `busy` runs an
@@ -3602,10 +3641,11 @@ async function maintainOnce() {
   }
   const intent = connectionEpoch;
   let observedTabs = [];
-  try { observedTabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS }); } catch { /* Status/recovery still runs; no unobserved tab is pruned. */ }
+  try { observedTabs = await chrome.tabs.query({ url: SUPPORTED_TAB_URLS }); } catch { /* Status/recovery still runs; no unobserved tab is pruned. */ }
   const openConversations = [...new Set(observedTabs.map(conversationForTab).filter(Boolean))];
   // Observe login in an existing regular-profile page; extension pairing alone is not login.
   const loginTab = observedTabs.find(tab => !tab.incognito && !tab.discarded && !tab.frozen && tab.status !== 'loading' &&
+    isChatGptUrl(tab.url) &&
     typeof tab.id === 'number' && typeof tabDocuments[String(tab.id)] === 'string' && signInStage(tab.url) === 'done');
   const loginEpoch = loginTab ? tabEpochs[String(loginTab.id)] : undefined;
   const loginDocument = loginTab ? tabDocuments[String(loginTab.id)] : undefined;
@@ -3665,13 +3705,17 @@ async function maintainOnce() {
         // Once the provider conversation is bound, its ordinary live-chat grant
         // takes over. A manual move to another chat cannot borrow this opening.
         const start = custody.url ? new URL(custody.url) : null;
-        if (!conversationFromUrl(tab.url) && url.origin === 'https://chatgpt.com' &&
+        if (!conversationFromUrl(tab.url) && isSupportedChatUrl(url.href) &&
             url.pathname === (start?.pathname || '/') &&
             (!queryCommand || !hashCommand || queryCommand === hashCommand) &&
             (queryCommand || hashCommand) === custody.commandId) return true;
       }
       const id = url.searchParams.get('cos-input') || new URLSearchParams(url.hash.slice(1)).get('cos-input');
       if (liveOpenings.has(id) && inputOpenings[id]?.tab === tab.id) return true;
+      if (isGeminiUrl(url.href) && !conversationFromUrl(url.href) &&
+          Object.entries(inputOpenings).some(([inputId, opening]) => liveOpenings.has(inputId) && opening?.provider === 'gemini' && opening?.tab === tab.id)) {
+        return true;
+      }
       // Reuse has no input marker until native New Chat/Work -> Chat finishes.
       // Its elected document owns that one transition, including the home render.
       return Object.entries(inputOpenings).some(([inputId, opening]) =>
@@ -3679,13 +3723,13 @@ async function maintainOnce() {
         opening.documentId === tabDocuments[String(tab.id)] &&
         !Object.prototype.hasOwnProperty.call(terminalDocuments, String(tab.id)) &&
         (tab.url === opening.url && tabEpochs[String(tab.id)] === opening.navigationEpoch ||
-          conversationFromUrl(opening.url) && url.origin === 'https://chatgpt.com' && url.pathname === '/' && !id &&
+          conversationFromUrl(opening.url) && isProviderHomeUrl(url.href) && !id &&
           tabEpochs[String(tab.id)] >= opening.navigationEpoch && tabEpochs[String(tab.id)] <= opening.navigationEpoch + 1));
     } catch { return false; }
   };
   const refreshRendering = async (tabs) => {
     if (!activeTabs || intent !== connectionEpoch || !token || disconnected) return;
-    tabs ||= await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
+    tabs ||= await chrome.tabs.query({ url: SUPPORTED_TAB_URLS });
     // Bounded, and never fatal to the pass: a lease is a debugger command to each background chat tab,
     // and one that never answered, or failed to release, kept every later pass from reaching its repairs
     // (2026-11-01: a Loop chat's repairs were handed out ten times and never claimed, twice).
@@ -3736,7 +3780,8 @@ async function maintainOnce() {
     await placeSuccessorChat(reply.data.placement, null);
     await refreshRendering();
   }
-  inspectRequestedModels(reply.data.modelCatalogRequest);
+  inspectRequestedModels(reply.data.modelCatalogRequest, 'chatgpt');
+  inspectRequestedModels(reply.data.geminiModelCatalogRequest, 'gemini');
   await rememberConnectorNames(reply.data.connectorNames);
   await rememberConnectorApps(reply.data.connectorApps);
   inspectRequestedPluginRefresh(reply.data.pluginRefreshRequests, reply.data.background === true, reply.data.browserOnly === true);
@@ -3772,7 +3817,7 @@ async function maintainOnce() {
   if (!protectionWork && !managedWork && closable.size === 0 && repairs.length === 0) return clearRetryIfIdle();
   let tabs = [];
   try {
-    tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
+    tabs = await chrome.tabs.query({ url: SUPPORTED_TAB_URLS });
   } catch {
     return;
   }
@@ -3799,7 +3844,9 @@ async function maintainOnce() {
         changed = true;
       }
       // Legacy input openings still use their marker; a retired command cannot borrow it.
-      const opening = custody === true && !conversation && /[?&#](?:clf|cos-input)=/.test(tab.pendingUrl || tab.url || '');
+      const gemOpening = isGeminiUrl(tab.pendingUrl || tab.url || '') &&
+        Object.entries(inputOpenings).some(([inputId, row]) => liveOpenings.has(inputId) && row?.provider === 'gemini' && row?.tab === tab.id);
+      const opening = custody === true && !conversation && (/[?&#](?:clf|cos-input)=/.test(tab.pendingUrl || tab.url || '') || gemOpening);
       const protect = opening || carrying || nonDiscardable.has(conversation);
       if (custody && custody !== true && !carrying && protect) {
         discardProtectedTabs[key] = true;
@@ -3845,7 +3892,8 @@ async function performBrowserRepairs(repairs, policy) {
     // the duplicate rule below is deciding on a tab list that no longer exists.
     let live = [];
     try {
-      live = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
+      const tabUrls = typeof SUPPORTED_TAB_URLS !== 'undefined' ? SUPPORTED_TAB_URLS : CHATGPT_TAB_URLS;
+      live = await chrome.tabs.query({ url: tabUrls });
     } catch {
       return;
     }
@@ -4002,7 +4050,10 @@ async function performBrowserRepairs(repairs, policy) {
       }
       if (target) await chrome.tabs.reload(target.id);
       else {
-        await createChatTab(`https://chatgpt.com/c/${encodeURIComponent(conversationId)}`, policy.background === true, focus);
+        const reopenUrl = typeof conversationUrl === 'function'
+          ? conversationUrl(conversationId)
+          : `https://chatgpt.com/c/${encodeURIComponent(conversationId)}`;
+        await createChatTab(reopenUrl, policy.background === true, focus);
       }
     } catch {
       // A tab changed between the scan and action, or Chrome refused it. Report the exact failed
@@ -4028,7 +4079,8 @@ function conversationStillOpen(conversationId) {
 async function verifiedConversationGone(conversationId) {
   if (conversationStillOpen(conversationId)) return 'present';
   let tabs;
-  try { tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS }); }
+  const tabUrls = typeof SUPPORTED_TAB_URLS !== 'undefined' ? SUPPORTED_TAB_URLS : CHATGPT_TAB_URLS;
+  try { tabs = await chrome.tabs.query({ url: tabUrls }); }
   catch { return 'unknown'; }
   if (!Array.isArray(tabs)) return 'unknown';
   // A navigation in progress still carries its *old* committed tab.url. The
@@ -4205,14 +4257,70 @@ async function releaseTab(tab, expected = null, expectedDocument = null, expecte
   return { ok: true, closed: delivered.pending === 0, pendingClose: delivered.pending };
 }
 
+function isGeminiUrl(value) {
+  try {
+    const url = new URL(String(value || ''));
+    return url.protocol === 'https:' && url.hostname === 'gemini.google.com';
+  } catch {
+    return false;
+  }
+}
+
+function isSupportedChatUrl(value) {
+  return isChatGptUrl(value) || isGeminiUrl(value);
+}
+
+function homeUrlForProvider(provider) {
+  return provider === 'gemini' ? 'https://gemini.google.com/app' : 'https://chatgpt.com/';
+}
+
+function conversationUrl(conversationId) {
+  const id = cleanConversationId(conversationId);
+  if (!id) return 'https://chatgpt.com/';
+  if (isGeminiConversationId(id)) {
+    const slug = id.slice('gemini-'.length);
+    return `https://gemini.google.com/app/${encodeURIComponent(slug)}`;
+  }
+  return `https://chatgpt.com/c/${encodeURIComponent(id)}`;
+}
+
+function isProviderHomeUrl(value, provider = null, requireClean = false) {
+  try {
+    const url = new URL(String(value || ''));
+    if (url.protocol !== 'https:') return false;
+    if (requireClean && (url.search || url.hash)) return false;
+    if (url.hostname === 'chatgpt.com' || url.hostname === 'chat.openai.com') {
+      if (provider === 'gemini') return false;
+      return url.pathname === '/' || url.pathname === '';
+    }
+    if (url.hostname === 'gemini.google.com') {
+      if (provider === 'chatgpt') return false;
+      return /^\/(?:u\/\d+\/)?app\/?$/.test(url.pathname);
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 function conversationFromUrl(value) {
   try {
     const url = new URL(String(value || ''));
-    if (url.protocol !== 'https:' || (url.hostname !== 'chatgpt.com' && url.hostname !== 'chat.openai.com')) return null;
-    // Matches chatgpt-dom.js: a Project conversation is `/g/<project>/c/<id>`, while
-    // `/share/c/<id>` is a public snapshot the service worker must never bind a tab to.
-    const match = /^\/(?:g\/[^/]+\/)?c\/([0-9a-f-]{8,64})(?:\/|$)/i.exec(url.pathname);
-    return match ? match[1] : null;
+    if (url.protocol !== 'https:') return null;
+    if (url.hostname === 'chatgpt.com' || url.hostname === 'chat.openai.com') {
+      // Matches chatgpt-dom.js: a Project conversation is `/g/<project>/c/<id>`, while
+      // `/share/c/<id>` is a public snapshot the service worker must never bind a tab to.
+      const match = /^\/(?:g\/[^/]+\/)?c\/([0-9a-f-]{8,64})(?:\/|$)/i.exec(url.pathname);
+      return match ? match[1] : null;
+    }
+    if (url.hostname === 'gemini.google.com') {
+      const appMatch = /^\/(?:u\/\d+\/)?app\/([A-Za-z0-9_-]{8,56})(?:\/|$)/.exec(url.pathname);
+      if (appMatch && !/^new$/i.test(appMatch[1])) return `gemini-${appMatch[1]}`;
+      const gemMatch = /^\/(?:u\/\d+\/)?gem\/[A-Za-z0-9_-]+\/([A-Za-z0-9_-]{8,56})(?:\/|$)/.exec(url.pathname);
+      if (gemMatch && !/^new$/i.test(gemMatch[1])) return `gemini-${gemMatch[1]}`;
+      return null;
+    }
+    return null;
   } catch {
     return null;
   }
@@ -4446,14 +4554,20 @@ const HANDLERS = {
   },
   async model_catalog(message, _sender, source) {
     if (!ownsDocument(source) || typeof message.nonce !== 'string' || !/^[a-f0-9-]{36}$/i.test(message.nonce)) return { ok: false };
+    const provider = message.provider === 'gemini' ? 'gemini' : 'chatgpt';
     const tab = await chrome.tabs.get(source.tab);
-    const target = await currentModelCatalogTarget(message.nonce);
+    const target = await currentModelCatalogTarget(message.nonce, provider);
     const latest = await chrome.tabs.get(source.tab);
     if (!ownsDocument(source) || !target || target.tab !== source.tab || target.url !== (tab.url || tab.pendingUrl) ||
         target.url !== (latest.url || latest.pendingUrl) ||
         (target.documentId !== undefined && target.documentId !== source.documentId) ||
         (target.navigationEpoch !== undefined && target.navigationEpoch !== source.navigationEpoch)) return { ok: false };
-    const body = JSON.stringify({ nonce: message.nonce, models: message.models, error: message.error });
+    const body = JSON.stringify({
+      ...(provider === 'gemini' ? { provider: 'gemini' } : {}),
+      nonce: message.nonce,
+      models: message.models,
+      error: message.error
+    });
     if (body.length > 12000) return { ok: false };
     const result = await call('/models', { method: 'POST', body });
     return result;
@@ -4532,7 +4646,8 @@ const HANDLERS = {
       // A branch's draft (#482) can lose its marker when ChatGPT rewrites the URL after moving
       // there; the tab elected for this message still owns it.
       const branchDraft = () => { try { return inputOpenings[id]?.tab === tab.id && /^\/c\/local-chatgpt(?::|%3A)/i.test(new URL(tab.url).pathname); } catch { return false; } };
-      if (!conversationId && !String(tab.url || '').includes(`cos-input=${id}`) && !branchDraft()) return { ok: false };
+      const geminiOpening = () => inputOpenings[id]?.tab === tab.id && isGeminiUrl(tab.url);
+      if (!conversationId && !String(tab.url || '').includes(`cos-input=${id}`) && !branchDraft() && !geminiOpening()) return { ok: false };
       if (message.conversationId !== conversationId || !ownsDocument(source)) return { ok: false };
     }
     if (message.ack === true && message.lifetime !== 'temporary-planner') {
@@ -4729,7 +4844,7 @@ const HANDLERS = {
     // manifest.json already authorize URL-filtered tabs.query on these origins.
     let discovered = [];
     try {
-      discovered = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
+      discovered = await chrome.tabs.query({ url: SUPPORTED_TAB_URLS });
     } catch {
       discovered = [];
     }
@@ -4771,7 +4886,7 @@ const HANDLERS = {
     }
     const tab = active && typeof active.id === 'number' ? active.id : null;
     const key = tab === null ? null : String(tab);
-    const isChat = isChatGptUrl(active && active.url);
+    const isChat = isSupportedChatUrl(active && active.url);
     const bound = key ? cleanConversationId(tabConversations[key]) : null;
     const documentId = key && typeof tabDocuments[key] === 'string' ? tabDocuments[key] : null;
     const navigationEpoch = key ? tabEpochs[key] : null;
@@ -4792,16 +4907,27 @@ const HANDLERS = {
     }
 
     let chatTabs = 0;
+    let chatgptTabs = 0;
+    let geminiTabs = 0;
     try {
-      chatTabs = (await chrome.tabs.query({ url: CHATGPT_TAB_URLS })).length;
+      const openChatTabs = await chrome.tabs.query({ url: SUPPORTED_TAB_URLS });
+      chatTabs = openChatTabs.length;
+      for (const entry of openChatTabs) {
+        if (isGeminiUrl(entry && entry.url)) geminiTabs += 1;
+        else if (isChatGptUrl(entry && entry.url)) chatgptTabs += 1;
+      }
     } catch {
       chatTabs = 0;
     }
 
     const conversationId = bound || (page && cleanConversationId(page.conversationId)) || conversationFromUrl(active && active.url);
+    const provider = isChat
+      ? (isGeminiUrl(active && active.url) || isGeminiConversationId(conversationId) ? 'gemini' : 'chatgpt')
+      : null;
     return {
       tab,
       isChat,
+      provider,
       url: isChat ? String((active && active.url) || '') : null,
       conversationId,
       bound: bound !== null,
@@ -4811,6 +4937,8 @@ const HANDLERS = {
       recorder: page !== null,
       page,
       chatTabs,
+      chatgptTabs,
+      geminiTabs,
       pending: journal.filter(
         (entry) =>
           (conversationId && entry.conversationId === conversationId) ||
@@ -4995,7 +5123,7 @@ const HANDLERS = {
     // An unpacked extension can retain a cached recorder while executeScript reads
     // a newer helper from disk. Repairing only MAIN repeats that protocol mismatch
     // forever, so Continue never obtains its required fresh native-final check.
-    const repaired = await restoreChatgptTab(source.tab, () => ownsDocument(source), source.documentId);
+    const repaired = await restoreTabById(source.tab, () => ownsDocument(source), source.documentId);
     return !ownsDocument(source) ? { ok: false, error: 'stale_document' } :
       repaired ? { ok: true } : { ok: false, error: 'fiber_repair_failed' };
   },
@@ -5014,7 +5142,7 @@ const HANDLERS = {
     // ChatGPT assigns /c/B through an SPA transition. Read Chrome's current tab and
     // retain the exact document/epoch lease across that await before accepting its route.
     const tab = await chrome.tabs.get(source.tab).catch(() => null);
-    if (!ownsDocument(source) || !tab || !isChatGptUrl(tab.url))
+    if (!ownsDocument(source) || !tab || !isSupportedChatUrl(tab.url))
       return { ok: false, error: 'stale_document' };
     const named = cleanConversationId(message.conversationId);
     // Destination permits precede the first Send and therefore have no chat route.
@@ -5312,6 +5440,28 @@ const HANDLERS = {
     await forgetDeferredRevival(message.id);
     return { ok: true };
   },
+  async gemini_spawn_workers(message, _sender, source) {
+    await load();
+    if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
+    const conversationId = cleanConversationId(message && message.conversationId);
+    if (!conversationId || !isGeminiConversationId(conversationId)) {
+      return { ok: false, error: 'bad_conversation_id' };
+    }
+    const tab = await chrome.tabs.get(source.tab).catch(() => null);
+    const matchesBound = cleanConversationId(tabConversations[String(source.tab)]) === conversationId;
+    const matchesUrl = Boolean(tab && !tab.pendingUrl && conversationFromUrl(tab.url) === conversationId);
+    if (!matchesBound && !matchesUrl) {
+      return { ok: false, error: 'wrong_conversation' };
+    }
+    const turnId = typeof message?.turnId === 'string' ? message.turnId.slice(0, 128) : '';
+    const workers = Array.isArray(message?.workers) ? message.workers.slice(0, 12) : [];
+    if (!workers.length) return { ok: false, error: 'no_workers' };
+    const result = await call('/gemini/spawn-workers', {
+      method: 'POST',
+      body: JSON.stringify({ conversationId, turnId, workers })
+    });
+    return result.ok ? result.data : { ok: false, error: result.error || 'spawn_failed' };
+  },
   async ack(message, _sender, source) {
     const result = await ackCommand(
       String(message.id || ''),
@@ -5364,7 +5514,8 @@ async function browserIdentity() {
  */
 async function environmentDiagnostics() {
   let tabs = [];
-  try { tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS }); } catch { tabs = []; }
+  const tabUrls = typeof SUPPORTED_TAB_URLS !== 'undefined' ? SUPPORTED_TAB_URLS : CHATGPT_TAB_URLS;
+  try { tabs = await chrome.tabs.query({ url: tabUrls }); } catch { tabs = []; }
   if (!Array.isArray(tabs)) tabs = [];
   const backgroundWindow = await storedBackgroundWindow().catch(() => null);
   const count = test => tabs.filter(test).length;
@@ -5504,6 +5655,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'command_step',
     'defer_revival',
     'forget_revival',
+    'gemini_spawn_workers',
     'ack'
   ]);
   const run = async () => {
@@ -5541,7 +5693,7 @@ function conversationForTab(tab) {
   const pending = conversationFromUrl(tab.pendingUrl);
   if (pending) return pending;
   const urls = [tab.url, tab.pendingUrl].filter((value) => typeof value === 'string' && value);
-  if (urls.some((value) => !isChatGptUrl(value))) return null;
+  if (urls.some((value) => !isSupportedChatUrl(value))) return null;
   return cleanConversationId(tabConversations[String(tab.id)]);
 }
 
@@ -5584,7 +5736,7 @@ chrome.tabs.onUpdated.addListener((id, changeInfo, tab) => {
   // Chrome's InjectionResult owns document identity. Reading the new location in
   // that exact document distinguishes SPA routing from a dying page or reload,
   // without relying on tab loading/focus or running any provider handlers.
-  const sameDocument = typeof changeInfo.url === 'string' && isChatGptUrl(changeInfo.url) &&
+  const sameDocument = typeof changeInfo.url === 'string' && isSupportedChatUrl(changeInfo.url) &&
     documentId && tab?.url === changeInfo.url && !tab.pendingUrl
     ? browserReply(() => chrome.scripting.executeScript({ target: { tabId: id, documentIds: [documentId] },
       injectImmediately: true, func: () => location.href })).then(results =>
@@ -5605,7 +5757,7 @@ chrome.tabs.onUpdated.addListener((id, changeInfo, tab) => {
   }
   const fullNavigation = changeInfo.status === 'loading';
   const completedNavigation = changeInfo.status === 'complete';
-  const leftChatGpt = typeof changeInfo.url === 'string' && !isChatGptUrl(changeInfo.url);
+  const leftChatGpt = typeof changeInfo.url === 'string' && !isSupportedChatUrl(changeInfo.url);
   if (!fullNavigation && !completedNavigation && !leftChatGpt) return;
   // An unproved loading transition conservatively retires the old document.
   // A replacement must register its own MessageSender.documentId before IPC.
@@ -5617,8 +5769,8 @@ chrome.tabs.onUpdated.addListener((id, changeInfo, tab) => {
     void load().then(async () => {
       if (Object.values(inputOpenings).some(opening => opening.tab === id) ||
           discardProtectedTabs[String(id)]?.commandId) return maintain(true);
-      const owner = (await chrome.storage.session.get('modelCatalogOwner')).modelCatalogOwner;
-      if (owner?.tab === id && !owner.handedToInput) return maintain(true);
+      const { modelCatalogOwner: owner, geminiModelCatalogOwner: geminiOwner } = await chrome.storage.session.get(['modelCatalogOwner', 'geminiModelCatalogOwner']);
+      if ((owner?.tab === id && !owner.handedToInput) || (geminiOwner?.tab === id && !geminiOwner.handedToInput)) return maintain(true);
     }).catch(() => undefined);
     void (async () => {
       const key = String(id);
@@ -5635,8 +5787,8 @@ chrome.tabs.onUpdated.addListener((id, changeInfo, tab) => {
       try {
         const tab = await chrome.tabs.get(id);
         const targetUrl = tab?.pendingUrl || tab?.url;
-        if (tab?.status !== 'complete' || (targetUrl && isChatGptUrl(targetUrl))) return;
-        const present = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
+        if (tab?.status !== 'complete' || (targetUrl && isSupportedChatUrl(targetUrl))) return;
+        const present = await chrome.tabs.query({ url: SUPPORTED_TAB_URLS });
         if (!Array.isArray(present) || present.some((tab) => tab.id === id) || !stillDeparting()) return;
       } catch {
         // Query failure is unknown presence, never permission to detach a live chat.
@@ -5674,7 +5826,7 @@ chrome.tabs.onUpdated.addListener((id, changeInfo, tab) => {
       let rootReload = false;
       try {
         const url = new URL(targetUrl);
-        rootReload = isChatGptUrl(targetUrl) && (url.pathname === '/' || url.pathname === '');
+        rootReload = isProviderHomeUrl(targetUrl);
       } catch {
         rootReload = false;
       }
@@ -5683,7 +5835,7 @@ chrome.tabs.onUpdated.addListener((id, changeInfo, tab) => {
       // not A's. releaseTab() below retires A here and now — its provisional observations are
       // too old to be adopted by whatever loads next, and its final tab leaving is the app's
       // cue to bring it back if a turn is still running in it.
-      if (knownConversation && targetUrl && (!isChatGptUrl(targetUrl) || conversationFromUrl(targetUrl) !== knownConversation)) {
+      if (knownConversation && targetUrl && (!isSupportedChatUrl(targetUrl) || conversationFromUrl(targetUrl) !== knownConversation)) {
         departed = knownConversation;
       } else if (!knownConversation && rootReload && documentId) {
         await carryFreshReloadProvisional(id, documentId);
@@ -5716,6 +5868,8 @@ chrome.tabs.onUpdated.addListener((id, changeInfo, tab) => {
  * receive both its static manifest injection and this recovery injection.
  */
 const CHATGPT_TAB_URLS = ['https://chatgpt.com/*', 'https://chat.openai.com/*'];
+const GEMINI_TAB_URLS = ['https://gemini.google.com/*'];
+const SUPPORTED_TAB_URLS = [...CHATGPT_TAB_URLS, ...GEMINI_TAB_URLS];
 const PAGE_RECORDER_VERSION = 22;
 
 let deferredRecoveryWork = null;
@@ -5766,7 +5920,7 @@ function offerDeferredRevivalToTab(entry, tab) {
 
 function deferredRevivalUrl(entry) {
   if (!entry || !deferredRevivalId(entry.id) || !cleanConversationId(entry.conversationId)) return null;
-  const url = new URL(`https://chatgpt.com/c/${entry.conversationId}`);
+  const url = new URL(conversationUrl(entry.conversationId));
   url.searchParams.set('clf', entry.id);
   url.hash = `clf=${encodeURIComponent(entry.id)}`;
   return url.toString();
@@ -5791,14 +5945,18 @@ function deferredRevivalUrl(entry) {
  * ends at the command deadline; it never grants another browser-opening attempt.
  */
 /** Only the continuation's captured Project chooses a successor's scope. */
-function successorChatBase(offered, source) {
+function successorChatBase(offered, source, provider = null) {
+  const resolvedProvider = provider === 'gemini' || isGeminiConversationId(cleanConversationId(source)) ? 'gemini' : 'chatgpt';
+  if (resolvedProvider === 'gemini') return homeUrlForProvider('gemini');
   const project = typeof offered === 'string' && /^g-p-[0-9a-f]{32}$/.test(offered) ? offered : null;
   const conversation = cleanConversationId(source);
-  return project && conversation ? `https://chatgpt.com/c/${conversation}` : 'https://chatgpt.com/';
+  return project && conversation ? conversationUrl(conversation) : 'https://chatgpt.com/';
 }
 
 async function placeSuccessorChat(raw, tabId) {
   const id = commandMarkerId(raw && raw.id);
+  const resolvedProvider = raw?.provider === 'gemini' || isGeminiConversationId(cleanConversationId(raw?.homeConversationId)) ? 'gemini' : 'chatgpt';
+  const defaultHome = homeUrlForProvider(resolvedProvider);
   const placementError = error => error && typeof error.message === 'string' && error.message
     ? error.message
     : String(error);
@@ -5813,14 +5971,14 @@ async function placeSuccessorChat(raw, tabId) {
   };
   if (id && raw.background === true) {
     const marker = `clf=${encodeURIComponent(id)}`;
-    const model = commandModelSlug(raw.model);
-    const effort = commandReasoningEffort(raw.reasoningEffort);
+    const model = resolvedProvider === 'chatgpt' ? commandModelSlug(raw.model) : null;
+    const effort = resolvedProvider === 'chatgpt' ? commandReasoningEffort(raw.reasoningEffort) : null;
     const query = [marker];
     if (model) query.push(`model=${encodeURIComponent(model)}`);
     if (effort) query.push(`reasoning_effort=${encodeURIComponent(effort)}`);
     let created;
     try {
-      created = await createChatTab(`https://chatgpt.com/?${query.join('&')}#${marker}`, true);
+      created = await createChatTab(`${defaultHome}?${query.join('&')}#${marker}`, true);
     } catch (error) {
       await failPlacement(`successor_tab_create_failed: ${placementError(error)}`);
       return;
@@ -5854,15 +6012,15 @@ async function placeSuccessorChat(raw, tabId) {
     const conversationId = cleanConversationId(raw.homeConversationId);
     if (conversationId) {
       try {
-        const tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
+        const tabs = await chrome.tabs.query({ url: SUPPORTED_TAB_URLS });
         tabId = tabs.filter(tab => conversationForTab(tab) === conversationId).sort((a, b) => a.id - b.id)[0]?.id;
       } catch { /* Fall through to the placeless open below. */ }
     }
     if (typeof tabId !== 'number') {
-      const base = successorChatBase(raw.project, raw.homeConversationId);
-      const marker = `clf=${encodeURIComponent(id)}${base !== 'https://chatgpt.com/' ? '&clf_project=1' : ''}`;
-      const model = commandModelSlug(raw && raw.model);
-      const reasoningEffort = commandReasoningEffort(raw && raw.reasoningEffort);
+      const base = successorChatBase(raw.project, raw.homeConversationId, resolvedProvider);
+      const marker = `clf=${encodeURIComponent(id)}${base !== defaultHome ? '&clf_project=1' : ''}`;
+      const model = resolvedProvider === 'chatgpt' ? commandModelSlug(raw && raw.model) : null;
+      const reasoningEffort = resolvedProvider === 'chatgpt' ? commandReasoningEffort(raw && raw.reasoningEffort) : null;
       const query = [marker];
       if (model) query.push(`model=${encodeURIComponent(model)}`);
       if (reasoningEffort) query.push(`reasoning_effort=${encodeURIComponent(reasoningEffort)}`);
@@ -5894,10 +6052,10 @@ async function placeSuccessorChat(raw, tabId) {
   }
   // Both a query and a fragment, matching the app's commandUrl(): ChatGPT rewrites its own URL
   // during boot and which of the two survives has changed between builds.
-  const base = successorChatBase(raw.project, raw.homeConversationId);
-  const marker = `clf=${encodeURIComponent(id)}${base !== 'https://chatgpt.com/' ? '&clf_project=1' : ''}`;
-  const model = commandModelSlug(raw && raw.model);
-  const reasoningEffort = commandReasoningEffort(raw && raw.reasoningEffort);
+  const base = successorChatBase(raw.project, raw.homeConversationId, resolvedProvider);
+  const marker = `clf=${encodeURIComponent(id)}${base !== defaultHome ? '&clf_project=1' : ''}`;
+  const model = resolvedProvider === 'chatgpt' ? commandModelSlug(raw && raw.model) : null;
+  const reasoningEffort = resolvedProvider === 'chatgpt' ? commandReasoningEffort(raw && raw.reasoningEffort) : null;
   const query = [marker];
   if (model) query.push(`model=${encodeURIComponent(model)}`);
   if (reasoningEffort) query.push(`reasoning_effort=${encodeURIComponent(reasoningEffort)}`);
@@ -6000,7 +6158,7 @@ function recoverDeferredRevivals() {
 
     let tabs = [];
     try {
-      tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
+      tabs = await chrome.tabs.query({ url: SUPPORTED_TAB_URLS });
     } catch {
       return;
     }
@@ -6121,6 +6279,40 @@ async function reloadErrorPage(id) {
   } catch { await saveErrorPageReloads(); /* The tab went away; nothing to reload. */ }
 }
 
+async function restoreGeminiTab(id, current = () => true, documentId = null) {
+  if (!current()) return false;
+  const target = { tabId: id, ...(documentId ? { documentIds: [documentId] } : {}) };
+  try {
+    const live = documentId ? null : await tabReply(id, { type: 'clf-recorder-ping' });
+    if (!current()) return false;
+    if (live && live.ok === true) {
+      await forgetErrorPage(id);
+      return true;
+    }
+  } catch { /* Isolated world invalidated; re-inject below. */ }
+  try {
+    if (!current()) return false;
+    await chrome.scripting.executeScript({ target, files: ['gemini-dom.js'] });
+    if (!current()) return false;
+    await chrome.scripting.executeScript({ target, files: ['gemini-content.js'] });
+    await forgetErrorPage(id);
+    return current();
+  } catch (error) {
+    if (/showing error page/i.test(String(error?.message ?? ''))) await reloadErrorPage(id);
+    return false;
+  }
+}
+
+async function restoreTabForUrl(id, url, current = () => true, documentId = null) {
+  if (isGeminiUrl(url)) return restoreGeminiTab(id, current, documentId);
+  return restoreChatgptTab(id, current, documentId);
+}
+
+async function restoreTabById(id, current = () => true, documentId = null) {
+  const tab = await chrome.tabs.get(id).catch(() => null);
+  return restoreTabForUrl(id, tab?.url || '', current, documentId);
+}
+
 async function restoreChatgptTab(id, current = () => true, documentId = null) {
   if (!current()) return false;
   const target = { tabId: id, ...(documentId ? { documentIds: [documentId] } : {}) };
@@ -6193,10 +6385,10 @@ async function restoreSilentRecorders(tabs, intent) {
       if (!Number.isInteger(tab?.id) || tab.pendingUrl || tab.status === 'loading' || tab.discarded || tab.frozen) continue;
       const latest = await chrome.tabs.get(tab.id).catch(() => null);
       if (!current()) return;
-      if (!latest || latest.url !== tab.url || !isChatGptUrl(latest.url) || latest.pendingUrl ||
+      if (!latest || latest.url !== tab.url || !isSupportedChatUrl(latest.url) || latest.pendingUrl ||
           latest.status === 'loading' || latest.discarded || latest.frozen) continue;
       // A healthy isolated recorder cannot prove that the separate MAIN helper survived.
-      await restoreChatgptTab(tab.id, current);
+      await restoreTabForUrl(tab.id, latest.url, current);
     }
   } finally { recorderCheckRunning = false; }
 }
@@ -6233,15 +6425,15 @@ async function replaceUsageObserver(tabId, attempt = 0) {
 async function restoreOpenChatgptTabs() {
   let tabs = [];
   try {
-    tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
+    tabs = await chrome.tabs.query({ url: SUPPORTED_TAB_URLS });
   } catch {
     return;
   }
   for (const tab of tabs) {
     const id = tab && typeof tab.id === 'number' ? tab.id : null;
     if (id === null) continue;
-    await restoreChatgptTab(id);
-    void replaceUsageObserver(id);
+    await restoreTabForUrl(id, tab.url || '');
+    if (isChatGptUrl(tab.url)) void replaceUsageObserver(id);
   }
 }
 
@@ -6496,7 +6688,7 @@ if (!globalThis.__cosBrowserWorker) {
 // A tab moved into or out of the app's tab group is told at once: Chrome pauses a collapsed
 // group's tabs within seconds, long before the next maintenance pass (#128).
 chrome.tabs.onUpdated.addListener((_id, changeInfo, tab) => {
-  if (changeInfo.groupId === undefined || !tab || !isChatGptUrl(tab.pendingUrl || tab.url || '')) return;
+  if (changeInfo.groupId === undefined || !tab || !isSupportedChatUrl(tab.pendingUrl || tab.url || '')) return;
   void load().then(() => syncKeepAwake([tab], false)).catch(() => undefined);
 });
 

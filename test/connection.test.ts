@@ -1062,5 +1062,51 @@ describe('persistent connector URLs', () => {
       await connection.disconnect();
     } finally { mocks.config.mcp.persistentUrls = false; }
   });
+
+  it('starts and updates independent Gemini bridge without restarting active OpenAI tunnel', async () => {
+    vi.resetModules();
+    const connection = await import('../src/main/connection.js');
+    const { startMcpServer } = await import('../src/main/mcp/server.js');
+    const start = vi.mocked(startMcpServer);
+
+    mocks.config.tunnel.kind = 'openai';
+    (mocks.config as { mcp: Record<string, unknown> }).mcp = { instructions: '', persistentUrls: false };
+    mocks.starts = 0;
+    mocks.tunnelStop.mockClear();
+
+    try {
+      await connection.connect();
+      const tunnelStartsBefore = mocks.starts;
+      const allowedHostsFn = start.mock.calls.at(-1)?.[3] as (() => ReadonlySet<string>) | undefined;
+      expect(typeof allowedHostsFn).toBe('function');
+      await vi.waitFor(() => expect(connection.getStatus().geminiBridge?.mode).toBe('tunnel'));
+      expect(connection.getStatus().geminiBridge?.state).toBe('off');
+      expect(allowedHostsFn!().size).toBe(0);
+
+      (mocks.config as { mcp: Record<string, unknown> }).mcp = {
+        instructions: '',
+        persistentUrls: true,
+        geminiBridge: 'custom',
+        geminiPublicOrigin: 'https://mcp.example.com:8443'
+      };
+      await connection.applySettings();
+
+      expect(mocks.starts).toBe(tunnelStartsBefore);
+      expect(mocks.tunnelStop).not.toHaveBeenCalled();
+      expect(connection.getStatus().geminiBridge).toMatchObject({
+        mode: 'custom',
+        state: 'live',
+        publicOrigin: 'https://mcp.example.com:8443'
+      });
+      expect([...allowedHostsFn!()]).toEqual(['mcp.example.com:8443', 'mcp.example.com']);
+
+      await connection.disconnect();
+      expect(connection.getStatus().geminiBridge).toBeUndefined();
+      expect(allowedHostsFn!().size).toBe(0);
+    } finally {
+      mocks.config.tunnel.kind = 'cloudflared';
+      (mocks.config as { mcp: Record<string, unknown> }).mcp = { instructions: '', persistentUrls: false };
+    }
+  });
 });
 

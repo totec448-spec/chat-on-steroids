@@ -567,3 +567,46 @@ it("gives each worker one line of what it is doing: a wait on ChatGPT's approval
   panel.update('p', [worker('c', { lastAssistantFinalAt: now - 1_000, lastAnswerLine: 'Done. All 12 tests pass now' })]);
   expect(line('c')).toBeNull();
 });
+
+it('shows inline spawn sub-agent form when eligible and forwards submission to onSpawn', async () => {
+  dom = new JSDOM('<main></main>');
+  Object.assign(globalThis, { document: dom.window.document });
+  const host = document.querySelector('main')!;
+  const onSpawn = vi.fn(async () => true);
+  let allowed = true;
+  const panel = createAgentPanel({
+    host,
+    load: async () => ({ events: [] }),
+    render: () => [],
+    openMain: vi.fn(),
+    working: () => false,
+    canSpawn: () => allowed,
+    onSpawn
+  });
+  panel.update('prime-gem', []);
+  panel.show();
+
+  const toggle = host.querySelector<HTMLButtonElement>('.agent-spawn-toggle')!;
+  const form = host.querySelector<HTMLFormElement>('.agent-spawn-form')!;
+  expect(form.hidden).toBe(true);
+  toggle.click();
+  expect(form.hidden).toBe(false);
+
+  const label = host.querySelector<HTMLInputElement>('.agent-spawn-input')!;
+  const prompt = host.querySelector<HTMLTextAreaElement>('.agent-spawn-textarea')!;
+  label.value = 'Security';
+  label.dispatchEvent(new dom.window.Event('input'));
+  prompt.value = 'Check bridge CSRF protections';
+  prompt.dispatchEvent(new dom.window.Event('input'));
+
+  form.dispatchEvent(new dom.window.Event('submit', { cancelable: true }));
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(onSpawn).toHaveBeenCalledWith([{ label: 'Security', task: 'Check bridge CSRF protections' }]);
+  expect(form.hidden).toBe(true);
+
+  allowed = false;
+  panel.update('prime-gem', []);
+  panel.show();
+  expect(host.querySelector('.agent-spawn-bar')).toBeNull();
+});

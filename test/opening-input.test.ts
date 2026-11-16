@@ -238,7 +238,7 @@ it('fails closed instead of trusting a recovered opening whose durable attach ou
   const config = defaultConfig();
   await saveConfig({ ...config, multiAgent: { ...config.multiAgent, strictChatAllowlist: true } });
   await expect(acknowledgeBrowserInput(row.id, 'recovered-opening-owner', conversation, 'recovered-message'))
-    .rejects.toThrow('Reserved opening session belongs to another ChatGPT conversation');
+    .rejects.toThrow('Reserved opening session belongs to another conversation');
   expect((await getSession(row.sessionId!))?.conversationId).toBe(conversation);
   expect(isChatTrusted(conversation)).toBe(false);
 });

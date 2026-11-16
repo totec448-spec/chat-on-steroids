@@ -24,8 +24,12 @@ function harness(initial: Tab[], cached?: number) {
     return { id, tabs: [await create({ url: options.url, windowId: id })] };
   });
   const windowUpdate = vi.fn(async (id: number) => ({ id }));
+  const isChatGptUrl = (value: string) => /^https:\/\/(chatgpt\.com|chat\.openai\.com)\//.test(value);
+  const isGeminiUrl = (value: string) => /^https:\/\/gemini\.google\.com\//.test(value);
   const api = vm.runInNewContext(`${code}\n({ createChatTab, reconcileBackgroundWindow })`, {
-    URL, URLSearchParams, Promise, isChatGptUrl: (value: string) => /^https:\/\/(chatgpt\.com|chat\.openai\.com)\//.test(value), cleanConversationId: (value: unknown) => typeof value === 'string' ? value : null,
+    URL, URLSearchParams, Promise, isChatGptUrl, isGeminiUrl,
+    isSupportedChatUrl: (value: string) => isChatGptUrl(value) || isGeminiUrl(value),
+    cleanConversationId: (value: unknown) => typeof value === 'string' ? value : null,
     conversationForTab: (tab: Tab) => new URL(tab.url).pathname.match(/^\/c\/(.+)$/)?.[1] ?? null,
     chrome: {
       storage: {
@@ -240,8 +244,11 @@ function groupHarness(options: { tabs?: GTab[]; windows?: Win[]; lastFocused?: n
       } }
   };
   if (!options.noGroupsApi) chrome.tabGroups = { get: groupGet, update: groupUpdate, query: groupQuery };
+  const isChatGptUrl = (value: string) => /^https:\/\/(chatgpt\.com|chat\.openai\.com)\//.test(value);
+  const isGeminiUrl = (value: string) => /^https:\/\/gemini\.google\.com\//.test(value);
   const api = vm.runInNewContext(`${code}\n({ createChatTab, reconcileBackgroundWindow, setBackgroundPlacement })`, {
-    URL, URLSearchParams, Promise, isChatGptUrl: (value: string) => /^https:\/\/(chatgpt\.com|chat\.openai\.com)\//.test(value),
+    URL, URLSearchParams, Promise, isChatGptUrl, isGeminiUrl,
+    isSupportedChatUrl: (value: string) => isChatGptUrl(value) || isGeminiUrl(value),
     cleanConversationId: (value: unknown) => typeof value === 'string' ? value : null,
     conversationForTab: (tab: Tab) => new URL(tab.url).pathname.match(/^\/c\/(.+)$/)?.[1] ?? null,
     chrome

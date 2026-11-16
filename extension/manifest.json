@@ -19,6 +19,7 @@
     "https://*/*",
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
+    "https://gemini.google.com/*",
     "http://127.0.0.1:8765/*",
     "http://127.0.0.1:8766/*",
     "http://127.0.0.1:8767/*",
@@ -77,6 +78,16 @@
       ],
       "world": "MAIN",
       "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://gemini.google.com/*"
+      ],
+      "js": [
+        "gemini-dom.js",
+        "gemini-content.js"
+      ],
+      "run_at": "document_idle"
     }
   ],
   "icons": {

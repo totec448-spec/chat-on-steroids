@@ -17,7 +17,7 @@
  * protected-resource metadata request properly and never emits a non-JSON body.
  */
 
-import { noteConnectorUse } from '../connector-proof.js';
+import { noteConnectorUse, noteExternalClientUse } from '../connector-proof.js';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createInboundTiming, formatInboundTiming, requestIdFromHeader, withInboundRequestId } from './inbound.js';
 import http from 'node:http';
@@ -31,6 +31,13 @@ import { SURFACE_IDS, configuredConnectorName, type SurfaceId } from './surfaces
 import { noteRouteRequestArrived } from '../tunnel/route-settle.js';
 import { providerSessionKey } from './provider-session.js';
 import { observeProviderSessionRequest } from '../session/correlation.js';
+import type { McpClientIdentity } from '../../shared/session.js';
+import {
+  noteExternalMcpClientActivity,
+  observeMcpInitialize,
+  resetLiveExternalMcpClients,
+  resolveInboundMcpClient
+} from './client-identity.js';
 
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 
@@ -164,6 +171,33 @@ function protectedResourceMetadata(resource: string, resourceName: string): stri
   });
 }
 
+function parseRequestHost(rawHeader: string | string[] | undefined): { host: string; hostname: string } | null {
+  if (typeof rawHeader !== 'string') return null;
+  const trimmed = rawHeader.trim();
+  if (!trimmed || /[\s,@/\\?#]/.test(trimmed)) return null;
+  try {
+    const parsed = new URL(`http://${trimmed}`);
+    if (parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) return null;
+    if (!parsed.hostname) return null;
+    return { host: parsed.host.toLowerCase(), hostname: parsed.hostname.toLowerCase() };
+  } catch {
+    return null;
+  }
+}
+
+function matchedAllowedPublicHost(
+  rawHeader: string | string[] | undefined,
+  allowedHosts?: () => ReadonlySet<string>
+): string | null {
+  const allowed = allowedHosts?.();
+  if (!allowed || allowed.size === 0) return null;
+  const parsed = parseRequestHost(rawHeader);
+  if (!parsed) return null;
+  if (allowed.has(parsed.host)) return parsed.host;
+  if (allowed.has(parsed.hostname)) return parsed.host;
+  return null;
+}
+
 /**
  * When ChatGPT last actually reached this app, epoch ms.
  *
@@ -268,7 +302,8 @@ export function forgetExposedSurface(): void {
 export async function startMcpServer(
   getContext: () => ToolContext,
   kept: Partial<Record<SurfaceId, string>> = {},
-  options: { port?: number } = {}
+  options: { port?: number; allowedHosts?: () => ReadonlySet<string> } = {},
+  allowedPublicHosts?: () => ReadonlySet<string>
 ): Promise<McpEndpoint> {
   const providerProfileId = getContext().setupProfileId ?? null;
   // A per-session token in the path is what authorises callers. It is regenerated on
@@ -278,6 +313,7 @@ export async function startMcpServer(
   requestSeenAt = null;
   surfaceRequestAt.clear();
   resetToolClock();
+  resetLiveExternalMcpClients();
   selfTestToken = randomBytes(16).toString('hex');
   tunnelProbeToken = randomBytes(16).toString('hex');
   // One path per surface, each with its own token. Distinct tokens rather than one shared
@@ -346,7 +382,13 @@ export async function startMcpServer(
       { onerror: (error) => logError(`MCP handler error (${surface.id}): ${error.message}`) }
     )
   }));
-  const checkHost = localhostHostValidation();
+  const allowedHosts = allowedPublicHosts ?? options.allowedHosts;
+  const checkLocalHost = localhostHostValidation();
+  const checkHost = (req: http.IncomingMessage, res: http.ServerResponse): string | null | false => {
+    const publicHost = matchedAllowedPublicHost(req.headers.host, allowedHosts);
+    if (publicHost) return publicHost;
+    return checkLocalHost(req, res) ? '' : false;
+  };
   const checkOrigin = localhostOriginValidation();
 
   // A TCP connection or incomplete body is not an accepted MCP operation. Only
@@ -405,9 +447,11 @@ export async function startMcpServer(
     });
 
     if (prmRoute) {
-      if (!checkHost(req, res)) return;
+      const acceptedHost = checkHost(req, res);
+      if (acceptedHost === false) return;
       if (!checkOrigin(req, res)) return;
-      const body = protectedResourceMetadata(prmRoute.url, configuredConnectorName(prmRoute.id));
+      const resourceUrl = acceptedHost ? `https://${acceptedHost}${prmRoute.basePath}` : prmRoute.url;
+      const body = protectedResourceMetadata(resourceUrl, configuredConnectorName(prmRoute.id));
       res.writeHead(200, {
         'content-type': 'application/json',
         'cache-control': 'no-store',
@@ -421,7 +465,7 @@ export async function startMcpServer(
       jsonError(res, 404, 'not_found');
       return;
     }
-    if (!checkHost(req, res)) return;
+    if (checkHost(req, res) === false) return;
     if (!checkOrigin(req, res)) return;
 
     // Count only a validated request to the actual MCP endpoint. OAuth metadata,
@@ -476,7 +520,19 @@ export async function startMcpServer(
         }
       }
       if (res.destroyed) return;
-      withInboundRequestId(requestId, () => void route.handler(req, res, body), timing, publication, !selfTest && !tunnelProbe);
+      let client: { clientIdentity?: McpClientIdentity | null; mcpSessionId?: string | null } | undefined;
+      if (!selfTest && !tunnelProbe) {
+        observeMcpInitialize(route.id, req.headers, body);
+        client = resolveInboundMcpClient(route.id, req.headers, body, req.url);
+        if (client.clientIdentity) {
+          const methodName = rpcMethod ?? (typeof (body as { method?: unknown } | undefined)?.method === 'string'
+            ? (body as { method: string }).method
+            : null);
+          noteExternalMcpClientActivity(route.id, client.clientIdentity, methodName);
+          noteExternalClientUse(client.clientIdentity, route.id, methodName === 'tools/call' ? 'tool' : 'request');
+        }
+      }
+      withInboundRequestId(requestId, () => void route.handler(req, res, body), timing, publication, !selfTest && !tunnelProbe, client);
     };
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       void readBoundedJsonBody(req).then((parsed) => {
@@ -557,6 +613,7 @@ export async function startMcpServer(
         server.close(() => {
           stopped = true;
           if (forceTimer) clearTimeout(forceTimer);
+          resetLiveExternalMcpClients(true);
           logInfo('server stopped');
           resolveStop();
         });

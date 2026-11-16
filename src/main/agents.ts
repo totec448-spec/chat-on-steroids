@@ -14,14 +14,15 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { AgentInfo, AgentMessage, AgentState, ReasoningEffort, SwarmState } from '../shared/session.js';
+import type { AgentInfo, AgentMessage, AgentState, McpClientIdentity, ReasoningEffort, SwarmState } from '../shared/session.js';
 import { REASONING_EFFORTS, isReasoningEffort } from '../shared/session.js';
+import { isChatProvider, isGeminiConversationId, providerForConversationId, type ChatProvider } from '../shared/provider.js';
 import { getConfig } from './config.js';
 import { setWorkerSlotSource, workerSlotsRefusal } from './chats-at-once.js';
 import { liveConnectorName } from './mcp/surfaces.js';
 import { workerBrief, workerOwnTask } from '../shared/worker-brief.js';
-import { getChatModels, refreshForUnoffered } from './chat-models.js';
-import { resolveChatModel, type ChatModelOption } from '../shared/chat-models.js';
+import { getChatModels, refreshForUnoffered, getGeminiModels, refreshGeminiForUnoffered } from './chat-models.js';
+import { resolveChatModel, resolveGeminiModel, type ChatModelOption, type GeminiModelOption } from '../shared/chat-models.js';
 import { logInfo, logWarn } from './logger.js';
 import { inheritWorkspace, releasePrimeWorkspace, bindAgentWorkspace } from './workspace.js';
 import { requestCorrelation } from './session/correlation.js';
@@ -720,6 +721,7 @@ export interface WorkerSpawn {
   model: string | null;
   /** Requested reasoning level, or null to inherit the default. */
   reasoningEffort: ReasoningEffort | null;
+  provider: ChatProvider;
 }
 
 /** Workers that exist but have not joined: their chat is still owed. */
@@ -729,7 +731,7 @@ export function pendingWorkerSpawns(): WorkerSpawn[] {
       (agent) =>
         agent.info.role === 'worker' && agent.info.state === 'invited' && !unpublishedAgents.has(agent)
     )
-    .map((agent) => ({ runId: run.runId, primeConversationId: run.primeConversationId, id: agent.info.id, task: agent.info.task, model: agent.info.model, reasoningEffort: agent.info.reasoningEffort })));
+    .map((agent) => ({ runId: run.runId, primeConversationId: run.primeConversationId, id: agent.info.id, task: agent.info.task, model: agent.info.model, reasoningEffort: agent.info.reasoningEffort, provider: agent.info.provider ?? providerForConversationId(run.primeConversationId) ?? 'chatgpt' })));
 }
 
 /**
@@ -774,6 +776,8 @@ export interface Caller {
   setupProfileId?: string | null;
   /** Optional family selection; ownership is checked independently. */
   runId?: string;
+  clientIdentity?: McpClientIdentity | null;
+  mcpSessionId?: string | null;
 }
 
 type Family = Run | DormantRun;
@@ -1472,7 +1476,7 @@ export function identify(caller: Caller): AgentInfo {
  * cannot tell them apart is one that reports back on the house rules.
  */
 const briefFor = workerBrief;
-function makeWorker(id: string, label: string, task: string, model: string | null, reasoningEffort: ReasoningEffort | null): Agent {
+function makeWorker(id: string, label: string, task: string, model: string | null, reasoningEffort: ReasoningEffort | null, provider: ChatProvider = 'chatgpt'): Agent {
   return {
     info: {
       id,
@@ -1482,6 +1486,7 @@ function makeWorker(id: string, label: string, task: string, model: string | nul
       jobTitle: (workerOwnTask(task).split(/[\r\n]/, 1)[0]?.trim() ?? '').slice(0, 160) || undefined,
       model,
       reasoningEffort,
+      provider,
       state: 'invited',
       createdAt: Date.now(),
       activatedAt: null,
@@ -1788,7 +1793,7 @@ export function hasRetiredWorkerLeases(): boolean {
 
 export interface SpawnInput {
   /** `reviewer` only from the app's Goal step reviewer (#1832); the agents tool cannot set it. */
-  workers: ReadonlyArray<{ label?: string; task: string; model?: string | null; reasoning_effort?: string | null; reviewer?: boolean }>;
+  workers: ReadonlyArray<{ label?: string; task: string; model?: string | null; reasoning_effort?: string | null; provider?: ChatProvider | null; reviewer?: boolean }>;
   /**
    * What every worker in this spawn needs to know, written once.
    *
@@ -1958,6 +1963,29 @@ function usableDefaults(
   }
   if (notes.size) refreshForUnoffered(`default worker ${[...notes].join(',')}`);
   return { model, effort };
+}
+
+function usableGeminiDefault(
+  model: string | null, defaultModel: boolean,
+  models: GeminiModelOption[], notes: Set<string>
+): string | null {
+  if (!model || !models.length || !defaultModel) return model;
+  const resolved = resolveGeminiModel(models, model);
+  if (!resolved) {
+    notes.add(`The default Gemini sub-agent model "${model}" saved in Settings is not offered by this Gemini account, so Gemini workers use Gemini's current model. Choose an available model in Settings → Agents & automation.`);
+    refreshGeminiForUnoffered(`default gemini worker ${[...notes].join(',')}`);
+    return null;
+  }
+  return resolved.id;
+}
+
+function validateGeminiWorkerModel(index: number, model: string | null, models: GeminiModelOption[]): void {
+  if (!models.length || !model) return;
+  const match = resolveGeminiModel(models, model);
+  if (!match) {
+    const available = models.map(choice => `${choice.id} (${choice.label})`).join('; ');
+    throw new AgentError(`Worker ${index + 1}'s Gemini model "${model}" is not observed in the Gemini account. Observed Gemini models: ${available}`);
+  }
 }
 
 function validateWorkerModel(index: number, model: string | null, effort: ReasoningEffort | null, models: ChatModelOption[]): void {
@@ -2149,7 +2177,7 @@ export function requestWorkerBootstraps(ids: readonly string[], runId?: string):
         !unpublishedAgents.has(agent) &&
         wanted.has(agent.info.id)
     )
-    .map((agent) => ({ runId: run.runId, primeConversationId: run.primeConversationId, id: agent.info.id, task: agent.info.task, model: agent.info.model, reasoningEffort: agent.info.reasoningEffort }));
+    .map((agent) => ({ runId: run.runId, primeConversationId: run.primeConversationId, id: agent.info.id, task: agent.info.task, model: agent.info.model, reasoningEffort: agent.info.reasoningEffort, provider: agent.info.provider ?? providerForConversationId(run.primeConversationId) ?? 'chatgpt' }));
   if (owed.length === 0) return 0;
   if (spawnRequest) spawnRequest(owed);
   else logWarn('multi-agent: no browser extension is paired, so worker chats cannot be opened automatically');
@@ -2188,7 +2216,13 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
     throw new AgentError(`The shared context is too long (limit ${MAX_CONTEXT_CHARS} characters)`);
   }
 
+  const defaultProvider: ChatProvider = input.caller.conversationId
+    ? (providerForConversationId(input.caller.conversationId) ?? (input.caller.clientIdentity?.id === 'gemini' ? 'gemini' : 'chatgpt'))
+    : input.caller.clientIdentity?.id === 'gemini'
+    ? 'gemini'
+    : 'chatgpt';
   const observedModels = getChatModels().models;
+  const observedGeminiModels = getGeminiModels().models;
   const defaultNotes = new Set<string>();
   const planned = input.workers.map((worker, index) => {
     const task = worker.task.trim();
@@ -2198,17 +2232,34 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
     if (label.length > MAX_LABEL_CHARS) {
       throw new AgentError(`Worker ${index + 1}'s label is too long (limit ${MAX_LABEL_CHARS} characters)`);
     }
-    const requested = usableDefaults(
-      normalizeModel(index, worker.model === undefined ? getConfig().multiAgent.defaultModel : worker.model),
-      normalizeReasoningEffort(index, worker.reasoning_effort === undefined ? getConfig().multiAgent.defaultReasoning : worker.reasoning_effort),
-      worker.model === undefined, worker.reasoning_effort === undefined, observedModels, defaultNotes);
+    if (worker.provider !== undefined && worker.provider !== null && !isChatProvider(worker.provider)) {
+      throw new AgentError(`Worker ${index + 1}'s provider must be "chatgpt" or "gemini"`);
+    }
+    const provider: ChatProvider = worker.provider ?? defaultProvider;
+    const isGeminiWorker = provider === 'gemini';
+    const rawGeminiModel = isGeminiWorker
+      ? (worker.model === undefined ? (getConfig().multiAgent.defaultGeminiModel ?? '').trim() || null : worker.model?.trim() || null)
+      : null;
+    if (isGeminiWorker && rawGeminiModel && rawGeminiModel.length > MAX_MODEL_CHARS) {
+      throw new AgentError(`Worker ${index + 1}'s Gemini model name is too long (limit ${MAX_MODEL_CHARS} characters)`);
+    }
+    const requested = isGeminiWorker
+      ? {
+          model: usableGeminiDefault(rawGeminiModel, worker.model === undefined, observedGeminiModels, defaultNotes),
+          effort: null
+        }
+      : usableDefaults(
+          normalizeModel(index, worker.model === undefined ? getConfig().multiAgent.defaultModel : worker.model),
+          normalizeReasoningEffort(index, worker.reasoning_effort === undefined ? getConfig().multiAgent.defaultReasoning : worker.reasoning_effort),
+          worker.model === undefined, worker.reasoning_effort === undefined, observedModels, defaultNotes);
     const model = requested.model, reasoningEffort = requested.effort;
-    validateWorkerModel(index, model, reasoningEffort, observedModels);
+    if (isGeminiWorker) validateGeminiWorkerModel(index, model, observedGeminiModels);
+    else validateWorkerModel(index, model, reasoningEffort, observedModels);
     // Composed once, here, and stored as *the* task. Everything downstream — the bootstrap
     // the browser types, the repeated-spawn match, the status table, the snapshot — then
     // sees the same single string a worker actually receives, with no second field to keep
     // in step and no way for the two halves to be delivered apart.
-    return { label, task: briefFor(context, task), model, reasoningEffort, reviewer: worker.reviewer === true };
+    return { label, task: briefFor(context, task), model, reasoningEffort, provider, reviewer: worker.reviewer === true };
   });
 
   const conversationId = input.caller.conversationId ?? null;
@@ -2344,7 +2395,7 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
   const createdAgents: Agent[] = [];
   for (const [index, worker] of planned.entries()) {
     const id = ids[index] as string;
-    const agent = makeWorker(id, worker.label || id, worker.task, worker.model, worker.reasoningEffort);
+    const agent = makeWorker(id, worker.label || id, worker.task, worker.model, worker.reasoningEffort, worker.provider);
     agent.info.workerAllocationRunId = activeRun.runId;
     if (worker.reviewer) { agent.info.reviewer = true; agent.info.reviewAskedAt = Date.now(); }
     activeRun.agents.set(id, agent);
@@ -2391,19 +2442,19 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
  * worker still gets one; only an exact repetition of work already under way is folded back.
  */
 function matchExistingRequest(
-  requested: ReadonlyArray<{ label: string; task: string; model: string | null; reasoningEffort: ReasoningEffort | null }>,
+  requested: ReadonlyArray<{ label: string; task: string; model: string | null; reasoningEffort: ReasoningEffort | null; provider: ChatProvider }>,
   live: readonly Agent[]
 ): Agent[] | null {
   if (requested.length === 0 || live.length === 0) return null;
-  // An unambiguous encoding of the (label, task, model, reasoning) tuple rather than a separator character.
+  // An unambiguous encoding of the (label, task, model, reasoning, provider) tuple rather than a separator character.
   // Any separator is only as good as the assumption that it cannot occur in the operands, and
   // the first two are free text a model wrote; JSON removes the assumption entirely, so
   // ("a", "b c") and ("a b", "c") can never shape-collide into one match. It also keeps this
   // file plain text: the NUL that used to do this job was a literal byte, which made every
-  // text tool treat the source as binary. Model and reasoning ride along because a retry that
-  // asks for a different model or level is new intent, not the same request arriving twice.
-  const shape = (label: string, task: string, model: string | null, reasoningEffort: ReasoningEffort | null): string =>
-    JSON.stringify([label.trim(), task.trim(), model, reasoningEffort]);
+  // text tool treat the source as binary. Model, reasoning, and provider ride along because a retry that
+  // asks for a different model, level, or target site is new intent, not the same request arriving twice.
+  const shape = (label: string, task: string, model: string | null, reasoningEffort: ReasoningEffort | null, provider: ChatProvider): string =>
+    JSON.stringify([label.trim(), task.trim(), model, reasoningEffort, provider]);
   const taken = new Set<Agent>();
   const matched: Agent[] = [];
   for (const worker of requested) {
@@ -2412,10 +2463,10 @@ function matchExistingRequest(
     const found = live.find(
       (agent) =>
         !taken.has(agent) &&
-        (shape(agent.info.label, agent.info.task, agent.info.model, agent.info.reasoningEffort) ===
-          shape(worker.label || agent.info.id, worker.task, worker.model, worker.reasoningEffort) ||
-          shape(agent.info.label, agent.info.task, agent.info.model, agent.info.reasoningEffort) ===
-            shape(worker.label, worker.task, worker.model, worker.reasoningEffort))
+        (shape(agent.info.label, agent.info.task, agent.info.model, agent.info.reasoningEffort, agent.info.provider ?? 'chatgpt') ===
+          shape(worker.label || agent.info.id, worker.task, worker.model, worker.reasoningEffort, worker.provider) ||
+          shape(agent.info.label, agent.info.task, agent.info.model, agent.info.reasoningEffort, agent.info.provider ?? 'chatgpt') ===
+            shape(worker.label, worker.task, worker.model, worker.reasoningEffort, worker.provider))
     );
     if (!found) return null;
     taken.add(found);
@@ -3072,6 +3123,64 @@ export function acknowledgeLocalReports(caller: Caller, messageIds: readonly str
     .flatMap(owner => acknowledgeAgentOffers(owner.agents.get(PRIME_ID)!, false, Number.POSITIVE_INFINITY, ids));
   if (acknowledged.length) changed('critical');
   return acknowledged;
+}
+
+/** Gemini Web prime chats whose current wave of sub-agents has settled with undelivered reports. */
+export function pendingGeminiPrimeConversationIds(): string[] {
+  const out = new Set<string>();
+  for (const owner of allFamilies()) {
+    if (!owner.primeConversationId || !isGeminiConversationId(owner.primeConversationId)) continue;
+    const active = 'runId' in owner ? owner : null;
+    if (active && (activeSpawnStages.has(active) || [...activeFinishStages.values()].some(s => !s.settled && s.run === active))) continue;
+    if ([...owner.agents.values()].some(a => a.info.role === 'worker' && (a.info.state === 'invited' || a.info.state === 'active' || a.info.state === 'waking'))) continue;
+    const prime = owner.agents.get(PRIME_ID);
+    if (prime?.queue.some(m => m.ackedAt === null && !unpublishedMessages.has(m))) out.add(owner.primeConversationId);
+  }
+  return [...out];
+}
+
+/** Returns unread worker reports for a settled Gemini Web prime chat without acknowledging them yet. */
+export function peekGeminiPrimeReports(primeConversationId: string): { runId: string; messages: AgentMessage[] } | null {
+  if (!isGeminiConversationId(primeConversationId)) return null;
+  const owner = [...allFamilies()]
+    .filter(entry => entry.primeConversationId === primeConversationId)
+    .find(entry => {
+      const active = 'runId' in entry ? entry : null;
+      if (active && (activeSpawnStages.has(active) || [...activeFinishStages.values()].some(s => !s.settled && s.run === active))) return false;
+      if ([...entry.agents.values()].some(a => a.info.role === 'worker' && (a.info.state === 'invited' || a.info.state === 'active' || a.info.state === 'waking'))) return false;
+      const prime = entry.agents.get(PRIME_ID);
+      return Boolean(prime?.queue.some(m => m.ackedAt === null && !unpublishedMessages.has(m)));
+    });
+  if (!owner) return null;
+  const prime = owner.agents.get(PRIME_ID)!;
+  const unread = prime.queue.filter(m => m.ackedAt === null && !unpublishedMessages.has(m));
+  return unread.length ? { runId: familyKey(owner), messages: unread.map(m => ({ ...m })) } : null;
+}
+
+/** Marks Gemini Web prime reports delivered after the browser outbox has durably queued them. */
+export function markGeminiPrimeReportsDelivered(primeConversationId: string, messageIds: readonly string[]): number {
+  if (!isGeminiConversationId(primeConversationId) || messageIds.length === 0) return 0;
+  const ids = new Set(messageIds);
+  const now = Date.now();
+  let total = 0;
+  for (const owner of allFamilies()) {
+    if (owner.primeConversationId !== primeConversationId) continue;
+    const prime = owner.agents.get(PRIME_ID);
+    if (!prime) continue;
+    let delivered = 0;
+    for (const message of prime.queue) {
+      if (message.ackedAt !== null || !ids.has(message.id)) continue;
+      message.ackedAt = now;
+      delivered += 1;
+    }
+    if (delivered > 0) {
+      prime.info.delivered += delivered;
+      recount(prime);
+      total += delivered;
+    }
+  }
+  if (total > 0) changed('critical');
+  return total;
 }
 
 export function pendingCount(id: string, runId?: string): number {
@@ -5786,6 +5895,7 @@ function deserializeAgents(entries: readonly SerializedAgent[], savedAt: number)
         jobTitle: typeof entry.info.jobTitle === 'string' && entry.info.jobTitle ? entry.info.jobTitle.slice(0, 160) : undefined,
         model: isModelSlug(entry.info.model) ? entry.info.model : null,
         reasoningEffort: isReasoningEffort(entry.info.reasoningEffort) ? entry.info.reasoningEffort : null,
+        provider: isChatProvider(entry.info.provider) ? entry.info.provider : undefined,
         sleptAt: typeof entry.info.sleptAt === 'number' ? entry.info.sleptAt : null,
         contextTokens: Number.isFinite(entry.info.contextTokens) ? entry.info.contextTokens : 0,
         lastRevivalCommandId:

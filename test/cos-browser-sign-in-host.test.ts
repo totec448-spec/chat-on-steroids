@@ -1,4 +1,7 @@
 import { EventEmitter } from 'node:events';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 
 const native = vi.hoisted(() => {
@@ -14,12 +17,39 @@ const native = vi.hoisted(() => {
     setVisible = vi.fn();
     constructor() { panels.push(this); }
   }
-  return { panels, WebContentsView, open: vi.fn(async () => 'edge'),
+  const swSession = {
+    setUserAgent: vi.fn(),
+    setPermissionRequestHandler: vi.fn(),
+    setPermissionCheckHandler: vi.fn(),
+    registerPreloadScript: vi.fn(),
+    clearStorageData: vi.fn(async () => undefined),
+    clearCache: vi.fn(async () => undefined),
+    clearCodeCaches: vi.fn(async () => undefined),
+    cookies: { get: vi.fn(async () => []), on: vi.fn() },
+    serviceWorkers: {
+      on: vi.fn(),
+      getAllRunning: () => ({}),
+      getWorkerFromVersionID: () => undefined,
+      startWorkerForScope: vi.fn(async () => undefined)
+    },
+    extensions: {
+      loadExtension: vi.fn(async () => ({ id: 'ext-cos-123', version: '2.1.53' })),
+      removeExtension: vi.fn()
+    }
+  };
+  return {
+    panels, WebContentsView, open: vi.fn(async () => 'edge'),
+    userDataDir: '', extDir: '', swSession,
     icon: vi.fn(async () => ({ isEmpty: () => false, toDataURL: () => 'data:image/png;base64,AA==' })),
-    thumbnail: vi.fn(async () => ({ isEmpty: () => false, toDataURL: () => 'data:image/png;base64,AA==' })) };
+    thumbnail: vi.fn(async () => ({ isEmpty: () => false, toDataURL: () => 'data:image/png;base64,AA==' }))
+  };
 });
 vi.mock('electron', () => ({ BaseWindow: class {}, BrowserWindow: class {}, WebContentsView: native.WebContentsView, nativeTheme: { shouldUseDarkColors: false },
-  app: { getFileIcon: native.icon }, nativeImage: { createThumbnailFromPath: native.thumbnail }, session: {}, shell: {} }));
+  app: { getFileIcon: native.icon, getPath: () => native.userDataDir, once: vi.fn(), userAgentFallback: 'Chrome/130' },
+  nativeImage: { createThumbnailFromPath: native.thumbnail },
+  session: { fromPartition: vi.fn(() => native.swSession) },
+  shell: {} }));
+vi.mock('../src/main/extension-path.js', () => ({ extensionDir: () => native.extDir || null }));
 vi.mock('../src/main/config.js', () => ({ getConfig: () => ({ ui: { chatBrowser: 'cos', language: 'pt-BR' } }) }));
 vi.mock('../src/main/browser.js', () => ({
   installedSignInBrowsers: () => process.platform === 'darwin'
@@ -312,4 +342,55 @@ it('loads only web pages and the empty page into a tab, whatever the extension a
   host.control.navigate(contents.id, 'https://chatgpt.com/c/abc');
   host.control.navigate(contents.id, 'about:blank');
   expect((contents.loadURL.mock.calls as unknown as string[][]).map(call => call[0])).toEqual(['https://chatgpt.com/c/abc', 'about:blank']);
+});
+
+it('clears stale Service Worker script cache when extension scripts change while preserving storage', async () => {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), 'cos-browser-sw-'));
+  try {
+    const userData = path.join(tmp, 'userData');
+    const ext = path.join(tmp, 'extension');
+    const swCache = path.join(userData, 'Partitions', 'cos-browser', 'Service Worker', 'ScriptCache');
+    const extSettings = path.join(userData, 'Partitions', 'cos-browser', 'Local Extension Settings', 'ext-cos-123');
+    mkdirSync(swCache, { recursive: true });
+    mkdirSync(extSettings, { recursive: true });
+    mkdirSync(path.join(ext, 'icons'), { recursive: true });
+    writeFileSync(path.join(swCache, 'stale_0'), 'old-worker');
+    writeFileSync(path.join(extSettings, '000003.log'), 'keep-settings');
+    writeFileSync(path.join(ext, 'manifest.json'), '{"manifest_version":3,"version":"2.1.53"}');
+    writeFileSync(path.join(ext, 'background.js'), '// v1');
+    writeFileSync(path.join(ext, 'build-stamp.txt'), '111111111111\n');
+    writeFileSync(path.join(ext, 'icons', 'icon32.png'), '');
+
+    native.userDataDir = userData;
+    native.extDir = ext;
+    native.swSession.clearStorageData.mockClear();
+    native.swSession.clearCache.mockClear();
+    native.swSession.clearCodeCaches.mockClear();
+
+    const first = new CosBrowser({ preloadDir: tmp, rendererUrl: () => null, rendererDir: tmp });
+    await first.start();
+    expect(existsSync(path.join(userData, 'Partitions', 'cos-browser', 'Service Worker'))).toBe(false);
+    expect(existsSync(path.join(extSettings, '000003.log'))).toBe(true);
+    expect(native.swSession.clearStorageData).toHaveBeenCalledWith({ storages: ['serviceworkers', 'cachestorage'] });
+    expect(native.swSession.clearCache).toHaveBeenCalledTimes(1);
+    expect(native.swSession.clearCodeCaches).toHaveBeenCalledTimes(1);
+    first.stop();
+
+    // Same scripts -> no repeat Service Worker cache clear.
+    const second = new CosBrowser({ preloadDir: tmp, rendererUrl: () => null, rendererDir: tmp });
+    await second.start();
+    expect(native.swSession.clearStorageData).toHaveBeenCalledTimes(1);
+    second.stop();
+
+    // Script edits with unchanged manifest version -> clears cache again.
+    writeFileSync(path.join(ext, 'background.js'), '// v2 with wantGemini');
+    const third = new CosBrowser({ preloadDir: tmp, rendererUrl: () => null, rendererDir: tmp });
+    await third.start();
+    expect(native.swSession.clearStorageData).toHaveBeenCalledTimes(2);
+    third.stop();
+  } finally {
+    native.userDataDir = '';
+    native.extDir = '';
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });

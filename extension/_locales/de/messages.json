@@ -26,6 +26,9 @@
   "content_auto_compaction_threshold_app": {
     "message": "Schwelle in der App festgelegt"
   },
+  "content_auto_compaction_waiting_app": {
+    "message": "Automatisches Komprimieren: wartet auf die App"
+  },
   "content_auto_compaction_worker_off": {
     "message": "hier aus: Worker-Chats werden nie automatisch komprimiert"
   },
@@ -35,11 +38,11 @@
   "content_bootstrap_composer_changed_before_send": {
     "message": "das Eingabefeld hat sich vor dem Senden des Starttexts geändert; der Entwurf blieb erhalten"
   },
-  "content_bootstrap_composer_replaced": {
-    "message": "ChatGPT hat das Eingabefeld beim Einfügen des Starttexts ersetzt"
-  },
   "content_bootstrap_composer_never_ready": {
     "message": "ChatGPT hat für den Start kein nutzbares Eingabefeld angezeigt"
+  },
+  "content_bootstrap_composer_replaced": {
+    "message": "ChatGPT hat das Eingabefeld beim Einfügen des Starttexts ersetzt"
   },
   "content_bootstrap_composer_unavailable": {
     "message": "ChatGPT hat nach der Modellauswahl kein nutzbares Eingabefeld mehr angezeigt"
@@ -326,11 +329,11 @@
   "content_delivery_existing_draft": {
     "message": "In ChatGPT steht bereits ein ungesendeter Entwurf. Sende oder leere ihn in Chrome, bevor du es erneut versuchst."
   },
-  "content_delivery_signed_out": {
-    "message": "ChatGPT ist in diesem Browser nicht angemeldet. Melde dich dort bei ChatGPT an und sende dann erneut."
-  },
   "content_delivery_model_unconfirmed": {
     "message": "Das gewünschte Modell oder die Denkstufe ließ sich nicht bestätigen"
+  },
+  "content_delivery_signed_out": {
+    "message": "ChatGPT ist in diesem Browser nicht angemeldet. Melde dich dort bei ChatGPT an und sende dann erneut."
   },
   "content_delivery_stop_failed": {
     "message": "Die laufende Antwort konnte nicht gestoppt werden."
@@ -346,6 +349,12 @@
   },
   "content_dismiss": {
     "message": "Schließen"
+  },
+  "content_edit_message_missing": {
+    "message": "Diese Nachricht ist nicht mehr auf der ChatGPT-Seite und kann nicht bearbeitet werden."
+  },
+  "content_edit_unavailable": {
+    "message": "ChatGPT hat für diese Nachricht kein Bearbeiten angeboten. Öffne den Chat in ChatGPT und versuche es dann erneut."
   },
   "content_empty": {
     "message": "(leer)"
@@ -407,11 +416,122 @@
   "content_goal_delivery_only_finish": {
     "message": "Nur zum Sitzungsende"
   },
+  "content_goal_error_astra_finish_only": {
+    "message": "Dieser Chat setzt über das Abschluss-Tool fort. Mit der aktuellen Einstellung löst eine fertige Antwort im Browser keine weitere Nachricht aus."
+  },
+  "content_goal_error_auth_rejected": {
+    "message": "Der Anbieter der Fortsetzung hat die API-Zugangsdaten abgelehnt. Prüfe den API-Schlüssel und die Zugriffsrechte in den Einstellungen."
+  },
+  "content_goal_error_chat_blocked": {
+    "message": "Dieser Chat ist in der App blockiert. Gib ihn dort frei, bevor du die Fortsetzung aktivierst."
+  },
+  "content_goal_error_conversation_superseded": {
+    "message": "Dieser Chat wurde durch Komprimieren & Fortsetzen ersetzt. Mach im Nachfolge-Chat weiter."
+  },
+  "content_goal_error_goal_ack_not_durable": {
+    "message": "Die App konnte die Zustellbestätigung nicht speichern. Prüfe den freien Speicherplatz und den Chat, bevor du manuell erneut sendest."
+  },
+  "content_goal_error_goal_browser_busy": {
+    "message": "Eine Anfrage an den Helfer läuft bereits. Lass sie fertig werden oder brich sie ab, bevor du eine neue startest."
+  },
+  "content_goal_error_goal_browser_cancelled": {
+    "message": "Die Anfrage an den Helfer wurde abgebrochen. Starte sie erneut, wenn du weitermachen willst."
+  },
+  "content_goal_error_goal_browser_send_failed": {
+    "message": "Der Prompt an den Helfer konnte ChatGPT nicht zugestellt werden. Öffne den Helfer-Chat und prüfe das Eingabefeld oder den angezeigten Fehler, bevor du es erneut versuchst."
+  },
+  "content_goal_error_goal_browser_send_unconfirmed": {
+    "message": "Die App konnte nicht bestätigen, ob ChatGPT den Prompt des Helfers erhalten hat. Prüfe den Helfer-Chat, bevor du es erneut versuchst, damit nichts doppelt gesendet wird."
+  },
+  "content_goal_error_goal_context_too_large": {
+    "message": "Die Aufgabe und die Goal-/Loop-Anweisungen sind zu lang für den Helfer. Kürze die Aufgabe oder die eigenen Fortsetzungsanweisungen in den Einstellungen."
+  },
+  "content_goal_error_goal_disabled": {
+    "message": "Goal/Loop ist für diesen Chat aus. Schalte es ein, um die Fortsetzung zu erlauben."
+  },
+  "content_goal_error_goal_final_not_confirmed": {
+    "message": "Die App hat noch keine fertige Antwort bestätigt, die automatisch fortgesetzt werden kann. Prüfe den Ausgangs-Chat auf laufende Arbeit oder einen Fehler."
+  },
+  "content_goal_error_goal_helper_stop_unverified": {
+    "message": "Der Helfer sagt, das Ziel sei erreicht, aber das wurde nicht überprüft. Es wurde keine Folgeantwort gesendet. Prüfe den Chat und fahre fort, falls noch Arbeit offen ist."
+  },
+  "content_goal_error_goal_marker_missing": {
+    "message": "Der Antwort fehlt der Abschlussmarker, den die Offline-Vorlagen für Goal brauchen. Prüfe die Anweisungen der Vorlage oder wähle eine andere Quelle für die Fortsetzung."
+  },
+  "content_goal_error_goal_objective_not_durable": {
+    "message": "Die App konnte die Aufgabe nicht speichern. Prüfe den freien Speicherplatz und speichere erneut."
+  },
+  "content_goal_error_goal_owned_elsewhere": {
+    "message": "Ein anderer Browser-Tab kümmert sich um diese Fortsetzung. Den Fortschritt siehst du in diesem Tab."
+  },
+  "content_goal_error_goal_reply_not_durable": {
+    "message": "Die App konnte die ausstehende Fortsetzung nicht speichern. Prüfe den freien Speicherplatz und die Diagnose der App."
+  },
+  "content_goal_error_goal_reply_not_pending": {
+    "message": "Für diese Antwort gibt es keine ausstehende Fortsetzung. Sie wurde vielleicht schon erledigt oder durch neuere Arbeit ersetzt. Prüfe die letzte Chat-Aktivität, bevor du es erneut versuchst."
+  },
+  "content_goal_error_goal_switch_not_durable": {
+    "message": "Die App konnte die Goal-/Loop-Einstellung nicht speichern. Prüfe den freien Speicherplatz und speichere erneut."
+  },
+  "content_goal_error_goal_worker_chat": {
+    "message": "Worker können kein eigenes Goal/Loop ausführen. Aktiviere die Fortsetzung stattdessen im übergeordneten Chat."
+  },
+  "content_goal_error_invalid_provider": {
+    "message": "Der eigene Endpunkt für die Fortsetzung ist ungültig. Prüfe die URL in den Einstellungen; nutze HTTPS oder einen lokalen HTTP-Endpunkt."
+  },
+  "content_goal_error_loop_mcp_call_missing": {
+    "message": "In der letzten Antwort wurde kein MCP-Tool-Aufruf aufgezeichnet. ChatGPT stellt möglicherweise eine Frage, oder die Verbindung zu den Tools wurde unterbrochen. Beantworte die Frage oder prüfe den Tunnel, falls die Tools nicht mehr funktionieren. Die automatische Fortsetzung ist pausiert; Loop bleibt aktiv."
+  },
+  "content_goal_error_loop_stop_refused": {
+    "message": "Der Helfer hat immer wieder angehalten, statt eine Loop-Fortsetzung zu schreiben. Prüfe die Loop-Anweisungen oder wähle ein anderes Helfer-Modell."
+  },
+  "content_goal_error_no_api_key": {
+    "message": "Für den Anbieter der Fortsetzung ist kein API-Schlüssel eingerichtet. Füge in den Einstellungen einen hinzu oder wähle ChatGPT als Quelle für die Fortsetzung."
+  },
+  "content_goal_error_no_conversation": {
+    "message": "Es gibt keine aufgezeichnete Unterhaltung zum Fortsetzen. Sende zuerst eine Aufgabe."
+  },
+  "content_goal_error_no_objective": {
+    "message": "Es wurde keine Aufgabe angegeben. Gib eine Aufgabe ein, bevor du Goal/Loop startest."
+  },
+  "content_goal_error_nothing_to_open_with": {
+    "message": "Der Helfer hat keine erste Nachricht erzeugt. Formuliere die Aufgabe genauer und versuche es erneut."
+  },
+  "content_goal_error_out_of_credit": {
+    "message": "Das Konto beim Anbieter der Fortsetzung hat kein Guthaben. Lade Guthaben auf oder wähle in den Einstellungen eine andere Quelle für die Fortsetzung."
+  },
+  "content_goal_error_rate_limited": {
+    "message": "Der Anbieter der Fortsetzung drosselt die Anfragen. Warte auf den angezeigten neuen Versuch oder wähle ein anderes Modell für die Fortsetzung."
+  },
+  "content_goal_error_reply_too_long": {
+    "message": "Der Helfer hat eine Fortsetzung geschrieben, die zu lang zum Senden ist. Verlange kürzere Fortsetzungsanweisungen oder wähle in den Einstellungen ein anderes Helfer-Modell."
+  },
+  "content_goal_error_request_failed": {
+    "message": "Die Anfrage für die Fortsetzung ist fehlgeschlagen. Prüfe den gewählten Helfer oder API-Endpunkt und die Diagnose der App, bevor du es erneut versuchst."
+  },
+  "content_goal_error_response_body_too_large": {
+    "message": "Die Antwort des Anbieters hat das Größenlimit überschritten. Wähle ein anderes Modell für die Fortsetzung oder verlange kürzere Antworten."
+  },
+  "content_goal_error_session_not_recorded": {
+    "message": "Die App hat für diesen Chat keinen aufgezeichneten Verlauf. Aktiviere die Aufzeichnung und sende eine Nachricht, bevor du die automatische Fortsetzung nutzt."
+  },
+  "content_goal_error_stream_record_too_long": {
+    "message": "Der Anbieter hat eine zu große Antwort geliefert. Wähle ein anderes Modell für die Fortsetzung oder verlange kürzere Antworten."
+  },
+  "content_goal_error_timeout_or_cancelled": {
+    "message": "Die Anfrage für die Fortsetzung hat zu lange gedauert oder wurde abgebrochen. Prüfe den Helfer-Chat oder den Status des Anbieters, bevor du es erneut versuchst."
+  },
+  "content_goal_error_unknown_model": {
+    "message": "Der Anbieter der Fortsetzung hat das gewählte Modell nicht gefunden. Aktualisiere seine Modellliste und wähle in den Einstellungen ein verfügbares Modell."
+  },
   "content_goal_loop_off": {
     "message": "Goal und Loop aus"
   },
   "content_goal_loop_stopped": {
     "message": "Der Goal-Loop wurde gestoppt"
+  },
+  "content_goal_loop_waiting_app": {
+    "message": "Goal und Loop: wartet auf die App"
   },
   "content_goal_message_box_in_use": {
     "message": "das Nachrichtenfeld war belegt, daher wurde nichts gesendet"
@@ -461,6 +581,9 @@
   "content_goal_retrying__one": {
     "message": "Goal wird in $1 Sekunde erneut versucht"
   },
+  "content_goal_reviewer_deadline": {
+    "message": "Weiter ohne Review in $1"
+  },
   "content_goal_save": {
     "message": "Als Goal speichern"
   },
@@ -491,6 +614,9 @@
   "content_goal_step_writing": {
     "message": "Antwort schreiben"
   },
+  "content_goal_wait_paused": {
+    "message": "ChatGPT hat um eine Pause gebeten · wartet bis zur genannten Zeit"
+  },
   "content_goal_wait_recovery_activity": {
     "message": "Warte nach der Wiederherstellung auf Aktivität"
   },
@@ -500,32 +626,29 @@
   "content_goal_wait_resumed": {
     "message": "ChatGPT arbeitet wieder · Warte vor neuem Versuch"
   },
-  "content_goal_wait_running_tools": {
-    "message": "Warte auf laufende Tools"
-  },
-  "content_goal_wait_tool_inactivity": {
-    "message": "Warte, bis die Tools ruhen"
-  },
-  "content_goal_reviewer_deadline": {
-    "message": "Weiter ohne Review in $1"
-  },
   "content_goal_wait_reviewer": {
     "message": "Warte auf den Reviewer"
   },
-  "content_goal_wait_workers": {
-    "message": "Warte auf die Sub-Agenten dieses Chats"
+  "content_goal_wait_running_tools": {
+    "message": "Warte auf laufende Tools"
   },
   "content_goal_wait_slots": {
     "message": "Wartet auf einen freien Platz (Gleichzeitig arbeitende Chats)"
   },
-  "content_goal_wait_paused": {
-    "message": "ChatGPT hat um eine Pause gebeten · wartet bis zur genannten Zeit"
+  "content_goal_wait_tool_inactivity": {
+    "message": "Warte, bis die Tools ruhen"
+  },
+  "content_goal_wait_workers": {
+    "message": "Warte auf die Sub-Agenten dieses Chats"
   },
   "content_goal_writing_first_message": {
     "message": "$1 schreibt die erste Nachricht"
   },
   "content_goal_wrote_next_message": {
     "message": "$1 hat die nächste Nachricht geschrieben"
+  },
+  "content_history_rate_limited": {
+    "message": "ChatGPT hat den Zugriff auf diesen Chatverlauf vorübergehend begrenzt. Chat On Steroids pausiert die automatische Wiederherstellung bis zum Ablauf der Wartezeit."
   },
   "content_loop_add_specific": {
     "message": "konkreten Loop hinzufügen"
@@ -602,11 +725,17 @@
   "content_paused": {
     "message": "Pausiert"
   },
+  "content_revival_draft_appeared": {
+    "message": "Während der Weckruf des Workers vorbereitet wurde, wurde etwas in den Chat geschrieben, daher hat der Weckruf es nicht ersetzt."
+  },
   "content_saving": {
     "message": "Wird gespeichert …"
   },
   "content_settings_aria": {
     "message": "Einstellungen von Chat On Steroids"
+  },
+  "content_settings_waiting_app": {
+    "message": "wartet auf die App"
   },
   "content_stage_handoff_attention": {
     "message": "Die Übergabe-Antwort braucht deine Aufmerksamkeit"
@@ -640,6 +769,9 @@
   },
   "content_task_pick_mode_first": {
     "message": "Wähl oben zuerst Goal oder Loop – bei „Aus“ wird nichts geschrieben."
+  },
+  "content_task_waiting_app": {
+    "message": "Wartet auf eine Antwort von Chat On Steroids."
   },
   "content_task_worker_unavailable": {
     "message": "Ein Worker-Chat wird bereits von seinem Prime gesteuert."
@@ -758,6 +890,24 @@
   "content_worker_still_running": {
     "message": "Worker läuft noch: $1"
   },
+  "content_workers_failed": {
+    "message": "$1 fehlgeschlagen"
+  },
+  "content_workers_failed__one": {
+    "message": "$1 fehlgeschlagen"
+  },
+  "content_workers_finished": {
+    "message": "$1 fertig"
+  },
+  "content_workers_finished__one": {
+    "message": "$1 fertig"
+  },
+  "content_workers_running": {
+    "message": "$1 laufen"
+  },
+  "content_workers_running__one": {
+    "message": "$1 läuft"
+  },
   "content_workers_still_running": {
     "message": "$1 Worker laufen noch"
   },
@@ -782,6 +932,9 @@
   "popup_advanced": {
     "message": "Erweitert"
   },
+  "popup_app_not_running_help": {
+    "message": "Stelle sicher, dass Chat On Steroids auf diesem Computer geöffnet ist. Die Browser-Erweiterung verbindet sich dann von selbst."
+  },
   "popup_attribution_agent_key": {
     "message": "Agent-Schlüssel"
   },
@@ -805,6 +958,9 @@
   },
   "popup_chat_id": {
     "message": "Chat-ID"
+  },
+  "popup_chat_tab": {
+    "message": "ChatGPT- / Gemini-Tab"
   },
   "popup_chatgpt_tab": {
     "message": "ChatGPT-Tab"
@@ -857,17 +1013,35 @@
   "popup_detail_app_value": {
     "message": "v$1 · Port $2"
   },
+  "popup_detail_calls": {
+    "message": "$1 Aufrufe"
+  },
+  "popup_detail_calls__one": {
+    "message": "$1 Aufruf"
+  },
   "popup_detail_chat_id": {
     "message": "Chat-ID"
   },
   "popup_detail_delivered": {
     "message": "zugestellt"
   },
+  "popup_detail_events": {
+    "message": "$1 Ereignisse"
+  },
+  "popup_detail_events__one": {
+    "message": "$1 Ereignis"
+  },
   "popup_detail_extension": {
     "message": "Erweiterung"
   },
   "popup_detail_extension_value": {
     "message": "v$1 · Protokoll $2"
+  },
+  "popup_detail_failed": {
+    "message": "$1 fehlgeschlagen"
+  },
+  "popup_detail_failed__one": {
+    "message": "$1 fehlgeschlagen"
   },
   "popup_detail_in_this_browser": {
     "message": "in diesem Browser"
@@ -890,6 +1064,9 @@
   "popup_detail_recorder": {
     "message": "Rekorder"
   },
+  "popup_detail_recorder_gemini_value": {
+    "message": "Gemini v$1 · Lauf $2"
+  },
   "popup_detail_recorder_value": {
     "message": "Fiber v$1 · Lauf $2"
   },
@@ -899,11 +1076,20 @@
   "popup_detail_tab_value": {
     "message": "$1 · Epoche $2"
   },
+  "popup_detail_total": {
+    "message": "$1 gesamt"
+  },
   "popup_detail_turn": {
     "message": "Durchlauf"
   },
   "popup_detail_turn_live": {
     "message": "$1 · live"
+  },
+  "popup_gemini_companion_feature": {
+    "message": "Live-Transkript & Sub-Agents"
+  },
+  "popup_gemini_tab": {
+    "message": "Gemini-Tab"
   },
   "popup_no": {
     "message": "nein"
@@ -938,11 +1124,23 @@
   "popup_pipeline_extension_blocked": {
     "message": "Die Erweiterung nimmt die Beobachtungen dieses Tabs nicht an ($1). Lade den ChatGPT-Tab neu."
   },
+  "popup_pipeline_extension_blocked_gemini": {
+    "message": "Die Erweiterung nimmt die Beobachtungen dieses Tabs nicht an ($1). Lade den Gemini-Tab neu."
+  },
+  "popup_pipeline_gemini_synced": {
+    "message": "Gemini-Chat aufgezeichnet und mit der App synchronisiert."
+  },
   "popup_pipeline_id_found_waiting_receipt": {
     "message": "ID im letzten Durchlauf gefunden. Warte auf die Empfangsbestätigung der App."
   },
   "popup_pipeline_no_recorder": {
     "message": "Kein Rekorder in diesem Tab. Lade die Seite neu."
+  },
+  "popup_pipeline_not_a_chat": {
+    "message": "Diese ChatGPT-Seite ist kein Chat, daher kann die App hier nichts verfolgen. Öffne oder starte einen Chat."
+  },
+  "popup_pipeline_not_a_chat_gemini": {
+    "message": "Diese Gemini-Seite ist kein Chat, daher kann die App hier nichts verfolgen. Öffne oder starte einen Chat."
   },
   "popup_pipeline_owner_confirmed_no_activity": {
     "message": "Zuständigkeit der Anfrage bestätigt. Noch keine passende Tool-Aktivität aufgezeichnet."
@@ -965,9 +1163,6 @@
   "popup_pipeline_waiting_first_message": {
     "message": "Warte auf die erste Nachricht."
   },
-  "popup_pipeline_not_a_chat": {
-    "message": "Diese ChatGPT-Seite ist kein Chat, daher kann die App hier nichts verfolgen. Öffne oder starte einen Chat."
-  },
   "popup_pipeline_waiting_latest_request_id": {
     "message": "Chat aufgezeichnet. Warte auf eine Request-ID aus dem letzten Durchlauf."
   },
@@ -989,6 +1184,9 @@
   "popup_section_augment_chatgpt": {
     "message": "ChatGPT erweitern"
   },
+  "popup_section_gemini": {
+    "message": "Gemini Web"
+  },
   "popup_section_session_capture": {
     "message": "Sitzungsaufzeichnung"
   },
@@ -997,6 +1195,21 @@
   },
   "popup_sent_to_app": {
     "message": "An die App gesendet"
+  },
+  "popup_sign_in_failed": {
+    "message": "Fehlgeschlagen. Anmeldung in CoS neu starten."
+  },
+  "popup_sign_in_imported": {
+    "message": "Sitzung übertragen"
+  },
+  "popup_sign_in_imported_detail": {
+    "message": "Du bist im CoS-Browser angemeldet."
+  },
+  "popup_sign_in_permission": {
+    "message": "Cookie-Zugriff abgelehnt. Erneut klicken."
+  },
+  "popup_sign_in_transfer": {
+    "message": "Sitzung in den CoS-Browser übertragen"
   },
   "popup_state_app_not_reachable": {
     "message": "App nicht erreichbar"
@@ -1015,6 +1228,9 @@
   },
   "popup_state_version_mismatch": {
     "message": "Versionen passen nicht zusammen"
+  },
+  "popup_status_active": {
+    "message": "aktiv"
   },
   "popup_status_answering": {
     "message": "antwortet"
@@ -1037,14 +1253,14 @@
   "popup_status_new_chat": {
     "message": "neuer Chat"
   },
-  "popup_status_not_a_chat": {
-    "message": "kein Chat"
-  },
   "popup_status_none_open": {
     "message": "keiner offen"
   },
   "popup_status_none_yet": {
     "message": "noch keine"
+  },
+  "popup_status_not_a_chat": {
+    "message": "kein Chat"
   },
   "popup_status_not_attached": {
     "message": "nicht verbunden"
@@ -1058,6 +1274,9 @@
   "popup_status_retired": {
     "message": "beendet"
   },
+  "popup_status_synced": {
+    "message": "synchronisiert"
+  },
   "popup_status_tool_matched": {
     "message": "Tool zugeordnet"
   },
@@ -1066,6 +1285,15 @@
   },
   "popup_status_waiting": {
     "message": "wartet"
+  },
+  "popup_tabs_summary_both": {
+    "message": "$1 ChatGPT · $2 Gemini"
+  },
+  "popup_tabs_summary_chatgpt": {
+    "message": "$1 ChatGPT"
+  },
+  "popup_tabs_summary_gemini": {
+    "message": "$1 Gemini"
   },
   "popup_time_hours_short": {
     "message": "$1 h"
@@ -1087,194 +1315,5 @@
   },
   "popup_yes": {
     "message": "ja"
-  },
-  "content_goal_error_loop_mcp_call_missing": {
-    "message": "In der letzten Antwort wurde kein MCP-Tool-Aufruf aufgezeichnet. ChatGPT stellt möglicherweise eine Frage, oder die Verbindung zu den Tools wurde unterbrochen. Beantworte die Frage oder prüfe den Tunnel, falls die Tools nicht mehr funktionieren. Die automatische Fortsetzung ist pausiert; Loop bleibt aktiv."
-  },
-  "content_goal_error_goal_reply_not_pending": {
-    "message": "Für diese Antwort gibt es keine ausstehende Fortsetzung. Sie wurde vielleicht schon erledigt oder durch neuere Arbeit ersetzt. Prüfe die letzte Chat-Aktivität, bevor du es erneut versuchst."
-  },
-  "content_goal_error_goal_context_too_large": {
-    "message": "Die Aufgabe und die Goal-/Loop-Anweisungen sind zu lang für den Helfer. Kürze die Aufgabe oder die eigenen Fortsetzungsanweisungen in den Einstellungen."
-  },
-  "content_goal_error_reply_too_long": {
-    "message": "Der Helfer hat eine Fortsetzung geschrieben, die zu lang zum Senden ist. Verlange kürzere Fortsetzungsanweisungen oder wähle in den Einstellungen ein anderes Helfer-Modell."
-  },
-  "content_goal_error_stream_record_too_long": {
-    "message": "Der Anbieter hat eine zu große Antwort geliefert. Wähle ein anderes Modell für die Fortsetzung oder verlange kürzere Antworten."
-  },
-  "content_goal_error_response_body_too_large": {
-    "message": "Die Antwort des Anbieters hat das Größenlimit überschritten. Wähle ein anderes Modell für die Fortsetzung oder verlange kürzere Antworten."
-  },
-  "content_goal_error_no_api_key": {
-    "message": "Für den Anbieter der Fortsetzung ist kein API-Schlüssel eingerichtet. Füge in den Einstellungen einen hinzu oder wähle ChatGPT als Quelle für die Fortsetzung."
-  },
-  "content_goal_error_auth_rejected": {
-    "message": "Der Anbieter der Fortsetzung hat die API-Zugangsdaten abgelehnt. Prüfe den API-Schlüssel und die Zugriffsrechte in den Einstellungen."
-  },
-  "content_goal_error_out_of_credit": {
-    "message": "Das Konto beim Anbieter der Fortsetzung hat kein Guthaben. Lade Guthaben auf oder wähle in den Einstellungen eine andere Quelle für die Fortsetzung."
-  },
-  "content_goal_error_unknown_model": {
-    "message": "Der Anbieter der Fortsetzung hat das gewählte Modell nicht gefunden. Aktualisiere seine Modellliste und wähle in den Einstellungen ein verfügbares Modell."
-  },
-  "content_goal_error_invalid_provider": {
-    "message": "Der eigene Endpunkt für die Fortsetzung ist ungültig. Prüfe die URL in den Einstellungen; nutze HTTPS oder einen lokalen HTTP-Endpunkt."
-  },
-  "content_history_rate_limited": {
-    "message": "ChatGPT hat den Zugriff auf diesen Chatverlauf vorübergehend begrenzt. Chat On Steroids pausiert die automatische Wiederherstellung bis zum Ablauf der Wartezeit."
-  },
-  "content_goal_error_rate_limited": {
-    "message": "Der Anbieter der Fortsetzung drosselt die Anfragen. Warte auf den angezeigten neuen Versuch oder wähle ein anderes Modell für die Fortsetzung."
-  },
-  "content_goal_error_timeout_or_cancelled": {
-    "message": "Die Anfrage für die Fortsetzung hat zu lange gedauert oder wurde abgebrochen. Prüfe den Helfer-Chat oder den Status des Anbieters, bevor du es erneut versuchst."
-  },
-  "content_goal_error_request_failed": {
-    "message": "Die Anfrage für die Fortsetzung ist fehlgeschlagen. Prüfe den gewählten Helfer oder API-Endpunkt und die Diagnose der App, bevor du es erneut versuchst."
-  },
-  "content_goal_error_goal_browser_busy": {
-    "message": "Eine Anfrage an den Helfer läuft bereits. Lass sie fertig werden oder brich sie ab, bevor du eine neue startest."
-  },
-  "content_goal_error_goal_browser_cancelled": {
-    "message": "Die Anfrage an den Helfer wurde abgebrochen. Starte sie erneut, wenn du weitermachen willst."
-  },
-  "content_goal_error_goal_browser_send_failed": {
-    "message": "Der Prompt an den Helfer konnte ChatGPT nicht zugestellt werden. Öffne den Helfer-Chat und prüfe das Eingabefeld oder den angezeigten Fehler, bevor du es erneut versuchst."
-  },
-  "content_goal_error_goal_browser_send_unconfirmed": {
-    "message": "Die App konnte nicht bestätigen, ob ChatGPT den Prompt des Helfers erhalten hat. Prüfe den Helfer-Chat, bevor du es erneut versuchst, damit nichts doppelt gesendet wird."
-  },
-  "content_goal_error_goal_owned_elsewhere": {
-    "message": "Ein anderer Browser-Tab kümmert sich um diese Fortsetzung. Den Fortschritt siehst du in diesem Tab."
-  },
-  "content_goal_error_goal_final_not_confirmed": {
-    "message": "Die App hat noch keine fertige Antwort bestätigt, die automatisch fortgesetzt werden kann. Prüfe den Ausgangs-Chat auf laufende Arbeit oder einen Fehler."
-  },
-  "content_goal_error_astra_finish_only": {
-    "message": "Dieser Chat setzt über das Abschluss-Tool fort. Mit der aktuellen Einstellung löst eine fertige Antwort im Browser keine weitere Nachricht aus."
-  },
-  "content_goal_error_goal_disabled": {
-    "message": "Goal/Loop ist für diesen Chat aus. Schalte es ein, um die Fortsetzung zu erlauben."
-  },
-  "content_goal_error_goal_worker_chat": {
-    "message": "Worker können kein eigenes Goal/Loop ausführen. Aktiviere die Fortsetzung stattdessen im übergeordneten Chat."
-  },
-  "content_goal_error_conversation_superseded": {
-    "message": "Dieser Chat wurde durch Komprimieren & Fortsetzen ersetzt. Mach im Nachfolge-Chat weiter."
-  },
-  "content_goal_error_chat_blocked": {
-    "message": "Dieser Chat ist in der App blockiert. Gib ihn dort frei, bevor du die Fortsetzung aktivierst."
-  },
-  "content_goal_error_session_not_recorded": {
-    "message": "Die App hat für diesen Chat keinen aufgezeichneten Verlauf. Aktiviere die Aufzeichnung und sende eine Nachricht, bevor du die automatische Fortsetzung nutzt."
-  },
-  "content_goal_error_no_conversation": {
-    "message": "Es gibt keine aufgezeichnete Unterhaltung zum Fortsetzen. Sende zuerst eine Aufgabe."
-  },
-  "content_goal_error_no_objective": {
-    "message": "Es wurde keine Aufgabe angegeben. Gib eine Aufgabe ein, bevor du Goal/Loop startest."
-  },
-  "content_goal_error_nothing_to_open_with": {
-    "message": "Der Helfer hat keine erste Nachricht erzeugt. Formuliere die Aufgabe genauer und versuche es erneut."
-  },
-  "content_goal_error_goal_helper_stop_unverified": {
-    "message": "Der Helfer sagt, das Ziel sei erreicht, aber das wurde nicht überprüft. Es wurde keine Folgeantwort gesendet. Prüfe den Chat und fahre fort, falls noch Arbeit offen ist."
-  },
-  "content_goal_error_loop_stop_refused": {
-    "message": "Der Helfer hat immer wieder angehalten, statt eine Loop-Fortsetzung zu schreiben. Prüfe die Loop-Anweisungen oder wähle ein anderes Helfer-Modell."
-  },
-  "content_goal_error_goal_marker_missing": {
-    "message": "Der Antwort fehlt der Abschlussmarker, den die Offline-Vorlagen für Goal brauchen. Prüfe die Anweisungen der Vorlage oder wähle eine andere Quelle für die Fortsetzung."
-  },
-  "content_goal_error_goal_reply_not_durable": {
-    "message": "Die App konnte die ausstehende Fortsetzung nicht speichern. Prüfe den freien Speicherplatz und die Diagnose der App."
-  },
-  "content_goal_error_goal_ack_not_durable": {
-    "message": "Die App konnte die Zustellbestätigung nicht speichern. Prüfe den freien Speicherplatz und den Chat, bevor du manuell erneut sendest."
-  },
-  "content_goal_error_goal_switch_not_durable": {
-    "message": "Die App konnte die Goal-/Loop-Einstellung nicht speichern. Prüfe den freien Speicherplatz und speichere erneut."
-  },
-  "content_goal_error_goal_objective_not_durable": {
-    "message": "Die App konnte die Aufgabe nicht speichern. Prüfe den freien Speicherplatz und speichere erneut."
-  },
-  "popup_sign_in_transfer": {
-    "message": "Sitzung in den CoS-Browser übertragen"
-  },
-  "popup_sign_in_permission": {
-    "message": "Cookie-Zugriff abgelehnt. Erneut klicken."
-  },
-  "popup_sign_in_imported": {
-    "message": "Sitzung übertragen"
-  },
-  "popup_sign_in_imported_detail": {
-    "message": "Du bist im CoS-Browser angemeldet."
-  },
-  "popup_sign_in_failed": {
-    "message": "Fehlgeschlagen. Anmeldung in CoS neu starten."
-  },
-  "popup_app_not_running_help": {
-    "message": "Stelle sicher, dass Chat On Steroids auf diesem Computer geöffnet ist. Die Browser-Erweiterung verbindet sich dann von selbst."
-  },
-  "content_workers_finished": {
-    "message": "$1 fertig"
-  },
-  "content_workers_finished__one": {
-    "message": "$1 fertig"
-  },
-  "content_workers_running": {
-    "message": "$1 laufen"
-  },
-  "content_workers_running__one": {
-    "message": "$1 läuft"
-  },
-  "content_workers_failed": {
-    "message": "$1 fehlgeschlagen"
-  },
-  "content_workers_failed__one": {
-    "message": "$1 fehlgeschlagen"
-  },
-  "popup_detail_events": {
-    "message": "$1 Ereignisse"
-  },
-  "popup_detail_events__one": {
-    "message": "$1 Ereignis"
-  },
-  "popup_detail_calls": {
-    "message": "$1 Aufrufe"
-  },
-  "popup_detail_calls__one": {
-    "message": "$1 Aufruf"
-  },
-  "popup_detail_failed": {
-    "message": "$1 fehlgeschlagen"
-  },
-  "popup_detail_failed__one": {
-    "message": "$1 fehlgeschlagen"
-  },
-  "popup_detail_total": {
-    "message": "$1 gesamt"
-  },
-  "content_edit_message_missing": {
-    "message": "Diese Nachricht ist nicht mehr auf der ChatGPT-Seite und kann nicht bearbeitet werden."
-  },
-  "content_edit_unavailable": {
-    "message": "ChatGPT hat für diese Nachricht kein Bearbeiten angeboten. Öffne den Chat in ChatGPT und versuche es dann erneut."
-  },
-  "content_auto_compaction_waiting_app": {
-    "message": "Automatisches Komprimieren: wartet auf die App"
-  },
-  "content_goal_loop_waiting_app": {
-    "message": "Goal und Loop: wartet auf die App"
-  },
-  "content_settings_waiting_app": {
-    "message": "wartet auf die App"
-  },
-  "content_task_waiting_app": {
-    "message": "Wartet auf eine Antwort von Chat On Steroids."
-  },
-  "content_revival_draft_appeared": {
-    "message": "Während der Weckruf des Workers vorbereitet wurde, wurde etwas in den Chat geschrieben, daher hat der Weckruf es nicht ersetzt."
   }
 }

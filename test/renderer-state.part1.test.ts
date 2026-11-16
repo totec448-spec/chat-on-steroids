@@ -1936,6 +1936,66 @@ it('keeps global connection controls in a compact sidebar popover', async () => 
   expect(popover.hidden).toBe(true);
 });
 
+it('shows external MCP clients like Gemini in the connection popover when present and removes them cleanly', async () => {
+  const mounted = await mountChat({ hasApiKey: true });
+  const doc = mounted.window.document;
+  const now = Date.now();
+  const baseStatus = {
+    ...structuredClone(mounted.state.status),
+    state: 'connected' as const,
+    handshakeAt: now - 5_000,
+    lastRequestAt: now - 3_000,
+    surfaces: []
+  };
+
+  // Default state without externalClients keeps only ChatGPT and Extension rows.
+  mounted.push({ ...mounted.state, status: baseStatus });
+  const popover = doc.getElementById('connectionPopover')!;
+  expect([...popover.querySelectorAll('.connection-popover-row > span:first-child')].map(n => n.textContent)).toEqual([
+    'ChatGPT',
+    'Extension'
+  ]);
+
+  // Connected external clients appear between ChatGPT and Extension in order.
+  mounted.push({
+    ...mounted.state,
+    status: {
+      ...baseStatus,
+      externalClients: [
+        { id: 'gemini', name: 'Gemini', version: '0.9.1', surfaces: ['core'], connected: true, lastRequestAt: now - 2_000, lastToolCallAt: now - 1_500 },
+        { id: 'claude', name: 'Claude', surfaces: ['core'], connected: false, lastRequestAt: now - 60_000, lastToolCallAt: null }
+      ]
+    }
+  });
+  const rows = [...popover.querySelectorAll<HTMLElement>('.connection-popover-row')];
+  expect(rows.map(r => r.firstElementChild!.textContent)).toEqual(['ChatGPT', 'Gemini', 'Claude', 'Extension']);
+  const geminiRow = popover.querySelector<HTMLElement>('.connection-popover-row[data-external-client="gemini"]')!;
+  const claudeRow = popover.querySelector<HTMLElement>('.connection-popover-row[data-external-client="claude"]')!;
+  expect(geminiRow.dataset.tone).toBe('ok');
+  expect(geminiRow.querySelector('.sr-only')!.textContent).toBe('Reached');
+  expect(geminiRow.title).toMatch(/Reached/i);
+  expect(claudeRow.dataset.tone).toBe('wait');
+  expect(claudeRow.querySelector('.sr-only')!.textContent).toBe('waiting');
+  expect(popover.querySelectorAll('button')).toHaveLength(1);
+
+  // Disconnecting clears tones quietly; disconnected turns external client rows bad.
+  mounted.push({
+    ...mounted.state,
+    status: {
+      ...baseStatus,
+      state: 'disconnecting',
+      externalClients: [
+        { id: 'gemini', name: 'Gemini', surfaces: ['core'], connected: true, lastRequestAt: now - 2_000, lastToolCallAt: null }
+      ]
+    }
+  });
+  expect(popover.querySelectorAll('.connection-popover-row[data-external-client]')).toHaveLength(1);
+  expect(popover.querySelector<HTMLElement>('.connection-popover-row[data-external-client="gemini"]')!.dataset.tone).toBe('closing');
+
+  mounted.push({ ...mounted.state, status: { ...baseStatus, externalClients: [] } });
+  expect(popover.querySelectorAll('.connection-popover-row[data-external-client]')).toHaveLength(0);
+});
+
 it('keeps a quick Disconnecting on screen long enough to read, then shows the real state', async () => {
   const mounted = await mountChat({ hasApiKey: true });
   const doc = mounted.window.document;
@@ -2456,4 +2516,93 @@ it('moves a chat to a project from its menu and undoes it from the toast (#1919)
   await waitFor(() => expect(moveChatProject).toHaveBeenLastCalledWith(chat.id, null, undefined));
   await waitFor(() => expect(toastText()).toBe('Moved out of its project. ChatGPT keeps it where it was.'));
   closeRowMenus(doc);
+});
+
+it('shows named external MCP clients (e.g. Gemini) as first-class cards outside Unattributed activity and reflects working vs blocked state', async () => {
+  const now = Date.now();
+  const gemini = inboxChat('gemini-ext-0001', {
+    title: 'Gemini',
+    conversationId: null,
+    chatIds: [],
+    mcpClient: { id: 'gemini', name: 'Gemini', version: '0.9.1' },
+    lastToolCallAt: now - 1000,
+    activityExpiresAt: now + 30_000,
+    lastToolActivity: { kind: 'run', title: 'Ran git status' },
+    updatedAt: now
+  });
+  const loose = inboxChat('loose-anon-0001', {
+    title: 'Unattributed activity',
+    conversationId: null,
+    chatIds: [],
+    updatedAt: now - 10_000
+  });
+  const pending = inboxChat('pending-chat-0001', {
+    title: 'New chat draft',
+    conversationId: null,
+    chatIds: [],
+    origin: { kind: 'desktop', openedAt: now - 5_000 },
+    updatedAt: now - 5_000
+  });
+
+  const mounted = await mountInbox({
+    listProjects: async () => ({ ok: true, data: [inboxProjects().alpha] }),
+    listSessions: async () => ({ ok: true, data: { sessions: [gemini, loose, pending], activeId: null, pressure: [], blocked: [], trusted: [] } })
+  });
+  const doc = mounted.window.document;
+  await waitFor(() => expect(doc.querySelector(`.sess-card[data-id="${gemini.id}"]`)).not.toBeNull());
+  const geminiCard = () => doc.querySelector<HTMLElement>(`.sess-card[data-id="${gemini.id}"]`);
+  expect(geminiCard()).not.toBeNull();
+  expect(geminiCard()!.querySelector('.sess-top b')?.textContent).toBe('Gemini');
+  expect(geminiCard()!.querySelector('.sess-client-mark')).not.toBeNull();
+  // Default harness fixture has allowUnattributedCalls: false, so external clients draw Blocked attention first.
+  expect(geminiCard()!.querySelector('.sess-state.is-attention')?.textContent).toContain('Blocked');
+  expect(geminiCard()!.querySelector('.sess-detail')?.textContent).toBe('Gemini 0.9.1 · Ran git status');
+
+  // Unattributed disclosure holds only the anonymous bucket, not Gemini.
+  const disclosure = doc.querySelector<HTMLDetailsElement>('.session-diagnostics');
+  expect(disclosure).not.toBeNull();
+  expect(disclosure!.querySelector('summary')?.textContent).toBe('Unattributed activity · 1');
+  expect(disclosure!.querySelector(`[data-id="${gemini.id}"]`)).toBeNull();
+
+  // Turning on Allow unattributed calls switches Gemini into live Working state.
+  mounted.push({
+    ...mounted.state,
+    config: {
+      ...mounted.state.config,
+      multiAgent: { ...mounted.state.config.multiAgent, allowUnattributedCalls: true }
+    }
+  });
+  await waitFor(() =>
+    expect(geminiCard()!.querySelector('.sess-state.is-working')?.textContent).toContain('Working')
+  );
+
+  // Gemini exposes pin + rename + move-to-project + block + remove; pending keeps its existing actions.
+  rowMenuItem(geminiCard()!, 'pin');
+  const geminiActions = [...doc.querySelectorAll<HTMLElement>('.row-menu')].at(-1)!
+    .querySelectorAll<HTMLElement>('.row-menu-item');
+  expect([...geminiActions].map((item) => item.dataset.rowAction)).toEqual([
+    'pin', 'rename', 'move-to-project', 'block', 'remove'
+  ]);
+  closeRowMenus(doc);
+
+  const pendingRow = doc.querySelector<HTMLElement>(`[data-id="${pending.id}"]`)!;
+  rowMenuItem(pendingRow, 'rename');
+  const pendingActions = [...doc.querySelectorAll<HTMLElement>('.row-menu')].at(-1)!
+    .querySelectorAll<HTMLElement>('.row-menu-item');
+  expect([...pendingActions].map((item) => item.dataset.rowAction)).toEqual([
+    'rename', 'move-to-project', 'remove'
+  ]);
+  closeRowMenus(doc);
+
+  // Turning off Allow unattributed calls switches Gemini back into blocked attention state.
+  mounted.push({
+    ...mounted.state,
+    config: {
+      ...mounted.state.config,
+      multiAgent: { ...mounted.state.config.multiAgent, allowUnattributedCalls: false }
+    }
+  });
+  await waitFor(() =>
+    expect(geminiCard()!.querySelector('.sess-state.is-attention')?.textContent).toContain('Blocked')
+  );
 });

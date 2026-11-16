@@ -43,6 +43,7 @@
  */
 
 import { requestBrowserDecision, authorizeBrowserHelperRetry } from './session/input.js';
+import { isAcceptedConversationId } from '../shared/provider.js';
 import { goalErrorKey, goalErrorMessage } from '../shared/goal-errors.js';
 import { userPromptText } from '../shared/user-prompt.js';
 import { planProgressText, type TaskProgressUpdate } from '../shared/task-progress.js';
@@ -512,7 +513,7 @@ export function restoreGoalReplies(snapshot: GoalRepliesSnapshot | null): void {
   for (const raw of snapshot.replies) {
     if (
       !raw ||
-      !/^[0-9a-z-]{8,256}$/i.test(raw.conversationId) ||
+      !isAcceptedConversationId(raw.conversationId, true) ||
       !raw.sessionId ||
       !raw.replyId ||
       !raw.turnId ||
@@ -929,7 +930,7 @@ export function restoreGoalObjectives(snapshot: GoalObjectivesSnapshot | null): 
   goalObjectives.clear();
   if (!snapshot || snapshot.version !== 1 || !Array.isArray(snapshot.objectives)) return;
   for (const raw of snapshot.objectives) {
-    if (!raw || typeof raw.conversationId !== 'string' || !/^[0-9a-z-]{8,256}$/i.test(raw.conversationId)) continue;
+    if (!raw || !isAcceptedConversationId(raw.conversationId, true)) continue;
     if (typeof raw.objective !== 'string') continue;
     const objective = raw.objective.trim();
     if (!objective) continue;
@@ -1050,7 +1051,7 @@ export function restoreGoalOutcomes(snapshot: GoalOutcomesSnapshot | null): void
   goalOutcomes.clear();
   if (!snapshot || snapshot.version !== 1 || !Array.isArray(snapshot.outcomes)) return;
   for (const raw of snapshot.outcomes.slice(-MAX_GOAL_OUTCOMES)) {
-    if (!raw || typeof raw.conversationId !== 'string' || !/^[0-9a-z-]{8,256}$/i.test(raw.conversationId)) continue;
+    if (!raw || !isAcceptedConversationId(raw.conversationId, true)) continue;
     if (typeof raw.turnId !== 'string' || !raw.turnId || raw.turnId.length > 200 || typeof raw.model !== 'string' || raw.model.length > 200) continue;
     if (raw.backend !== 'api' && raw.backend !== 'chatgpt' && raw.backend !== 'templates') continue;
     goalOutcomes.set(raw.conversationId, { turnId: raw.turnId, model: raw.model, backend: raw.backend, at: Number.isSafeInteger(raw.at) ? raw.at : Date.now() });
@@ -1147,7 +1148,7 @@ export function restoreGoalSwitches(snapshot: GoalSwitchesSnapshot | null): void
   goalSwitches.clear();
   if (!snapshot || snapshot.version !== 1 || !Array.isArray(snapshot.switches)) return;
   for (const raw of snapshot.switches) {
-    if (!raw || typeof raw.conversationId !== 'string' || !/^[0-9a-z-]{8,256}$/i.test(raw.conversationId)) continue;
+    if (!raw || !isAcceptedConversationId(raw.conversationId, true)) continue;
     if (typeof raw.enabled !== 'boolean' || (raw.mode !== 'goal' && raw.mode !== 'loop')) continue;
     const at = Number.isSafeInteger(raw.at) && raw.at > 0 ? raw.at : Date.now();
     const sourceSessionId = raw.role === 'decision' && typeof raw.sourceSessionId === 'string' && /^[\w-]{8,64}$/.test(raw.sourceSessionId)
@@ -1188,7 +1189,7 @@ export function isGoalDecisionChat(conversationId: string): boolean {
 /** The bridge commits this before acknowledging a helper's first send. */
 export function registerGoalDecisionChat(conversationId: string, sourceSessionId?: string): Promise<void> {
   return saveGoalControl<void>(pendingGoalSwitches, conversationId, GOAL_SWITCHES_STATE, snapshotGoalSwitches, (targetConversationId) => {
-    if (!/^[0-9a-z-]{8,256}$/i.test(targetConversationId)) throw new Error('bad_conversation_id');
+    if (!isAcceptedConversationId(targetConversationId, true)) throw new Error('bad_conversation_id');
     const before = goalSwitches.get(targetConversationId);
     if (sourceSessionId && !/^[\w-]{8,64}$/.test(sourceSessionId)) throw new Error('bad_source_session_id');
     if (sourceSessionId && before?.sourceSessionId && before.sourceSessionId !== sourceSessionId) throw new Error('goal_helper_wrong_source');

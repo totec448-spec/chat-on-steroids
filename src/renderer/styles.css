@@ -670,6 +670,23 @@ code {
 .sidebar-section-empty { padding: 6px 28px 4px; text-align: left; font-size: calc(11px * var(--text-scale, 1)); line-height: 1.5; }
 .sidebar .new-chat { color: var(--ink); }
 .sidebar-sessions { display: flex; flex-direction: column; flex: 1; min-height: 0; margin-top: 4px; }
+/* Client switcher (All | ChatGPT | Gemini): stays pinned above the chat groups and scrollable list. */
+.sidebar-client-switch { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; flex: none; margin: 0 0 10px; padding: 2px;
+  border: 1px solid var(--line); border-radius: 9px; background: color-mix(in srgb, var(--ink) 3%, transparent); }
+.sidebar-client-option { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 0; height: 26px; padding: 0 6px;
+  border: 0; border-radius: 7px; background: transparent; color: var(--faint); font: inherit; font-size: calc(11.5px * var(--text-scale, 1));
+  font-weight: 500; cursor: pointer; transition: background-color 120ms ease, color 120ms ease; }
+.sidebar-client-option > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-client-option:hover { color: var(--soft); }
+.sidebar-client-option.is-sel { background: var(--hover); color: var(--ink); font-weight: 600;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 10%, transparent); }
+.sidebar-client-option:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.sidebar-client-dot { display: none; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+.sidebar-client-option.is-live .sidebar-client-dot { display: block; }
+.sidebar-client-option.is-working .sidebar-client-dot { display: block; box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 22%, transparent); }
+.sidebar-filtered-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 18px 12px; text-align: center; }
+.sidebar-filtered-empty > p { margin: 0; }
+.sidebar-filtered-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
 /* Let the scrollbar reach the divider; keep a small gap on the row side of its track. Its room
    stays reserved, so rows and the Inbox toolbar keep their width when a filter or a collapsed
    section makes the list short enough to need no scrollbar. */
@@ -2639,6 +2656,12 @@ input[readonly] {
 .composer textarea { grid-column: 1 / -1; grid-row: 1; width: 100%; field-sizing: content; min-height: 24px; max-height: 220px; resize: none; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: calc(15px * var(--text-scale, 1)); line-height: 1.6; padding: 0 2px 14px; }
 .composer-toolbar { display: contents; }
 .composer-primary-controls { grid-column: 1; grid-row: 2; display: flex; align-items: center; gap: 4px; min-width: 0; }
+.composer-provider-switch { display: inline-flex; align-items: center; gap: 2px; margin-left: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 999px; background: color-mix(in srgb, var(--ink) 3%, transparent); }
+.composer-provider-switch[hidden] { display: none; }
+.composer-provider-option { display: inline-flex; align-items: center; justify-content: center; height: 22px; padding: 0 9px; border: 0; border-radius: 999px; background: transparent; color: var(--faint); font: inherit; font-size: calc(11.5px * var(--text-scale, 1)); font-weight: 500; cursor: pointer; transition: background-color 120ms ease, color 120ms ease; }
+.composer-provider-option:hover { color: var(--soft); }
+.composer-provider-option.is-sel { background: var(--hover); color: var(--ink); font-weight: 600; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 10%, transparent); }
+.composer-provider-option:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .composer #contextMeter { grid-column: 2; grid-row: 2; }
 .composer #modelMenu { grid-column: 3; grid-row: 2; }
 .composer .send-control { grid-column: 4; grid-row: 2; }
@@ -2871,6 +2894,9 @@ input[readonly] {
 .sess-settled .sess-top b { color: var(--faint); font-size: calc(13px * var(--text-scale, 1)); }
 .sess-settled:is(:hover, .is-pointed, .is-sel) .sess-top b { color: var(--soft); }
 .sess-settled .project-mark { opacity: 0.7; }
+/* Named external MCP client (for example Gemini) sparkle accent in classic list, inbox cards, and settled rows. */
+.sess-client-mark { flex: none; --ico: 14px; --glyph: 14px; color: color-mix(in srgb, var(--blue, var(--accent)) 80%, var(--accent)); }
+.sess-settled .sess-client-mark { opacity: 0.75; }
 
 /* ---------------------------------------------------------- timeline */
 
@@ -4409,13 +4435,15 @@ select option:hover, select option:focus { background: var(--hover); outline: no
 select option:checked { background: color-mix(in srgb, var(--accent) 16%, var(--card)); }
 select option:disabled { color: var(--soft); opacity: .55; }
 select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink); }
-:is(#defaultChatModel, #defaultChatReasoning, #workerModel, #workerReasoning, #helperModel, #helperReasoning)::picker(select) {
+:is(#defaultChatModel, #defaultChatReasoning, #defaultGeminiModel, #workerModel, #workerReasoning, #workerGeminiModel, #helperModel, #helperReasoning)::picker(select) {
   width: max-content; min-width: anchor-size(width); max-width: min(260px, calc(100vw - 24px));
   left: auto; right: anchor(right);
 }
-:is(#defaultChatModel, #defaultChatReasoning, #workerModel, #workerReasoning, #helperModel, #helperReasoning) option {
+:is(#defaultChatModel, #defaultChatReasoning, #defaultGeminiModel, #workerModel, #workerReasoning, #workerGeminiModel, #helperModel, #helperReasoning) option {
   white-space: nowrap; overflow-wrap: normal;
 }
+#composerModelChoices .model-choice-text { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; text-align: left; }
+#composerModelChoices .model-choice-text small { color: var(--soft); font-size: calc(11.5px * var(--text-scale, 1)); line-height: 1.3; font-weight: 400; }
 
 .session-controls-menu { padding: 8px 0 0; margin-top: 8px; border-top: 1px solid var(--line); }
 #composerSettings > summary { gap: 6px; }
@@ -4686,6 +4714,15 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 /* Held by the approval card: the timeline's waiting row's emphasis. A failed step: the tool row's red, without the sheen. */
 .agent-card-approval { color: var(--ink); font-weight: 500; }
 .agent-card-activity[data-tone='bad'] { animation: none; background: none; color: var(--red); }
+.agent-spawn-bar { display: flex; flex-direction: column; gap: 8px; margin: 2px 8px 14px; }
+.agent-spawn-toggle { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; font-size: calc(12.5px * var(--text-scale, 1)); padding: 5px 10px; }
+.agent-spawn-form { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--ink) 2.5%, transparent); }
+.agent-spawn-form[hidden] { display: none; }
+.agent-spawn-input, .agent-spawn-textarea { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--page); color: var(--ink); font: inherit; font-size: calc(12.5px * var(--text-scale, 1)); line-height: 1.45; resize: vertical; }
+.agent-spawn-input:focus-visible, .agent-spawn-textarea:focus-visible { outline: 2px solid var(--accent-edge); outline-offset: -1px; }
+.agent-spawn-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.agent-spawn-error { margin: 0; color: var(--red); font-size: calc(12px * var(--text-scale, 1)); }
+.agent-spawn-error[hidden] { display: none; }
 /* A worker's two views (#105): pills like the dock's tabs, on their own line under its name. */
 .agent-panel-header:has(.agent-panel-views) { flex-wrap: wrap; row-gap: 10px; padding-bottom: 10px; }
 .agent-panel-views { display: flex; gap: 4px; flex-basis: 100%; min-width: 0; }
@@ -5698,3 +5735,38 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .turn-change > .unified-diff > .meta { margin: 0; padding: 8px 10px; }
 .turn-changes-review { justify-self: start; }
 @media (prefers-reduced-motion: reduce) { .turn-changes-chevron { transition: none; } }
+
+/* Remote Gemini MCP setup card rendered below #connectorCards in step 6. */
+.gemini-setup-slot { margin-top: 12px; min-width: 0; }
+.gemini-setup-slot:empty { margin-top: 0; }
+.gemini-card { display: grid; gap: 10px; }
+.gemini-card.is-warn { border-color: color-mix(in srgb, var(--amber, #d97706) 45%, var(--edge)); }
+.gemini-card.is-ready { border-color: color-mix(in srgb, var(--accent) 35%, var(--edge)); }
+.gemini-card-section { display: grid; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.gemini-mode-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px; }
+.gemini-mode-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 6px; }
+.gemini-mode-btn { display: grid; gap: 2px; text-align: left; padding: 8px 10px; border: 1px solid var(--edge); border-radius: var(--r-sm); background: var(--sunk); color: var(--ink); font: inherit; cursor: pointer; transition: border-color 120ms ease, background 120ms ease; }
+.gemini-mode-btn:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--edge)); }
+.gemini-mode-btn.is-selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--sunk)); }
+.gemini-mode-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.gemini-mode-title { font-size: calc(12.5px * var(--text-scale, 1)); font-weight: 600; color: var(--ink); }
+.gemini-mode-sub { font-size: calc(11px * var(--text-scale, 1)); color: var(--soft); }
+.gemini-input-field { display: grid; gap: 6px; }
+.gemini-input-field label { margin: 0; }
+.gemini-input-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.gemini-text-input { flex: 1 1 220px; min-width: 0; padding: 7px 10px; border: 1px solid var(--edge); border-radius: var(--r-sm); background: var(--sunk); color: var(--ink); font: inherit; }
+.gemini-text-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.gemini-card-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.gemini-surface-select { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--edge); border-radius: var(--r-sm); background: var(--sunk); color: var(--ink); font: inherit; }
+.gemini-json-field { display: grid; gap: 6px; }
+.gemini-json-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.gemini-json-head label { margin: 0; }
+.gemini-json-preview { width: 100%; min-width: 0; padding: 9px 11px; border: 1px solid var(--edge); border-radius: var(--r-sm); background: var(--sunk); color: var(--ink); font-family: var(--mono); font-size: calc(11.5px * var(--text-scale, 1)); line-height: 1.45; resize: vertical; }
+.gemini-json-preview:focus-visible, .gemini-surface-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.gemini-guide-title { margin: 0; font-size: calc(13px * var(--text-scale, 1)); font-weight: 600; color: var(--ink); }
+.gemini-guide-section .gemini-guide-moves { margin: 4px 0 0; gap: 6px; }
+.gemini-guide-section .guide-move { margin-left: 0; padding: 4px 6px; }
+.gemini-guide-section .guide-move:hover { background: transparent; color: var(--soft); }
+.gemini-guide-section .guide-move.is-done { color: var(--ink); }
+.gemini-guide-section .guide-move.is-done .guide-pin { background: color-mix(in srgb, var(--green) 16%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 45%, transparent); color: var(--green); }
+.gemini-help { margin-top: 2px; padding-top: 10px; }

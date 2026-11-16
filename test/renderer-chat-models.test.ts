@@ -773,3 +773,61 @@ it('offers Off, the Goal chat\'s own model and this account\'s models for the st
   expect(reviewer.selectedOptions[0]!.disabled).toBe(true);
   expect(reviewer.selectedOptions[0]!.textContent).toBe('retired-model · not verified');
 });
+
+it('shows and switches Gemini composer & Settings models independently from ChatGPT', async () => {
+  dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  const requestGeminiModels = vi.fn(async () => ({ ok: true, data: { state: 'ready', requestedAt: 1, observedAt: 10, models: [] } }));
+  const chatModels = { state: 'ready', requestedAt: null, observedAt: 5, models: [{ id: 'gpt-6', label: 'GPT-6', efforts: ['medium', 'high'] }] };
+  const geminiModels = {
+    state: 'ready',
+    requestedAt: null,
+    observedAt: 9,
+    models: [
+      { id: 'fast', label: 'Fast', description: 'Answers quickly' },
+      { id: 'pro', label: '2.5 Pro', description: 'Reasoning, math and code' }
+    ]
+  };
+  Object.assign(dom.window, {
+    api: {
+      getChatModels: async () => ({ ok: true, data: chatModels }),
+      getGeminiModels: async () => ({ ok: true, data: geminiModels }),
+      requestGeminiModels
+    }
+  });
+  const { initChatModels, applyChatModels, setActiveModelProvider, confirmedComposerModel, composerSendModel } = await import('../src/renderer/chat-models.js');
+  initChatModels();
+  applyChatModels({ ui: {}, multiAgent: {}, goal: {} } as Config);
+  await Promise.resolve();
+  await Promise.resolve();
+
+  const doc = dom.window.document;
+  expect([...(doc.getElementById('defaultGeminiModel') as HTMLSelectElement).options].map(o => o.value)).toEqual(['', 'fast', 'pro']);
+  expect([...(doc.getElementById('workerGeminiModel') as HTMLSelectElement).options].map(o => o.value)).toEqual(['', 'fast', 'pro']);
+
+  // ChatGPT starts active cleanly.
+  expect(confirmedComposerModel()).toEqual({ model: 'gpt-6', reasoningEffort: 'high' });
+
+  // Switching to Gemini swaps the composer menu to Gemini choices without mixing GPT-6 in.
+  setActiveModelProvider('gemini');
+  expect(doc.getElementById('composerSpark')!.hidden).toBe(true);
+  expect(doc.getElementById('composerModelLabel')!.textContent).toBe('Automatic');
+  expect(composerSendModel()).toEqual({ model: null, reasoningEffort: null });
+
+  const menu = doc.getElementById('modelMenu') as HTMLDetailsElement;
+  menu.open = true;
+  menu.dispatchEvent(new dom.window.Event('toggle'));
+  const list = doc.getElementById('composerModelChoices')!;
+  expect(list.hidden).toBe(false);
+  expect([...list.querySelectorAll<HTMLElement>('[data-model]')].map(btn => btn.dataset.model)).toEqual(['', 'fast', 'pro']);
+
+  list.querySelector<HTMLButtonElement>('[data-model="pro"]')!.click();
+  expect(doc.getElementById('composerModelLabel')!.textContent).toBe('2.5 Pro');
+  expect(confirmedComposerModel()).toEqual({ model: 'pro', reasoningEffort: null });
+  expect(composerSendModel()).toEqual({ model: 'pro', reasoningEffort: null });
+
+  // Switching back to ChatGPT restores the ChatGPT catalog and effort slider control.
+  setActiveModelProvider('chatgpt');
+  expect(doc.getElementById('composerSpark')!.hidden).toBe(false);
+  expect(confirmedComposerModel()).toEqual({ model: 'gpt-6', reasoningEffort: 'high' });
+});

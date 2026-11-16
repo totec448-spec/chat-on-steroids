@@ -8,9 +8,10 @@
  * Until discovery finishes, carry the source pair over as is. A refresh retains old choices for
  * display; they are not the pending observation's answer about what is unavailable.
  */
-import { getChatModels } from './chat-models.js';
+import { getChatModels, getGeminiModels } from './chat-models.js';
 import { logInfo } from './logger.js';
-import { resolveChatModel } from '../shared/chat-models.js';
+import { resolveChatModel, resolveGeminiModel } from '../shared/chat-models.js';
+import type { ChatProvider } from '../shared/provider.js';
 import type { ReasoningEffort } from '../shared/session.js';
 
 type Selection = { model: string | null; reasoningEffort: ReasoningEffort | null };
@@ -28,8 +29,8 @@ function note(line: string): void {
 }
 
 /** `resume` names the resume being handed out, so each one logs its own decision once. */
-export function resumeModelSelection(requested: { model: string; reasoningEffort: ReasoningEffort | null } | null | undefined, resume = ''): Selection {
-  return offeredSelection(requested, resume, 'resume', 'the new chat');
+export function resumeModelSelection(requested: { model: string; reasoningEffort: ReasoningEffort | null } | null | undefined, resume = '', provider: ChatProvider = 'chatgpt'): Selection {
+  return offeredSelection(requested, resume, 'resume', 'the new chat', provider);
 }
 
 /**
@@ -38,15 +39,33 @@ export function resumeModelSelection(requested: { model: string; reasoningEffort
  * worker opened on GPT-5.6 high went on in GPT-6 medium. Vetted against this account exactly as a
  * resume is. `wake` names the wake command, so each logs its decision once.
  */
-export function wakeModelSelection(requested: { model: string | null; reasoningEffort: ReasoningEffort | null } | null | undefined, wake = ''): Selection {
+export function wakeModelSelection(requested: { model: string | null; reasoningEffort: ReasoningEffort | null } | null | undefined, wake = '', provider: ChatProvider = 'chatgpt'): Selection {
   // A worker opened on the account default has no model to choose; its reasoning alone still is.
-  if (!requested?.model) return { model: null, reasoningEffort: requested?.reasoningEffort ?? null };
-  return offeredSelection({ model: requested.model, reasoningEffort: requested.reasoningEffort }, wake, 'worker wake', 'the wake');
+  if (!requested?.model) return { model: null, reasoningEffort: provider === 'gemini' ? null : requested?.reasoningEffort ?? null };
+  return offeredSelection({ model: requested.model, reasoningEffort: requested.reasoningEffort }, wake, 'worker wake', 'the wake', provider);
 }
 
-function offeredSelection(requested: { model: string; reasoningEffort: ReasoningEffort | null } | null | undefined, which: string, what: string, target: string): Selection {
+function offeredSelection(requested: { model: string; reasoningEffort: ReasoningEffort | null } | null | undefined, which: string, what: string, target: string, provider: ChatProvider): Selection {
   key = which;
   if (!requested) return { model: null, reasoningEffort: null };
+  if (provider === 'gemini') {
+    const geminiCatalog = getGeminiModels();
+    if (geminiCatalog.state === 'unknown' || geminiCatalog.state === 'pending') {
+      if (geminiCatalog.models.length) note(`${what}: Gemini model discovery is ${geminiCatalog.state}; retained choices do not remove the requested model before native confirmation`);
+      return { model: requested.model, reasoningEffort: null };
+    }
+    if (!geminiCatalog.models.length) {
+      if (geminiCatalog.state !== 'unavailable') return { model: requested.model, reasoningEffort: null };
+      note(`${what}: this Gemini account shows no readable model picker; ${target} uses Gemini's current selection`);
+      return { model: null, reasoningEffort: null };
+    }
+    const offered = resolveGeminiModel(geminiCatalog.models, requested.model);
+    if (!offered) {
+      note(`${what}: model "${requested.model}" is not offered by this Gemini account; ${target} uses Gemini's current selection`);
+      return { model: null, reasoningEffort: null };
+    }
+    return { model: requested.model, reasoningEffort: null };
+  }
   const catalog = getChatModels();
   if (catalog.state === 'unknown' || catalog.state === 'pending') {
     if (catalog.models.length) note(`${what}: model discovery is ${catalog.state}; retained choices do not remove the requested model or reasoning before native confirmation`);

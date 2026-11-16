@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { McpClientIdentity } from '../../shared/session.js';
 import type { OutputPublication } from '../codex/unified-exec.js';
 
 /**
@@ -23,7 +24,14 @@ export interface InboundTiming {
   calls: number;
   phases: Record<InboundPhase, number>;
 }
-const store = new AsyncLocalStorage<{ requestId: string | null; timing?: InboundTiming; publication?: OutputPublication; providerRequest: boolean }>();
+const store = new AsyncLocalStorage<{
+  requestId: string | null;
+  timing?: InboundTiming;
+  publication?: OutputPublication;
+  providerRequest: boolean;
+  clientIdentity?: McpClientIdentity | null;
+  mcpSessionId?: string | null;
+}>();
 
 /** Fixed-size, process-local numbers only: no payload, credential, path or chat identity. */
 export function createInboundTiming(): InboundTiming {
@@ -57,8 +65,35 @@ export function formatInboundTiming(timing: InboundTiming): string {
 }
 
 /** Runs `body` with the request id of the HTTP request currently being served. */
-export function withInboundRequestId<T>(requestId: string | null, body: () => T, timing?: InboundTiming, publication?: OutputPublication, providerRequest = false): T {
-  return store.run({ requestId, timing, publication, providerRequest }, body);
+export function withInboundRequestId<T>(
+  requestId: string | null,
+  body: () => T,
+  timing?: InboundTiming,
+  publication?: OutputPublication,
+  providerRequest = false,
+  client?: { clientIdentity?: McpClientIdentity | null; mcpSessionId?: string | null }
+): T {
+  return store.run(
+    {
+      requestId,
+      timing,
+      publication,
+      providerRequest,
+      clientIdentity: client?.clientIdentity ?? null,
+      mcpSessionId: client?.mcpSessionId ?? null
+    },
+    body
+  );
+}
+
+/** Presentation-only external MCP client identity captured at HTTP ingress, if any. */
+export function inboundClientIdentity(): McpClientIdentity | null {
+  return store.getStore()?.clientIdentity ?? null;
+}
+
+/** Sanitized `mcp-session-id` header captured at HTTP ingress, if any. */
+export function inboundMcpSessionId(): string | null {
+  return store.getStore()?.mcpSessionId ?? null;
 }
 export function inboundProviderRequest(): boolean { return store.getStore()?.providerRequest === true; }
 

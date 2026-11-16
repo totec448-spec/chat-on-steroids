@@ -28,7 +28,7 @@ import {
 import { setSystemProxyResolver } from './tunnel/index.js';
 import { configureAppProxy, refreshAppProxy } from './app-proxy.js';
 import { openSessionChat, registerIpc } from './ipc.js';
-import { getChatModels, restoreChatModels, startChatModelDiscovery } from './chat-models.js';
+import { getChatModels, restoreChatModels, restoreGeminiModels, startChatModelDiscovery } from './chat-models.js';
 import { flushLogBeforeExit, initLogFile, logError, logInfo, logWarn, onLog, snapshotLogOnCrash } from './logger.js';
 import { noteRuntimeEvent, tallyLogEntry } from './diagnostics-facts.js';
 import { unifiedExecManager } from './codex/manager.js';
@@ -491,7 +491,7 @@ void app.whenReady().then(async () => {
   // Bundled pet packages: the packaged app's resources, or the repository's pets/ folder in dev.
   try { await initPetLibrary(userData, app.isPackaged ? path.join(process.resourcesPath, 'pets') : path.join(app.getAppPath(), 'pets')); }
   catch (error) { logWarn(`Pet library unavailable: ${error instanceof Error ? error.message : String(error)}`); }
-  await restoreChatModels();
+  await Promise.all([restoreChatModels(), restoreGeminiModels()]);
   if (windowActivation.isDisabled()) return;
   await loadConfig();
   markStartup('config');

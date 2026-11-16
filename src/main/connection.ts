@@ -7,16 +7,35 @@
  */
 
 import { loadKeptPort, loadSurfaceTokens, rememberSurfaceTokens } from './mcp/persistent-paths.js';
-import { connectorProof } from './connector-proof.js';
-import type { ConnectionState, ConnectionStatus, SurfaceStatus, TunnelSettings } from '../shared/types.js';
+import { connectorProof, externalClientProofs } from './connector-proof.js';
+import type {
+  ConnectionState,
+  ConnectionStatus,
+  ExternalClientStatus,
+  GeminiBridgeMode,
+  SurfaceStatus,
+  TunnelKind,
+  TunnelSettings
+} from '../shared/types.js';
 import { requiresApprovedFilesystemRoot } from '../shared/capabilities.js';
 import { prewarmComputerHelper } from './computer/index.js';
 import { effectiveCapabilities, getConfig } from './config.js';
 import { logError, logInfo, logWarn } from './logger.js';
 import { lastRequestAt, startMcpServer, tunnelProbeHeaders, type McpEndpoint } from './mcp/server.js';
+import {
+  listLiveExternalMcpClients,
+  onExternalMcpClientsChange,
+  resetLiveExternalMcpClients
+} from './mcp/client-identity.js';
 import { lastToolCallAt } from './mcp/tools.js';
 import { SURFACE_LIST, configuredConnectorName, liveConnectorName, surfaceIsUseful, desktopToolNames, type SurfaceId } from './mcp/surfaces.js';
 import { getSecret } from './secrets.js';
+import {
+  startGeminiBridge,
+  stopManagedTailscaleFunnel,
+  type GeminiBridgeHandle,
+  type ManagedTailscaleFunnel
+} from './mcp/gemini-bridge.js';
 import { setupApiKeySlot } from '../shared/setup-profile.js';
 import { startTunnel, TunnelError, type TunnelHandle } from './tunnel/index.js';
 import { tunnelRouteSettlingUntil } from './tunnel/route-settle.js';
@@ -32,6 +51,12 @@ let pendingDisconnect: Promise<void> | null = null;
 let pendingTeardown: Promise<void> | null = null;
 /** The Core tunnel. Also the only tunnel on the cloudflared and manual paths. */
 let tunnel: TunnelHandle | null = null;
+let allowedGeminiHosts: ReadonlySet<string> = new Set();
+let geminiBridgeHandle: GeminiBridgeHandle | null = null;
+let managedTailscaleFunnel: ManagedTailscaleFunnel | null = null;
+let activeGeminiBridgeKey: string | null = null;
+let geminiBridgeSeq = 0;
+let geminiBridgeSync: Promise<void> = Promise.resolve();
 /** Independent optional tunnel lifetimes on the OpenAI path. */
 type OptionalSurface = 'desktop' | 'plugins';
 const optionalTunnels = new Map<OptionalSurface, {
@@ -214,9 +239,53 @@ export function getStatus(): ConnectionStatus {
     lastRequestAt: lastRequestAt(),
     lastToolCallAt: lastToolCallAt(),
     routeSettlingUntil: tunnelRouteSettlingUntil(),
-    surfaces: describeSurfaces()
+    surfaces: describeSurfaces(),
+    externalClients: describeExternalClients()
   };
 }
+
+function describeExternalClients(): ExternalClientStatus[] {
+  const running = endpoint !== null;
+  const merged = new Map<string, ExternalClientStatus>();
+  for (const proof of externalClientProofs()) {
+    merged.set(proof.id, {
+      id: proof.id,
+      name: proof.name,
+      ...(proof.version ? { version: proof.version } : {}),
+      surfaces: [...proof.surfaces],
+      connected: false,
+      lastRequestAt: proof.requestAt,
+      lastToolCallAt: proof.toolCallAt
+    });
+  }
+  for (const live of listLiveExternalMcpClients()) {
+    const prev = merged.get(live.id);
+    const surfaces = [...new Set<SurfaceId>([...(prev?.surfaces ?? []), ...live.surfaces])];
+    const lastRequestAt = prev?.lastRequestAt !== null && prev?.lastRequestAt !== undefined
+      ? Math.max(prev.lastRequestAt, live.lastRequestAt)
+      : live.lastRequestAt;
+    const prevTool = prev?.lastToolCallAt ?? null;
+    const liveTool = live.lastToolCallAt;
+    const lastToolCallAt = prevTool !== null && liveTool !== null ? Math.max(prevTool, liveTool) : (liveTool ?? prevTool);
+    merged.set(live.id, {
+      id: live.id,
+      name: live.name,
+      ...(live.version ?? prev?.version ? { version: live.version ?? prev?.version } : {}),
+      surfaces,
+      connected: running,
+      lastRequestAt,
+      lastToolCallAt
+    });
+  }
+  return [...merged.values()].sort((a, b) => {
+    if (a.connected !== b.connected) return a.connected ? -1 : 1;
+    return (b.lastRequestAt ?? 0) - (a.lastRequestAt ?? 0);
+  });
+}
+
+onExternalMcpClientsChange(() => {
+  setStatus({ externalClients: describeExternalClients() });
+});
 
 export function onStatusChange(listener: (status: ConnectionStatus) => void): () => void {
   listeners.add(listener);
@@ -368,6 +437,122 @@ function siblingPublicUrl(publicUrl: string | null, localUrl: string | null): st
   }
 }
 
+function geminiBridgeKey(
+  mode: GeminiBridgeMode,
+  publicOrigin: string,
+  tunnelToken: string | null,
+  localUrl: string,
+  tunnelKind: TunnelKind,
+  tunnelPublicUrl: string | null
+): string {
+  const scope =
+    mode === 'tunnel'
+      ? `${tunnelKind}:${tunnelPublicUrl ?? ''}`
+      : mode === 'custom'
+        ? `${publicOrigin}:${tunnelToken ?? ''}`
+        : localUrl;
+  return `${mode}\0${localUrl}\0${scope}`;
+}
+
+function syncGeminiBridge(force = false): Promise<void> {
+  const run = geminiBridgeSync
+    .then(async () => {
+      const seq = ++geminiBridgeSeq;
+      const gen = connectionGeneration;
+      if (shutdownRequested || pendingDisconnect || !endpoint) return;
+
+      const cfg = getConfig();
+      const mode: GeminiBridgeMode = cfg.mcp?.geminiBridge ?? 'tunnel';
+      const publicOrigin = cfg.mcp?.geminiPublicOrigin ?? '';
+      const tunnelToken = mode === 'custom' ? await getSecret('geminiTunnelToken').catch(() => null) : null;
+      if (
+        seq !== geminiBridgeSeq ||
+        gen !== connectionGeneration ||
+        shutdownRequested ||
+        pendingDisconnect ||
+        !endpoint
+      ) {
+        return;
+      }
+
+      const desiredKey = geminiBridgeKey(
+        mode,
+        publicOrigin,
+        tunnelToken,
+        endpoint.url,
+        cfg.tunnel.kind,
+        status.publicUrl
+      );
+      if (!force && activeGeminiBridgeKey === desiredKey && geminiBridgeHandle) return;
+
+      const previousHandle = geminiBridgeHandle;
+      const previousFunnel = managedTailscaleFunnel;
+      if (previousHandle) {
+        if (!previousFunnel || mode !== 'tailscale') {
+          geminiBridgeHandle = null;
+          allowedGeminiHosts = new Set();
+          await previousHandle.stop().catch(() => {});
+          if (previousFunnel) managedTailscaleFunnel = null;
+        } else {
+          geminiBridgeHandle = null;
+        }
+      }
+      if (
+        seq !== geminiBridgeSeq ||
+        gen !== connectionGeneration ||
+        shutdownRequested ||
+        pendingDisconnect ||
+        !endpoint
+      ) {
+        return;
+      }
+
+      const handle = await startGeminiBridge({
+        mode,
+        localUrl: endpoint.url,
+        publicOrigin,
+        tunnelToken,
+        cloudflaredPathHint: cfg.tunnel.binaryPath,
+        tunnelKind: cfg.tunnel.kind,
+        tunnelPublicUrl: status.publicUrl,
+        previousManagedFunnel: mode === 'tailscale' ? managedTailscaleFunnel : null,
+        report: (nextStatus) => {
+          if (
+            seq !== geminiBridgeSeq ||
+            gen !== connectionGeneration ||
+            shutdownRequested ||
+            !endpoint
+          ) {
+            return;
+          }
+          setStatus({ geminiBridge: nextStatus });
+        }
+      });
+
+      if (
+        seq !== geminiBridgeSeq ||
+        gen !== connectionGeneration ||
+        shutdownRequested ||
+        pendingDisconnect ||
+        !endpoint
+      ) {
+        await handle.stop().catch(() => {});
+        return;
+      }
+
+      geminiBridgeHandle = handle;
+      managedTailscaleFunnel = handle.managedFunnel;
+      allowedGeminiHosts = handle.allowedHosts;
+      activeGeminiBridgeKey = desiredKey;
+      setStatus({ geminiBridge: handle.status });
+    })
+    .catch((err) => {
+      logWarn(`Gemini bridge sync failed: ${err instanceof Error ? err.message : String(err)}`);
+    });
+  geminiBridgeSync = run;
+  return run;
+}
+
 async function connectImpl(current: () => boolean = () => true): Promise<void> {
   if (shutdownRequested || pendingDisconnect || !current()) return;
   // Offline counts as running: the tunnel is alive and retrying on its own.
@@ -418,7 +603,7 @@ async function connectImpl(current: () => boolean = () => true): Promise<void> {
         readOnly: live.readOnly,
         privacyScreenshots: live.ui.privacyScreenshots
       };
-    }, kept, keptPort ? { port: keptPort } : {});
+    }, kept, keptPort ? { port: keptPort } : {}, () => allowedGeminiHosts);
     if (keepUrls && !(await rememberSurfaceTokens(startedEndpoint.urls))) {
       logWarn('connector URLs: secure storage is unavailable, so they change at the next start');
     }
@@ -438,6 +623,7 @@ async function connectImpl(current: () => boolean = () => true): Promise<void> {
     }
     setStatus({ localUrl: endpoint.url, keptPortMoved: keptPort && endpoint.port !== keptPort ? { from: keptPort, to: endpoint.port } : null,
       surfaces: describeSurfaces() });
+    void syncGeminiBridge();
     if (desktopAutomationSupported() && (caps.screen || caps.control)) void prewarmComputerHelper();
     updateSurface('core', { state: 'starting', detail: 'Connecting…' });
 
@@ -465,6 +651,9 @@ async function connectImpl(current: () => boolean = () => true): Promise<void> {
           ...(report.handshakeAt === undefined ? {} : { handshakeAt: report.handshakeAt }),
           ...(report.health === undefined ? {} : { health: report.health })
         });
+        if (report.publicUrl !== undefined && (getConfig().mcp?.geminiBridge ?? 'tunnel') === 'tunnel') {
+          void syncGeminiBridge();
+        }
         updateSurface('core', {
           state: surfaceStateForConnection(report.state),
           detail: report.detail,
@@ -625,6 +814,7 @@ async function applySettingsImpl(): Promise<void> {
   // Rebuild the cards first: permissions may have changed which tools each surface would
   // advertise, and on a whole-origin transport that is all there is to do.
   setStatus({ surfaces: describeSurfaces() });
+  await syncGeminiBridge();
 
   if (config.tunnel.kind !== 'openai') {
     for (const id of optionalSurfaces) {
@@ -685,11 +875,23 @@ async function disconnectResources(endpointForceAfterMs?: number): Promise<void>
   }
   for (const { handle } of optionalTunnels.values()) await handle?.stop().catch(() => {});
   optionalTunnels.clear();
+  geminiBridgeSeq += 1;
+  await geminiBridgeSync.catch(() => {});
+  if (geminiBridgeHandle) {
+    await geminiBridgeHandle.stop().catch(() => {});
+    geminiBridgeHandle = null;
+  } else if (managedTailscaleFunnel) {
+    await stopManagedTailscaleFunnel(managedTailscaleFunnel).catch(() => {});
+  }
+  managedTailscaleFunnel = null;
+  allowedGeminiHosts = new Set();
+  activeGeminiBridgeKey = null;
   if (tunnel) {
     await tunnel.stop().catch(() => {});
     tunnel = null;
   }
   activeCoreTransport = null;
+  resetLiveExternalMcpClients();
   if (status.state !== 'disconnected') logInfo('disconnected');
   setStatus({
     state: 'disconnected',
@@ -699,7 +901,17 @@ async function disconnectResources(endpointForceAfterMs?: number): Promise<void>
     keptPortMoved: null,
     handshakeAt: null,
     health: null,
-    surfaces: describeSurfaces()
+    surfaces: describeSurfaces(),
+    externalClients: describeExternalClients(),
+    geminiBridge: undefined
+  });
+}
+
+/** Retries or refreshes the independent Gemini access bridge without restarting ChatGPT's tunnel. */
+export function refreshGeminiBridge(): Promise<void> {
+  return enqueueLifecycle(async () => {
+    if (!endpoint) return;
+    await syncGeminiBridge(true);
   });
 }
 

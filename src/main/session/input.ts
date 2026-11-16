@@ -1,4 +1,5 @@
 import { REASONING_EFFORTS, workSequence } from '../../shared/session.js';
+import { isAcceptedConversationId, providerForConversationId, type ChatProvider } from '../../shared/provider.js';
 /** User-authored input has one durable owner across browser and MCP delivery.
  * A claimed browser send is never automatically retried: losing the ACK is ambiguous.
  * Tool delivery repeats under a stable message id until a later request proves receipt.
@@ -82,7 +83,9 @@ export const inputArgs = z.object({
   /** Scheduled runs (#1826): this message is a run of the chat's schedule, due at `dueAt`; `late` when it went out after a missed time. */
   scheduled: z.object({ scheduleId: z.string().uuid(), dueAt: z.number().int().nonnegative(), late: z.boolean() }).strict().optional(),
   /** Sent by the person from somewhere else: a reply to a Telegram notification (Haz on #1990). Main sets it, never the window. */
-  via: z.literal('telegram').optional()
+  via: z.literal('telegram').optional(),
+  /** Target web chat provider when opening a fresh conversation from CoS (`chatgpt` by default). */
+  provider: z.enum(['chatgpt', 'gemini']).optional()
 });
 export type InputArgs = z.infer<typeof inputArgs>;
 const entrySchema = inputArgs.extend({
@@ -694,6 +697,21 @@ async function heldUntil(row: InputEntry): Promise<number> {
 }
 
 /** Mirrors every main-process gate before counting a scheduled browser pickup second. */
+/** Resolves the web chat provider owning an outbox entry or its reserved local session. */
+export async function resolvedInputProvider(
+  entry: Pick<InputEntry, 'provider' | 'sessionId'>,
+  conversationId: string | null
+): Promise<ChatProvider | undefined> {
+  const fromConversation = conversationId ? providerForConversationId(conversationId) : null;
+  if (fromConversation) return fromConversation;
+  if (entry.provider) return entry.provider;
+  if (entry.sessionId) {
+    const session = await getSession(entry.sessionId);
+    if (session?.mcpClient?.id === 'gemini') return 'gemini';
+  }
+  return undefined;
+}
+
 async function scheduledPickupEligible(row: InputEntry, current: InputEntry[]): Promise<boolean> {
   if (!row.scheduled || row.state !== 'queued' || row.dueAt > Date.now() || heldBySendCheck(row) || companionOf(current, row)) return false;
   try {
@@ -702,7 +720,8 @@ async function scheduledPickupEligible(row: InputEntry, current: InputEntry[]): 
     if (!await browserInputAllowed(row)) return false;
     const conversationId = await target(row);
     if (conversationId && !readyForWake(conversationId)) return false;
-    const chatgptProject = !conversationId && row.projectId && row.purpose !== 'decision' && !row.lifetime && !row.branch
+    const provider = await resolvedInputProvider(row, conversationId);
+    const chatgptProject = provider !== 'gemini' && !conversationId && row.projectId && row.purpose !== 'decision' && !row.lifetime && !row.branch
       ? (await getProject(row.projectId))?.chatgpt : undefined;
     if (chatgptProject && chatgptProject.state !== 'linked') return false;
     // This is the same last admission gate used by pendingBrowserInputs. A refusal
@@ -1100,12 +1119,13 @@ async function materializeOpening(entry: InputEntry): Promise<void> {
     existing.origin?.kind !== 'worker' && existing.origin?.kind !== 'helper';
   const session = recoveredExactOwner ? existing : await createSession({ reservedId: entry.sessionId,
     title: userTitle(entry.text, authoredTextOf(entry)), titleSource: 'fallback',
+    ...(entry.provider === 'gemini' ? { mcpClient: { id: 'gemini', name: 'Gemini' } } : {}),
     origin: entry.branch
       ? { kind: 'desktop', fromSessionId: entry.branch.sessionId, agentId: null, task: '',
         branchOf: { conversationId: entry.branch.conversationId, messageId: entry.branch.messageId } }
       : { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } });
   if (session.conversationId && session.conversationId !== entry.conversationId)
-    throw new Error('Reserved opening session belongs to another ChatGPT conversation');
+    throw new Error('Reserved opening session belongs to another conversation');
   if (entry.projectId && session.projectId !== entry.projectId) await assignSessionProject(session.id, entry.projectId);
 }
 /**
@@ -2158,9 +2178,9 @@ async function completedStageBoundary(entry: InputEntry, current: InputEntry[]):
       row.dueAt <= Date.now() && ['queued', 'browser', 'tool'].includes(row.state))) return null;
   return turnId;
 }
-export function pendingBrowserInputs(): Promise<Array<{ id: string; conversationId: string | null; recovery?: { questionId: string; stop: boolean }; silenceTurnId?: string; directTurn?: InputEntry['directTurn']; supersededConversationId?: string; lifetime?: 'temporary-planner'; project?: string; branch?: { conversationId: string; messageId: string }; edit?: { messageId: string } }>> {
+export function pendingBrowserInputs(): Promise<Array<{ id: string; conversationId: string | null; provider?: ChatProvider; recovery?: { questionId: string; stop: boolean }; silenceTurnId?: string; directTurn?: InputEntry['directTurn']; supersededConversationId?: string; lifetime?: 'temporary-planner'; project?: string; branch?: { conversationId: string; messageId: string }; edit?: { messageId: string } }>> {
   return serial(async () => {
-    const result: Array<{ id: string; conversationId: string | null; recovery?: { questionId: string; stop: boolean }; silenceTurnId?: string; directTurn?: InputEntry['directTurn']; supersededConversationId?: string; lifetime?: 'temporary-planner'; project?: string; branch?: { conversationId: string; messageId: string }; edit?: { messageId: string } }> = [];
+    const result: Array<{ id: string; conversationId: string | null; provider?: ChatProvider; recovery?: { questionId: string; stop: boolean }; silenceTurnId?: string; directTurn?: InputEntry['directTurn']; supersededConversationId?: string; lifetime?: 'temporary-planner'; project?: string; branch?: { conversationId: string; messageId: string }; edit?: { messageId: string } }> = [];
     const current = await load();
     const slotHeld = new Map<string, NonNullable<InputEntry['slotHold']>>();
     const scheduledPickupStarts = new Map<string, number>();
@@ -2178,10 +2198,12 @@ export function pendingBrowserInputs(): Promise<Array<{ id: string; conversation
         const conversationId = await target(entry);
         // A worker chat this app archived in ChatGPT has no message box until it is restored (#1701).
         if (conversationId && !readyForWake(conversationId)) { pauseScheduledPickup(); continue; }
+        const provider = await resolvedInputProvider(entry, conversationId);
         // A new chat of a project with a native ChatGPT Project opens in that Project and nowhere
         // else: it waits while the Project is being created or could not be, never the root.
+        // Gemini chats stay in CoS project folders without redirecting to a ChatGPT Project page.
         // A branch is made where its source chat lives in ChatGPT, never on a Project's page.
-        const chatgptProject = !conversationId && entry.projectId && entry.purpose !== 'decision' && !entry.lifetime && !entry.branch
+        const chatgptProject = provider !== 'gemini' && !conversationId && entry.projectId && entry.purpose !== 'decision' && !entry.lifetime && !entry.branch
           ? (await getProject(entry.projectId))?.chatgpt : undefined;
         if (chatgptProject && chatgptProject.state !== 'linked') { pauseScheduledPickup(); continue; }
         // Chats working at once (#1694): the app's own send waits its turn; the line is kept by first wait.
@@ -2199,6 +2221,7 @@ export function pendingBrowserInputs(): Promise<Array<{ id: string; conversation
         const silenceTurnId = entry.silenceBoundary?.turnId ?? (end?.kind === 'turn_end' && end.outcome === 'failed' &&
           end.reason === 'thinking_failed' && end.turnId && await eligibleStageEnd(entry) === end.turnId ? end.turnId : undefined);
         result.push({ id: entry.id, conversationId,
+          ...(provider === 'gemini' ? { provider: 'gemini' as const } : {}),
           ...(entry.recovery ? { recovery: { questionId: entry.recovery.questionId, stop: entry.silenceBoundary?.nativeBusy === true && entry.recovery.phase === 'ready' } } : {}),
           ...(silenceTurnId ? { silenceTurnId } : {}),
           ...(entry.directTurn ? { directTurn: entry.directTurn } : {}),
@@ -2740,7 +2763,7 @@ async function bindOpening(entry: InputEntry, conversationId: string): Promise<b
 /** Bind exact opening/project ownership before the document publishes request evidence. */
 export function bindBrowserInputProject(id: string, owner: string, conversationId: string): Promise<boolean> {
   return serial(async () => {
-    if (!owner || !/^[0-9a-z-]{8,256}$/i.test(conversationId)) return false;
+    if (!owner || !isAcceptedConversationId(conversationId, true)) return false;
     const current = await load();
     const entry = current.find(row => row.id === id && row.owner === owner);
     if (!entry || !['browser', 'sent'].includes(entry.state) || (!entry.opening && !entry.projectId) || entry.purpose === 'decision') return false;
@@ -2768,7 +2791,7 @@ export function acknowledgeBrowserInput(id: string, owner: string, conversationI
     if (entry && companionOf(current, entry)) return false;
     if (!owner || !entry || !['browser', 'sent', 'decision', 'cancelled'].includes(entry.state) ||
       (entry.state === 'cancelled' && entry.purpose === 'decision')) return false;
-    if (conversationId !== undefined && !(entry.lifetime === 'temporary-planner' && conversationId === null) && (!conversationId || !/^[0-9a-z-]{8,256}$/i.test(conversationId))) return false;
+    if (conversationId !== undefined && !(entry.lifetime === 'temporary-planner' && conversationId === null) && (!conversationId || !isAcceptedConversationId(conversationId, true))) return false;
     if (conversationId && entry.conversationId && entry.conversationId !== conversationId) return false;
     // A fresh user send is not complete until ChatGPT assigns its exact conversation.
     // Keep the authored sessionId unchanged so retrying the original enqueue is idempotent.

@@ -9,6 +9,7 @@ import { workerName } from './agent-panel.js';
 import { primaryShiftShortcut, primaryShortcut } from './shortcuts.js';
 import { desktopAccessProblem, paintDesktopAccessNotice } from './desktop-access-notice.js';
 import { chatgptNameLine } from './connector-name.js';
+import { paintGeminiSetupCard } from './gemini-card.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { displayLocalServer } from './local-url.js';
 import { paintPluginRefreshReminder } from './plugin-refresh-reminder.js';
@@ -58,7 +59,16 @@ import { parseCommandAllowlistText } from '../shared/command-allowlist.js';
 
 import type { AppApi, SettingsPatch } from '../preload/index.js';
 import { requiresApprovedFilesystemRoot } from '../shared/capabilities.js';
-import type { AppState, Capability, ChatBrowser, Config, LogEntry, SurfaceStatus } from '../shared/types.js';
+import type {
+  AppState,
+  Capability,
+  ChatBrowser,
+  Config,
+  ExternalClientStatus,
+  GeminiBridgeMode,
+  LogEntry,
+  SurfaceStatus
+} from '../shared/types.js';
 import { opensInCosBrowser } from '../shared/cos-browser-sites.js';
 import {
   browserExtensionRequired,
@@ -868,7 +878,25 @@ let settingsSaveQueue: Promise<void> = Promise.resolve();
 let requestedSettings: SettingsPatch | null = null;
 
 /** Resolves true once main saved the form, false when nothing was saved (an invalid field, a refusal). */
-function save(over: { readOnly?: boolean; theme?: ThemeChoice; appearance?: AppearanceSettings } = {}): Promise<boolean> {
+function save(over: {
+  readOnly?: boolean;
+  theme?: ThemeChoice;
+  appearance?: AppearanceSettings;
+  allowUnattributedCalls?: boolean;
+  tunnelKind?: 'openai' | 'cloudflared' | 'manual';
+  persistentUrls?: boolean;
+  geminiBridge?: GeminiBridgeMode;
+  geminiPublicOrigin?: string;
+} = {}): Promise<boolean> {
+  if (over.allowUnattributedCalls !== undefined) {
+    $<HTMLInputElement>('allowUnattributedCalls').checked = over.allowUnattributedCalls;
+  }
+  if (over.tunnelKind !== undefined) {
+    $<HTMLSelectElement>('tunnelKind').value = over.tunnelKind;
+  }
+  if (over.persistentUrls !== undefined) {
+    $<HTMLInputElement>('mcpPersistentUrls').checked = over.persistentUrls;
+  }
   if (applying || !state) return Promise.resolve(false);
 
   const previous: AppState['config'] = requestedSettings
@@ -907,6 +935,7 @@ function save(over: { readOnly?: boolean; theme?: ThemeChoice; appearance?: Appe
       ...previous.ui,
       defaultChatModel: $<HTMLSelectElement>('defaultChatModel').value || undefined,
       defaultChatReasoning: ($<HTMLSelectElement>('defaultChatReasoning').value || undefined) as Config['ui']['defaultChatReasoning'],
+      defaultGeminiModel: (document.getElementById('defaultGeminiModel') as HTMLSelectElement | null)?.value || undefined,
       chatBrowser: $<HTMLSelectElement>('chatBrowser').value as ChatBrowser,
       cosBrowserMinimize: $<HTMLSelectElement>('cosBrowserMinimize').value === 'tray' ? 'tray' : 'taskbar',
       desktopAsk: ($<HTMLSelectElement>('desktopAsk').value || 'off') as NonNullable<Config['ui']['desktopAsk']>,
@@ -957,7 +986,21 @@ function save(over: { readOnly?: boolean; theme?: ThemeChoice; appearance?: Appe
     projects: { codeCheckpoints: $<HTMLInputElement>('codeCheckpoints').checked },
     ...chatPatch,
     // After the chat patch, which still carries the stored mcp settings it no longer edits.
-    mcp: { instructions: previous.mcp?.instructions ?? '', persistentUrls: $<HTMLInputElement>('mcpPersistentUrls').checked }
+    mcp: (() => {
+      const nextGeminiBridge = over.geminiBridge ?? previous.mcp?.geminiBridge;
+      const nextGeminiOrigin =
+        over.geminiPublicOrigin !== undefined ? over.geminiPublicOrigin : previous.mcp?.geminiPublicOrigin;
+      return {
+        instructions: previous.mcp?.instructions ?? '',
+        persistentUrls: $<HTMLInputElement>('mcpPersistentUrls').checked,
+        ...(nextGeminiBridge && (nextGeminiBridge !== 'tunnel' || previous.mcp?.geminiBridge)
+          ? { geminiBridge: nextGeminiBridge }
+          : {}),
+        ...(nextGeminiOrigin || previous.mcp?.geminiPublicOrigin
+          ? { geminiPublicOrigin: nextGeminiOrigin ?? '' }
+          : {})
+      };
+    })()
   };
   requestedSettings = patch;
 
@@ -2114,7 +2157,11 @@ function apply(next: AppState): void {
           : t("ChatGPT ran a tool {0} — the whole chain works.", [ago(ranAt)]));
 
   const cards = $('connectorCards');
-  paintWhenShown(cards, () => cards.replaceChildren(...connectorCards(next)));
+  const geminiCard = $('geminiConnectorCard');
+  paintWhenShown(cards, () => {
+    cards.replaceChildren(...connectorCards(next));
+    paintGeminiSetupCard(geminiCard, next, geminiCardDeps);
+  });
 
   // Step marks: everything before the first unfinished step counts as done.
   const order = ['browser', 'folder', 'access', 'tunnel', 'key', 'connect', 'chatgpt'];
@@ -2233,6 +2280,54 @@ function copyRow(label: string | (() => string), value: string, what: string): H
   field.append(el('label', '', label), row);
   return field;
 }
+
+function openExternalCallSettings(): void {
+  showTab('settings');
+  const control = $('strictChatAllowlist');
+  const row = control.closest<HTMLElement>('.setting') ?? control;
+  for (let node: HTMLElement | null = row; node; node = node.parentElement) {
+    if (node.tagName === 'DETAILS') (node as HTMLDetailsElement).open = true;
+  }
+  row.scrollIntoView({ block: 'center' });
+  row.classList.remove('is-found');
+  void row.offsetWidth;
+  row.classList.add('is-found');
+  control.focus();
+}
+
+const geminiCardDeps = {
+  copyRow,
+  copyText: async (value: string, toastMessage: string) => {
+    const copied = await run(api.writeClipboard(value));
+    if (copied) toast(toastMessage);
+  },
+  setAllowExternalCalls: (allowed: boolean) => save({ allowUnattributedCalls: allowed }),
+  setTunnelKindCloudflared: () => save({ tunnelKind: 'cloudflared' }),
+  setPersistentUrls: (enabled: boolean) => save({ persistentUrls: enabled }),
+  setGeminiBridge: (mode: GeminiBridgeMode) =>
+    save({
+      geminiBridge: mode,
+      ...(mode !== 'tunnel' &&
+      !state?.config.mcp?.persistentUrls &&
+      state?.secureStorage?.available !== false
+        ? { persistentUrls: true }
+        : {})
+    }),
+  setGeminiPublicOrigin: (origin: string) => save({ geminiPublicOrigin: origin }),
+  setGeminiTunnelToken: async (token: string) => {
+    const nextState = await run(api.setGeminiTunnelToken(token));
+    if (nextState) apply(nextState);
+  },
+  refreshGeminiBridge: async () => {
+    const nextState = await run(api.refreshGeminiBridge());
+    if (nextState) apply(nextState);
+  },
+  openExternalUrl: async (url: string) => {
+    await run(api.openLink(url, { external: true }));
+  },
+  openSetupStep: (step: 'access' | 'connect') => openSetupStep(step),
+  openExternalCallSettings
+};
 
 /**
  * One card per connector, with the exact strings to paste into ChatGPT.
@@ -2384,6 +2479,65 @@ function facts(next: AppState): HTMLElement[] {
   });
 }
 
+/** Synchronizes external MCP client rows (e.g. Gemini) inside the connection popover card. */
+function paintExternalConnectionRows(
+  card: HTMLElement,
+  beforeRow: HTMLElement,
+  clients: ExternalClientStatus[],
+  running: boolean,
+  disconnecting: boolean
+): boolean {
+  const existing = new Map<string, HTMLElement>();
+  for (const row of card.querySelectorAll<HTMLElement>('.connection-popover-row[data-external-client]')) {
+    const id = row.dataset.externalClient;
+    if (id) existing.set(id, row);
+  }
+  const keep = new Set(clients.map((client) => client.id));
+  let layoutChanged = false;
+  for (const [id, row] of existing) {
+    if (keep.has(id)) continue;
+    row.remove();
+    existing.delete(id);
+    layoutChanged = true;
+  }
+
+  let expectedNext: Element = beforeRow;
+  for (let index = clients.length - 1; index >= 0; index -= 1) {
+    const client = clients[index]!;
+    let row = existing.get(client.id);
+    let labelEl: HTMLElement;
+    let srEl: HTMLElement;
+    if (!row) {
+      labelEl = el('span', '', client.name);
+      srEl = el('span', 'sr-only');
+      const dotEl = el('i');
+      dotEl.setAttribute('aria-hidden', 'true');
+      row = el('div', 'connection-popover-row');
+      row.append(labelEl, srEl, dotEl);
+      row.dataset.externalClient = client.id;
+      layoutChanged = true;
+    } else {
+      labelEl = row.children[0] as HTMLElement;
+      srEl = row.children[1] as HTMLElement;
+      if (labelEl.textContent !== client.name) labelEl.textContent = client.name;
+    }
+    if (row.parentElement !== card || row.nextElementSibling !== expectedNext) {
+      card.insertBefore(row, expectedNext);
+    }
+    expectedNext = row;
+    row.dataset.tone = disconnecting ? 'closing' : !running ? 'bad' : client.connected ? 'ok' : 'wait';
+    ui(srEl, 'textContent', () => disconnecting ? t('Disconnecting…') : !running
+      ? t('Not connected')
+      : client.connected
+        ? t('Reached')
+        : t('waiting'));
+    ui(row, 'title', () => client.lastRequestAt
+      ? t('Reached {0}', [ago(client.lastRequestAt)])
+      : srEl.textContent ?? '');
+  }
+  return layoutChanged;
+}
+
 /**
  * Repaints only what ages: the two numbers and status tooltips. Runs every second so
  * "verified 8s ago" keeps counting between reports instead of freezing.
@@ -2422,6 +2576,9 @@ function paintClock(): void {
   browserRow.dataset.tone = bridge.present ? 'ok' : bridge.paired ? 'wait' : 'bad';
   ui(connectorRow, 'title', () => core?.lastRequestAt ? t("Reached {0}", [ago(core.lastRequestAt)]) : $('connectionPopoverConnector').textContent ?? '');
   ui(browserRow, 'title', () => bridge.lastSeenAt ? t("Seen {0}", [ago(bridge.lastSeenAt)]) : $('connectionPopoverBrowser').textContent ?? '');
+  if (paintExternalConnectionRows(connectorRow.parentElement!, browserRow, status.externalClients ?? [], running, disconnecting) && !$('connectionPopover').hidden) {
+    positionConnectionPopover();
+  }
   ui($('connectionPopoverTitle'), 'title', () => disconnecting ? t('Closing connection…') : status.handshakeAt !== null ? t("verified {0}", [ago(status.handshakeAt)]) : t("no handshake yet"));
 
   const triggerText = status.handshakeAt !== null && running

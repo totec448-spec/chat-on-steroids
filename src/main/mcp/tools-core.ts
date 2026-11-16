@@ -1706,8 +1706,13 @@ async function callerNow(startedAt: number, options: { exact?: boolean; runId?: 
   // `exact` marks the one action that binds a run: spawn. It is the call whose refusal the
   // model cannot absorb, so it gets the longer ceiling; every other `agents` action can be
   // declined and asked again on the next tool call.
-  const window = base.requestId ? (options.exact ? SPAWN_EVIDENCE_MS : IDENTITY_EVIDENCE_MS) : PRIME_EVIDENCE_MS;
-  const allowRequest = Boolean(base.requestId && (currentCall()?.allowUnattributed ?? getConfig().multiAgent.allowUnattributedCalls));
+  const allowUnattributed = currentCall()?.allowUnattributed ?? getConfig().multiAgent.allowUnattributedCalls;
+  const syntheticRequestId = !base.requestId && allowUnattributed && base.mcpSessionId
+    ? `mcp_${base.clientIdentity?.id ?? 'remote'}_${base.mcpSessionId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 64)}`
+    : null;
+  const effectiveRequestId = base.requestId ?? syntheticRequestId;
+  const window = effectiveRequestId ? (options.exact ? SPAWN_EVIDENCE_MS : IDENTITY_EVIDENCE_MS) : PRIME_EVIDENCE_MS;
+  const allowRequest = Boolean(effectiveRequestId && allowUnattributed);
   const requestOwnsTarget = !options.member || agentFamiliesForCaller(base).length > 0;
   const resolved =
     base.conversationId ??
@@ -1720,6 +1725,7 @@ async function callerNow(startedAt: number, options: { exact?: boolean; runId?: 
     }));
   const caller: Caller = {
     ...base,
+    requestId: effectiveRequestId,
     conversationId: resolved,
     runId: options.runId
   };

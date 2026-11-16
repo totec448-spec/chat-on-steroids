@@ -7,8 +7,9 @@
  * into the model. Windows belong to the app, so a window the extension keeps in the background is
  * simply never shown: nothing appears in a taskbar or dock on any platform.
  */
+import { createHash } from 'node:crypto';
 import { BaseWindow, BrowserWindow, WebContentsView, app, nativeImage, session, shell, type NativeImage, type Session, type WebContents } from 'electron';
-import { readFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { defaultAppearance, paletteTokens } from '../../shared/appearance.js';
 import { getConfig } from '../config.js';
@@ -20,6 +21,7 @@ import { CHATGPT_SESSION_COOKIE, cosBrowserSignedIn, setCosBrowserSignedIn, isGo
 import { cosSignInTransfer, SignInTransferError, type SignInCookie } from './sign-in-transfer.js';
 import { EXTERNAL_BROWSER_LABELS, installedSignInBrowsers, openBrowserSignIn, type ExternalChatBrowser } from '../browser.js';
 import { opensInCosBrowser } from '../../shared/cos-browser-sites.js';
+import { conversationFromUrl as providerConversationFromUrl } from '../../shared/provider.js';
 import { TabModel, WINDOW_ID_NONE, type ModelEvent, type WindowState } from './tab-model.js';
 import { shownTheme } from '../theme.js';
 
@@ -123,13 +125,9 @@ interface SignInPanel {
   expiry: ReturnType<typeof setTimeout> | null;
 }
 
-/** The conversation a ChatGPT tab shows, from its `/c/<id>` path. */
+/** The conversation a ChatGPT or Gemini tab shows, from its URL. */
 function conversationOf(url: string): string | null {
-  try {
-    const parsed = new URL(url);
-    if (parsed.hostname !== 'chatgpt.com' && parsed.hostname !== 'chat.openai.com') return null;
-    return /^\/(?:g\/[^/]+\/)?c\/([0-9a-z-]+)/i.exec(parsed.pathname)?.[1] ?? null;
-  } catch { return null; }
+  return providerConversationFromUrl(url)?.conversationId ?? null;
 }
 
 /** macOS draws its traffic lights at the left of a hidden title bar; Windows and Linux draw caption buttons at the right. */
@@ -150,6 +148,21 @@ export function browserIcon(executable: string, platform: NodeJS.Platform = proc
   const bundle = executable.match(/^(.*?\.app)(?:\/|$)/)?.[1];
   if (!bundle) return Promise.reject(new Error(`${executable} is not inside an app bundle`));
   return nativeImage.createThumbnailFromPath(bundle, { width: 64, height: 64 });
+}
+
+const COS_BROWSER_SW_STAMP_FILE = 'cos-browser-extension-stamp.txt';
+const EXTENSION_STAMPED_SCRIPTS = ['manifest.json', 'background.js', 'content.js', 'gemini-content.js', 'gemini-dom.js', 'build-stamp.txt'] as const;
+
+/** Digest of the extension scripts Chromium executes in `persist:cos-browser`, so in-place updates clear stale Service Worker script cache. */
+function extensionScriptDigest(dir: string): string {
+  const hash = createHash('sha256');
+  for (const file of EXTENSION_STAMPED_SCRIPTS) {
+    try {
+      hash.update(`${file}\0`);
+      hash.update(readFileSync(path.join(dir, file)));
+    } catch { /* optional stamp or script file absent in custom checkouts */ }
+  }
+  return hash.digest('hex').slice(0, 24);
 }
 
 export class CosBrowser {
@@ -241,10 +254,33 @@ export class CosBrowser {
     if (!dir) throw new Error('The CoS browser needs the bundled extension folder, which is missing from this installation.');
     this.stopping = false;
     this.browserEpoch++;
+    const userDataDir = typeof app.getPath === 'function' ? app.getPath('userData') : null;
+    const stampPath = userDataDir ? path.join(userDataDir, COS_BROWSER_SW_STAMP_FILE) : null;
+    const currentDigest = extensionScriptDigest(dir);
+    let previousDigest = '';
+    if (stampPath) {
+      try { previousDigest = readFileSync(stampPath, 'utf8').trim(); } catch { previousDigest = ''; }
+    }
+    const refreshServiceWorkerCache = Boolean(userDataDir) && previousDigest !== currentDigest;
+    if (refreshServiceWorkerCache && userDataDir && !this.configured) {
+      try { rmSync(path.join(userDataDir, 'Partitions', 'cos-browser', 'Service Worker'), { recursive: true, force: true }); }
+      catch { /* Partition may be locked or absent; session cache clear below handles live partitions too. */ }
+    }
     const ses = session.fromPartition(PARTITION);
+    if (refreshServiceWorkerCache) {
+      if (typeof ses.clearStorageData === 'function') {
+        await ses.clearStorageData({ storages: ['serviceworkers', 'cachestorage'] }).catch(() => undefined);
+      }
+      if (typeof ses.clearCache === 'function') await ses.clearCache().catch(() => undefined);
+      if (typeof ses.clearCodeCaches === 'function') await ses.clearCodeCaches({}).catch(() => undefined);
+      logInfo(`cos browser: cleared stale extension service worker cache for build digest ${currentDigest.slice(0, 12)}`);
+    }
     this.configure(ses);
     this.ses = ses;
     const extension = await ses.extensions.loadExtension(dir);
+    if (stampPath) {
+      try { writeFileSync(stampPath, `${currentDigest}\n`, 'utf8'); } catch { /* non-fatal; next boot retries */ }
+    }
     this.extensionId = extension.id;
     try { this.companionIcon = `data:image/png;base64,${readFileSync(path.join(dir, 'icons', 'icon32.png')).toString('base64')}`; }
     catch { this.companionIcon = null; }

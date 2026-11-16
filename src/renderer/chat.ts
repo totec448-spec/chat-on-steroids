@@ -17,7 +17,7 @@ import { createWorkspaceDocks } from './workspace-docks.js';
 import { currentLanguage, ui, t, tn } from './i18n.js';
 import { APP_COMMANDS, initSkills } from './skills.js';
 import { imageStorageButton } from './image-storage.js';
-import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedComposerModel, composerSendModel, ensureComposerModel, chatModelName } from './chat-models.js';
+import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedComposerModel, composerSendModel, ensureComposerModel, chatModelName, setActiveModelProvider } from './chat-models.js';
 import { marked, Marked, type TokenizerAndRendererExtension } from 'marked';
 import { safeExternalLink } from '../shared/external-link.js';
 import { AGENT_STATE_WORDS, createAgentPanel, workerName, workerSlotLimit } from './agent-panel.js';
@@ -43,6 +43,20 @@ import { dateSections, type DateSection } from './date-sections.js';
 import { createSidebarPins, pinnedSortScope } from './sidebar-pins.js';
 import { createComposerDrafts } from './composer-drafts.js';
 import { createSelectedTabFollow } from './selected-tab-follow.js';
+import {
+  conversationUrl,
+  isAcceptedConversationId,
+  providerForConversationId,
+  type ChatProvider
+} from '../shared/provider.js';
+import {
+  geminiSidebarPresence,
+  loadSidebarClientFilter,
+  matchesSidebarClientFilter,
+  normalizeSidebarClientFilter,
+  saveSidebarClientFilter,
+  type SidebarClientFilter
+} from './sidebar-client.js';
 import { createSidebarCompletionState } from './sidebar-completion.js';
 import { toolResultText } from './tool-result.js';
 import { renderEditCards } from './tool-artifacts.js';
@@ -98,6 +112,7 @@ import {
   committedResumeAncestorsFromSummary,
   continuationMarkerOf,
   DEFAULT_RECORDING_STORAGE_GIB,
+  isExternalMcpSession,
   isUnattributedSession,
   RECORDING_STORAGE_LIMITS_GIB,
   STUCK_SUMMARY_MS,
@@ -558,8 +573,8 @@ const PROJECT_TASK_PAGE_SIZE = 5;
 const PROJECT_TASK_PAGE_INCREMENT = 8;
 let sidebarOrder: ReturnType<typeof createSidebarOrder> | undefined;
 let sidebarPins: ReturnType<typeof createSidebarPins> | undefined;
-/** Only a person's own recorded chats can be pinned; workers live inside their task's row. */
-const pinnable = (entry: SessionSummary): boolean => !!entry.conversationId && entry.origin?.kind !== 'worker';
+/** Only a person's own recorded chats (and external MCP client streams) can be pinned; workers live inside their task's row. */
+const pinnable = (entry: SessionSummary): boolean => (!!entry.conversationId || isExternalMcpSession(entry)) && entry.origin?.kind !== 'worker';
 const pinnedChat = (entry: SessionSummary): boolean => pinnable(entry) && sidebarPins?.has(entry.id) === true;
 let sidebarCompletion: ReturnType<typeof createSidebarCompletionState> | undefined;
 function draftKey(): string { return selectedId ?? (selectedProjectId ? `project:${selectedProjectId}` : 'new'); }
@@ -1112,6 +1127,13 @@ function sessionBadges(summary: SessionSummary): Badge[] {
       ? [{ text: 'blocked', tone: 'is-failed' }, { text: 'not a chat', tone: '' }]
       : [{ text: 'not a chat', tone: '' }];
   }
+  if (isExternalMcpSession(summary)) {
+    const badges: Badge[] = [];
+    if (unattributedBlocked()) badges.push({ text: 'blocked', tone: 'is-failed' });
+    badges.push({ text: summary.mcpClient!.name, tone: '' });
+    if (sessionWorking(summary)) badges.push(AGENT_BADGE.active);
+    return badges;
+  }
   // A new chat whose first message has not gone out yet (#1759): nothing to say about it until it has a conversation.
   if (summary.conversationId === null) return badges;
   // First, and in the failure tone: the states that need the person, most pressing first. A chat
@@ -1218,9 +1240,12 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   top.dataset.sortHandle = '';
   if (renaming?.id === summary.id) top.append(renameField(summary));
   else {
+    if (isExternalMcpSession(summary) && sidebarLayout() !== 'inbox') {
+      top.append(icon('i-sparkle', 'ico sess-client-mark'));
+    }
     const title = el('b', '', () => shownSessionTitle(summary)); title.dir = 'auto';
     // Double-click names the chat, like the pencil does (#1107).
-    if (summary.conversationId) title.addEventListener('dblclick', (event) => { event.stopPropagation(); startRename(summary); });
+    if (summary.conversationId || isExternalMcpSession(summary)) title.addEventListener('dblclick', (event) => { event.stopPropagation(); startRename(summary); });
     top.append(title);
   }
   const badges = sessionBadges(summary);
@@ -1292,6 +1317,29 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     title: () => t("Remove this chat and its saved history from the app. The chat stays in ChatGPT."),
     run: () => void deleteSession(summary.id)
   };
+  const pinMenuItem = (): RowMenuItem => ({
+    action: 'pin', icon: pinned ? 'i-pinned' : 'i-pin',
+    label: () => pinned ? t('Unpin chat') : t('Pin chat'),
+    title: () => pinned ? t("Unpin this chat") : t("Pin this chat to the top of its list"),
+    run: () => {
+      sidebarPins?.toggle(summary.id);
+      paintSessions();
+      // The row moved: keep the keyboard on the same chat's menu button. Its button shows only
+      // while the row has focus, so the row takes focus first.
+      const rebuilt = $('sessionList').querySelector<HTMLElement>(`.sess[data-id="${CSS.escape(summary.id)}"]`);
+      rebuilt?.querySelector<HTMLElement>('.sess-top')?.focus({ preventScroll: true });
+      rowMenuButton(owner)?.focus({ preventScroll: true });
+    }
+  });
+  const unattributedBlockMenuItem = (separated: boolean, blocked: boolean, onToggle: () => void): RowMenuItem => ({
+    action: 'block', icon: blocked ? 'i-play' : 'i-ban',
+    ...(separated ? { separated: true } : {}),
+    label: () => blocked ? t('Allow unattributed calls') : t('Block unattributed calls'),
+    title: () => blocked
+      ? t("Allow unattributed calls: self-contained calls run again even when the app cannot prove which chat sent them")
+      : t("Block unattributed calls: every call the app cannot attribute to a chat is refused and the chat is told to stop"),
+    run: onToggle
+  });
   if (isUnattributedSession(summary)) {
     // Strict mode cannot trust an unattributed stream by definition. Do not offer an "Allow"
     // that the kernel will intentionally ignore; the Settings checkbox explains that
@@ -1300,19 +1348,19 @@ function sessionRow(summary: SessionSummary): HTMLElement {
       // The same decision as a chat's Block: may this activity use local tools? It has no
       // conversation to be stored against, so it moves the app-wide switch and nothing else.
       const blocked = unattributedBlocked();
-      items.push({
-        action: 'block', icon: blocked ? 'i-play' : 'i-ban',
-        label: () => blocked ? t('Allow unattributed calls') : t('Block unattributed calls'),
-        title: () => blocked
-          ? t("Allow unattributed calls: self-contained calls run again even when the app cannot prove which chat sent them")
-          : t("Block unattributed calls: every call the app cannot attribute to a chat is refused and the chat is told to stop"),
-        run: () => void toggleUnattributedBlock(!blocked)
-      });
+      items.push(unattributedBlockMenuItem(false, blocked, () => void toggleUnattributedBlock(!blocked)));
     }
   } else if (summary.conversationId === null) {
     // A new chat whose first message has not gone out yet (#1759): no ChatGPT link to open, copy or block.
     items.push({ action: 'rename', icon: 'i-pencil', label: () => t('Rename'), title: () => t("Rename this chat in the app. Its title in ChatGPT stays the same."), run: () => startRename(summary) });
     items.push(...moveToProjectMenuItems(summary), ...chatGroupMenuItems(summary));
+    if (isExternalMcpSession(summary)) {
+      if (deps.state()?.config.multiAgent?.strictChatAllowlist !== true) {
+        const blocked = unattributedBlocked();
+        items.push(unattributedBlockMenuItem(true, blocked, () => void toggleUnattributedBlock(!blocked)));
+      }
+      if (pinnable(summary)) items.unshift(pinMenuItem());
+    }
   } else {
     const policyLineage = [
       summary.conversationId,
@@ -1338,8 +1386,9 @@ function sessionRow(summary: SessionSummary): HTMLElement {
       { action: 'rename', icon: 'i-pencil', label: () => t('Rename'), title: () => t("Rename this chat in the app. Its title in ChatGPT stays the same."), run: () => startRename(summary) },
       { action: 'open', icon: 'i-out', label: () => t('Open in browser'), title: () => t("Open this chat in your browser"), run: () => void run(api.openSessionChat(summary.id)) },
       // ChatGPT opens /c/<id> wherever the chat lives, a project included (#1107).
-      { action: 'copy-link', icon: 'i-copy', label: () => t('Copy link'), title: () => t("Copy this chat's ChatGPT link"),
-        run: async () => { if (await run(api.writeClipboard(`https://chatgpt.com/c/${summary.conversationId}`))) toast(t('Link copied')); } },
+      { action: 'copy-link', icon: 'i-copy', label: () => t('Copy link'),
+        title: () => providerForConversationId(summary.conversationId) === 'gemini' ? t("Copy this chat's Gemini link") : t("Copy this chat's ChatGPT link"),
+        run: async () => { if (await run(api.writeClipboard(conversationUrl(summary.conversationId!)))) toast(t('Link copied')); } },
       { action: 'share', icon: 'i-globe', label: () => t('Share as web page'),
         title: () => t('Save this chat as one web page file to send to anyone. You see the page before it is saved.'), run: () => openSharePage(summary.id) }
     );
@@ -1379,20 +1428,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     }
     if (pinnable(summary)) {
       // First, as in ChatGPT: a pinned chat stays above the unpinned ones of its own list (#1133).
-      items.unshift({
-        action: 'pin', icon: pinned ? 'i-pinned' : 'i-pin',
-        label: () => pinned ? t('Unpin chat') : t('Pin chat'),
-        title: () => pinned ? t("Unpin this chat") : t("Pin this chat to the top of its list"),
-        run: () => {
-          sidebarPins?.toggle(summary.id);
-          paintSessions();
-          // The row moved: keep the keyboard on the same chat's menu button. Its button shows only
-          // while the row has focus, so the row takes focus first.
-          const rebuilt = $('sessionList').querySelector<HTMLElement>(`.sess[data-id="${CSS.escape(summary.id)}"]`);
-          rebuilt?.querySelector<HTMLElement>('.sess-top')?.focus({ preventScroll: true });
-          rowMenuButton(owner)?.focus({ preventScroll: true });
-        }
-      });
+      items.unshift(pinMenuItem());
     }
   }
   items.push(remove);
@@ -1889,6 +1925,99 @@ const INBOX_SETTLE_MS = 24 * 60 * 60_000;
 /** The project the inbox shows, or null for all of them. Window-local, like disclosure state. */
 let inboxProject: string | null = null;
 let inboxSettledOpen = true;
+/** Which AI client's chats and project groups the sidebar shows: All, ChatGPT, or Gemini. */
+let sidebarClient: SidebarClientFilter = loadSidebarClientFilter();
+/** Explicit AI client choice for an un-branched New chat when the user clicks the composer toggle. */
+let newChatProvider: ChatProvider | null = null;
+
+function activeChatProvider(): ChatProvider {
+  if (selectedId !== null) {
+    const selected = sessions.find(row => row.id === selectedId);
+    if (selected?.conversationId) return providerForConversationId(selected.conversationId) ?? 'chatgpt';
+    const pending = pendingComposerInputs.find(row => row.opening && row.sessionId === selectedId);
+    if (pending?.provider === 'gemini' || pending?.provider === 'chatgpt') return pending.provider;
+    if (selected?.mcpClient?.id === 'gemini') return 'gemini';
+    return 'chatgpt';
+  }
+  if (newChatBranch) return providerForConversationId(newChatBranch.conversationId) ?? 'chatgpt';
+  if (newChatProvider) return newChatProvider;
+  if (sidebarClient === 'gemini') return 'gemini';
+  if (sidebarClient === 'chatgpt') return 'chatgpt';
+  return deps.state()?.config.ui.defaultChatProvider ?? 'chatgpt';
+}
+
+function syncComposerProviderSwitch(): void {
+  const provider = activeChatProvider();
+  const host = document.getElementById('composerProviderSwitch');
+  if (host) {
+    host.hidden = !(newChatSelected && selectedId === null && !newChatBranch);
+    for (const button of host.querySelectorAll<HTMLButtonElement>('[data-composer-provider]')) {
+      const active = button.dataset.composerProvider === provider;
+      button.classList.toggle('is-sel', active);
+      button.setAttribute('aria-pressed', String(active));
+    }
+  }
+  const modelMenu = document.getElementById('modelMenu');
+  if (modelMenu) modelMenu.hidden = false;
+  setActiveModelProvider(provider);
+}
+
+function syncSidebarClientSwitch(): void {
+  const host = document.getElementById('sidebarClientSwitch');
+  if (!host) return;
+  const presence = geminiSidebarPresence(deps?.state?.(), sessions);
+  for (const button of host.querySelectorAll<HTMLButtonElement>('[data-sidebar-client]')) {
+    const mode = normalizeSidebarClientFilter(button.dataset.sidebarClient);
+    const active = mode === sidebarClient;
+    button.classList.toggle('is-sel', active);
+    button.setAttribute('aria-pressed', String(active));
+    if (mode === 'gemini') {
+      button.classList.toggle('is-live', presence.live);
+      button.classList.toggle('is-working', presence.working);
+    }
+  }
+}
+
+function selectSidebarClient(next: SidebarClientFilter): void {
+  const normalized = normalizeSidebarClientFilter(next);
+  if (normalized === sidebarClient) return;
+  sidebarClient = normalized;
+  newChatProvider = normalized === 'gemini' ? 'gemini' : normalized === 'chatgpt' ? 'chatgpt' : null;
+  saveSidebarClientFilter(sidebarClient);
+  syncSidebarClientSwitch();
+  syncComposerProviderSwitch();
+  if (selectedId === null && !selectedProjectId) {
+    setComposerPlaceholder(() => activeChatProvider() === 'gemini' ? t('Message Gemini…') : t('Ask anything…'));
+  }
+  paintSessions();
+}
+
+function openGeminiSetup(): void {
+  openSettingsTab('setup');
+  window.setTimeout(() => {
+    document.getElementById('geminiConnectorCard')?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+  }, 60);
+}
+
+function filteredEmptyState(): HTMLElement {
+  const box = el('div', 'empty sidebar-filtered-empty');
+  box.append(el('p', '', () => sidebarClient === 'gemini' ? t('No Gemini chats yet.') : t('No ChatGPT chats yet.')));
+  const actions = el('div', 'sidebar-filtered-empty-actions');
+  if (sidebarClient === 'gemini') {
+    const setup = el('button', 'btn', () => t('Open Gemini setup')) as HTMLButtonElement;
+    setup.type = 'button';
+    setup.dataset.sidebarEmptyAction = 'gemini-setup';
+    setup.addEventListener('click', openGeminiSetup);
+    actions.append(setup);
+  }
+  const reset = el('button', 'btn', () => t('Show all chats')) as HTMLButtonElement;
+  reset.type = 'button';
+  reset.dataset.sidebarEmptyAction = 'show-all';
+  reset.addEventListener('click', () => selectSidebarClient('all'));
+  actions.append(reset);
+  box.append(actions);
+  return box;
+}
 
 /** A chat's sub-agents that keep it in view: running, or needing the person. */
 function busyWorkers(workers: SessionSummary[]): SessionSummary[] {
@@ -1925,6 +2054,7 @@ const ATTENTION: Record<ChatAttention, { icon: string; label: () => string }> = 
   failed: { icon: 'i-warning', label: () => t('Failed') }
 };
 function chatAttention(summary: SessionSummary): ChatAttention | null {
+  if (isExternalMcpSession(summary)) return unattributedBlocked() ? 'blocked' : null;
   const id = summary.conversationId;
   if (id && approvalChats.has(id)) return 'approval';
   if (id && stoppedChats.has(id)) return 'recovery';
@@ -1991,7 +2121,9 @@ function inboxCard(summary: SessionSummary, workers?: SessionSummary[]): HTMLEle
   if (!inboxProject) {
     // A chat outside every project says so, where a project's name would be.
     const name = el('span', 'sess-project');
-    name.append(project ? projectMark(project) : icon('i-chat', 'ico project-mark'), el('span', '', () => project?.name ?? t('No project')));
+    if (project) name.append(projectMark(project), el('span', '', () => project.name));
+    else if (isExternalMcpSession(summary)) name.append(icon('i-sparkle', 'ico project-mark sess-client-mark'), el('span', '', () => summary.mcpClient?.name || t('External client')));
+    else name.append(icon('i-chat', 'ico project-mark'), el('span', '', () => t('No project')));
     meta.append(name);
   }
   const state = el('span', 'sess-state');
@@ -2024,7 +2156,15 @@ function inboxCard(summary: SessionSummary, workers?: SessionSummary[]): HTMLEle
   meta.append(state);
   top.prepend(meta);
   const model = summary.selectedModel;
-  const detail = model ? el('span', 'sess-detail', () => chatModelName(model.model, model.reasoningEffort)) : null;
+  const detail = model
+    ? el('span', 'sess-detail', () => chatModelName(model.model, model.reasoningEffort))
+    : isExternalMcpSession(summary)
+      ? el('span', 'sess-detail', () => {
+          const client = [summary.mcpClient?.name, summary.mcpClient?.version].filter(Boolean).join(' ');
+          const activity = summary.lastToolActivity?.title;
+          return activity ? (client ? `${client} · ${activity}` : activity) : client;
+        })
+      : null;
   // Its sub-agents, counted, even while the chat itself is quiet: on the model's line, which has the
   // room the project and state above it do not.
   const crew = workers ? workerSummary(workers) : null;
@@ -2045,7 +2185,7 @@ function inboxSettledRow(summary: SessionSummary): HTMLElement {
   if (!inboxProject) {
     // A chat outside every project gets the chat mark its card uses, not a blank.
     const project = projects.find(entry => entry.id === projectGroup(summary.projectId));
-    top.prepend(project ? projectMark(project) : icon('i-chat', 'ico project-mark'));
+    top.prepend(project ? projectMark(project) : isExternalMcpSession(summary) ? icon('i-sparkle', 'ico project-mark sess-client-mark') : icon('i-chat', 'ico project-mark'));
   }
   // A turn that failed and was left there still says so once settled, in the card's own words.
   if (chatAttention(summary) === 'failed') {
@@ -2099,13 +2239,17 @@ function paintInbox(): void {
   const hadControlFocus = document.activeElement instanceof HTMLElement && list.contains(document.activeElement) &&
     document.activeElement.matches('[data-inbox-control]');
   const children = workerChildren();
+  const parentsById = new Map(sessions.map(entry => [entry.id, entry] as const));
   const busy = new Map([...children].map(([key, workers]) => [key, busyWorkers(workers)]));
   const inProject = (entry: SessionSummary) => !inboxProject || projectGroup(entry.projectId) === inboxProject;
+  const inClient = (entry: SessionSummary) => matchesSidebarClientFilter(entry, sidebarClient, parentsById);
   // Everything but the unattributed bucket is a chat, a new one still waiting for its conversation too (#1759).
   const attributed = (entry: SessionSummary) => !isUnattributedSession(entry);
-  const shown = sessions.filter(entry => entry.origin?.kind !== 'worker' && attributed(entry) && inProject(entry));
+  const shown = sessions.filter(entry => entry.origin?.kind !== 'worker' && attributed(entry) && inClient(entry) && inProject(entry));
   // What the tree puts under "Unattributed activity", under the same disclosure here.
-  const diagnostics = sessions.filter(entry => entry.origin?.kind !== 'worker' && !attributed(entry) && inProject(entry));
+  const diagnostics = sidebarClient === 'gemini'
+    ? []
+    : sessions.filter(entry => entry.origin?.kind !== 'worker' && !attributed(entry) && inProject(entry));
   const settles = new Set(shown.filter(entry => inboxSettled(entry, busy.get(entry.id))));
   // A settled chat ranks with the rest: one that failed long ago orders by recency and pages like any quiet chat.
   const rank = new Map(shown.map(entry => [entry.id, settles.has(entry) ? INBOX_REST : inboxRank(entry, busy.get(entry.id))]));
@@ -2216,7 +2360,7 @@ function paintInbox(): void {
   }
   // After both groups, outside Settled: it reads on in the whole list, and Settled may be closed.
   if (showMore) rows.push(showMore);
-  const orphans = (children.get('other-workers') ?? []).filter(worker => !id || projectGroup(worker.projectId) === id);
+  const orphans = (children.get('other-workers') ?? []).filter(worker => (!id || projectGroup(worker.projectId) === id) && inClient(worker));
   const history = workerHistory(orphans);
   if (history) rows.push(history);
   const unattributed = unattributedActivity(diagnostics);
@@ -2252,6 +2396,7 @@ function inboxEmpty(id: string | null): HTMLElement {
     line.setAttribute('role', 'status');
     return line;
   }
+  if (sidebarClient !== 'all') return filteredEmptyState();
   return el('p', 'empty', () => t('No chats yet.'));
 }
 
@@ -2459,6 +2604,7 @@ function paintSessions(): void {
   // Nor replace the name field mid-word: an input method's composition (Chinese, Japanese,
   // Korean) lives in that exact node. The edit's end repaints with everything that changed.
   if (renaming && (document.activeElement as HTMLElement | null)?.classList.contains('sess-rename')) return;
+  syncSidebarClientSwitch();
   const layout = sidebarLayout();
   paintedLayout = layout;
   // The header's Mark all as seen shows only while a chat shows New response.
@@ -2516,10 +2662,18 @@ function paintSessions(): void {
     };
     return [...ordered(true), ...ordered(false)];
   });
+  const parentsById = new Map(sessions.map(entry => [entry.id, entry] as const));
+  const inClient = (entry: SessionSummary): boolean => matchesSidebarClientFilter(entry, sidebarClient, parentsById);
+  const projectHasAnySessions = new Set<string>();
   for (const entry of orderedSessions) {
     if (entry.origin?.kind === 'worker') continue;
-    if (isUnattributedSession(entry)) { diagnostics.push(entry); continue; }
+    if (isUnattributedSession(entry)) {
+      if (sidebarClient !== 'gemini') diagnostics.push(entry);
+      continue;
+    }
     const projectId = groupOf(entry.projectId);
+    if (projectId) projectHasAnySessions.add(projectId);
+    if (!inClient(entry)) continue;
     const workers = children.get(entry.id);
     if (projectId) {
       const tasks = projectRows.get(projectId) ?? [];
@@ -2533,10 +2687,16 @@ function paintSessions(): void {
       if (workers) workerGroup(entry.id, workers, row, rows);
     }
   }
-  const history = workerHistory(children.get('other-workers') ?? []);
+  const orphans = (children.get('other-workers') ?? []).filter(worker => inClient(worker));
+  const history = workerHistory(orphans);
   if (history) rows.push(history);
   const projectEntries = projectSortEntries(groupOf);
-  const orderedProjects = sidebarOrder?.ordered(SIDEBAR_PROJECT_SCOPE, projectEntries) ?? projectEntries;
+  const orderedProjects = (sidebarOrder?.ordered(SIDEBAR_PROJECT_SCOPE, projectEntries) ?? projectEntries).filter(({ id }) => {
+    if (sidebarClient === 'all') return true;
+    const matching = projectRows.get(id)?.length ?? 0;
+    if (sidebarClient === 'gemini') return matching > 0;
+    return matching > 0 || !projectHasAnySessions.has(id);
+  });
   const projectSections: HTMLElement[] = [];
   for (const { id } of orderedProjects) {
     const project = projects.find(row => row.id === id);
@@ -2588,7 +2748,11 @@ function paintSessions(): void {
       const members = groupedTasks.get(group.id);
       if (members) members.push(task); else groupedTasks.set(group.id, [task]);
     }
-    for (const group of projectChatGroups(id)) section.append(chatGroupSection(group, groupedTasks.get(group.id) ?? []));
+    for (const group of projectChatGroups(id)) {
+      const members = groupedTasks.get(group.id) ?? [];
+      if (sidebarClient !== 'all' && members.length === 0) continue;
+      section.append(chatGroupSection(group, members));
+    }
     const count = projectVisibleCounts.get(id) ?? PROJECT_TASK_PAGE_SIZE;
     const shown = tasks.filter((task, index) => index < count || task.selected);
     const shownRows: HTMLElement[] = [];
@@ -2618,6 +2782,7 @@ function paintSessions(): void {
   }
   const unattributed = unattributedActivity(diagnostics);
   if (unattributed) rows.push(unattributed);
+  if (sidebarClient !== 'all' && !projectSections.length && !rows.length) rows.push(filteredEmptyState());
   // A new node is not :hover until the pointer moves again: the row under it would lose its hover
   // look for a moment, and a sub-agent arrow would jump back to the menu's column and slide out again.
   // The row under the pointer is born pointed (until the pointer leaves), keeps its tooltip, and an
@@ -2653,7 +2818,7 @@ function paintSessions(): void {
   restoreGroupFocus();
   keepFocus();
   syncSelectedWorkspace();
-  $('projectsEmpty').hidden = projectSections.length > 0;
+  $('projectsEmpty').hidden = projectSections.length > 0 || sidebarClient !== 'all';
   $('sessionsEmpty').hidden = rows.length > 0;
 
   scheduleToolActivityExpiry();
@@ -3586,7 +3751,7 @@ function paintTaskActions(): void {
 }
 function paintLoopDelivery(): void {
   const model = confirmedComposerModel();
-  $('loopDeliveryRow').hidden = deps.state()?.config.ui.finishTool !== true || !model ||
+  $('loopDeliveryRow').hidden = deps.state()?.config.ui.finishTool !== true || !model || !model.reasoningEffort ||
     !supportsFinishAutomation($<HTMLSelectElement>('chatAutomation').value as InputAutomation, model.model, model.reasoningEffort);
 }
 function openingLoopDelivery(): boolean | undefined {
@@ -3681,7 +3846,7 @@ async function refreshSessionControls(): Promise<void> {
     clearSummaryOffer();
   }
   paintAutomationSwitch();
-  if (!id) { controlledSessionId = null; controlledTurnId = null; controlledHeldTurnId = null; controlledPageless = false; paintDeliveryControls(); menu.hidden = false;
+  if (!id) { controlledSessionId = null; controlledTurnId = null; controlledHeldTurnId = null; controlledPageless = false; paintDeliveryControls(); menu.hidden = activeChatProvider() === 'gemini';
     $<HTMLTextAreaElement>('sessionObjective').disabled = false;
     paintTaskActions();
     for (const action of ['compactSession', 'cancelCompaction', 'resumeLastSummary']) $(action).hidden = true;
@@ -3691,7 +3856,7 @@ async function refreshSessionControls(): Promise<void> {
     controlledSessionId = id; controlledSelection = selectionGeneration; controlledTurnId = null; controlledHeldTurnId = null;
     controlledCanInject = false; controlledCanSendDirectly = false; controlledQueueAtFinish = false;
     controlledStopPending = false; controlledFinishWaiting = false; controlledPageless = false;
-    menu.hidden = false;
+    menu.hidden = activeChatProvider() === 'gemini';
     goalDraftView = null; goalWaitView = null; finishGoalDraftView = null; controlledRecovery = [];
     $<HTMLSelectElement>('chatAutomation').value = opening?.automation ?? 'off';
     $<HTMLSelectElement>('loopDelivery').value = opening?.loopAfterTurn ? 'after-turn' : 'finish';
@@ -3726,7 +3891,7 @@ async function refreshSessionControls(): Promise<void> {
   paintDeliveryControls();
   paintStateLine();
   repaintHeld();
-  menu.hidden = !controls;
+  menu.hidden = !controls || activeChatProvider() === 'gemini';
   $('compactSession').hidden = !controls;
   if (!controls) { $('cancelCompaction').hidden = true; clearSummaryOffer(); return; }
   const objective = $<HTMLTextAreaElement>('sessionObjective');
@@ -6813,7 +6978,7 @@ function paintDetail(followBottom = historyBefore === null): void {
   paintStateLine();
   paintBackgroundProcesses();
   const summary = sessions.find((s) => s.id === selectedId) ?? null;
-  applyComposerSessionModel(selectedId ? `${selectedId}:${selectionGeneration}` : null, composerSessionSelection(summary) ?? null);
+  applyComposerSessionModel(selectedId ? `${selectedId}:${selectionGeneration}` : null, composerSessionSelection(summary) ?? null, activeChatProvider());
   const config = deps.state()?.config;
   if (config) paintContextMeter(summary, config, confirmedComposerModel());
   const project = selectedLocalProject();
@@ -7969,6 +8134,12 @@ function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad'; working?:
       tone: ''
     };
   }
+  if (selected && isExternalMcpSession(selected)) {
+    const name = selected.mcpClient?.name ?? 'MCP';
+    return unattributedBlocked()
+      ? { text: t("{0} is blocked — allow unattributed calls in Settings to let it run tools", [name]), tone: 'is-bad' }
+      : { text: t("Connected via {0} (external MCP client)", [name]), tone: '' };
+  }
 
   const workers = swarm?.agents.filter((agent) => agent.role === 'worker') ?? [];
   if (workers.length === 0) return { text: '', tone: '' };
@@ -8203,6 +8374,7 @@ export function chatSettingsPatch(current: Config): {
     multiAgent: {
       defaultModel: $<HTMLSelectElement>('workerModel').value,
       defaultReasoning: $<HTMLSelectElement>('workerReasoning').value as Config['multiAgent']['defaultReasoning'],
+      defaultGeminiModel: (document.getElementById('workerGeminiModel') as HTMLSelectElement | null)?.value || undefined,
       // The exposure switch lives with every other ChatGPT tool switch, on Home. Settings owns
       // the per-family worker limit and the optional broker-wide admission cap below.
       enabled: $<HTMLInputElement>('homeMaEnabled').checked,
@@ -8652,7 +8824,7 @@ const CHAT_INPUTS = [
   'chatBrowser', 'cosBrowserMinimize', 'browserBridgePort',
   'goalIncludeToolCalls',
   'planBackend',
-  'finishTool', 'finishHoldOnStop', 'finishLeadMinutes', 'rotateTurnMinutes', 'rotateStopFallback', 'localAppUsage', 'defaultChatModel', 'defaultChatReasoning', 'workerModel', 'workerReasoning', 'autoSelectSkills', 'backgroundChats', 'backgroundPlacement', 'browserOnly', 'autoRefreshPlugins',
+  'finishTool', 'finishHoldOnStop', 'finishLeadMinutes', 'rotateTurnMinutes', 'rotateStopFallback', 'localAppUsage', 'defaultChatModel', 'defaultChatReasoning', 'defaultGeminiModel', 'workerModel', 'workerReasoning', 'workerGeminiModel', 'autoSelectSkills', 'backgroundChats', 'backgroundPlacement', 'browserOnly', 'autoRefreshPlugins',
   'goalBackend',
   'loopBackend',
   'helperModel', 'helperReasoning',
@@ -8745,6 +8917,7 @@ export function chatApply(state: AppState, previous?: Config): void {
   if (sendCheckConfigured !== !!config.ui.sendCheckUrl) { sendCheckConfigured = !!config.ui.sendCheckUrl; paintPendingInputs(); }
   if (visible && selectedId) void refreshSessionControls();
   applyChatModels(config, previous);
+  setActiveModelProvider(activeChatProvider());
   // After the picker took this state: the meter's Pro rule reads the picker, and before it could
   // still describe the previous model and fill a Pro chat toward a compaction point it never uses.
   paintContextMeter(sessions.find(session => session.id === selectedId) ?? null, config, confirmedComposerModel());
@@ -8847,6 +9020,7 @@ export function chatApply(state: AppState, previous?: Config): void {
   $('bridgeState').classList.toggle('is-warn', browserRequired && (!bridge.present || !secureStorageAvailable));
   void showExtensionPath();
 
+  syncSidebarClientSwitch();
   // A changed layout redraws even with nothing loaded yet: its own controls are the list's head.
   if (sessions.length > 0 || sidebarLayout() !== paintedLayout) paintSessions();
 }
@@ -9336,15 +9510,20 @@ async function retryPlannedInput(entry: InputEntry): Promise<void> {
   if (dismissedInputNotices.has(entry.id) || entry.stagesApplied || !['failed', 'cancelled'].includes(entry.state)) return;
   // The outbox retains the authored workflow after failure. Retry that payload, not
   // its stage-one display text, and never revive the old browser claim/receipt.
-  const { sessionId, projectId, text, objective, stages, images, attachments, attachmentDelivery, automation, loopAfterTurn, model, reasoningEffort, afterTurn } = entry;
+  const { sessionId, projectId, text, objective, stages, images, attachments, attachmentDelivery, automation, loopAfterTurn, model, reasoningEffort, afterTurn, provider } = entry;
+  const targetProvider: ChatProvider = provider === 'gemini'
+    ? 'gemini'
+    : sessionId
+      ? (providerForConversationId(sessions.find(row => row.id === sessionId)?.conversationId) ?? 'chatgpt')
+      : 'chatgpt';
   const args: InputArgs = { id: crypto.randomUUID(), sessionId, projectId, text, objective, stages, images, attachments, attachmentDelivery,
-    automation, loopAfterTurn, model, reasoningEffort, afterTurn, mode: entry.requestedMode ?? entry.mode, dueAt: Date.now() };
+    automation, loopAfterTurn, model, reasoningEffort, afterTurn, ...(provider ? { provider } : {}), mode: entry.requestedMode ?? entry.mode, dueAt: Date.now() };
   const generation = selectionGeneration;
   // Hide during the attempt, but persist dismissal only after its replacement is durable.
   dismissedInputNotices.add(entry.id); void refreshInputQueue();
   let accepted = false;
   try {
-    if (entry.error === 'Requested model or reasoning could not be confirmed') {
+    if (entry.error === 'Requested model or reasoning could not be confirmed' && targetProvider !== 'gemini') {
       const selection = await ensureComposerModel(true);
       if (generation !== selectionGeneration || cancelledStarts.has(args.id)) return;
       // This message asked for an exact model; Automatic would quietly replace it (#864).
@@ -9443,6 +9622,8 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
   }
   const discoveryGeneration = ++composerDiscoveryGeneration;
   const discoverySelection = selectionGeneration, discoverySession = selectedId, discoveryDraft = authoredComposerText();
+  const targetProvider = activeChatProvider();
+  setActiveModelProvider(targetProvider);
   const modelSettings = composerSendModel() ?? await ensureComposerModel();
   // Discovery can outlive navigation or draft edits. Only the latest unchanged
   // authored send may continue; a second click must never send the same text twice.
@@ -9470,11 +9651,12 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
   const authoredSource = plan ? 'objective' as const : 'text' as const;
   // Branch in new chat (#482): the first message of a branch, or its retry before ChatGPT has it.
   const reserved = sessionId ? sessions.find(row => row.id === sessionId) : undefined;
+  const keepProvider = sessionId === null || (!reserved?.conversationId && targetProvider === 'gemini');
   const branch = sessionId === null && newChatBranch
     ? { sessionId: newChatBranch.sessionId, conversationId: newChatBranch.conversationId, messageId: newChatBranch.messageId }
     : reserved?.origin?.branchOf && reserved.origin.fromSessionId && !reserved.conversationId
       ? { sessionId: reserved.origin.fromSessionId, ...reserved.origin.branchOf } : undefined;
-  startingInputs.set(id, { id, sessionId, projectId, text, ...attachmentPayload, ...(branch ? { branch } : {}), ...(edit ? { edit } : {}), stages: plan?.slice(1), objective, authoredSource, mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn',
+  startingInputs.set(id, { id, sessionId, projectId, text, ...attachmentPayload, ...(branch ? { branch } : {}), ...(edit ? { edit } : {}), ...(keepProvider ? { provider: targetProvider } : {}), stages: plan?.slice(1), objective, authoredSource, mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn',
     dueAt, ...modelSettings, state: 'queued', owner: null, createdAt: dueAt, conversationId: null });
   replaceComposerDraft();
   input.value = ''; inputDrafts.delete(key);
@@ -9494,7 +9676,7 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
   void refreshInputQueue();
   paintDeliveryControls();
   try {
-    const result = await run(api.sendInput({ id, sessionId, projectId, text, ...attachmentPayload, ...(picture ? { imageRequest: true as const } : {}), ...(branch ? { branch } : {}), ...(edit ? { edit } : {}), stages: plan?.slice(1), objective, authoredSource, automation: mode === 'finish' ? undefined : $<HTMLSelectElement>('chatAutomation').value as InputAutomation, loopAfterTurn: openingLoopDelivery(), mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn', dueAt, ...modelSettings }));
+    const result = await run(api.sendInput({ id, sessionId, projectId, text, ...attachmentPayload, ...(picture ? { imageRequest: true as const } : {}), ...(branch ? { branch } : {}), ...(edit ? { edit } : {}), ...(keepProvider ? { provider: targetProvider } : {}), stages: plan?.slice(1), objective, authoredSource, automation: mode === 'finish' ? undefined : $<HTMLSelectElement>('chatAutomation').value as InputAutomation, loopAfterTurn: openingLoopDelivery(), mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn', dueAt, ...modelSettings }));
     if (cancelledStarts.has(id)) return;
     if (!result) {
       // A disk failure after outbox commit still owns this input. Keep its exact
@@ -9595,9 +9777,10 @@ function selectSession(id: string): void {
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   newChatSelected = false;
   selectedId = id;
+  syncComposerProviderSwitch();
   refreshBackgroundProcesses();
   const selected = sessions.find(row => row.id === id);
-  applyComposerSessionModel(`${id}:${selectionGeneration}`, composerSessionSelection(selected) ?? null);
+  applyComposerSessionModel(`${id}:${selectionGeneration}`, composerSessionSelection(selected) ?? null, activeChatProvider());
   const parent = selected?.origin?.kind === 'worker' ? selected.origin.fromSessionId : null;
   if (parent) expandedWorkers.add(parent);
   selectedProjectId = projectGroup(parent ? sessions.find(row => row.id === parent)?.projectId : selected?.projectId);
@@ -9660,12 +9843,14 @@ function selectNewChat(projectId: string | null = null, branch: typeof newChatBr
   inputQueueGeneration++;
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   selectedCatalogFallback = null;
+  if (branch) newChatProvider = null;
   newChatSelected = true; selectedId = null; selectedProjectId = projectId; detailFor = null; detailCursor = null;
+  syncComposerProviderSwitch();
   requestSelectedTabFollow(null);
   refreshBackgroundProcesses();
   sendAnchor = null; readingAfterSend = false; readerAtEnd = true;
   if (projectId) expandedProjects.add(projectId);
-  applyComposerSessionModel(null, null);
+  applyComposerSessionModel(null, null, activeChatProvider());
   // New Chat selects its existing draft, just like a session. Navigation is not
   // permission to discard authored text, attachments or a prepared workflow.
   $('inputQueue').replaceChildren();
@@ -9673,7 +9858,7 @@ function selectNewChat(projectId: string | null = null, branch: typeof newChatBr
   if (!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
     $('composer').animate?.([{ opacity: 0.45 }, { opacity: 1 }], { duration: 150, easing: 'ease-out' });
   }
-  setComposerPlaceholder(() => projectId ? t("Message in {0}…", [projects.find(project => project.id === projectId)?.name ?? 'project']) : t("Ask anything…"));
+  setComposerPlaceholder(() => projectId ? t("Message in {0}…", [projects.find(project => project.id === projectId)?.name ?? 'project']) : activeChatProvider() === 'gemini' ? t("Message Gemini…") : t("Ask anything…"));
   paintBranchNotices();
   $<HTMLTextAreaElement>('chatInput').focus();
 }
@@ -9736,6 +9921,24 @@ export function initChat(next: Deps): void {
     openMain: selectSession, working: sessionWorking,
     modelLabel: chatModelName,
     slotLimit: () => workerSlotLimit(deps.state()?.config.multiAgent),
+    canSpawn: () => {
+      const selected = selectedId ? sessions.find(row => row.id === selectedId) : undefined;
+      return Boolean(
+        selected &&
+        selected.conversationId &&
+        isAcceptedConversationId(selected.conversationId) &&
+        selected.origin?.kind !== 'worker' &&
+        selected.origin?.kind !== 'helper' &&
+        !blockedChats.has(selected.conversationId)
+      );
+    },
+    onSpawn: async (workers) => {
+      if (!selectedId) return false;
+      const reply = await run(api.spawnWorkers({ id: selectedId, workers }));
+      if (!reply?.ok) return false;
+      toast(reply.workers.length === 1 ? t('Sub-agent launched') : t('Sub-agents launched'));
+      return true;
+    },
     agent: worker => [...(swarm?.agents ?? []), ...(swarm?.retainedWorkers ?? [])].find(entry => entry.role === 'worker' && entry.id === worker.origin?.agentId &&
       !!entry.conversationId && entry.conversationId === worker.conversationId) ?? null,
     render: (source, id, current, outlines) => {
@@ -9848,7 +10051,9 @@ export function initChat(next: Deps): void {
       if (!id) {
         const draft = objective.value, mode = $<HTMLSelectElement>('sessionObjectiveMode').value as 'goal' | 'loop';
         if (!draft.trim()) return;
-        const settings = confirmedComposerModel();
+        const targetProvider = activeChatProvider();
+        setActiveModelProvider(targetProvider);
+        const settings = targetProvider === 'gemini' ? composerSendModel() : confirmedComposerModel();
         if (!settings) { toast(t('Reload model choices and select an available model and thinking effort before sending.')); return; }
         closeObjectiveEditor();
         const selection = selectionGeneration, intent = goalIntentGeneration, requestId = crypto.randomUUID();
@@ -9868,7 +10073,7 @@ export function initChat(next: Deps): void {
           if (!opening) { if (goalProgress?.requestId === requestId) { goalProgress.phase = 'failed'; goalProgress.error ||= 'Opening message generation failed'; paintGoalProgress(); } return; }
           const dueAt = Date.now(), inputId = crypto.randomUUID();
           const entry: InputEntry = { id: inputId, sessionId: null, projectId, text: opening.reply, objective: draft.trim(), authoredSource: 'objective', automation: mode,
-            loopAfterTurn: openingLoopDelivery(),
+            loopAfterTurn: openingLoopDelivery(), provider: targetProvider,
             mode: 'auto', dueAt, model, reasoningEffort, state: 'queued', owner: null, createdAt: dueAt, conversationId: null };
           startingInputs.set(inputId, entry); pendingNewInput = { id: inputId, generation: selection };
           goalProgress = { requestId, selection, inputId, phase: 'queued', text: '' }; paintDeliveryControls();
@@ -10448,6 +10653,47 @@ export function initChat(next: Deps): void {
     recall = null;
     paintDetail();
   });
+
+  const clientSwitch = document.getElementById('sidebarClientSwitch');
+  if (clientSwitch) {
+    ui(clientSwitch, 'aria-label', () => t('Chat client filter'));
+    clientSwitch.addEventListener('click', (event) => {
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-sidebar-client]');
+      if (!button) return;
+      selectSidebarClient(normalizeSidebarClientFilter(button.dataset.sidebarClient));
+    });
+    clientSwitch.addEventListener('keydown', (event) => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      const buttons = [...clientSwitch.querySelectorAll<HTMLButtonElement>('[data-sidebar-client]')];
+      if (!buttons.length) return;
+      const index = Math.max(0, buttons.indexOf(event.target as HTMLButtonElement));
+      const nextIndex = event.key === 'Home' ? 0
+        : event.key === 'End' ? buttons.length - 1
+        : event.key === 'ArrowRight' ? (index + 1) % buttons.length
+        : (index - 1 + buttons.length) % buttons.length;
+      const target = buttons[nextIndex]!;
+      event.preventDefault();
+      target.focus({ preventScroll: true });
+      selectSidebarClient(normalizeSidebarClientFilter(target.dataset.sidebarClient));
+    });
+    syncSidebarClientSwitch();
+  }
+
+  const providerSwitch = document.getElementById('composerProviderSwitch');
+  if (providerSwitch) {
+    ui(providerSwitch, 'aria-label', () => t('AI client for new chat'));
+    providerSwitch.addEventListener('click', (event) => {
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-composer-provider]');
+      if (!button) return;
+      newChatProvider = button.dataset.composerProvider === 'gemini' ? 'gemini' : 'chatgpt';
+      syncComposerProviderSwitch();
+      if (selectedId === null && !selectedProjectId) {
+        setComposerPlaceholder(() => activeChatProvider() === 'gemini' ? t('Message Gemini…') : t('Ask anything…'));
+      }
+      paintDeliveryControls();
+    });
+    syncComposerProviderSwitch();
+  }
 
   $('chatRefresh').addEventListener('click', event => { event.preventDefault(); void refreshAll(); });
   $('markAllSeen').addEventListener('click', () => markAllSeen());

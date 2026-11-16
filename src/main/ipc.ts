@@ -1,6 +1,7 @@
 import { registerAgentOutputIpc } from './agent-output-ipc.js';
 import { onChatsAtOnceChange, resumeAutomaticSends } from './chats-at-once.js';
 import { MAX_CHAT_STYLE_CHARS } from '../shared/chat-style.js';
+import { CHAT_PROVIDERS, inputBrowserUrl, isAcceptedConversationId, providerForConversationId } from '../shared/provider.js';
 import { registerWorkspaceTerminalIpc } from './workspace-terminal-ipc.js';
 import { forgetSurfaceTokens } from './mcp/persistent-paths.js';
 import { firefoxAddonUrl } from '../shared/firefox-addon.js';
@@ -28,7 +29,10 @@ import { committedResumeAncestorsFromSummary, DEFAULT_RECORDING_STORAGE_GIB, REA
 import { safeExternalLink } from '../shared/external-link.js';
 import { wakeBrowserWork } from './browser-wake.js';
 import { refreshKeepAwake } from './keep-awake.js';
-import { getChatModels, startChatModelDiscovery, configureChatModelDiscovery } from './chat-models.js';
+import {
+  getChatModels, startChatModelDiscovery, configureChatModelDiscovery,
+  getGeminiModels, startGeminiModelDiscovery, configureGeminiModelDiscovery
+} from './chat-models.js';
 import { releaseSessionFinish, requestSessionFinishGoal } from './session/finish.js';
 import { GOAL_MARKER_INSTRUCTION } from '../shared/goal-templates.js';
 import { validateInputImages } from './session/input-images.js';
@@ -88,7 +92,8 @@ import {
 import { MAX_GOAL_SYSTEM_PROMPT_CHARS } from '../shared/goal.js';
 import { DEFAULT_HANDOFF_LENGTH, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS } from '../shared/handoff.js';
 import { CUSTOM_CONTINUE_MAX_CHARS } from '../shared/recovery.js';
-import { applySettings, connect, disconnect, getStatus, onStatusChange, rememberRunningSurfaceTokens } from './connection.js';
+import { applySettings, connect, disconnect, getStatus, onStatusChange, refreshGeminiBridge, rememberRunningSurfaceTokens } from './connection.js';
+import { normalizeHttpsOrigin } from '../shared/gemini-bridge.js';
 import { effectiveCapabilities, getConfig, updateConfig, MAX_MCP_INSTRUCTIONS_CHARS, browserBridgePortSchema, settingsRecovered } from './config.js';
 import { UI_LANGUAGES } from '../shared/ui-language.js';
 import { CHATGPT_PROJECT_ID, PROJECT_COLORS } from '../shared/projects.js';
@@ -168,18 +173,20 @@ import { commitProjectChanges, createPullRequest, pushProject, readCommitState }
 import { exportSessionPage } from './session/page-export.js';
 import { feedbackIssueUrl, operatingSystemName, systemVersion } from './feedback.js';
 import { saveCodeFile } from './code-file.js';
-import { blockedChatIds, setChatsBlocked } from './session/blocked-chats.js';
+import { blockedChatIds, isChatBlocked, setChatsBlocked } from './session/blocked-chats.js';
 import { setChatsTrusted, trustedChatIds } from './session/trusted-chats.js';
 import {
   clearAgent,
   onSwarmChange,
   pauseSwarmForDisable,
   persistAgentAuthorityNow,
+  requestWorkerBootstraps,
   workerPrimeOwner,
   resetSwarm,
   swarmState
 } from './agents.js';
-import { forgetWorkspaceRoot, renameWorkspaceRoot } from './workspace.js';
+import { currentWorkspace, forgetWorkspaceRoot, primeWorkspace, renameWorkspaceRoot } from './workspace.js';
+import { spawnAgentWorkers } from './agent-admission.js';
 import { hostPlatformInfo } from './platform.js';
 import {
   MAX_COMMAND_ALLOWLIST_RULES,
@@ -256,8 +263,10 @@ const settingsPatch = z.object({
   ui: z.object({
     appearance: appearanceSchema.optional(),
     autoContinue: z.boolean().optional(),
+    defaultChatProvider: z.enum(CHAT_PROVIDERS).optional(),
     defaultChatModel: z.string().trim().min(1).max(80).optional(),
     defaultChatReasoning: z.enum(REASONING_EFFORTS).optional(),
+    defaultGeminiModel: z.string().trim().min(1).max(80).optional(),
     chatBrowser: z.enum(CHAT_BROWSERS).optional(),
     cosBrowserMinimize: z.enum(['taskbar', 'tray']).optional(),
     desktopAsk: z.enum(['off', 'active', 'always']).optional(),
@@ -338,6 +347,7 @@ const settingsPatch = z.object({
     enabled: z.boolean(),
     defaultModel: z.string().max(80).optional(),
     defaultReasoning: z.enum(['', ...REASONING_EFFORTS]).optional(),
+    defaultGeminiModel: z.string().trim().max(80).optional(),
     maxWorkers: z.number().int().min(1).max(8),
     globalMaxWorkers: z.number().int().min(0).max(64).optional(),
     chatsAtOnce: z.number().int().min(0).max(10).optional(),
@@ -349,7 +359,22 @@ const settingsPatch = z.object({
     endSleepingWorkerProcesses: z.boolean().optional(),
     archiveWorkerChats: z.boolean().optional()
   }),
-  mcp: z.object({ instructions: z.string().trim().max(MAX_MCP_INSTRUCTIONS_CHARS), persistentUrls: z.boolean().optional() }).strict().optional(),
+  mcp: z
+    .object({
+      instructions: z.string().trim().max(MAX_MCP_INSTRUCTIONS_CHARS),
+      persistentUrls: z.boolean().optional(),
+      geminiBridge: z.enum(['tunnel', 'tailscale', 'custom', 'local']).optional(),
+      geminiPublicOrigin: z
+        .string()
+        .trim()
+        .max(512)
+        .refine((v) => !v || normalizeHttpsOrigin(v) !== '', {
+          message: 'Enter a valid HTTPS origin such as https://mcp.example.com'
+        })
+        .optional()
+    })
+    .strict()
+    .optional(),
   controlApi: z.object({ enabled: z.boolean(), allowActions: z.boolean().optional() }).strict().optional(),
   projects: z.object({ codeCheckpoints: z.boolean() }).strict().optional(),
   goal: z.object({
@@ -457,8 +482,36 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
     ...(wanted.connectorSuffix === undefined ? {} : {
       connectorSuffix: pick(current.connectorSuffix ?? '', base.connectorSuffix ?? '', wanted.connectorSuffix)
     }),
-    mcp: wanted.mcp ? { instructions: pick(current.mcp.instructions, base.mcp?.instructions ?? '', wanted.mcp.instructions),
-      persistentUrls: pick(current.mcp.persistentUrls === true, base.mcp?.persistentUrls === true, wanted.mcp.persistentUrls ?? current.mcp.persistentUrls === true) } : current.mcp,
+    mcp: wanted.mcp
+      ? {
+          instructions: pick(current.mcp.instructions, base.mcp?.instructions ?? '', wanted.mcp.instructions),
+          persistentUrls: pick(
+            current.mcp.persistentUrls === true,
+            base.mcp?.persistentUrls === true,
+            wanted.mcp.persistentUrls ?? current.mcp.persistentUrls === true
+          ),
+          ...(() => {
+            const pickedBridge = pick(
+              current.mcp.geminiBridge,
+              base.mcp?.geminiBridge ?? current.mcp.geminiBridge,
+              wanted.mcp.geminiBridge === undefined ? current.mcp.geminiBridge : wanted.mcp.geminiBridge
+            );
+            return pickedBridge !== undefined && pickedBridge !== 'tunnel'
+              ? { geminiBridge: pickedBridge }
+              : {};
+          })(),
+          ...(() => {
+            const currentOrigin = current.mcp.geminiPublicOrigin;
+            const baseOrigin = base.mcp?.geminiPublicOrigin ?? currentOrigin;
+            const wantedOrigin =
+              wanted.mcp.geminiPublicOrigin === undefined
+                ? currentOrigin
+                : normalizeHttpsOrigin(wanted.mcp.geminiPublicOrigin);
+            const pickedOrigin = pick(currentOrigin, baseOrigin, wantedOrigin);
+            return pickedOrigin ? { geminiPublicOrigin: pickedOrigin } : {};
+          })()
+        }
+      : current.mcp,
     controlApi,
     projects,
     capabilities,
@@ -487,8 +540,10 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       ...current.ui,
       appearance: mergeAppearance(current.ui.appearance, base.ui.appearance, wanted.ui.appearance),
       autoContinue: pick(current.ui.autoContinue, base.ui.autoContinue, wanted.ui.autoContinue),
+      defaultChatProvider: pick(current.ui.defaultChatProvider, base.ui.defaultChatProvider, wanted.ui.defaultChatProvider),
       defaultChatModel: pick(current.ui.defaultChatModel, base.ui.defaultChatModel, wanted.ui.defaultChatModel),
       defaultChatReasoning: pick(current.ui.defaultChatReasoning, base.ui.defaultChatReasoning, wanted.ui.defaultChatReasoning),
+      defaultGeminiModel: pick(current.ui.defaultGeminiModel, base.ui.defaultGeminiModel, wanted.ui.defaultGeminiModel),
       chatBrowser: pick(current.ui.chatBrowser, base.ui.chatBrowser, wanted.ui.chatBrowser),
       cosBrowserMinimize: pick(current.ui.cosBrowserMinimize, base.ui.cosBrowserMinimize, wanted.ui.cosBrowserMinimize),
       // None saved is the default, off: a stale snapshot without the field and the form's Off are the same
@@ -587,6 +642,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
     multiAgent: {
       defaultModel: pick(current.multiAgent.defaultModel, base.multiAgent.defaultModel, wanted.multiAgent.defaultModel),
       defaultReasoning: pick(current.multiAgent.defaultReasoning, base.multiAgent.defaultReasoning, wanted.multiAgent.defaultReasoning),
+      defaultGeminiModel: pick(current.multiAgent.defaultGeminiModel, base.multiAgent.defaultGeminiModel, wanted.multiAgent.defaultGeminiModel),
       enabled: pick(current.multiAgent.enabled, base.multiAgent.enabled, wanted.multiAgent.enabled),
       maxWorkers: pick(current.multiAgent.maxWorkers, base.multiAgent.maxWorkers, wanted.multiAgent.maxWorkers),
       globalMaxWorkers: pick(
@@ -701,6 +757,7 @@ async function buildState(): Promise<AppState> {
     hasGoalKey: await hasSecret('openRouterApiKey'),
     hasCustomProviderKey: await hasSecret('customProviderApiKey'),
     hasPhonePushToken: await hasSecret('ntfyToken'),
+    hasGeminiTunnelToken: await hasSecret('geminiTunnelToken'),
     telegram: telegramView(),
     // After the reads above: only a read can find the file unreadable.
     credentialsUnreadable: storedSecretsUnreadable(),
@@ -773,8 +830,8 @@ function handle<T>(channel: string, fn: (payload: unknown, event: IpcMainInvokeE
 export async function openSessionChat(id: string): Promise<void> {
   const summary = await getSession(id);
   const conversationId = summary?.conversationId;
-  if (!conversationId || !/^[0-9a-z-]{8,64}$/i.test(conversationId)) {
-    throw new Error('This session has no valid ChatGPT conversation');
+  if (!conversationId || !isAcceptedConversationId(conversationId)) {
+    throw new Error('This session has no valid conversation');
   }
   // The selected browser owns this explicit action. In particular, a connected companion in
   // Chrome/Edge must not override the user's choice to open the chat in the CoS browser.
@@ -1840,6 +1897,18 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return buildState();
   });
 
+  handle('geminiBridge:setToken', async (payload) => {
+    const { value } = z.object({ value: z.string().trim().max(2048) }).strict().parse(payload);
+    await setSecret('geminiTunnelToken', value);
+    await refreshGeminiBridge();
+    return buildState();
+  });
+
+  handle('geminiBridge:refresh', async () => {
+    await refreshGeminiBridge();
+    return buildState();
+  });
+
   handle('diagnostics:run', async () => runDiagnostics());
   // "Save diagnostics report": one plain-text file for a bug report, personal details removed
   // (see diagnostics-report.ts). Revealed after saving so the user reads what they would share.
@@ -2158,8 +2227,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return requestSessionFinishGoal(id, expectedTurnId);
   });
   handle('chatModels:get', async () => getChatModels());
+  handle('geminiModels:get', async () => getGeminiModels());
   handle('browser:preferences', async (payload) => requestBrowserPreferences(payload));
   handle('chatModels:request', async () => startChatModelDiscovery());
+  handle('geminiModels:request', async () => startGeminiModelDiscovery());
   handle('sessions:controls', async (payload) => sessionControlsFor(sessionIdArg.parse(payload).id));
   // Resume now (#1694): the person ends ChatGPT's pause early, at the risk of the limit returning.
   handle('automation:resumeNow', async () => resumeAutomaticSends());
@@ -2280,6 +2351,47 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return true;
   });
 
+  const spawnWorkersArg = z.object({
+    id: sessionIdArg.shape.id,
+    workers: z.array(z.object({
+      label: z.string().trim().max(60).optional(),
+      task: z.string().trim().min(1).max(4000)
+    }).strict()).min(1).max(8),
+    context: z.string().trim().max(4000).nullable().optional()
+  }).strict();
+
+  handle('sessions:spawnWorkers', async (payload) => {
+    const { id, workers, context } = spawnWorkersArg.parse(payload);
+    const summary = await getSession(id);
+    const conversationId = summary?.conversationId;
+    if (!summary || !conversationId || !isAcceptedConversationId(conversationId)) {
+      throw new Error('This session has no valid conversation');
+    }
+    if (isChatBlocked(conversationId)) {
+      throw new Error('This chat is blocked from spawning sub-agents');
+    }
+    const provider = providerForConversationId(conversationId);
+    const cfg = getConfig();
+    const caps = effectiveCapabilities(cfg);
+    const { created, becamePrime, runId } = await spawnAgentWorkers(
+      {
+        workers: workers.map((worker) => ({ ...(worker.label ? { label: worker.label } : {}), task: worker.task, provider })),
+        context: context ?? null,
+        caller: { conversationId, sessionId: summary.id }
+      },
+      async () => (await getSessionProject(summary.id)) ?? primeWorkspace(conversationId) ?? currentWorkspace(),
+      () => !cfg.readOnly && caps.command && caps.create && caps.edit
+    );
+    requestWorkerBootstraps(created.map((worker) => worker.id), runId);
+    wakeBrowserWork();
+    return {
+      ok: true as const,
+      runId,
+      becamePrime,
+      workers: created.map((info) => ({ id: info.id, label: info.label, state: info.state, provider: info.provider ?? provider }))
+    };
+  });
+
   // ChatGPT's tool approval card, answered in the app (approval-wait.ts). Only a person's click
   // in the renderer reaches `answerApproval`; the page presses the button for that exact card.
   handle('sessions:approvalCard', async (payload) => {
@@ -2317,7 +2429,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       logInfo('browser follow: selected chat has no conversation binding; follow stays pending for retry');
       return false;
     }
-    if (/^[0-9a-z-]{8,64}$/i.test(conversationId)) return followChatInBackground(conversationId);
+    if (isAcceptedConversationId(conversationId)) return followChatInBackground(conversationId);
     return true;
   });
 
@@ -2341,8 +2453,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         throw new Error('This session is being deleted; its block cannot be changed');
       }
       const currentConversationId = summary.conversationId;
-      if (!currentConversationId || !/^[0-9a-z-]{8,64}$/i.test(currentConversationId)) {
-        throw new Error('This session has no valid ChatGPT conversation');
+      if (!currentConversationId || !isAcceptedConversationId(currentConversationId)) {
+        throw new Error('This session has no valid conversation');
       }
       setChatsBlocked(
         blocked
@@ -2368,7 +2480,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { id, expectedConversationId, trusted } = z
       .object({
         id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
-        expectedConversationId: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
+        expectedConversationId: z.string().min(8).max(64).refine((value) => isAcceptedConversationId(value)),
         trusted: z.boolean()
       })
       .parse(payload);
@@ -2382,11 +2494,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         throw new Error('This session is being deleted; its trust cannot be changed');
       }
       const currentConversationId = summary.conversationId;
-      if (!currentConversationId || !/^[0-9a-z-]{8,64}$/i.test(currentConversationId)) {
-        throw new Error('This session has no valid ChatGPT conversation');
+      if (!currentConversationId || !isAcceptedConversationId(currentConversationId)) {
+        throw new Error('This session has no valid conversation');
       }
       if (currentConversationId !== expectedConversationId) {
-        throw new Error('This session moved to another ChatGPT conversation; refresh the chat list before changing trust');
+        throw new Error('This session moved to another conversation; refresh the chat list before changing trust');
       }
       const workerOwner = workerPrimeOwner(currentConversationId);
       if (trusted && (workerOwner.owned || summary.origin?.kind === 'worker')) {
@@ -2743,9 +2855,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       signal.throwIfAborted();
       if (!await startBridge()) throw new Error('The browser bridge could not start');
       signal.throwIfAborted();
-      const marker = `cos-input=${encodeURIComponent(entry.id)}`;
-      await wakeBrowserUrl(entry.conversationId ? `https://chatgpt.com/c/${encodeURIComponent(entry.conversationId)}`
-        : `https://chatgpt.com/?${entry.lifetime === 'temporary-planner' ? 'temporary-chat=true&' : ''}${marker}#${marker}`);
+      await wakeBrowserUrl(inputBrowserUrl({
+        id: entry.id,
+        conversationId: entry.conversationId,
+        provider: entry.provider,
+        temporary: entry.lifetime === 'temporary-planner'
+      }));
     },
     bindHelper: async (conversationId, fromSessionId) => {
       const source = fromSessionId ? await getSession(fromSessionId) : null;
@@ -2847,6 +2962,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       // tunnel. On a fresh install, discovery opened ChatGPT before any of that existed and the
       // reminder read "One last step" at step 0 of 6; Setup's last card keeps it until then.
       if (getConfig().tunnel.tunnelId.trim()) push('setup:toolApprovalNotice');
+    }
+  } });
+  configureGeminiModelDiscovery({ changed: () => push('geminiModels:changed', getGeminiModels()), wake: async (nonce, allowOpen) => {
+    if (!await startBridge()) throw new Error('The browser bridge could not start');
+    if (allowOpen) {
+      await wakeBrowserUrl(`https://gemini.google.com/app?cos-model-catalog=${nonce}#cos-model-catalog=${nonce}`, true, true);
     }
   } });
   onUpdateChange(pushState);
