@@ -149,10 +149,14 @@ export type ChatBrowser = (typeof CHAT_BROWSERS)[number];
 export interface UiPrefs {
   /** Recover an unfinished silent executor turn only while Goal and Loop are both off. */
   autoContinue?: boolean;
+  /** Preferred web chat provider when opening a fresh ordinary chat (`chatgpt` or `gemini`). */
+  defaultChatProvider?: import('./provider.js').ChatProvider;
   /** Preferred account-observed model for a fresh ordinary chat; omitted keeps the catalog fallback. */
   defaultChatModel?: string;
   /** Preferred reasoning for a fresh ordinary chat; omitted keeps the model's normal fallback. */
   defaultChatReasoning?: ReasoningEffort;
+  /** Preferred account-observed model for a fresh ordinary Gemini chat; omitted uses Gemini's current selection. */
+  defaultGeminiModel?: string;
   /** Maintenance may reuse existing tabs but cannot open helpers or missing chats. */
   browserOnly?: boolean;
   backgroundChats?: boolean;
@@ -413,6 +417,7 @@ export interface GoalSettings {
 export interface MultiAgentSettings {
   defaultModel?: string;
   defaultReasoning?: ReasoningEffort | '';
+  defaultGeminiModel?: string;
   enabled: boolean;
   /** Upper bound on simultaneous slot-holding workers in one prime family. */
   maxWorkers: number;
@@ -458,6 +463,20 @@ export interface MultiAgentSettings {
   archiveWorkerChats?: boolean;
 }
 
+export type GeminiBridgeMode = 'tunnel' | 'tailscale' | 'custom' | 'local';
+export type GeminiBridgeState = 'off' | 'starting' | 'live' | 'error';
+
+export interface GeminiBridgeStatus {
+  mode: GeminiBridgeMode;
+  state: GeminiBridgeState;
+  /** Permanent or resolved origin used to build Gemini URLs when running, or null when not ready. */
+  publicOrigin: string | null;
+  /** Human-readable status explanation (never includes secrets). */
+  detail: string;
+  /** Optional interactive enablement URL (e.g. Tailscale tailnet Funnel approval page). */
+  actionUrl?: string | null;
+}
+
 /** The user's own additions to what each MCP connector tells the model about itself. */
 export interface McpSettings {
   /** Appended to the Core and Desktop server instructions, or empty for none. */
@@ -468,6 +487,14 @@ export interface McpSettings {
    * OS-backed secret store; turning it off forgets them.
    */
   persistentUrls?: boolean;
+  /**
+   * Independent Gemini access mode alongside the primary ChatGPT tunnel (`'tunnel'` shares active
+   * cloudflared/manual public URL; `'tailscale'` uses permanent Tailscale Funnel HTTPS; `'custom'`
+   * uses `geminiPublicOrigin` + optional Cloudflare Named Tunnel token; `'local'` exposes 127.0.0.1).
+   */
+  geminiBridge?: GeminiBridgeMode;
+  /** Fixed HTTPS origin (e.g. `https://mcp.example.com`) used in `'custom'` Gemini bridge mode. */
+  geminiPublicOrigin?: string;
 }
 
 /** The opt-in local control API for an agent watching this app (`src/main/control-api.ts`). */
@@ -590,6 +617,30 @@ export interface ConnectionStatus {
    * whether that particular connector is currently live.
    */
   surfaces: SurfaceStatus[];
+  /**
+   * External (non-ChatGPT) MCP clients that reached this app in the current run or were
+   * observed recently across runs, shown alongside ChatGPT in the connection popover.
+   */
+  externalClients?: ExternalClientStatus[];
+  /** Live status of the parallel Gemini bridge (Tailscale Funnel, fixed custom HTTPS, or local). */
+  geminiBridge?: GeminiBridgeStatus;
+}
+
+export interface ExternalClientStatus {
+  /** Normalized client identifier (for example `gemini`, `claude`, `cursor`). */
+  id: string;
+  /** Safe presentation label (for example `Gemini`, `Claude`). */
+  name: string;
+  /** Self-reported client version when supplied. */
+  version?: string;
+  /** Connector surfaces this client reached. */
+  surfaces: SurfaceId[];
+  /** True once this client reached the active local server during the current connection. */
+  connected: boolean;
+  /** Epoch ms when this external client last reached any MCP surface. */
+  lastRequestAt: number | null;
+  /** Epoch ms when this external client last called a tool. */
+  lastToolCallAt: number | null;
 }
 
 /** The identifiers of the connectors this app publishes. Mirrors `mcp/surfaces.ts`. */
@@ -925,6 +976,8 @@ export interface AppState {
   hasCustomProviderKey: boolean;
   /** An ntfy access token is saved (never the token itself). */
   hasPhonePushToken?: boolean;
+  /** True when a Cloudflare Named Tunnel token for the Gemini bridge is saved in secure storage. */
+  hasGeminiTunnelToken?: boolean;
   /** The Telegram bot (#1934): linked or not, its @name and the account; never the token. */
   telegram?: { state: 'off' | 'pairing' | 'linked' | 'conflict' | 'token-refused'; botName: string | null; userName: string | null; code?: string; codeUntil?: number };
   /** Resolved path of the tunnel binary we would run, or null if we cannot find one. */

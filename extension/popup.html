@@ -53,7 +53,7 @@
       <section class="card">
         <div class="row" id="r-tab">
           <svg class="ico"><use href="#i-tab" /></svg>
-          <span class="name" data-i18n="popup_chatgpt_tab">ChatGPT tab</span>
+          <span class="name" id="tabLabel" data-i18n="popup_chat_tab">ChatGPT / Gemini tab</span>
           <span class="meta" id="d-tab"></span>
           <span class="badge"></span>
       </div>
@@ -94,8 +94,8 @@
     </section>
 
 
-    <p class="caption" data-i18n="popup_section_augment_chatgpt">Augment ChatGPT</p>
-    <section class="card">
+    <p class="caption" id="augmentCaption" data-i18n="popup_section_augment_chatgpt">Augment ChatGPT</p>
+    <section class="card" id="augmentCard">
       <label class="row" for="overwriteToggle">
         <svg class="ico"><use href="#i-pen" /></svg>
         <span class="name" data-i18n="popup_overwrite_chatgpt">Overwrite ChatGPT</span>
@@ -108,6 +108,16 @@
         <input id="timeToggle" type="checkbox" />
         <span class="track" aria-hidden="true"><span class="thumb"></span></span>
       </label>
+    </section>
+
+    <p class="caption" id="geminiCaption" data-i18n="popup_section_gemini" hidden>Gemini Web</p>
+    <section class="card" id="geminiCard" hidden>
+      <div class="row" id="r-gemini-sync">
+        <svg class="ico"><use href="#i-rec" /></svg>
+        <span class="name" data-i18n="popup_gemini_companion_feature">Live transcript & sub-agents</span>
+        <span class="meta" id="d-gemini-sync"></span>
+        <span class="badge"></span>
+      </div>
     </section>
 
     <details id="more">

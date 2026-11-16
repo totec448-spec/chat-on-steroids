@@ -1246,11 +1246,16 @@ it('persists optional ordinary new-chat model defaults without inventing them fo
   const config = defaultConfig();
   expect(config.ui.defaultChatModel).toBeUndefined();
   expect(config.ui.defaultChatReasoning).toBeUndefined();
-  Object.assign(config.ui, { defaultChatModel: 'gpt-5.6-sol', defaultChatReasoning: 'xhigh' });
+  expect(config.ui.defaultGeminiModel).toBeUndefined();
+  expect(config.multiAgent.defaultGeminiModel).toBeUndefined();
+  Object.assign(config.ui, { defaultChatModel: 'gpt-5.6-sol', defaultChatReasoning: 'xhigh', defaultGeminiModel: 'pro' });
+  Object.assign(config.multiAgent, { defaultGeminiModel: 'fast' });
   await saveConfig(config);
   const loaded = await loadConfig();
   expect(loaded.ui.defaultChatModel).toBe('gpt-5.6-sol');
   expect(loaded.ui.defaultChatReasoning).toBe('xhigh');
+  expect(loaded.ui.defaultGeminiModel).toBe('pro');
+  expect(loaded.multiAgent.defaultGeminiModel).toBe('fast');
 });
 
 it('keeps a Continue prompt, and reads an empty or overlong one as the built-in phrases', async () => {

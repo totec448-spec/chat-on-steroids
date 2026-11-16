@@ -74,3 +74,37 @@ export type ChatModelCatalog = {
   waiting?: string;
   error?: string;
 };
+
+export type GeminiModelOption = { id: string; label: string; description?: string };
+export type GeminiModelCatalog = {
+  state: 'unknown' | 'pending' | 'ready' | 'unavailable';
+  requestedAt: number | null;
+  observedAt: number | null;
+  models: GeminiModelOption[];
+  waiting?: string;
+  error?: string;
+};
+
+const normalizeGeminiModelName = (value: string): string =>
+  value
+    .normalize('NFKC')
+    .replace(/[\u0130I]/g, 'i')
+    .replace(/\u0131/g, 'i')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}.]/gu, '');
+
+/**
+ * Resolve a saved Gemini model value to one observed Gemini catalog entry.
+ * Exact id wins; otherwise a unique normalized label match (with optional leading "gemini" omitted) wins.
+ */
+export function resolveGeminiModel(models: GeminiModelOption[], value: string): GeminiModelOption | undefined {
+  const exact = models.filter(choice => choice.id === value);
+  if (exact.length) return exact.length === 1 ? exact[0] : undefined;
+  const bare = (text: string): string => normalizeGeminiModelName(text).replace(/^gemini(?=\d|[a-z])/, '');
+  const name = bare(value);
+  if (!name) return undefined;
+  const matches = models.filter(choice => bare(choice.label) === name || bare(choice.id) === name);
+  return matches.length === 1 ? matches[0] : undefined;
+}

@@ -1,4 +1,5 @@
 import { offerToolInput, acknowledgeToolInput, TOOL_INPUT_HEADER } from '../session/input.js';
+import { conversationUrl } from '../../shared/provider.js';
 import { STRICT_REFUSAL_PROGRESS_PREFIX, UNPROVEN_WORKER_NOTICE, UNTRUSTED_NOTICE, UNTRUSTED_WORKER_NOTICE } from '../../shared/trust-notices.js';
 import { noteConnectorUse } from '../connector-proof.js';
 import { beginPluginToolCall } from '../plugin-refresh.js';
@@ -26,10 +27,11 @@ import { WINDOWS_COMPUTER_STATE_INPUT_METHODS } from '../../shared/windows-compu
  */
 
 import { rawPromises as fs } from '../rawfs.js';
-import { randomUUID } from 'node:crypto';
-import { beginToolTiming, inboundRequestId, inboundPublication, inboundProviderRequest } from './inbound.js';
+import { createHash, randomUUID } from 'node:crypto';
+import { beginToolTiming, inboundClientIdentity, inboundMcpSessionId, inboundPublication, inboundProviderRequest, inboundRequestId } from './inbound.js';
 import { McpServer, type ServerContext } from '@modelcontextprotocol/server';
 import { z } from 'zod';
+import type { McpClientIdentity } from '../../shared/session.js';
 import type { Capabilities, RemoteFolder, Root } from '../../shared/types.js';
 import { fsForRoot } from '../remote/project-fs.js';
 import { CAPABILITY_LABELS, WRITE_CAPABILITIES } from '../../shared/types.js';
@@ -571,12 +573,39 @@ async function withBackgroundExecRecovery(
 /** Tools whose answer does not depend on which chat called them. */
 const IDENTITY_FREE_TOOLS: ReadonlySet<string> = new Set(['usage']);
 
+/**
+ * Merge all text blocks into the primary text block while keeping non-text blocks in order.
+ * Single-block MCP clients drop or overwrite extra text blocks, so unattributed responses must
+ * keep both tool output and delivery notices in one text entry.
+ */
+function collapseTextContent(content: ToolContent[]): ToolContent[] {
+  const firstTextIndex = content.findIndex((part) => part.type === 'text');
+  if (firstTextIndex === -1) return content;
+  let merged = '';
+  let textCount = 0;
+  for (const part of content) {
+    if (part.type !== 'text') continue;
+    merged = textCount === 0
+      ? part.text
+      : `${merged}${merged.endsWith('\n') || part.text.startsWith('\n') ? '' : '\n'}${part.text}`;
+    textCount++;
+  }
+  if (textCount <= 1) return content;
+  const collapsed: ToolContent[] = [];
+  content.forEach((part, index) => {
+    if (part.type !== 'text') collapsed.push(part);
+    else if (index === firstTextIndex) collapsed.push({ ...part, text: merged });
+  });
+  return collapsed;
+}
+
 function withUnattributedNotice(
   conversationId: string | null | undefined,
   result: ToolResult,
   requestId: string | null,
   allowUnattributed: boolean,
-  provisional = false
+  provisional = false,
+  clientIdentity: McpClientIdentity | null = null
 ): ToolResult {
   if (conversationId) return result;
   const requestOwnershipNotice =
@@ -588,6 +617,28 @@ function withUnattributedNotice(
     'Continue using enabled self-contained tools with their existing permissions. Do not repeat a completed operation to repair attribution. ' +
     requestOwnershipNotice
   }] };
+  if (clientIdentity) {
+    return {
+      ...result,
+      content: [
+        ...result.content,
+        {
+          type: 'text',
+          text: allowUnattributed
+            ? '\n--- Identity notice ---\n' +
+              `This call is recorded under external MCP client "${clientIdentity.name}" (no ChatGPT conversation is attached). ` +
+              'Continue using every enabled tool, including apply_patch, exec_command, Desktop and Plugins; their existing permissions still apply. ' +
+              (requestId
+                ? requestOwnershipNotice
+                : 'This call has no request id, so request-owned plans and worker families cannot be created until a request id is available. ') +
+              'Report the actual tool result; do not claim mutation or terminal tools are unavailable because of this notice, and never replay successful work.'
+            : '\n--- Identity notice ---\n' +
+              `This call from external MCP client "${clientIdentity.name}" was filed without an attached ChatGPT conversation. ` +
+              'The result above still states what ran. Attribution does not switch on Read-only mode; report a refusal only for the operation that actually failed, and never replay a successful mutation.'
+        }
+      ]
+    };
+  }
   const eta = unattributedRepairEta(Date.now(), requestId);
   const recovery = eta === null ? '' : `The next attribution recovery check is in about ${eta}s. `;
   return {
@@ -630,6 +681,18 @@ function withUnattributedNotice(
  * Messages are *offered* here, not retired. They are retired when this agent calls
  * again, because that is the first real evidence this result reached ChatGPT.
  */
+const SYNTHETIC_MCP_REQUEST_ID_RE = /^mcp_[A-Za-z0-9_-]{1,20}_[0-9a-f]{48}$/;
+
+export function syntheticMcpRequestId(clientId: string, mcpSessionId: string): string {
+  const clientTag = clientId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 20) || 'remote';
+  const digest = createHash('sha256').update(`${clientId}\0${mcpSessionId}`).digest('hex').slice(0, 48);
+  return `mcp_${clientTag}_${digest}`;
+}
+
+export function isSyntheticMcpRequestId(requestId: string | null | undefined): boolean {
+  return typeof requestId === 'string' && SYNTHETIC_MCP_REQUEST_ID_RE.test(requestId);
+}
+
 function withInbox(
   caller: CallCaller,
   agent: string | null,
@@ -692,7 +755,9 @@ export async function dispatch(
   // those gaps describes a machine that has not finished changing. The counter therefore
   // opens with the request and closes with it.
   const context: CallContext = {
-    recordingContext: parent?.recordingContext ?? (inboundProviderRequest() && requestId ? captureRecordingContext(Date.now()) : null),
+    recordingContext:
+      parent?.recordingContext ??
+      (inboundProviderRequest() && requestId && !inboundClientIdentity() ? captureRecordingContext(Date.now()) : null),
     publication: parent?.publication ?? inboundPublication() ?? { completedAt: null, failed: false },
     startedAt: Date.now(),
     activity: summarizeRunningCall(name, args, emptyEvidence()),
@@ -701,7 +766,15 @@ export async function dispatch(
     allowUnattributed: getConfig().multiAgent.allowUnattributedCalls,
     caller: parent
       ? { ...parent.caller }
-      : { transportKey, requestId, conversationId: null, sessionId: null, setupProfileId },
+      : {
+          transportKey,
+          requestId,
+          conversationId: null,
+          sessionId: null,
+          setupProfileId,
+          clientIdentity: inboundClientIdentity(),
+          mcpSessionId: inboundMcpSessionId()
+        },
     outcome: null,
     evidence: emptyEvidence()
   };
@@ -1071,7 +1144,7 @@ async function dispatchTracked(
             fail(
               'CONVERSATION_SUPERSEDED: Compact & Resume replaced this ChatGPT conversation. Its transcript remains readable, but it can no longer execute local tools. ' +
                 (replacement
-                  ? `The work continues in https://chatgpt.com/c/${replacement.conversationId}${replacement.title.trim() ? `, shown in Chat On Steroids as ${JSON.stringify(replacement.title.trim())}` : ''}. Tell the user to continue there; no local tool was run.`
+                  ? `The work continues in ${conversationUrl(replacement.conversationId)}${replacement.title.trim() ? `, shown in Chat On Steroids as ${JSON.stringify(replacement.title.trim())}` : ''}. Tell the user to continue there; no local tool was run.`
                   : 'Continue only in the replacement chat; no local tool was run.')
             )
           )
@@ -1201,7 +1274,8 @@ async function dispatchTracked(
     deliveryFenced ? baseResult : withInbox(context.caller, context.agent, baseResult, isFinish),
     context.caller.requestId,
     context.allowUnattributed === true,
-    recordingContextCurrent(context.recordingContext)
+    recordingContextCurrent(context.recordingContext),
+    context.caller.clientIdentity ?? null
   );
   if (!nested && recoveredWorkerRole && !deliveryFenced) delivered = {
     ...delivered,
@@ -1247,6 +1321,9 @@ async function dispatchTracked(
     const merged = [typeof own === 'string' ? own : '', supplemental].filter(Boolean).join('\n');
     if (supplemental) delivered = { ...delivered, structuredContent: { ...delivered.structuredContent, supplemental_context: merged } };
   }
+  if (!nested && !context.caller.conversationId) {
+    delivered = { ...delivered, content: collapseTextContent(delivered.content) };
+  }
   const recorderStartedAt = Date.now();
   // Event duration includes identity/handler/delivery work. Recorder and local HTTP finish
   // are measured separately because a row cannot contain the time of its own later commit.
@@ -1273,13 +1350,19 @@ async function dispatchTracked(
     conversationId: context.caller.conversationId,
     sessionId: context.caller.sessionId ?? null,
     ...(context.caller.providerSessionAnchor ? { providerSessionAnchor: context.caller.providerSessionAnchor } : {}),
+    ...(context.caller.conversationId
+      ? {}
+      : { mcpClient: context.caller.clientIdentity ?? null, mcpSessionId: context.caller.mcpSessionId ?? null }),
     endsActivity: isFinish && !result.isError
   });
   // Exact request-id identity needs no browser wait, so make its durable session append part
   // of completing the MCP call. The recorder catches storage failures and returns null, so a
   // broken history never breaks the tool itself. Only the degraded/unidentified path remains
   // fire-and-forget because it may still spend a grace window waiting for page evidence.
-  if (context.caller.conversationId) {
+  if (
+    context.caller.conversationId ||
+    (context.caller.clientIdentity && (!context.caller.requestId || isSyntheticMcpRequestId(context.caller.requestId)))
+  ) {
     try { await recording; } finally { await closeHold?.(); }
   } else {
     void recording.then(() => logInfo(`mcp recording surface=${surface} recorder_async_ms=${Date.now() - recorderStartedAt}`));

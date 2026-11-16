@@ -16,7 +16,7 @@ export function compactTokens(value: number, language: string): string {
 }
 
 /** Recorder estimates, never a claim about the provider's exact context window. */
-export function paintContextMeter(session: SessionSummary | null, config: Config, composer: { model: string; reasoningEffort: ReasoningEffort } | null = null): void {
+export function paintContextMeter(session: SessionSummary | null, config: Config, composer: { model: string; reasoningEffort?: ReasoningEffort | null } | null = null): void {
   const button = document.getElementById('contextMeterButton');
   const panel = document.getElementById('contextMeterInfo');
   const arc = document.getElementById('contextMeterArc');
@@ -26,7 +26,7 @@ export function paintContextMeter(session: SessionSummary | null, config: Config
   // preceding turn (or not exist yet in a new chat).
   const observed = session?.selectedModel;
   const selection = composer ?? (observed?.conversationId === session?.conversationId ? observed : null);
-  const pro = isProModel(selection?.model, selection?.reasoningEffort);
+  const pro = isProModel(selection?.model, selection?.reasoningEffort ?? undefined);
   // What the ring fills toward, as the ChatGPT page's meter does: the compaction point while
   // automatic compaction acts on it, else the size the app warns about. Neither is the model's
   // own context limit, which no provider reports (#1806).

@@ -6,6 +6,7 @@
  * agree on exactly.
  */
 import { workerOwnTask } from './worker-brief.js';
+import type { ChatProvider } from './provider.js';
 
 /** Where an event came from. The extension is untrusted UI observation; mcp is ours. */
 export type EventSource = 'extension' | 'mcp' | 'app';
@@ -813,6 +814,8 @@ export interface SessionSummary {
   agents: string[];
   /** Set only for a chat this app opened itself. Null for one the user started. */
   origin: SessionOrigin | null;
+  /** Presentation-only identity for a recognized external MCP client session (such as Gemini). */
+  mcpClient?: McpClientIdentity;
 }
 
 /**
@@ -979,6 +982,8 @@ export interface AgentInfo {
    * across sleep/wake reuse. Null for the prime, which runs in the user's own chat.
    */
   model: string | null;
+  /** Web chat provider hosting this agent's browser tab (`chatgpt` unless specified). */
+  provider?: ChatProvider;
   state: AgentState;
   createdAt: number;
   /**
@@ -1366,16 +1371,46 @@ export interface SessionSearchReply {
  * marker the app finds that chat by (with no conversation), so it stays English on disk and the
  * window shows it in the interface language.
  */
+/**
+ * Self-reported external MCP client identity (for example Gemini or Claude).
+ *
+ * Presentation-only: labels and groups external MCP tool sessions in the UI
+ * instead of collapsing every non-ChatGPT caller into anonymous unattributed
+ * activity. Never grants conversation ownership or security privileges.
+ */
+export interface McpClientIdentity {
+  /** Normalized client slug (for example 'gemini', 'claude', 'cursor'). */
+  id: string;
+  /** Human-readable client label (for example 'Gemini', 'Claude'). */
+  name: string;
+  /** Optional sanitized version reported in MCP initialize. */
+  version?: string;
+}
+
 export const UNATTRIBUTED_SESSION_TITLE = 'Unattributed activity';
 
 /**
  * The chat that collects unplaceable tool calls. No conversation alone does not make one: a new
  * chat whose first message has not gone out yet has none either (#1759). The bucket is created
  * without an origin, while such a chat starts with one, so even a chat renamed to the bucket's
- * title stays a chat.
+ * title stays a chat. Named external MCP client sessions carry `mcpClient` and stay separate.
  */
-export function isUnattributedSession(summary: { conversationId: string | null; title: string; origin?: SessionOrigin | null }): boolean {
-  return summary.conversationId === null && !summary.origin && summary.title === UNATTRIBUTED_SESSION_TITLE;
+export function isUnattributedSession(summary: {
+  conversationId: string | null;
+  title: string;
+  origin?: SessionOrigin | null;
+  mcpClient?: McpClientIdentity | null;
+}): boolean {
+  return summary.conversationId === null && !summary.origin && !summary.mcpClient && summary.title === UNATTRIBUTED_SESSION_TITLE;
+}
+
+/** True when a non-ChatGPT session represents a recognized external MCP client (such as Gemini). */
+export function isExternalMcpSession(summary: {
+  conversationId: string | null;
+  origin?: SessionOrigin | null;
+  mcpClient?: McpClientIdentity | null;
+}): boolean {
+  return summary.conversationId === null && !summary.origin && !!summary.mcpClient;
 }
 
 /** How long a Compact & Resume may wait for ChatGPT's summary before the last saved one is offered (2026-11-01). */

@@ -129,23 +129,55 @@ function attribution(app) {
   }
 }
 
+const GEMINI_NON_CHAT_SEGMENTS = new Set([
+  'app', 'apps', 'auth', 'download', 'edit', 'extensions', 'faq',
+  'gem', 'gems', 'help', 'login', 'logout', 'new', 'saved-info',
+  'scheduled', 'settings', 'share', 'updates', 'workspace'
+]);
+
+function tabProvider(info) {
+  if (info && (info.provider === 'gemini' || info.provider === 'chatgpt')) return info.provider;
+  if (info && typeof info.conversationId === 'string' && /^gemini-/i.test(info.conversationId)) return 'gemini';
+  if (info && info.url) {
+    try {
+      const { hostname } = new URL(String(info.url));
+      if (hostname === 'gemini.google.com') return 'gemini';
+      if (hostname === 'chatgpt.com' || hostname === 'chat.openai.com') return 'chatgpt';
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 /**
- * Whether a ChatGPT URL is a route a chat lives on or starts from: the start page, a chat, or a
- * Project or GPT with its chats. Other ChatGPT pages (a Dot at `/dots/…`, the library, a shared
- * snapshot) have no chat the app can follow, so the popup says so instead of waiting (#1855).
+ * Whether a ChatGPT or Gemini URL is a route a chat lives on or starts from: a start page,
+ * an active chat, or a Project / Gem workspace. Other routes (Dots, library, Gemini Settings
+ * or Gems catalog) have no chat the app follows, so the popup says so instead of waiting.
  */
-function chatRoute(url) {
+function chatRoute(url, providerHint) {
   try {
-    const { pathname } = new URL(String(url || ''));
+    const parsed = new URL(String(url || ''));
+    const provider = providerHint || (parsed.hostname === 'gemini.google.com' ? 'gemini' : null);
+    const { pathname } = parsed;
+    if (provider === 'gemini') {
+      const parts = pathname.split('/').filter(Boolean);
+      const start = parts[0] === 'u' && /^\d+$/.test(parts[1] || '') ? 2 : 0;
+      const tail = parts.slice(start);
+      if (tail.length === 0) return true;
+      if (tail[0] === 'app') return tail.length === 1 || (tail.length === 2 && !GEMINI_NON_CHAT_SEGMENTS.has(tail[1].toLowerCase()));
+      if (tail[0] === 'gem') return tail.length === 2 || (tail.length === 3 && !GEMINI_NON_CHAT_SEGMENTS.has(tail[2].toLowerCase()));
+      return false;
+    }
     return /^\/(?:g\/[^/]+(?:\/project)?\/?|(?:g\/[^/]+\/)?c\/[^/]+\/?)?$/i.test(pathname);
   } catch {
     return true;
   }
 }
 
-/** A ChatGPT tab on a page that is not a chat, with nothing recorded or bound that says otherwise. */
+/** A supported provider tab on a page that is not a chat, with nothing recorded or bound that says otherwise. */
 function notAChat(info) {
-  return Boolean(info && info.isChat && !info.conversationId && !(info.page && info.page.events) && !chatRoute(info.url));
+  return Boolean(info && info.isChat && !info.conversationId && !(info.page && info.page.events) && !chatRoute(info.url, tabProvider(info)));
 }
 
 /**
@@ -161,11 +193,22 @@ function pipeline(info, ready) {
   const pending = info ? info.pending : 0;
   const read = page ? page.events : 0;
   const calls = page && Array.isArray(page.trace) ? page.trace : [];
+  const isGemini = tabProvider(info) === 'gemini';
 
   if (!info || !info.isChat) return { read: ['off'], sent: ['off'], proc: ['off'], why: ['', ''] };
   // Before the recorder: on a page that is not a chat there is nothing to record or reload.
   if (notAChat(info)) {
-    return { read: ['off'], sent: ['off'], proc: ['off'], why: ['', t('popup_pipeline_not_a_chat', 'This ChatGPT page is not a chat, so the app has nothing to follow here. Open or start a chat.')] };
+    return {
+      read: ['off'],
+      sent: ['off'],
+      proc: ['off'],
+      why: [
+        '',
+        isGemini
+          ? t('popup_pipeline_not_a_chat_gemini', 'This Gemini page is not a chat, so the app has nothing to follow here. Open or start a chat.')
+          : t('popup_pipeline_not_a_chat', 'This ChatGPT page is not a chat, so the app has nothing to follow here. Open or start a chat.')
+      ]
+    };
   }
   if (!info.recorder) {
     return { read: ['failed'], sent: ['off'], proc: ['off'], why: ['bad', t('popup_pipeline_no_recorder', 'No recorder in this tab. Reload the page.')] };
@@ -203,11 +246,17 @@ function pipeline(info, ready) {
       proc: ['off'],
       why: [
         'bad',
-        t(
-          'popup_pipeline_extension_blocked',
-          'The extension is not accepting this tab’s observations ($1). Reload the ChatGPT tab.',
-          page.blocked
-        )
+        isGemini
+          ? t(
+            'popup_pipeline_extension_blocked_gemini',
+            'The extension is not accepting this tab’s observations ($1). Reload the Gemini tab.',
+            page.blocked
+          )
+          : t(
+            'popup_pipeline_extension_blocked',
+            'The extension is not accepting this tab’s observations ($1). Reload the ChatGPT tab.',
+            page.blocked
+          )
       ]
     };
   }
@@ -230,10 +279,20 @@ function pipeline(info, ready) {
       why: ['', t('popup_pipeline_waiting_session_receipt', 'App reachable. Waiting for this chat’s session receipt.')]
     };
   }
-  if (!calls.length) return {
-    read: ['running'], sent: ['off'], proc: ['off'],
-    why: ['', t('popup_pipeline_waiting_latest_request_id', 'Chat recorded. Waiting for a request ID from the latest turn.')]
-  };
+  if (!calls.length) {
+    if (isGemini) {
+      return {
+        read: ['done', String(read)],
+        sent: ['done', sent && sent.events ? String(sent.events) : ''],
+        proc: ['done'],
+        why: ['', t('popup_pipeline_gemini_synced', 'Gemini chat recorded and synced with the app.')]
+      };
+    }
+    return {
+      read: ['running'], sent: ['off'], proc: ['off'],
+      why: ['', t('popup_pipeline_waiting_latest_request_id', 'Chat recorded. Waiting for a request ID from the latest turn.')]
+    };
+  }
   const received = calls.filter(call => call.sent || call.app === 'request_id').length;
   const confirmed = calls.filter(call => call.confirmed || call.app === 'request_id').length;
   const sentStage = [received === calls.length ? 'done' : 'running', `${received}/${calls.length}`];
@@ -421,11 +480,14 @@ function paintDetails(status, info) {
         : t('popup_status_unbound', 'unbound')) : null,
     Boolean(info && info.terminal)
   );
+  const isGemini = tabProvider(info) === 'gemini';
   detail(
     grid,
     t('popup_detail_recorder', 'recorder'),
     page
-      ? t('popup_detail_recorder_value', 'fiber v$1 · run $2', [page.recorderVersion ?? '?', page.runId || '?'])
+      ? (isGemini
+        ? t('popup_detail_recorder_gemini_value', 'gemini v$1 · run $2', [page.recorderVersion ?? '?', page.runId || '?'])
+        : t('popup_detail_recorder_value', 'fiber v$1 · run $2', [page.recorderVersion ?? '?', page.runId || '?']))
       : t('popup_status_not_attached', 'not attached'),
     !page
   );
@@ -479,10 +541,34 @@ async function refresh() {
   const ready = paintHeader(status);
   const isChat = Boolean(info && info.isChat);
   const page = info && info.page;
+  const provider = isChat ? tabProvider(info) : null;
+  const isGemini = provider === 'gemini';
 
-  // On a ChatGPT page that is not a chat there is nothing to record, so no row claims a chat.
+  // On a provider page that is not a chat there is nothing to record, so no row claims a chat.
   const elsewhere = notAChat(info);
-  row('tab', isChat ? 'ok' : 'off', isChat ? '' : t('popup_status_none_open', 'none open'));
+  const chatgptTabs = Number.isFinite(info?.chatgptTabs) ? info.chatgptTabs : 0;
+  const geminiTabs = Number.isFinite(info?.geminiTabs) ? info.geminiTabs : 0;
+  const tabLabel = $('tabLabel');
+  if (tabLabel) {
+    tabLabel.textContent = provider === 'gemini'
+      ? t('popup_gemini_tab', 'Gemini tab')
+      : provider === 'chatgpt'
+        ? t('popup_chatgpt_tab', 'ChatGPT tab')
+        : t('popup_chat_tab', 'ChatGPT / Gemini tab');
+  }
+  let tabMeta = '';
+  if (!isChat) {
+    if (chatgptTabs > 0 && geminiTabs > 0) {
+      tabMeta = t('popup_tabs_summary_both', '$1 ChatGPT · $2 Gemini', [chatgptTabs, geminiTabs]);
+    } else if (geminiTabs > 0) {
+      tabMeta = t('popup_tabs_summary_gemini', '$1 Gemini', geminiTabs);
+    } else if (chatgptTabs > 0) {
+      tabMeta = t('popup_tabs_summary_chatgpt', '$1 ChatGPT', chatgptTabs);
+    } else {
+      tabMeta = t('popup_status_none_open', 'none open');
+    }
+  }
+  row('tab', isChat ? 'ok' : 'off', tabMeta);
   row(
     'rec',
     !isChat || elsewhere ? 'off' : info.recorder ? 'ok' : 'no',
@@ -498,6 +584,8 @@ async function refresh() {
   );
 
   const requestId = page && page.requestId;
+  const reqRow = $('r-req');
+  if (reqRow) reqRow.hidden = isGemini && !requestId && !(Array.isArray(page?.trace) && page.trace.length > 0);
   idRow(
     'req',
     !isChat || elsewhere ? 'off' : requestId ? 'ok' : 'wait',
@@ -515,19 +603,43 @@ async function refresh() {
 
   const broken = state.why[0] === 'bad';
   const flowing = Array.isArray(page?.trace) && page.trace.some(call => call.app === 'request_id');
+  const geminiSynced = isGemini && state.proc[0] === 'done' && !flowing;
   row(
     'app',
-    !isChat || elsewhere ? 'off' : broken ? 'no' : flowing ? 'ok' : 'wait',
+    !isChat || elsewhere ? 'off' : broken ? 'no' : flowing || geminiSynced ? 'ok' : 'wait',
     !isChat || elsewhere
       ? ''
       : broken
         ? t('popup_status_blocked', 'blocked')
         : flowing
           ? t('popup_status_tool_matched', 'tool matched')
-          : state.proc[0] === 'done'
-            ? t('popup_status_id_confirmed', 'ID confirmed')
-            : t('popup_status_waiting', 'waiting')
+          : geminiSynced
+            ? t('popup_status_synced', 'synced')
+            : state.proc[0] === 'done'
+              ? t('popup_status_id_confirmed', 'ID confirmed')
+              : t('popup_status_waiting', 'waiting')
   );
+  // Show Gemini Web companion status instead of ChatGPT-only overlay switches on Gemini tabs.
+  const augmentCaption = $('augmentCaption');
+  const augmentCard = $('augmentCard');
+  const geminiCaption = $('geminiCaption');
+  const geminiCard = $('geminiCard');
+  if (augmentCaption) augmentCaption.hidden = isGemini;
+  if (augmentCard) augmentCard.hidden = isGemini;
+  if (geminiCaption) geminiCaption.hidden = !isGemini;
+  if (geminiCard) geminiCard.hidden = !isGemini;
+  if (isGemini && $('r-gemini-sync')) {
+    const blockedHere = !ready || Boolean(page?.blocked);
+    const geminiSyncState = elsewhere ? 'off' : blockedHere ? 'no' : info.recorder ? 'ok' : 'no';
+    const geminiSyncMeta = elsewhere
+      ? ''
+      : blockedHere
+        ? t('popup_status_blocked', 'blocked')
+        : info.recorder
+          ? t('popup_status_active', 'active')
+          : t('popup_status_reload', 'reload');
+    row('gemini-sync', geminiSyncState, geminiSyncMeta);
+  }
   // Opens itself the first time something is actually wrong, so the panel that explains
   // the failure is already open when the popup is opened to look at one.
   if (broken && !openedOnFailure) {

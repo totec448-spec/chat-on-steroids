@@ -70,7 +70,8 @@ const SECRET_ENV_KEYS = [
   'OPENAI_API_KEY',
   'OPENAI_ADMIN_KEY',
   'CLOUDFLARED_TOKEN',
-  'CLOUDFLARED_TUNNEL_TOKEN'
+  'CLOUDFLARED_TUNNEL_TOKEN',
+  'TUNNEL_TOKEN'
 ];
 
 function validateEnvironment(overrides: CommandEnvironment | undefined): void {

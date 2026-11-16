@@ -168,9 +168,12 @@ import {
   lineNumberArg,
   resolveCwd,
   resolveIn,
+  isSyntheticMcpRequestId,
+  syntheticMcpRequestId,
   type SurfaceRegistrar,
   type ToolResult
 } from './kernel.js';
+export { isSyntheticMcpRequestId, syntheticMcpRequestId };
 
 /** Entries one `read` of a directory returns before it says it stopped. */
 const MAX_DIR_ENTRIES = 200;
@@ -1706,8 +1709,13 @@ async function callerNow(startedAt: number, options: { exact?: boolean; runId?: 
   // `exact` marks the one action that binds a run: spawn. It is the call whose refusal the
   // model cannot absorb, so it gets the longer ceiling; every other `agents` action can be
   // declined and asked again on the next tool call.
-  const window = base.requestId ? (options.exact ? SPAWN_EVIDENCE_MS : IDENTITY_EVIDENCE_MS) : PRIME_EVIDENCE_MS;
-  const allowRequest = Boolean(base.requestId && (currentCall()?.allowUnattributed ?? getConfig().multiAgent.allowUnattributedCalls));
+  const allowUnattributed = currentCall()?.allowUnattributed ?? getConfig().multiAgent.allowUnattributedCalls;
+  const syntheticRequestId = !base.requestId && allowUnattributed && base.mcpSessionId
+    ? syntheticMcpRequestId(base.clientIdentity?.id ?? 'remote', base.mcpSessionId)
+    : null;
+  const effectiveRequestId = base.requestId ?? syntheticRequestId;
+  const window = effectiveRequestId ? (options.exact ? SPAWN_EVIDENCE_MS : IDENTITY_EVIDENCE_MS) : PRIME_EVIDENCE_MS;
+  const allowRequest = Boolean(effectiveRequestId && allowUnattributed);
   const requestOwnsTarget = !options.member || agentFamiliesForCaller(base).length > 0;
   const resolved =
     base.conversationId ??
@@ -1720,11 +1728,15 @@ async function callerNow(startedAt: number, options: { exact?: boolean; runId?: 
     }));
   const caller: Caller = {
     ...base,
+    requestId: effectiveRequestId,
     conversationId: resolved,
     runId: options.runId
   };
   const call = currentCall();
-  if (call) call.caller.runId = options.runId;
+  if (call) {
+    call.caller.runId = options.runId;
+    if (syntheticRequestId && !call.caller.requestId) call.caller.requestId = syntheticRequestId;
+  }
   if (resolved) {
     const call = currentCall();
     if (call) call.caller.conversationId = resolved;

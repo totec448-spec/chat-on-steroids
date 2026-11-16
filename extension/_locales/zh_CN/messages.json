@@ -26,6 +26,9 @@
   "content_auto_compaction_threshold_app": {
     "message": "阈值在应用中设置"
   },
+  "content_auto_compaction_waiting_app": {
+    "message": "自动压缩：正在等待应用"
+  },
   "content_auto_compaction_worker_off": {
     "message": "此处已关闭：子代理聊天不会自动压缩"
   },
@@ -35,11 +38,11 @@
   "content_bootstrap_composer_changed_before_send": {
     "message": "发送引导消息前输入框发生变化；草稿已保留"
   },
-  "content_bootstrap_composer_replaced": {
-    "message": "插入引导消息时，ChatGPT 替换了输入框"
-  },
   "content_bootstrap_composer_never_ready": {
     "message": "ChatGPT 未显示可用于启动的输入框"
+  },
+  "content_bootstrap_composer_replaced": {
+    "message": "插入引导消息时，ChatGPT 替换了输入框"
   },
   "content_bootstrap_composer_unavailable": {
     "message": "选择模型后，ChatGPT 未重新显示可用的输入框"
@@ -326,11 +329,11 @@
   "content_delivery_existing_draft": {
     "message": "ChatGPT 中已有未发送的草稿。重试前，请先在 Chrome 中发送或清除该草稿。"
   },
-  "content_delivery_signed_out": {
-    "message": "此浏览器中未登录 ChatGPT。请在其中登录 ChatGPT，然后重新发送。"
-  },
   "content_delivery_model_unconfirmed": {
     "message": "无法确认请求的模型或推理强度"
+  },
+  "content_delivery_signed_out": {
+    "message": "此浏览器中未登录 ChatGPT。请在其中登录 ChatGPT，然后重新发送。"
   },
   "content_delivery_stop_failed": {
     "message": "无法停止当前回复。"
@@ -346,6 +349,12 @@
   },
   "content_dismiss": {
     "message": "关闭"
+  },
+  "content_edit_message_missing": {
+    "message": "该消息已不在 ChatGPT 页面上，无法编辑。"
+  },
+  "content_edit_unavailable": {
+    "message": "ChatGPT 没有为该消息提供编辑。请在 ChatGPT 中打开聊天，然后重试。"
   },
   "content_empty": {
     "message": "（空）"
@@ -407,11 +416,122 @@
   "content_goal_delivery_only_finish": {
     "message": "仅在轮次结束通知时"
   },
+  "content_goal_error_astra_finish_only": {
+    "message": "此聊天通过 finish 工具继续。按当前设置，浏览器中的最终回答不会触发另一条消息。"
+  },
+  "content_goal_error_auth_rejected": {
+    "message": "继续提供者拒绝了 API 凭据。请在设置中检查 API 密钥和访问权限。"
+  },
+  "content_goal_error_chat_blocked": {
+    "message": "此聊天已在应用中被阻止。请先在应用中解除阻止，然后再启用继续。"
+  },
+  "content_goal_error_conversation_superseded": {
+    "message": "此聊天已被“压缩并继续”替换。请在其后续聊天中继续。"
+  },
+  "content_goal_error_goal_ack_not_durable": {
+    "message": "应用无法保存发送确认。请检查可用磁盘空间；手动重新发送前先检查聊天。"
+  },
+  "content_goal_error_goal_browser_busy": {
+    "message": "已有一个辅助请求正在等待处理。请让它完成，或先取消该请求再开始另一个。"
+  },
+  "content_goal_error_goal_browser_cancelled": {
+    "message": "辅助请求已取消。想继续时请重新开始。"
+  },
+  "content_goal_error_goal_browser_send_failed": {
+    "message": "无法将辅助提示发送到 ChatGPT。重试前请打开辅助聊天，检查其输入框或可见错误。"
+  },
+  "content_goal_error_goal_browser_send_unconfirmed": {
+    "message": "应用无法确认 ChatGPT 是否收到了辅助提示。重试前请先检查辅助聊天，以免重复发送。"
+  },
+  "content_goal_error_goal_context_too_large": {
+    "message": "任务和目标/循环指令太长，无法发送给辅助工具。请缩短任务或设置中的自定义继续指令。"
+  },
+  "content_goal_error_goal_disabled": {
+    "message": "此聊天的目标/循环已关闭。请开启它以允许继续。"
+  },
+  "content_goal_error_goal_final_not_confirmed": {
+    "message": "应用尚未确认可用于自动继续的最终回答。请检查来源聊天是否仍在进行工作或发生错误。"
+  },
+  "content_goal_error_goal_helper_stop_unverified": {
+    "message": "辅助工具称目标已达成，但尚未检查。没有发送后续回复。请检查聊天；如果还有工作未完成，请继续。"
+  },
+  "content_goal_error_goal_marker_missing": {
+    "message": "回答缺少离线目标模板要求的完成标记。请检查模板指令，或选择其他继续来源。"
+  },
+  "content_goal_error_goal_objective_not_durable": {
+    "message": "应用无法保存任务。请检查可用磁盘空间，然后重试保存。"
+  },
+  "content_goal_error_goal_owned_elsewhere": {
+    "message": "另一个浏览器标签页正在处理此次继续操作。请前往该标签页查看进度。"
+  },
+  "content_goal_error_goal_reply_not_durable": {
+    "message": "应用无法保存待处理的继续操作。请检查可用磁盘空间和应用诊断。"
+  },
+  "content_goal_error_goal_reply_not_pending": {
+    "message": "此回答没有待处理的继续操作。它可能已经处理，或已被更新的工作取代。重试前请先检查最新的聊天活动。"
+  },
+  "content_goal_error_goal_switch_not_durable": {
+    "message": "应用无法保存目标/循环设置。请检查可用磁盘空间，然后重试保存。"
+  },
+  "content_goal_error_goal_worker_chat": {
+    "message": "子智能体不能运行自己的目标/循环。请改为在父聊天中启用继续。"
+  },
+  "content_goal_error_invalid_provider": {
+    "message": "自定义继续端点无效。请在设置中检查其 URL；请使用 HTTPS 或本地 HTTP 端点。"
+  },
+  "content_goal_error_loop_mcp_call_missing": {
+    "message": "上一条回复中未记录 MCP 工具调用。ChatGPT 可能正在向你提问，也可能是工具连接已断开。请回答问题；如果工具无法继续工作，请检查隧道。自动继续已暂停；循环仍保持启用。"
+  },
+  "content_goal_error_loop_stop_refused": {
+    "message": "辅助工具一直选择停止，而不是编写循环继续内容。请检查循环指令，或选择其他辅助模型。"
+  },
+  "content_goal_error_no_api_key": {
+    "message": "未为继续提供者配置 API 密钥。请在设置中添加，或选择 ChatGPT 继续来源。"
+  },
+  "content_goal_error_no_conversation": {
+    "message": "没有可继续的已记录对话。请先发送任务。"
+  },
+  "content_goal_error_no_objective": {
+    "message": "未提供任务。请在启动目标/循环前输入任务。"
+  },
+  "content_goal_error_nothing_to_open_with": {
+    "message": "辅助工具未生成开场消息。请让任务更具体后再试。"
+  },
+  "content_goal_error_out_of_credit": {
+    "message": "继续提供者账户没有可用额度。请充值，或在设置中选择其他继续来源。"
+  },
+  "content_goal_error_rate_limited": {
+    "message": "继续提供者正在限制请求频率。请等待显示的重试时间，或选择其他继续模型。"
+  },
+  "content_goal_error_reply_too_long": {
+    "message": "辅助工具编写的继续内容太长，无法发送。请要求更短的继续指令，或在设置中选择其他辅助模型。"
+  },
+  "content_goal_error_request_failed": {
+    "message": "继续请求失败。重试前请检查所选辅助工具或 API 端点，以及应用诊断。"
+  },
+  "content_goal_error_response_body_too_large": {
+    "message": "提供者响应超出大小限制。请选择其他继续模型，或要求更短的回复。"
+  },
+  "content_goal_error_session_not_recorded": {
+    "message": "应用没有此聊天的已记录历史。请启用记录并先发送一条消息，然后再使用自动继续。"
+  },
+  "content_goal_error_stream_record_too_long": {
+    "message": "提供者返回的响应过大。请选择其他继续模型，或要求更短的回复。"
+  },
+  "content_goal_error_timeout_or_cancelled": {
+    "message": "继续请求超时或已取消。重试前请检查辅助聊天或提供者状态。"
+  },
+  "content_goal_error_unknown_model": {
+    "message": "继续提供者找不到所选模型。请刷新其模型列表，并在设置中选择可用模型。"
+  },
   "content_goal_loop_off": {
     "message": "目标和循环已关闭"
   },
   "content_goal_loop_stopped": {
     "message": "目标循环已停止"
+  },
+  "content_goal_loop_waiting_app": {
+    "message": "目标和循环：正在等待应用"
   },
   "content_goal_message_box_in_use": {
     "message": "输入框正在使用，因此未发送任何内容"
@@ -458,6 +578,9 @@
   "content_goal_retrying": {
     "message": "将在 $1 秒后重试目标"
   },
+  "content_goal_reviewer_deadline": {
+    "message": "$1 后不等审查继续"
+  },
   "content_goal_save": {
     "message": "保存为目标"
   },
@@ -488,6 +611,9 @@
   "content_goal_step_writing": {
     "message": "正在编写回复"
   },
+  "content_goal_wait_paused": {
+    "message": "ChatGPT 要求放慢速度 · 等到它指定的时间"
+  },
   "content_goal_wait_recovery_activity": {
     "message": "恢复后等待活动"
   },
@@ -497,32 +623,29 @@
   "content_goal_wait_resumed": {
     "message": "ChatGPT 已恢复工作 · 等待后重试"
   },
-  "content_goal_wait_running_tools": {
-    "message": "等待正在运行的工具"
-  },
-  "content_goal_wait_tool_inactivity": {
-    "message": "等待工具活动停止"
-  },
-  "content_goal_reviewer_deadline": {
-    "message": "$1 后不等审查继续"
-  },
   "content_goal_wait_reviewer": {
     "message": "正在等待审查者"
   },
-  "content_goal_wait_workers": {
-    "message": "正在等待此对话的子代理"
+  "content_goal_wait_running_tools": {
+    "message": "等待正在运行的工具"
   },
   "content_goal_wait_slots": {
     "message": "等待空位（同时工作的聊天数）"
   },
-  "content_goal_wait_paused": {
-    "message": "ChatGPT 要求放慢速度 · 等到它指定的时间"
+  "content_goal_wait_tool_inactivity": {
+    "message": "等待工具活动停止"
+  },
+  "content_goal_wait_workers": {
+    "message": "正在等待此对话的子代理"
   },
   "content_goal_writing_first_message": {
     "message": "$1 正在编写第一条消息"
   },
   "content_goal_wrote_next_message": {
     "message": "$1 已编写下一条消息"
+  },
+  "content_history_rate_limited": {
+    "message": "ChatGPT 暂时限制了对此对话历史的访问。Chat On Steroids 将暂停自动恢复，直到等待期结束。"
   },
   "content_loop_add_specific": {
     "message": "添加具体循环"
@@ -599,11 +722,17 @@
   "content_paused": {
     "message": "已暂停"
   },
+  "content_revival_draft_appeared": {
+    "message": "准备唤醒工作者时，对话中输入了内容，因此唤醒没有替换它。"
+  },
   "content_saving": {
     "message": "保存中…"
   },
   "content_settings_aria": {
     "message": "Chat On Steroids 设置"
+  },
+  "content_settings_waiting_app": {
+    "message": "正在等待应用"
   },
   "content_stage_handoff_attention": {
     "message": "交接回复需要处理"
@@ -637,6 +766,9 @@
   },
   "content_task_pick_mode_first": {
     "message": "请先在上方选择“目标”或“循环”——“关闭”不会写入任何内容。"
+  },
+  "content_task_waiting_app": {
+    "message": "正在等待 Chat On Steroids 响应。"
   },
   "content_task_worker_unavailable": {
     "message": "子代理聊天已由其主代理驱动。"
@@ -740,6 +872,15 @@
   "content_worker_still_running": {
     "message": "子代理仍在运行：$1"
   },
+  "content_workers_failed": {
+    "message": "$1 个失败"
+  },
+  "content_workers_finished": {
+    "message": "$1 个已完成"
+  },
+  "content_workers_running": {
+    "message": "$1 个运行中"
+  },
   "content_workers_still_running": {
     "message": "仍有 $1 个子代理在运行"
   },
@@ -760,6 +901,9 @@
   },
   "popup_advanced": {
     "message": "高级"
+  },
+  "popup_app_not_running_help": {
+    "message": "请确认 Chat On Steroids 已在这台电脑上打开。扩展会自动连接。"
   },
   "popup_attribution_agent_key": {
     "message": "智能体键"
@@ -784,6 +928,9 @@
   },
   "popup_chat_id": {
     "message": "聊天 ID"
+  },
+  "popup_chat_tab": {
+    "message": "ChatGPT / Gemini 标签页"
   },
   "popup_chatgpt_tab": {
     "message": "ChatGPT 标签页"
@@ -830,17 +977,26 @@
   "popup_detail_app_value": {
     "message": "v$1 · 端口 $2"
   },
+  "popup_detail_calls": {
+    "message": "$1 次调用"
+  },
   "popup_detail_chat_id": {
     "message": "聊天 ID"
   },
   "popup_detail_delivered": {
     "message": "已发送"
   },
+  "popup_detail_events": {
+    "message": "$1 个事件"
+  },
   "popup_detail_extension": {
     "message": "扩展"
   },
   "popup_detail_extension_value": {
     "message": "v$1 · 协议 $2"
+  },
+  "popup_detail_failed": {
+    "message": "$1 次失败"
   },
   "popup_detail_in_this_browser": {
     "message": "在此浏览器中"
@@ -863,6 +1019,9 @@
   "popup_detail_recorder": {
     "message": "记录器"
   },
+  "popup_detail_recorder_gemini_value": {
+    "message": "gemini v$1 · 运行 ID $2"
+  },
   "popup_detail_recorder_value": {
     "message": "fiber v$1 · 运行 ID $2"
   },
@@ -872,11 +1031,20 @@
   "popup_detail_tab_value": {
     "message": "$1 · 世代 $2"
   },
+  "popup_detail_total": {
+    "message": "共 $1 个"
+  },
   "popup_detail_turn": {
     "message": "轮次"
   },
   "popup_detail_turn_live": {
     "message": "$1 · 实时"
+  },
+  "popup_gemini_companion_feature": {
+    "message": "实时记录与子代理"
+  },
+  "popup_gemini_tab": {
+    "message": "Gemini 标签页"
   },
   "popup_no": {
     "message": "否"
@@ -908,11 +1076,23 @@
   "popup_pipeline_extension_blocked": {
     "message": "扩展未接受此标签页的观察结果（$1）。请重新加载 ChatGPT 标签页。"
   },
+  "popup_pipeline_extension_blocked_gemini": {
+    "message": "扩展未接受此标签页的观察结果（$1）。请重新加载 Gemini 标签页。"
+  },
+  "popup_pipeline_gemini_synced": {
+    "message": "已记录 Gemini 聊天并与应用同步。"
+  },
   "popup_pipeline_id_found_waiting_receipt": {
     "message": "已在最新轮次中找到 ID。正在等待应用确认接收。"
   },
   "popup_pipeline_no_recorder": {
     "message": "此标签页没有记录器。请重新加载页面。"
+  },
+  "popup_pipeline_not_a_chat": {
+    "message": "此 ChatGPT 页面不是聊天，应用在这里没有可跟踪的内容。请打开或开始一个聊天。"
+  },
+  "popup_pipeline_not_a_chat_gemini": {
+    "message": "此 Gemini 页面不是聊天，应用在这里没有可跟踪的内容。请打开或开始一个聊天。"
   },
   "popup_pipeline_owner_confirmed_no_activity": {
     "message": "请求归属已确认。尚无匹配的工具活动记录。"
@@ -931,9 +1111,6 @@
   },
   "popup_pipeline_waiting_first_message": {
     "message": "正在等待首条消息。"
-  },
-  "popup_pipeline_not_a_chat": {
-    "message": "此 ChatGPT 页面不是聊天，应用在这里没有可跟踪的内容。请打开或开始一个聊天。"
   },
   "popup_pipeline_waiting_latest_request_id": {
     "message": "聊天已记录。正在等待最新轮次的请求 ID。"
@@ -956,6 +1133,9 @@
   "popup_section_augment_chatgpt": {
     "message": "增强 ChatGPT"
   },
+  "popup_section_gemini": {
+    "message": "Gemini Web"
+  },
   "popup_section_session_capture": {
     "message": "会话捕获"
   },
@@ -964,6 +1144,21 @@
   },
   "popup_sent_to_app": {
     "message": "已发送到应用"
+  },
+  "popup_sign_in_failed": {
+    "message": "失败。请从 CoS 重新开始登录。"
+  },
+  "popup_sign_in_imported": {
+    "message": "会话已转移"
+  },
+  "popup_sign_in_imported_detail": {
+    "message": "你已登录 CoS browser。"
+  },
+  "popup_sign_in_permission": {
+    "message": "Cookie 访问被拒绝。请再次点击。"
+  },
+  "popup_sign_in_transfer": {
+    "message": "将会话带到 CoS browser"
   },
   "popup_state_app_not_reachable": {
     "message": "无法连接应用"
@@ -982,6 +1177,9 @@
   },
   "popup_state_version_mismatch": {
     "message": "版本不匹配"
+  },
+  "popup_status_active": {
+    "message": "已启用"
   },
   "popup_status_answering": {
     "message": "正在回复"
@@ -1004,14 +1202,14 @@
   "popup_status_new_chat": {
     "message": "新聊天"
   },
-  "popup_status_not_a_chat": {
-    "message": "不是聊天"
-  },
   "popup_status_none_open": {
     "message": "未打开"
   },
   "popup_status_none_yet": {
     "message": "暂无"
+  },
+  "popup_status_not_a_chat": {
+    "message": "不是聊天"
   },
   "popup_status_not_attached": {
     "message": "未附加"
@@ -1025,6 +1223,9 @@
   "popup_status_retired": {
     "message": "已停用"
   },
+  "popup_status_synced": {
+    "message": "已同步"
+  },
   "popup_status_tool_matched": {
     "message": "工具已匹配"
   },
@@ -1033,6 +1234,15 @@
   },
   "popup_status_waiting": {
     "message": "正在等待"
+  },
+  "popup_tabs_summary_both": {
+    "message": "$1 ChatGPT · $2 Gemini"
+  },
+  "popup_tabs_summary_chatgpt": {
+    "message": "$1 ChatGPT"
+  },
+  "popup_tabs_summary_gemini": {
+    "message": "$1 Gemini"
   },
   "popup_time_hours_short": {
     "message": "$1 小时"
@@ -1054,176 +1264,5 @@
   },
   "popup_yes": {
     "message": "是"
-  },
-  "content_goal_error_loop_mcp_call_missing": {
-    "message": "上一条回复中未记录 MCP 工具调用。ChatGPT 可能正在向你提问，也可能是工具连接已断开。请回答问题；如果工具无法继续工作，请检查隧道。自动继续已暂停；循环仍保持启用。"
-  },
-  "content_goal_error_goal_reply_not_pending": {
-    "message": "此回答没有待处理的继续操作。它可能已经处理，或已被更新的工作取代。重试前请先检查最新的聊天活动。"
-  },
-  "content_goal_error_goal_context_too_large": {
-    "message": "任务和目标/循环指令太长，无法发送给辅助工具。请缩短任务或设置中的自定义继续指令。"
-  },
-  "content_goal_error_reply_too_long": {
-    "message": "辅助工具编写的继续内容太长，无法发送。请要求更短的继续指令，或在设置中选择其他辅助模型。"
-  },
-  "content_goal_error_stream_record_too_long": {
-    "message": "提供者返回的响应过大。请选择其他继续模型，或要求更短的回复。"
-  },
-  "content_goal_error_response_body_too_large": {
-    "message": "提供者响应超出大小限制。请选择其他继续模型，或要求更短的回复。"
-  },
-  "content_goal_error_no_api_key": {
-    "message": "未为继续提供者配置 API 密钥。请在设置中添加，或选择 ChatGPT 继续来源。"
-  },
-  "content_goal_error_auth_rejected": {
-    "message": "继续提供者拒绝了 API 凭据。请在设置中检查 API 密钥和访问权限。"
-  },
-  "content_goal_error_out_of_credit": {
-    "message": "继续提供者账户没有可用额度。请充值，或在设置中选择其他继续来源。"
-  },
-  "content_goal_error_unknown_model": {
-    "message": "继续提供者找不到所选模型。请刷新其模型列表，并在设置中选择可用模型。"
-  },
-  "content_goal_error_invalid_provider": {
-    "message": "自定义继续端点无效。请在设置中检查其 URL；请使用 HTTPS 或本地 HTTP 端点。"
-  },
-  "content_history_rate_limited": {
-    "message": "ChatGPT 暂时限制了对此对话历史的访问。Chat On Steroids 将暂停自动恢复，直到等待期结束。"
-  },
-  "content_goal_error_rate_limited": {
-    "message": "继续提供者正在限制请求频率。请等待显示的重试时间，或选择其他继续模型。"
-  },
-  "content_goal_error_timeout_or_cancelled": {
-    "message": "继续请求超时或已取消。重试前请检查辅助聊天或提供者状态。"
-  },
-  "content_goal_error_request_failed": {
-    "message": "继续请求失败。重试前请检查所选辅助工具或 API 端点，以及应用诊断。"
-  },
-  "content_goal_error_goal_browser_busy": {
-    "message": "已有一个辅助请求正在等待处理。请让它完成，或先取消该请求再开始另一个。"
-  },
-  "content_goal_error_goal_browser_cancelled": {
-    "message": "辅助请求已取消。想继续时请重新开始。"
-  },
-  "content_goal_error_goal_browser_send_failed": {
-    "message": "无法将辅助提示发送到 ChatGPT。重试前请打开辅助聊天，检查其输入框或可见错误。"
-  },
-  "content_goal_error_goal_browser_send_unconfirmed": {
-    "message": "应用无法确认 ChatGPT 是否收到了辅助提示。重试前请先检查辅助聊天，以免重复发送。"
-  },
-  "content_goal_error_goal_owned_elsewhere": {
-    "message": "另一个浏览器标签页正在处理此次继续操作。请前往该标签页查看进度。"
-  },
-  "content_goal_error_goal_final_not_confirmed": {
-    "message": "应用尚未确认可用于自动继续的最终回答。请检查来源聊天是否仍在进行工作或发生错误。"
-  },
-  "content_goal_error_astra_finish_only": {
-    "message": "此聊天通过 finish 工具继续。按当前设置，浏览器中的最终回答不会触发另一条消息。"
-  },
-  "content_goal_error_goal_disabled": {
-    "message": "此聊天的目标/循环已关闭。请开启它以允许继续。"
-  },
-  "content_goal_error_goal_worker_chat": {
-    "message": "子智能体不能运行自己的目标/循环。请改为在父聊天中启用继续。"
-  },
-  "content_goal_error_conversation_superseded": {
-    "message": "此聊天已被“压缩并继续”替换。请在其后续聊天中继续。"
-  },
-  "content_goal_error_chat_blocked": {
-    "message": "此聊天已在应用中被阻止。请先在应用中解除阻止，然后再启用继续。"
-  },
-  "content_goal_error_session_not_recorded": {
-    "message": "应用没有此聊天的已记录历史。请启用记录并先发送一条消息，然后再使用自动继续。"
-  },
-  "content_goal_error_no_conversation": {
-    "message": "没有可继续的已记录对话。请先发送任务。"
-  },
-  "content_goal_error_no_objective": {
-    "message": "未提供任务。请在启动目标/循环前输入任务。"
-  },
-  "content_goal_error_nothing_to_open_with": {
-    "message": "辅助工具未生成开场消息。请让任务更具体后再试。"
-  },
-  "content_goal_error_goal_helper_stop_unverified": {
-    "message": "辅助工具称目标已达成，但尚未检查。没有发送后续回复。请检查聊天；如果还有工作未完成，请继续。"
-  },
-  "content_goal_error_loop_stop_refused": {
-    "message": "辅助工具一直选择停止，而不是编写循环继续内容。请检查循环指令，或选择其他辅助模型。"
-  },
-  "content_goal_error_goal_marker_missing": {
-    "message": "回答缺少离线目标模板要求的完成标记。请检查模板指令，或选择其他继续来源。"
-  },
-  "content_goal_error_goal_reply_not_durable": {
-    "message": "应用无法保存待处理的继续操作。请检查可用磁盘空间和应用诊断。"
-  },
-  "content_goal_error_goal_ack_not_durable": {
-    "message": "应用无法保存发送确认。请检查可用磁盘空间；手动重新发送前先检查聊天。"
-  },
-  "content_goal_error_goal_switch_not_durable": {
-    "message": "应用无法保存目标/循环设置。请检查可用磁盘空间，然后重试保存。"
-  },
-  "content_goal_error_goal_objective_not_durable": {
-    "message": "应用无法保存任务。请检查可用磁盘空间，然后重试保存。"
-  },
-  "popup_sign_in_transfer": {
-    "message": "将会话带到 CoS browser"
-  },
-  "popup_sign_in_permission": {
-    "message": "Cookie 访问被拒绝。请再次点击。"
-  },
-  "popup_sign_in_imported": {
-    "message": "会话已转移"
-  },
-  "popup_sign_in_imported_detail": {
-    "message": "你已登录 CoS browser。"
-  },
-  "popup_sign_in_failed": {
-    "message": "失败。请从 CoS 重新开始登录。"
-  },
-  "popup_app_not_running_help": {
-    "message": "请确认 Chat On Steroids 已在这台电脑上打开。扩展会自动连接。"
-  },
-  "content_workers_finished": {
-    "message": "$1 个已完成"
-  },
-  "content_workers_running": {
-    "message": "$1 个运行中"
-  },
-  "content_workers_failed": {
-    "message": "$1 个失败"
-  },
-  "popup_detail_events": {
-    "message": "$1 个事件"
-  },
-  "popup_detail_calls": {
-    "message": "$1 次调用"
-  },
-  "popup_detail_failed": {
-    "message": "$1 次失败"
-  },
-  "popup_detail_total": {
-    "message": "共 $1 个"
-  },
-  "content_edit_message_missing": {
-    "message": "该消息已不在 ChatGPT 页面上，无法编辑。"
-  },
-  "content_edit_unavailable": {
-    "message": "ChatGPT 没有为该消息提供编辑。请在 ChatGPT 中打开聊天，然后重试。"
-  },
-  "content_auto_compaction_waiting_app": {
-    "message": "自动压缩：正在等待应用"
-  },
-  "content_goal_loop_waiting_app": {
-    "message": "目标和循环：正在等待应用"
-  },
-  "content_settings_waiting_app": {
-    "message": "正在等待应用"
-  },
-  "content_task_waiting_app": {
-    "message": "正在等待 Chat On Steroids 响应。"
-  },
-  "content_revival_draft_appeared": {
-    "message": "准备唤醒工作者时，对话中输入了内容，因此唤醒没有替换它。"
   }
 }

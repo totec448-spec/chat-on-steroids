@@ -26,6 +26,9 @@
   "content_auto_compaction_threshold_app": {
     "message": "eşik uygulamada ayarlanır"
   },
+  "content_auto_compaction_waiting_app": {
+    "message": "Otomatik sıkıştırma: uygulama bekleniyor"
+  },
   "content_auto_compaction_worker_off": {
     "message": "burada kapalı: yardımcı ajan sohbetleri hiçbir zaman otomatik sıkıştırılmaz"
   },
@@ -35,11 +38,11 @@
   "content_bootstrap_composer_changed_before_send": {
     "message": "başlangıç mesajı gönderilmeden önce mesaj alanı değişti; taslak korundu"
   },
-  "content_bootstrap_composer_replaced": {
-    "message": "ChatGPT, başlangıç metni eklenirken mesaj alanını değiştirdi"
-  },
   "content_bootstrap_composer_never_ready": {
     "message": "ChatGPT başlangıç için kullanılabilir bir ileti alanı göstermedi"
+  },
+  "content_bootstrap_composer_replaced": {
+    "message": "ChatGPT, başlangıç metni eklenirken mesaj alanını değiştirdi"
   },
   "content_bootstrap_composer_unavailable": {
     "message": "Model seçiminden sonra ChatGPT kullanılabilir bir ileti alanını yeniden göstermedi"
@@ -326,11 +329,11 @@
   "content_delivery_existing_draft": {
     "message": "ChatGPT’de zaten gönderilmemiş bir taslak var. Yeniden denemeden önce bu taslağı Chrome’da gönderin veya temizleyin."
   },
-  "content_delivery_signed_out": {
-    "message": "Bu tarayıcıda ChatGPT oturumu açık değil. Orada ChatGPT’ye giriş yapın, sonra yeniden gönderin."
-  },
   "content_delivery_model_unconfirmed": {
     "message": "İstenen model veya akıl yürütme düzeyi doğrulanamadı"
+  },
+  "content_delivery_signed_out": {
+    "message": "Bu tarayıcıda ChatGPT oturumu açık değil. Orada ChatGPT’ye giriş yapın, sonra yeniden gönderin."
   },
   "content_delivery_stop_failed": {
     "message": "Geçerli yanıt durdurulamadı."
@@ -346,6 +349,12 @@
   },
   "content_dismiss": {
     "message": "Kapat"
+  },
+  "content_edit_message_missing": {
+    "message": "Bu mesaj artık ChatGPT sayfasında değil, bu yüzden düzenlenemez."
+  },
+  "content_edit_unavailable": {
+    "message": "ChatGPT bu mesaj için Düzenle seçeneği sunmadı. Sohbeti ChatGPT'de açıp yeniden deneyin."
   },
   "content_empty": {
     "message": "(boş)"
@@ -407,11 +416,122 @@
   "content_goal_delivery_only_finish": {
     "message": "Yalnızca oturum bitişinde"
   },
+  "content_goal_error_astra_finish_only": {
+    "message": "Bu sohbet bitiş aracı üzerinden devam ediyor. Geçerli ayarla tarayıcıdaki nihai yanıt başka bir mesaj tetiklemez."
+  },
+  "content_goal_error_auth_rejected": {
+    "message": "Devam sağlayıcısı API kimlik bilgilerini reddetti. Ayarlar'da API anahtarını ve erişim izinlerini kontrol edin."
+  },
+  "content_goal_error_chat_blocked": {
+    "message": "Bu sohbet uygulamada engellenmiş. Devamı etkinleştirmeden önce engeli kaldırın."
+  },
+  "content_goal_error_conversation_superseded": {
+    "message": "Bu sohbet Sıkıştır ve sürdür ile değiştirildi. Ardıl sohbette devam edin."
+  },
+  "content_goal_error_goal_ack_not_durable": {
+    "message": "Uygulama iletim onayını kaydedemedi. Boş disk alanını kontrol edin; elle yeniden göndermeden önce sohbeti kontrol edin."
+  },
+  "content_goal_error_goal_browser_busy": {
+    "message": "Başka bir yardımcı isteği zaten bekliyor. Yeni bir istek başlatmadan önce tamamlanmasını bekleyin veya iptal edin."
+  },
+  "content_goal_error_goal_browser_cancelled": {
+    "message": "Yardımcı isteği iptal edildi. Devam etmek istediğinizde yeniden başlatın."
+  },
+  "content_goal_error_goal_browser_send_failed": {
+    "message": "Yardımcı istemi ChatGPT'ye iletilemedi. Yeniden denemeden önce yardımcı sohbetini açın ve mesaj alanını veya görünen hatayı kontrol edin."
+  },
+  "content_goal_error_goal_browser_send_unconfirmed": {
+    "message": "Uygulama, ChatGPT'nin yardımcı istemini alıp almadığını doğrulayamadı. İki kez göndermemek için yeniden denemeden önce yardımcı sohbetini kontrol edin."
+  },
+  "content_goal_error_goal_context_too_large": {
+    "message": "Görev ve Hedef/Döngü talimatları yardımcıya gönderilemeyecek kadar uzun. Ayarlar'daki görevi veya özel devam talimatlarını kısaltın."
+  },
+  "content_goal_error_goal_disabled": {
+    "message": "Bu sohbet için Hedef/Döngü kapalı. Devama izin vermek için açın."
+  },
+  "content_goal_error_goal_final_not_confirmed": {
+    "message": "Uygulama, otomatik devam için uygun bir nihai yanıtı henüz doğrulamadı. Kaynak sohbette devam eden çalışma veya hata olup olmadığını kontrol edin."
+  },
+  "content_goal_error_goal_helper_stop_unverified": {
+    "message": "Yardımcı hedefe ulaşıldığını söylüyor, ancak bu kontrol edilmedi. Takip yanıtı gönderilmedi. Sohbeti kontrol edin ve iş kaldıysa devam edin."
+  },
+  "content_goal_error_goal_marker_missing": {
+    "message": "Yanıtta çevrimdışı Hedef şablonlarının gerektirdiği tamamlama işareti eksik. Şablon talimatlarını kontrol edin veya başka bir devam kaynağı seçin."
+  },
+  "content_goal_error_goal_objective_not_durable": {
+    "message": "Uygulama görevi kaydedemedi. Boş disk alanını kontrol edip yeniden kaydetmeyi deneyin."
+  },
+  "content_goal_error_goal_owned_elsewhere": {
+    "message": "Bu devam işlemini başka bir tarayıcı sekmesi yürütüyor. İlerleme için o sekmeyi kontrol edin."
+  },
+  "content_goal_error_goal_reply_not_durable": {
+    "message": "Uygulama bekleyen devamı kaydedemedi. Boş disk alanını ve uygulama tanılamalarını kontrol edin."
+  },
+  "content_goal_error_goal_reply_not_pending": {
+    "message": "Bu yanıt için bekleyen bir devam yok. Zaten işlenmiş veya daha yeni bir çalışma tarafından değiştirilmiş olabilir. Yeniden denemeden önce en son sohbet etkinliğini kontrol edin."
+  },
+  "content_goal_error_goal_switch_not_durable": {
+    "message": "Uygulama Hedef/Döngü ayarını kaydedemedi. Boş disk alanını kontrol edip yeniden kaydetmeyi deneyin."
+  },
+  "content_goal_error_goal_worker_chat": {
+    "message": "Yardımcı ajanlar kendi Hedef/Döngü işlemlerini çalıştıramaz. Bunun yerine üst sohbette devamı etkinleştirin."
+  },
+  "content_goal_error_invalid_provider": {
+    "message": "Özel devam uç noktası geçersiz. URL'sini Ayarlar'da kontrol edin; HTTPS veya yerel bir HTTP uç noktası kullanın."
+  },
+  "content_goal_error_loop_mcp_call_missing": {
+    "message": "Son yanıtta MCP araç çağrısı kaydedilmedi. ChatGPT size bir soru soruyor olabilir veya araç bağlantısı kesilmiş olabilir. Soruyu yanıtlayın ya da araçlar çalışmayı durdurduysa tüneli kontrol edin. Otomatik devam duraklatıldı; Döngü etkin kalır."
+  },
+  "content_goal_error_loop_stop_refused": {
+    "message": "Yardımcı, Döngü devamı yazmak yerine durmayı seçmeye devam etti. Döngü talimatlarını gözden geçirin veya başka bir yardımcı model seçin."
+  },
+  "content_goal_error_no_api_key": {
+    "message": "Devam sağlayıcısı için API anahtarı yapılandırılmamış. Ayarlar'da bir anahtar ekleyin veya ChatGPT devam kaynağını seçin."
+  },
+  "content_goal_error_no_conversation": {
+    "message": "Devam ettirilecek kayıtlı konuşma yok. Önce bir görev gönderin."
+  },
+  "content_goal_error_no_objective": {
+    "message": "Görev belirtilmedi. Hedef/Döngü'yü başlatmadan önce bir görev girin."
+  },
+  "content_goal_error_nothing_to_open_with": {
+    "message": "Yardımcı bir açılış mesajı üretmedi. Görevi daha belirgin hale getirip yeniden deneyin."
+  },
+  "content_goal_error_out_of_credit": {
+    "message": "Devam sağlayıcısı hesabında kullanılabilir kredi yok. Kredi ekleyin veya Ayarlar'da başka bir devam kaynağı seçin."
+  },
+  "content_goal_error_rate_limited": {
+    "message": "Devam sağlayıcısı istek hızını sınırlıyor. Gösterilen yeniden denemeyi bekleyin veya başka bir devam modeli seçin."
+  },
+  "content_goal_error_reply_too_long": {
+    "message": "Yardımcı, gönderilemeyecek kadar uzun bir devam yazdı. Daha kısa devam talimatları isteyin veya Ayarlar'da başka bir yardımcı model seçin."
+  },
+  "content_goal_error_request_failed": {
+    "message": "Devam isteği başarısız oldu. Yeniden denemeden önce seçili yardımcıyı veya API uç noktasını ve uygulama tanılamalarını kontrol edin."
+  },
+  "content_goal_error_response_body_too_large": {
+    "message": "Sağlayıcı yanıtı boyut sınırını aştı. Başka bir devam modeli seçin veya daha kısa yanıtlar isteyin."
+  },
+  "content_goal_error_session_not_recorded": {
+    "message": "Uygulamada bu sohbet için kayıtlı geçmiş yok. Otomatik devamı kullanmadan önce kaydı etkinleştirip bir mesaj gönderin."
+  },
+  "content_goal_error_stream_record_too_long": {
+    "message": "Sağlayıcı aşırı büyük bir yanıt döndürdü. Başka bir devam modeli seçin veya daha kısa yanıtlar isteyin."
+  },
+  "content_goal_error_timeout_or_cancelled": {
+    "message": "Devam isteği zaman aşımına uğradı veya iptal edildi. Yeniden denemeden önce yardımcı sohbetini veya sağlayıcı durumunu kontrol edin."
+  },
+  "content_goal_error_unknown_model": {
+    "message": "Devam sağlayıcısı seçili modeli bulamadı. Model listesini yenileyin ve Ayarlar'da kullanılabilir bir model seçin."
+  },
   "content_goal_loop_off": {
     "message": "Hedef ve Döngü kapalı"
   },
   "content_goal_loop_stopped": {
     "message": "Hedef döngüsü durdu"
+  },
+  "content_goal_loop_waiting_app": {
+    "message": "Hedef ve Döngü: uygulama bekleniyor"
   },
   "content_goal_message_box_in_use": {
     "message": "mesaj alanı kullanılıyordu; bu nedenle hiçbir şey gönderilmedi"
@@ -461,6 +581,9 @@
   "content_goal_retrying__one": {
     "message": "Hedef $1 saniye içinde yeniden denenecek"
   },
+  "content_goal_reviewer_deadline": {
+    "message": "$1 sonra gözden geçirme olmadan devam eder"
+  },
   "content_goal_save": {
     "message": "Hedef olarak kaydet"
   },
@@ -491,6 +614,9 @@
   "content_goal_step_writing": {
     "message": "Yanıt yazılıyor"
   },
+  "content_goal_wait_paused": {
+    "message": "ChatGPT yavaşlamayı istedi · belirttiği saate kadar bekler"
+  },
   "content_goal_wait_recovery_activity": {
     "message": "Kurtarma sonrası etkinlik bekleniyor"
   },
@@ -500,32 +626,29 @@
   "content_goal_wait_resumed": {
     "message": "ChatGPT çalışmaya devam etti · tekrar denemeden önce bekleniyor"
   },
-  "content_goal_wait_running_tools": {
-    "message": "Çalışan araçlar bekleniyor"
-  },
-  "content_goal_wait_tool_inactivity": {
-    "message": "Araç etkinliğinin durması bekleniyor"
-  },
-  "content_goal_reviewer_deadline": {
-    "message": "$1 sonra gözden geçirme olmadan devam eder"
-  },
   "content_goal_wait_reviewer": {
     "message": "Gözden geçiren bekleniyor"
   },
-  "content_goal_wait_workers": {
-    "message": "Bu sohbetin yardımcı ajanları bekleniyor"
+  "content_goal_wait_running_tools": {
+    "message": "Çalışan araçlar bekleniyor"
   },
   "content_goal_wait_slots": {
     "message": "Boş yer bekleniyor (Aynı anda çalışan sohbetler)"
   },
-  "content_goal_wait_paused": {
-    "message": "ChatGPT yavaşlamayı istedi · belirttiği saate kadar bekler"
+  "content_goal_wait_tool_inactivity": {
+    "message": "Araç etkinliğinin durması bekleniyor"
+  },
+  "content_goal_wait_workers": {
+    "message": "Bu sohbetin yardımcı ajanları bekleniyor"
   },
   "content_goal_writing_first_message": {
     "message": "$1 ilk mesajı yazıyor"
   },
   "content_goal_wrote_next_message": {
     "message": "$1 sonraki mesajı yazdı"
+  },
+  "content_history_rate_limited": {
+    "message": "ChatGPT bu sohbet geçmişine erişimi geçici olarak sınırladı. Chat On Steroids bekleme süresi bitene kadar otomatik kurtarmayı duraklatır."
   },
   "content_loop_add_specific": {
     "message": "özel döngü ekle"
@@ -602,11 +725,17 @@
   "content_paused": {
     "message": "Duraklatıldı"
   },
+  "content_revival_draft_appeared": {
+    "message": "Çalışanın uyandırması hazırlanırken sohbete bir şey yazıldı, bu yüzden uyandırma onun yerine geçmedi."
+  },
   "content_saving": {
     "message": "Kaydediliyor…"
   },
   "content_settings_aria": {
     "message": "Chat On Steroids ayarları"
+  },
+  "content_settings_waiting_app": {
+    "message": "uygulama bekleniyor"
   },
   "content_stage_handoff_attention": {
     "message": "Devir özeti yanıtı ilgilenmenizi gerektiriyor"
@@ -640,6 +769,9 @@
   },
   "content_task_pick_mode_first": {
     "message": "Önce yukarıdan Hedef veya Döngü seçin — Kapalı seçeneği hiçbir şey yazmaz."
+  },
+  "content_task_waiting_app": {
+    "message": "Chat On Steroids yanıtı bekleniyor."
   },
   "content_task_worker_unavailable": {
     "message": "Yardımcı ajan sohbeti zaten ana ajanı tarafından yönetiliyor."
@@ -758,6 +890,24 @@
   "content_worker_still_running": {
     "message": "Yardımcı ajan hâlâ çalışıyor: $1"
   },
+  "content_workers_failed": {
+    "message": "$1 başarısız"
+  },
+  "content_workers_failed__one": {
+    "message": "$1 başarısız"
+  },
+  "content_workers_finished": {
+    "message": "$1 tamamlandı"
+  },
+  "content_workers_finished__one": {
+    "message": "$1 tamamlandı"
+  },
+  "content_workers_running": {
+    "message": "$1 çalışıyor"
+  },
+  "content_workers_running__one": {
+    "message": "$1 çalışıyor"
+  },
   "content_workers_still_running": {
     "message": "$1 yardımcı ajan hâlâ çalışıyor"
   },
@@ -782,6 +932,9 @@
   "popup_advanced": {
     "message": "Gelişmiş"
   },
+  "popup_app_not_running_help": {
+    "message": "Chat On Steroids'in bu bilgisayarda açık olduğundan emin olun. Eklenti kendiliğinden bağlanır."
+  },
   "popup_attribution_agent_key": {
     "message": "ajan anahtarı"
   },
@@ -805,6 +958,9 @@
   },
   "popup_chat_id": {
     "message": "Sohbet kimliği"
+  },
+  "popup_chat_tab": {
+    "message": "ChatGPT / Gemini sekmesi"
   },
   "popup_chatgpt_tab": {
     "message": "ChatGPT sekmesi"
@@ -857,17 +1013,35 @@
   "popup_detail_app_value": {
     "message": "v$1 · bağlantı noktası $2"
   },
+  "popup_detail_calls": {
+    "message": "$1 çağrı"
+  },
+  "popup_detail_calls__one": {
+    "message": "$1 çağrı"
+  },
   "popup_detail_chat_id": {
     "message": "sohbet kimliği"
   },
   "popup_detail_delivered": {
     "message": "iletildi"
   },
+  "popup_detail_events": {
+    "message": "$1 olay"
+  },
+  "popup_detail_events__one": {
+    "message": "$1 olay"
+  },
   "popup_detail_extension": {
     "message": "uzantı"
   },
   "popup_detail_extension_value": {
     "message": "v$1 · protokol $2"
+  },
+  "popup_detail_failed": {
+    "message": "$1 başarısız"
+  },
+  "popup_detail_failed__one": {
+    "message": "$1 başarısız"
   },
   "popup_detail_in_this_browser": {
     "message": "bu tarayıcıda"
@@ -890,6 +1064,9 @@
   "popup_detail_recorder": {
     "message": "kaydedici"
   },
+  "popup_detail_recorder_gemini_value": {
+    "message": "gemini v$1 · çalışma $2"
+  },
   "popup_detail_recorder_value": {
     "message": "fiber v$1 · çalışma $2"
   },
@@ -899,11 +1076,20 @@
   "popup_detail_tab_value": {
     "message": "$1 · dönem $2"
   },
+  "popup_detail_total": {
+    "message": "toplam $1"
+  },
   "popup_detail_turn": {
     "message": "tur"
   },
   "popup_detail_turn_live": {
     "message": "$1 · canlı"
+  },
+  "popup_gemini_companion_feature": {
+    "message": "Canlı transkript ve alt ajanlar"
+  },
+  "popup_gemini_tab": {
+    "message": "Gemini sekmesi"
   },
   "popup_no": {
     "message": "hayır"
@@ -938,11 +1124,23 @@
   "popup_pipeline_extension_blocked": {
     "message": "Uzantı bu sekmenin gözlemlerini kabul etmiyor ($1). ChatGPT sekmesini yeniden yükleyin."
   },
+  "popup_pipeline_extension_blocked_gemini": {
+    "message": "Uzantı bu sekmenin gözlemlerini kabul etmiyor ($1). Gemini sekmesini yeniden yükleyin."
+  },
+  "popup_pipeline_gemini_synced": {
+    "message": "Gemini sohbeti kaydedildi ve uygulamayla eşitlendi."
+  },
   "popup_pipeline_id_found_waiting_receipt": {
     "message": "Son turda kimlik bulundu. Uygulamanın alındı onayı bekleniyor."
   },
   "popup_pipeline_no_recorder": {
     "message": "Bu sekmede kaydedici yok. Sayfayı yeniden yükleyin."
+  },
+  "popup_pipeline_not_a_chat": {
+    "message": "Bu ChatGPT sayfası bir sohbet değil, bu yüzden uygulamanın burada izleyeceği bir şey yok. Bir sohbet açın veya başlatın."
+  },
+  "popup_pipeline_not_a_chat_gemini": {
+    "message": "Bu Gemini sayfası bir sohbet değil, bu yüzden uygulamanın burada izleyeceği bir şey yok. Bir sohbet açın veya başlatın."
   },
   "popup_pipeline_owner_confirmed_no_activity": {
     "message": "İsteğin sahibi doğrulandı. Henüz eşleşen araç etkinliği kaydedilmedi."
@@ -965,9 +1163,6 @@
   "popup_pipeline_waiting_first_message": {
     "message": "İlk mesaj bekleniyor."
   },
-  "popup_pipeline_not_a_chat": {
-    "message": "Bu ChatGPT sayfası bir sohbet değil, bu yüzden uygulamanın burada izleyeceği bir şey yok. Bir sohbet açın veya başlatın."
-  },
   "popup_pipeline_waiting_latest_request_id": {
     "message": "Sohbet kaydedildi. Son turdan bir istek kimliği bekleniyor."
   },
@@ -989,6 +1184,9 @@
   "popup_section_augment_chatgpt": {
     "message": "ChatGPT görünümünü genişlet"
   },
+  "popup_section_gemini": {
+    "message": "Gemini Web"
+  },
   "popup_section_session_capture": {
     "message": "Oturum kaydı"
   },
@@ -997,6 +1195,21 @@
   },
   "popup_sent_to_app": {
     "message": "Uygulamaya gönderildi"
+  },
+  "popup_sign_in_failed": {
+    "message": "Başarısız. Oturum açmayı CoS üzerinden yeniden başlatın."
+  },
+  "popup_sign_in_imported": {
+    "message": "Oturum aktarıldı"
+  },
+  "popup_sign_in_imported_detail": {
+    "message": "CoS browser’da oturum açtınız."
+  },
+  "popup_sign_in_permission": {
+    "message": "Çerez erişimi reddedildi. Yeniden tıklayın."
+  },
+  "popup_sign_in_transfer": {
+    "message": "Oturumu CoS browser’a aktar"
   },
   "popup_state_app_not_reachable": {
     "message": "Uygulamaya ulaşılamıyor"
@@ -1015,6 +1228,9 @@
   },
   "popup_state_version_mismatch": {
     "message": "Sürüm uyuşmazlığı"
+  },
+  "popup_status_active": {
+    "message": "etkin"
   },
   "popup_status_answering": {
     "message": "yanıtlıyor"
@@ -1037,14 +1253,14 @@
   "popup_status_new_chat": {
     "message": "yeni sohbet"
   },
-  "popup_status_not_a_chat": {
-    "message": "sohbet değil"
-  },
   "popup_status_none_open": {
     "message": "açık olan yok"
   },
   "popup_status_none_yet": {
     "message": "henüz yok"
+  },
+  "popup_status_not_a_chat": {
+    "message": "sohbet değil"
   },
   "popup_status_not_attached": {
     "message": "bağlı değil"
@@ -1058,6 +1274,9 @@
   "popup_status_retired": {
     "message": "sonlandırıldı"
   },
+  "popup_status_synced": {
+    "message": "eşitlendi"
+  },
   "popup_status_tool_matched": {
     "message": "araç eşleştirildi"
   },
@@ -1066,6 +1285,15 @@
   },
   "popup_status_waiting": {
     "message": "bekliyor"
+  },
+  "popup_tabs_summary_both": {
+    "message": "$1 ChatGPT · $2 Gemini"
+  },
+  "popup_tabs_summary_chatgpt": {
+    "message": "$1 ChatGPT"
+  },
+  "popup_tabs_summary_gemini": {
+    "message": "$1 Gemini"
   },
   "popup_time_hours_short": {
     "message": "$1 sa"
@@ -1087,194 +1315,5 @@
   },
   "popup_yes": {
     "message": "evet"
-  },
-  "content_goal_error_loop_mcp_call_missing": {
-    "message": "Son yanıtta MCP araç çağrısı kaydedilmedi. ChatGPT size bir soru soruyor olabilir veya araç bağlantısı kesilmiş olabilir. Soruyu yanıtlayın ya da araçlar çalışmayı durdurduysa tüneli kontrol edin. Otomatik devam duraklatıldı; Döngü etkin kalır."
-  },
-  "content_goal_error_goal_reply_not_pending": {
-    "message": "Bu yanıt için bekleyen bir devam yok. Zaten işlenmiş veya daha yeni bir çalışma tarafından değiştirilmiş olabilir. Yeniden denemeden önce en son sohbet etkinliğini kontrol edin."
-  },
-  "content_goal_error_goal_context_too_large": {
-    "message": "Görev ve Hedef/Döngü talimatları yardımcıya gönderilemeyecek kadar uzun. Ayarlar'daki görevi veya özel devam talimatlarını kısaltın."
-  },
-  "content_goal_error_reply_too_long": {
-    "message": "Yardımcı, gönderilemeyecek kadar uzun bir devam yazdı. Daha kısa devam talimatları isteyin veya Ayarlar'da başka bir yardımcı model seçin."
-  },
-  "content_goal_error_stream_record_too_long": {
-    "message": "Sağlayıcı aşırı büyük bir yanıt döndürdü. Başka bir devam modeli seçin veya daha kısa yanıtlar isteyin."
-  },
-  "content_goal_error_response_body_too_large": {
-    "message": "Sağlayıcı yanıtı boyut sınırını aştı. Başka bir devam modeli seçin veya daha kısa yanıtlar isteyin."
-  },
-  "content_goal_error_no_api_key": {
-    "message": "Devam sağlayıcısı için API anahtarı yapılandırılmamış. Ayarlar'da bir anahtar ekleyin veya ChatGPT devam kaynağını seçin."
-  },
-  "content_goal_error_auth_rejected": {
-    "message": "Devam sağlayıcısı API kimlik bilgilerini reddetti. Ayarlar'da API anahtarını ve erişim izinlerini kontrol edin."
-  },
-  "content_goal_error_out_of_credit": {
-    "message": "Devam sağlayıcısı hesabında kullanılabilir kredi yok. Kredi ekleyin veya Ayarlar'da başka bir devam kaynağı seçin."
-  },
-  "content_goal_error_unknown_model": {
-    "message": "Devam sağlayıcısı seçili modeli bulamadı. Model listesini yenileyin ve Ayarlar'da kullanılabilir bir model seçin."
-  },
-  "content_goal_error_invalid_provider": {
-    "message": "Özel devam uç noktası geçersiz. URL'sini Ayarlar'da kontrol edin; HTTPS veya yerel bir HTTP uç noktası kullanın."
-  },
-  "content_history_rate_limited": {
-    "message": "ChatGPT bu sohbet geçmişine erişimi geçici olarak sınırladı. Chat On Steroids bekleme süresi bitene kadar otomatik kurtarmayı duraklatır."
-  },
-  "content_goal_error_rate_limited": {
-    "message": "Devam sağlayıcısı istek hızını sınırlıyor. Gösterilen yeniden denemeyi bekleyin veya başka bir devam modeli seçin."
-  },
-  "content_goal_error_timeout_or_cancelled": {
-    "message": "Devam isteği zaman aşımına uğradı veya iptal edildi. Yeniden denemeden önce yardımcı sohbetini veya sağlayıcı durumunu kontrol edin."
-  },
-  "content_goal_error_request_failed": {
-    "message": "Devam isteği başarısız oldu. Yeniden denemeden önce seçili yardımcıyı veya API uç noktasını ve uygulama tanılamalarını kontrol edin."
-  },
-  "content_goal_error_goal_browser_busy": {
-    "message": "Başka bir yardımcı isteği zaten bekliyor. Yeni bir istek başlatmadan önce tamamlanmasını bekleyin veya iptal edin."
-  },
-  "content_goal_error_goal_browser_cancelled": {
-    "message": "Yardımcı isteği iptal edildi. Devam etmek istediğinizde yeniden başlatın."
-  },
-  "content_goal_error_goal_browser_send_failed": {
-    "message": "Yardımcı istemi ChatGPT'ye iletilemedi. Yeniden denemeden önce yardımcı sohbetini açın ve mesaj alanını veya görünen hatayı kontrol edin."
-  },
-  "content_goal_error_goal_browser_send_unconfirmed": {
-    "message": "Uygulama, ChatGPT'nin yardımcı istemini alıp almadığını doğrulayamadı. İki kez göndermemek için yeniden denemeden önce yardımcı sohbetini kontrol edin."
-  },
-  "content_goal_error_goal_owned_elsewhere": {
-    "message": "Bu devam işlemini başka bir tarayıcı sekmesi yürütüyor. İlerleme için o sekmeyi kontrol edin."
-  },
-  "content_goal_error_goal_final_not_confirmed": {
-    "message": "Uygulama, otomatik devam için uygun bir nihai yanıtı henüz doğrulamadı. Kaynak sohbette devam eden çalışma veya hata olup olmadığını kontrol edin."
-  },
-  "content_goal_error_astra_finish_only": {
-    "message": "Bu sohbet bitiş aracı üzerinden devam ediyor. Geçerli ayarla tarayıcıdaki nihai yanıt başka bir mesaj tetiklemez."
-  },
-  "content_goal_error_goal_disabled": {
-    "message": "Bu sohbet için Hedef/Döngü kapalı. Devama izin vermek için açın."
-  },
-  "content_goal_error_goal_worker_chat": {
-    "message": "Yardımcı ajanlar kendi Hedef/Döngü işlemlerini çalıştıramaz. Bunun yerine üst sohbette devamı etkinleştirin."
-  },
-  "content_goal_error_conversation_superseded": {
-    "message": "Bu sohbet Sıkıştır ve sürdür ile değiştirildi. Ardıl sohbette devam edin."
-  },
-  "content_goal_error_chat_blocked": {
-    "message": "Bu sohbet uygulamada engellenmiş. Devamı etkinleştirmeden önce engeli kaldırın."
-  },
-  "content_goal_error_session_not_recorded": {
-    "message": "Uygulamada bu sohbet için kayıtlı geçmiş yok. Otomatik devamı kullanmadan önce kaydı etkinleştirip bir mesaj gönderin."
-  },
-  "content_goal_error_no_conversation": {
-    "message": "Devam ettirilecek kayıtlı konuşma yok. Önce bir görev gönderin."
-  },
-  "content_goal_error_no_objective": {
-    "message": "Görev belirtilmedi. Hedef/Döngü'yü başlatmadan önce bir görev girin."
-  },
-  "content_goal_error_nothing_to_open_with": {
-    "message": "Yardımcı bir açılış mesajı üretmedi. Görevi daha belirgin hale getirip yeniden deneyin."
-  },
-  "content_goal_error_goal_helper_stop_unverified": {
-    "message": "Yardımcı hedefe ulaşıldığını söylüyor, ancak bu kontrol edilmedi. Takip yanıtı gönderilmedi. Sohbeti kontrol edin ve iş kaldıysa devam edin."
-  },
-  "content_goal_error_loop_stop_refused": {
-    "message": "Yardımcı, Döngü devamı yazmak yerine durmayı seçmeye devam etti. Döngü talimatlarını gözden geçirin veya başka bir yardımcı model seçin."
-  },
-  "content_goal_error_goal_marker_missing": {
-    "message": "Yanıtta çevrimdışı Hedef şablonlarının gerektirdiği tamamlama işareti eksik. Şablon talimatlarını kontrol edin veya başka bir devam kaynağı seçin."
-  },
-  "content_goal_error_goal_reply_not_durable": {
-    "message": "Uygulama bekleyen devamı kaydedemedi. Boş disk alanını ve uygulama tanılamalarını kontrol edin."
-  },
-  "content_goal_error_goal_ack_not_durable": {
-    "message": "Uygulama iletim onayını kaydedemedi. Boş disk alanını kontrol edin; elle yeniden göndermeden önce sohbeti kontrol edin."
-  },
-  "content_goal_error_goal_switch_not_durable": {
-    "message": "Uygulama Hedef/Döngü ayarını kaydedemedi. Boş disk alanını kontrol edip yeniden kaydetmeyi deneyin."
-  },
-  "content_goal_error_goal_objective_not_durable": {
-    "message": "Uygulama görevi kaydedemedi. Boş disk alanını kontrol edip yeniden kaydetmeyi deneyin."
-  },
-  "popup_sign_in_transfer": {
-    "message": "Oturumu CoS browser’a aktar"
-  },
-  "popup_sign_in_permission": {
-    "message": "Çerez erişimi reddedildi. Yeniden tıklayın."
-  },
-  "popup_sign_in_imported": {
-    "message": "Oturum aktarıldı"
-  },
-  "popup_sign_in_imported_detail": {
-    "message": "CoS browser’da oturum açtınız."
-  },
-  "popup_sign_in_failed": {
-    "message": "Başarısız. Oturum açmayı CoS üzerinden yeniden başlatın."
-  },
-  "popup_app_not_running_help": {
-    "message": "Chat On Steroids'in bu bilgisayarda açık olduğundan emin olun. Eklenti kendiliğinden bağlanır."
-  },
-  "content_workers_finished": {
-    "message": "$1 tamamlandı"
-  },
-  "content_workers_finished__one": {
-    "message": "$1 tamamlandı"
-  },
-  "content_workers_running": {
-    "message": "$1 çalışıyor"
-  },
-  "content_workers_running__one": {
-    "message": "$1 çalışıyor"
-  },
-  "content_workers_failed": {
-    "message": "$1 başarısız"
-  },
-  "content_workers_failed__one": {
-    "message": "$1 başarısız"
-  },
-  "popup_detail_events": {
-    "message": "$1 olay"
-  },
-  "popup_detail_events__one": {
-    "message": "$1 olay"
-  },
-  "popup_detail_calls": {
-    "message": "$1 çağrı"
-  },
-  "popup_detail_calls__one": {
-    "message": "$1 çağrı"
-  },
-  "popup_detail_failed": {
-    "message": "$1 başarısız"
-  },
-  "popup_detail_failed__one": {
-    "message": "$1 başarısız"
-  },
-  "popup_detail_total": {
-    "message": "toplam $1"
-  },
-  "content_edit_message_missing": {
-    "message": "Bu mesaj artık ChatGPT sayfasında değil, bu yüzden düzenlenemez."
-  },
-  "content_edit_unavailable": {
-    "message": "ChatGPT bu mesaj için Düzenle seçeneği sunmadı. Sohbeti ChatGPT'de açıp yeniden deneyin."
-  },
-  "content_auto_compaction_waiting_app": {
-    "message": "Otomatik sıkıştırma: uygulama bekleniyor"
-  },
-  "content_goal_loop_waiting_app": {
-    "message": "Hedef ve Döngü: uygulama bekleniyor"
-  },
-  "content_settings_waiting_app": {
-    "message": "uygulama bekleniyor"
-  },
-  "content_task_waiting_app": {
-    "message": "Chat On Steroids yanıtı bekleniyor."
-  },
-  "content_revival_draft_appeared": {
-    "message": "Çalışanın uyandırması hazırlanırken sohbete bir şey yazıldı, bu yüzden uyandırma onun yerine geçmedi."
   }
 }

@@ -1,4 +1,5 @@
 import { modelSelectionDiagnostic, type ModelSelectionDiagnostic } from '../shared/model-selection-diagnostic.js';
+import { conversationUrl, homeUrlForProvider, isChatProvider, isGeminiConversationId, isValidConversationId, providerForConversationId, type ChatProvider } from '../shared/provider.js';
 import { nextWorkerArchive, onWorkerChatReady, readyForWake, settleWorkerArchive } from './worker-archive.js';
 import { considerTurnRotation, noteRotationDeclined, noteStopFallback, stopFallbackDue, type RotationDeps } from './turn-rotation.js';
 import { armRotationFence, clearRotationFence, FENCE_MS, restoreRotationFences, rotationFenced, rotationFenceTurn } from './rotation-fence.js';
@@ -17,13 +18,16 @@ import { MAX_CHATGPT_MESSAGE_CHARS, userPromptText } from '../shared/user-prompt
 import { CONVERSATION_DELETED } from '../shared/chat-error.js';
 import { prepareSessionPrompt } from './session/prompt.js';
 import { NEW_CHAT, noteAutomaticReply } from './session/automatic-replies.js';
-import { pendingChatModelRequest, observeChatModels, requestChatModels } from './chat-models.js';
+import {
+  pendingChatModelRequest, observeChatModels, requestChatModels,
+  pendingGeminiModelRequest, observeGeminiModels, requestGeminiModels
+} from './chat-models.js';
 import { resumeModelSelection, wakeModelSelection } from './resume-model.js';
 import { isDeliberateEffort, isProModel } from '../shared/chat-models.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
 import { injectedUserMessage, recordedRequestTurn, responseTurnId, type TimelineTurns } from '../shared/chronology.js';
 import type { SessionSummary } from '../shared/session.js';
-import { STUCK_SUMMARY_MS } from '../shared/session.js';
+import { isExternalMcpSession, STUCK_SUMMARY_MS } from '../shared/session.js';
 import { messageReferences } from '../shared/session.js';
 import { turnTrace } from '../shared/turn-trace.js';
 import { checkAutomaticSend, SEND_CHECK_RETRY_MS } from './send-check.js';
@@ -33,7 +37,7 @@ import { authorizedPluginRefreshPublications, hasRequestedPluginRefresh, pending
 import { attachBrowserWake, wakeBrowserWork } from './browser-wake.js';
 import { noteRouteExistingChatSend, tunnelRouteSettling } from './tunnel/route-settle.js';
 import { noteChatgptProjects } from './chatgpt-project-catalog.js';
-import { armProjectCreate, bindChatToLinkedProject, claimProjectCreate, completeProjectCreate, failProjectCreate, getProject, markProjectGone, pendingProjectCreates } from './projects.js';
+import { armProjectCreate, bindChatToLinkedProject, claimProjectCreate, completeProjectCreate, failProjectCreate, getProject, getSessionProject, markProjectGone, pendingProjectCreates } from './projects.js';
 import { wakeBrowserUrl } from './browser-startup.js';
 let browserWake: ReturnType<typeof attachBrowserWake> | null = null;
 import { browserWindowBounds, currentBrowserWorkArea } from './browser-window-layout.js';
@@ -41,7 +45,7 @@ export { setBrowserWorkArea } from './browser-window-layout.js';
 import { pendingBrowserPreferenceRequest, acknowledgeBrowserPreferences } from './browser-preferences.js';
 import { sessionFinishHeld, releaseSessionFinish, getSessionFinishDraft, sessionFinishWaiting } from './session/finish.js';
 import { observeUsage } from './session/usage.js';
-import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, lostBrowserOpening, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, queuedInputOfferBlocker, continueAsOrdinaryMessage, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, withdrawOwnContinuesAfterStop, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation, ownUnsentTexts, ownSentResidue, retireMismatchedRecoveryInput, noteInputHeld } from './session/input.js';
+import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, resolvedInputProvider, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, lostBrowserOpening, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, queuedInputOfferBlocker, continueAsOrdinaryMessage, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, withdrawOwnContinuesAfterStop, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation, ownUnsentTexts, ownSentResidue, retireMismatchedRecoveryInput, noteInputHeld, enqueueInput } from './session/input.js';
 /**
  * The local bridge between the Chrome extension and this app.
  *
@@ -64,7 +68,7 @@ import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSend
  * submit an action, read a local file, run a process or change a permission here.
  */
 
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
 import type { BridgeStatus, CompanionDiagnostics, CompanionEnvironment, CompanionPageDiagnostics, CompanionTabDiagnostics, CompanionTraceEntry } from '../shared/types.js';
 import { BROWSER_PICKUP_ATTEMPT_LIMIT, BROWSER_PICKUP_BACKOFF_MS, BROWSER_PICKUP_MAX_ATTEMPTS, BROWSER_PICKUP_SLOW_MS, browserPickupDelay, recoveryBusyMs } from '../shared/recovery.js';
@@ -195,6 +199,11 @@ import { ownCoreHint,
   onSpawnRequest,
   onSwarmChange,
   onSwarmEnd,
+  onWorkerFinished,
+  pendingGeminiPrimeConversationIds,
+  peekGeminiPrimeReports,
+  markGeminiPrimeReportsDelivered,
+  requestWorkerBootstraps,
   pendingWorkerRevivals,
   pendingWorkerSpawns,
   primeConversationGone,
@@ -263,7 +272,8 @@ import { conversationHasMcpCallSince, readHandoff, readHandoffResponse } from '.
 import { sessionWorkingAt } from '../shared/session-activity.js';
 import { requestCorrelation } from './session/correlation.js';
 import { completeImageExport, IMAGE_EXPORT_BODY_BYTES, pendingImageExports } from './image-export.js';
-import { bindAgentWorkspace } from './workspace.js';
+import { bindAgentWorkspace, currentWorkspace, primeWorkspace } from './workspace.js';
+import { spawnAgentWorkers } from './agent-admission.js';
 import { extensionUpdateOffer, prepareExtensionUpdate, shippedExtensionBuild } from './extension-path.js';
 
 /** Fixed candidates so the extension can find the app without being told a port. */
@@ -424,6 +434,7 @@ type CommandSpec =
        * value; only the chat's own picker state proves what ChatGPT applied.
        */
       reasoningEffort: ReasoningEffort | null;
+      provider?: ChatProvider;
       runId: string;
     }
   /**
@@ -1856,7 +1867,7 @@ function parseObservations(input: unknown): ChatObservation[] {
     if (item['authoredNow'] === true && kind === 'user_message') observation.authoredNow = true;
     if (typeof item['activeNow'] === 'boolean' && (kind === 'assistant_message' || kind === 'page_tool')) observation.activeNow = item['activeNow'];
     if (kind === 'model_selection') {
-      if (typeof item['model'] !== 'string' || !/^[a-zA-Z0-9 ._-]{1,80}$/.test(item['model'])) continue;
+      if (typeof item['model'] !== 'string' || !/^[\p{L}\p{N} ._()/+:-]{1,80}$/u.test(item['model'])) continue;
       observation.model = item['model'];
       if (isReasoningEffort(item['reasoningEffort'])) {
         observation.reasoningEffort = item['reasoningEffort'];
@@ -2114,9 +2125,7 @@ async function reconcileWorkerFinish(id: string, sessionId: string, observations
 }
 
 function conversationId(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  // ChatGPT conversation ids are uuid-shaped; anything else is not one.
-  return /^[0-9a-f-]{8,64}$/i.test(value) ? value : null;
+  return isValidConversationId(value) ? value : null;
 }
 
 const MAX_ACTIVITY_CALL_ID_CHARS = 200;
@@ -3151,7 +3160,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     return json(res, 200, { ok: true, changed }, origin);
   }
   if (route === '/models' && req.method === 'POST') {
-    const accepted = observeChatModels(await readBody(req));
+    const body = await readBody(req);
+    const gemini = body && typeof body === 'object' && (body as Record<string, unknown>).provider === 'gemini';
+    const accepted = gemini ? observeGeminiModels(body) : observeChatModels(body);
     if (accepted) changed();
     return json(res, accepted ? 200 : 409, { ok: accepted }, origin);
   }
@@ -3338,6 +3349,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         conversations: live,
         stopTurns: await pendingStopCommands(),
         modelCatalogRequest: otherBrowser ? null : pendingChatModelRequest(),
+        geminiModelCatalogRequest: otherBrowser ? null : pendingGeminiModelRequest(),
         // This install's connector names, so the extension recognizes exactly its own traffic.
         connectorNames: connectorNames(getConfig().connectorSuffix),
         // Apps proven to be this install's connectors, so a renamed connector is still recognized.
@@ -3498,13 +3510,20 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       return json(res, 200, { chunk: await readInputAttachmentChunk(attachment, body.offset) }, origin);
     }
     if (route === '/input/fail') {
-      const ok = await failBrowserInput(body.id, body.owner, typeof body.error === 'string' ? body.error : 'Unable to prepare ChatGPT',
+      const existingEntry = (await listInputs()).find((row) => row.id === body.id);
+      const isGemini = existingEntry?.provider === 'gemini' || isGeminiConversationId(existingEntry?.conversationId ?? null);
+      const ok = await failBrowserInput(body.id, body.owner, typeof body.error === 'string' ? body.error : isGemini ? 'Unable to prepare Gemini' : 'Unable to prepare ChatGPT',
         // The page's own short reason code, as the extension forwards it (see RELEASE_DETAIL there).
         typeof body.detail === 'string' && /^[a-z][a-z0-9 _-]{0,79}$/.test(body.detail) ? body.detail : undefined);
       // A rejected picker choice invalidates cached availability. Reobserve existing
       // browser documents through the catalog owner; failure grants no new-tab authority.
       // The page words that reason in its own language; its code says it in any (2.1.47 round).
-      if (ok && (body.detail === 'model-unconfirmed' || body.error === 'Requested model or reasoning could not be confirmed')) requestChatModels(false);
+      if (ok && (body.detail === 'model-unconfirmed' ||
+          body.error === 'Requested model or reasoning could not be confirmed' ||
+          body.error === 'Requested Gemini model could not be confirmed')) {
+        if (isGemini) requestGeminiModels(false);
+        else requestChatModels(false);
+      }
       return json(res, 200, { ok }, origin);
     }
     if (route === '/input/progress') {
@@ -3581,8 +3600,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       // own page, which the page names; the root or another Project is never its destination.
       if (!target) {
         const entry = (await listInputs()).find(row => row.id === body.id);
+        const provider = entry ? await resolvedInputProvider(entry, null) : undefined;
         // A branch (#482) is made where its source chat lives in ChatGPT, never on a Project's page.
-        const link = entry?.projectId && entry.purpose !== 'decision' && !entry.lifetime && !entry.branch ? (await getProject(entry.projectId))?.chatgpt : undefined;
+        // Gemini openings inside a CoS project never redirect to a native ChatGPT Project page.
+        const link = entry?.projectId && entry.purpose !== 'decision' && !entry.lifetime && !entry.branch && provider !== 'gemini' ? (await getProject(entry.projectId))?.chatgpt : undefined;
         if (link && (link.state !== 'linked' || body.project !== link.id)) return json(res, 200, { input: null }, origin);
       }
       // #1794: an automatic send is first checked with the person's send check, outside the queue's lock.
@@ -3930,6 +3951,75 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (!id) return json(res, 400, { error: 'bad_conversation_id' }, origin);
     unclaimedChatShowFailed(id);
     return json(res, 200, { ok: true }, origin);
+  }
+
+  if (route === '/gemini/spawn-workers' && req.method === 'POST') {
+    let body: Record<string, unknown>;
+    try {
+      body = (await readBody(req)) as Record<string, unknown>;
+    } catch (err) {
+      if ((err as Error).message === 'body_too_large') return tooLarge(res, origin);
+      return json(res, 400, { error: 'bad_request' }, origin);
+    }
+    const id = conversationId(body['conversationId']);
+    if (!id || !isGeminiConversationId(id)) {
+      return json(res, 400, { error: 'bad_conversation_id' }, origin);
+    }
+    if (isWorkerConversation(id) || retiredWorkerForConversation(id)) {
+      return json(res, 403, { error: 'worker_cannot_spawn' }, origin);
+    }
+    if (isChatBlocked(id)) {
+      return json(res, 403, { error: 'blocked_chat' }, origin);
+    }
+    const turnId = typeof body['turnId'] === 'string' ? body['turnId'].trim().slice(0, 128) : '';
+    const rawWorkers = Array.isArray(body['workers']) ? body['workers'] : null;
+    if (!rawWorkers || rawWorkers.length === 0 || rawWorkers.length > 8) {
+      return json(res, 400, { error: 'bad_workers' }, origin);
+    }
+    const workers = rawWorkers.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [];
+      const item = entry as Record<string, unknown>;
+      const task = typeof item['task'] === 'string' ? item['task'].trim().slice(0, 4000) : '';
+      if (!task) return [];
+      const label = typeof item['label'] === 'string' ? item['label'].trim().slice(0, 60) : undefined;
+      return [{ ...(label ? { label } : {}), task, provider: 'gemini' as const }];
+    });
+    if (workers.length !== rawWorkers.length) {
+      return json(res, 400, { error: 'bad_worker_task' }, origin);
+    }
+    const context = typeof body['context'] === 'string' ? body['context'].trim().slice(0, 4000) : null;
+    const dedupeKey = turnId ? `${id}:${turnId}` : '';
+    const existing = dedupeKey ? geminiSpawnedTurns.get(dedupeKey) : undefined;
+    if (existing) {
+      return json(res, 200, { ok: true, runId: existing.runId, workers: existing.workers, duplicate: true }, origin);
+    }
+    try {
+      const { created, becamePrime, runId } = await spawnAgentWorkers(
+        { workers, context, caller: { conversationId: id } },
+        async () => {
+          const session = await findSessionByConversation(id, { requireUnique: true });
+          return (session ? await getSessionProject(session.id) : null) ?? primeWorkspace(id) ?? currentWorkspace();
+        },
+        () => {
+          const live = getConfig();
+          const liveCaps = effectiveCapabilities(live);
+          return !live.readOnly && liveCaps.command && liveCaps.create && liveCaps.edit;
+        }
+      );
+      requestWorkerBootstraps(created.map((worker) => worker.id), runId);
+      const summary = created.map((info) => ({ id: info.id, label: info.label, state: info.state }));
+      if (dedupeKey) {
+        if (geminiSpawnedTurns.size >= 200) {
+          const oldest = geminiSpawnedTurns.keys().next().value;
+          if (oldest !== undefined) geminiSpawnedTurns.delete(oldest);
+        }
+        geminiSpawnedTurns.set(dedupeKey, { runId, workers: summary });
+      }
+      logInfo(`gemini: spawned ${summary.length} worker(s) from ${id} (run ${runId})`);
+      return json(res, 200, { ok: true, runId, becamePrime, workers: summary }, origin);
+    } catch (err) {
+      return json(res, 409, { error: 'spawn_failed', message: err instanceof Error ? err.message : String(err) }, origin);
+    }
   }
 
   if (route === '/closed' && req.method === 'POST') {
@@ -6423,6 +6513,169 @@ async function sweepOwnedSwarm(runId: string, now: number): Promise<boolean> {
 /** Lifecycle subscriptions are disposed before restarting the bridge. */
 let dropSwarmEndListener: (() => void) | null = null;
 let dropSwarmChangeListener: (() => void) | null = null;
+let dropWorkerFinishedListener: (() => void) | null = null;
+const GEMINI_REPORT_DELIVERY_DEBOUNCE_MS = 250;
+const GEMINI_REPORT_DELIVERY_MAX_RETRIES = 3;
+const GEMINI_REPORT_CONTINUE_MARKER = '\n\n[continued in next message]';
+const geminiSpawnedTurns = new Map<string, { runId: string; workers: Array<{ id: string; label: string; state: string }> }>();
+const geminiReportDeliveryTimers = new Map<string, NodeJS.Timeout>();
+const geminiReportDeliveryQueues = new Map<string, Promise<void>>();
+const geminiReportRetryAttempts = new Map<string, number>();
+const geminiReportPartialOffsets = new Map<string, number>();
+
+export interface GeminiPrimeReportBatch {
+  text: string;
+  completedIds: string[];
+  nextOffset?: { id: string; offset: number };
+}
+
+function formatGeminiPrimeReportSections(
+  items: ReadonlyArray<{ from: string; body: string; continued?: boolean }>
+): string {
+  const header =
+    items.length === 1
+      ? 'Sub-agent report received:'
+      : `${items.length} sub-agent reports received:`;
+  const sections = items
+    .map((item) => `### From: ${item.from}${item.continued ? ' (continued)' : ''}\n${item.body}`)
+    .join('\n\n---\n\n');
+  return `${header}\n\n${sections}`;
+}
+
+/**
+ * Packs complete Gemini sub-agent reports up to `maxChars` without dropping trailing messages,
+ * or splits an individual oversized report into continuation chunks before acknowledging its ID.
+ */
+export function buildGeminiPrimeReportBatch(
+  messages: ReadonlyArray<{ id: string; from: string; text: string }>,
+  partialOffsets: ReadonlyMap<string, number> = new Map(),
+  maxChars: number = MAX_CHATGPT_MESSAGE_CHARS
+): GeminiPrimeReportBatch {
+  const limit = Math.max(128, maxChars);
+  const packed: Array<{ id: string; from: string; body: string; continued: boolean }> = [];
+  for (const message of messages) {
+    const startOffset = Math.max(0, partialOffsets.get(message.id) ?? 0);
+    const trimmed = message.text.trim();
+    const remaining = startOffset > 0 ? trimmed.slice(startOffset) : trimmed;
+    const nextItem = { id: message.id, from: message.from, body: remaining, continued: startOffset > 0 };
+    const formatted = formatGeminiPrimeReportSections([...packed, nextItem]);
+    if (formatted.length <= limit) {
+      packed.push(nextItem);
+      continue;
+    }
+    if (packed.length === 0) {
+      const prefix = `Sub-agent report received:\n\n### From: ${message.from}${startOffset > 0 ? ' (continued)' : ''}\n`;
+      const suffix = GEMINI_REPORT_CONTINUE_MARKER;
+      const available = Math.max(1, limit - prefix.length - suffix.length);
+      let sliceLen = Math.min(remaining.length, available);
+      if (sliceLen < remaining.length && sliceLen > 1) {
+        const code = remaining.charCodeAt(sliceLen - 1);
+        if (code >= 0xd800 && code <= 0xdbff) sliceLen -= 1;
+      }
+      const chunk = remaining.slice(0, sliceLen);
+      const text = `${prefix}${chunk}${suffix}`.slice(0, limit);
+      const nextPos = startOffset + chunk.length;
+      if (nextPos >= trimmed.length) {
+        return { text: `${prefix}${remaining}`.slice(0, limit), completedIds: [message.id] };
+      }
+      return {
+        text,
+        completedIds: [],
+        nextOffset: { id: message.id, offset: nextPos }
+      };
+    }
+    break;
+  }
+  return {
+    text: formatGeminiPrimeReportSections(packed),
+    completedIds: packed.map((item) => item.id)
+  };
+}
+
+async function deliverGeminiPrimeReports(primeConversationId: string): Promise<void> {
+  if (!bridgeDesiredRunning || !server) return;
+  if (isChatBlocked(primeConversationId)) return;
+  const peeked = peekGeminiPrimeReports(primeConversationId);
+  if (!peeked || peeked.messages.length === 0) {
+    geminiReportRetryAttempts.delete(primeConversationId);
+    return;
+  }
+  const session = await findSessionByConversation(primeConversationId, { requireUnique: true });
+  if (!session || session.endedAt !== null) {
+    geminiReportRetryAttempts.delete(primeConversationId);
+    return;
+  }
+  const batch = buildGeminiPrimeReportBatch(peeked.messages, geminiReportPartialOffsets);
+  const mode = session.activeTurnId ? 'after-turn' : 'auto';
+  try {
+    await enqueueInput({
+      id: randomUUID(),
+      sessionId: session.id,
+      text: batch.text,
+      mode,
+      dueAt: Date.now(),
+      model: null,
+      reasoningEffort: null,
+      authoredSource: 'none'
+    });
+    noteAutomaticReply(primeConversationId, batch.text);
+    for (const id of batch.completedIds) {
+      geminiReportPartialOffsets.delete(id);
+    }
+    if (batch.nextOffset) {
+      geminiReportPartialOffsets.set(batch.nextOffset.id, batch.nextOffset.offset);
+    }
+    if (batch.completedIds.length > 0) {
+      markGeminiPrimeReportsDelivered(primeConversationId, batch.completedIds);
+    }
+    geminiReportRetryAttempts.delete(primeConversationId);
+    wakeBrowserWork();
+    if (batch.nextOffset || peekGeminiPrimeReports(primeConversationId)) {
+      scheduleGeminiPrimeReportDelivery(primeConversationId);
+    }
+  } catch (err) {
+    logWarn(`gemini: failed delivering prime reports to ${primeConversationId}: ${err instanceof Error ? err.message : String(err)}`);
+    const attempts = (geminiReportRetryAttempts.get(primeConversationId) ?? 0) + 1;
+    if (attempts <= GEMINI_REPORT_DELIVERY_MAX_RETRIES) {
+      geminiReportRetryAttempts.set(primeConversationId, attempts);
+      scheduleGeminiPrimeReportDelivery(primeConversationId);
+    } else {
+      geminiReportRetryAttempts.delete(primeConversationId);
+      logWarn(`gemini: giving up on prime report delivery to ${primeConversationId} after ${GEMINI_REPORT_DELIVERY_MAX_RETRIES} retries`);
+    }
+  }
+}
+
+function scheduleGeminiPrimeReportDelivery(primeConversationId: string): void {
+  if (!bridgeDesiredRunning || !server) return;
+  const existing = geminiReportDeliveryTimers.get(primeConversationId);
+  if (existing) clearTimeout(existing);
+  const timer = setTimeout(() => {
+    if (geminiReportDeliveryTimers.get(primeConversationId) === timer) {
+      geminiReportDeliveryTimers.delete(primeConversationId);
+    }
+    const prior = geminiReportDeliveryQueues.get(primeConversationId) ?? Promise.resolve();
+    const next = prior
+      .catch(() => undefined)
+      .then(() => deliverGeminiPrimeReports(primeConversationId));
+    const settled = next.catch(() => undefined);
+    geminiReportDeliveryQueues.set(primeConversationId, settled);
+    void settled.then(() => {
+      if (geminiReportDeliveryQueues.get(primeConversationId) === settled) {
+        geminiReportDeliveryQueues.delete(primeConversationId);
+      }
+    });
+  }, GEMINI_REPORT_DELIVERY_DEBOUNCE_MS);
+  timer.unref?.();
+  geminiReportDeliveryTimers.set(primeConversationId, timer);
+}
+
+function scheduleAllPendingGeminiPrimeDeliveries(): void {
+  if (!bridgeDesiredRunning || !server) return;
+  for (const primeConversationId of pendingGeminiPrimeConversationIds()) {
+    scheduleGeminiPrimeReportDelivery(primeConversationId);
+  }
+}
 let staleSwarmTimer: NodeJS.Timeout | null = null;
 /** One wake-up on the earliest live silence deadline. See armSilenceSweep(). */
 let silenceTimer: NodeJS.Timeout | null = null;
@@ -6672,11 +6925,19 @@ async function startBridgeOnce(epoch: number, prepared?: PreparedBridge): Promis
   // a still-live lease can sit forever with no timer to end it.
   rearmRetainedCommandDeadlines();
   dropSwarmChangeListener?.();
-  dropSwarmChangeListener = onSwarmChange(retireInactiveWorkerRecovery);
+  dropSwarmChangeListener = onSwarmChange(() => {
+    retireInactiveWorkerRecovery();
+    scheduleAllPendingGeminiPrimeDeliveries();
+  });
   retireInactiveWorkerRecovery();
+  dropWorkerFinishedListener?.();
+  dropWorkerFinishedListener = onWorkerFinished(() => {
+    scheduleAllPendingGeminiPrimeDeliveries();
+  });
+  scheduleAllPendingGeminiPrimeDeliveries();
   dropSpawnRequestListener?.();
   dropSpawnRequestListener = onSpawnRequest((workers) => {
-    for (const worker of workers) queueWorkerBootstrap(worker.id, worker.task, worker.model, worker.reasoningEffort, worker.runId);
+    for (const worker of workers) queueWorkerBootstrap(worker.id, worker.task, worker.model, worker.reasoningEffort, worker.runId, worker.provider);
   });
   // The same replay contract for waking a worker that already has a chat. A run restored
   // from disk can hold a worker left in `waking` by a crash mid-revival; registering here
@@ -6762,7 +7023,7 @@ function retryUnclaimedBrowserInputs(): Promise<void> {
           latest.pickupRetryCount === 1 && latest.sendAuthorizedAt === undefined && latest.deliveredAt === undefined;
       };
       try {
-        await wakeBrowserUrl(`https://chatgpt.com/c/${encodeURIComponent(row.conversationId)}`, false,
+        await wakeBrowserUrl(chatUrl(row.conversationId), false,
           getConfig().ui.backgroundChats === true, { current: stillOwned });
       } catch (error) {
         logWarn(`recovered browser input ${row.id} remains queued because its chat could not be opened: ${error instanceof Error ? error.message : String(error)}`);
@@ -6840,6 +7101,13 @@ export async function stopBridge(): Promise<void> {
     dropSwarmEndListener = null;
     dropSwarmChangeListener?.();
     dropSwarmChangeListener = null;
+    dropWorkerFinishedListener?.();
+    dropWorkerFinishedListener = null;
+    for (const timer of geminiReportDeliveryTimers.values()) clearTimeout(timer);
+    geminiReportDeliveryTimers.clear();
+    geminiReportRetryAttempts.clear();
+    geminiReportPartialOffsets.clear();
+    geminiSpawnedTurns.clear();
     dropSpawnRequestListener?.();
     dropSpawnRequestListener = null;
     dropReviveRequestListener?.();
@@ -7403,12 +7671,24 @@ async function cancelAutomaticResumesNow(sessionId?: string): Promise<number> {
  * stored: the chat this opens is bound to the slot by the extension's report, and the
  * recovery key exists only if the user asks the app for one after that has failed.
  */
-export function queueWorkerBootstrap(agent: string, task: string, model: string | null, reasoningEffort: ReasoningEffort | null, runId: string): BridgeCommand | null {
+function commandProvider(spec: CommandSpec): ChatProvider {
+  if (spec.type === 'worker') {
+    if (spec.provider) return spec.provider;
+    const prime = primeConversation(spec.runId);
+    return prime ? (providerForConversationId(prime) ?? 'chatgpt') : 'chatgpt';
+  }
+  if (spec.type === 'revive' || spec.type === 'stop') {
+    return providerForConversationId(spec.conversationId) ?? 'chatgpt';
+  }
+  return providerForConversationId(commandHomeConversation(spec)) ?? 'chatgpt';
+}
+
+export function queueWorkerBootstrap(agent: string, task: string, model: string | null, reasoningEffort: ReasoningEffort | null, runId: string, provider: ChatProvider = 'chatgpt'): BridgeCommand | null {
   // A worker bootstrap is authority for one concrete broker incarnation. There is no safe
   // meaning for one outside a run, and manufacturing an unscoped command here is exactly how
   // stale durable work later becomes somebody else's `worker-1`.
   if (!runId || !swarmRunning(runId)) return null;
-  const command = queue({ type: 'worker', agent, task, model, reasoningEffort, runId });
+  const command = queue({ type: 'worker', agent, task, model, reasoningEffort, provider, runId });
   // Start the clock at broker admission, exactly as a revival does. A bootstrap that never
   // reaches a page is the case that has no other clock at all.
   armDeadline(command);
@@ -7558,7 +7838,7 @@ export function setBrowserOpener(open: ((url: string) => Promise<void>) | null):
 
 /** The one place this app writes a ChatGPT conversation URL. */
 export function chatUrl(conversationId: string): string {
-  return `https://chatgpt.com/c/${encodeURIComponent(conversationId)}`;
+  return conversationUrl(conversationId);
 }
 
 /** Where the app opens a fresh worker/resume chat. The marker is an id, not a credential. */
@@ -7567,7 +7847,8 @@ export function commandUrl(
   model?: string | null,
   reasoningEffort?: ReasoningEffort | null,
   project?: string | null,
-  sourceConversationId?: string | null
+  sourceConversationId?: string | null,
+  provider?: ChatProvider | null
 ): string {
   // Both a query and a fragment: ChatGPT is a single-page app that rewrites its own URL
   // during boot, and which of the two survives has changed between builds. The content
@@ -7587,7 +7868,7 @@ export function commandUrl(
   const params = [marker];
   if (model) params.push(`model=${encodeURIComponent(model)}`);
   if (reasoningEffort) params.push(`reasoning_effort=${encodeURIComponent(reasoningEffort)}`);
-  const base = entry ? chatUrl(entry) : 'https://chatgpt.com/';
+  const base = entry ? chatUrl(entry) : homeUrlForProvider(provider ?? 'chatgpt');
   return `${base}?${params.join('&')}#${marker}`;
 }
 
@@ -7842,7 +8123,7 @@ function offerPlacement(command: Command): boolean {
  * a replacement's only while that browser holds the replacement's source chat.
  */
 function pendingBrowserPlacement(conversationId: string | null, browser: string | null = null): {
-  id: string; model: string | null; reasoningEffort: ReasoningEffort | null;
+  id: string; model: string | null; reasoningEffort: ReasoningEffort | null; provider: ChatProvider;
   background?: true; active: boolean; homeConversationId: string | null; project: string | null;
 } | null {
   const command = commands.find(entry => entry.owner === null && entry.placement &&
@@ -7855,11 +8136,13 @@ function pendingBrowserPlacement(conversationId: string | null, browser: string 
   command.progress = { ...command.progress, opened: 'browser' };
   const spec = command.spec;
   const worker = spec.type === 'worker';
+  const provider = commandProvider(spec);
   // Only what this ChatGPT account offers: a Free plan has no picker to confirm a model with (#1766).
-  const selection = commandModelSelection(command);
+  const selection = provider === 'gemini' ? null : commandModelSelection(command);
   return {
-    id: command.id, model: worker ? spec.model : selection?.model ?? null,
-    reasoningEffort: worker ? spec.reasoningEffort : selection?.reasoningEffort ?? null,
+    id: command.id, model: provider === 'gemini' ? null : worker ? spec.model : selection?.model ?? null,
+    reasoningEffort: provider === 'gemini' ? null : worker ? spec.reasoningEffort : selection?.reasoningEffort ?? null,
+    provider,
     active: !worker, homeConversationId: placement.conversationId, project: commandProject(command),
     ...(placement.background ? { background: true as const } : {})
   };
@@ -8089,9 +8372,18 @@ export function sessionInputActivity(summary: SessionSummary): InputActivity {
     possible: exact || !!silenceHeldByCalls(id, grant?.sessionId === summary.id ? grant : undefined) ||
     (expiry !== undefined && expiry !== null && expiry > Date.now()) };
 }
+const EXTERNAL_CLIENT_ACTIVITY_MS = 60_000;
+
 export function sessionActivityExpiresAt(summary: SessionSummary): number | null | undefined {
   const id = summary.conversationId;
   if (id && isChatBlocked(id)) return null;
+  if (isExternalMcpSession(summary)) {
+    const multiAgent = getConfig().multiAgent;
+    if (!multiAgent.allowUnattributedCalls || multiAgent.strictChatAllowlist) return null;
+    if (!summary.lastToolCallAt) return null;
+    const deadline = summary.lastToolCallAt + EXTERNAL_CLIENT_ACTIVITY_MS;
+    return deadline > Date.now() ? deadline : null;
+  }
   const grant = id ? activeUntil.get(id) : undefined;
   // Admission is already live work, even before a long call has a recorded result.
   // Use exact running ownership, never the conservative anonymous safety counter.
@@ -12066,8 +12358,8 @@ async function openFreshChatInBrowser(command: Command): Promise<void> {
     command.progress = { ...command.progress, opened: 'os' };
     await openInBrowser(
       command.spec.type === 'worker'
-        ? commandUrl(command.id, command.spec.model, command.spec.reasoningEffort)
-        : commandUrl(command.id, null, null, commandProject(command), commandHomeConversation(command.spec))
+        ? commandUrl(command.id, command.spec.model, command.spec.reasoningEffort, null, null, commandProvider(command.spec))
+        : commandUrl(command.id, null, null, commandProject(command), commandHomeConversation(command.spec), commandProvider(command.spec))
     );
   } catch (err) {
     // One command is one browser-open attempt. A rejected opener can never produce an ACK,
@@ -12398,15 +12690,17 @@ function revivalFor(agent: string, runId: string): WorkerRevival | null {
  */
 function commandModelSelection(command: Command): { model: string | null; reasoningEffort: ReasoningEffort | null } | null {
   const spec = command.spec;
-  if (spec.type === 'resume') return resumeModelSelection(continuationByToken(spec.token)?.requestedModel, spec.token);
+  const provider = commandProvider(spec);
+  if (spec.type === 'resume') return resumeModelSelection(continuationByToken(spec.token)?.requestedModel, spec.token, provider);
   if (spec.type !== 'revive') return null;
   const agent = agentInfoForOwnedConversation(spec.conversationId);
   if (!agent || agent.id !== spec.agent || (agent.runId !== undefined && agent.runId !== spec.runId)) return null;
-  return wakeModelSelection(agent, command.id);
+  return wakeModelSelection(agent, command.id, provider);
 }
 
 function describe(command: Command, client: string | null, claimedSummary?: string): BridgeCommand {
   const spec = command.spec;
+  const provider = commandProvider(spec);
   // Only what this ChatGPT account offers: a Free plan has no picker to confirm a model with (#1766).
   const selection = commandModelSelection(command);
   const expiresAt = Date.now() + Math.max(1, commandDeadlineDelay(command));
@@ -12429,7 +12723,7 @@ function describe(command: Command, client: string | null, claimedSummary?: stri
     text,
     agent: spec.type === 'resume' ? null : spec.agent,
     model: spec.type === 'worker' ? spec.model : selection?.model ?? null,
-    reasoningEffort: spec.type === 'worker' ? spec.reasoningEffort : selection?.reasoningEffort ?? null,
+    reasoningEffort: provider === 'gemini' ? null : (spec.type === 'worker' ? spec.reasoningEffort : selection?.reasoningEffort ?? null),
     // The fence the page enforces before it types. Only a revival has one: the other two
     // kinds open a chat that does not exist yet, so there is nothing to compare against.
     conversationId: spec.type === 'revive' ? spec.conversationId : null
@@ -12816,6 +13110,7 @@ function restoredCommandSpec(version: number, raw: Partial<CommandSpec>): Comman
       task: worker.task.slice(0, 512 * 1024),
       model: isModelSlug(worker.model) ? worker.model : null,
       reasoningEffort: isReasoningEffort(worker.reasoningEffort) ? worker.reasoningEffort : null,
+      ...(isChatProvider(worker.provider) ? { provider: worker.provider } : {}),
       runId: worker.runId
     };
   }

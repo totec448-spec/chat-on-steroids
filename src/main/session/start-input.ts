@@ -3,11 +3,15 @@ import { connect, getStatus, onStatusChange } from '../connection.js';
 import { startBridge } from '../bridge.js';
 import { wakeBrowserUrl, resetBrowserStartupForTests } from '../browser-startup.js';
 import { getConfig } from '../config.js';
+import { inputBrowserUrl } from '../../shared/provider.js';
 import { enqueueInput, cancelInput, listInputs, noteInputStartupError, retireRemovedOpening, type InputArgs, type InputEntry } from './input.js';
 
 function wakeBrowser(entry: InputEntry, retry = false): Promise<void> {
-  const marker = `cos-input=${encodeURIComponent(entry.id)}`;
-  return wakeBrowserUrl(entry.conversationId ? `https://chatgpt.com/c/${encodeURIComponent(entry.conversationId)}` : `https://chatgpt.com/?${marker}#${marker}`, retry, getConfig().ui.backgroundChats === true);
+  return wakeBrowserUrl(
+    inputBrowserUrl({ id: entry.id, conversationId: entry.conversationId, provider: entry.provider }),
+    retry,
+    getConfig().ui.backgroundChats === true
+  );
 }
 /**
  * Connection setup, not the browser, stopped this send (#882 VM test, 2026-10-04: a fresh install

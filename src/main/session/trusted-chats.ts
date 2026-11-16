@@ -7,6 +7,7 @@
  * provenance; no successor id is copied into this file merely because it resumed a trusted chat.
  */
 import { readDurable, writeDurableNow, writeDurableSoon } from '../durable.js';
+import { isAcceptedConversationId } from '../../shared/provider.js';
 
 const MAX_TRUSTED_CHATS = 200;
 const TRUSTED_STATE = 'trusted-chats';
@@ -22,7 +23,7 @@ interface PersistedTrustedChats {
 }
 
 function validConversationId(value: unknown): value is string {
-  return typeof value === 'string' && /^[0-9a-z-]{8,64}$/i.test(value);
+  return isAcceptedConversationId(value);
 }
 
 function snapshot(values: ReadonlySet<string> = trusted): PersistedTrustedChats {

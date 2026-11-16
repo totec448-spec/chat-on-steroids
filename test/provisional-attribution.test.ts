@@ -670,7 +670,9 @@ it('only provider ingress can capture presentation context; handlers retain unkn
     expect(currentCaller()?.conversationId).toBeNull();
     return ok('completed');
   }), undefined, undefined, true);
-  const text = result.content.filter(part => part.type === 'text').map(part => part.text).join('\n');
+  const textBlocks = result.content.filter(part => part.type === 'text');
+  expect(textBlocks).toHaveLength(1);
+  const text = textBlocks.map(part => part.text).join('\n');
   expect(text).toContain('--- Recording context ---');
   expect(text).toContain('Use the process and run ids returned to this request; later exact proof attaches that state to its chat.');
   expect(text).not.toContain('next attribution recovery check');

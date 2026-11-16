@@ -26,6 +26,9 @@
   "content_auto_compaction_threshold_app": {
     "message": "seuil défini dans l’application"
   },
+  "content_auto_compaction_waiting_app": {
+    "message": "Compactage automatique : en attente de l’application"
+  },
   "content_auto_compaction_worker_off": {
     "message": "désactivé ici : les chats d’agents ne sont jamais compactés automatiquement"
   },
@@ -35,11 +38,11 @@
   "content_bootstrap_composer_changed_before_send": {
     "message": "la zone de saisie a changé avant l’envoi du message initial ; le brouillon a été conservé"
   },
-  "content_bootstrap_composer_replaced": {
-    "message": "ChatGPT a remplacé la zone de saisie pendant l’insertion du message initial"
-  },
   "content_bootstrap_composer_never_ready": {
     "message": "ChatGPT n'a pas affiché d'éditeur utilisable pour le démarrage"
+  },
+  "content_bootstrap_composer_replaced": {
+    "message": "ChatGPT a remplacé la zone de saisie pendant l’insertion du message initial"
   },
   "content_bootstrap_composer_unavailable": {
     "message": "ChatGPT n'a pas réaffiché d'éditeur utilisable après la sélection du modèle"
@@ -326,11 +329,11 @@
   "content_delivery_existing_draft": {
     "message": "ChatGPT contient déjà un brouillon non envoyé. Envoyez ou effacez ce brouillon dans Chrome avant de réessayer."
   },
-  "content_delivery_signed_out": {
-    "message": "ChatGPT n’est pas connecté dans ce navigateur. Connectez-vous à ChatGPT dans ce navigateur, puis renvoyez le message."
-  },
   "content_delivery_model_unconfirmed": {
     "message": "Le modèle ou le raisonnement demandé n'a pas pu être confirmé"
+  },
+  "content_delivery_signed_out": {
+    "message": "ChatGPT n’est pas connecté dans ce navigateur. Connectez-vous à ChatGPT dans ce navigateur, puis renvoyez le message."
   },
   "content_delivery_stop_failed": {
     "message": "Impossible d’arrêter la réponse en cours."
@@ -346,6 +349,12 @@
   },
   "content_dismiss": {
     "message": "Fermer"
+  },
+  "content_edit_message_missing": {
+    "message": "Ce message n’est plus sur la page ChatGPT, il ne peut donc pas être modifié."
+  },
+  "content_edit_unavailable": {
+    "message": "ChatGPT n’a pas proposé Modifier pour ce message. Ouvrez la discussion dans ChatGPT, puis réessayez."
   },
   "content_empty": {
     "message": "(vide)"
@@ -407,11 +416,122 @@
   "content_goal_delivery_only_finish": {
     "message": "Uniquement à la fin de session"
   },
+  "content_goal_error_astra_finish_only": {
+    "message": "Ce chat se poursuit via l’outil de fin de session. Avec le réglage actuel, une réponse finale dans le navigateur ne déclenche pas un nouveau message."
+  },
+  "content_goal_error_auth_rejected": {
+    "message": "Le fournisseur de continuation a rejeté les identifiants API. Vérifiez sa clé API et ses autorisations d’accès dans les paramètres."
+  },
+  "content_goal_error_chat_blocked": {
+    "message": "Ce chat est bloqué dans l’application. Débloquez-le avant d’activer la continuation."
+  },
+  "content_goal_error_conversation_superseded": {
+    "message": "Ce chat a été remplacé par « Compacter et continuer ». Continuez dans le chat qui lui succède."
+  },
+  "content_goal_error_goal_ack_not_durable": {
+    "message": "L’application n’a pas pu enregistrer la confirmation de livraison. Vérifiez l’espace disque disponible ; consultez le chat avant de renvoyer manuellement."
+  },
+  "content_goal_error_goal_browser_busy": {
+    "message": "Une requête d’assistant est déjà en attente. Laissez-la se terminer ou annulez-la avant d’en lancer une autre."
+  },
+  "content_goal_error_goal_browser_cancelled": {
+    "message": "La requête de l’assistant a été annulée. Relancez-la lorsque vous souhaitez continuer."
+  },
+  "content_goal_error_goal_browser_send_failed": {
+    "message": "L’invite de l’assistant n’a pas pu être envoyée à ChatGPT. Ouvrez le chat de l’assistant et vérifiez son éditeur ou l’erreur visible avant de réessayer."
+  },
+  "content_goal_error_goal_browser_send_unconfirmed": {
+    "message": "L’application n’a pas pu confirmer si ChatGPT a reçu l’invite de l’assistant. Vérifiez le chat de l’assistant avant de réessayer afin d’éviter un double envoi."
+  },
+  "content_goal_error_goal_context_too_large": {
+    "message": "La tâche et les instructions Goal/Loop sont trop longues pour être envoyées à l’assistant. Raccourcissez la tâche ou les instructions de continuation personnalisées dans les paramètres."
+  },
+  "content_goal_error_goal_disabled": {
+    "message": "Goal/Loop est désactivé pour ce chat. Activez-le pour autoriser la continuation."
+  },
+  "content_goal_error_goal_final_not_confirmed": {
+    "message": "L’application n’a pas encore confirmé de réponse finale pouvant déclencher la continuation automatique. Vérifiez le chat source pour voir s’il reste du travail en cours ou une erreur."
+  },
+  "content_goal_error_goal_helper_stop_unverified": {
+    "message": "L’assistant indique que l’objectif est atteint, mais cela n’a pas été vérifié. Aucun message de suivi n’a été envoyé. Vérifiez la conversation et poursuivez s’il reste du travail."
+  },
+  "content_goal_error_goal_marker_missing": {
+    "message": "La réponse ne contient pas le marqueur d’achèvement requis par les modèles Goal hors ligne. Vérifiez les instructions du modèle ou choisissez une autre source de continuation."
+  },
+  "content_goal_error_goal_objective_not_durable": {
+    "message": "L’application n’a pas pu enregistrer la tâche. Vérifiez l’espace disque disponible et essayez de l’enregistrer à nouveau."
+  },
+  "content_goal_error_goal_owned_elsewhere": {
+    "message": "Un autre onglet du navigateur gère cette continuation. Consultez cet onglet pour suivre la progression."
+  },
+  "content_goal_error_goal_reply_not_durable": {
+    "message": "L’application n’a pas pu enregistrer la continuation en attente. Vérifiez l’espace disque disponible et les diagnostics de l’application."
+  },
+  "content_goal_error_goal_reply_not_pending": {
+    "message": "Aucune continuation n’est en attente pour cette réponse. Elle a peut-être déjà été traitée ou remplacée par un travail plus récent. Vérifiez l’activité la plus récente du chat avant de réessayer."
+  },
+  "content_goal_error_goal_switch_not_durable": {
+    "message": "L’application n’a pas pu enregistrer le réglage Goal/Loop. Vérifiez l’espace disque disponible et essayez de l’enregistrer à nouveau."
+  },
+  "content_goal_error_goal_worker_chat": {
+    "message": "Les workers ne peuvent pas exécuter leur propre Goal/Loop. Activez plutôt la continuation dans le chat parent."
+  },
+  "content_goal_error_invalid_provider": {
+    "message": "Le point de terminaison de continuation personnalisé est invalide. Vérifiez son URL dans les paramètres ; utilisez HTTPS ou un point de terminaison HTTP local."
+  },
+  "content_goal_error_loop_mcp_call_missing": {
+    "message": "Aucun appel d’outil MCP n’a été enregistré dans la dernière réponse. ChatGPT vous pose peut-être une question, ou la connexion aux outils a peut-être été perdue. Répondez à sa question ou vérifiez le tunnel si les outils ne fonctionnent plus. La continuation automatique est en pause ; Loop reste activé."
+  },
+  "content_goal_error_loop_stop_refused": {
+    "message": "L’assistant a continué à choisir l’arrêt au lieu de rédiger une continuation Loop. Vérifiez les instructions Loop ou choisissez un autre modèle d’assistant."
+  },
+  "content_goal_error_no_api_key": {
+    "message": "Aucune clé API n’est configurée pour le fournisseur de continuation. Ajoutez-en une dans les paramètres ou sélectionnez la source de continuation ChatGPT."
+  },
+  "content_goal_error_no_conversation": {
+    "message": "Aucune conversation enregistrée n’est disponible à poursuivre. Envoyez d’abord une tâche."
+  },
+  "content_goal_error_no_objective": {
+    "message": "Aucune tâche n’a été fournie. Saisissez une tâche avant de démarrer Goal/Loop."
+  },
+  "content_goal_error_nothing_to_open_with": {
+    "message": "L’assistant n’a pas produit de message d’ouverture. Rendez la tâche plus précise et réessayez."
+  },
+  "content_goal_error_out_of_credit": {
+    "message": "Le compte du fournisseur de continuation n’a plus de crédit disponible. Ajoutez du crédit ou choisissez une autre source de continuation dans les paramètres."
+  },
+  "content_goal_error_rate_limited": {
+    "message": "Le fournisseur de continuation limite le débit des requêtes. Attendez la nouvelle tentative affichée ou choisissez un autre modèle de continuation."
+  },
+  "content_goal_error_reply_too_long": {
+    "message": "L’assistant a rédigé une continuation trop longue pour être envoyée. Demandez des instructions de continuation plus courtes ou choisissez un autre modèle d’assistant dans les paramètres."
+  },
+  "content_goal_error_request_failed": {
+    "message": "La requête de continuation a échoué. Vérifiez l’assistant sélectionné ou le point de terminaison API ainsi que les diagnostics de l’application avant de réessayer."
+  },
+  "content_goal_error_response_body_too_large": {
+    "message": "La réponse du fournisseur a dépassé la limite de taille. Choisissez un autre modèle de continuation ou demandez des réponses plus courtes."
+  },
+  "content_goal_error_session_not_recorded": {
+    "message": "L’application ne dispose d’aucun historique enregistré pour ce chat. Activez l’enregistrement et envoyez un message avant d’utiliser la continuation automatique."
+  },
+  "content_goal_error_stream_record_too_long": {
+    "message": "Le fournisseur a renvoyé une réponse trop volumineuse. Choisissez un autre modèle de continuation ou demandez des réponses plus courtes."
+  },
+  "content_goal_error_timeout_or_cancelled": {
+    "message": "La requête de continuation a expiré ou a été annulée. Vérifiez le chat de l’assistant ou l’état du fournisseur avant de réessayer."
+  },
+  "content_goal_error_unknown_model": {
+    "message": "Le fournisseur de continuation n’a pas trouvé le modèle sélectionné. Actualisez sa liste de modèles et choisissez un modèle disponible dans les paramètres."
+  },
   "content_goal_loop_off": {
     "message": "Goal et Loop désactivés"
   },
   "content_goal_loop_stopped": {
     "message": "La boucle Goal s’est arrêtée"
+  },
+  "content_goal_loop_waiting_app": {
+    "message": "Goal et Loop : en attente de l’application"
   },
   "content_goal_message_box_in_use": {
     "message": "la zone de saisie était utilisée ; rien n’a donc été envoyé"
@@ -458,11 +578,14 @@
   "content_goal_retrying": {
     "message": "Nouvelle tentative de Goal dans $1 secondes"
   },
+  "content_goal_retrying__many": {
+    "message": "Nouvelle tentative de Goal dans $1 de secondes"
+  },
   "content_goal_retrying__one": {
     "message": "Nouvelle tentative de Goal dans $1 seconde"
   },
-  "content_goal_retrying__many": {
-    "message": "Nouvelle tentative de Goal dans $1 de secondes"
+  "content_goal_reviewer_deadline": {
+    "message": "Continue sans la relecture dans $1"
   },
   "content_goal_save": {
     "message": "Enregistrer comme Goal"
@@ -494,6 +617,9 @@
   "content_goal_step_writing": {
     "message": "Rédaction de la réponse"
   },
+  "content_goal_wait_paused": {
+    "message": "ChatGPT a demandé de ralentir · attend l'heure indiquée"
+  },
   "content_goal_wait_recovery_activity": {
     "message": "En attente d'activité après récupération"
   },
@@ -503,32 +629,29 @@
   "content_goal_wait_resumed": {
     "message": "ChatGPT a repris le travail · en attente avant nouvelle tentative"
   },
-  "content_goal_wait_running_tools": {
-    "message": "En attente des outils en cours d'exécution"
-  },
-  "content_goal_wait_tool_inactivity": {
-    "message": "En attente d'inactivité des outils"
-  },
-  "content_goal_reviewer_deadline": {
-    "message": "Continue sans la relecture dans $1"
-  },
   "content_goal_wait_reviewer": {
     "message": "En attente du relecteur"
   },
-  "content_goal_wait_workers": {
-    "message": "En attente des agents de ce chat"
+  "content_goal_wait_running_tools": {
+    "message": "En attente des outils en cours d'exécution"
   },
   "content_goal_wait_slots": {
     "message": "En attente d'une place libre (Chats actifs en même temps)"
   },
-  "content_goal_wait_paused": {
-    "message": "ChatGPT a demandé de ralentir · attend l'heure indiquée"
+  "content_goal_wait_tool_inactivity": {
+    "message": "En attente d'inactivité des outils"
+  },
+  "content_goal_wait_workers": {
+    "message": "En attente des agents de ce chat"
   },
   "content_goal_writing_first_message": {
     "message": "$1 rédige le premier message"
   },
   "content_goal_wrote_next_message": {
     "message": "$1 a rédigé le message suivant"
+  },
+  "content_history_rate_limited": {
+    "message": "ChatGPT a temporairement limité l’accès à l’historique de cette conversation. Chat On Steroids suspend la récupération automatique jusqu’à la fin de l’attente."
   },
   "content_loop_add_specific": {
     "message": "ajouter un Loop précis"
@@ -605,11 +728,17 @@
   "content_paused": {
     "message": "En pause"
   },
+  "content_revival_draft_appeared": {
+    "message": "Quelque chose a été saisi dans la conversation pendant la préparation du réveil du worker, donc le réveil ne l’a pas remplacé."
+  },
   "content_saving": {
     "message": "Enregistrement…"
   },
   "content_settings_aria": {
     "message": "Réglages de Chat On Steroids"
+  },
+  "content_settings_waiting_app": {
+    "message": "en attente de l’application"
   },
   "content_stage_handoff_attention": {
     "message": "La réponse de continuité nécessite votre attention"
@@ -644,6 +773,9 @@
   "content_task_pick_mode_first": {
     "message": "Choisissez d’abord Goal ou Loop ci-dessus — Désactivé n’écrit rien."
   },
+  "content_task_waiting_app": {
+    "message": "En attente de la réponse de Chat On Steroids."
+  },
   "content_task_worker_unavailable": {
     "message": "Un chat d’agent est déjà piloté par son agent principal."
   },
@@ -653,20 +785,20 @@
   "content_tokens_from": {
     "message": "à partir de $1 jetons"
   },
-  "content_tokens_from__one": {
-    "message": "à partir de $1 jeton"
-  },
   "content_tokens_from__many": {
     "message": "à partir de $1 de jetons"
+  },
+  "content_tokens_from__one": {
+    "message": "à partir de $1 jeton"
   },
   "content_tool_calls_count": {
     "message": "$1 appels d’outil"
   },
-  "content_tool_calls_count__one": {
-    "message": "$1 appel d’outil"
-  },
   "content_tool_calls_count__many": {
     "message": "$1 d’appels d’outil"
+  },
+  "content_tool_calls_count__one": {
+    "message": "$1 appel d’outil"
   },
   "content_tool_details_loading": {
     "message": "Chargement des détails enregistrés…"
@@ -677,11 +809,11 @@
   "content_tool_more_changed_files": {
     "message": "$1 autres fichiers modifiés"
   },
-  "content_tool_more_changed_files__one": {
-    "message": "$1 autre fichier modifié"
-  },
   "content_tool_more_changed_files__many": {
     "message": "$1 autres fichiers modifiés"
+  },
+  "content_tool_more_changed_files__one": {
+    "message": "$1 autre fichier modifié"
   },
   "content_tool_outcome_completed": {
     "message": "terminé"
@@ -701,11 +833,11 @@
   "content_tool_preview_truncated": {
     "message": "Aperçu tronqué à partir de $1 caractères."
   },
-  "content_tool_preview_truncated__one": {
-    "message": "Aperçu tronqué à partir de $1 caractère."
-  },
   "content_tool_preview_truncated__many": {
     "message": "Aperçu tronqué à partir de $1 de caractères."
+  },
+  "content_tool_preview_truncated__one": {
+    "message": "Aperçu tronqué à partir de $1 caractère."
   },
   "content_tool_ran": {
     "message": "$1 exécuté"
@@ -758,11 +890,11 @@
   "content_waiting_local_tools": {
     "message": "En attente de la fin de $1 outils locaux"
   },
-  "content_waiting_local_tools__one": {
-    "message": "En attente de la fin de $1 outil local"
-  },
   "content_waiting_local_tools__many": {
     "message": "En attente de la fin de $1 d’outils locaux"
+  },
+  "content_waiting_local_tools__one": {
+    "message": "En attente de la fin de $1 outil local"
   },
   "content_worker_generic": {
     "message": "un agent"
@@ -776,14 +908,41 @@
   "content_worker_still_running": {
     "message": "Agent toujours en cours : $1"
   },
+  "content_workers_failed": {
+    "message": "$1 en échec"
+  },
+  "content_workers_failed__many": {
+    "message": "$1 en échec"
+  },
+  "content_workers_failed__one": {
+    "message": "$1 en échec"
+  },
+  "content_workers_finished": {
+    "message": "$1 terminés"
+  },
+  "content_workers_finished__many": {
+    "message": "$1 terminés"
+  },
+  "content_workers_finished__one": {
+    "message": "$1 terminé"
+  },
+  "content_workers_running": {
+    "message": "$1 en cours"
+  },
+  "content_workers_running__many": {
+    "message": "$1 en cours"
+  },
+  "content_workers_running__one": {
+    "message": "$1 en cours"
+  },
   "content_workers_still_running": {
     "message": "$1 agents sont encore en cours"
   },
-  "content_workers_still_running__one": {
-    "message": "$1 agent est encore en cours"
-  },
   "content_workers_still_running__many": {
     "message": "$1 d’agents sont encore en cours"
+  },
+  "content_workers_still_running__one": {
+    "message": "$1 agent est encore en cours"
   },
   "content_working": {
     "message": "travail en cours…"
@@ -802,6 +961,9 @@
   },
   "popup_advanced": {
     "message": "Avancé"
+  },
+  "popup_app_not_running_help": {
+    "message": "Vérifiez que Chat On Steroids est ouvert sur cet ordinateur. L’extension se connecte d’elle-même."
   },
   "popup_attribution_agent_key": {
     "message": "clé d'agent"
@@ -826,6 +988,9 @@
   },
   "popup_chat_id": {
     "message": "ID de chat"
+  },
+  "popup_chat_tab": {
+    "message": "Onglet ChatGPT / Gemini"
   },
   "popup_chatgpt_tab": {
     "message": "Onglet ChatGPT"
@@ -854,19 +1019,19 @@
   "popup_count_held": {
     "message": "$1 en attente"
   },
-  "popup_count_held__one": {
+  "popup_count_held__many": {
     "message": "$1 en attente"
   },
-  "popup_count_held__many": {
+  "popup_count_held__one": {
     "message": "$1 en attente"
   },
   "popup_count_held_in_page": {
     "message": "$1 en attente dans la page"
   },
-  "popup_count_held_in_page__one": {
+  "popup_count_held_in_page__many": {
     "message": "$1 en attente dans la page"
   },
-  "popup_count_held_in_page__many": {
+  "popup_count_held_in_page__one": {
     "message": "$1 en attente dans la page"
   },
   "popup_count_queued": {
@@ -884,17 +1049,44 @@
   "popup_detail_app_value": {
     "message": "v$1 · port $2"
   },
+  "popup_detail_calls": {
+    "message": "$1 appels"
+  },
+  "popup_detail_calls__many": {
+    "message": "$1 d’appels"
+  },
+  "popup_detail_calls__one": {
+    "message": "$1 appel"
+  },
   "popup_detail_chat_id": {
     "message": "id de chat"
   },
   "popup_detail_delivered": {
     "message": "livré"
   },
+  "popup_detail_events": {
+    "message": "$1 événements"
+  },
+  "popup_detail_events__many": {
+    "message": "$1 d’événements"
+  },
+  "popup_detail_events__one": {
+    "message": "$1 événement"
+  },
   "popup_detail_extension": {
     "message": "extension"
   },
   "popup_detail_extension_value": {
     "message": "v$1 · protocole $2"
+  },
+  "popup_detail_failed": {
+    "message": "$1 en échec"
+  },
+  "popup_detail_failed__many": {
+    "message": "$1 en échec"
+  },
+  "popup_detail_failed__one": {
+    "message": "$1 en échec"
   },
   "popup_detail_in_this_browser": {
     "message": "dans ce navigateur"
@@ -917,6 +1109,9 @@
   "popup_detail_recorder": {
     "message": "enregistreur"
   },
+  "popup_detail_recorder_gemini_value": {
+    "message": "gemini v$1 · exécution $2"
+  },
   "popup_detail_recorder_value": {
     "message": "fiber v$1 · exécution $2"
   },
@@ -926,11 +1121,20 @@
   "popup_detail_tab_value": {
     "message": "$1 · époque $2"
   },
+  "popup_detail_total": {
+    "message": "$1 au total"
+  },
   "popup_detail_turn": {
     "message": "tour"
   },
   "popup_detail_turn_live": {
     "message": "$1 · actif"
+  },
+  "popup_gemini_companion_feature": {
+    "message": "Transcription en direct et sous-agents"
+  },
+  "popup_gemini_tab": {
+    "message": "Onglet Gemini"
   },
   "popup_no": {
     "message": "non"
@@ -950,11 +1154,11 @@
   "popup_pipeline_call_fallback_many": {
     "message": "L’application n’a pas pu attribuer $1 appels par ID de requête. À la place : $2."
   },
-  "popup_pipeline_call_fallback_many__one": {
-    "message": "L’application n’a pas pu attribuer $1 appel par ID de requête. À la place : $2."
-  },
   "popup_pipeline_call_fallback_many__many": {
     "message": "L’application n’a pas pu attribuer $1 d’appels par ID de requête. À la place : $2."
+  },
+  "popup_pipeline_call_fallback_many__one": {
+    "message": "L’application n’a pas pu attribuer $1 appel par ID de requête. À la place : $2."
   },
   "popup_pipeline_call_fallback_one": {
     "message": "L’application n’a pas pu attribuer l’appel par ID de requête. À la place : $1."
@@ -968,11 +1172,23 @@
   "popup_pipeline_extension_blocked": {
     "message": "L'extension n'accepte pas les observations de cet onglet ($1). Rechargez l'onglet ChatGPT."
   },
+  "popup_pipeline_extension_blocked_gemini": {
+    "message": "L'extension n'accepte pas les observations de cet onglet ($1). Rechargez l'onglet Gemini."
+  },
+  "popup_pipeline_gemini_synced": {
+    "message": "Discussion Gemini enregistrée et synchronisée avec l’app."
+  },
   "popup_pipeline_id_found_waiting_receipt": {
     "message": "ID trouvé dans le dernier tour. En attente de la confirmation de réception par l'application."
   },
   "popup_pipeline_no_recorder": {
     "message": "Aucun enregistreur dans cet onglet. Rechargez la page."
+  },
+  "popup_pipeline_not_a_chat": {
+    "message": "Cette page ChatGPT n’est pas un chat, l’app n’a donc rien à suivre ici. Ouvrez ou démarrez un chat."
+  },
+  "popup_pipeline_not_a_chat_gemini": {
+    "message": "Cette page Gemini n’est pas un chat, l’app n’a donc rien à suivre ici. Ouvrez ou démarrez un chat."
   },
   "popup_pipeline_owner_confirmed_no_activity": {
     "message": "Propriétaire de la requête confirmé. Aucune activité d'outil correspondante enregistrée pour l'instant."
@@ -986,20 +1202,17 @@
   "popup_pipeline_request_id_matched_many": {
     "message": "$1 ID de requête associés à l'activité d'outil enregistrée."
   },
-  "popup_pipeline_request_id_matched_many__one": {
-    "message": "$1 ID de requête associé à l'activité d'outil enregistrée."
-  },
   "popup_pipeline_request_id_matched_many__many": {
     "message": "$1 d’ID de requête associés à l'activité d'outil enregistrée."
+  },
+  "popup_pipeline_request_id_matched_many__one": {
+    "message": "$1 ID de requête associé à l'activité d'outil enregistrée."
   },
   "popup_pipeline_request_id_matched_one": {
     "message": "1 ID de requête correspond à une activité d’outil enregistrée."
   },
   "popup_pipeline_waiting_first_message": {
     "message": "En attente du premier message."
-  },
-  "popup_pipeline_not_a_chat": {
-    "message": "Cette page ChatGPT n’est pas un chat, l’app n’a donc rien à suivre ici. Ouvrez ou démarrez un chat."
   },
   "popup_pipeline_waiting_latest_request_id": {
     "message": "Chat enregistré. En attente d'un ID de requête du dernier tour."
@@ -1022,6 +1235,9 @@
   "popup_section_augment_chatgpt": {
     "message": "Enrichir ChatGPT"
   },
+  "popup_section_gemini": {
+    "message": "Gemini Web"
+  },
   "popup_section_session_capture": {
     "message": "Capture de session"
   },
@@ -1030,6 +1246,21 @@
   },
   "popup_sent_to_app": {
     "message": "Envoyé à l'application"
+  },
+  "popup_sign_in_failed": {
+    "message": "Échec. Relancez la connexion depuis CoS."
+  },
+  "popup_sign_in_imported": {
+    "message": "Session transférée"
+  },
+  "popup_sign_in_imported_detail": {
+    "message": "Vous êtes connecté à CoS browser."
+  },
+  "popup_sign_in_permission": {
+    "message": "Accès aux cookies refusé. Cliquez à nouveau."
+  },
+  "popup_sign_in_transfer": {
+    "message": "Transférer la session vers CoS browser"
   },
   "popup_state_app_not_reachable": {
     "message": "Application inaccessible"
@@ -1048,6 +1279,9 @@
   },
   "popup_state_version_mismatch": {
     "message": "Versions incompatibles"
+  },
+  "popup_status_active": {
+    "message": "actif"
   },
   "popup_status_answering": {
     "message": "réponse"
@@ -1070,14 +1304,14 @@
   "popup_status_new_chat": {
     "message": "nouveau chat"
   },
-  "popup_status_not_a_chat": {
-    "message": "pas un chat"
-  },
   "popup_status_none_open": {
     "message": "aucun ouvert"
   },
   "popup_status_none_yet": {
     "message": "aucun pour l'instant"
+  },
+  "popup_status_not_a_chat": {
+    "message": "pas un chat"
   },
   "popup_status_not_attached": {
     "message": "non rattaché"
@@ -1091,6 +1325,9 @@
   "popup_status_retired": {
     "message": "retiré"
   },
+  "popup_status_synced": {
+    "message": "synchronisé"
+  },
   "popup_status_tool_matched": {
     "message": "outil associé"
   },
@@ -1099,6 +1336,15 @@
   },
   "popup_status_waiting": {
     "message": "en attente"
+  },
+  "popup_tabs_summary_both": {
+    "message": "$1 ChatGPT · $2 Gemini"
+  },
+  "popup_tabs_summary_chatgpt": {
+    "message": "$1 ChatGPT"
+  },
+  "popup_tabs_summary_gemini": {
+    "message": "$1 Gemini"
   },
   "popup_time_hours_short": {
     "message": "$1 h"
@@ -1120,212 +1366,5 @@
   },
   "popup_yes": {
     "message": "oui"
-  },
-  "content_goal_error_loop_mcp_call_missing": {
-    "message": "Aucun appel d’outil MCP n’a été enregistré dans la dernière réponse. ChatGPT vous pose peut-être une question, ou la connexion aux outils a peut-être été perdue. Répondez à sa question ou vérifiez le tunnel si les outils ne fonctionnent plus. La continuation automatique est en pause ; Loop reste activé."
-  },
-  "content_goal_error_goal_reply_not_pending": {
-    "message": "Aucune continuation n’est en attente pour cette réponse. Elle a peut-être déjà été traitée ou remplacée par un travail plus récent. Vérifiez l’activité la plus récente du chat avant de réessayer."
-  },
-  "content_goal_error_goal_context_too_large": {
-    "message": "La tâche et les instructions Goal/Loop sont trop longues pour être envoyées à l’assistant. Raccourcissez la tâche ou les instructions de continuation personnalisées dans les paramètres."
-  },
-  "content_goal_error_reply_too_long": {
-    "message": "L’assistant a rédigé une continuation trop longue pour être envoyée. Demandez des instructions de continuation plus courtes ou choisissez un autre modèle d’assistant dans les paramètres."
-  },
-  "content_goal_error_stream_record_too_long": {
-    "message": "Le fournisseur a renvoyé une réponse trop volumineuse. Choisissez un autre modèle de continuation ou demandez des réponses plus courtes."
-  },
-  "content_goal_error_response_body_too_large": {
-    "message": "La réponse du fournisseur a dépassé la limite de taille. Choisissez un autre modèle de continuation ou demandez des réponses plus courtes."
-  },
-  "content_goal_error_no_api_key": {
-    "message": "Aucune clé API n’est configurée pour le fournisseur de continuation. Ajoutez-en une dans les paramètres ou sélectionnez la source de continuation ChatGPT."
-  },
-  "content_goal_error_auth_rejected": {
-    "message": "Le fournisseur de continuation a rejeté les identifiants API. Vérifiez sa clé API et ses autorisations d’accès dans les paramètres."
-  },
-  "content_goal_error_out_of_credit": {
-    "message": "Le compte du fournisseur de continuation n’a plus de crédit disponible. Ajoutez du crédit ou choisissez une autre source de continuation dans les paramètres."
-  },
-  "content_goal_error_unknown_model": {
-    "message": "Le fournisseur de continuation n’a pas trouvé le modèle sélectionné. Actualisez sa liste de modèles et choisissez un modèle disponible dans les paramètres."
-  },
-  "content_goal_error_invalid_provider": {
-    "message": "Le point de terminaison de continuation personnalisé est invalide. Vérifiez son URL dans les paramètres ; utilisez HTTPS ou un point de terminaison HTTP local."
-  },
-  "content_history_rate_limited": {
-    "message": "ChatGPT a temporairement limité l’accès à l’historique de cette conversation. Chat On Steroids suspend la récupération automatique jusqu’à la fin de l’attente."
-  },
-  "content_goal_error_rate_limited": {
-    "message": "Le fournisseur de continuation limite le débit des requêtes. Attendez la nouvelle tentative affichée ou choisissez un autre modèle de continuation."
-  },
-  "content_goal_error_timeout_or_cancelled": {
-    "message": "La requête de continuation a expiré ou a été annulée. Vérifiez le chat de l’assistant ou l’état du fournisseur avant de réessayer."
-  },
-  "content_goal_error_request_failed": {
-    "message": "La requête de continuation a échoué. Vérifiez l’assistant sélectionné ou le point de terminaison API ainsi que les diagnostics de l’application avant de réessayer."
-  },
-  "content_goal_error_goal_browser_busy": {
-    "message": "Une requête d’assistant est déjà en attente. Laissez-la se terminer ou annulez-la avant d’en lancer une autre."
-  },
-  "content_goal_error_goal_browser_cancelled": {
-    "message": "La requête de l’assistant a été annulée. Relancez-la lorsque vous souhaitez continuer."
-  },
-  "content_goal_error_goal_browser_send_failed": {
-    "message": "L’invite de l’assistant n’a pas pu être envoyée à ChatGPT. Ouvrez le chat de l’assistant et vérifiez son éditeur ou l’erreur visible avant de réessayer."
-  },
-  "content_goal_error_goal_browser_send_unconfirmed": {
-    "message": "L’application n’a pas pu confirmer si ChatGPT a reçu l’invite de l’assistant. Vérifiez le chat de l’assistant avant de réessayer afin d’éviter un double envoi."
-  },
-  "content_goal_error_goal_owned_elsewhere": {
-    "message": "Un autre onglet du navigateur gère cette continuation. Consultez cet onglet pour suivre la progression."
-  },
-  "content_goal_error_goal_final_not_confirmed": {
-    "message": "L’application n’a pas encore confirmé de réponse finale pouvant déclencher la continuation automatique. Vérifiez le chat source pour voir s’il reste du travail en cours ou une erreur."
-  },
-  "content_goal_error_astra_finish_only": {
-    "message": "Ce chat se poursuit via l’outil de fin de session. Avec le réglage actuel, une réponse finale dans le navigateur ne déclenche pas un nouveau message."
-  },
-  "content_goal_error_goal_disabled": {
-    "message": "Goal/Loop est désactivé pour ce chat. Activez-le pour autoriser la continuation."
-  },
-  "content_goal_error_goal_worker_chat": {
-    "message": "Les workers ne peuvent pas exécuter leur propre Goal/Loop. Activez plutôt la continuation dans le chat parent."
-  },
-  "content_goal_error_conversation_superseded": {
-    "message": "Ce chat a été remplacé par « Compacter et continuer ». Continuez dans le chat qui lui succède."
-  },
-  "content_goal_error_chat_blocked": {
-    "message": "Ce chat est bloqué dans l’application. Débloquez-le avant d’activer la continuation."
-  },
-  "content_goal_error_session_not_recorded": {
-    "message": "L’application ne dispose d’aucun historique enregistré pour ce chat. Activez l’enregistrement et envoyez un message avant d’utiliser la continuation automatique."
-  },
-  "content_goal_error_no_conversation": {
-    "message": "Aucune conversation enregistrée n’est disponible à poursuivre. Envoyez d’abord une tâche."
-  },
-  "content_goal_error_no_objective": {
-    "message": "Aucune tâche n’a été fournie. Saisissez une tâche avant de démarrer Goal/Loop."
-  },
-  "content_goal_error_nothing_to_open_with": {
-    "message": "L’assistant n’a pas produit de message d’ouverture. Rendez la tâche plus précise et réessayez."
-  },
-  "content_goal_error_goal_helper_stop_unverified": {
-    "message": "L’assistant indique que l’objectif est atteint, mais cela n’a pas été vérifié. Aucun message de suivi n’a été envoyé. Vérifiez la conversation et poursuivez s’il reste du travail."
-  },
-  "content_goal_error_loop_stop_refused": {
-    "message": "L’assistant a continué à choisir l’arrêt au lieu de rédiger une continuation Loop. Vérifiez les instructions Loop ou choisissez un autre modèle d’assistant."
-  },
-  "content_goal_error_goal_marker_missing": {
-    "message": "La réponse ne contient pas le marqueur d’achèvement requis par les modèles Goal hors ligne. Vérifiez les instructions du modèle ou choisissez une autre source de continuation."
-  },
-  "content_goal_error_goal_reply_not_durable": {
-    "message": "L’application n’a pas pu enregistrer la continuation en attente. Vérifiez l’espace disque disponible et les diagnostics de l’application."
-  },
-  "content_goal_error_goal_ack_not_durable": {
-    "message": "L’application n’a pas pu enregistrer la confirmation de livraison. Vérifiez l’espace disque disponible ; consultez le chat avant de renvoyer manuellement."
-  },
-  "content_goal_error_goal_switch_not_durable": {
-    "message": "L’application n’a pas pu enregistrer le réglage Goal/Loop. Vérifiez l’espace disque disponible et essayez de l’enregistrer à nouveau."
-  },
-  "content_goal_error_goal_objective_not_durable": {
-    "message": "L’application n’a pas pu enregistrer la tâche. Vérifiez l’espace disque disponible et essayez de l’enregistrer à nouveau."
-  },
-  "popup_sign_in_transfer": {
-    "message": "Transférer la session vers CoS browser"
-  },
-  "popup_sign_in_permission": {
-    "message": "Accès aux cookies refusé. Cliquez à nouveau."
-  },
-  "popup_sign_in_imported": {
-    "message": "Session transférée"
-  },
-  "popup_sign_in_imported_detail": {
-    "message": "Vous êtes connecté à CoS browser."
-  },
-  "popup_sign_in_failed": {
-    "message": "Échec. Relancez la connexion depuis CoS."
-  },
-  "popup_app_not_running_help": {
-    "message": "Vérifiez que Chat On Steroids est ouvert sur cet ordinateur. L’extension se connecte d’elle-même."
-  },
-  "content_workers_finished": {
-    "message": "$1 terminés"
-  },
-  "content_workers_finished__one": {
-    "message": "$1 terminé"
-  },
-  "content_workers_finished__many": {
-    "message": "$1 terminés"
-  },
-  "content_workers_running": {
-    "message": "$1 en cours"
-  },
-  "content_workers_running__one": {
-    "message": "$1 en cours"
-  },
-  "content_workers_running__many": {
-    "message": "$1 en cours"
-  },
-  "content_workers_failed": {
-    "message": "$1 en échec"
-  },
-  "content_workers_failed__one": {
-    "message": "$1 en échec"
-  },
-  "content_workers_failed__many": {
-    "message": "$1 en échec"
-  },
-  "popup_detail_events": {
-    "message": "$1 événements"
-  },
-  "popup_detail_events__one": {
-    "message": "$1 événement"
-  },
-  "popup_detail_events__many": {
-    "message": "$1 d’événements"
-  },
-  "popup_detail_calls": {
-    "message": "$1 appels"
-  },
-  "popup_detail_calls__one": {
-    "message": "$1 appel"
-  },
-  "popup_detail_calls__many": {
-    "message": "$1 d’appels"
-  },
-  "popup_detail_failed": {
-    "message": "$1 en échec"
-  },
-  "popup_detail_failed__one": {
-    "message": "$1 en échec"
-  },
-  "popup_detail_failed__many": {
-    "message": "$1 en échec"
-  },
-  "popup_detail_total": {
-    "message": "$1 au total"
-  },
-  "content_edit_message_missing": {
-    "message": "Ce message n’est plus sur la page ChatGPT, il ne peut donc pas être modifié."
-  },
-  "content_edit_unavailable": {
-    "message": "ChatGPT n’a pas proposé Modifier pour ce message. Ouvrez la discussion dans ChatGPT, puis réessayez."
-  },
-  "content_auto_compaction_waiting_app": {
-    "message": "Compactage automatique : en attente de l’application"
-  },
-  "content_goal_loop_waiting_app": {
-    "message": "Goal et Loop : en attente de l’application"
-  },
-  "content_settings_waiting_app": {
-    "message": "en attente de l’application"
-  },
-  "content_task_waiting_app": {
-    "message": "En attente de la réponse de Chat On Steroids."
-  },
-  "content_revival_draft_appeared": {
-    "message": "Quelque chose a été saisi dans la conversation pendant la préparation du réveil du worker, donc le réveil ne l’a pas remplacé."
   }
 }

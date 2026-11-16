@@ -1,4 +1,5 @@
 import { MAX_CHAT_STYLE_CHARS } from '../shared/chat-style.js';
+import { CHAT_PROVIDERS } from '../shared/provider.js';
 import { DEFAULT_PHONE_PUSH } from '../shared/phone-push.js';
 import { DEFAULT_HELPER_CHAT_MODEL, SUPERSEDED_HELPER_CHAT_MODELS } from '../shared/chat-models.js';
 import { UI_LANGUAGES } from '../shared/ui-language.js';
@@ -6,6 +7,7 @@ import { DEFAULT_RECORDING_STORAGE_GIB, REASONING_EFFORTS, RECORDING_STORAGE_LIM
 import { appearanceSchema } from './appearance-schema.js';
 import { BROWSER_BRIDGE_PORTS } from '../shared/browser-bridge.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
+import { normalizeHttpsOrigin } from '../shared/gemini-bridge.js';
 import { CUSTOM_CONTINUE_MAX_CHARS } from '../shared/recovery.js';
 /**
  * Non-secret settings, stored as one small JSON file in the app's userData folder.
@@ -354,8 +356,10 @@ const configSchema = z.object({
   ui: z.object({
     appearance: appearanceSchema.optional().catch(undefined),
     autoContinue: z.boolean().optional().default(true),
+    defaultChatProvider: z.enum(CHAT_PROVIDERS).optional().catch(undefined),
     defaultChatModel: z.string().trim().min(1).max(80).optional().catch(undefined),
     defaultChatReasoning: z.enum(REASONING_EFFORTS).optional().catch(undefined),
+    defaultGeminiModel: z.string().trim().min(1).max(80).optional().catch(undefined),
     chatBrowser: z.enum(CHAT_BROWSERS).optional().default('chrome'),
     /** Where a minimized built-in browser window goes. */
     cosBrowserMinimize: z.enum(['taskbar', 'tray']).optional().default('taskbar'),
@@ -534,6 +538,7 @@ const configSchema = z.object({
       enabled: z.boolean().optional().default(DEFAULT_MULTI_AGENT.enabled),
     defaultModel: z.string().max(80).optional(),
     defaultReasoning: z.enum(['', ...REASONING_EFFORTS]).optional(),
+    defaultGeminiModel: z.string().trim().min(1).max(80).optional().catch(undefined),
       maxWorkers: z.number().int().min(1).max(8).optional().default(DEFAULT_MULTI_AGENT.maxWorkers),
       globalMaxWorkers: z.number().int().min(0).max(64).optional().default(DEFAULT_MULTI_AGENT.globalMaxWorkers ?? 0),
       chatsAtOnce: z.number().int().min(0).max(10).optional().catch(0).default(DEFAULT_MULTI_AGENT.chatsAtOnce ?? 0),
@@ -651,7 +656,14 @@ const configSchema = z.object({
         .transform((value) => value.slice(0, MAX_MCP_INSTRUCTIONS_CHARS).trim())
         .catch(DEFAULT_MCP.instructions),
       // Opt-in only: a malformed value repairs to off, the rotating default.
-      persistentUrls: z.boolean().optional().default(false).catch(false)
+      persistentUrls: z.boolean().optional().default(false).catch(false),
+      geminiBridge: z.enum(['tunnel', 'tailscale', 'custom', 'local']).optional().catch(undefined),
+      geminiPublicOrigin: z
+        .string()
+        .max(512)
+        .transform((value) => normalizeHttpsOrigin(value) || undefined)
+        .catch(undefined)
+        .optional()
     })
     .optional()
     .default({ ...DEFAULT_MCP })

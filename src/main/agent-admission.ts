@@ -164,6 +164,9 @@ export async function spawnAgentWorkers(
           if (liveConfig.multiAgent.autoWorktrees !== true) {
             throw new Error('WORKTREE_POLICY_CHANGED: automatic worker isolation was disabled during the spawn.');
           }
+          if (!canIsolate()) {
+            throw new Error('WORKTREE_PERMISSION_REQUIRED: worker isolation requires Command, Create and Edit, with Read-only disabled.');
+          }
           for (const lease of admittedLeases) {
             if (!liveConfig.roots.some(root => root.name === lease.approvedRoot.name &&
               nodePath.resolve(root.path) === nodePath.resolve(lease.approvedRoot.path))) {

@@ -644,6 +644,35 @@ describe('account-observed worker admission', () => {
     const result = spawn({ caller: prime, workers: [{ task: 'native confirmation', model: 'future-model', reasoning_effort: 'high' }] });
     expect(result.created[0]).toMatchObject({ model: 'future-model', reasoningEffort: 'high' });
   });
+
+  it('validates Gemini worker models against the Gemini catalog and keeps reasoningEffort null', async () => {
+    const gemSpy = vi.spyOn(chatModels, 'getGeminiModels').mockReturnValue({
+      state: 'ready',
+      requestedAt: null,
+      observedAt: 1,
+      models: [
+        { id: 'fast', label: 'Fast', description: 'Quick' },
+        { id: 'pro', label: '2.5 Pro', description: 'Reasoning' }
+      ]
+    });
+    const base = defaultConfig();
+    await saveConfig({ ...base, multiAgent: { ...base.multiAgent, enabled: true, defaultGeminiModel: 'fast' } });
+    try {
+      const result = spawn({ caller: prime, workers: [
+        { task: 'gemini default', provider: 'gemini' },
+        { task: 'gemini explicit', provider: 'gemini', model: '2.5 Pro' }
+      ] });
+      expect(result.created.map(worker => [worker.provider, worker.model, worker.reasoningEffort])).toEqual([
+        ['gemini', 'fast', null],
+        ['gemini', '2.5 Pro', null]
+      ]);
+      expect(() => spawn({ caller: prime, workers: [{ task: 'invalid gem', provider: 'gemini', model: 'gpt-6' }] }))
+        .toThrow(/not observed in the Gemini account/);
+    } finally {
+      gemSpy.mockRestore();
+      await setEnabled(true);
+    }
+  });
 });
 
 describe('worker models', () => {
@@ -2802,7 +2831,7 @@ describe('restart', () => {
 
     expect(swarmState().running).toBe(true);
     expect(snapshotSwarm()?.agents.map((entry) => entry.info.id)).toEqual(['prime', 'worker-1']);
-    expect(pendingWorkerSpawns()).toEqual([{ runId: staged.runId, primeConversationId: PRIME_CHAT, id: 'worker-1', model: null, reasoningEffort: null, task: 'inspect topology' }]);
+    expect(pendingWorkerSpawns()).toEqual([{ runId: staged.runId, primeConversationId: PRIME_CHAT, id: 'worker-1', model: null, reasoningEffort: null, provider: 'chatgpt', task: 'inspect topology' }]);
     expect(ordinary.at(-1)?.agents.map((entry) => entry.info.id)).toEqual(['prime', 'worker-1']);
   });
 

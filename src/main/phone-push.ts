@@ -12,6 +12,7 @@
  */
 
 import { mainText } from './main-texts.js';
+import { conversationUrl, isAcceptedConversationId } from '../shared/provider.js';
 import { DEFAULT_PHONE_PUSH, inQuietHours, type PhonePushSettings } from '../shared/phone-push.js';
 // Re-exported: phone notifications and sounds share one rule for the quiet hours.
 export { inQuietHours };
@@ -98,8 +99,8 @@ export function createPhonePush(deps: PhonePushDeps) {
       text = minutes === null ? mainText('A chat finished.') : mainText('Finished after {0} min.').replace('{0}', String(minutes));
       if (details && event.detail) text += ` ${oneLine(event.detail, 200)}`;
     }
-    const click = details && event.conversationId && /^[0-9a-z-]{8,64}$/i.test(event.conversationId) && event.kind !== 'failed'
-      ? `https://chatgpt.com/c/${event.conversationId}` : undefined;
+    const click = details && event.conversationId && isAcceptedConversationId(event.conversationId) && event.kind !== 'failed'
+      ? conversationUrl(event.conversationId) : undefined;
     return { title, message: text, ...(click ? { click } : {}) };
   };
 

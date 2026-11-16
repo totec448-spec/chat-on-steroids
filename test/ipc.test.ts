@@ -1444,6 +1444,49 @@ describe('settings writes from more than one UI', () => {
     expect((await save({ ...current, mcp: { instructions: 'x'.repeat(4001) } }, current)).ok).toBe(false);
     expect(getConfig().mcp.instructions).toBe('');
   });
+  it('persists parallel Gemini bridge settings, validates HTTPS origins, and stores tunnel tokens without exposing them', async () => {
+    const base = defaultConfig();
+    await saveConfig(base);
+    const bad = await save(
+      { ...base, mcp: { instructions: '', persistentUrls: true, geminiBridge: 'custom', geminiPublicOrigin: 'http://not-https.example.com' } },
+      base
+    );
+    expect(bad.ok).toBe(false);
+
+    const custom = {
+      ...base,
+      mcp: {
+        instructions: '',
+        persistentUrls: true,
+        geminiBridge: 'custom' as const,
+        geminiPublicOrigin: 'https://MCP.Example.COM:8443/extra'
+      }
+    };
+    const saved = await save(custom, base);
+    expect(saved.ok, saved.error).toBe(true);
+    expect(getConfig().mcp).toEqual({
+      instructions: '',
+      persistentUrls: true,
+      geminiBridge: 'custom',
+      geminiPublicOrigin: 'https://mcp.example.com:8443'
+    });
+
+    // Stale UI save omitting geminiBridge/geminiPublicOrigin preserves the saved values.
+    const staleSave = await save(
+      { ...base, ui: { ...base.ui, minimizeToTray: !base.ui.minimizeToTray } },
+      base
+    );
+    expect(staleSave.ok).toBe(true);
+    expect(getConfig().mcp.geminiBridge).toBe('custom');
+    expect(getConfig().mcp.geminiPublicOrigin).toBe('https://mcp.example.com:8443');
+
+    const tokenRes = await handlers.get('geminiBridge:setToken')!({}, { value: 'cf-secret-named-token' });
+    expect(tokenRes).toMatchObject({ ok: true, data: { hasGeminiTunnelToken: true } });
+    expect(JSON.stringify(tokenRes)).not.toContain('cf-secret-named-token');
+
+    const clearedRes = await handlers.get('geminiBridge:setToken')!({}, { value: '' });
+    expect(clearedRes).toMatchObject({ ok: true, data: { hasGeminiTunnelToken: false } });
+  });
   it('starts and stops the local control API only when its switch changes, and keeps it through stale saves', async () => {
     const controlApi = await import('../src/main/control-api.js');
     controlApi.initControlApiPath(dir);
@@ -2202,7 +2245,7 @@ describe('session IPC contracts', () => {
     const unattributed = await createSession({ title: 'no conversation', conversationId: null });
     const refused = (await handlers.get('sessions:block')!(null, { id: unattributed.id, blocked: true })) as any;
     expect(refused.ok).toBe(false);
-    expect(refused.error).toMatch(/no valid ChatGPT conversation/i);
+    expect(refused.error).toMatch(/no valid conversation/i);
     resetBlockedChatsForTests();
   });
 
@@ -2231,7 +2274,7 @@ describe('session IPC contracts', () => {
       id: unattributed.id, expectedConversationId: conversationId, trusted: true
     })) as any;
     expect(refused.ok).toBe(false);
-    expect(refused.error).toMatch(/no valid ChatGPT conversation/i);
+    expect(refused.error).toMatch(/no valid conversation/i);
     resetTrustedChatsForTests();
   });
 
@@ -2307,7 +2350,7 @@ describe('session IPC contracts', () => {
       id: session.id, expectedConversationId: chatA, trusted: true
     })) as any;
     expect(stale.ok).toBe(false);
-    expect(stale.error).toMatch(/moved to another ChatGPT conversation/i);
+    expect(stale.error).toMatch(/moved to another conversation/i);
     expect(isChatTrusted(chatA)).toBe(false);
     expect(isChatTrusted(chatB)).toBe(false);
 
@@ -2345,7 +2388,7 @@ describe('session IPC contracts', () => {
       expect(await moving).toBe(true);
       const stale = await trusting;
       expect(stale.ok).toBe(false);
-      expect(stale.error).toMatch(/moved to another ChatGPT conversation/i);
+      expect(stale.error).toMatch(/moved to another conversation/i);
       expect(isChatTrusted(chatA)).toBe(false);
       expect(isChatTrusted(chatB)).toBe(false);
     } finally {
@@ -2678,7 +2721,7 @@ describe('session IPC contracts', () => {
     const unattributed = await createSession({ title: 'no conversation', conversationId: null });
     const refused = await handlers.get('sessions:openChat')!(null, { id: unattributed.id }) as any;
     expect(refused.ok).toBe(false);
-    expect(refused.error).toMatch(/no valid ChatGPT conversation/i);
+    expect(refused.error).toMatch(/no valid conversation/i);
   });
 
   it.each([
