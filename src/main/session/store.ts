@@ -4812,6 +4812,7 @@ export async function clearImageStorage(mode: ImageStorageClearMode, sessionId?:
   // Claim the existing asset queue before inspecting disk. Prior writes finish first; later writes
   // wait until references are retired and selected files are gone.
   const cleanup = enqueueAssetOperation(async () => {
+    const deletedKeys = new Set<string>();
     try {
       const scopedSessionId = mode === 'session-images' || mode === 'session-texts' ? sessionId : undefined;
       const inventory = await imageStorageInventory(true, scopedSessionId);
@@ -4836,14 +4837,15 @@ export async function clearImageStorage(mode: ImageStorageClearMode, sessionId?:
       let removedFiles = 0;
       for (const file of chosen) {
         const identity = `${file.sessionId}\u0000${file.assetId}`;
+        const key = localAssetKey(file.sessionId, file.assetId);
         if (!deletable.has(identity)) {
           // Cleanup vetoed deletion, so the retained file must remain admissible to concurrent writers.
-          const key = localAssetKey(file.sessionId, file.assetId);
           if (removedAssetEpoch.get(key) === cleanupEpoch) removedAssetEpoch.delete(key);
           continue;
         }
         const removed = await deleteSelectedImage(file);
         if (!removed) continue;
+        deletedKeys.add(key);
         freedBytes += removed;
         removedFiles += 1;
       }
@@ -4870,7 +4872,7 @@ export async function clearImageStorage(mode: ImageStorageClearMode, sessionId?:
       };
     } catch (error) {
       for (const [key, epoch] of removedAssetEpoch) {
-        if (epoch === cleanupEpoch) removedAssetEpoch.delete(key);
+        if (epoch === cleanupEpoch && !deletedKeys.has(key)) removedAssetEpoch.delete(key);
       }
       rejectSelection(error);
       throw error;
