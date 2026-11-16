@@ -110,6 +110,7 @@ const {
   DEFAULT_PORTS,
   revealChatInBrowser,
   followChatInBackground,
+  notifyBrowserActivity,
   startBridge,
   stopBridge,
   sweepStaleSwarm,
@@ -19781,5 +19782,297 @@ describe('why a command ran out of time', () => {
     expect(commandExpiryReasonForTests({ lastError: 'boom', claimedAt: 1, owner: null, progress: {} })).toBe('boom');
     expect(commandExpiryReasonForTests({ lastError: null, claimedAt: null, owner: null, progress: {} }))
       .toBe('the browser did not claim this command before its deadline');
+  });
+});
+
+describe('push-driven activity wakes over /wake', () => {
+  it('coalesces discrete and streaming activity wakes, pushes on app changes, and suppresses /events self-echo', async () => {
+    await pair();
+    const CHAT = 'cafe1111-2222-4333-8444-555555555555';
+    const socket = new WebSocket(base.replace('http:', 'ws:') + '/wake', { origin: EXTENSION_ORIGIN });
+    await once(socket, 'open');
+    const authWake = once(socket, 'message');
+    socket.send(token!);
+    await authWake;
+
+    const frames: string[] = [];
+    socket.on('message', (bytes) => frames.push(String(bytes)));
+    const expectedFrame = `activity:${CHAT}`;
+
+    try {
+      const created = await request('POST', '/events', {
+        body: { conversationId: CHAT, events: [{ kind: 'turn_start', time: Date.now(), turnId: 'turn-push-init' }] }
+      });
+      expect(created.status).toBe(200);
+      const sessionId = created.body.sessionId as string;
+
+      // Discrete notifications in the same turn coalesce into one wake frame.
+      frames.length = 0;
+      notifyBrowserActivity(CHAT);
+      notifyBrowserActivity(CHAT);
+      notifyBrowserActivity(CHAT);
+      await vi.waitFor(() => expect(frames.filter((f) => f === expectedFrame)).toHaveLength(1), { timeout: 5_000 });
+
+      // Rapid streaming updates emit leading + trailing wakes instead of one per token.
+      const CHAT_STREAM = 'cafe2222-3333-4444-8555-666666666666';
+      const streamFrame = `activity:${CHAT_STREAM}`;
+      frames.length = 0;
+      for (let i = 0; i < 6; i += 1) notifyBrowserActivity(CHAT_STREAM, true);
+      await vi.waitFor(() => expect(frames.filter((f) => f === streamFrame).length).toBeGreaterThanOrEqual(2), { timeout: 5_000 });
+      expect(frames.filter((f) => f === streamFrame).length).toBeLessThanOrEqual(3);
+
+      // App-authored progress and running-tool transitions wake the target tab immediately.
+      frames.length = 0;
+      const { recordProgress } = await import('../src/main/session/recorder.js');
+      await recordProgress(sessionId, `push-wake:${CHAT}`, 'Working on it...');
+      await vi.waitFor(() => expect(frames).toContain(expectedFrame), { timeout: 5_000 });
+
+      frames.length = 0;
+      const { emptyEvidence, trackInFlight } = await import('../src/main/mcp/call-context.js');
+      await trackInFlight({
+        startedAt: Date.now(),
+        transportKey: null,
+        agent: null,
+        caller: { transportKey: null, requestId: null, conversationId: CHAT, sessionId },
+        outcome: null,
+        evidence: emptyEvidence()
+      }, async () => {
+        await vi.waitFor(() => expect(frames).toContain(expectedFrame), { timeout: 5_000 });
+        frames.length = 0;
+      });
+      await vi.waitFor(() => expect(frames).toContain(expectedFrame), { timeout: 5_000 });
+
+      // Browser-originated /events batches must not echo activity wakes back to the sender.
+      frames.length = 0;
+      const posted = await request('POST', '/events', {
+        body: {
+          conversationId: CHAT,
+          events: [{ kind: 'turn_start', time: Date.now(), turnId: 'turn-push-echo' },
+            { kind: 'assistant_message', time: Date.now() + 1, turnId: 'turn-push-echo', messageId: 'msg-echo-1', text: 'Streaming...', state: 'streaming', final: false }]
+        }
+      });
+      expect(posted.status).toBe(200);
+      await new Promise((resolve) => setTimeout(resolve, 460));
+      expect(frames.filter((f) => f === expectedFrame)).toHaveLength(0);
+
+      // Non-extension app writes inside the echo window still emit an activity wake.
+      await recordProgress(sessionId, `app-during-echo:${CHAT}`, 'App progress during echo window');
+      await vi.waitFor(() => expect(frames).toContain(expectedFrame), { timeout: 5_000 });
+    } finally {
+      const closed = once(socket, 'close');
+      socket.close();
+      await closed;
+    }
+  });
+
+  it('bounds combined streaming wakes across multiple chats and clears pending timers on stopBridge', async () => {
+    await pair();
+    const CHAT_A = 'cafeaaaa-1111-4111-8111-111111111111';
+    const CHAT_B = 'cafebbbb-2222-4222-8222-222222222222';
+    const socket = new WebSocket(base.replace('http:', 'ws:') + '/wake', { origin: EXTENSION_ORIGIN });
+    await once(socket, 'open');
+    const authWake = once(socket, 'message');
+    socket.send(token!);
+    await authWake;
+
+    const frames: string[] = [];
+    socket.on('message', (bytes) => frames.push(String(bytes)));
+
+    try {
+      // Interleaved streaming updates for two targets share one 200 ms combined pacing budget.
+      for (let i = 0; i < 6; i += 1) {
+        notifyBrowserActivity(CHAT_A, true);
+        notifyBrowserActivity(CHAT_B, true);
+      }
+      await vi.waitFor(() => expect(frames.filter((f) => f.startsWith('activity:'))).toHaveLength(3), { timeout: 5_000 });
+      expect(frames).toContain(`activity:${CHAT_A}`);
+      expect(frames).toContain(`activity:${CHAT_B}`);
+
+      // Queueing a trailing streaming wake and stopping the bridge must clear pending timers.
+      frames.length = 0;
+      notifyBrowserActivity(CHAT_A, true);
+      notifyBrowserActivity(CHAT_B, true);
+      const logger = await import('../src/main/logger.js');
+      const warn = vi.spyOn(logger, 'logWarn');
+      try {
+        // Reaching the 64-target streaming wake cap drops the oldest wake and writes one bounded warning.
+        for (let i = 0; i <= 70; i += 1) notifyBrowserActivity(`cap-conv-${i}`, true);
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0]?.[0]).toContain('64-target queue cap reached');
+      } finally {
+        warn.mockRestore();
+      }
+      await stopBridge();
+      const closed = once(socket, 'close');
+      await closed;
+
+      const restartedPort = await startBridge();
+      expect(restartedPort).toBeTypeOf('number');
+      base = `http://127.0.0.1:${restartedPort}`;
+      const socket2 = new WebSocket(`${base}`.replace('http:', 'ws:') + '/wake', { origin: EXTENSION_ORIGIN });
+      await once(socket2, 'open');
+      const authWake2 = once(socket2, 'message');
+      socket2.send(token!);
+      await authWake2;
+      const frames2: string[] = [];
+      socket2.on('message', (bytes) => frames2.push(String(bytes)));
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        expect(frames2.filter((f) => f.startsWith('activity:'))).toHaveLength(0);
+      } finally {
+        const closed2 = once(socket2, 'close');
+        socket2.close();
+        await closed2;
+      }
+    } finally {
+      if (socket.readyState <= 1) {
+        const closed = once(socket, 'close');
+        socket.close();
+        await closed;
+      }
+    }
+  });
+
+  it('bounds wake frames and suppresses upload self-echo across a long mixed burst and mid-burst reconnect', async () => {
+    await pair();
+    const UPLOAD_CHAT = 'cafe3333-1111-4111-8111-111111111111';
+    const APP_CHAT = 'cafe4444-2222-4222-8222-222222222222';
+    const uploadFrame = `activity:${UPLOAD_CHAT}`;
+    const appFrame = `activity:${APP_CHAT}`;
+
+    const connectWake = async () => {
+      const ws = new WebSocket(base.replace('http:', 'ws:') + '/wake', { origin: EXTENSION_ORIGIN });
+      await once(ws, 'open');
+      const auth = once(ws, 'message');
+      ws.send(token!);
+      const initial = String((await auth)[0]);
+      expect(initial).toBe('wake');
+      return ws;
+    };
+
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const { recordProgress } = await import('../src/main/session/recorder.js');
+
+    let socket = await connectWake();
+    const recorded: Array<{ frame: string; at: number }> = [];
+    const attachRecorder = (ws: WebSocket) => {
+      ws.on('message', (bytes) => {
+        const frame = String(bytes);
+        if (frame === 'activity' || frame.startsWith('activity:')) {
+          recorded.push({ frame, at: Date.now() });
+        }
+      });
+    };
+    attachRecorder(socket);
+
+    try {
+      const initUpload = await request('POST', '/events', {
+        body: { conversationId: UPLOAD_CHAT, events: [{ kind: 'turn_start', time: Date.now(), turnId: 'burst-u-0' }] }
+      });
+      const initApp = await request('POST', '/events', {
+        body: { conversationId: APP_CHAT, events: [{ kind: 'turn_start', time: Date.now(), turnId: 'burst-a-0' }] }
+      });
+      expect(initUpload.status).toBe(200);
+      expect(initApp.status).toBe(200);
+      const uploadSessionId = initUpload.body.sessionId as string;
+      const appSessionId = initApp.body.sessionId as string;
+      await sleep(460);
+      recorded.length = 0;
+
+      const uploadTick = async (index: number) => {
+        const res = await request('POST', '/events', {
+          body: {
+            conversationId: UPLOAD_CHAT,
+            events: [
+              {
+                kind: 'assistant_message',
+                time: Date.now(),
+                turnId: 'burst-u-0',
+                messageId: 'burst-msg-u',
+                text: `Chunk ${index}`,
+                state: 'streaming',
+                final: false
+              },
+              ...(index % 4 === 0 ? [{ kind: 'turn_trace', time: Date.now(), turnId: 'burst-u-0', trace: `step ${index}` }] : [])
+            ]
+          }
+        });
+        expect(res.status).toBe(200);
+      };
+
+      const appWriteTick = async (index: number) => {
+        notifyBrowserActivity(APP_CHAT);
+        notifyBrowserActivity(APP_CHAT, true);
+        if (index % 5 === 0) {
+          await recordProgress(appSessionId, `burst-progress:${APP_CHAT}`, `Step ${index}`);
+        }
+      };
+
+      // Phase 1: sustained burst of page uploads mixed with app writes.
+      const phase1Start = Date.now();
+      for (let i = 1; i <= 24; i += 1) {
+        await Promise.all([uploadTick(i), appWriteTick(i)]);
+        await sleep(25);
+      }
+      await sleep(460);
+      const phase1Elapsed = Date.now() - phase1Start;
+
+      const phase1UploadWakes = recorded.filter((item) => item.frame === uploadFrame || item.frame === 'activity');
+      const phase1AppWakes = recorded.filter((item) => item.frame === appFrame);
+      expect(phase1UploadWakes).toHaveLength(0);
+      expect(phase1AppWakes.length).toBeGreaterThanOrEqual(2);
+      expect(phase1AppWakes.length).toBeLessThanOrEqual(Math.ceil(phase1Elapsed / 200) + 1);
+
+      // Phase 2: repeat the burst while closing and reconnecting the /wake socket mid-burst.
+      recorded.length = 0;
+      const phase2Start = Date.now();
+      for (let i = 25; i <= 34; i += 1) {
+        await Promise.all([uploadTick(i), appWriteTick(i)]);
+        await sleep(25);
+      }
+      const closedMidBurst = once(socket, 'close');
+      socket.close();
+      await closedMidBurst;
+
+      for (let i = 35; i <= 38; i += 1) {
+        await Promise.all([uploadTick(i), appWriteTick(i)]);
+        await sleep(25);
+      }
+
+      socket = await connectWake();
+      attachRecorder(socket);
+
+      for (let i = 39; i <= 48; i += 1) {
+        await Promise.all([uploadTick(i), appWriteTick(i)]);
+        await sleep(25);
+      }
+      await sleep(460);
+      const phase2Elapsed = Date.now() - phase2Start;
+
+      const phase2UploadWakes = recorded.filter((item) => item.frame === uploadFrame || item.frame === 'activity');
+      const phase2AppWakes = recorded.filter((item) => item.frame === appFrame);
+      expect(phase2UploadWakes).toHaveLength(0);
+      expect(phase2AppWakes.length).toBeGreaterThanOrEqual(1);
+      expect(phase2AppWakes.length).toBeLessThanOrEqual(Math.ceil(phase2Elapsed / 200) + 1);
+
+      // Phase 3: a non-browser write on the uploading chat still wakes it, and follow-up uploads do not echo.
+      recorded.length = 0;
+      await Promise.all([
+        uploadTick(49),
+        recordProgress(uploadSessionId, `app-write-on-upload:${UPLOAD_CHAT}`, 'App status update')
+      ]);
+      await vi.waitFor(() => expect(recorded.some((item) => item.frame === uploadFrame)).toBe(true), { timeout: 5_000 });
+
+      recorded.length = 0;
+      await uploadTick(50);
+      await sleep(460);
+      expect(recorded.filter((item) => item.frame === uploadFrame || item.frame === 'activity')).toHaveLength(0);
+    } finally {
+      if (socket.readyState <= 1) {
+        const closed = once(socket, 'close');
+        socket.close();
+        await closed;
+      }
+    }
   });
 });
