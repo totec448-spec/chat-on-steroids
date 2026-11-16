@@ -19,6 +19,7 @@ import {
   upsertMessageEvent,
   writeAsset
 } from '../src/main/session/store.js';
+import { recordChatObservations, resetRecorderForTests } from '../src/main/session/recorder.js';
 import * as logger from '../src/main/logger.js';
 
 // #1406: the store held 2 GiB and could only shed images. Long texts (tool output, long answers)
@@ -38,6 +39,7 @@ beforeEach(async () => {
 afterEach(async () => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  resetRecorderForTests();
   resetSessionStoreForTests();
   await fs.rm(directory, { recursive: true, force: true });
 });
@@ -350,4 +352,79 @@ it('limits pre-cleanup inspection to the target chat so an unreadable asset else
     opendirSpy.mockRestore();
     warnSpy.mockRestore();
   }
+});
+
+it('prevents repeated observations from re-spilling retired overflow text assets after session-texts cleanup and restart', async () => {
+  const conversationId = 'conv-retired-long-text';
+  const session = await createSession({ conversationId, title: 'Retired long texts' });
+  const longUserText = 'U'.repeat(260_000);
+  const longAssistantText = 'A'.repeat(260_000);
+  const longAssistantHtml = `<p>${'H'.repeat(125_000)}</p>`;
+
+  await recordChatObservations(conversationId, [
+    { kind: 'user_message', time: NOW + 1, messageId: 'msg-u-long', text: longUserText },
+    {
+      kind: 'assistant_message',
+      time: NOW + 2,
+      messageId: 'msg-a-long',
+      text: longAssistantText,
+      renderedHtml: longAssistantHtml,
+      state: 'final',
+      final: true
+    }
+  ]);
+
+  const assetsDir = path.join(directory, 'sessions', session.id, 'assets');
+  const beforeFiles = (await fs.readdir(assetsDir)).filter((name) => name.endsWith('.txt'));
+  expect(beforeFiles).toHaveLength(3);
+
+  const cleared = await clearImageStorage('session-texts', session.id);
+  expect(cleared.removedFiles).toBe(3);
+  expect(await fs.readdir(assetsDir)).toEqual([]);
+
+  const replaySame = async () => recordChatObservations(conversationId, [
+    { kind: 'user_message', time: NOW + 3, messageId: 'msg-u-long', text: longUserText },
+    {
+      kind: 'assistant_message',
+      time: NOW + 4,
+      messageId: 'msg-a-long',
+      text: longAssistantText,
+      renderedHtml: longAssistantHtml,
+      state: 'final',
+      final: true
+    }
+  ]);
+
+  await replaySame();
+  expect(await fs.readdir(assetsDir)).toEqual([]);
+
+  // Simulate app restart and replay the exact same page observations: retired texts must stay deleted.
+  resetRecorderForTests();
+  resetSessionStoreForTests();
+  initSessionStore(directory);
+
+  await replaySame();
+  expect(await fs.readdir(assetsDir)).toEqual([]);
+  const eventsAfterRestart = await readEvents(session.id);
+  const userAfter = eventsAfterRestart.find((ev) => ev.kind === 'user_message');
+  const assistantAfter = eventsAfterRestart.find((ev) => ev.kind === 'assistant_message');
+  expect(userAfter?.kind === 'user_message' ? userAfter.message.assetId : undefined).toBeUndefined();
+  expect(assistantAfter?.kind === 'assistant_message' ? assistantAfter.message.assetId : undefined).toBeUndefined();
+  expect(assistantAfter?.kind === 'assistant_message' ? assistantAfter.renderedHtml?.assetId : undefined).toBeUndefined();
+  expect(userAfter?.kind === 'user_message' ? userAfter.message.text : '').toContain('more characters removed to free storage');
+  expect(assistantAfter?.kind === 'assistant_message' ? assistantAfter.message.text : '').toContain('more characters removed to free storage');
+
+  // New edited content on the same message id (different hash) still spills normally.
+  await recordChatObservations(conversationId, [
+    {
+      kind: 'assistant_message',
+      time: NOW + 5,
+      messageId: 'msg-a-long',
+      text: `${longAssistantText} edited`,
+      state: 'final',
+      final: true
+    }
+  ]);
+  const afterEditFiles = (await fs.readdir(assetsDir)).filter((name) => name.endsWith('.txt'));
+  expect(afterEditFiles).toHaveLength(1);
 });

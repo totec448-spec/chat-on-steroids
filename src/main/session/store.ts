@@ -331,6 +331,46 @@ function deniedAssetIds(sessionId: string, assets: readonly AssetRef[] | undefin
   return assets.filter((asset) => !admitted.has(asset.id)).map((asset) => asset.id);
 }
 
+function overflowTextAssetId(text: string): string {
+  return `${createHash('sha256').update(Buffer.from(text, 'utf8')).digest('hex').slice(0, 32)}.txt`;
+}
+
+function retireTextField(
+  stored: StoredText,
+  retired: ReadonlySet<string>
+): { stored: StoredText; retiredIds: string[] } {
+  if (!stored.assetId || !retired.has(stored.assetId)) return { stored, retiredIds: [] };
+  const retiredId = stored.assetId;
+  const { assetId: _assetId, ...rest } = stored;
+  return {
+    stored: {
+      ...rest,
+      text: stored.text.replace(
+        `more characters stored in full as ${retiredId}]`,
+        'more characters removed to free storage]'
+      )
+    },
+    retiredIds: [retiredId]
+  };
+}
+
+/** True when a keyed message's overflow `.txt` asset was explicitly retired by cleanup. */
+export async function isRetiredMessageText(
+  sessionId: string,
+  kind: 'user_message' | 'assistant_message',
+  messageId: string,
+  text: string
+): Promise<boolean> {
+  if (text.length > MAX_OVERFLOW_ASSET_CHARS) return false;
+  const key = messageKey({ kind, messageId } as CanonicalEvent);
+  if (!key) return false;
+  const entry = await ensureOpen(sessionId);
+  const previous = entry.messages.get(key);
+  if (!previous || (previous.kind !== 'user_message' && previous.kind !== 'assistant_message')) return false;
+  if (!previous.retiredTextAssetIds?.length) return false;
+  return previous.retiredTextAssetIds.includes(overflowTextAssetId(text));
+}
+
 function mergedRetiredAssetIds(...groups: Array<readonly string[] | undefined>): string[] | undefined {
   const ids = [...new Set(groups.flatMap((group) => group ?? []))];
   return ids.length ? ids : undefined;
@@ -1477,28 +1517,45 @@ export function upsertMessageEvent(
         return { event: previous, changed: false, contentChanged: false };
       }
 
+      const retiredIds =
+        previous?.kind === 'user_message' || previous?.kind === 'assistant_message'
+          ? previous.retiredTextAssetIds
+          : undefined;
+      const retiredSet = retiredIds?.length ? new Set(retiredIds) : null;
+      const sanitizedMessage = retiredSet ? retireTextField(event.message, retiredSet).stored : event.message;
+      const sanitizedHtml =
+        event.kind === 'assistant_message' && event.renderedHtml && retiredSet
+          ? retireTextField(event.renderedHtml, retiredSet).stored
+          : event.kind === 'assistant_message'
+            ? event.renderedHtml
+            : undefined;
+      const normalizedEvent: NewMessageEvent =
+        event.kind === 'assistant_message'
+          ? { ...event, message: sanitizedMessage, ...(sanitizedHtml !== undefined ? { renderedHtml: sanitizedHtml } : {}) }
+          : { ...event, message: sanitizedMessage };
+
       // Message bodies can be hundreds of kilobytes. The old path JSON.stringify-compared the
       // same StoredText pair once while preserving rendered HTML and then again while deciding
       // whether the observation changed at all. StoredText has a fixed five-field shape, so a
       // direct comparison is exact and avoids repeated full-string serialisation/allocation on
       // every streaming observation.
       const sameMessage =
-        previous?.kind === event.kind && storedTextEqual(previous.message, event.message);
+        previous?.kind === normalizedEvent.kind && storedTextEqual(previous.message, normalizedEvent.message);
 
       const nextEvent: NewMessageEvent =
-        previous?.kind === 'assistant_message' && event.kind === 'assistant_message'
+        previous?.kind === 'assistant_message' && normalizedEvent.kind === 'assistant_message'
           ? {
-              ...event,
+              ...normalizedEvent,
               // The producer already supplied the stable website identity. Keep that exact
               // identity through every revision; a different id is a different logical row.
               messageId: previous.messageId,
-              authoredAt: authoredTimeOf(previous) ?? event.authoredAt,
-              providerMessageId: event.providerMessageId ?? previous.providerMessageId,
-              resolvedModel: event.resolvedModel ?? previous.resolvedModel,
-              references: event.references ?? previous.references,
+              authoredAt: authoredTimeOf(previous) ?? normalizedEvent.authoredAt,
+              providerMessageId: normalizedEvent.providerMessageId ?? previous.providerMessageId,
+              resolvedModel: normalizedEvent.resolvedModel ?? previous.resolvedModel,
+              references: normalizedEvent.references ?? previous.references,
               // `final` is a compatibility mirror of state, not an independent truth.
-              state: continuing || event.state === 'final' || event.final === true ? 'final' : 'streaming',
-              final: continuing || event.state === 'final' || event.final === true,
+              state: continuing || normalizedEvent.state === 'final' || normalizedEvent.final === true ? 'final' : 'streaming',
+              final: continuing || normalizedEvent.state === 'final' || normalizedEvent.final === true,
               // Goal eligibility is an accepted fact about this stable reply, not a property a
               // later sparse page snapshot may retract. This is what makes a 503/reload replay
               // re-offer the same durable obligation instead of silently dropping it.
@@ -1507,42 +1564,48 @@ export function upsertMessageEvent(
               // representation we already captured. If the prose itself changed, omitting
               // HTML deliberately falls back to the new plain text instead of showing stale
               // markup for different content.
-              ...(event.renderedHtml === undefined && sameMessage
+              ...(normalizedEvent.renderedHtml === undefined && sameMessage
                 ? { renderedHtml: previous.renderedHtml }
+                : {}),
+              ...(mergedRetiredAssetIds(previous.retiredTextAssetIds, normalizedEvent.retiredTextAssetIds)
+                ? { retiredTextAssetIds: mergedRetiredAssetIds(previous.retiredTextAssetIds, normalizedEvent.retiredTextAssetIds) }
                 : {})
             }
-          : previous?.kind === 'user_message' && event.kind === 'user_message'
-            ? { ...event, inputId: event.inputId ?? previous.inputId,
-                ...(event.scheduled ?? previous.scheduled ? { scheduled: event.scheduled ?? previous.scheduled } : {}),
-                ...(event.via ?? previous.via ? { via: event.via ?? previous.via } : {}),
-                authoredAt: previous.authoredAt ?? event.authoredAt,
-                authoredText: event.authoredText ?? previous.authoredText,
-                wireTokenEstimate: event.wireTokenEstimate ?? previous.wireTokenEstimate,
-                reaction: event.reaction === undefined ? previous.reaction : event.reaction,
+          : previous?.kind === 'user_message' && normalizedEvent.kind === 'user_message'
+            ? { ...normalizedEvent, inputId: normalizedEvent.inputId ?? previous.inputId,
+                ...(normalizedEvent.scheduled ?? previous.scheduled ? { scheduled: normalizedEvent.scheduled ?? previous.scheduled } : {}),
+                ...(normalizedEvent.via ?? previous.via ? { via: normalizedEvent.via ?? previous.via } : {}),
+                authoredAt: previous.authoredAt ?? normalizedEvent.authoredAt,
+                authoredText: normalizedEvent.authoredText ?? previous.authoredText,
+                wireTokenEstimate: normalizedEvent.wireTokenEstimate ?? previous.wireTokenEstimate,
+                reaction: normalizedEvent.reaction === undefined ? previous.reaction : normalizedEvent.reaction,
                 // Where it sits in ChatGPT's tree, and which version it replaced, do not change once known.
-                parentId: previous.parentId ?? event.parentId,
+                parentId: previous.parentId ?? normalizedEvent.parentId,
                 replaces: previous.replacesConfirmed === true ? previous.replaces
-                  : event.replacesConfirmed === true ? event.replaces : previous.replaces ?? event.replaces,
-                ...(previous.replacesConfirmed === true || event.replacesConfirmed === true ? { replacesConfirmed: true as const } : {}),
-                automatic: previous.automatic ?? event.automatic,
+                  : normalizedEvent.replacesConfirmed === true ? normalizedEvent.replaces : previous.replaces ?? normalizedEvent.replaces,
+                ...(previous.replacesConfirmed === true || normalizedEvent.replacesConfirmed === true ? { replacesConfirmed: true as const } : {}),
+                automatic: previous.automatic ?? normalizedEvent.automatic,
                 // App-owned originals/previews retain their outbox identity when the
                 // provider later observes different native attachment ids for that send.
-                attachments: previous.inputId ? previous.attachments ?? event.attachments : event.attachments ?? previous.attachments,
-                inputDelivery: previous.inputDelivery === 'confirmed' ? 'confirmed' : event.inputDelivery ?? previous.inputDelivery,
-                model: event.model ?? previous.model,
-                reasoningEffort: event.reasoningEffort ?? previous.reasoningEffort,
+                attachments: previous.inputId ? previous.attachments ?? normalizedEvent.attachments : normalizedEvent.attachments ?? previous.attachments,
+                inputDelivery: previous.inputDelivery === 'confirmed' ? 'confirmed' : normalizedEvent.inputDelivery ?? previous.inputDelivery,
+                model: normalizedEvent.model ?? previous.model,
+                reasoningEffort: normalizedEvent.reasoningEffort ?? previous.reasoningEffort,
                 retiredImageAssetIds: mergedRetiredAssetIds(previous.retiredImageAssetIds,
-                  deniedAssetIds(sessionId, event.assets ?? previous.assets)),
+                  deniedAssetIds(sessionId, normalizedEvent.assets ?? previous.assets)),
+                ...(mergedRetiredAssetIds(previous.retiredTextAssetIds, normalizedEvent.retiredTextAssetIds)
+                  ? { retiredTextAssetIds: mergedRetiredAssetIds(previous.retiredTextAssetIds, normalizedEvent.retiredTextAssetIds) }
+                  : {}),
                 assets: admittedAssets(sessionId,
-                  retainedAssets(event.assets ?? previous.assets, previous.retiredImageAssetIds)) }
-            : event.kind === 'user_message'
+                  retainedAssets(normalizedEvent.assets ?? previous.assets, previous.retiredImageAssetIds)) }
+            : normalizedEvent.kind === 'user_message'
               ? {
-                  ...event,
-                  retiredImageAssetIds: mergedRetiredAssetIds(event.retiredImageAssetIds,
-                    deniedAssetIds(sessionId, event.assets)),
-                  assets: admittedAssets(sessionId, event.assets)
+                  ...normalizedEvent,
+                  retiredImageAssetIds: mergedRetiredAssetIds(normalizedEvent.retiredImageAssetIds,
+                    deniedAssetIds(sessionId, normalizedEvent.assets)),
+                  assets: admittedAssets(sessionId, normalizedEvent.assets)
                 }
-              : event;
+              : normalizedEvent;
       // A canonical assistant message belongs to exactly one generation permanently. Ownership
       // may still be *promoted* from "not known yet" to a durable generation id when the
       // recorder learns it late, but a settled assistant answer may never move to another turn.
@@ -1582,6 +1645,7 @@ export function upsertMessageEvent(
           (nextEvent.reaction === previous.reaction && nextEvent.parentId === previous.parentId && nextEvent.replaces === previous.replaces && nextEvent.replacesConfirmed === previous.replacesConfirmed && nextEvent.automatic === previous.automatic && nextEvent.inputId === previous.inputId && nextEvent.authoredText === previous.authoredText && nextEvent.wireTokenEstimate === previous.wireTokenEstimate && nextEvent.inputDelivery === previous.inputDelivery && JSON.stringify(nextEvent.assets) === JSON.stringify(previous.assets) && JSON.stringify(nextEvent.retiredImageAssetIds) === JSON.stringify(previous.retiredImageAssetIds) && JSON.stringify(nextEvent.attachments) === JSON.stringify(previous.attachments))) &&
         (previous.turnId ?? undefined) === settledTurnId &&
         (nextEvent.agent === undefined || previous.agent === nextEvent.agent) &&
+        JSON.stringify(nextEvent.retiredTextAssetIds) === JSON.stringify(previous.retiredTextAssetIds) &&
         (!preferTime || previous.time === nextEvent.time)
       ) {
         return { event: previous, changed: false, contentChanged: false };
@@ -4543,16 +4607,20 @@ function retireImageReferences(event: CanonicalEvent, selected: ReadonlySet<stri
   return { ...event, call: { ...event.call, assets: retainedAssets(event.call.assets, retiredImageAssetIds), retiredImageAssetIds } };
 }
 
-/** Every long-text file name an event mentions anywhere, including in its prose. */
+/** Every active long-text file name an event mentions anywhere (excluding retirement tombstones). */
 function mentionedTextAssetIds(event: SessionEvent): string[] {
-  return JSON.stringify(event).match(/[0-9a-f]{8,64}\.txt/g) ?? [];
+  const active =
+    event.kind === 'user_message' || event.kind === 'assistant_message'
+      ? { ...event, retiredTextAssetIds: undefined, retiredImageAssetIds: undefined }
+      : event.kind === 'tool_call'
+        ? { ...event, call: { ...event.call, retiredImageAssetIds: undefined } }
+        : event;
+  return JSON.stringify(active).match(/[0-9a-f]{8,64}\.txt/g) ?? [];
 }
 
 /** The head stays; the note says the rest was removed instead of naming a file that is gone. */
 function retireStoredText(stored: StoredText, selected: ReadonlySet<string>): StoredText {
-  if (!stored.assetId || !selected.has(stored.assetId)) return stored;
-  const { assetId, ...rest } = stored;
-  return { ...rest, text: stored.text.replace(`more characters stored in full as ${assetId}]`, 'more characters removed to free storage]') };
+  return retireTextField(stored, selected).stored;
 }
 
 function retireTextReferences(event: CanonicalEvent, selected: ReadonlySet<string>): CanonicalEvent | null {
@@ -4570,10 +4638,14 @@ function retireTextReferences(event: CanonicalEvent, selected: ReadonlySet<strin
     return { ...event, call: { ...event.call, args, result, ...(changes ? { changes } : {}) } };
   }
   if (event.kind !== 'user_message' && event.kind !== 'assistant_message') return null;
-  const message = retireStoredText(event.message, selected);
-  const renderedHtml = event.kind === 'assistant_message' && event.renderedHtml ? retireStoredText(event.renderedHtml, selected) : undefined;
-  if (message === event.message && (event.kind !== 'assistant_message' || renderedHtml === event.renderedHtml)) return null;
-  return event.kind === 'assistant_message' ? { ...event, message, ...(renderedHtml ? { renderedHtml } : {}) } : { ...event, message };
+  const message = retireTextField(event.message, selected);
+  const renderedHtml = event.kind === 'assistant_message' && event.renderedHtml ? retireTextField(event.renderedHtml, selected) : null;
+  const newlyRetired = [...message.retiredIds, ...(renderedHtml?.retiredIds ?? [])];
+  if (!newlyRetired.length) return null;
+  const retiredTextAssetIds = mergedRetiredAssetIds(event.retiredTextAssetIds, newlyRetired);
+  return event.kind === 'assistant_message'
+    ? { ...event, message: message.stored, ...(renderedHtml ? { renderedHtml: renderedHtml.stored } : {}), ...(retiredTextAssetIds ? { retiredTextAssetIds } : {}) }
+    : { ...event, message: message.stored, ...(retiredTextAssetIds ? { retiredTextAssetIds } : {}) };
 }
 
 /**

@@ -58,6 +58,7 @@ import {
   endSession,
   findSessionByConversation,
   getSession,
+  isRetiredMessageText,
   readAsset,
   readEvents,
   readRecentEvents,
@@ -1263,10 +1264,18 @@ async function repairAttributionNow(affected?: ReadonlySet<string>): Promise<{ s
 async function storeText(
   sessionId: string,
   text: string,
-  cap: number
+  cap: number,
+  retiredCheck?: { kind: 'user_message' | 'assistant_message'; messageId?: string }
 ): Promise<StoredText> {
   const value = typeof text === 'string' ? text : String(text ?? '');
   if (value.length <= cap) return { text: value, truncated: false, chars: value.length };
+  if (retiredCheck?.messageId && await isRetiredMessageText(sessionId, retiredCheck.kind, retiredCheck.messageId, value)) {
+    return {
+      text: `${value.slice(0, cap)}\n…[${value.length - cap} more characters removed to free storage]`,
+      truncated: true,
+      chars: value.length
+    };
+  }
   const assetId = await writeOverflowText(sessionId, value);
   const note = assetId
     ? `\n…[${value.length - cap} more characters stored in full as ${assetId}]`
@@ -2583,7 +2592,10 @@ async function recordSupersededMessages(
         {
           ...base,
           kind: 'user_message',
-          message: await storeText(sessionId, item.text ?? '', MAX_USER_MESSAGE_CHARS),
+          message: await storeText(sessionId, item.text ?? '', MAX_USER_MESSAGE_CHARS, {
+            kind: 'user_message',
+            messageId: item.messageId
+          }),
           ...(item.attachments?.length ? { attachments: item.attachments } : {}),
           ...(item.reaction !== undefined ? { reaction: item.reaction } : {}),
           ...(item.model ? { model: item.model } : {}),
@@ -2598,9 +2610,17 @@ async function recordSupersededMessages(
         {
           ...base,
           kind: 'assistant_message',
-          message: await storeText(sessionId, item.text ?? '', 256_000),
+          message: await storeText(sessionId, item.text ?? '', 256_000, {
+            kind: 'assistant_message',
+            messageId: item.messageId
+          }),
           ...(item.renderedHtml
-            ? { renderedHtml: await storeText(sessionId, item.renderedHtml, 120_000) }
+            ? {
+                renderedHtml: await storeText(sessionId, item.renderedHtml, 120_000, {
+                  kind: 'assistant_message',
+                  messageId: item.messageId
+                })
+              }
             : {}),
           messageId: item.messageId,
           state,
@@ -2699,7 +2719,10 @@ async function recordChatObservationsNow(
         const written = await upsertMessageEvent(sessionId, {
           ...base,
           kind: 'user_message',
-          message: await storeText(sessionId, item.text ?? '', MAX_USER_MESSAGE_CHARS),
+          message: await storeText(sessionId, item.text ?? '', MAX_USER_MESSAGE_CHARS, {
+            kind: 'user_message',
+            messageId: item.messageId
+          }),
           ...(item.attachments?.length ? { attachments: item.attachments } : {}),
           ...(item.reaction !== undefined ? { reaction: item.reaction } : {}),
           ...(item.model ? { model: item.model } : {}),
@@ -2819,9 +2842,17 @@ async function recordChatObservationsNow(
           kind: 'assistant_message',
           // Keep normal 15k–20k-token handoff-style answers inline rather than making the
           // local transcript itself look truncated while the continuation carries more.
-          message: await storeText(sessionId, item.text ?? '', 256_000),
+          message: await storeText(sessionId, item.text ?? '', 256_000, {
+            kind: 'assistant_message',
+            messageId: item.messageId
+          }),
           ...(item.renderedHtml
-            ? { renderedHtml: await storeText(sessionId, item.renderedHtml, 120_000) }
+            ? {
+                renderedHtml: await storeText(sessionId, item.renderedHtml, 120_000, {
+                  kind: 'assistant_message',
+                  messageId: item.messageId
+                })
+              }
             : {}),
           messageId: item.messageId,
           state,
