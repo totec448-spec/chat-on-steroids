@@ -1521,18 +1521,41 @@ export function upsertMessageEvent(
         previous?.kind === 'user_message' || previous?.kind === 'assistant_message'
           ? previous.retiredTextAssetIds
           : undefined;
-      const retiredSet = retiredIds?.length ? new Set(retiredIds) : null;
-      const sanitizedMessage = retiredSet ? retireTextField(event.message, retiredSet).stored : event.message;
+      const incomingTextAssets: AssetRef[] = [
+        ...(event.message.assetId ? [{ id: event.message.assetId, mimeType: 'text/plain', bytes: 0 }] : []),
+        ...(event.kind === 'assistant_message' && event.renderedHtml?.assetId
+          ? [{ id: event.renderedHtml.assetId, mimeType: 'text/plain', bytes: 0 }]
+          : [])
+      ];
+      const epochDeniedTextIds = deniedAssetIds(sessionId, incomingTextAssets);
+      const retiredSet = retiredIds?.length || epochDeniedTextIds.length
+        ? new Set([...(retiredIds ?? []), ...epochDeniedTextIds])
+        : null;
+      const sanitizedMessage = retiredSet ? retireTextField(event.message, retiredSet) : { stored: event.message, retiredIds: [] };
       const sanitizedHtml =
-        event.kind === 'assistant_message' && event.renderedHtml && retiredSet
-          ? retireTextField(event.renderedHtml, retiredSet).stored
-          : event.kind === 'assistant_message'
-            ? event.renderedHtml
-            : undefined;
+        event.kind === 'assistant_message' && event.renderedHtml
+          ? (retiredSet ? retireTextField(event.renderedHtml, retiredSet) : { stored: event.renderedHtml, retiredIds: [] })
+          : null;
+      const mergedRetiredTextIds = mergedRetiredAssetIds(
+        retiredIds,
+        event.retiredTextAssetIds,
+        epochDeniedTextIds,
+        sanitizedMessage.retiredIds,
+        sanitizedHtml?.retiredIds
+      );
       const normalizedEvent: NewMessageEvent =
         event.kind === 'assistant_message'
-          ? { ...event, message: sanitizedMessage, ...(sanitizedHtml !== undefined ? { renderedHtml: sanitizedHtml } : {}) }
-          : { ...event, message: sanitizedMessage };
+          ? {
+              ...event,
+              message: sanitizedMessage.stored,
+              ...(sanitizedHtml ? { renderedHtml: sanitizedHtml.stored } : {}),
+              ...(mergedRetiredTextIds ? { retiredTextAssetIds: mergedRetiredTextIds } : {})
+            }
+          : {
+              ...event,
+              message: sanitizedMessage.stored,
+              ...(mergedRetiredTextIds ? { retiredTextAssetIds: mergedRetiredTextIds } : {})
+            };
 
       // Message bodies can be hundreds of kilobytes. The old path JSON.stringify-compared the
       // same StoredText pair once while preserving rendered HTML and then again while deciding
