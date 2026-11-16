@@ -14710,6 +14710,84 @@ describe('unattributed activity recovery', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it('releases an after-turn queued message immediately when an interim note is updated between final and turn_end completed', async () => {
+    const input = await import('../src/main/session/input.js');
+    const { recoveryHeldByCalls, recoveryInputAllowed, sessionInputActivity } = await import('../src/main/bridge.js');
+    input.configureInputDelivery({ recoveryAllowed: recoveryInputAllowed, callsHoldRecovery: recoveryHeldByCalls,
+      activity: sessionInputActivity, applyAutomation: async () => {}, changed: () => {} });
+    const chat = randomUUID(), turnId = 'interim-note-before-end';
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(chat, [
+        { kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() },
+        { kind: 'user_message', messageId: 'question', text: 'Inspect the source.', time: Date.now(), authoredNow: true },
+        openTurn(turnId),
+        { kind: 'assistant_message', messageId: 'interim-note', providerMessageId: '66666666-7777-4888-8999-000000000000',
+          turnId, time: Date.now(), text: 'Working on it...', state: 'streaming', activeNow: true }
+      ]);
+      const sessionId = (await request('GET', `/activity?conversationId=${chat}`)).body.sessionId;
+      await attributed(chat, false, Date.now());
+      const queued = await input.enqueueInput({ id: randomUUID(), sessionId, text: 'Follow up after turn', mode: 'after-turn',
+        dueAt: Date.now(), model: 'GPT-5.6 Sol', reasoningEffort: 'high' });
+      expect(await input.pendingBrowserInputs()).toEqual([]);
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await events(chat, [
+        { kind: 'assistant_message', messageId: 'final-answer', providerMessageId: '11111111-2222-4333-8444-555555555555',
+          turnId, time: Date.now(), text: 'Everything is ready.', final: true, state: 'final', activeNow: true },
+        { kind: 'assistant_message', messageId: 'interim-note', providerMessageId: '66666666-7777-4888-8999-000000000000',
+          turnId, time: Date.now() - 200, text: 'Working on it closely...', state: 'streaming', activeNow: true },
+        endTurn(turnId, 'completed')
+      ]);
+
+      expect((await getSession(sessionId))?.activeTurnId).toBeNull();
+      expect(sessionInputActivity((await getSession(sessionId))!)).toMatchObject({ exact: false, possible: false });
+      expect((await input.pendingBrowserInputs()).map(row => row.id)).toContain(queued.id);
+    } finally {
+      input.configureInputDelivery(null as never);
+      await writeDurableNow('session-input', []); input.resetInputForTests(); vi.useRealTimers();
+    }
+  });
+
+  it('retires an expired silence grant immediately once readCompletedFinal is ready instead of holding until activityDeadline', async () => {
+    const input = await import('../src/main/session/input.js');
+    const { recoveryHeldByCalls, recoveryInputAllowed, sessionInputActivity } = await import('../src/main/bridge.js');
+    input.configureInputDelivery({ recoveryAllowed: recoveryInputAllowed, callsHoldRecovery: recoveryHeldByCalls,
+      activity: sessionInputActivity, applyAutomation: async () => {}, changed: () => {} });
+    const chat = randomUUID(), turnId = 'settled-before-deadline';
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(chat, [
+        { kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() },
+        { kind: 'user_message', messageId: 'question', text: 'Inspect the source.', time: Date.now(), authoredNow: true },
+        openTurn(turnId)
+      ]);
+      const sessionId = (await request('GET', `/activity?conversationId=${chat}`)).body.sessionId;
+      await attributed(chat, false, Date.now());
+      const queued = await input.enqueueInput({ id: randomUUID(), sessionId, text: 'Queued after turn', mode: 'after-turn',
+        dueAt: Date.now(), model: 'GPT-5.6 Sol', reasoningEffort: 'high' });
+
+      // Tool-only completion keeps a silence grant in activeUntil; then the completed final is recorded durably.
+      await events(chat, [endTurn(turnId, 'completed')]);
+      await sessionStoreModule.appendEvent(sessionId, {
+        kind: 'assistant_message', source: 'extension', time: Date.now(), turnId, messageId: 'settled-answer',
+        providerMessageId: '22222222-3333-4444-8555-666666666666',
+        message: { text: 'Finished.', truncated: false, chars: 9 }, state: 'final', final: true
+      } as never);
+
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+      await sweepStaleSwarm(Date.now());
+      // Must not wait an extra minute until CHAT_ACTIVE_MS (activityDeadline) when the answer already completed.
+      expect(sessionInputActivity((await getSession(sessionId))!)).toMatchObject({ exact: false, possible: false });
+      expect((await input.pendingBrowserInputs()).map(row => row.id)).toContain(queued.id);
+    } finally {
+      input.configureInputDelivery(null as never);
+      await writeDurableNow('session-input', []); input.resetInputForTests(); vi.useRealTimers();
+    }
+  });
+
   it.each(['normal', 'pro'] as const)('renews %s activity and silence recovery when the stopped request keeps working after its finish hold was released', async model => {
     const previous = getConfig();
     await saveConfig({ ...previous, ui: { ...previous.ui, autoContinue: true },
