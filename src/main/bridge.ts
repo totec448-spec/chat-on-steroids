@@ -1408,7 +1408,11 @@ function flushPendingDiscreteActivityWakes(): void {
   discreteActivityWakeTimer = null;
   discreteActivityWakeTimerDueAt = 0;
   if (!bridgeDesiredRunning || !server || !browserWakeConnected()) {
-    pendingDiscreteActivityWakes.clear();
+    if (pendingDiscreteActivityWakes.size > 0) {
+      const reason = !bridgeDesiredRunning || !server ? 'bridge stopped' : 'wake channel disconnected';
+      logInfo(`bridge: discarded ${pendingDiscreteActivityWakes.size} pending discrete activity wake(s) (${reason})`);
+      pendingDiscreteActivityWakes.clear();
+    }
     return;
   }
   const now = Date.now();
@@ -1440,7 +1444,7 @@ function scheduleDiscreteActivityWake(target: string): void {
     clearTimeout(streamActivityWakeTimer);
     streamActivityWakeTimer = null;
   }
-  if (pendingActivityWakes.has(target)) return;
+  if (pendingActivityWakes.has('*') || pendingActivityWakes.has(target)) return;
   const now = Date.now();
   const lastAt = lastWakeAtFor(target);
   if (lastAt !== 0 && now - lastAt < ACTIVITY_WAKE_INTERVAL_MS) {
@@ -1448,7 +1452,12 @@ function scheduleDiscreteActivityWake(target: string): void {
     return;
   }
   pendingDiscreteActivityWakes.delete(target);
-  pendingActivityWakes.add(target);
+  if (target === '*' || pendingActivityWakes.size >= ACTIVITY_STREAM_WAKE_CAP) {
+    pendingActivityWakes.clear();
+    pendingActivityWakes.add('*');
+  } else {
+    pendingActivityWakes.add(target);
+  }
   if (activityWakeMicrotaskQueued) return;
   activityWakeMicrotaskQueued = true;
   queueMicrotask(() => {
@@ -1480,7 +1489,11 @@ function scheduleDiscreteActivityWake(target: string): void {
 function flushNextStreamingWake(): void {
   streamActivityWakeTimer = null;
   if (!bridgeDesiredRunning || !server || !browserWakeConnected()) {
-    pendingStreamActivityWakes.clear();
+    if (pendingStreamActivityWakes.size > 0) {
+      const reason = !bridgeDesiredRunning || !server ? 'bridge stopped' : 'wake channel disconnected';
+      logInfo(`bridge: discarded ${pendingStreamActivityWakes.size} pending streaming activity wake(s) (${reason})`);
+      pendingStreamActivityWakes.clear();
+    }
     return;
   }
   const now = Date.now();
@@ -1520,7 +1533,7 @@ function scheduleStreamingWakePump(delayMs: number): void {
  */
 export function notifyBrowserActivity(conversationId?: string, streaming = false): void {
   if (!bridgeDesiredRunning || !server || !browserWakeConnected()) return;
-  const target = conversationId ?? '*';
+  const target = conversationId && /^[0-9a-z-]{8,64}$/i.test(conversationId) ? conversationId : '*';
   if (!streaming || target === '*') {
     scheduleDiscreteActivityWake(target);
     return;
