@@ -295,6 +295,22 @@ it('handles malformed session IDs, symlinked assets dirs, ENOENT lstat races, an
   const vetoed = await clearImageStorage('session-texts', protectedChat.session.id);
   expect(vetoed.removedFiles).toBe(1); // unreferenced extraTxt removed, protectedChat.asset kept
   expect(await readAsset(protectedChat.session.id, protectedChat.asset.id)).not.toBeNull();
+
+  // Vetoed files stay admissible for subsequent message upserts (not poisoned in removedAssetEpoch).
+  const keptUpsert = await upsertMessageEvent(protectedChat.session.id, {
+    time: NOW + 1,
+    source: 'extension',
+    kind: 'assistant_message',
+    messageId: 'vetoed-kept-msg',
+    message: { text: `head\n…[1196 more characters stored in full as ${protectedChat.asset.id}]`, truncated: true, chars: 1200, assetId: protectedChat.asset.id },
+    state: 'final',
+    final: true
+  });
+  expect(keptUpsert.event.kind).toBe('assistant_message');
+  if (keptUpsert.event.kind === 'assistant_message') {
+    expect(keptUpsert.event.message.assetId).toBe(protectedChat.asset.id);
+    expect(keptUpsert.event.retiredTextAssetIds).toBeUndefined();
+  }
 });
 
 it('limits pre-cleanup inspection to the target chat so an unreadable asset elsewhere cannot block session cleanup', async () => {
