@@ -391,7 +391,9 @@ it('uses native menu-bar/Dock wording on macOS instead of Windows tray copy', as
   expect(doc.getElementById('minimizeToTrayCopy')!.textContent).toBe('Hide the window to the menu bar when closed');
   expect(doc.getElementById('showTrayIconRow')!.hidden).toBe(false);
   expect(doc.getElementById('showTrayIconCopy')!.textContent).toBe('Show icon in the menu bar');
+});
 
+it('hides the menu bar icon setting row on Windows', async () => {
   const winMounted = await mountChat({
     platform: { family: 'windows', name: 'Windows', desktopAutomation: true }
   });

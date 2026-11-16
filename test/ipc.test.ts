@@ -1685,7 +1685,7 @@ describe('settings writes from more than one UI', () => {
 
   it('round-trips showTrayIcon through settings save and invokes syncTrayVisibility on change', async () => {
     let synced = 0;
-    registerIpc(() => null, () => undefined, () => { synced += 1; });
+    registerIpc(() => currentWindow as any, () => { quitToInstallCalls += 1; }, () => { synced += 1; });
     const base = defaultConfig();
     await saveConfig(base);
     expect(getConfig().ui.showTrayIcon).toBe(true);

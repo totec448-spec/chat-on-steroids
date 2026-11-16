@@ -137,7 +137,8 @@ import {
   trackNormalWindowBounds,
   shouldBeginAppBootstrap,
   shouldQuitOnWindowAllClosed,
-  shouldShowTrayIcon
+  shouldShowTrayIcon,
+  reconcileTrayState
 } from './window-lifecycle.js';
 import { trayGuidArgsForPlatform, trayImageSpec } from './tray-image.js';
 import { browserWindowIconPath } from './window-icon.js';
@@ -443,20 +444,17 @@ function refreshTray(): void {
 
 function syncTray(): void {
   const visible = shouldShowTrayIcon(process.platform, getConfig().ui.showTrayIcon);
-  if (visible) {
-    if (!tray) {
-      tray = new Tray(trayIcon(false), ...trayGuidArgsForPlatform());
-      tray.on('click', windowActivation.request);
-      logInfo('tray icon: created');
-    }
-    refreshTray();
-  } else if (tray) {
-    tray.destroy();
-    tray = null;
-    logInfo('tray icon: destroyed');
-  } else {
-    logInfo('tray icon: disabled by preference');
-  }
+  tray = reconcileTrayState(
+    tray,
+    visible,
+    () => {
+      const created = new Tray(trayIcon(false), ...trayGuidArgsForPlatform());
+      created.on('click', windowActivation.request);
+      return created;
+    },
+    () => refreshTray(),
+    logInfo
+  );
 }
 
 app.on('second-instance', (_event, argv) => {

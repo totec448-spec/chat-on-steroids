@@ -937,8 +937,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       else if (!config.goal.impulseMinutes && (proposed.goal.impulseMinutes ?? 0) > 0) await cancelFinishInputs(true);
       return proposed;
     }, async (published, previous) => {
-      if (previous.ui.finishTool && !published.ui.finishTool) await cancelFinishInputs(false);
-      else if ((previous.goal.impulseMinutes ?? 0) > 0 && !published.goal.impulseMinutes) await cancelFinishInputs(true);
+      try {
+        if (previous.ui.finishTool && !published.ui.finishTool) await cancelFinishInputs(false);
+        else if ((previous.goal.impulseMinutes ?? 0) > 0 && !published.goal.impulseMinutes) await cancelFinishInputs(true);
+      } finally {
+        if ((previous.ui.showTrayIcon !== false) !== (published.ui.showTrayIcon !== false)) syncTrayVisibility?.();
+      }
     }, publishBridgePortChange);
     // Renderer palette changes are immediate, so keep OS/Electron-owned chrome in lock-step too.
     // Without this, selecting Dark on macOS left the title bar, menus and file picker in the
@@ -947,7 +951,6 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     void refreshAppProxy();
     setRecordingStorageLimit(next.sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB);
     if ((before.ui.keepAwake !== false) !== (next.ui.keepAwake !== false) || (before.ui.keepScreenAwake === true) !== (next.ui.keepScreenAwake === true)) refreshKeepAwake();
-    if ((before.ui.showTrayIcon !== false) !== (next.ui.showTrayIcon !== false)) syncTrayVisibility?.();
     // Electron's own `system` source is what System (#1914) means; set first, so the shown theme is current.
     nativeTheme.themeSource = next.ui.theme;
     // The default macOS application menu exposes Reload, and after a live theme switch an old
