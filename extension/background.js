@@ -3010,9 +3010,11 @@ const ACTIVITY_WAKE_QUEUE_CAP = 64;
 let activityWakeTokens = ACTIVITY_WAKE_BURST;
 let activityWakeLastRefillAt = 0;
 let activityWakeDrainTimer = null;
+let activityWakeEpoch = 0;
 const pendingActivityWakeTabs = new Map();
 
 function resetActivityWakeLimiter() {
+  activityWakeEpoch += 1;
   if (activityWakeDrainTimer !== null) {
     clearTimeout(activityWakeDrainTimer);
     activityWakeDrainTimer = null;
@@ -3117,8 +3119,9 @@ async function unionQueriedChatGptTabs(knownIds, target = null) {
 
 /** Wakes matching open ChatGPT tab(s) so `/activity` reacts without waiting for the poll timer. */
 async function notifyActivityTabs(conversationId) {
+  const epoch = activityWakeEpoch;
   await load();
-  if (disconnected || typeof chrome.tabs?.sendMessage !== 'function') return;
+  if (disconnected || epoch !== activityWakeEpoch || typeof chrome.tabs?.sendMessage !== 'function') return;
   const target = conversationId ? cleanConversationId(conversationId) : null;
   if (conversationId && !target) return;
   const known = Object.entries(tabConversations)
@@ -3126,7 +3129,7 @@ async function notifyActivityTabs(conversationId) {
     .map(([key]) => Number(key))
     .filter((id) => Number.isInteger(id));
   const tabIds = await unionQueriedChatGptTabs(known, target);
-  if (disconnected || typeof chrome.tabs?.sendMessage !== 'function') return;
+  if (disconnected || epoch !== activityWakeEpoch || typeof chrome.tabs?.sendMessage !== 'function') return;
   for (const id of tabIds) queueActivityWakeTab(id, target);
 }
 function connectWakeSocket() {
@@ -3159,6 +3162,7 @@ function connectWakeSocket() {
   connection.onclose = () => {
     if (wakeSocket === connection) {
       wakeSocket = null;
+      resetActivityWakeLimiter();
       void activeTabs?.revoke().catch(() => undefined);
     }
   };
