@@ -26267,6 +26267,11 @@ describe('clf-activity-wake runtime push handler', () => {
         .toEqual({ ok: true });
 
       const staleIdleTimers = idleCallbacks.splice(0);
+      // Firing the armed idle callback while the direct pull is still in flight must not consume activityWakePending.
+      for (const entry of staleIdleTimers) entry.fn();
+      await new Promise((resolve) => globalThis.setTimeout(resolve, 10));
+      expect(activityCalls).toBe(callsBeforeInflight + 1);
+
       zeroScheduled.length = 0;
       pendingReply!({ ok: true, data: { stream: [], userAnchors: [] } });
       await inflight;

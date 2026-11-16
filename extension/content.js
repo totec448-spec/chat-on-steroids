@@ -13008,12 +13008,12 @@
       // harness's setTimeout runs its callback in a microtask, so a loop re-armed there would
       // be an unbroken microtask chain that starves the event loop — the next test then waits
       // forever for a window 'load' event that no macrotask could ever deliver.
-      armNextActivityPull();
+      if (!pulling) armNextActivityPull();
     }, Math.max(0, delay));
   }
 
   function consumePendingActivityWake() {
-    if (!activityWakeEnabled() || !activityWakePending) return false;
+    if (!activityWakeEnabled() || pulling || !activityWakePending) return false;
     activityWakePending = false;
     resetActivityTimer();
     scheduleActivityPull(0);

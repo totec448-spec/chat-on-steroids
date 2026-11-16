@@ -6947,6 +6947,26 @@ describe('activity push wakes over /wake', () => {
     await advanceClock(250);
     expect(worker.tabsSendMessage).toHaveBeenCalledTimes(1);
     expect(worker.tabsSendMessage).toHaveBeenCalledWith(10, { type: 'clf-activity-wake' });
+
+    // Peer socket close clears queued wakes and discards in-flight tab discovery from the closed epoch.
+    for (let i = 0; i < 6; i += 1) socket.onmessage?.({ data: `activity:${convA}` });
+    await advanceClock(10);
+    worker.tabsSendMessage.mockClear();
+
+    let resolveDelayedQuery: ((tabs: Array<{ id: number; url: string }>) => void) | null = null;
+    worker.tabsQuery.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveDelayedQuery = resolve; })
+    );
+    socket.onmessage?.({ data: `activity:${convB}` });
+    await vi.waitFor(() => expect(resolveDelayedQuery).not.toBeNull(), { timeout: 5_000 });
+
+    // Also queue a wake before the peer closes the socket: onclose must cancel the drain timer and clear the queue.
+    socket.onmessage?.({ data: `activity:${convA}` });
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
     socket.close();
+
+    resolveDelayedQuery!([{ id: 99, url: `https://chatgpt.com/c/${convB}` }]);
+    await advanceClock(400);
+    expect(worker.tabsSendMessage).not.toHaveBeenCalled();
   });
 });
