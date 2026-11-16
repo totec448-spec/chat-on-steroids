@@ -1037,8 +1037,22 @@ let badgeKey = '';
 let handoff: Handoff | null = null;
 let handoffFor: string | null = null;
 
+const LIST_RELOAD_MS = 400;
+const ACTIVE_DETAIL_COOLDOWN_MS = 100;
+
 let listTimer: number | undefined;
+let listTimerSeq = 0;
 let listRefreshDirty = false;
+let activeDetailTimer: number | undefined;
+let activeDetailDrainTimer: number | undefined;
+let activeDetailLastAt = 0;
+let activeDetailInFlight: { sessionId: string; promise: Promise<boolean> } | null = null;
+let activeDetailDirty = false;
+/** Monotonic count of pushes targeting the selected transcript; consumed pushes already satisfied
+ *  by a faster incremental detail read need not re-run `loadDetail()` after `listSessions`. */
+let activeDetailPushSeq = 0;
+let detailSatisfiedPushSeq = -1;
+let controlsRefreshNeeded = false;
 /** Transcript owners named by `session:changed` pushes that no catalog refresh has consumed yet. */
 let changedTranscripts: { all: boolean; ids: Set<string> } = { all: false, ids: new Set() };
 /** Summary values the selected transcript's latest live-tail read was requested against. */
@@ -1666,6 +1680,7 @@ async function deleteSession(id: string): Promise<void> {
   pressure.delete(id);
   sessionTotal = Math.max(0, sessionTotal - 1);
   if (selectedId === id) {
+    resetActiveDetailRefresh();
     selectedId = null;
     requestSelectedTabFollow(null);
     events = [];
@@ -1740,8 +1755,10 @@ async function readSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
   }
   // Take the pushed invalidations only now, after the last await that can hand this read over to a newer one:
   // a read that is superseded must leave them for its successor (CodeRabbit on #2063).
+  if (detail === 'changed' && !visible) return;
   const changed = changedTranscripts;
   changedTranscripts = { all: false, ids: new Set() };
+  const consumedPushSeq = activeDetailPushSeq;
   if (fallbackId && present.has(fallbackId)) {
     fallbackToKeep = list.sessions.find(row => row.id === fallbackId) ?? fallbackToKeep;
     if (fallbackToKeep) selectedCatalogFallback = fallbackToKeep;
@@ -1785,6 +1802,7 @@ async function readSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
     pressure = new Map(list.pressure.map((entry) => [entry.id, entry]));
   }
   if (selectedId !== null && !sessions.some((s) => s.id === selectedId)) {
+    resetActiveDetailRefresh();
     selectedId = null;
     detailFor = null;
     detailCursor = null;
@@ -1794,9 +1812,17 @@ async function readSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
   chatSearch?.refresh();
   const row = selectedId === null ? undefined : sessions.find(entry => entry.id === selectedId);
   selectedTabFollow?.observe(row);
-  if (detail === 'reread' || selectedId === null || detailFor !== selectedId || changed.all || changed.ids.has(selectedId) ||
-      row?.updatedAt !== detailStamp?.updatedAt || row?.events !== detailStamp?.events) await loadDetail();
-  else void refreshSessionControls();
+  if (detail === 'changed' && selectedId !== null && activeDetailInFlight?.sessionId === selectedId) {
+    await activeDetailInFlight.promise;
+    if (generation !== sessionsLoadGeneration || (detail === 'changed' && !visible)) return;
+  }
+  const latestRow = selectedId === null ? undefined : sessions.find(entry => entry.id === selectedId);
+  const targetChanged = changed.all || (selectedId !== null && changed.ids.has(selectedId));
+  const satisfiedByFastPath = targetChanged && detailSatisfiedPushSeq >= consumedPushSeq;
+  const activeUnseenPush = targetChanged && !satisfiedByFastPath;
+  if (detail === 'reread' || selectedId === null || detailFor !== selectedId || activeUnseenPush ||
+      latestRow?.updatedAt !== detailStamp?.updatedAt || latestRow?.events !== detailStamp?.events) await loadDetail();
+  else if (controlsRefreshNeeded) void refreshSessionControls();
   void refreshInputQueue();
 }
 
@@ -3144,8 +3170,9 @@ function announceFinishedTurns(delta: readonly SessionEvent[]): void {
 }
 
 /** Merge one sequence-cursor delta without letting canonical message revisions duplicate rows. */
-function mergeDetailDelta(delta: SessionEvent[]): void {
-  if (delta.length === 0) return;
+function mergeDetailDelta(delta: SessionEvent[]): boolean {
+  if (delta.length === 0) return false;
+  let changed = false;
   const merged = [...events];
   const floor = events.length ? Math.min(...events.map(residenceOf)) : 0;
   const messageRows = new Map<string, number>();
@@ -3156,17 +3183,20 @@ function mergeDetailDelta(delta: SessionEvent[]): void {
   for (const event of delta) {
     const key = canonicalMessageKey(event);
     const index = key ? messageRows.get(key) : undefined;
-    if (index !== undefined) merged[index] = event;
+    if (index !== undefined) { merged[index] = event; changed = true; }
     else {
       // An old canonical revision is not newly authored history. Its original
       // page still owns it; admitting it here would evict an unrelated live row.
       if (residenceOf(event) < floor) continue;
       if (key) messageRows.set(key, merged.length);
       merged.push(event);
+      changed = true;
     }
   }
+  if (!changed) return false;
   const folded = chronological(foldProgress(merged));
   events = retainTimelinePage(folded, 'newer');
+  return true;
 }
 
 let controlsGeneration = 0;
@@ -3698,6 +3728,7 @@ function applyUserRequests(sessionId: string | null, requests: UserRequestView[]
 let controlsAskedAt = 0;
 const RUNNING_CONTROLS_RECHECK_MS = 20_000;
 async function refreshSessionControls(): Promise<void> {
+  controlsRefreshNeeded = false;
   const id = selectedId, generation = ++controlsGeneration;
   const askedAt = controlsAskedAt = Date.now();
   const planHost = $('agentPlan');
@@ -3737,6 +3768,7 @@ async function refreshSessionControls(): Promise<void> {
   }
   const controls = await run(api.getSessionControls(id));
   if (generation !== controlsGeneration || id !== selectedId) return;
+  if (!controls) controlsRefreshNeeded = true;
   renderAgentPlan(planHost, id, controls?.plan ?? null);
   // A failed read is not an empty list: keep the last view instead of calling steps gone (CodeRabbit on #2049).
   if (controls) applyUserRequests(id, controls.userRequests ?? [], askedAt);
@@ -3812,6 +3844,8 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
   const prepend = olderBefore !== undefined;
   const wanted = selectedId;
   const selection = selectionGeneration;
+  const capturedPushSeq = activeDetailPushSeq;
+  if (!prepend && newerFrom === undefined) clearActiveDetailTimers();
   const observed = wanted === null ? undefined : sessions.find(row => row.id === wanted);
   const observedCompletion = observed ? { ...observed } : undefined;
   if (wanted !== null && (historyBefore !== null || historyLoading) && detailFor === wanted && !navigate) {
@@ -3833,85 +3867,116 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
     paintDetail();
     return false;
   }
-  const opening = detailFor !== wanted;
-  if (opening) { historyBefore = null; historyStart = null; roundsEnter = false; }
-  // Live deltas must not evict a historical page while the user is reading it.
-  const incremental = !prepend && newerFrom === undefined && historyBefore === null && detailFor === wanted && detailCursor !== null;
-  const detail = await run(
-    api.getSession(wanted, newerFrom !== undefined ? { after: newerFrom, limit: TIMELINE_BATCH_SIZE } : incremental ? { from: detailCursor!, limit: TIMELINE_BATCH_SIZE } : { ...(olderBefore !== undefined ? { before: olderBefore } : historyBefore !== null ? { before: historyBefore } : {}), limit: TIMELINE_BATCH_SIZE })
-  );
-  if (generation !== detailLoadGeneration || selection !== selectionGeneration || selectedId !== wanted) return false;
-  if (!detail) {
-    // A failed destination read must not leave another chat displayed indefinitely.
-    // run() already presents the read error; keep the destination empty and retryable.
-    if (opening) {
-      $('timeline').replaceChildren();
-      $('timeline').removeAttribute('inert');
-      $('timeline').removeAttribute('aria-busy');
+  const trackLive = !prepend && newerFrom === undefined && historyBefore === null;
+  const runDetail = async (): Promise<boolean> => {
+    const opening = detailFor !== wanted;
+    if (opening) { historyBefore = null; historyStart = null; roundsEnter = false; }
+    // Live deltas must not evict a historical page while the user is reading it.
+    const incremental = !prepend && newerFrom === undefined && historyBefore === null && detailFor === wanted && detailCursor !== null;
+    const detail = await run(
+      api.getSession(wanted, newerFrom !== undefined ? { after: newerFrom, limit: TIMELINE_BATCH_SIZE } : incremental ? { from: detailCursor!, limit: TIMELINE_BATCH_SIZE } : { ...(olderBefore !== undefined ? { before: olderBefore } : historyBefore !== null ? { before: historyBefore } : {}), limit: TIMELINE_BATCH_SIZE })
+    );
+    if (generation !== detailLoadGeneration || selection !== selectionGeneration || selectedId !== wanted) return false;
+    if (!detail) {
+      // A failed destination read must not leave another chat displayed indefinitely.
+      // run() already presents the read error; keep the destination empty and retryable.
+      if (opening) {
+        $('timeline').replaceChildren();
+        $('timeline').removeAttribute('inert');
+        $('timeline').removeAttribute('aria-busy');
+      }
+      return false;
     }
-    return false;
-  }
-  // An empty older page is not navigation. Keep the live cursor and viewport intact.
-  if (prepend && !detail.events.length) return true;
-  // User/assistant prose is canonical in messages.json, while structured page activity stays
-  // append-only by design: ChatGPT can grow one commentary caption or rewrite one activity
-  // label several times. `foldProgress` turns those snapshots back into the one logical row
-  // their stable progressId/messageId names, then chronology places that row at its first
-  // appearance. This helper existed already but was never wired into the desktop reader,
-  // which is why "Inspecting…" and "Inspected…" still appeared as siblings.
-  if (incremental) { mergeDetailDelta(detail.events); announceFinishedTurns(detail.events); }
-  else {
-    const folded = chronological(foldProgress(detail.events));
-    if (newerFrom !== undefined) {
-      events = retainTimelinePage(chronological(foldProgress([...events, ...folded])), 'newer');
-      // Reaching the live tail restores ordinary delta reads. Paging itself preserves
-      // the reader's row even when they were at the bottom of the previous window.
-      if (detail.events.length < TIMELINE_BATCH_SIZE) historyBefore = null;
-    } else if (prepend) {
-      const boundary = olderBefore!;
-      historyBefore = boundary;
-      const retained = events.filter(event => residenceOf(event) >= boundary);
-      events = retainTimelinePage(chronological(foldProgress([...folded, ...retained])), 'older');
-    } else events = chronological([...folded].sort((a, b) => residenceOf(a) - residenceOf(b)).slice(-MAX_TIMELINE_ROWS));
-    detailFor = wanted;
-  }
-  detailCursor = Math.max(opening ? 0 : detailCursor ?? 0,
-    typeof detail.nextFrom === 'number'
-      ? detail.nextFrom
-      : detail.events.reduce((cursor, event) => Math.max(cursor, event.seq + 1), incremental ? detailCursor! : 0));
-  totalEvents = detail.total;
-  // Stamp from the request-time copy: a summary newer than this read must still prove it stale.
-  if (!prepend && newerFrom === undefined)
-    detailStamp = observedCompletion ? { updatedAt: observedCompletion.updatedAt, events: observedCompletion.events } : null;
-  // The outlines arrive with the rows they structure. A failed read keeps the last ones of this
-  // chat: rounds fall back to recorded order, nothing is lost.
-  const outlined = await api.turnTraces(wanted, traceTurnIds(events)).catch(() => null);
-  if (generation !== detailLoadGeneration || selection !== selectionGeneration || selectedId !== wanted) return false;
-  if (outlined?.ok) traces = outlined.data ?? {};
-  else if (tracesFor !== wanted) traces = {};
-  tracesFor = wanted;
-  if (opening) $('timelineContent').style.removeProperty('--timeline-scroll-reserve');
-  // History paged in is not new work: only rounds that arrive live enter with a fade.
-  if (prepend || newerFrom !== undefined) roundsEnter = false;
-  paintDetail(!prepend && newerFrom === undefined);
-  // A sidebar completion becomes read only after this exact selection/load has successfully
-  // painted its conversation at the live tail. Keep the completion snapshot from request time:
-  // a newer completion observed while this load is in flight must remain unseen.
-  if (visible && historyBefore === null && generation === detailLoadGeneration && selection === selectionGeneration && selectedId === wanted) {
-    sidebarCompletion?.markSeen(observedCompletion);
-    paintSessions();
-  }
-  // A selection opens at the latest message; the previous chat's viewport is not
-  // a reading position in this one. Apply only after the current load has rendered.
-  if (opening) $('chatBody').scrollTop = $('chatBody').scrollHeight;
-  if (opening) requestHistory(-1, true);
-  void loadHandoff();
-  // A burst can contain more than one renderer-sized page between coalesced notifications.
-  // Drain it page by page rather than silently jumping the cursor or lifting the payload cap.
-  if (incremental && detail.events.length === TIMELINE_BATCH_SIZE && selectedId === wanted) {
-    window.setTimeout(() => void loadDetail(), 0);
-  }
-  return true;
+    // An empty older page is not navigation. Keep the live cursor and viewport intact.
+    if (prepend && !detail.events.length) return true;
+    // User/assistant prose is canonical in messages.json, while structured page activity stays
+    // append-only by design: ChatGPT can grow one commentary caption or rewrite one activity
+    // label several times. `foldProgress` turns those snapshots back into the one logical row
+    // their stable progressId/messageId names, then chronology places that row at its first
+    // appearance. This helper existed already but was never wired into the desktop reader,
+    // which is why "Inspecting…" and "Inspected…" still appeared as siblings.
+    let deltaChanged = false;
+    if (incremental) { deltaChanged = mergeDetailDelta(detail.events); announceFinishedTurns(detail.events); }
+    else {
+      const folded = chronological(foldProgress(detail.events));
+      if (newerFrom !== undefined) {
+        events = retainTimelinePage(chronological(foldProgress([...events, ...folded])), 'newer');
+        // Reaching the live tail restores ordinary delta reads. Paging itself preserves
+        // the reader's row even when they were at the bottom of the previous window.
+        if (detail.events.length < TIMELINE_BATCH_SIZE) historyBefore = null;
+      } else if (prepend) {
+        const boundary = olderBefore!;
+        historyBefore = boundary;
+        const retained = events.filter(event => residenceOf(event) >= boundary);
+        events = retainTimelinePage(chronological(foldProgress([...folded, ...retained])), 'older');
+      } else events = chronological([...folded].sort((a, b) => residenceOf(a) - residenceOf(b)).slice(-MAX_TIMELINE_ROWS));
+      detailFor = wanted;
+    }
+    detailCursor = Math.max(opening ? 0 : detailCursor ?? 0,
+      typeof detail.nextFrom === 'number'
+        ? detail.nextFrom
+        : detail.events.reduce((cursor, event) => Math.max(cursor, event.seq + 1), incremental ? detailCursor! : 0));
+    totalEvents = detail.total;
+    // Stamp from the read-time summary when present so a faster incremental delta already
+    // carries the matching updatedAt/events count without waiting on `listSessions()`.
+    const stampSummary = detail.summary ?? observedCompletion;
+    if (!prepend && newerFrom === undefined)
+      detailStamp = stampSummary ? { updatedAt: stampSummary.updatedAt, events: stampSummary.events } : null;
+    // The outlines arrive with the rows they structure. A failed read keeps the last ones of this
+    // chat: rounds fall back to recorded order, nothing is lost.
+    const outlined = await api.turnTraces(wanted, traceTurnIds(events)).catch(() => null);
+    if (generation !== detailLoadGeneration || selection !== selectionGeneration || selectedId !== wanted) return false;
+    if (outlined?.ok) traces = outlined.data ?? {};
+    else if (tracesFor !== wanted) traces = {};
+    tracesFor = wanted;
+    if (opening) $('timelineContent').style.removeProperty('--timeline-scroll-reserve');
+    // History paged in is not new work: only rounds that arrive live enter with a fade.
+    if (prepend || newerFrom !== undefined) roundsEnter = false;
+    // Only live growth follows to the bottom; an empty or off-window incremental check must not pull a scrolled pane down.
+    paintDetail(!prepend && newerFrom === undefined && historyBefore === null && (!incremental || deltaChanged));
+    if (!prepend && newerFrom === undefined && !(incremental && detail.events.length === TIMELINE_BATCH_SIZE)) {
+      detailSatisfiedPushSeq = Math.max(detailSatisfiedPushSeq, capturedPushSeq);
+    }
+    // A sidebar completion becomes read only after this exact selection/load has successfully
+    // painted its conversation at the live tail. Keep the snapshot from read time:
+    // a newer completion observed while this load was in flight must remain unseen.
+    if (visible && historyBefore === null && generation === detailLoadGeneration && selection === selectionGeneration && selectedId === wanted &&
+        !(incremental && detail.events.length === TIMELINE_BATCH_SIZE)) {
+      const wasUnseen = stampSummary ? sidebarCompletion?.isUnseen(stampSummary) === true : false;
+      sidebarCompletion?.markSeen(stampSummary);
+      if (!incremental || wasUnseen) paintSessions();
+    }
+    // A selection opens at the latest message; the previous chat's viewport is not
+    // a reading position in this one. Apply only after the current load has rendered.
+    if (opening) $('chatBody').scrollTop = $('chatBody').scrollHeight;
+    if (opening) requestHistory(-1, true);
+    void loadHandoff();
+    // A burst can contain more than one renderer-sized page between coalesced notifications.
+    // Drain it page by page rather than silently jumping the cursor or lifting the payload cap.
+    if (incremental && detail.events.length === TIMELINE_BATCH_SIZE && visible && selectedId === wanted &&
+        selection === selectionGeneration && generation === detailLoadGeneration) {
+      if (activeDetailDrainTimer !== undefined) window.clearTimeout(activeDetailDrainTimer);
+      activeDetailDrainTimer = window.setTimeout(() => {
+        activeDetailDrainTimer = undefined;
+        if (visible && selectedId === wanted && selection === selectionGeneration &&
+            historyBefore === null && !historyLoading && detailFor === wanted) {
+          void loadDetail();
+        }
+      }, 0);
+    }
+    return true;
+  };
+  if (!trackLive) return runDetail();
+  let tracked: Promise<boolean>;
+  tracked = runDetail().finally(() => {
+    if (activeDetailInFlight?.promise === tracked) activeDetailInFlight = null;
+    if (activeDetailDirty && visible && selectedId === wanted) {
+      activeDetailDirty = false;
+      scheduleActiveDetailRefresh(wanted);
+    }
+  });
+  activeDetailInFlight = { sessionId: wanted, promise: tracked };
+  return tracked;
 }
 
 /** The newest turns these events name, at most the 64 one outline read takes. */
@@ -8893,6 +8958,14 @@ export function chatVisible(next: boolean): void {
     window.clearTimeout(toolActivityTimer);
     window.clearTimeout(durationTimer);
     toolActivityTimer = undefined;
+    listTimerSeq++;
+    if (listTimer !== undefined) {
+      window.clearTimeout(listTimer);
+      listTimer = undefined;
+    }
+    listRefreshDirty = false;
+    clearActiveDetailTimers();
+    activeDetailDirty = false;
   }
 }
 
@@ -8902,21 +8975,76 @@ async function refreshAll(): Promise<void> {
   if (swarmNow) paintSwarm(swarmNow);
 }
 
+function clearActiveDetailTimers(): void {
+  if (activeDetailTimer !== undefined) {
+    window.clearTimeout(activeDetailTimer);
+    activeDetailTimer = undefined;
+  }
+  if (activeDetailDrainTimer !== undefined) {
+    window.clearTimeout(activeDetailDrainTimer);
+    activeDetailDrainTimer = undefined;
+  }
+}
+
+function resetActiveDetailRefresh(): void {
+  clearActiveDetailTimers();
+  activeDetailDirty = false;
+  activeDetailInFlight = null;
+  activeDetailLastAt = 0;
+  detailSatisfiedPushSeq = -1;
+  controlsRefreshNeeded = false;
+}
+
+function targetsSelectedLiveTail(change?: SessionChange): boolean {
+  if (!visible || selectedId === null || historyBefore !== null || historyLoading) return false;
+  if (detailFor !== selectedId || detailCursor === null) return false;
+  return change?.allTranscripts === true || Boolean(change?.sessionIds?.includes(selectedId));
+}
+
+function scheduleActiveDetailRefresh(sessionId: string): void {
+  if (!visible || selectedId !== sessionId || historyBefore !== null || historyLoading || detailFor !== sessionId || detailCursor === null) return;
+  if (activeDetailInFlight?.sessionId === sessionId) {
+    activeDetailDirty = true;
+    return;
+  }
+  if (activeDetailTimer !== undefined) return;
+  const delay = activeDetailLastAt === 0 ? 0 : Math.max(0, ACTIVE_DETAIL_COOLDOWN_MS - (Date.now() - activeDetailLastAt));
+  activeDetailTimer = window.setTimeout(() => {
+    activeDetailTimer = undefined;
+    if (!visible || selectedId !== sessionId || historyBefore !== null || historyLoading || detailFor !== sessionId || detailCursor === null) return;
+    activeDetailLastAt = Date.now();
+    activeDetailDirty = false;
+    void loadDetail();
+  }, delay);
+}
+
 /** Sessions change on every recorded event, so the reload is coalesced. */
 function scheduleReload(change?: SessionChange): void {
   if (!visible) return;
   if (change?.allTranscripts) changedTranscripts.all = true;
   for (const id of change?.sessionIds ?? []) changedTranscripts.ids.add(id);
+  controlsRefreshNeeded = true;
+  if (selectedId !== null && (change?.allTranscripts || change?.sessionIds?.includes(selectedId))) {
+    activeDetailPushSeq++;
+    if (targetsSelectedLiveTail(change)) scheduleActiveDetailRefresh(selectedId);
+  }
   // One refresh owns the timer until its asynchronous read completes. Starting a
-  // newer read every 400 ms can invalidate every result on a busy/slower store.
+  // newer read frequently can invalidate every result on a busy/slower store.
   if (listTimer !== undefined) { listRefreshDirty = true; return; }
+  const owner = ++listTimerSeq;
   listTimer = window.setTimeout(() => {
+    if (owner !== listTimerSeq) return;
     listRefreshDirty = false;
-    void loadSessions('changed').finally(() => {
+    if (!visible) {
       listTimer = undefined;
-      if (listRefreshDirty) scheduleReload();
+      return;
+    }
+    void loadSessions('changed').finally(() => {
+      if (owner !== listTimerSeq) return;
+      listTimer = undefined;
+      if (listRefreshDirty && visible) scheduleReload();
     });
-  }, 400);
+  }, LIST_RELOAD_MS);
 }
 
 /**
@@ -9638,6 +9766,7 @@ function selectSession(id: string): void {
   setComposerPlaceholder(() => t("Ask anything…"));
   restoreDraft();
   if (ownerChanged) {
+    resetActiveDetailRefresh();
     // Retire the prior owner now; retain only its inert painted transcript until the
     // selected detail arrives. Existing async image/load generation fences still apply.
     // Reading away from a sent message belongs to the chat it happened in.
@@ -9693,6 +9822,7 @@ function selectNewChat(projectId: string | null = null, branch: typeof newChatBr
   inputQueueGeneration++;
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   selectedCatalogFallback = null;
+  resetActiveDetailRefresh();
   newChatSelected = true; selectedId = null; selectedProjectId = projectId; detailFor = null; detailCursor = null;
   requestSelectedTabFollow(null);
   refreshBackgroundProcesses();
