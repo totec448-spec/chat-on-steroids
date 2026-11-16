@@ -7,7 +7,7 @@ import { TaskRequestError } from '../src/main/task-request.js';
 // Loaded CI runners (Windows especially) can take longer than waitFor's 1 s default to reach
 // the asynchronous follow-up; the conditions themselves are unchanged.
 const WAIT = { timeout: 10_000 };
-const hooks = vi.hoisted(() => ({ caller: { sessionId: '', conversationId: '' }, startedAt: 2000, followup: vi.fn(), enqueue: vi.fn(), hasInput: true, delivered: [] as Array<{ id: string; sessionId: string; text: string; state: string }>, inputListeners: new Set<() => void>() }));
+const hooks = vi.hoisted(() => ({ caller: { sessionId: '', conversationId: '' }, startedAt: 2000, followup: vi.fn(), enqueue: vi.fn(), hasInput: true, delivered: [] as Array<{ id: string; sessionId: string; text: string; state: string }>, inputListeners: new Set<() => void>(), suppressSessionChanges: false }));
 vi.mock('../src/main/session/input.js', () => ({
   hasEligibleToolInput: async () => hooks.hasInput,
   finishNeedsBrowserInput: async () => false,
@@ -15,6 +15,14 @@ vi.mock('../src/main/session/input.js', () => ({
   enqueueInput: hooks.enqueue,
   onInputChange: (listener: () => void) => { hooks.inputListeners.add(listener); return () => hooks.inputListeners.delete(listener); }
 }));
+vi.mock('../src/main/session/recorder.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../src/main/session/recorder.js')>();
+  return {
+    ...actual,
+    onSessionChange: (listener: Parameters<typeof actual.onSessionChange>[0]) =>
+      actual.onSessionChange((...args) => { if (!hooks.suppressSessionChanges) listener(...args); })
+  };
+});
 vi.mock('../src/main/goal.js', async importOriginal => ({ ...await importOriginal<object>(), draftFastFollowup: hooks.followup }));
 vi.mock('../src/main/mcp/call-context.js', async (importOriginal) => ({
   ...await importOriginal<object>(), currentCall: () => ({ caller: { ...hooks.caller }, startedAt: hooks.startedAt })
@@ -49,7 +57,7 @@ beforeAll(async () => {
   initConfigPath(directory); initSessionStore(directory);
 });
 beforeEach(async () => {
-  hooks.hasInput = true; hooks.delivered = [];
+  hooks.hasInput = true; hooks.delivered = []; hooks.suppressSessionChanges = false;
   hooks.followup.mockReset().mockResolvedValue('Check the remaining requirement');
   hooks.enqueue.mockReset().mockImplementation(async (input, owner) => ({ ...input, finishOwner: owner, state: 'queued' }));
   notify.mockReset(); setFinishNotifier(notify);
@@ -187,7 +195,17 @@ describe('session finish turn identity', () => {
     if (reason === 'new input') {
       hooks.delivered.push({ id: 'new-user-work', sessionId, text: 'Changed instructions', state: 'sent' });
       for (const listener of hooks.inputListeners) listener();
-    } else await releaseSessionFinish(sessionId, 'turn-one');
+    } else {
+      hooks.suppressSessionChanges = true;
+      try {
+        await releaseSessionFinish(sessionId, 'turn-one');
+        // Drain pure microtasks (zero fake-timer advance, session-change events suppressed) so only releaseListeners can cancel.
+        for (let i = 0; i < 50 && hooks.inputListeners.size > 0; i += 1) await Promise.resolve();
+        expect(hooks.inputListeners.size).toBe(0);
+      } finally {
+        hooks.suppressSessionChanges = false;
+      }
+    }
     vi.useRealTimers();
     await settleSessionFinishForTests();
     expect(hooks.followup).toHaveBeenCalledTimes(1);
