@@ -7521,7 +7521,7 @@
     } finally {
       pulling = false;
       if (!recorderHandle.healthy()) activityWakePending = false;
-      else consumePendingActivityWake();
+      else if (!consumePendingActivityWake()) armNextActivityPull();
     }
     // Outside the guard, and last: startCompact runs for tens of seconds and polls this
     // same endpoint while it works, so firing it with `pulling` still set would deadlock

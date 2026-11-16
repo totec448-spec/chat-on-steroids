@@ -26307,13 +26307,13 @@ describe('clf-activity-wake runtime push handler', () => {
       }
     });
 
-    const idleCallbacks: number[] = [];
+    const idleCallbacks: Array<{ fn: () => void; ms: number }> = [];
     const zeroScheduled: number[] = [];
     const prevSetTimeout = live.window.setTimeout;
     live.window.setTimeout = ((fn: () => void, ms?: number) => {
       const delay = Number(ms) || 0;
       if (delay >= 10_000) {
-        idleCallbacks.push(delay);
+        idleCallbacks.push({ fn, ms: delay });
         return idleCallbacks.length;
       }
       if (delay === 0) {
@@ -26326,6 +26326,19 @@ describe('clf-activity-wake runtime push handler', () => {
     try {
       live.hook.setActivityWakeForTest(true);
       await live.hook.pullActivity(); // arms idle timer
+      expect(idleCallbacks.length).toBeGreaterThan(0);
+
+      // Case 0: overlapping idle callback fires while a direct pull fails with no pending wake -> finally re-arms polling.
+      const armedBeforeFail = idleCallbacks.splice(0);
+      pendingReply = null;
+      deferNext = true;
+      const failedNoWake = live.hook.pullActivity();
+      await vi.waitFor(() => expect(pendingReply).not.toBeNull(), { timeout: 5_000 });
+      for (const entry of armedBeforeFail) entry.fn();
+      expect(idleCallbacks).toHaveLength(0);
+      pendingReply!({ ok: false, error: 'temporary_failure' });
+      await failedNoWake;
+      expect(idleCallbacks.length).toBeGreaterThan(0);
 
       // Case 1: unsuccessful { ok: false } early-return still schedules pending wake at 0 ms.
       const callsBeforeFail = activityCalls;
