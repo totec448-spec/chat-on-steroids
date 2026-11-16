@@ -670,8 +670,8 @@ code {
 .sidebar-section-empty { padding: 6px 28px 4px; text-align: left; font-size: calc(11px * var(--text-scale, 1)); line-height: 1.5; }
 .sidebar .new-chat { color: var(--ink); }
 .sidebar-sessions { display: flex; flex-direction: column; flex: 1; min-height: 0; margin-top: 4px; }
-/* Client switcher (All | ChatGPT | Gemini): stays pinned above the chat groups and scrollable list. */
-.sidebar-client-switch { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; flex: none; margin: 0 0 10px; padding: 2px;
+/* Client switcher (All | ChatGPT | Gemini): sits at the top of the scrollable list so short windows keep full list height. */
+.sidebar-client-switch { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; flex: none; margin: 0 0 8px; padding: 2px;
   border: 1px solid var(--line); border-radius: 9px; background: color-mix(in srgb, var(--ink) 3%, transparent); }
 .sidebar-client-option { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 0; height: 26px; padding: 0 6px;
   border: 0; border-radius: 7px; background: transparent; color: var(--faint); font: inherit; font-size: calc(11.5px * var(--text-scale, 1));
