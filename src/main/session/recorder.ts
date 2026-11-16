@@ -189,8 +189,11 @@ let lastActiveSessionId: string | null = null;
  */
 const REOPEN_NOTICE_MS = 60_000;
 
+const NOTIFY_COOLDOWN_MS = 180;
+
 const listeners = new Set<(change: SessionChange) => void>();
 let notifyTimer: NodeJS.Timeout | null = null;
+let lastNotifyAt = -Infinity;
 /** Every local session written during the current burst; one push names all of them. */
 const changedSessions = new Set<string>();
 
@@ -203,12 +206,14 @@ export function onSessionChange(listener: (change: SessionChange) => void): () =
 export function notifyChanged(...sessionIds: string[]): void {
   for (const id of sessionIds) changedSessions.add(id);
   if (notifyTimer) return;
+  const delay = Math.max(0, NOTIFY_COOLDOWN_MS - (performance.now() - lastNotifyAt));
   notifyTimer = setTimeout(() => {
     notifyTimer = null;
+    lastNotifyAt = performance.now();
     const change: SessionChange = { sessionIds: [...changedSessions] };
     changedSessions.clear();
     for (const listener of listeners) listener(change);
-  }, 400);
+  }, delay);
   notifyTimer.unref?.();
 }
 
@@ -3409,6 +3414,7 @@ export function resetRecorderForTests(): void {
     notifyTimer = null;
     changedSessions.clear();
   }
+  lastNotifyAt = -Infinity;
 }
 
 export type { SessionSummary, SessionEvent };
