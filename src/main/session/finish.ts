@@ -24,6 +24,7 @@ export function getSessionFinishDraft(sessionId: string, turnId: string | null |
   return draft ? { ...draft } : null;
 }
 const finishCalls = new Map<string, number>();
+const releaseListeners = new Set<() => void>();
 export function sessionFinishDeadline(startedAt: number): number {
   return startedAt + 25_000;
 }
@@ -149,6 +150,7 @@ async function prepareNotice(sessionId: string, summary: string, userRequested =
     const stopInput = onInputChange(checkDecision);
     const stopSession = onSessionChange(checkDecision);
     const stopGoal = onGoalChange(checkDecision);
+    releaseListeners.add(checkDecision);
     try {
       let publishedAt = 0;
       const reply = await retryTaskRequest(async signal => {
@@ -214,7 +216,7 @@ async function prepareNotice(sessionId: string, summary: string, userRequested =
       }
     } catch (error) {
       result = `${notification} Goal follow-up was not available: ${(error as Error).message}. ${REMAINING}`;
-    } finally { stopInput(); stopSession(); stopGoal(); }
+    } finally { stopInput(); stopSession(); stopGoal(); releaseListeners.delete(checkDecision); }
     const recorded = await recordProgress(sessionId, progressId, result, anchor, turnId, undefined, unverifiedStop ? 'helper_stop_unverified' : undefined);
     if (unverifiedStop && !recorded) logWarn(`finish: unverified stop could not be recorded in ${session.conversationId}`);
     return result;
@@ -260,6 +262,7 @@ export async function releaseSessionFinish(sessionId: string, expectedTurnId: st
   const receipt = await recordProgress(sessionId, `finish-release:${expectedTurnId}`, message,
     undefined, expectedTurnId, { state: 'released', conversationId: session.conversationId });
   if (!receipt) throw new Error('End turn could not be saved; this turn remains held');
+  for (const listener of releaseListeners) listener();
 }
 
 /** One bounded transport wait. Event subscriptions observe; only the kernel consumes input. */

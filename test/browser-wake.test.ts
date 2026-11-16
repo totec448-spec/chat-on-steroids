@@ -2,7 +2,7 @@ import http from 'node:http';
 import { once } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
-import { attachBrowserWake, wakeBrowserWork } from '../src/main/browser-wake.js';
+import { attachBrowserWake, wakeActivityWork, wakeBrowserWork } from '../src/main/browser-wake.js';
 import * as logger from '../src/main/logger.js';
 
 const cleanup: Array<() => Promise<void>> = [];
@@ -180,5 +180,20 @@ describe('authenticated wake-only browser transport', () => {
     client.send('paired'); await checking;
     const closed = once(client, 'close'); h.bridge.revoke(); resolve(true); await closed;
     expect(client.readyState).toBe(WebSocket.CLOSED);
+  });
+
+  it('pushes wake-only activity hints scoped to a valid conversation or global without carrying state', async () => {
+    const h = await setup();
+    const client = h.client(); await once(client, 'open');
+    const ready = once(client, 'message'); client.send('paired'); await ready;
+    const targeted = once(client, 'message');
+    wakeActivityWork('11111111-2222-4333-8444-555555555555');
+    expect(String((await targeted)[0])).toBe('activity:11111111-2222-4333-8444-555555555555');
+    const globalWake = once(client, 'message');
+    wakeActivityWork();
+    expect(String((await globalWake)[0])).toBe('activity');
+    const invalidFallback = once(client, 'message');
+    wakeActivityWork('not valid');
+    expect(String((await invalidFallback)[0])).toBe('activity');
   });
 });
