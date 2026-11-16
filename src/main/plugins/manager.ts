@@ -80,6 +80,7 @@ interface Live {
   transport?: StdioClientTransport;
   users: number;
   oauth?: PluginOAuth;
+  retryBlocked?: boolean;
 }
 
 function validLongestCallSeconds(value: unknown): value is number {
@@ -882,7 +883,7 @@ export class PluginManager {
           if (this.live.get(row.id) !== live || !row.enabled) return;
           try {
             const refreshed = await this.discover(client);
-            if (this.live.get(row.id) !== live) return;
+            if (this.live.get(row.id) !== live || row.status !== 'connecting') return;
             live.tools = refreshed;
             this.publishTools(row, refreshed);
             await this.save();
@@ -1068,8 +1069,11 @@ export class PluginManager {
         row.status = row.enabled ? needsAuth ? 'needs-auth' : 'error' : 'disabled';
         row.error = needsAuth ? 'Sign in again to reconnect this plugin.' : 'Server call failed or disconnected. Restart after checking its application.';
         const reason = row.status === 'error' && row.source.kind === 'remote' ? remoteConnectionFailure(error) : undefined;
-        if (reason) this.scheduleReconnect(row, reason);
-        else if (row.source.kind === 'remote') this.cancelReconnect(row.id, 'non-retryable call failure');
+        if (reason && !live.retryBlocked) this.scheduleReconnect(row, reason);
+        else if (!reason && row.source.kind === 'remote') {
+          live.retryBlocked = true;
+          this.cancelReconnect(row.id, 'non-retryable call failure');
+        }
         this.changed();
       }
       return errorResult(
