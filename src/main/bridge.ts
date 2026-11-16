@@ -3994,15 +3994,17 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       return json(res, 200, { ok: true, runId: existing.runId, workers: existing.workers, duplicate: true }, origin);
     }
     try {
-      const cfg = getConfig();
-      const caps = effectiveCapabilities(cfg);
       const { created, becamePrime, runId } = await spawnAgentWorkers(
         { workers, context, caller: { conversationId: id } },
         async () => {
           const session = await findSessionByConversation(id, { requireUnique: true });
           return (session ? await getSessionProject(session.id) : null) ?? primeWorkspace(id) ?? currentWorkspace();
         },
-        () => !cfg.readOnly && caps.command && caps.create && caps.edit
+        () => {
+          const live = getConfig();
+          const liveCaps = effectiveCapabilities(live);
+          return !live.readOnly && liveCaps.command && liveCaps.create && liveCaps.edit;
+        }
       );
       requestWorkerBootstraps(created.map((worker) => worker.id), runId);
       const summary = created.map((info) => ({ id: info.id, label: info.label, state: info.state }));
@@ -6513,54 +6515,134 @@ let dropSwarmEndListener: (() => void) | null = null;
 let dropSwarmChangeListener: (() => void) | null = null;
 let dropWorkerFinishedListener: (() => void) | null = null;
 const GEMINI_REPORT_DELIVERY_DEBOUNCE_MS = 250;
+const GEMINI_REPORT_DELIVERY_MAX_RETRIES = 3;
+const GEMINI_REPORT_CONTINUE_MARKER = '\n\n[continued in next message]';
 const geminiSpawnedTurns = new Map<string, { runId: string; workers: Array<{ id: string; label: string; state: string }> }>();
 const geminiReportDeliveryTimers = new Map<string, NodeJS.Timeout>();
 const geminiReportDeliveryQueues = new Map<string, Promise<void>>();
+const geminiReportRetryAttempts = new Map<string, number>();
+const geminiReportPartialOffsets = new Map<string, number>();
 
-function formatGeminiPrimeReportBatch(messages: ReadonlyArray<{ from: string; text: string }>): string {
+export interface GeminiPrimeReportBatch {
+  text: string;
+  completedIds: string[];
+  nextOffset?: { id: string; offset: number };
+}
+
+function formatGeminiPrimeReportSections(
+  items: ReadonlyArray<{ from: string; body: string; continued?: boolean }>
+): string {
   const header =
-    messages.length === 1
+    items.length === 1
       ? 'Sub-agent report received:'
-      : `${messages.length} sub-agent reports received:`;
-  const body = messages.map((message) => `### From: ${message.from}\n${message.text.trim()}`).join('\n\n---\n\n');
-  let combined = `${header}\n\n${body}`;
-  if (combined.length > MAX_CHATGPT_MESSAGE_CHARS) {
-    combined = `${combined.slice(0, MAX_CHATGPT_MESSAGE_CHARS - 24)}\n\n[truncated for size]`;
+      : `${items.length} sub-agent reports received:`;
+  const sections = items
+    .map((item) => `### From: ${item.from}${item.continued ? ' (continued)' : ''}\n${item.body}`)
+    .join('\n\n---\n\n');
+  return `${header}\n\n${sections}`;
+}
+
+/**
+ * Packs complete Gemini sub-agent reports up to `maxChars` without dropping trailing messages,
+ * or splits an individual oversized report into continuation chunks before acknowledging its ID.
+ */
+export function buildGeminiPrimeReportBatch(
+  messages: ReadonlyArray<{ id: string; from: string; text: string }>,
+  partialOffsets: ReadonlyMap<string, number> = new Map(),
+  maxChars: number = MAX_CHATGPT_MESSAGE_CHARS
+): GeminiPrimeReportBatch {
+  const limit = Math.max(128, maxChars);
+  const packed: Array<{ id: string; from: string; body: string; continued: boolean }> = [];
+  for (const message of messages) {
+    const startOffset = Math.max(0, partialOffsets.get(message.id) ?? 0);
+    const trimmed = message.text.trim();
+    const remaining = startOffset > 0 ? trimmed.slice(startOffset) : trimmed;
+    const nextItem = { id: message.id, from: message.from, body: remaining, continued: startOffset > 0 };
+    const formatted = formatGeminiPrimeReportSections([...packed, nextItem]);
+    if (formatted.length <= limit) {
+      packed.push(nextItem);
+      continue;
+    }
+    if (packed.length === 0) {
+      const prefix = `Sub-agent report received:\n\n### From: ${message.from}${startOffset > 0 ? ' (continued)' : ''}\n`;
+      const suffix = GEMINI_REPORT_CONTINUE_MARKER;
+      const available = Math.max(1, limit - prefix.length - suffix.length);
+      let sliceLen = Math.min(remaining.length, available);
+      if (sliceLen < remaining.length && sliceLen > 1) {
+        const code = remaining.charCodeAt(sliceLen - 1);
+        if (code >= 0xd800 && code <= 0xdbff) sliceLen -= 1;
+      }
+      const chunk = remaining.slice(0, sliceLen);
+      const text = `${prefix}${chunk}${suffix}`.slice(0, limit);
+      const nextPos = startOffset + chunk.length;
+      if (nextPos >= trimmed.length) {
+        return { text: `${prefix}${remaining}`.slice(0, limit), completedIds: [message.id] };
+      }
+      return {
+        text,
+        completedIds: [],
+        nextOffset: { id: message.id, offset: nextPos }
+      };
+    }
+    break;
   }
-  return combined;
+  return {
+    text: formatGeminiPrimeReportSections(packed),
+    completedIds: packed.map((item) => item.id)
+  };
 }
 
 async function deliverGeminiPrimeReports(primeConversationId: string): Promise<void> {
   if (!bridgeDesiredRunning || !server) return;
   if (isChatBlocked(primeConversationId)) return;
   const peeked = peekGeminiPrimeReports(primeConversationId);
-  if (!peeked || peeked.messages.length === 0) return;
+  if (!peeked || peeked.messages.length === 0) {
+    geminiReportRetryAttempts.delete(primeConversationId);
+    return;
+  }
   const session = await findSessionByConversation(primeConversationId, { requireUnique: true });
-  if (!session || session.endedAt !== null) return;
-  const text = formatGeminiPrimeReportBatch(peeked.messages);
+  if (!session || session.endedAt !== null) {
+    geminiReportRetryAttempts.delete(primeConversationId);
+    return;
+  }
+  const batch = buildGeminiPrimeReportBatch(peeked.messages, geminiReportPartialOffsets);
   const mode = session.activeTurnId ? 'after-turn' : 'auto';
   try {
     await enqueueInput({
       id: randomUUID(),
       sessionId: session.id,
-      text,
+      text: batch.text,
       mode,
       dueAt: Date.now(),
       model: null,
       reasoningEffort: null,
       authoredSource: 'none'
     });
-    noteAutomaticReply(primeConversationId, text);
-    markGeminiPrimeReportsDelivered(
-      primeConversationId,
-      peeked.messages.map((message) => message.id)
-    );
+    noteAutomaticReply(primeConversationId, batch.text);
+    for (const id of batch.completedIds) {
+      geminiReportPartialOffsets.delete(id);
+    }
+    if (batch.nextOffset) {
+      geminiReportPartialOffsets.set(batch.nextOffset.id, batch.nextOffset.offset);
+    }
+    if (batch.completedIds.length > 0) {
+      markGeminiPrimeReportsDelivered(primeConversationId, batch.completedIds);
+    }
+    geminiReportRetryAttempts.delete(primeConversationId);
     wakeBrowserWork();
-    if (peekGeminiPrimeReports(primeConversationId)) {
+    if (batch.nextOffset || peekGeminiPrimeReports(primeConversationId)) {
       scheduleGeminiPrimeReportDelivery(primeConversationId);
     }
   } catch (err) {
     logWarn(`gemini: failed delivering prime reports to ${primeConversationId}: ${err instanceof Error ? err.message : String(err)}`);
+    const attempts = (geminiReportRetryAttempts.get(primeConversationId) ?? 0) + 1;
+    if (attempts <= GEMINI_REPORT_DELIVERY_MAX_RETRIES) {
+      geminiReportRetryAttempts.set(primeConversationId, attempts);
+      scheduleGeminiPrimeReportDelivery(primeConversationId);
+    } else {
+      geminiReportRetryAttempts.delete(primeConversationId);
+      logWarn(`gemini: giving up on prime report delivery to ${primeConversationId} after ${GEMINI_REPORT_DELIVERY_MAX_RETRIES} retries`);
+    }
   }
 }
 
@@ -7023,6 +7105,8 @@ export async function stopBridge(): Promise<void> {
     dropWorkerFinishedListener = null;
     for (const timer of geminiReportDeliveryTimers.values()) clearTimeout(timer);
     geminiReportDeliveryTimers.clear();
+    geminiReportRetryAttempts.clear();
+    geminiReportPartialOffsets.clear();
     geminiSpawnedTurns.clear();
     dropSpawnRequestListener?.();
     dropSpawnRequestListener = null;
@@ -7604,7 +7688,7 @@ export function queueWorkerBootstrap(agent: string, task: string, model: string 
   // meaning for one outside a run, and manufacturing an unscoped command here is exactly how
   // stale durable work later becomes somebody else's `worker-1`.
   if (!runId || !swarmRunning(runId)) return null;
-  const command = queue({ type: 'worker', agent, task, model, reasoningEffort, ...(provider === 'gemini' ? { provider: 'gemini' as const } : {}), runId });
+  const command = queue({ type: 'worker', agent, task, model, reasoningEffort, provider, runId });
   // Start the clock at broker admission, exactly as a revival does. A bootstrap that never
   // reaches a page is the case that has no other clock at all.
   armDeadline(command);

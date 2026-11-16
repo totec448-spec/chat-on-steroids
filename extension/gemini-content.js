@@ -45,6 +45,8 @@
   const reportedErrors = new Set();
   const claimedInputs = new Set();
   const claimedCommands = new Set();
+  const redeemingCommands = new Set();
+  const bootRetryTimers = new Map();
   const dispatchedWorkerTurns = new Set();
 
   let outgoing = [];
@@ -109,10 +111,25 @@
     try {
       while (alive && outgoing.length) {
         const batch = outgoing.slice(0, 50);
+        const entries = batch.map((item) => {
+          if (item && typeof item === 'object' && item.event && typeof item.event.kind === 'string') {
+            return {
+              ...item,
+              conversationId: item.conversationId || conversationId || null,
+              ...(item.agent || agent ? { agent: item.agent || agent, agentCommandId: item.agentCommandId || agentCommandId } : {})
+            };
+          }
+          const itemConv = (item && typeof item.conversationId === 'string' && item.conversationId) || conversationId || null;
+          return {
+            event: item,
+            conversationId: itemConv,
+            ...(agent ? { agent, agentCommandId } : {})
+          };
+        });
         const reply = await ask({
           type: 'events',
           conversationId,
-          entries: batch,
+          entries,
           ...(agent ? { agent, agentCommandId } : {})
         });
         if (!reply || reply.ok !== true) break;
@@ -140,14 +157,22 @@
       lastHref = href;
       if (nextConv !== prevConv) {
         conversationId = nextConv;
-        if (prevConv && nextConv && prevConv !== nextConv) {
+        if (prevConv) {
           epoch += 1;
           reportedUsers.clear();
           reportedAssistants.clear();
           reportedErrors.clear();
+          if (settleTimer) {
+            clearTimeout(settleTimer);
+            settleTimer = null;
+          }
           currentTurnId = null;
           generating = false;
+          stopRequested = false;
+          activePromptAttempt = false;
           initialScanDone = false;
+          lastTitle = '';
+          lastModel = '';
         }
         if (nextConv) {
           void ask({ type: 'bind', conversationId: nextConv });
@@ -326,14 +351,37 @@
     return guard() ? DOM.composer() : null;
   }
 
-  async function waitForSendReady(timeoutMs = 2_500) {
+  async function waitForSendReady(timeoutMs = 2_500, guard = () => alive) {
     const deadline = Date.now() + timeoutMs;
-    while (alive && Date.now() < deadline) {
+    while (guard() && Date.now() < deadline) {
       const btn = DOM.sendButton();
       if (btn) return btn;
       await new Promise((resolve) => setTimeout(resolve, 80));
     }
-    return DOM.sendButton();
+    return guard() ? DOM.sendButton() : null;
+  }
+
+  function composerPromptBlocker(wantedText, allowedDrafts = []) {
+    if (generating || DOM.generating()) return 'busy';
+    const comp = DOM.composer();
+    if (!comp) return 'missing';
+    const currentDraft = normText(DOM.readComposerText(comp));
+    const wanted = normText(wantedText);
+    if (currentDraft && currentDraft !== wanted && !allowedDrafts.includes(currentDraft)) {
+      return 'draft';
+    }
+    return null;
+  }
+
+  function scheduleBootstrapRetry(id, delayMs = 1_500) {
+    if (!alive || !id || claimedCommands.has(id) || bootRetryTimers.has(id)) return;
+    const timer = setTimeout(() => {
+      bootRetryTimers.delete(id);
+      if (alive && !claimedCommands.has(id)) {
+        void redeemBootstrapCommand(id);
+      }
+    }, delayMs);
+    bootRetryTimers.set(id, timer);
   }
 
   function urlParam(name) {
@@ -348,17 +396,42 @@
     }
   }
 
-  async function submitPromptIntoComposer(text, failReport) {
-    const comp = await waitForComposer(12_000);
+  async function submitPromptIntoComposer(text, failReport, options = {}) {
+    const capturedEpoch = Number.isInteger(options.expectedEpoch) ? options.expectedEpoch : epoch;
+    const hasExpectedConv = Object.prototype.hasOwnProperty.call(options, 'expectedConversationId');
+    const capturedConv = hasExpectedConv ? options.expectedConversationId : conversationId;
+    const routeCurrent = () => {
+      refreshConversationRoute();
+      return alive && epoch === capturedEpoch && (capturedConv === null ? !conversationId : conversationId === capturedConv);
+    };
+
+    const comp = await waitForComposer(12_000, routeCurrent);
+    if (!routeCurrent()) return failReport('Gemini tab navigated away before composer was ready.', 'route-changed');
     if (!comp) return failReport('Gemini composer did not appear in time.', 'transient');
 
+    if (options.checkBusyAndDraft) {
+      const blocker = composerPromptBlocker(text, options.allowedDrafts);
+      if (blocker === 'busy') {
+        return failReport('Gemini is currently generating a response.', options.deferIfBlocked ? 'defer' : 'busy');
+      }
+      if (blocker === 'draft') {
+        return failReport('Gemini already contains an unsent draft. Send or clear it in your browser first.', options.deferIfBlocked ? 'defer' : 'draft');
+      }
+    }
+
+    if (!routeCurrent()) return failReport('Gemini tab navigated away before prompt insertion.', 'route-changed');
     activePromptAttempt = true;
     if (!DOM.insertPrompt(text)) {
       activePromptAttempt = false;
       return failReport('Could not insert the prompt into Gemini.');
     }
 
-    await waitForSendReady(2_000);
+    await waitForSendReady(2_000, routeCurrent);
+    if (!routeCurrent()) {
+      activePromptAttempt = false;
+      return failReport('Gemini tab navigated away before triggering Gemini Send.', 'route-changed');
+    }
+
     const beforeUsers = DOM.extractTurns().filter((t) => t.role === 'user').length;
     if (!DOM.send()) {
       activePromptAttempt = false;
@@ -392,6 +465,7 @@
     if (claimedInputs.has(message.id)) return true;
     if (desktopInputBusy || commandBusy) return false;
     refreshConversationRoute();
+    const startEpoch = epoch;
     const target = message.conversationId || null;
     if (conversationId !== target) return false;
     if (generating || DOM.generating()) return false;
@@ -464,6 +538,11 @@
       const sent = await submitPromptIntoComposer(input.text, (err) => {
         failReason = err;
         return false;
+      }, {
+        expectedEpoch: startEpoch,
+        expectedConversationId: target,
+        checkBusyAndDraft: true,
+        allowedDrafts: ownUnsent
       });
       if (!sent) return fail(failReason || 'Could not send message to Gemini.');
 
@@ -498,13 +577,17 @@
 
   async function redeemBootstrapCommand(explicitId = null) {
     const id = explicitId || urlParam('clf');
-    if (!id || claimedCommands.has(id) || commandBusy) return;
+    if (!id || claimedCommands.has(id) || redeemingCommands.has(id) || commandBusy) return;
     commandBusy = true;
-    claimedCommands.add(id);
+    redeemingCommands.add(id);
     try {
       const comp = await waitForComposer(bootWaitMs(explicitId));
       if (!alive || !comp) return;
       refreshConversationRoute();
+      if (explicitId && (generating || DOM.generating())) {
+        scheduleBootstrapRetry(id);
+        return;
+      }
       const reply = await ask({
         type: 'redeem',
         id,
@@ -512,7 +595,12 @@
         ...(conversationId ? { conversationId } : {})
       });
       const boot = reply?.command;
-      if (!boot) return;
+      if (!boot) {
+        if (reply?.gone === true || (reply?.ok === true && !reply?.command)) {
+          claimedCommands.add(id);
+        }
+        return;
+      }
       if (boot.agent) {
         agent = boot.agent;
         agentCommandId = boot.id;
@@ -520,7 +608,9 @@
 
       const target = typeof boot.conversationId === 'string' && boot.conversationId ? boot.conversationId : null;
       refreshConversationRoute();
+      const startEpoch = epoch;
       if (target && conversationId !== target) {
+        claimedCommands.add(id);
         await ask({
           type: 'ack',
           id: boot.id,
@@ -531,8 +621,22 @@
         return;
       }
 
+      const preSendBlocker = composerPromptBlocker(boot.prompt || '');
+      if (preSendBlocker === 'busy' || preSendBlocker === 'draft') {
+        if (target) {
+          void ask({ type: 'defer_revival', id: boot.id, conversationId: target });
+        }
+        scheduleBootstrapRetry(id);
+        return;
+      }
+
+      claimedCommands.add(id);
+
       if (boot.model) {
-        const picked = await DOM.selectModel(boot.model, () => alive && conversationId === target);
+        const picked = await DOM.selectModel(boot.model, () => {
+          refreshConversationRoute();
+          return alive && epoch === startEpoch && (target ? conversationId === target : !conversationId);
+        });
         if (!picked?.ok) {
           await ask({
             type: 'ack',
@@ -556,8 +660,21 @@
         failedError = why;
         failedDetail = detail;
         return false;
+      }, {
+        expectedEpoch: startEpoch,
+        expectedConversationId: target ?? null,
+        checkBusyAndDraft: true,
+        deferIfBlocked: true
       });
       if (!ok) {
+        if (failedDetail === 'defer') {
+          claimedCommands.delete(id);
+          if (target) {
+            void ask({ type: 'defer_revival', id: boot.id, conversationId: target });
+          }
+          scheduleBootstrapRetry(id);
+          return;
+        }
         await ask({
           type: 'ack',
           id: boot.id,
@@ -589,6 +706,7 @@
         client: RUN_ID
       });
     } finally {
+      redeemingCommands.delete(id);
       commandBusy = false;
     }
   }
@@ -808,6 +926,8 @@
     if (observeTimer) clearTimeout(observeTimer);
     if (observeInterval) clearInterval(observeInterval);
     if (activityTimer) clearInterval(activityTimer);
+    for (const timer of bootRetryTimers.values()) clearTimeout(timer);
+    bootRetryTimers.clear();
     if (observer) observer.disconnect();
     try { chrome.runtime.onMessage.removeListener(runtimeMessage); } catch { /* ignore */ }
     try { globalThis.removeEventListener('pagehide', handleUnload); } catch { /* ignore */ }

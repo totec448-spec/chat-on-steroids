@@ -1701,6 +1701,12 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
  * The proven identity is then adopted for the rest of the call, so this result is recorded
  * against the right agent and carries the right inbox.
  */
+export function syntheticMcpRequestId(clientId: string, mcpSessionId: string): string {
+  const clientTag = clientId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 20) || 'remote';
+  const digest = createHash('sha256').update(`${clientId}\0${mcpSessionId}`).digest('hex').slice(0, 48);
+  return `mcp_${clientTag}_${digest}`;
+}
+
 async function callerNow(startedAt: number, options: { exact?: boolean; runId?: string; member?: boolean } = {}): Promise<Caller> {
   const base = currentCaller();
   // `exact` marks the one action that binds a run: spawn. It is the call whose refusal the
@@ -1708,7 +1714,7 @@ async function callerNow(startedAt: number, options: { exact?: boolean; runId?: 
   // declined and asked again on the next tool call.
   const allowUnattributed = currentCall()?.allowUnattributed ?? getConfig().multiAgent.allowUnattributedCalls;
   const syntheticRequestId = !base.requestId && allowUnattributed && base.mcpSessionId
-    ? `mcp_${base.clientIdentity?.id ?? 'remote'}_${base.mcpSessionId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 64)}`
+    ? syntheticMcpRequestId(base.clientIdentity?.id ?? 'remote', base.mcpSessionId)
     : null;
   const effectiveRequestId = base.requestId ?? syntheticRequestId;
   const window = effectiveRequestId ? (options.exact ? SPAWN_EVIDENCE_MS : IDENTITY_EVIDENCE_MS) : PRIME_EVIDENCE_MS;
@@ -1730,7 +1736,10 @@ async function callerNow(startedAt: number, options: { exact?: boolean; runId?: 
     runId: options.runId
   };
   const call = currentCall();
-  if (call) call.caller.runId = options.runId;
+  if (call) {
+    call.caller.runId = options.runId;
+    if (syntheticRequestId && !call.caller.requestId) call.caller.requestId = syntheticRequestId;
+  }
   if (resolved) {
     const call = currentCall();
     if (call) call.caller.conversationId = resolved;

@@ -616,6 +616,21 @@ export async function startGeminiBridge(
   }
 
   // Tailscale Funnel mode
+  const carriedFunnel: ManagedTailscaleFunnel | null =
+    options.mode === 'tailscale' &&
+    options.previousManagedFunnel &&
+    normalizeProxyTarget(options.previousManagedFunnel.localTarget) === normalizeProxyTarget(localTarget)
+      ? options.previousManagedFunnel
+      : null;
+  const tailscaleErrorHandle = (status: GeminiBridgeStatus): GeminiBridgeHandle => ({
+    status,
+    allowedHosts: new Set<string>(),
+    managedFunnel: carriedFunnel,
+    stop: async () => {
+      await stopManagedTailscaleFunnel(carriedFunnel, execTailscale);
+    }
+  });
+
   emit({
     mode: 'tailscale',
     state: 'starting',
@@ -632,12 +647,7 @@ export async function startGeminiBridge(
       detail: 'Tailscale was not found on this PC. Install and sign in to Tailscale, then click Retry.',
       actionUrl: 'https://tailscale.com/download'
     });
-    return {
-      status,
-      allowedHosts: new Set<string>(),
-      managedFunnel: null,
-      stop: async () => {}
-    };
+    return tailscaleErrorHandle(status);
   }
 
   const tsStatusRes = await execTailscale(tailscalePath, ['status', '--json'], {
@@ -652,12 +662,7 @@ export async function startGeminiBridge(
       publicOrigin: null,
       detail: detail || 'Could not read Tailscale status. Make sure Tailscale is open and running.'
     });
-    return {
-      status,
-      allowedHosts: new Set<string>(),
-      managedFunnel: null,
-      stop: async () => {}
-    };
+    return tailscaleErrorHandle(status);
   }
 
   if (!summary.running) {
@@ -670,12 +675,7 @@ export async function startGeminiBridge(
           ? 'Sign in to Tailscale first, then click Retry.'
           : `Tailscale is currently ${summary.backendState || 'stopped'}. Turn it on and click Retry.`
     });
-    return {
-      status,
-      allowedHosts: new Set<string>(),
-      managedFunnel: null,
-      stop: async () => {}
-    };
+    return tailscaleErrorHandle(status);
   }
 
   if (!summary.dnsName) {
@@ -686,12 +686,7 @@ export async function startGeminiBridge(
       detail: 'Enable MagicDNS and HTTPS certificates in your Tailscale admin console, then click Retry.',
       actionUrl: 'https://login.tailscale.com/admin/dns'
     });
-    return {
-      status,
-      allowedHosts: new Set<string>(),
-      managedFunnel: null,
-      stop: async () => {}
-    };
+    return tailscaleErrorHandle(status);
   }
 
   const serveRes = await execTailscale(tailscalePath, ['serve', 'status', '--json'], {
@@ -711,12 +706,7 @@ export async function startGeminiBridge(
       publicOrigin: null,
       detail: 'Tailscale Funnel ports 443, 8443, and 10000 are already serving other local apps.'
     });
-    return {
-      status,
-      allowedHosts: new Set<string>(),
-      managedFunnel: null,
-      stop: async () => {}
-    };
+    return tailscaleErrorHandle(status);
   }
 
   const origin = normalizeHttpsOrigin(
@@ -731,12 +721,7 @@ export async function startGeminiBridge(
       publicOrigin: null,
       detail: 'Tailscale reported an invalid MagicDNS hostname.'
     });
-    return {
-      status,
-      allowedHosts: new Set<string>(),
-      managedFunnel: null,
-      stop: async () => {}
-    };
+    return tailscaleErrorHandle(status);
   }
 
   let createdByUs = false;
@@ -759,12 +744,7 @@ export async function startGeminiBridge(
             'Could not enable Tailscale Funnel on this device.',
         actionUrl
       });
-      return {
-        status,
-        allowedHosts: new Set<string>(),
-        managedFunnel: null,
-        stop: async () => {}
-      };
+      return tailscaleErrorHandle(status);
     }
     createdByUs = true;
     logInfo(`Gemini Tailscale Funnel live at ${origin} -> ${localTarget}`);

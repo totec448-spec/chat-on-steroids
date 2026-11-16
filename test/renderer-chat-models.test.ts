@@ -831,3 +831,57 @@ it('shows and switches Gemini composer & Settings models independently from Chat
   expect(doc.getElementById('composerSpark')!.hidden).toBe(false);
   expect(confirmedComposerModel()).toEqual({ model: 'gpt-6', reasoningEffort: 'high' });
 });
+
+it('treats an unedited existing Gemini chat as Automatic when its observed model is unlisted or catalog is empty', async () => {
+  dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  let geminiModels: {
+    state: 'ready' | 'unavailable';
+    requestedAt: number | null;
+    observedAt: number | null;
+    models: Array<{ id: string; label: string }>;
+  } = {
+    state: 'ready',
+    requestedAt: null,
+    observedAt: 9,
+    models: [
+      { id: 'fast', label: 'Fast' },
+      { id: 'pro', label: '2.5 Pro' }
+    ]
+  };
+  Object.assign(dom.window, {
+    api: {
+      getChatModels: async () => ({ ok: true, data: { state: 'unavailable', requestedAt: null, observedAt: null, models: [] } }),
+      getGeminiModels: async () => ({ ok: true, data: geminiModels }),
+      requestGeminiModels: async () => ({ ok: true, data: geminiModels })
+    }
+  });
+  const {
+    initChatModels,
+    applyChatModels,
+    applyComposerSessionModel,
+    setActiveModelProvider,
+    composerSendModel,
+    ensureComposerModel
+  } = await import('../src/renderer/chat-models.js');
+  initChatModels();
+  applyChatModels({ ui: {}, multiAgent: {}, goal: {} } as Config);
+  await Promise.resolve();
+  await Promise.resolve();
+
+  setActiveModelProvider('gemini');
+  applyComposerSessionModel('gemini-existing-chat', {
+    model: '2.5 Pro (experimental)',
+    observedAt: Date.now()
+  }, 'gemini');
+
+  // Existing unedited Gemini chat with an observed model outside the catalog never blocks Send.
+  expect(composerSendModel()).toEqual({ model: null, reasoningEffort: null });
+  await expect(ensureComposerModel()).resolves.toEqual({ model: null, reasoningEffort: null });
+
+  // Same when Gemini model discovery catalog is empty.
+  geminiModels = { state: 'unavailable', requestedAt: null, observedAt: null, models: [] };
+  applyChatModels({ ui: {}, multiAgent: {}, goal: {} } as Config);
+  await Promise.resolve();
+  expect(composerSendModel()).toEqual({ model: null, reasoningEffort: null });
+});

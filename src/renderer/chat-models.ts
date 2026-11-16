@@ -52,7 +52,11 @@ function exactModelRequested(): boolean {
 function automaticApplies(): boolean {
   if (composerContext?.automatic === true) return true;
   if (activeProvider === 'gemini') {
-    return !exactModelRequested() && !($<HTMLSelectElement>('composerModel')?.value);
+    if (exactModelRequested()) return false;
+    const value = $<HTMLSelectElement>('composerModel')?.value;
+    // An existing chat keeps its own model; never block Send on an unlisted observation.
+    const existing = !!composerContext && composerContext.scope !== null && !composerContext.edited;
+    return !value || existing || !geminiCatalog.models.length;
   }
   return !activeCatalog().models.length && !exactModelRequested();
 }

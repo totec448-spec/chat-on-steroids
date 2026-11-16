@@ -28,10 +28,13 @@ const { resetBlockedChatsForTests, setChatBlocked } = await import('../src/main/
 const {
   onSwarmPersistNow,
   peekGeminiPrimeReports,
+  requestWorkerBootstraps,
   resetSwarm
 } = await import('../src/main/agents.js');
+const { spawnAgentWorkers } = await import('../src/main/agent-admission.js');
 const inputMod = await import('../src/main/session/input.js');
 const {
+  buildGeminiPrimeReportBatch,
   commandUrl,
   pendingCommands,
   resetBridgeForTests,
@@ -39,7 +42,9 @@ const {
   startBridge,
   stopBridge
 } = await import('../src/main/bridge.js');
-const { pickTailscaleFunnelPort } = await import('../src/main/mcp/gemini-bridge.js');
+const { pickTailscaleFunnelPort, startGeminiBridge } = await import('../src/main/mcp/gemini-bridge.js');
+const { syntheticMcpRequestId } = await import('../src/main/mcp/tools-core.js');
+const { opensInCosBrowser } = await import('../src/shared/cos-browser-sites.js');
 const { makeTempDir, removeTempDir } = await import('./helpers.js');
 
 const EXTENSION_ORIGIN = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
@@ -448,5 +453,134 @@ describe('Gemini Web bridge integration', () => {
     expect(session?.selectedModel?.model).toBe('2.5 Pro (experimental)');
 
     resetGeminiModelsForTests();
+  });
+
+  it('preserves previousManagedFunnel ownership when a same-target Tailscale refresh fails', async () => {
+    const execCalls: string[][] = [];
+    const previousManagedFunnel = {
+      binaryPath: 'tailscale',
+      httpsPort: 443 as const,
+      localTarget: 'http://127.0.0.1:43123'
+    };
+    const handle = await startGeminiBridge({
+      mode: 'tailscale',
+      localUrl: 'http://127.0.0.1:43123',
+      tunnelKind: 'openai',
+      tunnelPublicUrl: null,
+      previousManagedFunnel,
+      report: () => {},
+      deps: {
+        locateTailscale: () => 'tailscale',
+        execTailscale: async (_bin, args) => {
+          execCalls.push(args);
+          if (args[0] === 'status') {
+            return { exitCode: 1, stdout: '', stderr: 'timed out reading status', timedOut: false };
+          }
+          if (args[0] === 'serve') {
+            return {
+              exitCode: 0,
+              stdout: JSON.stringify({
+                TCP: { '443': { HTTPS: true } },
+                Web: { 'demo.tail123.ts.net:443': { Handlers: { '/': { Proxy: 'http://127.0.0.1:43123' } } } },
+                AllowFunnel: { 'demo.tail123.ts.net:443': true }
+              }),
+              stderr: '',
+              timedOut: false
+            };
+          }
+          return { exitCode: 0, stdout: '', stderr: '', timedOut: false };
+        }
+      }
+    });
+
+    expect(handle.status.state).toBe('error');
+    expect(handle.managedFunnel).toEqual(previousManagedFunnel);
+    await handle.stop();
+    expect(execCalls.some((args) => args.join(' ') === 'funnel --https=443 off')).toBe(true);
+  });
+
+  it('batches Gemini prime reports without truncation loss and preserves explicit chatgpt worker provider', async () => {
+    // 1. Multi-message packing leaves overflow messages uncompleted; oversized single report splits cleanly.
+    const packed = buildGeminiPrimeReportBatch(
+      [
+        { id: 'm1', from: 'worker-1', text: 'First report payload '.repeat(4).trim() },
+        { id: 'm2', from: 'worker-2', text: 'Second report payload '.repeat(4).trim() }
+      ],
+      new Map(),
+      140
+    );
+    expect(packed.completedIds).toEqual(['m1']);
+    expect(packed.nextOffset).toBeUndefined();
+    expect(packed.text).toContain('First report payload');
+    expect(packed.text).not.toContain('Second report payload');
+
+    const longBody = Array.from({ length: 40 }, (_, i) => `[seg-${i}]`).join('');
+    const offsets = new Map<string, number>();
+    const bodySlices: string[] = [];
+    for (let step = 0; step < 10; step += 1) {
+      const part = buildGeminiPrimeReportBatch([{ id: 'big-1', from: 'worker-1', text: longBody }], offsets, 150);
+      expect(part.text.length).toBeLessThanOrEqual(150);
+      const afterHeader = part.text.replace(/^Sub-agent report received:\n\n### From: worker-1(?: \(continued\))?\n/, '');
+      const bodyOnly = afterHeader.replace(/\n\n\[continued in next message\]$/, '');
+      bodySlices.push(bodyOnly);
+      if (part.completedIds.includes('big-1')) {
+        offsets.delete('big-1');
+        break;
+      }
+      expect(part.completedIds).toEqual([]);
+      expect(part.nextOffset).toBeDefined();
+      offsets.set(part.nextOffset!.id, part.nextOffset!.offset);
+    }
+    expect(offsets.has('big-1')).toBe(false);
+    expect(bodySlices.join('')).toBe(longBody);
+
+    // 2. Explicit chatgpt worker spawned under a Gemini prime keeps its ChatGPT open URL.
+    await pair();
+    const primeId = 'gemini-mixedprime1234';
+    await request('POST', '/events', {
+      body: {
+        conversationId: primeId,
+        events: [{ kind: 'user_message', time: Date.now(), messageId: 'gm-u1', text: 'Spawn mixed workers' }]
+      }
+    });
+    const spawned = await spawnAgentWorkers(
+      {
+        workers: [
+          { label: 'GeminiWorker', task: 'Handle Gemini side', provider: 'gemini' },
+          { label: 'ChatGPTWorker', task: 'Run ChatGPT task', provider: 'chatgpt' }
+        ],
+        caller: { conversationId: primeId }
+      },
+      async () => null,
+      () => true
+    );
+    requestWorkerBootstraps(
+      spawned.created.map((worker) => worker.id),
+      spawned.runId
+    );
+    await vi.waitFor(
+      () => {
+        expect(opened.some((u) => u.startsWith('https://gemini.google.com/'))).toBe(true);
+        expect(opened.some((u) => u.startsWith('https://chatgpt.com/'))).toBe(true);
+      },
+      {
+        timeout: 10_000,
+        interval: 20
+      }
+    );
+  });
+
+  it('derives injective synthetic MCP request ids and keeps Gemini out of CoS browser routing', () => {
+    const idA = syntheticMcpRequestId('gemini', 'session.a');
+    const idB = syntheticMcpRequestId('gemini', 'session_a');
+    const idLong1 = syntheticMcpRequestId('gemini', `${'x'.repeat(80)}-one`);
+    const idLong2 = syntheticMcpRequestId('gemini', `${'x'.repeat(80)}-two`);
+    expect(idA).not.toBe(idB);
+    expect(idLong1).not.toBe(idLong2);
+    expect(idA).toMatch(/^[a-z0-9_-]{1,100}$/i);
+    expect(idLong1).toMatch(/^[a-z0-9_-]{1,100}$/i);
+
+    expect(opensInCosBrowser('https://gemini.google.com/app')).toBe(false);
+    expect(opensInCosBrowser('https://chatgpt.com/')).toBe(true);
   });
 });
