@@ -389,6 +389,13 @@ it('uses native menu-bar/Dock wording on macOS instead of Windows tray copy', as
   expect(doc.getElementById('backgroundRunningCopy')!.textContent).toContain('menu bar and Dock');
   expect(doc.getElementById('backgroundRunningCopy')!.textContent).not.toContain('tray');
   expect(doc.getElementById('minimizeToTrayCopy')!.textContent).toBe('Hide the window to the menu bar when closed');
+  expect(doc.getElementById('showTrayIconRow')!.hidden).toBe(false);
+  expect(doc.getElementById('showTrayIconCopy')!.textContent).toBe('Show icon in the menu bar');
+
+  const winMounted = await mountChat({
+    platform: { family: 'windows', name: 'Windows', desktopAutomation: true }
+  });
+  expect(winMounted.window.document.getElementById('showTrayIconRow')!.hidden).toBe(true);
 });
 
 it('surfaces the existing root rename API in the folder row', async () => {

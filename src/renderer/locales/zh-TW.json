@@ -1015,6 +1015,7 @@
   "Disconnect": "中斷連線",
   "Leave it running while you use its plugins in ChatGPT. It stays available from the menu bar and Dock when you close the window.": "在 ChatGPT 中使用它的外掛時，請保持它執行。關閉視窗後仍可從選單列和 Dock 使用。",
   "Hide the window to the menu bar when closed": "關閉視窗時隱藏到選單列",
+  "Show icon in the menu bar": "在選單列中顯示圖示",
   "Leave it running while you use its plugins in ChatGPT. It stays in the tray when you close the window.": "在 ChatGPT 中使用它的外掛時，請保持它執行。關閉視窗後它會留在系統匣中。",
   "Keep running in the tray when closed": "關閉視窗後在系統匣中繼續執行",
   "A key is stored with secure OS credential storage. Type a new one to replace it, or use Remove stored API key.": "金鑰已儲存在系統安全認證資料儲存中。輸入新金鑰可替換，也可點選「刪除已儲存的 API 金鑰」。",

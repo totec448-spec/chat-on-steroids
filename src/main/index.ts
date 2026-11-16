@@ -136,7 +136,8 @@ import {
   registerNativeWindowActivation,
   trackNormalWindowBounds,
   shouldBeginAppBootstrap,
-  shouldQuitOnWindowAllClosed
+  shouldQuitOnWindowAllClosed,
+  shouldShowTrayIcon
 } from './window-lifecycle.js';
 import { trayGuidArgsForPlatform, trayImageSpec } from './tray-image.js';
 import { browserWindowIconPath } from './window-icon.js';
@@ -438,6 +439,24 @@ function refreshTray(): void {
       }
     ])
   );
+}
+
+function syncTray(): void {
+  const visible = shouldShowTrayIcon(process.platform, getConfig().ui.showTrayIcon);
+  if (visible) {
+    if (!tray) {
+      tray = new Tray(trayIcon(false), ...trayGuidArgsForPlatform());
+      tray.on('click', windowActivation.request);
+      logInfo('tray icon: created');
+    }
+    refreshTray();
+  } else if (tray) {
+    tray.destroy();
+    tray = null;
+    logInfo('tray icon: destroyed');
+  } else {
+    logInfo('tray icon: disabled by preference');
+  }
 }
 
 app.on('second-instance', (_event, argv) => {
@@ -822,7 +841,8 @@ void app.whenReady().then(async () => {
     () => {
       quitting = true;
       app.quit();
-    }
+    },
+    syncTray
   );
   // Chats are restored here; the window, once enabled, can ask for its state before the pet overlay is ready.
   markStartup('restored');
@@ -836,9 +856,7 @@ void app.whenReady().then(async () => {
   // Dock activation/re-launch can safely recreate or focus it.
   registerNativeWindowActivation(app, windowActivation.request);
 
-  tray = new Tray(trayIcon(false), ...trayGuidArgsForPlatform());
-  tray.on('click', windowActivation.request);
-  refreshTray();
+  syncTray();
   onStatusChange(refreshTray);
   // The built-in browser's own hooks live in its module, which loads only once it is selected.
   onCosBrowserLoaded(cosBrowser => { cosBrowser.onChange(refreshTray); refreshTray(); });

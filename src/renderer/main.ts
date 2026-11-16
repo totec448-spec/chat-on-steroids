@@ -941,6 +941,7 @@ function save(over: { readOnly?: boolean; theme?: ThemeChoice; appearance?: Appe
       keepAwake: $<HTMLSelectElement>('keepAwake').value !== 'off',
       keepScreenAwake: $<HTMLSelectElement>('keepAwake').value === 'screen',
       minimizeToTray: $<HTMLInputElement>('minimizeToTray').checked,
+      showTrayIcon: $<HTMLInputElement>('showTrayIcon').checked,
       developerMode: $<HTMLInputElement>('developerMode').checked,
       playfulStatus: $<HTMLInputElement>('playfulStatus').checked,
       playfulContinue: $<HTMLInputElement>('playfulContinue').checked,
@@ -1995,6 +1996,11 @@ function apply(next: AppState): void {
     previousState?.config.ui.minimizeToTray
   );
   applyChecked(
+    $<HTMLInputElement>('showTrayIcon'),
+    config.ui.showTrayIcon !== false,
+    previousState ? previousState.config.ui.showTrayIcon !== false : undefined
+  );
+  applyChecked(
     $<HTMLInputElement>('privacyScreenshots'),
     config.ui.privacyScreenshots,
     previousState?.config.ui.privacyScreenshots
@@ -2009,9 +2015,11 @@ function apply(next: AppState): void {
   // Only macOS screenshots can show the whole screen; on Windows every capture is one window
   // already, so the switch would change nothing there.
   $('privacyScreenshotsSetting').hidden = !(next.platform?.desktopAutomation ?? true) || next.platform?.family !== 'macos';
+  $('showTrayIconRow').hidden = next.platform?.family !== 'macos';
   if (next.platform?.family === 'macos') {
     ui($('backgroundRunningCopy'), 'textContent', () => t("Leave it running while you use its plugins in ChatGPT. It stays available from the menu bar and Dock when you close the window."));
     ui($('minimizeToTrayCopy'), 'textContent', () => t("Hide the window to the menu bar when closed"));
+    ui($('showTrayIconCopy'), 'textContent', () => t("Show icon in the menu bar"));
     ui($('cosBrowserMinimizeTaskbar'), 'textContent', () => t("Dock"));
     ui($('cosBrowserMinimizeTray'), 'textContent', () => t("Menu bar"));
   } else {
@@ -3098,6 +3106,7 @@ for (const id of [
   'startAtLogin',
   'keepAwake',
   'minimizeToTray',
+  'showTrayIcon',
   'developerMode',
   'playfulStatus',
   'playfulContinue',

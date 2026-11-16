@@ -10,7 +10,8 @@ import {
   registerNativeWindowActivation,
   trackNormalWindowBounds,
   shouldBeginAppBootstrap,
-  shouldQuitOnWindowAllClosed
+  shouldQuitOnWindowAllClosed,
+  shouldShowTrayIcon
 } from '../src/main/window-lifecycle.js';
 
 describe('native window activation', () => {
@@ -170,6 +171,18 @@ describe('native window activation', () => {
   it.each(['win32', 'linux'] as const)('keeps close-to-tray semantics on %s', (platform) => {
     expect(shouldQuitOnWindowAllClosed(platform, true)).toBe(false);
     expect(shouldQuitOnWindowAllClosed(platform, false)).toBe(true);
+  });
+
+  it('allows disabling the menu bar icon only on macOS', () => {
+    expect(shouldShowTrayIcon('darwin', true)).toBe(true);
+    expect(shouldShowTrayIcon('darwin', false)).toBe(false);
+    expect(shouldShowTrayIcon('darwin', undefined)).toBe(true);
+  });
+
+  it.each(['win32', 'linux'] as const)('always keeps the tray icon enabled on %s', (platform) => {
+    expect(shouldShowTrayIcon(platform, true)).toBe(true);
+    expect(shouldShowTrayIcon(platform, false)).toBe(true);
+    expect(shouldShowTrayIcon(platform, undefined)).toBe(true);
   });
 
   it('persists normal bounds plus maximized presentation and ignores other transient native states', () => {

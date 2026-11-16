@@ -839,6 +839,7 @@
   "Disconnect": "Desconectar",
   "Leave it running while you use its plugins in ChatGPT. It stays available from the menu bar and Dock when you close the window.": "Mantenha-o em execução enquanto você usa os plugins dele no ChatGPT. Ele continua disponível na barra de menus e no Dock quando você fecha a janela.",
   "Hide the window to the menu bar when closed": "Ocultar a janela na barra de menus ao fechar",
+  "Show icon in the menu bar": "Mostrar ícone na barra de menus",
   "Leave it running while you use its plugins in ChatGPT. It stays in the tray when you close the window.": "Mantenha-o em execução enquanto você usa os plugins dele no ChatGPT. Ele continua na bandeja do sistema quando você fecha a janela.",
   "Keep running in the tray when closed": "Continuar em execução na área de notificação ao fechar",
   "A key is stored with secure OS credential storage. Type a new one to replace it, or use Remove stored API key.": "Uma chave está armazenada no gerenciador seguro de credenciais do sistema operacional. Digite uma nova para substituí-la ou escolha Remover chave de API salva.",

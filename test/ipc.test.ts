@@ -1682,6 +1682,28 @@ describe('settings writes from more than one UI', () => {
     expect(getConfig().ui.minimizeToTray).toBe(!base.ui.minimizeToTray);
     expect(getConfig().multiAgent.recoverAgentTabs).toBe(false);
   });
+
+  it('round-trips showTrayIcon through settings save and invokes syncTrayVisibility on change', async () => {
+    let synced = 0;
+    registerIpc(() => null, () => undefined, () => { synced += 1; });
+    const base = defaultConfig();
+    await saveConfig(base);
+    expect(getConfig().ui.showTrayIcon).toBe(true);
+
+    const changed = await save({ ...base, ui: { ...base.ui, showTrayIcon: false } }, base);
+    expect(changed.ok).toBe(true);
+    expect(getConfig().ui.showTrayIcon).toBe(false);
+    expect(synced).toBe(1);
+
+    const unchanged = await save({ ...base, ui: { ...base.ui, showTrayIcon: false } }, { ...base, ui: { ...base.ui, showTrayIcon: false } });
+    expect(unchanged.ok).toBe(true);
+    expect(synced).toBe(1);
+
+    const restored = await save({ ...base, ui: { ...base.ui, showTrayIcon: true } }, { ...base, ui: { ...base.ui, showTrayIcon: false } });
+    expect(restored.ok).toBe(true);
+    expect(getConfig().ui.showTrayIcon).toBe(true);
+    expect(synced).toBe(2);
+  });
 });
 
 describe('root namespace invariants', () => {

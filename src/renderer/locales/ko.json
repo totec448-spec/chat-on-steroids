@@ -803,6 +803,7 @@
   "Disconnect": "연결 끊기",
   "Leave it running while you use its plugins in ChatGPT. It stays available from the menu bar and Dock when you close the window.": "ChatGPT에서 이 앱의 플러그인을 사용하는 동안 계속 실행해 두세요. 창을 닫아도 메뉴 막대와 Dock에서 사용할 수 있습니다.",
   "Hide the window to the menu bar when closed": "창을 닫으면 메뉴 막대로 숨기기",
+  "Show icon in the menu bar": "메뉴 막대에 아이콘 표시",
   "Leave it running while you use its plugins in ChatGPT. It stays in the tray when you close the window.": "ChatGPT에서 이 앱의 플러그인을 사용하는 동안 계속 실행해 두세요. 창을 닫아도 시스템 트레이에 남아 있습니다.",
   "Keep running in the tray when closed": "창을 닫아도 트레이에서 계속 실행",
   "A key is stored with secure OS credential storage. Type a new one to replace it, or use Remove stored API key.": "OS의 안전한 자격 증명 저장소에 키가 보관되어 있습니다. 교체하려면 새 키를 입력하거나 저장된 API 키 제거를 사용하세요.",

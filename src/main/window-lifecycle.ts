@@ -68,6 +68,18 @@ export function shouldQuitOnWindowAllClosed(
 }
 
 /**
+ * On macOS, users can choose to turn off the menu bar (system tray) icon because the app remains
+ * accessible via the Dock and application menu. Other platforms (Windows/Linux) require the tray
+ * icon so background sessions and close-to-tray do not become headless and unreachable.
+ */
+export function shouldShowTrayIcon(
+  platform: NodeJS.Platform = process.platform,
+  showTrayIcon?: boolean
+): boolean {
+  return platform !== 'darwin' || showTrayIcon !== false;
+}
+
+/**
  * macOS users return to a hidden app through the Dock, which Electron reports as `activate`.
  * Windows/Linux use the tray/second-instance paths and should not gain a synthetic handler.
  */

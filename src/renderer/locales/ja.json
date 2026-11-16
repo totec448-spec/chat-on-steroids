@@ -903,6 +903,7 @@
   "Disconnect": "切断",
   "Leave it running while you use its plugins in ChatGPT. It stays available from the menu bar and Dock when you close the window.": "ChatGPT でこのアプリのプラグインを使う間は、実行したままにしてください。ウィンドウを閉じても、メニューバーと Dock から利用できます。",
   "Hide the window to the menu bar when closed": "閉じるとウィンドウをメニューバーに隠す",
+  "Show icon in the menu bar": "メニューバーにアイコンを表示",
   "Leave it running while you use its plugins in ChatGPT. It stays in the tray when you close the window.": "ChatGPT でこのアプリのプラグインを使う間は、実行したままにしてください。ウィンドウを閉じても、トレイに残ります。",
   "Keep running in the tray when closed": "閉じてもトレイで実行を継続",
   "A key is stored with secure OS credential storage. Type a new one to replace it, or use Remove stored API key.": "キーは OS の安全な認証情報ストレージに保存されています。新しいキーを入力すると置き換えます。「保存済み API キーを削除」から削除することもできます。",

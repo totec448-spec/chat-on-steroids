@@ -903,6 +903,7 @@
   "Disconnect": "断开连接",
   "Leave it running while you use its plugins in ChatGPT. It stays available from the menu bar and Dock when you close the window.": "在 ChatGPT 中使用它的插件时，请保持它运行。关闭窗口后仍可从菜单栏和程序坞使用。",
   "Hide the window to the menu bar when closed": "关闭窗口时隐藏到菜单栏",
+  "Show icon in the menu bar": "在菜单栏中显示图标",
   "Leave it running while you use its plugins in ChatGPT. It stays in the tray when you close the window.": "在 ChatGPT 中使用它的插件时，请保持它运行。关闭窗口后它会留在托盘中。",
   "Keep running in the tray when closed": "关闭窗口后在托盘中继续运行",
   "A key is stored with secure OS credential storage. Type a new one to replace it, or use Remove stored API key.": "密钥已保存在系统安全凭据存储中。输入新密钥可替换，也可点击“删除已保存的 API 密钥”。",
