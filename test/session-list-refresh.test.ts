@@ -24,7 +24,6 @@ import {
 } from '../src/main/session/store.js';
 import { upsertMessageEvent } from '../src/main/session/store.js';
 import type { SessionEvent, SessionSummary } from '../src/shared/session.js';
-import * as logger from '../src/main/logger.js';
 import { notifyChanged, onSessionChange, resetRecorderForTests } from '../src/main/session/recorder.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
@@ -815,12 +814,11 @@ describe('scoped session change refresh', () => {
     };
     const listsBefore = state.lists;
     const controlsBefore = state.controlsCalls.length;
-    // Send only a targeted push so recovery relies on targeted invalidation of controlsPushSeq.
     state.a = { ...state.a, updatedAt: 31_000, events: 2 };
     state.changed({ sessionIds: [state.a.id] });
     await vi.waitFor(() => expect(state.controlsCalls.length).toBe(controlsBefore + 1), { timeout: 300 });
     expect(state.detailCalls).toHaveLength(2);
-    // Recover controls before the catalog refresh settles: line 1793 must retry because the failure stayed unacknowledged.
+    // Recover controls before the catalog refresh settles: catalog catch-up refreshes controls without rereading the transcript.
     failControls = false;
     await vi.waitFor(() => expect(state.lists).toBe(listsBefore + 1), { timeout: 1600 });
     await vi.waitFor(() => expect(state.controlsCalls.length).toBe(controlsBefore + 2), { timeout: 400 });
@@ -946,78 +944,76 @@ describe('scoped session change refresh', () => {
     await vi.waitFor(() => expect(state.lists).toBe(listsBefore + 1), { timeout: 800 });
   });
 
-  it('schedules bounded controls retry when getSessionControls fails after catalog catch-up', async () => {
-    const { w, state, publish } = await openSelected();
-    const listsBefore = state.lists;
-    const controlsBefore = state.controlsCalls.length;
-    let releaseDelayedFailure = (_result: any) => {};
-    let attempt = 0;
-    (w as any).api.getSessionControls = (id: string) => {
-      state.controlsCalls.push(id);
-      attempt += 1;
-      if (attempt === 1) {
-        return new Promise((resolve) => { releaseDelayedFailure = resolve; });
-      }
-      if (attempt === 2) {
-        return Promise.resolve({ ok: true, data: { plan: null, userRequests: [], objective: 'Recovered objective' } });
-      }
-      return Promise.resolve({ ok: false, error: 'Controls still down' });
+  it('reads the selected chat exactly once on reopen after multiple pushes arrive while hidden', async () => {
+    const { w, state, chatVisible } = await openSelected();
+    let releaseHiddenList = (_value: any) => {};
+    let holdNextList = true;
+    (w as any).api.listSessions = () => {
+      state.lists += 1;
+      const sessions = state.listed ? [state.a, state.b] : [state.b];
+      const payload = { ok: true as const, data: { sessions, activeId: null, pressure: [], total: sessions.length, nextCursor: null, blocked: [] } };
+      if (!holdNextList) return Promise.resolve(payload);
+      holdNextList = false;
+      return new Promise(resolve => { releaseHiddenList = resolve; });
     };
 
+    // Put A into its 100 ms active-detail cooldown so the next push stays queued when readSessions('changed') starts.
     state.a = summary(state.a.id, 30_500, 2);
-    await publish({ allTranscripts: false, sessionIds: [state.a.id] });
-    await vi.waitFor(() => expect(state.controlsCalls.length).toBe(controlsBefore + 1), { timeout: 400 });
-    await vi.waitFor(() => expect(state.lists).toBe(listsBefore + 1), { timeout: 1600 });
-    // Catalog catch-up skipped getSessionControls because the initial read was still in flight.
-    expect(state.controlsCalls.length).toBe(controlsBefore + 1);
+    state.changed({ allTranscripts: false, sessionIds: [state.a.id] });
+    await vi.waitFor(() => expect(state.detailCalls).toHaveLength(2), { timeout: 400 });
+    const listsBeforeInFlight = state.lists;
+    await vi.waitFor(() => expect(state.lists).toBe(listsBeforeInFlight + 1), { timeout: 1000 });
 
-    releaseDelayedFailure({ ok: false, error: 'Delayed failure after catch-up' });
-    await vi.waitFor(() => expect(state.controlsCalls.length).toBe(controlsBefore + 2), { timeout: 1000 });
-    await vi.waitFor(() =>
-      expect((w.document.getElementById('sessionObjective') as HTMLTextAreaElement).value).toBe('Recovered objective'),
-      { timeout: 600 }
-    );
+    // Hide while readSessions('changed') is awaiting listSessions, then resolve listSessions so line 1725 returns early while hidden.
+    const detailsBeforeHide = state.detailCalls.length;
+    chatVisible(false);
+    releaseHiddenList({
+      ok: true as const,
+      data: { sessions: [state.a, state.b], activeId: null, pressure: [], total: 2, nextCursor: null, blocked: [] }
+    });
+    await new Promise(resolve => setTimeout(resolve, 30));
 
-    // Further failures stop after the bounded retry budget rather than polling indefinitely.
-    state.a = summary(state.a.id, 30_600, 3);
-    await publish({ allTranscripts: false, sessionIds: [state.a.id] });
-    await vi.waitFor(() => expect(state.controlsCalls.length).toBe(controlsBefore + 5), { timeout: 1800 });
-    await new Promise(resolve => setTimeout(resolve, 650));
-    expect(state.controlsCalls.length).toBe(controlsBefore + 5);
+    // Deliver multiple additional pushes for the selected chat while the window is hidden.
+    state.a = summary(state.a.id, 31_000, 3);
+    state.changed({ allTranscripts: false, sessionIds: [state.a.id] });
+    state.a = summary(state.a.id, 32_000, 4);
+    state.changed({ allTranscripts: false, sessionIds: [state.a.id] });
+    state.a = summary(state.a.id, 33_000, 5);
+    state.changed({ allTranscripts: false, sessionIds: [state.a.id] });
+
+    const listsWhileHidden = state.lists;
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(state.lists).toBe(listsWhileHidden);
+    expect(state.detailCalls).toHaveLength(detailsBeforeHide);
+
+    chatVisible(true);
+    await vi.waitFor(() => expect(state.lists).toBe(listsWhileHidden + 1), { timeout: 800 });
+    await vi.waitFor(() => expect(state.detailCalls).toHaveLength(detailsBeforeHide + 1), { timeout: 800 });
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(state.lists).toBe(listsWhileHidden + 1);
+    expect(state.detailCalls).toHaveLength(detailsBeforeHide + 1);
+    expect(w.document.getElementById('timeline')?.textContent).toContain('A row 3');
   });
 
-  it('schedules bounded drain retry when catalog catch-up returns a full page and its follow-up drain fails', async () => {
-    const { w, state, publish } = await openSelected();
+  it('coalesces a burst of writes to an unselected background chat into one 400 ms catalog read with zero getSession calls', async () => {
+    const { w, state } = await openSelected();
     const listsBefore = state.lists;
-    w.api.getSession = (id: string, options?: any) => {
-      state.detailCalls.push({ id, options });
-      if (state.detailCalls.length === 2) return Promise.resolve({ ok: false, error: 'Initial push failed' });
-      if (state.detailCalls.length === 3) {
-        return Promise.resolve({
-          ok: true,
-          data: {
-            summary: state.a,
-            events: Array.from({ length: 30 }, (_, index) => note(101 + index, `Catchup page row ${index}`)),
-            total: 32,
-            nextFrom: 131
-          }
-        });
-      }
-      if (state.detailCalls.length === 4) return Promise.resolve({ ok: false, error: 'Follow-up drain failed' });
-      return Promise.resolve({
-        ok: true,
-        data: { summary: state.a, events: [note(131, 'Recovered catchup drain row')], total: 32, nextFrom: 132 }
-      });
-    };
+    const detailsBefore = state.detailCalls.length;
 
-    state.a = summary(state.a.id, 30_800, 32);
-    await publish({ allTranscripts: false, sessionIds: [state.a.id] });
-    await vi.waitFor(() => expect(state.lists).toBe(listsBefore + 1), { timeout: 1600 });
-    await vi.waitFor(
-      () => expect(w.document.getElementById('timeline')?.textContent).toContain('Recovered catchup drain row'),
-      { timeout: 1600 }
-    );
-    expect(state.detailCalls.length).toBe(5);
+    for (let i = 1; i <= 8; i += 1) {
+      state.b = summary(state.b.id, 20_000 + i * 100, 1 + i);
+      state.changed({ allTranscripts: false, sessionIds: [state.b.id] });
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(state.lists).toBe(listsBefore);
+    expect(state.detailCalls).toHaveLength(detailsBefore);
+
+    await vi.waitFor(() => expect(state.lists).toBe(listsBefore + 1), { timeout: 1000 });
+    await new Promise(resolve => setTimeout(resolve, 120));
+    expect(state.lists).toBe(listsBefore + 1);
+    expect(state.detailCalls).toHaveLength(detailsBefore);
+    expect(w.document.querySelector(`#sessionList [data-id="${state.b.id}"]`)).not.toBeNull();
   });
 
   it('fences catalog listTimer cleanup to its owner across hide and reopen', async () => {
@@ -1063,8 +1059,7 @@ describe('scoped session change refresh', () => {
 });
 
 describe('recorder session change cooldown', () => {
-  it('uses a monotonic clock and logs cooldown delays without stalling on wall-clock steps back', async () => {
-    const logged = vi.spyOn(logger, 'logInfo').mockImplementation(() => undefined);
+  it('uses a monotonic clock so cooldown delays do not stall on wall-clock steps back', async () => {
     const changes: string[][] = [];
     const drop = onSessionChange(change => changes.push([...(change.sessionIds ?? [])]));
     vi.useFakeTimers();
@@ -1076,7 +1071,6 @@ describe('recorder session change cooldown', () => {
       // Step the wall clock backward while sending a burst inside the 180 ms cooldown: all writes coalesce to one push.
       vi.setSystemTime(Date.now() - 60_000);
       for (let i = 0; i < 5; i += 1) notifyChanged('sess-2');
-      expect(logged.mock.calls.some(([msg]) => typeof msg === 'string' && msg.includes('session-change notification cooldown'))).toBe(true);
       await vi.advanceTimersByTimeAsync(179);
       expect(changes).toEqual([['sess-1']]);
       await vi.advanceTimersByTimeAsync(1);
@@ -1085,7 +1079,6 @@ describe('recorder session change cooldown', () => {
       drop();
       resetRecorderForTests();
       vi.useRealTimers();
-      logged.mockRestore();
     }
   });
 });

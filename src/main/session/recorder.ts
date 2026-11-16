@@ -205,9 +205,6 @@ export function notifyChanged(...sessionIds: string[]): void {
   for (const id of sessionIds) changedSessions.add(id);
   if (notifyTimer) return;
   const delay = Math.max(0, NOTIFY_COOLDOWN_MS - (performance.now() - lastNotifyAt));
-  if (delay > 0) {
-    logInfo(`recorder: waiting ${Math.ceil(delay)} ms for session-change notification cooldown (${changedSessions.size} session(s) queued)`);
-  }
   notifyTimer = setTimeout(() => {
     notifyTimer = null;
     lastNotifyAt = performance.now();

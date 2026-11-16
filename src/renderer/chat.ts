@@ -1008,8 +1008,6 @@ let handoffFor: string | null = null;
 
 const LIST_RELOAD_MS = 400;
 const ACTIVE_DETAIL_COOLDOWN_MS = 100;
-const REFRESH_RETRY_BASE_MS = 200;
-const MAX_REFRESH_RETRIES = 2;
 
 let listTimer: number | undefined;
 let listTimerSeq = 0;
@@ -1023,14 +1021,7 @@ let activeDetailDirty = false;
  *  by a faster incremental detail read need not re-run `loadDetail()` after `listSessions`. */
 let activeDetailPushSeq = 0;
 let detailSatisfiedPushSeq = -1;
-/** Tracks payload-less/non-transcript pushes independently of transcript fast-path satisfaction
- *  so catalog catch-up refreshes never drop a pending controls read. */
-let controlsPushSeq = 0;
-let controlsAttemptedPushSeq = -1;
-let controlsSatisfiedPushSeq = -1;
-let activeDetailDrainRetryCount = 0;
-let controlsRetryTimer: number | undefined;
-let controlsRetryCount = 0;
+let controlsRefreshNeeded = false;
 /** Transcript owners named by `session:changed` pushes that no catalog refresh has consumed yet. */
 let changedTranscripts: { all: boolean; ids: Set<string> } = { all: false, ids: new Set() };
 /** Summary values the selected transcript's latest live-tail read was requested against. */
@@ -1799,7 +1790,7 @@ async function readSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
   const activeUnseenPush = targetChanged && !satisfiedByFastPath;
   if (detail === 'reread' || selectedId === null || detailFor !== selectedId || activeUnseenPush ||
       latestRow?.updatedAt !== detailStamp?.updatedAt || latestRow?.events !== detailStamp?.events) await loadDetail();
-  else if (!satisfiedByFastPath || controlsAttemptedPushSeq < controlsPushSeq) void refreshSessionControls();
+  else if (controlsRefreshNeeded) void refreshSessionControls();
   void refreshInputQueue();
 }
 
@@ -3702,33 +3693,11 @@ function applyUserRequests(sessionId: string | null, requests: UserRequestView[]
  * stopped reporting, an activity window that ran out. Read once, the caption counted on for six
  * hours. While it counts, it asks again now and then; any other refresh resets the interval.
  */
-function clearControlsRetryTimer(): void {
-  if (controlsRetryTimer !== undefined) {
-    window.clearTimeout(controlsRetryTimer);
-    controlsRetryTimer = undefined;
-  }
-}
-
-function scheduleControlsRetry(sessionId: string, selection: number): void {
-  if (!visible || selectedId !== sessionId || selection !== selectionGeneration) return;
-  if (controlsSatisfiedPushSeq >= controlsPushSeq || controlsRetryCount >= MAX_REFRESH_RETRIES) return;
-  clearControlsRetryTimer();
-  const delay = REFRESH_RETRY_BASE_MS * 2 ** controlsRetryCount++;
-  controlsRetryTimer = window.setTimeout(() => {
-    controlsRetryTimer = undefined;
-    if (!visible || selectedId !== sessionId || selection !== selectionGeneration ||
-        controlsSatisfiedPushSeq >= controlsPushSeq) return;
-    void refreshSessionControls();
-  }, delay);
-}
-
 let controlsAskedAt = 0;
 const RUNNING_CONTROLS_RECHECK_MS = 20_000;
 async function refreshSessionControls(): Promise<void> {
-  clearControlsRetryTimer();
-  const controlsPushAtStart = controlsPushSeq;
-  controlsAttemptedPushSeq = Math.max(controlsAttemptedPushSeq, controlsPushAtStart);
-  const id = selectedId, generation = ++controlsGeneration, selection = selectionGeneration;
+  controlsRefreshNeeded = false;
+  const id = selectedId, generation = ++controlsGeneration;
   const askedAt = controlsAskedAt = Date.now();
   const planHost = $('agentPlan');
   if (planHost.dataset.sessionId !== (id ?? '')) renderAgentPlan(planHost, id, null);
@@ -3747,8 +3716,6 @@ async function refreshSessionControls(): Promise<void> {
     $<HTMLTextAreaElement>('sessionObjective').disabled = false;
     paintTaskActions();
     for (const action of ['compactSession', 'cancelCompaction', 'resumeLastSummary']) $(action).hidden = true;
-    controlsSatisfiedPushSeq = Math.max(controlsSatisfiedPushSeq, controlsPushAtStart);
-    controlsRetryCount = 0;
     return; }
   const opening = pendingComposerInputs.find(row => row.opening && row.sessionId === id && ['queued', 'browser'].includes(row.state));
   if (!sessions.find(row => row.id === id)?.conversationId) {
@@ -3765,19 +3732,11 @@ async function refreshSessionControls(): Promise<void> {
     objective.dataset.sessionId = id;
     for (const action of ['compactSession', 'cancelCompaction', 'resumeLastSummary']) $(action).hidden = true;
     paintAutomationSwitch(); paintDeliveryControls(); repaintHeld();
-    controlsSatisfiedPushSeq = Math.max(controlsSatisfiedPushSeq, controlsPushAtStart);
-    controlsRetryCount = 0;
     return;
   }
   const controls = await run(api.getSessionControls(id));
-  if (generation !== controlsGeneration || id !== selectedId || selection !== selectionGeneration) return;
-  if (controls) {
-    controlsSatisfiedPushSeq = Math.max(controlsSatisfiedPushSeq, controlsPushAtStart);
-    controlsRetryCount = 0;
-  } else {
-    controlsAttemptedPushSeq = controlsSatisfiedPushSeq;
-    scheduleControlsRetry(id, selection);
-  }
+  if (generation !== controlsGeneration || id !== selectedId) return;
+  if (!controls) controlsRefreshNeeded = true;
   renderAgentPlan(planHost, id, controls?.plan ?? null);
   // A failed read is not an empty list: keep the last view instead of calling steps gone (CodeRabbit on #2049).
   if (controls) applyUserRequests(id, controls.userRequests ?? [], askedAt);
@@ -3847,27 +3806,6 @@ async function refreshSessionControls(): Promise<void> {
   ui($('sessionControlStatus'), 'textContent', () => controls.blocked === 'worker' ? t("This sub-agent is managed by its prime.") : controls.blocked === 'blocked' ? t("This chat is blocked.")
     : lastSummary ? t("ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.")
     : controls.job?.busy ? t("Compaction is running in ChatGPT.") : '');
-}
-
-function scheduleActiveDetailDrain(wanted: string, selection: number, delay = 0): void {
-  if (activeDetailDrainTimer !== undefined) window.clearTimeout(activeDetailDrainTimer);
-  activeDetailDrainTimer = window.setTimeout(() => {
-    activeDetailDrainTimer = undefined;
-    if (!visible || selectedId !== wanted || selection !== selectionGeneration ||
-        historyBefore !== null || historyLoading || detailFor !== wanted) return;
-    const generationBefore = detailLoadGeneration;
-    void loadDetail().then((ok) => {
-      if (ok) {
-        activeDetailDrainRetryCount = 0;
-        return;
-      }
-      if (!visible || selectedId !== wanted || selection !== selectionGeneration ||
-          historyBefore !== null || historyLoading || detailFor !== wanted) return;
-      if (detailLoadGeneration !== generationBefore + 1) return;
-      if (activeDetailDrainRetryCount >= MAX_REFRESH_RETRIES) return;
-      scheduleActiveDetailDrain(wanted, selection, REFRESH_RETRY_BASE_MS * 2 ** activeDetailDrainRetryCount++);
-    });
-  }, delay);
 }
 
 async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: number): Promise<boolean> {
@@ -3964,10 +3902,8 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
     if (prepend || newerFrom !== undefined) roundsEnter = false;
     // Only live growth follows to the bottom; an empty or off-window incremental check must not pull a scrolled pane down.
     paintDetail(!prepend && newerFrom === undefined && historyBefore === null && (!incremental || deltaChanged));
-    if (!prepend && newerFrom === undefined) {
-      activeDetailDrainRetryCount = 0;
-      if (!(incremental && detail.events.length === TIMELINE_BATCH_SIZE))
-        detailSatisfiedPushSeq = Math.max(detailSatisfiedPushSeq, capturedPushSeq);
+    if (!prepend && newerFrom === undefined && !(incremental && detail.events.length === TIMELINE_BATCH_SIZE)) {
+      detailSatisfiedPushSeq = Math.max(detailSatisfiedPushSeq, capturedPushSeq);
     }
     // A sidebar completion becomes read only after this exact selection/load has successfully
     // painted its conversation at the live tail. Keep the snapshot from read time:
@@ -3987,7 +3923,14 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
     // Drain it page by page rather than silently jumping the cursor or lifting the payload cap.
     if (incremental && detail.events.length === TIMELINE_BATCH_SIZE && visible && selectedId === wanted &&
         selection === selectionGeneration && generation === detailLoadGeneration) {
-      scheduleActiveDetailDrain(wanted, selection, 0);
+      if (activeDetailDrainTimer !== undefined) window.clearTimeout(activeDetailDrainTimer);
+      activeDetailDrainTimer = window.setTimeout(() => {
+        activeDetailDrainTimer = undefined;
+        if (visible && selectedId === wanted && selection === selectionGeneration &&
+            historyBefore === null && !historyLoading && detailFor === wanted) {
+          void loadDetail();
+        }
+      }, 0);
     }
     return true;
   };
@@ -8989,10 +8932,7 @@ export function chatVisible(next: boolean): void {
     }
     listRefreshDirty = false;
     clearActiveDetailTimers();
-    clearControlsRetryTimer();
     activeDetailDirty = false;
-    activeDetailDrainRetryCount = 0;
-    controlsRetryCount = 0;
   }
 }
 
@@ -9015,15 +8955,11 @@ function clearActiveDetailTimers(): void {
 
 function resetActiveDetailRefresh(): void {
   clearActiveDetailTimers();
-  clearControlsRetryTimer();
   activeDetailDirty = false;
-  activeDetailDrainRetryCount = 0;
-  controlsRetryCount = 0;
   activeDetailInFlight = null;
   activeDetailLastAt = 0;
   detailSatisfiedPushSeq = -1;
-  controlsAttemptedPushSeq = -1;
-  controlsSatisfiedPushSeq = -1;
+  controlsRefreshNeeded = false;
 }
 
 function targetsSelectedLiveTail(change?: SessionChange): boolean {
@@ -9054,7 +8990,7 @@ function scheduleReload(change?: SessionChange): void {
   if (!visible) return;
   if (change?.allTranscripts) changedTranscripts.all = true;
   for (const id of change?.sessionIds ?? []) changedTranscripts.ids.add(id);
-  controlsPushSeq++;
+  controlsRefreshNeeded = true;
   if (selectedId !== null && (change?.allTranscripts || change?.sessionIds?.includes(selectedId))) {
     activeDetailPushSeq++;
     if (targetsSelectedLiveTail(change)) scheduleActiveDetailRefresh(selectedId);
