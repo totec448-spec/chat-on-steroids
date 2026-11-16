@@ -469,7 +469,7 @@ export type SessionEvent =
       previewWidth?: number;
       previewHeight?: number;
       previewStatus: 'pending' | 'available' | 'unavailable';
-      previewError?: 'not_loaded' | 'ambiguous' | 'tainted' | 'oversized' | 'invalid' | 'quota' | 'removed';
+      previewError?: 'not_loaded' | 'ambiguous' | 'tainted' | 'oversized' | 'invalid' | 'quota' | 'session_quota' | 'removed';
       asset?: AssetRef;
       /** First sequence assigned to this exact provider-message/asset tuple. */
       origin?: number;

@@ -1310,6 +1310,7 @@
   "Image preview is loading": "Cargando vista previa de la imagen",
   "Image preview unavailable": "Vista previa de la imagen no disponible",
   "Image preview unavailable — recording storage is full": "Vista previa no disponible: el almacenamiento del historial está lleno",
+  "Image preview unavailable — this chat reached its 192 MB storage limit": "Vista previa no disponible: este chat alcanzó su límite de almacenamiento de 192 MB",
   "Image preview unavailable — image exceeds the recording limit": "Vista previa no disponible: la imagen supera el límite del historial",
   "Toggle Files side panel": "Mostrar u ocultar el panel de archivos",
   "Refresh files": "Actualizar archivos",

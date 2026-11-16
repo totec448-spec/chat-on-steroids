@@ -1336,6 +1336,7 @@
   "Image preview is loading": "Загрузка предпросмотра изображения",
   "Image preview unavailable": "Предпросмотр изображения недоступен",
   "Image preview unavailable — recording storage is full": "Предпросмотр изображения недоступен — хранилище записей заполнено",
+  "Image preview unavailable — this chat reached its 192 MB storage limit": "Предпросмотр изображения недоступен — этот чат достиг лимита хранилища в 192 МБ",
   "Image preview unavailable — image exceeds the recording limit": "Предпросмотр изображения недоступен — изображение превышает лимит записи",
   "Toggle Files side panel": "Показать/скрыть боковую панель файлов",
   "Refresh files": "Обновить файлы",
