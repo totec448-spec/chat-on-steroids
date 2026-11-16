@@ -19867,9 +19867,16 @@ describe('push-driven activity wakes over /wake', () => {
       await vi.waitFor(() => expect(frames.filter((f) => f === 'activity')).toHaveLength(1), { timeout: 5_000 });
       await new Promise((resolve) => setTimeout(resolve, 220));
       frames.length = 0;
-      for (let i = 0; i <= 70; i += 1) notifyBrowserActivity(`11111111-2222-4333-8444-${String(i).padStart(12, '0')}`);
-      await vi.waitFor(() => expect(frames.filter((f) => f === 'activity')).toHaveLength(1), { timeout: 5_000 });
-      expect(frames.filter((f) => f.startsWith('activity:'))).toHaveLength(0);
+      const loggerMod = await import('../src/main/logger.js');
+      const collapseInfo = vi.spyOn(loggerMod, 'logInfo');
+      try {
+        for (let i = 0; i <= 70; i += 1) notifyBrowserActivity(`11111111-2222-4333-8444-${String(i).padStart(12, '0')}`);
+        await vi.waitFor(() => expect(frames.filter((f) => f === 'activity')).toHaveLength(1), { timeout: 5_000 });
+        expect(frames.filter((f) => f.startsWith('activity:'))).toHaveLength(0);
+        expect(collapseInfo.mock.calls.some((c) => String(c[0]).includes('collapsed 65 immediate activity wakes into a global wake (64-target cap reached)'))).toBe(true);
+      } finally {
+        collapseInfo.mockRestore();
+      }
 
       // Non-extension app writes inside the echo window still emit an activity wake.
       await new Promise((resolve) => setTimeout(resolve, 220));

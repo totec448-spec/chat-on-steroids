@@ -1452,7 +1452,11 @@ function scheduleDiscreteActivityWake(target: string): void {
     return;
   }
   pendingDiscreteActivityWakes.delete(target);
-  if (target === '*' || pendingActivityWakes.size >= ACTIVITY_STREAM_WAKE_CAP) {
+  if (target === '*') {
+    pendingActivityWakes.clear();
+    pendingActivityWakes.add('*');
+  } else if (pendingActivityWakes.size >= ACTIVITY_STREAM_WAKE_CAP) {
+    logInfo(`bridge: collapsed ${pendingActivityWakes.size + 1} immediate activity wakes into a global wake (${ACTIVITY_STREAM_WAKE_CAP}-target cap reached)`);
     pendingActivityWakes.clear();
     pendingActivityWakes.add('*');
   } else {
