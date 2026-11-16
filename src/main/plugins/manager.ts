@@ -875,7 +875,7 @@ export class PluginManager {
       if (previous && previous !== live) this.retireLive(row.id, previous);
       client.setNotificationHandler('notifications/tools/list_changed', () => {
         // A current connection can invalidate its own listing, never resurrect a retired one.
-        if (this.live.get(row.id) !== live || row.status === 'connecting') return;
+        if (this.live.get(row.id) !== live || row.status !== 'ready') return;
         row.status = 'connecting';
         this.changed();
         void this.serial(row.id, async () => {
@@ -1069,6 +1069,7 @@ export class PluginManager {
         row.error = needsAuth ? 'Sign in again to reconnect this plugin.' : 'Server call failed or disconnected. Restart after checking its application.';
         const reason = row.status === 'error' && row.source.kind === 'remote' ? remoteConnectionFailure(error) : undefined;
         if (reason) this.scheduleReconnect(row, reason);
+        else if (row.source.kind === 'remote') this.cancelReconnect(row.id, 'non-retryable call failure');
         this.changed();
       }
       return errorResult(

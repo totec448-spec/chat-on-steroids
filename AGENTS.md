@@ -5839,6 +5839,8 @@ This also recovers a notification SSE stream that has exhausted the SDK's zero s
 parsing, authorization or configuration errors. A replaced remote client with in-flight tool
 calls is retained until those calls release it; explicit shutdown/uninstall closes retired
 clients too. Pending retry cancellations name their lifecycle reason in the activity log.
+Notifications from an unavailable connection cannot republish cached tools. A non-retryable
+failure from a concurrent call cancels any previously queued reconnect for that connection.
 Each installation owns a typed `longestCallSeconds` outside its MCP server `config`: default 120,
 integer range 1–1800 (30 minutes maximum). Old or malformed stored values normalize to 120
 without deleting the installation. Plugin install/configure IPC rejects invalid input. Changing
