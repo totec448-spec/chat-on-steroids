@@ -189,9 +189,12 @@ let lastActiveSessionId: string | null = null;
  */
 const REOPEN_NOTICE_MS = 60_000;
 
+const NOTIFY_COOLDOWN_MS = 180;
+
 const listeners = new Set<(change: SessionChange) => void>();
 const nonExtensionListeners = new Set<(change: SessionChange) => void>();
 let notifyTimer: NodeJS.Timeout | null = null;
+let lastNotifyAt = -Infinity;
 /** Every local session written during the current burst; one push names all of them. */
 const changedSessions = new Set<string>();
 /** Sessions in the current burst with at least one non-extension change (for anti-echo wakes). */
@@ -210,8 +213,10 @@ export function onNonExtensionSessionChange(listener: (change: SessionChange) =>
 
 function scheduleNotifyFlush(): void {
   if (notifyTimer) return;
+  const delay = Math.max(0, NOTIFY_COOLDOWN_MS - (performance.now() - lastNotifyAt));
   notifyTimer = setTimeout(() => {
     notifyTimer = null;
+    lastNotifyAt = performance.now();
     const change: SessionChange = { sessionIds: [...changedSessions] };
     const nonExtensionChange: SessionChange | null = changedNonExtensionSessions.size > 0
       ? { sessionIds: [...changedNonExtensionSessions] }
@@ -222,7 +227,7 @@ function scheduleNotifyFlush(): void {
     if (nonExtensionChange) {
       for (const listener of nonExtensionListeners) listener(nonExtensionChange);
     }
-  }, 400);
+  }, delay);
   notifyTimer.unref?.();
 }
 
@@ -3442,8 +3447,10 @@ export function resetRecorderForTests(): void {
   if (notifyTimer) {
     clearTimeout(notifyTimer);
     notifyTimer = null;
-    changedSessions.clear();
   }
+  changedSessions.clear();
+  changedNonExtensionSessions.clear();
+  lastNotifyAt = -Infinity;
 }
 
 export type { SessionSummary, SessionEvent };
