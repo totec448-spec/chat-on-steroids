@@ -4836,7 +4836,12 @@ export async function clearImageStorage(mode: ImageStorageClearMode, sessionId?:
       let removedFiles = 0;
       for (const file of chosen) {
         const identity = `${file.sessionId}\u0000${file.assetId}`;
-        if (!deletable.has(identity)) continue;
+        if (!deletable.has(identity)) {
+          // Cleanup vetoed deletion, so the retained file must remain admissible to concurrent writers.
+          const key = localAssetKey(file.sessionId, file.assetId);
+          if (removedAssetEpoch.get(key) === cleanupEpoch) removedAssetEpoch.delete(key);
+          continue;
+        }
         const removed = await deleteSelectedImage(file);
         if (!removed) continue;
         freedBytes += removed;
@@ -4864,6 +4869,9 @@ export async function clearImageStorage(mode: ImageStorageClearMode, sessionId?:
         })
       };
     } catch (error) {
+      for (const [key, epoch] of removedAssetEpoch) {
+        if (epoch === cleanupEpoch) removedAssetEpoch.delete(key);
+      }
       rejectSelection(error);
       throw error;
     }
