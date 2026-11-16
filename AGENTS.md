@@ -3336,6 +3336,11 @@ Chromium browser/profile separate from ChatGPT account state. Use the selected b
 process evidence; a disconnected bridge or sleeping MV3 socket does not prove it is closed.
 OS wake launches require positive process absence and coalesce within one absence episode.
 The socket is a heartbeat/wake path; HTTP remains command/evidence authority.
+For `activity` and `activity:<conversationId>` wake frames, the service worker unions known
+and queried tabs and paces `clf-activity-wake` messages across tabs (6 burst, 1 per `200 ms`
+steady-state) within the shared `900 req/min` bridge budget, so `content.js` pulls `/activity`
+immediately (or drains one pending wake on pull completion or failure while `pulling` is
+true) while HTTP `/activity` remains the sole authority and fallback.
 
 External navigation may hide its destination URL under ChatGPT-only host permissions.
 A completed tab absent from a successful ChatGPT URL query can release the departed

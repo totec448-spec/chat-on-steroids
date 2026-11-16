@@ -7520,6 +7520,8 @@
       armNextActivityPull();
     } finally {
       pulling = false;
+      if (!recorderHandle.healthy()) activityWakePending = false;
+      else consumePendingActivityWake();
     }
     // Outside the guard, and last: startCompact runs for tens of seconds and polls this
     // same endpoint while it works, so firing it with `pulling` still set would deadlock
@@ -12954,6 +12956,16 @@
   }
 
   let activityTimer = null;
+  let activityWakePending = false;
+  let testActivityWake = false;
+  const activityWakeEnabled = () => !TEST_MODE || testActivityWake;
+
+  function resetActivityTimer() {
+    if (activityTimer !== null) {
+      cancelLater(activityTimer);
+      activityTimer = null;
+    }
+  }
   function activityPullDelay(input = {}) {
     const hidden = input.hidden === true;
     if (input.drafting === true || input.presentationPending === true) return LIVE_ACTIVITY_MS;
@@ -13000,16 +13012,27 @@
     }, Math.max(0, delay));
   }
 
+  function consumePendingActivityWake() {
+    if (!activityWakeEnabled() || !activityWakePending) return false;
+    activityWakePending = false;
+    resetActivityTimer();
+    scheduleActivityPull(0);
+    return true;
+  }
+
   function armNextActivityPull() {
-    if (!TEST_MODE) scheduleActivityPull(currentActivityPullDelay());
+    if (!activityWakeEnabled()) return;
+    if (consumePendingActivityWake()) return;
+    scheduleActivityPull(currentActivityPullDelay());
   }
 
   function expediteActivityPull() {
-    if (TEST_MODE) return;
-    if (activityTimer !== null) {
-      cancelLater(activityTimer);
-      activityTimer = null;
+    if (!activityWakeEnabled()) return;
+    if (pulling) {
+      activityWakePending = true;
+      return;
     }
+    resetActivityTimer();
     scheduleActivityPull(0);
   }
 
@@ -14906,6 +14929,16 @@
         }, { deferredRecovery: message.deferredRecovery === true });
         return true;
       }
+      if (message.type === 'clf-activity-wake') {
+        if (typeof message.conversationId === 'string' && message.conversationId &&
+            CLF_DOM.conversationId() !== message.conversationId) {
+          sendResponse({ ok: false, ignored: 'wrong_conversation' });
+          return false;
+        }
+        expediteActivityPull();
+        sendResponse({ ok: true });
+        return false;
+      }
       if (message.type === 'clf-overwrite-now') {
         if (!renderStreamAllowed()) {
           sendResponse({ ok: false, error: 'overwrite_disabled' });
@@ -15001,8 +15034,7 @@
       // The transcript first: a tab brought back in front owes the app whatever settled while
       // it was hidden, and the pull that follows reports against that state.
       observe();
-      if (activityTimer !== null) cancelLater(activityTimer);
-      activityTimer = null;
+      resetActivityTimer();
       scheduleActivityPull(0);
     };
     listen(document, 'visibilitychange', visibilityChanged);
@@ -15029,10 +15061,8 @@
     // intervals drain themselves on their next tick through every().
     alive = false;
     for (const check of pageViewChecks) void check();
-    if (activityTimer !== null) {
-      cancelLater(activityTimer);
-      activityTimer = null;
-    }
+    activityWakePending = false;
+    resetActivityTimer();
     for (const cleanup of stopCleanups.splice(0)) {
       try {
         cleanup();
@@ -15124,6 +15154,9 @@
       desktopInputBusyForTest: () => desktopInputBusy,
       setShowTimes: (on) => {
         SHOW_TIMES = on === true;
+      },
+      setActivityWakeForTest: (on) => {
+        testActivityWake = on === true;
       }
     });
   }
