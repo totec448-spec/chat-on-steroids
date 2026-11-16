@@ -341,7 +341,7 @@ describe('Gemini Setup card in renderer', () => {
       expect([...slot.querySelectorAll('button')].some((b) => b.textContent === 'Review in Settings')).toBe(true)
     );
     [...slot.querySelectorAll('button')].find((b) => b.textContent === 'Review in Settings')!.click();
-    expect(doc.querySelector('button[data-tab="settings"]')!.classList.contains('is-sel')).toBe(true);
+    expect(doc.querySelector('button[data-tab="agents-tools"]')!.classList.contains('is-sel')).toBe(true);
     expect(doc.getElementById('strictChatAllowlist')!.closest('[hidden]')).toBeNull();
     expect(doc.activeElement).toBe(doc.getElementById('strictChatAllowlist'));
   });

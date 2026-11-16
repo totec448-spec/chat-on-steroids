@@ -2288,7 +2288,7 @@ function copyRow(label: string | (() => string), value: string, what: string): H
 }
 
 function openExternalCallSettings(): void {
-  showTab('settings');
+  showTab('agents-tools');
   const control = $('strictChatAllowlist');
   const row = control.closest<HTMLElement>('.setting') ?? control;
   for (let node: HTMLElement | null = row; node; node = node.parentElement) {
