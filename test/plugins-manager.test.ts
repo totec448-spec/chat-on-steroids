@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createServer, type ServerResponse } from 'node:http';
-import { Client, SdkError, SdkErrorCode } from '@modelcontextprotocol/client';
+import { Client, SdkError, SdkErrorCode, SdkHttpError } from '@modelcontextprotocol/client';
 import { zipSync, strToU8 } from 'fflate';
 import sharp from 'sharp';
 import { makeTempDir, removeTempDir } from './helpers.js';
@@ -992,6 +992,42 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
     }
   });
 
+  it('does not republish cached tools when an old client notifies during an outage', async () => {
+    const remote = remoteFixture();
+    remote.online(true);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const handlers = vi.spyOn(Client.prototype, 'setNotificationHandler');
+    const row = (await manager.install({ source: { kind: 'remote', url: 'https://remote.example/mcp' } })).plugins[0]!;
+    const changed = handlers.mock.calls.find(([method]) => method === 'notifications/tools/list_changed')?.[1] as unknown as
+      ((event: { method: 'notifications/tools/list_changed' }) => void) | undefined;
+    expect(changed).toBeDefined();
+    let finish!: (value: { content: [{ type: 'text'; text: string }] }) => void;
+    const slow = new Promise<{ content: [{ type: 'text'; text: string }] }>(resolve => { finish = resolve; });
+    let began = false;
+    vi.spyOn(Client.prototype, 'callTool').mockImplementation((_call) => {
+      if (_call.arguments?.kind === 'slow') { began = true; return slow; }
+      return Promise.reject(Object.assign(new TypeError('fetch failed'), {
+        cause: Object.assign(new Error('socket closed'), { code: 'UND_ERR_SOCKET' }),
+      }));
+    });
+    const first = manager.call('remote_action', { kind: 'slow' });
+    await vi.waitFor(() => expect(began).toBe(true), { timeout: 10_000 });
+    expect((await manager.call('remote_action', { kind: 'fail' })).isError).toBe(true);
+    expect(manager.snapshot().plugins[0]?.status).toBe('error');
+    expect(manager.tools()).toEqual([]);
+    const exposures: string[][] = [];
+    const stop = manager.onChanged(() => exposures.push(manager.tools().map(tool => tool.name)));
+    changed!({ method: 'notifications/tools/list_changed' });
+    expect(manager.snapshot().plugins[0]?.status).toBe('error');
+    expect(manager.tools()).toEqual([]);
+    expect(exposures).toEqual([]);
+    stop();
+    finish({ content: [{ type: 'text', text: 'done' }] });
+    await first;
+    await manager.close();
+    expect(row.id).toBeDefined();
+  });
+
   it('closes the replaced MCP client only after its last in-flight call releases', async () => {
     const remote = remoteFixture();
     remote.online(true);
@@ -1071,6 +1107,37 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
       await vi.advanceTimersByTimeAsync(300_000);
       expect(remote.initializations).toBe(1);
     }
+  });
+
+  it('cancels a queued reconnect when another in-flight call fails non-retryably', async () => {
+    const remote = remoteFixture();
+    remote.online(true);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const row = (await manager.install({ source: { kind: 'remote', url: 'https://remote.example/mcp' } })).plugins[0]!;
+    type PendingCall = {
+      resolve: (result: { content: [{ type: 'text'; text: string }] }) => void;
+      reject: (error: Error) => void;
+    };
+    const pending = new Map<string, PendingCall>();
+    vi.spyOn(Client.prototype, 'callTool').mockImplementation(request => new Promise((resolve, reject) => {
+      pending.set(String(request.arguments?.kind), { resolve, reject });
+    }));
+    const slow = manager.call('remote_action', { kind: 'slow' });
+    const network = manager.call('remote_action', { kind: 'network' });
+    const forbidden = manager.call('remote_action', { kind: 'forbidden' });
+    await vi.waitFor(() => expect(pending.size).toBe(3), { timeout: 10_000 });
+    pending.get('network')!.reject(Object.assign(new TypeError('fetch failed'), {
+      cause: Object.assign(new Error('socket closed'), { code: 'UND_ERR_SOCKET' }),
+    }));
+    expect((await network).isError).toBe(true);
+    expect(manager.snapshot().plugins[0]?.status).toBe('error');
+    pending.get('forbidden')!.reject(new SdkHttpError(SdkErrorCode.ClientHttpForbidden, 'Forbidden', { status: 403 }));
+    expect((await forbidden).isError).toBe(true);
+    expect(getLog().some(entry => entry.message.includes(`Remote MCP plugin ${row.id}: reconnect canceled (non-retryable call failure)`))).toBe(true);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(remote.initializations).toBe(1);
+    pending.get('slow')!.resolve({ content: [{ type: 'text', text: 'finished' }] });
+    expect((await slow).isError).not.toBe(true);
   });
 
   it.each([401, 403, 404])('does not retry an HTTP %i authentication/configuration failure', async status => {
