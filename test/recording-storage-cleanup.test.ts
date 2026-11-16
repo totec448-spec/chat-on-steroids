@@ -477,3 +477,59 @@ it('rejects overflow text references removed between writeOverflowText and new m
     expect(upserted.event.retiredTextAssetIds).toEqual([proseAssetId]);
   }
 });
+
+it('preserves removal epochs for already-deleted assets and clears only retained ones when a later unlink fails', async () => {
+  const session = await createSession({ conversationId: 'conv-partial-delete-abort', title: 'Partial delete abort' });
+  const bodyA = 'A'.repeat(260_000);
+  const bodyB = 'B'.repeat(260_000);
+  const assetA = await writeOverflowText(session.id, bodyA);
+  const assetB = await writeOverflowText(session.id, bodyB);
+  expect(assetA).toBeTruthy();
+  expect(assetB).toBeTruthy();
+
+  // Fail fs.rename on the second text file deletion after the first text file is already unlinked.
+  const sortedIds = [assetA!, assetB!].sort();
+  let deletedFirst = '';
+  const realRename = fs.rename.bind(fs);
+  const renameSpy = vi.spyOn(fs, 'rename').mockImplementation(async (oldPath, newPath, ...rest) => {
+    const oldStr = String(oldPath);
+    if (oldStr.endsWith(sortedIds[0]!) || oldStr.endsWith(sortedIds[1]!)) {
+      if (!deletedFirst) deletedFirst = oldStr.endsWith(sortedIds[0]!) ? sortedIds[0]! : sortedIds[1]!;
+      else throw Object.assign(new Error('disk error during second delete'), { code: 'EIO' });
+    }
+    return (realRename as (...args: unknown[]) => Promise<void>)(oldPath, newPath, ...rest);
+  });
+
+  try {
+    await expect(clearImageStorage('session-texts', session.id)).rejects.toThrow('disk error during second delete');
+  } finally {
+    renameSpy.mockRestore();
+  }
+
+  const keptSecond = deletedFirst === sortedIds[0] ? sortedIds[1]! : sortedIds[0]!;
+  expect(await readAsset(session.id, deletedFirst)).toBeNull();
+  expect(await readAsset(session.id, keptSecond)).not.toBeNull();
+
+  // Upserting the already-deleted asset must retire its missing assetId; the retained asset remains admissible.
+  const firstUpsert = await upsertMessageEvent(session.id, {
+    time: NOW + 2,
+    source: 'extension',
+    kind: 'assistant_message',
+    messageId: 'msg-after-abort-a',
+    message: { text: `head\n…[10 more characters stored in full as ${deletedFirst}]`, truncated: true, chars: 260_000, assetId: deletedFirst },
+    state: 'final',
+    final: true
+  });
+  expect(firstUpsert.event.kind === 'assistant_message' ? firstUpsert.event.message.assetId : undefined).toBeUndefined();
+
+  const secondUpsert = await upsertMessageEvent(session.id, {
+    time: NOW + 3,
+    source: 'extension',
+    kind: 'assistant_message',
+    messageId: 'msg-after-abort-b',
+    message: { text: `head\n…[10 more characters stored in full as ${keptSecond}]`, truncated: true, chars: 260_000, assetId: keptSecond },
+    state: 'final',
+    final: true
+  });
+  expect(secondUpsert.event.kind === 'assistant_message' ? secondUpsert.event.message.assetId : undefined).toBe(keptSecond);
+});
