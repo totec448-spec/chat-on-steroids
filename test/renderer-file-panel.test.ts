@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createFilePanel } from '../src/renderer/file-panel.js';
 import { setLanguage } from '../src/renderer/i18n.js';
 import { createAgentPanel } from '../src/renderer/agent-panel.js';
+import type { ChatEdit } from '../src/shared/session.js';
 import type { LocalProject } from '../src/shared/projects.js';
 import type { ProjectDirectoryListing, ProjectFilePreview, ProjectFilesChanged } from '../src/shared/project-files.js';
 import type { ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot } from '../src/shared/project-git.js';
@@ -660,6 +661,41 @@ it('shows Files and the read-only Review projection at once without a second fil
   expect(window.api.listProjectFiles).toHaveBeenCalledTimes(1);
   expect(window.api.watchProjectFiles).toHaveBeenCalledTimes(fileWatchCalls);
   expect(window.api.getProjectGitSnapshot).toHaveBeenCalled();
+});
+
+it.each([false, true])('uses the exact failed diff identity after a list refresh (newer edit: %s)', async newer => {
+  const edit: ChatEdit = { path: 'src/main.ts', callId: 'first-call', index: 0, position: 1, state: 'changed', reviewable: true };
+  const refreshed = newer ? { ...edit, callId: 'newer-call', position: 2 } : { ...edit };
+  let failDiff!: (result: { ok: true; data: null }) => void;
+  const failure = new Promise<{ ok: true; data: null }>(resolve => { failDiff = resolve; });
+  const onEditSource = vi.fn();
+  let current = edit;
+  const getToolEditReview = vi.fn().mockReturnValueOnce(failure).mockImplementation(() => ok({
+    callId: refreshed.callId, changeIndex: refreshed.index, path: refreshed.path,
+    added: 1, removed: 1, baseText: 'before', currentText: 'after'
+  }));
+  Object.assign(window.api, { getChatEdits: () => ok({ rows: [{ ...current }], limited: false }), getToolEditReview });
+  const panel = createFilePanel({ host, reviewOnly: true, onEditSource });
+  panel.update(projectA, 'session-id');
+  await panel.show();
+  await panel.refreshChatEdits();
+  const row = () => host.querySelector<HTMLButtonElement>('.review-chat-edits button')!;
+  row().click();
+  expect(getToolEditReview).toHaveBeenCalledOnce();
+  current = refreshed;
+  await panel.refreshChatEdits();
+  failDiff({ ok: true, data: null });
+  await tick();
+  expect(row().getAttribute('aria-label')).toContain(newer ? 'Review edit' : 'Go to recorded edit');
+  row().click();
+  if (newer) {
+    expect(getToolEditReview).toHaveBeenLastCalledWith('session-id', refreshed.callId, 0, projectA.id);
+    expect(onEditSource).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(host.querySelector('.test-diff-viewer')).not.toBeNull(), { timeout: 5_000 });
+  } else {
+    expect(getToolEditReview).toHaveBeenCalledOnce();
+    expect(onEditSource).toHaveBeenCalledWith('session-id', { ...edit, reviewable: false });
+  }
 });
 
 it('returns a recorded edit to Review rather than exposing Files actions', async () => {
