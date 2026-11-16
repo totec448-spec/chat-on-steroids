@@ -17,7 +17,8 @@ import {
   resetSessionStoreForTests,
   setRecordingStorageLimit,
   upsertMessageEvent,
-  writeAsset
+  writeAsset,
+  writeOverflowText
 } from '../src/main/session/store.js';
 import { recordChatObservations, resetRecorderForTests } from '../src/main/session/recorder.js';
 import * as logger from '../src/main/logger.js';
@@ -427,4 +428,36 @@ it('prevents repeated observations from re-spilling retired overflow text assets
   ]);
   const afterEditFiles = (await fs.readdir(assetsDir)).filter((name) => name.endsWith('.txt'));
   expect(afterEditFiles).toHaveLength(1);
+});
+
+it('rejects overflow text references removed between writeOverflowText and new message upsert', async () => {
+  const session = await createSession({ conversationId: 'conv-epoch-text-race', title: 'Epoch text race' });
+  const overflowBody = 'R'.repeat(260_000);
+  const proseAssetId = await writeOverflowText(session.id, overflowBody);
+  expect(proseAssetId).toBeTruthy();
+
+  const cleared = await clearImageStorage('session-texts', session.id);
+  expect(cleared.removedFiles).toBe(1);
+
+  const upserted = await upsertMessageEvent(session.id, {
+    time: NOW + 1,
+    source: 'extension',
+    kind: 'assistant_message',
+    messageId: 'msg-raced-before-upsert',
+    message: {
+      text: `${overflowBody.slice(0, 256_000)}\n…[${overflowBody.length - 256_000} more characters stored in full as ${proseAssetId}]`,
+      truncated: true,
+      chars: overflowBody.length,
+      assetId: proseAssetId!
+    },
+    state: 'final',
+    final: true
+  });
+
+  expect(upserted.event.kind).toBe('assistant_message');
+  if (upserted.event.kind === 'assistant_message') {
+    expect(upserted.event.message.assetId).toBeUndefined();
+    expect(upserted.event.message.text).toContain('more characters removed to free storage');
+    expect(upserted.event.retiredTextAssetIds).toEqual([proseAssetId]);
+  }
 });
