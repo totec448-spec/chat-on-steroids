@@ -157,6 +157,21 @@ export function runInCallContext<T>(context: CallContext, fn: () => T): T {
 const running = new Set<CallContext>();
 const settling = new Set<CallContext>();
 let inFlightRequests = 0;
+const runningListeners = new Set<(conversationId: string) => void>();
+
+/** Subscribes to exact-owner running tool count transitions so `/activity` can refresh promptly. */
+export function onRunningToolChange(listener: (conversationId: string) => void): () => void {
+  runningListeners.add(listener);
+  return () => { runningListeners.delete(listener); };
+}
+
+function notifyRunningChange(context: CallContext): void {
+  const owner = exactOwner(context);
+  if (!owner) return;
+  for (const listener of runningListeners) {
+    try { listener(owner); } catch { /* A listener never fails tool execution. */ }
+  }
+}
 
 function countFor(calls: Iterable<CallContext>, conversationId: string | null): number {
   let count = 0;
@@ -274,10 +289,12 @@ export async function trackMcpRequest<T>(fn: () => Promise<T>): Promise<T> {
  */
 export async function trackInFlight<T>(context: CallContext, fn: () => Promise<T>): Promise<T> {
   running.add(context);
+  notifyRunningChange(context);
   try {
     return await fn();
   } finally {
     running.delete(context);
+    notifyRunningChange(context);
   }
 }
 

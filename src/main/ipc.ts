@@ -138,7 +138,8 @@ import {
   sweepStaleSwarm,
   unpair,
   followChatInBackground,
-  browserPickupContext
+  browserPickupContext,
+  notifyBrowserActivity
 } from './bridge.js';
 import { extensionDir } from './extension-path.js';
 import { APP_VERSION, extensionDownloadUrl } from './version.js';
@@ -2316,6 +2317,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const answer = requestApprovalAnswer(conversationId, cardId, choice);
     if (answer.ok) {
       logInfo(`approval card: the user chose ${choice} in the app for ${conversationId}`);
+      notifyBrowserActivity(conversationId);
       return { ok: true as const };
     }
     return answer;
@@ -2380,6 +2382,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     );
     // A blocked worker chat frees its swarm slot now, not on the next 30-second pass: the
     // user pressing Block on a worker is usually about to start something in its place.
+    notifyBrowserActivity(conversationId);
     if (blocked) await sweepStaleSwarm().catch(() => undefined);
     refreshPetOverlayActivities();
     return blockedChatIds();
