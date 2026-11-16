@@ -946,6 +946,9 @@ export class PluginManager {
       this.exposureCache = null;
       if (transport?.pid) await terminateProcessTree(transport.pid, true);
       await client.close().catch(() => undefined);
+      // The owner may cancel this retry while discovery is still in progress.
+      // Its failure must not schedule a fresh retry or change the current state.
+      if (reconnect && !this.reconnects.has(row.id)) return;
       if (!signal.aborted) {
         const needsAuth = e instanceof PluginNeedsAuth || e instanceof UnauthorizedError;
         row.status = needsAuth ? 'needs-auth' : 'error';

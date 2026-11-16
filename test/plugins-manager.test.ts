@@ -1189,7 +1189,9 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
     expect(remote.initializations).toBe(1);
   });
 
-  it('discards an in-flight reconnect canceled by an old call returning HTTP 403', async () => {
+  it.each(['successful', 'failed'] as const)(
+    'discards an in-flight reconnect canceled by HTTP 403 even if discovery %s',
+    async discoveryOutcome => {
     const remote = remoteFixture();
     remote.online(true);
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
@@ -1209,9 +1211,9 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
     expect((await network).isError).toBe(true);
     expect(manager.snapshot().plugins[0]?.status).toBe('error');
 
-    let listingStarted!: () => void, finishListing!: () => void;
+    let listingStarted!: () => void, finishListing!: () => void, rejectListing!: (error: Error) => void;
     const started = new Promise<void>(resolve => { listingStarted = resolve; });
-    const held = new Promise<void>(resolve => { finishListing = resolve; });
+    const held = new Promise<void>((resolve, reject) => { finishListing = resolve; rejectListing = reject; });
     remote.onList(async () => { listingStarted(); await held; });
     const closed = vi.spyOn(Client.prototype, 'close');
     await vi.advanceTimersByTimeAsync(10_000);
@@ -1221,7 +1223,10 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
     rejected.get('forbidden')!(new SdkHttpError(SdkErrorCode.ClientHttpForbidden, 'Forbidden', { status: 403 }));
     expect((await forbidden).isError).toBe(true);
     expect(getLog().some(entry => entry.message.includes(`Remote MCP plugin ${row.id}: reconnect canceled (non-retryable call failure)`))).toBe(true);
-    finishListing();
+    if (discoveryOutcome === 'successful') finishListing();
+    else rejectListing(Object.assign(new TypeError('fetch failed'), {
+      cause: Object.assign(new Error('socket closed'), { code: 'UND_ERR_SOCKET' }),
+    }));
     await vi.waitFor(() => expect(closed).toHaveBeenCalled(), { timeout: 10_000 });
     expect(manager.snapshot().plugins[0]?.status).toBe('error');
     expect(manager.tools()).toEqual([]);
