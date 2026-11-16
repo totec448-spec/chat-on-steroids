@@ -2224,8 +2224,9 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
       return !!own && !!finalTurn && own !== finalTurn && own.endOrigin !== undefined && own.origin < finalTurn.origin;
     }
     return nativeFinal && recent.some(end => end.kind === 'turn_end' && end.outcome === 'completed' &&
-      sameTurn(end.turnId, finalTurnId) && end.seq < event.seq &&
-      !recent.some(start => start.kind === 'turn_start' && sameTurn(start.turnId, finalTurnId) && start.seq > end.seq && start.seq < event.seq));
+      sameTurn(end.turnId, finalTurnId) &&
+      !recent.some(start => start.kind === 'turn_start' && sameTurn(start.turnId, finalTurnId) && start.seq > end.seq &&
+        (end.seq < event.seq ? start.seq < event.seq : true)));
   };
   if (recent.some(event => {
     if (event === final || workSequence(event) <= seq || lateNote(event)) return false;

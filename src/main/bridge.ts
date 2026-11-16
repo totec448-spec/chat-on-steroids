@@ -10474,10 +10474,16 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
     // makes the handout disappear while this scheduler keeps recreating it.
     if (!await silenceSourceCurrent(conversationId, grant)) {
       if (activeUntil.get(conversationId) === grant) {
+        const completed = grant.turnId ? await readCompletedFinal(grant.sessionId, conversationId, grant.turnId) : null;
+        if (activeUntil.get(conversationId) !== grant) continue;
         // The same work can still be displayed after a close or pending Stop.
         // Preserve its original silence deadline so a real page return does
         // not pretend to be fresh work or start another waiting window.
-        if (!grant.thinkingFailed && now < activityDeadline(grant)) deferred = true;
+        // Once the turn's completed final has arrived, retire immediately instead of holding queued work.
+        if (completed) {
+          noteSilence(conversationId, grant, 'spent: the complete answer arrived');
+          markSpent(conversationId, grant);
+        } else if (!grant.thinkingFailed && now < activityDeadline(grant)) deferred = true;
         else {
           noteSilence(conversationId, grant, 'spent: the silent work is no longer this chat\'s current turn (a newer question, a close or a Stop)');
           markSpent(conversationId, grant);
