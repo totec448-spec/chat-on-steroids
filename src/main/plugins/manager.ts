@@ -865,7 +865,9 @@ export class PluginManager {
           /^(?:error\b|could not connect\b|connection refused\b)/i.test(block.text.trim())))
           throw new Error('Open Blender, enable its MCP addon, and click Start MCP Server in Blender. Then restart this plugin.');
       }
-      if (signal.aborted || this.closing || !row.enabled) {
+      // A non-retryable failure on the previous client can revoke this retry
+      // while discovery is in flight. Do not publish the cancelled connection.
+      if (signal.aborted || this.closing || !row.enabled || (reconnect && !this.reconnects.has(row.id))) {
         if (transport?.pid) await terminateProcessTree(transport.pid, true);
         await client.close();
         return;
