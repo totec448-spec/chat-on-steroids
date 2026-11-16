@@ -264,7 +264,8 @@ const sessionAssetUsage = new Map<string, number>();
 /** Deduplicate overflow warnings while a session remains at its own asset-size limit. */
 const sessionOverflowQuotaWarned = new Set<string>();
 let globalAssetUsage: number | null = null;
-const GLOBAL_ASSET_QUOTA_EXCEEDED = 'Global session asset quota exceeded';
+export const SESSION_ASSET_QUOTA_EXCEEDED = 'Session asset quota exceeded';
+export const GLOBAL_ASSET_QUOTA_EXCEEDED = 'Global session asset quota exceeded';
 // A full store is one state the app shows, not one log warning per refused write (#1406).
 let recordingStoreFull = false;
 const recordingStoreFullListeners = new Set<() => void>();
@@ -272,14 +273,15 @@ const recordingStoreFullListeners = new Set<() => void>();
 function setRecordingStoreFull(full: boolean): void {
   if (recordingStoreFull === full) return;
   recordingStoreFull = full;
-  if (full) logWarn('recording storage is full (2 GiB): new images and long texts are not saved until space is freed');
+  const limitGiB = Math.round(globalAssetLimitBytes / (1024 * 1024 * 1024));
+  if (full) logWarn(`recording storage is full (${limitGiB} GiB): new images and long texts are not saved until space is freed`);
   else logInfo('recording storage has room again');
   for (const listener of recordingStoreFullListeners) {
     try { listener(); } catch (err) { logWarn(`recording storage listener failed: ${(err as Error).message}`); }
   }
 }
 
-/** True from a write refused by the 2 GiB limit until space is free again. */
+/** True from a write refused by the global recording limit until space is free again. */
 export function recordingStorageFull(): boolean {
   return recordingStoreFull;
 }
@@ -1710,10 +1712,13 @@ export function upsertNativeImageEvent(
       const incomingAsset = event.asset ? admittedAssets(sessionId, [event.asset])?.[0] : undefined;
       const staleAsset = Boolean(event.asset && !incomingAsset);
       const asset = previous?.asset ?? incomingAsset;
-      const previewError = previous?.previewError === 'quota' && !asset
-        ? 'quota'
-        : staleAsset
-          ? 'removed'
+      const quotaError = [event.previewError, previous?.previewError].find(
+        (code): code is 'quota' | 'session_quota' => code === 'quota' || code === 'session_quota'
+      );
+      const previewError = staleAsset
+        ? 'removed'
+        : quotaError && !asset
+          ? quotaError
           : event.previewError ?? previous?.previewError;
       const previewStatus = asset
         ? 'available'
@@ -2024,6 +2029,7 @@ export async function readRecentEvents(
     maxBytes?: number; before?: number; after?: number; orderByOrigin?: boolean;
     /** History pages for reading: a turn's final answer sits beside its end (`residenceOf`). */
     byResidence?: boolean;
+    acceptEvent?: (event: SessionEvent) => boolean;
   } = {}
 ): Promise<SessionEvent[]> {
   assertSessionId(sessionId);
@@ -2219,8 +2225,9 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
       return !!own && !!finalTurn && own !== finalTurn && own.endOrigin !== undefined && own.origin < finalTurn.origin;
     }
     return nativeFinal && recent.some(end => end.kind === 'turn_end' && end.outcome === 'completed' &&
-      sameTurn(end.turnId, finalTurnId) && end.seq < event.seq &&
-      !recent.some(start => start.kind === 'turn_start' && sameTurn(start.turnId, finalTurnId) && start.seq > end.seq && start.seq < event.seq));
+      sameTurn(end.turnId, finalTurnId) &&
+      !recent.some(start => start.kind === 'turn_start' && sameTurn(start.turnId, finalTurnId) && start.seq > end.seq &&
+        (end.seq < event.seq ? start.seq < event.seq : true)));
   };
   if (recent.some(event => {
     if (event === final || workSequence(event) <= seq || lateNote(event)) return false;
@@ -2684,7 +2691,9 @@ export async function readEditReviewAsset(sessionId: string, assetId: string): P
 
 /** Retrieves one immutable, bounded edit artifact by its durable session/call/index identity. */
 
-export async function readToolEditReview(sessionId: string, callId: string, changeIndex: number): Promise<ToolEditReview | null> {
+export async function readToolEditReview(sessionId: string, callId: string, changeIndex: number,
+  allowed?: (event: Extract<SessionEvent, { kind: 'tool_call' }>, index: number) => Promise<boolean>
+): Promise<ToolEditReview | null> {
   assertSessionId(sessionId);
   if (!/^[0-9a-f-]{36}$/i.test(callId) || !Number.isSafeInteger(changeIndex) || changeIndex < 0 || changeIndex >= 64) return null;
   await settleSessionWrites(sessionId);
@@ -2700,6 +2709,7 @@ export async function readToolEditReview(sessionId: string, callId: string, chan
   try {
     const parsed = JSON.parse(data.toString('utf8')) as { before?: unknown; after?: unknown };
     if (typeof parsed.before !== 'string' || typeof parsed.after !== 'string') return null;
+    if (allowed && !await allowed(event, changeIndex)) return null;
     return { callId, changeIndex, path: change.path, added: change.added, removed: change.removed,
       baseText: parsed.before, currentText: parsed.after };
   } catch { return null; }
@@ -4233,7 +4243,7 @@ export async function writeAsset(
     }
     const used = await sessionAssetBytesOnDisk(sessionId);
     const globalUsed = await globalAssetBytesOnDisk();
-    if (used + data.length > MAX_SESSION_ASSET_BYTES) throw new Error('Session asset quota exceeded');
+    if (used + data.length > MAX_SESSION_ASSET_BYTES) throw new Error(SESSION_ASSET_QUOTA_EXCEEDED);
     if (globalUsed + data.length > globalAssetLimitBytes) {
       setRecordingStoreFull(true);
       throw new Error(GLOBAL_ASSET_QUOTA_EXCEEDED);

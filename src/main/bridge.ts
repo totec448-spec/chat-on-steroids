@@ -30,7 +30,7 @@ import { checkAutomaticSend, SEND_CHECK_RETRY_MS } from './send-check.js';
 import { publishBrowserDecision, authorizeBrowserInput, sessionInputPolicy, collectRecordedBrowserDecision, fileRotationInput, fileRotationContinueAfterStop, rotationDelivery, withdrawUnsentRotation, type InputActivity } from './session/input.js';
 import { callHoldOpen, holdCalls } from './rotation-hold.js';
 import { authorizedPluginRefreshPublications, hasRequestedPluginRefresh, pendingPluginRefreshes, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh } from './plugin-refresh.js';
-import { attachBrowserWake, wakeBrowserWork } from './browser-wake.js';
+import { attachBrowserWake, wakeActivityWork, wakeBrowserWork } from './browser-wake.js';
 import { noteRouteExistingChatSend, tunnelRouteSettling } from './tunnel/route-settle.js';
 import { noteChatgptProjects } from './chatgpt-project-catalog.js';
 import { armProjectCreate, bindChatToLinkedProject, claimProjectCreate, completeProjectCreate, failProjectCreate, getProject, markProjectGone, pendingProjectCreates } from './projects.js';
@@ -115,7 +115,8 @@ import {
   withdrawSilenceGoalReplyNow,
   setGoalObjectiveNow,
   setGoalSwitchNow,
-  startGoalDraft
+  startGoalDraft,
+  onGoalChange
 } from './goal.js';
 import { logInfo, logWarn } from './logger.js';
 import { userRequestFound } from './user-request-files.js';
@@ -125,6 +126,7 @@ import {
   closeConversation,
   liveConversations,
   noteChatOrigin,
+  onNonExtensionSessionChange,
   recordAgentMessage,
   recordChatObservations,
   recordRequestEvidence,
@@ -163,7 +165,7 @@ import {
   turnEndedDurably,
   requestTurnOwnershipCutoff
 } from './session/store.js';
-import { inFlightMcpRequests, inFlightToolCalls, runningToolCalls, runningToolConversations, runningToolProgress, sentResults, settlingToolCalls } from './mcp/call-context.js';
+import { inFlightMcpRequests, inFlightToolCalls, onRunningToolChange, runningToolCalls, runningToolConversations, runningToolProgress, sentResults, settlingToolCalls } from './mcp/call-context.js';
 import { automaticSendRefusal, chatsAtOnceStatus, noteChatLimit, restoreChatsAtOnce, setWorkingChatsSource } from './chats-at-once.js';
 import { nativeHandoffPrompt } from './session/handoff-prompt.js';
 import { DEFAULT_HANDOFF_PROMPT } from '../shared/handoff.js';
@@ -1321,6 +1323,255 @@ export function browserPresent(): boolean {
 /** Recent HTTP presence cannot prove that an explicit desktop send can wake Chrome now. */
 export function browserWakeConnected(): boolean { return browserWake?.connected() === true; }
 
+const ACTIVITY_WAKE_INTERVAL_MS = 200;
+const ACTIVITY_STREAM_WAKE_CAP = 64;
+const ACTIVITY_DISCRETE_WAKE_CAP = 256;
+const ACTIVITY_STREAM_WAKE_EVICT_LOG_MS = 10_000;
+const pendingActivityWakes = new Set<string>();
+let activityWakeMicrotaskQueued = false;
+const pendingDiscreteActivityWakes = new Map<string, number>();
+let discreteActivityWakeTimer: NodeJS.Timeout | null = null;
+let discreteActivityWakeTimerDueAt = 0;
+const lastActivityWakeAtByTarget = new Map<string, number>();
+const pendingStreamActivityWakes = new Set<string>();
+let streamActivityWakeTimer: NodeJS.Timeout | null = null;
+let lastStreamActivityWakeAt = 0;
+let lastStreamWakeEvictLogAt = 0;
+
+function clearActivityWakes(): void {
+  pendingActivityWakes.clear();
+  activityWakeMicrotaskQueued = false;
+  if (discreteActivityWakeTimer) clearTimeout(discreteActivityWakeTimer);
+  discreteActivityWakeTimer = null;
+  discreteActivityWakeTimerDueAt = 0;
+  pendingDiscreteActivityWakes.clear();
+  lastActivityWakeAtByTarget.clear();
+  if (streamActivityWakeTimer) clearTimeout(streamActivityWakeTimer);
+  streamActivityWakeTimer = null;
+  lastStreamActivityWakeAt = 0;
+  lastStreamWakeEvictLogAt = 0;
+  pendingStreamActivityWakes.clear();
+}
+
+function lastWakeAtFor(target: string): number {
+  return Math.max(lastActivityWakeAtByTarget.get(target) ?? 0, lastActivityWakeAtByTarget.get('*') ?? 0);
+}
+
+function recordActivityWakeSent(target: string, now: number): void {
+  lastActivityWakeAtByTarget.delete(target);
+  lastActivityWakeAtByTarget.set(target, now);
+  if (lastActivityWakeAtByTarget.size > ACTIVITY_DISCRETE_WAKE_CAP) {
+    const oldest = lastActivityWakeAtByTarget.keys().next().value;
+    if (oldest !== undefined) lastActivityWakeAtByTarget.delete(oldest);
+  }
+}
+
+function emitActivityWake(target: string, now = Date.now()): void {
+  recordActivityWakeSent(target, now);
+  if (target === '*') {
+    pendingDiscreteActivityWakes.clear();
+    if (discreteActivityWakeTimer) {
+      clearTimeout(discreteActivityWakeTimer);
+      discreteActivityWakeTimer = null;
+      discreteActivityWakeTimerDueAt = 0;
+    }
+    wakeActivityWork();
+    return;
+  }
+  wakeActivityWork(target);
+}
+
+function armDiscreteActivityWakeTimer(now = Date.now()): void {
+  if (pendingDiscreteActivityWakes.size === 0) return;
+  let earliestDue = Infinity;
+  for (const dueAt of pendingDiscreteActivityWakes.values()) {
+    if (dueAt < earliestDue) earliestDue = dueAt;
+  }
+  if (discreteActivityWakeTimer && earliestDue >= discreteActivityWakeTimerDueAt) return;
+  if (discreteActivityWakeTimer) clearTimeout(discreteActivityWakeTimer);
+  discreteActivityWakeTimerDueAt = earliestDue;
+  discreteActivityWakeTimer = setTimeout(flushPendingDiscreteActivityWakes, Math.max(1, earliestDue - now));
+  discreteActivityWakeTimer.unref?.();
+}
+
+function queuePendingDiscreteWake(target: string, dueAt: number, now = Date.now()): void {
+  if (pendingDiscreteActivityWakes.has(target)) return;
+  if (pendingDiscreteActivityWakes.size >= ACTIVITY_DISCRETE_WAKE_CAP) {
+    const oldest = pendingDiscreteActivityWakes.keys().next().value;
+    if (oldest !== undefined) pendingDiscreteActivityWakes.delete(oldest);
+  }
+  pendingDiscreteActivityWakes.set(target, dueAt);
+  armDiscreteActivityWakeTimer(now);
+}
+
+function flushPendingDiscreteActivityWakes(): void {
+  discreteActivityWakeTimer = null;
+  discreteActivityWakeTimerDueAt = 0;
+  if (!bridgeDesiredRunning || !server || !browserWakeConnected()) {
+    if (pendingDiscreteActivityWakes.size > 0) {
+      const reason = !bridgeDesiredRunning || !server ? 'bridge stopped' : 'wake channel disconnected';
+      logInfo(`bridge: discarded ${pendingDiscreteActivityWakes.size} pending discrete activity wake(s) (${reason})`);
+      pendingDiscreteActivityWakes.clear();
+    }
+    return;
+  }
+  const now = Date.now();
+  const globalDue = pendingDiscreteActivityWakes.get('*');
+  if (globalDue !== undefined && globalDue <= now) {
+    const lastGlobalAt = lastActivityWakeAtByTarget.get('*') ?? 0;
+    if (lastGlobalAt === 0 || now - lastGlobalAt >= ACTIVITY_WAKE_INTERVAL_MS) {
+      emitActivityWake('*', now);
+      return;
+    }
+    pendingDiscreteActivityWakes.set('*', lastGlobalAt + ACTIVITY_WAKE_INTERVAL_MS);
+  }
+  for (const [target, dueAt] of [...pendingDiscreteActivityWakes.entries()]) {
+    if (dueAt > now) continue;
+    pendingDiscreteActivityWakes.delete(target);
+    const lastAt = lastWakeAtFor(target);
+    if (lastAt === 0 || now - lastAt >= ACTIVITY_WAKE_INTERVAL_MS) {
+      emitActivityWake(target, now);
+    } else {
+      queuePendingDiscreteWake(target, lastAt + ACTIVITY_WAKE_INTERVAL_MS, now);
+    }
+  }
+  armDiscreteActivityWakeTimer(now);
+}
+
+function scheduleDiscreteActivityWake(target: string): void {
+  pendingStreamActivityWakes.delete(target);
+  if (pendingStreamActivityWakes.size === 0 && streamActivityWakeTimer) {
+    clearTimeout(streamActivityWakeTimer);
+    streamActivityWakeTimer = null;
+  }
+  if (pendingActivityWakes.has('*') || pendingActivityWakes.has(target)) return;
+  const now = Date.now();
+  const lastAt = lastWakeAtFor(target);
+  if (lastAt !== 0 && now - lastAt < ACTIVITY_WAKE_INTERVAL_MS) {
+    queuePendingDiscreteWake(target, lastAt + ACTIVITY_WAKE_INTERVAL_MS, now);
+    return;
+  }
+  pendingDiscreteActivityWakes.delete(target);
+  if (target === '*') {
+    pendingActivityWakes.clear();
+    pendingActivityWakes.add('*');
+  } else if (pendingActivityWakes.size >= ACTIVITY_STREAM_WAKE_CAP) {
+    logInfo(`bridge: collapsed ${pendingActivityWakes.size + 1} immediate activity wakes into a global wake (${ACTIVITY_STREAM_WAKE_CAP}-target cap reached)`);
+    pendingActivityWakes.clear();
+    pendingActivityWakes.add('*');
+  } else {
+    pendingActivityWakes.add(target);
+  }
+  if (activityWakeMicrotaskQueued) return;
+  activityWakeMicrotaskQueued = true;
+  queueMicrotask(() => {
+    activityWakeMicrotaskQueued = false;
+    const targets = [...pendingActivityWakes];
+    pendingActivityWakes.clear();
+    if (!bridgeDesiredRunning || !server || !browserWakeConnected()) return;
+    const flushNow = Date.now();
+    if (targets.includes('*')) {
+      const lastGlobalAt = lastActivityWakeAtByTarget.get('*') ?? 0;
+      if (lastGlobalAt === 0 || flushNow - lastGlobalAt >= ACTIVITY_WAKE_INTERVAL_MS) {
+        emitActivityWake('*', flushNow);
+      } else {
+        queuePendingDiscreteWake('*', lastGlobalAt + ACTIVITY_WAKE_INTERVAL_MS, flushNow);
+      }
+      return;
+    }
+    for (const id of targets) {
+      const idLastAt = lastWakeAtFor(id);
+      if (idLastAt === 0 || flushNow - idLastAt >= ACTIVITY_WAKE_INTERVAL_MS) {
+        emitActivityWake(id, flushNow);
+      } else {
+        queuePendingDiscreteWake(id, idLastAt + ACTIVITY_WAKE_INTERVAL_MS, flushNow);
+      }
+    }
+  });
+}
+
+function flushNextStreamingWake(): void {
+  streamActivityWakeTimer = null;
+  if (!bridgeDesiredRunning || !server || !browserWakeConnected()) {
+    if (pendingStreamActivityWakes.size > 0) {
+      const reason = !bridgeDesiredRunning || !server ? 'bridge stopped' : 'wake channel disconnected';
+      logInfo(`bridge: discarded ${pendingStreamActivityWakes.size} pending streaming activity wake(s) (${reason})`);
+      pendingStreamActivityWakes.clear();
+    }
+    return;
+  }
+  const now = Date.now();
+  let readyTarget: string | undefined;
+  let minWaitMs = Infinity;
+  for (const candidate of pendingStreamActivityWakes) {
+    const lastAt = lastWakeAtFor(candidate);
+    const waitMs = lastAt === 0 ? 0 : ACTIVITY_WAKE_INTERVAL_MS - (now - lastAt);
+    if (waitMs <= 0) {
+      readyTarget = candidate;
+      break;
+    }
+    if (waitMs < minWaitMs) minWaitMs = waitMs;
+  }
+  if (readyTarget !== undefined) {
+    pendingStreamActivityWakes.delete(readyTarget);
+    lastStreamActivityWakeAt = now;
+    emitActivityWake(readyTarget, now);
+    if (pendingStreamActivityWakes.size > 0) scheduleStreamingWakePump(ACTIVITY_WAKE_INTERVAL_MS);
+    return;
+  }
+  if (pendingStreamActivityWakes.size > 0) {
+    scheduleStreamingWakePump(Math.max(1, minWaitMs));
+  }
+}
+
+function scheduleStreamingWakePump(delayMs: number): void {
+  if (streamActivityWakeTimer) return;
+  streamActivityWakeTimer = setTimeout(flushNextStreamingWake, Math.max(1, delayMs));
+  streamActivityWakeTimer.unref?.();
+}
+
+/**
+ * Signals connected ChatGPT tabs to pull `/activity` now, coalescing bursty updates and
+ * enforcing both a per-target 200 ms cadence and a combined streaming throttle across targets
+ * so WebSocket and `/activity` traffic stays within the shared bridge budget.
+ */
+export function notifyBrowserActivity(conversationId?: string, streaming = false): void {
+  if (!bridgeDesiredRunning || !server || !browserWakeConnected()) return;
+  const target = conversationId && /^[0-9a-z-]{8,64}$/i.test(conversationId) ? conversationId : '*';
+  if (!streaming || target === '*') {
+    scheduleDiscreteActivityWake(target);
+    return;
+  }
+  const now = Date.now();
+  const elapsed = now - lastStreamActivityWakeAt;
+  const targetLastAt = lastWakeAtFor(target);
+  const targetElapsed = now - targetLastAt;
+  if (
+    !streamActivityWakeTimer &&
+    pendingStreamActivityWakes.size === 0 &&
+    (lastStreamActivityWakeAt === 0 || elapsed >= ACTIVITY_WAKE_INTERVAL_MS) &&
+    (targetLastAt === 0 || targetElapsed >= ACTIVITY_WAKE_INTERVAL_MS)
+  ) {
+    lastStreamActivityWakeAt = now;
+    scheduleDiscreteActivityWake(target);
+    return;
+  }
+  if (!pendingStreamActivityWakes.has(target) && pendingStreamActivityWakes.size >= ACTIVITY_STREAM_WAKE_CAP) {
+    const oldest = pendingStreamActivityWakes.values().next().value;
+    if (oldest !== undefined) {
+      pendingStreamActivityWakes.delete(oldest);
+      if (lastStreamWakeEvictLogAt === 0 || now - lastStreamWakeEvictLogAt >= ACTIVITY_STREAM_WAKE_EVICT_LOG_MS) {
+        lastStreamWakeEvictLogAt = now;
+        logWarn(`bridge: dropped oldest pending streaming activity wake (${ACTIVITY_STREAM_WAKE_CAP}-target queue cap reached)`);
+      }
+    }
+  }
+  pendingStreamActivityWakes.add(target);
+  const pumpWait = lastStreamActivityWakeAt === 0 ? ACTIVITY_WAKE_INTERVAL_MS : ACTIVITY_WAKE_INTERVAL_MS - Math.max(0, elapsed);
+  const targetWait = targetLastAt === 0 ? 0 : ACTIVITY_WAKE_INTERVAL_MS - Math.max(0, targetElapsed);
+  scheduleStreamingWakePump(Math.max(pumpWait, targetWait));
+}
+
 /**
  * The extension in the person's own Chrome, Edge or Brave, apart from the CoS browser's copy: Setup
  * waits for this one, because the built-in browser's Google sign-in comes back through it.
@@ -2424,6 +2675,92 @@ async function continueStuckFromSavedSummary(entry: { token: string; sessionId: 
   }
 }
 
+/**
+ * Documents that read a chat's saved copy as missing a message the browser delivered, by chat (#2184).
+ *
+ * On 2026-11-14 ChatGPT stopped saving a 790k-token Goal chat after its history limit: the live page went on
+ * streaming and acknowledged two Continues, while every reload read the saved copy, whose newest question was an
+ * older one. Nothing owned the chat afterwards, and it stood idle for hours. A page that holds an automatic Continue
+ * because its newest question is not the one it answers says which question it read and when its document loaded.
+ * A document that loaded well after the newest message the app recorded for the chat, and still read an older
+ * newest question, saw a copy that lacks that message; two such documents ten minutes apart are the proof.
+ */
+const SAVED_COPY_DOCUMENT_GRACE_MS = 5 * 60_000;
+const SAVED_COPY_PROOF_SPAN_MS = 10 * 60_000;
+const savedCopyBehind = new Map<string, { messageId: string; documents: Set<number> }>();
+const savedCopyContinued = new Set<string>();
+
+/** Why a chat whose saved copy lags may not be moved to a new chat right now, or '' when it may (#2184). */
+function savedCopyRecoveryBlocker(conversationId: string, session: Pick<SessionSummary, 'id' | 'activeTurnId'>, now: number): string {
+  if (isChatBlocked(conversationId)) return 'the chat is blocked';
+  if (!goalArmedFor(conversationId) || !goalSwitchFor(conversationId).enabled) return 'Goal and Loop are not on for it';
+  if (chatIsWorkingNow(conversationId, now)) return 'the chat is still working';
+  // A turn the recorder or a page still reports is not idle however old it is: the age limit of chatIsWorkingNow is a
+  // recovery heuristic, and with two browsers one page can hold a thinking turn another page does not see (CodeRabbit on #2195).
+  if (session.activeTurnId || liveConversations().some(entry => entry.conversationId === conversationId && (entry.generating || Boolean(entry.activeTurnId)))) return 'the recorder still reports a turn';
+  if (runningToolProgress(conversationId) !== null) return 'a tool call is running';
+  if (continuationForSession(session.id)) return 'a Compact & Resume is under way';
+  return '';
+}
+
+async function noteSavedCopyBehind(conversationId: string, newestUser: string, documentSince: number, now: number): Promise<void> {
+  if (savedCopyContinued.has(conversationId) || !Number.isFinite(documentSince) || documentSince <= 0 || documentSince > now + 60_000) return;
+  const session = await findSessionByConversation(conversationId);
+  if (!session || session.conversationId !== conversationId) return;
+  const rows = (await readRecentEvents(session.id, 200, { kinds: ['user_message'] }))
+    .filter((event): event is Extract<SessionEvent, { kind: 'user_message' }> => event.kind === 'user_message' && event.messageId !== undefined);
+  const order = (event: SessionEvent): number => ('origin' in event ? event.origin : undefined) ?? event.seq;
+  const newest = rows.reduce<typeof rows[number] | null>((best, event) => !best || order(event) > order(best) ? event : best, null);
+  const read = rows.find(event => event.messageId === newestUser);
+  // The page must have positively read a question the app recorded, older than the one the app says is newest, and
+  // its document must have loaded long after the newer one was recorded: only then is the newer one missing from it.
+  if (!newest || !read || newest.messageId === newestUser || order(read) >= order(newest) ||
+      documentSince < newest.time + SAVED_COPY_DOCUMENT_GRACE_MS) {
+    savedCopyBehind.delete(conversationId);
+    return;
+  }
+  let record = savedCopyBehind.get(conversationId);
+  if (!record || record.messageId !== newest.messageId) record = { messageId: newest.messageId!, documents: new Set() };
+  record.documents.add(documentSince);
+  savedCopyBehind.delete(conversationId);
+  savedCopyBehind.set(conversationId, record);
+  if (savedCopyBehind.size > 200) savedCopyBehind.delete(savedCopyBehind.keys().next().value!);
+  const spread = Math.max(...record.documents) - Math.min(...record.documents);
+  if (record.documents.size < 2 || spread < SAVED_COPY_PROOF_SPAN_MS) return;
+  // Only an unattended chat that nothing else is working on is moved: Goal or Loop on, not blocked, nothing running.
+  const blocker = savedCopyRecoveryBlocker(conversationId, session, now);
+  if (blocker) {
+    const key = `saved-copy-wait|${conversationId}|${blocker}`;
+    if (now - (pageNotesLogged.get(key) ?? 0) >= 60_000) {
+      notePageNoteLogged(key, now);
+      logInfo(`bridge: ${conversationId}: ChatGPT's saved copy of this chat lacks the message the browser delivered, and the chat waits to continue from its saved summary: ${blocker}`);
+    }
+    return;
+  }
+  const saved = session.lastHandoffId;
+  if (!saved || !await savedSummaryUsable(session.id, saved)) {
+    logInfo(`bridge: ${conversationId}: ChatGPT's saved copy of this chat lacks the message the browser delivered, and the session has no usable saved summary to go on from`);
+    savedCopyContinued.add(conversationId);
+    return;
+  }
+  // Read the session first, then check every condition with no await before the call below: the person may have
+  // turned the switch off, or the chat may have started working, or a Compact & Resume may have begun meanwhile.
+  const current = await getSession(session.id);
+  if (current?.conversationId !== conversationId || savedCopyContinued.has(conversationId) || savedCopyRecoveryBlocker(conversationId, current, Date.now())) return;
+  savedCopyContinued.add(conversationId);
+  try {
+    await resumeFromSavedSummary(session.id, saved, { refuseIfCompacting: true });
+    logWarn(`bridge: ${conversationId}: ChatGPT's saved copy of this chat lacks the message the browser delivered ` +
+      `(${record.documents.size} documents read an older newest question over ${Math.round(spread / 60_000)} minutes); ` +
+      `the ${goalSwitchFor(conversationId).mode} chat continues in a new chat from saved summary ${saved}`);
+  } catch (error) {
+    // A failed attempt (the summary could not be stored again) or a Compact & Resume that began meanwhile leaves the
+    // proof in place, and a later report may try again; only a successful resume keeps the marker.
+    savedCopyContinued.delete(conversationId);
+    logInfo(`bridge: ${conversationId}: could not continue from the saved summary (${(error as Error).message})`);
+  }
+}
+
 export { STUCK_SUMMARY_MS };
 async function stuckSummaryOffer(sessionId: string, session: SessionSummary): Promise<SessionControlsView['lastSummary']> {
   const job = resumeJobFor(sessionId);
@@ -2574,6 +2911,7 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string,
   else if (!options.rotation) logInfo(`bridge: desktop (sent by ${options.from ?? 'the app'}) Stop for session ${sessionId}, turn ${expectedTurnId} joins the Stop already requested (command ${command.id})`);
   else if (pendingHeld) logInfo(`bridge: Stop repeated for held turn ${expectedTurnId} in ${id}; command ${command.id} stays a held-turn Stop`);
   wakeBrowserWork();
+  notifyBrowserActivity(id);
   changed();
   if (!alreadyQueued) {
     const lifecycle = bridgeLifecycleEpoch;
@@ -2651,6 +2989,7 @@ async function saveConversationObjective(id: string, text: string, named: 'goal'
       goalActiveFor(id) && getConfig().sessions.record && await goalKeyPresent(goalModeFor(id)));
     forgetGoalWatch(id);
   } catch { throw new Error('goal_ticket_not_durable'); }
+  notifyBrowserActivity(id);
   changed();
   return { objective, ...(chatSwitch ? { enabled: chatSwitch.enabled, own: true, mode: chatSwitch.mode } : {}) };
 }
@@ -2682,6 +3021,7 @@ export async function setSessionAutomation(sessionId: string, automation: Sessio
   await activateConversationGoalReply(id, held.enabled && live.enabled && live.mode === held.mode && !goalBlockReason(id)
     && getConfig().sessions.record && keyPresent);
   forgetGoalWatch(id);
+  notifyBrowserActivity(id);
   changed();
   for (const listener of automationListeners) { try { listener(sessionId, automation !== 'off', from); } catch { /* a listener never fails a switch */ } }
   return sessionControlsFor(sessionId);
@@ -2695,6 +3035,7 @@ async function fileCompactionTicket(sessionId: string, id: string, automatic = f
   const existing = continuationForSession(sessionId);
   const opened = existing ?? await openContinuationNow(sessionId, id, automatic);
   rememberToken(sessionId, opened.token);
+  notifyBrowserActivity(id);
   changed();
   return { opened, started: !existing };
 }
@@ -2709,12 +3050,14 @@ export async function compactSession(sessionId: string): Promise<SessionControls
   return sessionControlsFor(sessionId);
 }
 /** Compact & Resume again from the summary an abandoned run already captured (#1215). */
-export async function resumeFromSavedSummary(sessionId: string, handoffId: string): Promise<SessionControlsView> {
+export async function resumeFromSavedSummary(sessionId: string, handoffId: string, options: { refuseIfCompacting?: boolean } = {}): Promise<SessionControlsView> {
   await controlledConversation(sessionId);
   // A summary that cannot be used ends nothing: the waiting Compact & Resume stays (CodeRabbit on #2019).
   if (!await savedSummaryUsable(sessionId, handoffId)) throw new Error('This summary can no longer be used. Start Compact & Resume again.');
   // The person chose the saved summary over a Compact & Resume still waiting for ChatGPT's: that ticket ends.
   const waiting = continuationForSession(sessionId);
+  // The automatic path never ends a Compact & Resume the person or the app started while it was reading (#2184).
+  if (waiting && options.refuseIfCompacting) throw new Error('a Compact & Resume is under way');
   if (waiting && waiting.state === 'awaiting-summary' && !waiting.handoffId) {
     logInfo(`bridge: ${sessionId} continues from saved summary ${handoffId}; the Compact & Resume still waiting for ChatGPT's summary is cancelled`);
     await cancelResumeNow(sessionId);
@@ -2727,8 +3070,9 @@ export async function resumeFromSavedSummary(sessionId: string, handoffId: strin
   return sessionControlsFor(sessionId);
 }
 export async function cancelSessionCompaction(sessionId: string): Promise<SessionControlsView> {
-  await controlledConversation(sessionId);
+  const id = await controlledConversation(sessionId);
   await cancelResumeNow(sessionId);
+  notifyBrowserActivity(id);
   changed();
   return sessionControlsFor(sessionId);
 }
@@ -5601,6 +5945,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           recoveryQuestionChanged.delete(inputId);
           changed();
         }
+        // Which question the page read and when its document loaded (older pages say neither).
+        const newestUser = typeof body['newestUser'] === 'string' && body['newestUser'].length <= 256 ? body['newestUser'] : null;
+        const documentSince = typeof body['documentSince'] === 'number' ? body['documentSince'] : null;
+        if (newestUser && documentSince !== null) await noteSavedCopyBehind(chat, newestUser, documentSince, now).catch(() => undefined);
       }
       return json(res, 200, { ok: true }, origin);
     }
@@ -6331,6 +6679,9 @@ async function sweepOwnedSwarm(runId: string, now: number): Promise<boolean> {
 /** Lifecycle subscriptions are disposed before restarting the bridge. */
 let dropSwarmEndListener: (() => void) | null = null;
 let dropSwarmChangeListener: (() => void) | null = null;
+let dropGoalChangeListener: (() => void) | null = null;
+let dropSessionChangeListener: (() => void) | null = null;
+let dropRunningToolListener: (() => void) | null = null;
 let staleSwarmTimer: NodeJS.Timeout | null = null;
 /** One wake-up on the earliest live silence deadline. See armSilenceSweep(). */
 let silenceTimer: NodeJS.Timeout | null = null;
@@ -6582,6 +6933,26 @@ async function startBridgeOnce(epoch: number, prepared?: PreparedBridge): Promis
   dropSwarmChangeListener?.();
   dropSwarmChangeListener = onSwarmChange(retireInactiveWorkerRecovery);
   retireInactiveWorkerRecovery();
+  dropGoalChangeListener?.();
+  dropGoalChangeListener = onGoalChange((change) => {
+    notifyBrowserActivity(change?.conversationId, change?.streaming === true);
+  });
+  dropSessionChangeListener?.();
+  dropSessionChangeListener = onNonExtensionSessionChange((change) => {
+    if (!bridgeDesiredRunning || !server || !browserWakeConnected()) return;
+    if (change.allTranscripts) {
+      notifyBrowserActivity();
+      return;
+    }
+    for (const sessionId of change.sessionIds ?? []) {
+      const target = liveConversations().find((entry) => entry.sessionId === sessionId)?.conversationId;
+      if (target) notifyBrowserActivity(target);
+    }
+  });
+  dropRunningToolListener?.();
+  dropRunningToolListener = onRunningToolChange((conversationId) => {
+    notifyBrowserActivity(conversationId);
+  });
   dropSpawnRequestListener?.();
   dropSpawnRequestListener = onSpawnRequest((workers) => {
     for (const worker of workers) queueWorkerBootstrap(worker.id, worker.task, worker.model, worker.reasoningEffort, worker.runId);
@@ -6748,6 +7119,13 @@ export async function stopBridge(): Promise<void> {
     dropSwarmEndListener = null;
     dropSwarmChangeListener?.();
     dropSwarmChangeListener = null;
+    dropGoalChangeListener?.();
+    dropGoalChangeListener = null;
+    dropSessionChangeListener?.();
+    dropSessionChangeListener = null;
+    dropRunningToolListener?.();
+    dropRunningToolListener = null;
+    clearActivityWakes();
     dropSpawnRequestListener?.();
     dropSpawnRequestListener = null;
     dropReviveRequestListener?.();
@@ -10096,10 +10474,16 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
     // makes the handout disappear while this scheduler keeps recreating it.
     if (!await silenceSourceCurrent(conversationId, grant)) {
       if (activeUntil.get(conversationId) === grant) {
+        const completed = grant.turnId ? await readCompletedFinal(grant.sessionId, conversationId, grant.turnId) : null;
+        if (activeUntil.get(conversationId) !== grant) continue;
         // The same work can still be displayed after a close or pending Stop.
         // Preserve its original silence deadline so a real page return does
         // not pretend to be fresh work or start another waiting window.
-        if (!grant.thinkingFailed && now < activityDeadline(grant)) deferred = true;
+        // Once the turn's completed final has arrived, retire immediately instead of holding queued work.
+        if (completed) {
+          noteSilence(conversationId, grant, 'spent: the complete answer arrived');
+          markSpent(conversationId, grant);
+        } else if (!grant.thinkingFailed && now < activityDeadline(grant)) deferred = true;
         else {
           noteSilence(conversationId, grant, 'spent: the silent work is no longer this chat\'s current turn (a newer question, a close or a Stop)');
           markSpent(conversationId, grant);

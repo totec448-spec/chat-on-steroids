@@ -13735,7 +13735,12 @@
       if (!alive || CLF_DOM.conversationId() !== chat) return false;
       // Sent only while this document is still on the same chat and navigation: a registration that
       // is still pending must not let the note go out stamped for a page that moved on (CodeRabbit).
-      void ask({ type: 'page_note', note: 'input-held', reason, inputId: message.id, conversationId: chat },
+      // A page whose newest question is not the one the Continue answers says which question it read and when
+      // this document loaded: a saved copy that stopped following the chat reads an older question after every reload (#2184).
+      const newestUser = reason === 'recovery-question-changed'
+        ? CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id : undefined;
+      void ask({ type: 'page_note', note: 'input-held', reason, inputId: message.id, conversationId: chat,
+          ...(typeof newestUser === 'string' && newestUser ? { newestUser, documentSince: Math.floor(performance.timeOrigin) } : {}) },
         () => alive && epoch === heldEpoch && CLF_DOM.conversationId() === chat).catch(() => undefined);
       return false;
     };
