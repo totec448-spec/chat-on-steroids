@@ -190,26 +190,55 @@ let lastActiveSessionId: string | null = null;
 const REOPEN_NOTICE_MS = 60_000;
 
 const listeners = new Set<(change: SessionChange) => void>();
+const nonExtensionListeners = new Set<(change: SessionChange) => void>();
 let notifyTimer: NodeJS.Timeout | null = null;
 /** Every local session written during the current burst; one push names all of them. */
 const changedSessions = new Set<string>();
+/** Sessions in the current burst with at least one non-extension change (for anti-echo wakes). */
+const changedNonExtensionSessions = new Set<string>();
 
 export function onSessionChange(listener: (change: SessionChange) => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
 
-/** Publishes the exact sessions whose durable projection this recorder just wrote. */
-export function notifyChanged(...sessionIds: string[]): void {
-  for (const id of sessionIds) changedSessions.add(id);
+/** Subscribes to session changes that include at least one non-extension write in the burst. */
+export function onNonExtensionSessionChange(listener: (change: SessionChange) => void): () => void {
+  nonExtensionListeners.add(listener);
+  return () => nonExtensionListeners.delete(listener);
+}
+
+function scheduleNotifyFlush(): void {
   if (notifyTimer) return;
   notifyTimer = setTimeout(() => {
     notifyTimer = null;
     const change: SessionChange = { sessionIds: [...changedSessions] };
+    const nonExtensionChange: SessionChange | null = changedNonExtensionSessions.size > 0
+      ? { sessionIds: [...changedNonExtensionSessions] }
+      : null;
     changedSessions.clear();
+    changedNonExtensionSessions.clear();
     for (const listener of listeners) listener(change);
+    if (nonExtensionChange) {
+      for (const listener of nonExtensionListeners) listener(nonExtensionChange);
+    }
   }, 400);
   notifyTimer.unref?.();
+}
+
+/** Publishes the exact sessions whose durable projection this recorder just wrote. */
+export function notifyChanged(...sessionIds: string[]): void {
+  for (const id of sessionIds) {
+    changedSessions.add(id);
+    changedNonExtensionSessions.add(id);
+  }
+  scheduleNotifyFlush();
+}
+
+/** Publishes extension-originated observations without triggering browser activity echo wakes. */
+function notifyExtensionChanged(...sessionIds: string[]): void {
+  for (const id of sessionIds) changedSessions.add(id);
+  scheduleNotifyFlush();
 }
 
 export function recordingEnabled(): boolean {
@@ -230,9 +259,10 @@ export async function sessionForConversation(
   conversationId: string | null,
   title?: string,
   /** An observed authored user message, not a guessed route or page label. */
-  openingUserMessage?: string
+  openingUserMessage?: string,
+  extensionOrigin = false
 ): Promise<string | null> {
-  if (!conversationId) return initializeSessionForConversation(conversationId, title, openingUserMessage);
+  if (!conversationId) return initializeSessionForConversation(conversationId, title, openingUserMessage, extensionOrigin);
 
   const pending = sessionInitializations.get(conversationId);
   if (pending) {
@@ -242,12 +272,12 @@ export async function sessionForConversation(
       // caller did not yet have: command origin or the first authored user title. Apply both
       // after the shared initialization rather than dropping the later evidence.
       if (pendingOrigins.has(conversationId)) await applyOrigin(sessionId, conversationId);
-      await promoteGenericTitle(sessionId, title);
+      await promoteGenericTitle(sessionId, title, extensionOrigin);
     }
     return sessionId;
   }
 
-  const initializing = initializeSessionForConversation(conversationId, title, openingUserMessage);
+  const initializing = initializeSessionForConversation(conversationId, title, openingUserMessage, extensionOrigin);
   sessionInitializations.set(conversationId, initializing);
   try {
     const sessionId = await initializing;
@@ -256,7 +286,7 @@ export async function sessionForConversation(
     // initializer sampled pendingOrigins.
     if (sessionId) {
       if (pendingOrigins.has(conversationId)) await applyOrigin(sessionId, conversationId);
-      await promoteGenericTitle(sessionId, title);
+      await promoteGenericTitle(sessionId, title, extensionOrigin);
     }
     return sessionId;
   } finally {
@@ -315,7 +345,8 @@ export class ResumeDestinationPendingError extends Error {
 async function initializeSessionForConversation(
   conversationId: string | null,
   title?: string,
-  openingUserMessage?: string
+  openingUserMessage?: string,
+  extensionOrigin = false
 ): Promise<string | null> {
   if (!recordingEnabled()) return null;
   if (!conversationId) return ensureUnattributedSession();
@@ -446,7 +477,7 @@ async function initializeSessionForConversation(
     logInfo(`session started for a ChatGPT conversation (${summary.id})`);
   }
   if (origin && known) await applyOrigin(summary.id, conversationId);
-  if (known) await promoteGenericTitle(summary.id, title);
+  if (known) await promoteGenericTitle(summary.id, title, extensionOrigin);
   if (known) {
     // There are two awaited metadata niceties above. A rebind that starts after the pre-publish
     // check can therefore still commit before this initializer returns. Re-check once more and
@@ -464,26 +495,29 @@ async function initializeSessionForConversation(
     }
   }
   lastActiveSessionId = summary.id;
-  notifyChanged(summary.id);
+  if (extensionOrigin) notifyExtensionChanged(summary.id);
+  else notifyChanged(summary.id);
   return summary.id;
 }
 
 /** Generic placeholders yield to authored previews; store owns naming precedence. */
-async function promoteGenericTitle(sessionId: string, title?: string): Promise<void> {
+async function promoteGenericTitle(sessionId: string, title?: string, extensionOrigin = false): Promise<void> {
   const next = title?.trim();
   if (!next) return;
   const summary = await getSession(sessionId);
   if (!summary || summary.title !== 'ChatGPT session') return;
   await renameSession(sessionId, next, 'fallback');
-  notifyChanged(sessionId);
+  if (extensionOrigin) notifyExtensionChanged(sessionId);
+  else notifyChanged(sessionId);
 }
 
 /** Provider titles may arrive before message history, after a receipt, or after restart. */
-async function promoteConversationTitle(sessionId: string, title?: string, conversationId?: string): Promise<void> {
+async function promoteConversationTitle(sessionId: string, title?: string, conversationId?: string, extensionOrigin = false): Promise<void> {
   const next = title?.trim();
   if (!next) return;
   await renameSession(sessionId, next, 'provider', conversationId);
-  notifyChanged(sessionId);
+  if (extensionOrigin) notifyExtensionChanged(sessionId);
+  else notifyChanged(sessionId);
 }
 
 /**
@@ -2451,7 +2485,7 @@ export async function recordRequestEvidence(
   if (!recordingEnabled()) return null;
   const lineage = !conversations.has(conversationId) ? await supersededLineage(conversationId) : null;
   const firstUser = observations.find((item) => item.kind === 'user_message' && item.messageId && item.text);
-  const sessionId = lineage ?? await sessionForConversation(conversationId, observationTitle(observations), firstUser?.text);
+  const sessionId = lineage ?? await sessionForConversation(conversationId, observationTitle(observations), firstUser?.text, true);
   if (!sessionId) return null;
   // Proof identifies even a retired caller; kernel/recorder attachment checks then refuse it
   // as superseded. Never turn an exact historical owner into anonymous executable authority.
@@ -2578,7 +2612,7 @@ async function recordSupersededMessages(
     }
     if (written?.changed) stored++;
   }
-  if (stored > 0) notifyChanged(sessionId);
+  if (stored > 0) notifyExtensionChanged(sessionId);
   return stored;
 }
 
@@ -2621,7 +2655,8 @@ async function recordChatObservationsNow(
   const sessionId = await sessionForConversation(
     conversationId,
     pageTitle?.text?.trim() || observedUserTitle(firstUser?.text),
-    firstUser?.messageId ? firstUser.text : undefined
+    firstUser?.messageId ? firstUser.text : undefined,
+    true
   );
   if (!sessionId) return { sessionId: null, stored: 0, activity, goalCandidates: [] };
   const live = conversations.get(conversationId);
@@ -2881,7 +2916,7 @@ async function recordChatObservationsNow(
       }
       case 'turn_trace': {
         // Presentation beside the log: no event, no activity, no work or completion evidence.
-        if (item.turnId && item.trace && await writeTurnTrace(sessionId, item.turnId, item.trace, item.question)) notifyChanged(sessionId);
+        if (item.turnId && item.trace && await writeTurnTrace(sessionId, item.turnId, item.trace, item.question)) notifyExtensionChanged(sessionId);
         continue;
       }
       case 'page_tool': {
@@ -3086,7 +3121,7 @@ async function recordChatObservationsNow(
     }
     stored++;
   }
-  if (pageTitle) await promoteConversationTitle(sessionId, pageTitle.text, conversationId);
+  if (pageTitle) await promoteConversationTitle(sessionId, pageTitle.text, conversationId, true);
   // Completion and delivery readiness are separate: retain the exact native final
   // while a tool drains. The input owner keeps its in-flight fence until sending is safe.
   // Reload republishes historical request-owned finals as activeNow, including HTML-only
@@ -3123,7 +3158,7 @@ async function recordChatObservationsNow(
     stored++;
   }
   if (recoveredGoalSeen && live) live.lastTurnOutcome = 'completed';
-  notifyChanged(sessionId);
+  notifyExtensionChanged(sessionId);
   return { sessionId, stored, activity, goalCandidates };
 }
 
@@ -3302,7 +3337,7 @@ export async function closeConversation(conversationId: string, dismissBrowserRe
   }
   conversations.delete(conversationId);
   await endSession(live.sessionId, dismissBrowserRecovery, conversationId);
-  notifyChanged(live.sessionId);
+  notifyExtensionChanged(live.sessionId);
 }
 
 /**
