@@ -31,7 +31,7 @@ const REMOTE_RETRY_FIRST_MS = 10_000;
 const REMOTE_RETRY_MAX_MS = 300_000;
 const REMOTE_NETWORK_CODES = new Set([
   'ECONNREFUSED', 'ECONNRESET', 'EPIPE', 'ENETUNREACH', 'EHOSTUNREACH',
-  'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT',
+  'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET',
 ]);
 
 /** Classify transport evidence, never provider text or a tool's response content. */
@@ -128,6 +128,8 @@ export class PluginManager {
   private queues = new Map<string, Promise<unknown>>();
   private starting = new Map<string, { promise: Promise<void>; controller: AbortController }>();
   private reconnects = new Map<string, { failures: number; timer?: ReturnType<typeof setTimeout> }>();
+  /** Old connections with outstanding calls must survive replacement until their last release. */
+  private retired = new Map<string, Set<Live>>();
   private secretValues = new Set<string>();
   private revision = 0;
   private exposureCache: ReturnType<typeof pluginExposure> | null = null;
@@ -155,10 +157,11 @@ export class PluginManager {
     this.exposureCache = null;
     await writeDurableNow('plugins', this.records);
   }
-  private cancelReconnect(id: string): void {
+  private cancelReconnect(id: string, reason?: string): void {
     const pending = this.reconnects.get(id);
     if (pending?.timer) clearTimeout(pending.timer);
     this.reconnects.delete(id);
+    if (pending && reason) logInfo(`Remote MCP plugin ${id}: reconnect canceled (${reason}).`);
   }
   private scheduleReconnect(row: RecordEntry, reason: string): void {
     if (this.closing || !row.enabled || row.source.kind !== 'remote' ||
@@ -439,7 +442,7 @@ export class PluginManager {
       this.validateConfig(patch.config ?? row.config);
       if (row.fields?.some((f) => f.secret && f.key in (patch.config ?? row.config)))
         throw new Error('Store sensitive bundle fields in secure credentials');
-      this.cancelReconnect(row.id);
+      this.cancelReconnect(row.id, 'configuration changed');
       const oldKeys = [...row.credentialKeys],
         oldConfig = row.config,
         oldName = row.name,
@@ -474,7 +477,7 @@ export class PluginManager {
   }
   restart(id: string): Promise<PluginSnapshot> {
     this.authenticating.get(id)?.controller.abort();
-    this.cancelReconnect(id);
+    this.cancelReconnect(id, 'manual restart');
     this.starting.get(id)?.controller.abort();
     return this.serial(id, async () => {
       const row = this.row(id);
@@ -489,7 +492,7 @@ export class PluginManager {
     return this.serial(id, async () => {
       const row = this.row(id);
       const catalog = pluginCatalog.find((p) => p.id === row.catalogId);
-      this.cancelReconnect(row.id);
+      this.cancelReconnect(row.id, 'plugin update');
       await this.replace(row, catalog?.source ?? row.source, row.config);
       this.changed();
       return this.snapshot();
@@ -565,6 +568,7 @@ export class PluginManager {
   }
   uninstall(id: string): Promise<PluginSnapshot> {
     const row = this.row(id);
+    this.cancelReconnect(id, 'uninstalled');
     row.enabled = false;
     const retirement = this.disconnect(row);
     void retirement.catch(() => undefined);
@@ -592,19 +596,17 @@ export class PluginManager {
     });
   }
   private async disconnect(row: RecordEntry, preserveReconnect = false): Promise<void> {
-    if (!preserveReconnect) this.cancelReconnect(row.id);
+    if (!preserveReconnect) this.cancelReconnect(row.id, row.enabled ? 'connection replaced' : 'disabled');
     this.authenticating.get(row.id)?.controller.abort();
     this.starting.get(row.id)?.controller.abort();
     const live = this.live.get(row.id);
     this.live.delete(row.id);
+    const retired = [...(this.retired.get(row.id) ?? [])];
+    this.retired.delete(row.id);
     row.status = !row.enabled ? 'disabled' : ['error', 'needs-auth'].includes(row.status) ? row.status : 'installed';
     // Revocation happens before process/transport retirement can yield.
     this.exposureCache = null;
-    if (live) {
-      live.oauth?.dispose();
-      if (live.transport?.pid) await terminateProcessTree(live.transport.pid, true);
-      await live.client.close().catch(() => undefined);
-    }
+    await Promise.all([...retired, ...(live ? [live] : [])].map(connection => this.closeLive(connection)));
   }
   /** Explicit UI action, returning immediately; no other lifecycle path opens a browser. */
   async authenticate(id: string): Promise<PluginSnapshot> {
@@ -695,9 +697,30 @@ export class PluginManager {
     row.status = 'ready';
     this.exposureCache = null;
   }
+  private async closeLive(live: Live): Promise<void> {
+    live.oauth?.dispose();
+    if (live.transport?.pid) await terminateProcessTree(live.transport.pid, true);
+    await live.client.close().catch(() => undefined);
+  }
+  private retireLive(id: string, live: Live): void {
+    const retained = this.retired.get(id) ?? new Set<Live>();
+    retained.add(live);
+    this.retired.set(id, retained);
+    if (live.users === 0) void this.closeRetired(id, live);
+  }
+  private async closeRetired(id: string, live: Live): Promise<void> {
+    const retained = this.retired.get(id);
+    if (!retained?.delete(live)) return;
+    if (!retained.size) this.retired.delete(id);
+    await this.closeLive(live);
+  }
   private release(row: RecordEntry, live: Live): void {
     live.users--;
-    if (this.live.get(row.id) !== live || live.users !== 0) return;
+    if (live.users !== 0) return;
+    if (this.live.get(row.id) !== live) {
+      void this.closeRetired(row.id, live);
+      return;
+    }
     if (row.status === 'error' || row.status === 'needs-auth') {
       void this.serial(row.id, async () => {
         if (this.live.get(row.id) === live && live.users === 0) await this.disconnect(row, this.reconnects.has(row.id));
@@ -847,7 +870,9 @@ export class PluginManager {
         return;
       }
       const live: Live = { client, tools, transport, users: 0, oauth };
+      const previous = this.live.get(row.id);
       this.live.set(row.id, live);
+      if (previous && previous !== live) this.retireLive(row.id, previous);
       client.setNotificationHandler('notifications/tools/list_changed', () => {
         // A current connection can invalidate its own listing, never resurrect a retired one.
         if (this.live.get(row.id) !== live || row.status === 'connecting') return;
@@ -861,27 +886,47 @@ export class PluginManager {
             live.tools = refreshed;
             this.publishTools(row, refreshed);
             await this.save();
-          } catch {
+          } catch (error) {
             if (this.live.get(row.id) !== live) return;
             if (live.users === 0) await this.disconnect(row);
             row.status = 'error';
             row.error = 'Tool discovery changed and could not be refreshed. Restart this plugin.';
+            const reason = row.source.kind === 'remote' ? remoteConnectionFailure(error) : undefined;
+            if (reason) this.scheduleReconnect(row, reason);
+            else if (row.source.kind === 'remote')
+              logWarn(`Remote MCP plugin ${row.id}: not retrying (tool discovery failure without transport error).`);
           }
           this.changed();
         });
       });
       client.onclose = () => {
-        oauth?.dispose();
         if (this.live.get(row.id) === live) {
+          const wasActive = row.status === 'ready' || row.status === 'connecting';
           this.live.delete(row.id);
+          // Only remote clients use delayed retirement; leave stdio teardown unchanged.
+          if (row.source.kind === 'remote') this.retireLive(row.id, live);
+          else oauth?.dispose();
+          // A call already classified as authorization/configuration failure
+          // must not become retryable merely because its transport then closes.
+          if (!wasActive) return;
           row.status = 'error';
           row.error = 'Server disconnected. Restart it after checking its application and credentials.';
           if (row.source.kind === 'remote') this.scheduleReconnect(row, 'transport closed');
           this.changed();
         }
       };
-      client.onerror = () => {
-        /* Transport errors are deliberately not logged: they may contain headers or credentials. */
+      client.onerror = error => {
+        // With maxRetries=0 the MCP SDK reports a dead notification SSE stream
+        // through this exact terminal signal, without calling onclose. Other
+        // onerror messages include parse errors and requests that must not reconnect.
+        if (row.source.kind !== 'remote' || error.message !== 'Maximum reconnection attempts (0) exceeded.' ||
+          this.live.get(row.id) !== live || this.closing || !row.enabled || row.status === 'error') return;
+        this.live.delete(row.id);
+        this.retireLive(row.id, live);
+        row.status = 'error';
+        row.error = 'Notification stream disconnected. Reconnecting this plugin.';
+        this.scheduleReconnect(row, 'notification stream exhausted');
+        this.changed();
       };
       if (reconnect) row.error = undefined;
       this.publishTools(row, tools);
@@ -1033,6 +1078,7 @@ export class PluginManager {
   }
   async close(): Promise<void> {
     this.closing = true;
+    for (const row of this.records) this.cancelReconnect(row.id, 'shutdown');
     for (const operation of this.starting.values()) operation.controller.abort();
     await Promise.all(this.records.map(row => this.disconnect(row)));
     await stopInstallers();

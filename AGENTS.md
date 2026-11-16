@@ -5834,6 +5834,11 @@ tools unpublished through each retry, and emits one availability change when rea
 no failed tool call is replayed. HTTP authorization/configuration failures do not retry.
 Disabling, uninstalling, reconfiguring, manually restarting or shutting down cancels pending
 retries. Each failed connection attempt logs its classified reason and next delay.
+This also recovers a notification SSE stream that has exhausted the SDK's zero stream retries
+(without an onclose callback), and transient notification-driven tools/list failures, but not
+parsing, authorization or configuration errors. A replaced remote client with in-flight tool
+calls is retained until those calls release it; explicit shutdown/uninstall closes retired
+clients too. Pending retry cancellations name their lifecycle reason in the activity log.
 Each installation owns a typed `longestCallSeconds` outside its MCP server `config`: default 120,
 integer range 1–1800 (30 minutes maximum). Old or malformed stored values normalize to 120
 without deleting the installation. Plugin install/configure IPC rejects invalid input. Changing
