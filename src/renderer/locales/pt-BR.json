@@ -1286,6 +1286,7 @@
   "Image preview is loading": "Carregando a prévia da imagem",
   "Image preview unavailable": "Pré-visualização da imagem indisponível",
   "Image preview unavailable — recording storage is full": "Prévia da imagem indisponível — o armazenamento de gravações está cheio",
+  "Image preview unavailable — this chat reached its 192 MB storage limit": "Prévia da imagem indisponível — este chat atingiu o limite de armazenamento de 192 MB",
   "Image preview unavailable — image exceeds the recording limit": "Prévia da imagem indisponível — a imagem excede o limite de gravação",
   "Toggle Files side panel": "Alternar o painel lateral Arquivos",
   "Refresh files": "Atualizar arquivos",

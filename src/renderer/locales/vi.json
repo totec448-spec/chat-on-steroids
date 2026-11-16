@@ -1249,6 +1249,7 @@
   "Image preview is loading": "Đang tải ảnh xem trước",
   "Image preview unavailable": "Không có ảnh xem trước",
   "Image preview unavailable — recording storage is full": "Không có ảnh xem trước — bộ nhớ lưu bản ghi đã đầy",
+  "Image preview unavailable — this chat reached its 192 MB storage limit": "Không có ảnh xem trước — cuộc trò chuyện này đã đạt giới hạn lưu trữ 192 MB",
   "Image preview unavailable — image exceeds the recording limit": "Không có ảnh xem trước — ảnh vượt giới hạn ghi lại",
   "Toggle Files side panel": "Bật/tắt bảng Tệp bên cạnh",
   "Refresh files": "Làm mới tệp",
