@@ -1189,6 +1189,47 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
     expect(remote.initializations).toBe(1);
   });
 
+  it('discards an in-flight reconnect canceled by an old call returning HTTP 403', async () => {
+    const remote = remoteFixture();
+    remote.online(true);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const row = (await manager.install({ source: { kind: 'remote', url: 'https://remote.example/mcp' } })).plugins[0]!;
+    expect(row.status).toBe('ready');
+
+    const rejected = new Map<string, (error: Error) => void>();
+    vi.spyOn(Client.prototype, 'callTool').mockImplementation(request => new Promise((_resolve, reject) => {
+      rejected.set(String(request.arguments?.kind), reject);
+    }));
+    const network = manager.call('remote_action', { kind: 'network' });
+    const forbidden = manager.call('remote_action', { kind: 'forbidden' });
+    await vi.waitFor(() => expect(rejected.size).toBe(2), { timeout: 10_000 });
+    rejected.get('network')!(Object.assign(new TypeError('fetch failed'), {
+      cause: Object.assign(new Error('socket closed'), { code: 'UND_ERR_SOCKET' }),
+    }));
+    expect((await network).isError).toBe(true);
+    expect(manager.snapshot().plugins[0]?.status).toBe('error');
+
+    let listingStarted!: () => void, finishListing!: () => void;
+    const started = new Promise<void>(resolve => { listingStarted = resolve; });
+    const held = new Promise<void>(resolve => { finishListing = resolve; });
+    remote.onList(async () => { listingStarted(); await held; });
+    const closed = vi.spyOn(Client.prototype, 'close');
+    await vi.advanceTimersByTimeAsync(10_000);
+    await started;
+    expect(remote.initializations).toBe(2);
+
+    rejected.get('forbidden')!(new SdkHttpError(SdkErrorCode.ClientHttpForbidden, 'Forbidden', { status: 403 }));
+    expect((await forbidden).isError).toBe(true);
+    expect(getLog().some(entry => entry.message.includes(`Remote MCP plugin ${row.id}: reconnect canceled (non-retryable call failure)`))).toBe(true);
+    finishListing();
+    await vi.waitFor(() => expect(closed).toHaveBeenCalled(), { timeout: 10_000 });
+    expect(manager.snapshot().plugins[0]?.status).toBe('error');
+    expect(manager.tools()).toEqual([]);
+    remote.onList(undefined);
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(remote.initializations).toBe(2);
+  });
+
   it.each([401, 403, 404])('does not retry an HTTP %i authentication/configuration failure', async status => {
     const remote = remoteFixture();
     remote.online(true);
