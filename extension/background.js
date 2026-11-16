@@ -5387,7 +5387,12 @@ const HANDLERS = {
     } else if (message?.note === 'input-held' && ['page-moved', 'chat-moved-on', 'question-gone', 'still-answering', 'turn-held', 'tool-running', 'no-composer', 'composer-hidden', 'recovery-question-changed',
         'recovery-question-unreadable', 'recovery-not-ready'].includes(message.reason) &&
         typeof message.inputId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(message.inputId)) {
-      body = { note: 'input-held', reason: message.reason, inputId: message.inputId, conversationId };
+      // Only the question-changed hold names the question the page read, and when its document loaded (#2184).
+      const named = message.reason === 'recovery-question-changed' && typeof message.newestUser === 'string' &&
+        message.newestUser.length > 0 && message.newestUser.length <= 256 && !/[\u0000-\u001f\u007f]/.test(message.newestUser) &&
+        Number.isFinite(message.documentSince) && message.documentSince > 0;
+      body = { note: 'input-held', reason: message.reason, inputId: message.inputId, conversationId,
+        ...(named ? { newestUser: message.newestUser, documentSince: Math.floor(message.documentSince) } : {}) };
     }
     if (!body) return { ok: false };
     // Best effort, and never in the tab's queue: a claim or receipt behind it must not wait on a log line.

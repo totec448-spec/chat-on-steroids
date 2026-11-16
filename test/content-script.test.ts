@@ -25103,9 +25103,12 @@ describe('ordinary Continue native recovery', () => {
       live.hook.observe(); await settle();
       expect(await live.runtimeMessage({ type: 'clf-desktop-input', id, conversationId: chat, silenceTurnId: 'source-turn',
         recovery: { questionId: 'm-source', stop: false } })).toEqual({ ok: false });
-      expect(live.sent.filter(message => message.type === 'page_note')).toEqual([
-        expect.objectContaining({ note: 'input-held', reason, inputId: id, conversationId: chat })
-      ]);
+      const notes = live.sent.filter(message => message.type === 'page_note');
+      expect(notes).toEqual([expect.objectContaining({ note: 'input-held', reason, inputId: id, conversationId: chat })]);
+      // #2184: a page that reads another question says which one and when this document loaded, so the app can tell
+      // a saved copy that stopped following the chat from a newer question the person typed. Never for an unreadable page.
+      if (shown) expect(notes[0]).toMatchObject({ newestUser: expect.stringContaining(shown), documentSince: expect.any(Number) });
+      else expect(notes[0]).not.toHaveProperty('newestUser');
     });
   it.each(['idle', 'busy'] as const)('repairs a %s Continue whose fresh page-model scan cannot map the latest assistant turn', async scenario => {
     live = await harness(`https://chatgpt.com/c/${chat}`, {
