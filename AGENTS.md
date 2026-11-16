@@ -3341,7 +3341,12 @@ Activity wakes (`wakeActivityWork`) reuse the same authenticated `/wake` transpo
 microtask-coalesced and rate-limited at a `200 ms` per-target cadence (plus a combined
 `200 ms` streaming pump across up to 64 targets), while `onNonExtensionSessionChange`
 suppresses self-echo from extension `/events` recordings so concurrent non-extension writes
-still wake promptly without echoing browser uploads.
+still wake promptly without echoing browser uploads. For `activity` and
+`activity:<conversationId>` wake frames, the service worker unions known and queried tabs
+and paces `clf-activity-wake` messages across tabs (6 burst, 1 per `200 ms` steady-state)
+within the shared `900 req/min` bridge budget, so `content.js` pulls `/activity` immediately
+(or drains one pending wake on pull completion or failure while `pulling` is true) while
+HTTP `/activity` remains the sole authority and fallback.
 
 External navigation may hide its destination URL under ChatGPT-only host permissions.
 A completed tab absent from a successful ChatGPT URL query can release the departed

@@ -172,6 +172,7 @@ interface Hook {
   desktopProjectInputForTest(): { id: string; owner: string } | null;
   desktopInputBusyForTest(): boolean;
   setShowTimes(on: boolean): void;
+  setActivityWakeForTest(on: boolean): void;
   /** How long Overwrite leaves a user-driven scroll completely presentation-stable. */
   PRESENTATION_SCROLL_IDLE_MS: number;
 }
@@ -26202,5 +26203,177 @@ describe('edit and resubmit (#365)', () => {
     expect(await live!.runtimeMessage(offer())).toEqual({ ok: false });
     expect(claims).toEqual([]);
     expect(openQuestionEdit).not.toHaveBeenCalled();
+  });
+});
+
+describe('clf-activity-wake runtime push handler', () => {
+  it('accepts matching or unscoped activity wakes and ignores foreign conversation wakes', async () => {
+    const convA = 'aaaaaaaa-1111-4111-8111-111111111111';
+    const convB = 'bbbbbbbb-2222-4222-8222-222222222222';
+    const live = await harness(`https://chatgpt.com/c/${convA}`);
+    expect(await live.runtimeMessage({ type: 'clf-activity-wake', conversationId: convB }))
+      .toEqual({ ok: false, ignored: 'wrong_conversation' });
+    expect(await live.runtimeMessage({ type: 'clf-activity-wake', conversationId: convA }))
+      .toEqual({ ok: true });
+    expect(await live.runtimeMessage({ type: 'clf-activity-wake' }))
+      .toEqual({ ok: true });
+    live.close();
+  });
+
+  it('cancels an armed idle timer and pulls at 0 ms when clf-activity-wake arrives during a direct pull', async () => {
+    const convA = 'aaaaaaaa-1111-4111-8111-111111111111';
+    let activityCalls = 0;
+    let deferNext = false;
+    let pendingReply: ((value: unknown) => void) | null = null;
+    const live = await harness(`https://chatgpt.com/c/${convA}`, {
+      activity: () => {
+        activityCalls += 1;
+        if (deferNext) {
+          deferNext = false;
+          return new Promise((resolve) => { pendingReply = resolve; });
+        }
+        return { ok: true, data: { stream: [], userAnchors: [] } };
+      }
+    });
+
+    const idleCallbacks: Array<{ fn: () => void; ms: number }> = [];
+    const zeroScheduled: number[] = [];
+    const prevSetTimeout = live.window.setTimeout;
+    live.window.setTimeout = ((fn: () => void, ms?: number) => {
+      const delay = Number(ms) || 0;
+      if (delay >= 10_000) {
+        idleCallbacks.push({ fn, ms: delay });
+        return idleCallbacks.length;
+      }
+      if (delay === 0) {
+        zeroScheduled.push(delay);
+        return globalThis.setTimeout(fn, 0) as unknown as number;
+      }
+      return prevSetTimeout(fn, ms);
+    }) as unknown as typeof live.window.setTimeout;
+
+    try {
+      live.hook.setActivityWakeForTest(true);
+      // Complete one direct pull so armNextActivityPull() arms the 30s idle timer (activityTimer !== null).
+      await live.hook.pullActivity();
+      expect(idleCallbacks.length).toBeGreaterThan(0);
+      const callsBeforeInflight = activityCalls;
+
+      // Start a second direct pull while the 30s idle timer remains armed, then wake mid-flight.
+      deferNext = true;
+      const inflight = live.hook.pullActivity();
+      await vi.waitFor(() => expect(pendingReply).not.toBeNull(), { timeout: 5_000 });
+      expect(await live.runtimeMessage({ type: 'clf-activity-wake', conversationId: convA }))
+        .toEqual({ ok: true });
+
+      const staleIdleTimers = idleCallbacks.splice(0);
+      // Firing the armed idle callback while the direct pull is still in flight must not consume activityWakePending.
+      for (const entry of staleIdleTimers) entry.fn();
+      await new Promise((resolve) => globalThis.setTimeout(resolve, 10));
+      expect(activityCalls).toBe(callsBeforeInflight + 1);
+
+      zeroScheduled.length = 0;
+      pendingReply!({ ok: true, data: { stream: [], userAnchors: [] } });
+      await inflight;
+
+      expect(zeroScheduled).toContain(0);
+      await vi.waitFor(() => expect(activityCalls).toBe(callsBeforeInflight + 2), { timeout: 5_000 });
+
+      // Stale idle timer callbacks must have been cancelled via cancelLater and must not fire again.
+      const countAfterFollowUp = activityCalls;
+      for (const entry of staleIdleTimers) entry.fn();
+      await new Promise((resolve) => globalThis.setTimeout(resolve, 20));
+      expect(activityCalls).toBe(countAfterFollowUp);
+    } finally {
+      live.hook.setActivityWakeForTest(false);
+      live.window.setTimeout = prevSetTimeout;
+      live.close();
+    }
+  });
+
+  it('drains deferred clf-activity-wake when a direct pull receives an unsuccessful reply or throws', async () => {
+    const convA = 'aaaaaaaa-1111-4111-8111-111111111111';
+    let activityCalls = 0;
+    let deferNext = false;
+    let pendingReply: ((value: unknown) => void) | null = null;
+    const live = await harness(`https://chatgpt.com/c/${convA}`, {
+      activity: () => {
+        activityCalls += 1;
+        if (deferNext) {
+          deferNext = false;
+          return new Promise((resolve) => { pendingReply = resolve; });
+        }
+        return { ok: true, data: { stream: [], userAnchors: [] } };
+      }
+    });
+
+    const idleCallbacks: Array<{ fn: () => void; ms: number }> = [];
+    const zeroScheduled: number[] = [];
+    const prevSetTimeout = live.window.setTimeout;
+    live.window.setTimeout = ((fn: () => void, ms?: number) => {
+      const delay = Number(ms) || 0;
+      if (delay >= 10_000) {
+        idleCallbacks.push({ fn, ms: delay });
+        return idleCallbacks.length;
+      }
+      if (delay === 0) {
+        zeroScheduled.push(delay);
+        return globalThis.setTimeout(fn, 0) as unknown as number;
+      }
+      return prevSetTimeout(fn, ms);
+    }) as unknown as typeof live.window.setTimeout;
+
+    try {
+      live.hook.setActivityWakeForTest(true);
+      await live.hook.pullActivity(); // arms idle timer
+      expect(idleCallbacks.length).toBeGreaterThan(0);
+
+      // Case 0: overlapping idle callback fires while a direct pull fails with no pending wake -> finally re-arms polling.
+      const armedBeforeFail = idleCallbacks.splice(0);
+      pendingReply = null;
+      deferNext = true;
+      const failedNoWake = live.hook.pullActivity();
+      await vi.waitFor(() => expect(pendingReply).not.toBeNull(), { timeout: 5_000 });
+      for (const entry of armedBeforeFail) entry.fn();
+      expect(idleCallbacks).toHaveLength(0);
+      pendingReply!({ ok: false, error: 'temporary_failure' });
+      await failedNoWake;
+      expect(idleCallbacks.length).toBeGreaterThan(0);
+
+      // Case 1: unsuccessful { ok: false } early-return still schedules pending wake at 0 ms.
+      const callsBeforeFail = activityCalls;
+      pendingReply = null;
+      deferNext = true;
+      const failedPull = live.hook.pullActivity();
+      await vi.waitFor(() => expect(pendingReply).not.toBeNull(), { timeout: 5_000 });
+      await live.runtimeMessage({ type: 'clf-activity-wake', conversationId: convA });
+      zeroScheduled.length = 0;
+      pendingReply!({ ok: false, error: 'temporary_failure' });
+      await failedPull;
+      expect(zeroScheduled).toContain(0);
+      await vi.waitFor(() => expect(activityCalls).toBe(callsBeforeFail + 2), { timeout: 5_000 });
+
+      // Case 2: exception thrown inside pullActivity also drains pending wake at 0 ms via finally.
+      const callsBeforeThrow = activityCalls;
+      pendingReply = null;
+      deferNext = true;
+      const throwingPull = live.hook.pullActivity();
+      await vi.waitFor(() => expect(pendingReply).not.toBeNull(), { timeout: 5_000 });
+      await live.runtimeMessage({ type: 'clf-activity-wake', conversationId: convA });
+      zeroScheduled.length = 0;
+      const origConvId = live.window.CLF_DOM.conversationId;
+      live.window.CLF_DOM.conversationId = () => {
+        live.window.CLF_DOM.conversationId = origConvId;
+        throw new Error('dom read failed');
+      };
+      pendingReply!({ ok: true, data: { stream: [], userAnchors: [] } });
+      await expect(throwingPull).rejects.toThrow('dom read failed');
+      expect(zeroScheduled).toContain(0);
+      await vi.waitFor(() => expect(activityCalls).toBe(callsBeforeThrow + 2), { timeout: 5_000 });
+    } finally {
+      live.hook.setActivityWakeForTest(false);
+      live.window.setTimeout = prevSetTimeout;
+      live.close();
+    }
   });
 });
