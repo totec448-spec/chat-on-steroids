@@ -354,7 +354,7 @@ async function initializeSessionForConversation(
   if (existing) {
     lastActiveSessionId = existing.sessionId;
     if (pendingOrigins.has(conversationId)) await applyOrigin(existing.sessionId, conversationId);
-    await promoteGenericTitle(existing.sessionId, title);
+    await promoteGenericTitle(existing.sessionId, title, extensionOrigin);
     return existing.sessionId;
   }
   // Reuse a session already recorded for this conversation, so closing and reopening

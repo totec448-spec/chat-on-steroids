@@ -19842,20 +19842,38 @@ describe('push-driven activity wakes over /wake', () => {
       });
       await vi.waitFor(() => expect(frames).toContain(expectedFrame), { timeout: 5_000 });
 
-      // Browser-originated /events batches must not echo activity wakes back to the sender.
+      // Browser-originated /events batches (including generic title promotion on a live placeholder session)
+      // must not echo activity wakes back to the sender.
       frames.length = 0;
       const posted = await request('POST', '/events', {
         body: {
           conversationId: CHAT,
-          events: [{ kind: 'turn_start', time: Date.now(), turnId: 'turn-push-echo' },
-            { kind: 'assistant_message', time: Date.now() + 1, turnId: 'turn-push-echo', messageId: 'msg-echo-1', text: 'Streaming...', state: 'streaming', final: false }]
+          events: [
+            { kind: 'user_message', time: Date.now(), turnId: 'turn-push-echo', messageId: 'user-echo-1', text: 'Promoted placeholder title' },
+            { kind: 'turn_start', time: Date.now(), turnId: 'turn-push-echo' },
+            { kind: 'assistant_message', time: Date.now() + 1, turnId: 'turn-push-echo', messageId: 'msg-echo-1', text: 'Streaming...', state: 'streaming', final: false }
+          ]
         }
       });
       expect(posted.status).toBe(200);
       await new Promise((resolve) => setTimeout(resolve, 460));
-      expect(frames.filter((f) => f === expectedFrame)).toHaveLength(0);
+      expect(frames.filter((f) => f === expectedFrame || f === 'activity')).toHaveLength(0);
+
+      // Invalid conversation IDs normalize to '*' and share the global 200 ms cooldown,
+      // and >64 distinct synchronous targets collapse to one global 'activity' wake.
+      frames.length = 0;
+      notifyBrowserActivity('not valid');
+      notifyBrowserActivity('also invalid');
+      await vi.waitFor(() => expect(frames.filter((f) => f === 'activity')).toHaveLength(1), { timeout: 5_000 });
+      await new Promise((resolve) => setTimeout(resolve, 220));
+      frames.length = 0;
+      for (let i = 0; i <= 70; i += 1) notifyBrowserActivity(`11111111-2222-4333-8444-${String(i).padStart(12, '0')}`);
+      await vi.waitFor(() => expect(frames.filter((f) => f === 'activity')).toHaveLength(1), { timeout: 5_000 });
+      expect(frames.filter((f) => f.startsWith('activity:'))).toHaveLength(0);
 
       // Non-extension app writes inside the echo window still emit an activity wake.
+      await new Promise((resolve) => setTimeout(resolve, 220));
+      frames.length = 0;
       await recordProgress(sessionId, `app-during-echo:${CHAT}`, 'App progress during echo window');
       await vi.waitFor(() => expect(frames).toContain(expectedFrame), { timeout: 5_000 });
     } finally {
@@ -19902,8 +19920,8 @@ describe('push-driven activity wakes over /wake', () => {
       } finally {
         warn.mockRestore();
       }
-      await stopBridge();
       const closed = once(socket, 'close');
+      await stopBridge();
       await closed;
 
       const restartedPort = await startBridge();
@@ -19919,10 +19937,32 @@ describe('push-driven activity wakes over /wake', () => {
       try {
         await new Promise((resolve) => setTimeout(resolve, 350));
         expect(frames2.filter((f) => f.startsWith('activity:'))).toHaveLength(0);
+
+        // Disconnecting while delayed discrete and streaming wakes are queued logs their discard.
+        const info = vi.spyOn(logger, 'logInfo');
+        try {
+          notifyBrowserActivity(CHAT_A);
+          await vi.waitFor(() => expect(frames2).toContain(`activity:${CHAT_A}`), { timeout: 5_000 });
+          notifyBrowserActivity(CHAT_A);
+          notifyBrowserActivity(CHAT_B, true);
+          notifyBrowserActivity(CHAT_A, true);
+          const closed2Early = once(socket2, 'close');
+          socket2.close();
+          await closed2Early;
+          await vi.waitFor(() => {
+            const lines = info.mock.calls.map((c) => String(c[0]));
+            expect(lines.some((l) => l.includes('discarded') && l.includes('discrete activity wake') && l.includes('wake channel disconnected'))).toBe(true);
+            expect(lines.some((l) => l.includes('discarded') && l.includes('streaming activity wake') && l.includes('wake channel disconnected'))).toBe(true);
+          }, { timeout: 5_000 });
+        } finally {
+          info.mockRestore();
+        }
       } finally {
-        const closed2 = once(socket2, 'close');
-        socket2.close();
-        await closed2;
+        if (socket2.readyState <= 1) {
+          const closed2 = once(socket2, 'close');
+          socket2.close();
+          await closed2;
+        }
       }
     } finally {
       if (socket.readyState <= 1) {
