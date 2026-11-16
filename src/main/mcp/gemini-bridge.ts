@@ -351,20 +351,81 @@ async function execTailscaleCli(
   });
 }
 
-/** Cleanly removes only the Tailscale Funnel port listener previously opened by this app. */
+function portServesTarget(
+  serveConfig: TailscaleServeStatusShape,
+  httpsPort: number,
+  localTarget: string
+): boolean {
+  const web = serveConfig.Web && typeof serveConfig.Web === 'object' ? serveConfig.Web : {};
+  const normalizedTarget = normalizeProxyTarget(localTarget);
+  for (const [key, entry] of Object.entries(web)) {
+    const lowerKey = key.toLowerCase().replace(/\.+:/, ':');
+    if (lowerKey !== String(httpsPort) && !lowerKey.endsWith(`:${httpsPort}`)) continue;
+    const handlers = entry?.Handlers && typeof entry.Handlers === 'object' ? entry.Handlers : null;
+    const entries = handlers ? Object.entries(handlers) : [];
+    const rootProxy = handlers?.['/']?.Proxy;
+    if (
+      entries.length === 1 &&
+      typeof rootProxy === 'string' &&
+      normalizeProxyTarget(rootProxy) === normalizedTarget
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Cleanly removes only the Tailscale Funnel port listener still pointing at `managed.localTarget`. Returns true when the record may be cleared. */
 export async function stopManagedTailscaleFunnel(
   managed: ManagedTailscaleFunnel | null | undefined,
   execTailscale: (binaryPath: string, args: string[], opts?: TailscaleExecOptions) => Promise<TailscaleExecResult> = execTailscaleCli
-): Promise<void> {
-  if (!managed) return;
+): Promise<boolean> {
+  if (!managed) return true;
   try {
-    await execTailscale(managed.binaryPath, ['funnel', `--https=${managed.httpsPort}`, 'off'], {
+    const statusRes = await execTailscale(managed.binaryPath, ['serve', 'status', '--json'], {
       timeoutMs: TAILSCALE_STATUS_TIMEOUT_MS
     });
+    const raw = statusRes.stdout.trim();
+    let parsed: TailscaleServeStatusShape | null = null;
+    if (statusRes.exitCode === 0) {
+      if (!raw) parsed = {};
+      else {
+        try {
+          const obj = JSON.parse(raw) as unknown;
+          if (obj && typeof obj === 'object') parsed = obj as TailscaleServeStatusShape;
+        } catch {
+          parsed = null;
+        }
+      }
+    }
+    if (!parsed) {
+      logWarn(
+        `skipping Tailscale Funnel off on port ${managed.httpsPort}: could not verify live serve status (keeping record pending cleanup)`
+      );
+      return false;
+    }
+    if (!portServesTarget(parsed, managed.httpsPort, managed.localTarget)) {
+      logInfo(
+        `skipping Tailscale Funnel off on port ${managed.httpsPort}: live mapping no longer targets ${managed.localTarget} (clearing record)`
+      );
+      return true;
+    }
+    const offRes = await execTailscale(managed.binaryPath, ['funnel', `--https=${managed.httpsPort}`, 'off'], {
+      timeoutMs: TAILSCALE_STATUS_TIMEOUT_MS
+    });
+    if (offRes.exitCode !== 0) {
+      logWarn(
+        `failed to stop Tailscale Funnel on port ${managed.httpsPort}: exit ${offRes.exitCode ?? 'null'} (keeping record pending cleanup)`
+      );
+      return false;
+    }
+    logInfo(`stopped Tailscale Funnel on port ${managed.httpsPort} for ${managed.localTarget}`);
+    return true;
   } catch (err) {
     logWarn(
       `failed to stop Tailscale Funnel on port ${managed.httpsPort}: ${err instanceof Error ? err.message : String(err)}`
     );
+    return false;
   }
 }
 
@@ -443,11 +504,13 @@ export async function startGeminiBridge(
 
   const localTarget = loopbackOrigin(options.localUrl);
 
+  let retainedFunnel: ManagedTailscaleFunnel | null = null;
   const cleanupPreviousFunnelIfStale = async (): Promise<void> => {
     const prev = options.previousManagedFunnel;
     if (!prev) return;
     if (options.mode !== 'tailscale' || normalizeProxyTarget(prev.localTarget) !== normalizeProxyTarget(localTarget)) {
-      await stopManagedTailscaleFunnel(prev, execTailscale);
+      const cleaned = await stopManagedTailscaleFunnel(prev, execTailscale);
+      if (!cleaned) retainedFunnel = prev;
     }
   };
 
@@ -463,8 +526,10 @@ export async function startGeminiBridge(
     return {
       status,
       allowedHosts: new Set<string>(),
-      managedFunnel: null,
-      stop: async () => {}
+      managedFunnel: retainedFunnel,
+      stop: async () => {
+        await stopManagedTailscaleFunnel(retainedFunnel, execTailscale);
+      }
     };
   }
 
@@ -478,8 +543,10 @@ export async function startGeminiBridge(
     return {
       status,
       allowedHosts: new Set<string>(),
-      managedFunnel: null,
-      stop: async () => {}
+      managedFunnel: retainedFunnel,
+      stop: async () => {
+        await stopManagedTailscaleFunnel(retainedFunnel, execTailscale);
+      }
     };
   }
 
@@ -495,8 +562,10 @@ export async function startGeminiBridge(
       return {
         status,
         allowedHosts: new Set<string>(),
-        managedFunnel: null,
-        stop: async () => {}
+        managedFunnel: retainedFunnel,
+        stop: async () => {
+          await stopManagedTailscaleFunnel(retainedFunnel, execTailscale);
+        }
       };
     }
 
@@ -512,8 +581,10 @@ export async function startGeminiBridge(
       return {
         status,
         allowedHosts,
-        managedFunnel: null,
-        stop: async () => {}
+        managedFunnel: retainedFunnel,
+        stop: async () => {
+          await stopManagedTailscaleFunnel(retainedFunnel, execTailscale);
+        }
       };
     }
 
@@ -528,8 +599,10 @@ export async function startGeminiBridge(
       return {
         status,
         allowedHosts,
-        managedFunnel: null,
-        stop: async () => {}
+        managedFunnel: retainedFunnel,
+        stop: async () => {
+          await stopManagedTailscaleFunnel(retainedFunnel, execTailscale);
+        }
       };
     }
 
@@ -600,23 +673,25 @@ export async function startGeminiBridge(
     return {
       status: currentStatus,
       allowedHosts,
-      managedFunnel: null,
+      managedFunnel: retainedFunnel,
       stop: async () => {
-        if (stopped) return;
-        stopped = true;
-        if (readyTimer) {
-          clearTimeout(readyTimer);
-          readyTimer = null;
+        if (!stopped) {
+          stopped = true;
+          if (readyTimer) {
+            clearTimeout(readyTimer);
+            readyTimer = null;
+          }
+          if (child.pid && child.exitCode === null) {
+            await terminateProcessTree(child.pid, true);
+          }
         }
-        if (child.pid && child.exitCode === null) {
-          await terminateProcessTree(child.pid, true);
-        }
+        await stopManagedTailscaleFunnel(retainedFunnel, execTailscale);
       }
     };
   }
 
   // Tailscale Funnel mode
-  const carriedFunnel: ManagedTailscaleFunnel | null =
+  let carriedFunnel: ManagedTailscaleFunnel | null =
     options.mode === 'tailscale' &&
     options.previousManagedFunnel &&
     normalizeProxyTarget(options.previousManagedFunnel.localTarget) === normalizeProxyTarget(localTarget)
@@ -693,10 +768,15 @@ export async function startGeminiBridge(
     timeoutMs: TAILSCALE_STATUS_TIMEOUT_MS
   });
   const serveConfig = parseTailscaleServeStatusJson(serveRes.stdout);
+  if (carriedFunnel && serveRes.exitCode === 0 && !portServesTarget(serveConfig, carriedFunnel.httpsPort, localTarget)) {
+    logInfo(
+      `clearing stale Tailscale Funnel record on port ${carriedFunnel.httpsPort}: live mapping no longer targets ${localTarget}`
+    );
+    carriedFunnel = null;
+  }
   const preferredPort =
-    options.previousManagedFunnel &&
-    normalizeProxyTarget(options.previousManagedFunnel.localTarget) === normalizeProxyTarget(localTarget)
-      ? options.previousManagedFunnel.httpsPort
+    carriedFunnel
+      ? carriedFunnel.httpsPort
       : null;
   const selection = pickTailscaleFunnelPort(serveConfig, summary.dnsName, localTarget, preferredPort);
   if (!selection) {

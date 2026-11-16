@@ -492,7 +492,12 @@ function syncGeminiBridge(force = false): Promise<void> {
           geminiBridgeHandle = null;
           allowedGeminiHosts = new Set();
           await previousHandle.stop().catch(() => {});
-          if (previousFunnel) managedTailscaleFunnel = null;
+          if (previousFunnel) {
+            const cleared = await stopManagedTailscaleFunnel(previousFunnel).catch(() => false);
+            if (cleared && managedTailscaleFunnel === previousFunnel) {
+              managedTailscaleFunnel = null;
+            }
+          }
         } else {
           geminiBridgeHandle = null;
         }
@@ -877,13 +882,18 @@ async function disconnectResources(endpointForceAfterMs?: number): Promise<void>
   optionalTunnels.clear();
   geminiBridgeSeq += 1;
   await geminiBridgeSync.catch(() => {});
+  let funnelCleaned = true;
   if (geminiBridgeHandle) {
+    const heldFunnel = geminiBridgeHandle.managedFunnel;
     await geminiBridgeHandle.stop().catch(() => {});
     geminiBridgeHandle = null;
+    if (heldFunnel) {
+      funnelCleaned = await stopManagedTailscaleFunnel(heldFunnel).catch(() => false);
+    }
   } else if (managedTailscaleFunnel) {
-    await stopManagedTailscaleFunnel(managedTailscaleFunnel).catch(() => {});
+    funnelCleaned = await stopManagedTailscaleFunnel(managedTailscaleFunnel).catch(() => false);
   }
-  managedTailscaleFunnel = null;
+  if (funnelCleaned) managedTailscaleFunnel = null;
   allowedGeminiHosts = new Set();
   activeGeminiBridgeKey = null;
   if (tunnel) {

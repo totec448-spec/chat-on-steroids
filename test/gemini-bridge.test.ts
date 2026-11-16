@@ -42,8 +42,8 @@ const {
   startBridge,
   stopBridge
 } = await import('../src/main/bridge.js');
-const { pickTailscaleFunnelPort, startGeminiBridge } = await import('../src/main/mcp/gemini-bridge.js');
-const { syntheticMcpRequestId } = await import('../src/main/mcp/tools-core.js');
+const { pickTailscaleFunnelPort, startGeminiBridge, stopManagedTailscaleFunnel } = await import('../src/main/mcp/gemini-bridge.js');
+const { isSyntheticMcpRequestId, syntheticMcpRequestId } = await import('../src/main/mcp/tools-core.js');
 const { opensInCosBrowser } = await import('../src/shared/cos-browser-sites.js');
 const { makeTempDir, removeTempDir } = await import('./helpers.js');
 
@@ -579,8 +579,84 @@ describe('Gemini Web bridge integration', () => {
     expect(idLong1).not.toBe(idLong2);
     expect(idA).toMatch(/^[a-z0-9_-]{1,100}$/i);
     expect(idLong1).toMatch(/^[a-z0-9_-]{1,100}$/i);
+    expect(isSyntheticMcpRequestId(idA)).toBe(true);
+    expect(isSyntheticMcpRequestId('req-transport-123')).toBe(false);
+    expect(isSyntheticMcpRequestId('mcp_gemini_short')).toBe(false);
 
     expect(opensInCosBrowser('https://gemini.google.com/app')).toBe(false);
     expect(opensInCosBrowser('https://chatgpt.com/')).toBe(true);
+  });
+
+  it('guards stopManagedTailscaleFunnel against disabling another app or clearing on status check failure', async () => {
+    const managed = { binaryPath: 'tailscale', httpsPort: 443, localTarget: 'http://127.0.0.1:43123' };
+
+    // 1. Live mapping replaced by another app on port 443 -> skip `funnel off`, clear record.
+    const replacedCalls: string[][] = [];
+    const clearedOnReplace = await stopManagedTailscaleFunnel(managed, async (_bin, args) => {
+      replacedCalls.push(args);
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          Web: { 'demo.tail123.ts.net:443': { Handlers: { '/': { Proxy: 'http://127.0.0.1:9999' } } } }
+        }),
+        stderr: '',
+        timedOut: false
+      };
+    });
+    expect(clearedOnReplace).toBe(true);
+    expect(replacedCalls.some((args) => args[0] === 'funnel')).toBe(false);
+
+    // 2. Serve status check fails -> skip `funnel off`, retain record for pending cleanup.
+    const failedCalls: string[][] = [];
+    const clearedOnError = await stopManagedTailscaleFunnel(managed, async (_bin, args) => {
+      failedCalls.push(args);
+      return { exitCode: 1, stdout: '', stderr: 'tailscaled unavailable', timedOut: false };
+    });
+    expect(clearedOnError).toBe(false);
+    expect(failedCalls.some((args) => args[0] === 'funnel')).toBe(false);
+
+    // 3. Port selection exhausted because other apps hold 443/8443/10000 -> carried record cleared and never turns off 443.
+    const exhaustedCalls: string[][] = [];
+    const exhaustedHandle = await startGeminiBridge({
+      mode: 'tailscale',
+      localUrl: 'http://127.0.0.1:43123',
+      tunnelKind: 'openai',
+      tunnelPublicUrl: null,
+      previousManagedFunnel: managed,
+      report: () => {},
+      deps: {
+        locateTailscale: () => 'tailscale',
+        execTailscale: async (_bin, args) => {
+          exhaustedCalls.push(args);
+          if (args[0] === 'status') {
+            return {
+              exitCode: 0,
+              stdout: JSON.stringify({ BackendState: 'Running', Self: { DNSName: 'demo.tail123.ts.net.' } }),
+              stderr: '',
+              timedOut: false
+            };
+          }
+          if (args[0] === 'serve') {
+            return {
+              exitCode: 0,
+              stdout: JSON.stringify({
+                Web: {
+                  'demo.tail123.ts.net:443': { Handlers: { '/': { Proxy: 'http://127.0.0.1:9999' } } },
+                  'demo.tail123.ts.net:8443': { Handlers: { '/': { Proxy: 'http://127.0.0.1:9998' } } },
+                  'demo.tail123.ts.net:10000': { Handlers: { '/': { Proxy: 'http://127.0.0.1:9997' } } }
+                }
+              }),
+              stderr: '',
+              timedOut: false
+            };
+          }
+          return { exitCode: 0, stdout: '', stderr: '', timedOut: false };
+        }
+      }
+    });
+    expect(exhaustedHandle.status.state).toBe('error');
+    expect(exhaustedHandle.managedFunnel).toBeNull();
+    await exhaustedHandle.stop();
+    expect(exhaustedCalls.some((args) => args[0] === 'funnel')).toBe(false);
   });
 });

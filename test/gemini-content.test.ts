@@ -300,4 +300,64 @@ describe('gemini-content', () => {
     ).toBe(true);
     expect(h.asks.some((c) => c.message.type === 'ack' && c.message.id === 'cmd-revive-1')).toBe(false);
   });
+
+  it('stamps worker identity at emit time rather than applying a later worker identity to earlier queued events', async () => {
+    let allowEvents = false;
+    const h = mountGeminiContent({
+      url: 'https://gemini.google.com/app/dddddddddddddddd',
+      html: `<!doctype html><html><body>
+        <div class="conversation-container">
+          <user-query><div class="query-text"><p>Pre-redemption msg</p></div></user-query>
+        </div>
+        <rich-textarea><div class="ql-editor ql-blank" contenteditable="true" role="textbox"></div></rich-textarea>
+        <button class="send-button" aria-label="Send message"></button>
+      </body></html>`,
+      onAsk: (msg) => {
+        if (msg.type === 'register_document') return { ok: true, keepAwake: false };
+        if (msg.type === 'events') return allowEvents ? { ok: true, pending: 0 } : { ok: false };
+        if (msg.type === 'redeem') {
+          allowEvents = true;
+          return {
+            ok: true,
+            command: {
+              id: msg.id,
+              conversationId: 'gemini-dddddddddddddddd',
+              prompt: 'Worker task prompt',
+              agent: 'worker-1'
+            }
+          };
+        }
+        return { ok: true };
+      }
+    });
+    const sendBtn = h.dom.window.document.querySelector('.send-button')!;
+    const editor = h.dom.window.document.querySelector('.ql-editor')!;
+    sendBtn.addEventListener('click', () => {
+      editor.innerHTML = '';
+    });
+    await flushMicrotasks();
+
+    await h.emitRuntimeMessage({ type: 'clf-run-command', id: 'cmd-worker-id' });
+    await flushMicrotasks();
+
+    const acceptedBatch = [...h.asks]
+      .reverse()
+      .find((c) => c.message.type === 'events' && Array.isArray(c.message.entries) && c.message.entries.length > 0);
+    const entries = (acceptedBatch?.message.entries as Array<Record<string, unknown>>) || [];
+    const preEntry = entries.find(
+      (entry) => (entry.event as Record<string, unknown> | undefined)?.kind === 'user_message' &&
+        (entry.event as Record<string, unknown>)?.text === 'Pre-redemption msg'
+    );
+    const workerTurnStart = entries.find(
+      (entry) => (entry.event as Record<string, unknown> | undefined)?.kind === 'turn_start'
+    );
+
+    expect(preEntry).toBeDefined();
+    expect(preEntry?.agent).toBeUndefined();
+    expect(preEntry?.agentCommandId).toBeUndefined();
+    expect(workerTurnStart).toMatchObject({
+      agent: 'worker-1',
+      agentCommandId: 'cmd-worker-id'
+    });
+  });
 });

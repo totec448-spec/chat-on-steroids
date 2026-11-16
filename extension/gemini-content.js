@@ -96,7 +96,8 @@
     outgoing.push({
       ...event,
       time: typeof event.time === 'number' ? event.time : Date.now(),
-      ...(conversationId ? { conversationId } : {})
+      ...(conversationId ? { conversationId } : {}),
+      ...(agent ? { agent, agentCommandId } : {})
     });
     if (outgoing.length > 500) outgoing = outgoing.slice(-500);
   }
@@ -116,21 +117,21 @@
             return {
               ...item,
               conversationId: item.conversationId || conversationId || null,
-              ...(item.agent || agent ? { agent: item.agent || agent, agentCommandId: item.agentCommandId || agentCommandId } : {})
+              ...(item.agent ? { agent: item.agent, agentCommandId: item.agentCommandId } : {})
             };
           }
           const itemConv = (item && typeof item.conversationId === 'string' && item.conversationId) || conversationId || null;
+          const { agent: itemAgent, agentCommandId: itemCommandId, ...itemEvent } = item || {};
           return {
-            event: item,
+            event: itemEvent,
             conversationId: itemConv,
-            ...(agent ? { agent, agentCommandId } : {})
+            ...(itemAgent ? { agent: itemAgent, agentCommandId: itemCommandId } : {})
           };
         });
         const reply = await ask({
           type: 'events',
           conversationId,
-          entries,
-          ...(agent ? { agent, agentCommandId } : {})
+          entries
         });
         if (!reply || reply.ok !== true) break;
         outgoing.splice(0, batch.length);

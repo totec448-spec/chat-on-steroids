@@ -168,9 +168,12 @@ import {
   lineNumberArg,
   resolveCwd,
   resolveIn,
+  isSyntheticMcpRequestId,
+  syntheticMcpRequestId,
   type SurfaceRegistrar,
   type ToolResult
 } from './kernel.js';
+export { isSyntheticMcpRequestId, syntheticMcpRequestId };
 
 /** Entries one `read` of a directory returns before it says it stopped. */
 const MAX_DIR_ENTRIES = 200;
@@ -1701,12 +1704,6 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
  * The proven identity is then adopted for the rest of the call, so this result is recorded
  * against the right agent and carries the right inbox.
  */
-export function syntheticMcpRequestId(clientId: string, mcpSessionId: string): string {
-  const clientTag = clientId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 20) || 'remote';
-  const digest = createHash('sha256').update(`${clientId}\0${mcpSessionId}`).digest('hex').slice(0, 48);
-  return `mcp_${clientTag}_${digest}`;
-}
-
 async function callerNow(startedAt: number, options: { exact?: boolean; runId?: string; member?: boolean } = {}): Promise<Caller> {
   const base = currentCaller();
   // `exact` marks the one action that binds a run: spawn. It is the call whose refusal the

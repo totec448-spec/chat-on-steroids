@@ -27,7 +27,7 @@ import { WINDOWS_COMPUTER_STATE_INPUT_METHODS } from '../../shared/windows-compu
  */
 
 import { rawPromises as fs } from '../rawfs.js';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { beginToolTiming, inboundClientIdentity, inboundMcpSessionId, inboundPublication, inboundProviderRequest, inboundRequestId } from './inbound.js';
 import { McpServer, type ServerContext } from '@modelcontextprotocol/server';
 import { z } from 'zod';
@@ -681,6 +681,18 @@ function withUnattributedNotice(
  * Messages are *offered* here, not retired. They are retired when this agent calls
  * again, because that is the first real evidence this result reached ChatGPT.
  */
+const SYNTHETIC_MCP_REQUEST_ID_RE = /^mcp_[A-Za-z0-9_-]{1,20}_[0-9a-f]{48}$/;
+
+export function syntheticMcpRequestId(clientId: string, mcpSessionId: string): string {
+  const clientTag = clientId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 20) || 'remote';
+  const digest = createHash('sha256').update(`${clientId}\0${mcpSessionId}`).digest('hex').slice(0, 48);
+  return `mcp_${clientTag}_${digest}`;
+}
+
+export function isSyntheticMcpRequestId(requestId: string | null | undefined): boolean {
+  return typeof requestId === 'string' && SYNTHETIC_MCP_REQUEST_ID_RE.test(requestId);
+}
+
 function withInbox(
   caller: CallCaller,
   agent: string | null,
@@ -1347,7 +1359,10 @@ async function dispatchTracked(
   // of completing the MCP call. The recorder catches storage failures and returns null, so a
   // broken history never breaks the tool itself. Only the degraded/unidentified path remains
   // fire-and-forget because it may still spend a grace window waiting for page evidence.
-  if (context.caller.conversationId || (context.caller.clientIdentity && !context.caller.requestId)) {
+  if (
+    context.caller.conversationId ||
+    (context.caller.clientIdentity && (!context.caller.requestId || isSyntheticMcpRequestId(context.caller.requestId)))
+  ) {
     try { await recording; } finally { await closeHold?.(); }
   } else {
     void recording.then(() => logInfo(`mcp recording surface=${surface} recorder_async_ms=${Date.now() - recorderStartedAt}`));
