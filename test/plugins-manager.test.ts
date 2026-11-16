@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { createServer } from 'node:http';
-import { Client, SdkError, SdkErrorCode } from '@modelcontextprotocol/client';
+import { createServer, type ServerResponse } from 'node:http';
+import { Client, SdkError, SdkErrorCode, SdkHttpError } from '@modelcontextprotocol/client';
 import { zipSync, strToU8 } from 'fflate';
 import sharp from 'sharp';
 import { makeTempDir, removeTempDir } from './helpers.js';
@@ -17,6 +17,7 @@ vi.mock('../src/main/secrets.js', () => ({
   }),
 }));
 import { initDurableStore } from '../src/main/durable.js';
+import { getLog } from '../src/main/logger.js';
 import { getSecret } from '../src/main/secrets.js';
 import * as configModule from '../src/main/config.js';
 import { PluginManager } from '../src/main/plugins/manager.js';
@@ -28,6 +29,98 @@ import * as durableModule from '../src/main/durable.js';
 const fixture = `const readline=require('node:readline');
 const tools=[{name:'Echo.Mixed',description:'Echo fixture',inputSchema:{type:'object',properties:{value:{type:'string'}},required:['value'],additionalProperties:false},annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},outputSchema:{type:'object',properties:{value:{type:'string'}},required:['value']}}];
 readline.createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);if(m.id===undefined)return;if(m.method==='tools/call'&&m.params.arguments.value==='rpc-error'){process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,error:{code:-32603,message:'invalid tool arguments'}})+'\\n');return;}let result;if(m.method==='initialize')result={protocolVersion:'2025-11-25',capabilities:{tools:{}},serverInfo:{name:'CoS test fixture',version:'1'}};else if(m.method==='tools/list')result={tools};else if(m.method==='tools/call')result={content:[{type:'text',text:process.env.TEST_SECRET||m.params.arguments.value}],structuredContent:{value:m.params.arguments.value},isError:m.params.arguments.value==='error'};else result={};process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`;
+
+/** Real MCP client/HTTP transport, with only the network boundary controlled by the test. */
+function remoteFixture() {
+  let online = false;
+  let httpStatus = 0;
+  let networkCode = 'ECONNREFUSED';
+  let initializations = 0;
+  let toolCalls = 0;
+  let onList: (() => Promise<void>) | undefined;
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+    if (init?.method !== 'POST') return new Response(null, { status: 405 });
+    const message = JSON.parse(String(init.body));
+    if (message.method === 'initialize') initializations++;
+    if (!online) {
+      throw Object.assign(new TypeError('fetch failed'), {
+        cause: Object.assign(new Error('Connection refused'), { code: networkCode }),
+      });
+    }
+    if (httpStatus) return new Response(null, { status: httpStatus });
+    if (message.id === undefined) return new Response(null, { status: 202 });
+    let result: unknown;
+    if (message.method === 'initialize') result = {
+      protocolVersion: '2025-11-25', capabilities: { tools: {} },
+      serverInfo: { name: 'Remote fixture', version: '1' },
+    };
+    else if (message.method === 'tools/list') {
+      await onList?.();
+      result = { tools: [{ name: 'remote_action', inputSchema: { type: 'object' } }] };
+    }
+    else if (message.method === 'tools/call') {
+      toolCalls++;
+      result = { content: [{ type: 'text', text: 'ok' }] };
+    } else result = {};
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: message.id, result }), {
+      headers: { 'content-type': 'application/json' },
+    });
+  });
+  return {
+    online: (value: boolean) => { online = value; },
+    networkCode: (value: string) => { networkCode = value; },
+    httpStatus: (value: number) => { httpStatus = value; },
+    onList: (handler: (() => Promise<void>) | undefined) => { onList = handler; },
+    get initializations() { return initializations; },
+    get toolCalls() { return toolCalls; },
+  };
+}
+
+/** Disposable HTTP MCP server with a real notification SSE stream. */
+async function notificationFixture() {
+  const streams: ServerResponse[] = [];
+  let initializations = 0;
+  let listFailures = false;
+  let listCalls = 0;
+  const server = createServer(async (request, response) => {
+    if (request.method === 'GET') {
+      response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+      response.write(': connected\n\n');
+      streams.push(response);
+      return;
+    }
+    if (request.method !== 'POST') { response.writeHead(405).end(); return; }
+    let body = '';
+    for await (const chunk of request) body += chunk;
+    const message = JSON.parse(body);
+    if (message.id === undefined) { response.writeHead(202).end(); return; }
+    let result: unknown;
+    if (message.method === 'initialize') {
+      initializations++;
+      result = { protocolVersion: '2025-11-25', capabilities: { tools: { listChanged: true } }, serverInfo: { name: 'SSE fixture', version: '1' } };
+    } else if (message.method === 'tools/list') {
+      listCalls++;
+      if (listFailures) { response.writeHead(503).end(); return; }
+      result = { tools: [{ name: 'remote_action', inputSchema: { type: 'object' } }] };
+    } else result = { content: [{ type: 'text', text: 'ok' }] };
+    response.writeHead(200, { 'content-type': 'application/json' })
+      .end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result }));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  return {
+    url: `http://127.0.0.1:${(server.address() as { port: number }).port}/mcp`,
+    get streamCount() { return streams.length; },
+    get initializations() { return initializations; },
+    get listCalls() { return listCalls; },
+    failListing: (value: boolean) => { listFailures = value; },
+    dropStream: () => { streams.at(-1)!.end(); },
+    changed: () => { streams.at(-1)!.write('data: {"jsonrpc":"2.0","method":"notifications/tools/list_changed"}\n\n'); },
+    close: async () => {
+      server.closeAllConnections();
+      await new Promise<void>(resolve => server.close(() => resolve()));
+    },
+  };
+}
 let dir: string, manager: PluginManager, entry: string;
 beforeEach(async () => {
   dir = await makeTempDir('plugins-test-');
@@ -727,6 +820,434 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  });
+
+  it('recovers a remote MCP whose host starts after CoS without flapping tool exposure', async () => {
+    const remote = remoteFixture();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const row = (await manager.install({ source: { kind: 'remote', url: 'https://remote.example/mcp' } })).plugins[0]!;
+    expect(row.status).toBe('error');
+    expect(remote.initializations).toBe(1);
+    expect(manager.tools()).toEqual([]);
+    const exposures: string[][] = [];
+    const stop = manager.onChanged(() => exposures.push(manager.tools().map(t => t.name)));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(remote.initializations).toBe(2);
+    expect(manager.snapshot().plugins[0]?.status).toBe('error');
+    expect(exposures.every(names => names.length === 0)).toBe(true);
+    remote.online(true);
+    await vi.advanceTimersByTimeAsync(20_000);
+    await vi.waitFor(() => expect(manager.snapshot().plugins[0]?.status).toBe('ready'), { timeout: 10_000 });
+    expect(manager.snapshot().plugins[0]?.error).toBeUndefined();
+    expect(manager.tools().map(t => t.name)).toEqual(['remote_action']);
+    await vi.waitFor(() => expect(exposures.filter(names => names.length > 0)).toEqual([['remote_action']]), { timeout: 10_000 });
+    stop();
+  });
+
+  it('recovers an actual loopback Streamable HTTP server that starts after the plugin', async () => {
+    let initialized = 0;
+    const server = createServer(async (request, response) => {
+      if (request.method !== 'POST') { response.writeHead(405).end(); return; }
+      let body = '';
+      for await (const chunk of request) body += chunk;
+      const message = JSON.parse(body);
+      if (message.id === undefined) { response.writeHead(202).end(); return; }
+      let result: unknown;
+      if (message.method === 'initialize') {
+        initialized++;
+        result = { protocolVersion: '2025-11-25', capabilities: { tools: {} }, serverInfo: { name: 'Loopback fixture', version: '1' } };
+      } else if (message.method === 'tools/list') {
+        result = { tools: [{ name: 'probe', inputSchema: { type: 'object' } }] };
+      } else {
+        result = { content: [{ type: 'text', text: 'loopback is live' }] };
+      }
+      response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result }));
+    });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const row = (await manager.install({ source: { kind: 'remote', url: `http://127.0.0.1:${port}/mcp` } })).plugins[0]!;
+      expect(row.status).toBe('error');
+      await new Promise<void>(resolve => server.listen(port, '127.0.0.1', resolve));
+      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.waitFor(() => expect(manager.snapshot().plugins[0]?.status).toBe('ready'), { timeout: 10_000 });
+      expect(initialized).toBe(1);
+      expect(JSON.stringify(await manager.call('probe', {}))).toContain('loopback is live');
+      const recoveryLog = getLog().filter(entry => entry.message.includes(`Remote MCP plugin ${row.id}:`));
+      expect(recoveryLog.map(entry => entry.message)).toEqual([
+        expect.stringContaining('connection failed (ECONNREFUSED); retry in 10s'),
+        expect.stringContaining('reconnected after 1 failed attempt(s)'),
+      ]);
+      await manager.uninstall(row.id);
+    } finally {
+      await manager.close();
+      server.closeAllConnections();
+      await new Promise<void>(resolve => server.close(() => resolve()));
+    }
+  });
+
+  it('backs off a permanently unavailable remote MCP with a ceiling and no busy loop', async () => {
+    const remote = remoteFixture();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const row = (await manager.install({ source: { kind: 'remote', url: 'https://remote.example/mcp' } })).plugins[0]!;
+    expect(row.status).toBe('error');
+    await vi.advanceTimersByTimeAsync(10_000 + 20_000 + 40_000 + 80_000 + 160_000 + 300_000);
+    expect(remote.initializations).toBe(7);
+    await vi.advanceTimersByTimeAsync(299_000);
+    expect(remote.initializations).toBe(7);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(remote.initializations).toBe(8);
+    expect(manager.snapshot().plugins[0]?.status).toBe('error');
+  });
+
+  it('stops pending remote retries after disable, uninstall, manual restart or shutdown', async () => {
+    const remote = remoteFixture();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const row = (await manager.install({ source: { kind: 'remote', url: 'https://remote.example/mcp' } })).plugins[0]!;
+    expect(row.status).toBe('error');
+    await manager.setEnabled(row.id, false);
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(remote.initializations).toBe(1);
+    await manager.setEnabled(row.id, true);
+    expect(remote.initializations).toBe(2);
+    remote.online(true);
+    await manager.restart(row.id);
+    expect(remote.initializations).toBe(3);
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(remote.initializations).toBe(3);
+    await manager.uninstall(row.id);
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(remote.initializations).toBe(3);
+    await manager.close();
+  });
+
+  it('refuses tool calls during a remote outage without replaying them when connectivity returns', async () => {
+    const remote = remoteFixture();
+    remote.online(true);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const row = (await manager.install({ source: { kind: 'remote', url: 'https://remote.example/mcp' } })).plugins[0]!;
+    expect(row.status).toBe('ready');
+    remote.online(false);
+    expect((await manager.call('remote_action', {})).isError).toBe(true);
+    expect(manager.snapshot().plugins[0]?.status).toBe('error');
+    const outcome = vi.fn();
+    const refused = JSON.stringify(await manager.call('remote_action', {}, outcome));
+    expect(refused).toContain('PLUGIN_UNAVAILABLE');
+    expect(outcome).toHaveBeenCalledExactlyOnceWith('tool_rejected');
+    expect(remote.toolCalls).toBe(0);
+    remote.online(true);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.waitFor(() => expect(manager.snapshot().plugins[0]?.status).toBe('ready'), { timeout: 10_000 });
+    expect(remote.toolCalls).toBe(0);
+    expect((await manager.call('remote_action', {})).isError).not.toBe(true);
+    expect(remote.toolCalls).toBe(1);
+  });
+
+  it('reconnects after UND_ERR_SOCKET while initializing MCP', async () => {
+    const remote = remoteFixture();
+    remote.networkCode('UND_ERR_SOCKET');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const row = (await manager.install({ source: { kind: 'remote', url: 'https://remote.example/mcp' } })).plugins[0]!;
+    expect(row.status).toBe('error');
+    remote.online(true);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.waitFor(() => expect(manager.snapshot().plugins[0]?.status).toBe('ready'), { timeout: 10_000 });
+    expect(remote.initializations).toBe(2);
+  });
+
+  it('recovers an ended notification SSE stream without a subsequent tool call', async () => {
+    const server = await notificationFixture();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const row = (await manager.install({ source: { kind: 'remote', url: server.url } })).plugins[0]!;
+      expect(row.status).toBe('ready');
+      await vi.waitFor(() => expect(server.streamCount).toBe(1), { timeout: 10_000 });
+      server.dropStream();
+      await vi.waitFor(() => expect(manager.snapshot().plugins[0]?.status).toBe('error'), { timeout: 10_000 });
+      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.waitFor(() => expect(manager.snapshot().plugins[0]?.status).toBe('ready'), { timeout: 10_000 });
+      expect(server.initializations).toBe(2);
+      expect((await manager.call('remote_action', {})).isError).not.toBe(true);
+    } finally {
+      await manager.close();
+      await server.close();
+    }
+  });
+
+  it('recovers a notification-driven tools/list failure when its server returns', async () => {
+    const server = await notificationFixture();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const row = (await manager.install({ source: { kind: 'remote', url: server.url } })).plugins[0]!;
+      expect(row.status).toBe('ready');
+      await vi.waitFor(() => expect(server.streamCount).toBe(1), { timeout: 10_000 });
+      server.failListing(true);
+      server.changed();
+      await vi.waitFor(() => expect(manager.snapshot().plugins[0]?.status).toBe('error'), { timeout: 10_000 });
+      server.failListing(false);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.waitFor(() => expect(manager.snapshot().plugins[0]?.status).toBe('ready'), { timeout: 10_000 });
+      expect(server.initializations).toBe(2);
+      expect(server.listCalls).toBeGreaterThanOrEqual(3);
+    } finally {
+      await manager.close();
+      await server.close();
+    }
+  });
+
+  it('does not publish a completed tool refresh after a concurrent call fails', async () => {
+    const remote = remoteFixture();
+    remote.online(true);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const handlers = vi.spyOn(Client.prototype, 'setNotificationHandler');
+    await manager.install({ source: { kind: 'remote', url: 'https://remote.example/mcp' } });
+    const changed = handlers.mock.calls.find(([method]) => method === 'notifications/tools/list_changed')?.[1] as
+      ((event: { method: 'notifications/tools/list_changed' }) => void) | undefined;
+    expect(changed).toBeDefined();
+    let rejectCall!: (error: Error) => void;
+    let dispatched = false;
+    const inFlight = new Promise<never>((_resolve, reject) => { rejectCall = reject; });
+    vi.spyOn(Client.prototype, 'callTool').mockImplementation(() => {
+      dispatched = true;
+      return inFlight;
+    });
+    const call = manager.call('remote_action', {});
+    await vi.waitFor(() => expect(dispatched).toBe(true), { timeout: 10_000 });
+    let entered!: () => void;
+    let release!: () => void;
+    const listingStarted = new Promise<void>(resolve => { entered = resolve; });
+    const listingBlocked = new Promise<void>(resolve => { release = resolve; });
+    remote.onList(async () => { entered(); await listingBlocked; });
+    changed!({ method: 'notifications/tools/list_changed' });
+    await listingStarted;
+    expect(manager.snapshot().plugins[0]?.status).toBe('connecting');
+    rejectCall(Object.assign(new TypeError('fetch failed'), {
+      cause: Object.assign(new Error('socket closed'), { code: 'UND_ERR_SOCKET' }),
+    }));
+    expect((await call).isError).toBe(true);
+    expect(manager.snapshot().plugins[0]?.status).toBe('error');
+    release();
+    await vi.waitFor(() => expect(manager.snapshot().plugins[0]?.status).toBe('error'), { timeout: 10_000 });
+    expect(manager.tools()).toEqual([]);
+    remote.onList(undefined);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.waitFor(() => expect(manager.snapshot().plugins[0]?.status).toBe('ready'), { timeout: 10_000 });
+    expect(remote.initializations).toBe(2);
+  });
+
+  it('does not republish cached tools when an old client notifies during an outage', async () => {
+    const remote = remoteFixture();
+    remote.online(true);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const handlers = vi.spyOn(Client.prototype, 'setNotificationHandler');
+    const row = (await manager.install({ source: { kind: 'remote', url: 'https://remote.example/mcp' } })).plugins[0]!;
+    const changed = handlers.mock.calls.find(([method]) => method === 'notifications/tools/list_changed')?.[1] as unknown as
+      ((event: { method: 'notifications/tools/list_changed' }) => void) | undefined;
+    expect(changed).toBeDefined();
+    let finish!: (value: { content: [{ type: 'text'; text: string }] }) => void;
+    const slow = new Promise<{ content: [{ type: 'text'; text: string }] }>(resolve => { finish = resolve; });
+    let began = false;
+    vi.spyOn(Client.prototype, 'callTool').mockImplementation((_call) => {
+      if (_call.arguments?.kind === 'slow') { began = true; return slow; }
+      return Promise.reject(Object.assign(new TypeError('fetch failed'), {
+        cause: Object.assign(new Error('socket closed'), { code: 'UND_ERR_SOCKET' }),
+      }));
+    });
+    const first = manager.call('remote_action', { kind: 'slow' });
+    await vi.waitFor(() => expect(began).toBe(true), { timeout: 10_000 });
+    expect((await manager.call('remote_action', { kind: 'fail' })).isError).toBe(true);
+    expect(manager.snapshot().plugins[0]?.status).toBe('error');
+    expect(manager.tools()).toEqual([]);
+    const exposures: string[][] = [];
+    const stop = manager.onChanged(() => exposures.push(manager.tools().map(tool => tool.name)));
+    changed!({ method: 'notifications/tools/list_changed' });
+    expect(manager.snapshot().plugins[0]?.status).toBe('error');
+    expect(manager.tools()).toEqual([]);
+    expect(exposures).toEqual([]);
+    stop();
+    finish({ content: [{ type: 'text', text: 'done' }] });
+    await first;
+    await manager.close();
+    expect(row.id).toBeDefined();
+  });
+
+  it('closes the replaced MCP client only after its last in-flight call releases', async () => {
+    const remote = remoteFixture();
+    remote.online(true);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const row = (await manager.install({ source: { kind: 'remote', url: 'https://remote.example/mcp' } })).plugins[0]!;
+    expect(row.status).toBe('ready');
+    let complete!: (value: { content: [{ type: 'text'; text: string }] }) => void;
+    const slow = new Promise<{ content: [{ type: 'text'; text: string }] }>(resolve => { complete = resolve; });
+    let oldClient: Client | undefined;
+    const upstream = vi.spyOn(Client.prototype, 'callTool').mockImplementation(function (this: Client, request) {
+      oldClient = this;
+      if (request.arguments?.kind === 'slow') return slow;
+      return Promise.reject(Object.assign(new TypeError('fetch failed'), {
+        cause: Object.assign(new Error('socket closed'), { code: 'UND_ERR_SOCKET' }),
+      }));
+    });
+    const first = manager.call('remote_action', { kind: 'slow' });
+    await vi.waitFor(() => expect(oldClient).toBeDefined(), { timeout: 10_000 });
+    const closed = vi.spyOn(oldClient!, 'close');
+    expect((await manager.call('remote_action', { kind: 'fail' })).isError).toBe(true);
+    expect(manager.snapshot().plugins[0]?.status).toBe('error');
+    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.waitFor(() => expect(manager.snapshot().plugins[0]?.status).toBe('ready'), { timeout: 10_000 });
+    expect(closed).not.toHaveBeenCalled();
+    complete({ content: [{ type: 'text', text: 'finished' }] });
+    expect((await first).isError).not.toBe(true);
+    await vi.waitFor(() => expect(closed).toHaveBeenCalledTimes(1), { timeout: 10_000 });
+    expect(manager.snapshot().plugins[0]?.status).toBe('ready');
+    upstream.mockRestore();
+  });
+
+  it('closes an in-flight retired client on uninstall without waiting for its call', async () => {
+    const remote = remoteFixture();
+    remote.online(true);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const row = (await manager.install({ source: { kind: 'remote', url: 'https://remote.example/mcp' } })).plugins[0]!;
+    let finish!: (value: { content: [{ type: 'text'; text: string }] }) => void;
+    const slow = new Promise<{ content: [{ type: 'text'; text: string }] }>(resolve => { finish = resolve; });
+    let previousClient: Client | undefined;
+    vi.spyOn(Client.prototype, 'callTool').mockImplementation(function (this: Client, request) {
+      if (request.arguments?.kind === 'slow') {
+        previousClient = this;
+        return slow;
+      }
+      return Promise.reject(Object.assign(new TypeError('fetch failed'), {
+        cause: Object.assign(new Error('socket closed'), { code: 'ECONNRESET' }),
+      }));
+    });
+    const inFlight = manager.call('remote_action', { kind: 'slow' });
+    await vi.waitFor(() => expect(previousClient).toBeDefined(), { timeout: 10_000 });
+    const closed = vi.spyOn(previousClient!, 'close');
+    expect((await manager.call('remote_action', { kind: 'fail' })).isError).toBe(true);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.waitFor(() => expect(manager.snapshot().plugins[0]?.status).toBe('ready'), { timeout: 10_000 });
+    expect(closed).not.toHaveBeenCalled();
+    await manager.uninstall(row.id);
+    expect(closed).toHaveBeenCalledTimes(1);
+    finish({ content: [{ type: 'text', text: 'completed' }] });
+    await inFlight;
+    expect(closed).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['disable', 'disabled'], ['uninstall', 'uninstalled'], ['restart', 'manual restart'],
+    ['configure', 'configuration changed'], ['shutdown', 'shutdown'],
+  ] as const)('logs why a pending retry was canceled by %s', async (action, reason) => {
+    const remote = remoteFixture();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const row = (await manager.install({ source: { kind: 'remote', url: 'https://remote.example/mcp' } })).plugins[0]!;
+    if (action === 'disable') await manager.setEnabled(row.id, false);
+    else if (action === 'uninstall') await manager.uninstall(row.id);
+    else if (action === 'restart') await manager.restart(row.id);
+    else if (action === 'configure') await manager.configure(row.id, { name: 'Updated fixture' });
+    else await manager.close();
+    expect(getLog().some(entry => entry.message.includes(`Remote MCP plugin ${row.id}: reconnect canceled (${reason})`))).toBe(true);
+    if (action === 'disable' || action === 'uninstall' || action === 'shutdown') {
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(remote.initializations).toBe(1);
+    }
+  });
+
+  it('cancels a queued reconnect when another in-flight call fails non-retryably', async () => {
+    const remote = remoteFixture();
+    remote.online(true);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const row = (await manager.install({ source: { kind: 'remote', url: 'https://remote.example/mcp' } })).plugins[0]!;
+    type PendingCall = {
+      resolve: (result: { content: [{ type: 'text'; text: string }] }) => void;
+      reject: (error: Error) => void;
+    };
+    const pending = new Map<string, PendingCall>();
+    vi.spyOn(Client.prototype, 'callTool').mockImplementation(request => new Promise((resolve, reject) => {
+      pending.set(String(request.arguments?.kind), { resolve, reject });
+    }));
+    const slow = manager.call('remote_action', { kind: 'slow' });
+    const network = manager.call('remote_action', { kind: 'network' });
+    const forbidden = manager.call('remote_action', { kind: 'forbidden' });
+    await vi.waitFor(() => expect(pending.size).toBe(3), { timeout: 10_000 });
+    pending.get('network')!.reject(Object.assign(new TypeError('fetch failed'), {
+      cause: Object.assign(new Error('socket closed'), { code: 'UND_ERR_SOCKET' }),
+    }));
+    expect((await network).isError).toBe(true);
+    expect(manager.snapshot().plugins[0]?.status).toBe('error');
+    pending.get('forbidden')!.reject(new SdkHttpError(SdkErrorCode.ClientHttpForbidden, 'Forbidden', { status: 403 }));
+    expect((await forbidden).isError).toBe(true);
+    expect(getLog().some(entry => entry.message.includes(`Remote MCP plugin ${row.id}: reconnect canceled (non-retryable call failure)`))).toBe(true);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(remote.initializations).toBe(1);
+    pending.get('slow')!.reject(Object.assign(new TypeError('fetch failed'), {
+      cause: Object.assign(new Error('socket closed'), { code: 'UND_ERR_SOCKET' }),
+    }));
+    expect((await slow).isError).toBe(true);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(remote.initializations).toBe(1);
+  });
+
+  it.each(['successful', 'failed'] as const)(
+    'discards an in-flight reconnect canceled by HTTP 403 even if discovery %s',
+    async discoveryOutcome => {
+    const remote = remoteFixture();
+    remote.online(true);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const row = (await manager.install({ source: { kind: 'remote', url: 'https://remote.example/mcp' } })).plugins[0]!;
+    expect(row.status).toBe('ready');
+
+    const rejected = new Map<string, (error: Error) => void>();
+    vi.spyOn(Client.prototype, 'callTool').mockImplementation(request => new Promise((_resolve, reject) => {
+      rejected.set(String(request.arguments?.kind), reject);
+    }));
+    const network = manager.call('remote_action', { kind: 'network' });
+    const forbidden = manager.call('remote_action', { kind: 'forbidden' });
+    await vi.waitFor(() => expect(rejected.size).toBe(2), { timeout: 10_000 });
+    rejected.get('network')!(Object.assign(new TypeError('fetch failed'), {
+      cause: Object.assign(new Error('socket closed'), { code: 'UND_ERR_SOCKET' }),
+    }));
+    expect((await network).isError).toBe(true);
+    expect(manager.snapshot().plugins[0]?.status).toBe('error');
+
+    let listingStarted!: () => void, finishListing!: () => void, rejectListing!: (error: Error) => void;
+    const started = new Promise<void>(resolve => { listingStarted = resolve; });
+    const held = new Promise<void>((resolve, reject) => { finishListing = resolve; rejectListing = reject; });
+    remote.onList(async () => { listingStarted(); await held; });
+    const closed = vi.spyOn(Client.prototype, 'close');
+    await vi.advanceTimersByTimeAsync(10_000);
+    await started;
+    expect(remote.initializations).toBe(2);
+
+    rejected.get('forbidden')!(new SdkHttpError(SdkErrorCode.ClientHttpForbidden, 'Forbidden', { status: 403 }));
+    expect((await forbidden).isError).toBe(true);
+    expect(getLog().some(entry => entry.message.includes(`Remote MCP plugin ${row.id}: reconnect canceled (non-retryable call failure)`))).toBe(true);
+    if (discoveryOutcome === 'successful') finishListing();
+    else rejectListing(Object.assign(new TypeError('fetch failed'), {
+      cause: Object.assign(new Error('socket closed'), { code: 'UND_ERR_SOCKET' }),
+    }));
+    await vi.waitFor(() => expect(closed).toHaveBeenCalled(), { timeout: 10_000 });
+    expect(manager.snapshot().plugins[0]?.status).toBe('error');
+    expect(manager.tools()).toEqual([]);
+    remote.onList(undefined);
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(remote.initializations).toBe(2);
+  });
+
+  it.each([401, 403, 404])('does not retry an HTTP %i authentication/configuration failure', async status => {
+    const remote = remoteFixture();
+    remote.online(true);
+    remote.httpStatus(status);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const row = (await manager.install({ source: { kind: 'remote', url: 'https://remote.example/mcp' } })).plugins[0]!;
+    expect(['error', 'needs-auth']).toContain(row.status);
+    expect(getLog().filter(entry => entry.message.includes(`Remote MCP plugin ${row.id}:`)).map(entry => entry.message))
+      .toEqual([expect.stringContaining(`not retrying (HTTP ${status})`)]);
+    const before = remote.initializations;
+    await vi.advanceTimersByTimeAsync(900_000);
+    expect(remote.initializations).toBe(before);
+    expect(manager.snapshot().plugins[0]?.status).not.toBe('ready');
   });
   it.runIf(process.env.COS_PLUGIN_LIVE_TEST === '1')(
     'live pinned Memory npm server: install, discover, create/read and update without data loss',

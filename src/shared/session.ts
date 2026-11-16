@@ -156,6 +156,21 @@ export interface FileChange {
   reviewUnavailable?: 'too-large' | 'not-kept';
 }
 
+/** The latest recorded edit of a path within the selected chat's local project. */
+export interface ChatEdit {
+  path: string;
+  callId: string;
+  index: number;
+  position: number;
+  state: 'changed' | 'deleted' | 'missing' | 'unavailable';
+  reviewable: boolean;
+}
+
+export interface ChatEdits {
+  rows: ChatEdit[];
+  limited: boolean;
+}
+
 /** Historical edit evidence, independent of the current Git working tree. */
 export interface ToolEditReview {
   callId: string;

@@ -1,7 +1,7 @@
 import { byteSize } from '../shared/age.js';
 import type { InputAttachment } from '../shared/input.js';
 import type { LocalProject } from '../shared/projects.js';
-import type { ToolEditReview } from '../shared/session.js';
+import type { ChatEdit, ChatEdits, ToolEditReview } from '../shared/session.js';
 import type { ProjectDirectoryListing, ProjectFileEntry, ProjectFileKind, ProjectFilePreview, ProjectFilesChanged } from '../shared/project-files.js';
 import { CHECKPOINT_REF_PREFIX, type ProjectGitChange, type ProjectGitChanged, type ProjectGitDiff, type ProjectGitSnapshot, type ProjectGitStatus } from '../shared/project-git.js';
 import { requestName } from './name-dialog.js';
@@ -23,6 +23,7 @@ interface FilePanelOptions {
   toggle?: HTMLButtonElement;
   reviewOnly?: boolean;
   onOpenChanges?: () => void;
+  onEditSource?: (sessionId: string, edit: ChatEdit) => void;
   onEscape?: () => void;
   onShow?: () => void;
   onAttach?: (attachment: InputAttachment) => void;
@@ -242,6 +243,9 @@ export function createFilePanel(options: FilePanelOptions) {
   const changesList = el('div', 'file-changes-list');
   changesList.setAttribute('role', 'region');
   ui(changesList, 'aria-label', () => t('Git changes'));
+  const chatList = el('section', 'review-chat-edits');
+  chatList.hidden = true;
+  ui(chatList, 'aria-label', () => t('Recorded edits in this chat'));
   // Commit sits under the working-tree changes it commits; a branch comparison has nothing to commit.
   const commitBar = el('div', 'file-commit-bar'); commitBar.hidden = true;
   // Whether the working tree's changes can be committed from here; shown only with their list, not over a diff.
@@ -251,7 +255,7 @@ export function createFilePanel(options: FilePanelOptions) {
   commitButton.type = 'button';
   commitButton.addEventListener('click', () => { if (project) options.onCommit?.(project.id); });
   commitBar.append(commitButton);
-  changesView.append(changesHeader, changesList, commitBar);
+  changesView.append(chatList, changesHeader, changesList, commitBar);
   const preview = el('section', 'file-preview'); preview.hidden = true;
   const previewResize = el('div', 'file-preview-resize');
   previewResize.tabIndex = 0;
@@ -293,6 +297,10 @@ export function createFilePanel(options: FilePanelOptions) {
   let reviewReturnMode: 'files' | 'changes' = 'files';
   let reviewSource: { sessionId: string; callId: string; indices: number[]; cursor: number } | null = null;
   let reviewValue: ToolEditReview | null = null;
+  let chatOwner: string | null = null;
+  let chatRequest = 0;
+  let chatEdits: ChatEdits | null | undefined;
+  let fromChat: ChatEdit | null = null;
   let reviewGeneration = 0;
   let gitSnapshot: ProjectGitSnapshot | null = null;
   let selectedBaseRef: string | null = null;
@@ -503,12 +511,13 @@ export function createFilePanel(options: FilePanelOptions) {
 
   function hide(): void {
     closeBranchMenu();
-    generation++; viewEpoch++;
+    generation++; viewEpoch++; chatRequest++;
     if (gitReconcileTimer !== null) window.clearTimeout(gitReconcileTimer);
     gitReconcileTimer = null;
     destroyPdfViewer();
     destroyDiffViewer();
     pane.hidden = true;
+    if (fromChat && !reviewValue) leaveReview();
     if (!options.mount) options.host.classList.remove('has-file-panel');
     options.toggle?.setAttribute('aria-expanded', 'false');
     syncWatches();
@@ -522,7 +531,10 @@ export function createFilePanel(options: FilePanelOptions) {
     options.toggle?.setAttribute('aria-expanded', 'true');
     if (mode === 'files' && !listings.has('')) await loadDirectory('');
     else render();
-    if (reconcile) void reconcileGitChanges();
+    if (reconcile) {
+      void reconcileGitChanges();
+      void loadChatEdits();
+    }
     const draft = project && retainedDrafts.get(project.id);
     if (mode === 'files' && draft && !editingPath) {
       selection = { path: draft.preview.path, kind: 'file' };
@@ -1089,6 +1101,56 @@ export function createFilePanel(options: FilePanelOptions) {
     return stats;
   }
 
+  function paintChatEdits(): void {
+    const owner = chatOwner, projectId = project?.id;
+    chatList.hidden = !owner || !projectId || mode !== 'changes' || gitDiffPath !== null;
+    if (!owner || !projectId) { chatList.replaceChildren(); return; }
+    const focused = document.activeElement instanceof HTMLElement && chatList.contains(document.activeElement)
+      ? document.activeElement.dataset.path : undefined;
+    const title = el('h3', 'file-change-group-title', () => t('Recorded edits in this chat'));
+    title.tabIndex = -1;
+    chatList.replaceChildren(title);
+    if (!chatEdits?.rows.length) {
+      const message = chatEdits === undefined ? 'Loading…' : chatEdits === null ? 'Recorded edits are unavailable.' : 'No recent recorded edits.';
+      chatList.append(el('p', 'review-chat-note', () => t(message)));
+    }
+    for (const edit of chatEdits?.rows ?? []) {
+      const status = () => t(edit.state === 'deleted' ? 'Deleted' : edit.state === 'missing' ? 'Missing' :
+        edit.state === 'unavailable' || !edit.reviewable ? 'Unavailable' : 'Modified');
+      const action = () => t(edit.reviewable ? 'Review edit' : 'Go to recorded edit');
+      const row = el('button', 'file-change-row') as HTMLButtonElement;
+      row.type = 'button';
+      row.dataset.path = edit.path;
+      ui(row, 'title', () => `${edit.path} · ${status()} · ${action()}`);
+      ui(row, 'aria-label', () => `${edit.path} · ${status()} · ${action()}`);
+      const mark = el('span', `file-change-status is-${edit.state === 'deleted' ? 'd' : edit.state === 'changed' ? 'm' : 'u'}`);
+      mark.setAttribute('aria-hidden', 'true');
+      mark.append(icon(edit.reviewable ? 'i-git-diff' : 'i-arrow-right'));
+      const names = el('span', 'file-change-names');
+      names.append(el('span', 'file-change-path', edit.path));
+      row.append(mark, names, el('span', 'file-change-stats review-chat-state', status));
+      row.addEventListener('click', () => {
+        if (!row.isConnected || chatOwner !== owner || project?.id !== projectId) return;
+        if (!edit.reviewable) { options.onEditSource?.(owner, edit); return; }
+        void openReview(projectId, owner, edit.callId, [edit.index], edit);
+      });
+      chatList.append(row);
+    }
+    if (chatEdits?.limited && chatEdits.rows.length)
+      chatList.append(el('p', 'review-chat-note', () => t('Showing recent recorded edits.')));
+    if (focused) ([...chatList.querySelectorAll('button')].find(row => row.dataset.path === focused) ?? title).focus({ preventScroll: true });
+  }
+
+  async function loadChatEdits(): Promise<void> {
+    const owner = chatOwner, projectId = project?.id;
+    if (!owner || !projectId || pane.hidden) return;
+    const request = ++chatRequest;
+    const reply = await window.api.getChatEdits(owner, projectId).catch(() => null);
+    if (request !== chatRequest || pane.hidden) return;
+    chatEdits = reply?.ok ? reply.data : null;
+    paintChatEdits();
+  }
+
   function renderChangesList(): void {
     changesList.replaceChildren();
     commitOffered = !!(options.reviewOnly && options.onCommit && project && !project.remote && gitSnapshot?.state === 'ready'
@@ -1257,6 +1319,8 @@ export function createFilePanel(options: FilePanelOptions) {
   function leaveReview(): void {
     if (mode !== 'review') return;
     reviewGeneration++; viewEpoch++;
+    const prior = fromChat;
+    fromChat = null;
     reviewSource = null; reviewValue = null;
     mode = reviewReturnMode;
     destroyDiffViewer();
@@ -1267,6 +1331,7 @@ export function createFilePanel(options: FilePanelOptions) {
       gitDiffValue = null;
     }
     render();
+    if (prior) [...chatList.querySelectorAll('button')].find(row => row.dataset.path === prior.path)?.focus();
   }
 
   async function selectReview(cursor: number): Promise<void> {
@@ -1278,9 +1343,21 @@ export function createFilePanel(options: FilePanelOptions) {
     reviewValue = null;
     destroyDiffViewer();
     render();
-    const value = await run(window.api.getToolEditReview(source.sessionId, source.callId, source.indices[cursor]!));
+    const projected = fromChat;
+    const index = source.indices[cursor]!;
+    const value = await run(projected ? window.api.getToolEditReview(source.sessionId, source.callId, index, current.id)
+      : window.api.getToolEditReview(source.sessionId, source.callId, index));
     if (token !== reviewGeneration || project?.id !== current.id || mode !== 'review' || reviewSource !== source) return;
-    if (!value) { leaveReview(); toast(t('Recorded edit is unavailable.')); return; }
+    if (!value || (projected && (value.callId !== source.callId || value.changeIndex !== index ||
+        value.path !== projected.path))) {
+      if (projected && chatEdits) {
+        chatEdits = { ...chatEdits, rows: chatEdits.rows.map(row =>
+          row.callId === projected.callId && row.index === projected.index && row.path === projected.path
+            ? { ...row, reviewable: false } : row) };
+        paintChatEdits();
+      }
+      leaveReview(); toast(t('Recorded edit is unavailable.')); return;
+    }
     reviewValue = value;
     render();
   }
@@ -1365,6 +1442,12 @@ export function createFilePanel(options: FilePanelOptions) {
       actions.append(actionButton(() => t('Ask chat to resolve'), 'i-chat', () => ask(t(
         'Help me resolve the merge conflict in {0}. Read the common base, ours and theirs with git show :1:./{0}, :2:./{0} and :3:./{0}, then write a version that keeps what both sides meant and tell me what you chose. Do not stage or commit it.',
         [conflicted.path]))));
+    }
+    if (historical && fromChat && reviewSource && value) {
+      const source = fromChat, owner = reviewSource.sessionId;
+      actions.append(actionButton(() => t('Go to recorded edit'), 'i-arrow-right', () => {
+        if (source === fromChat && owner === chatOwner) options.onEditSource?.(owner, source);
+      }));
     }
     actions.append(actionButton(() => t('Close preview'), 'i-x', historical ? leaveReview : closeGitDiff));
     head.append(title, actions);
@@ -1510,14 +1593,15 @@ export function createFilePanel(options: FilePanelOptions) {
     await reconcileGitChanges();
   }
 
-  async function openReview(projectId: string, sessionId: string, callId: string, indices: number[]): Promise<boolean> {
+  async function openReview(projectId: string, sessionId: string, callId: string, indices: number[], edit: ChatEdit | null = null): Promise<boolean> {
     const projectGeneration = generation;
     if (project?.id !== projectId || !indices.length || indices.length > 32 ||
         indices.some(index => !Number.isSafeInteger(index) || index < 0 || index >= 64)) return false;
     if (editingPath && !(await leaveEditorIfNeeded())) return false;
     if (project?.id !== projectId || generation !== projectGeneration) return false;
     reviewGeneration++;
-    reviewReturnMode = mode === 'changes' ? 'changes' : 'files';
+    if (mode !== 'review') reviewReturnMode = mode;
+    fromChat = edit;
     reviewSource = { sessionId, callId, indices, cursor: 0 };
     reviewValue = null;
     mode = 'review';
@@ -1526,9 +1610,13 @@ export function createFilePanel(options: FilePanelOptions) {
     if (pane.hidden) await show(false);
     else render();
     if (project?.id !== projectId || mode !== 'review') return false;
+    const opening = reviewSource;
     await selectReview(0);
-    if (project?.id === projectId && mode === 'review') backToFiles.focus();
-    return project?.id === projectId && mode === 'review' && reviewValue !== null;
+    if (!pane.hidden && project?.id === projectId && reviewSource === opening && reviewValue !== null) {
+      backToFiles.focus();
+      return true;
+    }
+    return false;
   }
 
   function render(): void {
@@ -1538,6 +1626,7 @@ export function createFilePanel(options: FilePanelOptions) {
     tree.hidden = showingChanges || showingReview;
     changesView.hidden = !showingChanges && !showingReview;
     changesList.hidden = showingDiff;
+    chatList.hidden = !chatOwner || !showingChanges || showingDiff;
     paintCommitBar();
     ui(changesHeaderTitle, 'textContent', () => t(showingReview ? 'Review edit' : showingDiff ? 'Diff' :
       options.reviewOnly && gitSnapshot?.state === 'ready' ? gitSnapshot.currentBranch ?? 'HEAD' : 'Working tree'));
@@ -1796,7 +1885,10 @@ export function createFilePanel(options: FilePanelOptions) {
     await reconcileGitChanges(true);
   }
 
-  refresh.onclick = () => void (mode === 'changes' ? reconcileGitChanges(true) : refreshAll());
+  refresh.onclick = () => {
+    if (mode === 'changes') { void reconcileGitChanges(true); void loadChatEdits(); }
+    else void refreshAll();
+  };
   function closeBranchMenu(restoreFocus = false): void { branchPopup.close(restoreFocus); }
   branchTrigger.addEventListener('click', () => {
     if (branchPopup.open) { closeBranchMenu(); return; }
@@ -1827,13 +1919,29 @@ export function createFilePanel(options: FilePanelOptions) {
     mountAt(parent: HTMLElement): void { if (pane.parentElement !== parent) parent.append(pane); },
     openReview,
     visible: () => !pane.hidden,
-    update(next: LocalProject | null): void {
+    refreshChatEdits: loadChatEdits,
+    invalidateChatEdits(): void {
+      if (!chatOwner) return;
+      chatEdits = undefined;
+      if (fromChat) leaveReview();
+      paintChatEdits();
+      void loadChatEdits();
+    },
+    update(next: LocalProject | null, nextChat: string | null = null): void {
+      const chatChanged = nextChat !== chatOwner || project?.id !== next?.id;
+      if (chatChanged) {
+        chatOwner = nextChat;
+        chatRequest++;
+        chatEdits = undefined;
+        if (fromChat && project?.id === next?.id) leaveReview();
+      }
       const changed = project?.id !== next?.id;
       const labelChanged = project?.name !== next?.name || project?.path !== next?.path;
       if (changed && project && editingPath && editorDirty && previewValue && editablePreview(previewValue)) {
         retainedDrafts.set(project.id, { preview: previewValue, text: codeEditor?.getValue() ?? editorDraft });
       }
       project = next;
+      if (chatChanged) paintChatEdits();
       if (changed) watchSignature = '';
       if (changed) { closeBranchMenu(); selectedBaseRef = null; }
       if (options.toggle) {
@@ -1842,6 +1950,7 @@ export function createFilePanel(options: FilePanelOptions) {
       }
       if (!changed) {
         if (labelChanged) renderTree();
+        if (chatChanged) void loadChatEdits();
         return;
       }
       if (editingPath) {
@@ -1852,7 +1961,7 @@ export function createFilePanel(options: FilePanelOptions) {
       if (gitReconcileTimer !== null) window.clearTimeout(gitReconcileTimer);
       gitReconcileTimer = null;
       gitSnapshot = null; gitLoading = false; gitDiffPath = null; gitDiffValue = null;
-      reviewGeneration++; reviewSource = null; reviewValue = null; mode = options.reviewOnly ? 'changes' : 'files';
+      reviewGeneration++; fromChat = null; reviewSource = null; reviewValue = null; mode = options.reviewOnly ? 'changes' : 'files';
       generation++; viewEpoch++;
       listings.clear(); expanded = new Set(['']); selection = { path: '', kind: 'root' };
       previewPath = null; previewValue = null;

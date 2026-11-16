@@ -138,7 +138,8 @@ import {
   sweepStaleSwarm,
   unpair,
   followChatInBackground,
-  browserPickupContext
+  browserPickupContext,
+  notifyBrowserActivity
 } from './bridge.js';
 import { extensionDir } from './extension-path.js';
 import { APP_VERSION, extensionDownloadUrl } from './version.js';
@@ -158,6 +159,7 @@ import {
   readEvents,
   withSessionMutationFence
 } from './session/store.js';
+import { readChatEdits, reviewChatEditPath } from './session/chat-edits.js';
 import { netTurnChanges, netTurnFileDiff, turnFileEdits, type EditAt } from './session/turn-changes.js';
 import { forgetSession, notifyChanged, onSessionChange } from './session/recorder.js';
 import { findInSession, locateMessage, locateSearchMatch, searchSessions } from './session/search.js';
@@ -1722,13 +1724,25 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       return response === 1;
     });
   });
+  handle('sessions:chatEdits', async payload => {
+    const { id, projectId } = turnRequest('sessions:chatEdits', sessionIdArg.extend({ projectId: projectFileId }).strict(), payload);
+    return readChatEdits(id, projectId);
+  });
   handle('sessions:toolEditReview', async payload => {
-    const { sessionId, callId, changeIndex } = z.object({
-      sessionId: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
+    const { sessionId, callId, changeIndex, projectId } = z.object({
+      sessionId: sessionIdArg.shape.id,
       callId: z.string().uuid(),
-      changeIndex: z.number().int().min(0).max(63)
+      changeIndex: z.number().int().min(0).max(63),
+      projectId: projectFileId.optional()
     }).strict().parse(payload);
-    return readToolEditReview(sessionId, callId, changeIndex);
+    if (!projectId) return readToolEditReview(sessionId, callId, changeIndex);
+    let path: string | null = null;
+    const value = await readToolEditReview(sessionId, callId, changeIndex, async (event, index) => {
+      path = await reviewChatEditPath(sessionId, projectId, event, index);
+      return path !== null;
+    });
+    if (!value || path === null) { logInfo('chat edits: recorded diff unavailable or outside current scope'); return null; }
+    return { ...value, path };
   });
   handle('projectFiles:preview', async payload => {
     const { projectId, path } = z.object({ projectId: projectFileId, path: projectRelativePath.min(1) }).strict().parse(payload);
@@ -2303,6 +2317,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const answer = requestApprovalAnswer(conversationId, cardId, choice);
     if (answer.ok) {
       logInfo(`approval card: the user chose ${choice} in the app for ${conversationId}`);
+      notifyBrowserActivity(conversationId);
       return { ok: true as const };
     }
     return answer;
@@ -2367,6 +2382,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     );
     // A blocked worker chat frees its swarm slot now, not on the next 30-second pass: the
     // user pressing Block on a worker is usually about to start something in its place.
+    notifyBrowserActivity(conversationId);
     if (blocked) await sweepStaleSwarm().catch(() => undefined);
     refreshPetOverlayActivities();
     return blockedChatIds();
