@@ -45,6 +45,8 @@ import {
   MAX_TOOL_RESULT_CHARS,
   MAX_USER_MESSAGE_CHARS,
   MAX_ASSET_BYTES,
+  GLOBAL_ASSET_QUOTA_EXCEEDED,
+  SESSION_ASSET_QUOTA_EXCEEDED,
   appendEvent,
   recordProcessCall,
   reviseProvisionalCall,
@@ -187,27 +189,61 @@ let lastActiveSessionId: string | null = null;
  */
 const REOPEN_NOTICE_MS = 60_000;
 
+const NOTIFY_COOLDOWN_MS = 180;
+
 const listeners = new Set<(change: SessionChange) => void>();
+const nonExtensionListeners = new Set<(change: SessionChange) => void>();
 let notifyTimer: NodeJS.Timeout | null = null;
+let lastNotifyAt = -Infinity;
 /** Every local session written during the current burst; one push names all of them. */
 const changedSessions = new Set<string>();
+/** Sessions in the current burst with at least one non-extension change (for anti-echo wakes). */
+const changedNonExtensionSessions = new Set<string>();
 
 export function onSessionChange(listener: (change: SessionChange) => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
 
-/** Publishes the exact sessions whose durable projection this recorder just wrote. */
-export function notifyChanged(...sessionIds: string[]): void {
-  for (const id of sessionIds) changedSessions.add(id);
+/** Subscribes to session changes that include at least one non-extension write in the burst. */
+export function onNonExtensionSessionChange(listener: (change: SessionChange) => void): () => void {
+  nonExtensionListeners.add(listener);
+  return () => nonExtensionListeners.delete(listener);
+}
+
+function scheduleNotifyFlush(): void {
   if (notifyTimer) return;
+  const delay = Math.max(0, NOTIFY_COOLDOWN_MS - (performance.now() - lastNotifyAt));
   notifyTimer = setTimeout(() => {
     notifyTimer = null;
+    lastNotifyAt = performance.now();
     const change: SessionChange = { sessionIds: [...changedSessions] };
+    const nonExtensionChange: SessionChange | null = changedNonExtensionSessions.size > 0
+      ? { sessionIds: [...changedNonExtensionSessions] }
+      : null;
     changedSessions.clear();
+    changedNonExtensionSessions.clear();
     for (const listener of listeners) listener(change);
-  }, 400);
+    if (nonExtensionChange) {
+      for (const listener of nonExtensionListeners) listener(nonExtensionChange);
+    }
+  }, delay);
   notifyTimer.unref?.();
+}
+
+/** Publishes the exact sessions whose durable projection this recorder just wrote. */
+export function notifyChanged(...sessionIds: string[]): void {
+  for (const id of sessionIds) {
+    changedSessions.add(id);
+    changedNonExtensionSessions.add(id);
+  }
+  scheduleNotifyFlush();
+}
+
+/** Publishes extension-originated observations without triggering browser activity echo wakes. */
+function notifyExtensionChanged(...sessionIds: string[]): void {
+  for (const id of sessionIds) changedSessions.add(id);
+  scheduleNotifyFlush();
 }
 
 export function recordingEnabled(): boolean {
@@ -228,9 +264,10 @@ export async function sessionForConversation(
   conversationId: string | null,
   title?: string,
   /** An observed authored user message, not a guessed route or page label. */
-  openingUserMessage?: string
+  openingUserMessage?: string,
+  extensionOrigin = false
 ): Promise<string | null> {
-  if (!conversationId) return initializeSessionForConversation(conversationId, title, openingUserMessage);
+  if (!conversationId) return initializeSessionForConversation(conversationId, title, openingUserMessage, extensionOrigin);
 
   const pending = sessionInitializations.get(conversationId);
   if (pending) {
@@ -240,12 +277,12 @@ export async function sessionForConversation(
       // caller did not yet have: command origin or the first authored user title. Apply both
       // after the shared initialization rather than dropping the later evidence.
       if (pendingOrigins.has(conversationId)) await applyOrigin(sessionId, conversationId);
-      await promoteGenericTitle(sessionId, title);
+      await promoteGenericTitle(sessionId, title, extensionOrigin);
     }
     return sessionId;
   }
 
-  const initializing = initializeSessionForConversation(conversationId, title, openingUserMessage);
+  const initializing = initializeSessionForConversation(conversationId, title, openingUserMessage, extensionOrigin);
   sessionInitializations.set(conversationId, initializing);
   try {
     const sessionId = await initializing;
@@ -254,7 +291,7 @@ export async function sessionForConversation(
     // initializer sampled pendingOrigins.
     if (sessionId) {
       if (pendingOrigins.has(conversationId)) await applyOrigin(sessionId, conversationId);
-      await promoteGenericTitle(sessionId, title);
+      await promoteGenericTitle(sessionId, title, extensionOrigin);
     }
     return sessionId;
   } finally {
@@ -313,7 +350,8 @@ export class ResumeDestinationPendingError extends Error {
 async function initializeSessionForConversation(
   conversationId: string | null,
   title?: string,
-  openingUserMessage?: string
+  openingUserMessage?: string,
+  extensionOrigin = false
 ): Promise<string | null> {
   if (!recordingEnabled()) return null;
   if (!conversationId) return ensureUnattributedSession();
@@ -321,7 +359,7 @@ async function initializeSessionForConversation(
   if (existing) {
     lastActiveSessionId = existing.sessionId;
     if (pendingOrigins.has(conversationId)) await applyOrigin(existing.sessionId, conversationId);
-    await promoteGenericTitle(existing.sessionId, title);
+    await promoteGenericTitle(existing.sessionId, title, extensionOrigin);
     return existing.sessionId;
   }
   // Reuse a session already recorded for this conversation, so closing and reopening
@@ -444,7 +482,7 @@ async function initializeSessionForConversation(
     logInfo(`session started for a ChatGPT conversation (${summary.id})`);
   }
   if (origin && known) await applyOrigin(summary.id, conversationId);
-  if (known) await promoteGenericTitle(summary.id, title);
+  if (known) await promoteGenericTitle(summary.id, title, extensionOrigin);
   if (known) {
     // There are two awaited metadata niceties above. A rebind that starts after the pre-publish
     // check can therefore still commit before this initializer returns. Re-check once more and
@@ -462,26 +500,29 @@ async function initializeSessionForConversation(
     }
   }
   lastActiveSessionId = summary.id;
-  notifyChanged(summary.id);
+  if (extensionOrigin) notifyExtensionChanged(summary.id);
+  else notifyChanged(summary.id);
   return summary.id;
 }
 
 /** Generic placeholders yield to authored previews; store owns naming precedence. */
-async function promoteGenericTitle(sessionId: string, title?: string): Promise<void> {
+async function promoteGenericTitle(sessionId: string, title?: string, extensionOrigin = false): Promise<void> {
   const next = title?.trim();
   if (!next) return;
   const summary = await getSession(sessionId);
   if (!summary || summary.title !== 'ChatGPT session') return;
   await renameSession(sessionId, next, 'fallback');
-  notifyChanged(sessionId);
+  if (extensionOrigin) notifyExtensionChanged(sessionId);
+  else notifyChanged(sessionId);
 }
 
 /** Provider titles may arrive before message history, after a receipt, or after restart. */
-async function promoteConversationTitle(sessionId: string, title?: string, conversationId?: string): Promise<void> {
+async function promoteConversationTitle(sessionId: string, title?: string, conversationId?: string, extensionOrigin = false): Promise<void> {
   const next = title?.trim();
   if (!next) return;
   await renameSession(sessionId, next, 'provider', conversationId);
-  notifyChanged(sessionId);
+  if (extensionOrigin) notifyExtensionChanged(sessionId);
+  else notifyChanged(sessionId);
 }
 
 /**
@@ -1619,12 +1660,14 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
         // Only fixed storage diagnostics may enter the transcript; arbitrary fs errors
         // can contain private paths. Recording failure never changes the MCP payload.
         const message = err instanceof Error ? err.message : '';
-        const reason = message === 'Global session asset quota exceeded' || message === 'Session asset quota exceeded'
+        const reason = message === GLOBAL_ASSET_QUOTA_EXCEEDED
           ? 'recording storage limit reached'
-          : message === 'Session image exceeds the recording limit' ? 'recording image size limit' : 'recording write failed';
+          : message === SESSION_ASSET_QUOTA_EXCEEDED
+            ? 'chat recording limit reached (192 MiB)'
+            : message === 'Session image exceeds the recording limit' ? 'recording image size limit' : 'recording write failed';
         imageRecordingReasons.add(reason);
         // The store reports being full once, as a state (#1406); other reasons keep their line.
-        if (message !== 'Global session asset quota exceeded') logWarn(`session image not stored: ${reason}`);
+        if (message !== GLOBAL_ASSET_QUOTA_EXCEEDED) logWarn(`session image not stored: ${reason}`);
       }
     }
 
@@ -2340,8 +2383,13 @@ async function recordNativeImage(
     });
     if (enriched.changed) changed += 1;
   } catch (error) {
-    const reason = /quota/i.test((error as Error).message) ? 'quota' : 'invalid';
-    logWarn(`native generated image preview unavailable: ${(error as Error).message}`);
+    const message = error instanceof Error ? error.message : String(error);
+    const reason = message === SESSION_ASSET_QUOTA_EXCEEDED
+      ? 'session_quota'
+      : message === GLOBAL_ASSET_QUOTA_EXCEEDED || /quota/i.test(message)
+        ? 'quota'
+        : 'invalid';
+    logWarn(`native generated image preview unavailable: ${message}`);
     const unavailable = await upsertNativeImageEvent(sessionId, {
       ...base,
       kind: 'native_image',
@@ -2442,7 +2490,7 @@ export async function recordRequestEvidence(
   if (!recordingEnabled()) return null;
   const lineage = !conversations.has(conversationId) ? await supersededLineage(conversationId) : null;
   const firstUser = observations.find((item) => item.kind === 'user_message' && item.messageId && item.text);
-  const sessionId = lineage ?? await sessionForConversation(conversationId, observationTitle(observations), firstUser?.text);
+  const sessionId = lineage ?? await sessionForConversation(conversationId, observationTitle(observations), firstUser?.text, true);
   if (!sessionId) return null;
   // Proof identifies even a retired caller; kernel/recorder attachment checks then refuse it
   // as superseded. Never turn an exact historical owner into anonymous executable authority.
@@ -2569,7 +2617,7 @@ async function recordSupersededMessages(
     }
     if (written?.changed) stored++;
   }
-  if (stored > 0) notifyChanged(sessionId);
+  if (stored > 0) notifyExtensionChanged(sessionId);
   return stored;
 }
 
@@ -2612,7 +2660,8 @@ async function recordChatObservationsNow(
   const sessionId = await sessionForConversation(
     conversationId,
     pageTitle?.text?.trim() || observedUserTitle(firstUser?.text),
-    firstUser?.messageId ? firstUser.text : undefined
+    firstUser?.messageId ? firstUser.text : undefined,
+    true
   );
   if (!sessionId) return { sessionId: null, stored: 0, activity, goalCandidates: [] };
   const live = conversations.get(conversationId);
@@ -2872,7 +2921,7 @@ async function recordChatObservationsNow(
       }
       case 'turn_trace': {
         // Presentation beside the log: no event, no activity, no work or completion evidence.
-        if (item.turnId && item.trace && await writeTurnTrace(sessionId, item.turnId, item.trace, item.question)) notifyChanged(sessionId);
+        if (item.turnId && item.trace && await writeTurnTrace(sessionId, item.turnId, item.trace, item.question)) notifyExtensionChanged(sessionId);
         continue;
       }
       case 'page_tool': {
@@ -3077,7 +3126,7 @@ async function recordChatObservationsNow(
     }
     stored++;
   }
-  if (pageTitle) await promoteConversationTitle(sessionId, pageTitle.text, conversationId);
+  if (pageTitle) await promoteConversationTitle(sessionId, pageTitle.text, conversationId, true);
   // Completion and delivery readiness are separate: retain the exact native final
   // while a tool drains. The input owner keeps its in-flight fence until sending is safe.
   // Reload republishes historical request-owned finals as activeNow, including HTML-only
@@ -3114,7 +3163,7 @@ async function recordChatObservationsNow(
     stored++;
   }
   if (recoveredGoalSeen && live) live.lastTurnOutcome = 'completed';
-  notifyChanged(sessionId);
+  notifyExtensionChanged(sessionId);
   return { sessionId, stored, activity, goalCandidates };
 }
 
@@ -3293,7 +3342,7 @@ export async function closeConversation(conversationId: string, dismissBrowserRe
   }
   conversations.delete(conversationId);
   await endSession(live.sessionId, dismissBrowserRecovery, conversationId);
-  notifyChanged(live.sessionId);
+  notifyExtensionChanged(live.sessionId);
 }
 
 /**
@@ -3398,8 +3447,10 @@ export function resetRecorderForTests(): void {
   if (notifyTimer) {
     clearTimeout(notifyTimer);
     notifyTimer = null;
-    changedSessions.clear();
   }
+  changedSessions.clear();
+  changedNonExtensionSessions.clear();
+  lastNotifyAt = -Infinity;
 }
 
 export type { SessionSummary, SessionEvent };

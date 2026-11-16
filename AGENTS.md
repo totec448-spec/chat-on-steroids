@@ -2416,7 +2416,7 @@ decodes previews before asset admission. The global asset budget remains exact; 
 `config.sessions.storageLimitGiB` (2, 5, 10, 20 or 50; default 2; anything else loads as 2), set in
 Settings → Browser & history (Storage size) and applied through `setRecordingStorageLimit()` at
 startup and on every settings save, which re-decides the full state at once when usage is known;
-quota failures retain the canonical row and explicitly report storage full. The store keeps that as
+quota failures retain the canonical row (`previewError: 'session_quota'` for the 192 MiB per-session limit, or `'quota'` for the global limit) and explicitly report storage full. The store keeps that as
 one state (`recordingStorageFull()`, set by a write the global limit refused, cleared by an admitted
 write or a clean-up that leaves room): it is logged once per change, travels as
 `AppState.recordingStorageFull`, and the window shows one dismissible notice that opens the clean-up.
@@ -3333,6 +3333,12 @@ Chromium browser/profile separate from ChatGPT account state. Use the selected b
 process evidence; a disconnected bridge or sleeping MV3 socket does not prove it is closed.
 OS wake launches require positive process absence and coalesce within one absence episode.
 The socket is a heartbeat/wake path; HTTP remains command/evidence authority.
+Activity wakes (`wakeActivityWork`) reuse the same authenticated `/wake` transport with
+`activity` or `activity:<conversationId>` topics: discrete and streaming updates are
+microtask-coalesced and rate-limited at a `200 ms` per-target cadence (plus a combined
+`200 ms` streaming pump across up to 64 targets), while `onNonExtensionSessionChange`
+suppresses self-echo from extension `/events` recordings so concurrent non-extension writes
+still wake promptly without echoing browser uploads.
 
 External navigation may hide its destination URL under ChatGPT-only host permissions.
 A completed tab absent from a successful ChatGPT URL query can release the departed
@@ -4458,7 +4464,19 @@ reason. The page says nothing once the tab shows another chat or the person stop
 Continue, and `inputId` must be a UUID. An automatic Continue held for `recovery-question-changed`
 without a break of more than 5 minutes, and with no other hold reason in between, for 30 minutes is retired (`retireMismatchedRecoveryInput`:
 cancelled with its reason, `recovery.ended: 'page-final'`); it would only answer the wrong question
-(2026-11-02: one sat queued for eleven hours). Internal busy states
+(2026-11-02: one sat queued for eleven hours). The `recovery-question-changed` note also carries `newestUser` (the id of
+the question the page read, at most 256 characters, no control characters) and `documentSince` (`performance.timeOrigin`, whole
+milliseconds); the extension worker forwards both only on that reason, and an older page says neither. The bridge reads them
+as proof that ChatGPT's saved copy stopped following the chat (#2184: after its history limit ChatGPT kept a Goal chat's
+first 7 s of a turn only; the live page streamed on and the browser acknowledged two Continues, but every reload read the
+older copy, and nothing owned the chat for hours). `noteSavedCopyBehind` counts a document only when the page read a question
+the app recorded for the chat, older than the newest `user_message` the app recorded, and the document loaded at least
+5 minutes after that newer message; two such documents at least 10 minutes apart are the proof. Then, only for a chat
+with Goal or Loop on that is not blocked, not working (no turn the page reports, no activity grant, no running call) has
+no turn the recorder or a page still reports (however old: `chatIsWorkingNow`'s one-hour limit does not apply) and has
+no open Compact & Resume, the session goes on in a new chat from its saved summary (`resumeFromSavedSummary`), once per
+chat and process, and the log says `ChatGPT's saved copy of this chat lacks the message the browser delivered`. A page that
+read no question, an unknown one, or the newest one itself proves nothing (a newer question a person typed is the newest one the page then reads). Internal busy states
 (another delivery, a model read, a Goal draft) stay unlogged. A dialog with a field
 (Settings, Rename, a form) is left alone and keeps holding input as before.
 A worker given up for time after a page claimed it (no page-reported failure) is a late-start
@@ -5773,6 +5791,19 @@ only the bounded viewport. Unavailable reads reset lazy-load admission so closin
 retries, while a pending or successful read remains single-flight/cached. Inline syntax uses the
 file viewer's palette in the selected theme; dark overrides are scoped to dark mode for both
 surfaces. The existing Review dock remains available.
+The Review dock's **Recorded edits in this chat** section calls `sessions:chatEdits { id, projectId }`
+(`getChatEdits`). It projects up to 30 latest distinct project paths from a bounded read of that
+exact local session's successful, request-attributed patch records (including committed Compact &
+Resume predecessors). It uses the session's current project and approved project path checks, not
+the working-tree diff or shell output. A missing old path stays missing; a rename is not inferred.
+The list reads no file contents. It opens the latest immutable diff for a path via the existing
+`sessions:toolEditReview` with an optional `projectId` to recheck scope and return a project-relative path. Existing
+historical callers omit it and retain their contract. Records carry virtual paths, not a durable
+root identity. After an approved root is renamed, old paths that no longer match the current
+prefix are omitted from Review; the timeline still shows them. Never infer an old root from a
+matching path suffix. A source jump uses the recorded call and timeline position, clears the
+timeline's agent filter, and closes the dock only when it would hide the timeline. No saved
+fields or filesystem authority are added.
 Per answer (#1827, `main/session/turn-changes.ts`): `sessions:turnChanges` { sessionId, turnId, from }
 groups a turn's successful recorded edits by path (first-change order, the prime's own calls only,
 never a `worker-N` agent's) and gives each file one net diff, the first edit's before against the
@@ -5825,6 +5856,19 @@ shutdown. Accept bounded validated schemas (up to 256 upstream tools and 250,000
 upstream names, and fail closed on collisions, including retained disabled-name claims. A
 cached unauthorized schema is not live exposure. External servers retain their own OS/account
 permissions; the app's approved-path wrapper is not an OS sandbox around a third-party process.
+Transient remote MCP connection failures retry only connection/discovery: the first retry waits
+10 seconds, then exponential backoff caps at five minutes. The plugin stays in `error` with its
+tools unpublished through each retry, and emits one availability change when ready again;
+no failed tool call is replayed. HTTP authorization/configuration failures do not retry.
+Disabling, uninstalling, reconfiguring, manually restarting or shutting down cancels pending
+retries. Each failed connection attempt logs its classified reason and next delay.
+This also recovers a notification SSE stream that has exhausted the SDK's zero stream retries
+(without an onclose callback), and transient notification-driven tools/list failures, but not
+parsing, authorization or configuration errors. A replaced remote client with in-flight tool
+calls is retained until those calls release it; explicit shutdown/uninstall closes retired
+clients too. Pending retry cancellations name their lifecycle reason in the activity log.
+Notifications from an unavailable connection cannot republish cached tools. A non-retryable
+failure from a concurrent call cancels any previously queued reconnect for that connection.
 Each installation owns a typed `longestCallSeconds` outside its MCP server `config`: default 120,
 integer range 1–1800 (30 minutes maximum). Old or malformed stored values normalize to 120
 without deleting the installation. Plugin install/configure IPC rejects invalid input. Changing

@@ -169,6 +169,21 @@ export interface FileChange {
   reviewUnavailable?: 'too-large' | 'not-kept';
 }
 
+/** The latest recorded edit of a path within the selected chat's local project. */
+export interface ChatEdit {
+  path: string;
+  callId: string;
+  index: number;
+  position: number;
+  state: 'changed' | 'deleted' | 'missing' | 'unavailable';
+  reviewable: boolean;
+}
+
+export interface ChatEdits {
+  rows: ChatEdit[];
+  limited: boolean;
+}
+
 /** Historical edit evidence, independent of the current Git working tree. */
 export interface ToolEditReview {
   callId: string;
@@ -482,7 +497,7 @@ export type SessionEvent =
       previewWidth?: number;
       previewHeight?: number;
       previewStatus: 'pending' | 'available' | 'unavailable';
-      previewError?: 'not_loaded' | 'ambiguous' | 'tainted' | 'oversized' | 'invalid' | 'quota' | 'removed';
+      previewError?: 'not_loaded' | 'ambiguous' | 'tainted' | 'oversized' | 'invalid' | 'quota' | 'session_quota' | 'removed';
       asset?: AssetRef;
       /** First sequence assigned to this exact provider-message/asset tuple. */
       origin?: number;
