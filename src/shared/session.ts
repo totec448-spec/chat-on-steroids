@@ -433,6 +433,8 @@ export type SessionEvent =
       assets?: AssetRef[];
       /** Image assets explicitly removed from local recording storage; same-message replay cannot restore them. */
       retiredImageAssetIds?: string[];
+      /** Overflow text assets explicitly removed from local recording storage; same-message replay cannot restore them. */
+      retiredTextAssetIds?: string[];
       /** First sequence assigned to this stable website message; revisions keep this anchor. */
       origin?: number;
       /** Store-owned authored-content revision; metadata and rehydration preserve it. */
@@ -478,6 +480,8 @@ export type SessionEvent =
       origin?: number;
       /** Store-owned text/state revision, including interim progress before the final. */
       contentSeq?: number;
+      /** Overflow text assets explicitly removed from local recording storage; same-message replay cannot restore them. */
+      retiredTextAssetIds?: string[];
     })
   | (BaseEvent & {
       /** ChatGPT-native generated media, independent of assistant prose and local MCP calls. */
