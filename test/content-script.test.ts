@@ -26663,4 +26663,108 @@ describe('reconciling discarded streaming assistant messages via turn_messages',
       messageIds: []
     });
   });
+
+  it('re-emits turn_messages with settled true when membership is unchanged across settlement and suppresses duplicate settled scans', async () => {
+    live = await harness();
+    userTurn(live.document, 'q-settle-sig', 'Settle signature check', { sent: false });
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'page-settle-sig', []);
+    live.hook.observe();
+    await settle();
+    const localTurnId = emitted(live.sent, 'turn_start').at(-1)!.event.turnId as string;
+
+    const userMsg = { messageId: 'q-settle-sig', rawMessageId: 'q-settle-sig', role: 'user', stable: true, rawText: 'Settle signature check', renderedHtml: '<p>Settle signature check</p>' };
+    const surviving = { messageId: 'msg-sig-keep', rawMessageId: 'msg-sig-keep', stable: false, rawText: 'Surviving update', renderedHtml: '<p>Surviving update</p>' };
+    const aborted = { messageId: 'msg-sig-drop', rawMessageId: 'msg-sig-drop', stable: false, rawText: 'Aborted chunk', renderedHtml: '<p>Aborted chunk</p>' };
+
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-settle-sig', messagesComplete: true, messages: [userMsg, surviving, aborted] } }]);
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-settle-sig', messagesComplete: true, messages: [userMsg, surviving] } }]);
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-settle-sig', messagesComplete: true, messages: [userMsg, surviving] } }]);
+    await live.hook.flush();
+
+    expect(emitted(live.sent, 'turn_messages')).toHaveLength(1);
+    expect(emitted(live.sent, 'turn_messages')[0]!.event.settled).toBeUndefined();
+
+    // Now the turn settles with identical surviving membership: must emit once with settled: true, then suppress repeats.
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-settle-sig', endMessageId: 'msg-sig-keep', messagesComplete: true, messages: [userMsg, surviving] } }]);
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-settle-sig', endMessageId: 'msg-sig-keep', messagesComplete: true, messages: [userMsg, surviving] } }]);
+    await live.hook.flush();
+
+    const sentSnapshots = emitted(live.sent, 'turn_messages').map((row) => row.event);
+    expect(sentSnapshots).toHaveLength(2);
+    expect(sentSnapshots[1]).toMatchObject({
+      kind: 'turn_messages',
+      turnId: localTurnId,
+      messageIds: ['msg-sig-keep'],
+      settled: true
+    });
+  });
+
+  it('never emits turn_messages for a turn whose conversationId differs from the active conversation', async () => {
+    live = await harness();
+    userTurn(live.document, 'q-foreign-conv', 'Foreign turn check', { sent: false });
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'page-foreign-conv', []);
+    live.hook.observe();
+    await settle();
+
+    const userMsg = { messageId: 'q-foreign-conv', rawMessageId: 'q-foreign-conv', role: 'user', stable: true, rawText: 'Foreign turn check', renderedHtml: '<p>Foreign turn check</p>' };
+    const foreignDraft = { messageId: 'msg-foreign-1', rawMessageId: 'msg-foreign-1', stable: false, rawText: 'Foreign draft', renderedHtml: '<p>Foreign draft</p>' };
+    const foreignTurn = (messages: unknown[]) => ({
+      section,
+      turn: {
+        turnId: 'page-foreign-conv',
+        conversationId: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+        messagesComplete: true,
+        messages
+      }
+    });
+
+    await bindRenderedFiberTurns([foreignTurn([userMsg, foreignDraft])]);
+    await bindRenderedFiberTurns([foreignTurn([userMsg])]);
+    await bindRenderedFiberTurns([foreignTurn([userMsg])]);
+    await live.hook.flush();
+
+    expect(emitted(live.sent, 'turn_messages')).toEqual([]);
+  });
+
+  it('keeps turn_messages unsettled while approvalHolding is true and emits settled after the approval hold clears', async () => {
+    live = await harness();
+    userTurn(live.document, 'q-approval-hold', 'Approval hold check', { sent: false });
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'page-approval-hold', []);
+    live.hook.observe();
+    await settle();
+
+    const card = live.document.createElement('div');
+    card.setAttribute('data-codex-approval-surface', 'true');
+    card.append(live.document.createElement('button'), live.document.createElement('button'));
+    card.getClientRects = () => [{ width: 600, height: 200 }] as unknown as DOMRectList;
+    live.document.body.append(card);
+
+    const userMsg = { messageId: 'q-approval-hold', rawMessageId: 'q-approval-hold', role: 'user', stable: true, rawText: 'Approval hold check', renderedHtml: '<p>Approval hold check</p>' };
+    const surviving = { messageId: 'msg-appr-keep', rawMessageId: 'msg-appr-keep', stable: false, rawText: 'Waiting for approval', renderedHtml: '<p>Waiting for approval</p>' };
+    const dropped = { messageId: 'msg-appr-drop', rawMessageId: 'msg-appr-drop', stable: false, rawText: 'Aborted draft', renderedHtml: '<p>Aborted draft</p>' };
+
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-approval-hold', messagesComplete: true, messages: [userMsg, surviving, dropped] } }]);
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-approval-hold', endMessageId: 'msg-appr-keep', messagesComplete: true, messages: [userMsg, surviving] } }]);
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-approval-hold', endMessageId: 'msg-appr-keep', messagesComplete: true, messages: [userMsg, surviving] } }]);
+    await live.hook.flush();
+
+    expect(emitted(live.sent, 'turn_messages')).toHaveLength(1);
+    expect(emitted(live.sent, 'turn_messages')[0]!.event.settled).toBeUndefined();
+
+    // Clearing the approval card and advancing past APPROVAL_SETTLE_MS lets settlement publish with settled: true.
+    card.remove();
+    live.advance(live.hook.APPROVAL_SETTLE_MS + 1);
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-approval-hold', endMessageId: 'msg-appr-keep', messagesComplete: true, messages: [userMsg, surviving] } }]);
+    await live.hook.flush();
+
+    expect(emitted(live.sent, 'turn_messages')).toHaveLength(2);
+    expect(emitted(live.sent, 'turn_messages')[1]!.event).toMatchObject({
+      kind: 'turn_messages',
+      messageIds: ['msg-appr-keep'],
+      settled: true
+    });
+  });
 });

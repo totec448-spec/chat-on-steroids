@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
+import { getLog, resetLoggerForTests } from '../src/main/logger.js';
 import { recordChatObservations, resetRecorderForTests } from '../src/main/session/recorder.js';
 import { readSessionEvents } from '../src/main/session/read-model.js';
 import {
@@ -26,11 +27,13 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  resetLoggerForTests();
   resetRecorderForTests();
   resetSessionStoreForTests();
 });
 
 afterAll(async () => {
+  resetLoggerForTests();
   resetRecorderForTests();
   resetSessionStoreForTests();
   await removeTempDir(directory);
@@ -181,10 +184,64 @@ it('fences turn_messages retraction by document, revision, settled flag, and obs
     { kind: 'turn_messages', time: 130, turnId: 'turn-1', messageIds: [], docId: 'doc-2', docSeq: 1 } as never
   ]);
   expect((await readEvents(sessionId, { kinds: ['assistant_message'] })).map(e => e.kind === 'assistant_message' ? e.messageId : null)).toEqual(['doc1-msg']);
+  expect(getLog().map(entry => entry.message)).toEqual(
+    expect.arrayContaining([
+      expect.stringContaining('skipped retracting 1 discarded streaming message(s) in turn turn-1 (stale docSeq: 1)'),
+      expect.stringContaining('skipped retracting 1 discarded streaming message(s) in turn turn-1 (older timestamp: 1)'),
+      expect.stringContaining('skipped retracting 1 discarded streaming message(s) in turn turn-1 (other document: 1)')
+    ])
+  );
 
   // Settled snapshot from a newer document (post-reload cleanup) or newer revision retracts cleanly.
   await recordChatObservations(conversationId, [
     { kind: 'turn_messages', time: 140, turnId: 'turn-1', messageIds: [], docId: 'doc-2', docSeq: 2, settled: true } as never
   ]);
   expect(await readEvents(sessionId, { kinds: ['assistant_message'] })).toEqual([]);
+});
+
+it('rejects delayed positive observations older than the retraction watermark and fences unsettled snapshots across restart', async () => {
+  const conversationId = 'conv-retract-restart-watermark';
+  const opened = await recordChatObservations(conversationId, [
+    { kind: 'turn_start', time: 100, turnId: 'turn-1' },
+    { kind: 'assistant_message', time: 110, turnId: 'turn-1', messageId: 'doc1-draft', docId: 'doc-1', docSeq: 5, text: 'Draft v5', state: 'streaming', activeNow: true } as never,
+    { kind: 'assistant_message', time: 115, turnId: 'turn-1', messageId: 'restart-draft', docId: 'doc-1', docSeq: 5, text: 'Pre-restart draft', state: 'streaming', activeNow: true } as never
+  ]);
+  const sessionId = opened.sessionId!;
+
+  // Retract doc1-draft at docSeq 6 (keeping restart-draft present).
+  await recordChatObservations(conversationId, [
+    { kind: 'turn_messages', time: 120, turnId: 'turn-1', messageIds: ['restart-draft'], docId: 'doc-1', docSeq: 6 } as never
+  ]);
+  expect((await readEvents(sessionId, { kinds: ['assistant_message'] })).map(e => e.kind === 'assistant_message' ? e.messageId : null)).toEqual(['restart-draft']);
+
+  // Delayed pre-retraction or retraction-seq observation must not restore doc1-draft.
+  await recordChatObservations(conversationId, [
+    { kind: 'assistant_message', time: 125, turnId: 'turn-1', messageId: 'doc1-draft', docId: 'doc-1', docSeq: 4, text: 'Stale v4', state: 'streaming', activeNow: true } as never,
+    { kind: 'assistant_message', time: 126, turnId: 'turn-1', messageId: 'doc1-draft', docId: 'doc-1', docSeq: 6, text: 'Stale v6', state: 'streaming', activeNow: true } as never
+  ]);
+  expect((await readEvents(sessionId, { kinds: ['assistant_message'] })).map(e => e.kind === 'assistant_message' ? e.messageId : null)).toEqual(['restart-draft']);
+
+  // Genuinely newer docSeq restores the returning draft cleanly.
+  await recordChatObservations(conversationId, [
+    { kind: 'assistant_message', time: 127, turnId: 'turn-1', messageId: 'doc1-draft', docId: 'doc-1', docSeq: 7, text: 'Restored v7', state: 'streaming', activeNow: true } as never
+  ]);
+  expect((await readEvents(sessionId, { kinds: ['assistant_message'] })).map(e => e.kind === 'assistant_message' ? e.messageId : null)).toEqual(['doc1-draft', 'restart-draft']);
+
+  // Simulate app restart: in-memory provenance is gone, so unsettled retractions from another doc fail closed,
+  // while settled cleanup remains enabled for legacy/pre-restart shards.
+  await flushSessions();
+  resetLoggerForTests();
+  resetRecorderForTests();
+  resetSessionStoreForTests();
+
+  await recordChatObservations(conversationId, [
+    { kind: 'turn_messages', time: 200, turnId: 'turn-1', messageIds: ['restart-draft'], docId: 'doc-2', docSeq: 1 } as never
+  ]);
+  expect((await readEvents(sessionId, { kinds: ['assistant_message'] })).map(e => e.kind === 'assistant_message' ? e.messageId : null)).toEqual(['doc1-draft', 'restart-draft']);
+  expect(getLog().some(entry => entry.message.includes('unknown provenance: 1'))).toBe(true);
+
+  await recordChatObservations(conversationId, [
+    { kind: 'turn_messages', time: 210, turnId: 'turn-1', messageIds: ['restart-draft'], docId: 'doc-2', docSeq: 2, settled: true } as never
+  ]);
+  expect((await readEvents(sessionId, { kinds: ['assistant_message'] })).map(e => e.kind === 'assistant_message' ? e.messageId : null)).toEqual(['restart-draft']);
 });

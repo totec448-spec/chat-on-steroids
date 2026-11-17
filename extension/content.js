@@ -5201,7 +5201,7 @@
           snapshotIds.push(missingId);
         }
       }
-      const currentMembershipSignature = presentIds.join('\u0000');
+      const currentMembershipSignature = `0\u0001${presentIds.join('\u0000')}`;
       if (!settled && !droppedConfirmed) {
         const lastReported = turnMessagesReported.get(localOwner);
         if (lastReported !== undefined && lastReported !== currentMembershipSignature) {
@@ -5209,7 +5209,7 @@
         }
         return;
       }
-      const signature = snapshotIds.join('\u0000');
+      const signature = `${settled ? '1' : '0'}\u0001${snapshotIds.join('\u0000')}`;
       if (turnMessagesReported.get(localOwner) === signature) return;
       turnMessagesReported.delete(localOwner);
       turnMessagesReported.set(localOwner, signature);
