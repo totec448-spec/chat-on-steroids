@@ -3171,6 +3171,8 @@ function announceFinishedTurns(delta: readonly SessionEvent[]): void {
   if (before !== text) { region.textContent = text; next(finished - 1); } else say(finished);
 }
 
+const retractedResidentKeys = new Set<string>();
+
 /** Merge one sequence-cursor delta without letting canonical message revisions duplicate rows. */
 function mergeDetailDelta(delta: SessionEvent[]): boolean {
   if (delta.length === 0) return false;
@@ -3186,13 +3188,20 @@ function mergeDetailDelta(delta: SessionEvent[]): boolean {
     const retracted = event.kind === 'assistant_message' && event.retracted === true;
     const key = canonicalMessageKey(event);
     const index = key ? messageRows.get(key) : undefined;
-    if (index !== undefined) { merged[index] = event; changed = true; }
-    else {
+    if (index !== undefined) {
+      if (retracted && key) retractedResidentKeys.add(key);
+      else if (!retracted && key) retractedResidentKeys.delete(key);
+      merged[index] = event;
+      changed = true;
+    } else {
       if (retracted) continue;
       // An old canonical revision is not newly authored history. Its original
       // page still owns it; admitting it here would evict an unrelated live row.
-      if (residenceOf(event) < floor) continue;
-      if (key) messageRows.set(key, merged.length);
+      if (residenceOf(event) < floor && !(key && retractedResidentKeys.has(key))) continue;
+      if (key) {
+        retractedResidentKeys.delete(key);
+        messageRows.set(key, merged.length);
+      }
       merged.push(event);
       changed = true;
     }
@@ -3863,6 +3872,7 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
     handoffLoadGeneration++;
     historyBefore = null;
     events = [];
+    retractedResidentKeys.clear();
     traces = {};
     tracesFor = null;
     totalEvents = 0;
@@ -3875,7 +3885,7 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
   const trackLive = !prepend && newerFrom === undefined && historyBefore === null;
   const runDetail = async (): Promise<boolean> => {
     const opening = detailFor !== wanted;
-    if (opening) { historyBefore = null; historyStart = null; roundsEnter = false; }
+    if (opening) { historyBefore = null; historyStart = null; roundsEnter = false; retractedResidentKeys.clear(); }
     // Live deltas must not evict a historical page while the user is reading it.
     const incremental = !prepend && newerFrom === undefined && historyBefore === null && detailFor === wanted && detailCursor !== null;
     const detail = await run(

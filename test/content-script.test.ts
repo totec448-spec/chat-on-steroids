@@ -26567,4 +26567,100 @@ describe('reconciling discarded streaming assistant messages via turn_messages',
     expect(sends()).toBe(1);
     expect(live.sent.filter((row) => row.fail)).toEqual([]);
   });
+
+  it('does not double-count concurrent callers sharing one Fiber scanToken, protects unconfirmed ids, and re-emits after a draft returns', async () => {
+    live = await harness();
+    userTurn(live.document, 'q-cr-edges', 'Check edge cases', { sent: false });
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'page-cr-edges', []);
+    live.hook.observe();
+    await settle();
+    const localTurnId = emitted(live.sent, 'turn_start').at(-1)!.event.turnId as string;
+
+    const userMsg = { messageId: 'q-cr-edges', rawMessageId: 'q-cr-edges', role: 'user', stable: true, rawText: 'Check edge cases', renderedHtml: '<p>Check edge cases</p>' };
+    const msgA = { messageId: 'msg-cr-a', rawMessageId: 'msg-cr-a', stable: false, rawText: 'Draft A', renderedHtml: '<p>Draft A</p>' };
+    const msgB = { messageId: 'msg-cr-b', rawMessageId: 'msg-cr-b', stable: false, rawText: 'Draft B', renderedHtml: '<p>Draft B</p>' };
+
+    // Scan 1: both A and B present.
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-cr-edges', messagesComplete: true, messages: [userMsg, msgA, msgB] } }]);
+    await live.hook.flush();
+
+    // Concurrent refreshFiber() callers sharing one askFiber() reply (same scanToken):
+    // missing B once must count as 1 scan, not 2.
+    section.setAttribute('data-clf-fiber-turn', '0');
+    const win = live.window as any;
+    const instant = win.setTimeout;
+    win.setTimeout = (fn: () => void, ms: number) => globalThis.setTimeout(fn, ms);
+    let askCount = 0;
+    const onSharedAsk = (event: any) => {
+      if (!event.data || event.data.source !== 'clf-fiber-ask') return;
+      askCount += 1;
+      const scanToken = event.data.nonce;
+      section.setAttribute('data-clf-fiber-turn', `${scanToken}:0`);
+      win.dispatchEvent(new win.MessageEvent('message', {
+        source: win,
+        data: {
+          source: 'clf-fiber-reply',
+          nonce: event.data.nonce,
+          scanToken,
+          v: fiberVersion,
+          scanOk: true,
+          rows: [],
+          turns: [{
+            index: 0,
+            turnId: 'page-cr-edges',
+            conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+            calls: [],
+            activities: [],
+            messagesComplete: true,
+            messages: [userMsg, msgA]
+          }]
+        }
+      }));
+    };
+    win.addEventListener('message', onSharedAsk);
+    try {
+      await Promise.all([live.hook.refreshFiber(), live.hook.refreshFiber()]);
+    } finally {
+      win.removeEventListener('message', onSharedAsk);
+      win.setTimeout = instant;
+    }
+    expect(askCount).toBe(1);
+    await settle();
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_messages')).toEqual([]);
+
+    // Scan 3: B is missing a 2nd distinct scan AND A vanishes for its 1st scan.
+    // B is confirmed discarded, while A must remain in the unsettled snapshot for flicker protection.
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-cr-edges', messagesComplete: true, messages: [userMsg] } }]);
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_messages').map((row) => row.event)).toEqual([
+      expect.objectContaining({
+        kind: 'turn_messages',
+        turnId: localTurnId,
+        messageIds: ['msg-cr-a']
+      })
+    ]);
+
+    // Scan 4: A is absent for its 2nd distinct scan -> A is now dropped cleanly (empty assistant snapshot).
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-cr-edges', messagesComplete: true, messages: [userMsg] } }]);
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_messages').at(-1)!.event).toMatchObject({
+      kind: 'turn_messages',
+      turnId: localTurnId,
+      messageIds: []
+    });
+
+    // Scan 5: A returns -> signature must invalidate so when A disappears twice again it retracts again.
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-cr-edges', messagesComplete: true, messages: [userMsg, msgA] } }]);
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-cr-edges', messagesComplete: true, messages: [userMsg] } }]);
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-cr-edges', messagesComplete: true, messages: [userMsg] } }]);
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_messages')).toHaveLength(3);
+    expect(emitted(live.sent, 'turn_messages').at(-1)!.event).toMatchObject({
+      kind: 'turn_messages',
+      turnId: localTurnId,
+      messageIds: []
+    });
+  });
 });
