@@ -20211,33 +20211,35 @@ describe('turn_messages retraction over bridge', () => {
         conversationId,
         events: [
           { kind: 'turn_start', time: 100, turnId: 'turn-bridge-retract' },
-          { kind: 'assistant_message', time: 101, turnId: 'turn-bridge-retract', messageId: 'msg-kept', text: 'Kept update', state: 'streaming', activeNow: true },
-          { kind: 'assistant_message', time: 102, turnId: 'turn-bridge-retract', messageId: 'msg-dropped', text: 'Aborted draft', state: 'streaming', activeNow: true }
+          { kind: 'assistant_message', time: 101, turnId: 'turn-bridge-retract', messageId: 'msg-kept', docId: 'doc-a', docSeq: 1, text: 'Kept update', state: 'streaming', activeNow: true },
+          { kind: 'assistant_message', time: 102, turnId: 'turn-bridge-retract', messageId: 'msg-dropped', docId: 'doc-a', docSeq: 2, text: 'Aborted draft', state: 'streaming', activeNow: true }
         ]
       }
     });
     const before = await request('GET', `/activity?conversationId=${conversationId}`);
     const since = before.body.nextSince as number;
 
-    // Malformed or oversized turn_messages payloads must fail closed without retracting anything.
+    // Malformed, oversized, stale docSeq, or foreign-document unsettled turn_messages payloads must fail closed without retracting anything.
     await request('POST', '/events', {
       body: {
         conversationId,
         events: [
           { kind: 'turn_messages', time: 103, turnId: 'turn-bridge-retract', messageIds: ['msg-kept', ''] },
-          { kind: 'turn_messages', time: 104, turnId: 'turn-bridge-retract', messageIds: Array.from({ length: 401 }, (_, i) => `id-${i}`) }
+          { kind: 'turn_messages', time: 104, turnId: 'turn-bridge-retract', messageIds: Array.from({ length: 401 }, (_, i) => `id-${i}`) },
+          { kind: 'turn_messages', time: 105, turnId: 'turn-bridge-retract', messageIds: ['msg-kept'], docId: 'doc-a', docSeq: 2 },
+          { kind: 'turn_messages', time: 106, turnId: 'turn-bridge-retract', messageIds: ['msg-kept'], docId: 'doc-b', docSeq: 1 }
         ]
       }
     });
     const afterInvalid = await request('GET', `/activity?conversationId=${conversationId}&since=${since}`);
     expect(afterInvalid.body.stream).toEqual([]);
 
-    // Valid turn_messages retracts the vanished draft and sends the retraction over incremental /activity.
+    // Valid newer turn_messages retracts the vanished draft and sends the retraction over incremental /activity.
     await request('POST', '/events', {
       body: {
         conversationId,
         events: [
-          { kind: 'turn_messages', time: 105, turnId: 'turn-bridge-retract', messageIds: ['msg-kept'] }
+          { kind: 'turn_messages', time: 107, turnId: 'turn-bridge-retract', messageIds: ['msg-kept'], docId: 'doc-a', docSeq: 3 }
         ]
       }
     });

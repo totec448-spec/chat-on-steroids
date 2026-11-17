@@ -2281,6 +2281,11 @@ export interface ChatObservation {
   trace?: import('../../shared/turn-trace.js').TurnTrace;
   /** On `turn_messages`: complete surviving assistant message ids/provider UUIDs for `turnId`. */
   messageIds?: string[];
+  /** On `assistant_message` and `turn_messages`: document id & monotonic sequence for staleness fencing. */
+  docId?: string;
+  docSeq?: number;
+  /** On `turn_messages`: true when the page turn has already settled (`endMessageId` or `terminalWithoutFinal`). */
+  settled?: boolean;
   /** On `turn_trace`: the user message that opened the page turn it was read from (#1301). */
   question?: string;
   final?: boolean;
@@ -2834,7 +2839,15 @@ async function recordChatObservationsNow(
           ...(item.resolvedModel ? { resolvedModel: item.resolvedModel } : {}),
           ...(item.references ? { references: item.references } : {}),
           ...(goalEligible && state === 'final' ? { goalEligible: true } : {})
-        }, { preferTime: item.authoredTime === true, work: item.activeNow === true && !lateNoteOfEndedTurn });
+        }, {
+          preferTime: item.authoredTime === true,
+          work: item.activeNow === true && !lateNoteOfEndedTurn,
+          observation: {
+            time: item.time,
+            ...(item.docId ? { docId: item.docId } : {}),
+            ...(item.docSeq !== undefined ? { docSeq: item.docSeq } : {})
+          }
+        });
         if (lateNoteOfEndedTurn && item.activeNow === true && written.contentChanged) {
           logInfo(`session recorder: ${conversationId} reported a message of turn ${item.turnId} after that turn ended; kept in history, not counted as new work`);
         }
@@ -2930,7 +2943,12 @@ async function recordChatObservationsNow(
       }
       case 'turn_messages': {
         if (!item.turnId || !Array.isArray(item.messageIds)) continue;
-        const retracted = await retractTurnStreamingMessages(sessionId, item.turnId, item.messageIds);
+        const retracted = await retractTurnStreamingMessages(sessionId, item.turnId, item.messageIds, {
+          observedAt: item.time,
+          ...(item.docId ? { docId: item.docId } : {}),
+          ...(item.docSeq !== undefined ? { docSeq: item.docSeq } : {}),
+          ...(item.settled === true ? { settled: true } : {})
+        });
         if (retracted > 0) {
           notifyExtensionChanged(sessionId);
           logInfo(`session recorder: ${conversationId} retracted ${retracted} discarded streaming message(s) in turn ${item.turnId}`);

@@ -2233,6 +2233,15 @@ function parseObservations(input: unknown): ChatObservation[] {
       if (!validIds) continue;
       observation.turnId = rawTurnId;
       observation.messageIds = [...rawIds];
+      if (item['settled'] === true) observation.settled = true;
+    }
+    if ((kind === 'assistant_message' || kind === 'turn_messages') && typeof item['docId'] === 'string' &&
+        /^[a-z0-9_-]{1,80}$/i.test(item['docId'])) {
+      observation.docId = item['docId'];
+    }
+    if ((kind === 'assistant_message' || kind === 'turn_messages') && typeof item['docSeq'] === 'number' &&
+        Number.isSafeInteger(item['docSeq']) && item['docSeq'] >= 0) {
+      observation.docSeq = item['docSeq'];
     }
     if (typeof item['renderedHtml'] === 'string') {
       // Keep the whole compact rendering of a stable final through /events.

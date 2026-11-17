@@ -231,6 +231,8 @@ interface OpenSession {
   queue: Promise<void>;
   /** Canonical messages and background calls, replaced by stable message/call identity. */
   messages: Map<string, CanonicalEvent>;
+  /** Latest positive observation watermark per assistant message key, for turn_messages fencing. */
+  assistantProvenance?: Map<string, { time: number; docId?: string; docSeq?: number }>;
   metaDirty: boolean;
   metaTimer: NodeJS.Timeout | null;
 }
@@ -1415,7 +1417,7 @@ function continuesFinalText(previous: StoredText, next: StoredText): boolean {
 export function upsertMessageEvent(
   sessionId: string,
   event: NewMessageEvent,
-  options: { preferTime?: boolean; work?: boolean; replacementOnly?: true } = {}
+  options: { preferTime?: boolean; work?: boolean; replacementOnly?: true; observation?: { time: number; docId?: string; docSeq?: number } } = {}
 ): Promise<{ event: MessageEvent; changed: boolean; contentChanged: boolean }> {
   const directKey = messageKey(event as MessageEvent);
   if (!directKey) throw new Error('Canonical message update requires ChatGPT messageId');
@@ -1561,6 +1563,17 @@ export function upsertMessageEvent(
         previous?.kind === 'assistant_message' && nextEvent.kind === 'assistant_message'
           ? previous.turnId ?? nextEvent.turnId ?? undefined
           : nextEvent.turnId ?? undefined;
+      if (event.kind === 'assistant_message' && options.observation) {
+        entry.assistantProvenance ??= new Map();
+        const priorSeen = entry.assistantProvenance.get(key);
+        const nextObs = options.observation;
+        const keepPrior =
+          priorSeen &&
+          ((priorSeen.docId && nextObs.docId && priorSeen.docId === nextObs.docId &&
+            priorSeen.docSeq !== undefined && nextObs.docSeq !== undefined && nextObs.docSeq < priorSeen.docSeq) ||
+           (priorSeen.time > nextObs.time && (!priorSeen.docId || priorSeen.docId !== nextObs.docId)));
+        if (!keepPrior) entry.assistantProvenance.set(key, nextObs);
+      }
       if (
         previous &&
         previous.kind === nextEvent.kind &&
@@ -1684,7 +1697,8 @@ export function upsertMessageEvent(
 export async function retractTurnStreamingMessages(
   sessionId: string,
   turnId: string,
-  presentIds: readonly string[]
+  presentIds: readonly string[],
+  evidence?: { observedAt?: number; docId?: string; docSeq?: number; settled?: boolean }
 ): Promise<number> {
   if (!turnId) return 0;
   const entry = await ensureOpen(sessionId);
@@ -1698,6 +1712,17 @@ export async function retractTurnStreamingMessages(
       if (event.kind !== 'assistant_message' || event.source !== 'extension' || !event.messageId) continue;
       if (event.turnId !== turnId || event.final === true || event.state === 'final' || event.retracted === true) continue;
       if (present.has(event.messageId) || (event.providerMessageId && present.has(event.providerMessageId))) continue;
+      const seen = entry.assistantProvenance?.get(key) ?? { time: event.time };
+      if (evidence) {
+        // An unsettled snapshot cannot retract a draft observed by another document; settled turns or newer snapshots can.
+        if (seen.docId && evidence.docId && seen.docId !== evidence.docId && evidence.settled !== true) continue;
+        if (
+          seen.docId && evidence.docId && seen.docId === evidence.docId &&
+          seen.docSeq !== undefined && evidence.docSeq !== undefined &&
+          evidence.docSeq <= seen.docSeq
+        ) continue;
+        if (evidence.observedAt !== undefined && Number.isFinite(seen.time) && evidence.observedAt < seen.time) continue;
+      }
       updates.push([key, event]);
     }
     if (!updates.length) return 0;

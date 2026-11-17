@@ -160,3 +160,31 @@ it('treats missing or damaged retracted fields in saved canonical shards as non-
   expect(events).toHaveLength(1);
   expect(events[0]).toMatchObject({ kind: 'assistant_message', messageId: 'legacy-msg' });
 });
+
+it('fences turn_messages retraction by document, revision, settled flag, and observation timestamp', async () => {
+  const conversationId = 'conv-retract-fences';
+  const opened = await recordChatObservations(conversationId, [
+    { kind: 'turn_start', time: 100, turnId: 'turn-1' },
+    { kind: 'assistant_message', time: 110, turnId: 'turn-1', messageId: 'doc1-msg', docId: 'doc-1', docSeq: 5, text: 'Observed by doc 1', state: 'streaming', activeNow: true } as never
+  ]);
+  const sessionId = opened.sessionId!;
+
+  // Stale revision from same doc (docSeq <= 5) or older timestamp (time < 110) must not retract.
+  await recordChatObservations(conversationId, [
+    { kind: 'turn_messages', time: 120, turnId: 'turn-1', messageIds: [], docId: 'doc-1', docSeq: 5 } as never,
+    { kind: 'turn_messages', time: 105, turnId: 'turn-1', messageIds: [], docId: 'doc-1', docSeq: 6 } as never
+  ]);
+  expect((await readEvents(sessionId, { kinds: ['assistant_message'] })).map(e => e.kind === 'assistant_message' ? e.messageId : null)).toEqual(['doc1-msg']);
+
+  // Unsettled snapshot from a different document must not retract doc-1's streaming draft.
+  await recordChatObservations(conversationId, [
+    { kind: 'turn_messages', time: 130, turnId: 'turn-1', messageIds: [], docId: 'doc-2', docSeq: 1 } as never
+  ]);
+  expect((await readEvents(sessionId, { kinds: ['assistant_message'] })).map(e => e.kind === 'assistant_message' ? e.messageId : null)).toEqual(['doc1-msg']);
+
+  // Settled snapshot from a newer document (post-reload cleanup) or newer revision retracts cleanly.
+  await recordChatObservations(conversationId, [
+    { kind: 'turn_messages', time: 140, turnId: 'turn-1', messageIds: [], docId: 'doc-2', docSeq: 2, settled: true } as never
+  ]);
+  expect(await readEvents(sessionId, { kinds: ['assistant_message'] })).toEqual([]);
+});
