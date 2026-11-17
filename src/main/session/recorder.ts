@@ -66,6 +66,7 @@ import {
   indexedSessions,
   renameSession,
   reopenSession,
+  retractTurnStreamingMessages,
   rewriteUnattributedToolCalls,
   setSessionOrigin,
   upsertMessageEvent,
@@ -2223,6 +2224,7 @@ export interface ChatObservation {
     | 'native_image'
     | 'page_tool'
     | 'turn_trace'
+    | 'turn_messages'
     | 'turn_start'
     | 'turn_end'
     | 'chat_error'
@@ -2277,6 +2279,8 @@ export interface ChatObservation {
   turnId?: string;
   /** A `turn_trace` observation's round outline (shared/turn-trace.ts). */
   trace?: import('../../shared/turn-trace.js').TurnTrace;
+  /** On `turn_messages`: complete surviving assistant message ids/provider UUIDs for `turnId`. */
+  messageIds?: string[];
   /** On `turn_trace`: the user message that opened the page turn it was read from (#1301). */
   question?: string;
   final?: boolean;
@@ -2922,6 +2926,15 @@ async function recordChatObservationsNow(
       case 'turn_trace': {
         // Presentation beside the log: no event, no activity, no work or completion evidence.
         if (item.turnId && item.trace && await writeTurnTrace(sessionId, item.turnId, item.trace, item.question)) notifyExtensionChanged(sessionId);
+        continue;
+      }
+      case 'turn_messages': {
+        if (!item.turnId || !Array.isArray(item.messageIds)) continue;
+        const retracted = await retractTurnStreamingMessages(sessionId, item.turnId, item.messageIds);
+        if (retracted > 0) {
+          notifyExtensionChanged(sessionId);
+          logInfo(`session recorder: ${conversationId} retracted ${retracted} discarded streaming message(s) in turn ${item.turnId}`);
+        }
         continue;
       }
       case 'page_tool': {

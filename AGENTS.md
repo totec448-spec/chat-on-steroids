@@ -283,7 +283,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Session/current chat/project | `store.ts` / `sessions/<id>/meta.json` | Rebind is the semantic A→B commit. |
 | Exact request ownership | `correlation.ts` / `state/request-correlations.json` plus recorded proof | Native request proof establishes the session epoch and scoped provider-session bindings. Derived owners commit before publication; native request proof supersedes a derivation. Startup trusts a complete ledger and scans history only to migrate an older one. |
 | Running exec process | `UnifiedExecProcessManager` process memory plus `codex/ownership.ts` custody | The manager is the only live-process authority. A yielded child may start under temporary request custody; exact correlation promotes it to the durable session. IPC/preload/renderer only project that owner-scoped state and may request an ownership- and incarnation-checked stop. |
-| Authored message | `store.ts` / canonical message shard | Replace by stable identity, preserving origin chronology. |
+| Authored message | `store.ts` / canonical message shard | Replace by stable identity, preserving origin chronology. `turn_messages` from `/events` may mark unfinalized extension `assistant_message` shards of that `turnId` `retracted: true` when absent from a complete non-continued turn snapshot (`eventTokens` = 0, hidden on non-incremental reads, cleared if re-observed). |
 | Turn round outline | `recorder.ts` `turn_trace` → `store.ts::writeTurnTrace` / `sessions/<id>/traces/<turnId>.json` | Validated by `shared/turn-trace.ts`; the newest outline replaces the turn's; never an event or evidence. |
 | Agent progress plan | `request-plans.ts` → `store.ts::updateSessionPlan` / `sessions/<id>/plan.json` | Request-scoped storage before proof; exact session and invocation ordering on attachment; atomically replace the whole plan. |
 | Input and checkpoints | `input.ts` / `state/session-input.json` | Serialized acceptance, frozen payload, exclusive claim and receipt; stages belong here. |
@@ -5218,7 +5218,7 @@ read after a reload sends its outline too, which is how recaps that arrived late
 The bridge validates it (`shared/turn-trace.ts`), and the recorder stores it per turn in
 `sessions/<id>/traces/<turnId>.json`, replacing the turn's previous outline. It is presentation
 beside the log, never an event, message, call, work or completion evidence. `sessions:traces`
-(preload `turnTraces`) returns the outlines of up to 64 turns a timeline shows.
+(`sessions:traces`, preload `turnTraces`) returns the outlines of up to 64 turns a timeline shows. For complete non-conflicted non-steered turns (`messagesComplete: true`), `fiber.js` / `content.js` likewise emits coalesced `turn_messages` on settlement or when a previously observed streaming `assistant_message` vanishes for two consecutive complete scans, and `/activity` consumers drop `assistant_message` rows marked `retracted: true`.
 
 A message the user sends into a running answer (#1301): ChatGPT shows it as the start of a turn
 of its own but keeps the answer's one MCP request id across it. The page ends the local turn there
