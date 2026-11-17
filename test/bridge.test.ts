@@ -20225,6 +20225,8 @@ describe('turn_messages retraction over bridge', () => {
         conversationId,
         events: [
           { kind: 'turn_messages', time: 103, turnId: 'turn-bridge-retract', messageIds: ['msg-kept', ''] },
+          { kind: 'turn_messages', time: 103, turnId: 't'.repeat(101), messageIds: ['msg-kept'] },
+          { kind: 'turn_messages', time: 103, turnId: 'turn-bridge-retract', messageIds: ['msg-kept', 'm'.repeat(201)] },
           { kind: 'turn_messages', time: 104, turnId: 'turn-bridge-retract', messageIds: Array.from({ length: 401 }, (_, i) => `id-${i}`) },
           { kind: 'turn_messages', time: 105, turnId: 'turn-bridge-retract', messageIds: ['msg-kept'], docId: 'doc-a', docSeq: 2 },
           { kind: 'turn_messages', time: 106, turnId: 'turn-bridge-retract', messageIds: ['msg-kept'], docId: 'doc-b', docSeq: 1 }

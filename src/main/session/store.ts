@@ -217,6 +217,24 @@ function assertSessionId(id: string): void {
 
 // ------------------------------------------------------------------ state
 
+type AssistantWatermark = { time: number; docId?: string; docSeq?: number };
+
+function staleObservationReason(
+  obs: AssistantWatermark,
+  watermark: AssistantWatermark | undefined,
+  inclusiveSameDoc: boolean
+): 'docSeq' | 'timestamp' | null {
+  if (!watermark) return null;
+  if (
+    watermark.docId && obs.docId && watermark.docId === obs.docId &&
+    watermark.docSeq !== undefined && obs.docSeq !== undefined
+  ) {
+    const staleSeq = inclusiveSameDoc ? obs.docSeq <= watermark.docSeq : obs.docSeq < watermark.docSeq;
+    return staleSeq ? 'docSeq' : null;
+  }
+  return Number.isFinite(watermark.time) && obs.time < watermark.time ? 'timestamp' : null;
+}
+
 interface OpenSession {
   summary: SessionSummary;
   nextSeq: number;
@@ -232,7 +250,9 @@ interface OpenSession {
   /** Canonical messages and background calls, replaced by stable message/call identity. */
   messages: Map<string, CanonicalEvent>;
   /** Latest positive observation watermark per assistant message key, for turn_messages fencing. */
-  assistantProvenance?: Map<string, { time: number; docId?: string; docSeq?: number }>;
+  assistantProvenance?: Map<string, AssistantWatermark>;
+  /** Latest retraction watermark per assistant message key, rejecting delayed re-observations. */
+  assistantRetractions?: Map<string, AssistantWatermark>;
   metaDirty: boolean;
   metaTimer: NodeJS.Timeout | null;
 }
@@ -1564,15 +1584,22 @@ export function upsertMessageEvent(
           ? previous.turnId ?? nextEvent.turnId ?? undefined
           : nextEvent.turnId ?? undefined;
       if (event.kind === 'assistant_message' && options.observation) {
+        const nextObs = options.observation;
+        if (previous?.kind === 'assistant_message' && previous.retracted === true) {
+          const staleReason =
+            staleObservationReason(nextObs, entry.assistantRetractions?.get(key), true) ??
+            staleObservationReason(nextObs, entry.assistantProvenance?.get(key), false);
+          if (staleReason) {
+            logInfo(`session store: ${sessionId} ignored stale observation for retracted assistant message ${event.messageId} (${staleReason})`);
+            return { event: previous, changed: false, contentChanged: false };
+          }
+          entry.assistantRetractions?.delete(key);
+        }
         entry.assistantProvenance ??= new Map();
         const priorSeen = entry.assistantProvenance.get(key);
-        const nextObs = options.observation;
-        const keepPrior =
-          priorSeen &&
-          ((priorSeen.docId && nextObs.docId && priorSeen.docId === nextObs.docId &&
-            priorSeen.docSeq !== undefined && nextObs.docSeq !== undefined && nextObs.docSeq < priorSeen.docSeq) ||
-           (priorSeen.time > nextObs.time && (!priorSeen.docId || priorSeen.docId !== nextObs.docId)));
-        if (!keepPrior) entry.assistantProvenance.set(key, nextObs);
+        if (!staleObservationReason(nextObs, priorSeen, false)) {
+          entry.assistantProvenance.set(key, nextObs);
+        }
       }
       if (
         previous &&
@@ -1708,25 +1735,47 @@ export async function retractTurnStreamingMessages(
     if (turns?.[turnId]?.continued === true || turns?.[canonicalTurn]?.continued === true) return 0;
     const present = new Set(presentIds);
     const updates: Array<[string, Extract<CanonicalEvent, { kind: 'assistant_message' }>]> = [];
+    const skipped = { provenance: 0, doc: 0, rev: 0, time: 0 };
     for (const [key, event] of entry.messages) {
       if (event.kind !== 'assistant_message' || event.source !== 'extension' || !event.messageId) continue;
       if (event.turnId !== turnId || event.final === true || event.state === 'final' || event.retracted === true) continue;
       if (present.has(event.messageId) || (event.providerMessageId && present.has(event.providerMessageId))) continue;
-      const seen = entry.assistantProvenance?.get(key) ?? { time: event.time };
+      const seen = entry.assistantProvenance?.get(key);
       if (evidence) {
+        if (!seen && evidence.settled !== true) { skipped.provenance += 1; continue; }
+        const seenTime = seen?.time ?? event.time;
         // An unsettled snapshot cannot retract a draft observed by another document; settled turns or newer snapshots can.
-        if (seen.docId && evidence.docId && seen.docId !== evidence.docId && evidence.settled !== true) continue;
+        if (seen?.docId && evidence.docId && seen.docId !== evidence.docId && evidence.settled !== true) { skipped.doc += 1; continue; }
         if (
-          seen.docId && evidence.docId && seen.docId === evidence.docId &&
+          seen?.docId && evidence.docId && seen.docId === evidence.docId &&
           seen.docSeq !== undefined && evidence.docSeq !== undefined &&
           evidence.docSeq <= seen.docSeq
-        ) continue;
-        if (evidence.observedAt !== undefined && Number.isFinite(seen.time) && evidence.observedAt < seen.time) continue;
+        ) { skipped.rev += 1; continue; }
+        if (evidence.observedAt !== undefined && Number.isFinite(seenTime) && evidence.observedAt < seenTime) { skipped.time += 1; continue; }
       }
       updates.push([key, event]);
     }
+    const skippedTotal = skipped.provenance + skipped.doc + skipped.rev + skipped.time;
+    if (skippedTotal > 0) {
+      const reasons = [
+        skipped.provenance ? `unknown provenance: ${skipped.provenance}` : '',
+        skipped.doc ? `other document: ${skipped.doc}` : '',
+        skipped.rev ? `stale docSeq: ${skipped.rev}` : '',
+        skipped.time ? `older timestamp: ${skipped.time}` : ''
+      ].filter(Boolean);
+      logInfo(`session store: ${sessionId} skipped retracting ${skippedTotal} discarded streaming message(s) in turn ${turnId} (${reasons.join(', ')})`);
+    }
     if (!updates.length) return 0;
+    if (evidence) entry.assistantRetractions ??= new Map();
     for (const [key, event] of updates) {
+      if (evidence) {
+        const seenTime = entry.assistantProvenance?.get(key)?.time ?? event.time;
+        entry.assistantRetractions!.set(key, {
+          time: Math.max(Number.isFinite(seenTime) ? seenTime : 0, evidence.observedAt ?? 0),
+          ...(evidence.docId ? { docId: evidence.docId } : {}),
+          ...(evidence.docSeq !== undefined ? { docSeq: evidence.docSeq } : {})
+        });
+      }
       const removedTokens = eventTokens(event);
       const retracted: CanonicalEvent = {
         ...event,
