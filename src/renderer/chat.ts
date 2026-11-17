@@ -3183,10 +3183,12 @@ function mergeDetailDelta(delta: SessionEvent[]): boolean {
     if (key) messageRows.set(key, index);
   }
   for (const event of delta) {
+    const retracted = event.kind === 'assistant_message' && event.retracted === true;
     const key = canonicalMessageKey(event);
     const index = key ? messageRows.get(key) : undefined;
     if (index !== undefined) { merged[index] = event; changed = true; }
     else {
+      if (retracted) continue;
       // An old canonical revision is not newly authored history. Its original
       // page still owns it; admitting it here would evict an unrelated live row.
       if (residenceOf(event) < floor) continue;
@@ -3196,7 +3198,8 @@ function mergeDetailDelta(delta: SessionEvent[]): boolean {
     }
   }
   if (!changed) return false;
-  const folded = chronological(foldProgress(merged));
+  const active = merged.filter(event => !(event.kind === 'assistant_message' && event.retracted === true));
+  const folded = chronological(foldProgress(active));
   events = retainTimelinePage(folded, 'newer');
   return true;
 }
@@ -3900,7 +3903,8 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
     let deltaChanged = false;
     if (incremental) { deltaChanged = mergeDetailDelta(detail.events); announceFinishedTurns(detail.events); }
     else {
-      const folded = chronological(foldProgress(detail.events));
+      const visible = detail.events.filter(event => !(event.kind === 'assistant_message' && event.retracted === true));
+      const folded = chronological(foldProgress(visible));
       if (newerFrom !== undefined) {
         events = retainTimelinePage(chronological(foldProgress([...events, ...folded])), 'newer');
         // Reaching the live tail restores ordinary delta reads. Paging itself preserves
@@ -6058,7 +6062,7 @@ function eventRow(event: SessionEvent): HTMLElement {
   const row = el('div', `ev ev-${event.kind}`);
   // A note the app filed about its own work (a recovery reload), not ChatGPT's phase caption.
   if (event.kind === 'progress' && event.source === 'app') row.dataset.appNote = '';
-  if (event.kind === 'assistant_message' && !withoutMessageReaction(event.message.text).trim()) row.hidden = true;
+  if (event.kind === 'assistant_message' && (event.retracted === true || !withoutMessageReaction(event.message.text).trim())) row.hidden = true;
   tagImageRow(row, event);
   // When the app saw it, the same clock as the question above it. Only a message the app saw long
   // after it was written (an earlier answer read after a reload) shows when it was written: ChatGPT's

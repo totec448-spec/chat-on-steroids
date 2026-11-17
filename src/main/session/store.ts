@@ -1573,6 +1573,7 @@ export function upsertMessageEvent(
             storedTextEqual(previous.renderedHtml, nextEvent.renderedHtml) &&
             previous.state === nextEvent.state &&
             previous.final === nextEvent.final &&
+            previous.retracted === nextEvent.retracted &&
             previous.goalEligible === nextEvent.goalEligible &&
             previous.providerMessageId === nextEvent.providerMessageId &&
             previous.resolvedModel === nextEvent.resolvedModel &&
@@ -1673,6 +1674,50 @@ export function upsertMessageEvent(
       (err: Error) => logError(`session message upsert failed: ${err.message}`)
     );
     return write;
+  });
+}
+
+/**
+ * Marks unfinalized extension assistant messages of `turnId` as retracted when a complete
+ * Fiber snapshot of that turn no longer contains their message id or provider UUID.
+ */
+export async function retractTurnStreamingMessages(
+  sessionId: string,
+  turnId: string,
+  presentIds: readonly string[]
+): Promise<number> {
+  if (!turnId) return 0;
+  const entry = await ensureOpen(sessionId);
+  return enqueueSessionOperation(entry, 'retract discarded streaming messages', async () => {
+    const turns = entry.summary.timelineTurns;
+    const canonicalTurn = responseTurnId(turns, turnId);
+    if (turns?.[turnId]?.continued === true || turns?.[canonicalTurn]?.continued === true) return 0;
+    const present = new Set(presentIds);
+    const updates: Array<[string, Extract<CanonicalEvent, { kind: 'assistant_message' }>]> = [];
+    for (const [key, event] of entry.messages) {
+      if (event.kind !== 'assistant_message' || event.source !== 'extension' || !event.messageId) continue;
+      if (event.turnId !== turnId || event.final === true || event.state === 'final' || event.retracted === true) continue;
+      if (present.has(event.messageId) || (event.providerMessageId && present.has(event.providerMessageId))) continue;
+      updates.push([key, event]);
+    }
+    if (!updates.length) return 0;
+    for (const [key, event] of updates) {
+      const removedTokens = eventTokens(event);
+      const retracted: CanonicalEvent = {
+        ...event,
+        retracted: true,
+        origin: event.origin ?? event.seq,
+        seq: entry.nextSeq
+      };
+      await writeCanonicalMessage(sessionId, key, retracted);
+      entry.nextSeq += 1;
+      entry.messages.set(key, retracted);
+      entry.summary.estimatedTokens = Math.max(0, entry.summary.estimatedTokens - removedTokens);
+      entry.summary.contextTokens = Math.max(0, entry.summary.contextTokens - removedTokens);
+      entry.historySeq = retracted.seq;
+    }
+    scheduleMeta(entry);
+    return updates.length;
   });
 }
 
@@ -1957,6 +2002,7 @@ export async function readEvents(sessionId: string, options: ReadOptions = {}): 
   });
   for (const message of messages.values()) {
     if (message.seq < from) continue;
+    if (options.from === undefined && message.kind === 'assistant_message' && message.retracted === true) continue;
     if (options.kinds && !options.kinds.includes(message.kind)) continue;
     if (options.agent && message.agent !== options.agent) continue;
     out.push(message);
@@ -2576,6 +2622,7 @@ async function readRecentEventsFromDisk(
 
   const candidates: SessionEvent[] = [...rawTail];
   for (const message of messages.values()) {
+    if (message.kind === 'assistant_message' && message.retracted === true) continue;
     if (options.before !== undefined && sequence(message) >= options.before) continue;
     if (forward && sequence(message) <= options.after!) continue;
     if (options.kinds && !options.kinds.includes(message.kind)) continue;
@@ -2613,7 +2660,7 @@ export async function readActivityEvents(sessionId: string, since: number, limit
     const candidates = [...entry.tail, ...entry.messages.values()].sort((a, b) => a.seq - b.seq);
     const reset = cursor < entry.tailFrom && !(cursor === 0 && entry.tailFrom === 1);
     const selected = reset || cursor === 0
-      ? candidates.slice(-cap)
+      ? candidates.filter((event) => !(event.kind === 'assistant_message' && event.retracted === true)).slice(-cap)
       : candidates.filter((event) => event.seq >= cursor).slice(0, cap);
     // All canonical messages remain authoritative after tail eviction and message revision.
     let openingUserMessage: Extract<SessionEvent, { kind: 'user_message' }> | null = null;

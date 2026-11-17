@@ -1596,13 +1596,13 @@
       );
       if (prior >= 0) removeQueueEntry(prior);
     }
-    // A turn's outline is whole each time; only the newest unsent one matters.
-    if (queued.event.kind === 'turn_trace' && typeof queued.event.turnId === 'string') {
+    // Whole-turn snapshots (`turn_trace`, `turn_messages`) supersede prior unsent ones for the turn.
+    if ((queued.event.kind === 'turn_trace' || queued.event.kind === 'turn_messages') && typeof queued.event.turnId === 'string') {
       const prior = queue.findIndex(
         (entry) =>
           !queueGapKeys.has(entry) &&
           entry.conversationId === queued.conversationId &&
-          entry.event?.kind === 'turn_trace' &&
+          entry.event?.kind === queued.event.kind &&
           entry.event?.turnId === queued.event.turnId
       );
       if (prior >= 0) removeQueueEntry(prior);
@@ -2128,6 +2128,9 @@
     requestOwnerRetryAt.clear();
     requestOwnerAttempts.clear();
     messagesReported.clear();
+    turnStreamingIds.clear();
+    turnMissingStreaming.clear();
+    turnMessagesReported.clear();
     userAuthoredTimesReported.clear();
     // Fiber descriptors and per-call request evidence belong to the conversation whose
     // React tree they were read from. Never carry that cache across an SPA navigation.
@@ -3908,6 +3911,12 @@
   const requestOwnerAttempts = new Map();
   /** Last canonical snapshot and strongest non-conflicting local owner per assistant message. */
   const messagesReported = new Map();
+  /** Streaming assistant message IDs observed per local turn before settlement. */
+  const turnStreamingIds = new Map();
+  /** Consecutive complete-scan absence counts per "turnId\\0messageId" before retracting. */
+  const turnMissingStreaming = new Map();
+  /** Last reconciled assistant ID list signature per local turn. */
+  const turnMessagesReported = new Map();
   /** ChatGPT-authored create_time already emitted for each stable user-message occurrence. */
   const userAuthoredTimesReported = new Map();
 
@@ -4059,10 +4068,11 @@
       sightings.push({ requestId, appId, linkId: cap(entry.linkId, 200) || null, appName: cap(entry.appName, 200) || null });
     }
 
+    const rawMessages = Array.isArray(raw.messages) ? raw.messages : [];
     const messages = [];
     const messageIndex = new Map();
     const conflictingMessages = new Set();
-    for (const entry of (Array.isArray(raw.messages) ? raw.messages : []).slice(0, FIBER_MAX_MESSAGES)) {
+    for (const entry of rawMessages.slice(0, FIBER_MAX_MESSAGES)) {
       if (!entry || typeof entry !== 'object') continue;
       const messageId = cap(entry.messageId, 200);
       if (!messageId) continue;
@@ -4220,6 +4230,7 @@
       conversationConflict: raw.conversationConflict === true,
       requestOwnerRequired: raw.requestOwnerRequired === true,
       endMessageId,
+      messagesComplete: raw.messagesComplete === true && !raw.conversationConflict && rawMessages.length <= FIBER_MAX_MESSAGES && conflictingMessages.size === 0,
       terminalWithoutFinal: raw.terminalWithoutFinal === true && !endMessageId,
       calls: kept,
       codeModeCalls,
@@ -5091,6 +5102,86 @@
     // merges two responses into one group and paints both of them into the first section.
     // An unresolved live binding is not evidence that the live turn owns nothing; it is
     // exactly the case where a settled claim on that id cannot be proven.
+    /** Emits `turn_messages` when a settled complete turn or 2-scan absence drops a prior streaming message. */
+    function reconcileDiscardedStreamingMessages(turn, index, localOwner) {
+      const currentConversation = CLF_DOM.conversationId();
+      if (
+        !localOwner ||
+        turn.messagesComplete !== true ||
+        turn.conversationConflict ||
+        !turn.conversationId ||
+        (currentConversation && turn.conversationId !== currentConversation) ||
+        steeredTurns.size > 0 ||
+        steeredTurns.has(localOwner)
+      ) return;
+      const presentIdSet = new Set();
+      const presentIds = [];
+      for (const message of turn.messages || []) {
+        if (message.role !== 'assistant') continue;
+        for (const id of [message.messageId, message.rawMessageId]) {
+          if (!id || presentIdSet.has(id)) continue;
+          if (presentIds.length >= 400) return;
+          presentIdSet.add(id);
+          presentIds.push(id);
+        }
+      }
+      const heldForApproval = generating &&
+        (index === activeTurnIndex || (activeTurnIndex < 0 && index === answer.turns.length - 1)) &&
+        approvalHolding();
+      const settled = Boolean(!heldForApproval && (turn.endMessageId || turn.terminalWithoutFinal));
+      const streamingNow = new Set();
+      for (const message of turn.messages || []) {
+        if (message.role !== 'assistant') continue;
+        const isTerminal = Boolean(
+          turn.endMessageId && !heldForApproval &&
+          (message.rawMessageId === turn.endMessageId || message.messageId === turn.endMessageId)
+        );
+        if (!isTerminal) {
+          for (const id of [message.messageId, message.rawMessageId]) {
+            if (id) streamingNow.add(id);
+          }
+        }
+      }
+      let tracked = turnStreamingIds.get(localOwner);
+      let droppedConfirmed = false;
+      if (tracked) {
+        for (const priorId of [...tracked]) {
+          const missingKey = `${localOwner}\u0000${priorId}`;
+          if (presentIdSet.has(priorId)) {
+            turnMissingStreaming.delete(missingKey);
+            continue;
+          }
+          const missingScans = (turnMissingStreaming.get(missingKey) || 0) + 1;
+          if (missingScans >= 2) {
+            droppedConfirmed = true;
+            tracked.delete(priorId);
+            turnMissingStreaming.delete(missingKey);
+          } else {
+            turnMissingStreaming.set(missingKey, missingScans);
+          }
+        }
+      }
+      if (settled) {
+        turnStreamingIds.delete(localOwner);
+        for (const missingKey of [...turnMissingStreaming.keys()]) {
+          if (missingKey.startsWith(`${localOwner}\u0000`)) turnMissingStreaming.delete(missingKey);
+        }
+      } else if (streamingNow.size > 0 || tracked) {
+        if (!tracked) {
+          tracked = new Set();
+          turnStreamingIds.set(localOwner, tracked);
+        }
+        for (const id of streamingNow) tracked.add(id);
+        turnStreamingIds.delete(localOwner);
+        turnStreamingIds.set(localOwner, tracked);
+      }
+      if (!settled && !droppedConfirmed) return;
+      const signature = presentIds.join('\u0000');
+      if (turnMessagesReported.get(localOwner) === signature) return;
+      turnMessagesReported.delete(localOwner);
+      turnMessagesReported.set(localOwner, signature);
+      emit({ kind: 'turn_messages', turnId: localOwner, messageIds: presentIds });
+    }
     const settledOwners = new Map();
     const ownerClaims = new Map();
     if (activeLocalTurnId) ownerClaims.set(activeLocalTurnId, 1);
@@ -5322,6 +5413,7 @@
           expediteActivityPull();
         }
       }
+      reconcileDiscardedStreamingMessages(turn, index, localOwner);
       // The provider's outline of this turn's rounds, for the timeline only. It needs a local turn
       // to be filed under, so an unowned historical section sends none; an unchanged outline sends
       // nothing, and a settled turn read after a reload refreshes the outline its recaps came late to.
@@ -5404,6 +5496,14 @@
     if (messagesReported.size > 4000) messagesReported.clear();
     if (pageToolsReported.size > 4000) pageToolsReported.clear();
     while (tracesReported.size > 64) tracesReported.delete(tracesReported.keys().next().value);
+    while (turnStreamingIds.size > 64) {
+      const oldestTurn = turnStreamingIds.keys().next().value;
+      turnStreamingIds.delete(oldestTurn);
+      for (const key of [...turnMissingStreaming.keys()]) {
+        if (key.startsWith(`${oldestTurn}\u0000`)) turnMissingStreaming.delete(key);
+      }
+    }
+    while (turnMessagesReported.size > 64) turnMessagesReported.delete(turnMessagesReported.keys().next().value);
     if (nativeImagesReported.size > 2000) {
       for (const key of nativeImagesReported.keys()) {
         nativeImagesReported.delete(key);
@@ -7364,6 +7464,12 @@
         if (entry && entry.kind === 'assistant_message' && entry.messageId) {
           const messageId = String(entry.messageId);
           const priorSeq = streamMessageSeq.get(messageId);
+          if (entry.retracted === true) {
+            if (Number.isFinite(priorSeq)) streamBySeq.delete(priorSeq);
+            streamMessageSeq.delete(messageId);
+            streamAdded++;
+            continue;
+          }
           const prior = Number.isFinite(priorSeq) ? streamBySeq.get(priorSeq) : null;
           const changed = !prior || snapshotText(prior) !== snapshotText(entry);
           if (Number.isFinite(priorSeq)) streamBySeq.delete(priorSeq);

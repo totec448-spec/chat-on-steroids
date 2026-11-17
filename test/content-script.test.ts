@@ -26377,3 +26377,194 @@ describe('clf-activity-wake runtime push handler', () => {
     }
   });
 });
+
+describe('reconciling discarded streaming assistant messages via turn_messages', () => {
+  it('emits turn_messages only after a previously observed streaming message is absent for two complete scans', async () => {
+    live = await harness();
+    userTurn(live.document, 'q-reconcile', 'Check the textures', { sent: false });
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'page-reconcile', []);
+    live.hook.observe();
+    await settle();
+    const localTurnId = emitted(live.sent, 'turn_start').at(-1)!.event.turnId as string;
+
+    const kept = {
+      messageId: 'msg-kept-1',
+      rawMessageId: 'msg-kept-1',
+      stable: true,
+      rawText: 'Confirmed two texture files.',
+      renderedHtml: '<p>Confirmed two texture files.</p>'
+    };
+    const discarded = {
+      messageId: 'msg-aborted-2',
+      rawMessageId: 'msg-aborted-2',
+      stable: false,
+      rawText: 'PBR channels val',
+      renderedHtml: '<p>PBR channels val</p>'
+    };
+
+    // Scan 1: both messages observed streaming; no disappearance yet.
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-reconcile', messagesComplete: true, messages: [kept, discarded] } }]);
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_messages')).toEqual([]);
+
+    // Scan 2 (complete): discarded disappears once -> do not retract prematurely on 1-tick flicker.
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-reconcile', messagesComplete: true, messages: [kept] } }]);
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_messages')).toEqual([]);
+
+    // Transient flicker recovery: if it reappears before 2 consecutive missing scans, reset and stay silent.
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-reconcile', messagesComplete: true, messages: [kept, discarded] } }]);
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_messages')).toEqual([]);
+
+    // Now disappear for 2 consecutive complete scans -> emit turn_messages with surviving IDs.
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-reconcile', messagesComplete: true, messages: [kept] } }]);
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_messages')).toEqual([]);
+
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-reconcile', messagesComplete: true, messages: [kept] } }]);
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_messages').map((row) => row.event)).toEqual([
+      expect.objectContaining({
+        kind: 'turn_messages',
+        turnId: localTurnId,
+        messageIds: ['msg-kept-1']
+      })
+    ]);
+  });
+
+  it('never emits turn_messages for truncated, conflicted, or steered turns', async () => {
+    live = await harness();
+    userTurn(live.document, 'q-guard-1', 'First', { sent: false });
+    startGenerating(live.document, { send: false });
+    const section = assistantTurn(live.document, 'page-guard', []);
+    for (let i = 0; i < 3; i++) { live.hook.observe(); await settle(); }
+
+    const dropped = {
+      messageId: 'msg-guard-drop',
+      rawMessageId: 'msg-guard-drop',
+      stable: false,
+      rawText: 'Interim...',
+      renderedHtml: '<p>Interim...</p>'
+    };
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-guard', messagesComplete: true, messages: [dropped] } }]);
+    await live.hook.flush();
+
+    // Truncated scans must never trigger turn_messages.
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-guard', messagesComplete: false, messages: [] } }]);
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-guard', messagesComplete: false, messages: [] } }]);
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_messages')).toEqual([]);
+
+    // Conflicted scans must never trigger turn_messages even on settled turns.
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-guard', conversationConflict: true, endMessageId: 'final-x', messagesComplete: true, messages: [] } }]);
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_messages')).toEqual([]);
+
+    // Steering closes the first turn as continued (steeredTurns); the steered turn must not emit turn_messages.
+    userTurn(live.document, 'q-guard-2', 'Steer it', { sent: false });
+    for (let i = 0; i < 3; i++) { live.hook.observe(); await settle(); }
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-guard', endMessageId: 'final-after-steer', messagesComplete: true,
+      messages: [{ messageId: 'final-after-steer', rawMessageId: 'final-after-steer', stable: true, rawText: 'Done', renderedHtml: '<p>Done</p>' }] } }]);
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_messages')).toEqual([]);
+  });
+
+  it('emits turn_messages immediately when a settled complete turn holds an endMessageId', async () => {
+    live = await harness();
+    userTurn(live.document, 'q-settled', 'Summarize files', { sent: false });
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'page-settled', []);
+    live.hook.observe();
+    await settle();
+    const localTurnId = emitted(live.sent, 'turn_start').at(-1)!.event.turnId as string;
+
+    const finalMsg = {
+      messageId: 'msg-settled-final',
+      rawMessageId: 'msg-settled-final',
+      stable: true,
+      rawText: 'All done.',
+      renderedHtml: '<p>All done.</p>'
+    };
+    await bindRenderedFiberTurns([{
+      section,
+      turn: { turnId: 'page-settled', endMessageId: 'msg-settled-final', messagesComplete: true, messages: [finalMsg] }
+    }]);
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_messages').map((row) => row.event)).toEqual([
+      expect.objectContaining({
+        kind: 'turn_messages',
+        turnId: localTurnId,
+        messageIds: ['msg-settled-final']
+      })
+    ]);
+  });
+
+  it('treats retracted assistant_message entries from /activity as removed rather than active progress', async () => {
+    let silenceTurnId = '';
+    let pullCount = 0;
+    live = await harness(undefined, {
+      desktop_input: async (message: Record<string, unknown>) => {
+        if (message.authorize) {
+          live!.reply.set('activity', () => ({
+            ok: true,
+            data: {
+              entries: [],
+              pendingTools: 0,
+              stream: [
+                {
+                  seq: 90 + ++pullCount,
+                  time: 120 + pullCount,
+                  kind: 'assistant_message',
+                  turnId: silenceTurnId,
+                  messageId: 'ghost-msg',
+                  text: 'aborted partial',
+                  state: 'streaming',
+                  final: false,
+                  retracted: true
+                }
+              ]
+            }
+          }));
+          await live!.hook.pullActivity();
+          return { ok: true, data: { ok: true } };
+        }
+        if (message.ack || message.fail) return { ok: true, data: { ok: true } };
+        return {
+          ok: true,
+          data: {
+            input: {
+              id: 'desktop-retract-1',
+              conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+              text: 'Continue after abort',
+              turnId: silenceTurnId,
+              afterTurn: true,
+              claimToken: 'claim-1',
+              silenceBoundary: { turnId: silenceTurnId }
+            }
+          }
+        };
+      }
+    });
+    startGenerating(live.document);
+    live.hook.observe();
+    await settle();
+    silenceTurnId = emitted(live.sent, 'turn_start').at(-1)!.event.turnId as string;
+    stopGenerating(live.document);
+    const sends = watchSend(live.document);
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      userTurn(live!.document, 'retract-next-user', 'Continue after abort', { sent: false });
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+    });
+    const delivered = await live.runtimeMessage({
+      type: 'clf-desktop-input',
+      id: 'desktop-retract-1',
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      silenceTurnId
+    });
+    expect(delivered).toEqual({ ok: true });
+    expect(sends()).toBe(1);
+    expect(live.sent.filter((row) => row.fail)).toEqual([]);
+  });
+});
