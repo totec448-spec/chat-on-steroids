@@ -1410,6 +1410,7 @@ it('keeps generated-image metadata visible when recording storage is full', asyn
 });
 
 it.each([
+  ['session_quota', 'this chat reached its 192 MB storage limit', true],
   ['oversized', 'exceeds the recording limit', false],
   ['not_loaded', 'Image preview unavailable', false],
   ['removed', 'removed from local storage', true]

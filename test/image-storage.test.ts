@@ -7,6 +7,7 @@ import {
   appendEvent,
   clearImageStorage,
   createSession,
+  deleteSession,
   getImageStorage,
   initSessionStore,
   MAX_GLOBAL_ASSET_BYTES,
@@ -16,7 +17,7 @@ import {
   readEvents,
   recordingStorageFull,
   resetSessionStoreForTests,
-  deleteSession,
+  setRecordingStorageLimit,
   upsertMessageEvent,
   upsertNativeImageEvent,
   writeAsset,
@@ -228,6 +229,82 @@ it('reports a full recording store once, and clears the report when space is fre
   stop();
 });
 
+it('preserves a per-session quota failure across weaker observations and logs the configured storage limit', async () => {
+  const session = await createSession({ conversationId: 'session-quota-precedence', title: 'Session quota' });
+  const identity = {
+    time: 200, source: 'extension' as const, kind: 'native_image' as const,
+    messageId: 'session-quota-message', providerAssetId: 'file_00000000000000000000000000000003',
+    providerRole: 'tool' as const, providerStatus: 'finished_successfully' as const
+  };
+  await upsertNativeImageEvent(session.id, {
+    ...identity, previewStatus: 'unavailable', previewError: 'session_quota'
+  });
+  const replay = await upsertNativeImageEvent(session.id, {
+    ...identity, time: 201, previewStatus: 'unavailable', previewError: 'not_loaded'
+  });
+  expect(replay.event).toMatchObject({ previewStatus: 'unavailable', previewError: 'session_quota' });
+
+  const switchedToGlobal = await upsertNativeImageEvent(session.id, {
+    ...identity, time: 202, previewStatus: 'unavailable', previewError: 'quota'
+  });
+  expect(switchedToGlobal.event).toMatchObject({ previewStatus: 'unavailable', previewError: 'quota' });
+
+  const switchedToSession = await upsertNativeImageEvent(session.id, {
+    ...identity, time: 203, previewStatus: 'unavailable', previewError: 'session_quota'
+  });
+  expect(switchedToSession.event).toMatchObject({ previewStatus: 'unavailable', previewError: 'session_quota' });
+
+  const filler = await createSession({ title: 'Configured limit filler' });
+  await writeAsset(filler.id, Buffer.from('seed asset'), 'text/plain');
+  resetSessionStoreForTests();
+  initSessionStore(directory);
+  setRecordingStorageLimit(5);
+  const warned = vi.spyOn(logger, 'logWarn').mockImplementation(() => undefined);
+  const realStat = fs.stat.bind(fs);
+  const stat = vi.spyOn(fs, 'stat').mockImplementation(async (file, ...rest) => {
+    const found = await (realStat as (...args: unknown[]) => Promise<Awaited<ReturnType<typeof fs.stat>>>)(file, ...rest);
+    if (String(file).includes(path.join(filler.id, 'assets') + path.sep)) Object.defineProperty(found, 'size', { value: 5 * 1024 * 1024 * 1024 });
+    return found;
+  });
+  try {
+    await expect(writeAsset(session.id, Buffer.from('refused at 5 GiB'), 'text/plain')).rejects.toThrow('Global session asset quota exceeded');
+  } finally {
+    stat.mockRestore();
+  }
+  expect(warned).toHaveBeenCalledWith(expect.stringContaining('recording storage is full (5 GiB)'));
+});
+
+it('marks a cleaned-up retry after session_quota as removed so later replays do not resurrect it', async () => {
+  const session = await createSession({ conversationId: 'quota-cleanup-removed', title: 'Quota cleanup removed' });
+  const identity = {
+    time: 200, source: 'extension' as const, kind: 'native_image' as const,
+    messageId: 'quota-cleanup-message', providerAssetId: 'file_00000000000000000000000000000004',
+    providerRole: 'tool' as const, providerStatus: 'finished_successfully' as const
+  };
+  await upsertNativeImageEvent(session.id, {
+    ...identity, previewStatus: 'unavailable', previewError: 'session_quota'
+  });
+
+  const pixels = await sharp({ create: { width: 3, height: 2, channels: 3, background: '#446622' } }).webp().toBuffer();
+  const write = writeAsset(session.id, pixels, 'image/webp');
+  const cleanup = clearImageStorage('all');
+  const staleRetryAsset = await write;
+  const cleanupResult = await cleanup;
+  expect(cleanupResult).toMatchObject({ removedFiles: 1, freedBytes: pixels.length });
+
+  const afterCleanup = await upsertNativeImageEvent(session.id, {
+    ...identity, time: 201, previewStatus: 'available', previewWidth: 3, previewHeight: 2, asset: staleRetryAsset
+  });
+  expect(afterCleanup.event).toMatchObject({ previewStatus: 'unavailable', previewError: 'removed' });
+  expect(afterCleanup.event.asset).toBeUndefined();
+
+  const replacement = await writeAsset(session.id, pixels, 'image/webp');
+  const laterReplay = await upsertNativeImageEvent(session.id, {
+    ...identity, time: 202, previewStatus: 'available', previewWidth: 3, previewHeight: 2, asset: replacement
+  });
+  expect(laterReplay.accepted).toBe(false);
+  expect(laterReplay.event).toMatchObject({ previewStatus: 'unavailable', previewError: 'removed' });
+});
 
 it('warns once per full session, preserving omitted overflow and independent sessions', async () => {
   const first = await createSession({ title: 'Long first chat' });

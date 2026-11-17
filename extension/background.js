@@ -3004,9 +3004,133 @@ globalThis.chrome?.debugger?.onDetach.addListener(source => {
   void activeTabs?.detached(source).catch(() => undefined);
   void getBrowserController().then(controller => controller?.detached(source)).catch(() => undefined);
 });
+const ACTIVITY_WAKE_BURST = 6;
+const ACTIVITY_WAKE_INTERVAL_MS = 200;
+const ACTIVITY_WAKE_QUEUE_CAP = 64;
+let activityWakeTokens = ACTIVITY_WAKE_BURST;
+let activityWakeLastRefillAt = 0;
+let activityWakeDrainTimer = null;
+let activityWakeEpoch = 0;
+const pendingActivityWakeTabs = new Map();
+
+function resetActivityWakeLimiter() {
+  activityWakeEpoch += 1;
+  if (activityWakeDrainTimer !== null) {
+    clearTimeout(activityWakeDrainTimer);
+    activityWakeDrainTimer = null;
+  }
+  pendingActivityWakeTabs.clear();
+  activityWakeTokens = ACTIVITY_WAKE_BURST;
+  activityWakeLastRefillAt = 0;
+}
+
 function closeWakeSocket() {
+  resetActivityWakeLimiter();
   const previous = wakeSocket; wakeSocket = null;
   if (previous) previous.close();
+}
+
+function takeActivityWakeToken(now = Date.now()) {
+  if (activityWakeLastRefillAt === 0) activityWakeLastRefillAt = now;
+  else if (now > activityWakeLastRefillAt) {
+    const gained = Math.floor((now - activityWakeLastRefillAt) / ACTIVITY_WAKE_INTERVAL_MS);
+    if (gained > 0) {
+      activityWakeTokens = Math.min(ACTIVITY_WAKE_BURST, activityWakeTokens + gained);
+      activityWakeLastRefillAt += gained * ACTIVITY_WAKE_INTERVAL_MS;
+    }
+  }
+  if (activityWakeTokens <= 0) return false;
+  activityWakeTokens -= 1;
+  return true;
+}
+
+function dispatchActivityWakeToTab(id, target) {
+  if (disconnected || typeof chrome.tabs?.sendMessage !== 'function') return;
+  const message = target ? { type: 'clf-activity-wake', conversationId: target } : { type: 'clf-activity-wake' };
+  try {
+    void chrome.tabs.sendMessage(id, message).catch(() => undefined);
+  } catch {
+    // Tab may be navigating/unloading; ordinary fallback polling still delivers.
+  }
+}
+
+function drainActivityWakeTabs() {
+  activityWakeDrainTimer = null;
+  if (disconnected || typeof chrome.tabs?.sendMessage !== 'function') {
+    resetActivityWakeLimiter();
+    return;
+  }
+  while (pendingActivityWakeTabs.size > 0 && takeActivityWakeToken()) {
+    const next = pendingActivityWakeTabs.entries().next().value;
+    if (!next) break;
+    const [tabId, target] = next;
+    pendingActivityWakeTabs.delete(tabId);
+    dispatchActivityWakeToTab(tabId, target);
+  }
+  if (pendingActivityWakeTabs.size > 0) {
+    const now = Date.now();
+    const waitMs = activityWakeLastRefillAt === 0
+      ? ACTIVITY_WAKE_INTERVAL_MS
+      : Math.max(1, ACTIVITY_WAKE_INTERVAL_MS - (now - activityWakeLastRefillAt));
+    activityWakeDrainTimer = setTimeout(drainActivityWakeTabs, waitMs);
+  }
+}
+
+function queueActivityWakeTab(id, target) {
+  if (pendingActivityWakeTabs.size === 0 && takeActivityWakeToken()) {
+    dispatchActivityWakeToTab(id, target);
+    return;
+  }
+  if (pendingActivityWakeTabs.has(id)) {
+    const prev = pendingActivityWakeTabs.get(id);
+    pendingActivityWakeTabs.set(id, prev === target ? target : null);
+  } else {
+    if (pendingActivityWakeTabs.size >= ACTIVITY_WAKE_QUEUE_CAP) {
+      const oldest = pendingActivityWakeTabs.keys().next().value;
+      if (oldest !== undefined) pendingActivityWakeTabs.delete(oldest);
+    }
+    pendingActivityWakeTabs.set(id, target);
+  }
+  if (activityWakeDrainTimer === null) {
+    const now = Date.now();
+    const waitMs = activityWakeLastRefillAt === 0
+      ? ACTIVITY_WAKE_INTERVAL_MS
+      : Math.max(1, ACTIVITY_WAKE_INTERVAL_MS - (now - activityWakeLastRefillAt));
+    activityWakeDrainTimer = setTimeout(drainActivityWakeTabs, waitMs);
+  }
+}
+
+/** Unions registry-known tab IDs with matching open ChatGPT tabs (discovering unregistered tabs). */
+async function unionQueriedChatGptTabs(knownIds, target = null) {
+  let queried = [];
+  if (typeof chrome.tabs?.query === 'function') {
+    try {
+      const discovered = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
+      queried = discovered
+        .filter((tab) => tab && typeof tab.id === 'number' && Number.isInteger(tab.id) &&
+          (!target || conversationFromUrl(tab.url) === target))
+        .map((tab) => tab.id);
+    } catch {
+      queried = [];
+    }
+  }
+  return [...new Set([...knownIds, ...queried])];
+}
+
+/** Wakes matching open ChatGPT tab(s) so `/activity` reacts without waiting for the poll timer. */
+async function notifyActivityTabs(conversationId) {
+  const epoch = activityWakeEpoch;
+  await load();
+  if (disconnected || epoch !== activityWakeEpoch || typeof chrome.tabs?.sendMessage !== 'function') return;
+  const target = conversationId ? cleanConversationId(conversationId) : null;
+  if (conversationId && !target) return;
+  const known = Object.entries(tabConversations)
+    .filter(([, value]) => !target || cleanConversationId(value) === target)
+    .map(([key]) => Number(key))
+    .filter((id) => Number.isInteger(id));
+  const tabIds = await unionQueriedChatGptTabs(known, target);
+  if (disconnected || epoch !== activityWakeEpoch || typeof chrome.tabs?.sendMessage !== 'function') return;
+  for (const id of tabIds) queueActivityWakeTab(id, target);
 }
 function connectWakeSocket() {
   if (!token || disconnected || !port || typeof WebSocket === 'undefined') return;
@@ -3028,12 +3152,17 @@ function connectWakeSocket() {
     else if (event.data === 'wake') {
       void pumpBrowserControl().catch(() => undefined);
       void maintain(true).catch(() => undefined);
+    } else if (event.data === 'activity') {
+      void notifyActivityTabs(null).catch(() => undefined);
+    } else if (typeof event.data === 'string' && event.data.startsWith('activity:')) {
+      void notifyActivityTabs(event.data.slice('activity:'.length)).catch(() => undefined);
     }
   };
   connection.onerror = () => connection.close();
   connection.onclose = () => {
     if (wakeSocket === connection) {
       wakeSocket = null;
+      resetActivityWakeLimiter();
       void activeTabs?.revoke().catch(() => undefined);
     }
   };
@@ -4728,20 +4857,7 @@ const HANDLERS = {
     // exact moment the user turns Overwrite on. Discover the same host allowlist used by
     // extension-reload recovery and union it with the durable registry. Host permissions in
     // manifest.json already authorize URL-filtered tabs.query on these origins.
-    let discovered = [];
-    try {
-      discovered = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
-    } catch {
-      discovered = [];
-    }
-    const tabs = [
-      ...new Set([
-        ...known,
-        ...discovered
-          .map((tab) => (tab && typeof tab.id === 'number' ? tab.id : NaN))
-          .filter((value) => Number.isInteger(value))
-      ])
-    ];
+    const tabs = await unionQueriedChatGptTabs(known);
     let applied = 0;
     for (const id of tabs) {
       try {

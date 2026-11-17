@@ -18,11 +18,13 @@ import {
   initSessionStore,
   listSessionPage,
   listUsageSessions,
+  readEvents,
   reopenSession,
   resetSessionStoreForTests
 } from '../src/main/session/store.js';
 import { upsertMessageEvent } from '../src/main/session/store.js';
 import type { SessionEvent, SessionSummary } from '../src/shared/session.js';
+import { notifyChanged, onSessionChange, resetRecorderForTests } from '../src/main/session/recorder.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
 let dir = '';
@@ -584,6 +586,7 @@ describe('scoped session change refresh', () => {
       b: summary('2026-09-30-bbbbbbbb', 20_000, 1),
       listed: true,
       lists: 0,
+      controlsCalls: [] as string[],
       detailCalls: [] as Array<{ id: string; options: any }>,
       changed: (_change?: unknown) => undefined as void
     };
@@ -595,10 +598,12 @@ describe('scoped session change refresh', () => {
         return ok({ sessions, activeId: null, pressure: [], total: sessions.length, nextCursor: null, blocked: [] });
       },
       turnTraces: () => ok({}),
+      getSessionControls: (id: string) => { state.controlsCalls.push(id); return ok({ plan: null, userRequests: [] }); },
+      deleteSession: (id: string) => { if (id === state.a.id) state.listed = false; return ok(true); },
       getSession: (id: string, options?: any) => {
         state.detailCalls.push({ id, options });
         const seq = 100 + state.detailCalls.length - 1;
-        return ok({ summary: state.a, events: [note(seq, `A row ${state.detailCalls.length}`)], total: state.detailCalls.length, nextFrom: seq + 1 });
+        return ok({ summary: id === state.b.id ? state.b : state.a, events: [note(seq, `${id === state.b.id ? 'B' : 'A'} row ${state.detailCalls.length}`)], total: state.detailCalls.length, nextFrom: seq + 1 });
       },
       getSwarm: () => ok({ running: false, runId: null, agents: [], maxWorkers: 2, pendingReports: 0 }),
       onSessionChanged: (listener: (change?: unknown) => void) => { state.changed = listener; return () => undefined; },
@@ -620,7 +625,7 @@ describe('scoped session change refresh', () => {
       await vi.waitFor(() => expect(state.lists).toBe(before + 1), { timeout: 1600 });
       await new Promise(resolve => setTimeout(resolve, 50));
     };
-    return { w, state, publish };
+    return { w, state, publish, chatVisible };
   }
 
   it('keeps the catalog fresh without rereading A for unrelated or payload-less changes', async () => {
@@ -654,6 +659,428 @@ describe('scoped session change refresh', () => {
     expect(w.document.querySelector(`#sessionList [data-id="${state.a.id}"]`)).toBeNull();
     expect(state.detailCalls).toHaveLength(1);
   });
+
+  it('paints an active-chat delta before the catalog refresh settles without duplicating the detail read', async () => {
+    const { w, state } = await openSelected();
+    const listsBefore = state.lists;
+    state.a = { ...state.a, updatedAt: 31_000, events: 2 };
+    state.changed({ sessionIds: [state.a.id] });
+    // The active chat renders immediately from its incremental delta before the coalesced catalog timer fires.
+    await vi.waitFor(() => expect(w.document.getElementById('timeline')?.textContent).toContain('A row 2'), { timeout: 200 });
+    expect(state.detailCalls).toHaveLength(2);
+    // Once the coalesced catalog refresh runs with the matching summary, it does not reread A again.
+    await vi.waitFor(() => expect(state.lists).toBe(listsBefore + 1), { timeout: 1600 });
+    await new Promise(resolve => setTimeout(resolve, 60));
+    expect(state.detailCalls).toHaveLength(2);
+  });
+
+  it('drains pushes that arrive while an active-chat delta read is in flight without losing rows', async () => {
+    const { w, state } = await openSelected();
+    let release!: () => void;
+    const origGetSession = (w as any).api.getSession;
+    let interceptNext = true;
+    (w as any).api.getSession = (id: string, options?: any) => {
+      if (interceptNext) {
+        interceptNext = false;
+        return new Promise(resolve => {
+          release = () => resolve(origGetSession(id, options));
+        });
+      }
+      return origGetSession(id, options);
+    };
+    state.a = { ...state.a, updatedAt: 31_000, events: 2 };
+    state.changed({ sessionIds: [state.a.id] });
+    await new Promise(resolve => setTimeout(resolve, 30));
+    // A second push arrives before the in-flight delta finishes: it must trigger one catch-up read afterward.
+    state.a = { ...state.a, updatedAt: 32_000, events: 3 };
+    state.changed({ sessionIds: [state.a.id] });
+    release();
+    await vi.waitFor(() => expect(w.document.getElementById('timeline')?.textContent).toContain('A row 3'), { timeout: 1600 });
+    expect(w.document.getElementById('timeline')?.textContent).toContain('A row 1');
+    expect(w.document.getElementById('timeline')?.textContent).toContain('A row 2');
+  });
+
+  it('refreshes controls independently on a payload-less push even after a satisfied fast-path delta', async () => {
+    const { w, state } = await openSelected();
+    const listsBefore = state.lists;
+    state.a = { ...state.a, updatedAt: 31_000, events: 2 };
+    state.changed({ sessionIds: [state.a.id] });
+    await vi.waitFor(() => expect(w.document.getElementById('timeline')?.textContent).toContain('A row 2'), { timeout: 400 });
+    const controlsAfterDelta = state.controlsCalls.length;
+    // A payload-less push follows before the catalog refresh settles; catalog catch-up must still refresh controls.
+    state.changed();
+    await vi.waitFor(() => expect(state.lists).toBe(listsBefore + 1), { timeout: 1600 });
+    await vi.waitFor(() => expect(state.controlsCalls.length).toBeGreaterThan(controlsAfterDelta), { timeout: 400 });
+    expect(state.detailCalls).toHaveLength(2);
+  });
+
+  it('cancels pending active-detail refreshes on chat switch and when chat becomes hidden', async () => {
+    const { w, state, chatVisible } = await openSelected();
+    const listsAfterOpen = state.lists;
+    // Put A into its 100 ms cooldown, then push another change for A and immediately switch to B.
+    state.a = { ...state.a, updatedAt: 31_000, events: 2 };
+    state.changed({ sessionIds: [state.a.id] });
+    await vi.waitFor(() => expect(state.detailCalls).toHaveLength(2), { timeout: 400 });
+    state.a = { ...state.a, updatedAt: 32_000, events: 3 };
+    state.changed({ sessionIds: [state.a.id] });
+    (w.document.querySelector(`#sessionList [data-id="${state.b.id}"]`) as HTMLElement).click();
+    await vi.waitFor(() => expect(state.detailCalls.some(call => call.id === state.b.id)).toBe(true), { timeout: 400 });
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(state.detailCalls.filter(call => call.id === state.a.id)).toHaveLength(2);
+
+    // Let the catalog timer from A settle before testing the backgrounded-view timer on B so the 400 ms catalog loop does not collide.
+    await vi.waitFor(() => expect(state.lists).toBeGreaterThan(listsAfterOpen), { timeout: 800 });
+    await new Promise(resolve => setTimeout(resolve, 40));
+
+    // Put B into its cooldown, push again, and hide Chat before the timer fires: no getSession runs while hidden.
+    const bCallsBefore = state.detailCalls.filter(call => call.id === state.b.id).length;
+    state.b = { ...state.b, updatedAt: 40_000, events: 2 };
+    state.changed({ sessionIds: [state.b.id] });
+    await vi.waitFor(() => expect(state.detailCalls.filter(call => call.id === state.b.id).length).toBe(bCallsBefore + 1), { timeout: 400 });
+    state.b = { ...state.b, updatedAt: 41_000, events: 3 };
+    state.changed({ sessionIds: [state.b.id] });
+    chatVisible(false);
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(state.detailCalls.filter(call => call.id === state.b.id).length).toBe(bCallsBefore + 1);
+  });
+
+  it('skips live-tail deltas while paging older history and ignores off-window revisions without pulling scroll', async () => {
+    const { w, state } = await openSelected();
+    const pane = w.document.getElementById('chatBody')!;
+    let scrollHeight = 2000;
+    Object.defineProperties(pane, {
+      clientHeight: { configurable: true, get: () => 400 },
+      scrollHeight: { configurable: true, get: () => scrollHeight }
+    });
+    pane.scrollTop = 1600;
+    // An off-window canonical revision (seq < floor=100) arrives on a live delta: it must not grow or scroll down.
+    const origGetSession = (w as any).api.getSession;
+    let mode: 'normal' | 'offwindow' | 'older' = 'offwindow';
+    (w as any).api.getSession = (id: string, options?: any) => {
+      state.detailCalls.push({ id, options });
+      if (mode === 'offwindow') {
+        return Promise.resolve({ ok: true as const, data: { summary: state.a, events: [note(50, 'Off-window revision')], total: 1, nextFrom: 102 } });
+      }
+      if (mode === 'older') {
+        return Promise.resolve({ ok: true as const, data: { summary: state.a, events: [note(90, 'Older page event')], total: 40, nextFrom: 102 } });
+      }
+      return origGetSession(id, options);
+    };
+    pane.scrollTop = 1000;
+    state.a = { ...state.a, updatedAt: 31_000, events: 2 };
+    state.changed({ sessionIds: [state.a.id] });
+    await vi.waitFor(() => expect(state.detailCalls).toHaveLength(2), { timeout: 400 });
+    expect(pane.scrollTop).toBe(1000);
+    expect(w.document.getElementById('timeline')?.textContent).not.toContain('Off-window revision');
+
+    // Scroll to the top to enter older-history paging (`historyBefore !== null`).
+    mode = 'older';
+    pane.scrollTop = 0;
+    pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: -100 }));
+    await vi.waitFor(() => expect(w.document.getElementById('timeline')?.textContent).toContain('Older page event'), { timeout: 800 });
+    const callsAtHistory = state.detailCalls.length;
+    state.a = { ...state.a, updatedAt: 32_000, events: 3 };
+    state.changed({ sessionIds: [state.a.id] });
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(state.detailCalls).toHaveLength(callsAtHistory);
+  });
+
+  it('drains full-size incremental delta pages automatically without dropping trailing rows', async () => {
+    const { w, state } = await openSelected();
+    let callIndex = 0;
+    (w as any).api.getSession = (id: string, options?: any) => {
+      state.detailCalls.push({ id, options });
+      callIndex += 1;
+      if (callIndex === 1) {
+        const fullBatch = Array.from({ length: 30 }, (_, index) => note(101 + index, `Burst row ${index + 1}`));
+        return Promise.resolve({ ok: true as const, data: { summary: state.a, events: fullBatch, total: 32, nextFrom: 131 } });
+      }
+      return Promise.resolve({ ok: true as const, data: { summary: state.a, events: [note(131, 'Trailing drain row')], total: 32, nextFrom: 132 } });
+    };
+    state.a = { ...state.a, updatedAt: 31_000, events: 32 };
+    state.changed({ sessionIds: [state.a.id] });
+    await vi.waitFor(() => expect(w.document.getElementById('timeline')?.textContent).toContain('Trailing drain row'), { timeout: 800 });
+    expect(state.detailCalls[1]?.options).toEqual({ from: 101, limit: 30 });
+    expect(state.detailCalls[2]?.options).toEqual({ from: 131, limit: 30 });
+  });
+
+  it('retries controls refresh on catalog catch-up after a targeted-push getSessionControls failure', async () => {
+    const { w, state } = await openSelected();
+    let failControls = true;
+    (w as any).api.getSessionControls = (id: string) => {
+      state.controlsCalls.push(id);
+      if (failControls) return Promise.resolve({ ok: false as const, error: 'temporary failure' });
+      return Promise.resolve({ ok: true as const, data: { plan: null, userRequests: [] } });
+    };
+    const listsBefore = state.lists;
+    const controlsBefore = state.controlsCalls.length;
+    state.a = { ...state.a, updatedAt: 31_000, events: 2 };
+    state.changed({ sessionIds: [state.a.id] });
+    await vi.waitFor(() => expect(state.controlsCalls.length).toBe(controlsBefore + 1), { timeout: 300 });
+    expect(state.detailCalls).toHaveLength(2);
+    // Recover controls before the catalog refresh settles: catalog catch-up refreshes controls without rereading the transcript.
+    failControls = false;
+    await vi.waitFor(() => expect(state.lists).toBe(listsBefore + 1), { timeout: 1600 });
+    await vi.waitFor(() => expect(state.controlsCalls.length).toBe(controlsBefore + 2), { timeout: 400 });
+    expect(state.detailCalls).toHaveLength(2);
+  });
+
+  it('clears pending active-detail timers when the selected session is deleted', async () => {
+    const { w, state } = await openSelected();
+    // Put A into cooldown, push another change, then immediately delete A via its row action menu.
+    state.a = { ...state.a, updatedAt: 31_000, events: 2 };
+    state.changed({ sessionIds: [state.a.id] });
+    await vi.waitFor(() => expect(state.detailCalls).toHaveLength(2), { timeout: 400 });
+    state.a = { ...state.a, updatedAt: 32_000, events: 3 };
+    state.changed({ sessionIds: [state.a.id] });
+    const rowA = w.document.querySelector(`#sessionList [data-id="${state.a.id}"]`) as HTMLElement;
+    rowA.dispatchEvent(new w.MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    const removeButton = w.document.querySelector<HTMLButtonElement>('.row-menu [data-row-action="remove"]')!;
+    removeButton.click();
+    await vi.waitFor(() => expect(state.listed).toBe(false), { timeout: 800 });
+    await new Promise(resolve => setTimeout(resolve, 200));
+    expect(state.detailCalls.filter(call => call.id === state.a.id)).toHaveLength(2);
+  });
+
+  it('fences A -> B -> A switches against interleaved active-detail pushes without stale paints or cancelled navigation reads', async () => {
+    const { w, state } = await openSelected();
+    let releaseB!: () => void;
+    const origGetSession = (w as any).api.getSession;
+    (w as any).api.getSession = (id: string, options?: any) => {
+      if (id === state.b.id && !releaseB) {
+        state.detailCalls.push({ id, options });
+        return new Promise(resolve => {
+          releaseB = () => resolve({ ok: true as const, data: { summary: state.b, events: [note(200, 'Stale B row')], total: 1, nextFrom: 201 } });
+        });
+      }
+      return origGetSession(id, options);
+    };
+    (w.document.querySelector(`#sessionList [data-id="${state.b.id}"]`) as HTMLElement).click();
+    await vi.waitFor(() => expect(releaseB).toBeTypeOf('function'), { timeout: 400 });
+    // Push a change for A while B is still mid-navigation, then immediately return to A.
+    state.a = { ...state.a, updatedAt: 31_000, events: 2 };
+    state.changed({ sessionIds: [state.a.id] });
+    (w.document.querySelector(`#sessionList [data-id="${state.a.id}"]`) as HTMLElement).click();
+    releaseB();
+    await vi.waitFor(() => expect(state.detailCalls.filter(call => call.id === state.a.id).length).toBeGreaterThanOrEqual(2), { timeout: 800 });
+    await vi.waitFor(() => {
+      const timeline = w.document.getElementById('timeline')!;
+      expect(timeline.textContent).toContain('A row 3');
+      expect(timeline.hasAttribute('inert')).toBe(false);
+      expect(timeline.hasAttribute('aria-busy')).toBe(false);
+    }, { timeout: 800 });
+    expect(w.document.getElementById('timeline')?.textContent).not.toContain('Stale B row');
+  });
+
+  it('retries via catalog catch-up when a full-size incremental drain read fails and cancels pending drain on hide', async () => {
+    const { w, state, chatVisible } = await openSelected();
+    let callIndex = 0;
+    const fullBatch = Array.from({ length: 30 }, (_, index) => note(101 + index, `Drain page row ${index + 1}`));
+    (w as any).api.getSession = (id: string, options?: any) => {
+      state.detailCalls.push({ id, options });
+      callIndex += 1;
+      if (callIndex === 1) return Promise.resolve({ ok: true as const, data: { summary: state.a, events: fullBatch, total: 32, nextFrom: 131 } });
+      if (callIndex === 2) return Promise.resolve({ ok: false as const, error: 'transient drain failure' });
+      return Promise.resolve({ ok: true as const, data: { summary: state.a, events: [note(131, 'Recovered trailing drain row')], total: 32, nextFrom: 132 } });
+    };
+    const listsBefore = state.lists;
+    state.a = { ...state.a, updatedAt: 31_000, events: 32 };
+    state.changed({ sessionIds: [state.a.id] });
+    // First drain call failed, so catalog catch-up at 400 ms must retry and paint the trailing row.
+    await vi.waitFor(() => expect(state.lists).toBe(listsBefore + 1), { timeout: 1600 });
+    await vi.waitFor(() => expect(w.document.getElementById('timeline')?.textContent).toContain('Recovered trailing drain row'), { timeout: 800 });
+
+    // Trigger another full-size incremental delta and hide Chat before the scheduled drain fires.
+    let incrementalDrainScheduled = false;
+    const beforeHide = state.detailCalls.length;
+    (w as any).api.getSession = (id: string, options?: any) => {
+      state.detailCalls.push({ id, options });
+      if (typeof options?.from === 'number' && !incrementalDrainScheduled) {
+        incrementalDrainScheduled = true;
+        chatVisible(false);
+        return Promise.resolve({ ok: true as const, data: { summary: state.a, events: fullBatch, total: 62, nextFrom: 161 } });
+      }
+      return Promise.resolve({ ok: true as const, data: { summary: state.a, events: [], total: 62, nextFrom: 161 } });
+    };
+    state.a = { ...state.a, updatedAt: 32_000, events: 62 };
+    state.changed({ sessionIds: [state.a.id] });
+    await vi.waitFor(() => expect(state.detailCalls.length).toBe(beforeHide + 1), { timeout: 400 });
+    await new Promise(resolve => setTimeout(resolve, 60));
+    expect(state.detailCalls.length).toBe(beforeHide + 1);
+  });
+
+  it('ignores an empty incremental delta without changing transcript content or scrollTop', async () => {
+    const { w, state } = await openSelected();
+    const pane = w.document.getElementById('chatBody')!;
+    Object.defineProperties(pane, {
+      clientHeight: { configurable: true, get: () => 400 },
+      scrollHeight: { configurable: true, get: () => 2000 }
+    });
+    pane.scrollTop = 1000;
+    (w as any).api.getSession = (id: string, options?: any) => {
+      state.detailCalls.push({ id, options });
+      return Promise.resolve({ ok: true as const, data: { summary: state.a, events: [], total: 1, nextFrom: 101 } });
+    };
+    const timelineBefore = w.document.getElementById('timeline')?.textContent;
+    state.a = { ...state.a, updatedAt: 31_000, events: 2 };
+    state.changed({ sessionIds: [state.a.id] });
+    await vi.waitFor(() => expect(state.detailCalls).toHaveLength(2), { timeout: 400 });
+    expect(state.detailCalls[1]?.options).toEqual({ from: 101, limit: 30 });
+    expect(pane.scrollTop).toBe(1000);
+    expect(w.document.getElementById('timeline')?.textContent).toBe(timelineBefore);
+  });
+  it('cancels a pending catalog catch-up timer when chat becomes hidden before 400 ms', async () => {
+    const { state, chatVisible } = await openSelected();
+    const listsBefore = state.lists;
+    const detailsBefore = state.detailCalls.length;
+    state.b = summary(state.b.id, 20_500, 2);
+    state.changed({ allTranscripts: false, sessionIds: [state.b.id] });
+    chatVisible(false);
+    await new Promise(resolve => setTimeout(resolve, 460));
+    expect(state.lists).toBe(listsBefore);
+    expect(state.detailCalls.length).toBe(detailsBefore);
+
+    chatVisible(true);
+    await vi.waitFor(() => expect(state.lists).toBe(listsBefore + 1), { timeout: 800 });
+  });
+
+  it('reads the selected chat exactly once on reopen after multiple pushes arrive while hidden', async () => {
+    const { w, state, chatVisible } = await openSelected();
+    let releaseHiddenList = (_value: any) => {};
+    let holdNextList = true;
+    (w as any).api.listSessions = () => {
+      state.lists += 1;
+      const sessions = state.listed ? [state.a, state.b] : [state.b];
+      const payload = { ok: true as const, data: { sessions, activeId: null, pressure: [], total: sessions.length, nextCursor: null, blocked: [] } };
+      if (!holdNextList) return Promise.resolve(payload);
+      holdNextList = false;
+      return new Promise(resolve => { releaseHiddenList = resolve; });
+    };
+
+    // Put A into its 100 ms active-detail cooldown so the next push stays queued when readSessions('changed') starts.
+    state.a = summary(state.a.id, 30_500, 2);
+    state.changed({ allTranscripts: false, sessionIds: [state.a.id] });
+    await vi.waitFor(() => expect(state.detailCalls).toHaveLength(2), { timeout: 400 });
+    const listsBeforeInFlight = state.lists;
+    await vi.waitFor(() => expect(state.lists).toBe(listsBeforeInFlight + 1), { timeout: 1000 });
+
+    // Hide while readSessions('changed') is awaiting listSessions, then resolve listSessions so line 1725 returns early while hidden.
+    const detailsBeforeHide = state.detailCalls.length;
+    chatVisible(false);
+    releaseHiddenList({
+      ok: true as const,
+      data: { sessions: [state.a, state.b], activeId: null, pressure: [], total: 2, nextCursor: null, blocked: [] }
+    });
+    await new Promise(resolve => setTimeout(resolve, 30));
+
+    // Deliver multiple additional pushes for the selected chat while the window is hidden.
+    state.a = summary(state.a.id, 31_000, 3);
+    state.changed({ allTranscripts: false, sessionIds: [state.a.id] });
+    state.a = summary(state.a.id, 32_000, 4);
+    state.changed({ allTranscripts: false, sessionIds: [state.a.id] });
+    state.a = summary(state.a.id, 33_000, 5);
+    state.changed({ allTranscripts: false, sessionIds: [state.a.id] });
+
+    const listsWhileHidden = state.lists;
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(state.lists).toBe(listsWhileHidden);
+    expect(state.detailCalls).toHaveLength(detailsBeforeHide);
+
+    chatVisible(true);
+    await vi.waitFor(() => expect(state.lists).toBe(listsWhileHidden + 1), { timeout: 800 });
+    await vi.waitFor(() => expect(state.detailCalls).toHaveLength(detailsBeforeHide + 1), { timeout: 800 });
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(state.lists).toBe(listsWhileHidden + 1);
+    expect(state.detailCalls).toHaveLength(detailsBeforeHide + 1);
+    expect(w.document.getElementById('timeline')?.textContent).toContain('A row 3');
+  });
+
+  it('coalesces a burst of writes to an unselected background chat into one 400 ms catalog read with zero getSession calls', async () => {
+    const { w, state } = await openSelected();
+    const listsBefore = state.lists;
+    const detailsBefore = state.detailCalls.length;
+
+    for (let i = 1; i <= 8; i += 1) {
+      state.b = summary(state.b.id, 20_000 + i * 100, 1 + i);
+      state.changed({ allTranscripts: false, sessionIds: [state.b.id] });
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(state.lists).toBe(listsBefore);
+    expect(state.detailCalls).toHaveLength(detailsBefore);
+
+    await vi.waitFor(() => expect(state.lists).toBe(listsBefore + 1), { timeout: 1000 });
+    await new Promise(resolve => setTimeout(resolve, 120));
+    expect(state.lists).toBe(listsBefore + 1);
+    expect(state.detailCalls).toHaveLength(detailsBefore);
+    expect(w.document.querySelector(`#sessionList [data-id="${state.b.id}"]`)).not.toBeNull();
+  });
+
+  it('fences catalog listTimer cleanup to its owner across hide and reopen', async () => {
+    const { w, state, chatVisible } = await openSelected();
+    let releaseStaleList = (_value: any) => {};
+    let holdNextList = false;
+    (w as any).api.listSessions = () => {
+      state.lists += 1;
+      const sessions = state.listed ? [state.a, state.b] : [state.b];
+      const payload = { ok: true as const, data: { sessions, activeId: null, pressure: [], total: sessions.length, nextCursor: null, blocked: [] } };
+      if (!holdNextList) return Promise.resolve(payload);
+      holdNextList = false;
+      return new Promise(resolve => { releaseStaleList = resolve; });
+    };
+
+    holdNextList = true;
+    state.b = summary(state.b.id, 20_600, 2);
+    state.changed({ allTranscripts: false, sessionIds: [state.b.id] });
+    const listsBeforeStale = state.lists;
+    await vi.waitFor(() => expect(state.lists).toBe(listsBeforeStale + 1), { timeout: 1200 });
+
+    // Hide while the stale catalog read is still pending, reopen, and schedule a fresh timer.
+    chatVisible(false);
+    chatVisible(true);
+    await vi.waitFor(() => expect(state.lists).toBe(listsBeforeStale + 2), { timeout: 800 });
+    const listsAfterReopen = state.lists;
+    state.b = summary(state.b.id, 20_700, 3);
+    state.changed({ allTranscripts: false, sessionIds: [state.b.id] });
+
+    // Completing the superseded stale read must not clear the newly scheduled timer's handle,
+    // so an immediate follow-up push still coalesces into that active 400 ms timer.
+    releaseStaleList({
+      ok: true as const,
+      data: { sessions: [state.a, state.b], activeId: null, pressure: [], total: 2, nextCursor: null, blocked: [] }
+    });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    state.b = summary(state.b.id, 20_800, 4);
+    state.changed({ allTranscripts: false, sessionIds: [state.b.id] });
+
+    await new Promise(resolve => setTimeout(resolve, 460));
+    expect(state.lists).toBe(listsAfterReopen + 1);
+  });
+});
+
+describe('recorder session change cooldown', () => {
+  it('uses a monotonic clock so cooldown delays do not stall on wall-clock steps back', async () => {
+    const changes: string[][] = [];
+    const drop = onSessionChange(change => changes.push([...(change.sessionIds ?? [])]));
+    vi.useFakeTimers();
+    try {
+      notifyChanged('sess-1');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(changes).toEqual([['sess-1']]);
+
+      // Step the wall clock backward while sending a burst inside the 180 ms cooldown: all writes coalesce to one push.
+      vi.setSystemTime(Date.now() - 60_000);
+      for (let i = 0; i < 5; i += 1) notifyChanged('sess-2');
+      await vi.advanceTimersByTimeAsync(179);
+      expect(changes).toEqual([['sess-1']]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(changes).toEqual([['sess-1'], ['sess-2']]);
+    } finally {
+      drop();
+      resetRecorderForTests();
+      vi.useRealTimers();
+    }
+  });
 });
 
 it('serves repeated Usage metadata from the shared index without disk rereads', async () => {
@@ -681,4 +1108,90 @@ it('omits exact helper origins before pagination while retaining ordinary lookal
     expect(await getSession(helper.id)).toMatchObject({ conversationId: 'owned-helper', origin: { kind: 'helper' } });
     expect((await listUsageSessions()).map(row => row.id)).toContain(helper.id);
   }
+});
+
+it('discards pending in-memory notification and detail timers on simulated restart while rendering persisted transcript from disk', async () => {
+  const session = await createSession({ title: 'Restart recovery chat', conversationId: 'conv-restart' });
+  await appendEvent(session.id, { time: 1_000, source: 'app', kind: 'note', message: { text: 'Initial persisted message', truncated: false, chars: 25 } });
+  await flushSessions();
+
+  const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
+  const mount = async (readEventsList: string[]) => {
+    dom?.window.close();
+    dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
+    const w = dom.window;
+    Object.assign(globalThis, {
+      window: w, document: w.document, HTMLElement: w.HTMLElement, Element: w.Element, Node: w.Node,
+      DocumentFragment: w.DocumentFragment, HTMLInputElement: w.HTMLInputElement, HTMLSelectElement: w.HTMLSelectElement,
+      HTMLTextAreaElement: w.HTMLTextAreaElement, HTMLButtonElement: w.HTMLButtonElement
+    });
+    if (!(w.HTMLElement.prototype as any).scrollIntoView) (w.HTMLElement.prototype as any).scrollIntoView = () => {};
+    let listener: ((change?: unknown) => void) | null = null;
+    const ok = (data: any) => Promise.resolve({ ok: true as const, data });
+    const api: any = new Proxy({
+      listSessions: async (options?: any) => {
+        const page = await listSessionPage(options);
+        return ok({ ...page, activeId: null, pressure: [], blocked: [], approval: [], recoveryStopped: [], trusted: [] });
+      },
+      getSession: async (id: string, options?: any) => {
+        readEventsList.push(id);
+        const found = await getSession(id);
+        if (!found) return { ok: false as const, error: 'Session not found' };
+        const fullEvents = await readEvents(id, options);
+        const lastSeq = fullEvents.at(-1)?.seq ?? -1;
+        return ok({
+          summary: found,
+          events: fullEvents,
+          total: found.events,
+          nextFrom: lastSeq + 1
+        });
+      },
+      getSessionControls: () => ok({ plan: null, userRequests: [] }),
+      turnTraces: () => ok({}),
+      getSwarm: () => ok({ running: false, runId: null, agents: [], maxWorkers: 2, pendingReports: 0 }),
+      onSessionChanged: (next: (change?: unknown) => void) => { listener = next; return () => { listener = null; }; },
+      onSwarmChanged: () => () => undefined
+    }, { get(target, prop) { return prop in target ? (target as any)[prop] : (..._args: any[]) => ok(null); } });
+    Object.defineProperty(w, 'api', { value: api, configurable: true });
+    const mod = await import('../src/renderer/chat.js');
+    mod.initChat({ save: async () => true, state: () => ({ config: { sessions: { record: true, limitTokens: 533000 }, compaction: { auto: true, autoTokens: 400000 }, ui: { developerMode: true } } }) as any });
+    mod.chatVisible(true);
+    await vi.waitFor(() => expect(w.document.querySelector(`#sessionList [data-id="${session.id}"]`)).not.toBeNull(), { timeout: 1200 });
+    (w.document.querySelector(`#sessionList [data-id="${session.id}"]`) as HTMLElement).click();
+    return { w, mod, emit: (change?: unknown) => listener?.(change) };
+  };
+
+  const oldReads: string[] = [];
+  const first = await mount(oldReads);
+  await vi.waitFor(() => expect(first.w.document.getElementById('timeline')?.textContent).toContain('Initial persisted message'), { timeout: 1200 });
+  const readsBeforeHide = oldReads.length;
+
+  const staleDeliveries: unknown[] = [];
+  const dropOldSub = onSessionChange(change => staleDeliveries.push(change));
+  notifyChanged(session.id);
+  await vi.waitFor(() => expect(staleDeliveries).toHaveLength(1), { timeout: 400 });
+  staleDeliveries.length = 0;
+
+  notifyChanged(session.id); // Pending 180 ms recorder cooldown timer
+  first.emit({ allTranscripts: false, sessionIds: [session.id] }); // Pending 400 ms listTimer + detail refresh
+  first.mod.chatVisible(false);
+
+  // Append a new persisted event before simulated process restart.
+  await appendEvent(session.id, { time: 2_000, source: 'app', kind: 'note', message: { text: 'Persisted after crash', truncated: false, chars: 21 } });
+  await endSession(session.id);
+
+  // Simulate process restart: reset recorder/store timers and reload renderer module cleanly.
+  dropOldSub();
+  resetRecorderForTests();
+  resetSessionStoreForTests();
+  vi.resetModules();
+
+  await new Promise(resolve => setTimeout(resolve, 250));
+  expect(oldReads.length).toBe(readsBeforeHide);
+  expect(staleDeliveries).toHaveLength(0);
+
+  const newReads: string[] = [];
+  const restarted = await mount(newReads);
+  await vi.waitFor(() => expect(restarted.w.document.getElementById('timeline')?.textContent).toContain('Persisted after crash'), { timeout: 1200 });
+  expect(newReads.length).toBeGreaterThanOrEqual(1);
 });
