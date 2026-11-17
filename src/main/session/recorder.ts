@@ -2884,14 +2884,16 @@ async function recordChatObservationsNow(
         const workingActivity = written.contentChanged && !lateNoteOfEndedTurn && state !== 'final' && item.activeNow === true &&
           (!canonicalTurn || sameLiveTurn || resumedUncertainTurn) &&
           !(live?.turnStartedAt === null && (live.lastTurnOutcome === 'stopped' || live.lastTurnOutcome === 'completed'));
+        const rejectedRetracted = written.event.kind === 'assistant_message' && written.event.retracted === true;
         const finishingTurn = canonicalTurn && sameLiveTurn ? activeLiveTurn : null;
-        if (state === 'final' && written.event.kind === 'assistant_message' && finishingTurn && recoverableTurns.has(finishingTurn) &&
+        if (!rejectedRetracted && state === 'final' && written.event.kind === 'assistant_message' && finishingTurn && recoverableTurns.has(finishingTurn) &&
             !explicitEnds.has(finishingTurn)) {
           recoveredFinal = { turnId: finishingTurn, time: item.time,
             seq: written.event.finalContentSeq ?? written.event.origin ?? written.event.seq,
             origin: written.event.origin ?? written.event.seq, native: Boolean(written.event.providerMessageId) };
         }
         if (
+          !rejectedRetracted &&
           written.event.kind === 'assistant_message' &&
           written.event.goalEligible === true &&
           state === 'final' &&
@@ -2903,7 +2905,7 @@ async function recordChatObservationsNow(
             eventSeq: written.event.origin ?? written.event.seq
           });
         }
-        if (recoveredGoalEligible && live) {
+        if (!rejectedRetracted && recoveredGoalEligible && live) {
           // This is an in-memory verdict for later call/reload decisions, not a fabricated
           // turn_end. The canonical message keeps goalEligible monotonically, so an HTTP 503
           // can still replay the same obligation even after this stronger final evidence wins.

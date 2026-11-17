@@ -244,4 +244,23 @@ it('rejects delayed positive observations older than the retraction watermark an
     { kind: 'turn_messages', time: 210, turnId: 'turn-1', messageIds: ['restart-draft'], docId: 'doc-2', docSeq: 2, settled: true } as never
   ]);
   expect((await readEvents(sessionId, { kinds: ['assistant_message'] })).map(e => e.kind === 'assistant_message' ? e.messageId : null)).toEqual(['restart-draft']);
+
+  // A rejected stale final observation for a retracted draft must not flip an uncertain turn to completed.
+  const uncertainConv = 'conv-retract-stale-final';
+  const uncertainOpened = await recordChatObservations(uncertainConv, [
+    { kind: 'turn_start', time: 100, turnId: 'turn-u' },
+    { kind: 'assistant_message', time: 110, turnId: 'turn-u', messageId: 'stale-final-draft', docId: 'doc-1', docSeq: 5, text: 'Draft v5', state: 'streaming', activeNow: true } as never,
+    { kind: 'turn_messages', time: 120, turnId: 'turn-u', messageIds: [], docId: 'doc-1', docSeq: 6 } as never,
+    { kind: 'turn_end', time: 130, turnId: 'turn-u', outcome: 'failed' }
+  ]);
+  await recordChatObservations(uncertainConv, [
+    { kind: 'assistant_message', time: 140, messageId: 'stale-final-draft', docId: 'doc-1', docSeq: 4, text: 'Stale final v4', state: 'final', final: true, activeNow: true } as never
+  ]);
+  const summaryAfterRejectedFinal = await getSession(uncertainOpened.sessionId!);
+  expect(summaryAfterRejectedFinal?.lastTurnOutcome).toBe('failed');
+  expect((await readEvents(uncertainOpened.sessionId!, { kinds: ['turn_end'] })).at(-1)).toMatchObject({ kind: 'turn_end', outcome: 'failed' });
+  const followAfterRejectedFinal = await recordChatObservations(uncertainConv, [
+    { kind: 'assistant_message', time: 150, messageId: 'follow-after-fail', docId: 'doc-1', docSeq: 8, text: 'Continuing turn', state: 'streaming', activeNow: true } as never
+  ]);
+  expect(followAfterRejectedFinal.activity.working).toBe(true);
 });
