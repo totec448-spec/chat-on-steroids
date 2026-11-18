@@ -690,6 +690,8 @@
    * or the Stop control genuinely going away.
    */
   let fiberTerminalMessageId = null;
+  // Native call identities from the last scan that could still bind the live section.
+  let liveFiberClosingProof = null;
   /*
    * #746: native finals that were already settled before the current generation began. ChatGPT
    * can briefly hand a new answer's section the previous turn's React branch; its `end_turn`
@@ -2048,6 +2050,7 @@
     pendingPresentation = null;
     userAnchorByMessage.clear();
     openedUserMessageId = null;
+    liveFiberClosingProof = null;
     questionsAtGenerationOpen.clear();
     streamEntries = [];
     streamRequestTurnOwners.clear();
@@ -2802,6 +2805,7 @@
     // other named turn by accident. Modern generations always mint/adopt an id; this is the
     // fail-closed guard for stale/legacy/reinjected state.
     const endedTurnId = turnId;
+    liveFiberClosingProof = null;
     streamGone = null;
     resumedOrder = 0;
     generating = false;
@@ -4731,6 +4735,7 @@
     // emitted that exact final with no owner. Capture the node + durable id before the await.
     // If the lifecycle moves meanwhile, localGenerationOf() below accepts the claim only while
     // finishGeneration's exact node/signature tombstone still proves the old ownership.
+    const requestedTurnId = !settled && generating ? turnId : null;
     const requestedLiveOwner = !settled ? currentGenerationOwner() : null;
     const requestedOwner = settled || requestedLiveOwner;
     let answer = await askFiber();
@@ -4779,7 +4784,8 @@
       : requestedOwner;
     const ownedPageNode = exactOwner?.pageTurn || null;
     const ownedPageTurnId = exactOwner?.pageTurnId || null;
-    let ownedPageTurn = stampedFiberTurn(ownedPageNode, answer.turns, answer.scanToken);
+    const stampedPageTurn = stampedFiberTurn(ownedPageNode, answer.turns, answer.scanToken);
+    let ownedPageTurn = stampedPageTurn;
     if (!ownedPageTurn && ownedPageTurnId &&
         CLF_DOM.turns().filter(turn => turn.id === ownedPageTurnId).length === 1) {
       // A page id is only a hint when it is unique on both sides of this scan.
@@ -5104,11 +5110,33 @@
     for (const [turn, owner] of settledOwners) {
       if ((ownerClaims.get(owner) || 0) > 1) settledOwners.delete(turn);
     }
+    const activeClosingTurn = activeTurnIndex >= 0 && activeLocalTurnId === turnId
+      ? answer.turns[activeTurnIndex]
+      : null;
+    const sameLiveGeneration = generating && requestedTurnId && requestedTurnId === turnId;
+    if (sameLiveGeneration && requestedLiveOwner && activeClosingTurn && activeClosingTurn === stampedPageTurn &&
+        !activeClosingTurn.endMessageId && activeClosingTurn.conversationConflict !== true) {
+      const calls = new Map(activeClosingTurn.calls.filter(call => call.requestId).map(call => [call.messageId, call.requestId]));
+      if (calls.size) liveFiberClosingProof = { turnId, calls };
+    }
+    // A remounted section can lose its DOM binding. A unique settled request owner then
+    // needs a native call message we saw on the live section, since retries can reuse request ids.
+    const closingCalls = sameLiveGeneration && liveFiberClosingProof?.turnId === turnId
+      ? liveFiberClosingProof.calls : null;
+    const settledClosingMatches = !activeClosingTurn && closingCalls
+      ? [...settledOwners.entries()]
+          .filter(([candidate, owner]) => owner === turnId && candidate.endMessageId && candidate.conversationConflict !== true &&
+            candidate.calls.some(call => call.requestId && closingCalls.get(call.messageId) === call.requestId))
+          .map(([candidate]) => candidate)
+      : [];
+    const settledClosingTurn = settledClosingMatches.length === 1 ? settledClosingMatches[0] : null;
     for (let index = 0; index < answer.turns.length; index++) {
       const turn = answer.turns[index];
-      // The live generation owns the turn it is writing; a settled one is claimed only by
-      // ChatGPT's own request id. See settledTurnOwner().
-      const localOwner = index === activeTurnIndex ? activeLocalTurnId : settledOwners.get(turn) || null;
+      const settledOwner = settledOwners.get(turn);
+      // The recorder can also recover a turn's end from an owned final. Keep an unproven
+      // final in history so it cannot complete the live generation through the recorder.
+      const unprovenLiveFinal = generating && turn.endMessageId && settledOwner === turnId && turn !== settledClosingTurn;
+      const localOwner = index === activeTurnIndex ? activeLocalTurnId : unprovenLiveFinal ? null : settledOwner || null;
       // An adopted document's first complete view is a history baseline. Seeing
       // already-written rows after reload is not newly authored work. Subsequent
       // changes use this same retained Fiber snapshot; a witnessed local Send
@@ -5287,9 +5315,9 @@
         if (priorMessage?.signature === signature) continue;
         messagesReported.set(message.messageId, { signature, owner, conflicted: ownerConflict, text: message.rawText });
         if (state === 'streaming' && owner && priorMessage?.text !== message.rawText && freshPublication) noteTurnProgress(owner, 'page-text');
-        const liveAssistant =
+        const liveAssistant = !unprovenLiveFinal && (
           Boolean(localOwner) ||
-          (generating && (index === activeTurnIndex || (activeTurnIndex < 0 && index === answer.turns.length - 1)));
+          (generating && (index === activeTurnIndex || (activeTurnIndex < 0 && index === answer.turns.length - 1))));
         emit({
           kind: 'assistant_message',
           messageId: message.messageId,
@@ -5351,19 +5379,6 @@
     for (const bounded of [knownFinals, settledFinals]) {
       while (bounded.size > 2000) bounded.delete(bounded.values().next().value);
     }
-    // When ChatGPT remounts or virtualizes the live section so `generationTurn()` returns null
-    // (`activeTurnIndex === -1`), `settledOwners` still proves unique ownership of the completed
-    // Fiber turn via MCP `request_id`; close the local generation on that proven `endMessageId`
-    // so `generating` does not remain stuck and block queued prompts in `turn-held`.
-    const activeClosingTurn = activeTurnIndex >= 0 && activeLocalTurnId === turnId
-      ? answer.turns[activeTurnIndex]
-      : null;
-    const settledClosingMatches = !activeClosingTurn && turnId
-      ? [...settledOwners.entries()]
-          .filter(([candidate, owner]) => owner === turnId && Boolean(candidate?.endMessageId) && candidate.conversationConflict !== true)
-          .map(([candidate]) => candidate)
-      : [];
-    const settledClosingTurn = settledClosingMatches.length === 1 ? settledClosingMatches[0] : null;
     const closingTurn = activeClosingTurn || settledClosingTurn;
     if (
       generating &&
@@ -5375,7 +5390,7 @@
     ) {
       const ended = activeClosingTurn
         ? generationTurn()
-        : (CLF_DOM.turns().find(nodeTurn => fiberTurnFor(nodeTurn) === closingTurn) || generationTurn());
+        : CLF_DOM.turns().find(nodeTurn => fiberTurnFor(nodeTurn) === closingTurn) || null;
       if (ended || settledClosingTurn) {
         fiberTerminalMessageId = closingTurn.endMessageId;
         settledFinals.add(fiberTerminalMessageId);

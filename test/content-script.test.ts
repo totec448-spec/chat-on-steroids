@@ -3128,6 +3128,48 @@ describe('desktop input delivery and helper ownership', () => {
     expect(live!.sent.filter(message => message.type === 'page_note' && message.note === 'input-held')).toEqual([]);
   });
 
+  it('keeps the live turn open when a historical final above its question reuses its request id', async () => {
+    const requestId = 'req-reused-across-remount-attempts';
+    const { oldSection, activeTurnId } = await openRemountedToolTurn(requestId, 'current-attempt');
+    const document = live!.document;
+    const historicalSection = assistantTurn(document, 'historical-attempt', []);
+    oldSection.previousElementSibling!.before(historicalSection);
+    oldSection.remove();
+
+    await bindFiberTurns([{
+      section: historicalSection,
+      turn: {
+        turnId: 'historical-attempt',
+        endMessageId: 'previously-unseen-final',
+        calls: [{ messageId: 'historical-call', tool: 'read', order: 0, answered: true, requestId }],
+        messages: [{ role: 'assistant', messageId: 'previously-unseen-final', rawMessageId: 'previously-unseen-final', rawText: 'An older answer.' }]
+      }
+    }], true);
+    await live!.hook.flush();
+    expect(document.querySelector('[data-testid="stop-button"]')).not.toBeNull();
+    expect(emitted(live!.sent, 'turn_end')).toEqual([]);
+    const historicalFinal = emitted(live!.sent, 'assistant_message')
+      .find(entry => entry.event.messageId === 'previously-unseen-final')?.event;
+    expect(historicalFinal).toMatchObject({ final: true });
+    expect(historicalFinal?.turnId).toBeUndefined();
+    expect(historicalFinal?.activeNow).toBeUndefined();
+
+    stopGenerating(document);
+    await bindFiberTurns([{
+      section: document.createElement('section'),
+      turn: {
+        turnId: 'remounted-current-attempt',
+        endMessageId: 'current-attempt-final',
+        calls: [{ messageId: 'call-1', tool: 'read', order: 0, answered: true, requestId }],
+        messages: [{ role: 'assistant', messageId: 'current-attempt-final', rawMessageId: 'current-attempt-final', rawText: 'The current answer.' }]
+      }
+    }], true);
+    await live!.hook.flush();
+    expect(emitted(live!.sent, 'turn_end').map(entry => entry.event)).toEqual([
+      expect.objectContaining({ turnId: activeTurnId, outcome: 'completed' })
+    ]);
+  });
+
   it('does not close a remounted turn via settledOwners when an approval card is waiting', async () => {
     const requestId = 'req-remount-approval-hold';
     const { oldSection } = await openRemountedToolTurn(requestId, 'turn-dom-approval');
