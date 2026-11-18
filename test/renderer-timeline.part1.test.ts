@@ -1554,6 +1554,30 @@ it.each(['chat-a', undefined] as const)('scopes later-question echo check on mul
   expect(ids).toEqual(laterConversation === 'chat-a' ? [] : ['pending-rotated']);
 });
 
+it('ignores a revision of an older question when choosing the latest echo', async () => {
+  const { w, live, append } = await boot([
+    { seq: 3, origin: 1, time: T0 - 10, source: 'extension', kind: 'user_message', messageId: 'older-revised', conversationId: 'chat-b', message: text('Older question') },
+    { seq: 2, origin: 2, time: T0 + 1, source: 'extension', kind: 'user_message', messageId: 'newer-echo', conversationId: 'chat-b', message: text('New follow-up') }
+  ], true, [], [], { summary: { conversationId: 'chat-b', chatIds: ['chat-b'] } });
+  live.inputs.push({ id: 'pending-origin', sessionId: summary([]).id, state: 'browser', owner: 'page',
+    text: 'New follow-up', mode: 'auto', model: null, reasoningEffort: null, dueAt: T0, createdAt: T0, conversationId: 'chat-b' });
+  await append([]);
+  expect([...w.document.querySelectorAll<HTMLElement>('#inputQueue .pending-message')]).toHaveLength(0);
+});
+
+it('checks unfiltered paintedDetailEvents for later questions when an agent filter hides them', async () => {
+  const { w, live, append } = await boot([
+    { seq: 1, time: T0 + 1, source: 'extension', kind: 'user_message', agent: 'prime', messageId: 'prime-old', conversationId: 'chat-b', message: text('Filtered prompt') },
+    { seq: 2, time: T0 + 2, source: 'extension', kind: 'user_message', messageId: 'later-unattributed', message: text('Unattributed newer question') }
+  ], true, [], [], { developerMode: true, summary: { conversationId: 'chat-b', chatIds: ['chat-b'] } });
+  w.document.querySelector<HTMLButtonElement>('#chatAgentFilter [data-agent="prime"]')!.click();
+  await settle();
+  live.inputs.push({ id: 'filtered-pending', sessionId: summary([]).id, state: 'browser', owner: 'page',
+    text: 'Filtered prompt', mode: 'auto', model: null, reasoningEffort: null, dueAt: T0, createdAt: T0, conversationId: 'chat-b' });
+  await append([]);
+  expect([...w.document.querySelectorAll<HTMLElement>('#inputQueue .pending-message')].map(n => n.dataset.inputId)).toEqual(['filtered-pending']);
+});
+
 it('keeps echo exclusivity, cross-chat and history-page cache isolation, and Cancel delivery binding across races', async () => {
   const firstSession = { ...summary([]), id: '2026-09-30-aaaaaaaa', title: 'Session A', conversationId: 'chat-a', chatIds: ['chat-a'] };
   const secondSession = { ...summary([]), id: '2026-09-30-bbbbbbbb', title: 'Session B', conversationId: 'chat-b', chatIds: ['chat-b'] };
