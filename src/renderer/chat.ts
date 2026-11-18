@@ -3936,6 +3936,7 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
     if (prepend || newerFrom !== undefined) roundsEnter = false;
     // Only live growth follows to the bottom; an empty or off-window incremental check must not pull a scrolled pane down.
     paintDetail(!prepend && newerFrom === undefined && historyBefore === null && (!incremental || deltaChanged));
+    if (incremental && deltaChanged && detail.events.some(event => event.kind === 'user_message')) void refreshInputQueue();
     if (!prepend && newerFrom === undefined && !(incremental && detail.events.length === TIMELINE_BATCH_SIZE)) {
       detailSatisfiedPushSeq = Math.max(detailSatisfiedPushSeq, capturedPushSeq);
     }
@@ -9222,9 +9223,34 @@ function paintPendingInputs(): void {
   const unbound = (entry: InputEntry) => selectedId === null && pendingNewInput?.id === entry.id && pendingNewInput.generation === selectionGeneration && !entry.deliveredSessionId && entry.purpose !== 'decision' && ['queued', 'browser'].includes(entry.state);
   const notice = (entry: InputEntry) => belongsToSelection(entry) && entry.purpose !== 'decision' && entry.purpose !== 'rotation' &&
     ['failed', 'cancelled'].includes(entry.state) && !!entry.error && !dismissedInputNotices.has(entry.id);
+  const norm = (value: string) => value.replace(/\s+/g, ' ').trim();
+  const pageEchoAnchored = (entry: InputEntry): boolean => {
+    const immediate = entry.state === 'browser' ||
+      (entry.state === 'queued' && !entry.error && !entry.scheduled && !entry.sendCheck && entry.dueAt <= Date.now());
+    if (!immediate || queuedFollowup(entry) || entry.messageId) return false;
+    const authored = norm(authoredTextOf(entry));
+    const companion = entry.companionInputId ? all.find(other => other.id === entry.companionInputId) : undefined;
+    const combined = companion ? norm(`${authoredTextOf(entry)}\n\nNext queued instruction:\n${companion.text}`) : '';
+    const delivered = entry.deliveryText ? norm(entry.deliveryText) : '';
+    const candidates = [authored, combined, delivered].filter(Boolean);
+    if (!candidates.length) return false;
+    const settledBefore = entry.sendAuthorizedAt ?? entry.offeredAt ?? entry.createdAt;
+    return events.some(event => {
+      if (event.kind !== 'user_message' || event.source !== 'extension' || event.inputId || !event.messageId ||
+          event.messageId.startsWith('input:') || event.time < entry.createdAt) return false;
+      if (entry.edit && event.messageId === entry.edit.messageId) return false;
+      if (all.some(other => other.messageId === event.messageId)) return false;
+      if (events.some(later => later.seq > event.seq &&
+          (later.kind === 'user_message' || (later.kind === 'turn_end' && later.time <= settledBefore)))) return false;
+      const shown = norm(event.authoredText ?? userPromptText(event.message.text.trimStart()) ?? event.message.text);
+      const raw = norm(event.message.text);
+      return candidates.includes(shown) || candidates.includes(raw);
+    });
+  };
   const anchored = (entry: InputEntry) => detailFor === selectedId && (events.some(event =>
     event.kind === 'user_message' && (event.inputId === entry.id ||
       event.messageId === (entry.messageId ?? `input:${entry.id}`))) ||
+    pageEchoAnchored(entry) ||
     // History owns committed off-page rows. Keep only receipts newer than our
     // loaded publication cursor while the corresponding live snapshot arrives.
     ((entry.historyAnchored || entry.historyRecorded) &&
@@ -9234,7 +9260,7 @@ function paintPendingInputs(): void {
   const rows = all.filter((entry) => !dismissedInputNotices.has(entry.id) && !(!notice(entry) && anchored(entry)) && !(queuedFollowup(entry) && ['queued', 'tool', 'browser'].includes(entry.state)) && (belongsToSelection(entry) || unbound(entry) || notice(entry)) &&
     (notice(entry) || unbound(entry) || selectedId !== null || projectGroup(entry.projectId) === selectedProjectId) &&
     (notice(entry) || !['sent', 'cancelled'].includes(entry.state) || (entry.state === 'sent' && entry.messageId && !anchored(entry))));
-  for (const entry of startingInputs.values()) if (belongsToSelection(entry) && !all.some(row => row.id === entry.id)) rows.push(entry);
+  for (const entry of startingInputs.values()) if (belongsToSelection(entry) && !anchored(entry) && !all.some(row => row.id === entry.id)) rows.push(entry);
   const host = $('inputQueue');
   // A row whose status changed is rebuilt; a control of it that had keyboard focus keeps it (CodeRabbit on #2054).
   const active = document.activeElement instanceof HTMLElement && host.contains(document.activeElement) ? document.activeElement : null;
