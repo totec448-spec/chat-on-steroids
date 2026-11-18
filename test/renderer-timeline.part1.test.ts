@@ -1523,14 +1523,19 @@ it('never hides unauthorized browser claims, multi-conversation resumed sessions
   ]);
 });
 
-it('never matches an unattributed echo across conversations on a resumed multi-chat session', async () => {
+it('never matches an unattributed or cross-conversation echo on a multi-chat session, but anchors same-conversation echoes on rotated chats', async () => {
   const { w, live, append } = await boot([
-    { seq: 1, time: T0 + 1, source: 'extension', kind: 'user_message', messageId: 'old-tab-echo', message: text('Resumed chat prompt') }
-  ], true, [], [], { summary: { chatIds: ['chat-a', 'chat-b'] } });
+    { seq: 1, time: T0 + 1, source: 'extension', kind: 'user_message', messageId: 'unattributed-echo', message: text('Resumed chat prompt') },
+    { seq: 2, time: T0 + 2, source: 'extension', kind: 'user_message', messageId: 'old-tab-echo', conversationId: 'chat-a', message: text('Resumed chat prompt') }
+  ], true, [], [], { summary: { conversationId: 'chat-b', chatIds: ['chat-a', 'chat-b'] } });
   live.inputs.push({ id: 'resumed-pending', sessionId: summary([]).id, state: 'browser', owner: 'page',
     text: 'Resumed chat prompt', mode: 'auto', model: null, reasoningEffort: null, dueAt: T0, createdAt: T0, conversationId: 'chat-b' });
   await append([]);
   expect([...w.document.querySelectorAll<HTMLElement>('#inputQueue .pending-message')].map(n => n.dataset.inputId)).toEqual(['resumed-pending']);
+
+  // Rotated/compacted session (`chatIds.length > 1`): once the active conversation emits its own attributed echo, it anchors cleanly.
+  await append([{ seq: 3, time: T0 + 3, source: 'extension', kind: 'user_message', messageId: 'active-tab-echo', conversationId: 'chat-b', message: text('Resumed chat prompt') }]);
+  expect([...w.document.querySelectorAll<HTMLElement>('#inputQueue .pending-message')]).toHaveLength(0);
 });
 
 it('keeps echo exclusivity, cross-chat and history-page cache isolation, and Cancel delivery binding across races', async () => {
