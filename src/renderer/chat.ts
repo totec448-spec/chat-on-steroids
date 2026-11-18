@@ -9278,7 +9278,7 @@ function pageEchoAnchored(entry: InputEntry, all: readonly InputEntry[]): boolea
   if (priorEvent) return true;
   const sameConversationLaterUser = (event: SessionEvent, later: SessionEvent) =>
     positionOf(later) > positionOf(event) && later.kind === 'user_message' &&
-    !later.messageId?.startsWith('input:') &&
+    !(later.messageId?.startsWith('input:') && later.time < event.time) &&
     (!entry.conversationId || !later.conversationId || later.conversationId === entry.conversationId);
   const match = paintedTimelineEvents.find((event): event is Extract<SessionEvent, { kind: 'user_message' }> =>
     echoMatchesEntry(event) && !paintedDetailEvents.some(later => sameConversationLaterUser(event, later)));
