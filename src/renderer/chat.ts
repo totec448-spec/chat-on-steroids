@@ -9273,8 +9273,11 @@ function pageEchoAnchored(entry: InputEntry, all: readonly InputEntry[]): boolea
         echoMatchesEntry(event) && event.messageId === priorMatch.messageId)
     : undefined;
   if (priorEvent) return true;
+  const sameConversationLaterUser = (event: SessionEvent, later: SessionEvent) =>
+    later.seq > event.seq && later.kind === 'user_message' &&
+    (!entry.conversationId || !later.conversationId || later.conversationId === entry.conversationId);
   const match = paintedTimelineEvents.find((event): event is Extract<SessionEvent, { kind: 'user_message' }> =>
-    echoMatchesEntry(event) && !paintedTimelineEvents.some(later => later.seq > event.seq && later.kind === 'user_message'));
+    echoMatchesEntry(event) && !paintedTimelineEvents.some(later => sameConversationLaterUser(event, later)));
   if (match?.messageId) {
     pageEchoMatches.set(entry.id, { sessionId: selectedId, messageId: match.messageId });
     return true;
