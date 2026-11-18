@@ -1306,7 +1306,7 @@ it.each([false, true])('hands a delivered bubble to exact native history without
 });
 
 it('hands a delivered bubble, Cancel control, and focus to an early page echo without duplicating before or after /input/ack arrives', async () => {
-  const { w, live, append } = await boot([]);
+  const { w, live, append } = await boot([], true, [], [], { summary: { chatIds: ['chat-b'] } });
   (w as any).api.getSessionControls = (id: string) => Promise.resolve({
     ok: true as const,
     data: { sessionId: id, conversationId: 'chat-b', automation: 'off', activeTurnId: null, finishHeld: false, blocked: '', job: null }
@@ -1345,15 +1345,17 @@ it('hands a delivered bubble, Cancel control, and focus to an early page echo wi
   expect(w.document.querySelector('#timeline .said.is-user [aria-label="Delivery confirmed"]')).not.toBeNull();
 });
 
-it('keeps an image pending bubble visible until an echo carries attachments or /input/ack arrives', async () => {
-  const { w, live, append } = await boot([]);
+it.each(['images', 'attachments'] as const)('keeps media pending bubble visible (%s) until an echo carries attachments or /input/ack arrives', async kind => {
+  const { w, live, append } = await boot([], true, [], [], { summary: { chatIds: ['chat-b'] } });
   const row: InputEntry = {
-    id: 'delivery-image',
+    id: `delivery-${kind}`,
     sessionId: summary([]).id,
     state: 'browser',
     owner: 'page',
-    text: 'Look at this screenshot',
-    images: [{ name: 'shot.png', dataUrl: 'data:image/png;base64,AA==' }],
+    text: `Look at this ${kind}`,
+    ...(kind === 'images'
+      ? { images: [{ name: 'shot.png', dataUrl: 'data:image/png;base64,AA==' }] }
+      : { attachments: [{ id: 'doc-1', name: 'spec.pdf', mimeType: 'application/pdf', size: 120 }] }),
     mode: 'auto',
     model: null,
     reasoningEffort: null,
@@ -1363,26 +1365,34 @@ it('keeps an image pending bubble visible until an echo carries attachments or /
   };
   live.inputs.push(row);
   await append([]);
-  expect(w.document.querySelector('#inputQueue .pending-message img')).not.toBeNull();
+  expect(w.document.querySelector(kind === 'images' ? '#inputQueue .pending-message img' : '#inputQueue .pending-message .message-attachments')).not.toBeNull();
 
-  // Early echo without attachments/assets must keep the pending image preview visible.
+  // Early echo without attachments/assets must keep the pending media card visible.
   const echo: SessionEvent = { seq: 1, time: T0 + 1, source: 'extension', kind: 'user_message',
-    messageId: 'native-img-1', message: text(row.text) };
+    messageId: `native-${kind}-1`, message: text(row.text) };
   await append([echo]);
   expect(w.document.querySelector('#inputQueue .pending-message')).not.toBeNull();
 
-  // Once an echo revision includes attachment metadata, the pending preview can retire cleanly.
-  await append([{ ...echo, seq: 2, attachments: [{ id: 'att-1', name: 'shot.png', mimeType: 'image/png', size: 2 }] }]);
+  // Once an echo revision includes attachment metadata, the pending card retires cleanly.
+  await append([{ ...echo, seq: 2, attachments: [{ id: 'att-1', name: kind === 'images' ? 'shot.png' : 'spec.pdf', mimeType: kind === 'images' ? 'image/png' : 'application/pdf', size: 2 }] }]);
   expect(w.document.querySelector('#inputQueue .pending-message')).toBeNull();
   expect(w.document.querySelector('#timeline .said.is-user .message-attachments')).not.toBeNull();
 });
 
-it('syncs a delivered bubble and delivery controls on the fast active-detail path before the 400 ms catalog refresh', async () => {
-  const { w, live, append, notifySession } = await boot([]);
+it('syncs a delivered bubble and delivery controls only after the replacement bubble mounts on the fast active-detail path', async () => {
+  const { w, live, append, notifySession } = await boot([], true, [], [], { summary: { chatIds: ['chat-b'] } });
   (w as any).api.getSessionControls = (id: string) => Promise.resolve({
     ok: true as const,
     data: { sessionId: id, conversationId: 'chat-b', automation: 'off', activeTurnId: null, finishHeld: false, blocked: '', job: null }
   });
+  let releaseTraces: (() => void) | null = null;
+  let holdTraces = false;
+  (w as any).api.turnTraces = () => {
+    if (!holdTraces) return Promise.resolve({ ok: true as const, data: {} });
+    holdTraces = false;
+    return new Promise(resolve => { releaseTraces = () => resolve({ ok: true as const, data: {} }); });
+  };
+
   const row: InputEntry = { id: 'delivery-fast', sessionId: summary([]).id, state: 'browser', owner: 'page', text: 'Fast path sync',
     mode: 'auto', model: null, reasoningEffort: null, dueAt: T0, createdAt: T0, conversationId: 'chat-b' };
   live.inputs.push(row);
@@ -1390,7 +1400,7 @@ it('syncs a delivered bubble and delivery controls on the fast active-detail pat
   expect(w.document.querySelector('#inputQueue .pending-message')).not.toBeNull();
   expect(w.document.getElementById('chatSend')!.getAttribute('aria-label')).toBe('Cancel delivery');
 
-  // Hold the slower 400 ms catalog listSessions() refresh so only loadDetail()'s fast path can drive updates.
+  // Keep the 400 ms catalog listSessions() refresh held so only loadDetail()'s fast path drives updates.
   let releaseList!: () => void;
   const listCalls = { sessions: 0, inputs: 0 };
   const origListSessions = (w as any).api.listSessions;
@@ -1406,11 +1416,18 @@ it('syncs a delivered bubble and delivery controls on the fast active-detail pat
     return origListInputs(...args);
   };
 
-  live.inputs[0] = { ...row, state: 'sent', messageId: 'native-fast', historyAnchored: true, deliveredAt: T0 + 1 };
+  holdTraces = true;
   live.events.push({ seq: 1, time: T0 + 1, source: 'extension', kind: 'user_message',
     messageId: 'native-fast', message: text(row.text) });
   notifySession();
+  await waitFor(() => expect(releaseTraces).not.toBeNull());
+  // While turnTraces is still in flight and the echo bubble has not mounted yet, Cancel delivery must stay available.
+  expect(w.document.querySelectorAll('#timeline .said.is-user')).toHaveLength(0);
+  expect(w.document.querySelector('#inputQueue .pending-message')).not.toBeNull();
+  expect(w.document.getElementById('chatSend')!.getAttribute('aria-label')).toBe('Cancel delivery');
 
+  live.inputs[0] = { ...row, state: 'sent', messageId: 'native-fast', historyAnchored: true, deliveredAt: T0 + 1 };
+  releaseTraces!();
   await waitFor(() => {
     expect(w.document.querySelectorAll('#timeline .said.is-user')).toHaveLength(1);
     expect(listCalls.inputs).toBeGreaterThanOrEqual(1);
@@ -1425,7 +1442,7 @@ it('syncs a delivered bubble and delivery controls on the fast active-detail pat
 it('never hides an unsent pending bubble behind a prior turn with identical text', async () => {
   const { w, live, append } = await boot([
     { seq: 1, time: T0 - 10, source: 'extension', kind: 'user_message', messageId: 'prior-q', message: text('Repeat prompt') }
-  ]);
+  ], true, [], [], { summary: { chatIds: ['chat-b'] } });
   live.inputs.push({ id: 'unsent-prior', sessionId: summary([]).id, owner: 'page', mode: 'auto', model: null, reasoningEffort: null,
     conversationId: 'chat-b', state: 'browser', text: 'Repeat prompt', dueAt: T0, createdAt: T0 });
   await append([]);
@@ -1436,7 +1453,7 @@ it('never hides an unsent pending bubble behind a turn that ended before authori
   const { w, live, append } = await boot([
     { seq: 1, time: T0 + 5, source: 'extension', kind: 'user_message', messageId: 'mid-q', message: text('Later ended prompt') },
     { seq: 2, time: T0 + 8, source: 'extension', kind: 'turn_end', turnId: 'mid-turn', outcome: 'completed' }
-  ]);
+  ], true, [], [], { summary: { chatIds: ['chat-b'] } });
   live.inputs.push({ id: 'unsent-turn-ended', sessionId: summary([]).id, owner: 'page', mode: 'auto', model: null, reasoningEffort: null,
     conversationId: 'chat-b', state: 'browser', text: 'Later ended prompt', dueAt: T0, createdAt: T0, sendAuthorizedAt: T0 + 10 });
   await append([]);
@@ -1447,32 +1464,56 @@ it('never hides a pending edit behind the existing target message being edited',
   const targetId = '11111111-1111-4111-8111-111111111111';
   const { w, live, append } = await boot([
     { seq: 1, time: T0 + 20, source: 'extension', kind: 'user_message', messageId: targetId, message: text('Edit target prompt') }
-  ]);
+  ], true, [], [], { summary: { chatIds: ['chat-b'] } });
   live.inputs.push({ id: 'unsent-edit', sessionId: summary([]).id, owner: 'page', mode: 'auto', model: null, reasoningEffort: null,
     conversationId: 'chat-b', state: 'browser', text: 'Edit target prompt', dueAt: T0 + 15, createdAt: T0 + 15, edit: { messageId: targetId } });
   await append([]);
   expect([...w.document.querySelectorAll<HTMLElement>('#inputQueue .pending-message')].map(n => n.dataset.inputId)).toEqual(['unsent-edit']);
 });
 
-it('never hides held or unclaimed queued inputs behind a manual echo with matching text', async () => {
+it('never hides unauthorized browser claims, multi-conversation resumed sessions, or held/excluded queued inputs behind echoes', async () => {
   const future = Date.now() + 60_000;
   const now = Date.now();
   const { w, live, append } = await boot([
     { seq: 1, time: T0 + 25, source: 'extension', kind: 'user_message', messageId: 'latest-other', message: text('Something else') }
-  ]);
+  ], true, [], [], { summary: { chatIds: ['chat-b'] } });
+  const { chatApply } = await import('../src/renderer/chat.js');
+  const baseState = (await (w as any).api.getState()).data;
+  chatApply({
+    ...baseState,
+    bridge: { ...baseState.bridge, running: true, paired: true, present: true },
+    status: { ...baseState.status, routeSettlingUntil: 0 }
+  });
   const base = { sessionId: summary([]).id, owner: null, mode: 'auto' as const, model: null, reasoningEffort: null,
-    conversationId: 'chat-b', state: 'queued' as const, text: 'Something else', createdAt: T0 + 20 };
+    conversationId: 'chat-b', text: 'Something else', createdAt: T0 + 20 };
   live.inputs.push(
-    { ...base, id: 'queued-unclaimed-due', dueAt: T0 + 20 },
-    { ...base, id: 'held-unclaimed-due', dueAt: T0 + 20, slotWait: 'slots' },
-    { ...base, id: 'held-pagehold', dueAt: T0 + 20, offeredAt: T0 + 21, pageHold: { reason: 'still-answering', at: now } },
-    { ...base, id: 'held-sendcheck', dueAt: T0 + 20, sendCheck: { attempt: 1, nextAt: future, reason: 'budget', answered: true } },
-    { ...base, id: 'held-future', dueAt: future },
-    { ...base, id: 'held-error', dueAt: T0 + 20, error: 'Waiting for browser' }
+    { ...base, id: 'browser-unauth', owner: 'page', state: 'browser', dueAt: T0 + 20, requiresAuthorization: true },
+    { ...base, id: 'browser-preauth-echo', owner: 'page', state: 'browser', dueAt: T0 + 20, requiresAuthorization: true, sendAuthorizedAt: T0 + 30 },
+    { ...base, id: 'queued-unclaimed-due', state: 'queued', dueAt: T0 + 20 },
+    { ...base, id: 'held-scheduled', state: 'queued', dueAt: T0 + 20, offeredAt: T0 + 21, scheduled: { scheduleId: 'sched-1', dueAt: T0 + 20, late: false } },
+    { ...base, id: 'held-unclaimed-due', state: 'queued', dueAt: T0 + 20, slotWait: 'slots' },
+    { ...base, id: 'held-pagehold', state: 'queued', dueAt: T0 + 20, offeredAt: T0 + 21, pageHold: { reason: 'still-answering', at: now } },
+    { ...base, id: 'held-sendcheck', state: 'queued', dueAt: T0 + 20, sendCheck: { attempt: 1, nextAt: future, reason: 'budget', answered: true } },
+    { ...base, id: 'held-future', state: 'queued', dueAt: future },
+    { ...base, id: 'held-error', state: 'queued', dueAt: T0 + 20, error: 'Waiting for browser' }
   );
   await append([]);
+  expect(w.document.querySelector('#inputQueue [data-input-id="held-pagehold"]')!.textContent).toContain('Waiting for ChatGPT to finish its answer');
+
+  // Enable routeSettlingUntil alongside a routeHeld entry; it also remains visible and unanchored.
+  chatApply({
+    ...baseState,
+    bridge: { ...baseState.bridge, running: true, paired: true, present: true },
+    status: { ...baseState.status, routeSettlingUntil: future }
+  });
+  live.inputs.splice(3, 0, { ...base, id: 'held-route', state: 'queued', dueAt: T0 + 20, offeredAt: T0 + 21 });
+  await append([]);
   expect([...w.document.querySelectorAll<HTMLElement>('#inputQueue .pending-message')].map(n => n.dataset.inputId)).toEqual([
+    'browser-unauth',
+    'browser-preauth-echo',
     'queued-unclaimed-due',
+    'held-route',
+    'held-scheduled',
     'held-unclaimed-due',
     'held-pagehold',
     'held-sendcheck',
@@ -1481,24 +1522,38 @@ it('never hides held or unclaimed queued inputs behind a manual echo with matchi
   ]);
 });
 
-it('keeps echo exclusivity, cross-chat cache isolation, and Cancel delivery binding across selection and races', async () => {
-  const firstSession = { ...summary([]), id: '2026-09-30-aaaaaaaa', title: 'Session A', conversationId: 'chat-a' };
-  const secondSession = { ...summary([]), id: '2026-09-30-bbbbbbbb', title: 'Session B', conversationId: 'chat-b' };
+it('never matches an unattributed echo across conversations on a resumed multi-chat session', async () => {
+  const { w, live, append } = await boot([
+    { seq: 1, time: T0 + 1, source: 'extension', kind: 'user_message', messageId: 'old-tab-echo', message: text('Resumed chat prompt') }
+  ], true, [], [], { summary: { chatIds: ['chat-a', 'chat-b'] } });
+  live.inputs.push({ id: 'resumed-pending', sessionId: summary([]).id, state: 'browser', owner: 'page',
+    text: 'Resumed chat prompt', mode: 'auto', model: null, reasoningEffort: null, dueAt: T0, createdAt: T0, conversationId: 'chat-b' });
+  await append([]);
+  expect([...w.document.querySelectorAll<HTMLElement>('#inputQueue .pending-message')].map(n => n.dataset.inputId)).toEqual(['resumed-pending']);
+});
+
+it('keeps echo exclusivity, cross-chat and history-page cache isolation, and Cancel delivery binding across races', async () => {
+  const firstSession = { ...summary([]), id: '2026-09-30-aaaaaaaa', title: 'Session A', conversationId: 'chat-a', chatIds: ['chat-a'] };
+  const secondSession = { ...summary([]), id: '2026-09-30-bbbbbbbb', title: 'Session B', conversationId: 'chat-b', chatIds: ['chat-b'] };
   const rowsA: SessionEvent[] = [];
   const rowsB: SessionEvent[] = [{ seq: 1, time: T0, source: 'extension', kind: 'assistant_message', messageId: 'b-asst', message: text('Session B ready'), state: 'final', final: true }];
   const { w, live, notifySession } = await boot([], true, [], [], { sessions: [firstSession, secondSession] });
   const api = (w as any).api;
-  let releaseControls: (() => void) | null = null;
-  let holdControls = false;
+  let releaseClickControls: (() => void) | null = null;
+  let deferNextControlsRead = false;
   const cancelledIds: string[] = [];
   api.cancelInput = vi.fn((id: string) => { cancelledIds.push(id); return Promise.resolve({ ok: true as const, data: true }); });
   api.getSessionControls = (id: string) => {
     const reply = { ok: true as const, data: { sessionId: id, conversationId: id === firstSession.id ? 'chat-a' : 'chat-b', automation: 'off', activeTurnId: null, finishHeld: false, blocked: '', job: null } };
-    if (!holdControls) return Promise.resolve(reply);
-    return new Promise(resolve => { releaseControls = () => resolve(reply); });
+    if (!deferNextControlsRead) return Promise.resolve(reply);
+    deferNextControlsRead = false;
+    return new Promise(resolve => { releaseClickControls = () => resolve(reply); });
   };
-  api.getSession = (id: string, opts?: { from?: number }) => {
+  api.getSession = (id: string, opts?: { from?: number; before?: number }) => {
     const src = id === firstSession.id ? rowsA : rowsB;
+    if (opts?.before !== undefined) {
+      return Promise.resolve({ ok: true as const, data: { summary: firstSession, events: [], total: src.length, nextFrom: 0 } });
+    }
     const from = opts?.from ?? 0;
     const list = src.filter(event => event.seq >= from);
     return Promise.resolve({ ok: true as const, data: { summary: id === firstSession.id ? firstSession : secondSession, events: list, total: src.length, nextFrom: list.reduce((m, e) => Math.max(m, e.seq + 1), from) } });
@@ -1527,12 +1582,13 @@ it('keeps echo exclusivity, cross-chat cache isolation, and Cancel delivery bind
   live.inputs.push({ id: 'queued-fallback', sessionId: firstSession.id, state: 'queued', owner: null, text: 'Queued next', mode: 'auto', model: null, reasoningEffort: null, dueAt: T0 + 10, createdAt: T0 + 10, conversationId: 'chat-a' });
   notifySession();
   await waitFor(() => expect(w.document.getElementById('chatSend')!.getAttribute('aria-label')).toBe('Cancel delivery'));
-  holdControls = true;
+  deferNextControlsRead = true;
   w.document.getElementById('chatSend')!.click();
+  await waitFor(() => expect(releaseClickControls).not.toBeNull());
   rowsA.push({ seq: 3, time: T0 + 5, source: 'extension', kind: 'user_message', messageId: 'native-same-2', message: text('Same text') });
   notifySession();
   await waitFor(() => expect([...w.document.querySelectorAll<HTMLElement>('#inputQueue .pending-message')].map(n => n.dataset.inputId)).toEqual(['queued-fallback']));
-  releaseControls!();
+  releaseClickControls!();
   await settle();
   expect(cancelledIds).toEqual([]);
 });
