@@ -5115,7 +5115,7 @@
       : null;
     const sameLiveGeneration = generating && requestedTurnId && requestedTurnId === turnId;
     if (sameLiveGeneration && requestedLiveOwner && activeClosingTurn && activeClosingTurn === stampedPageTurn &&
-        !activeClosingTurn.endMessageId && activeClosingTurn.conversationConflict !== true) {
+        !settledFinals.has(activeClosingTurn.endMessageId) && activeClosingTurn.conversationConflict !== true) {
       const calls = new Map(activeClosingTurn.calls.filter(call => call.requestId).map(call => [call.messageId, call.requestId]));
       if (calls.size) liveFiberClosingProof = { turnId, calls };
     }
