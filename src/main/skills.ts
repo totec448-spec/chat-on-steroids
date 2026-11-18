@@ -10,6 +10,8 @@ import {
   MAX_SKILL_DESCRIPTION_CHARS,
   MAX_SKILL_NAME_CHARS,
   MAX_SKILLS,
+  MAX_GITHUB_SKILL_FILES,
+  MAX_GITHUB_SKILL_DIRECTORIES,
   SKILL_ORIGIN_FILENAME,
   SKILL_ID_PATTERN,
   validGitHubSkillOrigin,
@@ -543,11 +545,11 @@ export function linkSkillPackage(id: string, source: GitHubSkillOrigin): Promise
     const files: Array<{ relative: string; sha: string; size: number }> = [];
     let folders = 0, entries = 0, bytes = 0;
     const collect = async (folder: string, relative: string, depth: number): Promise<void> => {
-      if (++folders > 12 || depth > 10) throw new Error('The local skill has too many nested folders');
+      if (++folders > MAX_GITHUB_SKILL_DIRECTORIES || depth > 10) throw new Error('The local skill has too many nested folders');
       const before = identityOf(await fs.lstat(folder));
       const directory = await fs.opendir(folder);
       try { for await (const entry of directory) {
-        if (++entries > 52) throw new Error('The local skill exceeds GitHub update limits');
+        if (++entries > MAX_GITHUB_SKILL_FILES + MAX_GITHUB_SKILL_DIRECTORIES) throw new Error('The local skill exceeds GitHub update limits');
         if (relative === '' && entry.name === SKILL_ORIGIN_FILENAME)
           throw new Error('The local skill already contains origin metadata');
         const nextRelative = [relative, entry.name].filter(Boolean).join('/');
@@ -556,7 +558,7 @@ export function linkSkillPackage(id: string, source: GitHubSkillOrigin): Promise
         if (stat.isSymbolicLink()) throw new Error('The local skill contains a linked resource');
         if (stat.isDirectory()) { await collect(filename, nextRelative, depth + 1); continue; }
         if (!stat.isFile()) throw new Error('The local skill contains an unsupported resource');
-        if (files.length >= 40 || (bytes += stat.size) > 32 * 1024 * 1024)
+        if (files.length >= MAX_GITHUB_SKILL_FILES || (bytes += stat.size) > 32 * 1024 * 1024)
           throw new Error('The local skill exceeds GitHub update limits');
         const handle = await fs.open(filename, 'r');
         let content: Buffer;
