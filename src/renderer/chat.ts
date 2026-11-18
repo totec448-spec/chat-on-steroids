@@ -3320,6 +3320,7 @@ function paintGoalProgress(): void {
 const cancelledStarts = new Set<string>();
 function pendingComposerInput(): InputEntry | undefined {
   return [...startingInputs.values(), ...pendingComposerInputs].find(entry => (!queuedFollowup(entry) || entry.state === 'browser') && ['queued', 'browser'].includes(entry.state) &&
+    !anchoredPendingInput(entry) &&
     (selectedId ? (entry.sessionId ?? entry.deliveredSessionId) === selectedId :
       pendingNewInput?.generation === selectionGeneration && pendingNewInput.id === entry.id));
 }
@@ -9212,9 +9213,71 @@ function schedulePageHoldLapse(): void {
   pageHoldLapseTimer = window.setTimeout(() => { pageHoldLapseTimer = undefined; paintPendingInputs(); }, Math.max(0, Math.min(...due) - now) + 50);
 }
 
+const pageEchoMatches = new Map<string, { sessionId: string | null; messageId: string }>();
+
+function pageEchoAnchored(entry: InputEntry, all: readonly InputEntry[]): boolean {
+  if (detailFor !== selectedId) return false;
+  const dispatched = entry.state === 'browser' ||
+    (entry.state === 'queued' && !entry.error && !entry.scheduled && !heldBySendCheck(entry) &&
+      !queuedWaitReason(entry) && !routeHeld(entry) &&
+      (entry.offeredAt !== undefined || entry.sendAuthorizedAt !== undefined));
+  if (!dispatched || queuedFollowup(entry) || entry.messageId) return false;
+  const norm = (value: string) => value.replace(/\s+/g, ' ').trim();
+  const authored = norm(authoredTextOf(entry));
+  const companion = entry.companionInputId ? all.find(other => other.id === entry.companionInputId) : undefined;
+  const combined = companion ? norm(`${authoredTextOf(entry)}\n\nNext queued instruction:\n${companion.text}`) : '';
+  const delivered = entry.deliveryText ? norm(entry.deliveryText) : '';
+  const candidates = [authored, combined, delivered].filter(Boolean);
+  if (!candidates.length) return false;
+  const pendingImages = (entry.images?.length ?? 0) > 0;
+  const settledBefore = entry.sendAuthorizedAt ?? entry.offeredAt ?? entry.createdAt;
+  const echoMatchesEntry = (event: SessionEvent): event is Extract<SessionEvent, { kind: 'user_message' }> => {
+    if (event.kind !== 'user_message' || event.source !== 'extension' || event.inputId || !event.messageId ||
+        event.messageId.startsWith('input:') || event.time < entry.createdAt) return false;
+    if (entry.edit && event.messageId === entry.edit.messageId) return false;
+    if (all.some(other => other.id !== entry.id && other.messageId === event.messageId)) return false;
+    if (events.some(later => later.seq > event.seq && later.kind === 'turn_end' && later.time <= settledBefore)) return false;
+    const shown = norm(event.authoredText ?? userPromptText(event.message.text.trimStart()) ?? event.message.text);
+    const raw = norm(event.message.text);
+    const textMatch = candidates.includes(shown) || candidates.includes(raw);
+    return textMatch && (!pendingImages || !!event.attachments?.length || !!event.assets?.length);
+  };
+  const priorMatch = pageEchoMatches.get(entry.id);
+  const priorEvent = priorMatch && priorMatch.sessionId === selectedId
+    ? events.find((event): event is Extract<SessionEvent, { kind: 'user_message' }> =>
+        echoMatchesEntry(event) && event.messageId === priorMatch.messageId)
+    : undefined;
+  if (priorEvent) return true;
+  const match = events.find((event): event is Extract<SessionEvent, { kind: 'user_message' }> =>
+    echoMatchesEntry(event) && !events.some(later => later.seq > event.seq && later.kind === 'user_message'));
+  if (match?.messageId) {
+    pageEchoMatches.set(entry.id, { sessionId: selectedId, messageId: match.messageId });
+    return true;
+  }
+  pageEchoMatches.delete(entry.id);
+  return false;
+}
+
+function anchoredPendingInput(entry: InputEntry, all: readonly InputEntry[] = pendingComposerInputs): boolean {
+  return detailFor === selectedId && (events.some(event =>
+    event.kind === 'user_message' && (event.inputId === entry.id ||
+      event.messageId === (entry.messageId ?? `input:${entry.id}`))) ||
+    pageEchoAnchored(entry, all) ||
+    // History owns committed off-page rows. Keep only receipts newer than our
+    // loaded publication cursor while the corresponding live snapshot arrives.
+    (Boolean(entry.historyAnchored || entry.historyRecorded) &&
+      (historyBefore !== null || (entry.historySeq !== undefined
+        ? (detailCursor ?? 0) > entry.historySeq
+        : events.length > 0))));
+}
+
 function paintPendingInputs(): void {
   schedulePageHoldLapse();
   const all = pendingComposerInputs;
+  for (const id of [...pageEchoMatches.keys()]) {
+    const current = all.find(entry => entry.id === id) ?? startingInputs.get(id);
+    if (!current || current.messageId || ['sent', 'cancelled', 'failed'].includes(current.state)) pageEchoMatches.delete(id);
+  }
   const belongsToSelection = (entry: InputEntry): boolean => selectedId === null
     ? pendingNewInput?.generation === selectionGeneration && entry.id === pendingNewInput.id
     : (entry.sessionId ?? entry.deliveredSessionId) === selectedId;
@@ -9223,40 +9286,7 @@ function paintPendingInputs(): void {
   const unbound = (entry: InputEntry) => selectedId === null && pendingNewInput?.id === entry.id && pendingNewInput.generation === selectionGeneration && !entry.deliveredSessionId && entry.purpose !== 'decision' && ['queued', 'browser'].includes(entry.state);
   const notice = (entry: InputEntry) => belongsToSelection(entry) && entry.purpose !== 'decision' && entry.purpose !== 'rotation' &&
     ['failed', 'cancelled'].includes(entry.state) && !!entry.error && !dismissedInputNotices.has(entry.id);
-  const norm = (value: string) => value.replace(/\s+/g, ' ').trim();
-  const pageEchoAnchored = (entry: InputEntry): boolean => {
-    const immediate = entry.state === 'browser' ||
-      (entry.state === 'queued' && !entry.error && !entry.scheduled && !entry.sendCheck && entry.dueAt <= Date.now());
-    if (!immediate || queuedFollowup(entry) || entry.messageId) return false;
-    const authored = norm(authoredTextOf(entry));
-    const companion = entry.companionInputId ? all.find(other => other.id === entry.companionInputId) : undefined;
-    const combined = companion ? norm(`${authoredTextOf(entry)}\n\nNext queued instruction:\n${companion.text}`) : '';
-    const delivered = entry.deliveryText ? norm(entry.deliveryText) : '';
-    const candidates = [authored, combined, delivered].filter(Boolean);
-    if (!candidates.length) return false;
-    const settledBefore = entry.sendAuthorizedAt ?? entry.offeredAt ?? entry.createdAt;
-    return events.some(event => {
-      if (event.kind !== 'user_message' || event.source !== 'extension' || event.inputId || !event.messageId ||
-          event.messageId.startsWith('input:') || event.time < entry.createdAt) return false;
-      if (entry.edit && event.messageId === entry.edit.messageId) return false;
-      if (all.some(other => other.messageId === event.messageId)) return false;
-      if (events.some(later => later.seq > event.seq &&
-          (later.kind === 'user_message' || (later.kind === 'turn_end' && later.time <= settledBefore)))) return false;
-      const shown = norm(event.authoredText ?? userPromptText(event.message.text.trimStart()) ?? event.message.text);
-      const raw = norm(event.message.text);
-      return candidates.includes(shown) || candidates.includes(raw);
-    });
-  };
-  const anchored = (entry: InputEntry) => detailFor === selectedId && (events.some(event =>
-    event.kind === 'user_message' && (event.inputId === entry.id ||
-      event.messageId === (entry.messageId ?? `input:${entry.id}`))) ||
-    pageEchoAnchored(entry) ||
-    // History owns committed off-page rows. Keep only receipts newer than our
-    // loaded publication cursor while the corresponding live snapshot arrives.
-    ((entry.historyAnchored || entry.historyRecorded) &&
-      (historyBefore !== null || (entry.historySeq !== undefined
-        ? (detailCursor ?? 0) > entry.historySeq
-        : events.length > 0))));
+  const anchored = (entry: InputEntry) => anchoredPendingInput(entry, all);
   const rows = all.filter((entry) => !dismissedInputNotices.has(entry.id) && !(!notice(entry) && anchored(entry)) && !(queuedFollowup(entry) && ['queued', 'tool', 'browser'].includes(entry.state)) && (belongsToSelection(entry) || unbound(entry) || notice(entry)) &&
     (notice(entry) || unbound(entry) || selectedId !== null || projectGroup(entry.projectId) === selectedProjectId) &&
     (notice(entry) || !['sent', 'cancelled'].includes(entry.state) || (entry.state === 'sent' && entry.messageId && !anchored(entry))));
@@ -9278,9 +9308,13 @@ function paintPendingInputs(): void {
   reconcileChildren(host, [...next, ...host.querySelectorAll<HTMLElement>(':scope > .queued-input')]);
   if (focused?.id && active && !active.isConnected) {
     const row = [...host.querySelectorAll<HTMLElement>(':scope > .pending-message')].find(candidate => candidate.dataset.inputId === focused.id);
-    const buttons = [...row?.querySelectorAll<HTMLElement>('button') ?? []];
-    // The same control if the rebuilt row still has it, else the row's first one (a failed row shows Retry and Dismiss instead).
-    (buttons.find(button => button.className === focused.cls && button.getAttribute('aria-label') === focused.label) ?? buttons[0])?.focus({ preventScroll: true });
+    if (row) {
+      const buttons = [...row.querySelectorAll<HTMLElement>('button')];
+      // The same control if the rebuilt row still has it, else the row's first one (a failed row shows Retry and Dismiss instead).
+      (buttons.find(button => button.className === focused.cls && button.getAttribute('aria-label') === focused.label) ?? buttons[0])?.focus({ preventScroll: true });
+    } else {
+      $<HTMLTextAreaElement>('chatInput').focus({ preventScroll: true });
+    }
   }
   holdSentMessage();
 }
