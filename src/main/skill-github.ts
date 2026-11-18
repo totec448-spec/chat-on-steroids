@@ -97,10 +97,39 @@ async function inspectGitHubSkill(requested: GitHubSkillLocation, signal: AbortS
       if (commitInfo) { ref = candidate; directory = segments.slice(take).join('/'); break; }
     }
   }
-  const location = { ...requested, ref, directory };
+  let location = { ...requested, ref, directory };
   commitInfo ??= await githubJson(`${base}/commits/${encodeURIComponent(ref)}`, signal) as { sha?: unknown };
   if (typeof commitInfo.sha !== 'string' || !SHA.test(commitInfo.sha)) throw new Error('GitHub commit could not be verified');
   const commit = commitInfo.sha;
+  // A recursive tree contains the exact commit-pinned SHA/size of every file
+  // in a single API request. The old contents BFS spent one API request per
+  // directory and hit the 60/hour anonymous GitHub limit on large Skills.
+  const payload = await githubJson(`${base}/git/trees/${encodeURIComponent(commit)}?recursive=1`,
+    signal, 8 * 1024 * 1024) as { truncated?: unknown; tree?: unknown };
+  const tree = payload.truncated === false && Array.isArray(payload.tree) && payload.tree.length <= 20_000 &&
+    payload.tree.every(entry => entry && typeof entry === 'object' &&
+      typeof (entry as TreeEntry).path === 'string' && typeof (entry as TreeEntry).type === 'string' &&
+      typeof (entry as TreeEntry).mode === 'string' && typeof (entry as TreeEntry).sha === 'string')
+    ? payload.tree as TreeEntry[] : null;
+  // A repository root may contain exactly one Skill in a nested directory;
+  // only auto-select it when unambiguous. Never import unrelated repo files.
+  if (!location.directory) {
+    if (!tree) throw new Error('GitHub repository tree is too large or incomplete; use a direct skill folder link');
+    if (!tree.some(entry => entry.path === 'SKILL.md' && entry.type === 'blob')) {
+      const candidates = tree.filter(entry => entry.type === 'blob' && ['100644', '100755'].includes(entry.mode) &&
+        entry.path.endsWith('/SKILL.md') && entry.path.split('/').every(safeName));
+      if (candidates.length !== 1)
+        throw new Error(candidates.length ? 'GitHub repository contains multiple skills; choose a direct skill folder link' :
+          'GitHub repository has no SKILL.md; choose a direct skill folder link');
+      location = { ...location, directory: candidates[0]!.path.slice(0, -'/SKILL.md'.length) };
+    }
+  }
+  if (tree) {
+    const files = filesFromTree(tree, location.directory);
+    return { location, commit, revision: skillPackageRevision(files), files };
+  }
+  // A truncated large repository can still provide a complete *explicitly
+  // selected* Skill folder through the old bounded contents walk.
   const queue = [{ directory: location.directory, relative: '', depth: 0 }];
   const files: File[] = [];
   let directoryCount = 0, bytes = 0;
@@ -131,8 +160,8 @@ async function inspectGitHubSkill(requested: GitHubSkillLocation, signal: AbortS
   return { location, commit, revision, files };
 }
 
-/** The recursive tree gives one bounded, metadata-only observation for all skills in a repository. */
-function revisionFromTree(entries: TreeEntry[], directory: string): string {
+/** The recursive tree supplies both import/update file lists and revision checks. */
+function filesFromTree(entries: TreeEntry[], directory: string): File[] {
   const prefix = directory ? `${directory}/` : '';
   if (directory && !entries.some(entry => entry.path === directory && entry.type === 'tree'))
     throw new Error('GitHub skill folder was not found');
@@ -157,7 +186,11 @@ function revisionFromTree(entries: TreeEntry[], directory: string): string {
   }
   if (!files.some(file => file.relative === 'SKILL.md')) throw new Error('GitHub skill folder needs SKILL.md');
   if (files.some(file => file.relative === '.cos-github.json')) throw new Error('GitHub skill uses a reserved CoS metadata filename');
-  return skillPackageRevision(files);
+  return files;
+}
+
+function revisionFromTree(entries: TreeEntry[], directory: string): string {
+  return skillPackageRevision(filesFromTree(entries, directory));
 }
 
 /** A page visit checks sources, never installs them; each repository/ref is requested once. */
@@ -236,11 +269,10 @@ async function downloadPinnedResource(snapshot: Snapshot, file: File, signal: Ab
     throw new Error(signal.aborted ? 'GitHub download timed out. Try again.' : `Could not download GitHub skill file: ${file.relative}`);
   }
   if (!response.ok || !response.body) throw new Error(`GitHub skill resource could not be downloaded: ${file.relative} (${response.status})`);
-  const length = response.headers.get('content-length');
-  if (length !== null && Number(length) > file.size) {
-    await response.body.cancel().catch(() => undefined);
-    throw new Error(`GitHub file size changed: ${file.relative}`);
-  }
+  // Node fetch transparently decompresses raw GitHub responses: Content-Length
+  // can describe the *compressed wire bytes*, not the decoded stream (e.g. 49
+  // wire bytes for a 29-byte Python file). Bound decoded chunks and verify the
+  // exact Git blob checksum below instead of trusting this response header.
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
