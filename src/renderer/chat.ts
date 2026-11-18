@@ -9261,7 +9261,7 @@ function pageEchoAnchored(entry: InputEntry, all: readonly InputEntry[]): boolea
     for (const [otherId, cached] of pageEchoMatches) {
       if (otherId !== entry.id && cached.sessionId === selectedId && cached.messageId === event.messageId) return false;
     }
-    if (paintedDetailEvents.some(later => later.seq > event.seq && later.kind === 'turn_end' && later.time <= settledBefore)) return false;
+    if (paintedDetailEvents.some(later => positionOf(later) > positionOf(event) && later.kind === 'turn_end' && later.time <= settledBefore)) return false;
     const shown = norm(event.authoredText ?? userPromptText(event.message.text.trimStart()) ?? event.message.text);
     const raw = norm(event.message.text);
     const textMatch = candidates.includes(shown) || candidates.includes(raw);
@@ -9274,10 +9274,10 @@ function pageEchoAnchored(entry: InputEntry, all: readonly InputEntry[]): boolea
     : undefined;
   if (priorEvent) return true;
   const sameConversationLaterUser = (event: SessionEvent, later: SessionEvent) =>
-    later.seq > event.seq && later.kind === 'user_message' &&
+    positionOf(later) > positionOf(event) && later.kind === 'user_message' &&
     (!entry.conversationId || !later.conversationId || later.conversationId === entry.conversationId);
   const match = paintedTimelineEvents.find((event): event is Extract<SessionEvent, { kind: 'user_message' }> =>
-    echoMatchesEntry(event) && !paintedTimelineEvents.some(later => sameConversationLaterUser(event, later)));
+    echoMatchesEntry(event) && !paintedDetailEvents.some(later => sameConversationLaterUser(event, later)));
   if (match?.messageId) {
     pageEchoMatches.set(entry.id, { sessionId: selectedId, messageId: match.messageId });
     return true;
