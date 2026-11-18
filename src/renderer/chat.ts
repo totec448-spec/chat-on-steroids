@@ -9234,7 +9234,7 @@ function pageEchoAnchored(entry: InputEntry, all: readonly InputEntry[]): boolea
   if (!selectedId || detailFor !== selectedId || paintedTimelineFor !== selectedId || historyBefore !== null ||
       !inputBelongsToCurrentSelection(entry)) return false;
   const selectedSession = sessions.find(session => session.id === selectedId);
-  if ((selectedSession?.chatIds?.length ?? 0) > 1) return false;
+  const multiChat = (selectedSession?.chatIds?.length ?? 0) > 1;
   if (entry.requiresAuthorization && entry.sendAuthorizedAt === undefined) return false;
   const dispatched = entry.state === 'browser' ||
     (entry.state === 'queued' && !entry.error && !entry.scheduled && !heldBySendCheck(entry) &&
@@ -9254,6 +9254,8 @@ function pageEchoAnchored(entry: InputEntry, all: readonly InputEntry[]): boolea
   const echoMatchesEntry = (event: SessionEvent): event is Extract<SessionEvent, { kind: 'user_message' }> => {
     if (event.kind !== 'user_message' || event.source !== 'extension' || event.inputId || !event.messageId ||
         event.messageId.startsWith('input:') || event.time < minEchoTime) return false;
+    if (multiChat && (!entry.conversationId || event.conversationId !== entry.conversationId)) return false;
+    if (!multiChat && event.conversationId && entry.conversationId && event.conversationId !== entry.conversationId) return false;
     if (entry.edit && event.messageId === entry.edit.messageId) return false;
     if (all.some(other => other.id !== entry.id && other.messageId === event.messageId)) return false;
     for (const [otherId, cached] of pageEchoMatches) {

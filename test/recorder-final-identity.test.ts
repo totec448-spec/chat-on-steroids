@@ -401,3 +401,24 @@ it.each(['question', 'rebind'] as const)('rejects a final snapshot when %s chang
     expect(intercepted).toBe(true);
   } finally { spy.mockRestore(); }
 });
+
+it('records conversationId on both active and superseded extension user messages', async () => {
+  const oldConversation = 'conv-echo-scope-old';
+  const newConversation = 'conv-echo-scope-new';
+  const opened = await recordChatObservations(oldConversation, [
+    { kind: 'user_message', time: 10, messageId: 'msg-old-1', text: 'First chat turn' }
+  ]);
+  expect(await rebindSession(opened.sessionId!, oldConversation, newConversation)).toBe(true);
+  resetRecorderForTests();
+  await recordChatObservations(newConversation, [
+    { kind: 'user_message', time: 20, messageId: 'msg-new-1', text: 'Rotated chat turn', authoredNow: true }
+  ]);
+  await recordChatObservations(oldConversation, [
+    { kind: 'user_message', time: 21, messageId: 'msg-old-2', text: 'Late old tab turn' }
+  ]);
+  const users = (await readEvents(opened.sessionId!, { kinds: ['user_message'] }))
+    .filter((event): event is Extract<typeof event, { kind: 'user_message' }> => event.kind === 'user_message');
+  expect(users.find(event => event.messageId === 'msg-old-1')?.conversationId).toBe(oldConversation);
+  expect(users.find(event => event.messageId === 'msg-new-1')?.conversationId).toBe(newConversation);
+  expect(users.find(event => event.messageId === 'msg-old-2')?.conversationId).toBe(oldConversation);
+});
