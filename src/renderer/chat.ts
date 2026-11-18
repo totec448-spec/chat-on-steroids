@@ -3324,11 +3324,14 @@ function inputBelongsToCurrentSelection(entry: Pick<InputEntry, 'id' | 'sessionI
     : (entry.sessionId ?? entry.deliveredSessionId) === selectedId;
 }
 
-function pendingComposerInput(): InputEntry | undefined {
-  return [...startingInputs.values(), ...pendingComposerInputs].find(entry =>
-    inputBelongsToCurrentSelection(entry) &&
+function cancellablePendingInput(entry: InputEntry): boolean {
+  return inputBelongsToCurrentSelection(entry) &&
     (!queuedFollowup(entry) || entry.state === 'browser') && ['queued', 'browser'].includes(entry.state) &&
-    !anchoredPendingInput(entry));
+    !anchoredPendingInput(entry);
+}
+
+function pendingComposerInput(): InputEntry | undefined {
+  return [...startingInputs.values(), ...pendingComposerInputs].find(cancellablePendingInput);
 }
 let durationTimer: number | undefined;
 /** Whether the selected chat's running turn takes a message now (Send directly). */
@@ -9275,6 +9278,7 @@ function pageEchoAnchored(entry: InputEntry, all: readonly InputEntry[]): boolea
   if (priorEvent) return true;
   const sameConversationLaterUser = (event: SessionEvent, later: SessionEvent) =>
     positionOf(later) > positionOf(event) && later.kind === 'user_message' &&
+    !later.messageId?.startsWith('input:') &&
     (!entry.conversationId || !later.conversationId || later.conversationId === entry.conversationId);
   const match = paintedTimelineEvents.find((event): event is Extract<SessionEvent, { kind: 'user_message' }> =>
     echoMatchesEntry(event) && !paintedDetailEvents.some(later => sameConversationLaterUser(event, later)));
@@ -9691,8 +9695,10 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
       if (target) { await stopShownTurn(target, shownTurn, shownConversation, sameSelection); if (sameSelection()) void refreshSessionControls(); }
       return;
     }
-    const pending = shownPendingId ? pendingComposerInput() : undefined;
-    if (pending && pending.id === shownPendingId && ['queued', 'browser'].includes(pending.state)) {
+    const pending = shownPendingId
+      ? [...pendingComposerInputs, ...startingInputs.values()].find(entry => entry.id === shownPendingId)
+      : undefined;
+    if (pending && cancellablePendingInput(pending)) {
       const wasStarting = startingInputs.has(pending.id);
       if (wasStarting) cancelledStarts.add(pending.id);
       const cancelled = await run(api.cancelInput(pending.id));

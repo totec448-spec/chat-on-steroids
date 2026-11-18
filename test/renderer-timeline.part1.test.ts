@@ -1578,6 +1578,17 @@ it('checks unfiltered paintedDetailEvents for later questions when an agent filt
   expect([...w.document.querySelectorAll<HTMLElement>('#inputQueue .pending-message')].map(n => n.dataset.inputId)).toEqual(['filtered-pending']);
 });
 
+it('ignores a later synthetic tool-input receipt when anchoring a matching native echo', async () => {
+  const { w, live, append } = await boot([
+    { seq: 1, time: T0 + 1, source: 'extension', kind: 'user_message', messageId: 'native-echo', conversationId: 'chat-b', message: text('Browser follow-up') },
+    { seq: 2, time: T0 + 2, source: 'app', kind: 'user_message', messageId: 'input:tool-a', inputId: 'tool-a', inputDelivery: 'confirmed', message: text('Retried tool receipt') }
+  ], true, [], [], { summary: { conversationId: 'chat-b', chatIds: ['chat-b'] } });
+  live.inputs.push({ id: 'pending-browser', sessionId: summary([]).id, state: 'browser', owner: 'page',
+    text: 'Browser follow-up', mode: 'auto', model: null, reasoningEffort: null, dueAt: T0, createdAt: T0, conversationId: 'chat-b' });
+  await append([]);
+  expect([...w.document.querySelectorAll<HTMLElement>('#inputQueue .pending-message')]).toHaveLength(0);
+});
+
 it('keeps echo exclusivity, cross-chat and history-page cache isolation, and Cancel delivery binding across races', async () => {
   const firstSession = { ...summary([]), id: '2026-09-30-aaaaaaaa', title: 'Session A', conversationId: 'chat-a', chatIds: ['chat-a'] };
   const secondSession = { ...summary([]), id: '2026-09-30-bbbbbbbb', title: 'Session B', conversationId: 'chat-b', chatIds: ['chat-b'] };
@@ -1637,6 +1648,18 @@ it('keeps echo exclusivity, cross-chat and history-page cache isolation, and Can
   releaseClickControls!();
   await settle();
   expect(cancelledIds).toEqual([]);
+
+  // Clicking Cancel delivery on queued-fallback while another pending input moves ahead of it still cancels queued-fallback directly.
+  await waitFor(() => expect(w.document.getElementById('chatSend')!.getAttribute('aria-label')).toBe('Cancel delivery'));
+  deferNextControlsRead = true;
+  releaseClickControls = null;
+  w.document.getElementById('chatSend')!.click();
+  await waitFor(() => expect(releaseClickControls).not.toBeNull());
+  live.inputs.unshift({ id: 'front-runner', sessionId: firstSession.id, state: 'queued', owner: null, text: 'Prepended earlier', mode: 'auto', model: null, reasoningEffort: null, dueAt: T0 + 9, createdAt: T0 + 9, conversationId: 'chat-a' });
+  notifySession();
+  await waitFor(() => expect([...w.document.querySelectorAll<HTMLElement>('#inputQueue .pending-message')].map(n => n.dataset.inputId)).toEqual(['front-runner', 'queued-fallback']));
+  releaseClickControls!();
+  await waitFor(() => expect(cancelledIds).toEqual(['queued-fallback']));
 });
 
 it.each([undefined, 4])('never resurrects committed off-page inputs beside genuinely waiting inputs when old timestamps reappear (historySeq=%s)', async historySeq => {
