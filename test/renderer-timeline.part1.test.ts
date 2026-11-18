@@ -1305,13 +1305,21 @@ it.each([false, true])('hands a delivered bubble to exact native history without
   expect(w.document.querySelector('#inputQueue .pending-message')).toBeNull();
 });
 
-it('hands a delivered bubble to an early page echo without duplicating before /input/ack arrives', async () => {
+it('hands a delivered bubble, Cancel control, and focus to an early page echo without duplicating before or after /input/ack arrives', async () => {
   const { w, live, append } = await boot([]);
+  (w as any).api.getSessionControls = (id: string) => Promise.resolve({
+    ok: true as const,
+    data: { sessionId: id, conversationId: 'chat-b', automation: 'off', activeTurnId: null, finishHeld: false, blocked: '', job: null }
+  });
   const row: InputEntry = { id: 'delivery-echo', sessionId: summary([]).id, state: 'browser', owner: 'page', text: 'Follow-up once',
     mode: 'auto', model: null, reasoningEffort: null, dueAt: T0, createdAt: T0, conversationId: 'chat-b' };
   live.inputs.push(row);
   await append([]);
-  expect(w.document.querySelector('#inputQueue .pending-message')).not.toBeNull();
+  const pendingCancel = w.document.querySelector<HTMLButtonElement>('#inputQueue .pending-message button');
+  expect(pendingCancel).not.toBeNull();
+  pendingCancel!.focus();
+  expect(w.document.activeElement).toBe(pendingCancel);
+  expect(w.document.getElementById('chatSend')!.getAttribute('aria-label')).toBe('Cancel delivery');
 
   // Extension DOM scan reports the user_message first, without inputId, while outbox is still state: 'browser'.
   const echo: SessionEvent = { seq: 1, time: T0 + 1, source: 'extension', kind: 'user_message',
@@ -1320,13 +1328,52 @@ it('hands a delivered bubble to an early page echo without duplicating before /i
   const count = () => [...w.document.querySelectorAll('#timeline .said.is-user, #inputQueue .pending-message')].filter(node => node.textContent?.includes(row.text)).length;
   expect(count()).toBe(1);
   expect(w.document.querySelector('#inputQueue .pending-message')).toBeNull();
+  expect(w.document.getElementById('chatSend')!.getAttribute('aria-label')).toBe('Send message');
+  expect(w.document.activeElement).toBe(w.document.getElementById('chatInput'));
 
-  // Later /input/ack and recordDeliveredInput confirm the exact receipt and inputId.
-  live.inputs[0] = { ...row, state: 'sent', messageId: 'native-echo-1', historyAnchored: true, deliveredAt: T0 + 1 };
-  live.events[0] = { ...echo, inputId: row.id, inputDelivery: 'confirmed' };
-  await append([]);
+  // A subsequent question arriving before /input/ack must not resurrect a duplicate for the already-matched prompt.
+  await append([{ seq: 2, time: T0 + 2, source: 'extension', kind: 'user_message',
+    messageId: 'native-next-2', message: text('Second question') }]);
   expect(count()).toBe(1);
   expect(w.document.querySelector('#inputQueue .pending-message')).toBeNull();
+
+  // Later /input/ack commits the confirmed revision at a new sequence >= cursor.
+  live.inputs[0] = { ...row, state: 'sent', messageId: 'native-echo-1', historyAnchored: true, deliveredAt: T0 + 1 };
+  await append([{ ...echo, seq: 3, inputId: row.id, inputDelivery: 'confirmed' }]);
+  expect(count()).toBe(1);
+  expect(w.document.querySelector('#inputQueue .pending-message')).toBeNull();
+});
+
+it('keeps an image pending bubble visible until an echo carries attachments or /input/ack arrives', async () => {
+  const { w, live, append } = await boot([]);
+  const row: InputEntry = {
+    id: 'delivery-image',
+    sessionId: summary([]).id,
+    state: 'browser',
+    owner: 'page',
+    text: 'Look at this screenshot',
+    images: [{ name: 'shot.png', dataUrl: 'data:image/png;base64,AA==' }],
+    mode: 'auto',
+    model: null,
+    reasoningEffort: null,
+    dueAt: T0,
+    createdAt: T0,
+    conversationId: 'chat-b'
+  };
+  live.inputs.push(row);
+  await append([]);
+  expect(w.document.querySelector('#inputQueue .pending-message img')).not.toBeNull();
+
+  // Early echo without attachments/assets must keep the pending image preview visible.
+  const echo: SessionEvent = { seq: 1, time: T0 + 1, source: 'extension', kind: 'user_message',
+    messageId: 'native-img-1', message: text(row.text) };
+  await append([echo]);
+  expect(w.document.querySelector('#inputQueue .pending-message')).not.toBeNull();
+
+  // Once an echo revision includes attachment metadata, the pending preview can retire cleanly.
+  await append([{ ...echo, seq: 2, attachments: [{ id: 'att-1', name: 'shot.png', mimeType: 'image/png', size: 2 }] }]);
+  expect(w.document.querySelector('#inputQueue .pending-message')).toBeNull();
+  expect(w.document.querySelector('#timeline .said.is-user .message-attachments')).not.toBeNull();
 });
 
 it('syncs a delivered bubble and delivery controls on the fast active-detail path before the 400 ms catalog refresh', async () => {
@@ -1374,39 +1421,54 @@ it('syncs a delivered bubble and delivery controls on the fast active-detail pat
   if (releaseList) releaseList();
 });
 
-it('never hides an unsent pending delivered bubble behind prior-turn, subsequent, edited, or held user messages', async () => {
+it('never hides an unsent pending bubble behind a prior turn with identical text', async () => {
+  const { w, live, append } = await boot([
+    { seq: 1, time: T0 - 10, source: 'extension', kind: 'user_message', messageId: 'prior-q', message: text('Repeat prompt') }
+  ]);
+  live.inputs.push({ id: 'unsent-prior', sessionId: summary([]).id, owner: 'page', mode: 'auto', model: null, reasoningEffort: null,
+    conversationId: 'chat-b', state: 'browser', text: 'Repeat prompt', dueAt: T0, createdAt: T0 });
+  await append([]);
+  expect([...w.document.querySelectorAll<HTMLElement>('#inputQueue .pending-message')].map(n => n.dataset.inputId)).toEqual(['unsent-prior']);
+});
+
+it('never hides an unsent pending bubble behind a turn that ended before authorization', async () => {
+  const { w, live, append } = await boot([
+    { seq: 1, time: T0 + 5, source: 'extension', kind: 'user_message', messageId: 'mid-q', message: text('Later ended prompt') },
+    { seq: 2, time: T0 + 8, source: 'extension', kind: 'turn_end', turnId: 'mid-turn', outcome: 'completed' }
+  ]);
+  live.inputs.push({ id: 'unsent-turn-ended', sessionId: summary([]).id, owner: 'page', mode: 'auto', model: null, reasoningEffort: null,
+    conversationId: 'chat-b', state: 'browser', text: 'Later ended prompt', dueAt: T0, createdAt: T0, sendAuthorizedAt: T0 + 10 });
+  await append([]);
+  expect([...w.document.querySelectorAll<HTMLElement>('#inputQueue .pending-message')].map(n => n.dataset.inputId)).toEqual(['unsent-turn-ended']);
+});
+
+it('never hides a pending edit behind the existing target message being edited', async () => {
+  const targetId = '11111111-1111-4111-8111-111111111111';
+  const { w, live, append } = await boot([
+    { seq: 1, time: T0 + 20, source: 'extension', kind: 'user_message', messageId: targetId, message: text('Edit target prompt') }
+  ]);
+  live.inputs.push({ id: 'unsent-edit', sessionId: summary([]).id, owner: 'page', mode: 'auto', model: null, reasoningEffort: null,
+    conversationId: 'chat-b', state: 'browser', text: 'Edit target prompt', dueAt: T0 + 15, createdAt: T0 + 15, edit: { messageId: targetId } });
+  await append([]);
+  expect([...w.document.querySelectorAll<HTMLElement>('#inputQueue .pending-message')].map(n => n.dataset.inputId)).toEqual(['unsent-edit']);
+});
+
+it('never hides held or unclaimed queued inputs behind a manual echo with matching text', async () => {
   const future = Date.now() + 60_000;
   const { w, live, append } = await boot([
-    { seq: 1, time: T0 - 10, source: 'extension', kind: 'user_message', messageId: 'prior-q', message: text('Repeat prompt') },
-    { seq: 2, time: T0 - 5, source: 'extension', kind: 'turn_end', turnId: 'prior-turn', outcome: 'completed' },
-    { seq: 3, time: T0 + 5, source: 'extension', kind: 'user_message', messageId: 'mid-q', message: text('Later ended prompt') },
-    { seq: 4, time: T0 + 8, source: 'extension', kind: 'turn_end', turnId: 'mid-turn', outcome: 'completed' },
-    { seq: 5, time: T0 + 20, source: 'extension', kind: 'user_message', messageId: '11111111-1111-4111-8111-111111111111', message: text('Edit target prompt') },
-    { seq: 6, time: T0 + 25, source: 'extension', kind: 'user_message', messageId: 'latest-other', message: text('Something else') }
+    { seq: 1, time: T0 + 25, source: 'extension', kind: 'user_message', messageId: 'latest-other', message: text('Something else') }
   ]);
-  const base = { sessionId: summary([]).id, owner: 'page', mode: 'auto' as const, model: null, reasoningEffort: null,
-    conversationId: 'chat-b' };
+  const base = { sessionId: summary([]).id, owner: null, mode: 'auto' as const, model: null, reasoningEffort: null,
+    conversationId: 'chat-b', state: 'queued' as const, text: 'Something else', createdAt: T0 + 20 };
   live.inputs.push(
-    // Case A: Prior turn had identical text before entry.createdAt.
-    { ...base, id: 'unsent-prior', state: 'browser', text: 'Repeat prompt', dueAt: T0, createdAt: T0 },
-    // Case B: Message at >= createdAt already ended a turn before sendAuthorizedAt.
-    { ...base, id: 'unsent-turn-ended', state: 'browser', text: 'Later ended prompt', dueAt: T0, createdAt: T0, sendAuthorizedAt: T0 + 10 },
-    // Case C: Pending edit of the existing question with identical text must not anchor on the question being edited.
-    { ...base, id: 'unsent-edit', state: 'browser', text: 'Edit target prompt', dueAt: T0 + 15, createdAt: T0 + 15,
-      edit: { messageId: '11111111-1111-4111-8111-111111111111' } },
-    // Case D: Queued rows that are held by sendCheck, scheduled in the future, or failed startup.
-    { ...base, id: 'held-sendcheck', owner: null, state: 'queued', text: 'Something else', dueAt: T0 + 20, createdAt: T0 + 20,
-      sendCheck: { attempt: 1, nextAt: future, reason: 'budget', answered: true } },
-    { ...base, id: 'held-future', owner: null, state: 'queued', text: 'Something else', dueAt: future, createdAt: T0 + 20 },
-    { ...base, id: 'held-error', owner: null, state: 'queued', text: 'Something else', dueAt: T0 + 20, createdAt: T0 + 20,
-      error: 'Waiting for browser' }
+    { ...base, id: 'held-unclaimed-due', dueAt: T0 + 20, slotWait: 'slots' },
+    { ...base, id: 'held-sendcheck', dueAt: T0 + 20, sendCheck: { attempt: 1, nextAt: future, reason: 'budget', answered: true } },
+    { ...base, id: 'held-future', dueAt: future },
+    { ...base, id: 'held-error', dueAt: T0 + 20, error: 'Waiting for browser' }
   );
   await append([]);
-  const pendingIds = [...w.document.querySelectorAll<HTMLElement>('#inputQueue .pending-message')].map(node => node.dataset.inputId);
-  expect(pendingIds).toEqual([
-    'unsent-prior',
-    'unsent-turn-ended',
-    'unsent-edit',
+  expect([...w.document.querySelectorAll<HTMLElement>('#inputQueue .pending-message')].map(n => n.dataset.inputId)).toEqual([
+    'held-unclaimed-due',
     'held-sendcheck',
     'held-future',
     'held-error'
