@@ -7089,9 +7089,12 @@ function paintDetail(followBottom = historyBefore === null): void {
   placeTurnLines(timelineRows, workedSeconds);
   reconcileChildren($('timeline'), groupImageRows(renderRounds(timelineRows, tracesFor === selectedId ? traces : {}, turnWorking,
     turnWorking ? openTurnId(events) : null, selectedId, toolGroups, sayRows, true)));
+  paintedTimelineFor = detailFor;
+  paintedTimelineEvents = shown;
   // Rounds that arrive after this paint enter with a fade; the chat as it opened does not.
   roundsEnter = timelineRows.length > 0;
   paintPendingInputs();
+  paintDeliveryControls();
   $('timelineEmpty').hidden = selectedId !== null || timelineRows.length > 0 || $('inputQueue').childElementCount > 0;
   if (timelineShown() && !holdSentMessage()) restoreViewport();
   paintJumpLatest();
@@ -9219,10 +9222,16 @@ function schedulePageHoldLapse(): void {
   pageHoldLapseTimer = window.setTimeout(() => { pageHoldLapseTimer = undefined; paintPendingInputs(); }, Math.max(0, Math.min(...due) - now) + 50);
 }
 
+let paintedTimelineFor: string | null = null;
+let paintedTimelineEvents: SessionEvent[] = [];
 const pageEchoMatches = new Map<string, { sessionId: string | null; messageId: string }>();
 
 function pageEchoAnchored(entry: InputEntry, all: readonly InputEntry[]): boolean {
-  if (detailFor !== selectedId || historyBefore !== null || !inputBelongsToCurrentSelection(entry)) return false;
+  if (!selectedId || detailFor !== selectedId || paintedTimelineFor !== selectedId || historyBefore !== null ||
+      !inputBelongsToCurrentSelection(entry)) return false;
+  const selectedSession = sessions.find(session => session.id === selectedId);
+  if (selectedSession && selectedSession.chatIds.length > 1) return false;
+  if (entry.requiresAuthorization && entry.sendAuthorizedAt === undefined) return false;
   const dispatched = entry.state === 'browser' ||
     (entry.state === 'queued' && !entry.error && !entry.scheduled && !heldBySendCheck(entry) &&
       !queuedWaitReason(entry) && !routeHeld(entry) &&
@@ -9235,30 +9244,31 @@ function pageEchoAnchored(entry: InputEntry, all: readonly InputEntry[]): boolea
   const delivered = entry.deliveryText ? norm(entry.deliveryText) : '';
   const candidates = [authored, combined, delivered].filter(Boolean);
   if (!candidates.length) return false;
-  const pendingImages = (entry.images?.length ?? 0) > 0;
+  const pendingMedia = (entry.images?.length ?? 0) > 0 || (entry.attachments?.length ?? 0) > 0;
+  const minEchoTime = entry.requiresAuthorization ? entry.sendAuthorizedAt! : entry.createdAt;
   const settledBefore = entry.sendAuthorizedAt ?? entry.offeredAt ?? entry.createdAt;
   const echoMatchesEntry = (event: SessionEvent): event is Extract<SessionEvent, { kind: 'user_message' }> => {
     if (event.kind !== 'user_message' || event.source !== 'extension' || event.inputId || !event.messageId ||
-        event.messageId.startsWith('input:') || event.time < entry.createdAt) return false;
+        event.messageId.startsWith('input:') || event.time < minEchoTime) return false;
     if (entry.edit && event.messageId === entry.edit.messageId) return false;
     if (all.some(other => other.id !== entry.id && other.messageId === event.messageId)) return false;
     for (const [otherId, cached] of pageEchoMatches) {
       if (otherId !== entry.id && cached.sessionId === selectedId && cached.messageId === event.messageId) return false;
     }
-    if (events.some(later => later.seq > event.seq && later.kind === 'turn_end' && later.time <= settledBefore)) return false;
+    if (paintedTimelineEvents.some(later => later.seq > event.seq && later.kind === 'turn_end' && later.time <= settledBefore)) return false;
     const shown = norm(event.authoredText ?? userPromptText(event.message.text.trimStart()) ?? event.message.text);
     const raw = norm(event.message.text);
     const textMatch = candidates.includes(shown) || candidates.includes(raw);
-    return textMatch && (!pendingImages || !!event.attachments?.length || !!event.assets?.length);
+    return textMatch && (!pendingMedia || !!event.attachments?.length || !!event.assets?.length);
   };
   const priorMatch = pageEchoMatches.get(entry.id);
   const priorEvent = priorMatch && priorMatch.sessionId === selectedId
-    ? events.find((event): event is Extract<SessionEvent, { kind: 'user_message' }> =>
+    ? paintedTimelineEvents.find((event): event is Extract<SessionEvent, { kind: 'user_message' }> =>
         echoMatchesEntry(event) && event.messageId === priorMatch.messageId)
     : undefined;
   if (priorEvent) return true;
-  const match = events.find((event): event is Extract<SessionEvent, { kind: 'user_message' }> =>
-    echoMatchesEntry(event) && !events.some(later => later.seq > event.seq && later.kind === 'user_message'));
+  const match = paintedTimelineEvents.find((event): event is Extract<SessionEvent, { kind: 'user_message' }> =>
+    echoMatchesEntry(event) && !paintedTimelineEvents.some(later => later.seq > event.seq && later.kind === 'user_message'));
   if (match?.messageId) {
     pageEchoMatches.set(entry.id, { sessionId: selectedId, messageId: match.messageId });
     return true;
