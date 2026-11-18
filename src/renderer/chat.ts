@@ -3341,6 +3341,7 @@ let followUpTurn: string | null = null;
 function followUpQueues(): boolean {
   return deps.state()?.config.ui.followUp === 'queue';
 }
+let paintedPendingCancel: { id: string; target: string | null; selection: number } | null = null;
 function paintDeliveryControls(): void {
   paintGoalProgress();
   for (const button of document.querySelectorAll<HTMLButtonElement>('#finishQueue .queue-send-now')) button.hidden = !canSendQueuedNow();
@@ -3389,6 +3390,7 @@ function paintDeliveryControls(): void {
   send.disabled = !!preparedPlan && (preparedPlan.sending || preparedPlan.stages.some(stage => !stage.trim()));
   send.dataset.action = stop ? 'stop' : 'send';
   ui(send, 'aria-label', () => stop ? (controlledStopPending ? t("Stop requested") : t("Stop turn")) : t("Send message"));
+  paintedPendingCancel = stop && !working && !held && pending ? { id: pending.id, target: selectedId, selection: selectionGeneration } : null;
   if (stop && !working && !held && pending) ui(send, 'aria-label', () => t("Cancel delivery"));
   const planAction = selectedId && !chatKnownIdle(selectedId) ? t("Queue plan at Session finish") : t("Start full plan");
   if (preparedPlan && !stop) send.setAttribute('aria-label', planAction);
@@ -7091,6 +7093,7 @@ function paintDetail(followBottom = historyBefore === null): void {
     turnWorking ? openTurnId(events) : null, selectedId, toolGroups, sayRows, true)));
   paintedTimelineFor = detailFor;
   paintedTimelineEvents = shown;
+  paintedDetailEvents = events;
   // Rounds that arrive after this paint enter with a fade; the chat as it opened does not.
   roundsEnter = timelineRows.length > 0;
   paintPendingInputs();
@@ -9224,13 +9227,14 @@ function schedulePageHoldLapse(): void {
 
 let paintedTimelineFor: string | null = null;
 let paintedTimelineEvents: SessionEvent[] = [];
+let paintedDetailEvents: SessionEvent[] = [];
 const pageEchoMatches = new Map<string, { sessionId: string | null; messageId: string }>();
 
 function pageEchoAnchored(entry: InputEntry, all: readonly InputEntry[]): boolean {
   if (!selectedId || detailFor !== selectedId || paintedTimelineFor !== selectedId || historyBefore !== null ||
       !inputBelongsToCurrentSelection(entry)) return false;
   const selectedSession = sessions.find(session => session.id === selectedId);
-  if (selectedSession && selectedSession.chatIds.length > 1) return false;
+  if ((selectedSession?.chatIds?.length ?? 0) > 1) return false;
   if (entry.requiresAuthorization && entry.sendAuthorizedAt === undefined) return false;
   const dispatched = entry.state === 'browser' ||
     (entry.state === 'queued' && !entry.error && !entry.scheduled && !heldBySendCheck(entry) &&
@@ -9255,7 +9259,7 @@ function pageEchoAnchored(entry: InputEntry, all: readonly InputEntry[]): boolea
     for (const [otherId, cached] of pageEchoMatches) {
       if (otherId !== entry.id && cached.sessionId === selectedId && cached.messageId === event.messageId) return false;
     }
-    if (paintedTimelineEvents.some(later => later.seq > event.seq && later.kind === 'turn_end' && later.time <= settledBefore)) return false;
+    if (paintedDetailEvents.some(later => later.seq > event.seq && later.kind === 'turn_end' && later.time <= settledBefore)) return false;
     const shown = norm(event.authoredText ?? userPromptText(event.message.text.trimStart()) ?? event.message.text);
     const raw = norm(event.message.text);
     const textMatch = candidates.includes(shown) || candidates.includes(raw);
@@ -9278,9 +9282,9 @@ function pageEchoAnchored(entry: InputEntry, all: readonly InputEntry[]): boolea
 }
 
 function anchoredPendingInput(entry: InputEntry, all: readonly InputEntry[] = pendingComposerInputs): boolean {
-  return detailFor === selectedId && (events.some(event =>
+  return detailFor === selectedId && ((paintedTimelineFor === selectedId && paintedTimelineEvents.some(event =>
     event.kind === 'user_message' && (event.inputId === entry.id ||
-      event.messageId === (entry.messageId ?? `input:${entry.id}`))) ||
+      event.messageId === (entry.messageId ?? `input:${entry.id}`)))) ||
     pageEchoAnchored(entry, all) ||
     // History owns committed off-page rows. Keep only receipts newer than our
     // loaded publication cursor while the corresponding live snapshot arrives.
@@ -9665,7 +9669,8 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
     // The turn or pending delivery the button showed Stop/Cancel for, before the refresh can change it (CodeRabbit).
     const shownTurn = controlledSessionId === target && controlledSelection === selection ? controlledTurnId ?? controlledHeldTurnId : null;
     const shownConversation = shownTurn ? controlledConversationId : null;
-    const shownPendingId = !shownTurn ? pendingComposerInput()?.id ?? null : null;
+    const shownPendingId = !shownTurn && paintedPendingCancel?.target === target && paintedPendingCancel.selection === selection
+      ? paintedPendingCancel.id : null;
     await refreshSessionControls();
     if (!sameSelection()) return;
     // An actual turn takes precedence over queued follow-ups. Stop never silently

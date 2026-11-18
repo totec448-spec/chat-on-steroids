@@ -1498,6 +1498,7 @@ it('never hides unauthorized browser claims, multi-conversation resumed sessions
     { ...base, id: 'held-error', state: 'queued', dueAt: T0 + 20, error: 'Waiting for browser' }
   );
   await append([]);
+  expect([...w.document.querySelectorAll<HTMLElement>('#inputQueue .pending-message')].map(n => n.dataset.inputId)).toContain('queued-unclaimed-due');
   expect(w.document.querySelector('#inputQueue [data-input-id="held-pagehold"]')!.textContent).toContain('Waiting for ChatGPT to finish its answer');
 
   // Enable routeSettlingUntil alongside a routeHeld entry; it also remains visible and unanchored.
