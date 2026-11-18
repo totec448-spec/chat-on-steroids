@@ -3056,6 +3056,146 @@ describe('desktop input delivery and helper ownership', () => {
     expect(emitted(live.sent, 'chat_error')).toHaveLength(0);
   });
 
+  async function openRemountedToolTurn(requestId: string, domTurnId: string): Promise<{ oldSection: HTMLElement; activeTurnId: string }> {
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack || message.fail ? { ok: true } : { input: claimed() } }),
+      page_note: () => ({ ok: true })
+    });
+    startGenerating(live.document);
+    live.hook.observe(); await settle();
+    const oldSection = assistantTurn(live.document, domTurnId, []);
+    live.hook.observe(); await settle();
+    const activeTurnId = emitted(live.sent, 'turn_start').at(-1)!.event.turnId as string;
+    live.reply.set('activity', () => ({
+      ok: true,
+      data: {
+        stream: [{ kind: 'tool_call', seq: 10, time: 1_700_000_001, turnId: activeTurnId, requestId, tool: 'read', outcome: 'ok' }],
+        entries: [],
+        pendingTools: 0
+      }
+    }));
+    await live.hook.pullActivity();
+    await bindFiberTurns([{
+      section: oldSection,
+      turn: {
+        turnId: domTurnId,
+        conversationId: chatA,
+        endMessageId: null,
+        calls: [{ messageId: 'call-1', tool: 'read', order: 0, answered: true, requestId }],
+        messages: [],
+        activities: []
+      }
+    }]);
+    await live.hook.flush();
+    return { oldSection, activeTurnId };
+  }
+
+  it('closes a remounted live turn via request-id settledOwners endMessageId without leaving generating stuck in turn-held', async () => {
+    const requestId = 'req-remount-settled-close';
+    const { oldSection, activeTurnId } = await openRemountedToolTurn(requestId, 'turn-dom-1');
+
+    // ChatGPT unmounts/virtualizes the live assistant section at completion so generationTurn() is null
+    // while Fiber still returns the completed turn bearing our MCP request_id (`settledOwners === activeTurnId`).
+    oldSection.remove();
+    stopGenerating(live!.document);
+    const remountedSection = live!.document.createElement('section');
+    await bindFiberTurns([
+      {
+        section: remountedSection,
+        turn: {
+          turnId: 'fiber-turn-2',
+          conversationId: chatA,
+          endMessageId: 'remounted-final-msg',
+          calls: [{ messageId: 'call-1', tool: 'read', order: 0, answered: true, requestId }],
+          messages: [{ role: 'assistant', messageId: 'remounted-final-msg', rawMessageId: 'remounted-final-msg', rawText: 'Done after remount.' }],
+          activities: []
+        }
+      }
+    ], true);
+    await live!.hook.flush();
+    await settle();
+
+    expect(emitted(live!.sent, 'assistant_message').some(entry => entry.event?.final === true && entry.event?.turnId === activeTurnId)).toBe(true);
+    expect(emitted(live!.sent, 'turn_end').map(entry => entry.event)).toEqual([
+      expect.objectContaining({ turnId: activeTurnId, outcome: 'completed' })
+    ]);
+    live!.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      userTurn(live!.document, 'after-remount-user', text);
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+      live!.hook.observe();
+    });
+    expect(await live!.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA })).toEqual({ ok: true });
+    expect(live!.sent.filter(message => message.type === 'page_note' && message.note === 'input-held')).toEqual([]);
+  });
+
+  it('does not close a remounted turn via settledOwners when an approval card is waiting', async () => {
+    const requestId = 'req-remount-approval-hold';
+    const { oldSection } = await openRemountedToolTurn(requestId, 'turn-dom-approval');
+
+    oldSection.remove();
+    stopGenerating(live!.document);
+    const card = live!.document.createElement('div');
+    card.setAttribute('data-codex-approval-surface', 'true');
+    card.append(live!.document.createElement('button'), live!.document.createElement('button'));
+    card.getClientRects = () => [{ width: 600, height: 200 }] as unknown as DOMRectList;
+    live!.document.body.append(card);
+
+    const remountedSection = live!.document.createElement('section');
+    await bindFiberTurns([{
+      section: remountedSection,
+      turn: {
+        turnId: 'fiber-turn-approval',
+        conversationId: chatA,
+        endMessageId: 'remounted-approval-msg',
+        calls: [{ messageId: 'call-1', tool: 'read', order: 0, answered: true, requestId }],
+        messages: [{ role: 'assistant', messageId: 'remounted-approval-msg', rawMessageId: 'remounted-approval-msg', rawText: 'Waiting for approval.' }],
+        activities: []
+      }
+    }], true);
+    await live!.hook.flush();
+    await settle();
+
+    expect(emitted(live!.sent, 'turn_end')).toEqual([]);
+  });
+
+  it('does not close a remounted turn via settledOwners when request ownership is ambiguous across Fiber turns', async () => {
+    const requestId = 'req-remount-ambiguous';
+    const { oldSection } = await openRemountedToolTurn(requestId, 'turn-dom-ambig');
+
+    oldSection.remove();
+    stopGenerating(live!.document);
+    const firstTurn = live!.document.createElement('section');
+    const secondTurn = live!.document.createElement('section');
+    await bindFiberTurns([
+      {
+        section: firstTurn,
+        turn: {
+          turnId: 'fiber-ambig-1',
+          conversationId: chatA,
+          endMessageId: 'ambig-msg-1',
+          calls: [{ messageId: 'call-1', tool: 'read', order: 0, answered: true, requestId }],
+          messages: [{ role: 'assistant', messageId: 'ambig-msg-1', rawMessageId: 'ambig-msg-1', rawText: 'Retry 1.' }],
+          activities: []
+        }
+      },
+      {
+        section: secondTurn,
+        turn: {
+          turnId: 'fiber-ambig-2',
+          conversationId: chatA,
+          endMessageId: 'ambig-msg-2',
+          calls: [{ messageId: 'call-2', tool: 'read', order: 0, answered: true, requestId }],
+          messages: [{ role: 'assistant', messageId: 'ambig-msg-2', rawMessageId: 'ambig-msg-2', rawText: 'Retry 2.' }],
+          activities: []
+        }
+      }
+    ], true);
+    await live!.hook.flush();
+    await settle();
+
+    expect(emitted(live!.sent, 'turn_end')).toEqual([]);
+  });
+
   it.each([false, true])('handles autosaved text hydrated during model selection only for an owned fresh input (%s)', async (fresh) => {
     live = await harness(fresh ? `https://chatgpt.com/?cos-input=${inputId}` : `https://chatgpt.com/c/${chatA}`, {
       desktop_input: message => ({ ok: true, data: message.authorize ? { ok: true } : message.ack || message.fail ? { ok: true } : { input: claimed() } })

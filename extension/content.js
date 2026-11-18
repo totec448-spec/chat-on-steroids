@@ -5351,26 +5351,41 @@
     for (const bounded of [knownFinals, settledFinals]) {
       while (bounded.size > 2000) bounded.delete(bounded.values().next().value);
     }
+    // When ChatGPT remounts or virtualizes the live section so `generationTurn()` returns null
+    // (`activeTurnIndex === -1`), `settledOwners` still proves unique ownership of the completed
+    // Fiber turn via MCP `request_id`; close the local generation on that proven `endMessageId`
+    // so `generating` does not remain stuck and block queued prompts in `turn-held`.
+    const activeClosingTurn = activeTurnIndex >= 0 && activeLocalTurnId === turnId
+      ? answer.turns[activeTurnIndex]
+      : null;
+    const settledClosingMatches = !activeClosingTurn && turnId
+      ? [...settledOwners.entries()]
+          .filter(([candidate, owner]) => owner === turnId && Boolean(candidate?.endMessageId) && candidate.conversationConflict !== true)
+          .map(([candidate]) => candidate)
+      : [];
+    const settledClosingTurn = settledClosingMatches.length === 1 ? settledClosingMatches[0] : null;
+    const closingTurn = activeClosingTurn || settledClosingTurn;
     if (
       generating &&
-      activeTurnIndex >= 0 &&
-      activeLocalTurnId === turnId &&
-      Boolean(answer.turns[activeTurnIndex]?.endMessageId) &&
-      !settledFinals.has(answer.turns[activeTurnIndex].endMessageId) &&
+      closingTurn?.endMessageId &&
+      !settledFinals.has(closingTurn.endMessageId) &&
       // A turn waiting on ChatGPT's approval card is not over, whatever its last message says
       // (#1977), nor in the moment after it is answered; a refresh after that reads the final again.
       !approvalHolding()
     ) {
-      fiberTerminalMessageId = answer.turns[activeTurnIndex].endMessageId;
-      settledFinals.add(fiberTerminalMessageId);
-      const ended = generationTurn();
-      if (ended) {
+      const ended = activeClosingTurn
+        ? generationTurn()
+        : (CLF_DOM.turns().find(nodeTurn => fiberTurnFor(nodeTurn) === closingTurn) || generationTurn());
+      if (ended || settledClosingTurn) {
+        fiberTerminalMessageId = closingTurn.endMessageId;
+        settledFinals.add(fiberTerminalMessageId);
         // Native completion resolves transport uncertainty even when its old
         // banner remains mounted; explicit user stop still wins in endOutcome.
         const local = endOutcome(ended, true);
         // A later exact native final also supersedes the stale Thinking failed header.
         finishGeneration(ended, local.outcome === 'unknown' || local.reason === 'thinking_failed'
           ? { outcome: 'completed' } : local, false);
+        notifyCommandReadiness();
       }
     }
     // agents finish ends broker work, not ChatGPT's response. A tool-only
