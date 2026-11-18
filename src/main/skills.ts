@@ -532,8 +532,8 @@ export function linkSkillPackage(id: string, source: GitHubSkillOrigin): Promise
   return serial(async () => {
     assertSkillId(id);
     if (!validGitHubSkillOrigin(source)) throw new Error('Invalid GitHub skill source');
-    const name = source.directory.split('/').filter(Boolean).at(-1) ?? new URL(source.url).pathname.split('/')[2]!;
-    if (slugSkillId(name) !== id) throw new Error('The GitHub folder name does not match this skill');
+    // The local managed ID is stable, not a GitHub folder name. An existing
+    // SKILL.md must match the verified remote bytes; that is the link authority.
     const candidateRoot = requiredRoot();
     await assertManagedRoot(candidateRoot);
     const record = await recordAt(candidateRoot, id);
@@ -641,7 +641,8 @@ export function updateSkillPackage(
     assertSkillId(id);
     const candidateRoot = requiredRoot();
     const document = await packageDocument(sourcePath);
-    if (document.id !== id) throw new Error('GitHub skill folder no longer matches the installed skill');
+    // A linked source may live under a different GitHub directory from its
+    // local managed ID. Preserve that ID across updates; verify origin + bytes.
     const metadata = originBytes(nextOrigin, document.revision);
     if (!metadata || !validGitHubSkillOrigin(expectedOrigin) || nextOrigin.url !== expectedOrigin.url)
       throw new Error('GitHub skill source changed');
