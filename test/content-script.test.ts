@@ -3056,7 +3056,16 @@ describe('desktop input delivery and helper ownership', () => {
     expect(emitted(live.sent, 'chat_error')).toHaveLength(0);
   });
 
-  async function openRemountedToolTurn(requestId: string, domTurnId: string): Promise<{ oldSection: HTMLElement; activeTurnId: string }> {
+  function mountApprovalCard(document: Document): HTMLElement {
+    const card = document.createElement('div');
+    card.setAttribute('data-codex-approval-surface', 'true');
+    card.append(document.createElement('button'), document.createElement('button'));
+    card.getClientRects = () => [{ width: 600, height: 200 }] as unknown as DOMRectList;
+    document.body.append(card);
+    return card;
+  }
+
+  async function openRemountedToolTurn(requestId: string, domTurnId: string, approvalFinalId: string | null = null) {
     live = await harness(`https://chatgpt.com/c/${chatA}`, {
       desktop_input: message => ({ ok: true, data: message.authorize || message.ack || message.fail ? { ok: true } : { input: claimed() } }),
       page_note: () => ({ ok: true })
@@ -3075,19 +3084,23 @@ describe('desktop input delivery and helper ownership', () => {
       }
     }));
     await live.hook.pullActivity();
+    const card = approvalFinalId ? mountApprovalCard(live.document) : null;
+    if (card) stopGenerating(live.document);
     await bindFiberTurns([{
       section: oldSection,
       turn: {
         turnId: domTurnId,
         conversationId: chatA,
-        endMessageId: null,
+        endMessageId: approvalFinalId,
         calls: [{ messageId: 'call-1', tool: 'read', order: 0, answered: true, requestId }],
-        messages: [],
+        messages: approvalFinalId
+          ? [{ role: 'assistant', messageId: approvalFinalId, rawMessageId: approvalFinalId, rawText: 'The current answer.' }]
+          : [],
         activities: []
       }
     }]);
     await live.hook.flush();
-    return { oldSection, activeTurnId };
+    return { oldSection, activeTurnId, card };
   }
 
   it('closes a remounted live turn via request-id settledOwners endMessageId without leaving generating stuck in turn-held', async () => {
@@ -3176,11 +3189,7 @@ describe('desktop input delivery and helper ownership', () => {
 
     oldSection.remove();
     stopGenerating(live!.document);
-    const card = live!.document.createElement('div');
-    card.setAttribute('data-codex-approval-surface', 'true');
-    card.append(live!.document.createElement('button'), live!.document.createElement('button'));
-    card.getClientRects = () => [{ width: 600, height: 200 }] as unknown as DOMRectList;
-    live!.document.body.append(card);
+    mountApprovalCard(live!.document);
 
     const remountedSection = live!.document.createElement('section');
     await bindFiberTurns([{
@@ -3198,6 +3207,34 @@ describe('desktop input delivery and helper ownership', () => {
     await settle();
 
     expect(emitted(live!.sent, 'turn_end')).toEqual([]);
+  });
+
+  it('closes a detached turn after approval when its first stamped scan already had a final', async () => {
+    const requestId = 'req-approval-before-detachment';
+    const finalId = 'final-before-approval-clears';
+    const { oldSection, activeTurnId, card } = await openRemountedToolTurn(requestId, 'turn-approval-first-final', finalId);
+    expect(emitted(live!.sent, 'assistant_message').at(-1)?.event).toMatchObject({
+      messageId: finalId, turnId: activeTurnId, final: false
+    });
+    expect(emitted(live!.sent, 'turn_end')).toEqual([]);
+
+    oldSection.remove();
+    card!.remove();
+    live!.advance(live!.hook.APPROVAL_SETTLE_MS + 1);
+    await bindFiberTurns([{
+      section: live!.document.createElement('section'),
+      turn: {
+        turnId: 'detached-after-approval',
+        endMessageId: finalId,
+        calls: [{ messageId: 'call-1', tool: 'read', order: 0, answered: true, requestId }],
+        messages: [{ role: 'assistant', messageId: finalId, rawMessageId: finalId, rawText: 'The current answer.' }]
+      }
+    }], true);
+    await live!.hook.flush();
+
+    expect(emitted(live!.sent, 'turn_end').map(entry => entry.event)).toEqual([
+      expect.objectContaining({ turnId: activeTurnId, outcome: 'completed' })
+    ]);
   });
 
   it('does not close a remounted turn via settledOwners when request ownership is ambiguous across Fiber turns', async () => {
