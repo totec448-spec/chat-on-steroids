@@ -1342,6 +1342,7 @@ it('hands a delivered bubble, Cancel control, and focus to an early page echo wi
   await append([{ ...echo, seq: 3, inputId: row.id, inputDelivery: 'confirmed' }]);
   expect(count()).toBe(1);
   expect(w.document.querySelector('#inputQueue .pending-message')).toBeNull();
+  expect(w.document.querySelector('#timeline .said.is-user [aria-label="Delivery confirmed"]')).not.toBeNull();
 });
 
 it('keeps an image pending bubble visible until an echo carries attachments or /input/ack arrives', async () => {
@@ -1455,24 +1456,85 @@ it('never hides a pending edit behind the existing target message being edited',
 
 it('never hides held or unclaimed queued inputs behind a manual echo with matching text', async () => {
   const future = Date.now() + 60_000;
+  const now = Date.now();
   const { w, live, append } = await boot([
     { seq: 1, time: T0 + 25, source: 'extension', kind: 'user_message', messageId: 'latest-other', message: text('Something else') }
   ]);
   const base = { sessionId: summary([]).id, owner: null, mode: 'auto' as const, model: null, reasoningEffort: null,
     conversationId: 'chat-b', state: 'queued' as const, text: 'Something else', createdAt: T0 + 20 };
   live.inputs.push(
+    { ...base, id: 'queued-unclaimed-due', dueAt: T0 + 20 },
     { ...base, id: 'held-unclaimed-due', dueAt: T0 + 20, slotWait: 'slots' },
+    { ...base, id: 'held-pagehold', dueAt: T0 + 20, offeredAt: T0 + 21, pageHold: { reason: 'still-answering', at: now } },
     { ...base, id: 'held-sendcheck', dueAt: T0 + 20, sendCheck: { attempt: 1, nextAt: future, reason: 'budget', answered: true } },
     { ...base, id: 'held-future', dueAt: future },
     { ...base, id: 'held-error', dueAt: T0 + 20, error: 'Waiting for browser' }
   );
   await append([]);
   expect([...w.document.querySelectorAll<HTMLElement>('#inputQueue .pending-message')].map(n => n.dataset.inputId)).toEqual([
+    'queued-unclaimed-due',
     'held-unclaimed-due',
+    'held-pagehold',
     'held-sendcheck',
     'held-future',
     'held-error'
   ]);
+});
+
+it('keeps echo exclusivity, cross-chat cache isolation, and Cancel delivery binding across selection and races', async () => {
+  const firstSession = { ...summary([]), id: '2026-09-30-aaaaaaaa', title: 'Session A', conversationId: 'chat-a' };
+  const secondSession = { ...summary([]), id: '2026-09-30-bbbbbbbb', title: 'Session B', conversationId: 'chat-b' };
+  const rowsA: SessionEvent[] = [];
+  const rowsB: SessionEvent[] = [{ seq: 1, time: T0, source: 'extension', kind: 'assistant_message', messageId: 'b-asst', message: text('Session B ready'), state: 'final', final: true }];
+  const { w, live, notifySession } = await boot([], true, [], [], { sessions: [firstSession, secondSession] });
+  const api = (w as any).api;
+  let releaseControls: (() => void) | null = null;
+  let holdControls = false;
+  const cancelledIds: string[] = [];
+  api.cancelInput = vi.fn((id: string) => { cancelledIds.push(id); return Promise.resolve({ ok: true as const, data: true }); });
+  api.getSessionControls = (id: string) => {
+    const reply = { ok: true as const, data: { sessionId: id, conversationId: id === firstSession.id ? 'chat-a' : 'chat-b', automation: 'off', activeTurnId: null, finishHeld: false, blocked: '', job: null } };
+    if (!holdControls) return Promise.resolve(reply);
+    return new Promise(resolve => { releaseControls = () => resolve(reply); });
+  };
+  api.getSession = (id: string, opts?: { from?: number }) => {
+    const src = id === firstSession.id ? rowsA : rowsB;
+    const from = opts?.from ?? 0;
+    const list = src.filter(event => event.seq >= from);
+    return Promise.resolve({ ok: true as const, data: { summary: id === firstSession.id ? firstSession : secondSession, events: list, total: src.length, nextFrom: list.reduce((m, e) => Math.max(m, e.seq + 1), from) } });
+  };
+
+  // Two distinct browser inputs with identical text: one echo retires only the first, never both.
+  live.inputs.push(
+    { id: 'dup-first', sessionId: firstSession.id, state: 'browser', owner: 'page', text: 'Same text', mode: 'auto', model: null, reasoningEffort: null, dueAt: T0, createdAt: T0, conversationId: 'chat-a' },
+    { id: 'dup-second', sessionId: firstSession.id, state: 'browser', owner: 'page', text: 'Same text', mode: 'auto', model: null, reasoningEffort: null, dueAt: T0 + 1, createdAt: T0 + 1, conversationId: 'chat-a' }
+  );
+  rowsA.push({ seq: 1, time: T0 + 2, source: 'extension', kind: 'user_message', messageId: 'native-same-1', message: text('Same text') });
+  notifySession();
+  await waitFor(() => expect([...w.document.querySelectorAll<HTMLElement>('#inputQueue .pending-message')].map(n => n.dataset.inputId)).toEqual(['dup-second']));
+
+  // A subsequent question arrives on A; switching to B and back to A must preserve A's cached match.
+  rowsA.push({ seq: 2, time: T0 + 3, source: 'extension', kind: 'user_message', messageId: 'native-later-a', message: text('Later prompt in A') });
+  notifySession();
+  await waitFor(() => expect(w.document.querySelectorAll('#timeline .said.is-user')).toHaveLength(2));
+  (w.document.querySelector(`#sessionList [data-id="${secondSession.id}"]`) as HTMLElement).click();
+  await waitFor(() => expect(w.document.getElementById('timeline')!.textContent).toContain('Session B ready'));
+  (w.document.querySelector(`#sessionList [data-id="${firstSession.id}"]`) as HTMLElement).click();
+  await waitFor(() => expect(w.document.getElementById('timeline')!.textContent).toContain('Later prompt in A'));
+  expect([...w.document.querySelectorAll<HTMLElement>('#inputQueue .pending-message')].map(n => n.dataset.inputId)).toEqual(['dup-second']);
+
+  // Clicking Cancel delivery on dup-second while dup-second gets echoed mid-controls-refresh must not cancel a queued fallback row.
+  live.inputs.push({ id: 'queued-fallback', sessionId: firstSession.id, state: 'queued', owner: null, text: 'Queued next', mode: 'auto', model: null, reasoningEffort: null, dueAt: T0 + 10, createdAt: T0 + 10, conversationId: 'chat-a' });
+  notifySession();
+  await waitFor(() => expect(w.document.getElementById('chatSend')!.getAttribute('aria-label')).toBe('Cancel delivery'));
+  holdControls = true;
+  w.document.getElementById('chatSend')!.click();
+  rowsA.push({ seq: 3, time: T0 + 5, source: 'extension', kind: 'user_message', messageId: 'native-same-2', message: text('Same text') });
+  notifySession();
+  await waitFor(() => expect([...w.document.querySelectorAll<HTMLElement>('#inputQueue .pending-message')].map(n => n.dataset.inputId)).toEqual(['queued-fallback']));
+  releaseControls!();
+  await settle();
+  expect(cancelledIds).toEqual([]);
 });
 
 it.each([undefined, 4])('never resurrects committed off-page inputs beside genuinely waiting inputs when old timestamps reappear (historySeq=%s)', async historySeq => {
