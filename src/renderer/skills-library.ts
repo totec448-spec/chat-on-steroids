@@ -314,7 +314,9 @@ export function initSkillsLibrary(api: AppApi): () => void {
   const githubTokenSave = $<HTMLButtonElement>('skillGithubTokenSave');
   const githubTokenRemove = $<HTMLButtonElement>('skillGithubTokenRemove');
   let githubAuthEpoch = 0;
+  let lastGithubAuth: { stored: boolean; available: boolean } | null = null;
   const paintGithubAuth = (state: { stored: boolean; available: boolean }): void => {
+    lastGithubAuth = state;
     githubAuthStatus.textContent = t(!state.available ? 'Secure GitHub token storage is unavailable.'
       : state.stored ? 'GitHub token saved securely. API requests are authenticated.'
         : 'GitHub API is anonymous (60 requests per hour).');
@@ -336,7 +338,8 @@ export function initSkillsLibrary(api: AppApi): () => void {
     } finally {
       // Failed status reads must not strand both controls disabled after an IPC failure.
       if (!statusRead && own === githubAuthEpoch && githubDialog.open) {
-        githubToken.disabled = githubTokenSave.disabled = false;
+        githubToken.disabled = githubTokenSave.disabled = lastGithubAuth?.available === false;
+        githubTokenRemove.disabled = !lastGithubAuth?.available || !lastGithubAuth.stored;
       }
     }
   };
@@ -367,6 +370,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
   })());
   const openGithubDialog = (target: ManagedSkill | null): void => {
     linkTarget = target;
+    lastGithubAuth = null;
     ui($('skillGithubTitle'), 'textContent', () => t(target ? 'Link {0} to GitHub' : 'Import from GitHub', target ? [target.name] : []));
     ui($('skillGithubDescription'), 'textContent', () => t(target
       ? 'Link only if the local SKILL.md matches the GitHub file. Your files stay in place; missing or changed resources will show as an available update.'

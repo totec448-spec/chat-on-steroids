@@ -47,6 +47,44 @@ it('allows another credential save after rejected auth and a failed status refre
   await vi.waitFor(() => expect(w.document.getElementById('skillGithubAuthStatus')!.textContent).toContain('saved securely'), { timeout: 5_000 });
 });
 
+it('allows retrying Remove after its failure and a failed status read, preserving typed credentials', async () => {
+  dom = new JSDOM(`<!doctype html><body>
+    <input id="skillsSearch"><button id="skillsRefresh"></button>
+    <button id="skillsImportFolder"></button><button id="skillsImportFile"></button><button id="skillsImportGithub"></button>
+    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl">${authControls}<p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
+    <span id="skillsCount"></span><div id="skillsInstalled"></div>
+  </body>`, { url: 'https://skills.test/' });
+  const w = dom.window;
+  for (const [key, value] of Object.entries({ window: w, document: w.document, HTMLElement: w.HTMLElement,
+    HTMLButtonElement: w.HTMLButtonElement, HTMLDialogElement: w.HTMLDialogElement })) vi.stubGlobal(key, value);
+  w.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  let rejectRefresh!: (error: Error) => void;
+  const failedRefresh = new Promise<never>((_, reject) => { rejectRefresh = reject; });
+  const authStatus = vi.fn().mockResolvedValueOnce({ ok: true, data: { stored: true, available: true } })
+    .mockImplementationOnce(() => failedRefresh)
+    .mockResolvedValue({ ok: true, data: { stored: false, available: true } });
+  const remove = vi.fn().mockResolvedValueOnce({ ok: false, error: 'Could not remove saved GitHub token.' })
+    .mockResolvedValueOnce({ ok: true, data: { stored: false, available: true } });
+  const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
+  initSkillsLibrary(authApi({ listManagedSkills: vi.fn(async () => ({ ok: true, data: [] })),
+    skillsGithubAuthStatus: authStatus, skillsGithubAuthRemove: remove }) as any);
+  (w.document.getElementById('skillsImportGithub') as HTMLButtonElement).click();
+  const tokenInput = w.document.getElementById('skillGithubToken') as HTMLInputElement;
+  const removeButton = w.document.getElementById('skillGithubTokenRemove') as HTMLButtonElement;
+  await vi.waitFor(() => expect(removeButton.disabled).toBe(false), { timeout: 5_000 });
+  removeButton.click();
+  await vi.waitFor(() => expect(authStatus).toHaveBeenCalledTimes(2), { timeout: 5_000 });
+  const typed = 'github_pat_' + 'x'.repeat(70);
+  tokenInput.value = typed;
+  rejectRefresh(new Error('status IPC failed'));
+  await vi.waitFor(() => expect(w.document.getElementById('skillGithubAuthStatus')!.textContent).toContain('Could not read'), { timeout: 5_000 });
+  expect(removeButton.disabled).toBe(false);
+  expect(tokenInput.value).toBe(typed);
+  removeButton.click();
+  await vi.waitFor(() => expect(remove).toHaveBeenCalledTimes(2), { timeout: 5_000 });
+  await vi.waitFor(() => expect(w.document.getElementById('skillGithubAuthStatus')!.textContent).toContain('anonymous'), { timeout: 5_000 });
+});
+
 it('shows the managed library, imports both source shapes, filters and removes only after confirmation', async () => {
   dom = new JSDOM(`<!doctype html><body>
     <input id="skillsSearch"><button id="skillsRefresh"></button>
