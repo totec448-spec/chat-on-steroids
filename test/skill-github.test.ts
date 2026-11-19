@@ -270,6 +270,45 @@ it('still refuses GitHub packages over the 256-file bound', async () => {
   expect(await listManagedSkills()).toEqual([]);
 });
 
+it('uses bounded contents for a selected folder when the recursive tree exceeds the response limit', async () => {
+  const github = largeGithubFixture(3);
+  vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+    if (new URL(input).pathname.includes('/git/trees/'))
+      return new Response('{}', { headers: { 'content-length': String(8 * 1024 * 1024 + 1) } });
+    return github.request(input);
+  }));
+  expect((await importGitHubSkill('https://github.com/acme/skills/tree/main/kinship'))[0]?.id).toBe('kinship');
+  expect((await listManagedSkills())).toHaveLength(1);
+  await expect(importGitHubSkill('https://github.com/acme/skills')).rejects.toThrow('too large');
+});
+
+it.each([
+  ['symlink', { path: 'kinship/link', type: 'blob', mode: '120000', sha: 'b'.repeat(40), size: 1 }, 'unsupported file'],
+  ['unsafe traversal', { path: 'kinship/../escape', type: 'blob', mode: '100644', sha: 'b'.repeat(40), size: 1 }, 'unsafe path'],
+  ['reserved metadata', { path: 'kinship/.cos-github.json', type: 'blob', mode: '100644', sha: 'b'.repeat(40), size: 1 }, 'reserved'],
+  ['oversized package', { path: 'kinship/huge', type: 'blob', mode: '100644', sha: 'b'.repeat(40), size: 32 * 1024 * 1024 + 1 }, '32 MiB']
+])('rejects %s in a GitHub tree before fetching resources', async (_name, invalid, error) => {
+  const github = largeGithubFixture(2);
+  const request = vi.fn(async (input: string) => {
+    const response = await github.request(input);
+    if (!new URL(input).pathname.includes('/git/trees/')) return response;
+    const payload = await response.json() as { tree: unknown[] };
+    return json({ ...payload, tree: [...payload.tree, invalid] });
+  });
+  vi.stubGlobal('fetch', request);
+  await expect(importGitHubSkill('https://github.com/acme/skills/tree/main/kinship')).rejects.toThrow(error);
+  expect(request.mock.calls.filter(([input]) => new URL(input).host === 'raw.githubusercontent.com')).toHaveLength(0);
+});
+
+it('rejects an unverified GitHub commit SHA', async () => {
+  const github = largeGithubFixture(2);
+  const request = vi.fn(async (input: string) =>
+    new URL(input).pathname.endsWith('/commits/main') ? json({ sha: 'unverified' }) : github.request(input));
+  vi.stubGlobal('fetch', request);
+  await expect(importGitHubSkill('https://github.com/acme/skills/tree/main/kinship')).rejects.toThrow('could not be verified');
+  expect(request.mock.calls.filter(([input]) => new URL(input).host === 'raw.githubusercontent.com')).toHaveLength(0);
+});
+
 it('does not silently choose a skill when a repository root contains multiple SKILL.md files', async () => {
   const commit = 'a'.repeat(40);
   vi.stubGlobal('fetch', vi.fn(async (input: string) => {
@@ -449,6 +488,33 @@ it('keeps local edits and rejects untrusted origins or unsupported repository li
   await expect(updateGitHubSkill('pet', async () => {})).rejects.toThrow('local edits');
   expect(await fs.readFile(path.join(userData, 'skills/pet/references/guide.md'), 'utf8')).toBe('First guide');
   await expect(importGitHubSkill('https://github.com.evil.test/acme/skills/tree/main/pet')).rejects.toThrow();
+});
+
+it('refuses to overwrite a locally edited resource, added file, or deleted resource during GitHub update', async () => {
+  for (const change of ['edit', 'add', 'delete'] as const) {
+    const github = githubFixture(); vi.stubGlobal('fetch', github.request);
+    const id = `pet-${change}`;
+    const source = path.join(userData, 'sources', id);
+    await fs.mkdir(source, { recursive: true });
+    await fs.writeFile(path.join(source, 'SKILL.md'), '---\nname: Test Pet\ndescription: Version one.\n---\nUse guide.\n');
+    await importSkillPackage(source);
+    await linkGitHubSkill(id, 'https://github.com/acme/skills/tree/main/pet');
+    // Explicitly install the complete first version before modifying its resources.
+    await updateGitHubSkill(id, directory => fs.rename(directory, path.join(userData, `previous-${id}`)));
+    const directory = path.join(userData, 'skills', id);
+    const guide = path.join(directory, 'references', 'guide.md');
+    if (change === 'edit') await fs.writeFile(guide, 'My irreplaceable note');
+    if (change === 'add') await fs.writeFile(path.join(directory, 'personal.md'), 'My note');
+    if (change === 'delete') await fs.unlink(guide);
+    github.next();
+    const trash = vi.fn();
+    await expect(updateGitHubSkill(id, trash)).rejects.toThrow('local edits');
+    expect(trash).not.toHaveBeenCalled();
+    expect((await listManagedSkills()).find(skill => skill.id === id)?.origin?.ref).toBe('main');
+    if (change === 'edit') expect(await fs.readFile(guide, 'utf8')).toBe('My irreplaceable note');
+    if (change === 'add') expect(await fs.readFile(path.join(directory, 'personal.md'), 'utf8')).toBe('My note');
+    if (change === 'delete') await expect(fs.stat(guide)).rejects.toMatchObject({ code: 'ENOENT' });
+  }
 });
 
 it('restores the previous GitHub package after an interrupted directory swap', async () => {
