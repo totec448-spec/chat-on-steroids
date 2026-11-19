@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseGitHubSkillUrl } from '../src/shared/skills.js';
 import { checkGitHubSkillUpdates, importGitHubSkill, linkGitHubSkill, updateGitHubSkill } from '../src/main/skill-github.js';
-import { importSkillPackage, initSkillsPath, listManagedSkills, removeSkill } from '../src/main/skills.js';
+import { importSkillPackage, initSkillsPath, linkSkillPackage, listManagedSkills, removeSkill, skillPackageRevision, updateSkillPackage } from '../src/main/skills.js';
 
 let userData = '';
 const json = (data: unknown): Response => new Response(JSON.stringify(data), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -244,6 +244,32 @@ it('accepts exactly 256 commit-pinned files at the package bound', async () => {
   expect(await checkGitHubSkillUpdates('kinship')).toMatchObject([{ state: 'current' }]);
 });
 
+it('links SHA-256 commit resources and updates untouched packages without a false local-edits conflict', async () => {
+  const first = Buffer.from('---\nname: SHA-256 Link\ndescription: First version.\n---\nOriginal.\n');
+  const second = Buffer.from('---\nname: SHA-256 Link\ndescription: Second version.\n---\nUpdated.\n');
+  const blobSha256 = (bytes: Buffer) => createHash('sha256').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
+  const revision = (bytes: Buffer) => skillPackageRevision([{ relative: 'SKILL.md', sha: blobSha256(bytes), size: bytes.length }]);
+  const originalFolder = path.join(userData, 'sources', 'sha256-linked');
+  await fs.mkdir(originalFolder, { recursive: true });
+  await fs.writeFile(path.join(originalFolder, 'SKILL.md'), first);
+  await importSkillPackage(originalFolder);
+  const source = { kind: 'github' as const, url: 'https://github.com/acme/skills/tree/main/sha256-linked',
+    ref: 'main', directory: 'sha256-linked', commit: 'a'.repeat(64), revision: 'b'.repeat(64),
+    skillSha256: createHash('sha256').update(first).digest('hex') };
+  await linkSkillPackage('sha256-linked', source);
+  const linked = (await listManagedSkills()).find(skill => skill.id === 'sha256-linked')?.origin;
+  expect(linked?.revision).toBe(revision(first));
+  if (!linked) throw new Error('The linked SHA-256 origin was not recorded');
+  const updatedFolder = path.join(userData, 'sources', 'sha256-linked-updated');
+  await fs.mkdir(updatedFolder, { recursive: true });
+  await fs.writeFile(path.join(updatedFolder, 'SKILL.md'), second);
+  const next = { ...source, commit: 'c'.repeat(64), revision: revision(second),
+    skillSha256: createHash('sha256').update(second).digest('hex') };
+  const result = await updateSkillPackage('sha256-linked', linked, updatedFolder, next,
+    directory => fs.rename(directory, path.join(userData, 'sha256-previous')));
+  expect(result).toMatchObject({ updated: true });
+  expect(await fs.readFile(path.join(userData, 'skills', 'sha256-linked', 'SKILL.md'))).toEqual(second);
+});
 it('links a differently named local skill by identical SKILL.md and updates without changing its ID', async () => {
   const github = githubFixture();
   vi.stubGlobal('fetch', github.request);
