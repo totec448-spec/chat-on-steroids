@@ -5,11 +5,22 @@ import type { ManagedSkill } from '../src/shared/skills.js';
 let dom: JSDOM | null = null;
 afterEach(() => { dom?.window.close(); dom = null; vi.unstubAllGlobals(); vi.resetModules(); });
 
+function authApi<T extends object>(api: T): T {
+  return { skillsGithubAuthStatus: vi.fn(async () => ({ ok: true, data: { stored: false, available: true } })),
+    skillsGithubAuthSet: vi.fn(async () => ({ ok: true, data: { stored: true, available: true } })),
+    skillsGithubAuthRemove: vi.fn(async () => ({ ok: true, data: { stored: false, available: true } })),
+    ...api } as T;
+}
+
+/** Test fixtures include the GitHub-only credential controls in the real dialog. */
+const authControls = '<input id="skillGithubToken" type="password"><p id="skillGithubAuthStatus"></p>' +
+  '<button id="skillGithubTokenSave" type="button"></button><button id="skillGithubTokenRemove" type="button"></button>';
+
 it('shows the managed library, imports both source shapes, filters and removes only after confirmation', async () => {
   dom = new JSDOM(`<!doctype html><body>
     <input id="skillsSearch"><button id="skillsRefresh"></button>
     <details class="plugin-menu"><summary>Import</summary><div class="plugin-menu-actions"><button id="skillsImportFolder"></button><button id="skillsImportFile"></button><button id="skillsImportGithub"></button></div></details>
-    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl"><p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
+    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl">${authControls}<p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
     <span id="skillsCount"></span><div id="skillsInstalled"></div>
   </body>`, { url: 'https://skills.test/' });
   const w = dom.window;
@@ -26,6 +37,16 @@ it('shows the managed library, imports both source shapes, filters and removes o
     skills = skills.filter(skill => skill.id !== id);
     return { ok: true as const, data: skills };
   });
+  let tokenStored = false;
+  const skillsGithubAuthStatus = vi.fn(async () => ({ ok: true as const, data: { stored: tokenStored, available: true } }));
+  const skillsGithubAuthSet = vi.fn(async (_token: string) => {
+    tokenStored = true;
+    return { ok: true as const, data: { stored: true, available: true } };
+  });
+  const skillsGithubAuthRemove = vi.fn(async () => {
+    tokenStored = false;
+    return { ok: true as const, data: { stored: false, available: true } };
+  });
   const githubOrigin = { kind: 'github' as const, url: 'https://github.com/acme/skills/tree/main/review', ref: 'main', directory: 'review', commit: 'a'.repeat(40), revision: 'b'.repeat(64), skillSha256: 'c'.repeat(64) };
   const skillsImportGithub = vi.fn(async (_url: string) => {
     skills = [...skills, { id: 'review', name: 'Code Review', description: 'From GitHub.', path: '/skills/review/SKILL.md', origin: githubOrigin }];
@@ -39,7 +60,8 @@ it('shows the managed library, imports both source shapes, filters and removes o
     { id: 'review', originRevision: githubOrigin.revision, state: 'available' as const, checkedAt: Date.now() }
   ] }));
   const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
-  const open = initSkillsLibrary({ listManagedSkills, skillsImport, skillsRemove, skillsImportGithub, skillsCheckGithub, skillsUpdateGithub } as any);
+  const open = initSkillsLibrary(authApi({ listManagedSkills, skillsImport, skillsRemove, skillsImportGithub,
+    skillsCheckGithub, skillsUpdateGithub, skillsGithubAuthStatus, skillsGithubAuthSet, skillsGithubAuthRemove }) as any);
   await vi.waitFor(() => expect(w.document.getElementById('skillsInstalled')!.textContent).toContain('No skills installed'));
   (w.document.getElementById('skillsImportFolder') as HTMLButtonElement).click();
   await vi.waitFor(() => expect(w.document.querySelectorAll('.skill-library-card')).toHaveLength(1));
@@ -67,6 +89,17 @@ it('shows the managed library, imports both source shapes, filters and removes o
   search.value = ''; search.dispatchEvent(new w.Event('input'));
   (w.document.getElementById('skillsImportGithub') as HTMLButtonElement).click();
   expect((w.document.getElementById('skillGithubDialog') as HTMLDialogElement).open).toBe(true);
+  await vi.waitFor(() => expect(w.document.getElementById('skillGithubAuthStatus')!.textContent).toContain('anonymous'));
+  const token = 'github_pat_' + 'x'.repeat(65);
+  (w.document.getElementById('skillGithubToken') as HTMLInputElement).value = token;
+  (w.document.getElementById('skillGithubTokenSave') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(skillsGithubAuthSet).toHaveBeenCalledWith(token));
+  expect((w.document.getElementById('skillGithubToken') as HTMLInputElement).value).toBe('');
+  await vi.waitFor(() => expect(w.document.getElementById('skillGithubAuthStatus')!.textContent).toContain('saved securely'));
+  expect(w.document.body.textContent).not.toContain(token);
+  (w.document.getElementById('skillGithubTokenRemove') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(skillsGithubAuthRemove).toHaveBeenCalledOnce());
+  await vi.waitFor(() => expect(w.document.getElementById('skillGithubAuthStatus')!.textContent).toContain('anonymous'));
   (w.document.getElementById('skillGithubUrl') as HTMLInputElement).value = githubOrigin.url;
   w.document.getElementById('skillGithubForm')!.dispatchEvent(new w.Event('submit', { cancelable: true, bubbles: true }));
   await vi.waitFor(() => expect(skillsImportGithub).toHaveBeenCalledWith(githubOrigin.url));
@@ -109,7 +142,7 @@ it('links a matching local skill from its card without replacing it or hiding Gi
   dom = new JSDOM(`<!doctype html><body>
     <input id="skillsSearch"><button id="skillsRefresh"></button>
     <details class="plugin-menu"><summary>Import</summary><div><button id="skillsImportFolder"></button><button id="skillsImportFile"></button><button id="skillsImportGithub"></button></div></details>
-    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl"><p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
+    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl">${authControls}<p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
     <span id="skillsCount"></span><div id="skillsInstalled"></div>
   </body>`, { url: 'https://skills.test/' });
   const w = dom.window;
@@ -125,7 +158,7 @@ it('links a matching local skill from its card without replacing it or hiding Gi
     { id: 'review', originRevision: origin.revision, state: 'available' as const, checkedAt: Date.now() }
   ] }));
   const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
-  initSkillsLibrary({ listManagedSkills, skillsLinkGithub, skillsCheckGithub } as any);
+  initSkillsLibrary(authApi({ listManagedSkills, skillsLinkGithub, skillsCheckGithub }) as any);
   await vi.waitFor(() => expect(w.document.querySelector('.skill-library-card')).not.toBeNull());
   (w.document.querySelector('[data-skill-id="review"] .plugin-menu-actions .btn') as HTMLButtonElement).click();
   expect(w.document.getElementById('skillGithubTitle')!.textContent).toContain('Link Review');
@@ -144,7 +177,7 @@ it('automatically checks an installed GitHub skill on page open without installi
   dom = new JSDOM(`<!doctype html><body>
     <input id="skillsSearch"><button id="skillsRefresh"></button>
     <details class="plugin-menu"><summary>Import</summary><div><button id="skillsImportFolder"></button><button id="skillsImportFile"></button><button id="skillsImportGithub"></button></div></details>
-    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl"><p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
+    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl">${authControls}<p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
     <span id="skillsCount"></span><div id="skillsInstalled"></div>
   </body>`, { url: 'https://skills.test/' });
   const w = dom.window;
@@ -159,7 +192,7 @@ it('automatically checks an installed GitHub skill on page open without installi
   ] }));
   const skillsUpdateGithub = vi.fn();
   const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
-  const open = initSkillsLibrary({ listManagedSkills, skillsCheckGithub, skillsUpdateGithub } as any);
+  const open = initSkillsLibrary(authApi({ listManagedSkills, skillsCheckGithub, skillsUpdateGithub }) as any);
   await vi.waitFor(() => expect(w.document.querySelector('.skill-library-card')).not.toBeNull());
   expect(skillsCheckGithub).not.toHaveBeenCalled();
   open();
@@ -175,7 +208,7 @@ it('offers recommended skills that are not installed yet and installs one on req
   dom = new JSDOM(`<!doctype html><body>
     <input id="skillsSearch"><button id="skillsRefresh"></button>
     <details class="plugin-menu"><summary>Import</summary><div class="plugin-menu-actions"><button id="skillsImportFolder"></button><button id="skillsImportFile"></button><button id="skillsImportGithub"></button></div></details>
-    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl"><p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
+    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl">${authControls}<p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
     <span id="skillsCount"></span><div id="skillsInstalled"></div>
     <section id="skillsRecommendedSection" hidden><span id="skillsRecommendedCount"></span><div id="skillsRecommended"></div></section>
   </body>`, { url: 'https://skills.test/' });
@@ -195,7 +228,7 @@ it('offers recommended skills that are not installed yet and installs one on req
     installRecommendedSkill, skillsCheckGithub: vi.fn(async () => ({ ok: true as const, data: [] }))
   };
   const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
-  const open = initSkillsLibrary(api as never); open();
+  const open = initSkillsLibrary(authApi(api) as never); open();
   await vi.waitFor(() => expect(w.document.querySelectorAll('[data-recommended-skill-id]').length).toBe(2));
   expect(w.document.getElementById('skillsRecommendedSection')!.hidden).toBe(false);
   w.document.querySelector<HTMLButtonElement>('[data-recommended-skill-id="code-review"] .skill-recommended-install')!.click();
@@ -208,7 +241,7 @@ it('shows recommended skill descriptions in the interface language and finds the
   dom = new JSDOM(`<!doctype html><body>
     <input id="skillsSearch"><button id="skillsRefresh"></button>
     <details class="plugin-menu"><summary>Import</summary><div class="plugin-menu-actions"><button id="skillsImportFolder"></button><button id="skillsImportFile"></button><button id="skillsImportGithub"></button></div></details>
-    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl"><p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
+    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl">${authControls}<p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
     <span id="skillsCount"></span><div id="skillsInstalled"></div>
     <section id="skillsRecommendedSection" hidden><span id="skillsRecommendedCount"></span><div id="skillsRecommended"></div></section>
   </body>`, { url: 'https://skills.test/' });
@@ -226,7 +259,7 @@ it('shows recommended skill descriptions in the interface language and finds the
   setLanguage('de');
   try {
     const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
-    initSkillsLibrary(api as never)();
+    initSkillsLibrary(authApi(api) as never)();
     const card = () => w.document.querySelector('[data-recommended-skill-id="code-review"] p.muted')?.textContent;
     await vi.waitFor(() => expect(card()).toMatch(/^Prüfe eine Änderung/));
     const search = w.document.getElementById('skillsSearch') as HTMLInputElement;
@@ -240,7 +273,7 @@ it('says the skills could not be loaded when the first load fails, and lists the
   dom = new JSDOM(`<!doctype html><body>
     <input id="skillsSearch"><button id="skillsRefresh"></button>
     <button id="skillsImportFolder"></button><button id="skillsImportFile"></button><button id="skillsImportGithub"></button>
-    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl"><p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
+    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl">${authControls}<p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
     <span id="skillsCount">Loading…</span><div id="skillsInstalled"></div><span id="skillsRecommendedCount"></span><div id="skillsRecommended"></div>
   </body>`, { url: 'https://skills.test/' });
   const w = dom.window;
@@ -249,7 +282,7 @@ it('says the skills could not be loaded when the first load fails, and lists the
   const listManagedSkills = vi.fn(async () => fail ? { ok: false as const, error: 'Skill library unavailable' }
     : { ok: true as const, data: [{ id: 'review', name: 'Review', description: 'Reviews code.', path: '/skills/review/SKILL.md', origin: null }] as ManagedSkill[] });
   const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
-  initSkillsLibrary({ listManagedSkills, skillsCheckGithub: vi.fn(async () => ({ ok: true as const, data: [] })) } as any);
+  initSkillsLibrary(authApi({ listManagedSkills, skillsCheckGithub: vi.fn(async () => ({ ok: true as const, data: [] })) }) as any);
   await vi.waitFor(() => expect(w.document.getElementById('skillsInstalled')!.textContent).toBe('Skills could not be loaded.'), { timeout: 10_000 });
   expect(w.document.getElementById('skillsCount')!.textContent).toBe('');
   // Typing in the search repaints the list, and the failure stays (CodeRabbit on #2002).
@@ -269,7 +302,7 @@ it('shows no load error for a load that Refresh replaced', async () => {
   dom = new JSDOM(`<!doctype html><body>
     <input id="skillsSearch"><button id="skillsRefresh"></button>
     <button id="skillsImportFolder"></button><button id="skillsImportFile"></button><button id="skillsImportGithub"></button>
-    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl"><p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
+    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl">${authControls}<p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
     <span id="skillsCount">Loading…</span><div id="skillsInstalled"></div><span id="skillsRecommendedCount"></span><div id="skillsRecommended"></div>
   </body>`, { url: 'https://skills.test/' });
   const w = dom.window;
@@ -277,7 +310,7 @@ it('shows no load error for a load that Refresh replaced', async () => {
   const replies: Array<(reply: unknown) => void> = [];
   const listManagedSkills = vi.fn(() => new Promise(resolve => replies.push(resolve)));
   const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
-  initSkillsLibrary({ listManagedSkills, skillsCheckGithub: vi.fn(async () => ({ ok: true as const, data: [] })) } as any);
+  initSkillsLibrary(authApi({ listManagedSkills, skillsCheckGithub: vi.fn(async () => ({ ok: true as const, data: [] })) }) as any);
   (w.document.getElementById('skillsRefresh') as HTMLButtonElement).click();
   expect(replies).toHaveLength(2);
   replies[0]!({ ok: false, error: 'Skill library unavailable' });
@@ -293,7 +326,7 @@ it('loads again when a cancelled import replaced a first load that failed', asyn
   dom = new JSDOM(`<!doctype html><body>
     <input id="skillsSearch"><button id="skillsRefresh"></button>
     <button id="skillsImportFolder"></button><button id="skillsImportFile"></button><button id="skillsImportGithub"></button>
-    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl"><p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
+    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl">${authControls}<p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
     <span id="skillsCount">Loading…</span><div id="skillsInstalled"></div><span id="skillsRecommendedCount"></span><div id="skillsRecommended"></div>
   </body>`, { url: 'https://skills.test/' });
   const w = dom.window;
@@ -302,7 +335,7 @@ it('loads again when a cancelled import replaced a first load that failed', asyn
   const listManagedSkills = vi.fn(() => new Promise(resolve => loads.push(resolve)));
   const skillsImport = vi.fn(async () => ({ ok: true as const, data: null }));
   const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
-  initSkillsLibrary({ listManagedSkills, skillsImport, skillsCheckGithub: vi.fn(async () => ({ ok: true as const, data: [] })) } as any);
+  initSkillsLibrary(authApi({ listManagedSkills, skillsImport, skillsCheckGithub: vi.fn(async () => ({ ok: true as const, data: [] })) }) as any);
   (w.document.getElementById('skillsImportFolder') as HTMLButtonElement).click();
   await vi.waitFor(() => expect(loads).toHaveLength(2), { timeout: 10_000 });
   loads[0]!({ ok: false, error: 'Skill library unavailable' });

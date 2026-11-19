@@ -1330,6 +1330,38 @@ describe('turning multi-agent mode off', () => {
 });
 
 describe('bounded IPC identities and OS launch results', () => {
+  it('keeps GitHub credentials inward-only over IPC and stores/removes them through OS safeStorage', async () => {
+    const { getSecret, setSecret } = await import('../src/main/secrets.js');
+    const token = 'github_pat_' + 'x'.repeat(70);
+    const originalFetch = globalThis.fetch;
+    const request = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe('https://api.github.com/rate_limit');
+      expect(new Headers(init?.headers).get('Authorization')).toBe(`Bearer ${token}`);
+      return new Response(JSON.stringify({ resources: { core: { limit: 5000, remaining: 4999 } } }),
+        { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', request);
+    try {
+      await setSecret('githubSkillsToken', '');
+      const status = () => handlers.get('skills:githubAuthStatus')!(null, undefined) as Promise<any>;
+      const saveToken = (value: unknown) => handlers.get('skills:githubAuthSet')!(null, { token: value }) as Promise<any>;
+      const removeToken = () => handlers.get('skills:githubAuthRemove')!(null, undefined) as Promise<any>;
+      expect(await status()).toMatchObject({ ok: true, data: { stored: false, available: true } });
+      const saved = await saveToken(token);
+      expect(saved).toEqual({ ok: true, data: { stored: true, available: true } });
+      expect(JSON.stringify(saved)).not.toContain(token);
+      expect(await getSecret('githubSkillsToken')).toBe(token);
+      expect((await saveToken({ object: token })).ok).toBe(false);
+      expect((await saveToken('bad\nvalue')).ok).toBe(false);
+      expect(await getSecret('githubSkillsToken')).toBe(token);
+      expect(await removeToken()).toEqual({ ok: true, data: { stored: false, available: true } });
+      expect(await getSecret('githubSkillsToken')).toBeNull();
+    } finally {
+      vi.stubGlobal('fetch', originalFetch);
+      await setSecret('githubSkillsToken', '');
+    }
+  });
+
   it('reports shell.openPath failure instead of claiming the extension folder opened', async () => {
     vi.mocked(shell.openPath).mockResolvedValueOnce('Access is denied');
     const reply = (await handlers.get('bridge:openExtensionFolder')!(null, undefined)) as {

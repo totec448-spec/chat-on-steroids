@@ -90,7 +90,7 @@ function enqueue<T>(operation: () => Promise<T>): Promise<T> {
  * drafts, one per active provider), so they live under the same OS-backed encrypted blob
  * as the rest and never leave the main process.
  */
-export type SecretKey = 'openaiApiKey' | 'bridgeToken' | 'openRouterApiKey' | 'customProviderApiKey' | 'ntfyToken' | 'telegramBotToken' | `plugin:${string}` | `setup:${string}` | `mcp:path:${string}`;
+export type SecretKey = 'openaiApiKey' | 'bridgeToken' | 'openRouterApiKey' | 'customProviderApiKey' | 'githubSkillsToken' | 'ntfyToken' | 'telegramBotToken' | `plugin:${string}` | `setup:${string}` | `mcp:path:${string}`;
 
 export function initSecretsPath(userDataDir: string): void {
   secretsPath = path.join(userDataDir, FILE_NAME);
@@ -319,7 +319,8 @@ async function rotateIfNeeded(): Promise<void> {
  */
 const INVISIBLE_IN_KEYS = /[\s\u0085\u00AD\u180E\u200B-\u200F\u2028-\u202F\u205F-\u2064\u2066-\u206F\uFEFF]/g;
 function isApiKey(key: SecretKey): boolean {
-  return key === 'openaiApiKey' || key === 'openRouterApiKey' || key === 'customProviderApiKey' || key.startsWith('setup:');
+  return key === 'openaiApiKey' || key === 'openRouterApiKey' || key === 'customProviderApiKey' ||
+    key === 'githubSkillsToken' || key.startsWith('setup:');
 }
 export function cleanApiKey(value: string): string {
   return value.replace(INVISIBLE_IN_KEYS, '');

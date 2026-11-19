@@ -4,7 +4,18 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parseGitHubSkillUrl } from '../src/shared/skills.js';
-import { checkGitHubSkillUpdates, importGitHubSkill, linkGitHubSkill, updateGitHubSkill } from '../src/main/skill-github.js';
+const authSecret = vi.hoisted(() => ({ token: null as string | null, available: true }));
+vi.mock('../src/main/secrets.js', () => ({
+  getSecret: vi.fn(async (key: string) => key === 'githubSkillsToken' ? authSecret.token : null),
+  hasSecret: vi.fn(async (key: string) => key === 'githubSkillsToken' && authSecret.token !== null),
+  secureStorageStatus: vi.fn(async () => ({ available: authSecret.available })),
+  setSecret: vi.fn(async (key: string, value: string) => {
+    if (key !== 'githubSkillsToken' || !authSecret.available) throw new Error('Secure storage unavailable');
+    authSecret.token = value || null;
+  })
+}));
+import { checkGitHubSkillUpdates, githubSkillsAuthStatus, importGitHubSkill, linkGitHubSkill,
+  removeGitHubSkillsToken, saveGitHubSkillsToken, updateGitHubSkill } from '../src/main/skill-github.js';
 import { importSkillPackage, initSkillsPath, listManagedSkills, removeSkill } from '../src/main/skills.js';
 
 let userData = '';
@@ -72,8 +83,74 @@ function githubFixture() {
 }
 
 beforeEach(async () => {
+  authSecret.token = null;
+  authSecret.available = true;
   userData = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'cos-github-skills-test-')));
   await initSkillsPath(userData);
+});
+
+it('authenticates GitHub metadata and blob downloads, then reverts to anonymous requests after removal', async () => {
+  const github = githubFixture();
+  const token = 'github_pat_' + 'x'.repeat(70);
+  authSecret.token = token;
+  const fetches = vi.fn(async (input: string, _init?: RequestInit) => github.request(input));
+  vi.stubGlobal('fetch', fetches);
+  await importGitHubSkill('https://github.com/acme/skills/tree/main/pet');
+  await checkGitHubSkillUpdates('pet');
+  const api = fetches.mock.calls.filter(([input]) => new URL(input).host === 'api.github.com');
+  const blobs = fetches.mock.calls.filter(([input]) => new URL(input).pathname.includes('/git/blobs/'));
+  expect(api.length).toBeGreaterThan(1);
+  expect(blobs.length).toBeGreaterThan(0);
+  expect(api.every(([, init]) => new Headers(init?.headers).get('Authorization') === `Bearer ${token}`)).toBe(true);
+  await removeGitHubSkillsToken();
+  await checkGitHubSkillUpdates('pet');
+  const last = fetches.mock.calls.filter(([input]) => new URL(input).host === 'api.github.com').at(-1)!;
+  expect(new Headers(last[1]?.headers).has('Authorization')).toBe(false);
+});
+
+it('shows expired-token errors without exposing its value or silently retrying anonymously', async () => {
+  const token = 'github_pat_' + 'z'.repeat(70);
+  authSecret.token = token;
+  const calls = vi.fn(async (_input: string, _init?: RequestInit) =>
+    new Response('Bad credentials', { status: 401 }));
+  vi.stubGlobal('fetch', calls);
+  const error = await importGitHubSkill('https://github.com/acme/skills').catch((cause: unknown) => cause);
+  expect(error).toBeInstanceOf(Error);
+  expect((error as Error).message).toMatch(/rejected/i);
+  expect((error as Error).message).not.toContain(token);
+  expect(calls).toHaveBeenCalledTimes(1);
+  expect(new Headers(calls.mock.calls[0]![1]?.headers).get('Authorization')).toBe(`Bearer ${token}`);
+});
+
+it('validates a token before secure storage, returns status only, and preserves the old key on failure', async () => {
+  const first = 'github_pat_' + 'a'.repeat(70);
+  const second = 'github_pat_' + 'b'.repeat(70);
+  vi.stubGlobal('fetch', vi.fn(async (_input: string, init?: RequestInit) => {
+    const bearer = new Headers(init?.headers).get('Authorization');
+    expect(_input).toBe('https://api.github.com/rate_limit');
+    if (bearer === `Bearer ${second}`) return new Response('', { status: 401 });
+    return json({ resources: { core: { limit: 5000, remaining: 4999 } } });
+  }));
+  expect(await githubSkillsAuthStatus()).toEqual({ stored: false, available: true });
+  const status = await saveGitHubSkillsToken(first);
+  expect(status).toEqual({ stored: true, available: true });
+  expect(JSON.stringify(status)).not.toContain(first);
+  expect(authSecret.token).toBe(first);
+  await expect(saveGitHubSkillsToken(second)).rejects.toThrow('rejected');
+  expect(authSecret.token).toBe(first);
+  await expect(saveGitHubSkillsToken('bad\r\ntoken')).rejects.toThrow('without spaces');
+  expect(authSecret.token).toBe(first);
+  expect(await removeGitHubSkillsToken()).toEqual({ stored: false, available: true });
+  expect(authSecret.token).toBeNull();
+});
+
+it('refuses saving GitHub credentials when protected OS storage is unavailable', async () => {
+  authSecret.available = false;
+  vi.stubGlobal('fetch', vi.fn());
+  await expect(saveGitHubSkillsToken('github_pat_' + 'x'.repeat(70))).rejects.toThrow('Secure');
+  expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  expect(await githubSkillsAuthStatus()).toEqual({ stored: false, available: false });
+  expect(authSecret.token).toBeNull();
 });
 afterEach(async () => {
   vi.unstubAllGlobals();

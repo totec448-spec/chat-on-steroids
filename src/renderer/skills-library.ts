@@ -309,6 +309,51 @@ export function initSkillsLibrary(api: AppApi): () => void {
   const githubSubmit = $<HTMLButtonElement>('skillGithubSubmit');
   const githubClose = $<HTMLButtonElement>('skillGithubClose');
   const githubCancel = $<HTMLButtonElement>('skillGithubCancel');
+  const githubToken = $<HTMLInputElement>('skillGithubToken');
+  const githubAuthStatus = $('skillGithubAuthStatus');
+  const githubTokenSave = $<HTMLButtonElement>('skillGithubTokenSave');
+  const githubTokenRemove = $<HTMLButtonElement>('skillGithubTokenRemove');
+  let githubAuthEpoch = 0;
+  const paintGithubAuth = (state: { stored: boolean; available: boolean }): void => {
+    githubAuthStatus.textContent = t(!state.available ? 'Secure GitHub token storage is unavailable.'
+      : state.stored ? 'GitHub token saved securely. API requests are authenticated.'
+        : 'GitHub API is anonymous (60 requests per hour).');
+    githubToken.disabled = githubTokenSave.disabled = !state.available;
+    githubTokenRemove.disabled = !state.available || !state.stored;
+  };
+  const loadGithubAuth = async (): Promise<void> => {
+    const own = ++githubAuthEpoch;
+    githubAuthStatus.textContent = t('Checking GitHub authorization…');
+    const status = await api.skillsGithubAuthStatus();
+    if (own !== githubAuthEpoch || !githubDialog.open) return;
+    if (status.ok) paintGithubAuth(status.data);
+    else githubAuthStatus.textContent = t('Could not read GitHub authorization status.');
+  };
+  githubTokenSave.addEventListener('click', () => void (async () => {
+    const token = githubToken.value.trim();
+    githubToken.value = '';
+    githubTokenSave.disabled = githubTokenRemove.disabled = true;
+    githubError.hidden = true;
+    try {
+      const result = await api.skillsGithubAuthSet(token);
+      if (!result.ok) { githubError.textContent = t(result.error); githubError.hidden = false; return; }
+      paintGithubAuth(result.data);
+    } catch {
+      githubError.textContent = t('Could not reach GitHub. Try again.'); githubError.hidden = false;
+    } finally { void loadGithubAuth(); }
+  })());
+  githubTokenRemove.addEventListener('click', () => void (async () => {
+    githubTokenRemove.disabled = githubTokenSave.disabled = true;
+    githubToken.value = '';
+    githubError.hidden = true;
+    try {
+      const result = await api.skillsGithubAuthRemove();
+      if (!result.ok) { githubError.textContent = t(result.error); githubError.hidden = false; return; }
+      paintGithubAuth(result.data);
+    } catch {
+      githubError.textContent = t('Could not remove saved GitHub token.'); githubError.hidden = false;
+    } finally { void loadGithubAuth(); }
+  })());
   const openGithubDialog = (target: ManagedSkill | null): void => {
     linkTarget = target;
     ui($('skillGithubTitle'), 'textContent', () => t(target ? 'Link {0} to GitHub' : 'Import from GitHub', target ? [target.name] : []));
@@ -317,8 +362,9 @@ export function initSkillsLibrary(api: AppApi): () => void {
       : 'Paste a public GitHub folder link or a link to its SKILL.md. The complete skill folder will be copied to your CoS library.'));
     ui(githubSubmit, 'textContent', () => t(target ? 'Link source' : 'Import skill'));
     $('skillsImportGithub').closest('details')?.removeAttribute('open');
-    githubError.hidden = true; githubError.textContent = '';
+    githubError.hidden = true; githubError.textContent = ''; githubToken.value = '';
     githubDialog.showModal(); githubInput.focus();
+    void loadGithubAuth();
   };
   $('skillsImportGithub').addEventListener('click', () => openGithubDialog(null));
   githubClose.addEventListener('click', () => githubDialog.close());

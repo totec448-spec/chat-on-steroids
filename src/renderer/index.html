@@ -405,6 +405,16 @@
               <form id="skillGithubForm" class="plugin-dialog-body">
                 <p id="skillGithubDescription">Paste a public GitHub folder link or a link to its SKILL.md. The complete skill folder will be copied to your CoS library.</p>
                 <label class="plugin-field" for="skillGithubUrl"><span>GitHub URL</span><input id="skillGithubUrl" type="url" required autocomplete="url" spellcheck="false" placeholder="https://github.com/owner/repo/tree/main/skill" /></label>
+                <div class="plugin-field">
+                  <label for="skillGithubToken"><span>GitHub access token (optional)</span></label>
+                  <input id="skillGithubToken" type="password" autocomplete="off" spellcheck="false" maxlength="512" placeholder="Paste a read-only GitHub token" />
+                  <p class="muted" id="skillGithubAuthStatus" role="status">Checking GitHub authorization…</p>
+                  <p class="muted">For public skills, use a fine-grained token with no write permissions. Save it securely once; COS never displays it again.</p>
+                  <div class="pet-delete-actions">
+                    <button class="btn" id="skillGithubTokenSave" type="button">Save GitHub token</button>
+                    <button class="btn" id="skillGithubTokenRemove" type="button">Remove saved token</button>
+                  </div>
+                </div>
                 <p id="skillGithubError" class="plugin-error" role="alert" hidden></p>
                 <div class="pet-delete-actions"><button class="btn" id="skillGithubCancel" type="button">Cancel</button><button class="btn btn-solid" id="skillGithubSubmit" type="submit">Import skill</button></div>
               </form>

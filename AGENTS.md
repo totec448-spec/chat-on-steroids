@@ -518,6 +518,18 @@ internal length and closing boundary; authored whitespace after the frame remain
 
 ### Text Skills
 
+GitHub Skills may use an optional personal access token for authenticated GitHub REST API
+requests. `skill-github.ts` exclusively reads the `githubSkillsToken` OS-encrypted secret;
+requests remain anonymous when no token is saved. `skills:githubAuthStatus`,
+`skills:githubAuthSet` and `skills:githubAuthRemove` are fixed IPC/preload calls: status
+returns only `{ stored, available }`, saving validates the token with GitHub's `/rate_limit`
+endpoint before replacement, and removal clears the secret. The token is never returned to
+the renderer, included in logs, settings backups or Skill origin metadata. Missing/unavailable
+secure storage fails closed for writes; prior saved data without this key remains valid.
+GitHub metadata and blob API requests use the same Authorization header; no external URL
+is allowed to receive it. Renderer controls live in the GitHub import/link dialog and all
+user-facing authorization text is translated in the 12 renderer locales.
+
 `main/skills.ts` owns the empty-by-default `<userData>/skills/<id>/SKILL.md` library,
 bounded to 128 valid packages with fail-closed overflow, UTF-8 import/read and metadata catalog.
 Its Core connector projection omits the redundant per-skill path, trims descriptions to 160

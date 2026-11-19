@@ -3,6 +3,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
 import { rawPromises as fs } from './rawfs.js';
+import { logInfo, logWarn } from './logger.js';
+import { getSecret, hasSecret, secureStorageStatus, setSecret } from './secrets.js';
 import { importSkillPackage, linkSkillPackage, listManagedSkills, skillPackageRevision, updateSkillPackage } from './skills.js';
 import {
   githubSkillUrl,
@@ -35,19 +37,30 @@ function validRef(ref: unknown): ref is string {
     !ref.endsWith('.') && !ref.endsWith('.lock') && ref !== '@';
 }
 
-async function githubJson(endpoint: string, signal: AbortSignal, limit = 1024 * 1024, missing: 'throw' | 'null' = 'throw'): Promise<unknown> {
+async function githubJson(
+  endpoint: string, signal: AbortSignal, limit = 1024 * 1024,
+  missing: 'throw' | 'null' = 'throw', tokenOverride?: string
+): Promise<unknown> {
   let response: Response;
+  const token = tokenOverride ?? await getSecret('githubSkillsToken');
   try {
     response = await fetch(`https://api.github.com${endpoint}`, {
       redirect: 'error', signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]),
-      headers: { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'ChatOnSteroids-Skills' }
+      headers: { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'ChatOnSteroids-Skills', ...(token ? { Authorization: `Bearer ${token}` } : {}) }
     });
   } catch {
     throw new Error(signal.aborted ? 'GitHub download timed out. Try again.' : 'Could not reach GitHub. Try again.');
   }
   if (!response.ok) {
-    if (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0')
+    if (response.status === 401 && token) {
+      logWarn('GitHub Skills: authenticated API request rejected (401)');
+      throw new Error('GitHub token was rejected. Replace or remove the saved token.');
+    }
+    if (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0') {
+      logWarn('GitHub Skills: API request refused by rate limit (403)');
       throw new Error('GitHub API rate limit reached. Try again later.');
+    }
     if (response.status === 404) {
       if (missing === 'null') return null;
       throw new Error('GitHub skill folder was not found or is private.');
@@ -69,6 +82,44 @@ async function githubJson(endpoint: string, signal: AbortSignal, limit = 1024 * 
   }
   try { return JSON.parse(Buffer.concat(chunks, size).toString('utf8')) as unknown; }
   catch { throw new Error('GitHub returned invalid package metadata'); }
+}
+
+/** Only a presence flag returns to the renderer; never reveal the token. */
+export async function githubSkillsAuthStatus(): Promise<{ stored: boolean; available: boolean }> {
+  const available = (await secureStorageStatus()).available;
+  return { stored: available && await hasSecret('githubSkillsToken'), available };
+}
+
+/** Explicit user action. Validate against GitHub before committing to the OS key store. */
+export async function saveGitHubSkillsToken(value: string): Promise<{ stored: boolean; available: boolean }> {
+  const token = value.trim();
+  if (token.length < 8 || token.length > 512 || !/^[\x21-\x7E]+$/.test(token)) {
+    logWarn('GitHub Skills: token save refused (invalid format)');
+    throw new Error('Enter a valid GitHub access token without spaces');
+  }
+  if (!(await secureStorageStatus()).available) {
+    logWarn('GitHub Skills: token save refused (secure storage unavailable)');
+    throw new Error('Secure OS credential storage is unavailable');
+  }
+  const response = await githubJson('/rate_limit', AbortSignal.timeout(20_000), 1024 * 1024, 'throw', token) as
+    { resources?: { core?: { limit?: unknown } } };
+  if (typeof response.resources?.core?.limit !== 'number' || response.resources.core.limit <= 60) {
+    logWarn('GitHub Skills: token save refused (authenticated rate limit absent)');
+    throw new Error('GitHub token did not enable authenticated API access');
+  }
+  await setSecret('githubSkillsToken', token);
+  logInfo('GitHub Skills: authenticated API token saved');
+  return githubSkillsAuthStatus();
+}
+
+export async function removeGitHubSkillsToken(): Promise<{ stored: boolean; available: boolean }> {
+  if (!(await secureStorageStatus()).available) {
+    logWarn('GitHub Skills: token removal refused (secure storage unavailable)');
+    throw new Error('Secure OS credential storage is unavailable');
+  }
+  await setSecret('githubSkillsToken', '');
+  logInfo('GitHub Skills: authenticated API token removed');
+  return githubSkillsAuthStatus();
 }
 
 function repositoryEndpoint(location: GitHubSkillLocation): string {

@@ -18,7 +18,7 @@ import { appearanceSchema } from './appearance-schema.js';
 import { mergeAppearance } from '../shared/appearance.js';
 import { prepareSessionPrompt, prepareSkillFollowup } from './session/prompt.js';
 import { importSkillFile, importSkillPackage, listManagedSkills, listSkills, removeSkill } from './skills.js';
-import { checkGitHubSkillUpdates, importGitHubSkill, linkGitHubSkill, updateGitHubSkill } from './skill-github.js';
+import { checkGitHubSkillUpdates, githubSkillsAuthStatus, importGitHubSkill, linkGitHubSkill, removeGitHubSkillsToken, saveGitHubSkillsToken, updateGitHubSkill } from './skill-github.js';
 import { SKILL_ID_PATTERN } from '../shared/skills.js';
 import { listSkillLibrary } from './skill-library.js';
 import { installRecommendedSkill, listRecommendedSkills } from './recommended-skills.js';
@@ -1373,6 +1373,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { url } = z.object({ url: z.string().trim().min(1).max(2048) }).strict().parse(payload);
     return importGitHubSkill(url);
   });
+  handle('skills:githubAuthStatus', () => githubSkillsAuthStatus());
+  handle('skills:githubAuthSet', async payload => {
+    const { token } = z.object({ token: z.string().min(8).max(512) }).strict().parse(payload);
+    return saveGitHubSkillsToken(token);
+  });
+  handle('skills:githubAuthRemove', async () => removeGitHubSkillsToken());
   handle('skills:githubLink', async payload => {
     const { id, url } = z.object({ id: z.string().regex(SKILL_ID_PATTERN), url: z.string().trim().min(1).max(2048) }).strict().parse(payload);
     return linkGitHubSkill(id, url);
