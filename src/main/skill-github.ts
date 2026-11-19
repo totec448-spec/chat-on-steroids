@@ -93,15 +93,19 @@ export async function githubSkillsAuthStatus(): Promise<{ stored: boolean; avail
 // Claim the mutation slot synchronously when IPC calls arrive. In particular, a later
 // Remove must never be undone by an earlier Save whose GitHub validation finishes late.
 let credentialMutation = Promise.resolve();
-function queueCredentialMutation<T>(operation: () => Promise<T>): Promise<T> {
-  const result = credentialMutation.then(operation);
+let pendingCredentialMutations = 0;
+function queueCredentialMutation<T>(kind: 'save' | 'remove', operation: () => Promise<T>): Promise<T> {
+  if (pendingCredentialMutations > 0)
+    logInfo(`GitHub Skills: ${kind} token mutation queued (another credential mutation is pending)`);
+  pendingCredentialMutations++;
+  const result = credentialMutation.then(operation).finally(() => { pendingCredentialMutations--; });
   credentialMutation = result.then(() => undefined, () => undefined);
   return result;
 }
 
 /** Explicit user action. Validate against GitHub before committing to the OS key store. */
 export function saveGitHubSkillsToken(value: string): Promise<{ stored: boolean; available: boolean }> {
-  return queueCredentialMutation(() => validateAndSaveGitHubSkillsToken(value));
+  return queueCredentialMutation('save', () => validateAndSaveGitHubSkillsToken(value));
 }
 
 async function validateAndSaveGitHubSkillsToken(value: string): Promise<{ stored: boolean; available: boolean }> {
@@ -126,7 +130,7 @@ async function validateAndSaveGitHubSkillsToken(value: string): Promise<{ stored
 }
 
 export function removeGitHubSkillsToken(): Promise<{ stored: boolean; available: boolean }> {
-  return queueCredentialMutation(clearGitHubSkillsToken);
+  return queueCredentialMutation('remove', clearGitHubSkillsToken);
 }
 
 async function clearGitHubSkillsToken(): Promise<{ stored: boolean; available: boolean }> {

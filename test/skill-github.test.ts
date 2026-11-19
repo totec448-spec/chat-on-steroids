@@ -4,6 +4,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parseGitHubSkillUrl } from '../src/shared/skills.js';
+import * as logger from '../src/main/logger.js';
 const authSecret = vi.hoisted(() => ({ token: null as string | null, available: true }));
 vi.mock('../src/main/secrets.js', () => ({
   getSecret: vi.fn(async (key: string) => key === 'githubSkillsToken' ? authSecret.token : null),
@@ -149,6 +150,7 @@ it('validates a token before secure storage, returns status only, and preserves 
 });
 
 it('serializes Save and later Remove even when GitHub validation finishes after Remove was requested', async () => {
+  const queuedLog = vi.spyOn(logger, 'logInfo');
   let releaseValidation!: () => void;
   const validation = new Promise<void>(resolve => { releaseValidation = resolve; });
   let beganValidation!: () => void;
@@ -161,9 +163,13 @@ it('serializes Save and later Remove even when GitHub validation finishes after 
   const save = saveGitHubSkillsToken('github_pat_' + 'a'.repeat(70));
   await began;
   const remove = removeGitHubSkillsToken();
+  expect(queuedLog).toHaveBeenCalledWith('GitHub Skills: remove token mutation queued (another credential mutation is pending)');
+  expect(queuedLog.mock.calls.filter(([message]) => message.includes('mutation queued'))).toHaveLength(1);
+  expect(JSON.stringify(queuedLog.mock.calls)).not.toContain('github_pat_');
   releaseValidation();
   await Promise.all([save, remove]);
   expect(authSecret.token).toBeNull();
+  queuedLog.mockRestore();
 });
 
 it('keeps the old secret if GitHub validation aborts or times out, and still permits later removal', async () => {
