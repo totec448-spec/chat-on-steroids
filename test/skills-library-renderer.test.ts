@@ -397,6 +397,43 @@ it('does not steal focus when the user navigates elsewhere during a pending keyb
   expect(w.document.activeElement).toBe(other);
 });
 
+it('reloads a stale successful Disable after a newer cancelled import', async () => {
+  dom = new JSDOM(`<!doctype html><body>
+    <input id="skillsSearch"><button id="skillsRefresh"></button>
+    <button id="skillsImportFolder"></button><button id="skillsImportFile"></button><button id="skillsImportGithub"></button>
+    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl"><p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
+    <span id="skillsCount"></span><div id="skillsInstalled"></div>
+  </body>`, { url: 'https://skills.test/' });
+  const w = dom.window;
+  for (const [key, value] of Object.entries({ window: w, document: w.document, HTMLElement: w.HTMLElement, HTMLButtonElement: w.HTMLButtonElement, HTMLDialogElement: w.HTMLDialogElement })) vi.stubGlobal(key, value);
+  const initial: ManagedSkill[] = [{ id: 'review', name: 'Review', description: 'Steps', path: '/skills/review/SKILL.md', origin: null, enabled: true }];
+  let persisted = initial;
+  let resolveDisable!: (reply: unknown) => void;
+  const pendingDisable = new Promise(resolve => { resolveDisable = resolve; });
+  const listManagedSkills = vi.fn(async () => ({ ok: true as const, data: persisted }));
+  const skillsSetEnabled = vi.fn(() => pendingDisable);
+  const skillsImport = vi.fn(async () => ({ ok: true as const, data: null }));
+  const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
+  initSkillsLibrary({ listManagedSkills, skillsSetEnabled, skillsImport } as any);
+  await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="review"]')?.getAttribute('data-skill-enabled')).toBe('true'), { timeout: 10_000 });
+
+  const disable = [...w.document.querySelectorAll<HTMLButtonElement>('[data-skill-id="review"] .plugin-menu-actions button')]
+    .find(button => button.textContent === 'Disable skill')!;
+  disable.click();
+  await vi.waitFor(() => expect(skillsSetEnabled).toHaveBeenCalledWith('review', false), { timeout: 10_000 });
+  w.document.getElementById('skillsImportFile')!.click();
+  await vi.waitFor(() => expect(skillsImport).toHaveBeenCalledWith('file'), { timeout: 10_000 });
+  await vi.waitFor(() => expect((w.document.getElementById('skillsImportFile') as HTMLButtonElement).disabled).toBe(false), { timeout: 10_000 });
+  expect(listManagedSkills).toHaveBeenCalledTimes(1);
+
+  persisted = initial.map(skill => ({ ...skill, enabled: false }));
+  resolveDisable({ ok: true, data: persisted });
+  await vi.waitFor(() => expect(listManagedSkills).toHaveBeenCalledTimes(2), { timeout: 10_000 });
+  await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="review"]')?.getAttribute('data-skill-enabled')).toBe('false'), { timeout: 10_000 });
+  expect(w.document.querySelector('[data-skill-id="review"] .skill-library-disabled')?.textContent).toBe('Disabled');
+  expect(skillsSetEnabled).toHaveBeenCalledTimes(1);
+});
+
 // CodeRabbit on #2002: a cancelled import (no list) that replaced a first load which then fails must not leave
 // "Loading…" for good: the page loads again.
 it('loads again when a cancelled import replaced a first load that failed', async () => {
