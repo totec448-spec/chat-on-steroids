@@ -7,13 +7,20 @@ import {
   importSkillPackage,
   initSkillsPath,
   listSkills,
+  listManagedSkills,
+  managedSkillDirectory,
   readSkill,
+  readSkillAtRevision,
+  removeSkill,
+  setManagedSkillEnabled,
+  skillCatalogSnapshot,
   skillCatalogInstructions,
   skillsDirectory
 } from '../src/main/skills.js';
 import { MAX_SKILL_BYTES, MAX_SKILLS } from '../src/shared/skills.js';
 import { defaultConfig, getConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { rawPromises as rawFs } from '../src/main/rawfs.js';
+import { RECOMMENDED_SKILLS } from '../src/shared/recommended-skills.js';
 
 let userData = '';
 let sources = '';
@@ -39,6 +46,69 @@ async function sourceFile(relative: string, contents: string | Buffer): Promise<
 }
 
 describe('managed Skills store', () => {
+  it('identifies only exact bundled COS recommendations without inventing GitHub sources', async () => {
+    const builtin = RECOMMENDED_SKILLS.find(skill => skill.id === 'code-review')!;
+    const folder = path.join(sources, 'code-review');
+    await fs.mkdir(folder);
+    await fs.writeFile(path.join(folder, 'SKILL.md'), builtin.markdown);
+    await importSkillPackage(folder);
+    expect((await listManagedSkills())[0]).toMatchObject({ id: 'code-review', enabled: true, bundled: true, origin: null });
+    const localOnly = await sourceFile('local.md', '# Local\n\nCustom');
+    await importSkillFile(localOnly);
+    expect((await listManagedSkills()).find(skill => skill.id === 'local')).toMatchObject({ bundled: false, origin: null });
+  });
+  it('persists disabled managed skills without editing contents, excluding both explicit and automatic selection', async () => {
+    const source = await sourceFile('review.md', '# Review\n\nSafe steps.');
+    await importSkillFile(source);
+    const before = skillCatalogSnapshot();
+    expect(before).toHaveLength(1);
+    expect((await listManagedSkills())[0]).toMatchObject({ id: 'review', enabled: true, origin: null });
+    const filename = path.join(userData, 'skills', 'review', 'SKILL.md');
+    const original = await fs.readFile(filename);
+    await setManagedSkillEnabled('review', false);
+    expect((await listManagedSkills())[0]).toMatchObject({ id: 'review', enabled: false, origin: null });
+    expect(await listSkills()).toEqual([]);
+    expect(skillCatalogSnapshot()).toEqual([]);
+    expect(skillCatalogInstructions()).not.toContain('"id":"review"');
+    await expect(readSkill('review')).rejects.toThrow(/disabled/i);
+    await expect(readSkillAtRevision('review', before[0]!.revision)).rejects.toThrow(/disabled/i);
+    expect(await fs.readFile(filename)).toEqual(original);
+    const statePath = path.join(userData, 'skills', '.disabled-skills.json');
+    expect(JSON.parse(await fs.readFile(statePath, 'utf8'))).toEqual({ version: 1, disabled: ['review'] });
+    // Simulate application restart: the disabled decision must not depend on
+    // a cached renderer, package file edits or the previously published catalog.
+    await initSkillsPath(userData);
+    expect((await listManagedSkills())[0]).toMatchObject({ id: 'review', enabled: false });
+    expect(skillCatalogSnapshot()).toEqual([]);
+    await expect(setManagedSkillEnabled('../review', true)).rejects.toThrow(/skill id/i);
+    await expect(setManagedSkillEnabled('missing', false)).rejects.toThrow(/no longer installed/i);
+    await setManagedSkillEnabled('review', true);
+    expect((await listManagedSkills())[0]).toMatchObject({ id: 'review', enabled: true });
+    expect(await listSkills()).toHaveLength(1);
+    expect((await readSkill('review')).text).toBe('# Review\n\nSafe steps.');
+    expect(JSON.parse(await fs.readFile(statePath, 'utf8'))).toEqual({ version: 1, disabled: [] });
+  });
+
+  it('refuses an unsafe persisted state instead of silently re-enabling disabled Skills', async () => {
+    const source = await sourceFile('review.md', '# Review');
+    await importSkillFile(source);
+    const stateFile = path.join(userData, 'skills', '.disabled-skills.json');
+    await fs.writeFile(stateFile, JSON.stringify({ version: 1, disabled: ['../review'] }));
+    await expect(initSkillsPath(userData)).rejects.toThrow(/enablement is invalid/i);
+  });
+
+  it('removes stale disabled state when a disabled package is uninstalled and reimported', async () => {
+    const source = await sourceFile('review.md', '# Review\n\nMethod.');
+    await importSkillFile(source);
+    await setManagedSkillEnabled('review', false);
+    await removeSkill('review', directory => fs.rename(directory, path.join(userData, 'trashed-review')));
+    expect(JSON.parse(await fs.readFile(path.join(userData, 'skills', '.disabled-skills.json'), 'utf8')))
+      .toEqual({ version: 1, disabled: [] });
+    await importSkillFile(source);
+    expect((await listManagedSkills())[0]).toMatchObject({ id: 'review', enabled: true });
+    expect(await listSkills()).toHaveLength(1);
+  });
+
   it('starts empty and publishes only the managed path contract', async () => {
     expect(skillsDirectory()).toBe(path.join(userData, 'skills'));
     expect(await listSkills()).toEqual([]);
@@ -79,6 +149,14 @@ describe('managed Skills store', () => {
     expect(advertised).not.toContain(JSON.stringify(summary.path));
     expect(advertised).not.toContain('Use the entire file');
     expect(advertised).toContain(JSON.stringify(path.join(userData, 'skills')));
+  });
+
+  it('opens only an installed, valid managed Skill directory', async () => {
+    const source = await sourceFile('review.md', '# Review\n\nMethod.');
+    await importSkillFile(source);
+    expect(await managedSkillDirectory('review')).toBe(path.join(userData, 'skills', 'review'));
+    await expect(managedSkillDirectory('../sources')).rejects.toThrow(/skill id/i);
+    await expect(managedSkillDirectory('missing')).rejects.toThrow(/not found/i);
   });
 
   it('falls back to heading and prose when relevant frontmatter is not simple scalar metadata', async () => {
@@ -220,10 +298,12 @@ describe('managed Skills store', () => {
         path: '/skills/shared-review/SKILL.md'
       }]);
       expect((await readSkill('shared-review')).text).toContain('Read the linked package.');
+      expect(await managedSkillDirectory('shared-review')).toBe(await fs.realpath(packageDirectory));
       const readDisabled = { ...getConfig(), capabilities: { ...getConfig().capabilities, read: false } };
       await saveConfig(readDisabled);
       expect(await listSkills()).toEqual([]);
       await expect(readSkill('shared-review')).rejects.toThrow(/not found/i);
+      await expect(managedSkillDirectory('shared-review')).rejects.toThrow(/not found|approved/i);
       await saveConfig({ ...readDisabled, capabilities: { ...readDisabled.capabilities, read: true } });
       expect(await listSkills()).toHaveLength(1);
     } finally {

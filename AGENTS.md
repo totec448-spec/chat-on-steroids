@@ -672,6 +672,16 @@ Retries/restarts reuse that record instead of rerouting. Prompt preparation read
 managed body through the existing selected-Skill path and rejects it if its revision changed.
 The Skill list in that prompt stays complete: managed Skills come from the published catalog
 (no body re-read), while personal, project and Codex plugin Skills are discovered as without routing.
+The Skills library card exposes `skills:openFolder` and `skills:setEnabled` through the fixed
+preload API. Opening accepts only an installed Skill id and resolves its managed directory;
+linked directories require the normal approved-root read capability and resolve to the
+approved canonical target. The enablement toggle persists `version: 1` plus disabled ids in
+`skills/.disabled-skills.json`, independently of package contents. Missing state is all enabled;
+invalid state refuses initialization rather than silently activating previously disabled Skills.
+Disabled managed Skills remain visible in the library but are omitted from the published
+catalog, explicit selection and automatic routing, including stale revision selections.
+`bundled` labels only a byte-for-byte match to COS's installed recommended Skill text; it
+does not imply GitHub provenance or authorize updates.
 An explicit queued-message edit clears the automatic record rather than silently rerouting changed
 text; a new explicit Skill directive in that edited text is still authoritative at preparation.
 Explicit slash/picker selection never combines with the automatic record. Routing grants no root,

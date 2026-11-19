@@ -1330,6 +1330,54 @@ describe('turning multi-agent mode off', () => {
 });
 
 describe('bounded IPC identities and OS launch results', () => {
+  it('toggles only installed managed Skills through the validated IPC interface', async () => {
+    const { initSkillsPath, importSkillFile, listSkills } = await import('../src/main/skills.js');
+    const skillData = path.join(dir, 'enable-skill-test');
+    const source = path.join(skillData, 'review.md');
+    await fs.mkdir(skillData, { recursive: true });
+    await fs.writeFile(source, '# Review\n\nNever delete files.');
+    await initSkillsPath(skillData);
+    await importSkillFile(source);
+    const toggle = (id: unknown, enabled: unknown) =>
+      handlers.get('skills:setEnabled')!(null, { id, enabled }) as Promise<any>;
+    expect(await toggle('review', false)).toMatchObject({
+      ok: true, data: [expect.objectContaining({ id: 'review', enabled: false })]
+    });
+    expect(await listSkills()).toEqual([]);
+    expect((await toggle('../review', true)).ok).toBe(false);
+    expect((await toggle('review', 'yes')).ok).toBe(false);
+    expect((await toggle('missing', false)).ok).toBe(false);
+    expect(await toggle('review', true)).toMatchObject({
+      ok: true, data: [expect.objectContaining({ id: 'review', enabled: true })]
+    });
+    expect(await listSkills()).toHaveLength(1);
+  });
+
+  it('opens only the installed managed Skill folder and propagates Explorer errors', async () => {
+    const { initSkillsPath, importSkillFile } = await import('../src/main/skills.js');
+    const skillData = path.join(dir, 'open-skill-test');
+    const source = path.join(skillData, 'review.md');
+    await fs.mkdir(skillData, { recursive: true });
+    await fs.writeFile(source, '# Review\n\nInstructions.');
+    await initSkillsPath(skillData);
+    await importSkillFile(source);
+    const folder = path.join(skillData, 'skills', 'review');
+    const open = (id: unknown) => handlers.get('skills:openFolder')!(null, { id }) as Promise<any>;
+    expect(await open('review')).toEqual({ ok: true, data: true });
+    expect(shell.openPath).toHaveBeenCalledWith(folder);
+    vi.mocked(shell.openPath).mockClear();
+    const missing = await open('does-not-exist');
+    expect(missing.ok).toBe(false);
+    expect(shell.openPath).not.toHaveBeenCalled();
+    const traversal = await open('../review');
+    expect(traversal.ok).toBe(false);
+    expect(shell.openPath).not.toHaveBeenCalled();
+    vi.mocked(shell.openPath).mockResolvedValueOnce('Access is denied');
+    const denied = await open('review');
+    expect(denied.ok).toBe(false);
+    expect(denied.error).toMatch(/could not open.*access is denied/i);
+  });
+
   it('reports shell.openPath failure instead of claiming the extension folder opened', async () => {
     vi.mocked(shell.openPath).mockResolvedValueOnce('Access is denied');
     const reply = (await handlers.get('bridge:openExtensionFolder')!(null, undefined)) as {
