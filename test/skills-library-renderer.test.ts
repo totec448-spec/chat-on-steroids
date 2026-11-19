@@ -2,6 +2,7 @@ import { JSDOM } from 'jsdom';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { ManagedSkill } from '../src/shared/skills.js';
 
+
 let dom: JSDOM | null = null;
 afterEach(() => { dom?.window.close(); dom = null; vi.unstubAllGlobals(); vi.resetModules(); });
 
@@ -64,7 +65,7 @@ it('shows the managed library, imports both source shapes, filters and removes o
   disable.click();
   await vi.waitFor(() => expect(skillsSetEnabled).toHaveBeenCalledWith('folder', false));
   await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="folder"]')?.getAttribute('data-skill-enabled')).toBe('false'));
-  await vi.waitFor(() => expect(w.document.activeElement).toBe(w.document.querySelector('[data-skill-id="folder"] .plugin-menu > summary')), { timeout: 10_000 });
+  await vi.waitFor(() => expect(w.document.activeElement === w.document.querySelector('[data-skill-id="folder"] .plugin-menu > summary')).toBe(true), { timeout: 10_000 });
   expect(w.document.querySelector('[data-skill-id="folder"] .skill-library-disabled')?.textContent).toBe('Disabled');
   const enable = [...w.document.querySelectorAll<HTMLButtonElement>('[data-skill-id="folder"] .plugin-menu-actions button')]
     .find(button => button.textContent === 'Enable skill')!;
