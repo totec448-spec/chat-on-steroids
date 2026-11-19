@@ -285,6 +285,7 @@ it('uses bounded contents for a selected folder when the recursive tree exceeds 
 it.each([
   ['symlink', { path: 'kinship/link', type: 'blob', mode: '120000', sha: 'b'.repeat(40), size: 1 }, 'unsupported file'],
   ['unsafe traversal', { path: 'kinship/../escape', type: 'blob', mode: '100644', sha: 'b'.repeat(40), size: 1 }, 'unsafe path'],
+  ['Windows reserved device name', { path: 'kinship/CON.md', type: 'blob', mode: '100644', sha: 'b'.repeat(40), size: 1 }, 'unsafe path'],
   ['reserved metadata', { path: 'kinship/.cos-github.json', type: 'blob', mode: '100644', sha: 'b'.repeat(40), size: 1 }, 'reserved'],
   ['oversized package', { path: 'kinship/huge', type: 'blob', mode: '100644', sha: 'b'.repeat(40), size: 32 * 1024 * 1024 + 1 }, '32 MiB']
 ])('rejects %s in a GitHub tree before fetching resources', async (_name, invalid, error) => {
@@ -309,6 +310,23 @@ it('rejects an unverified GitHub commit SHA', async () => {
   expect(request.mock.calls.filter(([input]) => new URL(input).host === 'raw.githubusercontent.com')).toHaveLength(0);
 });
 
+it.each(['truncated', 'too-many-entries'] as const)(
+  'refuses %s repository-root trees without attempting an unsafe fallback',
+  async mode => {
+    const github = largeGithubFixture(2);
+    const request = vi.fn(async (input: string) => {
+      if (!new URL(input).pathname.includes('/git/trees/')) return github.request(input);
+      const response = await github.request(input);
+      const payload = await response.json() as { tree: unknown[] };
+      return json({ ...payload, truncated: mode === 'truncated',
+        tree: mode === 'too-many-entries' ? Array(20_001).fill(payload.tree[0]) : payload.tree });
+    });
+    vi.stubGlobal('fetch', request);
+    await expect(importGitHubSkill('https://github.com/acme/skills')).rejects.toThrow('too large or incomplete');
+    expect(await listManagedSkills()).toEqual([]);
+    expect(request.mock.calls.filter(([input]) => new URL(input).pathname.includes('/contents/'))).toHaveLength(0);
+  }
+);
 it('does not silently choose a skill when a repository root contains multiple SKILL.md files', async () => {
   const commit = 'a'.repeat(40);
   vi.stubGlobal('fetch', vi.fn(async (input: string) => {
