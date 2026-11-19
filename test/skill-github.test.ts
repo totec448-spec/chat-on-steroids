@@ -191,6 +191,58 @@ it('resolves a repository root containing exactly one nested SKILL.md and import
   expect(await checkGitHubSkillUpdates('last30days')).toMatchObject([{ state: 'current' }]);
 });
 
+it('preserves 190 deeply nested commit-pinned resources and verifies every checksum', async () => {
+  const commit = 'a'.repeat(40);
+  const folder = 'skills/kinship';
+  const resources = new Map<string, Buffer>([['SKILL.md', Buffer.from('---\nname: Kinship\ndescription: Nested references.\n---\nRead references.\n')]]);
+  for (let index = 0; index < 189; index++) {
+    const group = String(index % 7).padStart(2, '0');
+    resources.set(`references/group-${group}/item-${String(index).padStart(3, '0')}.md`, Buffer.from(`Reference ${index}\n`));
+  }
+  const directories = new Set<string>([folder]);
+  for (const relative of resources.keys()) {
+    const segments = `${folder}/${relative}`.split('/');
+    for (let depth = 1; depth < segments.length; depth++) directories.add(segments.slice(0, depth).join('/'));
+  }
+  const tree = [
+    ...[...directories].map(name => ({ path: name, type: 'tree', mode: '040000', sha: 'b'.repeat(40) })),
+    ...[...resources].map(([relative, content]) => ({
+      path: `${folder}/${relative}`, type: 'blob', mode: '100644', sha: blobSha(content), size: content.length
+    }))
+  ];
+  const requests: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+    const url = new URL(input);
+    requests.push(url.href);
+    if (url.origin === 'https://api.github.com') {
+      if (url.pathname === '/repos/acme/skills/commits/main') return json({ sha: commit });
+      if (url.pathname === `/repos/acme/skills/git/trees/${commit}` || url.pathname === '/repos/acme/skills/git/trees/main')
+        return json({ sha: commit, truncated: false, tree });
+    }
+    if (url.origin === 'https://raw.githubusercontent.com' && url.pathname.startsWith(`/acme/skills/${commit}/${folder}/`)) {
+      const relative = decodeURIComponent(url.pathname.slice(`/acme/skills/${commit}/${folder}/`.length));
+      const content = resources.get(relative);
+      if (content) return new Response(new Uint8Array(content));
+    }
+    return new Response('Not found', { status: 404 });
+  }));
+  const installed = await importGitHubSkill(`https://github.com/acme/skills/tree/main/${folder}`);
+  expect(installed[0]).toMatchObject({ id: 'kinship', origin: { directory: folder, commit } });
+  for (const [relative, expected] of resources) {
+    expect(await fs.readFile(path.join(userData, 'skills', 'kinship', ...relative.split('/')))).toEqual(expected);
+  }
+  expect(requests.filter(url => url.includes('raw.githubusercontent.com'))).toHaveLength(190);
+  expect(requests.filter(url => url.includes('/git/blobs/'))).toHaveLength(0);
+  expect(await checkGitHubSkillUpdates('kinship')).toMatchObject([{ state: 'current' }]);
+});
+
+it('accepts exactly 256 commit-pinned files at the package bound', async () => {
+  const github = largeGithubFixture(256);
+  vi.stubGlobal('fetch', github.request);
+  expect((await importGitHubSkill('https://github.com/acme/skills/tree/main/kinship'))[0]).toMatchObject({ id: 'kinship' });
+  expect(await checkGitHubSkillUpdates('kinship')).toMatchObject([{ state: 'current' }]);
+});
+
 it('links a differently named local skill by identical SKILL.md and updates without changing its ID', async () => {
   const github = githubFixture();
   vi.stubGlobal('fetch', github.request);
