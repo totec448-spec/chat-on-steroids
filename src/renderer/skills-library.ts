@@ -158,13 +158,9 @@ export function initSkillsLibrary(api: AppApi): () => void {
         void (async () => {
           let applied = false;
           try {
-            if (await update(api.skillsSetEnabled(skill.id, skill.enabled === false))) {
+            if (await update(api.skillsSetEnabled(skill.id, skill.enabled === false), false, true)) {
               applied = true;
               toast(t(skill.enabled === false ? 'Skill enabled' : 'Skill disabled'));
-            } else {
-              // A durable write may have succeeded even if the subsequent scan
-              // failed. Keep run()'s error toast, then reload authoritative state.
-              void loadList();
             }
           } finally {
             if (toggleEnabled.isConnected) toggleEnabled.disabled = false;
@@ -200,7 +196,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
    * decides what the page shows: a failed load says so, and a change that ended without a list (a cancelled
    * import) loads again rather than leaving "Loading…" for good. An older request says nothing (CodeRabbit on #2002).
    */
-  const update = async (request: Promise<{ ok: true; data: ManagedSkill[] | null } | { ok: false; error: string }>, load = false): Promise<boolean> => {
+  const update = async (request: Promise<{ ok: true; data: ManagedSkill[] | null } | { ok: false; error: string }>, load = false, reloadOnFailure = false): Promise<boolean> => {
     const own = ++epoch;
     const next = await run(request);
     if (own !== epoch) {
@@ -209,11 +205,12 @@ export function initSkillsLibrary(api: AppApi): () => void {
       // A superseded read must not start another read: concurrent refreshes
       // would otherwise keep invalidating each other indefinitely. Only a
       // successful superseded mutation needs authoritative reconciliation.
-      if (next && !load) void loadList();
+      if (!load && (next || reloadOnFailure)) void loadList();
       return false;
     }
     if (next) { setSkills(next); return true; }
-    if (!loaded) { if (load) { loadFailed = true; render(); } else void loadList(); }
+    if (reloadOnFailure) void loadList();
+    else if (!loaded) { if (load) { loadFailed = true; render(); } else void loadList(); }
     return false;
   };
 
