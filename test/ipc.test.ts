@@ -1336,7 +1336,7 @@ describe('bounded IPC identities and OS launch results', () => {
     const originalFetch = globalThis.fetch;
     const request = vi.fn(async (url: string, init?: RequestInit) => {
       expect(url).toBe('https://api.github.com/rate_limit');
-      expect(new Headers(init?.headers).get('Authorization')).toBe(`Bearer ${token}`);
+      expect(new Headers(init?.headers).get('Authorization')).toMatch(/^Bearer [!-~]{8,512}$/);
       return new Response(JSON.stringify({ resources: { core: { limit: 5000, remaining: 4999 } } }),
         { status: 200, headers: { 'content-type': 'application/json' } });
     });
@@ -1351,6 +1351,17 @@ describe('bounded IPC identities and OS launch results', () => {
       expect(saved).toEqual({ ok: true, data: { stored: true, available: true } });
       expect(JSON.stringify(saved)).not.toContain(token);
       expect(await getSecret('githubSkillsToken')).toBe(token);
+      for (const invalid of ['', '1234567', 'x'.repeat(513)]) {
+        const refused = await saveToken(invalid);
+        expect(refused.ok).toBe(false);
+        expect(refused.error).toBe('Enter a valid GitHub access token without spaces');
+        expect(await getSecret('githubSkillsToken')).toBe(token);
+      }
+      for (const valid of ['12345678', 'x'.repeat(512)]) {
+        expect(await saveToken(valid)).toMatchObject({ ok: true, data: { stored: true, available: true } });
+        expect(await getSecret('githubSkillsToken')).toBe(valid);
+      }
+      expect(await saveToken(token)).toMatchObject({ ok: true, data: { stored: true, available: true } });
       expect((await saveToken({ object: token })).ok).toBe(false);
       expect((await saveToken('bad\nvalue')).ok).toBe(false);
       expect(await getSecret('githubSkillsToken')).toBe(token);

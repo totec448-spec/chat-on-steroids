@@ -149,6 +149,23 @@ it('validates a token before secure storage, returns status only, and preserves 
   expect(authSecret.token).toBeNull();
 });
 
+it('accepts exactly 8 and 512 token characters while rejecting empty, 7 and 513 without overwriting the previous token', async () => {
+  const original = 'github_pat_' + 'a'.repeat(70);
+  authSecret.token = original;
+  const request = vi.fn(async () => json({ resources: { core: { limit: 5000 } } }));
+  vi.stubGlobal('fetch', request);
+  for (const invalid of ['', '1234567', 'x'.repeat(513)]) {
+    await expect(saveGitHubSkillsToken(invalid)).rejects.toThrow('Enter a valid GitHub access token without spaces');
+    expect(authSecret.token).toBe(original);
+  }
+  expect(request).not.toHaveBeenCalled();
+  for (const valid of ['12345678', 'x'.repeat(512)]) {
+    expect(await saveGitHubSkillsToken(valid)).toEqual({ stored: true, available: true });
+    expect(authSecret.token).toBe(valid);
+  }
+  expect(request).toHaveBeenCalledTimes(2);
+});
+
 it('serializes Save and later Remove even when GitHub validation finishes after Remove was requested', async () => {
   const queuedLog = vi.spyOn(logger, 'logInfo');
   let releaseValidation!: () => void;
