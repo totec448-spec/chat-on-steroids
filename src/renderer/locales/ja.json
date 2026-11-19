@@ -2691,6 +2691,7 @@
   "GitHub skill uses a reserved CoS metadata filename": "GitHub のスキルが CoS 用に予約されたメタデータのファイル名を使っています",
   "GitHub skill folder was not found": "GitHub のスキルフォルダーが見つかりません",
   "Only GitHub-imported skills can be checked": "確認できるのは GitHub からインポートしたスキルだけです",
+  "GitHub repository tree is too large or incomplete; use a direct skill folder link": "GitHub リポジトリのツリーが大きすぎるか不完全です。Skill フォルダーへの直接リンクを使用してください。",
   "GitHub repository tree is too large or incomplete to check safely": "GitHub リポジトリのツリーが大きすぎるか不完全なため、安全に確認できません",
   "GitHub returned invalid repository metadata": "GitHub から無効なリポジトリのメタデータが返されました",
   "Only local skills can be linked to GitHub": "GitHub にリンクできるのはローカルのスキルだけです",

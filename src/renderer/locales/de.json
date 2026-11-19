@@ -2728,6 +2728,7 @@
   "GitHub skill uses a reserved CoS metadata filename": "Der GitHub-Skill verwendet einen für CoS reservierten Metadaten-Dateinamen",
   "GitHub skill folder was not found": "Der GitHub-Skill-Ordner wurde nicht gefunden",
   "Only GitHub-imported skills can be checked": "Nur von GitHub importierte Skills können geprüft werden",
+  "GitHub repository tree is too large or incomplete; use a direct skill folder link": "Der GitHub-Repository-Baum ist zu groß oder unvollständig; verwende einen direkten Link zum Skill-Ordner.",
   "GitHub repository tree is too large or incomplete to check safely": "Der GitHub-Repository-Baum ist zu groß oder unvollständig für eine sichere Prüfung",
   "GitHub returned invalid repository metadata": "GitHub hat ungültige Repository-Metadaten geliefert",
   "Only local skills can be linked to GitHub": "Nur lokale Skills können mit GitHub verknüpft werden",
