@@ -78,6 +78,25 @@ it('deduplicates a managed package link against the same discovered SKILL.md', a
   expect(library.skills[0]).toMatchObject({ id: 'review', managed: true, path: '/skills/review/SKILL.md' });
 });
 
+it('does not rediscover a disabled managed link as a selectable hashed unmanaged skill', async () => {
+  const source = path.join(project, '.agents/skills/review');
+  await write(path.join(source, 'SKILL.md'), contents('Review', 'DISABLED_LINK_INSTRUCTIONS'));
+  const unmanaged = await listSkillLibrary({ projectPath: project });
+  const staleUnmanagedId = unmanaged.skills[0]!.id;
+  await fs.symlink(source, path.join(root, 'skills', 'review'), process.platform === 'win32' ? 'junction' : 'dir');
+  await setManagedSkillEnabled('review', false);
+  await expect(readLibrarySkill(staleUnmanagedId, { projectPath: project }, unmanaged)).rejects.toThrow(/disabled/i);
+  for (const fromCatalog of [false, true]) {
+    const library = await listSkillLibrary({ projectPath: project, managedFromCatalog: fromCatalog });
+    expect(library.skills).toEqual([]);
+    expect(skillLibraryInstructions(library)).not.toContain('DISABLED_LINK_INSTRUCTIONS');
+  }
+  await initSkillsPath(root);
+  expect((await listSkillLibrary({ projectPath: project })).skills).toEqual([]);
+  await setManagedSkillEnabled('review', true);
+  expect((await listSkillLibrary({ projectPath: project })).skills.map(item => item.id)).toEqual(['review']);
+});
+
 it('honors layered config and both YAML policy styles while keeping package resources out of discovery', async () => {
   await write(path.join(project, '.agents/skills/review/SKILL.md'), contents('Review'));
   await write(path.join(project, '.agents/skills/review/references/example/SKILL.md'), contents('Example only'));

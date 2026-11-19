@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { rawPromises as fs } from './rawfs.js';
 import { effectiveCapabilities, getConfig } from './config.js';
 import { isContained, resolvePath } from './sandbox.js';
-import { listSkills, readSkill, readSkillTextSnapshot, skillCatalogSnapshot, skillsDirectory, type SkillDocument } from './skills.js';
+import { disabledManagedSkillTargets, listSkills, readSkill, readSkillTextSnapshot, skillCatalogSnapshot, skillsDirectory, type SkillDocument } from './skills.js';
 import { approvedManagedSkillLink, sameSkillLink } from './skill-links.js';
 import { parseCodexPluginManifest, parseSkillConfiguration, parseSkillFrontmatter, parseSkillInterface, type SkillConfiguration } from './skill-metadata.js';
 import { listInstalledCodexPlugins } from './codex-plugin-runtime.js';
@@ -469,7 +469,7 @@ export async function listSkillLibrary(scope: SkillLibraryScope = {}, runtime: S
     for (const rule of config.rules) if (rule.name === name || (rule.path && samePath(rule.path, file))) value = rule.enabled;
     return value;
   };
-  const seen = new Set<string>();
+  const seen = new Set((await disabledManagedSkillTargets()).map(identity));
   for (const summary of managed) {
     const directory = path.join(root, summary.id), file = path.join(directory, 'SKILL.md');
     const document = scope.managedFromCatalog ? null : await readSkill(summary.id);
@@ -558,6 +558,8 @@ export async function readLibrarySkill(id: string, scope: SkillLibraryScope = {}
     return { summary: selected, text: document.text };
   }
   const document = await readApproved(selected.path);
+  if (new Set((await disabledManagedSkillTargets()).map(identity)).has(identity(document.real)))
+    throw new Error('The selected Skill is disabled in the managed library');
   // Commands are derived from canonical paths, not catalog ordering or mutable names.
   const hash = createHash('sha256').update(selected.codexPlugin
     ? pluginSkillIdentity(selected.codexPlugin, selected.codexPlugin.skillPath)

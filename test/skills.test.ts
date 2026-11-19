@@ -97,6 +97,28 @@ describe('managed Skills store', () => {
     await expect(initSkillsPath(userData)).rejects.toThrow(/enablement is invalid/i);
   });
 
+  it('drops a disabled Skill from the published catalog even if the post-toggle scan fails', async () => {
+    const source = await sourceFile('review.md', '# Review');
+    await importSkillFile(source);
+    const rename = rawFs.rename.bind(rawFs);
+    const opendir = rawFs.opendir.bind(rawFs);
+    let committed = false;
+    const write = vi.spyOn(rawFs, 'rename').mockImplementation((async (from: Parameters<typeof rawFs.rename>[0], to: Parameters<typeof rawFs.rename>[1]) => {
+      const result = await rename(from, to);
+      if (String(to).endsWith('.disabled-skills.json')) committed = true;
+      return result;
+    }) as typeof rawFs.rename);
+    const scan = vi.spyOn(rawFs, 'opendir').mockImplementation((async (...args: Parameters<typeof rawFs.opendir>) => {
+      if (committed) throw new Error('scan-failed');
+      return opendir(...args);
+    }) as typeof rawFs.opendir);
+    try {
+      await expect(setManagedSkillEnabled('review', false)).rejects.toThrow('scan-failed');
+      expect(skillCatalogSnapshot()).toEqual([]);
+    } finally { write.mockRestore(); scan.mockRestore(); }
+    expect((await listManagedSkills())[0]).toMatchObject({ id: 'review', enabled: false });
+  });
+
   it('removes stale disabled state when a disabled package is uninstalled and reimported', async () => {
     const source = await sourceFile('review.md', '# Review\n\nMethod.');
     await importSkillFile(source);
@@ -107,6 +129,43 @@ describe('managed Skills store', () => {
     await importSkillFile(source);
     expect((await listManagedSkills())[0]).toMatchObject({ id: 'review', enabled: true });
     expect(await listSkills()).toHaveLength(1);
+  });
+
+  it('reconciles an orphaned disabled ID on import after removal was interrupted', async () => {
+    const source = await sourceFile('review.md', '# Review');
+    await importSkillFile(source);
+    await setManagedSkillEnabled('review', false);
+    const state = path.join(userData, 'skills', '.disabled-skills.json');
+    await expect(removeSkill('review', async () => { throw new Error('trash failed'); })).rejects.toThrow('trash failed');
+    expect((await listManagedSkills())[0]).toMatchObject({ id: 'review', enabled: false });
+    expect(JSON.parse(await fs.readFile(state, 'utf8')).disabled).toEqual(['review']);
+
+    // Simulate a crash after moving the folder to Trash, before clearing its toggle.
+    await fs.rename(path.join(userData, 'skills', 'review'), path.join(userData, 'trashed-review'));
+    await initSkillsPath(userData);
+    expect(await listSkills()).toEqual([]);
+    await importSkillFile(source);
+    expect((await listManagedSkills())[0]).toMatchObject({ id: 'review', enabled: true });
+    expect(JSON.parse(await fs.readFile(state, 'utf8')).disabled).toEqual([]);
+  });
+
+  it('recovers after Trash succeeds but writing the disabled-state file fails', async () => {
+    const source = await sourceFile('review.md', '# Review');
+    await importSkillFile(source);
+    await setManagedSkillEnabled('review', false);
+    const rename = rawFs.rename.bind(rawFs);
+    const spy = vi.spyOn(rawFs, 'rename').mockImplementation((async (from: Parameters<typeof rawFs.rename>[0], to: Parameters<typeof rawFs.rename>[1]) => {
+      if (String(from).includes('.skill-state-') && String(to).endsWith('.disabled-skills.json'))
+        throw new Error('state-write-failed');
+      return rename(from, to);
+    }) as typeof rawFs.rename);
+    try {
+      await expect(removeSkill('review', directory => fs.rename(directory, path.join(userData, 'trashed-review'))))
+        .rejects.toThrow('state-write-failed');
+      expect(JSON.parse(await fs.readFile(path.join(userData, 'skills', '.disabled-skills.json'), 'utf8')).disabled).toEqual(['review']);
+    } finally { spy.mockRestore(); }
+    await importSkillFile(source);
+    expect((await listManagedSkills())[0]).toMatchObject({ id: 'review', enabled: true });
   });
 
   it('starts empty and publishes only the managed path contract', async () => {

@@ -358,7 +358,9 @@ function publish(records: SkillRecord[]): void {
   catalogRevisions = new Map(enabled.map(record => [record.summary.id, record.revision]));
 }
 
-/** Owner of persistent managed Skill enablement. Never rewrite source packages. */
+/** Owner of persistent managed Skill enablement. Never rewrite source packages.
+ * This state belongs to the local CoS user-data directory; another machine with
+ * its own library will not automatically inherit these toggles. */
 async function readDisabledSkills(directory: string): Promise<Set<string>> {
   const file = path.join(directory, DISABLED_SKILLS_FILENAME);
   let stat: Awaited<ReturnType<typeof fs.lstat>>;
@@ -407,6 +409,30 @@ async function writeDisabledSkills(directory: string, next: Set<string>): Promis
 
 export function skillsDirectory(): string | null {
   return root;
+}
+
+/** Disabled managed links must not re-enter discovery under hashed unmanaged IDs. */
+export async function disabledManagedSkillTargets(): Promise<string[]> {
+  if (!root || !disabledSkills.size) return [];
+  const config = getConfig();
+  if (!effectiveCapabilities(config).read) return [];
+  const targets: string[] = [];
+  for (const id of disabledSkills) {
+    const link = await approvedManagedSkillLink(root, id, config.roots);
+    if (link) targets.push(path.join(link.real, SKILL_FILENAME));
+  }
+  return targets;
+}
+
+/** Reconcile a removed package before reusing its ID, including after an interrupted uninstall. */
+async function clearOrphanedDisabledId(directory: string, id: string): Promise<void> {
+  if (!disabledSkills.has(id)) return;
+  if ((await directoryNames(directory)).some(name => name.toLowerCase() === id.toLowerCase()))
+    throw new Error(`Skill "${id}" already exists`);
+  const next = new Set(disabledSkills);
+  next.delete(id);
+  await writeDisabledSkills(directory, next);
+  disabledSkills = next;
 }
 
 /** Shared bounded snapshot reader for discovered metadata and explicit package imports. */
@@ -477,6 +503,12 @@ export function setManagedSkillEnabled(id: string, enabled: boolean): Promise<Ma
     else next.add(id);
     if (next.has(id) !== disabledSkills.has(id)) await writeDisabledSkills(directory, next);
     disabledSkills = next;
+    // The durable toggle has committed. A subsequent scan failure cannot leave the
+    // old enabled catalog advertising a now-disabled Skill to an active model turn.
+    if (!enabled) {
+      catalog = catalog.filter(summary => summary.id !== id);
+      catalogRevisions.delete(id);
+    }
     const records = await scan(directory);
     publish(records);
     const result: ManagedSkill[] = [];
@@ -564,6 +596,8 @@ export function importSkillFile(sourcePath: string): Promise<SkillSummary> {
     if (current.length >= MAX_SKILLS) throw new Error('The Skills library supports at most 128 skills');
     const names = await directoryNames(candidateRoot);
     if (names.some(name => name.toLowerCase() === id.toLowerCase())) throw new Error(`Skill "${id}" already exists`);
+
+    await clearOrphanedDisabledId(candidateRoot, id);
 
     const destination = path.join(candidateRoot, id);
     const finalFile = path.join(destination, SKILL_FILENAME);
@@ -727,6 +761,7 @@ export function importSkillPackage(sourcePath: string, origin?: GitHubSkillOrigi
     if (current.length >= MAX_SKILLS) throw new Error('The Skills library supports at most 128 skills');
     const names = await directoryNames(candidateRoot);
     if (names.some(name => name.toLowerCase() === id.toLowerCase())) throw new Error(`Skill "${id}" already exists`);
+    await clearOrphanedDisabledId(candidateRoot, id);
     const { publishSkillPackage } = await import('./skill-package.js');
     await publishSkillPackage(sourcePath, candidateRoot, id, document.bytes, originBytes(origin, document.revision));
     const records = await scan(candidateRoot);
