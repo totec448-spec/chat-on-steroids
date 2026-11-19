@@ -26,6 +26,11 @@ it('shows the managed library, imports both source shapes, filters and removes o
     skills = skills.filter(skill => skill.id !== id);
     return { ok: true as const, data: skills };
   });
+  const skillsOpenFolder = vi.fn(async (_id: string) => ({ ok: true as const, data: true }));
+  const skillsSetEnabled = vi.fn(async (id: string, enabled: boolean) => {
+    skills = skills.map(item => item.id === id ? { ...item, enabled } : item);
+    return { ok: true as const, data: skills };
+  });
   const githubOrigin = { kind: 'github' as const, url: 'https://github.com/acme/skills/tree/main/review', ref: 'main', directory: 'review', commit: 'a'.repeat(40), revision: 'b'.repeat(64), skillSha256: 'c'.repeat(64) };
   const skillsImportGithub = vi.fn(async (_url: string) => {
     skills = [...skills, { id: 'review', name: 'Code Review', description: 'From GitHub.', path: '/skills/review/SKILL.md', origin: githubOrigin }];
@@ -39,13 +44,32 @@ it('shows the managed library, imports both source shapes, filters and removes o
     { id: 'review', originRevision: githubOrigin.revision, state: 'available' as const, checkedAt: Date.now() }
   ] }));
   const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
-  const open = initSkillsLibrary({ listManagedSkills, skillsImport, skillsRemove, skillsImportGithub, skillsCheckGithub, skillsUpdateGithub } as any);
+  const open = initSkillsLibrary({ listManagedSkills, skillsImport, skillsRemove, skillsOpenFolder, skillsSetEnabled, skillsImportGithub,
+    skillsCheckGithub, skillsUpdateGithub } as any);
   await vi.waitFor(() => expect(w.document.getElementById('skillsInstalled')!.textContent).toContain('No skills installed'));
   (w.document.getElementById('skillsImportFolder') as HTMLButtonElement).click();
   await vi.waitFor(() => expect(w.document.querySelectorAll('.skill-library-card')).toHaveLength(1));
   expect(w.document.querySelector('[data-skill-id="folder"]')!.textContent).toContain('/folder');
   expect(w.document.querySelector('[data-skill-id="folder"] .skill-library-source')!.textContent).toContain('Local');
   expect(w.document.querySelector('[data-skill-id="folder"] .plugin-menu-actions')!.textContent).toContain('Link GitHub source');
+  const localOpen = [...w.document.querySelectorAll<HTMLButtonElement>('[data-skill-id="folder"] .plugin-menu-actions button')]
+    .find(button => button.textContent === 'Open local skill folder')!;
+  expect(localOpen).toBeDefined();
+  localOpen.click();
+  await vi.waitFor(() => expect(skillsOpenFolder).toHaveBeenCalledWith('folder'));
+  const disable = [...w.document.querySelectorAll<HTMLButtonElement>('[data-skill-id="folder"] .plugin-menu-actions button')]
+    .find(button => button.textContent === 'Disable skill')!;
+  expect(disable).toBeDefined();
+  disable.click();
+  await vi.waitFor(() => expect(skillsSetEnabled).toHaveBeenCalledWith('folder', false));
+  await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="folder"]')?.getAttribute('data-skill-enabled')).toBe('false'));
+  expect(w.document.querySelector('[data-skill-id="folder"] .skill-library-disabled')?.textContent).toBe('Disabled');
+  const enable = [...w.document.querySelectorAll<HTMLButtonElement>('[data-skill-id="folder"] .plugin-menu-actions button')]
+    .find(button => button.textContent === 'Enable skill')!;
+  expect(enable).toBeDefined();
+  enable.click();
+  await vi.waitFor(() => expect(skillsSetEnabled).toHaveBeenCalledWith('folder', true));
+  await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="folder"]')?.getAttribute('data-skill-enabled')).toBe('true'));
   (w.document.getElementById('skillsImportFile') as HTMLButtonElement).click();
   await vi.waitFor(() => expect(w.document.querySelectorAll('.skill-library-card')).toHaveLength(2));
   expect(skillsImport.mock.calls.map(call => call[0])).toEqual(['folder', 'file']);
@@ -73,6 +97,11 @@ it('shows the managed library, imports both source shapes, filters and removes o
   await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="review"] .skill-library-source')).not.toBeNull());
   expect((w.document.getElementById('skillGithubDialog') as HTMLDialogElement).open).toBe(false);
   expect(w.document.querySelector('[data-skill-id="review"] .skill-library-source')!.textContent).toContain('Up to date');
+  const githubOpen = [...w.document.querySelectorAll<HTMLButtonElement>('[data-skill-id="review"] .plugin-menu-actions button')]
+    .find(button => button.textContent === 'Open local skill folder')!;
+  expect(githubOpen).toBeDefined();
+  githubOpen.click();
+  await vi.waitFor(() => expect(skillsOpenFolder).toHaveBeenCalledWith('review'));
   expect(w.document.querySelector<HTMLElement>('[data-skill-id="review"] .skill-library-source')!.title)
     .toContain('main @ aaaaaaaaaaaa');
   (w.document.getElementById('skillsRefresh') as HTMLButtonElement).click();

@@ -229,6 +229,8 @@ const api = {
   },
   listSkills: () => call<SkillSummary[]>('skills:list'),
   listManagedSkills: () => call<ManagedSkill[]>('skills:managed'),
+  skillsSetEnabled: (id: string, enabled: boolean) => call<ManagedSkill[]>('skills:setEnabled', { id, enabled }),
+  skillsOpenFolder: (id: string) => call<boolean>('skills:openFolder', { id }),
   listRecommendedSkills: () => call<Array<{ id: string; name: string; description: string; installed: boolean }>>('skills:recommended'),
   installRecommendedSkill: (id: string) => call<ManagedSkill[]>('skills:installRecommended', { id }),
   skillsImport: (kind: 'folder' | 'file') => call<ManagedSkill[] | null>('skills:import', { kind }),

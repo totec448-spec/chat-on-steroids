@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { makeTempDir, removeTempDir } from './helpers.js';
 import { defaultConfig, getConfig, initConfigPath, saveConfig } from '../src/main/config.js';
-import { initSkillsPath, importSkillPackage, listSkills, removeSkill } from '../src/main/skills.js';
+import { initSkillsPath, importSkillPackage, listSkills, removeSkill, setManagedSkillEnabled } from '../src/main/skills.js';
 import { listSkillLibrary, readLibrarySkill, skillLibraryInstructions } from '../src/main/skill-library.js';
 import type { LibrarySkill } from '../src/shared/skills.js';
 
@@ -38,6 +38,21 @@ it('imports every resource and removes the whole package so it can be imported a
   expect(await listSkills()).toEqual([]);
   expect(await fs.readFile(path.join(root, 'removed-review/assets/binary.dat'))).toEqual(Buffer.from([0, 1, 255]));
   await expect(importSkillPackage(source)).resolves.toMatchObject({ id: 'review' });
+});
+
+it('excludes a disabled managed Skill from explicit discovery even with a stale library snapshot', async () => {
+  const source = path.join(root, 'sources', 'review');
+  await write(path.join(source, 'SKILL.md'), contents('Review', 'DO_NOT_INJECT_WHILE_DISABLED'));
+  await importSkillPackage(source);
+  const old = await listSkillLibrary({ projectPath: project });
+  expect(old.skills.map(skill => skill.id)).toEqual(['review']);
+  await setManagedSkillEnabled('review', false);
+  const next = await listSkillLibrary({ projectPath: project });
+  expect(next.skills.map(skill => skill.id)).not.toContain('review');
+  await expect(readLibrarySkill('review', { projectPath: project }, old)).rejects.toThrow(/disabled/i);
+  await expect(readLibrarySkill('review', { projectPath: project })).rejects.toThrow(/unavailable/i);
+  await setManagedSkillEnabled('review', true);
+  expect((await listSkillLibrary({ projectPath: project })).skills.map(skill => skill.id)).toContain('review');
 });
 
 it('keeps commands stable when another package with the same name appears or disappears', async () => {

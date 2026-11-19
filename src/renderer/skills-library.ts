@@ -25,8 +25,10 @@ export function initSkillsLibrary(api: AppApi): () => void {
     if (!source) return;
     if (!skill.origin) {
       source.className = 'skill-library-source is-local';
-      source.replaceChildren(icon('i-folder'), el('span', '', () => t('Local')));
-      ui(source, 'title', () => t('Link a GitHub source from the card menu to check for updates.'));
+      source.replaceChildren(icon('i-folder'), el('span', '', () => t(skill.bundled ? 'Bundled with COS' : 'Local')));
+      ui(source, 'title', () => t(skill.bundled
+        ? 'This Skill exactly matches the bundled COS recommended version.'
+        : 'Link a GitHub source from the card menu to check for updates.'));
       return;
     }
     const check = checks.get(skill.id);
@@ -112,12 +114,15 @@ export function initSkillsLibrary(api: AppApi): () => void {
     for (const skill of visible) {
       const card = el('article', 'plugin-card pet-library-card skill-library-card');
       card.dataset.skillId = skill.id;
+      card.dataset.skillEnabled = String(skill.enabled !== false);
+      if (skill.enabled === false) card.classList.add('is-disabled');
       const entry = el('div', 'plugin-entry pet-library-entry');
       const artwork = el('div', 'skill-library-icon'); artwork.append(icon('i-skill'));
       const title = el('div', 'plugin-card-title');
       title.append(el('h2', '', skill.name), el('p', 'muted', skill.description || t('Reusable instructions for this workspace.')));
       const foot = el('div', 'plugin-card-foot');
       foot.append(el('span', 'skill-library-id', `/${skill.id}`));
+      if (skill.enabled === false) foot.append(el('span', 'skill-library-disabled', () => t('Disabled')));
       const source = el('span', 'skill-library-source');
       source.setAttribute('aria-live', 'polite');
       foot.append(source);
@@ -136,6 +141,26 @@ export function initSkillsLibrary(api: AppApi): () => void {
         link.type = 'button'; link.addEventListener('click', () => { menu.open = false; openGithubDialog(skill); });
         actions.append(link);
       }
+      const openFolder = el('button', 'btn', () => t('Open local skill folder')) as HTMLButtonElement;
+      openFolder.type = 'button';
+      openFolder.addEventListener('click', () => {
+        menu.open = false;
+        void run(api.skillsOpenFolder(skill.id));
+      });
+      actions.append(openFolder);
+      const toggleEnabled = el('button', 'btn', () => t(skill.enabled === false ? 'Enable skill' : 'Disable skill')) as HTMLButtonElement;
+      toggleEnabled.type = 'button';
+      toggleEnabled.addEventListener('click', () => {
+        menu.open = false;
+        toggleEnabled.disabled = true;
+        void (async () => {
+          try {
+            if (await update(api.skillsSetEnabled(skill.id, skill.enabled === false)))
+              toast(t(skill.enabled === false ? 'Skill enabled' : 'Skill disabled'));
+          } finally { if (toggleEnabled.isConnected) toggleEnabled.disabled = false; }
+        })();
+      });
+      actions.append(toggleEnabled);
       const remove = el('button', 'btn plugin-destructive', () => t('Remove skill')) as HTMLButtonElement;
       remove.type = 'button'; remove.addEventListener('click', () => confirmRemove(skill));
       actions.append(remove); menu.append(summary, actions); card.append(entry, menu); host.append(card);

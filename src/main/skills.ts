@@ -4,6 +4,7 @@ import { rawPromises as fs, rawRealpathNative } from './rawfs.js';
 import { effectiveCapabilities, getConfig } from './config.js';
 import { approvedManagedSkillLink, sameSkillLink, type ApprovedSkillLink } from './skill-links.js';
 import { parseSkillFrontmatter } from './skill-metadata.js';
+import { RECOMMENDED_SKILLS } from '../shared/recommended-skills.js';
 import {
   MAX_SKILL_BYTES,
   MAX_SKILL_CHARS,
@@ -35,6 +36,7 @@ type SkillRecord = SkillDocument & { identity: FileIdentity; revision: string };
 
 const MAX_LIBRARY_ENTRIES = 256;
 const SKILL_FILENAME = 'SKILL.md';
+const DISABLED_SKILLS_FILENAME = '.disabled-skills.json';
 const RESERVED_IDS = new Set(['prompt']);
 const WINDOWS_RESERVED_ID = /^(?:con|prn|aux|nul|conin\$|conout\$|com[0-9]|lpt[0-9])(?:\.|$)/i;
 const SIMPLE_SCALAR_UNSAFE = /^(?:[\[\]{}|>&*!%@`]|[-?:]\s)|:\s/;
@@ -42,6 +44,8 @@ const SIMPLE_SCALAR_UNSAFE = /^(?:[\[\]{}|>&*!%@`]|[-?:]\s)|:\s/;
 let root: string | null = null;
 let catalog: SkillSummary[] = [];
 let catalogRevisions = new Map<string, string>();
+let disabledSkills = new Set<string>();
+const bundledSkillTexts = new Map(RECOMMENDED_SKILLS.map(entry => [entry.id, entry.markdown]));
 let operations: Promise<unknown> = Promise.resolve();
 
 function serial<T>(work: () => Promise<T>): Promise<T> {
@@ -349,8 +353,56 @@ async function recoverSkillBackups(candidateRoot: string): Promise<void> {
 }
 
 function publish(records: SkillRecord[]): void {
-  catalog = records.map(record => ({ ...record.summary }));
-  catalogRevisions = new Map(records.map(record => [record.summary.id, record.revision]));
+  const enabled = records.filter(record => !disabledSkills.has(record.summary.id));
+  catalog = enabled.map(record => ({ ...record.summary }));
+  catalogRevisions = new Map(enabled.map(record => [record.summary.id, record.revision]));
+}
+
+/** Owner of persistent managed Skill enablement. Never rewrite source packages. */
+async function readDisabledSkills(directory: string): Promise<Set<string>> {
+  const file = path.join(directory, DISABLED_SKILLS_FILENAME);
+  let stat: Awaited<ReturnType<typeof fs.lstat>>;
+  try { stat = await fs.lstat(file); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return new Set();
+    throw error;
+  }
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 16_384)
+    throw new Error('Managed Skill enablement file is invalid');
+  const value: unknown = JSON.parse(await fs.readFile(file, 'utf8'));
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new Error('Managed Skill enablement is invalid');
+  const object = value as Record<string, unknown>;
+  if (Object.keys(object).sort().join(',') !== 'disabled,version' || object.version !== 1 ||
+      !Array.isArray(object.disabled) || object.disabled.length > MAX_SKILLS ||
+      !object.disabled.every(id => typeof id === 'string' && validSkillId(id)) ||
+      new Set(object.disabled).size !== object.disabled.length)
+    throw new Error('Managed Skill enablement is invalid');
+  if (!sameIdentity(identityOf(stat), identityOf(await fs.lstat(file))))
+    throw new Error('Managed Skill enablement changed while reading');
+  return new Set(object.disabled as string[]);
+}
+
+async function writeDisabledSkills(directory: string, next: Set<string>): Promise<void> {
+  await assertManagedRoot(directory);
+  const file = path.join(directory, DISABLED_SKILLS_FILENAME);
+  try {
+    const existing = await fs.lstat(file);
+    if (!existing.isFile() || existing.isSymbolicLink())
+      throw new Error('Managed Skill enablement is not a regular file');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  const temporary = path.join(directory, `.skill-state-${randomUUID()}.tmp`);
+  try {
+    const handle = await fs.open(temporary, 'wx', 0o600);
+    try {
+      await handle.writeFile(JSON.stringify({ version: 1, disabled: [...next].sort() }));
+      await handle.sync();
+    } finally { await handle.close(); }
+    await assertManagedRoot(directory);
+    await fs.rename(temporary, file);
+  } finally { await fs.rm(temporary, { force: true }).catch(() => undefined); }
 }
 
 export function skillsDirectory(): string | null {
@@ -365,7 +417,7 @@ export async function readSkillTextSnapshot(filename: string): Promise<{ bytes: 
 export function initSkillsPath(userData: string): Promise<void> {
   return serial(async () => {
     if (!path.isAbsolute(userData)) throw new Error('Skills storage requires an absolute user-data path');
-    root = null; catalog = []; catalogRevisions = new Map();
+    root = null; catalog = []; catalogRevisions = new Map(); disabledSkills = new Set();
     await fs.mkdir(userData, { recursive: true });
     const realUserData = process.platform === 'win32' ? await rawRealpathNative(userData) : await fs.realpath(userData);
     const candidate = path.join(realUserData, 'skills');
@@ -374,6 +426,7 @@ export function initSkillsPath(userData: string): Promise<void> {
     await assertManagedRoot(candidate);
     await recoverSkillBackups(candidate);
     const records = await scan(candidate);
+    disabledSkills = await readDisabledSkills(candidate);
     root = candidate;
     publish(records);
   });
@@ -402,16 +455,72 @@ export function listManagedSkills(): Promise<ManagedSkill[]> {
     const candidateRoot = requiredRoot();
     const records = await scan(candidateRoot);
     const result: ManagedSkill[] = [];
-    for (const record of records) result.push({ ...record.summary, origin: await originAt(candidateRoot, record.summary.id) });
+    for (const record of records) result.push({ ...record.summary, origin: await originAt(candidateRoot, record.summary.id),
+      enabled: !disabledSkills.has(record.summary.id),
+      bundled: bundledSkillTexts.get(record.summary.id) === record.text });
     await assertManagedRoot(candidateRoot);
     publish(records);
     return result;
   });
 }
 
+/** Toggle only a known installed managed Skill. Disabled packages remain on disk
+ * and can still be managed, updated, re-enabled or removed in the library UI. */
+export function setManagedSkillEnabled(id: string, enabled: boolean): Promise<ManagedSkill[]> {
+  return serial(async () => {
+    assertSkillId(id);
+    const directory = requiredRoot();
+    await assertManagedRoot(directory);
+    if (!(await recordAt(directory, id))) throw new Error('The selected Skill is no longer installed');
+    const next = new Set(disabledSkills);
+    if (enabled) next.delete(id);
+    else next.add(id);
+    if (next.has(id) !== disabledSkills.has(id)) await writeDisabledSkills(directory, next);
+    disabledSkills = next;
+    const records = await scan(directory);
+    publish(records);
+    const result: ManagedSkill[] = [];
+    for (const record of records) result.push({ ...record.summary, origin: await originAt(directory, record.summary.id),
+      enabled: !disabledSkills.has(record.summary.id),
+      bundled: bundledSkillTexts.get(record.summary.id) === record.text });
+    return result;
+  });
+}
+
+/** Reveal only a skill already present in the managed library. Never let the
+ * renderer supply a filesystem path; approved linked skills open their
+ * canonical approved target instead of the mutable junction/symlink. */
+export function managedSkillDirectory(id: string): Promise<string> {
+  return serial(async () => {
+    assertSkillId(id);
+    const candidateRoot = requiredRoot();
+    const before = await assertManagedRoot(candidateRoot);
+    if (!(await recordAt(candidateRoot, id))) throw new Error(`Skill "${id}" was not found or is invalid`);
+    const candidate = path.join(candidateRoot, id);
+    const stat = await fs.lstat(candidate);
+    let directory: string;
+    if (stat.isSymbolicLink()) {
+      const config = getConfig();
+      if (!effectiveCapabilities(config).read) throw new Error('Linked Skill folder is not approved');
+      const link = await approvedManagedSkillLink(candidateRoot, id, config.roots);
+      if (!link) throw new Error('Linked Skill folder is not approved');
+      directory = link.real;
+    } else {
+      if (!stat.isDirectory()) throw new Error('The local Skill folder is not a directory');
+      directory = process.platform === 'win32' ? await rawRealpathNative(candidate) : await fs.realpath(candidate);
+      if (!sameNativePath(directory, candidate)) throw new Error('The local Skill folder was redirected');
+    }
+    if (!sameIdentity(before, await assertManagedRoot(candidateRoot)) ||
+        !(await recordAt(candidateRoot, id)))
+      throw new Error('The local Skill folder changed before opening');
+    return directory;
+  });
+}
+
 export function readSkill(id: string): Promise<SkillDocument> {
   return serial(async () => {
     assertSkillId(id);
+    if (disabledSkills.has(id)) throw new Error(`Skill "${id}" is disabled. Enable it in the Skills library.`);
     const directory = requiredRoot();
     const before = await assertManagedRoot(directory);
     const record = await recordAt(directory, id);
@@ -425,6 +534,7 @@ export function readSkill(id: string): Promise<SkillDocument> {
 export function readSkillAtRevision(id: string, expectedRevision: string): Promise<SkillDocument> {
   return serial(async () => {
     assertSkillId(id);
+    if (disabledSkills.has(id)) throw new Error(`Auto-selected Skill "${id}" is disabled. Enable it in the Skills library.`);
     if (!/^[0-9a-f]{64}$/i.test(expectedRevision)) throw new Error('Auto-selected Skill revision is invalid');
     const directory = requiredRoot();
     const before = await assertManagedRoot(directory);
@@ -712,6 +822,14 @@ export function removeSkill(id: string, moveToTrash: (directory: string) => Prom
     if (!current || record.revision !== current.revision || !sameIdentity(before, identityOf(await fs.lstat(directory))))
       throw new Error('The skill changed before removal; reload the library');
     await moveToTrash(directory);
+    if (disabledSkills.has(id)) {
+      // Removal ends this installation's enablement. A new import with the
+      // same ID should start enabled instead of inheriting an orphaned toggle.
+      const next = new Set(disabledSkills);
+      next.delete(id);
+      await writeDisabledSkills(candidateRoot, next);
+      disabledSkills = next;
+    }
     publish(await scan(candidateRoot));
   });
 }

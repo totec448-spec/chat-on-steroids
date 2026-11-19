@@ -17,7 +17,7 @@ import { startControlApi, stopControlApi } from './control-api.js';
 import { appearanceSchema } from './appearance-schema.js';
 import { mergeAppearance } from '../shared/appearance.js';
 import { prepareSessionPrompt, prepareSkillFollowup } from './session/prompt.js';
-import { importSkillFile, importSkillPackage, listManagedSkills, listSkills, removeSkill } from './skills.js';
+import { importSkillFile, importSkillPackage, listManagedSkills, listSkills, managedSkillDirectory, removeSkill, setManagedSkillEnabled } from './skills.js';
 import { checkGitHubSkillUpdates, importGitHubSkill, linkGitHubSkill, updateGitHubSkill } from './skill-github.js';
 import { SKILL_ID_PATTERN } from '../shared/skills.js';
 import { listSkillLibrary } from './skill-library.js';
@@ -1350,6 +1350,19 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('skills:list', () => listSkills());
   handle('skills:managed', () => listManagedSkills());
+  handle('skills:setEnabled', async payload => {
+    const { id, enabled } = z.object({ id: z.string().regex(SKILL_ID_PATTERN), enabled: z.boolean() }).strict().parse(payload);
+    const result = await setManagedSkillEnabled(id, enabled);
+    logInfo(`Managed Skill ${enabled ? 'enabled' : 'disabled'} by user`);
+    return result;
+  });
+  handle('skills:openFolder', async payload => {
+    const { id } = z.object({ id: z.string().regex(SKILL_ID_PATTERN) }).strict().parse(payload);
+    const directory = await managedSkillDirectory(id);
+    const error = await shell.openPath(directory);
+    if (error) throw new Error(`Could not open the Skill folder: ${error}`);
+    return true;
+  });
   handle('skills:recommended', () => listRecommendedSkills());
   handle('skills:installRecommended', async payload => {
     const { id } = z.object({ id: z.string().regex(SKILL_ID_PATTERN) }).strict().parse(payload);
