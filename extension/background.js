@@ -4001,7 +4001,7 @@ async function performBrowserRepairs(repairs, policy) {
         }
       }
       if (target && /[?&]temporary-chat=true(?:[&#]|$)/.test(target.pendingUrl || target.url || '')) {
-        await call(`/status?repaired=${encodeURIComponent(token)}&repairAction=preserved`);
+        await call(`/status?repaired=${encodeURIComponent(token)}&repairAction=preserved&preservedFor=temporary-chat`);
         continue;
       }
       if (target) await chrome.tabs.reload(target.id);
