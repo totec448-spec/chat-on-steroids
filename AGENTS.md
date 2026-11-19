@@ -1870,8 +1870,11 @@ its reply is not read). Anything else is held as `draft` as before. A
 `repairHeld` reply stamps `claimAskedAt`, so a page that keeps holding never spends the no-page
 offer budget.
 
-Before a browser repair reloads an open chat, the extension checks for ChatGPT's
-`?temporary-chat=true` URL flag and leaves that page open.
+Before a browser repair reloads an open chat, its fresh per-repair tab scan checks Chrome's
+`pendingUrl` during navigation or `url` after load for ChatGPT's exact `temporary-chat=true` flag.
+It leaves that page open and reports `repairAction=preserved&preservedFor=temporary-chat`;
+the bridge logs `Temporary Chat, not reloaded`. A Compact & Resume pickup may still count before that receipt;
+its separate accounting is not changed here.
 
 Direct active-turn corrections freeze `directTurn` in the same outbox entry. The exact turn
 start decides eligibility; earlier or running MCP calls do not revoke it. Recheck the exact claim

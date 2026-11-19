@@ -12975,6 +12975,23 @@ describe('unattributed activity recovery', () => {
     expect((await request('POST', '/repairs/claim', { body: { token: retry!.token } })).body.allowed).toBe(true);
   });
 
+  it('logs a Temporary Chat repair that the extension leaves open', async () => {
+    await pair();
+    await events(PRIME, [
+      { kind: 'user_message', time: Date.now(), messageId: 'temporary-question', text: 'Keep working' },
+      openTurn('temporary-answer'),
+      { kind: 'chat_error', time: Date.now(), turnId: 'temporary-answer', text: 'Connection interrupted', recoverable: true }
+    ]);
+    const repair = await maintenance();
+    expect(repair?.reason).toBe('assistant-error');
+    expect((await request('POST', '/repairs/claim', { body: { token: repair!.token } })).body.allowed).toBe(true);
+
+    await request('GET', `/status?repaired=${repair!.token}&repairAction=preserved&preservedFor=temporary-chat`);
+
+    expect(getLog().some(entry => entry.message === `bridge: ${PRIME}: Temporary Chat, not reloaded`)).toBe(true);
+    expect(await maintenance()).toBeNull();
+  });
+
   it('does not refund error recovery when reload remints a generation for the same authored question', async () => {
     vi.useFakeTimers();
     try {
