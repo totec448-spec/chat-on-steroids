@@ -200,7 +200,10 @@ export function initSkillsLibrary(api: AppApi): () => void {
     if (own !== epoch) {
       // A cancelled newer import can supersede a successful older mutation's response.
       // Read the authoritative catalog again after that mutation finishes.
-      if (next) void loadList();
+      // A superseded read must not start another read: concurrent refreshes
+      // would otherwise keep invalidating each other indefinitely. Only a
+      // successful superseded mutation needs authoritative reconciliation.
+      if (next && !load) void loadList();
       return false;
     }
     if (next) { setSkills(next); return true; }

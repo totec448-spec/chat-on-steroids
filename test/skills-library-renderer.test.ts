@@ -319,6 +319,30 @@ it('shows no load error for a load that Refresh replaced', async () => {
   await vi.waitFor(() => expect(w.document.querySelectorAll('.skill-library-card')).toHaveLength(1), { timeout: 10_000 });
 });
 
+it('does not recursively reload a successful stale list request', async () => {
+  dom = new JSDOM(`<!doctype html><body>
+    <input id="skillsSearch"><button id="skillsRefresh"></button>
+    <button id="skillsImportFolder"></button><button id="skillsImportFile"></button><button id="skillsImportGithub"></button>
+    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl"><p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
+    <span id="skillsCount"></span><div id="skillsInstalled"></div>
+  </body>`, { url: 'https://skills.test/' });
+  const w = dom.window;
+  for (const [key, value] of Object.entries({ window: w, document: w.document, HTMLElement: w.HTMLElement, HTMLButtonElement: w.HTMLButtonElement, HTMLDialogElement: w.HTMLDialogElement })) vi.stubGlobal(key, value);
+  const replies: Array<(reply: unknown) => void> = [];
+  const listManagedSkills = vi.fn(() => new Promise(resolve => replies.push(resolve)));
+  const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
+  initSkillsLibrary({ listManagedSkills } as any);
+  w.document.getElementById('skillsRefresh')!.click();
+  expect(replies).toHaveLength(2);
+  replies[1]!({ ok: true, data: [{ id: 'new', name: 'New', description: 'Newest list', path: '/skills/new/SKILL.md', origin: null }] });
+  await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="new"]')).not.toBeNull());
+  replies[0]!({ ok: true, data: [{ id: 'old', name: 'Old', description: 'Outdated list', path: '/skills/old/SKILL.md', origin: null }] });
+  for (let i = 0; i < 8; i++) await Promise.resolve();
+  expect(listManagedSkills).toHaveBeenCalledTimes(2);
+  expect(w.document.querySelector('[data-skill-id="new"]')).not.toBeNull();
+  expect(w.document.querySelector('[data-skill-id="old"]')).toBeNull();
+});
+
 // CodeRabbit on #2002: a cancelled import (no list) that replaced a first load which then fails must not leave
 // "Loading…" for good: the page loads again.
 it('loads again when a cancelled import replaced a first load that failed', async () => {
