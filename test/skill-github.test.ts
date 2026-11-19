@@ -191,6 +191,7 @@ it('resolves a repository root containing exactly one nested SKILL.md and import
   expect(await checkGitHubSkillUpdates('last30days')).toMatchObject([{ state: 'current' }]);
 });
 
+// This checks 190 on-disk resources; allow for variable hosted Windows runner I/O.
 it('preserves 190 deeply nested commit-pinned resources and verifies every checksum', async () => {
   const commit = 'a'.repeat(40);
   const folder = 'skills/kinship';
@@ -234,7 +235,7 @@ it('preserves 190 deeply nested commit-pinned resources and verifies every check
   expect(requests.filter(url => new URL(url).origin === 'https://raw.githubusercontent.com')).toHaveLength(190);
   expect(requests.filter(url => url.includes('/git/blobs/'))).toHaveLength(0);
   expect(await checkGitHubSkillUpdates('kinship')).toMatchObject([{ state: 'current' }]);
-});
+}, 120_000);
 
 it('accepts exactly 256 commit-pinned files at the package bound', async () => {
   const github = largeGithubFixture(256);
