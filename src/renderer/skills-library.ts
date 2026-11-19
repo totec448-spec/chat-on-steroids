@@ -154,16 +154,22 @@ export function initSkillsLibrary(api: AppApi): () => void {
         const keyboardFocus = event.detail === 0 && document.activeElement === toggleEnabled;
         menu.open = false;
         toggleEnabled.disabled = true;
+        const focusAfterDisable = document.activeElement;
         void (async () => {
           let applied = false;
           try {
             if (await update(api.skillsSetEnabled(skill.id, skill.enabled === false))) {
               applied = true;
               toast(t(skill.enabled === false ? 'Skill enabled' : 'Skill disabled'));
+            } else {
+              // A durable write may have succeeded even if the subsequent scan
+              // failed. Keep run()'s error toast, then reload authoritative state.
+              void loadList();
             }
           } finally {
             if (toggleEnabled.isConnected) toggleEnabled.disabled = false;
-            if (keyboardFocus && applied) {
+            if (keyboardFocus && applied &&
+                (document.activeElement === focusAfterDisable || document.activeElement === document.body)) {
               // A successful repaint replaces the menu that held keyboard focus.
               const current = [...document.querySelectorAll<HTMLElement>('.skill-library-card')]
                 .find(card => card.dataset.skillId === skill.id);

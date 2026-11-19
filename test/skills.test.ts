@@ -164,9 +164,35 @@ describe('managed Skills store', () => {
         .rejects.toThrow('state-write-failed');
       expect(JSON.parse(await fs.readFile(path.join(userData, 'skills', '.disabled-skills.json'), 'utf8')).disabled).toEqual(['review']);
     } finally { spy.mockRestore(); }
+    // A restart following the interrupted post-Trash state write must recover
+    // the orphan, without requiring the old ID to be reimported first.
+    await initSkillsPath(userData);
+    expect(JSON.parse(await fs.readFile(path.join(userData, 'skills', '.disabled-skills.json'), 'utf8')).disabled).toEqual([]);
     await importSkillFile(source);
     expect((await listManagedSkills())[0]).toMatchObject({ id: 'review', enabled: true });
   });
+
+  it('reconciles 128 orphaned disabled IDs before a count-bound toggle and import', async () => {
+    const managed = path.join(userData, 'skills');
+    const ids = Array.from({ length: MAX_SKILLS }, (_, index) => `old-${String(index).padStart(3, '0')}`);
+    // Simulate a valid saturated disabled state from which Trash moved packages,
+    // but writing the cleared state failed. The on-disk state is not corrupt.
+    for (const id of ids) {
+      const directory = path.join(managed, id);
+      await fs.mkdir(directory);
+      await fs.writeFile(path.join(directory, 'SKILL.md'), `# ${id}\n\nOld skill.`);
+    }
+    await fs.writeFile(path.join(managed, '.disabled-skills.json'), JSON.stringify({ version: 1, disabled: ids }));
+    await initSkillsPath(userData);
+    for (const id of ids) await fs.rm(path.join(managed, id), { recursive: true });
+    const review = await sourceFile('review.md', '# Review\n\nNew skill.');
+    await importSkillFile(review);
+    await setManagedSkillEnabled('review', false);
+    expect(JSON.parse(await fs.readFile(path.join(managed, '.disabled-skills.json'), 'utf8')).disabled).toEqual(['review']);
+    expect((await listManagedSkills())[0]).toMatchObject({ id: 'review', enabled: false });
+    await initSkillsPath(userData);
+    expect((await listManagedSkills())[0]).toMatchObject({ id: 'review', enabled: false });
+  }, 30_000);
 
   it('starts empty and publishes only the managed path contract', async () => {
     expect(skillsDirectory()).toBe(path.join(userData, 'skills'));
