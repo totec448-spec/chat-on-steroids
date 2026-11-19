@@ -1745,6 +1745,7 @@
   "No skills installed yet. Import a folder, SKILL.md, or GitHub link to get started.": "まだスキルがインストールされていません。フォルダー、SKILL.md、または GitHub リンクをインポートして開始してください。",
   "Reusable instructions for this workspace.": "このワークスペースで再利用できる指示です。",
   "Link GitHub source": "GitHub ソースをリンク",
+  "Secure OS credential storage is unavailable": "OS の安全な認証情報ストレージを利用できません。",
   "GitHub access token (optional)": "GitHub アクセストークン（任意）",
   "Paste a read-only GitHub token": "読み取り専用の GitHub トークンを貼り付け",
   "For public skills, use a fine-grained token with no write permissions. Save it securely once; COS never displays it again.": "公開スキルには書き込み権限のない詳細設定トークンを使用してください。COS は安全に保存し、以後表示しません。",

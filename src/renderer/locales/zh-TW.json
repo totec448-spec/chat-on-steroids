@@ -1745,6 +1745,7 @@
   "No skills installed yet. Import a folder, SKILL.md, or GitHub link to get started.": "尚未安裝技能。匯入資料夾、SKILL.md 或 GitHub 連結即可開始。",
   "Reusable instructions for this workspace.": "可供此工作區重複使用的指示。",
   "Link GitHub source": "連結 GitHub 來源",
+  "Secure OS credential storage is unavailable": "作業系統的安全憑證儲存空間無法使用。",
   "GitHub access token (optional)": "GitHub 存取權杖（選用）",
   "Paste a read-only GitHub token": "貼上唯讀 GitHub 權杖",
   "For public skills, use a fine-grained token with no write permissions. Save it securely once; COS never displays it again.": "對於公開技能，請使用不含寫入權限的細粒度權杖。COS 會安全儲存，之後不會再次顯示。",

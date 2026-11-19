@@ -1771,6 +1771,7 @@
   "No skills installed yet. Import a folder, SKILL.md, or GitHub link to get started.": "Henüz yüklü beceri yok. Başlamak için bir klasör, SKILL.md ya da GitHub bağlantısı içe aktar.",
   "Reusable instructions for this workspace.": "Bu çalışma alanı için yeniden kullanılabilir talimatlar.",
   "Link GitHub source": "GitHub kaynağı bağla",
+  "Secure OS credential storage is unavailable": "İşletim sisteminin güvenli kimlik bilgisi deposu kullanılamıyor.",
   "GitHub access token (optional)": "GitHub erişim belirteci (isteğe bağlı)",
   "Paste a read-only GitHub token": "Salt okunur GitHub belirteci yapıştırın",
   "For public skills, use a fine-grained token with no write permissions. Save it securely once; COS never displays it again.": "Herkese açık beceriler için yazma izni olmayan, ayrıntılı izinli bir belirteç kullanın. COS bunu güvenle saklar ve yeniden göstermez.",

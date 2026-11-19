@@ -1797,6 +1797,7 @@
   "No skills installed yet. Import a folder, SKILL.md, or GitHub link to get started.": "Ainda não há skills instaladas. Importa uma pasta, um SKILL.md ou uma ligação do GitHub para começar.",
   "Reusable instructions for this workspace.": "Instruções reutilizáveis para este espaço de trabalho.",
   "Link GitHub source": "Ligar fonte do GitHub",
+  "Secure OS credential storage is unavailable": "O armazenamento seguro de credenciais do sistema operativo não está disponível.",
   "GitHub access token (optional)": "Token de acesso ao GitHub (opcional)",
   "Paste a read-only GitHub token": "Cole um token do GitHub só de leitura",
   "For public skills, use a fine-grained token with no write permissions. Save it securely once; COS never displays it again.": "Para skills públicos, utilize um token de permissões específicas, sem escrita. O COS guarda-o em segurança e não volta a apresentá-lo.",

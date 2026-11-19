@@ -1745,6 +1745,7 @@
   "No skills installed yet. Import a folder, SKILL.md, or GitHub link to get started.": "아직 설치된 스킬이 없습니다. 폴더, SKILL.md 또는 GitHub 링크를 가져와 시작하세요.",
   "Reusable instructions for this workspace.": "이 워크스페이스에서 재사용할 수 있는 지침입니다.",
   "Link GitHub source": "GitHub 소스 연결",
+  "Secure OS credential storage is unavailable": "운영 체제의 보안 자격 증명 저장소를 사용할 수 없습니다.",
   "GitHub access token (optional)": "GitHub 액세스 토큰(선택 사항)",
   "Paste a read-only GitHub token": "읽기 전용 GitHub 토큰 붙여넣기",
   "For public skills, use a fine-grained token with no write permissions. Save it securely once; COS never displays it again.": "공개 스킬에는 쓰기 권한이 없는 세분화된 토큰을 사용하세요. COS는 토큰을 안전하게 저장하며 다시 표시하지 않습니다.",

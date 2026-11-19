@@ -1824,6 +1824,7 @@
   "No skills installed yet. Import a folder, SKILL.md, or GitHub link to get started.": "Skills ещё не установлены. Для начала импортируйте папку, SKILL.md или ссылку GitHub.",
   "Reusable instructions for this workspace.": "Повторно используемые инструкции для этого рабочего пространства.",
   "Link GitHub source": "Связать источник GitHub",
+  "Secure OS credential storage is unavailable": "Защищённое хранилище учётных данных ОС недоступно.",
   "GitHub access token (optional)": "Токен доступа GitHub (необязательно)",
   "Paste a read-only GitHub token": "Вставьте токен GitHub только для чтения",
   "For public skills, use a fine-grained token with no write permissions. Save it securely once; COS never displays it again.": "Для публичных скиллов используйте токен с минимальными правами, без записи. COS сохранит его защищённо и больше не покажет.",
