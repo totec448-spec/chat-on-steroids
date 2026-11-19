@@ -1437,6 +1437,40 @@ describe('native image readiness', () => {
     expect(await api.uploadImages(files ? [] : [image], () => true, undefined, originals)).toBe(true);
     expect(wrong).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['matching PNG', 'image(20261119-233120).png', 'YQ==', false, true],
+    ['different bytes', 'image(20261119-233120).png', 'Yg==', false, false],
+    ['different name', 'other(20261119-233120).png', 'YQ==', false, false],
+    ['extra attachment', 'image(20261119-233120).png', 'YQ==', true, false],
+  ])('checks the original bytes before sending a timestamped attachment (%s)', async (_case, name, data, extra, expected) => {
+    const input = upload();
+    input.accept = '';
+    const draft = api.captureComposerDraft('Exact app prompt');
+    const authorize = vi.fn(async () => true);
+    const click = vi.fn(() => user('Exact app prompt'));
+    button.addEventListener('click', click);
+    input.addEventListener('change', () => {
+      const area = document.createElement('div');
+      area.setAttribute('data-composer-attachments', '');
+      area.innerHTML = `<div role="button" aria-label="${name}"><img alt="${name}" src="data:image/png;base64,${data}"><button type="button" aria-label="Quitar ${name}"></button></div>`;
+      if (extra) area.insertAdjacentHTML('beforeend', '<button type="button" aria-label="Other attachment"></button>');
+      input.form!.append(area);
+    });
+    const file = new dom.window.File(['a'], 'image.png', { type: 'image/png' });
+    const delivery = api.uploadImages([], () => true, draft, [file])
+      .then(ready => ready && draft.current() && api.send({ beforeSend: authorize }));
+
+    if (expected) {
+      await vi.waitFor(() => expect(click).toHaveBeenCalledTimes(1));
+    } else {
+      await vi.advanceTimersByTimeAsync(600_000);
+    }
+    await expect(delivery).resolves.toBe(expected);
+    expect(authorize).toHaveBeenCalledTimes(expected ? 1 : 0);
+    expect(click).toHaveBeenCalledTimes(expected ? 1 : 0);
+    draft.dispose();
+  });
   it.each(['duplicate', 'disabled', 'foreign'])('does not dispatch an upload with %s native ownership', async reason => {
     const input = upload(); const changed = vi.fn(); input.addEventListener('change', changed);
     if (reason === 'duplicate') input.after(input.cloneNode());
