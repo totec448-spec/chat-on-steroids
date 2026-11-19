@@ -104,9 +104,16 @@ async function inspectGitHubSkill(requested: GitHubSkillLocation, signal: AbortS
   // A recursive tree contains the exact commit-pinned SHA/size of every file
   // in a single API request. The old contents BFS spent one API request per
   // directory and hit the 60/hour anonymous GitHub limit on large Skills.
-  const payload = await githubJson(`${base}/git/trees/${encodeURIComponent(commit)}?recursive=1`,
-    signal, 8 * 1024 * 1024) as { truncated?: unknown; tree?: unknown };
-  const tree = payload.truncated === false && Array.isArray(payload.tree) && payload.tree.length <= 20_000 &&
+  let payload: { truncated?: unknown; tree?: unknown } | null = null;
+  try {
+    payload = await githubJson(`${base}/git/trees/${encodeURIComponent(commit)}?recursive=1`,
+      signal, 8 * 1024 * 1024) as { truncated?: unknown; tree?: unknown };
+  } catch (error) {
+    // A large repository can exceed GitHub's response cap even when the
+    // explicitly selected folder is small enough to fetch safely.
+    if (!directory || !(error instanceof Error) || error.message !== 'GitHub response is too large') throw error;
+  }
+  const tree = payload?.truncated === false && Array.isArray(payload.tree) && payload.tree.length <= 20_000 &&
     payload.tree.every(entry => entry && typeof entry === 'object' &&
       typeof (entry as TreeEntry).path === 'string' && typeof (entry as TreeEntry).type === 'string' &&
       typeof (entry as TreeEntry).mode === 'string' && typeof (entry as TreeEntry).sha === 'string')
