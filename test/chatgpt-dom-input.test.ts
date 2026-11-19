@@ -1345,6 +1345,33 @@ describe('native image readiness', () => {
     expect(await draft.clear()).toBe(true);
     expect(api.hasComposerAttachments()).toBe(false); draft.dispose();
   });
+
+  it('sends once when a PNG tile finishes by updating its filename text in place', async () => {
+    const input = upload();
+    input.accept = '';
+    const attachments = document.createElement('div');
+    attachments.setAttribute('data-composer-attachments', '');
+    attachments.innerHTML = '<span><span><span>Uploading</span><button type="button" aria-label="capture.png"></button></span><button type="button" aria-label="Quitar"></button></span>';
+    const filename = attachments.querySelector('span span span')!.firstChild!;
+    input.addEventListener('change', () => document.querySelector('form')!.append(attachments));
+    const file = new dom.window.File(['image bytes'], 'capture.png', { type: 'image/png' });
+    const authorize = vi.fn(async () => true);
+    const click = vi.fn(() => user('Exact app prompt'));
+    button.addEventListener('click', click);
+    const delivery = api.uploadImages([], () => true, undefined, [file])
+      .then(ready => ready && api.send({ beforeSend: authorize }));
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(authorize).not.toHaveBeenCalled();
+    expect(click).not.toHaveBeenCalled();
+
+    filename.nodeValue = file.name;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(authorize).toHaveBeenCalledTimes(1);
+    expect(click).toHaveBeenCalledTimes(1);
+    await expect(delivery).resolves.toBe(true);
+  });
+
   // #1942 (2026-10-30): in German the remove label is "<name> entfernen", the name first, so no file was
   // ever recognized and every message with an attachment hung until "upload not confirmed".
   it.each([['German', 'notes.zip entfernen'], ['no name in the label', 'Datei entfernen']])('accepts the two-button file tile whatever its remove label says (%s)', async (_case, removal) => {
