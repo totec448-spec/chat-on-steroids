@@ -536,10 +536,12 @@ async function installedPackageRevision(directory: string, hash: 'sha1' | 'sha25
     if (++folders > MAX_GITHUB_SKILL_DIRECTORIES || depth > 10) throw new Error('The local skill has too many nested folders');
     const before = identityOf(await fs.lstat(folder));
     const listing = await fs.opendir(folder);
+    let children = 0;
     try { for await (const entry of listing) {
       if (++entries > MAX_GITHUB_SKILL_FILES + MAX_GITHUB_SKILL_DIRECTORIES)
         throw new Error('The local skill exceeds GitHub update limits');
       if (!relative && entry.name === SKILL_ORIGIN_FILENAME) continue;
+      children++;
       const nextRelative = [relative, entry.name].filter(Boolean).join('/');
       const filename = path.join(folder, entry.name);
       const stat = await fs.lstat(filename);
@@ -568,6 +570,10 @@ async function installedPackageRevision(directory: string, hash: 'sha1' | 'sha25
       files.push({ relative: nextRelative, size: content.length,
         sha: createHash(hash).update(`blob ${content.length}\0`).update(content).digest('hex') });
     } } finally { await listing.close().catch(() => undefined); }
+    // Git does not track empty directories, so they cannot appear in the
+    // recorded package revision. Replacing one would discard a local addition.
+    if (relative && children === 0)
+      throw new Error('The skill has local edits: an empty resource directory; preserve it before updating from GitHub');
     if (!sameIdentity(before, identityOf(await fs.lstat(folder))))
       throw new Error('The local skill changed during update');
   };
