@@ -150,14 +150,26 @@ export function initSkillsLibrary(api: AppApi): () => void {
       actions.append(openFolder);
       const toggleEnabled = el('button', 'btn', () => t(skill.enabled === false ? 'Enable skill' : 'Disable skill')) as HTMLButtonElement;
       toggleEnabled.type = 'button';
-      toggleEnabled.addEventListener('click', () => {
+      toggleEnabled.addEventListener('click', event => {
+        const keyboardFocus = event.detail === 0 && document.activeElement === toggleEnabled;
         menu.open = false;
         toggleEnabled.disabled = true;
         void (async () => {
+          let applied = false;
           try {
-            if (await update(api.skillsSetEnabled(skill.id, skill.enabled === false)))
+            if (await update(api.skillsSetEnabled(skill.id, skill.enabled === false))) {
+              applied = true;
               toast(t(skill.enabled === false ? 'Skill enabled' : 'Skill disabled'));
-          } finally { if (toggleEnabled.isConnected) toggleEnabled.disabled = false; }
+            }
+          } finally {
+            if (toggleEnabled.isConnected) toggleEnabled.disabled = false;
+            if (keyboardFocus && applied) {
+              // A successful repaint replaces the menu that held keyboard focus.
+              const current = [...document.querySelectorAll<HTMLElement>('.skill-library-card')]
+                .find(card => card.dataset.skillId === skill.id);
+              current?.querySelector<HTMLElement>('.plugin-menu > summary')?.focus();
+            }
+          }
         })();
       });
       actions.append(toggleEnabled);
@@ -185,7 +197,12 @@ export function initSkillsLibrary(api: AppApi): () => void {
   const update = async (request: Promise<{ ok: true; data: ManagedSkill[] | null } | { ok: false; error: string }>, load = false): Promise<boolean> => {
     const own = ++epoch;
     const next = await run(request);
-    if (own !== epoch) return false;
+    if (own !== epoch) {
+      // A cancelled newer import can supersede a successful older mutation's response.
+      // Read the authoritative catalog again after that mutation finishes.
+      if (next) void loadList();
+      return false;
+    }
     if (next) { setSkills(next); return true; }
     if (!loaded) { if (load) { loadFailed = true; render(); } else void loadList(); }
     return false;

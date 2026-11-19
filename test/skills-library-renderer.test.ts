@@ -60,9 +60,11 @@ it('shows the managed library, imports both source shapes, filters and removes o
   const disable = [...w.document.querySelectorAll<HTMLButtonElement>('[data-skill-id="folder"] .plugin-menu-actions button')]
     .find(button => button.textContent === 'Disable skill')!;
   expect(disable).toBeDefined();
+  disable.focus();
   disable.click();
   await vi.waitFor(() => expect(skillsSetEnabled).toHaveBeenCalledWith('folder', false));
   await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="folder"]')?.getAttribute('data-skill-enabled')).toBe('false'));
+  await vi.waitFor(() => expect(w.document.activeElement).toBe(w.document.querySelector('[data-skill-id="folder"] .plugin-menu > summary')), { timeout: 10_000 });
   expect(w.document.querySelector('[data-skill-id="folder"] .skill-library-disabled')?.textContent).toBe('Disabled');
   const enable = [...w.document.querySelectorAll<HTMLButtonElement>('[data-skill-id="folder"] .plugin-menu-actions button')]
     .find(button => button.textContent === 'Enable skill')!;

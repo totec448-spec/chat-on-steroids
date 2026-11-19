@@ -1352,16 +1352,26 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('skills:managed', () => listManagedSkills());
   handle('skills:setEnabled', async payload => {
     const { id, enabled } = z.object({ id: z.string().regex(SKILL_ID_PATTERN), enabled: z.boolean() }).strict().parse(payload);
-    const result = await setManagedSkillEnabled(id, enabled);
-    logInfo(`Managed Skill ${enabled ? 'enabled' : 'disabled'} by user`);
-    return result;
+    try {
+      const result = await setManagedSkillEnabled(id, enabled);
+      logInfo(`Managed Skill ${enabled ? 'enabled' : 'disabled'} by user`);
+      return result;
+    } catch (error) {
+      logWarn(`Managed Skill toggle refused: ${error instanceof Error && /no longer installed/.test(error.message) ? 'missing-package' : 'state-or-access-error'}`);
+      throw error;
+    }
   });
   handle('skills:openFolder', async payload => {
     const { id } = z.object({ id: z.string().regex(SKILL_ID_PATTERN) }).strict().parse(payload);
-    const directory = await managedSkillDirectory(id);
-    const error = await shell.openPath(directory);
-    if (error) throw new Error(`Could not open the Skill folder: ${error}`);
-    return true;
+    try {
+      const directory = await managedSkillDirectory(id);
+      const error = await shell.openPath(directory);
+      if (error) throw new Error('Could not open the Skill folder');
+      return true;
+    } catch (error) {
+      logWarn(`Managed Skill folder refused: ${error instanceof Error && /not found or is invalid/.test(error.message) ? 'missing-package' : 'access-or-shell-error'}`);
+      throw error;
+    }
   });
   handle('skills:recommended', () => listRecommendedSkills());
   handle('skills:installRecommended', async payload => {

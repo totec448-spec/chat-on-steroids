@@ -72,7 +72,8 @@
 .skill-library-source .ico { --ico: 13px; --glyph: 13px; }
 .skill-library-source.is-current .ico { color: var(--green); }
 .skill-library-source.is-error .ico { color: var(--red); }
-.skill-library-card.is-disabled .plugin-card-title :is(h2, p) { opacity: .58; }
+.skill-library-card.is-disabled .plugin-card-title h2 { color: var(--ink); }
+.skill-library-card.is-disabled .plugin-card-title p { color: var(--soft); }
 .skill-library-disabled { color: var(--soft); border: 1px solid var(--line); border-radius: 5px; padding: 2px 5px; }
 .skill-library-update { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: transparent; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; }
 .skill-library-update:hover { text-decoration: underline; text-underline-offset: 3px; }
