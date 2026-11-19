@@ -1748,7 +1748,7 @@
   "Remove skill": "移除技能",
   "Could not reach GitHub. Try again.": "無法連線至 GitHub，請重試。",
   "Update {0}?": "更新 {0}？",
-  "Check this GitHub source for changes. If it changed, CoS replaces the whole skill folder and moves the previous version to Trash. Local edits to resources will be replaced.": "檢查此 GitHub 來源是否有變更。如果有，CoS 會取代整個技能資料夾，並將舊版本移至垃圾桶。本機修改的資源會被取代。",
+  "Check this GitHub source for changes. If it changed, CoS can replace the whole skill folder and move the previous version to Trash. Updates are blocked when local files or resource folders have changed.": "檢查此 GitHub 來源是否有變更。如果有變更，CoS 可以取代整個技能資料夾，並將舊版本移至垃圾桶。如果本機檔案或資源資料夾已變更，更新將遭到封鎖。",
   "Check and update": "檢查並更新",
   "Checking GitHub…": "正在檢查 GitHub…",
   "Remove {0}?": "移除 {0}？",

@@ -1800,7 +1800,7 @@
   "Remove skill": "Eliminar Skill",
   "Could not reach GitHub. Try again.": "No se pudo conectar con GitHub. Inténtalo de nuevo.",
   "Update {0}?": "¿Actualizar {0}?",
-  "Check this GitHub source for changes. If it changed, CoS replaces the whole skill folder and moves the previous version to Trash. Local edits to resources will be replaced.": "Busca cambios en esta fuente de GitHub. Si cambió, CoS reemplazará toda la carpeta y moverá la versión anterior a la Papelera. Se perderán los cambios locales en los recursos.",
+  "Check this GitHub source for changes. If it changed, CoS can replace the whole skill folder and move the previous version to Trash. Updates are blocked when local files or resource folders have changed.": "Busca cambios en esta fuente de GitHub. Si hay cambios, CoS puede reemplazar toda la carpeta del skill y mover la versión anterior a la Papelera. La actualización se bloquea si se han modificado archivos o carpetas de recursos locales.",
   "Check and update": "Comprobar y actualizar",
   "Checking GitHub…": "Comprobando GitHub…",
   "Remove {0}?": "¿Eliminar {0}?",

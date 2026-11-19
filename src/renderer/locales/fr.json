@@ -1800,7 +1800,7 @@
   "Remove skill": "Supprimer la compétence",
   "Could not reach GitHub. Try again.": "Impossible de joindre GitHub. Réessayez.",
   "Update {0}?": "Mettre à jour {0} ?",
-  "Check this GitHub source for changes. If it changed, CoS replaces the whole skill folder and moves the previous version to Trash. Local edits to resources will be replaced.": "Vérifie si cette source GitHub a changé. Si c’est le cas, CoS remplace tout le dossier de la compétence et place l’ancienne version dans la corbeille. Les modifications locales des ressources seront remplacées.",
+  "Check this GitHub source for changes. If it changed, CoS can replace the whole skill folder and move the previous version to Trash. Updates are blocked when local files or resource folders have changed.": "Vérifie si cette source GitHub a changé. Si c’est le cas, CoS peut remplacer tout le dossier de la compétence et placer l’ancienne version dans la corbeille. La mise à jour est bloquée si des fichiers ou dossiers de ressources locaux ont été modifiés.",
   "Check and update": "Vérifier et mettre à jour",
   "Checking GitHub…": "Vérification de GitHub…",
   "Remove {0}?": "Supprimer {0} ?",

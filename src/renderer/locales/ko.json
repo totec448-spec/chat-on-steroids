@@ -1748,7 +1748,7 @@
   "Remove skill": "스킬 제거",
   "Could not reach GitHub. Try again.": "GitHub에 연결하지 못했습니다. 다시 시도하세요.",
   "Update {0}?": "{0}을(를) 업데이트할까요?",
-  "Check this GitHub source for changes. If it changed, CoS replaces the whole skill folder and moves the previous version to Trash. Local edits to resources will be replaced.": "이 GitHub 소스의 변경 사항을 확인합니다. 변경되었다면 CoS가 전체 스킬 폴더를 교체하고 이전 버전을 휴지통으로 이동합니다. 리소스에 대한 로컬 수정은 대체됩니다.",
+  "Check this GitHub source for changes. If it changed, CoS can replace the whole skill folder and move the previous version to Trash. Updates are blocked when local files or resource folders have changed.": "이 GitHub 소스의 변경 사항을 확인합니다. 변경 사항이 있으면 CoS가 전체 스킬 폴더를 교체하고 이전 버전을 휴지통으로 이동할 수 있습니다. 로컬 파일이나 리소스 폴더가 변경된 경우 업데이트가 차단됩니다.",
   "Check and update": "확인 및 업데이트",
   "Checking GitHub…": "GitHub 확인 중…",
   "Remove {0}?": "{0}을(를) 제거할까요?",
