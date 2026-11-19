@@ -517,6 +517,27 @@ it('refuses to overwrite a locally edited resource, added file, or deleted resou
   }
 });
 
+it('preserves a user-created empty nested directory during update while accepting normal resource folders', async () => {
+  const github = githubFixture(); vi.stubGlobal('fetch', github.request);
+  await importGitHubSkill('https://github.com/acme/skills/tree/main/pet');
+  // Git-backed references/ contains a file: a normal tracked resource folder.
+  const directory = path.join(userData, 'skills', 'pet');
+  expect(await fs.readFile(path.join(directory, 'references', 'guide.md'), 'utf8')).toBe('First guide');
+  const localEmpty = path.join(directory, 'personal', 'notes');
+  await fs.mkdir(localEmpty, { recursive: true });
+  github.next();
+  const trash = vi.fn();
+  await expect(updateGitHubSkill('pet', trash)).rejects.toThrow('empty resource directory');
+  expect(trash).not.toHaveBeenCalled();
+  expect((await fs.stat(localEmpty)).isDirectory()).toBe(true);
+  expect(await fs.readFile(path.join(directory, 'references', 'guide.md'), 'utf8')).toBe('First guide');
+  await fs.rmdir(localEmpty);
+  await fs.rmdir(path.dirname(localEmpty));
+  const updated = await updateGitHubSkill('pet', directory => fs.rename(directory, path.join(userData, 'previous-pet')));
+  expect(updated.status).toBe('updated');
+  expect(await fs.readFile(path.join(directory, 'references', 'guide.md'), 'utf8')).toBe('Second guide');
+});
+
 it('restores the previous GitHub package after an interrupted directory swap', async () => {
   const github = githubFixture(); vi.stubGlobal('fetch', github.request);
   await importGitHubSkill('https://github.com/acme/skills/tree/main/pet');
