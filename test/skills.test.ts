@@ -500,6 +500,30 @@ describe('managed Skills store', () => {
     await expect(importSkillPackage(packageRoot)).rejects.toThrow(limitError);
   });
 
+  it('reserves disabled slots for damaged installed folders when importing either source type', async () => {
+    const managed = path.join(userData, 'skills');
+    const ids = Array.from({ length: MAX_SKILLS }, (_, index) => `reserved-${String(index).padStart(3, '0')}`);
+    for (const id of ids) {
+      const directory = path.join(managed, id);
+      await fs.mkdir(directory);
+      await fs.writeFile(path.join(directory, 'SKILL.md'), `# ${id}\n\nInstructions.`);
+    }
+    await fs.writeFile(path.join(managed, '.disabled-skills.json'), JSON.stringify({ version: 1, disabled: ids }));
+    await initSkillsPath(userData);
+    // The directory still owns the disabled ID, although scan() ignores its
+    // missing document. Reconciliation must NOT erase this installed slot.
+    await fs.unlink(path.join(managed, ids[0]!, 'SKILL.md'));
+    expect(await listManagedSkills()).toHaveLength(MAX_SKILLS - 1);
+    const extraFile = await sourceFile('extra.md', '# Extra\n\nMust be refused.');
+    await expect(importSkillFile(extraFile)).rejects.toThrow('The Skills library supports at most 128 skills');
+    const extraPackage = path.join(sources, 'extra-package');
+    await fs.mkdir(extraPackage);
+    await fs.writeFile(path.join(extraPackage, 'SKILL.md'), '---\nname: Extra Package\ndescription: Must be refused.\n---\n\nInstructions.');
+    await expect(importSkillPackage(extraPackage)).rejects.toThrow('The Skills library supports at most 128 skills');
+    expect(JSON.parse(await fs.readFile(path.join(managed, '.disabled-skills.json'), 'utf8')).disabled).toEqual(ids);
+    expect(await listManagedSkills()).toHaveLength(MAX_SKILLS - 1);
+  }, 30_000);
+
   it('fails closed instead of silently omitting a valid over-cap skill', async () => {
     const root = path.join(userData, 'skills');
     for (let index = 0; index <= MAX_SKILLS; index++) {
