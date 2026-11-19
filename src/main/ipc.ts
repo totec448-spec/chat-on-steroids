@@ -1366,7 +1366,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     try {
       const directory = await managedSkillDirectory(id);
       const error = await shell.openPath(directory);
-      if (error) throw new Error('Could not open the Skill folder');
+      // Keep the OS-facing error contract for callers. The separate diagnostic
+      // log below deliberately records only a reason code, never the shell text.
+      if (error) throw new Error(`Could not open the Skill folder: ${error}`);
       return true;
     } catch (error) {
       logWarn(`Managed Skill folder refused: ${error instanceof Error && /not found or is invalid/.test(error.message) ? 'missing-package' : 'access-or-shell-error'}`);
