@@ -231,7 +231,7 @@ it('preserves 190 deeply nested commit-pinned resources and verifies every check
   for (const [relative, expected] of resources) {
     expect(await fs.readFile(path.join(userData, 'skills', 'kinship', ...relative.split('/')))).toEqual(expected);
   }
-  expect(requests.filter(url => url.includes('raw.githubusercontent.com'))).toHaveLength(190);
+  expect(requests.filter(url => new URL(url).origin === 'https://raw.githubusercontent.com')).toHaveLength(190);
   expect(requests.filter(url => url.includes('/git/blobs/'))).toHaveLength(0);
   expect(await checkGitHubSkillUpdates('kinship')).toMatchObject([{ state: 'current' }]);
 });
