@@ -386,6 +386,7 @@ async function readDisabledSkills(directory: string): Promise<Set<string>> {
 }
 
 async function writeDisabledSkills(directory: string, next: Set<string>): Promise<void> {
+  if (next.size > MAX_SKILLS) throw new Error('Managed Skill enablement exceeds the 128 Skill limit');
   await assertManagedRoot(directory);
   const file = path.join(directory, DISABLED_SKILLS_FILENAME);
   try {
@@ -424,13 +425,14 @@ export async function disabledManagedSkillTargets(): Promise<string[]> {
   return targets;
 }
 
-/** Reconcile a removed package before reusing its ID, including after an interrupted uninstall. */
-async function clearOrphanedDisabledId(directory: string, id: string): Promise<void> {
-  if (!disabledSkills.has(id)) return;
-  if ((await directoryNames(directory)).some(name => name.toLowerCase() === id.toLowerCase()))
-    throw new Error(`Skill "${id}" already exists`);
-  const next = new Set(disabledSkills);
-  next.delete(id);
+/** Repair interrupted Trash/state transactions before any count-bound state write.
+ * Keep IDs while any case-insensitive filesystem entry still owns that name;
+ * never silently re-enable an existing Skill after a failed Trash operation. */
+async function reconcileOrphanedDisabledIds(directory: string): Promise<void> {
+  if (!disabledSkills.size) return;
+  const names = new Set((await directoryNames(directory)).map(name => name.toLowerCase()));
+  const next = new Set([...disabledSkills].filter(id => names.has(id.toLowerCase())));
+  if (next.size === disabledSkills.size) return;
   await writeDisabledSkills(directory, next);
   disabledSkills = next;
 }
@@ -453,6 +455,7 @@ export function initSkillsPath(userData: string): Promise<void> {
     await recoverSkillBackups(candidate);
     const records = await scan(candidate);
     disabledSkills = await readDisabledSkills(candidate);
+    await reconcileOrphanedDisabledIds(candidate);
     root = candidate;
     publish(records);
   });
@@ -498,6 +501,7 @@ export function setManagedSkillEnabled(id: string, enabled: boolean): Promise<Ma
     const directory = requiredRoot();
     await assertManagedRoot(directory);
     if (!(await recordAt(directory, id))) throw new Error('The selected Skill is no longer installed');
+    await reconcileOrphanedDisabledIds(directory);
     const next = new Set(disabledSkills);
     if (enabled) next.delete(id);
     else next.add(id);
@@ -592,12 +596,11 @@ export function importSkillFile(sourcePath: string): Promise<SkillSummary> {
     const id = importId(sourcePath);
     const source = await readTextSnapshot(sourcePath);
     const candidateRoot = requiredRoot();
+    await reconcileOrphanedDisabledIds(candidateRoot);
     const current = await scan(candidateRoot);
     if (current.length >= MAX_SKILLS) throw new Error('The Skills library supports at most 128 skills');
     const names = await directoryNames(candidateRoot);
     if (names.some(name => name.toLowerCase() === id.toLowerCase())) throw new Error(`Skill "${id}" already exists`);
-
-    await clearOrphanedDisabledId(candidateRoot, id);
 
     const destination = path.join(candidateRoot, id);
     const finalFile = path.join(destination, SKILL_FILENAME);
@@ -757,11 +760,11 @@ export function importSkillPackage(sourcePath: string, origin?: GitHubSkillOrigi
     const document = await packageDocument(sourcePath);
     const id = document.id;
     const candidateRoot = requiredRoot();
+    await reconcileOrphanedDisabledIds(candidateRoot);
     const current = await scan(candidateRoot);
     if (current.length >= MAX_SKILLS) throw new Error('The Skills library supports at most 128 skills');
     const names = await directoryNames(candidateRoot);
     if (names.some(name => name.toLowerCase() === id.toLowerCase())) throw new Error(`Skill "${id}" already exists`);
-    await clearOrphanedDisabledId(candidateRoot, id);
     const { publishSkillPackage } = await import('./skill-package.js');
     await publishSkillPackage(sourcePath, candidateRoot, id, document.bytes, originBytes(origin, document.revision));
     const records = await scan(candidateRoot);
@@ -865,6 +868,7 @@ export function removeSkill(id: string, moveToTrash: (directory: string) => Prom
       await writeDisabledSkills(candidateRoot, next);
       disabledSkills = next;
     }
+    await reconcileOrphanedDisabledIds(candidateRoot);
     publish(await scan(candidateRoot));
   });
 }
