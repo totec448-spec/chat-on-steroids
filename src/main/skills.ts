@@ -386,7 +386,7 @@ async function readDisabledSkills(directory: string): Promise<Set<string>> {
 }
 
 async function writeDisabledSkills(directory: string, next: Set<string>): Promise<void> {
-  if (next.size > MAX_SKILLS) throw new Error('Managed Skill enablement exceeds the 128 Skill limit');
+  if (next.size > MAX_SKILLS) throw new Error('The Skills library supports at most 128 skills');
   await assertManagedRoot(directory);
   const file = path.join(directory, DISABLED_SKILLS_FILENAME);
   try {
@@ -598,7 +598,11 @@ export function importSkillFile(sourcePath: string): Promise<SkillSummary> {
     const candidateRoot = requiredRoot();
     await reconcileOrphanedDisabledIds(candidateRoot);
     const current = await scan(candidateRoot);
-    if (current.length >= MAX_SKILLS) throw new Error('The Skills library supports at most 128 skills');
+    // A damaged disabled package can retain its directory and ID while scan()
+    // omits its invalid SKILL.md. Reserve that slot rather than allowing a new
+    // install to make the next enablement write exceed MAX_SKILLS.
+    if (new Set([...current.map(record => record.summary.id), ...disabledSkills].map(id => id.toLowerCase())).size >= MAX_SKILLS)
+      throw new Error('The Skills library supports at most 128 skills');
     const names = await directoryNames(candidateRoot);
     if (names.some(name => name.toLowerCase() === id.toLowerCase())) throw new Error(`Skill "${id}" already exists`);
 
@@ -762,7 +766,8 @@ export function importSkillPackage(sourcePath: string, origin?: GitHubSkillOrigi
     const candidateRoot = requiredRoot();
     await reconcileOrphanedDisabledIds(candidateRoot);
     const current = await scan(candidateRoot);
-    if (current.length >= MAX_SKILLS) throw new Error('The Skills library supports at most 128 skills');
+    if (new Set([...current.map(record => record.summary.id), ...disabledSkills].map(id => id.toLowerCase())).size >= MAX_SKILLS)
+      throw new Error('The Skills library supports at most 128 skills');
     const names = await directoryNames(candidateRoot);
     if (names.some(name => name.toLowerCase() === id.toLowerCase())) throw new Error(`Skill "${id}" already exists`);
     const { publishSkillPackage } = await import('./skill-package.js');
