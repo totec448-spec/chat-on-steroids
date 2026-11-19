@@ -595,6 +595,7 @@ export function linkSkillPackage(id: string, source: GitHubSkillOrigin): Promise
     if (await originAt(candidateRoot, id)) throw new Error('This skill already has a GitHub source');
     if (record.revision !== source.skillSha256) throw new Error('The local SKILL.md does not match this GitHub source');
     const directory = path.join(candidateRoot, id);
+    const packageHash = source.commit.length === 64 ? 'sha256' : 'sha1';
     const beforeDirectory = identityOf(await fs.lstat(directory));
     const files: Array<{ relative: string; sha: string; size: number }> = [];
     let folders = 0, entries = 0, bytes = 0;
@@ -632,7 +633,7 @@ export function linkSkillPackage(id: string, source: GitHubSkillOrigin): Promise
         if (!sameIdentity(identityOf(stat), identityOf(await fs.lstat(filename))))
           throw new Error('The local skill changed while linking');
         files.push({ relative: nextRelative, size: content.length,
-          sha: createHash('sha1').update(`blob ${content.length}\0`).update(content).digest('hex') });
+          sha: createHash(packageHash).update(`blob ${content.length}\0`).update(content).digest('hex') });
       } } finally { await directory.close().catch(() => undefined); }
       if (!sameIdentity(before, identityOf(await fs.lstat(folder))))
         throw new Error('The local skill changed while linking');

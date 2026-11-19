@@ -3,6 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
 import { rawPromises as fs } from './rawfs.js';
+import { logInfo } from './logger.js';
 import { importSkillPackage, linkSkillPackage, listManagedSkills, skillPackageRevision, updateSkillPackage } from './skills.js';
 import {
   githubSkillUrl,
@@ -112,6 +113,7 @@ async function inspectGitHubSkill(requested: GitHubSkillLocation, signal: AbortS
     // A large repository can exceed GitHub's response cap even when the
     // explicitly selected folder is small enough to fetch safely.
     if (!directory || !(error instanceof Error) || error.message !== 'GitHub response is too large') throw error;
+    logInfo('skills: recursive GitHub tree exceeded the 8 MiB metadata limit; using bounded contents walk for an explicit folder');
   }
   const tree = payload?.truncated === false && Array.isArray(payload.tree) && payload.tree.length <= 20_000 &&
     payload.tree.every(entry => entry && typeof entry === 'object' &&
