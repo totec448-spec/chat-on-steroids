@@ -2691,6 +2691,7 @@
   "GitHub skill uses a reserved CoS metadata filename": "Kỹ năng GitHub dùng tên tệp siêu dữ liệu dành riêng cho CoS",
   "GitHub skill folder was not found": "Không tìm thấy thư mục kỹ năng trên GitHub",
   "Only GitHub-imported skills can be checked": "Chỉ có thể kiểm tra kỹ năng nhập từ GitHub",
+  "GitHub repository tree is too large or incomplete; use a direct skill folder link": "Cây thư mục của kho lưu trữ GitHub quá lớn hoặc không đầy đủ; hãy dùng liên kết trực tiếp đến thư mục Skill.",
   "GitHub repository tree is too large or incomplete to check safely": "Cây kho GitHub quá lớn hoặc không đầy đủ để kiểm tra an toàn",
   "GitHub returned invalid repository metadata": "GitHub trả về siêu dữ liệu kho không hợp lệ",
   "Only local skills can be linked to GitHub": "Chỉ có thể liên kết kỹ năng cục bộ với GitHub",

@@ -2691,6 +2691,7 @@
   "GitHub skill uses a reserved CoS metadata filename": "GitHub 技能使用了为 CoS 保留的元数据文件名",
   "GitHub skill folder was not found": "找不到 GitHub 技能文件夹",
   "Only GitHub-imported skills can be checked": "只能检查从 GitHub 导入的技能",
+  "GitHub repository tree is too large or incomplete; use a direct skill folder link": "GitHub 仓库目录树过大或不完整；请使用指向技能文件夹的直接链接。",
   "GitHub repository tree is too large or incomplete to check safely": "GitHub 仓库树过大或不完整，无法安全检查",
   "GitHub returned invalid repository metadata": "GitHub 返回了无效的仓库元数据",
   "Only local skills can be linked to GitHub": "只有本地技能可以关联到 GitHub",

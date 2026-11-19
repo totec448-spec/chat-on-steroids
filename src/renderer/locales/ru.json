@@ -2805,6 +2805,7 @@
   "GitHub skill uses a reserved CoS metadata filename": "Навык с GitHub использует имя файла метаданных, зарезервированное для CoS",
   "GitHub skill folder was not found": "Папка навыка на GitHub не найдена",
   "Only GitHub-imported skills can be checked": "Проверять можно только навыки, импортированные с GitHub",
+  "GitHub repository tree is too large or incomplete; use a direct skill folder link": "Дерево репозитория GitHub слишком велико или неполно; используйте прямую ссылку на папку скилла.",
   "GitHub repository tree is too large or incomplete to check safely": "Дерево репозитория на GitHub слишком велико или неполно для безопасной проверки",
   "GitHub returned invalid repository metadata": "GitHub вернул недопустимые метаданные репозитория",
   "Only local skills can be linked to GitHub": "Привязать к GitHub можно только локальные навыки",

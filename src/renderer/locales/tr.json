@@ -2728,6 +2728,7 @@
   "GitHub skill uses a reserved CoS metadata filename": "GitHub becerisi CoS için ayrılmış bir meta veri dosya adı kullanıyor",
   "GitHub skill folder was not found": "GitHub beceri klasörü bulunamadı",
   "Only GitHub-imported skills can be checked": "Yalnızca GitHub'dan içe aktarılan beceriler denetlenebilir",
+  "GitHub repository tree is too large or incomplete; use a direct skill folder link": "GitHub deposunun dizin ağacı çok büyük veya eksik; Skill klasörüne doğrudan bağlantı kullanın.",
   "GitHub repository tree is too large or incomplete to check safely": "GitHub depo ağacı güvenli denetim için çok büyük veya eksik",
   "GitHub returned invalid repository metadata": "GitHub geçersiz depo meta verisi döndürdü",
   "Only local skills can be linked to GitHub": "Yalnızca yerel beceriler GitHub'a bağlanabilir",
