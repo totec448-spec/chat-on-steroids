@@ -90,8 +90,21 @@ export async function githubSkillsAuthStatus(): Promise<{ stored: boolean; avail
   return { stored: available && await hasSecret('githubSkillsToken'), available };
 }
 
+// Claim the mutation slot synchronously when IPC calls arrive. In particular, a later
+// Remove must never be undone by an earlier Save whose GitHub validation finishes late.
+let credentialMutation = Promise.resolve();
+function queueCredentialMutation<T>(operation: () => Promise<T>): Promise<T> {
+  const result = credentialMutation.then(operation);
+  credentialMutation = result.then(() => undefined, () => undefined);
+  return result;
+}
+
 /** Explicit user action. Validate against GitHub before committing to the OS key store. */
-export async function saveGitHubSkillsToken(value: string): Promise<{ stored: boolean; available: boolean }> {
+export function saveGitHubSkillsToken(value: string): Promise<{ stored: boolean; available: boolean }> {
+  return queueCredentialMutation(() => validateAndSaveGitHubSkillsToken(value));
+}
+
+async function validateAndSaveGitHubSkillsToken(value: string): Promise<{ stored: boolean; available: boolean }> {
   const token = value.trim();
   if (token.length < 8 || token.length > 512 || !/^[\x21-\x7E]+$/.test(token)) {
     logWarn('GitHub Skills: token save refused (invalid format)');
@@ -112,7 +125,11 @@ export async function saveGitHubSkillsToken(value: string): Promise<{ stored: bo
   return githubSkillsAuthStatus();
 }
 
-export async function removeGitHubSkillsToken(): Promise<{ stored: boolean; available: boolean }> {
+export function removeGitHubSkillsToken(): Promise<{ stored: boolean; available: boolean }> {
+  return queueCredentialMutation(clearGitHubSkillsToken);
+}
+
+async function clearGitHubSkillsToken(): Promise<{ stored: boolean; available: boolean }> {
   if (!(await secureStorageStatus()).available) {
     logWarn('GitHub Skills: token removal refused (secure storage unavailable)');
     throw new Error('Secure OS credential storage is unavailable');

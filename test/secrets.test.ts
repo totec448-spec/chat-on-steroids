@@ -122,6 +122,8 @@ describe('secret store', () => {
     expect(await getSecret('openRouterApiKey')).toBe('sk-or-legacy');
     // Only API keys are cleaned; other secrets keep their exact bytes.
     expect(await getSecret('bridgeToken')).toBe('bridge-token');
+    // A pre-GitHub-PAT encrypted secrets file has no optional token key.
+    expect(await getSecret('githubSkillsToken')).toBeNull();
   });
 
   it('serializes concurrent writes so one credential cannot erase another', async () => {

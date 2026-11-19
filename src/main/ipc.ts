@@ -1375,7 +1375,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('skills:githubAuthStatus', () => githubSkillsAuthStatus());
   handle('skills:githubAuthSet', async payload => {
-    const { token } = z.object({ token: z.string().min(8).max(512) }).strict().parse(payload);
+    const { token } = z.object({ token: z.string()
+      .min(8, 'Enter a valid GitHub access token without spaces')
+      .max(512, 'Enter a valid GitHub access token without spaces') }).strict().parse(payload);
     return saveGitHubSkillsToken(token);
   });
   handle('skills:githubAuthRemove', async () => removeGitHubSkillsToken());

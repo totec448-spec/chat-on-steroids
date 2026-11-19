@@ -101,7 +101,11 @@ it('authenticates GitHub metadata and blob downloads, then reverts to anonymous 
   const blobs = fetches.mock.calls.filter(([input]) => new URL(input).pathname.includes('/git/blobs/'));
   expect(api.length).toBeGreaterThan(1);
   expect(blobs.length).toBeGreaterThan(0);
+  // Metadata and file content both use GitHub's fixed API host. No token-bearing
+  // request may reach raw.githubusercontent.com, a CDN, or an untrusted download URL.
+  expect(api).toHaveLength(fetches.mock.calls.length);
   expect(api.every(([, init]) => new Headers(init?.headers).get('Authorization') === `Bearer ${token}`)).toBe(true);
+  expect(api.every(([, init]) => init?.redirect === 'error')).toBe(true);
   await removeGitHubSkillsToken();
   await checkGitHubSkillUpdates('pet');
   const last = fetches.mock.calls.filter(([input]) => new URL(input).host === 'api.github.com').at(-1)!;
@@ -142,6 +146,36 @@ it('validates a token before secure storage, returns status only, and preserves 
   expect(authSecret.token).toBe(first);
   expect(await removeGitHubSkillsToken()).toEqual({ stored: false, available: true });
   expect(authSecret.token).toBeNull();
+});
+
+it('serializes Save and later Remove even when GitHub validation finishes after Remove was requested', async () => {
+  let releaseValidation!: () => void;
+  const validation = new Promise<void>(resolve => { releaseValidation = resolve; });
+  let beganValidation!: () => void;
+  const began = new Promise<void>(resolve => { beganValidation = resolve; });
+  vi.stubGlobal('fetch', vi.fn(async () => {
+    beganValidation();
+    await validation;
+    return json({ resources: { core: { limit: 5000 } } });
+  }));
+  const save = saveGitHubSkillsToken('github_pat_' + 'a'.repeat(70));
+  await began;
+  const remove = removeGitHubSkillsToken();
+  releaseValidation();
+  await Promise.all([save, remove]);
+  expect(authSecret.token).toBeNull();
+});
+
+it('keeps the old secret if GitHub validation aborts or times out, and still permits later removal', async () => {
+  const old = 'github_pat_' + 'a'.repeat(70);
+  authSecret.token = old;
+  vi.stubGlobal('fetch', vi.fn(async () => { throw new DOMException('Aborted', 'AbortError'); }));
+  await expect(saveGitHubSkillsToken('github_pat_' + 'b'.repeat(70))).rejects.toThrow('Could not reach GitHub');
+  expect(authSecret.token).toBe(old);
+  vi.stubGlobal('fetch', vi.fn(async () => { throw new DOMException('Timed out', 'TimeoutError'); }));
+  await expect(saveGitHubSkillsToken('github_pat_' + 'c'.repeat(70))).rejects.toThrow('Could not reach GitHub');
+  expect(authSecret.token).toBe(old);
+  expect(await removeGitHubSkillsToken()).toEqual({ stored: false, available: true });
 });
 
 it('refuses saving GitHub credentials when protected OS storage is unavailable', async () => {

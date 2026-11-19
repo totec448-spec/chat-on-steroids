@@ -323,11 +323,22 @@ export function initSkillsLibrary(api: AppApi): () => void {
   };
   const loadGithubAuth = async (): Promise<void> => {
     const own = ++githubAuthEpoch;
+    let statusRead = false;
     githubAuthStatus.textContent = t('Checking GitHub authorization…');
-    const status = await api.skillsGithubAuthStatus();
-    if (own !== githubAuthEpoch || !githubDialog.open) return;
-    if (status.ok) paintGithubAuth(status.data);
-    else githubAuthStatus.textContent = t('Could not read GitHub authorization status.');
+    try {
+      const status = await api.skillsGithubAuthStatus();
+      if (own !== githubAuthEpoch || !githubDialog.open) return;
+      if (status.ok) { statusRead = true; paintGithubAuth(status.data); }
+      else githubAuthStatus.textContent = t('Could not read GitHub authorization status.');
+    } catch {
+      if (own === githubAuthEpoch && githubDialog.open)
+        githubAuthStatus.textContent = t('Could not read GitHub authorization status.');
+    } finally {
+      // Failed status reads must not strand both controls disabled after an IPC failure.
+      if (!statusRead && own === githubAuthEpoch && githubDialog.open) {
+        githubToken.disabled = githubTokenSave.disabled = false;
+      }
+    }
   };
   githubTokenSave.addEventListener('click', () => void (async () => {
     const token = githubToken.value.trim();
