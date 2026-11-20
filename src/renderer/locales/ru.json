@@ -4224,5 +4224,14 @@
   "What a chat edited": "Что изменил чат",
   "Review lists the files this chat changed and opens each recorded diff.": "Проверка показывает файлы, которые изменил этот чат, и открывает каждый записанный diff.",
   "Steered active turn": "Перенаправил активный ход",
-  "Worked for {0}{1}s · steered": "Завершил работу — {0}{1} с · перенаправлен"
+  "Worked for {0}{1}s · steered": "Завершил работу — {0}{1} с · перенаправлен",
+  "Local skill": "Локальный навык",
+  "This Skill is managed by another provider.": "Этим навыком управляет другой поставщик.",
+  "Enable {0}": "Включить {0}",
+  "Other apps using this shared Skill folder will lose access to it too.": "Другие приложения, использующие эту общую папку навыка, тоже потеряют к ней доступ.",
+  "Could not read Skills activation state": "Не удалось прочитать состояние активации навыков",
+  "Too many disabled Skills to save safely": "Слишком много отключённых навыков для безопасного сохранения",
+  "The global Skill is no longer available": "Глобальный навык больше недоступен",
+  "This Skill belongs to another provider or is no longer available": "Этот навык принадлежит другому поставщику или больше недоступен",
+  "Could not restore the Skill; its staged folder was kept for recovery": "Не удалось восстановить навык. Его временная папка сохранена для восстановления."
 }

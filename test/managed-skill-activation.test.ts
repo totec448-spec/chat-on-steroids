@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { makeTempDir, removeTempDir } from './helpers.js';
+import { rawPromises } from '../src/main/rawfs.js';
 import {
   importSkillFile, initSkillsPath, listManagedSkills, listSkills, readSkill, readSkillAtRevision,
   removeSkill, setDiscoveredSkillEnabled, setManagedSkillEnabled, skillCatalogSnapshot, skillCatalogInstructions
@@ -11,11 +12,13 @@ import {
 let directory: string;
 beforeEach(async () => {
   directory = await makeTempDir('cos-managed-activation-');
+  for (const key of ['HOME', 'USERPROFILE', 'CODEX_HOME', 'CLAUDE_CONFIG_DIR'])
+    vi.stubEnv(key, path.join(directory, 'isolated', key));
   await initSkillsPath(directory);
   await fs.writeFile(path.join(directory, 'review.md'), '# Review\n\nReview source changes carefully.\n');
   await importSkillFile(path.join(directory, 'review.md'));
 });
-afterEach(async () => { await removeTempDir(directory); });
+afterEach(async () => { vi.restoreAllMocks(); vi.unstubAllEnvs(); await removeTempDir(directory); });
 
 /** Reproduce a process exit after the original folder was renamed into a marked stage. */
 async function interruptRemoval(original: string): Promise<{ stageRoot: string; staged: string }> {
@@ -117,6 +120,44 @@ it('refuses to overwrite a replacement managed Skill during removal recovery', a
   expect(await fs.readFile(path.join(original, 'SKILL.md'), 'utf8')).toBe('# Replacement\n\nKeep the new package.');
   expect(await fs.readFile(path.join(staged, 'SKILL.md'), 'utf8')).toContain('Review source changes');
   expect(await fs.readFile(path.join(stageRoot, '.cos-removal.json'), 'utf8')).toContain('"name":"review"');
+});
+
+it('keeps an empty replacement that appears during removal recovery', async () => {
+  const original = path.join(directory, 'skills/review');
+  const { stageRoot, staged } = await interruptRemoval(original);
+  const originalStat = rawPromises.lstat.bind(rawPromises);
+  let replacementCreated = false;
+  vi.spyOn(rawPromises, 'lstat').mockImplementation(async (target, options) => {
+    try {
+      return await originalStat(target, options);
+    } catch (error) {
+      if (!replacementCreated && target === original && (error as NodeJS.ErrnoException).code === 'ENOENT') {
+        await fs.mkdir(original);
+        replacementCreated = true;
+      }
+      throw error;
+    }
+  });
+
+  await initSkillsPath(directory);
+  expect(replacementCreated).toBe(true);
+  expect(await fs.readdir(original)).toEqual([]);
+  expect(await fs.readFile(path.join(staged, 'SKILL.md'), 'utf8')).toContain('Review source changes');
+  expect(await fs.readFile(path.join(stageRoot, '.cos-removal.json'), 'utf8')).toContain('"name":"review"');
+});
+
+it('initializes managed Skills when an external recovery directory cannot be listed', async () => {
+  const external = path.join(directory, 'isolated', 'CODEX_HOME', 'skills');
+  await fs.mkdir(external, { recursive: true });
+  const openDirectory = rawPromises.opendir.bind(rawPromises);
+  const open = vi.spyOn(rawPromises, 'opendir').mockImplementation(async (target, options) => {
+    if (target === external) throw Object.assign(new Error('Access denied'), { code: 'EACCES' });
+    return openDirectory(target, options);
+  });
+
+  await initSkillsPath(directory, true);
+  expect(open.mock.calls.some(([target]) => target === external)).toBe(true);
+  expect((await listSkills()).map(skill => skill.id)).toEqual(['review']);
 });
 
 it('refuses forged managed removal markers and keeps their staged contents untouched', async () => {

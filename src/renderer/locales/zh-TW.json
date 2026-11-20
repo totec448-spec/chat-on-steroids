@@ -3972,5 +3972,14 @@
   "What a chat edited": "聊天修改了什麼",
   "Review lists the files this chat changed and opens each recorded diff.": "審查會列出此聊天更改的檔案，並可開啟每筆已記錄的差異。",
   "Steered active turn": "已引導目前回合",
-  "Worked for {0}{1}s · steered": "已工作 {0}{1} 秒 · 已引導"
+  "Worked for {0}{1}s · steered": "已工作 {0}{1} 秒 · 已引導",
+  "Local skill": "本機技能",
+  "This Skill is managed by another provider.": "此技能由其他提供者管理。",
+  "Enable {0}": "啟用 {0}",
+  "Other apps using this shared Skill folder will lose access to it too.": "使用此共用技能資料夾的其他應用程式也將無法存取。",
+  "Could not read Skills activation state": "無法讀取技能啟用狀態",
+  "Too many disabled Skills to save safely": "已停用的技能過多，無法安全儲存",
+  "The global Skill is no longer available": "此全域技能已無法使用",
+  "This Skill belongs to another provider or is no longer available": "此技能屬於其他提供者，或已無法使用",
+  "Could not restore the Skill; its staged folder was kept for recovery": "無法還原技能。已保留暫存資料夾以供復原。"
 }

@@ -51,6 +51,8 @@ let operations: Promise<unknown> = Promise.resolve();
 
 const SKILL_STATE_FILENAME = '.cos-disabled-skills.json';
 const SKILL_REMOVAL_RECORD = '.cos-removal.json';
+// A 255-code-unit name may expand to six bytes per code unit when JSON escaped.
+const MAX_REMOVAL_RECORD_BYTES = 4096;
 const STAGED_REMOVAL_NAME = /^\.cos-removing-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 // The managed library is capped at 128; discovered Skills can exceed that count.
 const MAX_DISABLED_SKILLS = 512;
@@ -60,16 +62,16 @@ async function loadDisabledSkills(candidateRoot: string): Promise<Set<string>> {
   const filename = path.join(candidateRoot, SKILL_STATE_FILENAME);
   try {
     const stat = await fs.lstat(filename);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_DISABLED_STATE_BYTES) throw new Error('Invalid Skills activation state file');
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_DISABLED_STATE_BYTES) throw new Error('Could not read Skills activation state');
     const parsed: unknown = JSON.parse(await fs.readFile(filename, 'utf8'));
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Invalid Skills activation state');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Could not read Skills activation state');
     const state = parsed as { version?: unknown; disabled?: unknown };
     if (state.version !== 1 || !Array.isArray(state.disabled) || state.disabled.length > MAX_DISABLED_SKILLS ||
-        !state.disabled.every(id => typeof id === 'string' && validSkillId(id))) throw new Error('Invalid Skills activation state');
+        !state.disabled.every(id => typeof id === 'string' && validSkillId(id))) throw new Error('Could not read Skills activation state');
     return new Set(state.disabled as string[]);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return new Set();
-    throw new Error('Could not read Skills activation state; no Skills were re-enabled automatically', { cause: error });
+    throw new Error('Could not read Skills activation state', { cause: error });
   }
 }
 
@@ -78,8 +80,10 @@ async function persistDisabledSkills(candidateRoot: string, next: Set<string>): 
   // Check the complete next state before changing a previously valid state file.
   const serialized = JSON.stringify({ version: 1, disabled: [...next].sort() }) + '\n';
   if (next.size > MAX_DISABLED_SKILLS || Buffer.byteLength(serialized, 'utf8') > MAX_DISABLED_STATE_BYTES ||
-      ![...next].every(validSkillId))
+      ![...next].every(validSkillId)) {
+    logWarn('skills.activation.refused_invalid_state');
     throw new Error('Too many disabled Skills to save safely');
+  }
   const filename = path.join(candidateRoot, SKILL_STATE_FILENAME);
   if (!next.size) {
     // An empty activation record is unnecessary and would be a leftover after deleting the last disabled Skill.
@@ -136,10 +140,39 @@ function validRemovalRecord(value: unknown): value is RemovalRecord {
   });
 }
 async function writeRemovalRecord(parent: string, entry: RemovalRecord): Promise<void> {
+  const serialized = JSON.stringify(entry) + '\n';
+  if (!validRemovalRecord(entry) || Buffer.byteLength(serialized, 'utf8') > MAX_REMOVAL_RECORD_BYTES) {
+    logWarn('skills.removal.refused_invalid_record');
+    throw new Error('Could not move Skill to Trash. Try again.');
+  }
   const filename = path.join(parent, SKILL_REMOVAL_RECORD);
   const handle = await fs.open(filename, 'wx', 0o600);
-  try { await handle.writeFile(JSON.stringify(entry) + '\n', 'utf8'); await handle.sync(); }
+  try { await handle.writeFile(serialized, 'utf8'); await handle.sync(); }
   finally { await handle.close(); }
+}
+
+/** Rename on the same volume without replacing an entry created by another process.
+ * Node rename replaces empty directories on POSIX, so a preceding lstat is not sufficient.
+ * If the OS or filesystem cannot provide no-replace semantics, retain the marked stage.
+ */
+async function restoreWithoutReplacement(staged: string, original: string): Promise<boolean> {
+  const { load } = await import('koffi');
+  if (process.platform === 'win32') {
+    const lib = load('kernel32.dll');
+    const move = lib.func('__stdcall', 'MoveFileExW', 'int', ['str16', 'str16', 'uint32_t']);
+    return move(path.toNamespacedPath(staged), path.toNamespacedPath(original), 0) !== 0;
+  }
+  if (process.platform === 'darwin') {
+    const lib = load('/usr/lib/libSystem.B.dylib');
+    const rename = lib.func('int renamex_np(const char *from, const char *to, unsigned int flags)');
+    return rename(staged, original, 0x4 /* RENAME_EXCL */) === 0;
+  }
+  if (process.platform === 'linux') {
+    const lib = load('libc.so.6');
+    const rename = lib.func('int renameat2(int olddirfd, const char *from, int newdirfd, const char *to, unsigned int flags)');
+    return rename(-100 /* AT_FDCWD */, staged, -100, original, 1 /* RENAME_NOREPLACE */) === 0;
+  }
+  return false;
 }
 
 /**
@@ -158,44 +191,50 @@ async function recoverStagedRemovals(parent: string): Promise<void> {
     logWarn('skills.removal.recovery_root_unavailable'); return;
   }
   let entries = 0, stages = 0;
-  for await (const entry of await fs.opendir(parent)) {
-    if (++entries > 4096 || stages > 64) {
-      logWarn('skills.removal.recovery_scan_bounded'); break;
-    }
-    if (!STAGED_REMOVAL_NAME.test(entry.name)) continue;
-    stages++;
-    const stageRoot = path.join(parent, entry.name), marker = path.join(stageRoot, SKILL_REMOVAL_RECORD);
-    try {
-      const rootStat = await fs.lstat(stageRoot);
-      const stat = await fs.lstat(marker);
-      if (!rootStat.isDirectory() || rootStat.isSymbolicLink() || !sameNativePath(stageRoot, await fs.realpath(stageRoot)) ||
-          !stat.isFile() || stat.isSymbolicLink() || stat.size > 512) {
-        logWarn('skills.removal.recovery_invalid_stage'); continue;
+  try {
+    for await (const entry of await fs.opendir(parent)) {
+      if (++entries > 4096 || stages > 64) {
+        logWarn('skills.removal.recovery_scan_bounded'); break;
       }
-      const parsed: unknown = JSON.parse(await fs.readFile(marker, 'utf8'));
-      if (!validRemovalRecord(parsed)) { logWarn('skills.removal.recovery_invalid_record'); continue; }
-      const staged = path.join(stageRoot, parsed.name), original = path.join(parent, parsed.name);
-      let stagedStat: Awaited<ReturnType<typeof fs.lstat>>;
-      try { stagedStat = await fs.lstat(staged); }
-      catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-        // The process may have reached the OS Trash just before it exited.
+      if (!STAGED_REMOVAL_NAME.test(entry.name)) continue;
+      stages++;
+      const stageRoot = path.join(parent, entry.name), marker = path.join(stageRoot, SKILL_REMOVAL_RECORD);
+      try {
+        const rootStat = await fs.lstat(stageRoot);
+        const stat = await fs.lstat(marker);
+        if (!rootStat.isDirectory() || rootStat.isSymbolicLink() || !sameNativePath(stageRoot, await fs.realpath(stageRoot)) ||
+            !stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_REMOVAL_RECORD_BYTES) {
+          logWarn('skills.removal.recovery_invalid_stage'); continue;
+        }
+        const parsed: unknown = JSON.parse(await fs.readFile(marker, 'utf8'));
+        if (!validRemovalRecord(parsed)) { logWarn('skills.removal.recovery_invalid_record'); continue; }
+        const staged = path.join(stageRoot, parsed.name), original = path.join(parent, parsed.name);
+        let stagedStat: Awaited<ReturnType<typeof fs.lstat>>;
+        try { stagedStat = await fs.lstat(staged); }
+        catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+          // The process may have reached the OS Trash just before it exited.
+          await fs.unlink(marker); await fs.rmdir(stageRoot);
+          logInfo('skills.removal.recovery_completed_cleanup'); continue;
+        }
+        if ((parsed.kind === 'link' && !stagedStat.isSymbolicLink()) ||
+            (parsed.kind === 'directory' && (!stagedStat.isDirectory() || stagedStat.isSymbolicLink())) ||
+            !sameFileObject(parsed.identity as FileIdentity, identityOf(stagedStat))) {
+          logWarn('skills.removal.recovery_identity_mismatch'); continue;
+        }
+        try { await fs.lstat(original); logWarn('skills.removal.recovery_target_occupied'); continue; }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+        if (!await restoreWithoutReplacement(staged, original)) {
+          logWarn('skills.removal.recovery_no_replace_refused'); continue;
+        }
         await fs.unlink(marker); await fs.rmdir(stageRoot);
-        logInfo('skills.removal.recovery_completed_cleanup'); continue;
+        logInfo('skills.removal.recovery_restored');
+      } catch {
+        logWarn('skills.removal.recovery_unavailable');
       }
-      if ((parsed.kind === 'link' && !stagedStat.isSymbolicLink()) ||
-          (parsed.kind === 'directory' && (!stagedStat.isDirectory() || stagedStat.isSymbolicLink())) ||
-          !sameFileObject(parsed.identity as FileIdentity, identityOf(stagedStat))) {
-        logWarn('skills.removal.recovery_identity_mismatch'); continue;
-      }
-      try { await fs.lstat(original); logWarn('skills.removal.recovery_target_occupied'); continue; }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-      await fs.rename(staged, original);
-      await fs.unlink(marker); await fs.rmdir(stageRoot);
-      logInfo('skills.removal.recovery_restored');
-    } catch {
-      logWarn('skills.removal.recovery_unavailable');
     }
+  } catch {
+    logWarn('skills.removal.recovery_enumeration_failed');
   }
 }
 
@@ -212,28 +251,32 @@ async function trashVerifiedSkill(
   await fs.mkdir(stagingRoot, { mode: 0o700 });
   let moved = false;
   let completed = false;
+  let trashAttempted = false;
   let preserveForRecovery = false;
   try {
     const current = await fs.lstat(directory);
     if (!sameFileObject(expected, identityOf(current))) {
       logWarn('skills.removal.refused_identity_changed');
-      throw new Error('The Skill folder changed before removal');
+      throw new Error('The skill changed before removal; reload the library');
     }
     const record: RemovalRecord = {
       version: 1, name: path.basename(directory), kind: current.isSymbolicLink() ? 'link' : 'directory',
       identity: { dev: expected.dev, ino: expected.ino, size: expected.size }
     };
     await writeRemovalRecord(stagingRoot, record);
-    if (!sameFileObject(expected, identityOf(await fs.lstat(directory))))
-      throw new Error('The Skill folder changed before removal');
+    if (!sameFileObject(expected, identityOf(await fs.lstat(directory)))) {
+      logWarn('skills.removal.refused_identity_changed');
+      throw new Error('The skill changed before removal; reload the library');
+    }
     await fs.rename(directory, staged);
     moved = true;
     if (!sameFileObject(expected, identityOf(await fs.lstat(staged)))) {
       logWarn('skills.removal.refused_staged_identity');
-      throw new Error('The Skill folder changed while removal was staged');
+      throw new Error('The skill changed before removal; reload the library');
     }
+    trashAttempted = true;
     await moveToTrash(staged);
-    try { await fs.lstat(staged); throw new Error('The Skill folder was not moved to Trash'); }
+    try { await fs.lstat(staged); throw new Error('Could not move Skill to Trash. Try again.'); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     completed = true;
     logInfo('skills.removal.trashed');
@@ -241,18 +284,19 @@ async function trashVerifiedSkill(
     if (moved && !completed) {
       try {
         if (!sameFileObject(expected, identityOf(await fs.lstat(staged))))
-          throw new Error('The staged Skill changed');
-        try { await fs.lstat(directory); throw new Error('The original Skill path was replaced'); }
+          throw new Error('The skill changed before removal; reload the library');
+        try { await fs.lstat(directory); throw new Error('The skill changed before removal; reload the library'); }
         catch (missing) { if ((missing as NodeJS.ErrnoException).code !== 'ENOENT') throw missing; }
-        await fs.rename(staged, directory);
-        logInfo('skills.removal.trash_failed_restored');
+        if (!await restoreWithoutReplacement(staged, directory))
+          throw new Error('The skill changed before removal; reload the library');
+        logInfo(trashAttempted ? 'skills.removal.trash_failed_restored' : 'skills.removal.staging_failed_restored');
       } catch (restoreError) {
         preserveForRecovery = true;
-        logError('skills.removal.trash_failed_restore_failed');
-        throw new Error('Could not restore the Skill after Trash failed; its staged folder was kept for recovery', { cause: restoreError });
+        logError(trashAttempted ? 'skills.removal.trash_failed_restore_failed' : 'skills.removal.staging_failed_restore_failed');
+        throw new Error('Could not restore the Skill; its staged folder was kept for recovery', { cause: restoreError });
       }
     } else logWarn('skills.removal.refused_before_staging');
-    logWarn('skills.removal.trash_failed');
+    if (trashAttempted) logWarn('skills.removal.trash_failed');
     throw error;
   } finally {
     if (!preserveForRecovery) {
@@ -557,7 +601,7 @@ export async function readSkillTextSnapshot(filename: string): Promise<{ bytes: 
   return readTextSnapshot(filename);
 }
 
-export function initSkillsPath(userData: string): Promise<void> {
+export function initSkillsPath(userData: string, recoverExternalRoots = false): Promise<void> {
   return serial(async () => {
     if (!path.isAbsolute(userData)) throw new Error('Skills storage requires an absolute user-data path');
     root = null; catalog = []; catalogRevisions = new Map(); disabledManagedSkills = new Set();
@@ -569,16 +613,19 @@ export function initSkillsPath(userData: string): Promise<void> {
     await assertManagedRoot(candidate);
     await recoverSkillBackups(candidate);
     await recoverStagedRemovals(candidate);
-    const home = path.resolve((process.platform === 'win32' ? process.env.USERPROFILE : process.env.HOME) || os.homedir());
-    const externalRoots = [path.join(home, '.agents', 'skills'),
-      path.join(path.resolve(process.env.CODEX_HOME?.trim() || path.join(home, '.codex')), 'skills'),
-      path.join(path.resolve(process.env.CLAUDE_CONFIG_DIR?.trim() || path.join(home, '.claude')), 'skills')];
-    const visited = new Set([process.platform === 'win32' ? candidate.toLowerCase() : candidate]);
-    for (const external of externalRoots) {
-      const key = process.platform === 'win32' ? external.toLowerCase() : external;
-      if (visited.has(key)) continue;
-      visited.add(key);
-      await recoverStagedRemovals(external);
+    // Only the real app startup or an explicitly isolated fixture may scan external homes.
+    if (recoverExternalRoots) {
+      const home = path.resolve((process.platform === 'win32' ? process.env.USERPROFILE : process.env.HOME) || os.homedir());
+      const externalRoots = [path.join(home, '.agents', 'skills'),
+        path.join(path.resolve(process.env.CODEX_HOME?.trim() || path.join(home, '.codex')), 'skills'),
+        path.join(path.resolve(process.env.CLAUDE_CONFIG_DIR?.trim() || path.join(home, '.claude')), 'skills')];
+      const visited = new Set([process.platform === 'win32' ? candidate.toLowerCase() : candidate]);
+      for (const external of externalRoots) {
+        const key = process.platform === 'win32' ? external.toLowerCase() : external;
+        if (visited.has(key)) continue;
+        visited.add(key);
+        await recoverStagedRemovals(external);
+      }
     }
     const records = await scan(candidate);
     disabledManagedSkills = await loadDisabledSkills(candidate);
@@ -648,7 +695,7 @@ export function setDiscoveredSkillEnabled(id: string, enabled: boolean): Promise
     assertSkillId(id);
     const candidateRoot = requiredRoot();
     await assertManagedRoot(candidateRoot);
-    if (await recordAt(candidateRoot, id)) throw new Error('Use managed Skill activation for this package');
+    if (await recordAt(candidateRoot, id)) throw new Error('The global Skill is no longer available');
     const next = new Set(disabledManagedSkills);
     if (enabled) next.delete(id);
     else next.add(id);
@@ -671,7 +718,7 @@ export function removeDiscoveredSkill(
 ): Promise<void> {
   return serial(async () => {
     assertSkillId(id);
-    if (!removableUserSkill(source, virtualPath)) throw new Error('Only standalone user Skills may be removed here');
+    if (!removableUserSkill(source, virtualPath)) throw new Error('This Skill belongs to another provider or is no longer available');
     const match = /^\/user-skills\/(agents|codex|claude)\/skills\/([^/]+)\/SKILL\.md$/.exec(virtualPath)!;
     const home = path.resolve((process.platform === 'win32' ? process.env.USERPROFILE : process.env.HOME) || os.homedir());
     const areas: Record<string, string> = {
@@ -685,19 +732,19 @@ export function removeDiscoveredSkill(
     for (const location of [areas[match[1]!]!, root, directory]) {
       const stat = await fs.lstat(location);
       if (!stat.isDirectory() || stat.isSymbolicLink() || !sameNativePath(location, await fs.realpath(location)))
-        throw new Error('Skill removal refused: its folder is linked or changed');
+        throw new Error('The skill changed before removal; reload the library');
     }
     const fileStat = await fs.lstat(filename);
     if (!fileStat.isFile() || fileStat.isSymbolicLink() || !sameNativePath(filename, await fs.realpath(filename)))
-      throw new Error('Skill removal refused: its SKILL.md is linked or changed');
+      throw new Error('The skill changed before removal; reload the library');
     const canonicalFile = await fs.realpath(filename);
     const hash = createHash('sha256').update(process.platform === 'win32'
       ? path.resolve(canonicalFile).toLowerCase() : path.resolve(canonicalFile)).digest('hex').slice(0, 12);
-    if (!id.endsWith(`--user-${hash}`)) throw new Error('Skill removal refused: the package identity changed');
+    if (!id.endsWith(`--user-${hash}`)) throw new Error('The skill changed before removal; reload the library');
     const before = identityOf(await fs.lstat(directory));
     await assertManagedRoot(requiredRoot());
     if (!sameIdentity(before, identityOf(await fs.lstat(directory))))
-      throw new Error('Skill removal refused: the package changed');
+      throw new Error('The skill changed before removal; reload the library');
     await trashVerifiedSkill(directory, before, moveToTrash);
     if (disabledManagedSkills.has(id)) {
       const next = new Set(disabledManagedSkills); next.delete(id);

@@ -3972,5 +3972,14 @@
   "Chats update faster": "Chat cập nhật nhanh hơn",
   "A new message or tool call shows up in the open chat much sooner.": "Tin nhắn mới hoặc lệnh gọi công cụ hiện trong chat đang mở sớm hơn nhiều.",
   "What a chat edited": "Những gì một chat đã sửa",
-  "Review lists the files this chat changed and opens each recorded diff.": "Mục Xem lại liệt kê các tệp chat này đã thay đổi và mở từng diff đã ghi."
+  "Review lists the files this chat changed and opens each recorded diff.": "Mục Xem lại liệt kê các tệp chat này đã thay đổi và mở từng diff đã ghi.",
+  "Local skill": "Kỹ năng cục bộ",
+  "This Skill is managed by another provider.": "Kỹ năng này do nhà cung cấp khác quản lý.",
+  "Enable {0}": "Bật {0}",
+  "Other apps using this shared Skill folder will lose access to it too.": "Các ứng dụng khác dùng thư mục kỹ năng dùng chung này cũng sẽ mất quyền truy cập.",
+  "Could not read Skills activation state": "Không thể đọc trạng thái kích hoạt của các kỹ năng",
+  "Too many disabled Skills to save safely": "Có quá nhiều kỹ năng bị tắt để lưu trạng thái một cách an toàn",
+  "The global Skill is no longer available": "Kỹ năng toàn cục không còn khả dụng",
+  "This Skill belongs to another provider or is no longer available": "Kỹ năng này thuộc nhà cung cấp khác hoặc không còn khả dụng",
+  "Could not restore the Skill; its staged folder was kept for recovery": "Không thể khôi phục kỹ năng. Thư mục tạm đã được giữ lại để khôi phục."
 }

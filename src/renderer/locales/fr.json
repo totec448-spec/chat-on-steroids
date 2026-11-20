@@ -4140,5 +4140,14 @@
   "What a chat edited": "Ce qu'un chat a modifié",
   "Review lists the files this chat changed and opens each recorded diff.": "Revue liste les fichiers modifiés par ce chat et ouvre chaque diff enregistré.",
   "Steered active turn": "A réorienté le tour actif",
-  "Worked for {0}{1}s · steered": "A travaillé pendant {0}{1} s · réorienté"
+  "Worked for {0}{1}s · steered": "A travaillé pendant {0}{1} s · réorienté",
+  "Local skill": "Skill local",
+  "This Skill is managed by another provider.": "Ce Skill est géré par un autre fournisseur.",
+  "Enable {0}": "Activer {0}",
+  "Other apps using this shared Skill folder will lose access to it too.": "Les autres applications qui utilisent ce dossier partagé y perdront aussi l’accès.",
+  "Could not read Skills activation state": "Impossible de lire l’état d’activation des Skills",
+  "Too many disabled Skills to save safely": "Trop de Skills désactivés pour enregistrer leur état en toute sécurité",
+  "The global Skill is no longer available": "Le Skill global n’est plus disponible",
+  "This Skill belongs to another provider or is no longer available": "Ce Skill appartient à un autre fournisseur ou n’est plus disponible",
+  "Could not restore the Skill; its staged folder was kept for recovery": "Impossible de restaurer le Skill. Son dossier temporaire a été conservé pour permettre sa récupération."
 }

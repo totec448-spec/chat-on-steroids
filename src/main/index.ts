@@ -478,7 +478,7 @@ void app.whenReady().then(async () => {
   initSessionStore(userData);
   // The tunnel program reads proxies only from its environment; the system's setting comes from here (#1255).
   setSystemProxyResolver(url => session.defaultSession.resolveProxy(url));
-  try { await initSkillsPath(userData); }
+  try { await initSkillsPath(userData, true); }
   catch (error) { logWarn(`Skills library unavailable: ${error instanceof Error ? error.message : String(error)}`); }
   initDurableStore(userData);
   startupTiming.restore(await readDurable<unknown>(STARTUP_STATE));

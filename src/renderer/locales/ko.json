@@ -3972,5 +3972,14 @@
   "What a chat edited": "채팅이 수정한 내용",
   "Review lists the files this chat changed and opens each recorded diff.": "검토에서 이 채팅이 변경한 파일을 나열하고 기록된 diff를 각각 열 수 있습니다.",
   "Steered active turn": "현재 턴의 방향을 전환함",
-  "Worked for {0}{1}s · steered": "작업함 · {0}{1}초 · 방향 전환됨"
+  "Worked for {0}{1}s · steered": "작업함 · {0}{1}초 · 방향 전환됨",
+  "Local skill": "로컬 스킬",
+  "This Skill is managed by another provider.": "이 스킬은 다른 제공업체에서 관리합니다.",
+  "Enable {0}": "{0} 활성화",
+  "Other apps using this shared Skill folder will lose access to it too.": "이 공유 스킬 폴더를 사용하는 다른 앱도 접근할 수 없게 됩니다.",
+  "Could not read Skills activation state": "스킬 활성화 상태를 읽을 수 없습니다",
+  "Too many disabled Skills to save safely": "비활성화된 스킬이 너무 많아 안전하게 저장할 수 없습니다",
+  "The global Skill is no longer available": "전역 스킬을 더 이상 사용할 수 없습니다",
+  "This Skill belongs to another provider or is no longer available": "이 스킬은 다른 제공업체에 속하거나 더 이상 사용할 수 없습니다",
+  "Could not restore the Skill; its staged folder was kept for recovery": "스킬을 복원하지 못했습니다. 복구를 위해 임시 폴더를 보관했습니다."
 }

@@ -29,9 +29,10 @@ beforeEach(async () => {
   root = await makeTempDir('cos-skill-library-'); project = path.join(root, 'project');
   await fs.mkdir(project); await fs.mkdir(path.join(project, '.git'));
   vi.stubEnv('USERPROFILE', path.join(root, 'home')); vi.stubEnv('HOME', path.join(root, 'home'));
+  vi.stubEnv('CLAUDE_CONFIG_DIR', path.join(root, 'claude'));
   vi.stubEnv('CODEX_HOME', path.join(root, 'codex')); vi.stubEnv('ProgramData', path.join(root, 'admin'));
   initConfigPath(root); await saveConfig({ ...defaultConfig(), roots: [{ name: 'workspace', path: root }] });
-  await initSkillsPath(root);
+  await initSkillsPath(root, true);
 });
 afterEach(async () => { vi.unstubAllEnvs(); await removeTempDir(root); });
 
@@ -85,7 +86,7 @@ it('does not rediscover a disabled managed link under a new external Skill ID', 
   const hidden = await listSkillLibrary({ projectPath: project });
   expect(hidden.skills).toEqual([]);
   expect((await listGlobalSkills()).find(skill => skill.id === 'review')?.enabled).toBe(false);
-  await initSkillsPath(root);
+  await initSkillsPath(root, true);
   expect((await listSkillLibrary({ projectPath: project })).skills).toEqual([]);
   await setManagedSkillEnabled('review', true);
   expect((await listSkillLibrary({ projectPath: project })).skills.map(skill => skill.id)).toEqual(['review']);
@@ -137,7 +138,7 @@ it('shows existing global user Skills in the manager and persists their activati
   expect((await listSkillLibrary()).skills.some(skill => skill.id === first.id)).toBe(false);
   await expect(readLibrarySkill(first.id, {}, inspected)).rejects.toThrow('disabled');
   expect(await fs.readFile(path.join(root, 'home/.agents/skills/first/SKILL.md'), 'utf8')).toBe(contents('First'));
-  await initSkillsPath(root);
+  await initSkillsPath(root, true);
   expect((await listGlobalSkills()).find(skill => skill.id === first.id)?.enabled).toBe(false);
   await setDiscoveredSkillEnabled(first.id, true);
   expect((await listSkillLibrary()).skills.some(skill => skill.id === first.id)).toBe(true);
@@ -168,7 +169,7 @@ it('moves the complete user Skill package to Trash and clears its disabled state
   expect(await fs.readFile(path.join(externalResource, 'shared.txt'), 'utf8')).toBe('Shared data survives');
   expect((await listGlobalSkills()).map(skill => skill.name)).toEqual(['Other']);
   await expect(fs.lstat(path.join(root, 'skills/.cos-disabled-skills.json'))).rejects.toMatchObject({ code: 'ENOENT' });
-  await initSkillsPath(root);
+  await initSkillsPath(root, true);
   expect((await listGlobalSkills()).map(skill => skill.name)).toEqual(['Other']);
 });
 
@@ -178,16 +179,16 @@ it('refuses stale IDs and linked user Skill folders without following or deletin
   const first = (await listGlobalSkills())[0]!;
   const toTrash = async () => { throw new Error('Should not reach Trash'); };
   await expect(removeDiscoveredSkill('different--user-123456789abc', first.source, first.path, toTrash))
-    .rejects.toThrow('package identity changed');
+    .rejects.toThrow('The skill changed before removal');
   await expect(removeDiscoveredSkill(first.id, first.source, '/user-skills/agents/skills/../SKILL.md', toTrash))
-    .rejects.toThrow('Only standalone');
+    .rejects.toThrow('belongs to another provider');
   expect(await fs.readFile(path.join(folder, 'SKILL.md'), 'utf8')).toBe(contents('First'));
   const outside = path.join(root, 'outside');
   await write(path.join(outside, 'SKILL.md'), contents('Outside'));
   const link = path.join(root, 'home/.agents/skills/linked');
   await fs.symlink(outside, link, process.platform === 'win32' ? 'junction' : 'dir');
   await expect(removeDiscoveredSkill(first.id, first.source, '/user-skills/agents/skills/linked/SKILL.md', toTrash))
-    .rejects.toThrow('linked or changed');
+    .rejects.toThrow('The skill changed before removal');
   expect(await fs.readFile(path.join(outside, 'SKILL.md'), 'utf8')).toBe(contents('Outside'));
 });
 
@@ -202,7 +203,7 @@ it('restores a disabled user Skill when Trash fails, preserving its files and di
   })).rejects.toThrow('Trash unavailable');
   expect(await fs.readFile(path.join(folder, 'references/info.txt'), 'utf8')).toBe('Keep this data');
   expect((await listGlobalSkills())[0]!.enabled).toBe(false);
-  await initSkillsPath(root);
+  await initSkillsPath(root, true);
   expect((await listGlobalSkills())[0]!.enabled).toBe(false);
   expect((await fs.readdir(path.dirname(folder))).sort()).toEqual(['first']);
 });
@@ -236,7 +237,7 @@ it('restores crash-staged standalone Skills from direct agents, Codex, and Claud
     await expect(fs.lstat(entry.directory)).rejects.toMatchObject({ code: 'ENOENT' });
   }
 
-  await initSkillsPath(root);
+  await initSkillsPath(root, true);
   for (let index = 0; index < cases.length; index++) {
     const entry = cases[index]!;
     expect(await fs.readFile(path.join(entry.directory, 'SKILL.md'), 'utf8')).toBe(contents(entry.name));
@@ -265,7 +266,7 @@ it('leaves occupied and forged standalone recovery stages untouched', async () =
   record.identity.ino += 1_000_000; // Use a representable difference even for large Windows inode numbers.
   await fs.writeFile(forgedMarker, JSON.stringify(record));
 
-  await initSkillsPath(root);
+  await initSkillsPath(root, true);
   expect(await fs.readFile(path.join(original, 'SKILL.md'), 'utf8')).toBe(contents('Replacement'));
   expect(await fs.readFile(path.join(occupied.staged, 'SKILL.md'), 'utf8')).toBe(contents('OldVersion'));
   expect(await fs.readFile(path.join(occupied.stageRoot, '.cos-removal.json'), 'utf8')).toContain('"name":"existing"');

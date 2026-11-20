@@ -3972,5 +3972,14 @@
   "What a chat edited": "チャットが編集した内容",
   "Review lists the files this chat changed and opens each recorded diff.": "レビューに、このチャットが変更したファイルが一覧表示され、記録された差分を開けます。",
   "Steered active turn": "実行中のターンを方向転換",
-  "Worked for {0}{1}s · steered": "作業済み · {0}{1}秒 · 方向転換"
+  "Worked for {0}{1}s · steered": "作業済み · {0}{1}秒 · 方向転換",
+  "Local skill": "ローカルスキル",
+  "This Skill is managed by another provider.": "このスキルは別のプロバイダーが管理しています。",
+  "Enable {0}": "{0} を有効にする",
+  "Other apps using this shared Skill folder will lose access to it too.": "この共有スキルフォルダーを使う他のアプリもアクセスできなくなります。",
+  "Could not read Skills activation state": "スキルの有効化状態を読み取れませんでした",
+  "Too many disabled Skills to save safely": "無効なスキルが多すぎるため、安全に保存できません",
+  "The global Skill is no longer available": "グローバルスキルは利用できなくなりました",
+  "This Skill belongs to another provider or is no longer available": "このスキルは別のプロバイダーの所有物か、すでに利用できません",
+  "Could not restore the Skill; its staged folder was kept for recovery": "スキルを復元できませんでした。復旧用に一時フォルダーを残しました。"
 }

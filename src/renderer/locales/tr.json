@@ -4056,5 +4056,14 @@
   "What a chat edited": "Bir sohbetin düzenledikleri",
   "Review lists the files this chat changed and opens each recorded diff.": "İnceleme, bu sohbetin değiştirdiği dosyaları listeler ve kaydedilmiş her farkı açar.",
   "Steered active turn": "Etkin turu yönlendirdi",
-  "Worked for {0}{1}s · steered": "{0}{1} sn · Çalıştı · yönlendirildi"
+  "Worked for {0}{1}s · steered": "{0}{1} sn · Çalıştı · yönlendirildi",
+  "Local skill": "Yerel beceri",
+  "This Skill is managed by another provider.": "Bu beceri başka bir sağlayıcı tarafından yönetiliyor.",
+  "Enable {0}": "{0} becerisini etkinleştir",
+  "Other apps using this shared Skill folder will lose access to it too.": "Bu paylaşılan beceri klasörünü kullanan diğer uygulamalar da erişimi kaybeder.",
+  "Could not read Skills activation state": "Becerilerin etkinlik durumu okunamadı",
+  "Too many disabled Skills to save safely": "Güvenle kaydedilemeyecek kadar çok devre dışı beceri var",
+  "The global Skill is no longer available": "Genel beceri artık kullanılamıyor",
+  "This Skill belongs to another provider or is no longer available": "Bu beceri başka bir sağlayıcıya ait veya artık kullanılamıyor",
+  "Could not restore the Skill; its staged folder was kept for recovery": "Beceri geri yüklenemedi. Geçici klasörü kurtarma için saklandı."
 }

@@ -117,7 +117,7 @@ it('shows ChatCMD-style counts and filters and toggles a Skill through the real 
   expect(w.document.querySelector('[data-skill-id="review"]')).toBeNull();
 });
 
-it('renders standalone global Skills with working permanent-delete confirmation', async () => {
+it('renders standalone global Skills with working Trash confirmation', async () => {
   dom = new JSDOM(`<!doctype html><body>
     <input id="skillsSearch"><button id="skillsRefresh"></button>
     <button id="skillsImportFolder"></button><button id="skillsImportFile"></button><button id="skillsImportGithub"></button>
