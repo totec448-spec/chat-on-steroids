@@ -3330,10 +3330,20 @@ function paintGoalProgress(): void {
   }
 }
 const cancelledStarts = new Set<string>();
+function inputBelongsToCurrentSelection(entry: Pick<InputEntry, 'id' | 'sessionId' | 'deliveredSessionId'>): boolean {
+  return selectedId === null
+    ? pendingNewInput?.generation === selectionGeneration && entry.id === pendingNewInput.id
+    : (entry.sessionId ?? entry.deliveredSessionId) === selectedId;
+}
+
+function cancellablePendingInput(entry: InputEntry): boolean {
+  return inputBelongsToCurrentSelection(entry) &&
+    (!queuedFollowup(entry) || entry.state === 'browser') && ['queued', 'browser'].includes(entry.state) &&
+    !anchoredPendingInput(entry);
+}
+
 function pendingComposerInput(): InputEntry | undefined {
-  return [...startingInputs.values(), ...pendingComposerInputs].find(entry => (!queuedFollowup(entry) || entry.state === 'browser') && ['queued', 'browser'].includes(entry.state) &&
-    (selectedId ? (entry.sessionId ?? entry.deliveredSessionId) === selectedId :
-      pendingNewInput?.generation === selectionGeneration && pendingNewInput.id === entry.id));
+  return [...startingInputs.values(), ...pendingComposerInputs].find(cancellablePendingInput);
 }
 let durationTimer: number | undefined;
 /** Whether the selected chat's running turn takes a message now (Send directly). */
@@ -3346,6 +3356,7 @@ let followUpTurn: string | null = null;
 function followUpQueues(): boolean {
   return deps.state()?.config.ui.followUp === 'queue';
 }
+let paintedPendingCancel: { id: string; target: string | null; selection: number } | null = null;
 function paintDeliveryControls(): void {
   paintGoalProgress();
   for (const button of document.querySelectorAll<HTMLButtonElement>('#finishQueue .queue-send-now')) button.hidden = !canSendQueuedNow();
@@ -3394,6 +3405,7 @@ function paintDeliveryControls(): void {
   send.disabled = !!preparedPlan && (preparedPlan.sending || preparedPlan.stages.some(stage => !stage.trim()));
   send.dataset.action = stop ? 'stop' : 'send';
   ui(send, 'aria-label', () => stop ? (controlledStopPending ? t("Stop requested") : t("Stop turn")) : t("Send message"));
+  paintedPendingCancel = stop && !working && !held && pending ? { id: pending.id, target: selectedId, selection: selectionGeneration } : null;
   if (stop && !working && !held && pending) ui(send, 'aria-label', () => t("Cancel delivery"));
   const planAction = selectedId && !chatKnownIdle(selectedId) ? t("Queue plan at Session finish") : t("Start full plan");
   if (preparedPlan && !stop) send.setAttribute('aria-label', planAction);
@@ -3950,6 +3962,7 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
     if (prepend || newerFrom !== undefined) roundsEnter = false;
     // Only live growth follows to the bottom; an empty or off-window incremental check must not pull a scrolled pane down.
     paintDetail(!prepend && newerFrom === undefined && historyBefore === null && (!incremental || deltaChanged));
+    if (incremental && deltaChanged && detail.events.some(event => event.kind === 'user_message')) void refreshInputQueue();
     if (!prepend && newerFrom === undefined && !(incremental && detail.events.length === TIMELINE_BATCH_SIZE)) {
       detailSatisfiedPushSeq = Math.max(detailSatisfiedPushSeq, capturedPushSeq);
     }
@@ -7095,9 +7108,13 @@ function paintDetail(followBottom = historyBefore === null): void {
   placeTurnLines(timelineRows, workedSeconds);
   reconcileChildren($('timeline'), groupImageRows(renderRounds(timelineRows, tracesFor === selectedId ? traces : {}, turnWorking,
     turnWorking ? openTurnId(events) : null, selectedId, toolGroups, sayRows, true)));
+  paintedTimelineFor = detailFor;
+  paintedTimelineEvents = shown;
+  paintedDetailEvents = events;
   // Rounds that arrive after this paint enter with a fade; the chat as it opened does not.
   roundsEnter = timelineRows.length > 0;
   paintPendingInputs();
+  paintDeliveryControls();
   $('timelineEmpty').hidden = selectedId !== null || timelineRows.length > 0 || $('inputQueue').childElementCount > 0;
   if (timelineShown() && !holdSentMessage()) restoreViewport();
   paintJumpLatest();
@@ -9225,30 +9242,99 @@ function schedulePageHoldLapse(): void {
   pageHoldLapseTimer = window.setTimeout(() => { pageHoldLapseTimer = undefined; paintPendingInputs(); }, Math.max(0, Math.min(...due) - now) + 50);
 }
 
+let paintedTimelineFor: string | null = null;
+let paintedTimelineEvents: SessionEvent[] = [];
+let paintedDetailEvents: SessionEvent[] = [];
+const pageEchoMatches = new Map<string, { sessionId: string | null; messageId: string }>();
+
+function pageEchoAnchored(entry: InputEntry, all: readonly InputEntry[]): boolean {
+  if (!selectedId || detailFor !== selectedId || paintedTimelineFor !== selectedId || historyBefore !== null ||
+      !inputBelongsToCurrentSelection(entry)) return false;
+  const selectedSession = sessions.find(session => session.id === selectedId);
+  const multiChat = (selectedSession?.chatIds?.length ?? 0) > 1;
+  if (entry.requiresAuthorization && entry.sendAuthorizedAt === undefined) return false;
+  const dispatched = entry.state === 'browser' ||
+    (entry.state === 'queued' && !entry.error && !entry.scheduled && !heldBySendCheck(entry) &&
+      !queuedWaitReason(entry) && !routeHeld(entry) &&
+      (entry.offeredAt !== undefined || entry.sendAuthorizedAt !== undefined));
+  if (!dispatched || queuedFollowup(entry) || entry.messageId) return false;
+  const norm = (value: string) => value.replace(/\s+/g, ' ').trim();
+  const authored = norm(authoredTextOf(entry));
+  const companion = entry.companionInputId ? all.find(other => other.id === entry.companionInputId) : undefined;
+  const combined = companion ? norm(`${authoredTextOf(entry)}\n\nNext queued instruction:\n${companion.text}`) : '';
+  const delivered = entry.deliveryText ? norm(entry.deliveryText) : '';
+  const candidates = [authored, combined, delivered].filter(Boolean);
+  if (!candidates.length) return false;
+  const pendingMedia = (entry.images?.length ?? 0) > 0 || (entry.attachments?.length ?? 0) > 0;
+  const minEchoTime = entry.requiresAuthorization ? entry.sendAuthorizedAt! : entry.createdAt;
+  const settledBefore = entry.sendAuthorizedAt ?? entry.offeredAt ?? entry.createdAt;
+  const echoMatchesEntry = (event: SessionEvent): event is Extract<SessionEvent, { kind: 'user_message' }> => {
+    if (event.kind !== 'user_message' || event.source !== 'extension' || event.inputId || !event.messageId ||
+        event.messageId.startsWith('input:') || event.time < minEchoTime) return false;
+    if (multiChat && (!entry.conversationId || event.conversationId !== entry.conversationId)) return false;
+    if (!multiChat && event.conversationId && entry.conversationId && event.conversationId !== entry.conversationId) return false;
+    if (entry.edit && event.messageId === entry.edit.messageId) return false;
+    if (all.some(other => other.id !== entry.id && other.messageId === event.messageId)) return false;
+    for (const [otherId, cached] of pageEchoMatches) {
+      if (otherId !== entry.id && cached.sessionId === selectedId && cached.messageId === event.messageId) return false;
+    }
+    if (paintedDetailEvents.some(later => positionOf(later) > positionOf(event) && later.kind === 'turn_end' && later.time <= settledBefore)) return false;
+    const shown = norm(event.authoredText ?? userPromptText(event.message.text.trimStart()) ?? event.message.text);
+    const raw = norm(event.message.text);
+    const textMatch = candidates.includes(shown) || candidates.includes(raw);
+    return textMatch && (!pendingMedia || !!event.attachments?.length || !!event.assets?.length);
+  };
+  const priorMatch = pageEchoMatches.get(entry.id);
+  const priorEvent = priorMatch && priorMatch.sessionId === selectedId
+    ? paintedTimelineEvents.find((event): event is Extract<SessionEvent, { kind: 'user_message' }> =>
+        echoMatchesEntry(event) && event.messageId === priorMatch.messageId)
+    : undefined;
+  if (priorEvent) return true;
+  const sameConversationLaterUser = (event: SessionEvent, later: SessionEvent) =>
+    positionOf(later) > positionOf(event) && later.kind === 'user_message' &&
+    !(later.messageId?.startsWith('input:') && later.time < event.time) &&
+    (!entry.conversationId || !later.conversationId || later.conversationId === entry.conversationId);
+  const match = paintedTimelineEvents.find((event): event is Extract<SessionEvent, { kind: 'user_message' }> =>
+    echoMatchesEntry(event) && !paintedDetailEvents.some(later => sameConversationLaterUser(event, later)));
+  if (match?.messageId) {
+    pageEchoMatches.set(entry.id, { sessionId: selectedId, messageId: match.messageId });
+    return true;
+  }
+  pageEchoMatches.delete(entry.id);
+  return false;
+}
+
+function anchoredPendingInput(entry: InputEntry, all: readonly InputEntry[] = pendingComposerInputs): boolean {
+  return detailFor === selectedId && ((paintedTimelineFor === selectedId && paintedTimelineEvents.some(event =>
+    event.kind === 'user_message' && (event.inputId === entry.id ||
+      event.messageId === (entry.messageId ?? `input:${entry.id}`)))) ||
+    pageEchoAnchored(entry, all) ||
+    // History owns committed off-page rows. Keep only receipts newer than our
+    // loaded publication cursor while the corresponding live snapshot arrives.
+    (Boolean(entry.historyAnchored || entry.historyRecorded) &&
+      (historyBefore !== null || (entry.historySeq !== undefined
+        ? (detailCursor ?? 0) > entry.historySeq
+        : events.length > 0))));
+}
+
 function paintPendingInputs(): void {
   schedulePageHoldLapse();
   const all = pendingComposerInputs;
-  const belongsToSelection = (entry: InputEntry): boolean => selectedId === null
-    ? pendingNewInput?.generation === selectionGeneration && entry.id === pendingNewInput.id
-    : (entry.sessionId ?? entry.deliveredSessionId) === selectedId;
+  for (const id of [...pageEchoMatches.keys()]) {
+    const current = all.find(entry => entry.id === id) ?? startingInputs.get(id);
+    if (!current || current.messageId || ['sent', 'cancelled', 'failed'].includes(current.state)) pageEchoMatches.delete(id);
+  }
+  const belongsToSelection = inputBelongsToCurrentSelection;
   // A pre-acceptance or failed-materialization row belongs only to its exact draft.
   // A fresh New Chat never inherits another opening.
   const unbound = (entry: InputEntry) => selectedId === null && pendingNewInput?.id === entry.id && pendingNewInput.generation === selectionGeneration && !entry.deliveredSessionId && entry.purpose !== 'decision' && ['queued', 'browser'].includes(entry.state);
   const notice = (entry: InputEntry) => belongsToSelection(entry) && entry.purpose !== 'decision' && entry.purpose !== 'rotation' &&
     ['failed', 'cancelled'].includes(entry.state) && !!entry.error && !dismissedInputNotices.has(entry.id);
-  const anchored = (entry: InputEntry) => detailFor === selectedId && (events.some(event =>
-    event.kind === 'user_message' && (event.inputId === entry.id ||
-      event.messageId === (entry.messageId ?? `input:${entry.id}`))) ||
-    // History owns committed off-page rows. Keep only receipts newer than our
-    // loaded publication cursor while the corresponding live snapshot arrives.
-    ((entry.historyAnchored || entry.historyRecorded) &&
-      (historyBefore !== null || (entry.historySeq !== undefined
-        ? (detailCursor ?? 0) > entry.historySeq
-        : events.length > 0))));
-  const rows = all.filter((entry) => !dismissedInputNotices.has(entry.id) && !(!notice(entry) && anchored(entry)) && !(queuedFollowup(entry) && ['queued', 'tool', 'browser'].includes(entry.state)) && (belongsToSelection(entry) || unbound(entry) || notice(entry)) &&
+  const anchored = (entry: InputEntry) => anchoredPendingInput(entry, all);
+  const rows = all.filter((entry) => !dismissedInputNotices.has(entry.id) && (belongsToSelection(entry) || unbound(entry) || notice(entry)) && !(!notice(entry) && anchored(entry)) && !(queuedFollowup(entry) && ['queued', 'tool', 'browser'].includes(entry.state)) &&
     (notice(entry) || unbound(entry) || selectedId !== null || projectGroup(entry.projectId) === selectedProjectId) &&
     (notice(entry) || !['sent', 'cancelled'].includes(entry.state) || (entry.state === 'sent' && entry.messageId && !anchored(entry))));
-  for (const entry of startingInputs.values()) if (belongsToSelection(entry) && !all.some(row => row.id === entry.id)) rows.push(entry);
+  for (const entry of startingInputs.values()) if (belongsToSelection(entry) && !anchored(entry) && !all.some(row => row.id === entry.id)) rows.push(entry);
   const host = $('inputQueue');
   // A row whose status changed is rebuilt; a control of it that had keyboard focus keeps it (CodeRabbit on #2054).
   const active = document.activeElement instanceof HTMLElement && host.contains(document.activeElement) ? document.activeElement : null;
@@ -9266,9 +9352,13 @@ function paintPendingInputs(): void {
   reconcileChildren(host, [...next, ...host.querySelectorAll<HTMLElement>(':scope > .queued-input')]);
   if (focused?.id && active && !active.isConnected) {
     const row = [...host.querySelectorAll<HTMLElement>(':scope > .pending-message')].find(candidate => candidate.dataset.inputId === focused.id);
-    const buttons = [...row?.querySelectorAll<HTMLElement>('button') ?? []];
-    // The same control if the rebuilt row still has it, else the row's first one (a failed row shows Retry and Dismiss instead).
-    (buttons.find(button => button.className === focused.cls && button.getAttribute('aria-label') === focused.label) ?? buttons[0])?.focus({ preventScroll: true });
+    if (row) {
+      const buttons = [...row.querySelectorAll<HTMLElement>('button')];
+      // The same control if the rebuilt row still has it, else the row's first one (a failed row shows Retry and Dismiss instead).
+      (buttons.find(button => button.className === focused.cls && button.getAttribute('aria-label') === focused.label) ?? buttons[0])?.focus({ preventScroll: true });
+    } else {
+      $<HTMLTextAreaElement>('chatInput').focus({ preventScroll: true });
+    }
   }
   holdSentMessage();
 }
@@ -9599,9 +9689,11 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
     if (!controlAction) return;
     const target = selectedId, selection = selectionGeneration;
     const sameSelection = () => selectedId === target && selectionGeneration === selection;
-    // The turn the button showed Stop for, before the refresh can change it (CodeRabbit).
+    // The turn or pending delivery the button showed Stop/Cancel for, before the refresh can change it (CodeRabbit).
     const shownTurn = controlledSessionId === target && controlledSelection === selection ? controlledTurnId ?? controlledHeldTurnId : null;
     const shownConversation = shownTurn ? controlledConversationId : null;
+    const shownPendingId = !shownTurn && paintedPendingCancel?.target === target && paintedPendingCancel.selection === selection
+      ? paintedPendingCancel.id : null;
     await refreshSessionControls();
     if (!sameSelection()) return;
     // An actual turn takes precedence over queued follow-ups. Stop never silently
@@ -9617,8 +9709,10 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
       if (target) { await stopShownTurn(target, shownTurn, shownConversation, sameSelection); if (sameSelection()) void refreshSessionControls(); }
       return;
     }
-    const pending = pendingComposerInput();
-    if (pending && ['queued', 'browser'].includes(pending.state)) {
+    const pending = shownPendingId
+      ? [...pendingComposerInputs, ...startingInputs.values()].find(entry => entry.id === shownPendingId)
+      : undefined;
+    if (pending && cancellablePendingInput(pending)) {
       const wasStarting = startingInputs.has(pending.id);
       if (wasStarting) cancelledStarts.add(pending.id);
       const cancelled = await run(api.cancelInput(pending.id));
