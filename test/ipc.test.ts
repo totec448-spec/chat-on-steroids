@@ -960,6 +960,8 @@ it('adds picker-selected projects, reuses containing approval, and leaves cancel
 
 it('opens exactly the saved project folder and refuses unknown, unapproved or unavailable roots', async () => {
   const { addProject, removeProject } = await import('../src/main/projects.js');
+  const logger = await import('../src/main/logger.js');
+  const warning = vi.spyOn(logger, 'logWarn');
   const approved = await fs.realpath(dir);
   const parent = path.join(approved, 'approved-open-folder');
   const target = path.join(parent, 'actual-project');
@@ -979,7 +981,9 @@ it('opens exactly the saved project folder and refuses unknown, unapproved or un
     expect(result).toMatchObject({ ok: true, data: await fs.realpath(target) });
     expect(calls).toHaveBeenCalledExactlyOnceWith(await fs.realpath(target));
     // An arbitrary pathname cannot be injected into the IPC surface.
+    const invalidLogCount = warning.mock.calls.length;
     expect(await open(project.id, { path: other })).toMatchObject({ ok: false });
+    expect(warning.mock.calls.slice(invalidLogCount).map(call => call[0])).toEqual(['projects:openFolder refused: invalid_payload']);
     expect(await open('invalid-project-id')).toMatchObject({ ok: false });
     expect(await open('12345678-1234-4123-8123-123456789abc')).toMatchObject({ ok: false });
     expect(calls).toHaveBeenCalledTimes(1);
@@ -1004,6 +1008,25 @@ it('opens exactly the saved project folder and refuses unknown, unapproved or un
     } finally {
       statSpy.mockRestore();
     }
+    // These distinct inode values collapse to the same IEEE-754 Number.
+    // BigInt fs.Stats must still reject the substituted directory identity.
+    let bigintCalls = 0;
+    const precisionSpy = vi.spyOn(fs, 'stat').mockImplementation(async (...args) => {
+      const stat = await realStat(...args);
+      // The project resolver may also stat the same path; count only the
+      // explicit BigInt identity checks in this IPC handler.
+      if (String(args[0]) !== target || !args[1]?.bigint) return stat;
+      bigintCalls++;
+      return Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, {
+        ino: bigintCalls === 1 ? 9007199254740992n : 9007199254740993n
+      });
+    });
+    try {
+      expect(await open(project.id)).toMatchObject({ ok: false, error: expect.stringMatching(/changed on disk/) });
+      expect(calls).toHaveBeenCalledTimes(2);
+    } finally {
+      precisionSpy.mockRestore();
+    }
     // A saved project path replaced by a junction/symlink must not launch an
     // unapproved directory, even if its project ID and approved parent persist.
     const parked = path.join(parent, 'actual-project-parked');
@@ -1026,14 +1049,17 @@ it('opens exactly the saved project folder and refuses unknown, unapproved or un
     expect(await open(sibling.id)).toMatchObject({ ok: false });
     expect(calls).toHaveBeenCalledTimes(2);
     calls.mockResolvedValueOnce('Access is denied');
+    const shellLogCount = warning.mock.calls.length;
     expect(await open(project.id)).toMatchObject({ ok: false, error: expect.stringMatching(/Access is denied/) });
     expect(calls).toHaveBeenCalledTimes(3);
+    expect(warning.mock.calls.slice(shellLogCount).map(call => call[0])).toEqual(['projects:openFolder refused: shell_failed']);
     // Removing a project only marks the retained catalog entry `ungrouped`.
     // An old UUID must not bypass its disappearance from the project menu.
     await removeProject(project.id);
     expect(await open(project.id)).toMatchObject({ ok: false, error: expect.stringMatching(/Project not found/) });
     expect(calls).toHaveBeenCalledTimes(3);
   } finally {
+    warning.mockRestore();
     await removeTempDir(outside);
   }
 });

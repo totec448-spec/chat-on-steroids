@@ -1,4 +1,7 @@
 {
+  "Open project folder": "Projektordner ?ffnen",
+  "Open this project's exact approved folder": "Genau den genehmigten Ordner dieses Projekts ?ffnen",
+  "Opened project folder: {0}": "Projektordner ge?ffnet: {0}",
   "Save here and replace any existing file?": "Hier speichern und eine vorhandene Datei ersetzen?",
   "Replace this CSV file?": "Diese CSV-Datei ersetzen?",
   "Replace file": "Datei ersetzen",

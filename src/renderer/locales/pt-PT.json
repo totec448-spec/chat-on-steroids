@@ -1,4 +1,7 @@
 {
+  "Open project folder": "Abrir pasta do projeto",
+  "Open this project's exact approved folder": "Abrir exatamente a pasta aprovada deste projeto",
+  "Opened project folder: {0}": "Pasta do projeto aberta: {0}",
   "Save here and replace any existing file?": "Guardar aqui e substituir qualquer ficheiro existente?",
   "Replace this CSV file?": "Substituir este ficheiro CSV?",
   "Replace file": "Substituir ficheiro",

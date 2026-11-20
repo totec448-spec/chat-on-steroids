@@ -750,6 +750,18 @@ function handle<T>(channel: string, fn: (payload: unknown, event: IpcMainInvokeE
     try {
       return { ok: true as const, data: await fn(payload, event) };
     } catch (err) {
+      // This user-initiated OS action must be auditable without disclosing
+      // the selected project's UUID, native path or untrusted OS error text.
+      // One refusal is logged per failed invocation, including invalid IPC.
+      if (channel === 'projects:openFolder') {
+        const reason = err instanceof z.ZodError ? 'invalid_payload'
+          : err instanceof Error && err.message.includes('changed on disk') ? 'identity_changed'
+          : err instanceof Error && err.message.includes('changed location') ? 'location_changed'
+          : err instanceof Error && err.message.startsWith('Could not open the project folder:') ? 'shell_failed'
+          : err instanceof Error && /Project not found|Project no longer available/.test(err.message) ? 'project_unavailable'
+          : 'target_unavailable';
+        logWarn(`projects:openFolder refused: ${reason}`);
+      }
       // The renderer gets a generic text for schedule failures, so the log says which one failed and a safe code, never
       // the message or a path (CodeRabbit on #2063). Refusals the person can fix (listed messages, bad input) are not failures.
       if (channel.startsWith('schedules:') && !(err instanceof z.ZodError)) {
@@ -1255,11 +1267,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (!selected || selected.ungrouped) throw new Error('Project not found');
     const first = await projectFileTarget(projectId, '');
     if (first.kind !== 'directory') throw new Error('This project folder is unavailable');
-    const before = await fs.stat(first.real);
+    const before = await fs.stat(first.real, { bigint: true });
     if (!before.isDirectory()) throw new Error('This project folder is unavailable');
     // Re-resolve immediately before opening so a moved project or altered grant fails closed.
     const current = await projectFileTarget(projectId, '');
-    const after = await fs.stat(current.real);
+    const after = await fs.stat(current.real, { bigint: true });
     if (current.kind !== 'directory' || current.projectReal !== first.projectReal || current.real !== first.real) {
       throw new Error('The project folder changed location. Reload the project before opening.');
     }
