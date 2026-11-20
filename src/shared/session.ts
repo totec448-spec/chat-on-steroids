@@ -424,6 +424,8 @@ export type SessionEvent =
       origin?: number;
       /** Store-owned authored-content revision; metadata and rehydration preserve it. */
       contentSeq?: number;
+      /** ChatGPT conversation id that observed this message, scoping multi-chat/rotated echo matching. */
+      conversationId?: string;
     })
   | (BaseEvent & {
       kind: 'assistant_message';

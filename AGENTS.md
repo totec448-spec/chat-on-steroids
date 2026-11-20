@@ -2488,6 +2488,7 @@ to already-resident rows of the same exact local turn during incremental renderi
 The existing `nativeQuestion` summary excludes proven tool injections. Browser-delivered inputs
 can also carry `inputId`, so that field alone never excludes a native question. Injected corrections
 remain visible in history but cannot become native user anchors or recovery question identities.
+Extension-recorded `user_message` events also carry optional `conversationId`: the ChatGPT conversation that observed the message (written by both active observations and superseded lingering tabs so multi-chat/rotated timelines keep echo ownership scoped); older records may omit it.
 
 Unattributed is a first-class recorded state. Late exact proof repairs only matching call ids
 to the proved session epoch, copying assets first and rewriting only the scanned source prefix
@@ -4985,7 +4986,11 @@ replace them directly; queue/status repaints must not flash the New Chat welcome
 A failed destination read clears retained rows. The welcome belongs only to explicit New Chat.
 Unbound local sessions do not request provider-only controls. The timeline and pending-message
 projection reconcile exact input/native message identities in the same paint: keep an accepted
-bubble until its history arrives, then remove its pending copy. Unchanged pending rows stay mounted.
+bubble until its history arrives (including an early unattributed extension `user_message` echo on the
+mounted newest page once text and media readiness match after authorization/dispatch, scoped by
+`user_message.conversationId` on multi-chat or rotated sessions and ignoring other conversations'
+late user messages when choosing the newest echo while still treating unattributed later questions
+conservatively), then remove its pending copy. Unchanged pending rows stay mounted.
 The outbox's `historySeq` is the store-confirmed canonical origin. Once the loaded publication
 cursor covers it, the pending projection cannot resurrect that input when its history page is
 evicted. Historical browsing leaves committed inputs with history. Never infer membership from
