@@ -4851,6 +4851,52 @@ function safeRecordedImage(url: string): string | null {
   } catch { return null; }
 }
 
+const DIL_GRID = '[data-d-component="grid"]';
+const DIL_GRID_ITEM = '[data-d-component="grid-item"]';
+const DIL_BORDERED_BOX = '[data-d-component="box"][data-d-has-border]';
+const DIL_TITLE = '[data-d-component="title"]';
+const DIL_GRID_TEXT_BLOCK = 'p, h1, h2, h3, h4, h5, h6';
+const DIL_METRIC_ICON = '[data-d-component="row"] > :is(svg, span[data-cos-icon]:empty)';
+
+/** A complete row of typed, bordered metric cards with a recorded equal-width layout. */
+function recordedMetricGridColumns(node: Element): number | null {
+  const cells = [...node.children];
+  if (cells.length < 2 || cells.length > 4) return null;
+  const hasLooseText = (element: Element): boolean =>
+    [...element.childNodes].some(child => child.nodeType === 3 && child.textContent?.trim());
+  if (hasLooseText(node)) return null;
+  if (node.querySelector(`${DIL_GRID}, table, pre, code, [data-d-component="image"]`)) return null;
+  for (const cell of cells) {
+    const panel = cell.firstElementChild;
+    if (!cell.matches(DIL_GRID_ITEM) || cell.childElementCount !== 1 || !panel?.matches(DIL_BORDERED_BOX) ||
+        hasLooseText(cell) || panel.querySelector(DIL_BORDERED_BOX) || panel.querySelectorAll(DIL_TITLE).length !== 1 ||
+        !panel.querySelector('[data-d-component="text"]')) return null;
+  }
+  // Compact recordings store the same declaration as data. Only its equal-track count is used.
+  const style = node.getAttribute('style') ?? node.getAttribute('data-cos-style') ?? '';
+  const columns = [...style.matchAll(/(?:^|;)\s*grid-template-columns\s*:\s*([^;]*)/gi)];
+  if (columns.length !== 1) return null;
+  const match = /^repeat\(\s*([2-4])\s*,\s*(?:minmax\(\s*0(?:px)?\s*,\s*1fr\s*\)|1fr)\s*\)$/i.exec(columns[0]![1]!.trim());
+  return Number(match?.[1]) === cells.length ? cells.length : null;
+}
+
+/** Keep case, punctuation and field boundaries when comparing sanitized grid and Markdown. */
+function metricGridText(nodes: Element[]): string {
+  const parts: string[] = [];
+  const walk = (node: Node): void => {
+    if (node.nodeType === 3) { parts.push(node.textContent ?? ''); return; }
+    if (node.nodeType !== 1) return;
+    const element = node as Element;
+    if (element.matches('.markdown-dil-success-icon, .markdown-dil-down-icon')) return;
+    const block = element.matches(`${DIL_GRID_TEXT_BLOCK}, div, br, .markdown-dil-title, .markdown-dil-text`);
+    if (block) parts.push('\n');
+    for (const child of element.childNodes) walk(child);
+    if (block) parts.push('\n');
+  };
+  for (const node of nodes) walk(node);
+  return parts.join('').split('\n').map(line => line.replace(/[\t\f\r ]+/g, ' ').trim()).filter(Boolean).join('\n');
+}
+
 function restoreRecordedDilLayouts(box: HTMLElement, capture?: StoredText): void {
   if (!capture?.text || capture.truncated || capture.text.length > MAX_RENDERED_HTML_CHARS ||
       !capture.text.includes('data-d-component=')) return;
@@ -4869,12 +4915,30 @@ function restoreRecordedDilLayouts(box: HTMLElement, capture?: StoredText): void
         node.querySelector('p')) return 'photo';
     return null;
   };
-  const candidates = [...template.content.querySelectorAll('[data-d-component]')]
-    .map(node => ({ node, kind: candidate(node) })).filter((value): value is { node: Element; kind: 'card' | 'panel' | 'steps' | 'photo' } => !!value.kind)
-    .filter(value => !value.node.parentElement?.closest('[data-d-component="card"]'))
-    .slice(0, 16);
-  for (const { node, kind } of candidates) {
+  const candidates: Array<{ node: Element; kind: NonNullable<ReturnType<typeof candidate>>; columns?: never } |
+    { node: Element; kind: 'grid'; columns: number }> = [];
+  let metricGrid: Element | undefined;
+  for (const node of template.content.querySelectorAll('[data-d-component]')) {
+    if (metricGrid?.contains(node) || node.parentElement?.closest('[data-d-component="card"]')) continue;
+    if (node.matches(DIL_GRID) && !node.parentElement?.closest(`${DIL_GRID}, ${DIL_BORDERED_BOX}`) &&
+        node.querySelector(`:scope > ${DIL_GRID_ITEM} > ${DIL_BORDERED_BOX} ${DIL_TITLE}`)) {
+      // A recognizable metric grid owns its cells even if the complete layout fails validation.
+      // Unrelated DIL grids keep the existing panel, card and workflow behavior.
+      metricGrid = node;
+      const columns = recordedMetricGridColumns(node);
+      if (columns !== null) candidates.push({ node, kind: 'grid', columns });
+    } else {
+      const kind = candidate(node);
+      if (kind) candidates.push({ node, kind });
+    }
+    if (candidates.length === 16) break;
+  }
+  for (const { node, kind, columns } of candidates) {
     const copy = node.cloneNode(true) as Element;
+    if (kind === 'grid') {
+      // A decorative recorded drawing can carry aria-hidden; the typed layout keeps no glyph.
+      for (const symbol of copy.querySelectorAll(`:scope > ${DIL_GRID_ITEM} > ${DIL_BORDERED_BOX} > ${DIL_METRIC_ICON}`)) symbol.remove();
+    }
     if (kind === 'photo') {
       // Search-image overlays include functional controls; inline entity "pressables"
       // also wrap visible words. Keep their inert text, but never their behavior.
@@ -4885,6 +4949,8 @@ function restoreRecordedDilLayouts(box: HTMLElement, capture?: StoredText): void
     if (copy.querySelector('a, button, input, select, textarea, form, iframe, video, canvas, [contenteditable]') ||
         copy.querySelector('[hidden], [aria-hidden="true"]')) continue;
     const images = [...copy.querySelectorAll('img')];
+    // A metric grid draws values as text; any recorded image is not this supported layout.
+    if (kind === 'grid' && images.length) continue;
     if (images.length > 1 || images.some(img =>
       img.getAttribute('data-d-component') !== 'svg' && !img.closest('[data-d-component="image"]'))) continue;
     if (images.some(img => !(img.getAttribute('data-d-component') === 'svg'
@@ -4909,15 +4975,30 @@ function restoreRecordedDilLayouts(box: HTMLElement, capture?: StoredText): void
       }
     }
     if (matches.length !== 1) continue;
+    const { start, end } = matches[0]!;
+    // Matching words alone cannot authorize replacing canonical links, code, tables, or math.
+    const span = kind === 'grid' ? nodes.slice(start, end + 1) : [];
+    if (kind === 'grid' && span.some(node => !node.matches(DIL_GRID_TEXT_BLOCK) ||
+        node.querySelector('a, button, code, img, math, svg'))) continue;
     // The same sanitizer removes every untrusted style, class and event attribute.
     // Only an exact, unique canonical text span authorizes reconstructing a static layout.
     const markup = copy.outerHTML;
     const safe = renderedMessage({ text: markup, chars: markup.length, truncated: false }, '', true);
     const panel = safe.firstElementChild;
     if (!panel || visibleWords(panel).join('\u0000') !== expected.join('\u0000')) continue;
-    panel.classList.add(kind === 'panel' ? 'markdown-dil-panel' : kind === 'steps' ? 'markdown-dil-steps' :
-      kind === 'photo' ? 'markdown-dil-photo-row' : 'markdown-dil-card');
-    const { start, end } = matches[0]!;
+    if (kind === 'grid') {
+      // Every recorded cell, title and bordered box must survive sanitization before one shared
+      // grid may stand in for the canonical span.
+      const cards = [...panel.querySelectorAll(':scope > .markdown-dil-grid-item > .markdown-dil-bordered')];
+      if (!panel.classList.contains('markdown-dil-grid') ||
+          cards.length !== columns ||
+          panel.querySelectorAll('.markdown-dil-title').length !== columns ||
+          metricGridText([panel]) !== metricGridText(span)) continue;
+      panel.classList.add('markdown-dil-grid-standalone', `markdown-dil-grid-columns-${columns}`);
+    } else {
+      panel.classList.add(kind === 'panel' ? 'markdown-dil-panel' : kind === 'steps' ? 'markdown-dil-steps' :
+        kind === 'photo' ? 'markdown-dil-photo-row' : 'markdown-dil-card');
+    }
     nodes[start]!.replaceWith(panel);
     for (let at = start + 1; at <= end; at++) nodes[at]!.remove();
   }
