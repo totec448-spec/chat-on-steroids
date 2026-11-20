@@ -4201,6 +4201,15 @@
   "If a save fails, your original file stays as it was.": "Если сохранение не удалось, исходный файл остаётся как был.",
   "Write mid-answer in any language": "Сообщения посреди ответа на любом языке",
   "A message sent while ChatGPT is answering now goes out on pages in every language.": "Сообщение, отправленное во время ответа ChatGPT, теперь уходит на страницах на любом языке.",
+  "Goal chats that don't stand idle, a tidier Settings, faster chat updates, and the files a chat edited.": "Goal-чаты, которые не зависают, более аккуратные настройки, более быстрое обновление чатов и файлы, изменённые чатом.",
+  "Goal chats don't stand idle": "Goal-чаты больше не зависают",
+  "A Goal or Loop chat whose Compact & Resume got stuck goes on from its saved summary.": "Goal- или Loop-чат, у которого застряло «Сжать и продолжить», продолжает работу с сохранённой сводки.",
+  "A tidier Settings": "Более аккуратные настройки",
+  "Agents settings are split into five short pages instead of one very long one.": "Настройки агентов разделены на пять коротких страниц вместо одной очень длинной.",
+  "Chats update faster": "Чаты обновляются быстрее",
+  "A new message or tool call shows up in the open chat much sooner.": "Новое сообщение или вызов инструмента появляется в открытом чате намного раньше.",
+  "What a chat edited": "Что изменил чат",
+  "Review lists the files this chat changed and opens each recorded diff.": "Проверка показывает файлы, которые изменил этот чат, и открывает каждый записанный diff.",
   "Steered active turn": "Перенаправил активный ход",
   "Worked for {0}{1}s · steered": "Завершил работу — {0}{1} с · перенаправлен"
 }

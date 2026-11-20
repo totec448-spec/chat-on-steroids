@@ -4117,6 +4117,15 @@
   "If a save fails, your original file stays as it was.": "Si un enregistrement échoue, votre fichier d'origine reste tel quel.",
   "Write mid-answer in any language": "Écrire en pleine réponse, dans toutes les langues",
   "A message sent while ChatGPT is answering now goes out on pages in every language.": "Un message envoyé pendant que ChatGPT répond part désormais aussi sur les pages dans toutes les langues.",
+  "Goal chats that don't stand idle, a tidier Settings, faster chat updates, and the files a chat edited.": "Des chats Goal qui ne restent pas bloqués, des Réglages mieux rangés, des chats qui se mettent à jour plus vite et les fichiers qu'un chat a modifiés.",
+  "Goal chats don't stand idle": "Les chats Goal ne restent plus bloqués",
+  "A Goal or Loop chat whose Compact & Resume got stuck goes on from its saved summary.": "Un chat Goal ou Loop dont Compacter et reprendre est resté bloqué repart de son résumé enregistré.",
+  "A tidier Settings": "Des Réglages mieux rangés",
+  "Agents settings are split into five short pages instead of one very long one.": "Les réglages des agents sont répartis en cinq pages courtes au lieu d'une seule très longue.",
+  "Chats update faster": "Les chats se mettent à jour plus vite",
+  "A new message or tool call shows up in the open chat much sooner.": "Un nouveau message ou un appel d'outil apparaît dans le chat ouvert bien plus tôt.",
+  "What a chat edited": "Ce qu'un chat a modifié",
+  "Review lists the files this chat changed and opens each recorded diff.": "Revue liste les fichiers modifiés par ce chat et ouvre chaque diff enregistré.",
   "Steered active turn": "A réorienté le tour actif",
   "Worked for {0}{1}s · steered": "A travaillé pendant {0}{1} s · réorienté"
 }
