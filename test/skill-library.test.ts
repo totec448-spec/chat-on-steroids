@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { makeTempDir, removeTempDir } from './helpers.js';
 import { defaultConfig, getConfig, initConfigPath, saveConfig } from '../src/main/config.js';
-import { initSkillsPath, importSkillPackage, listSkills, removeSkill, setManagedSkillEnabled } from '../src/main/skills.js';
+import { disabledManagedSkillTargets, initSkillsPath, importSkillPackage, listSkills, removeSkill, setManagedSkillEnabled } from '../src/main/skills.js';
 import { listSkillLibrary, readLibrarySkill, skillLibraryInstructions } from '../src/main/skill-library.js';
 import type { LibrarySkill } from '../src/shared/skills.js';
 
@@ -95,6 +95,18 @@ it('does not rediscover a disabled managed link as a selectable hashed unmanaged
   expect((await listSkillLibrary({ projectPath: project })).skills).toEqual([]);
   await setManagedSkillEnabled('review', true);
   expect((await listSkillLibrary({ projectPath: project })).skills.map(item => item.id)).toEqual(['review']);
+});
+
+it('enumerates disabled managed targets after an earlier queued toggle', async () => {
+  const source = path.join(project, '.agents/skills/review');
+  await write(path.join(source, 'SKILL.md'), contents('Review'));
+  await fs.symlink(source, path.join(root, 'skills', 'review'), process.platform === 'win32' ? 'junction' : 'dir');
+  const target = path.join(await fs.realpath(source), 'SKILL.md');
+
+  const toggle = setManagedSkillEnabled('review', false);
+  const targets = disabledManagedSkillTargets();
+  await toggle;
+  expect(await targets).toEqual([target]);
 });
 
 it('honors layered config and both YAML policy styles while keeping package resources out of discovery', async () => {
