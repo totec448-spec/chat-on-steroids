@@ -20,7 +20,6 @@ import {
 import { MAX_SKILL_BYTES, MAX_SKILLS } from '../src/shared/skills.js';
 import { defaultConfig, getConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { rawPromises as rawFs } from '../src/main/rawfs.js';
-import { RECOMMENDED_SKILLS } from '../src/shared/recommended-skills.js';
 
 let userData = '';
 let sources = '';
@@ -46,17 +45,6 @@ async function sourceFile(relative: string, contents: string | Buffer): Promise<
 }
 
 describe('managed Skills store', () => {
-  it('identifies only exact bundled COS recommendations without inventing GitHub sources', async () => {
-    const builtin = RECOMMENDED_SKILLS.find(skill => skill.id === 'code-review')!;
-    const folder = path.join(sources, 'code-review');
-    await fs.mkdir(folder);
-    await fs.writeFile(path.join(folder, 'SKILL.md'), builtin.markdown);
-    await importSkillPackage(folder);
-    expect((await listManagedSkills())[0]).toMatchObject({ id: 'code-review', enabled: true, bundled: true, origin: null });
-    const localOnly = await sourceFile('local.md', '# Local\n\nCustom');
-    await importSkillFile(localOnly);
-    expect((await listManagedSkills()).find(skill => skill.id === 'local')).toMatchObject({ bundled: false, origin: null });
-  });
   it('persists disabled managed skills without editing contents, excluding both explicit and automatic selection', async () => {
     const source = await sourceFile('review.md', '# Review\n\nSafe steps.');
     await importSkillFile(source);
@@ -95,6 +83,16 @@ describe('managed Skills store', () => {
     const stateFile = path.join(userData, 'skills', '.disabled-skills.json');
     await fs.writeFile(stateFile, JSON.stringify({ version: 1, disabled: ['../review'] }));
     await expect(initSkillsPath(userData)).rejects.toThrow(/enablement is invalid/i);
+  });
+
+  it('reports a safe error for malformed state and leaves the managed catalog unavailable', async () => {
+    await importSkillFile(await sourceFile('review.md', '# Review'));
+    await setManagedSkillEnabled('review', false);
+    await fs.writeFile(path.join(userData, 'skills', '.disabled-skills.json'), 'private fixture text');
+
+    await expect(initSkillsPath(userData)).rejects.toThrow(/^Managed Skill enablement is invalid$/);
+    expect(skillsDirectory()).toBeNull();
+    expect(skillCatalogSnapshot()).toEqual([]);
   });
 
   it('drops a disabled Skill from the published catalog even if the post-toggle scan fails', async () => {

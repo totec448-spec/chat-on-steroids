@@ -1776,8 +1776,6 @@
   "Enable skill": "Beceriyi etkinleştir",
   "Skill disabled": "Beceri devre dışı bırakıldı",
   "Skill enabled": "Beceri etkinleştirildi",
-  "Bundled with COS": "COS ile birlikte gelir",
-  "This Skill exactly matches the bundled COS recommended version.": "Bu beceri, COS ile gelen önerilen sürümle tamamen eşleşiyor.",
   "Managed Skill enablement file is invalid": "Skill etkinleştirme durumu dosyası geçersiz.",
   "Managed Skill enablement is invalid": "Skill etkinleştirme durumu geçersiz.",
   "Managed Skill enablement changed while reading": "Skill etkinleştirme durumu okunurken değişti.",

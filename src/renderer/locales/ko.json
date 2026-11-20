@@ -1750,8 +1750,6 @@
   "Enable skill": "스킬 활성화",
   "Skill disabled": "스킬이 비활성화되었습니다",
   "Skill enabled": "스킬이 활성화되었습니다",
-  "Bundled with COS": "COS에 포함됨",
-  "This Skill exactly matches the bundled COS recommended version.": "이 스킬은 COS에 포함된 권장 버전과 정확히 일치합니다.",
   "Managed Skill enablement file is invalid": "Skill 활성화 상태 파일이 올바르지 않습니다.",
   "Managed Skill enablement is invalid": "Skill 활성화 상태가 올바르지 않습니다.",
   "Managed Skill enablement changed while reading": "읽는 동안 Skill 활성화 상태가 변경되었습니다.",

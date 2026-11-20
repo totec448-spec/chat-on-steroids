@@ -4,7 +4,6 @@ import { rawPromises as fs, rawRealpathNative } from './rawfs.js';
 import { effectiveCapabilities, getConfig } from './config.js';
 import { approvedManagedSkillLink, sameSkillLink, type ApprovedSkillLink } from './skill-links.js';
 import { parseSkillFrontmatter } from './skill-metadata.js';
-import { RECOMMENDED_SKILLS } from '../shared/recommended-skills.js';
 import {
   MAX_SKILL_BYTES,
   MAX_SKILL_CHARS,
@@ -47,7 +46,6 @@ let root: string | null = null;
 let catalog: SkillSummary[] = [];
 let catalogRevisions = new Map<string, string>();
 let disabledSkills = new Set<string>();
-const bundledSkillTexts = new Map(RECOMMENDED_SKILLS.map(entry => [entry.id, entry.markdown]));
 let operations: Promise<unknown> = Promise.resolve();
 
 function serial<T>(work: () => Promise<T>): Promise<T> {
@@ -369,11 +367,21 @@ async function readDisabledSkills(directory: string): Promise<Set<string>> {
   try { stat = await fs.lstat(file); }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return new Set();
-    throw error;
+    throw new Error('Managed Skill enablement file is invalid');
   }
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 16_384)
     throw new Error('Managed Skill enablement file is invalid');
-  const value: unknown = JSON.parse(await fs.readFile(file, 'utf8'));
+  let value: unknown;
+  let unchanged: boolean;
+  try {
+    const snapshot = await readTextSnapshot(file);
+    unchanged = sameIdentity(identityOf(stat), snapshot.identity) &&
+      sameIdentity(snapshot.identity, identityOf(await fs.lstat(file)));
+    value = JSON.parse(snapshot.text);
+  } catch {
+    throw new Error('Managed Skill enablement is invalid');
+  }
+  if (!unchanged) throw new Error('Managed Skill enablement changed while reading');
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new Error('Managed Skill enablement is invalid');
   const object = value as Record<string, unknown>;
@@ -382,8 +390,6 @@ async function readDisabledSkills(directory: string): Promise<Set<string>> {
       !object.disabled.every(id => typeof id === 'string' && validSkillId(id)) ||
       new Set(object.disabled).size !== object.disabled.length)
     throw new Error('Managed Skill enablement is invalid');
-  if (!sameIdentity(identityOf(stat), identityOf(await fs.lstat(file))))
-    throw new Error('Managed Skill enablement changed while reading');
   return new Set(object.disabled as string[]);
 }
 
@@ -487,8 +493,7 @@ export function listManagedSkills(): Promise<ManagedSkill[]> {
     const records = await scan(candidateRoot);
     const result: ManagedSkill[] = [];
     for (const record of records) result.push({ ...record.summary, origin: await originAt(candidateRoot, record.summary.id),
-      enabled: !disabledSkills.has(record.summary.id),
-      bundled: bundledSkillTexts.get(record.summary.id) === record.text });
+      enabled: !disabledSkills.has(record.summary.id) });
     await assertManagedRoot(candidateRoot);
     publish(records);
     return result;
@@ -519,8 +524,7 @@ export function setManagedSkillEnabled(id: string, enabled: boolean): Promise<Ma
     publish(records);
     const result: ManagedSkill[] = [];
     for (const record of records) result.push({ ...record.summary, origin: await originAt(directory, record.summary.id),
-      enabled: !disabledSkills.has(record.summary.id),
-      bundled: bundledSkillTexts.get(record.summary.id) === record.text });
+      enabled: !disabledSkills.has(record.summary.id) });
     return result;
   });
 }
@@ -533,7 +537,8 @@ export function managedSkillDirectory(id: string): Promise<string> {
     assertSkillId(id);
     const candidateRoot = requiredRoot();
     const before = await assertManagedRoot(candidateRoot);
-    if (!(await recordAt(candidateRoot, id))) throw new Error(`Skill "${id}" was not found or is invalid`);
+    const record = await recordAt(candidateRoot, id);
+    if (!record) throw new Error(`Skill "${id}" was not found or is invalid`);
     const candidate = path.join(candidateRoot, id);
     const stat = await fs.lstat(candidate);
     let directory: string;
@@ -548,8 +553,10 @@ export function managedSkillDirectory(id: string): Promise<string> {
       directory = process.platform === 'win32' ? await rawRealpathNative(candidate) : await fs.realpath(candidate);
       if (!sameNativePath(directory, candidate)) throw new Error('The local Skill folder was redirected');
     }
-    if (!sameIdentity(before, await assertManagedRoot(candidateRoot)) ||
-        !(await recordAt(candidateRoot, id)))
+    const current = await recordAt(candidateRoot, id);
+    if (!current || !sameIdentity(record.identity, current.identity) ||
+        !sameIdentity(identityOf(stat), identityOf(await fs.lstat(candidate))) ||
+        !sameIdentity(before, await assertManagedRoot(candidateRoot)))
       throw new Error('The local Skill folder changed before opening');
     return directory;
   });

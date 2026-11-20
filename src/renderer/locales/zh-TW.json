@@ -1750,8 +1750,6 @@
   "Enable skill": "啟用技能",
   "Skill disabled": "技能已停用",
   "Skill enabled": "技能已啟用",
-  "Bundled with COS": "COS 內建",
-  "This Skill exactly matches the bundled COS recommended version.": "此技能與 COS 內建的建議版本完全一致。",
   "Managed Skill enablement file is invalid": "技能啟用狀態檔案無效。",
   "Managed Skill enablement is invalid": "技能啟用狀態無效。",
   "Managed Skill enablement changed while reading": "讀取期間技能啟用狀態發生變更。",

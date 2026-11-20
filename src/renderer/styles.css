@@ -74,7 +74,7 @@
 .skill-library-source.is-error .ico { color: var(--red); }
 .skill-library-card.is-disabled .plugin-card-title h2 { color: var(--ink); }
 .skill-library-card.is-disabled .plugin-card-title p { color: var(--soft); }
-.skill-library-disabled { color: var(--soft); border: 1px solid var(--line); border-radius: 5px; padding: 2px 5px; }
+.skill-library-disabled { color: var(--soft); }
 .skill-library-update { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: transparent; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; }
 .skill-library-update:hover { text-decoration: underline; text-underline-offset: 3px; }
 .skill-source-url { margin: 10px 0 0; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); overflow-wrap: anywhere; user-select: text; }
