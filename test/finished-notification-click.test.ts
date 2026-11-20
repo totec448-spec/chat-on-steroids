@@ -1,5 +1,6 @@
+import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
-import { clickFinishedChatNotification } from '../src/main/finished-notification-click.js';
+import { clickFinishedChatNotification, createFinishedNoticeRetention } from '../src/main/finished-notification-click.js';
 
 function setup() {
   const openAppChat = vi.fn();
@@ -34,5 +35,72 @@ describe('native finished-chat notification clicks', () => {
     expect(actions.onBrowserFailure).toHaveBeenCalledExactlyOnceWith(refusal);
     expect(actions.openBrowserChat).toHaveBeenCalledOnce();
     expect(actions.openAppChat).not.toHaveBeenCalled();
+  });
+});
+
+describe('retaining native finished-chat notifications', () => {
+  it('keeps each notification bound to its own chat while several chats finish', async () => {
+    const active = createFinishedNoticeRetention();
+    const selected: string[] = [];
+    const first = new EventEmitter();
+    const second = new EventEmitter();
+    for (const [notice, id] of [[first, 'chat-a'], [second, 'chat-b']] as const) {
+      notice.on('click', () => clickFinishedChatNotification('linux', {
+        openAppChat: () => { throw new Error('Must not select CoS window'); },
+        openBrowserChat: async () => { selected.push(id); },
+        onBrowserFailure: () => { throw new Error('Must not fail'); }
+      }));
+      active.retain(notice);
+    }
+    second.emit('click');
+    await Promise.resolve();
+    expect(selected).toEqual(['chat-b']);
+    expect(active.has(first)).toBe(true);
+    first.emit('click');
+    await Promise.resolve();
+    expect(selected).toEqual(['chat-b', 'chat-a']);
+  });
+
+  it('keeps two different chats until their own notifications are activated', () => {
+    const active = createFinishedNoticeRetention();
+    const first = new EventEmitter();
+    const second = new EventEmitter();
+    active.retain(first);
+    active.retain(second);
+    expect(active.has(first)).toBe(true);
+    expect(active.has(second)).toBe(true);
+    first.emit('click');
+    expect(active.has(first)).toBe(false);
+    expect(active.has(second)).toBe(true);
+    second.emit('action');
+    expect(active.has(second)).toBe(false);
+  });
+
+  it('does not lose a notification simply because GNOME dismisses its transient banner', () => {
+    const active = createFinishedNoticeRetention();
+    const notice = new EventEmitter();
+    active.retain(notice);
+    notice.emit('close');
+    expect(active.has(notice)).toBe(true);
+    notice.emit('click');
+    expect(active.has(notice)).toBe(false);
+  });
+
+  it('bounds retained notifications and expires even when GNOME never sends close', () => {
+    vi.useFakeTimers();
+    try {
+      const active = createFinishedNoticeRetention(2, 1_000);
+      const first = new EventEmitter(), second = new EventEmitter(), third = new EventEmitter();
+      active.retain(first);
+      active.retain(first);
+      active.retain(second);
+      active.retain(third);
+      expect(active.has(first)).toBe(false);
+      expect(active.has(second)).toBe(true);
+      expect(active.has(third)).toBe(true);
+      vi.advanceTimersByTime(1_000);
+      expect(active.has(second)).toBe(false);
+      expect(active.has(third)).toBe(false);
+    } finally { vi.useRealTimers(); }
   });
 });

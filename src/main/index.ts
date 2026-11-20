@@ -50,7 +50,7 @@ import { flushSessions, getSession, getSessionOrNullIfMissing, initSessionStore,
 import { runDueSchedules, safeFailureReason, type RunnerDeps } from './scheduled-runs.js';
 import { deliveryProof, enqueueInput, listInputs } from './session/input.js';
 import { createTurnNotifier } from './turn-notifications.js';
-import { clickFinishedChatNotification } from './finished-notification-click.js';
+import { clickFinishedChatNotification, finishedNoticeRetention } from './finished-notification-click.js';
 import { DEFAULT_RECORDING_STORAGE_GIB } from '../shared/session.js';
 import { initSkillsPath } from './skills.js';
 import { initUvRuntime } from './plugins/uv-runtime.js';
@@ -338,13 +338,18 @@ setFinishNotifier((title, body, sessionId, turnId) => {
   ] });
   notice.on('click', () => clickFinishedChatNotification(process.platform, {
     openAppChat: write,
-    openBrowserChat: () => openSessionChat(sessionId),
+    openBrowserChat: async () => {
+      logInfo('finish notice: clicked; requesting the recorded browser chat');
+      await openSessionChat(sessionId);
+      logInfo('finish notice: browser reveal request dispatched (window focus not confirmed)');
+    },
     onBrowserFailure: error => logWarn(`finish notice: browser activation failed (${safeFailureReason(error)})`)
   }));
   notice.on('action', (details) => {
     if (details.actionIndex === 0) void requestSessionFinishGoal(sessionId, turnId).catch(error => logWarn(`Finish goal: ${error.message}`));
     else if (details.actionIndex === 1) write();
   });
+  finishedNoticeRetention.retain(notice);
   notice.show();
   return true;
 });
@@ -634,9 +639,14 @@ void app.whenReady().then(async () => {
           const open = (): void => { if (!target.isDestroyed()) target.send('session:write', sessionId); };
           if (target.isLoadingMainFrame()) target.once('did-finish-load', open); else open();
         },
-        openBrowserChat: () => openSessionChat(sessionId),
+        openBrowserChat: async () => {
+          logInfo('turn notice: clicked; requesting the recorded browser chat');
+          await openSessionChat(sessionId);
+          logInfo('turn notice: browser reveal request dispatched (window focus not confirmed)');
+        },
         onBrowserFailure: error => logWarn(`turn notice: browser activation failed (${safeFailureReason(error)})`)
       }));
+      finishedNoticeRetention.retain(notice);
       notice.show();
     }
   });
