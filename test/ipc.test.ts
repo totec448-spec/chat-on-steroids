@@ -959,7 +959,7 @@ it('adds picker-selected projects, reuses containing approval, and leaves cancel
 });
 
 it('opens exactly the saved project folder and refuses unknown, unapproved or unavailable roots', async () => {
-  const { addProject } = await import('../src/main/projects.js');
+  const { addProject, removeProject } = await import('../src/main/projects.js');
   const approved = await fs.realpath(dir);
   const parent = path.join(approved, 'approved-open-folder');
   const target = path.join(parent, 'actual-project');
@@ -1027,6 +1027,11 @@ it('opens exactly the saved project folder and refuses unknown, unapproved or un
     expect(calls).toHaveBeenCalledTimes(2);
     calls.mockResolvedValueOnce('Access is denied');
     expect(await open(project.id)).toMatchObject({ ok: false, error: expect.stringMatching(/Access is denied/) });
+    expect(calls).toHaveBeenCalledTimes(3);
+    // Removing a project only marks the retained catalog entry `ungrouped`.
+    // An old UUID must not bypass its disappearance from the project menu.
+    await removeProject(project.id);
+    expect(await open(project.id)).toMatchObject({ ok: false, error: expect.stringMatching(/Project not found/) });
     expect(calls).toHaveBeenCalledTimes(3);
   } finally {
     await removeTempDir(outside);

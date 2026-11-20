@@ -111,7 +111,7 @@ import type { WorkerWorktreeCleanupOffer } from '../shared/session.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { inFlightToolCalls } from './mcp/call-context.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
-import { addProject, addRemoteProject, createChatgptProjectFor, linkChatgptProject, unlinkChatgptProject, expireArmedProjectCreates, getSessionProject, listProjects, localProjectPath, moveChatWithGroup, onProjectLinkChange, projectWorkspace, relatedFolderViews, removeProject, retryProjectCreate, setProjectColor, setProjectSecretsShieldOff, setRelatedFolders } from './projects.js';
+import { addProject, addRemoteProject, createChatgptProjectFor, linkChatgptProject, unlinkChatgptProject, expireArmedProjectCreates, getProject, getSessionProject, listProjects, localProjectPath, moveChatWithGroup, onProjectLinkChange, projectWorkspace, relatedFolderViews, removeProject, retryProjectCreate, setProjectColor, setProjectSecretsShieldOff, setRelatedFolders } from './projects.js';
 import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile, serverFileSnapshot } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
@@ -1249,6 +1249,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // No arbitrary renderer-provided pathname or new root grant is accepted.
   handle('projects:openFolder', async payload => {
     const { projectId } = z.object({ projectId: z.string().uuid() }).strict().parse(payload);
+    // A removed project's catalog entry is retained for history as `ungrouped`.
+    // It is not a selectable project and must not remain an IPC-openable target.
+    const selected = await getProject(projectId);
+    if (!selected || selected.ungrouped) throw new Error('Project not found');
     const first = await projectFileTarget(projectId, '');
     if (first.kind !== 'directory') throw new Error('This project folder is unavailable');
     const before = await fs.stat(first.real);
@@ -1263,6 +1267,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // two checks (for example by a junction swap or a rename/recreate).
     if (!after.isDirectory() || before.dev !== after.dev || before.ino !== after.ino) {
       throw new Error('The project folder changed on disk. Reload the project before opening.');
+    }
+    // A project can be removed while asynchronous path resolution is in flight.
+    const stillSelected = await getProject(projectId);
+    if (!stillSelected || stillSelected.ungrouped || stillSelected.path !== selected.path) {
+      throw new Error('Project no longer available');
     }
     // This is not an OS-wide pathname lock: shell.openPath still resolves the
     // name later. It does, however, reject observed substitutions before launch.
