@@ -3949,6 +3949,15 @@
   "If a save fails, your original file stays as it was.": "保存失败时，你的原文件保持原样。",
   "Write mid-answer in any language": "回答中途发送，任何语言都行",
   "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT 回答期间发送的消息，现在在任何语言的页面上都能发出。",
+  "Goal chats that don't stand idle, a tidier Settings, faster chat updates, and the files a chat edited.": "不再卡住的目标聊天、更整洁的设置、更快的聊天更新，以及聊天修改过的文件。",
+  "Goal chats don't stand idle": "目标聊天不再卡住",
+  "A Goal or Loop chat whose Compact & Resume got stuck goes on from its saved summary.": "压缩并继续卡住的目标或循环聊天，会从已保存的摘要继续。",
+  "A tidier Settings": "更整洁的设置",
+  "Agents settings are split into five short pages instead of one very long one.": "智能体设置拆分为五个简短页面，不再是一个很长的页面。",
+  "Chats update faster": "聊天更新更快",
+  "A new message or tool call shows up in the open chat much sooner.": "新消息或工具调用会更早出现在打开的聊天中。",
+  "What a chat edited": "聊天修改了什么",
+  "Review lists the files this chat changed and opens each recorded diff.": "审查会列出此聊天更改的文件，并可打开每条已记录的差异。",
   "Steered active turn": "已引导当前轮次",
   "Worked for {0}{1}s · steered": "已工作 {0}{1} 秒 · 已引导"
 }
