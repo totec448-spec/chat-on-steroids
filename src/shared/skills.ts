@@ -154,6 +154,9 @@ export interface SkillLibrary {
 export interface SkillsDraftScope { sessionId?: string | null; projectId?: string | null }
 
 export const MAX_SKILLS = 128;
+/** Same bounded package contract for GitHub scan, import, link and update. */
+export const MAX_GITHUB_SKILL_FILES = 256;
+export const MAX_GITHUB_SKILL_DIRECTORIES = 12;
 export const SKILL_ORIGIN_FILENAME = '.cos-github.json';
 export const MAX_SKILL_BYTES = 128_000;
 export const MAX_SKILL_CHARS = 96_000;

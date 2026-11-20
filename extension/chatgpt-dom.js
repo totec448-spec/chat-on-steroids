@@ -3202,10 +3202,28 @@ var CLF_DOM = (() => {
   function pluginManagementIdle() {
     return safe(() => ![...document.querySelectorAll('textarea,input:not([type="hidden"]),[contenteditable="true"]')].some(node => node.getClientRects().length > 0 && String(node.value || node.textContent || '').trim()), false);
   }
+  function renamedPngPreview(host, button, file) {
+    const name = composerFileName(button);
+    const stem = file.name.slice(0, -4);
+    const extension = file.name.slice(-4);
+    if (!name?.startsWith(stem) || !name.endsWith(extension) ||
+        !/^\(\d{8}-\d{6}\)$/.test(name.slice(stem.length, -4))) return null;
+    const tile = button.closest('[data-composer-attachments] [role="button"][aria-label]');
+    const areas = host.querySelectorAll('[data-composer-attachments]');
+    if (!tile || areas.length !== 1 || areas[0].querySelectorAll('button').length !== 1) return null;
+    const previews = areas[0].querySelectorAll('img');
+    if (previews.length !== 1 || !tile.contains(previews[0]) || previews[0].getAttribute('alt') !== name) return null;
+    const source = previews[0].getAttribute('src');
+    const header = 'data:image/png;base64,';
+    return source?.startsWith(header) && source.length === header.length + Math.ceil(file.size / 3) * 4 ? source : null;
+  }
+
   async function uploadImages(images, stillCurrent = () => true, draft = null, files = []) {
     if (files.length) images = [...(images || []), ...files];
     if (!images?.length) return true;
     if (!Array.isArray(images) || images.length > 20 || !stillCurrent() || hasComposerAttachments()) return false;
+    const png = files.length === 1 && images.length === 1 && files[0].type === 'image/png' &&
+      /\.png$/i.test(files[0].name) ? files[0] : null;
     // The current shell uses React-generated ids. Elect by the native upload kind
     // inside this exact composer's form; a second matching input is ambiguous.
     const host = composerBox();
@@ -3227,10 +3245,18 @@ var CLF_DOM = (() => {
       input.dispatchEvent(new Event('change', { bubbles: true }));
     } catch { return false; }
     return new Promise((resolve) => {
-      let observer, timer;
+      let observer, timer, reader;
       let ownedTiles = null;
-      const finish = (ok) => { observer?.disconnect(); clearTimeout(timer); resolve(ok); };
+      let finished = false;
+      const finish = (ok) => {
+        finished = true;
+        observer?.disconnect();
+        clearTimeout(timer);
+        if (reader?.readyState === FileReader.LOADING) reader.abort();
+        resolve(ok);
+      };
       const check = () => {
+        if (finished) return;
         if (!stillCurrent()) return finish(false);
         const host = composerBox() || composerActions()?.host;
         if (!host) return;
@@ -3249,17 +3275,32 @@ var CLF_DOM = (() => {
             return true;
           })) ownedTiles = tiles;
         }
+        if (!ownedTiles && (!png || tiles.length !== 1)) return;
+        const ready = !host.querySelector('[aria-busy="true"], [role="progressbar"], [data-inline-file-uploading]') &&
+          sendButtonEnabled(sendButton());
+        if (!ownedTiles && ready) {
+          // ChatGPT can timestamp a pasted PNG before it exposes the first tile. The
+          // new tile must contain the original image bytes, even if its name looks right.
+          const preview = renamedPngPreview(host, tiles[0], png);
+          if (preview && !reader) {
+            reader = new FileReader();
+            reader.addEventListener('load', check, { once: true });
+            reader.readAsDataURL(png);
+          }
+          if (preview && preview === reader?.result) ownedTiles = tiles;
+        }
         if (!ownedTiles) return;
         // The provider can rename report.md to report(1).md during processing.
         // Bind once by exact original names, then retain those exact remove controls.
         if (tiles.length !== ownedTiles.length || tiles.some(node => !ownedTiles.includes(node))) return finish(false);
-        if (!host.querySelector('[aria-busy="true"], [role="progressbar"], [data-inline-file-uploading]') && sendButtonEnabled(sendButton())) {
+        if (ready) {
           draft?.attachments(ownedTiles);
           finish(true);
         }
       };
       observer = new MutationObserver(check);
-      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+      // A file tile can reveal its filename by changing an existing text node.
+      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, characterData: true });
       timer = setTimeout(() => finish(false), files.length ? 600000 : 60000);
       check();
     });
