@@ -472,17 +472,23 @@ var CLF_DOM = (() => {
   /** Confirm the current page title against the sidebar link for this exact chat. */
   function confirmedConversationTitle(expected) {
     return safe(() => {
-      if (document.visibilityState !== 'visible' || conversationId() !== expected) return null;
+      // The worker already verifies the browser's active tab. An app window covering Chrome
+      // can make the document hidden without invalidating its exact navigation links.
+      if (conversationId() !== expected) return null;
       const title = conversationTitle();
       if (!title) return null;
-      const rows = [...document.querySelectorAll('a[data-sidebar-item="true"][href]')].filter(link => {
+      const selector = 'a[data-sidebar-item="true"][href], nav a[href], [role="navigation"] a[href], a[aria-current="page"][href]';
+      const rows = [...document.querySelectorAll(selector)].filter(link => {
         const target = new URL(link.href, location.href);
         return target.origin === location.origin && conversationFromPath(target.pathname) === expected &&
           !link.closest('[hidden],[aria-hidden="true"],[inert]') && link.getClientRects().length > 0;
       });
-      if (rows.length !== 1 || rows[0].querySelector('input,textarea,[contenteditable="true"]')) return null;
-      const label = rows[0].querySelector('[dir="auto"]') ?? rows[0];
-      return label.textContent?.trim() === title ? title : null;
+      if (!rows.length || !rows.every(link => {
+        if (link.querySelector('input,textarea,[contenteditable="true"]')) return false;
+        const label = link.querySelector('[dir="auto"]') ?? link;
+        return label.textContent?.trim() === title || link.getAttribute('title')?.trim() === title;
+      })) return null;
+      return title;
     }, null);
   }
 
