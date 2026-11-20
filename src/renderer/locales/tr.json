@@ -4044,8 +4044,7 @@
   "Review lists the files this chat changed and opens each recorded diff.": "İnceleme, bu sohbetin değiştirdiği dosyaları listeler ve kaydedilmiş her farkı açar.",
   "Steered active turn": "Etkin turu yönlendirdi",
   "Worked for {0}{1}s · steered": "{0}{1} sn · Çalıştı · yönlendirildi",
-  "Check ChatGPT Web titles": "ChatGPT Web başlıklarını kontrol et",
-  "Compare titles from the chat menu. ChatGPT keeps its title.": "Başlıkları sohbet menüsünden karşılaştırın. ChatGPT kendi başlığını korur.",
-  "Titles match": "Başlıklar eşleşiyor",
-  "Titles differ": "Başlıklar farklı"
+  "Check ChatGPT titles": "ChatGPT başlıklarını kontrol et",
+  "Show a notice in the chat menu when the open ChatGPT chat has a different title.": "Açık ChatGPT sohbetinin başlığı farklıysa sohbet menüsünde bir bildirim gösterir.",
+  "ChatGPT title differs": "ChatGPT başlığı farklı"
 }

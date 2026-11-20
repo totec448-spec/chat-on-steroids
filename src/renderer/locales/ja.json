@@ -3960,8 +3960,7 @@
   "Review lists the files this chat changed and opens each recorded diff.": "レビューに、このチャットが変更したファイルが一覧表示され、記録された差分を開けます。",
   "Steered active turn": "実行中のターンを方向転換",
   "Worked for {0}{1}s · steered": "作業済み · {0}{1}秒 · 方向転換",
-  "Check ChatGPT Web titles": "ChatGPT Web のタイトルを確認",
-  "Compare titles from the chat menu. ChatGPT keeps its title.": "チャットメニューからタイトルを比較します。ChatGPT のタイトルはそのままです。",
-  "Titles match": "タイトルが一致",
-  "Titles differ": "タイトルが異なります"
+  "Check ChatGPT titles": "ChatGPT のタイトルを確認",
+  "Show a notice in the chat menu when the open ChatGPT chat has a different title.": "開いている ChatGPT チャットのタイトルが異なる場合、チャットメニューに通知を表示します。",
+  "ChatGPT title differs": "ChatGPT のタイトルが異なります"
 }
