@@ -1017,7 +1017,15 @@ describe('a standalone recorded metric grid', () => {
     expect(rendered.textContent).toContain('Service uptime');
   });
 
-  it('leaves the whole reply in Markdown when the recorded columns disagree with its cards', () => {
+  it('leaves the whole reply in Markdown when an outer grid wraps the complete metric grid', () => {
+    const wrapped = `<div data-d-component="grid"><div data-d-component="grid-item">${grid()}</div></div>`;
+    const rendered = renderedGrid(capture(wrapped));
+    // Neither the whole grid nor its longer cards alone may stand in for the reply.
+    expect(rendered.querySelector('.markdown-dil-grid-standalone, .markdown-dil-panel, .markdown-dil-card')).toBeNull();
+    expect([...rendered.querySelectorAll('h1')].map(heading => heading.textContent)).toEqual(['$24.8k', '1,284', '98.6%']);
+  });
+
+  it('leaves the whole reply in Markdown when the recorded grid contains a nested grid', () => {
     const rendered = renderedGrid(capture(grid(cells, 4)));
     expect(rendered.querySelector('.markdown-dil-grid-standalone, .markdown-dil-panel, .markdown-dil-card')).toBeNull();
     expect(rendered.textContent).toContain('Monthly active users');
@@ -1084,6 +1092,15 @@ describe('a standalone recorded metric grid', () => {
     const rendered = renderedGrid(capture(marked));
     expect(rendered.querySelector('.markdown-dil-grid-standalone, .markdown-dil-panel')).toBeNull();
     expect(rendered.querySelector(tag)).toBeNull();
+    expect([...rendered.querySelectorAll('h1')].at(-1)?.textContent).toBe('98.6%');
+  });
+
+  it('keeps the canonical value when the recording wraps its whole heading in <del>', () => {
+    const marked = grid().replace(/<h1([^>]*)>98\.6%<\/h1>/, '<del><h1$1>98.6%</h1></del>');
+    expect(marked).toContain('<del><h1');
+    const rendered = renderedGrid(capture(marked));
+    expect(rendered.querySelector('.markdown-dil-grid-standalone, .markdown-dil-panel')).toBeNull();
+    expect(rendered.querySelector('del')).toBeNull();
     expect([...rendered.querySelectorAll('h1')].at(-1)?.textContent).toBe('98.6%');
   });
 
