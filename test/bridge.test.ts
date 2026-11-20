@@ -556,16 +556,20 @@ it('offers a one-shot Web title check over the paired bridge and rejects another
       sessions: { ...before.sessions, checkWebChatTitles: true } });
     const check = readWebChatTitle(conversationId);
     const body = { openConversations: [conversationId] };
-    const status = await request('POST', '/status', { ...options, body });
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'firefox' } });
+    expect((await request('POST', '/status', { ...options, body })).body.webChatTitleCheck).toBeUndefined();
+    const firefox = { ...options, browser: 'firefoxtitlebrowser01', engine: 'gecko' };
+    const status = await request('POST', '/status', { ...firefox, body });
     const offer = status.body.webChatTitleCheck;
     expect(offer).toEqual({ id: expect.any(String), conversationId });
-    expect((await request('POST', '/status', { ...options, body })).body.webChatTitleCheck).toBeUndefined();
+    expect((await request('POST', '/status', { ...firefox, body })).body.webChatTitleCheck).toBeUndefined();
     const answer = { ...offer, title: 'Sample Web title' };
-    expect((await request('POST', '/browser/web-chat-title', { ...options, auth: null, body: answer })).status).toBe(401);
-    expect((await request('POST', '/browser/web-chat-title', { ...options, browser: 'othercheckbrowser001', body: answer })).status).toBe(409);
-    expect((await request('POST', '/browser/web-chat-title', { ...options, body: answer })).status).toBe(200);
+    expect((await request('POST', '/browser/web-chat-title', { ...firefox, auth: null, body: answer })).status).toBe(401);
+    expect((await request('POST', '/browser/web-chat-title', { ...firefox, browser: 'othercheckbrowser001', body: answer })).status).toBe(409);
+    expect((await request('POST', '/browser/web-chat-title', { ...firefox, engine: undefined, body: answer })).status).toBe(409);
+    expect((await request('POST', '/browser/web-chat-title', { ...firefox, body: answer })).status).toBe(200);
     await expect(check).resolves.toBe('Sample Web title');
-    expect(acceptWebChatTitle(options.browser, answer)).toBe(false);
+    expect(acceptWebChatTitle(firefox.browser, answer)).toBe(false);
   } finally {
     cancelWebChatTitleCheck();
     await saveConfig(before);

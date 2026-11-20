@@ -25,27 +25,34 @@ beforeAll(async () => {
   backgroundSource = backgroundSource.replace(/\r\n/g, '\n');
 });
 
-it.each([false, true])('checks the same live Web title document across the reply (tab switched = %s)', async switched => {
+it.each(['live', 'switched', 'terminal'])('checks the same live Web title document across the reply (%s)', async state => {
   const source = readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8');
   const code = source.slice(source.indexOf('async function checkWebChatTitle('), source.indexOf('async function maintainOnce()'));
   const conversationId = '11111111-1111-4111-8111-111111111111';
   const id = '22222222-2222-4222-8222-222222222222';
   const tab = { id: 7, status: 'complete', url: 'https://chatgpt.com/c/' + conversationId };
-  const query = vi.fn().mockResolvedValueOnce([tab]).mockResolvedValueOnce([switched ? { ...tab, id: 8 } : tab]);
+  const terminalDocuments: Record<string, string> = {};
+  const query = vi.fn().mockResolvedValueOnce([tab]).mockImplementationOnce(async () => {
+    if (state === 'terminal') terminalDocuments['7'] = 'doc-one';
+    return [state === 'switched' ? { ...tab, id: 8 } : tab];
+  });
   const call = vi.fn(async () => ({ ok: true }));
   const tabReply = vi.fn(async () => ({ title: 'Current Web title' }));
-  const check = vm.runInNewContext(code + '\ncheckWebChatTitle', {
+  const ownerStart = source.indexOf('function ownsDocument(');
+  const ownership = source.slice(ownerStart, source.indexOf('async function markTerminal(', ownerStart));
+  const check = vm.runInNewContext(ownership + code + '\ncheckWebChatTitle', {
     chrome: { tabs: { query } }, connectionEpoch: 1, token: 'fixture', disconnected: false,
     cleanConversationId: (value: string) => value, conversationFromUrl: (url: string) => url.split('/').at(-1),
-    tabDocuments: { '7': 'doc-one' }, tabEpochs: { '7': 1 }, tabReply, call
+    tabDocuments: { '7': 'doc-one' }, tabEpochs: { '7': 1 },
+    terminalDocuments, retiredDocuments: {}, tabReply, call
   });
   await check({ id, conversationId });
   expect(query).toHaveBeenCalledTimes(2);
   expect(tabReply).toHaveBeenCalledExactlyOnceWith(7, { type: 'clf-check-web-chat-title', conversationId }, { documentId: 'doc-one' }, 3000);
   expect(call).toHaveBeenCalledExactlyOnceWith('/browser/web-chat-title', {
     method: 'POST', body: JSON.stringify({
-      id, conversationId, title: switched ? null : 'Current Web title',
-      ...(switched ? { reason: 'document-changed' } : {})
+      id, conversationId, title: state === 'live' ? 'Current Web title' : null,
+      ...(state === 'live' ? {} : { reason: 'document-changed' })
     })
   });
 });

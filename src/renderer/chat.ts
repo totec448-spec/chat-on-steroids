@@ -177,6 +177,7 @@ let deps: Deps;
 let visible = false;
 
 let sessions: SessionSummary[] = [];
+let webTitleSettingsRevision = 0;
 let pressure = new Map<string, TokenPressure>();
 let sessionTotal = 0;
 let sessionPageCursor: { updatedAt: number; id: string } | null = null;
@@ -1449,23 +1450,26 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   const menu = (at?: { x: number; y: number }) => ({
     owner, at, label: () => shownSessionTitle(summary), anchor: () => rowMenuButton(owner),
     items: () => {
-      if (summary.titleSource !== 'manual' || !summary.conversationId ||
-          deps.state()?.config.sessions.checkWebChatTitles !== true) return items;
+      const config = deps.state()?.config;
+      if (summary.titleSource !== 'manual' || !summary.conversationId || !config?.sessions.checkWebChatTitles) return items;
+      const browser = config.ui.chatBrowser;
+      const revision = webTitleSettingsRevision;
       let differs = false;
-      const enabled = () => deps.state()?.config.sessions.checkWebChatTitles === true;
       const matchesMenu = () => {
+        const settings = deps.state()?.config;
         const current = sessions.find(chat => chat.id === summary.id);
-        return current?.titleSource === 'manual' && current.title === summary.title &&
-          current.conversationId === summary.conversationId;
+        return revision === webTitleSettingsRevision && settings?.sessions.checkWebChatTitles === true &&
+          settings.ui.chatBrowser === browser && current?.titleSource === 'manual' &&
+          current.title === summary.title && current.conversationId === summary.conversationId;
       };
       void api.checkWebChatTitle(summary.id).then(reply => {
-        if (reply?.ok && reply.data === 'different' && rowMenuOpenFor(owner) && enabled() && matchesMenu()) {
+        if (reply?.ok && reply.data === 'different' && rowMenuOpenFor(owner) && matchesMenu()) {
           differs = true;
           refreshRowMenu();
         }
       }).catch(() => undefined);
       return items.map(item => item.action === 'rename'
-        ? { ...item, description: () => differs && enabled() && matchesMenu() ? t('ChatGPT title differs') : '' }
+        ? { ...item, description: () => differs && matchesMenu() ? t('ChatGPT title differs') : '' }
         : item);
     }
   });
@@ -9076,7 +9080,11 @@ export function chatApply(state: AppState, previous?: Config): void {
     previous === undefined ? undefined : String(previous.sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB)
   );
   applyChatChecked($<HTMLInputElement>('checkWebChatTitles'), config.sessions.checkWebChatTitles === true, previous?.sessions.checkWebChatTitles);
-  if (previous?.sessions.checkWebChatTitles && !config.sessions.checkWebChatTitles) refreshRowMenu();
+  if (previous && (previous.ui.chatBrowser !== config.ui.chatBrowser ||
+      previous.sessions.checkWebChatTitles !== config.sessions.checkWebChatTitles)) {
+    webTitleSettingsRevision++;
+    refreshRowMenu();
+  }
   applyAutoCompactHint(config);
   $<HTMLInputElement>('autoCompactTokens').disabled = !config.compaction.auto;
 

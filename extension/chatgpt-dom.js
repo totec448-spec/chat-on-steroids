@@ -486,7 +486,10 @@ var CLF_DOM = (() => {
       if (!rows.length || !rows.every(link => {
         if (link.querySelector('input,textarea,[contenteditable="true"]')) return false;
         const label = link.querySelector('[dir="auto"]') ?? link;
-        return label.textContent?.trim() === title || link.getAttribute('title')?.trim() === title;
+        const visibleTitle = label.textContent?.trim();
+        const attributeTitle = link.getAttribute('title')?.trim();
+        if (visibleTitle && attributeTitle && visibleTitle !== attributeTitle) return false;
+        return (visibleTitle || attributeTitle) === title;
       })) return null;
       return title;
     }, null);

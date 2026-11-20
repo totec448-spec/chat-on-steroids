@@ -497,7 +497,10 @@ const configSchema = z.object({
         .default(DEFAULT_SESSIONS.advisoryTokens),
       limitTokens: z.number().int().min(10_000).max(4_000_000).optional().default(DEFAULT_SESSIONS.limitTokens),
       storageLimitGiB: recordingStorageLimit.catch(DEFAULT_RECORDING_STORAGE_GIB),
-      checkWebChatTitles: z.boolean().default(false).catch(false)
+      checkWebChatTitles: z.boolean().default(false).catch(() => {
+        logWarn('config: repaired invalid Web title check setting (defaulted to off)');
+        return false;
+      })
     })
     // `record` and `retainDays` remain readable for old configs and wire compatibility, but
     // they are no longer user choices. Normalizing here covers disk load, renderer saves,
