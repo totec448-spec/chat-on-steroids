@@ -3953,5 +3953,14 @@
   "Write mid-answer in any language": "Nhắn giữa lúc đang trả lời, ở mọi ngôn ngữ",
   "A message sent while ChatGPT is answering now goes out on pages in every language.": "Tin nhắn gửi khi ChatGPT đang trả lời giờ được gửi đi trên các trang ở mọi ngôn ngữ.",
   "Steered active turn": "Đã điều hướng lượt đang hoạt động",
-  "Worked for {0}{1}s · steered": "Đã làm việc trong {0}{1} giây · đã điều hướng"
+  "Worked for {0}{1}s · steered": "Đã làm việc trong {0}{1} giây · đã điều hướng",
+  "Goal chats that don't stand idle, a tidier Settings, faster chat updates, and the files a chat edited.": "Chat Goal không còn đứng yên, Cài đặt gọn gàng hơn, chat cập nhật nhanh hơn và các tệp mà một chat đã sửa.",
+  "Goal chats don't stand idle": "Chat Goal không còn đứng yên",
+  "A Goal or Loop chat whose Compact & Resume got stuck goes on from its saved summary.": "Chat Goal hoặc Loop có Compact & Resume bị kẹt sẽ tiếp tục từ bản tóm tắt đã lưu.",
+  "A tidier Settings": "Cài đặt gọn gàng hơn",
+  "Agents settings are split into five short pages instead of one very long one.": "Cài đặt tác nhân được chia thành năm trang ngắn thay vì một trang rất dài.",
+  "Chats update faster": "Chat cập nhật nhanh hơn",
+  "A new message or tool call shows up in the open chat much sooner.": "Tin nhắn mới hoặc lệnh gọi công cụ hiện trong chat đang mở sớm hơn nhiều.",
+  "What a chat edited": "Những gì một chat đã sửa",
+  "Review lists the files this chat changed and opens each recorded diff.": "Mục Xem lại liệt kê các tệp chat này đã thay đổi và mở từng diff đã ghi."
 }

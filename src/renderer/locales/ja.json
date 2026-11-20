@@ -3952,6 +3952,15 @@
   "If a save fails, your original file stays as it was.": "保存に失敗しても、元のファイルはそのまま残ります。",
   "Write mid-answer in any language": "回答中でも、どの言語でも送信",
   "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT が回答している最中に送ったメッセージが、どの言語のページでも送信されるようになりました。",
+  "Goal chats that don't stand idle, a tidier Settings, faster chat updates, and the files a chat edited.": "止まらないゴールのチャット、整理された設定、より速いチャット更新、チャットが編集したファイル。",
+  "Goal chats don't stand idle": "ゴールのチャットが止まらなくなりました",
+  "A Goal or Loop chat whose Compact & Resume got stuck goes on from its saved summary.": "圧縮して再開が止まったゴールまたはループのチャットは、保存済みの要約から続行します。",
+  "A tidier Settings": "整理された設定",
+  "Agents settings are split into five short pages instead of one very long one.": "エージェントの設定は、とても長い 1 ページではなく、短い 5 ページに分かれました。",
+  "Chats update faster": "チャットの更新が速くなりました",
+  "A new message or tool call shows up in the open chat much sooner.": "新しいメッセージやツール呼び出しが、開いているチャットにずっと早く表示されます。",
+  "What a chat edited": "チャットが編集した内容",
+  "Review lists the files this chat changed and opens each recorded diff.": "レビューに、このチャットが変更したファイルが一覧表示され、記録された差分を開けます。",
   "Steered active turn": "実行中のターンを方向転換",
   "Worked for {0}{1}s · steered": "作業済み · {0}{1}秒 · 方向転換"
 }

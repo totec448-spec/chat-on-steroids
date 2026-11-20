@@ -4036,6 +4036,15 @@
   "If a save fails, your original file stays as it was.": "Kaydetme başarısız olursa özgün dosyanız olduğu gibi kalır.",
   "Write mid-answer in any language": "Yanıt sırasında her dilde mesaj",
   "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT yanıt verirken gönderilen bir mesaj artık her dildeki sayfalarda gönderiliyor.",
+  "Goal chats that don't stand idle, a tidier Settings, faster chat updates, and the files a chat edited.": "Takılı kalmayan Hedef sohbetleri, daha derli toplu Ayarlar, daha hızlı sohbet güncellemeleri ve bir sohbetin düzenlediği dosyalar.",
+  "Goal chats don't stand idle": "Hedef sohbetleri artık takılı kalmıyor",
+  "A Goal or Loop chat whose Compact & Resume got stuck goes on from its saved summary.": "Sıkıştır ve sürdür adımı takılan bir Hedef veya Döngü sohbeti, kayıtlı özetinden devam eder.",
+  "A tidier Settings": "Daha derli toplu Ayarlar",
+  "Agents settings are split into five short pages instead of one very long one.": "Ajan ayarları çok uzun tek bir sayfa yerine beş kısa sayfaya bölündü.",
+  "Chats update faster": "Sohbetler daha hızlı güncelleniyor",
+  "A new message or tool call shows up in the open chat much sooner.": "Yeni bir mesaj veya araç çağrısı açık sohbette çok daha erken görünür.",
+  "What a chat edited": "Bir sohbetin düzenledikleri",
+  "Review lists the files this chat changed and opens each recorded diff.": "İnceleme, bu sohbetin değiştirdiği dosyaları listeler ve kaydedilmiş her farkı açar.",
   "Steered active turn": "Etkin turu yönlendirdi",
   "Worked for {0}{1}s · steered": "{0}{1} sn · Çalıştı · yönlendirildi"
 }
