@@ -1027,6 +1027,23 @@ it('opens exactly the saved project folder and refuses unknown, unapproved or un
     } finally {
       precisionSpy.mockRestore();
     }
+    // Revocation can race with the last asynchronous stat. The final
+    // synchronous grant check must reject the stale project resolution.
+    let revocationStatCalls = 0;
+    const revokeSpy = vi.spyOn(fs, 'stat').mockImplementation(async (...args) => {
+      const stat = await realStat(...args);
+      if (String(args[0]) === target && args[1]?.bigint && ++revocationStatCalls === 2) {
+        await saveConfig({ ...defaultConfig(), roots: [{ name: 'unrelated', path: outside }] });
+      }
+      return stat;
+    });
+    try {
+      expect(await open(project.id)).toMatchObject({ ok: false, error: expect.stringMatching(/approval was revoked/) });
+      expect(calls).toHaveBeenCalledTimes(2);
+    } finally {
+      revokeSpy.mockRestore();
+      await saveConfig({ ...defaultConfig(), roots: [{ name: 'approved', path: parent }] });
+    }
     // A saved project path replaced by a junction/symlink must not launch an
     // unapproved directory, even if its project ID and approved parent persist.
     const parked = path.join(parent, 'actual-project-parked');

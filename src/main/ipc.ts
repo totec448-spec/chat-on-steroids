@@ -110,7 +110,7 @@ import { listOfferedWorkerWorktrees, disposeOfferedWorkerWorktree, WorkerWorktre
 import type { WorkerWorktreeCleanupOffer } from '../shared/session.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { inFlightToolCalls } from './mcp/call-context.js';
-import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
+import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath, isContained } from './sandbox.js';
 import { addProject, addRemoteProject, createChatgptProjectFor, linkChatgptProject, unlinkChatgptProject, expireArmedProjectCreates, getProject, getSessionProject, listProjects, localProjectPath, moveChatWithGroup, onProjectLinkChange, projectWorkspace, relatedFolderViews, removeProject, retryProjectCreate, setProjectColor, setProjectSecretsShieldOff, setRelatedFolders } from './projects.js';
 import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile, serverFileSnapshot } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
@@ -1284,6 +1284,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const stillSelected = await getProject(projectId);
     if (!stillSelected || stillSelected.ungrouped || stillSelected.path !== selected.path) {
       throw new Error('Project no longer available');
+    }
+    // roots:remove can complete while an earlier stat/catalog read is pending.
+    // Consult the published grants synchronously after the last await: a stale
+    // path resolution is not authority to launch a folder after revocation.
+    if (!getConfig().roots.some(root => !root.remote && isContained(root.path, current.real))) {
+      throw new Error('Project folder approval was revoked');
     }
     // This is not an OS-wide pathname lock: shell.openPath still resolves the
     // name later. It does, however, reject observed substitutions before launch.
