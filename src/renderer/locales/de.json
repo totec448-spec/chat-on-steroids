@@ -4043,5 +4043,9 @@
   "What a chat edited": "Was ein Chat geändert hat",
   "Review lists the files this chat changed and opens each recorded diff.": "Die Prüfung listet die Dateien, die dieser Chat geändert hat, und öffnet jeden aufgezeichneten Diff.",
   "Steered active turn": "Laufenden Durchlauf umgelenkt",
-  "Worked for {0}{1}s · steered": "Gearbeitet · {0}{1} s · umgelenkt"
+  "Worked for {0}{1}s · steered": "Gearbeitet · {0}{1} s · umgelenkt",
+  "Check ChatGPT Web titles": "Titel in ChatGPT Web prüfen",
+  "Compare titles from the chat menu. ChatGPT keeps its title.": "Titel über das Chatmenü vergleichen. Der Titel in ChatGPT bleibt erhalten.",
+  "Titles match": "Titel stimmen überein",
+  "Titles differ": "Titel unterscheiden sich"
 }

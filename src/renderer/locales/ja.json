@@ -3959,5 +3959,9 @@
   "What a chat edited": "チャットが編集した内容",
   "Review lists the files this chat changed and opens each recorded diff.": "レビューに、このチャットが変更したファイルが一覧表示され、記録された差分を開けます。",
   "Steered active turn": "実行中のターンを方向転換",
-  "Worked for {0}{1}s · steered": "作業済み · {0}{1}秒 · 方向転換"
+  "Worked for {0}{1}s · steered": "作業済み · {0}{1}秒 · 方向転換",
+  "Check ChatGPT Web titles": "ChatGPT Web のタイトルを確認",
+  "Compare titles from the chat menu. ChatGPT keeps its title.": "チャットメニューからタイトルを比較します。ChatGPT のタイトルはそのままです。",
+  "Titles match": "タイトルが一致",
+  "Titles differ": "タイトルが異なります"
 }

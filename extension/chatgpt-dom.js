@@ -469,6 +469,23 @@ var CLF_DOM = (() => {
     }, '');
   }
 
+  /** Confirm the current page title against the sidebar link for this exact chat. */
+  function confirmedConversationTitle(expected) {
+    return safe(() => {
+      if (document.visibilityState !== 'visible' || conversationId() !== expected) return null;
+      const title = conversationTitle();
+      if (!title) return null;
+      const rows = [...document.querySelectorAll('a[data-sidebar-item="true"][href]')].filter(link => {
+        const target = new URL(link.href, location.href);
+        return target.origin === location.origin && conversationFromPath(target.pathname) === expected &&
+          !link.closest('[hidden],[aria-hidden="true"],[inert]') && link.getClientRects().length > 0;
+      });
+      if (rows.length !== 1 || rows[0].querySelector('input,textarea,[contenteditable="true"]')) return null;
+      const label = rows[0].querySelector('[dir="auto"]') ?? rows[0];
+      return label.textContent?.trim() === title ? title : null;
+    }, null);
+  }
+
   /**
    * Logical conversation turns, newest last.
    *
@@ -4347,6 +4364,7 @@ var CLF_DOM = (() => {
     conversationId,
     conversationFromPath,
     conversationTitle,
+    confirmedConversationTitle,
     turns,
     presentationTurns,
     messages,

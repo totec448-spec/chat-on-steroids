@@ -3959,5 +3959,9 @@
   "What a chat edited": "聊天修改了什麼",
   "Review lists the files this chat changed and opens each recorded diff.": "審查會列出此聊天更改的檔案，並可開啟每筆已記錄的差異。",
   "Steered active turn": "已引導目前回合",
-  "Worked for {0}{1}s · steered": "已工作 {0}{1} 秒 · 已引導"
+  "Worked for {0}{1}s · steered": "已工作 {0}{1} 秒 · 已引導",
+  "Check ChatGPT Web titles": "檢查 ChatGPT 網頁版標題",
+  "Compare titles from the chat menu. ChatGPT keeps its title.": "從聊天選單比較標題。ChatGPT 會保留原有標題。",
+  "Titles match": "標題相同",
+  "Titles differ": "標題不同"
 }

@@ -25,6 +25,28 @@ beforeAll(async () => {
   backgroundSource = backgroundSource.replace(/\r\n/g, '\n');
 });
 
+it.each([false, true])('checks the same live Web title document across the reply (tab switched = %s)', async switched => {
+  const source = readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('async function checkWebChatTitle('), source.indexOf('async function maintainOnce()'));
+  const conversationId = '11111111-1111-4111-8111-111111111111';
+  const id = '22222222-2222-4222-8222-222222222222';
+  const tab = { id: 7, status: 'complete', url: 'https://chatgpt.com/c/' + conversationId };
+  const query = vi.fn().mockResolvedValueOnce([tab]).mockResolvedValueOnce([switched ? { ...tab, id: 8 } : tab]);
+  const call = vi.fn(async () => ({ ok: true }));
+  const tabReply = vi.fn(async () => ({ title: 'Current Web title' }));
+  const check = vm.runInNewContext(code + '\ncheckWebChatTitle', {
+    chrome: { tabs: { query } }, connectionEpoch: 1, token: 'fixture', disconnected: false,
+    cleanConversationId: (value: string) => value, conversationFromUrl: (url: string) => url.split('/').at(-1),
+    tabDocuments: { '7': 'doc-one' }, tabEpochs: { '7': 1 }, tabReply, call
+  });
+  await check({ id, conversationId });
+  expect(query).toHaveBeenCalledTimes(2);
+  expect(tabReply).toHaveBeenCalledExactlyOnceWith(7, { type: 'clf-check-web-chat-title', conversationId }, { documentId: 'doc-one' }, 3000);
+  expect(call).toHaveBeenCalledExactlyOnceWith('/browser/web-chat-title', {
+    method: 'POST', body: JSON.stringify({ id, conversationId, title: switched ? null : 'Current Web title' })
+  });
+});
+
 describe('extension release metadata', () => {
   it('keeps the app package, bundled extension and bridge protocol on the same release', async () => {
     const pkg = JSON.parse(await fs.readFile(path.join(process.cwd(), 'package.json'), 'utf8')) as { version: string };

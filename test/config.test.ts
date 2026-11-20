@@ -1397,3 +1397,15 @@ it('logs a damaged saved chat style without its text, and nothing for an absent 
   warn.mockRestore();
 });
 
+
+it('defaults the manual Web title check off for new, old and damaged settings', async () => {
+  const fresh = defaultConfig();
+  expect(Reflect.get(fresh.sessions, 'checkWebChatTitles')).toBe(false);
+  const legacy = { ...fresh.sessions };
+  Reflect.deleteProperty(legacy, 'checkWebChatTitles');
+  for (const sessions of [legacy, { ...legacy, checkWebChatTitles: 'true' }]) {
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...fresh, sessions }), 'utf8');
+    expect(Reflect.get((await loadConfig()).sessions, 'checkWebChatTitles')).toBe(false);
+  }
+});
+

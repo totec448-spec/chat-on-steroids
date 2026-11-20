@@ -3261,6 +3261,25 @@ it('projects reloaded unreadable ledger health through state:get and recovers on
   expect(await fs.readFile(path.join(path.dirname(file), backups.at(-1)!), 'utf8')).toBe('{broken');
 });
 
+it('loads the Web title check as opt-in and preserves it when an older settings form saves', async () => {
+  const prior = getConfig();
+  const action = handlers.get('sessions:checkWebTitle')!;
+  try {
+    expect(await action(null, { id: 'unknown-session' })).toEqual({ ok: true, data: 'unavailable' });
+    const baseline = { ...prior, sessions: { ...prior.sessions } };
+    delete baseline.sessions.checkWebChatTitles;
+    expect(await save({ ...prior, sessions: { ...prior.sessions, checkWebChatTitles: true } })).toMatchObject({ ok: true });
+    expect(getConfig().sessions.checkWebChatTitles).toBe(true);
+    expect(await save(baseline, baseline)).toMatchObject({ ok: true });
+    expect(getConfig().sessions.checkWebChatTitles).toBe(true);
+    expect(await save({ ...getConfig(), sessions: { ...getConfig().sessions, checkWebChatTitles: false } })).toMatchObject({ ok: true });
+    expect(getConfig().sessions.checkWebChatTitles).toBe(false);
+    expect(await action(null, { id: 'unknown-session' })).toEqual({ ok: true, data: 'unavailable' });
+  } finally {
+    await saveConfig(prior);
+  }
+});
+
 // #1406: the recording store held a fixed 2 GB. Settings now offers larger sizes, applied at once.
 it('saves the recording storage size and applies it to the store', async () => {
   const store = await import('../src/main/session/store.js');
