@@ -4033,6 +4033,15 @@
   "If a save fails, your original file stays as it was.": "Schlägt das Speichern fehl, bleibt deine Originaldatei unverändert.",
   "Write mid-answer in any language": "Mitten in der Antwort schreiben, in jeder Sprache",
   "A message sent while ChatGPT is answering now goes out on pages in every language.": "Eine Nachricht, die du während der Antwort von ChatGPT sendest, wird jetzt auf Seiten in jeder Sprache gesendet.",
+  "Goal chats that don't stand idle, a tidier Settings, faster chat updates, and the files a chat edited.": "Goal-Chats, die nicht stehen bleiben, ein aufgeräumteres Einstellungsfenster, schnellere Chat-Updates und die Dateien, die ein Chat geändert hat.",
+  "Goal chats don't stand idle": "Goal-Chats bleiben nicht stehen",
+  "A Goal or Loop chat whose Compact & Resume got stuck goes on from its saved summary.": "Ein Goal- oder Loop-Chat, dessen Komprimieren & Fortsetzen hängt, macht mit seiner gespeicherten Zusammenfassung weiter.",
+  "A tidier Settings": "Aufgeräumtere Einstellungen",
+  "Agents settings are split into five short pages instead of one very long one.": "Die Agent-Einstellungen sind auf fünf kurze Seiten verteilt statt auf eine sehr lange.",
+  "Chats update faster": "Chats aktualisieren sich schneller",
+  "A new message or tool call shows up in the open chat much sooner.": "Eine neue Nachricht oder ein Tool-Aufruf erscheint im offenen Chat deutlich früher.",
+  "What a chat edited": "Was ein Chat geändert hat",
+  "Review lists the files this chat changed and opens each recorded diff.": "Die Prüfung listet die Dateien, die dieser Chat geändert hat, und öffnet jeden aufgezeichneten Diff.",
   "Steered active turn": "Laufenden Durchlauf umgelenkt",
   "Worked for {0}{1}s · steered": "Gearbeitet · {0}{1} s · umgelenkt"
 }

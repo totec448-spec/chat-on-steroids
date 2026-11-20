@@ -14,6 +14,15 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.54': {
+    lead: () => t("Goal chats that don't stand idle, a tidier Settings, faster chat updates, and the files a chat edited."),
+    highlights: [
+      { icon: 'i-agents', title: () => t("Goal chats don't stand idle"), text: () => t("A Goal or Loop chat whose Compact & Resume got stuck goes on from its saved summary.") },
+      { icon: 'i-gear', title: () => t("A tidier Settings"), text: () => t("Agents settings are split into five short pages instead of one very long one.") },
+      { icon: 'i-retry', title: () => t("Chats update faster"), text: () => t("A new message or tool call shows up in the open chat much sooner.") },
+      { icon: 'i-git-diff', title: () => t("What a chat edited"), text: () => t("Review lists the files this chat changed and opens each recorded diff.") }
+    ]
+  },
   '2.1.53': {
     lead: () => t("Compact & Resume in Projects, Goal chats that recover, and safer saves over SSH."),
     highlights: [
