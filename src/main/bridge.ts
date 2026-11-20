@@ -1941,7 +1941,10 @@ function tooLarge(res: http.ServerResponse, origin: string | null): void {
 
 function rateLimited(): boolean {
   const now = Date.now();
-  if (now - requestWindow.start > 60_000) requestWindow = { start: now, count: 0 };
+  // A clock corrected backwards leaves the window starting in the future; it would never close.
+  const behind = requestWindow.start - now;
+  if (behind >= 1000) logInfo(`bridge: the clock moved back ${Math.round(behind / 1000)} s; the request limit starts counting again`);
+  if (now < requestWindow.start || now - requestWindow.start > 60_000) requestWindow = { start: now, count: 0 };
   requestWindow.count += 1;
   return requestWindow.count > RATE_LIMIT;
 }
@@ -1957,6 +1960,8 @@ const OBSERVATION_KINDS = new Set([
   'page_tool',
   // A turn's round outline: presentation stored beside the log (shared/turn-trace.ts).
   'turn_trace',
+  // Complete surviving assistant message ids/provider UUIDs for one turn, used to retract discarded streaming drafts.
+  'turn_messages',
   'turn_start',
   'turn_end',
   'chat_error',
@@ -2223,6 +2228,25 @@ function parseObservations(input: unknown): ChatObservation[] {
       observation.trace = trace;
       // The user message that opened the page turn the outline was read from (#1301).
       if (typeof item['question'] === 'string' && /^[A-Za-z0-9_:.-]{1,200}$/.test(item['question'])) observation.question = item['question'];
+    }
+    if (kind === 'turn_messages') {
+      const rawTurnId = item['turnId'];
+      const rawIds = item['messageIds'];
+      if (typeof rawTurnId !== 'string' || !rawTurnId.length || rawTurnId.length > 100) continue;
+      if (!Array.isArray(rawIds) || rawIds.length > 400) continue;
+      const validIds = rawIds.every((id) => typeof id === 'string' && id.length > 0 && id.length <= 200);
+      if (!validIds) continue;
+      observation.turnId = rawTurnId;
+      observation.messageIds = [...rawIds];
+      if (item['settled'] === true) observation.settled = true;
+    }
+    if ((kind === 'assistant_message' || kind === 'turn_messages') && typeof item['docId'] === 'string' &&
+        /^[a-z0-9_-]{1,80}$/i.test(item['docId'])) {
+      observation.docId = item['docId'];
+    }
+    if ((kind === 'assistant_message' || kind === 'turn_messages') && typeof item['docSeq'] === 'number' &&
+        Number.isSafeInteger(item['docSeq']) && item['docSeq'] >= 0) {
+      observation.docSeq = item['docSeq'];
     }
     if (typeof item['renderedHtml'] === 'string') {
       // Keep the whole compact rendering of a stable final through /events.
@@ -4607,6 +4631,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
               renderedHtml: event.renderedHtml?.text ?? '',
               state: event.state ?? (event.final ? 'final' : 'streaming'),
               final: event.final,
+              ...(event.retracted === true ? { retracted: true } : {}),
               messageId: event.messageId ?? null,
               providerMessageId: event.providerMessageId ?? null,
               origin: event.origin ?? event.seq

@@ -3171,6 +3171,8 @@ function announceFinishedTurns(delta: readonly SessionEvent[]): void {
   if (before !== text) { region.textContent = text; next(finished - 1); } else say(finished);
 }
 
+const retractedResidentKeys = new Set<string>();
+
 /** Merge one sequence-cursor delta without letting canonical message revisions duplicate rows. */
 function mergeDetailDelta(delta: SessionEvent[]): boolean {
   if (delta.length === 0) return false;
@@ -3183,20 +3185,30 @@ function mergeDetailDelta(delta: SessionEvent[]): boolean {
     if (key) messageRows.set(key, index);
   }
   for (const event of delta) {
+    const retracted = event.kind === 'assistant_message' && event.retracted === true;
     const key = canonicalMessageKey(event);
     const index = key ? messageRows.get(key) : undefined;
-    if (index !== undefined) { merged[index] = event; changed = true; }
-    else {
+    if (index !== undefined) {
+      if (retracted && key) retractedResidentKeys.add(key);
+      else if (!retracted && key) retractedResidentKeys.delete(key);
+      merged[index] = event;
+      changed = true;
+    } else {
+      if (retracted) continue;
       // An old canonical revision is not newly authored history. Its original
       // page still owns it; admitting it here would evict an unrelated live row.
-      if (residenceOf(event) < floor) continue;
-      if (key) messageRows.set(key, merged.length);
+      if (residenceOf(event) < floor && !(key && retractedResidentKeys.has(key))) continue;
+      if (key) {
+        retractedResidentKeys.delete(key);
+        messageRows.set(key, merged.length);
+      }
       merged.push(event);
       changed = true;
     }
   }
   if (!changed) return false;
-  const folded = chronological(foldProgress(merged));
+  const active = merged.filter(event => !(event.kind === 'assistant_message' && event.retracted === true));
+  const folded = chronological(foldProgress(active));
   events = retainTimelinePage(folded, 'newer');
   return true;
 }
@@ -3318,10 +3330,20 @@ function paintGoalProgress(): void {
   }
 }
 const cancelledStarts = new Set<string>();
+function inputBelongsToCurrentSelection(entry: Pick<InputEntry, 'id' | 'sessionId' | 'deliveredSessionId'>): boolean {
+  return selectedId === null
+    ? pendingNewInput?.generation === selectionGeneration && entry.id === pendingNewInput.id
+    : (entry.sessionId ?? entry.deliveredSessionId) === selectedId;
+}
+
+function cancellablePendingInput(entry: InputEntry): boolean {
+  return inputBelongsToCurrentSelection(entry) &&
+    (!queuedFollowup(entry) || entry.state === 'browser') && ['queued', 'browser'].includes(entry.state) &&
+    !anchoredPendingInput(entry);
+}
+
 function pendingComposerInput(): InputEntry | undefined {
-  return [...startingInputs.values(), ...pendingComposerInputs].find(entry => (!queuedFollowup(entry) || entry.state === 'browser') && ['queued', 'browser'].includes(entry.state) &&
-    (selectedId ? (entry.sessionId ?? entry.deliveredSessionId) === selectedId :
-      pendingNewInput?.generation === selectionGeneration && pendingNewInput.id === entry.id));
+  return [...startingInputs.values(), ...pendingComposerInputs].find(cancellablePendingInput);
 }
 let durationTimer: number | undefined;
 /** Whether the selected chat's running turn takes a message now (Send directly). */
@@ -3334,6 +3356,7 @@ let followUpTurn: string | null = null;
 function followUpQueues(): boolean {
   return deps.state()?.config.ui.followUp === 'queue';
 }
+let paintedPendingCancel: { id: string; target: string | null; selection: number } | null = null;
 function paintDeliveryControls(): void {
   paintGoalProgress();
   for (const button of document.querySelectorAll<HTMLButtonElement>('#finishQueue .queue-send-now')) button.hidden = !canSendQueuedNow();
@@ -3382,6 +3405,7 @@ function paintDeliveryControls(): void {
   send.disabled = !!preparedPlan && (preparedPlan.sending || preparedPlan.stages.some(stage => !stage.trim()));
   send.dataset.action = stop ? 'stop' : 'send';
   ui(send, 'aria-label', () => stop ? (controlledStopPending ? t("Stop requested") : t("Stop turn")) : t("Send message"));
+  paintedPendingCancel = stop && !working && !held && pending ? { id: pending.id, target: selectedId, selection: selectionGeneration } : null;
   if (stop && !working && !held && pending) ui(send, 'aria-label', () => t("Cancel delivery"));
   const planAction = selectedId && !chatKnownIdle(selectedId) ? t("Queue plan at Session finish") : t("Start full plan");
   if (preparedPlan && !stop) send.setAttribute('aria-label', planAction);
@@ -3860,6 +3884,7 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
     handoffLoadGeneration++;
     historyBefore = null;
     events = [];
+    retractedResidentKeys.clear();
     traces = {};
     tracesFor = null;
     totalEvents = 0;
@@ -3872,7 +3897,7 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
   const trackLive = !prepend && newerFrom === undefined && historyBefore === null;
   const runDetail = async (): Promise<boolean> => {
     const opening = detailFor !== wanted;
-    if (opening) { historyBefore = null; historyStart = null; roundsEnter = false; }
+    if (opening) { historyBefore = null; historyStart = null; roundsEnter = false; retractedResidentKeys.clear(); }
     // Live deltas must not evict a historical page while the user is reading it.
     const incremental = !prepend && newerFrom === undefined && historyBefore === null && detailFor === wanted && detailCursor !== null;
     const detail = await run(
@@ -3900,7 +3925,8 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
     let deltaChanged = false;
     if (incremental) { deltaChanged = mergeDetailDelta(detail.events); announceFinishedTurns(detail.events); }
     else {
-      const folded = chronological(foldProgress(detail.events));
+      const visible = detail.events.filter(event => !(event.kind === 'assistant_message' && event.retracted === true));
+      const folded = chronological(foldProgress(visible));
       if (newerFrom !== undefined) {
         events = retainTimelinePage(chronological(foldProgress([...events, ...folded])), 'newer');
         // Reaching the live tail restores ordinary delta reads. Paging itself preserves
@@ -3936,6 +3962,7 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
     if (prepend || newerFrom !== undefined) roundsEnter = false;
     // Only live growth follows to the bottom; an empty or off-window incremental check must not pull a scrolled pane down.
     paintDetail(!prepend && newerFrom === undefined && historyBefore === null && (!incremental || deltaChanged));
+    if (incremental && deltaChanged && detail.events.some(event => event.kind === 'user_message')) void refreshInputQueue();
     if (!prepend && newerFrom === undefined && !(incremental && detail.events.length === TIMELINE_BATCH_SIZE)) {
       detailSatisfiedPushSeq = Math.max(detailSatisfiedPushSeq, capturedPushSeq);
     }
@@ -5683,6 +5710,24 @@ function paintInputReceipt(row: HTMLElement, item: ReturnType<typeof timelineIte
   receipt.parentElement?.classList.toggle('has-input-receipt', !receipt.hidden);
 }
 
+/** Shows when one of your questions steered a running turn so its branch stays legible in history. */
+function paintSteerOrigin(row: HTMLElement, steered: boolean): void {
+  row.classList.toggle('is-steered', steered);
+  const box = row.querySelector<HTMLElement>('.said.is-user');
+  if (!box) return;
+  const existing = box.querySelector<HTMLElement>('.said-origin.is-steer');
+  if (!steered) {
+    existing?.remove();
+    return;
+  }
+  if (existing) return;
+  const origin = el('span', 'said-origin is-steer');
+  origin.append(icon('i-bolt'), el('span', '', () => t("Steered active turn")));
+  const anchor = box.querySelector('.message-attachments, .user-message-text, .message-edited, .message-reaction, .input-receipt');
+  if (anchor) box.insertBefore(origin, anchor);
+  else box.append(origin);
+}
+
 /** The exact outbox input retains preview bytes until optional history storage succeeds. */
 function retainedInputImages(event: Extract<SessionEvent, { kind: 'user_message' }>, sessionId: string | null): InputImage[] {
   if (!sessionId || !event.inputId) return [];
@@ -6058,7 +6103,7 @@ function eventRow(event: SessionEvent): HTMLElement {
   const row = el('div', `ev ev-${event.kind}`);
   // A note the app filed about its own work (a recovery reload), not ChatGPT's phase caption.
   if (event.kind === 'progress' && event.source === 'app') row.dataset.appNote = '';
-  if (event.kind === 'assistant_message' && !withoutMessageReaction(event.message.text).trim()) row.hidden = true;
+  if (event.kind === 'assistant_message' && (event.retracted === true || !withoutMessageReaction(event.message.text).trim())) row.hidden = true;
   tagImageRow(row, event);
   // When the app saw it, the same clock as the question above it. Only a message the app saw long
   // after it was written (an earlier answer read after a reload) shows when it was written: ChatGPT's
@@ -6994,7 +7039,8 @@ function paintDetail(followBottom = historyBefore === null): void {
   // Completed turns and the answer message that carries their copy/export actions.
   const anchors = answerAnchors(events);
   const looseAnchors = messageAnswerAnchors(events);
-  const workedSeconds = exchangeDurations(events);
+  const steeredAsks = steeredUserMessages(events);
+  const workedSegments = exchangeSegments(events, steeredAsks);
   const workers = sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null);
   const items = timelineItems(shown);
   const latestCompaction = items.filter(item => item.kind === 'compaction').at(-1);
@@ -7041,6 +7087,7 @@ function paintDetail(followBottom = historyBefore === null): void {
         paintMessageReaction(cached.row.querySelector<HTMLElement>('.said.is-user')!, item.event.reaction);
       }
       paintInputReceipt(cached.row, item);
+      paintSteerOrigin(cached.row, item.kind === 'event' && item.event.kind === 'user_message' && steeredAsks.has(item.event.seq));
       if (item.kind === 'event') rowEvents.set(cached.row, item.event);
       timelineRows.push(cached.row);
       continue;
@@ -7072,18 +7119,23 @@ function paintDetail(followBottom = historyBefore === null): void {
     row.dataset.workerSessions = workerIds;
     if (item.kind === 'event' && item.event.kind === 'user_message') row.dataset.askedAt = String(item.event.time);
     paintInputReceipt(row, item);
+    paintSteerOrigin(row, item.kind === 'event' && item.event.kind === 'user_message' && steeredAsks.has(item.event.seq));
     if (item.kind === 'event') rowEvents.set(row, item.event);
     rowCache.set(key, { sig, row });
     timelineRows.push(row);
   }
   appendRetiredInputs(Infinity);
   for (const key of rowCache.keys()) if (!keep.has(key)) rowCache.delete(key);
-  placeTurnLines(timelineRows, workedSeconds);
+  placeTurnLines(timelineRows, workedSegments);
   reconcileChildren($('timeline'), groupImageRows(renderRounds(timelineRows, tracesFor === selectedId ? traces : {}, turnWorking,
     turnWorking ? openTurnId(events) : null, selectedId, toolGroups, sayRows, true)));
+  paintedTimelineFor = detailFor;
+  paintedTimelineEvents = shown;
+  paintedDetailEvents = events;
   // Rounds that arrive after this paint enter with a fade; the chat as it opened does not.
   roundsEnter = timelineRows.length > 0;
   paintPendingInputs();
+  paintDeliveryControls();
   $('timelineEmpty').hidden = selectedId !== null || timelineRows.length > 0 || $('inputQueue').childElementCount > 0;
   if (timelineShown() && !holdSentMessage()) restoreViewport();
   paintJumpLatest();
@@ -7797,32 +7849,146 @@ function turnLine(className: string): HTMLElement {
 }
 const workedLines = new Map<string, HTMLElement>();
 
-/**
- * How long each of your messages was worked on, keyed by the message's time: from it to the last
- * end the page reported before your next message (a completed turn end or ChatGPT's final answer,
- * whichever came later). Anchored to your messages rather than ChatGPT's turn ids, which a page
- * can report empty or leave off the rows that did the work.
- */
-function exchangeDurations(list: readonly SessionEvent[]): Map<number, number> {
-  const asks = list.filter(event => event.kind === 'user_message').map(event => event.time).sort((a, b) => a - b);
-  const durations = new Map<number, number>();
-  asks.forEach((asked, index) => {
-    const next = asks[index + 1] ?? Number.POSITIVE_INFINITY;
-    let ended = -1;
-    for (const event of list) {
-      if (event.time < asked || event.time >= next) continue;
-      if ((event.kind === 'turn_end' && event.outcome === 'completed') || (event.kind === 'assistant_message' && event.final)) {
-        ended = Math.max(ended, event.time);
-      }
-    }
-    if (ended >= asked) durations.set(asked, Math.floor((ended - asked) / 1000));
-  });
-  return durations;
+interface ExchangeSegment {
+  seconds: number;
+  steered: boolean;
 }
 
-function workedLine(asked: number, seconds: number): HTMLElement {
+/**
+ * Sequences of `user_message` events that steered a running turn — either backed by a `turn_end`
+ * with `continued: true`, or observed arriving into the currently open turn before its end is logged.
+ */
+function steeredUserMessages(list: readonly SessionEvent[]): Set<number> {
+  const steered = new Set<number>();
+  const turnStartTimes = new Map<string, number>();
+  const turnOriginTimes = new Map<string, number>();
+  const endedTurns = new Set<string>();
+  const nextTurnStarts: number[] = [];
+  let latestClosedEnd = Number.NEGATIVE_INFINITY;
+  for (const event of list) {
+    if (event.turnId && event.kind !== 'turn_end') {
+      const seen = turnOriginTimes.get(event.turnId);
+      if (seen === undefined || event.time < seen) turnOriginTimes.set(event.turnId, event.time);
+    }
+    if (event.kind === 'turn_start') {
+      nextTurnStarts.push(event.time);
+      if (event.turnId) {
+        const prev = turnStartTimes.get(event.turnId);
+        if (prev === undefined || event.time < prev) turnStartTimes.set(event.turnId, event.time);
+      }
+    } else if (event.kind === 'turn_end') {
+      if (event.turnId) endedTurns.add(event.turnId);
+      if (event.continued !== true) latestClosedEnd = Math.max(latestClosedEnd, event.time);
+    }
+  }
+  nextTurnStarts.sort((a, b) => a - b);
+  const asks = list
+    .filter((event): event is Extract<SessionEvent, { kind: 'user_message' }> => event.kind === 'user_message')
+    .sort((a, b) => a.time - b.time || a.seq - b.seq);
+
+  for (const event of list) {
+    if (event.kind !== 'turn_end' || event.continued !== true) continue;
+    const tStart = event.turnId ? (turnStartTimes.get(event.turnId) ?? turnOriginTimes.get(event.turnId)) : undefined;
+    let prevClosed = Number.NEGATIVE_INFINITY;
+    for (const candidate of list) {
+      if (candidate.kind === 'turn_end' && candidate.continued !== true && candidate.time < event.time) {
+        prevClosed = Math.max(prevClosed, candidate.time);
+      }
+    }
+    const nextStart = nextTurnStarts.find(at => at > (tStart ?? event.time) && at >= event.time) ?? event.time;
+    const windowEnd = Math.max(event.time, nextStart);
+    const windowStart = Math.max(tStart ?? Number.NEGATIVE_INFINITY, prevClosed);
+    const candidates = asks.filter((ask, idx) => {
+      if (ask.automatic || ask.time > windowEnd || ask.time < windowStart) return false;
+      if (ask.time === windowStart && idx === 0) return false;
+      if (event.turnId && ask.turnId === event.turnId && idx === 0) return false;
+      if (idx > 0) return true;
+      return tStart !== undefined && list.some(prior =>
+        prior.turnId === event.turnId && prior.time < ask.time &&
+        (prior.kind === 'assistant_message' || prior.kind === 'tool_call' || prior.kind === 'page_tool' || prior.kind === 'progress')
+      );
+    });
+    const match = candidates.at(-1);
+    if (match) steered.add(match.seq);
+  }
+
+  const open = openTurnId(list);
+  if (open && !endedTurns.has(open)) {
+    const openStart = turnStartTimes.get(open);
+    if (openStart !== undefined) {
+      const asksAfterClosed = asks.filter(ask => ask.time > latestClosedEnd);
+      const lastAsk = asksAfterClosed.at(-1);
+      if (lastAsk && asksAfterClosed.length >= 2 && !lastAsk.automatic && lastAsk.turnId !== open && lastAsk.time > openStart) {
+        steered.add(lastAsk.seq);
+      }
+    }
+  }
+  return steered;
+}
+
+/**
+ * How long each of your messages was worked on, keyed by the message's time: from it to the last
+ * end the page reported before your next message (a completed turn end, a continued steer boundary,
+ * or ChatGPT's final answer, whichever came later). Anchored to your messages rather than ChatGPT's
+ * turn ids, which a page can report empty or leave off the rows that did the work.
+ */
+function exchangeSegments(list: readonly SessionEvent[], steeredAsks: ReadonlySet<number>): Map<number, ExchangeSegment> {
+  const asks = list
+    .filter((event): event is Extract<SessionEvent, { kind: 'user_message' }> => event.kind === 'user_message')
+    .sort((a, b) => a.time - b.time || a.seq - b.seq);
+  const turnStartTimes = new Map<string, number>();
+  for (const event of list) {
+    if (!event.turnId || event.kind === 'turn_end') continue;
+    const prev = turnStartTimes.get(event.turnId);
+    if (prev === undefined || (event.kind === 'turn_start' ? event.time <= prev : event.time < prev)) {
+      turnStartTimes.set(event.turnId, event.time);
+    }
+  }
+  const segments = new Map<number, ExchangeSegment>();
+  asks.forEach((ask, index) => {
+    const asked = ask.time;
+    const nextAsk = asks[index + 1];
+    const next = nextAsk?.time ?? Number.POSITIVE_INFINITY;
+    let endedCompletedOrFinal = -1;
+    let endedContinued = -1;
+    for (const event of list) {
+      if (event.kind === 'assistant_message' && event.final) {
+        const at = event.finalObservedAt ?? event.time;
+        if (at >= asked && at < next) endedCompletedOrFinal = Math.max(endedCompletedOrFinal, at);
+        continue;
+      }
+      if (event.kind !== 'turn_end') continue;
+      if (event.continued === true) {
+        const startAt = event.turnId ? turnStartTimes.get(event.turnId) : undefined;
+        const inWindow = event.time >= asked && event.time < next;
+        const rotatedRightAfterNext = !inWindow && event.time >= next && next < Number.POSITIVE_INFINITY &&
+          startAt !== undefined && startAt >= asked && startAt < next;
+        if (inWindow || rotatedRightAfterNext) {
+          endedContinued = Math.max(endedContinued, inWindow ? event.time : next);
+        }
+        continue;
+      }
+      if (event.outcome === 'completed' && event.time >= asked && event.time < next) {
+        endedCompletedOrFinal = Math.max(endedCompletedOrFinal, event.time);
+      }
+    }
+    const ended = Math.max(endedCompletedOrFinal, endedContinued);
+    if (ended >= asked) {
+      segments.set(asked, {
+        seconds: Math.floor((ended - asked) / 1000),
+        steered: endedContinued >= endedCompletedOrFinal && nextAsk !== undefined && !nextAsk.automatic && steeredAsks.has(nextAsk.seq)
+      });
+    }
+  });
+  return segments;
+}
+
+function workedLine(asked: number, seconds: number, steered = false): HTMLElement {
   const line = workedLines.get(String(asked)) ?? turnLine('turn-worked');
-  ui(line.firstElementChild as HTMLElement, 'textContent', () => t("{0} for {1}{2}s", [t("Worked"), clockPrefix(seconds), seconds % 60]));
+  line.classList.toggle('is-steered', steered);
+  ui(line.firstElementChild as HTMLElement, 'textContent', () => steered
+    ? t("Worked for {0}{1}s · steered", [clockPrefix(seconds), seconds % 60])
+    : t("{0} for {1}{2}s", [t("Worked"), clockPrefix(seconds), seconds % 60]));
   workedLines.set(String(asked), line);
   return line;
 }
@@ -7832,7 +7998,7 @@ function workedLine(asked: number, seconds: number): HTMLElement {
  * live caption while the chat works, earlier ones how long they worked. A message still in the
  * outbox (or work with no message of yours on screen) has the live line parked after the outbox.
  */
-function placeTurnLines(rows: HTMLElement[], workedSeconds: ReadonlyMap<number, number>): void {
+function placeTurnLines(rows: HTMLElement[], workedSegments: ReadonlyMap<number, ExchangeSegment>): void {
   const status = deps.state()?.config.ui.developerMode ? null : stateLine();
   const working = status?.working === true;
   turnWorking = working;
@@ -7857,13 +8023,13 @@ function placeTurnLines(rows: HTMLElement[], workedSeconds: ReadonlyMap<number, 
     // An edit's earlier versions fold right under its question (#365); the turn's line follows them.
     const at = rows[index + 1]?.matches('.earlier-version') ? index + 2 : index + 1;
     if (latest && live && (!pending || runningBefore)) { rows.splice(at, 0, turnStatusLine); rows.push(turnNow); continue; }
-    const seconds = workedSeconds.get(asked);
-    if (latest && stopped && seconds === undefined && timelineReachesEnd()) {
+    const segment = workedSegments.get(asked);
+    if (latest && stopped && segment === undefined && timelineReachesEnd()) {
       ui(turnStoppedLine.firstElementChild as HTMLElement, 'textContent', () => stateLine().text);
       rows.splice(at, 0, turnStoppedLine); turnStoppedShown = true; continue;
     }
-    if (seconds === undefined || (latest && live)) continue;
-    rows.splice(at, 0, workedLine(asked, seconds)); used.add(String(asked));
+    if (segment === undefined || (latest && live)) continue;
+    rows.splice(at, 0, workedLine(asked, segment.seconds, segment.steered)); used.add(String(asked));
   }
   for (const key of workedLines.keys()) if (!used.has(key)) workedLines.delete(key);
   // A long turn pushes its question out of the loaded rows: every row left is that turn's work, so its
@@ -9218,30 +9384,99 @@ function schedulePageHoldLapse(): void {
   pageHoldLapseTimer = window.setTimeout(() => { pageHoldLapseTimer = undefined; paintPendingInputs(); }, Math.max(0, Math.min(...due) - now) + 50);
 }
 
+let paintedTimelineFor: string | null = null;
+let paintedTimelineEvents: SessionEvent[] = [];
+let paintedDetailEvents: SessionEvent[] = [];
+const pageEchoMatches = new Map<string, { sessionId: string | null; messageId: string }>();
+
+function pageEchoAnchored(entry: InputEntry, all: readonly InputEntry[]): boolean {
+  if (!selectedId || detailFor !== selectedId || paintedTimelineFor !== selectedId || historyBefore !== null ||
+      !inputBelongsToCurrentSelection(entry)) return false;
+  const selectedSession = sessions.find(session => session.id === selectedId);
+  const multiChat = (selectedSession?.chatIds?.length ?? 0) > 1;
+  if (entry.requiresAuthorization && entry.sendAuthorizedAt === undefined) return false;
+  const dispatched = entry.state === 'browser' ||
+    (entry.state === 'queued' && !entry.error && !entry.scheduled && !heldBySendCheck(entry) &&
+      !queuedWaitReason(entry) && !routeHeld(entry) &&
+      (entry.offeredAt !== undefined || entry.sendAuthorizedAt !== undefined));
+  if (!dispatched || queuedFollowup(entry) || entry.messageId) return false;
+  const norm = (value: string) => value.replace(/\s+/g, ' ').trim();
+  const authored = norm(authoredTextOf(entry));
+  const companion = entry.companionInputId ? all.find(other => other.id === entry.companionInputId) : undefined;
+  const combined = companion ? norm(`${authoredTextOf(entry)}\n\nNext queued instruction:\n${companion.text}`) : '';
+  const delivered = entry.deliveryText ? norm(entry.deliveryText) : '';
+  const candidates = [authored, combined, delivered].filter(Boolean);
+  if (!candidates.length) return false;
+  const pendingMedia = (entry.images?.length ?? 0) > 0 || (entry.attachments?.length ?? 0) > 0;
+  const minEchoTime = entry.requiresAuthorization ? entry.sendAuthorizedAt! : entry.createdAt;
+  const settledBefore = entry.sendAuthorizedAt ?? entry.offeredAt ?? entry.createdAt;
+  const echoMatchesEntry = (event: SessionEvent): event is Extract<SessionEvent, { kind: 'user_message' }> => {
+    if (event.kind !== 'user_message' || event.source !== 'extension' || event.inputId || !event.messageId ||
+        event.messageId.startsWith('input:') || event.time < minEchoTime) return false;
+    if (multiChat && (!entry.conversationId || event.conversationId !== entry.conversationId)) return false;
+    if (!multiChat && event.conversationId && entry.conversationId && event.conversationId !== entry.conversationId) return false;
+    if (entry.edit && event.messageId === entry.edit.messageId) return false;
+    if (all.some(other => other.id !== entry.id && other.messageId === event.messageId)) return false;
+    for (const [otherId, cached] of pageEchoMatches) {
+      if (otherId !== entry.id && cached.sessionId === selectedId && cached.messageId === event.messageId) return false;
+    }
+    if (paintedDetailEvents.some(later => positionOf(later) > positionOf(event) && later.kind === 'turn_end' && later.time <= settledBefore)) return false;
+    const shown = norm(event.authoredText ?? userPromptText(event.message.text.trimStart()) ?? event.message.text);
+    const raw = norm(event.message.text);
+    const textMatch = candidates.includes(shown) || candidates.includes(raw);
+    return textMatch && (!pendingMedia || !!event.attachments?.length || !!event.assets?.length);
+  };
+  const priorMatch = pageEchoMatches.get(entry.id);
+  const priorEvent = priorMatch && priorMatch.sessionId === selectedId
+    ? paintedTimelineEvents.find((event): event is Extract<SessionEvent, { kind: 'user_message' }> =>
+        echoMatchesEntry(event) && event.messageId === priorMatch.messageId)
+    : undefined;
+  if (priorEvent) return true;
+  const sameConversationLaterUser = (event: SessionEvent, later: SessionEvent) =>
+    positionOf(later) > positionOf(event) && later.kind === 'user_message' &&
+    !(later.messageId?.startsWith('input:') && later.time < event.time) &&
+    (!entry.conversationId || !later.conversationId || later.conversationId === entry.conversationId);
+  const match = paintedTimelineEvents.find((event): event is Extract<SessionEvent, { kind: 'user_message' }> =>
+    echoMatchesEntry(event) && !paintedDetailEvents.some(later => sameConversationLaterUser(event, later)));
+  if (match?.messageId) {
+    pageEchoMatches.set(entry.id, { sessionId: selectedId, messageId: match.messageId });
+    return true;
+  }
+  pageEchoMatches.delete(entry.id);
+  return false;
+}
+
+function anchoredPendingInput(entry: InputEntry, all: readonly InputEntry[] = pendingComposerInputs): boolean {
+  return detailFor === selectedId && ((paintedTimelineFor === selectedId && paintedTimelineEvents.some(event =>
+    event.kind === 'user_message' && (event.inputId === entry.id ||
+      event.messageId === (entry.messageId ?? `input:${entry.id}`)))) ||
+    pageEchoAnchored(entry, all) ||
+    // History owns committed off-page rows. Keep only receipts newer than our
+    // loaded publication cursor while the corresponding live snapshot arrives.
+    (Boolean(entry.historyAnchored || entry.historyRecorded) &&
+      (historyBefore !== null || (entry.historySeq !== undefined
+        ? (detailCursor ?? 0) > entry.historySeq
+        : events.length > 0))));
+}
+
 function paintPendingInputs(): void {
   schedulePageHoldLapse();
   const all = pendingComposerInputs;
-  const belongsToSelection = (entry: InputEntry): boolean => selectedId === null
-    ? pendingNewInput?.generation === selectionGeneration && entry.id === pendingNewInput.id
-    : (entry.sessionId ?? entry.deliveredSessionId) === selectedId;
+  for (const id of [...pageEchoMatches.keys()]) {
+    const current = all.find(entry => entry.id === id) ?? startingInputs.get(id);
+    if (!current || current.messageId || ['sent', 'cancelled', 'failed'].includes(current.state)) pageEchoMatches.delete(id);
+  }
+  const belongsToSelection = inputBelongsToCurrentSelection;
   // A pre-acceptance or failed-materialization row belongs only to its exact draft.
   // A fresh New Chat never inherits another opening.
   const unbound = (entry: InputEntry) => selectedId === null && pendingNewInput?.id === entry.id && pendingNewInput.generation === selectionGeneration && !entry.deliveredSessionId && entry.purpose !== 'decision' && ['queued', 'browser'].includes(entry.state);
   const notice = (entry: InputEntry) => belongsToSelection(entry) && entry.purpose !== 'decision' && entry.purpose !== 'rotation' &&
     ['failed', 'cancelled'].includes(entry.state) && !!entry.error && !dismissedInputNotices.has(entry.id);
-  const anchored = (entry: InputEntry) => detailFor === selectedId && (events.some(event =>
-    event.kind === 'user_message' && (event.inputId === entry.id ||
-      event.messageId === (entry.messageId ?? `input:${entry.id}`))) ||
-    // History owns committed off-page rows. Keep only receipts newer than our
-    // loaded publication cursor while the corresponding live snapshot arrives.
-    ((entry.historyAnchored || entry.historyRecorded) &&
-      (historyBefore !== null || (entry.historySeq !== undefined
-        ? (detailCursor ?? 0) > entry.historySeq
-        : events.length > 0))));
-  const rows = all.filter((entry) => !dismissedInputNotices.has(entry.id) && !(!notice(entry) && anchored(entry)) && !(queuedFollowup(entry) && ['queued', 'tool', 'browser'].includes(entry.state)) && (belongsToSelection(entry) || unbound(entry) || notice(entry)) &&
+  const anchored = (entry: InputEntry) => anchoredPendingInput(entry, all);
+  const rows = all.filter((entry) => !dismissedInputNotices.has(entry.id) && (belongsToSelection(entry) || unbound(entry) || notice(entry)) && !(!notice(entry) && anchored(entry)) && !(queuedFollowup(entry) && ['queued', 'tool', 'browser'].includes(entry.state)) &&
     (notice(entry) || unbound(entry) || selectedId !== null || projectGroup(entry.projectId) === selectedProjectId) &&
     (notice(entry) || !['sent', 'cancelled'].includes(entry.state) || (entry.state === 'sent' && entry.messageId && !anchored(entry))));
-  for (const entry of startingInputs.values()) if (belongsToSelection(entry) && !all.some(row => row.id === entry.id)) rows.push(entry);
+  for (const entry of startingInputs.values()) if (belongsToSelection(entry) && !anchored(entry) && !all.some(row => row.id === entry.id)) rows.push(entry);
   const host = $('inputQueue');
   // A row whose status changed is rebuilt; a control of it that had keyboard focus keeps it (CodeRabbit on #2054).
   const active = document.activeElement instanceof HTMLElement && host.contains(document.activeElement) ? document.activeElement : null;
@@ -9259,9 +9494,13 @@ function paintPendingInputs(): void {
   reconcileChildren(host, [...next, ...host.querySelectorAll<HTMLElement>(':scope > .queued-input')]);
   if (focused?.id && active && !active.isConnected) {
     const row = [...host.querySelectorAll<HTMLElement>(':scope > .pending-message')].find(candidate => candidate.dataset.inputId === focused.id);
-    const buttons = [...row?.querySelectorAll<HTMLElement>('button') ?? []];
-    // The same control if the rebuilt row still has it, else the row's first one (a failed row shows Retry and Dismiss instead).
-    (buttons.find(button => button.className === focused.cls && button.getAttribute('aria-label') === focused.label) ?? buttons[0])?.focus({ preventScroll: true });
+    if (row) {
+      const buttons = [...row.querySelectorAll<HTMLElement>('button')];
+      // The same control if the rebuilt row still has it, else the row's first one (a failed row shows Retry and Dismiss instead).
+      (buttons.find(button => button.className === focused.cls && button.getAttribute('aria-label') === focused.label) ?? buttons[0])?.focus({ preventScroll: true });
+    } else {
+      $<HTMLTextAreaElement>('chatInput').focus({ preventScroll: true });
+    }
   }
   holdSentMessage();
 }
@@ -9592,9 +9831,11 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
     if (!controlAction) return;
     const target = selectedId, selection = selectionGeneration;
     const sameSelection = () => selectedId === target && selectionGeneration === selection;
-    // The turn the button showed Stop for, before the refresh can change it (CodeRabbit).
+    // The turn or pending delivery the button showed Stop/Cancel for, before the refresh can change it (CodeRabbit).
     const shownTurn = controlledSessionId === target && controlledSelection === selection ? controlledTurnId ?? controlledHeldTurnId : null;
     const shownConversation = shownTurn ? controlledConversationId : null;
+    const shownPendingId = !shownTurn && paintedPendingCancel?.target === target && paintedPendingCancel.selection === selection
+      ? paintedPendingCancel.id : null;
     await refreshSessionControls();
     if (!sameSelection()) return;
     // An actual turn takes precedence over queued follow-ups. Stop never silently
@@ -9610,8 +9851,10 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
       if (target) { await stopShownTurn(target, shownTurn, shownConversation, sameSelection); if (sameSelection()) void refreshSessionControls(); }
       return;
     }
-    const pending = pendingComposerInput();
-    if (pending && ['queued', 'browser'].includes(pending.state)) {
+    const pending = shownPendingId
+      ? [...pendingComposerInputs, ...startingInputs.values()].find(entry => entry.id === shownPendingId)
+      : undefined;
+    if (pending && cancellablePendingInput(pending)) {
       const wasStarting = startingInputs.has(pending.id);
       if (wasStarting) cancelledStarts.add(pending.id);
       const cancelled = await run(api.cancelInput(pending.id));

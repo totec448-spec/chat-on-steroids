@@ -284,7 +284,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Session/current chat/project | `store.ts` / `sessions/<id>/meta.json` | Rebind is the semantic A→B commit. |
 | Exact request ownership | `correlation.ts` / `state/request-correlations.json` plus recorded proof | Native request proof establishes the session epoch and scoped provider-session bindings. Derived owners commit before publication; native request proof supersedes a derivation. Startup trusts a complete ledger and scans history only to migrate an older one. |
 | Running exec process | `UnifiedExecProcessManager` process memory plus `codex/ownership.ts` custody | The manager is the only live-process authority. A yielded child may start under temporary request custody; exact correlation promotes it to the durable session. IPC/preload/renderer only project that owner-scoped state and may request an ownership- and incarnation-checked stop. |
-| Authored message | `store.ts` / canonical message shard | Replace by stable identity, preserving origin chronology. |
+| Authored message | `store.ts` / canonical message shard | Replace by stable identity, preserving origin chronology. `turn_messages` from `/events` may mark unfinalized extension `assistant_message` shards of that `turnId` `retracted: true` when absent from a complete non-continued turn snapshot (fenced by `docId`, monotonic `docSeq`/`observedAt`, and `settled` for cross-document cleanup; `eventTokens` = 0, hidden on non-incremental reads, cleared if re-observed). |
 | Turn round outline | `recorder.ts` `turn_trace` → `store.ts::writeTurnTrace` / `sessions/<id>/traces/<turnId>.json` | Validated by `shared/turn-trace.ts`; the newest outline replaces the turn's; never an event or evidence. |
 | Agent progress plan | `request-plans.ts` → `store.ts::updateSessionPlan` / `sessions/<id>/plan.json` | Request-scoped storage before proof; exact session and invocation ordering on attachment; atomically replace the whole plan. |
 | Input and checkpoints | `input.ts` / `state/session-input.json` | Serialized acceptance, frozen payload, exclusive claim and receipt; stages belong here. |
@@ -490,6 +490,11 @@ Unlike a new worker, a wake whose model the picker cannot confirm is still typed
 step `model-unconfirmed` and the bridge logs which model it could not confirm. A Compact & Resume does the
 same (2026-11-01: an abandoned resume stopped its chat for good); its new chat then tries the model once more
 (`publishBootstrapSelection`).
+A bootstrap's model choice that ChatGPT takes back as the picker closes (receipt `failure=changed`,
+`failedPhase=close`, #2085) is tried once more, like an announcement over the picker: at most two attempts
+(receipt `attempt` 1 and 2), only for that outcome, and the picker read after the second close is still the only
+proof. Only a readable picker showing a different choice than the one selected counts: an unreadable, unavailable,
+mid-selection or unclosed picker, and a native reasoning control that disagrees with a picker that held, are not retried. Input sends keep one attempt.
 An effort-only request (no model) keeps ChatGPT's current model: `selectModelSettings` rounds the
 effort within that model only and never moves to another model offering the effort; with the current
 model unreadable it confirms nothing.
@@ -571,6 +576,15 @@ grouped under their folder, written once, as `<entry>: /<id> — description` (d
 one closing line saying the user can pick them with `/`.
 `skill-package.ts` stages resource copies and publishes SKILL.md last; the existing serialized
 managed-library owner controls imports and removals. Scripts/assets remain inert resources.
+GitHub Skill import (`skill-github.ts`) resolves a public repository, folder or SKILL.md link to
+an exact commit before reading its tree. A single unambiguous nested Skill may be selected from
+a repository-root link; multiple candidates require an explicit folder. Import, linking and
+updates share a bound of 256 regular files, 12 directories, 10 nested levels and 32 MiB per
+package; excessive, unsafe, linked or incomplete trees fail closed. Resources are downloaded
+from commit-pinned raw URLs and verified against Git blob hashes before publication. A locally
+linked Skill keeps its own ID and existing files; the recorded origin revision describes those
+local files until an explicit update replaces them. Updates compare whole-package revisions,
+preserve local edits and swap through the managed-library owner.
 When `CODEX_HOME` has a plugin cache (approved or as a user Skill area), that same read-only
 catalog may project Skills from the last `codex plugin list --json` installed/enabled snapshot.
 Only explicit `skills:library` inspection may create or refresh that runtime snapshot; session
@@ -2489,6 +2503,7 @@ to already-resident rows of the same exact local turn during incremental renderi
 The existing `nativeQuestion` summary excludes proven tool injections. Browser-delivered inputs
 can also carry `inputId`, so that field alone never excludes a native question. Injected corrections
 remain visible in history but cannot become native user anchors or recovery question identities.
+Extension-recorded `user_message` events also carry optional `conversationId`: the ChatGPT conversation that observed the message (written by both active observations and superseded lingering tabs so multi-chat/rotated timelines keep echo ownership scoped); older records may omit it.
 
 Unattributed is a first-class recorded state. Late exact proof repairs only matching call ids
 to the proved session epoch, copying assets first and rewriting only the scanned source prefix
@@ -4986,7 +5001,11 @@ replace them directly; queue/status repaints must not flash the New Chat welcome
 A failed destination read clears retained rows. The welcome belongs only to explicit New Chat.
 Unbound local sessions do not request provider-only controls. The timeline and pending-message
 projection reconcile exact input/native message identities in the same paint: keep an accepted
-bubble until its history arrives, then remove its pending copy. Unchanged pending rows stay mounted.
+bubble until its history arrives (including an early unattributed extension `user_message` echo on the
+mounted newest page once text and media readiness match after authorization/dispatch, scoped by
+`user_message.conversationId` on multi-chat or rotated sessions and ignoring other conversations'
+late user messages when choosing the newest echo while still treating unattributed later questions
+conservatively), then remove its pending copy. Unchanged pending rows stay mounted.
 The outbox's `historySeq` is the store-confirmed canonical origin. Once the loaded publication
 cursor covers it, the pending projection cannot resurrect that input when its history page is
 evicted. Historical browsing leaves committed inputs with history. Never infer membership from
@@ -5219,7 +5238,7 @@ read after a reload sends its outline too, which is how recaps that arrived late
 The bridge validates it (`shared/turn-trace.ts`), and the recorder stores it per turn in
 `sessions/<id>/traces/<turnId>.json`, replacing the turn's previous outline. It is presentation
 beside the log, never an event, message, call, work or completion evidence. `sessions:traces`
-(preload `turnTraces`) returns the outlines of up to 64 turns a timeline shows.
+(`sessions:traces`, preload `turnTraces`) returns the outlines of up to 64 turns a timeline shows. For complete non-conflicted non-steered turns (`messagesComplete: true`), `fiber.js` / `content.js` likewise emits coalesced `turn_messages` on settlement or when a previously observed streaming `assistant_message` vanishes for two consecutive complete scans, and `/activity` consumers drop `assistant_message` rows marked `retracted: true`.
 
 A message the user sends into a running answer (#1301): ChatGPT shows it as the start of a turn
 of its own but keeps the answer's one MCP request id across it. The page ends the local turn there

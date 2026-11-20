@@ -618,6 +618,48 @@ describe('direct browser control over the paired bridge', () => {
 });
 
 describe('who is allowed to talk to it', () => {
+  // 2026-11-20: the request window opened at a clock reading that was later corrected backwards (a
+  // wrong clock set right, a resumed VM). `now - start` stayed negative, the window never closed,
+  // and every later request counted against it until the clock caught up: the extension got 429 for
+  // as long as the correction was big.
+  it('does not lock the extension out when the clock is corrected backwards', async () => {
+    await pair();
+    const logger = await import('../src/main/logger.js');
+    const info = vi.spyOn(logger, 'logInfo');
+    const real = Date.now();
+    let now = real + 60 * 60_000;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      expect((await request('GET', '/status')).status).toBe(200);
+      now = real;
+      // Three minutes of ordinary traffic (400 a minute, 1,200 in all) after the correction.
+      const statuses = new Set<number>();
+      for (let minute = 0; minute < 3; minute += 1) {
+        for (let index = 0; index < 400; index += 1) statuses.add((await request('GET', '/status')).status);
+        now += 61_000;
+      }
+      expect([...statuses]).toEqual([200]);
+      // One line says why the count started again, not one per request.
+      expect(info.mock.calls.map(([line]) => String(line)).filter(line => line.includes('the clock moved back'))).toEqual([
+        'bridge: the clock moved back 3600 s; the request limit starts counting again'
+      ]);
+    } finally { clock.mockRestore(); info.mockRestore(); }
+  });
+
+  it('still refuses more than 900 requests inside one minute, and allows them again the next minute', async () => {
+    await pair();
+    const real = Date.now();
+    let now = real;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      let refused = 0;
+      for (let index = 0; index < 930; index += 1) if ((await request('GET', '/status')).status === 429) refused += 1;
+      expect(refused).toBeGreaterThan(0);
+      now += 61_000;
+      expect((await request('GET', '/status')).status).toBe(200);
+    } finally { clock.mockRestore(); }
+  });
+
   it('logs only bounded close-outbox decision codes and only once per extension report', async () => {
     await pair();
     const logger = await import('../src/main/logger.js');
@@ -20263,5 +20305,55 @@ describe('push-driven activity wakes over /wake', () => {
         await closed;
       }
     }
+  });
+});
+
+describe('turn_messages retraction over bridge', () => {
+  it('validates turn_messages observations and exposes streaming retractions on incremental /activity', async () => {
+    await pair();
+    const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac99';
+    await request('POST', '/events', {
+      body: {
+        conversationId,
+        events: [
+          { kind: 'turn_start', time: 100, turnId: 'turn-bridge-retract' },
+          { kind: 'assistant_message', time: 101, turnId: 'turn-bridge-retract', messageId: 'msg-kept', docId: 'doc-a', docSeq: 1, text: 'Kept update', state: 'streaming', activeNow: true },
+          { kind: 'assistant_message', time: 102, turnId: 'turn-bridge-retract', messageId: 'msg-dropped', docId: 'doc-a', docSeq: 2, text: 'Aborted draft', state: 'streaming', activeNow: true }
+        ]
+      }
+    });
+    const before = await request('GET', `/activity?conversationId=${conversationId}`);
+    const since = before.body.nextSince as number;
+
+    // Malformed, oversized, stale docSeq, or foreign-document unsettled turn_messages payloads must fail closed without retracting anything.
+    await request('POST', '/events', {
+      body: {
+        conversationId,
+        events: [
+          { kind: 'turn_messages', time: 103, turnId: 'turn-bridge-retract', messageIds: ['msg-kept', ''] },
+          { kind: 'turn_messages', time: 103, turnId: 't'.repeat(101), messageIds: ['msg-kept'] },
+          { kind: 'turn_messages', time: 103, turnId: 'turn-bridge-retract', messageIds: ['msg-kept', 'm'.repeat(201)] },
+          { kind: 'turn_messages', time: 104, turnId: 'turn-bridge-retract', messageIds: Array.from({ length: 401 }, (_, i) => `id-${i}`) },
+          { kind: 'turn_messages', time: 105, turnId: 'turn-bridge-retract', messageIds: ['msg-kept'], docId: 'doc-a', docSeq: 2 },
+          { kind: 'turn_messages', time: 106, turnId: 'turn-bridge-retract', messageIds: ['msg-kept'], docId: 'doc-b', docSeq: 1 }
+        ]
+      }
+    });
+    const afterInvalid = await request('GET', `/activity?conversationId=${conversationId}&since=${since}`);
+    expect(afterInvalid.body.stream).toEqual([]);
+
+    // Valid newer turn_messages retracts the vanished draft and sends the retraction over incremental /activity.
+    await request('POST', '/events', {
+      body: {
+        conversationId,
+        events: [
+          { kind: 'turn_messages', time: 107, turnId: 'turn-bridge-retract', messageIds: ['msg-kept'], docId: 'doc-a', docSeq: 3 }
+        ]
+      }
+    });
+    const delta = await request('GET', `/activity?conversationId=${conversationId}&since=${since}`);
+    expect(delta.body.stream).toEqual([
+      expect.objectContaining({ kind: 'assistant_message', messageId: 'msg-dropped', retracted: true })
+    ]);
   });
 });
