@@ -42,6 +42,10 @@ A Goal or Loop chat whose Compact & Resume got stuck now goes on by itself, Sett
 
 - **Image previews for a very long chat** say the chat reached its own limit, and the storage warning in the log appears once per chat.
 
+### Thank you
+
+To **@Neinndall** for the steered-answer ordering, the retracted half-written notes, the doubled message bubble, the settled-turn closes for remounted pages and generated images, the attachment fixes, the per-chat storage wording and the faster chat updates; **@atsu6** for the worker wake after a tool-only finish, the attachments that stay while a draft needs them, and Review showing what a chat edited; **@Kdevaulo** for the model and effort picker fixes and the quota-warning fix, and for the careful signed-in diagnostics on #2085; **@Akilaydin** for the report and the fix that brings remote plugins back by themselves; and **@lavalava45** for bigger GitHub Skills. And to **@0xConsole**, **@rockomania-dot**, **@WQuendry**, **@ColinKiiim**, **@artcraftfan1**, **@oysOYSoys**, **@kjm0202**, **@ahmedali5696**, **@dashielllubsen**, **@toannv216-oss**, **@fengnaiouo** and **@ralphchristianeclipse** for their reports and diagnostics, which found the stalled Compact & Resume cases fixed here and the ones still being worked on; and to **@Haz4rdovisk** for the product reviews.
+
 ## [2.1.53] — Compact & Resume in Projects, Goal chats that recover, and safer saves over SSH
 Compact & Resume now works in Projects where the app started chats, a Goal chat no longer stalls after a failed Continue, and saving a file over SSH can no longer lose the original. A message sent while ChatGPT answers goes out on pages in any language.
 
