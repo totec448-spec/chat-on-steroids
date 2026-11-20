@@ -3102,6 +3102,7 @@ input[readonly] {
   white-space: normal;
   line-height: calc(1.5 * var(--line-spacing, 1));
 }
+.msg.rich:has(.markdown-dil-grid-standalone),
 .msg.rich:has(.markdown-dil-photo-row) { container: message-content / inline-size; }
 
 /* Plain messages keep independent bidi paragraphs, including mixed-language pastes.
@@ -3190,11 +3191,20 @@ input[readonly] {
 }
 .msg.rich .markdown-dil-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--markdown-dil-columns, 2), minmax(0, 1fr));
   column-gap: 18px;
   row-gap: 14px;
 }
 .msg.rich .markdown-dil-grid-item { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.msg.rich .markdown-dil-grid-columns-3 { --markdown-dil-columns: 3; }
+.msg.rich .markdown-dil-grid-columns-4 { --markdown-dil-columns: 4; }
+.msg.rich .markdown-dil-grid-standalone > .markdown-dil-grid-item > .markdown-dil-bordered {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .msg.rich .markdown-dil-grid-item > .markdown-dil-text:first-child {
   color: var(--soft);
   font-size: calc(12px * var(--text-scale, 1));
@@ -3219,12 +3229,15 @@ input[readonly] {
   font-weight: 750;
   line-height: 1;
 }
+.msg.rich .markdown-dil-grid-standalone > .markdown-dil-grid-item > .markdown-dil-bordered,
 .msg.rich .markdown-dil-panel {
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   background: var(--card);
   color: var(--ink);
   padding: 12px;
+}
+.msg.rich .markdown-dil-panel {
   max-width: 100%;
   min-width: 0;
   display: flex;
