@@ -1939,7 +1939,10 @@ function tooLarge(res: http.ServerResponse, origin: string | null): void {
 
 function rateLimited(): boolean {
   const now = Date.now();
-  if (now - requestWindow.start > 60_000) requestWindow = { start: now, count: 0 };
+  // A clock corrected backwards leaves the window starting in the future; it would never close.
+  const behind = requestWindow.start - now;
+  if (behind >= 1000) logInfo(`bridge: the clock moved back ${Math.round(behind / 1000)} s; the request limit starts counting again`);
+  if (now < requestWindow.start || now - requestWindow.start > 60_000) requestWindow = { start: now, count: 0 };
   requestWindow.count += 1;
   return requestWindow.count > RATE_LIMIT;
 }
