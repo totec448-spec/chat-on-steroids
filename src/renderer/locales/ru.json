@@ -4212,8 +4212,7 @@
   "Review lists the files this chat changed and opens each recorded diff.": "Проверка показывает файлы, которые изменил этот чат, и открывает каждый записанный diff.",
   "Steered active turn": "Перенаправил активный ход",
   "Worked for {0}{1}s · steered": "Завершил работу — {0}{1} с · перенаправлен",
-  "Check ChatGPT Web titles": "Проверять заголовки в ChatGPT Web",
-  "Compare titles from the chat menu. ChatGPT keeps its title.": "Сравнивайте заголовки через меню чата. Заголовок в ChatGPT сохраняется.",
-  "Titles match": "Заголовки совпадают",
-  "Titles differ": "Заголовки различаются"
+  "Check ChatGPT titles": "Проверять заголовки в ChatGPT",
+  "Show a notice in the chat menu when the open ChatGPT chat has a different title.": "Показывает уведомление в меню чата, если у открытого чата ChatGPT другой заголовок.",
+  "ChatGPT title differs": "Заголовок в ChatGPT отличается"
 }

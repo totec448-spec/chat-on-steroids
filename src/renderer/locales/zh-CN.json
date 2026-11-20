@@ -3960,8 +3960,7 @@
   "Review lists the files this chat changed and opens each recorded diff.": "审查会列出此聊天更改的文件，并可打开每条已记录的差异。",
   "Steered active turn": "已引导当前轮次",
   "Worked for {0}{1}s · steered": "已工作 {0}{1} 秒 · 已引导",
-  "Check ChatGPT Web titles": "检查 ChatGPT 网页版标题",
-  "Compare titles from the chat menu. ChatGPT keeps its title.": "从聊天菜单比较标题。ChatGPT 会保留原有标题。",
-  "Titles match": "标题相同",
-  "Titles differ": "标题不同"
+  "Check ChatGPT titles": "检查 ChatGPT 标题",
+  "Show a notice in the chat menu when the open ChatGPT chat has a different title.": "如果在 ChatGPT 中打开的聊天使用了不同的标题，则在聊天菜单中显示提示。",
+  "ChatGPT title differs": "ChatGPT 标题不同"
 }

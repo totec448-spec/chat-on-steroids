@@ -34,6 +34,8 @@ export interface RowMenuItem {
   shortcut?: () => string;
   /** A short live value after the label, e.g. the zoom "110%"; `refreshRowMenu` repaints it. */
   hint?: () => string;
+  /** A live note below the label. An empty note takes no space. */
+  description?: () => string;
   /** Runs after the menu has closed, or with it still open when `keepOpen`. */
   run?: () => void;
   /** Like `run`, and told whether the keys chose the item (Enter or Space) rather than a pointer. */
@@ -202,7 +204,20 @@ function itemButton(item: RowMenuItem, menu: HTMLElement, depth: number): HTMLBu
   } else if (item.icon) button.append(icon(item.icon));
   else button.append(el('span', 'row-menu-gap'));
   const text = el('span', 'row-menu-label', item.label);
-  button.append(text);
+  if (item.description) {
+    const description = item.description;
+    const note = el('span', 'row-menu-description', description);
+    note.setAttribute('aria-live', 'polite');
+    const labels = el('span', 'row-menu-text');
+    labels.append(text, note);
+    button.append(labels);
+    current?.refreshers.push(() => {
+      const next = description();
+      if (note.textContent === next) return;
+      note.textContent = next;
+      if (current?.levels[0] === menu) place(menu, current.options);
+    });
+  } else button.append(text);
   if (item.hint) {
     const hint = item.hint;
     const value = el('span', 'row-menu-hint', hint);

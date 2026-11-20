@@ -3960,8 +3960,7 @@
   "Review lists the files this chat changed and opens each recorded diff.": "검토에서 이 채팅이 변경한 파일을 나열하고 기록된 diff를 각각 열 수 있습니다.",
   "Steered active turn": "현재 턴의 방향을 전환함",
   "Worked for {0}{1}s · steered": "작업함 · {0}{1}초 · 방향 전환됨",
-  "Check ChatGPT Web titles": "ChatGPT 웹 제목 확인",
-  "Compare titles from the chat menu. ChatGPT keeps its title.": "채팅 메뉴에서 제목을 비교합니다. ChatGPT의 제목은 그대로 유지됩니다.",
-  "Titles match": "제목 일치",
-  "Titles differ": "제목이 다름"
+  "Check ChatGPT titles": "ChatGPT 제목 확인",
+  "Show a notice in the chat menu when the open ChatGPT chat has a different title.": "열려 있는 ChatGPT 채팅의 제목이 다르면 채팅 메뉴에 알림을 표시합니다.",
+  "ChatGPT title differs": "ChatGPT 제목이 다릅니다"
 }

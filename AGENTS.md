@@ -5365,8 +5365,9 @@ That row remains visible and says awaiting attribution/check unless the original
 conditions already permit a reload. Its label then names the reload without changing its schedule.
 Exact MCP proof removes only its chat; later chats stay out.
 
-The optional `sessions.checkWebChatTitles` setting defaults off. The chat menu's explicit
-`sessions:checkWebTitle` compares the app's manual name with a freshly confirmed title in the
+The optional `sessions.checkWebChatTitles` setting defaults off. Opening a manually named
+chat's menu uses `sessions:checkWebTitle` and only shows a confirmed mismatch below Rename.
+The check compares the app's manual name with a freshly confirmed title in the
 active tab of the selected paired browser. One in-memory nonce is offered in `POST /status` and
 settled by that browser's `POST /browser/web-chat-title` response. The page must still be on
 the exact conversation, and its visible sidebar link and document title must agree. A changed

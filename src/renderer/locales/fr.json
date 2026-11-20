@@ -4128,8 +4128,7 @@
   "Review lists the files this chat changed and opens each recorded diff.": "Revue liste les fichiers modifiés par ce chat et ouvre chaque diff enregistré.",
   "Steered active turn": "A réorienté le tour actif",
   "Worked for {0}{1}s · steered": "A travaillé pendant {0}{1} s · réorienté",
-  "Check ChatGPT Web titles": "Vérifier les titres sur ChatGPT Web",
-  "Compare titles from the chat menu. ChatGPT keeps its title.": "Comparez les titres depuis le menu de la conversation. ChatGPT conserve son titre.",
-  "Titles match": "Les titres correspondent",
-  "Titles differ": "Les titres diffèrent"
+  "Check ChatGPT titles": "Vérifier les titres dans ChatGPT",
+  "Show a notice in the chat menu when the open ChatGPT chat has a different title.": "Affiche un avis dans le menu si la conversation ouverte dans ChatGPT porte un autre titre.",
+  "ChatGPT title differs": "Le titre diffère dans ChatGPT"
 }

@@ -1451,29 +1451,22 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     items: () => {
       if (summary.titleSource !== 'manual' || !summary.conversationId ||
           deps.state()?.config.sessions.checkWebChatTitles !== true) return items;
-      let hint = '';
-      let checking = false;
-      const check: RowMenuItem = {
-        action: 'check-web-title',
-        label: () => t('Check ChatGPT Web titles'),
-        hint: () => hint ? t(hint) : '',
-        keepOpen: true,
-        run: async () => {
-          if (checking || deps.state()?.config.sessions.checkWebChatTitles !== true) return;
-          checking = true;
-          hint = 'Checking…';
-          const reply = await api.checkWebChatTitle(summary.id).catch(() => null);
-          checking = false;
-          const current = sessions.find(chat => chat.id === summary.id);
-          if (!rowMenuOpenFor(owner) || deps.state()?.config.sessions.checkWebChatTitles !== true) return;
-          const result = reply?.ok && current?.title === summary.title &&
-            current.conversationId === summary.conversationId ? reply.data : 'unavailable';
-          hint = result === 'match' ? 'Titles match' : result === 'different' ? 'Titles differ' : 'Unavailable';
+      let differs = false;
+      const enabled = () => deps.state()?.config.sessions.checkWebChatTitles === true;
+      const matchesMenu = () => {
+        const current = sessions.find(chat => chat.id === summary.id);
+        return current?.titleSource === 'manual' && current.title === summary.title &&
+          current.conversationId === summary.conversationId;
+      };
+      void api.checkWebChatTitle(summary.id).then(reply => {
+        if (reply?.ok && reply.data === 'different' && rowMenuOpenFor(owner) && enabled() && matchesMenu()) {
+          differs = true;
           refreshRowMenu();
         }
-      };
-      const rename = items.findIndex(item => item.action === 'rename');
-      return [...items.slice(0, rename + 1), check, ...items.slice(rename + 1)];
+      }).catch(() => undefined);
+      return items.map(item => item.action === 'rename'
+        ? { ...item, description: () => differs && enabled() && matchesMenu() ? t('ChatGPT title differs') : '' }
+        : item);
     }
   });
   more.addEventListener('click', (event) => { event.stopPropagation(); removeSessionTooltip(); toggleRowMenu(menu()); });
@@ -9083,6 +9076,7 @@ export function chatApply(state: AppState, previous?: Config): void {
     previous === undefined ? undefined : String(previous.sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB)
   );
   applyChatChecked($<HTMLInputElement>('checkWebChatTitles'), config.sessions.checkWebChatTitles === true, previous?.sessions.checkWebChatTitles);
+  if (previous?.sessions.checkWebChatTitles && !config.sessions.checkWebChatTitles) refreshRowMenu();
   applyAutoCompactHint(config);
   $<HTMLInputElement>('autoCompactTokens').disabled = !config.compaction.auto;
 

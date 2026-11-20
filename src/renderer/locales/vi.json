@@ -3960,8 +3960,7 @@
   "A new message or tool call shows up in the open chat much sooner.": "Tin nhắn mới hoặc lệnh gọi công cụ hiện trong chat đang mở sớm hơn nhiều.",
   "What a chat edited": "Những gì một chat đã sửa",
   "Review lists the files this chat changed and opens each recorded diff.": "Mục Xem lại liệt kê các tệp chat này đã thay đổi và mở từng diff đã ghi.",
-  "Check ChatGPT Web titles": "Kiểm tra tiêu đề trên ChatGPT Web",
-  "Compare titles from the chat menu. ChatGPT keeps its title.": "So sánh tiêu đề từ menu cuộc trò chuyện. ChatGPT giữ nguyên tiêu đề.",
-  "Titles match": "Tiêu đề trùng khớp",
-  "Titles differ": "Tiêu đề khác nhau"
+  "Check ChatGPT titles": "Kiểm tra tiêu đề trên ChatGPT",
+  "Show a notice in the chat menu when the open ChatGPT chat has a different title.": "Hiện thông báo trong menu khi cuộc trò chuyện đang mở trên ChatGPT có tiêu đề khác.",
+  "ChatGPT title differs": "Tiêu đề trên ChatGPT khác"
 }
