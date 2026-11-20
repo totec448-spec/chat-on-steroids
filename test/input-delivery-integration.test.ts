@@ -605,6 +605,100 @@ it('ends a Continue the page refuses before claiming because its answer is finis
   } finally { clock.mockRestore(); }
 });
 
+// The replacement document may initially be unable to read the question or prove
+// that its answer is unfinished. Only a real final can file a Goal decision.
+// The native veto and the final journal may reach the bridge in either order.
+it.each(['veto-first', 'final-first', 'new-work'] as const)(
+  'hands an unreadable silence recovery back to its exact owner (%s)', async order => {
+    const bridge = await import('../src/main/bridge.js');
+    let now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoContinue: true },
+        goal: { ...defaultConfig().goal, enabled: false, backend: 'templates' } });
+      const { conversationId, turnId, session, row } = await silentTurnContinue(
+        'Unreadable recovery handoff', ms => now += ms);
+      await goal.setGoalObjectiveNow(conversationId, 'Finish the task');
+      await goal.setGoalSwitchNow(conversationId, 'goal', true);
+      const state = async () => (await input.listInputs()).find(entry => entry.id === row.id);
+      const pending = () => goal.goalPendingReplyFor(conversationId);
+      const activity = async () => {
+        const response = await fetch(`http://127.0.0.1:${bridgePort()}/activity?conversationId=${conversationId}`, {
+          headers: { authorization: `Bearer ${bearer}`, 'x-extension-version': APP_VERSION, 'x-extension-protocol': String(BRIDGE_PROTOCOL) }
+        });
+        expect(response.status).toBe(200);
+        return await response.json() as any;
+      };
+      const hold = (reason: string) => post('/page-note', { note: 'input-held', reason, inputId: row.id, conversationId });
+      const veto = () => post('/input/claim', { id: row.id, owner: 'replacement-page', conversationId, recoveryVeto: 'page-final' });
+      const final = () => post('/events', { conversationId, events: [
+        { kind: 'assistant_message', time: ++now, messageId: 'combined-final', turnId,
+          text: 'One part done.\n[[COS_GOAL:CONTINUE]]', state: 'final', final: true, goalEligible: true, activeNow: true },
+        { kind: 'turn_end', time: ++now, turnId, outcome: 'completed' }
+      ] });
+      expect(pending()).toBeNull();
+      expect(await state()).toMatchObject({ state: 'queued', owner: null, silenceBoundary: { turnId } });
+      expect(await input.inputBeforeGoal(session.id, turnId)).toBe('queued');
+      now += 4_000;
+      expect((await hold('recovery-question-unreadable')).body.ok).toBe(true);
+      now += 5_000;
+      expect((await hold('recovery-not-ready')).body.ok).toBe(true);
+      expect(await state()).toMatchObject({ state: 'queued', owner: null });
+      expect((await state())?.sendAuthorizedAt).toBeUndefined();
+      expect(pending()).toBeNull();
+
+      if (order === 'new-work') {
+        // The release trace ended here, not with a native final or a Goal decision.
+        now += 3_000;
+        await attributedMcp(conversationId);
+        await vi.waitFor(async () => expect(await state()).toMatchObject({ state: 'cancelled' }));
+        expect((await state())?.sendAuthorizedAt).toBeUndefined();
+        expect(pending()).toBeNull();
+        expect(await input.inputBeforeGoal(session.id, turnId)).toBeNull();
+        await bridge.sweepStaleSwarm(now);
+        expect((await input.listInputs()).filter(entry => entry.sessionId === session.id && entry.recovery)).toHaveLength(1);
+        return;
+      }
+
+      if (order === 'veto-first') {
+        expect((await veto()).body.ok).toBe(true);
+        expect(await state()).toMatchObject({ state: 'cancelled', recovery: { ended: 'page-final' } });
+        expect(pending()).toBeNull();
+        expect((await final()).status).toBe(200);
+      } else {
+        expect((await final()).status).toBe(200);
+        // The recorder's complete final retires the same unsent ticket on load.
+        expect((await veto()).body.ok).toBe(false);
+        expect(await state()).toMatchObject({ state: 'cancelled' });
+      }
+      expect((await state())?.sendAuthorizedAt).toBeUndefined();
+      expect(await input.inputBeforeGoal(session.id, turnId)).toBeNull();
+      const accepted = pending();
+      expect(accepted).toMatchObject({ replyId: 'combined-final' });
+      expect((await activity()).goal).toMatchObject({ pending: { replyId: accepted!.replyId }, queuePending: false });
+      expect((await bridge.sessionControlsFor(session.id)).recovery ?? []).not.toContainEqual(expect.objectContaining({ kind: 'silence' }));
+
+      // The final has its own durable Goal pickup, not another silence Continue.
+      for (const [index, gap] of [2, 5, 10, 15].entries()) {
+        now += gap * 60_000 + 1;
+        await bridge.sweepStaleSwarm(now);
+        const repairs = (await post('/status', { openConversations: [conversationId] })).body.repairs
+          .filter((repair: any) => repair.conversationId === conversationId);
+        expect(repairs).toHaveLength(1);
+        const repair = repairs[0];
+        expect(repair.reason).toBe('goal');
+        if (repair.requiresClaim) expect((await post('/repairs/claim', { conversationId, token: repair.token })).body.allowed).toBe(true);
+        await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [conversationId] });
+        expect(pending()).toMatchObject({ replyId: accepted!.replyId, acceptedAt: accepted!.acceptedAt, pickupAttempts: index + 1 });
+        expect((await input.listInputs()).filter(entry => entry.sessionId === session.id && entry.recovery)).toHaveLength(1);
+      }
+      expect(pending()?.pickupStoppedAt).toBeDefined();
+      expect((await post('/goal/draft', { conversationId, turnId: accepted!.turnId, clientId: 'replacement-page', terminalRequired: true })).status).toBe(200);
+      await vi.waitFor(() => expect(goal.goalViewFor(conversationId, 'replacement-page')?.stage).toBe('ready'));
+      await bridge.setSessionAutomation(session.id, 'off');
+    } finally { clock.mockRestore(); }
+  });
+
 it.each([
   { model: 'gpt-5.6-sol', alias: false }, { model: 'gpt-5.6-sol', alias: true },
   { model: 'gpt-6-pro', alias: false }, { model: 'gpt-6-pro', alias: true }
