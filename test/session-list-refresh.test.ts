@@ -328,6 +328,110 @@ describe('visible Chat refresh', () => {
     expect(w.document.getElementById('timeline')?.textContent).toContain('delta');
   });
 
+  it('removes a previously rendered streaming assistant message when an incremental delta retracts it', async () => {
+    const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
+    dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
+    const w = dom.window;
+    Object.assign(globalThis, {
+      window: w,
+      document: w.document,
+      HTMLElement: w.HTMLElement,
+      Element: w.Element,
+      Node: w.Node,
+      DocumentFragment: w.DocumentFragment,
+      HTMLInputElement: w.HTMLInputElement,
+      HTMLSelectElement: w.HTMLSelectElement,
+      HTMLTextAreaElement: w.HTMLTextAreaElement,
+      HTMLButtonElement: w.HTMLButtonElement
+    });
+    if (!(w.HTMLElement.prototype as any).scrollIntoView) (w.HTMLElement.prototype as any).scrollIntoView = () => {};
+
+    const selected = summary('2026-08-25-bbbbbbbb', 20_000, 2);
+    let changed: (change?: unknown) => void = () => undefined;
+    let detailRound = 0;
+    const streamingDraft: SessionEvent = {
+      seq: 100,
+      origin: 100,
+      time: 100,
+      source: 'extension',
+      turnId: 'turn-ui-retract',
+      kind: 'assistant_message',
+      messageId: 'ui-aborted',
+      state: 'streaming',
+      final: false,
+      message: { text: 'Canales PBR val', chars: 15, truncated: false }
+    };
+    const ok = (data: any) => Promise.resolve({ ok: true as const, data });
+    const api: any = new Proxy(
+      {
+        listSessions: async () => ok({
+          sessions: [selected],
+          activeId: selected.id,
+          pressure: [],
+          total: 1,
+          nextCursor: null
+        }),
+        turnTraces: () => ok({}),
+        getSession: () => {
+          detailRound += 1;
+          if (detailRound === 1) {
+            return ok({
+              summary: { ...selected, events: 2 },
+              events: [
+                { ...streamingDraft, seq: 100, origin: 100 },
+                { ...streamingDraft, seq: 101, origin: 101, messageId: 'ui-second', message: { text: 'Second paragraph', chars: 16, truncated: false } }
+              ],
+              total: 2,
+              nextFrom: 102
+            });
+          }
+          if (detailRound === 2) {
+            return ok({ summary: { ...selected, events: 3 }, events: [{ ...streamingDraft, seq: 102, origin: 100, retracted: true }], total: 3, nextFrom: 103 });
+          }
+          return ok({
+            summary: { ...selected, events: 4 },
+            events: [{ ...streamingDraft, seq: 103, origin: 100, message: { text: 'Canales PBR val', chars: 15, truncated: false } }],
+            total: 4,
+            nextFrom: 104
+          });
+        },
+        getSwarm: () => ok({ running: false, runId: null, agents: [], maxWorkers: 2, pendingReports: 0 }),
+        onSessionChanged: (listener: (change?: unknown) => void) => {
+          changed = listener;
+          return () => undefined;
+        },
+        onSwarmChanged: () => () => undefined
+      },
+      {
+        get(target, prop) {
+          if (prop in target) return (target as any)[prop];
+          return (..._args: any[]) => ok(null);
+        }
+      }
+    );
+    Object.defineProperty(w, 'api', { value: api, configurable: true });
+
+    const { chatVisible, initChat } = await import('../src/renderer/chat.js');
+    initChat({
+      save: async () => true,
+      state: () => ({ config: { sessions: { record: true, limitTokens: 533000 }, compaction: { auto: true, autoTokens: 400000 }, ui: { developerMode: true } } }) as any
+    });
+    chatVisible(true);
+    await vi.waitFor(() => expect(w.document.querySelector('#sessionList [data-id]')).not.toBeNull(), { timeout: 5_000 });
+    (w.document.querySelector('#sessionList [data-id]') as HTMLElement).click();
+    await vi.waitFor(() => expect(w.document.getElementById('timeline')?.textContent).toContain('Canales PBR val'), { timeout: 5_000 });
+
+    changed({ sessionIds: [selected.id] });
+    await vi.waitFor(() => expect(detailRound).toBe(2), { timeout: 5_000 });
+    await vi.waitFor(() => expect(w.document.getElementById('timeline')?.textContent).not.toContain('Canales PBR val'), { timeout: 5_000 });
+    expect(w.document.getElementById('timeline')?.textContent).toContain('Second paragraph');
+
+    // Re-appearing first message retains page membership even though origin 100 is below floor 101.
+    changed({ sessionIds: [selected.id] });
+    await vi.waitFor(() => expect(detailRound).toBe(3), { timeout: 5_000 });
+    await vi.waitFor(() => expect(w.document.getElementById('timeline')?.textContent).toContain('Canales PBR val'), { timeout: 5_000 });
+  });
+
   it('loads an older session page on scroll and replaces the misleading visible-count footer', async () => {
     const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
     dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });

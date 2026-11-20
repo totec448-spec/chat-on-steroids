@@ -67,6 +67,7 @@ import {
   indexedSessions,
   renameSession,
   reopenSession,
+  retractTurnStreamingMessages,
   rewriteUnattributedToolCalls,
   setSessionOrigin,
   upsertMessageEvent,
@@ -2232,6 +2233,7 @@ export interface ChatObservation {
     | 'native_image'
     | 'page_tool'
     | 'turn_trace'
+    | 'turn_messages'
     | 'turn_start'
     | 'turn_end'
     | 'chat_error'
@@ -2286,6 +2288,13 @@ export interface ChatObservation {
   turnId?: string;
   /** A `turn_trace` observation's round outline (shared/turn-trace.ts). */
   trace?: import('../../shared/turn-trace.js').TurnTrace;
+  /** On `turn_messages`: complete surviving assistant message ids/provider UUIDs for `turnId`. */
+  messageIds?: string[];
+  /** On `assistant_message` and `turn_messages`: document id & monotonic sequence for staleness fencing. */
+  docId?: string;
+  docSeq?: number;
+  /** On `turn_messages`: true when the page turn has already settled (`endMessageId` or `terminalWithoutFinal`). */
+  settled?: boolean;
   /** On `turn_trace`: the user message that opened the page turn it was read from (#1301). */
   question?: string;
   final?: boolean;
@@ -2574,6 +2583,7 @@ async function supersededLineage(conversationId: string): Promise<string | null>
  */
 async function recordSupersededMessages(
   sessionId: string,
+  conversationId: string,
   observations: readonly ChatObservation[]
 ): Promise<number> {
   let stored = 0;
@@ -2596,6 +2606,7 @@ async function recordSupersededMessages(
             kind: 'user_message',
             messageId: item.messageId
           }),
+          ...(conversationId ? { conversationId } : {}),
           ...(item.attachments?.length ? { attachments: item.attachments } : {}),
           ...(item.reaction !== undefined ? { reaction: item.reaction } : {}),
           ...(item.model ? { model: item.model } : {}),
@@ -2656,7 +2667,7 @@ async function recordChatObservationsNow(
   if (!conversations.has(conversationId)) {
     const lineage = await supersededLineage(conversationId);
     if (lineage) {
-      const stored = await recordSupersededMessages(lineage, observations);
+      const stored = await recordSupersededMessages(lineage, conversationId, observations);
       return { sessionId: lineage, stored, activity, goalCandidates: [] };
     }
   }
@@ -2730,6 +2741,7 @@ async function recordChatObservationsNow(
           ...(editReplacement(item.messageId) ? { replaces: editReplacement(item.messageId), replacesConfirmed: true as const }
             : item.parentId && item.parentExact === true ? await replacedQuestion(sessionId, item.messageId, item.parentId) : {}),
           ...(takeAutomaticReply(conversationId, item.text ?? '') ? { automatic: true as const } : {}),
+          ...(conversationId ? { conversationId } : {}),
           messageId: item.messageId
         }, { preferTime: item.authoredTime === true, work: item.authoredNow === true });
         if (live) {
@@ -2861,7 +2873,15 @@ async function recordChatObservationsNow(
           ...(item.resolvedModel ? { resolvedModel: item.resolvedModel } : {}),
           ...(item.references ? { references: item.references } : {}),
           ...(goalEligible && state === 'final' ? { goalEligible: true } : {})
-        }, { preferTime: item.authoredTime === true, work: item.activeNow === true && !lateNoteOfEndedTurn });
+        }, {
+          preferTime: item.authoredTime === true,
+          work: item.activeNow === true && !lateNoteOfEndedTurn,
+          observation: {
+            time: item.time,
+            ...(item.docId ? { docId: item.docId } : {}),
+            ...(item.docSeq !== undefined ? { docSeq: item.docSeq } : {})
+          }
+        });
         if (lateNoteOfEndedTurn && item.activeNow === true && written.contentChanged) {
           logInfo(`session recorder: ${conversationId} reported a message of turn ${item.turnId} after that turn ended; kept in history, not counted as new work`);
         }
@@ -2898,14 +2918,16 @@ async function recordChatObservationsNow(
         const workingActivity = written.contentChanged && !lateNoteOfEndedTurn && state !== 'final' && item.activeNow === true &&
           (!canonicalTurn || sameLiveTurn || resumedUncertainTurn) &&
           !(live?.turnStartedAt === null && (live.lastTurnOutcome === 'stopped' || live.lastTurnOutcome === 'completed'));
+        const rejectedRetracted = written.event.kind === 'assistant_message' && written.event.retracted === true;
         const finishingTurn = canonicalTurn && sameLiveTurn ? activeLiveTurn : null;
-        if (state === 'final' && written.event.kind === 'assistant_message' && finishingTurn && recoverableTurns.has(finishingTurn) &&
+        if (!rejectedRetracted && state === 'final' && written.event.kind === 'assistant_message' && finishingTurn && recoverableTurns.has(finishingTurn) &&
             !explicitEnds.has(finishingTurn)) {
           recoveredFinal = { turnId: finishingTurn, time: item.time,
             seq: written.event.finalContentSeq ?? written.event.origin ?? written.event.seq,
             origin: written.event.origin ?? written.event.seq, native: Boolean(written.event.providerMessageId) };
         }
         if (
+          !rejectedRetracted &&
           written.event.kind === 'assistant_message' &&
           written.event.goalEligible === true &&
           state === 'final' &&
@@ -2917,7 +2939,7 @@ async function recordChatObservationsNow(
             eventSeq: written.event.origin ?? written.event.seq
           });
         }
-        if (recoveredGoalEligible && live) {
+        if (!rejectedRetracted && recoveredGoalEligible && live) {
           // This is an in-memory verdict for later call/reload decisions, not a fabricated
           // turn_end. The canonical message keeps goalEligible monotonically, so an HTTP 503
           // can still replay the same obligation even after this stronger final evidence wins.
@@ -2953,6 +2975,20 @@ async function recordChatObservationsNow(
       case 'turn_trace': {
         // Presentation beside the log: no event, no activity, no work or completion evidence.
         if (item.turnId && item.trace && await writeTurnTrace(sessionId, item.turnId, item.trace, item.question)) notifyExtensionChanged(sessionId);
+        continue;
+      }
+      case 'turn_messages': {
+        if (!item.turnId || !Array.isArray(item.messageIds)) continue;
+        const retracted = await retractTurnStreamingMessages(sessionId, item.turnId, item.messageIds, {
+          observedAt: item.time,
+          ...(item.docId ? { docId: item.docId } : {}),
+          ...(item.docSeq !== undefined ? { docSeq: item.docSeq } : {}),
+          ...(item.settled === true ? { settled: true } : {})
+        });
+        if (retracted > 0) {
+          notifyExtensionChanged(sessionId);
+          logInfo(`session recorder: ${conversationId} retracted ${retracted} discarded streaming message(s) in turn ${item.turnId}`);
+        }
         continue;
       }
       case 'page_tool': {

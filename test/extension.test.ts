@@ -531,6 +531,8 @@ function loadWorker(options: {
   debuggerApi?: Record<string, unknown>;
   /** Chrome's tab-group API with these groups; omitted, the browser has none. */
   tabGroups?: Array<{ id: number; windowId: number; title?: string; collapsed?: boolean }>;
+  clock?: { Date?: DateConstructor; setTimeout?: typeof setTimeout; clearTimeout?: typeof clearTimeout };
+  WebSocket?: unknown;
 }): WorkerHarness {
   let listener: ((message: any, sender: any, sendResponse: (value: any) => void) => boolean) | null = null;
   const tabRemovedListeners: Array<(tabId: number) => void> = [];
@@ -664,11 +666,13 @@ function loadWorker(options: {
   vm.runInNewContext(activeTabsSource + backgroundSource.replace(/^import .*$/gm, ''), {
     // The browser-control module is imported in the real worker; with a debugger it is asked for one.
     ...(options.debuggerApi ? { createBrowserControl: () => ({ pump: async () => undefined, event: async () => undefined }) } : {}),
+    ...(options.WebSocket ? { WebSocket: options.WebSocket } : {}),
+    ...(options.clock?.Date ? { Date: options.clock.Date } : {}),
     chrome,
     fetch,
     AbortController,
-    setTimeout,
-    clearTimeout,
+    setTimeout: options.clock?.setTimeout ?? setTimeout,
+    clearTimeout: options.clock?.clearTimeout ?? clearTimeout,
     URL,
     TextEncoder,
     crypto: globalThis.crypto,
@@ -6728,4 +6732,241 @@ it('waits for rendering leases only through renderingLeases', () => {
   const source = readFileSync('extension/background.js', 'utf8');
   const raw = source.split('\n').filter(line => /await\s+activeTabs/.test(line) && !line.includes('renderingLeases'));
   expect(raw).toEqual([]);
+});
+
+describe('activity push wakes over /wake', () => {
+  const convA = '11111111-1111-4111-8111-111111111111';
+  const convB = '22222222-2222-4222-8222-222222222222';
+
+  it('forwards targeted activity wakes only to matching bound tabs and global wakes to all known tabs', async () => {
+    const sockets: any[] = [];
+    class FakeWebSocket {
+      url: string;
+      readyState = 0;
+      onopen: (() => void) | null = null;
+      onmessage: ((event: { data: unknown }) => void) | null = null;
+      onerror: (() => void) | null = null;
+      onclose: (() => void) | null = null;
+      sent: unknown[] = [];
+      constructor(url: string) {
+        this.url = url;
+        sockets.push(this);
+        queueMicrotask(() => {
+          this.readyState = 1;
+          this.onopen?.();
+        });
+      }
+      send(data: unknown) { this.sent.push(data); }
+      close() { this.readyState = 3; this.onclose?.(); }
+    }
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }),
+      session: new FakeStorageArea(),
+      WebSocket: FakeWebSocket,
+      fetch: async (input) => {
+        const pathName = new URL(input).pathname;
+        if (pathName === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (pathName === '/status') return response(200, { inputs: [], commands: [] });
+        if (pathName === '/bind') return response(200, { ok: true, sessionId: 'sess-1' });
+        return response(200, { ok: true });
+      }
+    });
+    await worker.registerTab(10, 'doc-10', `https://chatgpt.com/c/${convA}`);
+    await worker.send({ type: 'bind', conversationId: convA }, 10, 'doc-10');
+    await worker.registerTab(20, 'doc-20', `https://chatgpt.com/c/${convB}`);
+    await worker.send({ type: 'bind', conversationId: convB }, 20, 'doc-20');
+    await worker.startup();
+    await vi.waitFor(() => expect(sockets.length).toBeGreaterThan(0), { timeout: 5_000 });
+    const socket = sockets.at(-1)!;
+    expect(socket.sent).toContain('paired-token');
+
+    worker.tabsSendMessage.mockClear();
+    socket.onmessage?.({ data: `activity:${convA}` });
+    await vi.waitFor(() => expect(worker.tabsSendMessage).toHaveBeenCalledTimes(1), { timeout: 5_000 });
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(10, { type: 'clf-activity-wake', conversationId: convA });
+    expect(worker.tabsSendMessage).not.toHaveBeenCalledWith(20, expect.anything());
+
+    worker.tabsSendMessage.mockClear();
+    socket.onmessage?.({ data: 'activity' });
+    await vi.waitFor(() => expect(worker.tabsSendMessage).toHaveBeenCalledTimes(2), { timeout: 5_000 });
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(10, { type: 'clf-activity-wake' });
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(20, { type: 'clf-activity-wake' });
+
+    // Malformed non-empty activity:<id> payloads must not wake any tab.
+    worker.tabsSendMessage.mockClear();
+    socket.onmessage?.({ data: 'activity:not valid!' });
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(worker.tabsSendMessage).not.toHaveBeenCalled();
+  });
+
+  it('unions unregistered queried tabs with bound tabs and paces sustained cross-tab wakes', async () => {
+    const sockets: any[] = [];
+    class FakeWebSocket {
+      url: string;
+      readyState = 0;
+      onopen: (() => void) | null = null;
+      onmessage: ((event: { data: unknown }) => void) | null = null;
+      onerror: (() => void) | null = null;
+      onclose: (() => void) | null = null;
+      constructor(url: string) {
+        this.url = url;
+        sockets.push(this);
+        queueMicrotask(() => {
+          this.readyState = 1;
+          this.onopen?.();
+        });
+      }
+      send() {}
+      close() { this.readyState = 3; this.onclose?.(); }
+    }
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }),
+      session: new FakeStorageArea(),
+      WebSocket: FakeWebSocket,
+      tabsQuery: async () => [
+        { id: 10, url: `https://chatgpt.com/c/${convA}` },
+        { id: 30, url: `https://chatgpt.com/c/${convA}` },
+        { id: 20, url: `https://chatgpt.com/c/${convB}` }
+      ],
+      fetch: async (input) => {
+        const pathName = new URL(input).pathname;
+        if (pathName === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (pathName === '/status') return response(200, { inputs: [], commands: [] });
+        if (pathName === '/bind') return response(200, { ok: true, sessionId: 'sess-1' });
+        return response(200, { ok: true });
+      }
+    });
+    await worker.registerTab(10, 'doc-10', `https://chatgpt.com/c/${convA}`);
+    await worker.send({ type: 'bind', conversationId: convA }, 10, 'doc-10');
+    await worker.startup();
+    await vi.waitFor(() => expect(sockets.length).toBeGreaterThan(0), { timeout: 5_000 });
+    const socket = sockets.at(-1)!;
+
+    // Tab 10 is registered while tab 30 is only discovered via tabs.query: both receive the wake once.
+    worker.tabsSendMessage.mockClear();
+    socket.onmessage?.({ data: `activity:${convA}` });
+    await vi.waitFor(() => expect(worker.tabsSendMessage).toHaveBeenCalledTimes(2), { timeout: 5_000 });
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(10, { type: 'clf-activity-wake', conversationId: convA });
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(30, { type: 'clf-activity-wake', conversationId: convA });
+
+    // A burst of 20 cross-tab wakes coalesces and stays bounded within the shared token bucket budget.
+    worker.tabsSendMessage.mockClear();
+    for (let i = 0; i < 10; i += 1) {
+      socket.onmessage?.({ data: `activity:${convA}` });
+      socket.onmessage?.({ data: `activity:${convB}` });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 260));
+    expect(worker.tabsSendMessage.mock.calls.length).toBeLessThanOrEqual(8);
+    await vi.waitFor(() => {
+      const sentTabIds = worker.tabsSendMessage.mock.calls.map((call) => call[0]);
+      expect(sentTabIds).toContain(10);
+      expect(sentTabIds).toContain(30);
+      expect(sentTabIds).toContain(20);
+    }, { timeout: 5_000 });
+    socket.close();
+  });
+
+  it('merges queued wakes with differing conversation targets for the same tab into an unfiltered wake', async () => {
+    const sockets: any[] = [];
+    class FakeWebSocket {
+      url: string;
+      readyState = 0;
+      onopen: (() => void) | null = null;
+      onmessage: ((event: { data: unknown }) => void) | null = null;
+      onerror: (() => void) | null = null;
+      onclose: (() => void) | null = null;
+      constructor(url: string) {
+        this.url = url;
+        sockets.push(this);
+        queueMicrotask(() => {
+          this.readyState = 1;
+          this.onopen?.();
+        });
+      }
+      send() {}
+      close() { this.readyState = 3; this.onclose?.(); }
+    }
+    let navigated = false;
+    let fakeNow = 1_000_000;
+    let nextTimerId = 1;
+    const timers = new Map<number, { due: number; fn: () => void }>();
+    const FakeDate = class extends Date {
+      constructor(...args: unknown[]) {
+        if (args.length === 0) super(fakeNow);
+        else super(...(args as [number]));
+      }
+      static override now() { return fakeNow; }
+    } as unknown as DateConstructor;
+    const fakeSetTimeout = ((fn: () => void, ms = 0) => {
+      const id = nextTimerId++;
+      timers.set(id, { due: fakeNow + Math.max(0, ms), fn });
+      return id as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout;
+    const fakeClearTimeout = ((id: ReturnType<typeof setTimeout>) => {
+      timers.delete(id as unknown as number);
+    }) as typeof clearTimeout;
+    const advanceClock = async (ms: number) => {
+      fakeNow += ms;
+      for (const [id, entry] of [...timers.entries()].sort((a, b) => a[1].due - b[1].due)) {
+        if (entry.due <= fakeNow && timers.delete(id)) entry.fn();
+      }
+      for (let i = 0; i < 8; i += 1) await Promise.resolve();
+    };
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }),
+      session: new FakeStorageArea(),
+      WebSocket: FakeWebSocket,
+      clock: { Date: FakeDate, setTimeout: fakeSetTimeout, clearTimeout: fakeClearTimeout },
+      tabsQuery: async () => [{ id: 10, url: `https://chatgpt.com/c/${navigated ? convB : convA}` }],
+      fetch: async (input) => {
+        const pathName = new URL(input).pathname;
+        if (pathName === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (pathName === '/status') return response(200, { inputs: [], commands: [] });
+        if (pathName === '/bind') return response(200, { ok: true, sessionId: 'sess-1' });
+        return response(200, { ok: true });
+      }
+    });
+    await worker.registerTab(10, 'doc-10', `https://chatgpt.com/c/${convA}`);
+    await worker.send({ type: 'bind', conversationId: convA }, 10, 'doc-10');
+    await worker.startup();
+    await vi.waitFor(() => expect(sockets.length).toBeGreaterThan(0), { timeout: 5_000 });
+    const socket = sockets.at(-1)!;
+
+    // Drain initial token bucket with the VM clock pinned below refill so subsequent wakes queue.
+    for (let i = 0; i < 6; i += 1) socket.onmessage?.({ data: `activity:${convA}` });
+    await advanceClock(10);
+    worker.tabsSendMessage.mockClear();
+
+    // Tab navigated to convB while still bound to convA; queueing convB then convA must merge to unfiltered.
+    navigated = true;
+    socket.onmessage?.({ data: `activity:${convB}` });
+    socket.onmessage?.({ data: `activity:${convA}` });
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
+    expect(worker.tabsSendMessage).not.toHaveBeenCalled();
+
+    await advanceClock(250);
+    expect(worker.tabsSendMessage).toHaveBeenCalledTimes(1);
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(10, { type: 'clf-activity-wake' });
+
+    // Peer socket close clears queued wakes and discards in-flight tab discovery from the closed epoch.
+    for (let i = 0; i < 6; i += 1) socket.onmessage?.({ data: `activity:${convA}` });
+    await advanceClock(10);
+    worker.tabsSendMessage.mockClear();
+
+    let resolveDelayedQuery: ((tabs: Array<{ id: number; url: string }>) => void) | null = null;
+    worker.tabsQuery.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveDelayedQuery = resolve; })
+    );
+    socket.onmessage?.({ data: `activity:${convB}` });
+    await vi.waitFor(() => expect(resolveDelayedQuery).not.toBeNull(), { timeout: 5_000 });
+
+    // Also queue a wake before the peer closes the socket: onclose must cancel the drain timer and clear the queue.
+    socket.onmessage?.({ data: `activity:${convA}` });
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
+    socket.close();
+
+    resolveDelayedQuery!([{ id: 99, url: `https://chatgpt.com/c/${convB}` }]);
+    await advanceClock(400);
+    expect(worker.tabsSendMessage).not.toHaveBeenCalled();
+  });
 });
