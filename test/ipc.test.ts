@@ -958,6 +958,81 @@ it('adds picker-selected projects, reuses containing approval, and leaves cancel
   })).toMatchObject({ ok: false });
 });
 
+it('opens exactly the saved project folder and refuses unknown, unapproved or unavailable roots', async () => {
+  const { addProject } = await import('../src/main/projects.js');
+  const approved = await fs.realpath(dir);
+  const parent = path.join(approved, 'approved-open-folder');
+  const target = path.join(parent, 'actual-project');
+  const other = path.join(parent, 'other-project');
+  const outside = await makeTempDir('cos-unapproved-open-folder-');
+  await fs.mkdir(target, { recursive: true });
+  await fs.mkdir(other, { recursive: true });
+  await saveConfig({ ...defaultConfig(), roots: [{ name: 'approved', path: parent }] });
+  const project = await addProject(target);
+  const sibling = await addProject(other);
+  const open = (projectId: string, extra?: Record<string, unknown>) =>
+    handlers.get('projects:openFolder')!(null, { projectId, ...extra }) as Promise<any>;
+  const calls = vi.mocked(shell.openPath);
+  calls.mockClear();
+  try {
+    const result = await open(project.id);
+    expect(result).toMatchObject({ ok: true, data: await fs.realpath(target) });
+    expect(calls).toHaveBeenCalledExactlyOnceWith(await fs.realpath(target));
+    // An arbitrary pathname cannot be injected into the IPC surface.
+    expect(await open(project.id, { path: other })).toMatchObject({ ok: false });
+    expect(await open('invalid-project-id')).toMatchObject({ ok: false });
+    expect(await open('12345678-1234-4123-8123-123456789abc')).toMatchObject({ ok: false });
+    expect(calls).toHaveBeenCalledTimes(1);
+    // Another project must resolve to its own saved directory, not the parent or target.
+    const siblingResult = await open(sibling.id);
+    expect(siblingResult).toMatchObject({ ok: true, data: await fs.realpath(other) });
+    expect(calls).toHaveBeenLastCalledWith(await fs.realpath(other));
+    // An identity swap between the two canonical resolutions is not made safe
+    // merely because the saved pathname and approved root stayed unchanged.
+    const realStat = fs.stat.bind(fs);
+    let statCalls = 0;
+    const statSpy = vi.spyOn(fs, 'stat').mockImplementation(async (...args) => {
+      const stat = await realStat(...args);
+      if (String(args[0]) !== target || ++statCalls !== 2) return stat;
+      return Object.assign(Object.create(Object.getPrototypeOf(stat)), stat, {
+        ino: typeof stat.ino === 'bigint' ? stat.ino + 1n : stat.ino + 1
+      });
+    });
+    try {
+      expect(await open(project.id)).toMatchObject({ ok: false, error: expect.stringMatching(/changed on disk/) });
+      expect(calls).toHaveBeenCalledTimes(2);
+    } finally {
+      statSpy.mockRestore();
+    }
+    // A saved project path replaced by a junction/symlink must not launch an
+    // unapproved directory, even if its project ID and approved parent persist.
+    const parked = path.join(parent, 'actual-project-parked');
+    await fs.rename(target, parked);
+    try {
+      await fs.symlink(outside, target, process.platform === 'win32' ? 'junction' : 'dir');
+      expect(await open(project.id)).toMatchObject({ ok: false });
+      expect(calls).toHaveBeenCalledTimes(2);
+    } finally {
+      await fs.rm(target, { force: true });
+      await fs.rename(parked, target);
+    }
+    // No approval => no OS launch. The project entry and its old root remain untouched.
+    await saveConfig({ ...defaultConfig(), roots: [{ name: 'unrelated', path: outside }] });
+    expect(await open(project.id)).toMatchObject({ ok: false });
+    expect(calls).toHaveBeenCalledTimes(2);
+    // A saved directory removed from disk cannot be opened via a stale project ID.
+    await saveConfig({ ...defaultConfig(), roots: [{ name: 'approved', path: parent }] });
+    await fs.rmdir(other);
+    expect(await open(sibling.id)).toMatchObject({ ok: false });
+    expect(calls).toHaveBeenCalledTimes(2);
+    calls.mockResolvedValueOnce('Access is denied');
+    expect(await open(project.id)).toMatchObject({ ok: false, error: expect.stringMatching(/Access is denied/) });
+    expect(calls).toHaveBeenCalledTimes(3);
+  } finally {
+    await removeTempDir(outside);
+  }
+});
+
 it('reads the chat edits channel and checks project ownership for a recorded diff', async () => {
   const { addProject } = await import('../src/main/projects.js');
   const { bindSessionProject, writeAsset } = await import('../src/main/session/store.js');

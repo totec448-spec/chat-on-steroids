@@ -1,4 +1,7 @@
 {
+  "Open project folder": "プロジェクトのフォルダーを開く",
+  "Open this project's exact approved folder": "このプロジェクトの保存済みフォルダーを直接開く",
+  "Opened project folder: {0}": "プロジェクトフォルダーを開きました: {0}",
   "Save here and replace any existing file?": "ここに保存し、同じ名前のファイルがあれば置き換えますか？",
   "Replace this CSV file?": "このCSVファイルを置き換えますか？",
   "Replace file": "ファイルを置き換える",

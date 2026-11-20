@@ -343,6 +343,8 @@ const api = {
   listSessions: (options?: { cursor?: SessionListCursor; limit?: number; projectId?: string }) =>
     call<SessionList>('sessions:list', options ?? {}),
   listProjects: () => call<LocalProject[]>('projects:list'),
+  /** Opens this existing project's approved canonical folder in the system file manager. */
+  openProjectFolder: (projectId: string) => call<string>('projects:openFolder', { projectId }),
   // `chatgpt: 'later'`: the person picks a new or an existing ChatGPT Project next (#1756).
   addProject: (options?: { chatgpt?: 'later' }) => call<LocalProject | null>('projects:add', options ?? {}),
   addRemoteProject: (address: string, folder: string, options?: { chatgpt?: 'later' }) => call<LocalProject>('projects:addRemote', { address, folder, ...(options ?? {}) }),

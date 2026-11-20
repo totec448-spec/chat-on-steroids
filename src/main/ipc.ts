@@ -1245,6 +1245,31 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
 
   handle('projects:list', () => listProjects());
+  // Opens only the saved, approved local project's exact canonical directory.
+  // No arbitrary renderer-provided pathname or new root grant is accepted.
+  handle('projects:openFolder', async payload => {
+    const { projectId } = z.object({ projectId: z.string().uuid() }).strict().parse(payload);
+    const first = await projectFileTarget(projectId, '');
+    if (first.kind !== 'directory') throw new Error('This project folder is unavailable');
+    const before = await fs.stat(first.real);
+    if (!before.isDirectory()) throw new Error('This project folder is unavailable');
+    // Re-resolve immediately before opening so a moved project or altered grant fails closed.
+    const current = await projectFileTarget(projectId, '');
+    const after = await fs.stat(current.real);
+    if (current.kind !== 'directory' || current.projectReal !== first.projectReal || current.real !== first.real) {
+      throw new Error('The project folder changed location. Reload the project before opening.');
+    }
+    // Same pathname is insufficient if the directory was replaced between the
+    // two checks (for example by a junction swap or a rename/recreate).
+    if (!after.isDirectory() || before.dev !== after.dev || before.ino !== after.ino) {
+      throw new Error('The project folder changed on disk. Reload the project before opening.');
+    }
+    // This is not an OS-wide pathname lock: shell.openPath still resolves the
+    // name later. It does, however, reject observed substitutions before launch.
+    const error = await shell.openPath(current.real);
+    if (error) throw new Error(`Could not open the project folder: ${error}`);
+    return current.real;
+  });
   handle('ui:language', async payload => {
     // The renderer owns the choice; the main process keeps it for the browser extension.
     const language = z.enum(UI_LANGUAGES).parse(payload);

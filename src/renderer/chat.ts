@@ -355,6 +355,11 @@ function projectMenuItems(id: string): RowMenuItem[] {
     { action: 'chat-new', icon: 'i-plus', label: () => t('New chat'), title: () => t('New chat in this project'), run: () => selectNewChat(id) },
     { action: 'group-new', icon: 'i-group', label: () => t('New group'), title: () => t('Add a group to sort this project\'s chats'),
       run: () => void newChatGroup(id) },
+    { action: 'open-folder', icon: 'i-folder', label: () => t('Open project folder'),
+      title: () => t('Open this project\'s exact approved folder'),
+      run: () => void run(api.openProjectFolder(id)).then(opened => {
+        if (opened) toast(t('Opened project folder: {0}', [opened]));
+      }) },
     // A project without a ChatGPT Project, or whose creation failed, can take a new or an existing one (#1756).
     ...(!link || link.state === 'failed' || link.state === 'uncertain' ? [{
       action: 'chatgpt-link', icon: 'i-folder',
