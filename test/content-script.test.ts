@@ -26596,3 +26596,394 @@ describe('clf-activity-wake runtime push handler', () => {
     }
   });
 });
+
+describe('reconciling discarded streaming assistant messages via turn_messages', () => {
+  it('emits turn_messages only after a previously observed streaming message is absent for two complete scans', async () => {
+    live = await harness();
+    userTurn(live.document, 'q-reconcile', 'Check the textures', { sent: false });
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'page-reconcile', []);
+    live.hook.observe();
+    await settle();
+    const localTurnId = emitted(live.sent, 'turn_start').at(-1)!.event.turnId as string;
+
+    const kept = {
+      messageId: 'msg-kept-1',
+      rawMessageId: 'msg-kept-1',
+      stable: true,
+      rawText: 'Confirmed two texture files.',
+      renderedHtml: '<p>Confirmed two texture files.</p>'
+    };
+    const discarded = {
+      messageId: 'msg-aborted-2',
+      rawMessageId: 'msg-aborted-2',
+      stable: false,
+      rawText: 'PBR channels val',
+      renderedHtml: '<p>PBR channels val</p>'
+    };
+
+    // Scan 1: both messages observed streaming; no disappearance yet.
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-reconcile', messagesComplete: true, messages: [kept, discarded] } }]);
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_messages')).toEqual([]);
+
+    // Scan 2 (complete): discarded disappears once -> do not retract prematurely on 1-tick flicker.
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-reconcile', messagesComplete: true, messages: [kept] } }]);
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_messages')).toEqual([]);
+
+    // Transient flicker recovery: if it reappears before 2 consecutive missing scans, reset and stay silent.
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-reconcile', messagesComplete: true, messages: [kept, discarded] } }]);
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_messages')).toEqual([]);
+
+    // Now disappear for 2 consecutive complete scans -> emit turn_messages with surviving IDs.
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-reconcile', messagesComplete: true, messages: [kept] } }]);
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_messages')).toEqual([]);
+
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-reconcile', messagesComplete: true, messages: [kept] } }]);
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_messages').map((row) => row.event)).toEqual([
+      expect.objectContaining({
+        kind: 'turn_messages',
+        turnId: localTurnId,
+        messageIds: ['msg-kept-1']
+      })
+    ]);
+  });
+
+  it('never emits turn_messages for truncated, conflicted, or steered turns', async () => {
+    live = await harness();
+    userTurn(live.document, 'q-guard-1', 'First', { sent: false });
+    startGenerating(live.document, { send: false });
+    const section = assistantTurn(live.document, 'page-guard', []);
+    for (let i = 0; i < 3; i++) { live.hook.observe(); await settle(); }
+
+    const dropped = {
+      messageId: 'msg-guard-drop',
+      rawMessageId: 'msg-guard-drop',
+      stable: false,
+      rawText: 'Interim...',
+      renderedHtml: '<p>Interim...</p>'
+    };
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-guard', messagesComplete: true, messages: [dropped] } }]);
+    await live.hook.flush();
+
+    // Truncated scans must never trigger turn_messages.
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-guard', messagesComplete: false, messages: [] } }]);
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-guard', messagesComplete: false, messages: [] } }]);
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_messages')).toEqual([]);
+
+    // Conflicted scans must never trigger turn_messages even on settled turns.
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-guard', conversationConflict: true, endMessageId: 'final-x', messagesComplete: true, messages: [] } }]);
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_messages')).toEqual([]);
+
+    // Steering closes the first turn as continued (steeredTurns); the steered turn must not emit turn_messages.
+    userTurn(live.document, 'q-guard-2', 'Steer it', { sent: false });
+    for (let i = 0; i < 3; i++) { live.hook.observe(); await settle(); }
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-guard', endMessageId: 'final-after-steer', messagesComplete: true,
+      messages: [{ messageId: 'final-after-steer', rawMessageId: 'final-after-steer', stable: true, rawText: 'Done', renderedHtml: '<p>Done</p>' }] } }]);
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_messages')).toEqual([]);
+  });
+
+  it('emits turn_messages immediately when a settled complete turn holds an endMessageId', async () => {
+    live = await harness();
+    userTurn(live.document, 'q-settled', 'Summarize files', { sent: false });
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'page-settled', []);
+    live.hook.observe();
+    await settle();
+    const localTurnId = emitted(live.sent, 'turn_start').at(-1)!.event.turnId as string;
+
+    const finalMsg = {
+      messageId: 'msg-settled-final',
+      rawMessageId: 'msg-settled-final',
+      stable: true,
+      rawText: 'All done.',
+      renderedHtml: '<p>All done.</p>'
+    };
+    await bindRenderedFiberTurns([{
+      section,
+      turn: { turnId: 'page-settled', endMessageId: 'msg-settled-final', messagesComplete: true, messages: [finalMsg] }
+    }]);
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_messages').map((row) => row.event)).toEqual([
+      expect.objectContaining({
+        kind: 'turn_messages',
+        turnId: localTurnId,
+        messageIds: ['msg-settled-final']
+      })
+    ]);
+  });
+
+  it('treats retracted assistant_message entries from /activity as removed rather than active progress', async () => {
+    let silenceTurnId = '';
+    let pullCount = 0;
+    live = await harness(undefined, {
+      desktop_input: async (message: Record<string, unknown>) => {
+        if (message.authorize) {
+          live!.reply.set('activity', () => ({
+            ok: true,
+            data: {
+              entries: [],
+              pendingTools: 0,
+              stream: [
+                {
+                  seq: 90 + ++pullCount,
+                  time: 120 + pullCount,
+                  kind: 'assistant_message',
+                  turnId: silenceTurnId,
+                  messageId: 'ghost-msg',
+                  text: 'aborted partial',
+                  state: 'streaming',
+                  final: false,
+                  retracted: true
+                }
+              ]
+            }
+          }));
+          await live!.hook.pullActivity();
+          return { ok: true, data: { ok: true } };
+        }
+        if (message.ack || message.fail) return { ok: true, data: { ok: true } };
+        return {
+          ok: true,
+          data: {
+            input: {
+              id: 'desktop-retract-1',
+              conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+              text: 'Continue after abort',
+              turnId: silenceTurnId,
+              afterTurn: true,
+              claimToken: 'claim-1',
+              silenceBoundary: { turnId: silenceTurnId }
+            }
+          }
+        };
+      }
+    });
+    startGenerating(live.document);
+    live.hook.observe();
+    await settle();
+    silenceTurnId = emitted(live.sent, 'turn_start').at(-1)!.event.turnId as string;
+    stopGenerating(live.document);
+    const sends = watchSend(live.document);
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      userTurn(live!.document, 'retract-next-user', 'Continue after abort', { sent: false });
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+    });
+    const delivered = await live.runtimeMessage({
+      type: 'clf-desktop-input',
+      id: 'desktop-retract-1',
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      silenceTurnId
+    });
+    expect(delivered).toEqual({ ok: true });
+    expect(sends()).toBe(1);
+    expect(live.sent.filter((row) => row.fail)).toEqual([]);
+  });
+
+  it('does not double-count concurrent callers sharing one Fiber scanToken, protects unconfirmed ids, and re-emits after a draft returns', async () => {
+    live = await harness();
+    userTurn(live.document, 'q-cr-edges', 'Check edge cases', { sent: false });
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'page-cr-edges', []);
+    live.hook.observe();
+    await settle();
+    const localTurnId = emitted(live.sent, 'turn_start').at(-1)!.event.turnId as string;
+
+    const userMsg = { messageId: 'q-cr-edges', rawMessageId: 'q-cr-edges', role: 'user', stable: true, rawText: 'Check edge cases', renderedHtml: '<p>Check edge cases</p>' };
+    const msgA = { messageId: 'msg-cr-a', rawMessageId: 'msg-cr-a', stable: false, rawText: 'Draft A', renderedHtml: '<p>Draft A</p>' };
+    const msgB = { messageId: 'msg-cr-b', rawMessageId: 'msg-cr-b', stable: false, rawText: 'Draft B', renderedHtml: '<p>Draft B</p>' };
+
+    // Scan 1: both A and B present.
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-cr-edges', messagesComplete: true, messages: [userMsg, msgA, msgB] } }]);
+    await live.hook.flush();
+
+    // Concurrent refreshFiber() callers sharing one askFiber() reply (same scanToken):
+    // missing B once must count as 1 scan, not 2.
+    section.setAttribute('data-clf-fiber-turn', '0');
+    const win = live.window as any;
+    const instant = win.setTimeout;
+    win.setTimeout = (fn: () => void, ms: number) => globalThis.setTimeout(fn, ms);
+    let askCount = 0;
+    const onSharedAsk = (event: any) => {
+      if (!event.data || event.data.source !== 'clf-fiber-ask') return;
+      askCount += 1;
+      const scanToken = event.data.nonce;
+      section.setAttribute('data-clf-fiber-turn', `${scanToken}:0`);
+      win.dispatchEvent(new win.MessageEvent('message', {
+        source: win,
+        data: {
+          source: 'clf-fiber-reply',
+          nonce: event.data.nonce,
+          scanToken,
+          v: fiberVersion,
+          scanOk: true,
+          rows: [],
+          turns: [{
+            index: 0,
+            turnId: 'page-cr-edges',
+            conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+            calls: [],
+            activities: [],
+            messagesComplete: true,
+            messages: [userMsg, msgA]
+          }]
+        }
+      }));
+    };
+    win.addEventListener('message', onSharedAsk);
+    try {
+      await Promise.all([live.hook.refreshFiber(), live.hook.refreshFiber()]);
+    } finally {
+      win.removeEventListener('message', onSharedAsk);
+      win.setTimeout = instant;
+    }
+    expect(askCount).toBe(1);
+    await settle();
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_messages')).toEqual([]);
+
+    // Scan 3: B is missing a 2nd distinct scan AND A vanishes for its 1st scan.
+    // B is confirmed discarded, while A must remain in the unsettled snapshot for flicker protection.
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-cr-edges', messagesComplete: true, messages: [userMsg] } }]);
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_messages').map((row) => row.event)).toEqual([
+      expect.objectContaining({
+        kind: 'turn_messages',
+        turnId: localTurnId,
+        messageIds: ['msg-cr-a']
+      })
+    ]);
+
+    // Scan 4: A is absent for its 2nd distinct scan -> A is now dropped cleanly (empty assistant snapshot).
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-cr-edges', messagesComplete: true, messages: [userMsg] } }]);
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_messages').at(-1)!.event).toMatchObject({
+      kind: 'turn_messages',
+      turnId: localTurnId,
+      messageIds: []
+    });
+
+    // Scan 5: A returns -> signature must invalidate so when A disappears twice again it retracts again.
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-cr-edges', messagesComplete: true, messages: [userMsg, msgA] } }]);
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-cr-edges', messagesComplete: true, messages: [userMsg] } }]);
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-cr-edges', messagesComplete: true, messages: [userMsg] } }]);
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_messages')).toHaveLength(3);
+    expect(emitted(live.sent, 'turn_messages').at(-1)!.event).toMatchObject({
+      kind: 'turn_messages',
+      turnId: localTurnId,
+      messageIds: []
+    });
+  });
+
+  it('re-emits turn_messages with settled true when membership is unchanged across settlement and suppresses duplicate settled scans', async () => {
+    live = await harness();
+    userTurn(live.document, 'q-settle-sig', 'Settle signature check', { sent: false });
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'page-settle-sig', []);
+    live.hook.observe();
+    await settle();
+    const localTurnId = emitted(live.sent, 'turn_start').at(-1)!.event.turnId as string;
+
+    const userMsg = { messageId: 'q-settle-sig', rawMessageId: 'q-settle-sig', role: 'user', stable: true, rawText: 'Settle signature check', renderedHtml: '<p>Settle signature check</p>' };
+    const surviving = { messageId: 'msg-sig-keep', rawMessageId: 'msg-sig-keep', stable: false, rawText: 'Surviving update', renderedHtml: '<p>Surviving update</p>' };
+    const aborted = { messageId: 'msg-sig-drop', rawMessageId: 'msg-sig-drop', stable: false, rawText: 'Aborted chunk', renderedHtml: '<p>Aborted chunk</p>' };
+
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-settle-sig', messagesComplete: true, messages: [userMsg, surviving, aborted] } }]);
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-settle-sig', messagesComplete: true, messages: [userMsg, surviving] } }]);
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-settle-sig', messagesComplete: true, messages: [userMsg, surviving] } }]);
+    await live.hook.flush();
+
+    expect(emitted(live.sent, 'turn_messages')).toHaveLength(1);
+    expect(emitted(live.sent, 'turn_messages')[0]!.event.settled).toBeUndefined();
+
+    // Now the turn settles with identical surviving membership: must emit once with settled: true, then suppress repeats.
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-settle-sig', endMessageId: 'msg-sig-keep', messagesComplete: true, messages: [userMsg, surviving] } }]);
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-settle-sig', endMessageId: 'msg-sig-keep', messagesComplete: true, messages: [userMsg, surviving] } }]);
+    await live.hook.flush();
+
+    const sentSnapshots = emitted(live.sent, 'turn_messages').map((row) => row.event);
+    expect(sentSnapshots).toHaveLength(2);
+    expect(sentSnapshots[1]).toMatchObject({
+      kind: 'turn_messages',
+      turnId: localTurnId,
+      messageIds: ['msg-sig-keep'],
+      settled: true
+    });
+  });
+
+  it('never emits turn_messages for a turn whose conversationId differs from the active conversation', async () => {
+    live = await harness();
+    userTurn(live.document, 'q-foreign-conv', 'Foreign turn check', { sent: false });
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'page-foreign-conv', []);
+    live.hook.observe();
+    await settle();
+
+    const userMsg = { messageId: 'q-foreign-conv', rawMessageId: 'q-foreign-conv', role: 'user', stable: true, rawText: 'Foreign turn check', renderedHtml: '<p>Foreign turn check</p>' };
+    const foreignDraft = { messageId: 'msg-foreign-1', rawMessageId: 'msg-foreign-1', stable: false, rawText: 'Foreign draft', renderedHtml: '<p>Foreign draft</p>' };
+    const foreignTurn = (messages: unknown[]) => ({
+      section,
+      turn: {
+        turnId: 'page-foreign-conv',
+        conversationId: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+        messagesComplete: true,
+        messages
+      }
+    });
+
+    await bindRenderedFiberTurns([foreignTurn([userMsg, foreignDraft])]);
+    await bindRenderedFiberTurns([foreignTurn([userMsg])]);
+    await bindRenderedFiberTurns([foreignTurn([userMsg])]);
+    await live.hook.flush();
+
+    expect(emitted(live.sent, 'turn_messages')).toEqual([]);
+  });
+
+  it('keeps turn_messages unsettled while approvalHolding is true and emits settled after the approval hold clears', async () => {
+    live = await harness();
+    userTurn(live.document, 'q-approval-hold', 'Approval hold check', { sent: false });
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'page-approval-hold', []);
+    live.hook.observe();
+    await settle();
+
+    const card = live.document.createElement('div');
+    card.setAttribute('data-codex-approval-surface', 'true');
+    card.append(live.document.createElement('button'), live.document.createElement('button'));
+    card.getClientRects = () => [{ width: 600, height: 200 }] as unknown as DOMRectList;
+    live.document.body.append(card);
+
+    const userMsg = { messageId: 'q-approval-hold', rawMessageId: 'q-approval-hold', role: 'user', stable: true, rawText: 'Approval hold check', renderedHtml: '<p>Approval hold check</p>' };
+    const surviving = { messageId: 'msg-appr-keep', rawMessageId: 'msg-appr-keep', stable: false, rawText: 'Waiting for approval', renderedHtml: '<p>Waiting for approval</p>' };
+    const dropped = { messageId: 'msg-appr-drop', rawMessageId: 'msg-appr-drop', stable: false, rawText: 'Aborted draft', renderedHtml: '<p>Aborted draft</p>' };
+
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-approval-hold', messagesComplete: true, messages: [userMsg, surviving, dropped] } }]);
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-approval-hold', endMessageId: 'msg-appr-keep', messagesComplete: true, messages: [userMsg, surviving] } }]);
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-approval-hold', endMessageId: 'msg-appr-keep', messagesComplete: true, messages: [userMsg, surviving] } }]);
+    await live.hook.flush();
+
+    expect(emitted(live.sent, 'turn_messages')).toHaveLength(1);
+    expect(emitted(live.sent, 'turn_messages')[0]!.event.settled).toBeUndefined();
+
+    // Clearing the approval card and advancing past APPROVAL_SETTLE_MS lets settlement publish with settled: true.
+    card.remove();
+    live.advance(live.hook.APPROVAL_SETTLE_MS + 1);
+    await bindRenderedFiberTurns([{ section, turn: { turnId: 'page-approval-hold', endMessageId: 'msg-appr-keep', messagesComplete: true, messages: [userMsg, surviving] } }]);
+    await live.hook.flush();
+
+    expect(emitted(live.sent, 'turn_messages')).toHaveLength(2);
+    expect(emitted(live.sent, 'turn_messages')[1]!.event).toMatchObject({
+      kind: 'turn_messages',
+      messageIds: ['msg-appr-keep'],
+      settled: true
+    });
+  });
+});
