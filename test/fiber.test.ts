@@ -249,6 +249,8 @@ interface TurnEvidence {
   conversationId?: string | null;
   conversationConflict?: boolean;
   endMessageId?: string | null;
+  terminalWithoutFinal?: boolean;
+  messagesComplete?: boolean;
   calls: TurnCall[];
   codeModeCalls?: Array<{ messageId: string; requestId: string | null; answered: boolean }>;
   requests?: Array<{ requestId: string; messageId: string | null; createTime: number | null }>;
@@ -281,7 +283,7 @@ interface TurnEvidence {
 interface TurnFixture {
   id: string;
   messages: Message[];
-  renderer?: 'search';
+  renderer?: 'search' | 'shell';
   viewItems?: any[];
   viewStatus?: string;
   /** A visible `.markdown` block: its text, or markup when the test is about the markup. */
@@ -325,7 +327,7 @@ async function scan(
   const document = window.document;
 
   for (const turn of turnSections) {
-    if (turn.renderer === 'search') {
+    if (turn.renderer === 'search' || turn.renderer === 'shell') {
       const container = document.createElement('div');
       container.setAttribute('data-turn-key', turn.id);
       const user = document.createElement('div');
@@ -364,7 +366,21 @@ async function scan(
         assistant.append(block);
       }
       container.append(user, assistant);
-      document.body.append(container);
+      if (turn.renderer === 'shell') {
+        const surface = document.createElement('div');
+        surface.setAttribute('data-app-shell-main-surface', '');
+        const thread = document.createElement('div');
+        thread.setAttribute('data-thread-find-target', 'conversation');
+        user.setAttribute('data-content-search-turn-key', turn.id);
+        user.setAttribute('data-content-search-unit-key', `${turn.id}:user`);
+        (container as unknown as Record<string, unknown>)['__reactFiber$qlrmvxwbkkq'] = {
+          memoizedProps: { conversationId: THREAD, entry: { id: turn.id, conversationId: THREAD, turn: viewTurn } },
+          return: null
+        } satisfies Fiber;
+        thread.append(container);
+        surface.append(thread);
+        document.body.append(surface);
+      } else document.body.append(container);
       continue;
     }
     const section = document.createElement('section');
@@ -530,6 +546,25 @@ describe('reading a row out of the page', () => {
     ]));
     expect(JSON.stringify(result.turns)).not.toMatch(/must-not-cross-worlds|arguments/);
   });
+
+  it.each(['complete', 'in_progress'] as const)(
+    'separates a %s tool-only shell turn from an assistant final', async viewStatus => {
+      const result = await scan([], [{
+        id: 'tool-only-turn', messages: [], renderer: 'shell', viewStatus,
+        viewItems: [
+          { type: 'user-message', messageId: 'worker-question', message: 'Report the result.' },
+          { type: 'chatgpt-reasoning-group', completed: true, items: [{
+            type: 'mcp-tool-call', callId: 'worker-finish', completed: true,
+            invocation: { server: APP, tool: `${LINK}/agents` }
+          }] }
+        ]
+      }]);
+      expect(result.turns).toHaveLength(1);
+      expect(result.turns[0]).toMatchObject({ question: 'worker-question', endMessageId: null });
+      expect(result.turns[0]!.terminalWithoutFinal === true).toBe(viewStatus === 'complete');
+      expect(result.turns[0]!.messages.every(message => message.role === 'user')).toBe(true);
+    }
+  );
 
   it('reads the interim updates of a search-unit turn and still ends it, however long its work is (#2157)', async () => {
     const interim = (index: number) => ({ type: 'assistant-message', messageId: `interim-${index}`,
@@ -1861,5 +1896,62 @@ describe('what may leave the page', () => {
       [0, 'read_file'],
       [2, 'run_command']
     ]);
+  });
+
+  describe('reporting whether a turn exposed all of its assistant messages', () => {
+    it('marks complete turns complete and truncated long-work or budget-exhausted turns incomplete', async () => {
+      const complete = await scan([], [{
+        id: 'search-complete',
+        messages: [],
+        renderer: 'search',
+        viewStatus: 'complete',
+        viewItems: [
+          { type: 'user-message', messageId: 'u-1', message: 'Question', sentAtMs: 1_790_000_000_000 },
+          { type: 'chatgpt-reasoning-group', items: [
+            { type: 'assistant-message', messageId: 'interim-ok', content: 'Checking', phase: 'commentary', completed: true }
+          ] },
+          { type: 'assistant-message', messageId: 'final-ok', content: 'Done', completed: true, phase: 'final_answer' }
+        ],
+        rendered: ['Done']
+      }]);
+      expect(complete.turns[0]!.messagesComplete).toBe(true);
+
+      const overRows = await scan([], [{
+        id: 'search-over-rows',
+        messages: [],
+        renderer: 'search',
+        viewStatus: 'complete',
+        viewItems: [
+          { type: 'user-message', messageId: 'u-2', message: 'Question', sentAtMs: 1_790_000_000_000 },
+          { type: 'chatgpt-reasoning-group', items: [
+            ...Array.from({ length: 405 }, (_, index) => ({ type: 'mcp-tool-call', callId: `c-${index}`, invocation: { server: APP, tool: `${LINK}/read` } })),
+            { type: 'assistant-message', messageId: 'interim-cut', content: 'Cut past row limit', phase: 'commentary', completed: true }
+          ] },
+          { type: 'assistant-message', messageId: 'final-2', content: 'Done', completed: true, phase: 'final_answer' }
+        ],
+        rendered: ['Done']
+      }]);
+      expect(overRows.turns[0]!.messagesComplete).toBe(false);
+
+      const overBudget = await scan([], [{
+        id: 'search-over-budget',
+        messages: [],
+        renderer: 'search',
+        viewStatus: 'complete',
+        viewItems: [
+          { type: 'user-message', messageId: 'u-3', message: 'Question', sentAtMs: 1_790_000_000_000 },
+          { type: 'chatgpt-reasoning-group', items: Array.from({ length: 20 }, (_, index) => ({
+            type: 'assistant-message',
+            messageId: `interim-big-${index}`,
+            content: 'y'.repeat(16_000),
+            phase: 'commentary',
+            completed: true
+          })) },
+          { type: 'assistant-message', messageId: 'final-3', content: 'Done', completed: true, phase: 'final_answer' }
+        ],
+        rendered: ['Done']
+      }]);
+      expect(overBudget.turns[0]!.messagesComplete).toBe(false);
+    });
   });
 });

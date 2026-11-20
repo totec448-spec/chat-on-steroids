@@ -17,7 +17,7 @@ import type { ProjectDirectoryListing, ProjectFileMutationResult, ProjectFilePre
 import type { CheckpointRestoreResult, ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot } from '../shared/project-git.js';
 import type { PetLibraryState, PetOverlayControlState, PetRuntimeAsset } from '../shared/pets.js';
 import type { SkillSummary, ManagedSkill, GlobalSkill, GitHubSkillUpdateCheck, SkillLibrary, SkillsDraftScope } from '../shared/skills.js';
-import type { RunningToolActivity, SessionChange, SessionSearchReply, SessionSearchLocation, SessionBookmark, ToolEditReview } from '../shared/session.js';
+import type { RunningToolActivity, SessionChange, SessionSearchReply, SessionSearchLocation, SessionBookmark, ChatEdits, ToolEditReview } from '../shared/session.js';
 import type { TurnTrace } from '../shared/turn-trace.js';
 import type { AgentOutputEvent, RunningExecProcess } from '../shared/background-exec.js';
 import type { PluginSnapshot, PluginInstallRequest, PluginConfigPatch } from '../shared/plugins.js';
@@ -161,6 +161,7 @@ const api = {
     ipcRenderer.on('plugins:changed', wrapped);
     return () => ipcRenderer.removeListener('plugins:changed', wrapped);
   },
+  retainDraftAttachments: (ids: string[]) => call<void>('sessions:retainDraftAttachments', { ids }),
   chooseFiles: () => call<InputAttachment[]>('sessions:files'),
   chatGroups: () => call<ChatGroupsState>('chatGroups:get'),
   createChatGroup: (projectId: string, name: string) => call<{ group: ChatGroup; state: ChatGroupsState }>('chatGroups:create', { projectId, name }),
@@ -387,8 +388,9 @@ const api = {
   }),
   restoreCheckpoint: (projectId: string, checkpointId: string, paths: string[] | null, expectedRevision: string) =>
     call<CheckpointRestoreResult>('checkpoints:restore', { projectId, checkpointId, paths, expectedRevision }),
-  getToolEditReview: (sessionId: string, callId: string, changeIndex: number) =>
-    call<ToolEditReview | null>('sessions:toolEditReview', { sessionId, callId, changeIndex }),
+  getChatEdits: (id: string, projectId: string) => call<ChatEdits | null>('sessions:chatEdits', { id, projectId }),
+  getToolEditReview: (sessionId: string, callId: string, changeIndex: number, projectId?: string) =>
+    call<ToolEditReview | null>('sessions:toolEditReview', { sessionId, callId, changeIndex, ...(projectId ? { projectId } : {}) }),
   /** #1827: what one answer changed, per file, read from the turn's first event (`from`, a sequence number) on. */
   turnChanges: (sessionId: string, turnId: string, from: number) => call<{ changes: TurnFileChange[]; total: number }>('sessions:turnChanges', { sessionId, turnId, from }),
   turnFileDiff: (sessionId: string, turnId: string, from: number, path: string) => call<{ before: string; after: string } | null>('sessions:turnFileDiff', { sessionId, turnId, from, path }),

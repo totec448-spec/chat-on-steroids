@@ -12,6 +12,8 @@ import {
   MAX_SKILL_DESCRIPTION_CHARS,
   MAX_SKILL_NAME_CHARS,
   MAX_SKILLS,
+  MAX_GITHUB_SKILL_FILES,
+  MAX_GITHUB_SKILL_DIRECTORIES,
   SKILL_ORIGIN_FILENAME,
   SKILL_ID_PATTERN,
   validGitHubSkillOrigin,
@@ -796,11 +798,11 @@ export function importSkillFile(sourcePath: string): Promise<SkillSummary> {
   });
 }
 
-async function packageDocument(sourcePath: string): Promise<{ id: string; bytes: Buffer; revision: string }> {
+async function packageDocument(sourcePath: string, installedId?: string): Promise<{ id: string; bytes: Buffer; revision: string }> {
   if (!path.isAbsolute(sourcePath)) throw new Error('Choose an absolute skill package folder');
   const sourceDirectory = await fs.lstat(sourcePath);
   if (!sourceDirectory.isDirectory() || sourceDirectory.isSymbolicLink()) throw new Error('Choose a real skill package folder');
-  const id = slugSkillId(path.basename(sourcePath));
+  const id = installedId ?? slugSkillId(path.basename(sourcePath));
   const sourceFile = path.join(sourcePath, SKILL_FILENAME);
   const sourceStat = await fs.lstat(sourceFile);
   if (!sourceStat.isFile() || sourceStat.isSymbolicLink()) throw new Error('A skill package needs a regular SKILL.md');
@@ -822,13 +824,67 @@ export function skillPackageRevision(files: Array<{ relative: string; sha: strin
   return createHash('sha256').update(JSON.stringify(ordered)).digest('hex');
 }
 
+/** Compare the entire installed package with its recorded baseline, including resources.
+ * A linked local package's origin revision was captured from its actual local files. */
+async function installedPackageRevision(directory: string, hash: 'sha1' | 'sha256' = 'sha1'): Promise<string> {
+  const files: Array<{ relative: string; sha: string; size: number }> = [];
+  let folders = 0, entries = 0, bytes = 0;
+  const collect = async (folder: string, relative: string, depth: number): Promise<void> => {
+    if (++folders > MAX_GITHUB_SKILL_DIRECTORIES || depth > 10) throw new Error('The local skill has too many nested folders');
+    const before = identityOf(await fs.lstat(folder));
+    const listing = await fs.opendir(folder);
+    let children = 0;
+    try { for await (const entry of listing) {
+      if (++entries > MAX_GITHUB_SKILL_FILES + MAX_GITHUB_SKILL_DIRECTORIES)
+        throw new Error('The local skill exceeds GitHub update limits');
+      if (!relative && entry.name === SKILL_ORIGIN_FILENAME) continue;
+      children++;
+      const nextRelative = [relative, entry.name].filter(Boolean).join('/');
+      const filename = path.join(folder, entry.name);
+      const stat = await fs.lstat(filename);
+      if (stat.isSymbolicLink()) throw new Error('The local skill contains a linked resource');
+      if (stat.isDirectory()) { await collect(filename, nextRelative, depth + 1); continue; }
+      if (!stat.isFile()) throw new Error('The local skill contains an unsupported resource');
+      if (files.length >= MAX_GITHUB_SKILL_FILES || (bytes += stat.size) > 32 * 1024 * 1024)
+        throw new Error('The local skill exceeds GitHub update limits');
+      const handle = await fs.open(filename, 'r');
+      let content: Buffer;
+      try {
+        if (!sameIdentity(identityOf(stat), identityOf(await handle.stat())))
+          throw new Error('The local skill changed during update');
+        content = Buffer.alloc(stat.size);
+        let offset = 0;
+        while (offset < content.length) {
+          const read = await handle.read(content, offset, content.length - offset, offset);
+          if (!read.bytesRead) throw new Error('The local skill changed during update');
+          offset += read.bytesRead;
+        }
+        if (!sameIdentity(identityOf(stat), identityOf(await handle.stat())))
+          throw new Error('The local skill changed during update');
+      } finally { await handle.close(); }
+      if (!sameIdentity(identityOf(stat), identityOf(await fs.lstat(filename))))
+        throw new Error('The local skill changed during update');
+      files.push({ relative: nextRelative, size: content.length,
+        sha: createHash(hash).update(`blob ${content.length}\0`).update(content).digest('hex') });
+    } } finally { await listing.close().catch(() => undefined); }
+    // Git does not track empty directories, so they cannot appear in the
+    // recorded package revision. Replacing one would discard a local addition.
+    if (relative && children === 0)
+      throw new Error('The skill has local edits: an empty resource directory; preserve it before updating from GitHub');
+    if (!sameIdentity(before, identityOf(await fs.lstat(folder))))
+      throw new Error('The local skill changed during update');
+  };
+  await collect(directory, '', 0);
+  return skillPackageRevision(files);
+}
+
 /** Link an existing local package without replacing its files or claiming missing resources are current. */
 export function linkSkillPackage(id: string, source: GitHubSkillOrigin): Promise<void> {
   return serial(async () => {
     assertSkillId(id);
     if (!validGitHubSkillOrigin(source)) throw new Error('Invalid GitHub skill source');
-    const name = source.directory.split('/').filter(Boolean).at(-1) ?? new URL(source.url).pathname.split('/')[2]!;
-    if (slugSkillId(name) !== id) throw new Error('The GitHub folder name does not match this skill');
+    // The local managed ID is stable, not a GitHub folder name. An existing
+    // SKILL.md must match the verified remote bytes; that is the link authority.
     const candidateRoot = requiredRoot();
     await assertManagedRoot(candidateRoot);
     const record = await recordAt(candidateRoot, id);
@@ -836,15 +892,16 @@ export function linkSkillPackage(id: string, source: GitHubSkillOrigin): Promise
     if (await originAt(candidateRoot, id)) throw new Error('This skill already has a GitHub source');
     if (record.revision !== source.skillSha256) throw new Error('The local SKILL.md does not match this GitHub source');
     const directory = path.join(candidateRoot, id);
+    const packageHash = source.commit.length === 64 ? 'sha256' : 'sha1';
     const beforeDirectory = identityOf(await fs.lstat(directory));
     const files: Array<{ relative: string; sha: string; size: number }> = [];
     let folders = 0, entries = 0, bytes = 0;
     const collect = async (folder: string, relative: string, depth: number): Promise<void> => {
-      if (++folders > 12 || depth > 10) throw new Error('The local skill has too many nested folders');
+      if (++folders > MAX_GITHUB_SKILL_DIRECTORIES || depth > 10) throw new Error('The local skill has too many nested folders');
       const before = identityOf(await fs.lstat(folder));
       const directory = await fs.opendir(folder);
       try { for await (const entry of directory) {
-        if (++entries > 52) throw new Error('The local skill exceeds GitHub update limits');
+        if (++entries > MAX_GITHUB_SKILL_FILES + MAX_GITHUB_SKILL_DIRECTORIES) throw new Error('The local skill exceeds GitHub update limits');
         if (relative === '' && entry.name === SKILL_ORIGIN_FILENAME)
           throw new Error('The local skill already contains origin metadata');
         const nextRelative = [relative, entry.name].filter(Boolean).join('/');
@@ -853,7 +910,7 @@ export function linkSkillPackage(id: string, source: GitHubSkillOrigin): Promise
         if (stat.isSymbolicLink()) throw new Error('The local skill contains a linked resource');
         if (stat.isDirectory()) { await collect(filename, nextRelative, depth + 1); continue; }
         if (!stat.isFile()) throw new Error('The local skill contains an unsupported resource');
-        if (files.length >= 40 || (bytes += stat.size) > 32 * 1024 * 1024)
+        if (files.length >= MAX_GITHUB_SKILL_FILES || (bytes += stat.size) > 32 * 1024 * 1024)
           throw new Error('The local skill exceeds GitHub update limits');
         const handle = await fs.open(filename, 'r');
         let content: Buffer;
@@ -873,7 +930,7 @@ export function linkSkillPackage(id: string, source: GitHubSkillOrigin): Promise
         if (!sameIdentity(identityOf(stat), identityOf(await fs.lstat(filename))))
           throw new Error('The local skill changed while linking');
         files.push({ relative: nextRelative, size: content.length,
-          sha: createHash('sha1').update(`blob ${content.length}\0`).update(content).digest('hex') });
+          sha: createHash(packageHash).update(`blob ${content.length}\0`).update(content).digest('hex') });
       } } finally { await directory.close().catch(() => undefined); }
       if (!sameIdentity(before, identityOf(await fs.lstat(folder))))
         throw new Error('The local skill changed while linking');
@@ -935,8 +992,9 @@ export function updateSkillPackage(
   return serial(async () => {
     assertSkillId(id);
     const candidateRoot = requiredRoot();
-    const document = await packageDocument(sourcePath);
-    if (document.id !== id) throw new Error('GitHub skill folder no longer matches the installed skill');
+    const document = await packageDocument(sourcePath, id);
+    // A linked source may live under a different GitHub directory from its
+    // local managed ID. Preserve that ID across updates; verify origin + bytes.
     const metadata = originBytes(nextOrigin, document.revision);
     if (!metadata || !validGitHubSkillOrigin(expectedOrigin) || nextOrigin.url !== expectedOrigin.url)
       throw new Error('GitHub skill source changed');
@@ -946,8 +1004,9 @@ export function updateSkillPackage(
     if (!old || !oldOrigin || oldOrigin.url !== expectedOrigin.url || oldOrigin.revision !== expectedOrigin.revision)
       throw new Error('The skill changed while checking for updates; reload the library');
     if (nextOrigin.revision === oldOrigin.revision) return { updated: false };
-    if (old.revision !== oldOrigin.skillSha256)
-      throw new Error('SKILL.md has local edits; preserve them before updating from GitHub');
+    const packageHash = oldOrigin.commit.length === 64 ? 'sha256' : 'sha1';
+    if (await installedPackageRevision(path.join(candidateRoot, id), packageHash) !== oldOrigin.revision)
+      throw new Error('The skill has local edits to its files or resources; preserve them before updating from GitHub');
     const oldDirectory = identityOf(await fs.lstat(path.join(candidateRoot, id)));
 
     const operation = randomUUID();
@@ -964,6 +1023,8 @@ export function updateSkillPackage(
       if (!current || current.revision !== old.revision || !currentOrigin || currentOrigin.revision !== oldOrigin.revision ||
           !sameIdentity(oldDirectory, identityOf(await fs.lstat(destination))))
         throw new Error('The skill changed before update; reload the library');
+      if (await installedPackageRevision(destination, packageHash) !== oldOrigin.revision)
+        throw new Error('The skill has local edits to its files or resources; preserve them before updating from GitHub');
       await assertManagedRoot(candidateRoot);
       await fs.rename(destination, backup); oldMoved = true;
       await fs.rename(stage, destination); nextMoved = true;

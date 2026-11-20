@@ -279,7 +279,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
     const close = el('button', 'btn', () => t('Close')) as HTMLButtonElement;
     close.type = 'button'; close.addEventListener('click', () => dialog.close()); head.append(title, close);
     const body = el('div', 'plugin-dialog-body');
-    body.append(el('p', '', () => t('Check this GitHub source for changes. If it changed, CoS replaces the whole skill folder and moves the previous version to Trash. Local edits to resources will be replaced.')));
+    body.append(el('p', '', () => t('Check this GitHub source for changes. If it changed, CoS can replace the whole skill folder and move the previous version to Trash. Updates are blocked when local files or resource folders have changed.')));
     body.append(el('p', 'skill-source-url', skill.origin.url));
     body.append(el('p', 'skill-source-revision', installedRevision(skill)));
     const actions = el('div', 'pet-delete-actions');

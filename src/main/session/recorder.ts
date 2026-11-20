@@ -45,6 +45,8 @@ import {
   MAX_TOOL_RESULT_CHARS,
   MAX_USER_MESSAGE_CHARS,
   MAX_ASSET_BYTES,
+  GLOBAL_ASSET_QUOTA_EXCEEDED,
+  SESSION_ASSET_QUOTA_EXCEEDED,
   appendEvent,
   recordProcessCall,
   reviseProvisionalCall,
@@ -64,6 +66,7 @@ import {
   indexedSessions,
   renameSession,
   reopenSession,
+  retractTurnStreamingMessages,
   rewriteUnattributedToolCalls,
   setSessionOrigin,
   upsertMessageEvent,
@@ -187,27 +190,61 @@ let lastActiveSessionId: string | null = null;
  */
 const REOPEN_NOTICE_MS = 60_000;
 
+const NOTIFY_COOLDOWN_MS = 180;
+
 const listeners = new Set<(change: SessionChange) => void>();
+const nonExtensionListeners = new Set<(change: SessionChange) => void>();
 let notifyTimer: NodeJS.Timeout | null = null;
+let lastNotifyAt = -Infinity;
 /** Every local session written during the current burst; one push names all of them. */
 const changedSessions = new Set<string>();
+/** Sessions in the current burst with at least one non-extension change (for anti-echo wakes). */
+const changedNonExtensionSessions = new Set<string>();
 
 export function onSessionChange(listener: (change: SessionChange) => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
 
-/** Publishes the exact sessions whose durable projection this recorder just wrote. */
-export function notifyChanged(...sessionIds: string[]): void {
-  for (const id of sessionIds) changedSessions.add(id);
+/** Subscribes to session changes that include at least one non-extension write in the burst. */
+export function onNonExtensionSessionChange(listener: (change: SessionChange) => void): () => void {
+  nonExtensionListeners.add(listener);
+  return () => nonExtensionListeners.delete(listener);
+}
+
+function scheduleNotifyFlush(): void {
   if (notifyTimer) return;
+  const delay = Math.max(0, NOTIFY_COOLDOWN_MS - (performance.now() - lastNotifyAt));
   notifyTimer = setTimeout(() => {
     notifyTimer = null;
+    lastNotifyAt = performance.now();
     const change: SessionChange = { sessionIds: [...changedSessions] };
+    const nonExtensionChange: SessionChange | null = changedNonExtensionSessions.size > 0
+      ? { sessionIds: [...changedNonExtensionSessions] }
+      : null;
     changedSessions.clear();
+    changedNonExtensionSessions.clear();
     for (const listener of listeners) listener(change);
-  }, 400);
+    if (nonExtensionChange) {
+      for (const listener of nonExtensionListeners) listener(nonExtensionChange);
+    }
+  }, delay);
   notifyTimer.unref?.();
+}
+
+/** Publishes the exact sessions whose durable projection this recorder just wrote. */
+export function notifyChanged(...sessionIds: string[]): void {
+  for (const id of sessionIds) {
+    changedSessions.add(id);
+    changedNonExtensionSessions.add(id);
+  }
+  scheduleNotifyFlush();
+}
+
+/** Publishes extension-originated observations without triggering browser activity echo wakes. */
+function notifyExtensionChanged(...sessionIds: string[]): void {
+  for (const id of sessionIds) changedSessions.add(id);
+  scheduleNotifyFlush();
 }
 
 export function recordingEnabled(): boolean {
@@ -228,9 +265,10 @@ export async function sessionForConversation(
   conversationId: string | null,
   title?: string,
   /** An observed authored user message, not a guessed route or page label. */
-  openingUserMessage?: string
+  openingUserMessage?: string,
+  extensionOrigin = false
 ): Promise<string | null> {
-  if (!conversationId) return initializeSessionForConversation(conversationId, title, openingUserMessage);
+  if (!conversationId) return initializeSessionForConversation(conversationId, title, openingUserMessage, extensionOrigin);
 
   const pending = sessionInitializations.get(conversationId);
   if (pending) {
@@ -240,12 +278,12 @@ export async function sessionForConversation(
       // caller did not yet have: command origin or the first authored user title. Apply both
       // after the shared initialization rather than dropping the later evidence.
       if (pendingOrigins.has(conversationId)) await applyOrigin(sessionId, conversationId);
-      await promoteGenericTitle(sessionId, title);
+      await promoteGenericTitle(sessionId, title, extensionOrigin);
     }
     return sessionId;
   }
 
-  const initializing = initializeSessionForConversation(conversationId, title, openingUserMessage);
+  const initializing = initializeSessionForConversation(conversationId, title, openingUserMessage, extensionOrigin);
   sessionInitializations.set(conversationId, initializing);
   try {
     const sessionId = await initializing;
@@ -254,7 +292,7 @@ export async function sessionForConversation(
     // initializer sampled pendingOrigins.
     if (sessionId) {
       if (pendingOrigins.has(conversationId)) await applyOrigin(sessionId, conversationId);
-      await promoteGenericTitle(sessionId, title);
+      await promoteGenericTitle(sessionId, title, extensionOrigin);
     }
     return sessionId;
   } finally {
@@ -313,7 +351,8 @@ export class ResumeDestinationPendingError extends Error {
 async function initializeSessionForConversation(
   conversationId: string | null,
   title?: string,
-  openingUserMessage?: string
+  openingUserMessage?: string,
+  extensionOrigin = false
 ): Promise<string | null> {
   if (!recordingEnabled()) return null;
   if (!conversationId) return ensureUnattributedSession();
@@ -321,7 +360,7 @@ async function initializeSessionForConversation(
   if (existing) {
     lastActiveSessionId = existing.sessionId;
     if (pendingOrigins.has(conversationId)) await applyOrigin(existing.sessionId, conversationId);
-    await promoteGenericTitle(existing.sessionId, title);
+    await promoteGenericTitle(existing.sessionId, title, extensionOrigin);
     return existing.sessionId;
   }
   // Reuse a session already recorded for this conversation, so closing and reopening
@@ -444,7 +483,7 @@ async function initializeSessionForConversation(
     logInfo(`session started for a ChatGPT conversation (${summary.id})`);
   }
   if (origin && known) await applyOrigin(summary.id, conversationId);
-  if (known) await promoteGenericTitle(summary.id, title);
+  if (known) await promoteGenericTitle(summary.id, title, extensionOrigin);
   if (known) {
     // There are two awaited metadata niceties above. A rebind that starts after the pre-publish
     // check can therefore still commit before this initializer returns. Re-check once more and
@@ -462,26 +501,29 @@ async function initializeSessionForConversation(
     }
   }
   lastActiveSessionId = summary.id;
-  notifyChanged(summary.id);
+  if (extensionOrigin) notifyExtensionChanged(summary.id);
+  else notifyChanged(summary.id);
   return summary.id;
 }
 
 /** Generic placeholders yield to authored previews; store owns naming precedence. */
-async function promoteGenericTitle(sessionId: string, title?: string): Promise<void> {
+async function promoteGenericTitle(sessionId: string, title?: string, extensionOrigin = false): Promise<void> {
   const next = title?.trim();
   if (!next) return;
   const summary = await getSession(sessionId);
   if (!summary || summary.title !== 'ChatGPT session') return;
   await renameSession(sessionId, next, 'fallback');
-  notifyChanged(sessionId);
+  if (extensionOrigin) notifyExtensionChanged(sessionId);
+  else notifyChanged(sessionId);
 }
 
 /** Provider titles may arrive before message history, after a receipt, or after restart. */
-async function promoteConversationTitle(sessionId: string, title?: string, conversationId?: string): Promise<void> {
+async function promoteConversationTitle(sessionId: string, title?: string, conversationId?: string, extensionOrigin = false): Promise<void> {
   const next = title?.trim();
   if (!next) return;
   await renameSession(sessionId, next, 'provider', conversationId);
-  notifyChanged(sessionId);
+  if (extensionOrigin) notifyExtensionChanged(sessionId);
+  else notifyChanged(sessionId);
 }
 
 /**
@@ -1619,12 +1661,14 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
         // Only fixed storage diagnostics may enter the transcript; arbitrary fs errors
         // can contain private paths. Recording failure never changes the MCP payload.
         const message = err instanceof Error ? err.message : '';
-        const reason = message === 'Global session asset quota exceeded' || message === 'Session asset quota exceeded'
+        const reason = message === GLOBAL_ASSET_QUOTA_EXCEEDED
           ? 'recording storage limit reached'
-          : message === 'Session image exceeds the recording limit' ? 'recording image size limit' : 'recording write failed';
+          : message === SESSION_ASSET_QUOTA_EXCEEDED
+            ? 'chat recording limit reached (192 MiB)'
+            : message === 'Session image exceeds the recording limit' ? 'recording image size limit' : 'recording write failed';
         imageRecordingReasons.add(reason);
         // The store reports being full once, as a state (#1406); other reasons keep their line.
-        if (message !== 'Global session asset quota exceeded') logWarn(`session image not stored: ${reason}`);
+        if (message !== GLOBAL_ASSET_QUOTA_EXCEEDED) logWarn(`session image not stored: ${reason}`);
       }
     }
 
@@ -2180,6 +2224,7 @@ export interface ChatObservation {
     | 'native_image'
     | 'page_tool'
     | 'turn_trace'
+    | 'turn_messages'
     | 'turn_start'
     | 'turn_end'
     | 'chat_error'
@@ -2234,6 +2279,13 @@ export interface ChatObservation {
   turnId?: string;
   /** A `turn_trace` observation's round outline (shared/turn-trace.ts). */
   trace?: import('../../shared/turn-trace.js').TurnTrace;
+  /** On `turn_messages`: complete surviving assistant message ids/provider UUIDs for `turnId`. */
+  messageIds?: string[];
+  /** On `assistant_message` and `turn_messages`: document id & monotonic sequence for staleness fencing. */
+  docId?: string;
+  docSeq?: number;
+  /** On `turn_messages`: true when the page turn has already settled (`endMessageId` or `terminalWithoutFinal`). */
+  settled?: boolean;
   /** On `turn_trace`: the user message that opened the page turn it was read from (#1301). */
   question?: string;
   final?: boolean;
@@ -2340,8 +2392,13 @@ async function recordNativeImage(
     });
     if (enriched.changed) changed += 1;
   } catch (error) {
-    const reason = /quota/i.test((error as Error).message) ? 'quota' : 'invalid';
-    logWarn(`native generated image preview unavailable: ${(error as Error).message}`);
+    const message = error instanceof Error ? error.message : String(error);
+    const reason = message === SESSION_ASSET_QUOTA_EXCEEDED
+      ? 'session_quota'
+      : message === GLOBAL_ASSET_QUOTA_EXCEEDED || /quota/i.test(message)
+        ? 'quota'
+        : 'invalid';
+    logWarn(`native generated image preview unavailable: ${message}`);
     const unavailable = await upsertNativeImageEvent(sessionId, {
       ...base,
       kind: 'native_image',
@@ -2442,7 +2499,7 @@ export async function recordRequestEvidence(
   if (!recordingEnabled()) return null;
   const lineage = !conversations.has(conversationId) ? await supersededLineage(conversationId) : null;
   const firstUser = observations.find((item) => item.kind === 'user_message' && item.messageId && item.text);
-  const sessionId = lineage ?? await sessionForConversation(conversationId, observationTitle(observations), firstUser?.text);
+  const sessionId = lineage ?? await sessionForConversation(conversationId, observationTitle(observations), firstUser?.text, true);
   if (!sessionId) return null;
   // Proof identifies even a retired caller; kernel/recorder attachment checks then refuse it
   // as superseded. Never turn an exact historical owner into anonymous executable authority.
@@ -2517,6 +2574,7 @@ async function supersededLineage(conversationId: string): Promise<string | null>
  */
 async function recordSupersededMessages(
   sessionId: string,
+  conversationId: string,
   observations: readonly ChatObservation[]
 ): Promise<number> {
   let stored = 0;
@@ -2536,6 +2594,7 @@ async function recordSupersededMessages(
           ...base,
           kind: 'user_message',
           message: await storeText(sessionId, item.text ?? '', MAX_USER_MESSAGE_CHARS),
+          ...(conversationId ? { conversationId } : {}),
           ...(item.attachments?.length ? { attachments: item.attachments } : {}),
           ...(item.reaction !== undefined ? { reaction: item.reaction } : {}),
           ...(item.model ? { model: item.model } : {}),
@@ -2569,7 +2628,7 @@ async function recordSupersededMessages(
     }
     if (written?.changed) stored++;
   }
-  if (stored > 0) notifyChanged(sessionId);
+  if (stored > 0) notifyExtensionChanged(sessionId);
   return stored;
 }
 
@@ -2588,7 +2647,7 @@ async function recordChatObservationsNow(
   if (!conversations.has(conversationId)) {
     const lineage = await supersededLineage(conversationId);
     if (lineage) {
-      const stored = await recordSupersededMessages(lineage, observations);
+      const stored = await recordSupersededMessages(lineage, conversationId, observations);
       return { sessionId: lineage, stored, activity, goalCandidates: [] };
     }
   }
@@ -2612,7 +2671,8 @@ async function recordChatObservationsNow(
   const sessionId = await sessionForConversation(
     conversationId,
     pageTitle?.text?.trim() || observedUserTitle(firstUser?.text),
-    firstUser?.messageId ? firstUser.text : undefined
+    firstUser?.messageId ? firstUser.text : undefined,
+    true
   );
   if (!sessionId) return { sessionId: null, stored: 0, activity, goalCandidates: [] };
   const live = conversations.get(conversationId);
@@ -2658,6 +2718,7 @@ async function recordChatObservationsNow(
           ...(editReplacement(item.messageId) ? { replaces: editReplacement(item.messageId), replacesConfirmed: true as const }
             : item.parentId && item.parentExact === true ? await replacedQuestion(sessionId, item.messageId, item.parentId) : {}),
           ...(takeAutomaticReply(conversationId, item.text ?? '') ? { automatic: true as const } : {}),
+          ...(conversationId ? { conversationId } : {}),
           messageId: item.messageId
         }, { preferTime: item.authoredTime === true, work: item.authoredNow === true });
         if (live) {
@@ -2728,9 +2789,42 @@ async function recordChatObservationsNow(
         // appeared: ChatGPT draws a finished turn's steps as one collapsed group, and the note
         // written before its tool calls can reach the page only then (2.1.48 release round). As
         // new work it kept Goal waiting for a newer final forever. A final, or a reopened turn, counts.
-        // A turn whose view failed while thinking is reopened by its fresh note below, so that note is work.
-        const lateNoteOfEndedTurn = state !== 'final' && !!item.turnId && !!live &&
-          live.knownTurnEnds.has(item.turnId) && !live.openTurns.has(item.turnId) &&
+        // A turn whose view failed while thinking is reopened by its fresh note below, so that note is work,
+        // and a streaming continuation still reported under its continued predecessor writes work into the live turn
+        // only when the stored message itself is proven to belong to that continuation.
+        const endedTurnNote = state !== 'final' && !!item.turnId && !!live &&
+          live.knownTurnEnds.has(item.turnId) && !live.openTurns.has(item.turnId);
+        const liveTurn = live?.turnId;
+        const priorTurns = endedTurnNote && item.activeNow === true && !!liveTurn && liveTurn !== item.turnId
+          ? (await getSession(sessionId))?.timelineTurns : undefined;
+        const liveOrigin = priorTurns && liveTurn ? priorTurns[liveTurn]?.origin : undefined;
+        const liveResponse = priorTurns && liveTurn ? responseTurnId(priorTurns, liveTurn) : undefined;
+        const itemResponse = priorTurns && item.turnId ? responseTurnId(priorTurns, item.turnId) : undefined;
+        const itemOrigin = priorTurns && itemResponse ? priorTurns[itemResponse]?.origin : undefined;
+        let continuesIntoLiveTurn = false;
+        if (liveOrigin !== undefined && liveResponse && itemOrigin !== undefined && item.turnId &&
+            effectiveFinalTurnId(priorTurns, {
+              kind: 'assistant_message', seq: liveOrigin, origin: liveOrigin, contentSeq: liveOrigin,
+              time: item.time, turnId: item.turnId, final: false
+            }) === liveResponse) {
+          const boundaryEvents = await readRecentEvents(sessionId, 100, { kinds: ['assistant_message', 'user_message'] });
+          const existing = boundaryEvents.find(
+            (event): event is Extract<SessionEvent, { kind: 'assistant_message' }> =>
+              event.kind === 'assistant_message' && event.messageId === item.messageId
+          );
+          if (existing && existing.final !== true && existing.state !== 'final') {
+            const alreadyInLiveTurn = effectiveFinalTurnId(priorTurns, existing) === liveResponse;
+            const steeredParentMatch = boundaryEvents.some(
+              (event) =>
+                event.kind === 'user_message' &&
+                event.parentId === item.messageId &&
+                (event.origin ?? event.seq) > itemOrigin &&
+                (event.origin ?? event.seq) < liveOrigin
+            );
+            continuesIntoLiveTurn = alreadyInLiveTurn || steeredParentMatch;
+          }
+        }
+        const lateNoteOfEndedTurn = endedTurnNote && !continuesIntoLiveTurn &&
           !(item.activeNow === true && await thinkingFailureToReopen(sessionId, live, item.time, item.turnId));
         const written = await upsertMessageEvent(sessionId, {
           ...base,
@@ -2748,7 +2842,15 @@ async function recordChatObservationsNow(
           ...(item.resolvedModel ? { resolvedModel: item.resolvedModel } : {}),
           ...(item.references ? { references: item.references } : {}),
           ...(goalEligible && state === 'final' ? { goalEligible: true } : {})
-        }, { preferTime: item.authoredTime === true, work: item.activeNow === true && !lateNoteOfEndedTurn });
+        }, {
+          preferTime: item.authoredTime === true,
+          work: item.activeNow === true && !lateNoteOfEndedTurn,
+          observation: {
+            time: item.time,
+            ...(item.docId ? { docId: item.docId } : {}),
+            ...(item.docSeq !== undefined ? { docSeq: item.docSeq } : {})
+          }
+        });
         if (lateNoteOfEndedTurn && item.activeNow === true && written.contentChanged) {
           logInfo(`session recorder: ${conversationId} reported a message of turn ${item.turnId} after that turn ended; kept in history, not counted as new work`);
         }
@@ -2773,23 +2875,28 @@ async function recordChatObservationsNow(
           uncertainEnd.outcome !== 'completed' && uncertainEnd.outcome !== 'stopped' && item.time > uncertainEnd.time;
         // HTML, provider identity and authored-time promotion revise history, not work.
         // In particular a post-failure Fiber backfill must not reopen the dead turn.
-        const workingActivity = written.contentChanged && state !== 'final' && item.activeNow === true &&
-          (!canonicalTurn || canonicalTurn === live?.turnId || resumedUncertainTurn) &&
-          !(live?.turnStartedAt === null && (live.lastTurnOutcome === 'stopped' || live.lastTurnOutcome === 'completed'));
-        const turns = state === 'final' && canonicalTurn && written.event.kind === 'assistant_message'
-          ? (await getSession(sessionId))?.timelineTurns : undefined;
+        const turns = canonicalTurn && written.event.kind === 'assistant_message' &&
+          (state === 'final' || (written.contentChanged && item.activeNow === true && !!live?.turnId && canonicalTurn !== live.turnId))
+          ? priorTurns ?? (await getSession(sessionId))?.timelineTurns : undefined;
         const effectiveTurn = written.event.kind === 'assistant_message' && turns
           ? effectiveFinalTurnId(turns, written.event)
           : canonicalTurn;
-        const finishingTurn = canonicalTurn && live?.turnId && (canonicalTurn === live.turnId || effectiveTurn === live.turnId ||
-          (turns && responseTurnId(turns, effectiveTurn ?? canonicalTurn) === responseTurnId(turns, live.turnId))) ? live.turnId : null;
-        if (state === 'final' && written.event.kind === 'assistant_message' && finishingTurn && recoverableTurns.has(finishingTurn) &&
+        const activeLiveTurn = live?.turnId;
+        const sameLiveTurn = !!activeLiveTurn && (canonicalTurn === activeLiveTurn || effectiveTurn === activeLiveTurn ||
+          (!!turns && !!canonicalTurn && responseTurnId(turns, effectiveTurn ?? canonicalTurn) === responseTurnId(turns, activeLiveTurn)));
+        const workingActivity = written.contentChanged && !lateNoteOfEndedTurn && state !== 'final' && item.activeNow === true &&
+          (!canonicalTurn || sameLiveTurn || resumedUncertainTurn) &&
+          !(live?.turnStartedAt === null && (live.lastTurnOutcome === 'stopped' || live.lastTurnOutcome === 'completed'));
+        const rejectedRetracted = written.event.kind === 'assistant_message' && written.event.retracted === true;
+        const finishingTurn = canonicalTurn && sameLiveTurn ? activeLiveTurn : null;
+        if (!rejectedRetracted && state === 'final' && written.event.kind === 'assistant_message' && finishingTurn && recoverableTurns.has(finishingTurn) &&
             !explicitEnds.has(finishingTurn)) {
           recoveredFinal = { turnId: finishingTurn, time: item.time,
             seq: written.event.finalContentSeq ?? written.event.origin ?? written.event.seq,
             origin: written.event.origin ?? written.event.seq, native: Boolean(written.event.providerMessageId) };
         }
         if (
+          !rejectedRetracted &&
           written.event.kind === 'assistant_message' &&
           written.event.goalEligible === true &&
           state === 'final' &&
@@ -2801,7 +2908,7 @@ async function recordChatObservationsNow(
             eventSeq: written.event.origin ?? written.event.seq
           });
         }
-        if (recoveredGoalEligible && live) {
+        if (!rejectedRetracted && recoveredGoalEligible && live) {
           // This is an in-memory verdict for later call/reload decisions, not a fabricated
           // turn_end. The canonical message keeps goalEligible monotonically, so an HTTP 503
           // can still replay the same obligation even after this stronger final evidence wins.
@@ -2836,7 +2943,21 @@ async function recordChatObservationsNow(
       }
       case 'turn_trace': {
         // Presentation beside the log: no event, no activity, no work or completion evidence.
-        if (item.turnId && item.trace && await writeTurnTrace(sessionId, item.turnId, item.trace, item.question)) notifyChanged(sessionId);
+        if (item.turnId && item.trace && await writeTurnTrace(sessionId, item.turnId, item.trace, item.question)) notifyExtensionChanged(sessionId);
+        continue;
+      }
+      case 'turn_messages': {
+        if (!item.turnId || !Array.isArray(item.messageIds)) continue;
+        const retracted = await retractTurnStreamingMessages(sessionId, item.turnId, item.messageIds, {
+          observedAt: item.time,
+          ...(item.docId ? { docId: item.docId } : {}),
+          ...(item.docSeq !== undefined ? { docSeq: item.docSeq } : {}),
+          ...(item.settled === true ? { settled: true } : {})
+        });
+        if (retracted > 0) {
+          notifyExtensionChanged(sessionId);
+          logInfo(`session recorder: ${conversationId} retracted ${retracted} discarded streaming message(s) in turn ${item.turnId}`);
+        }
         continue;
       }
       case 'page_tool': {
@@ -3041,7 +3162,7 @@ async function recordChatObservationsNow(
     }
     stored++;
   }
-  if (pageTitle) await promoteConversationTitle(sessionId, pageTitle.text, conversationId);
+  if (pageTitle) await promoteConversationTitle(sessionId, pageTitle.text, conversationId, true);
   // Completion and delivery readiness are separate: retain the exact native final
   // while a tool drains. The input owner keeps its in-flight fence until sending is safe.
   // Reload republishes historical request-owned finals as activeNow, including HTML-only
@@ -3078,7 +3199,7 @@ async function recordChatObservationsNow(
     stored++;
   }
   if (recoveredGoalSeen && live) live.lastTurnOutcome = 'completed';
-  notifyChanged(sessionId);
+  notifyExtensionChanged(sessionId);
   return { sessionId, stored, activity, goalCandidates };
 }
 
@@ -3257,7 +3378,7 @@ export async function closeConversation(conversationId: string, dismissBrowserRe
   }
   conversations.delete(conversationId);
   await endSession(live.sessionId, dismissBrowserRecovery, conversationId);
-  notifyChanged(live.sessionId);
+  notifyExtensionChanged(live.sessionId);
 }
 
 /**
@@ -3362,8 +3483,10 @@ export function resetRecorderForTests(): void {
   if (notifyTimer) {
     clearTimeout(notifyTimer);
     notifyTimer = null;
-    changedSessions.clear();
   }
+  changedSessions.clear();
+  changedNonExtensionSessions.clear();
+  lastNotifyAt = -Infinity;
 }
 
 export type { SessionSummary, SessionEvent };

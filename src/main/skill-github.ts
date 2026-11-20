@@ -3,9 +3,12 @@ import path from 'node:path';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
 import { rawPromises as fs } from './rawfs.js';
+import { logInfo } from './logger.js';
 import { importSkillPackage, linkSkillPackage, listManagedSkills, skillPackageRevision, updateSkillPackage } from './skills.js';
 import {
   githubSkillUrl,
+  MAX_GITHUB_SKILL_DIRECTORIES,
+  MAX_GITHUB_SKILL_FILES,
   parseGitHubSkillUrl,
   type GitHubSkillLocation,
   type GitHubSkillOrigin,
@@ -13,8 +16,6 @@ import {
   type ManagedSkill
 } from '../shared/skills.js';
 
-const MAX_FILES = 40;
-const MAX_DIRECTORIES = 12;
 const MAX_PACKAGE_BYTES = 32 * 1024 * 1024;
 const SHA = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/;
 const WINDOWS_DEVICE = /^(?:con|prn|aux|nul|conin\$|conout\$|com[0-9]|lpt[0-9])(?:\.|$)/i;
@@ -97,16 +98,53 @@ async function inspectGitHubSkill(requested: GitHubSkillLocation, signal: AbortS
       if (commitInfo) { ref = candidate; directory = segments.slice(take).join('/'); break; }
     }
   }
-  const location = { ...requested, ref, directory };
+  let location = { ...requested, ref, directory };
   commitInfo ??= await githubJson(`${base}/commits/${encodeURIComponent(ref)}`, signal) as { sha?: unknown };
   if (typeof commitInfo.sha !== 'string' || !SHA.test(commitInfo.sha)) throw new Error('GitHub commit could not be verified');
   const commit = commitInfo.sha;
+  // A recursive tree contains the exact commit-pinned SHA/size of every file
+  // in a single API request. The old contents BFS spent one API request per
+  // directory and hit the 60/hour anonymous GitHub limit on large Skills.
+  let payload: { truncated?: unknown; tree?: unknown } | null = null;
+  try {
+    payload = await githubJson(`${base}/git/trees/${encodeURIComponent(commit)}?recursive=1`,
+      signal, 8 * 1024 * 1024) as { truncated?: unknown; tree?: unknown };
+  } catch (error) {
+    // A large repository can exceed GitHub's response cap even when the
+    // explicitly selected folder is small enough to fetch safely.
+    if (!directory || !(error instanceof Error) || error.message !== 'GitHub response is too large') throw error;
+    logInfo('skills: recursive GitHub tree exceeded the 8 MiB metadata limit; using bounded contents walk for an explicit folder');
+  }
+  const tree = payload?.truncated === false && Array.isArray(payload.tree) && payload.tree.length <= 20_000 &&
+    payload.tree.every(entry => entry && typeof entry === 'object' &&
+      typeof (entry as TreeEntry).path === 'string' && typeof (entry as TreeEntry).type === 'string' &&
+      typeof (entry as TreeEntry).mode === 'string' && typeof (entry as TreeEntry).sha === 'string')
+    ? payload.tree as TreeEntry[] : null;
+  // A repository root may contain exactly one Skill in a nested directory;
+  // only auto-select it when unambiguous. Never import unrelated repo files.
+  if (!location.directory) {
+    if (!tree) throw new Error('GitHub repository tree is too large or incomplete; use a direct skill folder link');
+    if (!tree.some(entry => entry.path === 'SKILL.md' && entry.type === 'blob')) {
+      const candidates = tree.filter(entry => entry.type === 'blob' && ['100644', '100755'].includes(entry.mode) &&
+        entry.path.endsWith('/SKILL.md') && entry.path.split('/').every(safeName));
+      if (candidates.length !== 1)
+        throw new Error(candidates.length ? 'GitHub repository contains multiple skills; choose a direct skill folder link' :
+          'GitHub repository has no SKILL.md; choose a direct skill folder link');
+      location = { ...location, directory: candidates[0]!.path.slice(0, -'/SKILL.md'.length) };
+    }
+  }
+  if (tree) {
+    const files = filesFromTree(tree, location.directory);
+    return { location, commit, revision: skillPackageRevision(files), files };
+  }
+  // A truncated large repository can still provide a complete *explicitly
+  // selected* Skill folder through the old bounded contents walk.
   const queue = [{ directory: location.directory, relative: '', depth: 0 }];
   const files: File[] = [];
   let directoryCount = 0, bytes = 0;
   while (queue.length) {
     const current = queue.shift()!;
-    if (++directoryCount > MAX_DIRECTORIES || current.depth > 10) throw new Error('GitHub skill has too many nested folders');
+    if (++directoryCount > MAX_GITHUB_SKILL_DIRECTORIES || current.depth > 10) throw new Error('GitHub skill has too many nested folders');
     const encoded = current.directory.split('/').filter(Boolean).map(encodeURIComponent).join('/');
     const listing = await githubJson(`${base}/contents${encoded ? `/${encoded}` : ''}?ref=${encodeURIComponent(commit)}`, signal);
     if (!Array.isArray(listing)) throw new Error('GitHub link must point to a skill folder');
@@ -119,7 +157,7 @@ async function inspectGitHubSkill(requested: GitHubSkillLocation, signal: AbortS
       if (entry.type !== 'file' || typeof entry.sha !== 'string' || !SHA.test(entry.sha) ||
           !Number.isSafeInteger(entry.size) || entry.size! < 0)
         throw new Error('GitHub skill contains an unsupported file or link');
-      if (files.length >= MAX_FILES) throw new Error('GitHub skill has too many files');
+      if (files.length >= MAX_GITHUB_SKILL_FILES) throw new Error('GitHub skill has too many files');
       bytes += entry.size!;
       if (bytes > MAX_PACKAGE_BYTES) throw new Error('GitHub skill exceeds 32 MiB');
       files.push({ relative, sha: entry.sha, size: entry.size! });
@@ -131,8 +169,8 @@ async function inspectGitHubSkill(requested: GitHubSkillLocation, signal: AbortS
   return { location, commit, revision, files };
 }
 
-/** The recursive tree gives one bounded, metadata-only observation for all skills in a repository. */
-function revisionFromTree(entries: TreeEntry[], directory: string): string {
+/** The recursive tree supplies both import/update file lists and revision checks. */
+function filesFromTree(entries: TreeEntry[], directory: string): File[] {
   const prefix = directory ? `${directory}/` : '';
   if (directory && !entries.some(entry => entry.path === directory && entry.type === 'tree'))
     throw new Error('GitHub skill folder was not found');
@@ -144,20 +182,24 @@ function revisionFromTree(entries: TreeEntry[], directory: string): string {
     const segments = relative.split('/');
     if (!segments.every(safeName)) throw new Error('GitHub skill contains an unsafe path');
     if (entry.type === 'tree' && entry.mode === '040000') {
-      if (++directories > MAX_DIRECTORIES || segments.length > 10) throw new Error('GitHub skill has too many nested folders');
+      if (++directories > MAX_GITHUB_SKILL_DIRECTORIES || segments.length > 10) throw new Error('GitHub skill has too many nested folders');
       continue;
     }
     if (entry.type !== 'blob' || !['100644', '100755'].includes(entry.mode) ||
         !SHA.test(entry.sha) || !Number.isSafeInteger(entry.size) || entry.size! < 0)
       throw new Error('GitHub skill contains an unsupported file or link');
-    if (files.length >= MAX_FILES) throw new Error('GitHub skill has too many files');
+    if (files.length >= MAX_GITHUB_SKILL_FILES) throw new Error('GitHub skill has too many files');
     bytes += entry.size!;
     if (bytes > MAX_PACKAGE_BYTES) throw new Error('GitHub skill exceeds 32 MiB');
     files.push({ relative, sha: entry.sha, size: entry.size! });
   }
   if (!files.some(file => file.relative === 'SKILL.md')) throw new Error('GitHub skill folder needs SKILL.md');
   if (files.some(file => file.relative === '.cos-github.json')) throw new Error('GitHub skill uses a reserved CoS metadata filename');
-  return skillPackageRevision(files);
+  return files;
+}
+
+function revisionFromTree(entries: TreeEntry[], directory: string): string {
+  return skillPackageRevision(filesFromTree(entries, directory));
 }
 
 /** A page visit checks sources, never installs them; each repository/ref is requested once. */
@@ -220,21 +262,74 @@ async function downloadBlob(base: string, file: File, signal: AbortSignal): Prom
   return bytes;
 }
 
+/** Fetch immutable commit-pinned bytes from GitHub's raw host, not its metered
+ * JSON API (one /git/blobs request per resource exceeds anonymous API quota
+ * for legitimate 40+ file skills). Keep the independent Git blob hash check. */
+async function downloadPinnedResource(snapshot: Snapshot, file: File, signal: AbortSignal): Promise<Buffer> {
+  const relative = [snapshot.location.directory, file.relative].filter(Boolean).join('/');
+  const url = 'https://raw.githubusercontent.com/' +
+    [snapshot.location.owner, snapshot.location.repository, snapshot.commit, ...relative.split('/')]
+      .map(encodeURIComponent).join('/');
+  let response: Response;
+  try {
+    response = await fetch(url, { redirect: 'error', signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]),
+      headers: { 'User-Agent': 'ChatOnSteroids-Skills' } });
+  } catch {
+    throw new Error(signal.aborted ? 'GitHub download timed out. Try again.' : `Could not download GitHub skill file: ${file.relative}`);
+  }
+  if (!response.ok || !response.body) throw new Error(`GitHub skill resource could not be downloaded: ${file.relative} (${response.status})`);
+  // Node fetch transparently decompresses raw GitHub responses: Content-Length
+  // can describe the *compressed wire bytes*, not the decoded stream (e.g. 49
+  // wire bytes for a 29-byte Python file). Bound decoded chunks and verify the
+  // exact Git blob checksum below instead of trusting this response header.
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > file.size) throw new Error(`GitHub file size changed: ${file.relative}`);
+      chunks.push(value);
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  } finally { reader.releaseLock(); }
+  if (size !== file.size) throw new Error(`GitHub file size changed: ${file.relative}`);
+  const bytes = Buffer.concat(chunks, size);
+  const algorithm = file.sha.length === 40 ? 'sha1' : 'sha256';
+  const actual = createHash(algorithm).update(`blob ${size}\0`).update(bytes).digest('hex');
+  if (actual !== file.sha) throw new Error(`GitHub file checksum failed: ${file.relative}`);
+  return bytes;
+}
+
 async function stageSkill(snapshot: Snapshot, signal: AbortSignal): Promise<{ folder: string; origin: GitHubSkillOrigin; cleanup: () => Promise<void> }> {
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'cos-github-skill-'));
   const folderName = snapshot.location.directory.split('/').filter(Boolean).at(-1) ?? snapshot.location.repository;
   const folder = path.join(temporary, folderName);
-  const base = repositoryEndpoint(snapshot.location);
   let skillSha256 = '';
   try {
     await fs.mkdir(folder);
-    for (const file of snapshot.files) {
-      const destination = path.join(folder, ...file.relative.split('/'));
-      const bytes = await downloadBlob(base, file, signal);
-      await fs.mkdir(path.dirname(destination), { recursive: true });
-      await fs.writeFile(destination, bytes, { flag: 'wx', mode: 0o600 });
-      if (file.relative === 'SKILL.md') skillSha256 = createHash('sha256').update(bytes).digest('hex');
-    }
+    // Small fixed worker pool: many files still finish within the bounded
+    // import timeout, and all workers settle before a failed staging folder is
+    // removed (no writes racing with cleanup).
+    let next = 0, failure: unknown = null;
+    await Promise.all(Array.from({ length: Math.min(4, snapshot.files.length) }, async () => {
+      while (!failure) {
+        const file = snapshot.files[next++];
+        if (!file) return;
+        try {
+          const bytes = await downloadPinnedResource(snapshot, file, signal);
+          const destination = path.join(folder, ...file.relative.split('/'));
+          await fs.mkdir(path.dirname(destination), { recursive: true });
+          await fs.writeFile(destination, bytes, { flag: 'wx', mode: 0o600 });
+          if (file.relative === 'SKILL.md') skillSha256 = createHash('sha256').update(bytes).digest('hex');
+        } catch (error) { failure ??= error; return; }
+      }
+    }));
+    if (failure) throw failure;
     const origin: GitHubSkillOrigin = {
       kind: 'github', url: githubSkillUrl(snapshot.location), ref: snapshot.location.ref,
       directory: snapshot.location.directory, commit: snapshot.commit, revision: snapshot.revision, skillSha256

@@ -958,6 +958,35 @@ it('adds picker-selected projects, reuses containing approval, and leaves cancel
   })).toMatchObject({ ok: false });
 });
 
+it('reads the chat edits channel and checks project ownership for a recorded diff', async () => {
+  const { addProject } = await import('../src/main/projects.js');
+  const { bindSessionProject, writeAsset } = await import('../src/main/session/store.js');
+  const approved = await fs.realpath(dir);
+  const folder = path.join(approved, 'review-chat-edits');
+  await fs.mkdir(folder);
+  await saveConfig({ ...defaultConfig(), roots: [{ name: 'demo', path: approved }] });
+  const project = await addProject(folder);
+  const session = await createSession({ title: 'Review fixture', conversationId: 'review-fixture-chat' });
+  await bindSessionProject(session.id, project.id);
+  const asset = await writeAsset(session.id, Buffer.from(JSON.stringify({ before: 'old', after: 'recorded' })), 'text/plain');
+  const callId = 'f7c5c5ad-0c0e-4b27-8b85-bd26d9529447';
+  const stored = { text: '{}', chars: 2, truncated: false };
+  await appendEvent(session.id, { kind: 'tool_call', time: 1, source: 'mcp', call: {
+    callId, tool: 'apply_patch', attribution: 'request_id', attributionMethod: 'request_id', outcome: 'ok',
+    requestId: 'sample-request', conversationId: 'review-fixture-chat', durationMs: 1, args: stored, result: stored,
+    summary: { kind: 'edit', title: 'Edited', tone: 'good' },
+    changes: [{ path: '/demo/review-chat-edits/file.txt', added: 1, removed: 1, approximate: false, reviewAssetId: asset.id }]
+  } });
+  const request = { sessionId: session.id, callId, changeIndex: 0 };
+  const review = (projectId?: string) => handlers.get('sessions:toolEditReview')!(null, { ...request, ...(projectId ? { projectId } : {}) });
+  expect(await review(project.id)).toMatchObject({ ok: true, data: { path: 'file.txt', currentText: 'recorded' } });
+  expect(await review('b8618038-bfcf-4354-a900-bea468d000b8')).toEqual({ ok: true, data: null });
+  expect(await review()).toMatchObject({ ok: true, data: { path: '/demo/review-chat-edits/file.txt' } });
+  expect(await handlers.get('sessions:chatEdits')!(null, { id: session.id, projectId: project.id })).toMatchObject({
+    ok: true, data: { rows: [{ path: 'file.txt', state: 'missing', callId }] }
+  });
+});
+
 it('adds a folder whose ChatGPT Project the person picks next, and links or creates it (#1756)', async () => {
   currentWindow = { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() } };
   const folder = path.join(dir, 'link-project');
@@ -3811,4 +3840,118 @@ describe('removing a new chat before its first Send is confirmed', () => {
       outbox.resetInputForTests();
     }
   });
+});
+
+it.each(['text drop', 'file drop', 'picker', 'local project', 'server snapshot'] as const)('keeps an aged draft attachment across %s and prunes it after release', async source => {
+  const event = { sender: {} };
+  const stage = async (text: string) => {
+    const result = await handlers.get('sessions:attachText')!(event, { text }) as any;
+    expect(result.ok).toBe(true);
+    return result.data;
+  };
+  const retain = async (ids: string[]) => handlers.get('sessions:retainDraftAttachments')?.(event, { ids });
+  const { readInputAttachmentChunk } = await import('../src/main/session/input-attachments.js');
+  const logger = await import('../src/main/logger.js');
+  const log = vi.spyOn(logger, 'logInfo');
+  const kept = await stage('Still in a draft');
+  const abandoned = await stage('No longer in a draft');
+  const old = new Date(Date.now() - 25 * 60 * 60 * 1000);
+  const stagedPath = (id: string) => path.join(dir, 'input-attachments', id);
+  for (const file of [kept, abandoned]) await fs.utimes(stagedPath(file.id), old, old);
+  try {
+    const hold = await retain([kept.id]);
+    if (source === 'text drop') await stage('Another attachment');
+    else if (source === 'file drop') {
+      expect(await handlers.get('sessions:dropFiles')!(event, { files: [
+        { name: 'drop.txt', bytes: new Uint8Array([1, 2, 3]) }
+      ] })).toMatchObject({ ok: true });
+    } else if (source === 'server snapshot') {
+      const { file, projectId } = await attachmentProjectFixture('attach-server-snapshot');
+      const projectFiles = await import('../src/main/project-files.js');
+      const cleanup = vi.fn(async () => fs.rm(file));
+      const snapshot = vi.spyOn(projectFiles, 'serverFileSnapshot').mockResolvedValueOnce({ file, cleanup });
+      try {
+        expect(await handlers.get('projectFiles:attach')!(event, { projectId, path: 'report.txt' })).toMatchObject({ ok: true });
+        expect(cleanup).toHaveBeenCalledOnce();
+      } finally { snapshot.mockRestore(); }
+    } else {
+      const { file, projectId } = await attachmentProjectFixture('attach-' + source.replace(' ', '-'));
+      if (source === 'picker') {
+        vi.mocked(dialog.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: [file] });
+        expect(await handlers.get('sessions:files')!(event, undefined)).toMatchObject({ ok: true });
+      } else {
+        expect(await handlers.get('projectFiles:attach')!(event, { projectId, path: 'report.txt' })).toMatchObject({ ok: true });
+      }
+    }
+    await expect(fs.stat(stagedPath(abandoned.id))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readInputAttachmentChunk(kept, 0)).resolves.toBe(Buffer.from('Still in a draft').toString('base64'));
+    expect(hold).toMatchObject({ ok: true });
+    expect(log.mock.calls.filter(([message]) => message.startsWith('attachment cleanup:'))).toEqual([
+      ['attachment cleanup: kept 1 expired attachment(s) still referenced by a draft or the outbox']
+    ]);
+
+    expect(await retain([])).toMatchObject({ ok: true });
+    await stage('Cleanup after release');
+    await expect(fs.stat(stagedPath(kept.id))).rejects.toMatchObject({ code: 'ENOENT' });
+  } finally {
+    log.mockRestore();
+    await retain([]);
+  }
+});
+
+async function attachmentProjectFixture(name: string) {
+  currentWindow = { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() } };
+  const folder = path.join(dir, name), file = path.join(folder, 'report.txt');
+  await fs.mkdir(folder, { recursive: true });
+  await fs.writeFile(file, 'Synthetic project file');
+  vi.mocked(dialog.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: [folder] });
+  const project = await handlers.get('projects:add')!(null, { chatgpt: 'later' }) as any;
+  expect(project).toMatchObject({ ok: true, data: { name } });
+  return { projectId: project.data.id, file };
+}
+
+it('keeps an aged attachment when Send takes ownership during project-file staging', async () => {
+  const outbox = await import('../src/main/session/input.js');
+  const projectFiles = await import('../src/main/project-files.js');
+  const { randomUUID } = await import('node:crypto');
+  const { readInputAttachmentChunk } = await import('../src/main/session/input-attachments.js');
+  await writeDurableNow('session-input', []);
+  outbox.resetInputForTests();
+  const event = { sender: {} };
+  const { projectId } = await attachmentProjectFixture('staged-send-race');
+  const staged = await handlers.get('sessions:attachText')!(event, { text: 'Draft becomes queued' }) as any;
+  expect(staged.ok).toBe(true);
+  const attachment = staged.data;
+  const retain = (ids: string[]) => handlers.get('sessions:retainDraftAttachments')!(event, { ids });
+  const target = projectFiles.projectFileTarget;
+  const gate = faultGate();
+  const spy = vi.spyOn(projectFiles, 'projectFileTarget').mockImplementationOnce(target).mockImplementationOnce(async (...args) => {
+    await gate.hold();
+    return target(...args);
+  });
+  await retain([attachment.id]);
+  const attaching = handlers.get('projectFiles:attach')!(event, { projectId, path: 'report.txt' });
+  try {
+    await gate.entered;
+    const message = await outbox.enqueueInput({ id: randomUUID(), sessionId: null, text: 'Synthetic send',
+      mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null, attachments: [attachment] });
+    expect(message.state).toBe('queued');
+    await retain([]);
+    // Admission renews mtime. Model an aged file by the time the delayed attachment request resumes.
+    const old = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    await fs.utimes(path.join(dir, 'input-attachments', attachment.id), old, old);
+    gate.release();
+    expect(await attaching).toMatchObject({ ok: true });
+    await expect(readInputAttachmentChunk(attachment, 0)).resolves.toBe(Buffer.from('Draft becomes queued').toString('base64'));
+    expect(await outbox.cancelInput(message.id)).toBe(true);
+    expect(await handlers.get('sessions:attachText')!(event, { text: 'Sweep after cancellation' })).toMatchObject({ ok: true });
+    await expect(readInputAttachmentChunk(attachment, 0)).rejects.toMatchObject({ code: 'ENOENT' });
+  } finally {
+    gate.release();
+    await attaching;
+    spy.mockRestore();
+    await retain([]);
+    await writeDurableNow('session-input', []);
+    outbox.resetInputForTests();
+  }
 });

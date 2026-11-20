@@ -46,7 +46,7 @@ app.whenReady().then(async () => {
     const open=async lang=>{
       await win.loadURL('http://127.0.0.1:'+server.address().port+'/?lang='+lang);
       await until(`document.getElementById('versionLine').textContent.length>0`);
-      await js(`document.querySelector('#tabs [data-tab="settings"]').click();document.getElementById('autoRefreshPlugins').closest('.setting').scrollIntoView({block:'center'})`);
+      await js(`document.querySelector('#tabs [data-tab="agents-browser"]').click();document.getElementById('autoRefreshPlugins').closest('.setting').scrollIntoView({block:'center'})`);
       await pause(250);
     };
     await open('en');

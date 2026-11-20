@@ -39,7 +39,7 @@ import { paintWindowTheme } from './theme.js';
 import { usageOverview } from './session/usage.js';
 import { exportUsageCsv } from './session/usage-export.js';
 import { readProviderUsage } from './provider-usage.js';
-import { inputArgs, deliveryProof, enqueueInput, listInputs, editQueuedInput, sendQueuedInputNow, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs, forgetOwnSent, type InputEntry } from './session/input.js';
+import { inputArgs, deliveryProof, enqueueInput, listInputs, outboxRetainsAttachment, editQueuedInput, sendQueuedInputNow, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs, forgetOwnSent, type InputEntry } from './session/input.js';
 import { draftOpeningMessage, onGoalChange, nativeGoalFailure } from './goal.js';
 import { cancelTaskRequest, runTaskRequest } from './task-request.js';
 import { randomUUID } from 'node:crypto';
@@ -138,7 +138,8 @@ import {
   sweepStaleSwarm,
   unpair,
   followChatInBackground,
-  browserPickupContext
+  browserPickupContext,
+  notifyBrowserActivity
 } from './bridge.js';
 import { extensionDir } from './extension-path.js';
 import { APP_VERSION, extensionDownloadUrl } from './version.js';
@@ -158,6 +159,7 @@ import {
   readEvents,
   withSessionMutationFence
 } from './session/store.js';
+import { readChatEdits, reviewChatEditPath } from './session/chat-edits.js';
 import { netTurnChanges, netTurnFileDiff, turnFileEdits, type EditAt } from './session/turn-changes.js';
 import { forgetSession, notifyChanged, onSessionChange } from './session/recorder.js';
 import { findInSession, locateMessage, locateSearchMatch, searchSessions } from './session/search.js';
@@ -802,6 +804,19 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   registerWorkspaceTerminalIpc(getWindow);
   registerAgentOutputIpc(getWindow);
   registerDictationIpc(getWindow);
+  // The renderer owns the live draft references; the outbox owns admitted input.
+  // Look up the latest draft references at prune time, including after a native picker or SFTP wait.
+  const draftAttachments = new WeakMap<IpcMainInvokeEvent['sender'], Set<string>>();
+  handle('sessions:retainDraftAttachments', async (payload, event) => {
+    const { ids } = z.object({ ids: z.array(z.string().uuid()).max(20_000) }).strict().parse(payload);
+    draftAttachments.set(event.sender, new Set(ids));
+  });
+  const attachmentRetention = async (event: IpcMainInvokeEvent) => {
+    await listInputs(); // Load durable input before entering the staging lock.
+    return { has: (id: string) => outboxRetainsAttachment(id) || draftAttachments.get(event?.sender)?.has(id) === true };
+  };
+  const stageFiles = async (sources: AttachmentSource[], event: IpcMainInvokeEvent) =>
+    stageInputAttachments(sources, await attachmentRetention(event));
   let watchedWindow: BrowserWindow | null = null;
   const projectFileWatches = new ProjectFileWatchSet(event => {
     const target = getWindow();
@@ -1729,13 +1744,25 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       return response === 1;
     });
   });
+  handle('sessions:chatEdits', async payload => {
+    const { id, projectId } = turnRequest('sessions:chatEdits', sessionIdArg.extend({ projectId: projectFileId }).strict(), payload);
+    return readChatEdits(id, projectId);
+  });
   handle('sessions:toolEditReview', async payload => {
-    const { sessionId, callId, changeIndex } = z.object({
-      sessionId: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
+    const { sessionId, callId, changeIndex, projectId } = z.object({
+      sessionId: sessionIdArg.shape.id,
       callId: z.string().uuid(),
-      changeIndex: z.number().int().min(0).max(63)
+      changeIndex: z.number().int().min(0).max(63),
+      projectId: projectFileId.optional()
     }).strict().parse(payload);
-    return readToolEditReview(sessionId, callId, changeIndex);
+    if (!projectId) return readToolEditReview(sessionId, callId, changeIndex);
+    let path: string | null = null;
+    const value = await readToolEditReview(sessionId, callId, changeIndex, async (event, index) => {
+      path = await reviewChatEditPath(sessionId, projectId, event, index);
+      return path !== null;
+    });
+    if (!value || path === null) { logInfo('chat edits: recorded diff unavailable or outside current scope'); return null; }
+    return { ...value, path };
   });
   handle('projectFiles:preview', async payload => {
     const { projectId, path } = z.object({ projectId: projectFileId, path: projectRelativePath.min(1) }).strict().parse(payload);
@@ -1770,16 +1797,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     shell.showItemInFolder(target.real);
     return true;
   });
-  handle('projectFiles:attach', async payload => {
+  handle('projectFiles:attach', async (payload, event) => {
     const { projectId, path } = z.object({ projectId: projectFileId, path: projectRelativePath.min(1) }).strict().parse(payload);
     // A file in a project on a server (#1469) is copied over SFTP first.
     const snapshot = await serverFileSnapshot(projectId, path);
     if (snapshot) {
-      const retained = new Set((await listInputs()).filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).flatMap(row => row.attachments?.map(file => file.id) ?? []));
-      try { return await stageInputAttachment(snapshot.file, retained); } finally { await snapshot.cleanup(); }
+      try { return (await stageFiles([snapshot.file], event))[0]!; } finally { await snapshot.cleanup(); }
     }
     const target = await projectFileTarget(projectId, path, { allowRoot: false, fileOnly: true });
-    const retained = new Set((await listInputs()).filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).flatMap(row => row.attachments?.map(file => file.id) ?? []));
+    const retained = await attachmentRetention(event);
     const checked = await projectFileTarget(projectId, path, { allowRoot: false, fileOnly: true });
     if (checked.real !== target.real) throw new Error('The project file changed location');
     return stageInputAttachment(checked.real, retained);
@@ -2122,26 +2148,22 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return page;
   });
 
-  const stageFiles = async (sources: AttachmentSource[]) => {
-    const retained = new Set((await listInputs()).filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).flatMap(row => row.attachments?.map(file => file.id) ?? []));
-    return stageInputAttachments(sources, retained);
-  };
-  handle('sessions:files', async () => {
+  handle('sessions:files', async (_payload, event) => {
     const chosen = await dialog.showOpenDialog({ ...dialogLabel('Attach files'), properties: ['openFile', 'multiSelections'] });
     if (chosen.canceled) return [];
     if (chosen.filePaths.length > 20) throw new Error('Attach up to 20 files per message');
-    return stageFiles(chosen.filePaths);
+    return stageFiles(chosen.filePaths, event);
   });
-  handle('sessions:dropFiles', async payload => {
+  handle('sessions:dropFiles', async (payload, event) => {
     const { files } = z.object({ files: z.array(z.union([
       z.string().min(1).max(32768),
       z.object({ name: z.string().min(1).max(255), bytes: z.instanceof(Uint8Array).refine(bytes => bytes.byteLength > 0 && bytes.byteLength <= 12 * 1024 * 1024) }).strict()
     ])).min(1).max(20) }).strict().parse(payload);
-    return stageFiles(files);
+    return stageFiles(files, event);
   });
-  handle('sessions:attachText', async payload => {
+  handle('sessions:attachText', async (payload, event) => {
     const { text } = z.object({ text: z.string().min(1).max(4 * 1024 * 1024) }).parse(payload);
-    return (await stageFiles([{ text }]))[0]!;
+    return (await stageFiles([{ text }], event))[0]!;
   });
   handle('sessions:stopTurn', async payload => {
     const { id, expectedTurnId, expectedConversationId } = sessionIdArg.extend({ expectedTurnId: z.string().min(1).max(256),
@@ -2315,6 +2337,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const answer = requestApprovalAnswer(conversationId, cardId, choice);
     if (answer.ok) {
       logInfo(`approval card: the user chose ${choice} in the app for ${conversationId}`);
+      notifyBrowserActivity(conversationId);
       return { ok: true as const };
     }
     return answer;
@@ -2379,6 +2402,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     );
     // A blocked worker chat frees its swarm slot now, not on the next 30-second pass: the
     // user pressing Block on a worker is usually about to start something in its place.
+    notifyBrowserActivity(conversationId);
     if (blocked) await sweepStaleSwarm().catch(() => undefined);
     refreshPetOverlayActivities();
     return blockedChatIds();

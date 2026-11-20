@@ -206,7 +206,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Archive worker chats | Off (`multiAgent.archiveWorkerChats`). | #1460, #1701. A worker chat queues 2 min after its worker reports done (`onWorkerFinished`, from `publishFinish`; `dueAt`), and every chat the broker retires for good queues at once (`onWorkerChatsRetired`: an ended run, Clear workers retiring parked histories, or a parked history expiring after 7 days), in `worker-archive.ts` (`state/worker-archive.json`, which also remembers the chats it archived). A wake for such a chat is held in the bridge's `onReviveRequest` (`readyForWake`): a not-yet-started archive is dropped; an archived (or being-archived) chat gets an unarchive job first, handed out before archives as `{ conversationId: null, unarchive }` (an old extension reads nothing), retried from 15 s, and the wake is queued on `onWorkerChatReady` (unarchived, given up, or 90 s at most). Unarchiving ignores the setting. The extension's alarm pass takes one via `POST /worker-archive/next` (leased 2 min), asks any registered ChatGPT page (`clf-archive-chat`) to `PATCH /backend-api/conversation/<id>` `{ is_archived: true }` with the signed-in account, and reports `archived`/`unarchived`/`failed`/`deferred` to `POST /worker-archive/result`. `deferred` (no page) costs no attempt; failures back off from 5 min, 6 attempts or a week at most. ChatGPT's own reversible archive: nothing is deleted. Temporary Chats were rejected: tools work there, but a reload loses the conversation (2026-10-14). |
 | Recover ordinary/agent tabs | Off. | Goal/Loop can independently justify recovery; history alone cannot. |
 | Automatic Continue | On. | Unfinished-response recovery also serves enabled Goal/Loop. This switch controls ordinary chats; explicit Off survives and malformed config disables it. See §14. |
-| Continue prompt | Built-in phrases (`ui.customContinue` unset). | Settings › Agents & automation. The person's text (trimmed, at most 500 characters, `CUSTOM_CONTINUE_MAX_CHARS`) replaces only the Continue phrase of a silence-recovery Continue (`recoveryMessage({ custom })`, frozen in the outbox row when it is filed); the notice to check existing work and the optional playful aside stay. Empty, too long or damaged reads as unset. Fresh-turn rotation keeps `rotationMessage()`, which `goal.ts` recognises by its text. |
+| Continue prompt | Built-in phrases (`ui.customContinue` unset). | Settings › Goal & Loop. The person's text (trimmed, at most 500 characters, `CUSTOM_CONTINUE_MAX_CHARS`) replaces only the Continue phrase of a silence-recovery Continue (`recoveryMessage({ custom })`, frozen in the outbox row when it is filed); the notice to check existing work and the optional playful aside stay. Empty, too long or damaged reads as unset. Fresh-turn rotation keeps `rotationMessage()`, which `goal.ts` recognises by its text. |
 | Goal / Loop | Off, preferred mode Goal. Both decision backends default to ChatGPT, helper `gpt-6` High (`DEFAULT_HELPER_CHAT_MODEL`, which High runs on its thinking lane); a config holding a superseded helper (`SUPERSEDED_HELPER_CHAT_MODELS`: `gpt-5.6-sol`, `gpt-6-thinking`) adopts it on load. | API uses the configured OpenRouter/custom endpoint and stored model. These defaults are not account-availability proof. |
 | Ordinary new-chat model | Automatic: no persisted model or reasoning override. | Optional `ui.defaultChatModel` / `ui.defaultChatReasoning` apply only to a fresh ordinary chat before it has a conversation selection. A recorded conversation or accepted opening input wins. Worker and Goal/Loop/Plan defaults remain separate. |
 | Desktop | Windows on; macOS retains its off default and separate native OS consent; Linux supports extension browser control. | Existing screen/control grants also govern browser tools; unsupported native clipboard remains masked. No new per-tab permission dialog. |
@@ -217,7 +217,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Phone notifications | Off (`ui.phonePush`, missing means off). | ntfy (`phone-push.ts`, Settings → General → Phone notifications). Three kinds: needs you (the Session finish and stuck/approval notifiers), failures (tunnel loss), finished (the turn notifier hands every completed top-level chat over with `workedMs` from the turn's `turn_start` event, whether or not the window is focused). The phone keeps its own rules: kind switches, finished only after `finishedAfterMinutes` (null never, 0 always; an unknown length counts as long), quiet hours (local, may wrap midnight), away = `powerMonitor.getSystemIdleState(180)` is idle/locked/unknown, at most once per chat and kind in 2 min and 20 an hour; a message that did not arrive does not count. JSON publish to the server root (UTF-8 safe), optional Bearer token from secure storage (`ntfyToken`, IPC `phonePush:token`, `AppState.hasPhonePushToken`). By default a message only says what happened; `includeDetails` adds the chat's name, the answer's start and a `click` link to the ChatGPT chat. One `phone push:` log line per decision, never the message. `phonePush:test` sends now regardless of the rules. |
 | Telegram (#1934) | Off: no token, no link. | A second phone destination beside ntfy, under the same rules and limits (`ui.phonePush.ntfy`, missing means on, turns ntfy alone off; its topic and server are checked only while it is on). `telegram.ts` (bot), `telegram-status.ts` (`/status`), `telegram-app.ts` (wiring). The person's own @BotFather token is in secure storage (`telegramBotToken`, IPC `telegram:connect`), never in `AppState`, a log line or a settings backup; Telegram's address carries it, so a network error quoting the address has it replaced by `<token>`. `connect` checks it with `getMe`, skips earlier updates, and shows an 8-character code for 10 minutes; `/start <code>` from a private chat links exactly that account (durable store `telegram-link`: user id, chat id, names). Linked: long polling (`getUpdates`, 50 s, outgoing only); messages and buttons from any other account are ignored and logged once a minute; commands older than 2 min (sent while the app was closed) are not answered; `/status` (counts, or with `includeDetails` up to eight named chats) and `/help` (also `/start`); anything else gets the command list. A needs-you message for a waiting approval card carries **Deny** only (never Allow: its own security review first); pressing it calls `requestApprovalAnswer(…, 'deny')` for exactly that card, answers "Already answered." when it is gone, and marks the message. 401/404 from Telegram stops the bot (`token-refused`); 409 (another app polls the bot) shows `conflict` and retries every minute. Unlink (`telegram:disconnect`) forgets the link and the token. `AppState.telegram` carries state, bot and account names and the pairing code. No desktop-question button: that question shows only while someone is at the computer and declines itself after 60 s. **Phase 2 (2026-10-31):** each notification about a chat is remembered with Telegram's message id (500 at most), so a reply acts on that chat. `/stop` (the app's Stop on its running or held turn, `stopSessionTurn`), `/pause` (Goal/Loop off, keeping which; the chat is saved in durable `telegram-paused` first) and `/resume` (back on, only for a chat paused from Telegram and still off) act on the replied-to chat, or else on the only chat they can mean (`telegramTargets`, own chats only): none or several get a sentence and nothing happens. A worker or helper chat is never a target and never gets a reply, also when its notification is replied to (`act` and `steer` look the chat up again); a held turn (`sessionHoldsTurn`: the stored open turn and the live recorder agree) counts as running for a bare `/stop`, a stored open turn alone never does. `/pause` means the running Goal/Loop chats first; its marker is kept only if the switch really went off, and any other control that turns the switch on (`onSessionAutomationChange`, `noteAutomationChanged`) ends it. Connecting a new token forgets the old bot's remembered notices. A settings import that turns `ui.phonePush.telegramSteer` on is listed as wider access; the form leaves an absent `telegramSteer` absent until the switch is touched, and shows it as saved after a refused save. Any other reply to a notification goes through `telegram-steer.ts` as the person's message (`sendDesktopInput`, mode by `ui.followUp` while the chat works), only with `ui.phonePush.telegramSteer` on (missing: off; a message can make ChatGPT run tools here), never to a worker or helper chat; its words never reach the log. A reply to an unknown or forgotten message does nothing and says so. |
 | Sounds (#1802) | Off (`ui.sounds`, missing means off). | Settings → General → Chats → Play sounds. `main/sound-cues.ts` decides at the same three points that hand events to the phone (needs you, failed, finished): finished only while the window is not focused, nothing during phone notifications' quiet hours while those are on, at most once per chat and kind in 2 min. It sends `sound:cue` (`SoundCue` in `shared/sound-cues.ts`) to the window, which plays a short Web Audio tone (`renderer/sound-cues.ts`, no audio files); with no window (tray only) nothing plays. One `sound:` log line per decision except when off. Turning the setting on plays the finished sound once as a preview. |
-| Fresh turns for long work | Every 30 minutes (`ui.rotateTurnMinutes`: 0 off, 20/30/45/60; missing or malformed means 30). | #1402. Measured: turns up to ~35 minutes ended cleanly, 37–64 minutes almost always broke; Stop + "continue" by hand never did. `turn-rotation.ts` `considerTurnRotation` runs on each attributed tool call (`noteCallAttribution`, after its `grantActivity`) for the chat's exact running turn. Once that turn's own `turn_start` is `rotateTurnMinutes` old, `input.ts` `fileRotationInput` files one `purpose: 'rotation'` direct-turn message (`rotationMessage()`, Core mention kept) into exactly that turn. The native send makes ChatGPT end the turn as interrupted and continue in a fresh one; the call in flight keeps its result. It must go in while that call still waits for its answer (#1662, measured 2026-10-18: 6/6 clean while a call ran; sent in the gap after a result ChatGPT sometimes queued it behind the reply, and a Stop during a call made the model run it again). So the kernel opens `rotation-hold.ts` `openCallHold` around recording an attributed call, rotation is considered only while `callHoldOpen`, and the bridge's `awaitRotationDelivery` holds the call's answer until the row is sent or settled; a row still unauthorized after 15 s is withdrawn (`withdrawUnsentRotation`, cancelled without an error) and the call answers. The page never stops a turn for it: offered no Send (ChatGPT shows only Stop at that moment), it sends nothing and reports `desktop_input` `fail` with `error` = `input.ts` `ROTATION_DECLINED` word for word and `detail: 'no-send'`; `failBrowserInput` cancels the row with that error, `rotationDelivery` answers `declined`, the held call answers at once, and `noteRotationDeclined` lets a tool result a minute later try again without spending one of the turn's two filings (at most six declines per turn; measured 2026-10-20 on Loop chats, where every continue fell on a Stop moment). Never for Pro, worker or helper chats, and never at the result of a Goal/Loop hold tool (`GOAL_HOLD_TOOLS`: `session_finish`, `keep_astra_on_forever`), which is Loop's next instruction. Goal and Loop chats rotate like any other (2.1.43): the rotated turn ends without a final answer, so no Goal/Loop decision is filed for it, and its continue is recorded with empty `authoredText`, which the Goal helper's transcript leaves out; never for a blocked chat, beside another pending message, or into a different turn. One per turn: a refused filing retries after 1 minute, one the page did not take after 5. A rotation row is not `manualInput`: a page that cannot take it during the turn drops it rather than keeping it for after the turn, and the timeline raises no delivery notice for it. A message of the user's own cancels a rotation that was never handed out. |
+| Fresh turns for long work | Every 30 minutes (`ui.rotateTurnMinutes`: 0 off, 20/30/45/60; missing or malformed means 30). | #1402. Measured: turns up to ~35 minutes ended cleanly, 37–64 minutes almost always broke; Stop + "continue" by hand never did. `turn-rotation.ts` `considerTurnRotation` runs on each attributed tool call (`noteCallAttribution`, after its `grantActivity`) for the chat's exact running turn. Once that turn's own `turn_start` is `rotateTurnMinutes` old, `input.ts` `fileRotationInput` files one `purpose: 'rotation'` direct-turn message (`rotationMessage()`, Core mention kept) into exactly that turn. The native send makes ChatGPT end the turn as interrupted and continue in a fresh one; the call in flight keeps its result. It must go in while that call still waits for its answer (#1662, measured 2026-10-18: 6/6 clean while a call ran; sent in the gap after a result ChatGPT sometimes queued it behind the reply, and a Stop during a call made the model run it again). So the kernel opens `rotation-hold.ts` `openCallHold` around recording an attributed call, rotation is considered only while `callHoldOpen`, and the bridge's `awaitRotationDelivery` holds the call's answer until the row is sent or settled; a row still unauthorized after 15 s is withdrawn (`withdrawUnsentRotation`, cancelled without an error) and the call answers. The page never stops a turn for it: offered no Send (ChatGPT shows only Stop at that moment), it sends nothing and reports `desktop_input` `fail` with `error` = `input.ts` `ROTATION_DECLINED` word for word and `detail: 'no-send'`; `failBrowserInput` cancels the row with that error, `rotationDelivery` answers `declined`, the held call answers at once, and `noteRotationDeclined` lets a tool result a minute later try again without spending one of the turn's two filings (at most six declines per turn; measured 2026-10-20 on Loop chats, where every continue fell on a Stop moment). Never for Pro, worker or helper chats, and never at the result of a Goal/Loop hold tool (`GOAL_HOLD_TOOLS`: `session_finish`, `keep_astra_on_forever`), which is Loop's next instruction. Goal and Loop chats rotate like any other (2.1.43): the rotated turn ends without a final answer, so no Goal/Loop decision is filed for it, and its continue is recorded with empty `authoredText`, which the Goal helper's transcript leaves out; never for a blocked chat, beside another pending message, or into a different turn. One per turn: a refused filing retries after 1 minute, one the page did not take after 5. Both rotation filings (`fileRotationInput`, `fileRotationContinueAfterStop`) also note their text with `noteAutomaticReply`, so the recorder marks the returning message `automatic` and the timeline never shows the app's own prompt as a person's steer (#2187, 2026-11-14). A rotation row is not `manualInput`: a page that cannot take it during the turn drops it rather than keeping it for after the turn, and the timeline raises no delivery notice for it. A message of the user's own cancels a rotation that was never handed out. |
 | Stop fallback for fresh turns | On since 2.1.49 (`ui.rotateStopFallback`; disabled while fresh turns are off). Earlier configs are turned on once (`adoptStopFallback`, marked `ui.rotateStopFallbackAdopted`), because every earlier save wrote the old default; a later off stays off. | Where ChatGPT shows only Stop at a tool result it offers no Send for the continue (`ROTATION_DECLINED`, `no-send`). After `STOP_FALLBACK_AFTER_DECLINES` (2) such declines in one turn and the usual minute, the next held result takes the fallback instead of a third continue (`stopFallbackDue`/`noteStopFallback`, once per turn): `rotation-fence.ts` arms a fence (the kernel refuses that chat's calls with `ROTATION_FENCE_REFUSAL`, nothing runs, so a Stop landing mid-call cannot repeat a call, #1662), and 500 ms later `stopSessionTurn(…, { rotation: true })` queues the native Stop without turning Goal/Loop off or cancelling Compact & Resume. The stopped end of exactly that turn lifts the fence and files `fileRotationContinueAfterStop`: a `purpose: 'rotation'`, `afterStop: true` ordinary message (no `directTurn`), which `typedAfterStop` lets through once the turn shows stopped and nothing runs. The fence lifts at the processed stopped end (which files the continue), at once when the page reports it could not send that Stop (a terminal-failure receipt) or when the person's own Stop takes the turn over (no continue follows; the pending Stop is first saved without its `rotation` mark, `withdrawStopRotation`, so a restart restores neither it nor its fence), or after the Stop's 120 s budget plus 15 s (`FENCE_MS`) without a stopped end; fences are kept in the durable store `rotation-fences` (`[{ conversationId,
 turnId, until }]`) and `restoreCommands` brings back what is left of each (`restoreRotationFences`), so a restart
 after ChatGPT took the Stop but before its stopped end still files the continue; the fresh-turn Stop
@@ -283,7 +283,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Session/current chat/project | `store.ts` / `sessions/<id>/meta.json` | Rebind is the semantic A→B commit. |
 | Exact request ownership | `correlation.ts` / `state/request-correlations.json` plus recorded proof | Native request proof establishes the session epoch and scoped provider-session bindings. Derived owners commit before publication; native request proof supersedes a derivation. Startup trusts a complete ledger and scans history only to migrate an older one. |
 | Running exec process | `UnifiedExecProcessManager` process memory plus `codex/ownership.ts` custody | The manager is the only live-process authority. A yielded child may start under temporary request custody; exact correlation promotes it to the durable session. IPC/preload/renderer only project that owner-scoped state and may request an ownership- and incarnation-checked stop. |
-| Authored message | `store.ts` / canonical message shard | Replace by stable identity, preserving origin chronology. |
+| Authored message | `store.ts` / canonical message shard | Replace by stable identity, preserving origin chronology. `turn_messages` from `/events` may mark unfinalized extension `assistant_message` shards of that `turnId` `retracted: true` when absent from a complete non-continued turn snapshot (fenced by `docId`, monotonic `docSeq`/`observedAt`, and `settled` for cross-document cleanup; `eventTokens` = 0, hidden on non-incremental reads, cleared if re-observed). |
 | Turn round outline | `recorder.ts` `turn_trace` → `store.ts::writeTurnTrace` / `sessions/<id>/traces/<turnId>.json` | Validated by `shared/turn-trace.ts`; the newest outline replaces the turn's; never an event or evidence. |
 | Agent progress plan | `request-plans.ts` → `store.ts::updateSessionPlan` / `sessions/<id>/plan.json` | Request-scoped storage before proof; exact session and invocation ordering on attachment; atomically replace the whole plan. |
 | Input and checkpoints | `input.ts` / `state/session-input.json` | Serialized acceptance, frozen payload, exclusive claim and receipt; stages belong here. |
@@ -473,6 +473,14 @@ revivals, compaction requests and resumed-chat bootstraps receive no appended se
 A worker revival (wake) command carries the model and effort its worker was opened with
 (`commandModelSelection` → `wakeModelSelection`, vetted against the account like a resume's), so the
 page chooses them before it types (#1952; before, a wake went out on whatever ChatGPT's box held).
+A Worker that ends with `agents finish` and no final answer closes its exact recorded turn
+when the mounted ChatGPT exchange is complete and the composer is idle. The Fiber reply's
+optional `terminalWithoutFinal` describes a completed shell exchange without a text/image
+final; the browser's `/activity` stream carries `endsActivity: true` on the durable successful
+`agents finish` row. Both must name the current Worker turn (including the native question).
+Neither a sleeping broker slot nor a completed tool row authorizes a wake while ChatGPT is
+generating, waiting for approval or still executing work. The browser emits the existing
+`turn_end` without a synthetic assistant message and keeps the existing pre-redeem flush.
 While model discovery is pending, its retained catalog is display data, not a fresh denial:
 `resume-model.ts` carries the requested model/effort to native confirmation unchanged, even when
 the old list lacks that model or effort. Completed discovery retains the existing availability
@@ -562,6 +570,15 @@ grouped under their folder, written once, as `<entry>: /<id> — description` (d
 one closing line saying the user can pick them with `/`.
 `skill-package.ts` stages resource copies and publishes SKILL.md last; the existing serialized
 managed-library owner controls imports and removals. Scripts/assets remain inert resources.
+GitHub Skill import (`skill-github.ts`) resolves a public repository, folder or SKILL.md link to
+an exact commit before reading its tree. A single unambiguous nested Skill may be selected from
+a repository-root link; multiple candidates require an explicit folder. Import, linking and
+updates share a bound of 256 regular files, 12 directories, 10 nested levels and 32 MiB per
+package; excessive, unsafe, linked or incomplete trees fail closed. Resources are downloaded
+from commit-pinned raw URLs and verified against Git blob hashes before publication. A locally
+linked Skill keeps its own ID and existing files; the recorded origin revision describes those
+local files until an explicit update replaces them. Updates compare whole-package revisions,
+preserve local edits and swap through the managed-library owner.
 When `CODEX_HOME` has a plugin cache (approved or as a user Skill area), that same read-only
 catalog may project Skills from the last `codex plugin list --json` installed/enabled snapshot.
 Only explicit `skills:library` inspection may create or refresh that runtime snapshot; session
@@ -1670,7 +1687,12 @@ has its own draft key. Manual deletion remains deleted; accepted openings retire
 draft as the outbox/session takes ownership. Navigation still fences stale async imports.
 Draft text is also written to the renderer's local storage (`composer-drafts.ts`, the newest 100
 drafts in at most 1,000,000 stored characters), so an unsent draft survives a restart; staged files and a new
-chat's Goal/Loop choices stay window-local. A chat other than the open one that holds a draft shows
+chat's Goal/Loop choices stay window-local. The renderer publishes its live staged attachment IDs
+for every draft and pending admission through `sessions:retainDraftAttachments`. Staging checks the
+current window's references and the latest published outbox membership for each file eligible
+for pruning after 24 hours. It does not take the outbox lock while staging; validation renews
+the file's age to cover admission until the row is published. Releasing the last reference makes
+an expired file eligible again. A chat other than the open one that holds a draft shows
 a pencil mark on its sidebar row, and removing a chat removes its saved draft.
 
 The chat composer and queued-message editor have no HTML character cap. Send and queue edits
@@ -2423,11 +2445,11 @@ decodes previews before asset admission. The global asset budget remains exact; 
 `config.sessions.storageLimitGiB` (2, 5, 10, 20 or 50; default 2; anything else loads as 2), set in
 Settings → Browser & history (Storage size) and applied through `setRecordingStorageLimit()` at
 startup and on every settings save, which re-decides the full state at once when usage is known;
-quota failures retain the canonical row and explicitly report storage full. The store keeps that as
+quota failures retain the canonical row (`previewError: 'session_quota'` for the 192 MiB per-session limit, or `'quota'` for the global limit) and explicitly report storage full. The store keeps that as
 one state (`recordingStorageFull()`, set by a write the global limit refused, cleared by an admitted
 write or a clean-up that leaves room): it is logged once per change, travels as
 `AppState.recordingStorageFull`, and the window shows one dismissible notice that opens the clean-up.
-The same clean-up is in Settings → Agents & automation → Browser & history (Recording storage), which
+The same clean-up is in Settings → Browser → Browser & history (Recording storage), which
 reads the usage when Settings opens. There is no automatic
 eviction. The adjacent Free storage action offers explicit oldest-1-GiB or all-recorded-image
 cleanup with confirmation; chat text, original files and pending attachments remain. Its third mode,
@@ -2495,6 +2517,7 @@ to already-resident rows of the same exact local turn during incremental renderi
 The existing `nativeQuestion` summary excludes proven tool injections. Browser-delivered inputs
 can also carry `inputId`, so that field alone never excludes a native question. Injected corrections
 remain visible in history but cannot become native user anchors or recovery question identities.
+Extension-recorded `user_message` events also carry optional `conversationId`: the ChatGPT conversation that observed the message (written by both active observations and superseded lingering tabs so multi-chat/rotated timelines keep echo ownership scoped); older records may omit it.
 
 Unattributed is a first-class recorded state. Late exact proof repairs only matching call ids
 to the proved session epoch, copying assets first and rewriting only the scanned source prefix
@@ -2826,7 +2849,7 @@ as soon as it loads), stops it when another browser is chosen, and the app stops
 - **Session.** One persistent partition (`persist:cos-browser`). Its windows are `BaseWindow`s
   with a toolbar view and one `WebContentsView` per tab; they live in the tray, and closing one
   hides it. Minimizing is an ordinary minimize: the window stays in the taskbar/Dock, and the
-  extension sees it `minimized` until it is restored (#1464). **Settings → Agents & automation →
+  extension sees it `minimized` until it is restored (#1464). **Settings → Browser →
   Minimize the built-in browser to** (`ui.cosBrowserMinimize`, `taskbar` by default, shown only while
   it is the ChatGPT browser; "Dock"/"Menu bar" on macOS) chooses `tray` instead: a minimize then hides
   the window exactly like closing it, notice included. The first time the user closes one, one desktop notice (a `MAIN_TEXTS`
@@ -3232,7 +3255,9 @@ The matched recorder/MAIN helper version is 22. Shell exchanges are read only un
 main/thread anchors. Their `entry.turn.items` supply actual user/assistant ids, public text and
 per-call completion; DOM slot keys only join those exact items to the current scan. Missing ids
 do not become invented messages. Only a completed final item in a successfully completed turn
-can end it; cancellation or an unknown turn status never acknowledges unfinished tool calls.
+is proof of a final answer. A completed shell exchange without a final can close only the
+exact tool-finished Worker turn described above. Cancellation or an unknown turn status
+never acknowledges unfinished tool calls.
 Bounds on a long turn limit what is reported, never the turn's own messages (#2157): at most 200 connector
 and 200 exec calls and 400 working rows (calls and interim updates share them) are read, and the rest are
 left out; the turn's user and final items are always read (up to 5,000 items, above which the turn is not
@@ -3341,6 +3366,17 @@ Chromium browser/profile separate from ChatGPT account state. Use the selected b
 process evidence; a disconnected bridge or sleeping MV3 socket does not prove it is closed.
 OS wake launches require positive process absence and coalesce within one absence episode.
 The socket is a heartbeat/wake path; HTTP remains command/evidence authority.
+Activity wakes (`wakeActivityWork`) reuse the same authenticated `/wake` transport with
+`activity` or `activity:<conversationId>` topics: discrete and streaming updates are
+microtask-coalesced and rate-limited at a `200 ms` per-target cadence (plus a combined
+`200 ms` streaming pump across up to 64 targets), while `onNonExtensionSessionChange`
+suppresses self-echo from extension `/events` recordings so concurrent non-extension writes
+still wake promptly without echoing browser uploads. For `activity` and
+`activity:<conversationId>` wake frames, the service worker unions known and queried tabs
+and paces `clf-activity-wake` messages across tabs (6 burst, 1 per `200 ms` steady-state)
+within the shared `900 req/min` bridge budget, so `content.js` pulls `/activity` immediately
+(or drains one pending wake on pull completion or failure while `pulling` is true) while
+HTTP `/activity` remains the sole authority and fallback.
 
 External navigation may hide its destination URL under ChatGPT-only host permissions.
 A completed tab absent from a successful ChatGPT URL query can release the departed
@@ -3598,7 +3634,7 @@ cannot delete a new pickup repair belonging to its durable ticket.
 Continue text, source question/work, busy deadline and exclusive send custody live in the
 outbox. One combination of ten Continue phrases and ten notices is frozen once; notices ask
 to inspect existing work before repeating it. With `ui.customContinue` (the Continue prompt in
-Settings › Agents & automation) the person's text takes the phrase's place; the notice stays.
+Settings › Goal & Loop) the person's text takes the phrase's place; the notice stays.
 One of eleven playful asides (marked to be ignored)
 is added only with `ui.playfulContinue` (Settings › General, off by default): they have no
 technical role, since receipts use ChatGPT's message ids. Unsent eligible tickets survive restart. A never-authorized lost or failed
@@ -4073,7 +4109,7 @@ awaiting-summary -> awaiting-chat -> claimed -> committing -> committed
    requirement that the compaction reply contain only the brief remain code-owned invariants.
    The shipped content prompt asks for a lossless, dense operational handoff: roughly
    10k-30k tokens for a substantial session, shorter only when less state exists, never above
-   30k (`src/shared/handoff.ts`). `compaction.handoffLength` (Settings › Agents & automation,
+   30k (`src/shared/handoff.ts`). `compaction.handoffLength` (Settings › Browser,
    default and absent = `thorough`) keeps that prompt byte for byte; `standard` (4k-10k) and
    `short` (2k-6k) swap the default prompt's two length sentences when present and always append
    one code-owned line that overrides any other length target, so an edited prompt follows the
@@ -4120,14 +4156,18 @@ handoff for `STUCK_SUMMARY_MS` (15 minutes) and the session has a usable `lastHa
 meter shows a dot and its popover the button "Continue in a new chat from the last summary". Using
 it, `resumeFromSavedSummary` first cancels that waiting continuation. A chat with Goal or Loop on
 does this by itself (`continueStuckFromSavedSummary`), once per ticket, when an automatic ticket's
-first slowed burst of pickups could not ask either; a chat without them is never moved by itself.
+first slowed burst of pickups could not ask either, and when an automatic ticket's request was sent but its brief
+never came, five minutes after a page confirmed its hourly reload and that also collected nothing (an unconfirmed
+reload only earns another hour; a transport error never brings it forward) (#2184); a chat without them is never moved by itself.
 The new ChatGPT chat joins the same session, as after any Compact & Resume.
 
 Restart restoration must converge on that same committed projection. A persisted send attempt
 can outlive a transport command; expiration releases transport, not permission for another
 blind Send. Automatic tickets can wait indefinitely before the request was sent and retain a
 six-hour sent-request window; manual transport is shorter (ten minutes). Pickup budgets depend
-on phase: unsent 2m×5, writing 5m×3, opening 15m×3. While the source turn still works
+on phase: unsent 2m×5, writing 5m×3, opening 15m×3. An automatic ticket whose summary request is out and whose brief
+never came keeps one reload an hour after the writing burst (the request is never sent again); a manual one stops
+at three (#787, #2184). While the source turn still works
 (`sessionInputActivity(...).exact`), an unsent ticket spends no pickup and raises no reload: the
 request is sent once that turn ends, and a ticket filed mid-turn used to spend its whole budget on a
 generating page (2026-10-12). These are bounded recovery of one obligation,
@@ -4211,9 +4251,18 @@ message sent from a Project home as that home's draft and restores it on every l
 is not the rule: an editor holding only text the app typed itself is emptied first (up to three times). That
 means a Compact & Resume brief, or the first message of an app chat (its `[[COS_CONTEXT:n]]` block), unchanged,
 optionally followed by the label of one of this installation's connector names (the mention); both are
-recognised from fingerprints kept in the page's storage (`clf-typed-briefs-v1`, 24 entries). Anything a person
+recognised from fingerprints kept in the page's storage (`clf-typed-briefs-v1`, 48 entries: a Compact & Resume types two texts). The handoff request (its
+`[[CLF-HANDOFF:…]]` marker) is the app's own text too: ChatGPT can put the one it just sent back into the source chat's
+composer, and the entry empties that draft before its click like the Project home's (2026-11-14; its timeout reason is
+`source-ready-timeout:last=source-not-ready:draft=<kind>:clears=<n>:chips=<n>`; the source chat and the Project home each have their own three clears, so a draft restored in one never spends the other's). Anything a person
 added stays and the entry fails as before (2026-11-12: every Compact & Resume in a Project failed after a chat
-had been started there through the app). User interaction,
+had been started there through the app). The mention a restored draft ends with is a chip that names the app as
+it is called now, so a chip whose app id (`app-mention-path`) is one this installation proved to be its own is
+read as not there, whatever its label (an app renamed in ChatGPT); another app's chip is text and keeps the draft
+(#2159). A timeout in this step says what kept the editor, without any of its text:
+`transition-timeout:last=composer-not-ready:draft=<kind>:clears=<n>:chips=<n>`, `kind` one of `no-editor`,
+`readonly`, `busy`, `attachment`, `empty`, `other`, `brief-own`, `brief-foreign`, `context-own`, `context-foreign`
+(`…-own` with `clears=3` means the app knew the draft and ChatGPT kept putting it back). User interaction,
 cancellation or a foreign route revokes the attempt; no extra tab compensates for a missing result.
 When an automatic Compact & Resume's page acks `project-entry:source-ready-timeout…` or
 `…transition-timeout…` (nothing sent), the bridge releases that attempt's destination claim
@@ -4222,6 +4271,14 @@ offers the same brief again (#1882: ChatGPT limiting history or a region change 
 late, and the written brief was thrown away). A manual press, a user interruption or any other
 failure still aborts. After its three quick opening pickups an automatic ticket tries once an hour
 (`AUTOMATIC_OPENING_SLOW_MS`, logged once): while open it owns the chat's recovery, so it must not stop.
+A dispatched new-chat send (`destinationSend` `dispatched-unresolved`) is never replayed, so no pickup is queued for
+it; while no browser attempt is out, each quarter hour still counts as one of the three opening pickups (logged:
+"its new chat has not reported back"). After them, an automatic ticket of a chat with Goal or Loop on ends and the chat
+goes on in a new chat from the session's saved summary (`continueStuckFromSavedSummary` with `opening`), once per
+ticket (#2184: the Goal chat stood idle for the ticket's six hours). A destination that reported its first message
+(`sent`) exists and is never replaced; a chat with Goal and Loop off keeps the hourly try and says why it does not
+continue. The old ticket ends before the successor opens: if the app stops between the two, the ended
+ticket owns nothing and the chat's next automatic ticket files as after any ended ticket.
 One exception, measured: a replacement tab opens the source at `/c/<id>` and ChatGPT rewrites that
 route twice (`/g/<project>/c/<id>`, then with the Project's name). A click between the two is
 taken and then dropped by the second rewrite (8 of 14 handoffs in a Project timed out on
@@ -4258,6 +4315,13 @@ it must not guess a new rebind, delete history or become the path for new contin
 independent user tasks run at once. Inside a family the worker topology is a star: workers report
 to their prime and cannot create worker descendants. Existing primes may also exchange a message
 across families when the sender already has the destination's explicit run address.
+
+A worker is a separate ChatGPT chat the app opens and drives through the extension (#2177). It is
+not ChatGPT's own in-conversation subagent: the app adds no `collaboration.*` tool and has no
+interface to the host's native delegation, so a conversation has those tools only when ChatGPT
+supplies them. The `agents` tool description says so as a fact (`test/mcp.test.ts` pins the text), so
+a model asked for native subagents does not substitute workers silently. Do not emulate native
+operations or present workers as native ones.
 
 `agents.ts` is the one broker. Its run map and v7 `activeRuns` snapshot hold independent families;
 `maxWorkers` applies **per family**. `multiAgent.globalMaxWorkers` is a separate optional
@@ -4438,7 +4502,19 @@ reason. The page says nothing once the tab shows another chat or the person stop
 Continue, and `inputId` must be a UUID. An automatic Continue held for `recovery-question-changed`
 without a break of more than 5 minutes, and with no other hold reason in between, for 30 minutes is retired (`retireMismatchedRecoveryInput`:
 cancelled with its reason, `recovery.ended: 'page-final'`); it would only answer the wrong question
-(2026-11-02: one sat queued for eleven hours). Internal busy states
+(2026-11-02: one sat queued for eleven hours). The `recovery-question-changed` note also carries `newestUser` (the id of
+the question the page read, at most 256 characters, no control characters) and `documentSince` (`performance.timeOrigin`, whole
+milliseconds); the extension worker forwards both only on that reason, and an older page says neither. The bridge reads them
+as proof that ChatGPT's saved copy stopped following the chat (#2184: after its history limit ChatGPT kept a Goal chat's
+first 7 s of a turn only; the live page streamed on and the browser acknowledged two Continues, but every reload read the
+older copy, and nothing owned the chat for hours). `noteSavedCopyBehind` counts a document only when the page read a question
+the app recorded for the chat, older than the newest `user_message` the app recorded, and the document loaded at least
+5 minutes after that newer message; two such documents at least 10 minutes apart are the proof. Then, only for a chat
+with Goal or Loop on that is not blocked, not working (no turn the page reports, no activity grant, no running call) has
+no turn the recorder or a page still reports (however old: `chatIsWorkingNow`'s one-hour limit does not apply) and has
+no open Compact & Resume, the session goes on in a new chat from its saved summary (`resumeFromSavedSummary`), once per
+chat and process, and the log says `ChatGPT's saved copy of this chat lacks the message the browser delivered`. A page that
+read no question, an unknown one, or the newest one itself proves nothing (a newer question a person typed is the newest one the page then reads). Internal busy states
 (another delivery, a model read, a Goal draft) stay unlogged. A dialog with a field
 (Settings, Rename, a form) is left alone and keeps holding input as before.
 A worker given up for time after a page claimed it (no page-reported failure) is a late-start
@@ -4807,7 +4883,7 @@ Current persistence/publication exceptions are in §21.
 
 Off by default (`goal.reviewerModel`: `''` off, `'same'` the Goal chat's own model, or a model id
 the account offers; an unoffered id falls back to the chat's model with one log line). Settings →
-Agents & automation → Goal says the cost (a second model pass per reviewed step) and the coverage:
+Goal & Loop → Goal says the cost (a second model pass per reviewed step) and the coverage:
 only edits made with the edit tools are reviewed, not files changed by commands, and never in Loop.
 Chosen while Sub-agents are off, the row offers **Turn on Sub-agents** (Home's own switch, only on
 the person's press).
@@ -4939,7 +5015,11 @@ replace them directly; queue/status repaints must not flash the New Chat welcome
 A failed destination read clears retained rows. The welcome belongs only to explicit New Chat.
 Unbound local sessions do not request provider-only controls. The timeline and pending-message
 projection reconcile exact input/native message identities in the same paint: keep an accepted
-bubble until its history arrives, then remove its pending copy. Unchanged pending rows stay mounted.
+bubble until its history arrives (including an early unattributed extension `user_message` echo on the
+mounted newest page once text and media readiness match after authorization/dispatch, scoped by
+`user_message.conversationId` on multi-chat or rotated sessions and ignoring other conversations'
+late user messages when choosing the newest echo while still treating unattributed later questions
+conservatively), then remove its pending copy. Unchanged pending rows stay mounted.
 The outbox's `historySeq` is the store-confirmed canonical origin. Once the loaded publication
 cursor covers it, the pending projection cannot resurrect that input when its history page is
 evicted. Historical browsing leaves committed inputs with history. Never infer membership from
@@ -5172,7 +5252,7 @@ read after a reload sends its outline too, which is how recaps that arrived late
 The bridge validates it (`shared/turn-trace.ts`), and the recorder stores it per turn in
 `sessions/<id>/traces/<turnId>.json`, replacing the turn's previous outline. It is presentation
 beside the log, never an event, message, call, work or completion evidence. `sessions:traces`
-(preload `turnTraces`) returns the outlines of up to 64 turns a timeline shows.
+(`sessions:traces`, preload `turnTraces`) returns the outlines of up to 64 turns a timeline shows. For complete non-conflicted non-steered turns (`messagesComplete: true`), `fiber.js` / `content.js` likewise emits coalesced `turn_messages` on settlement or when a previously observed streaming `assistant_message` vanishes for two consecutive complete scans, and `/activity` consumers drop `assistant_message` rows marked `retracted: true`.
 
 A message the user sends into a running answer (#1301): ChatGPT shows it as the start of a turn
 of its own but keeps the answer's one MCP request id across it. The page ends the local turn there
@@ -5191,7 +5271,10 @@ An older question remounting after the generation opened does not block its answ
 durable anchors prove that question preceded the generation's own unmounted question.
 A consolidated final belongs to the continuation open when it settled, consistently in timeline
 projection, completion lookup, finish holds and recorder/Goal completion; it cannot advance to
-a continuation that opened after that settlement. Image-only completion follows the same proven
+a continuation that opened after that settlement. While still streaming, a consolidated message whose
+content sequence advances past a `continued` end also projects and orders inside that continuation
+without changing completion eligibility, whereas an unmodified pre-steer interim remains in its
+earlier turn. Image-only completion follows the same proven
 continued chain while the canonical image retains its first owner; a reload hint alone is insufficient.
 A promoted final cannot override its resolved turn's failed/stopped end without a recorded reopen.
 A question sent after a shared assistant
@@ -5452,6 +5535,15 @@ Catalog checks cover all source keys and numbered placeholders;
 `dom.run()` translates catalogued IPC errors before displaying a toast; unknown error strings
 and successful payloads stay literal.
 Settings search folds both query and labels with the selected locale, including Turkish İ/ı.
+Settings pages: the sidebar lists Workspace, Setup, General, Appearance, then the group Agents
+(Goal & Loop, Models, Workers, Tools & access, Browser) and the group Insight (Usage, Activity);
+the group labels are quiet text in a `role="group"`. The five Agents tabs (`agents-goal`, `-models`,
+`-workers`, `-tools`, `-browser`, listed in `src/renderer/settings-tabs.ts`) are one view of the chat
+card (`[data-view="settings"]`): every direct child names its page in `data-agents-page`, and the
+page shown is `data-agents-current` on `.automation-content` (CSS hides the others; each page starts
+with its own `h1`). The old tab id `settings` opens Goal & Loop. A setting moves between pages only by
+moving its markup: ids, names, defaults and stored keys never depend on the page. Settings search
+reads each Agents tab through the blocks that name it, so a result opens the page that holds it.
 `scripts/verify-setup-guide.cjs` exercises narrow/zoomed layouts and native keyboard selection.
 Bindings live only in a WeakMap keyed by their DOM node. Language changes walk the current
 document, including hidden panels and bound text nodes. Never retain or periodically dereference
@@ -5741,6 +5833,19 @@ only the bounded viewport. Unavailable reads reset lazy-load admission so closin
 retries, while a pending or successful read remains single-flight/cached. Inline syntax uses the
 file viewer's palette in the selected theme; dark overrides are scoped to dark mode for both
 surfaces. The existing Review dock remains available.
+The Review dock's **Recorded edits in this chat** section calls `sessions:chatEdits { id, projectId }`
+(`getChatEdits`). It projects up to 30 latest distinct project paths from a bounded read of that
+exact local session's successful, request-attributed patch records (including committed Compact &
+Resume predecessors). It uses the session's current project and approved project path checks, not
+the working-tree diff or shell output. A missing old path stays missing; a rename is not inferred.
+The list reads no file contents. It opens the latest immutable diff for a path via the existing
+`sessions:toolEditReview` with an optional `projectId` to recheck scope and return a project-relative path. Existing
+historical callers omit it and retain their contract. Records carry virtual paths, not a durable
+root identity. After an approved root is renamed, old paths that no longer match the current
+prefix are omitted from Review; the timeline still shows them. Never infer an old root from a
+matching path suffix. A source jump uses the recorded call and timeline position, clears the
+timeline's agent filter, and closes the dock only when it would hide the timeline. No saved
+fields or filesystem authority are added.
 Per answer (#1827, `main/session/turn-changes.ts`): `sessions:turnChanges` { sessionId, turnId, from }
 groups a turn's successful recorded edits by path (first-change order, the prime's own calls only,
 never a `worker-N` agent's) and gives each file one net diff, the first edit's before against the
@@ -5793,6 +5898,19 @@ shutdown. Accept bounded validated schemas (up to 256 upstream tools and 250,000
 upstream names, and fail closed on collisions, including retained disabled-name claims. A
 cached unauthorized schema is not live exposure. External servers retain their own OS/account
 permissions; the app's approved-path wrapper is not an OS sandbox around a third-party process.
+Transient remote MCP connection failures retry only connection/discovery: the first retry waits
+10 seconds, then exponential backoff caps at five minutes. The plugin stays in `error` with its
+tools unpublished through each retry, and emits one availability change when ready again;
+no failed tool call is replayed. HTTP authorization/configuration failures do not retry.
+Disabling, uninstalling, reconfiguring, manually restarting or shutting down cancels pending
+retries. Each failed connection attempt logs its classified reason and next delay.
+This also recovers a notification SSE stream that has exhausted the SDK's zero stream retries
+(without an onclose callback), and transient notification-driven tools/list failures, but not
+parsing, authorization or configuration errors. A replaced remote client with in-flight tool
+calls is retained until those calls release it; explicit shutdown/uninstall closes retired
+clients too. Pending retry cancellations name their lifecycle reason in the activity log.
+Notifications from an unavailable connection cannot republish cached tools. A non-retryable
+failure from a concurrent call cancels any previously queued reconnect for that connection.
 Each installation owns a typed `longestCallSeconds` outside its MCP server `config`: default 120,
 integer range 1–1800 (30 minutes maximum). Old or malformed stored values normalize to 120
 without deleting the installation. Plugin install/configure IPC rejects invalid input. Changing
