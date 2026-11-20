@@ -3949,6 +3949,15 @@
   "If a save fails, your original file stays as it was.": "저장에 실패해도 원본 파일은 그대로 남습니다.",
   "Write mid-answer in any language": "답변 중에도 모든 언어로 전송",
   "A message sent while ChatGPT is answering now goes out on pages in every language.": "ChatGPT가 답하는 중에 보낸 메시지가 이제 어떤 언어의 페이지에서도 전송됩니다.",
+  "Goal chats that don't stand idle, a tidier Settings, faster chat updates, and the files a chat edited.": "멈추지 않는 Goal 채팅, 더 깔끔해진 설정, 더 빨라진 채팅 업데이트, 채팅이 수정한 파일.",
+  "Goal chats don't stand idle": "Goal 채팅이 멈추지 않습니다",
+  "A Goal or Loop chat whose Compact & Resume got stuck goes on from its saved summary.": "압축 후 계속가 멈춘 Goal 또는 Loop 채팅은 저장된 요약에서 이어서 진행합니다.",
+  "A tidier Settings": "더 깔끔해진 설정",
+  "Agents settings are split into five short pages instead of one very long one.": "에이전트 설정이 매우 긴 한 페이지 대신 짧은 다섯 페이지로 나뉩니다.",
+  "Chats update faster": "채팅이 더 빨리 업데이트됩니다",
+  "A new message or tool call shows up in the open chat much sooner.": "새 메시지나 도구 호출이 열려 있는 채팅에 훨씬 빨리 나타납니다.",
+  "What a chat edited": "채팅이 수정한 내용",
+  "Review lists the files this chat changed and opens each recorded diff.": "검토에서 이 채팅이 변경한 파일을 나열하고 기록된 diff를 각각 열 수 있습니다.",
   "Steered active turn": "현재 턴의 방향을 전환함",
   "Worked for {0}{1}s · steered": "작업함 · {0}{1}초 · 방향 전환됨"
 }
