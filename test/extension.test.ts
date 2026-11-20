@@ -6536,7 +6536,7 @@ it('keeps the temporary destination URL when a normal tab starts navigating ther
   expect(call).toHaveBeenCalledExactlyOnceWith('/status?repaired=temporary-navigation&repairAction=preserved&preservedFor=temporary-chat');
 });
 
-it('uses a regular pending destination when a Temporary Chat tab is already navigating away', async () => {
+it('keeps a Temporary Chat open when its pending destination is a regular chat', async () => {
   const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
   const tab = { id: 76,
     url: `https://chatgpt.com/c/${conversationId}?temporary-chat=true`,
@@ -6556,8 +6556,8 @@ it('uses a regular pending destination when a Temporary Chat tab is already navi
 
   await repair([{ conversationId, token: 'leaving-temporary-chat', reason: 'unattributed' }], {});
 
-  expect(reload).toHaveBeenCalledExactlyOnceWith(76);
-  expect(call).toHaveBeenCalledExactlyOnceWith('/status?repaired=leaving-temporary-chat&repairAction=reloaded');
+  expect(reload).not.toHaveBeenCalled();
+  expect(call).toHaveBeenCalledExactlyOnceWith('/status?repaired=leaving-temporary-chat&repairAction=preserved&preservedFor=temporary-chat');
 });
 
 /**

@@ -4000,7 +4000,7 @@ async function performBrowserRepairs(repairs, policy) {
           continue;
         }
       }
-      if (target && /[?&]temporary-chat=true(?:[&#]|$)/.test(target.pendingUrl || target.url || '')) {
+      if (target && [target.pendingUrl, target.url].some(url => /[?&]temporary-chat=true(?:[&#]|$)/.test(url || ''))) {
         await call(`/status?repaired=${encodeURIComponent(token)}&repairAction=preserved&preservedFor=temporary-chat`);
         continue;
       }
