@@ -4855,7 +4855,10 @@ const DIL_GRID = '[data-d-component="grid"]';
 const DIL_GRID_ITEM = '[data-d-component="grid-item"]';
 const DIL_BORDERED_BOX = '[data-d-component="box"][data-d-has-border]';
 const DIL_TITLE = '[data-d-component="title"]';
-const DIL_GRID_TEXT_BLOCK = 'p, h1, h2, h3, h4, h5, h6';
+const DIL_GRID_HEADING = 'h1, h2, h3, h4, h5, h6';
+const DIL_GRID_TEXT_BLOCK = `p, ${DIL_GRID_HEADING}`;
+const DIL_GRID_FIELD = `${DIL_GRID_TEXT_BLOCK}, div, .markdown-dil-title, .markdown-dil-text`;
+const DIL_INLINE_MARKUP = new Set(['BR', 'DEL', 'S', 'EM', 'STRONG', 'MARK', 'KBD', 'SUB', 'SUP']);
 const DIL_METRIC_ICON = '[data-d-component="row"] > :is(svg, span[data-cos-icon]:empty)';
 
 /** A complete row of typed, bordered metric cards with a recorded equal-width layout. */
@@ -4888,13 +4891,51 @@ function metricGridText(nodes: Element[]): string {
     if (node.nodeType !== 1) return;
     const element = node as Element;
     if (element.matches('.markdown-dil-success-icon, .markdown-dil-down-icon')) return;
-    const block = element.matches(`${DIL_GRID_TEXT_BLOCK}, div, br, .markdown-dil-title, .markdown-dil-text`);
+    const block = element.matches(`${DIL_GRID_FIELD}, br`);
     if (block) parts.push('\n');
     for (const child of element.childNodes) walk(child);
     if (block) parts.push('\n');
   };
   for (const node of nodes) walk(node);
   return parts.join('').split('\n').map(line => line.replace(/[\t\f\r ]+/g, ' ').trim()).filter(Boolean).join('\n');
+}
+
+function metricInlineMarkup(node: Node): string {
+  if (node.nodeType === 3) return (node.textContent ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;');
+  if (node.nodeType !== 1) return '';
+  const element = node as Element;
+  const inner = [...element.childNodes].map(metricInlineMarkup).join('');
+  return DIL_INLINE_MARKUP.has(element.tagName) ? `<${element.localName}>${inner}</${element.localName}>` : inner;
+}
+
+/** One field's words and inline markup, without the field element itself. */
+function metricFieldMarkup(field: Element): string {
+  return [...field.childNodes].map(metricInlineMarkup).join('').replace(/\s+/g, ' ').trim();
+}
+
+function metricFieldMatches(canonical: Element, recorded: Element): boolean {
+  const heading = canonical.matches(DIL_GRID_HEADING);
+  if (canonical.tagName !== recorded.tagName && (heading || recorded.matches(DIL_GRID_HEADING))) return false;
+  const wanted = metricFieldMarkup(canonical);
+  if (wanted === metricFieldMarkup(recorded)) return true;
+  if (!heading) return false;
+  // Compact recordings can wrap the entire heading in a decorative strong element.
+  let core = recorded;
+  while (core.childElementCount === 1 && core.firstElementChild!.matches('span, strong') &&
+    ![...core.childNodes].some(child => child.nodeType === 3 && child.textContent?.trim())) {
+    core = core.firstElementChild!;
+    if (core.tagName === 'STRONG' && wanted === metricFieldMarkup(core)) return true;
+  }
+  return false;
+}
+
+/** The reply's field boundaries and its emphasis inside each field must survive the replacement. */
+function metricFieldsMatch(canonical: Element[], panel: Element): boolean {
+  const fields = canonical.filter(field => field.textContent?.trim());
+  const recorded = [...panel.querySelectorAll(DIL_GRID_FIELD)]
+    .filter(field => field.textContent?.trim() && !field.querySelector(DIL_GRID_FIELD));
+  return recorded.length === fields.length &&
+    fields.every((field, index) => metricFieldMatches(field, recorded[index]!));
 }
 
 function restoreRecordedDilLayouts(box: HTMLElement, capture?: StoredText): void {
@@ -4993,7 +5034,8 @@ function restoreRecordedDilLayouts(box: HTMLElement, capture?: StoredText): void
       if (!panel.classList.contains('markdown-dil-grid') ||
           cards.length !== columns ||
           panel.querySelectorAll('.markdown-dil-title').length !== columns ||
-          metricGridText([panel]) !== metricGridText(span)) continue;
+          metricGridText([panel]) !== metricGridText(span) ||
+          !metricFieldsMatch(span, panel)) continue;
       panel.classList.add('markdown-dil-grid-standalone', `markdown-dil-grid-columns-${columns}`);
     } else {
       panel.classList.add(kind === 'panel' ? 'markdown-dil-panel' : kind === 'steps' ? 'markdown-dil-steps' :
