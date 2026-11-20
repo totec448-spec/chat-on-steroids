@@ -34,6 +34,7 @@ A Goal or Loop chat whose Compact & Resume got stuck now goes on by itself, Sett
 - **The model picker is steadier.** The app confirms the choice after the picker closes and no longer clicks a second time when the first Enter already changed it.
 - **Remote tools reconnect.** A remote MCP plugin whose server started late or dropped comes back by itself, with a growing wait, and a failed call is never sent again.
 - **Attachments stay while a draft needs them**, and an image whose preview ChatGPT renamed with a time stamp is still sent.
+- **The bundled tunnel client is OpenAI's current 0.0.21**, which adds regional control-plane endpoints (unset by default, so nothing changes unless you set one).
 - **The app's own "continue" after a long turn** is no longer shown as something you sent.
 - **A message sent after a turn** is no longer held for minutes when ChatGPT already finished.
 - **Clearer messages.** The `agents` tool says its workers are separate ChatGPT chats, and a chat that reaches its own 192 MiB storage limit says so instead of blaming the global storage.
