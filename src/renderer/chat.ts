@@ -119,7 +119,7 @@ import { browserExtensionRequired, type AppState, type Config } from '../shared/
 import { $, ago, clockTime, compactAgeText, compactNumber, disclosureChevron, el, elapsedDurationText, icon, rowTime, run, setIcon, toast } from './dom.js';
 import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_REPAIR_DEFERRED_TEXT, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
 import { STRICT_REFUSAL_PROGRESS_PREFIX, UNPROVEN_WORKER_NOTICE, UNTRUSTED_NOTICE, UNTRUSTED_WORKER_NOTICE } from '../shared/trust-notices.js';
-import { closeRowMenu, onRowMenuChange, openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem, type RowMenuOptions } from './row-menu.js';
+import { closeRowMenu, onRowMenuChange, openRowMenu, rowMenuOpenFor, refreshRowMenu, toggleRowMenu, type RowMenuItem, type RowMenuOptions } from './row-menu.js';
 import { createSearchPopup } from './search-popup.js';
 import { holdToTalkShortcut, holdToTalkSupported, primaryShortcut } from './shortcuts.js';
 import { initSshProjectDialog } from './ssh-project-dialog.js';
@@ -1447,7 +1447,34 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   ui(more, 'title', () => t('More options'));
   ui(more, 'aria-label', () => t('More options'));
   const menu = (at?: { x: number; y: number }) => ({
-    owner, at, label: () => shownSessionTitle(summary), anchor: () => rowMenuButton(owner), items: () => items
+    owner, at, label: () => shownSessionTitle(summary), anchor: () => rowMenuButton(owner),
+    items: () => {
+      if (summary.titleSource !== 'manual' || !summary.conversationId ||
+          deps.state()?.config.sessions.checkWebChatTitles !== true) return items;
+      let hint = '';
+      let checking = false;
+      const check: RowMenuItem = {
+        action: 'check-web-title',
+        label: () => t('Check ChatGPT Web titles'),
+        hint: () => hint ? t(hint) : '',
+        keepOpen: true,
+        run: async () => {
+          if (checking || deps.state()?.config.sessions.checkWebChatTitles !== true) return;
+          checking = true;
+          hint = 'Checking…';
+          const reply = await api.checkWebChatTitle(summary.id).catch(() => null);
+          checking = false;
+          const current = sessions.find(chat => chat.id === summary.id);
+          if (!rowMenuOpenFor(owner) || deps.state()?.config.sessions.checkWebChatTitles !== true) return;
+          const result = reply?.ok && current?.title === summary.title &&
+            current.conversationId === summary.conversationId ? reply.data : 'unavailable';
+          hint = result === 'match' ? 'Titles match' : result === 'different' ? 'Titles differ' : 'Unavailable';
+          refreshRowMenu();
+        }
+      };
+      const rename = items.findIndex(item => item.action === 'rename');
+      return [...items.slice(0, rename + 1), check, ...items.slice(rename + 1)];
+    }
   });
   more.addEventListener('click', (event) => { event.stopPropagation(); removeSessionTooltip(); toggleRowMenu(menu()); });
   row.addEventListener('contextmenu', (event) => { event.preventDefault(); removeSessionTooltip(); openRowMenu(menu({ x: event.clientX, y: event.clientY })); });
@@ -8470,6 +8497,7 @@ export function chatSettingsPatch(current: Config): {
       // Both follow the single threshold above rather than being typed separately.
       advisoryTokens: threshold,
       limitTokens: urgentFrom(threshold),
+      checkWebChatTitles: $<HTMLInputElement>('checkWebChatTitles').checked,
       storageLimitGiB: (RECORDING_STORAGE_LIMITS_GIB as readonly number[]).includes(Number($<HTMLSelectElement>('recordingStorageLimit').value))
         ? Number($<HTMLSelectElement>('recordingStorageLimit').value) as RecordingStorageLimitGiB
         : current.sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB
@@ -8958,6 +8986,7 @@ const CHAT_INPUTS = [
   'handoffPrompt',
   'handoffLength',
   'recordingStorageLimit',
+  'checkWebChatTitles',
   'goalPrompt',
   'goalObjectivePrompt',
   'goalLoopPrompt',
@@ -9053,6 +9082,7 @@ export function chatApply(state: AppState, previous?: Config): void {
     String(config.sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB),
     previous === undefined ? undefined : String(previous.sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB)
   );
+  applyChatChecked($<HTMLInputElement>('checkWebChatTitles'), config.sessions.checkWebChatTitles === true, previous?.sessions.checkWebChatTitles);
   applyAutoCompactHint(config);
   $<HTMLInputElement>('autoCompactTokens').disabled = !config.compaction.auto;
 

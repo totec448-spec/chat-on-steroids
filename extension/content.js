@@ -14948,6 +14948,11 @@
         void inspectRepairPage(message).then(sendResponse).catch(() => sendResponse({ safe: false }));
         return true;
       }
+      if (message.type === 'clf-check-web-chat-title') {
+        sendResponse({ title: alive && conversationId === message.conversationId
+          ? CLF_DOM.confirmedConversationTitle(message.conversationId) : null });
+        return false;
+      }
       if (message.type === 'clf-image-export') {
         void exportNativeImage(message).then(sendResponse).catch(() => sendResponse({ error: 'fetch_failed' }));
         return true;

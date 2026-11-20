@@ -111,7 +111,8 @@ const DEFAULT_SESSIONS: SessionSettings = {
   // so a default that did not already satisfy that relation would be a state the UI cannot
   // produce: the red line would move the first time anyone opened the panel and saved.
   limitTokens: Math.round((DEFAULT_CONTEXT_WINDOW * 4) / 3),
-  storageLimitGiB: DEFAULT_RECORDING_STORAGE_GIB
+  storageLimitGiB: DEFAULT_RECORDING_STORAGE_GIB,
+  checkWebChatTitles: false
 };
 
 /**
@@ -495,14 +496,15 @@ const configSchema = z.object({
         .optional()
         .default(DEFAULT_SESSIONS.advisoryTokens),
       limitTokens: z.number().int().min(10_000).max(4_000_000).optional().default(DEFAULT_SESSIONS.limitTokens),
-      storageLimitGiB: recordingStorageLimit.catch(DEFAULT_RECORDING_STORAGE_GIB)
+      storageLimitGiB: recordingStorageLimit.catch(DEFAULT_RECORDING_STORAGE_GIB),
+      checkWebChatTitles: z.boolean().default(false).catch(false)
     })
     // `record` and `retainDays` remain readable for old configs and wire compatibility, but
     // they are no longer user choices. Normalizing here covers disk load, renderer saves,
     // extension/config writers and direct updateConfig callers at one boundary.
     .transform((sessions) => ({ ...sessions, record: true, retainDays: 0 }))
     .optional()
-    .default({ ...DEFAULT_SESSIONS, storageLimitGiB: DEFAULT_RECORDING_STORAGE_GIB }),
+    .default({ ...DEFAULT_SESSIONS, storageLimitGiB: DEFAULT_RECORDING_STORAGE_GIB, checkWebChatTitles: false }),
   compaction: z
     .object({
       auto: z.boolean().optional().default(DEFAULT_COMPACTION.auto),
