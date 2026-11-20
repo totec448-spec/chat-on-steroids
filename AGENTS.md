@@ -1123,6 +1123,20 @@ Projects may also store one optional color from the fixed `PROJECT_COLORS` palet
 sidebar presentation metadata only: changing or removing it never resolves paths, changes the
 project folder, grants permission, rebinds sessions, or changes prompt/workspace
 selection. Legacy rows without color remain unchanged. A project's color tints its folder icon.
+
+The local project's **Open project folder** menu action sends only its UUID through the
+renderer/preload IPC contract (`projects:openFolder`). The main process, never the renderer,
+looks up that saved local catalog row and resolves its directory against the **current**
+approved roots. It refuses malformed or unknown IDs, removed (`ungrouped`) or remote projects,
+missing/inaccessible directories, revoked roots, and symlink/junction paths escaping approval;
+it does not grant a root, add or select a project, or accept a renderer-supplied pathname.
+Before `shell.openPath`, main re-resolves the canonical path and checks directory identity
+(device/inode) to reject detectable replacements, then synchronously rechecks current root
+approval after the final await. A pathname passed to an OS file manager is not an atomic
+open-by-handle: adversarial pathname replacement after the last check remains a narrow TOCTOU
+limitation. Refusals and OS open failures report errors without opening a different project.
+See the focused IPC and renderer tests for the exact contract; existing saved project data
+requires no migration.
 Secrets shield (#1797, `main/secrets-shield.ts`): `dispatch` masks the outer call's own tool result
 (and background command output appended to it) before the app adds its inbox, notices or the
 user's new messages, so ChatGPT and the recorded wire value never carry the credential. Only
