@@ -3056,6 +3056,225 @@ describe('desktop input delivery and helper ownership', () => {
     expect(emitted(live.sent, 'chat_error')).toHaveLength(0);
   });
 
+  function mountApprovalCard(document: Document): HTMLElement {
+    const card = document.createElement('div');
+    card.setAttribute('data-codex-approval-surface', 'true');
+    card.append(document.createElement('button'), document.createElement('button'));
+    card.getClientRects = () => [{ width: 600, height: 200 }] as unknown as DOMRectList;
+    document.body.append(card);
+    return card;
+  }
+
+  async function openRemountedToolTurn(requestId: string, domTurnId: string, approvalFinalId: string | null = null) {
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack || message.fail ? { ok: true } : { input: claimed() } }),
+      page_note: () => ({ ok: true })
+    });
+    startGenerating(live.document);
+    live.hook.observe(); await settle();
+    const oldSection = assistantTurn(live.document, domTurnId, []);
+    live.hook.observe(); await settle();
+    const activeTurnId = emitted(live.sent, 'turn_start').at(-1)!.event.turnId as string;
+    live.reply.set('activity', () => ({
+      ok: true,
+      data: {
+        stream: [{ kind: 'tool_call', seq: 10, time: 1_700_000_001, turnId: activeTurnId, requestId, tool: 'read', outcome: 'ok' }],
+        entries: [],
+        pendingTools: 0
+      }
+    }));
+    await live.hook.pullActivity();
+    const card = approvalFinalId ? mountApprovalCard(live.document) : null;
+    if (card) stopGenerating(live.document);
+    await bindFiberTurns([{
+      section: oldSection,
+      turn: {
+        turnId: domTurnId,
+        conversationId: chatA,
+        endMessageId: approvalFinalId,
+        calls: [{ messageId: 'call-1', tool: 'read', order: 0, answered: true, requestId }],
+        messages: approvalFinalId
+          ? [{ role: 'assistant', messageId: approvalFinalId, rawMessageId: approvalFinalId, rawText: 'The current answer.' }]
+          : [],
+        activities: []
+      }
+    }]);
+    await live.hook.flush();
+    return { oldSection, activeTurnId, card };
+  }
+
+  it('closes a remounted live turn via request-id settledOwners endMessageId without leaving generating stuck in turn-held', async () => {
+    const requestId = 'req-remount-settled-close';
+    const { oldSection, activeTurnId } = await openRemountedToolTurn(requestId, 'turn-dom-1');
+
+    // ChatGPT unmounts/virtualizes the live assistant section at completion so generationTurn() is null
+    // while Fiber still returns the completed turn bearing our MCP request_id (`settledOwners === activeTurnId`).
+    oldSection.remove();
+    stopGenerating(live!.document);
+    const remountedSection = live!.document.createElement('section');
+    await bindFiberTurns([
+      {
+        section: remountedSection,
+        turn: {
+          turnId: 'fiber-turn-2',
+          conversationId: chatA,
+          endMessageId: 'remounted-final-msg',
+          calls: [{ messageId: 'call-1', tool: 'read', order: 0, answered: true, requestId }],
+          messages: [{ role: 'assistant', messageId: 'remounted-final-msg', rawMessageId: 'remounted-final-msg', rawText: 'Done after remount.' }],
+          activities: []
+        }
+      }
+    ], true);
+    await live!.hook.flush();
+    await settle();
+
+    expect(emitted(live!.sent, 'assistant_message').some(entry => entry.event?.final === true && entry.event?.turnId === activeTurnId)).toBe(true);
+    expect(emitted(live!.sent, 'turn_end').map(entry => entry.event)).toEqual([
+      expect.objectContaining({ turnId: activeTurnId, outcome: 'completed' })
+    ]);
+    live!.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      userTurn(live!.document, 'after-remount-user', text);
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+      live!.hook.observe();
+    });
+    expect(await live!.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA })).toEqual({ ok: true });
+    expect(live!.sent.filter(message => message.type === 'page_note' && message.note === 'input-held')).toEqual([]);
+  });
+
+  it('keeps the live turn open when a historical final above its question reuses its request id', async () => {
+    const requestId = 'req-reused-across-remount-attempts';
+    const { oldSection, activeTurnId } = await openRemountedToolTurn(requestId, 'current-attempt');
+    const document = live!.document;
+    const historicalSection = assistantTurn(document, 'historical-attempt', []);
+    oldSection.previousElementSibling!.before(historicalSection);
+    oldSection.remove();
+
+    await bindFiberTurns([{
+      section: historicalSection,
+      turn: {
+        turnId: 'historical-attempt',
+        endMessageId: 'previously-unseen-final',
+        calls: [{ messageId: 'historical-call', tool: 'read', order: 0, answered: true, requestId }],
+        messages: [{ role: 'assistant', messageId: 'previously-unseen-final', rawMessageId: 'previously-unseen-final', rawText: 'An older answer.' }]
+      }
+    }], true);
+    await live!.hook.flush();
+    expect(document.querySelector('[data-testid="stop-button"]')).not.toBeNull();
+    expect(emitted(live!.sent, 'turn_end')).toEqual([]);
+    const historicalFinal = emitted(live!.sent, 'assistant_message')
+      .find(entry => entry.event.messageId === 'previously-unseen-final')?.event;
+    expect(historicalFinal).toMatchObject({ final: true });
+    expect(historicalFinal?.turnId).toBeUndefined();
+    expect(historicalFinal?.activeNow).toBeUndefined();
+
+    stopGenerating(document);
+    await bindFiberTurns([{
+      section: document.createElement('section'),
+      turn: {
+        turnId: 'remounted-current-attempt',
+        endMessageId: 'current-attempt-final',
+        calls: [{ messageId: 'call-1', tool: 'read', order: 0, answered: true, requestId }],
+        messages: [{ role: 'assistant', messageId: 'current-attempt-final', rawMessageId: 'current-attempt-final', rawText: 'The current answer.' }]
+      }
+    }], true);
+    await live!.hook.flush();
+    expect(emitted(live!.sent, 'turn_end').map(entry => entry.event)).toEqual([
+      expect.objectContaining({ turnId: activeTurnId, outcome: 'completed' })
+    ]);
+  });
+
+  it('does not close a remounted turn via settledOwners when an approval card is waiting', async () => {
+    const requestId = 'req-remount-approval-hold';
+    const { oldSection } = await openRemountedToolTurn(requestId, 'turn-dom-approval');
+
+    oldSection.remove();
+    stopGenerating(live!.document);
+    mountApprovalCard(live!.document);
+
+    const remountedSection = live!.document.createElement('section');
+    await bindFiberTurns([{
+      section: remountedSection,
+      turn: {
+        turnId: 'fiber-turn-approval',
+        conversationId: chatA,
+        endMessageId: 'remounted-approval-msg',
+        calls: [{ messageId: 'call-1', tool: 'read', order: 0, answered: true, requestId }],
+        messages: [{ role: 'assistant', messageId: 'remounted-approval-msg', rawMessageId: 'remounted-approval-msg', rawText: 'Waiting for approval.' }],
+        activities: []
+      }
+    }], true);
+    await live!.hook.flush();
+    await settle();
+
+    expect(emitted(live!.sent, 'turn_end')).toEqual([]);
+  });
+
+  it('closes a detached turn after approval when its first stamped scan already had a final', async () => {
+    const requestId = 'req-approval-before-detachment';
+    const finalId = 'final-before-approval-clears';
+    const { oldSection, activeTurnId, card } = await openRemountedToolTurn(requestId, 'turn-approval-first-final', finalId);
+    expect(emitted(live!.sent, 'assistant_message').at(-1)?.event).toMatchObject({
+      messageId: finalId, turnId: activeTurnId, final: false
+    });
+    expect(emitted(live!.sent, 'turn_end')).toEqual([]);
+
+    oldSection.remove();
+    card!.remove();
+    live!.advance(live!.hook.APPROVAL_SETTLE_MS + 1);
+    await bindFiberTurns([{
+      section: live!.document.createElement('section'),
+      turn: {
+        turnId: 'detached-after-approval',
+        endMessageId: finalId,
+        calls: [{ messageId: 'call-1', tool: 'read', order: 0, answered: true, requestId }],
+        messages: [{ role: 'assistant', messageId: finalId, rawMessageId: finalId, rawText: 'The current answer.' }]
+      }
+    }], true);
+    await live!.hook.flush();
+
+    expect(emitted(live!.sent, 'turn_end').map(entry => entry.event)).toEqual([
+      expect.objectContaining({ turnId: activeTurnId, outcome: 'completed' })
+    ]);
+  });
+
+  it('does not close a remounted turn via settledOwners when request ownership is ambiguous across Fiber turns', async () => {
+    const requestId = 'req-remount-ambiguous';
+    const { oldSection } = await openRemountedToolTurn(requestId, 'turn-dom-ambig');
+
+    oldSection.remove();
+    stopGenerating(live!.document);
+    const firstTurn = live!.document.createElement('section');
+    const secondTurn = live!.document.createElement('section');
+    await bindFiberTurns([
+      {
+        section: firstTurn,
+        turn: {
+          turnId: 'fiber-ambig-1',
+          conversationId: chatA,
+          endMessageId: 'ambig-msg-1',
+          calls: [{ messageId: 'call-1', tool: 'read', order: 0, answered: true, requestId }],
+          messages: [{ role: 'assistant', messageId: 'ambig-msg-1', rawMessageId: 'ambig-msg-1', rawText: 'Retry 1.' }],
+          activities: []
+        }
+      },
+      {
+        section: secondTurn,
+        turn: {
+          turnId: 'fiber-ambig-2',
+          conversationId: chatA,
+          endMessageId: 'ambig-msg-2',
+          calls: [{ messageId: 'call-2', tool: 'read', order: 0, answered: true, requestId }],
+          messages: [{ role: 'assistant', messageId: 'ambig-msg-2', rawMessageId: 'ambig-msg-2', rawText: 'Retry 2.' }],
+          activities: []
+        }
+      }
+    ], true);
+    await live!.hook.flush();
+    await settle();
+
+    expect(emitted(live!.sent, 'turn_end')).toEqual([]);
+  });
+
   it.each([false, true])('handles autosaved text hydrated during model selection only for an owned fresh input (%s)', async (fresh) => {
     live = await harness(fresh ? `https://chatgpt.com/?cos-input=${inputId}` : `https://chatgpt.com/c/${chatA}`, {
       desktop_input: message => ({ ok: true, data: message.authorize ? { ok: true } : message.ack || message.fail ? { ok: true } : { input: claimed() } })
