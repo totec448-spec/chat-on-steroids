@@ -3259,7 +3259,8 @@ var CLF_DOM = (() => {
         }
       };
       observer = new MutationObserver(check);
-      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+      // A file tile can reveal its filename by changing an existing text node.
+      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, characterData: true });
       timer = setTimeout(() => finish(false), files.length ? 600000 : 60000);
       check();
     });
