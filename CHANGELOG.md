@@ -9,6 +9,44 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.54] — Goal chats that don't stand idle, a tidier Settings, and faster chat updates
+
+A Goal or Loop chat whose Compact & Resume got stuck now goes on by itself, Settings is easier to move around in, a chat shows new messages sooner, and Review lists the files a chat edited.
+
+### 👉 After updating
+
+- Nothing to do. The browser extension updates itself.
+
+### ✨ New
+
+- **Review shows what this chat edited.** The Review panel lists the files this chat changed, newest first, and opens each recorded diff. A deleted file says so, a renamed file's old name shows as missing, and a chat with no recorded edits shows nothing extra.
+- **Settings in five pages for Agents.** The long Agents page is now Goal & Loop, Models, Workers, Tools & access and Browser, each short enough to read.
+- **A GitHub skill can be bigger.** Importing a Skill from GitHub takes up to 256 files and a nested Skill folder, downloads from pinned, checked copies, and an update refuses when you edited any of its files.
+
+### 💪 Better
+
+- **Goal and Loop chats do not stand idle.** When Compact & Resume asked for its summary and none came back, or opened its new chat and never heard from it, the chat now goes on in a new chat from its last saved summary. The same happens when ChatGPT stops saving a very long chat and the page keeps showing an older one.
+- **Compact & Resume in a Project is steadier.** The app now recognises its own restored draft, also when the connector was renamed in ChatGPT, empties the handoff request ChatGPT put back, and says what kept the message box when it still cannot open the Project.
+- **Chats update sooner.** A new message or tool call appears in the open chat in a fraction of a second, and the browser tab is told at once when the app has something for it.
+- **A message you steer into a running answer is marked**, and the time worked before it keeps its meaning ("Worked for 45s · steered").
+- **A long answer keeps its place.** A steered answer that is still streaming stays below your message, a discarded half-written note disappears once ChatGPT drops it, and your sent message no longer shows twice for a moment.
+- **A worker that finished with a tool call alone can be woken again**, and a turn that ends with a generated image or a remounted page closes by itself.
+- **The model picker is steadier.** The app confirms the choice after the picker closes and no longer clicks a second time when the first Enter already changed it.
+- **Remote tools reconnect.** A remote MCP plugin whose server started late or dropped comes back by itself, with a growing wait, and a failed call is never sent again.
+- **Attachments stay while a draft needs them**, and an image whose preview ChatGPT renamed with a time stamp is still sent.
+- **The bundled tunnel client is OpenAI's current 0.0.21**, which adds regional control-plane endpoints (unset by default, so nothing changes unless you set one).
+- **The app's own "continue" after a long turn** is no longer shown as something you sent.
+- **A message sent after a turn** is no longer held for minutes when ChatGPT already finished.
+- **Clearer messages.** The `agents` tool says its workers are separate ChatGPT chats, and a chat that reaches its own 192 MiB storage limit says so instead of blaming the global storage.
+
+### 🛠 Fixed
+
+- **Image previews for a very long chat** say the chat reached its own limit, and the storage warning in the log appears once per chat.
+
+### Thank you
+
+To **@Neinndall** for the steered-answer ordering, the retracted half-written notes, the doubled message bubble, the settled-turn closes for remounted pages and generated images, the attachment fixes, the per-chat storage wording and the faster chat updates; **@atsu6** for the worker wake after a tool-only finish, the attachments that stay while a draft needs them, and Review showing what a chat edited; **@Kdevaulo** for the model and effort picker fixes and the quota-warning fix, and for the careful signed-in diagnostics on #2085; **@Akilaydin** for the report and the fix that brings remote plugins back by themselves; and **@lavalava45** for bigger GitHub Skills. And to **@0xConsole**, **@rockomania-dot**, **@WQuendry**, **@ColinKiiim**, **@artcraftfan1**, **@oysOYSoys**, **@kjm0202**, **@ahmedali5696**, **@dashielllubsen**, **@toannv216-oss**, **@fengnaiouo** and **@ralphchristianeclipse** for their reports and diagnostics, which found the stalled Compact & Resume cases fixed here and the ones still being worked on; and to **@Haz4rdovisk** for the product reviews.
+
 ## [2.1.53] — Compact & Resume in Projects, Goal chats that recover, and safer saves over SSH
 Compact & Resume now works in Projects where the app started chats, a Goal chat no longer stalls after a failed Continue, and saving a file over SSH can no longer lose the original. A message sent while ChatGPT answers goes out on pages in any language.
 

@@ -649,7 +649,10 @@
       if (thoughtMessage(candidate)) thoughtParents.set(str(candidate.id), candidate);
     }
     for (let index = 0; index < messages.length; index++) {
-      if (!budget || budget.remaining <= 0) break;
+      if (!budget || budget.remaining <= 0) {
+        if (budget) budget.truncated = true;
+        break;
+      }
       const message = messages[index];
       if (!message || typeof message !== 'object') continue;
       const author = message.author;
@@ -663,7 +666,9 @@
       // Private reasoning, by ChatGPT's own routing. Never a transcript row.
       if (analysisMessage(message)) continue;
       const id = str(message.id);
-      const rawText = budgetedText(authoredText(message), budget, MAX_RENDERED_TEXT);
+      const authored = authoredText(message);
+      const rawText = budgetedText(authored, budget, MAX_RENDERED_TEXT);
+      if (authored && !rawText && budget) budget.truncated = true;
       // A native final can be textless (for example after generated images).
       // Preserve its exact end_turn proof through the normal message pipeline.
       if (!id || (!rawText && id !== terminalId)) continue;
@@ -752,7 +757,10 @@
     const seen = new Set();
     if (!Array.isArray(messages)) return out;
     for (let index = 0; index < messages.length; index++) {
-      if (!budget || budget.remaining <= 0) break;
+      if (!budget || budget.remaining <= 0) {
+        if (budget) budget.truncated = true;
+        break;
+      }
       const message = messages[index];
       if (!message || typeof message !== 'object') continue;
       const author = message.author;
@@ -1800,13 +1808,16 @@
   function messagesFromTurnView(turn) {
     if (!turn || typeof turn !== 'object' || !Array.isArray(turn.items) || turn.items.length > MAX_TURN_ITEMS) return null;
     const out = [], seen = new Set(), interim = { remaining: MAX_TRACE_TEXT };
+    let messagesComplete = true;
     const topLevel = new Set(turn.items.filter(item => item?.type === 'assistant-message').map(item => str(item.messageId) || str(item.latestMessageId)).filter(Boolean));
     const assistant = (item, nested) => {
       const id = str(item.messageId) || str(item.latestMessageId);
       if (!id || seen.has(id) || (nested && topLevel.has(id))) return;
+      const rawContent = typeof item.content === 'string' ? item.content : '';
       // Interim updates share a small text budget, so they cannot use up the turn's own for its final answer.
-      const body = nested ? budgetedText(typeof item.content === 'string' ? item.content : '', interim, MAX_TRACE_SAY)
-        : typeof item.content === 'string' ? item.content.slice(0, MAX_RENDERED_TEXT) : '';
+      const body = nested ? budgetedText(rawContent, interim, MAX_TRACE_SAY)
+        : rawContent.slice(0, MAX_RENDERED_TEXT);
+      if (nested && rawContent && !ONLY_CONTENT_REFERENCES.test(rawContent) && !body) messagesComplete = false;
       if (nested && (!body || ONLY_CONTENT_REFERENCES.test(body))) return;
       const phase = str(item.phase), complete = item.completed === true;
       const terminal = !nested && complete && phase === 'final_answer' && turn.status === 'complete';
@@ -1826,7 +1837,7 @@
     const working = items => {
       if (!Array.isArray(items)) return;
       for (const item of items) {
-        if (++work > MAX_ROWS) return;
+        if (++work > MAX_ROWS) { messagesComplete = false; return; }
         if (!item || typeof item !== 'object') continue;
         if (item.type === 'chatgpt-reasoning-group') working(item.items);
         else if (item.type === 'assistant-message') assistant(item, true);
@@ -1847,6 +1858,7 @@
       } else if (item.type === 'assistant-message') assistant(item, false);
       else if (item.type === 'chatgpt-reasoning-group') working(item.items);
     }
+    if (!messagesComplete) out.incomplete = true;
     return out;
   }
 
@@ -2312,6 +2324,7 @@
     // group while the turn runs. A top-level item owns its id; a nested copy of it is not read twice.
     const topLevel = new Set(entry.turn.items.filter(item => item?.type === 'assistant-message').map(item => str(item.messageId)).filter(Boolean));
     let work = 0;
+    let messagesComplete = true;
     const interim = { remaining: MAX_TRACE_TEXT };
     const interimText = value => typeof value === 'string' && value ? budgetedText(value, interim, MAX_TRACE_SAY) : '';
     // ChatGPT's own times for this turn (#2005): a question found in older history was recorded at the
@@ -2380,6 +2393,7 @@
           // still checked, so a repeated one refuses the turn however far down it sits.
           if (++work > MAX_ROWS) {
             if (work > MAX_TURN_ITEMS) return null;
+            if (step?.type === 'assistant-message') messagesComplete = false;
             if (step?.type === 'generated-image') {
               anyImageSkipped = true;
               if (step.status !== 'completed' || step.isPreview === true) unfinishedImageSkipped = true;
@@ -2402,7 +2416,11 @@
             const shown = shellItemText(step);
             if (!shown || ONLY_CONTENT_REFERENCES.test(shown)) continue;
             const text = interimText(shown);
-            if (!text || !remember(id)) continue;
+            if (!text) {
+              messagesComplete = false;
+              continue;
+            }
+            if (!remember(id)) continue;
             messages.push({ id, author: { role: 'assistant' }, content: { content_type: 'text', parts: [text] },
               channel: 'commentary', end_turn: false, status: step.completed === true ? 'finished_successfully' : 'in_progress', metadata: {} });
             continue;
@@ -2438,6 +2456,7 @@
         images.has(item) && item.status === 'completed' && item.isPreview !== true)
       ? lastAnswer.chatGptMessageId : null;
     return { entry, place, messages, calls, slots, callSources, executionIds, images,
+      messagesComplete,
       hasGeneratedImage: generatedImages.length > 0 || anyImageSkipped,
       endMessageId: imageAnswer ? imageEnd : turnEndMessageId(messages) };
   }
@@ -2551,9 +2570,16 @@
         const exactAnchors = new Map();
         const exactThoughtRows = new Map();
         const exactImageNodes = new Map();
-        const turnBudget = { remaining: Math.min(MAX_TURN_TEXT, responseBudget.remaining) };
+        const turnBudget = { remaining: Math.min(MAX_TURN_TEXT, responseBudget.remaining), truncated: false };
         const before = turnBudget.remaining;
         const renderedMessages = renderedMessagesOf(group.sections, messages, turnBudget, exactAnchors, conversation.conversationId);
+        const messagesComplete = Boolean(
+          Array.isArray(messages) &&
+          !messages.incomplete &&
+          (!shell || shell.messagesComplete) &&
+          !turnBudget.truncated &&
+          before > 0
+        );
         const nativeActivities = shell ? shellPublicActivity(shell, metadata, renderedMessages, turnBudget, section, exactAnchors) : nativeActivitiesOf(group.sections, messages, exactThoughtRows);
         responseBudget.remaining -= before - turnBudget.remaining;
         const generatedImages = generatedImagesOf(group.sections, messages, exactImageNodes, shell?.images);
@@ -2587,6 +2613,7 @@
           conversationConflict: conversation.conflict,
           ...(shell && !conversation.conversationId ? { requestOwnerRequired: true } : {}),
           endMessageId,
+          messagesComplete,
           ...(terminalWithoutFinal ? { terminalWithoutFinal: true } : {}),
           calls,
           codeModeCalls,

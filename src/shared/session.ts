@@ -424,6 +424,8 @@ export type SessionEvent =
       origin?: number;
       /** Store-owned authored-content revision; metadata and rehydration preserve it. */
       contentSeq?: number;
+      /** ChatGPT conversation id that observed this message, scoping multi-chat/rotated echo matching. */
+      conversationId?: string;
     })
   | (BaseEvent & {
       kind: 'assistant_message';
@@ -453,6 +455,8 @@ export type SessionEvent =
       state?: MessageState;
       /** Compatibility mirror for older consumers; equivalent to state === 'final'. */
       final: boolean;
+      /** ChatGPT withdrew this unfinalized streaming message from the turn before completing it. */
+      retracted?: true;
       /** This exact stable reply was proven terminal and may enter Goal policy. */
       goalEligible?: boolean;
       /** Store-owned sequence of the latest final text/state change; rendering/metadata cannot advance it. */
@@ -1236,6 +1240,8 @@ export function eventTokens(event: SessionEvent): number {
         Number.isFinite(event.wireTokenEstimate) ? Math.max(0, Math.floor(event.wireTokenEstimate!)) : 0
       );
     case 'assistant_message':
+      if (event.retracted === true) return 0;
+      return storedTextTokens(event.message);
     case 'chat_error':
     case 'note':
       return storedTextTokens(event.message);
