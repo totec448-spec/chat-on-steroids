@@ -18,7 +18,8 @@ import {
   setRecordingStorageLimit,
   upsertMessageEvent,
   writeAsset,
-  writeOverflowText
+  writeOverflowText,
+  writeRecordedOverflowText
 } from '../src/main/session/store.js';
 import { recordChatObservations, resetRecorderForTests } from '../src/main/session/recorder.js';
 import * as logger from '../src/main/logger.js';
@@ -189,6 +190,21 @@ it('reports per-chat image vs long-text breakdown without affecting global-only 
     imageBytes: image.bytes,
     textBytes: textSize
   });
+});
+
+it('counts only verified images in the breakdown while keeping other assets in the quota', async () => {
+  const session = await createSession({ title: 'Mixed asset bytes' });
+  const png = await sharp({ create: { width: 3, height: 3, channels: 3, background: '#113355' } }).png().toBuffer();
+  const legacyImage = await writeAsset(session.id, png, 'application/octet-stream');
+  const other = await writeAsset(session.id, Buffer.from('not an image'), 'application/octet-stream');
+
+  expect((await getImageStorage(session.id)).session).toMatchObject({
+    usedBytes: legacyImage.bytes + other.bytes, imageBytes: legacyImage.bytes, textBytes: 0
+  });
+  const cleared = await clearImageStorage('session-images', session.id);
+  expect(cleared.freedBytes).toBe(legacyImage.bytes);
+  expect(cleared.session).toMatchObject({ usedBytes: other.bytes, imageBytes: 0, textBytes: 0 });
+  expect(await readAsset(session.id, other.id)).not.toBeNull();
 });
 
 it('frees only images or only long texts from the chosen chat', async () => {
@@ -444,6 +460,59 @@ it('prevents repeated observations from re-spilling retired overflow text assets
   ]);
   const afterEditFiles = (await fs.readdir(assetsDir)).filter((name) => name.endsWith('.txt'));
   expect(afterEditFiles).toHaveLength(1);
+});
+
+it('keeps retired assistant texts off disk when the provider message is replayed under a new key', async () => {
+  const conversationId = 'conv-retired-provider-alias';
+  const session = await createSession({ conversationId, title: 'Provider alias' });
+  const observed = {
+    kind: 'assistant_message' as const,
+    time: NOW,
+    messageId: 'first-key',
+    providerMessageId: 'stable-provider-id',
+    text: 'A'.repeat(260_000),
+    renderedHtml: '<p>' + 'H'.repeat(125_000) + '</p>',
+    state: 'final' as const,
+    final: true
+  };
+  await recordChatObservations(conversationId, [observed]);
+  expect((await clearImageStorage('session-texts', session.id)).removedFiles).toBe(2);
+  resetRecorderForTests();
+  resetSessionStoreForTests();
+  initSessionStore(directory);
+
+  const alias = { ...observed, time: NOW + 1, messageId: 'reloaded-key' };
+  await recordChatObservations(conversationId, [alias]);
+  const assetsDir = path.join(directory, 'sessions', session.id, 'assets');
+  expect(await fs.readdir(assetsDir)).toEqual([]);
+
+  await recordChatObservations(conversationId, [{ ...alias, renderedHtml: undefined, text: alias.text + ' edited' }]);
+  expect(await fs.readdir(assetsDir)).toHaveLength(1);
+  const messages = (await readEvents(session.id)).filter((event) => event.kind === 'assistant_message');
+  expect(messages).toMatchObject([{ messageId: 'first-key', message: { assetId: expect.any(String) } }]);
+});
+
+it('keeps a queued text replay from recreating an asset removed by cleanup ahead of it', async () => {
+  const session = await createSession({ title: 'Queued cleanup' });
+  const body = 'old text '.repeat(30_000);
+  const { asset, stored } = await longText(session.id, body);
+  const owner = { kind: 'assistant_message' as const, messageId: 'queue-key', providerMessageId: 'queue-provider' };
+  await upsertMessageEvent(session.id, { ...owner, time: NOW, source: 'extension', message: stored, final: true });
+
+  const before = getImageStorage(session.id);
+  const cleanup = clearImageStorage('session-texts', session.id);
+  const replay = writeRecordedOverflowText(session.id, body, { ...owner, messageId: 'reloaded-queue-key' });
+  const after = getImageStorage(session.id);
+  const [initial, cleared, written, final] = await Promise.all([before, cleanup, replay, after]);
+
+  expect(initial.session?.textBytes).toBe(asset.bytes);
+  expect(cleared.freedBytes).toBe(asset.bytes);
+  expect(written).toEqual({ assetId: null, retired: true });
+  expect(final.session?.textBytes).toBe(0);
+  expect(await readAsset(session.id, asset.id)).toBeNull();
+
+  const edited = await writeRecordedOverflowText(session.id, body + ' edited', owner);
+  expect(edited).toEqual({ assetId: expect.any(String), retired: false });
 });
 
 it('rejects overflow text references removed between writeOverflowText and new message upsert', async () => {

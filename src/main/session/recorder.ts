@@ -58,7 +58,6 @@ import {
   endSession,
   findSessionByConversation,
   getSession,
-  isRetiredMessageText,
   readAsset,
   readEvents,
   readRecentEvents,
@@ -73,7 +72,8 @@ import {
   upsertMessageEvent,
   upsertNativeImageEvent,
   writeAsset,
-  writeOverflowText,
+  writeRecordedOverflowText,
+  type RecordedTextOwner,
   writeTurnTrace
 } from './store.js';
 import {
@@ -1266,21 +1266,16 @@ async function storeText(
   sessionId: string,
   text: string,
   cap: number,
-  retiredCheck?: { kind: 'user_message' | 'assistant_message'; messageId?: string }
+  owner?: RecordedTextOwner
 ): Promise<StoredText> {
   const value = typeof text === 'string' ? text : String(text ?? '');
   if (value.length <= cap) return { text: value, truncated: false, chars: value.length };
-  if (retiredCheck?.messageId && await isRetiredMessageText(sessionId, retiredCheck.kind, retiredCheck.messageId, value)) {
-    return {
-      text: `${value.slice(0, cap)}\n…[${value.length - cap} more characters removed to free storage]`,
-      truncated: true,
-      chars: value.length
-    };
-  }
-  const assetId = await writeOverflowText(sessionId, value);
-  const note = assetId
-    ? `\n…[${value.length - cap} more characters stored in full as ${assetId}]`
-    : `\n…[${value.length - cap} more characters were too large to store and are lost]`;
+  const { assetId, retired } = await writeRecordedOverflowText(sessionId, value, owner);
+  const note = retired
+    ? `\n…[${value.length - cap} more characters removed to free storage]`
+    : assetId
+      ? `\n…[${value.length - cap} more characters stored in full as ${assetId}]`
+      : `\n…[${value.length - cap} more characters were too large to store and are lost]`;
   return {
     text: `${value.slice(0, cap)}${note}`,
     truncated: true,
@@ -2623,13 +2618,15 @@ async function recordSupersededMessages(
           kind: 'assistant_message',
           message: await storeText(sessionId, item.text ?? '', 256_000, {
             kind: 'assistant_message',
-            messageId: item.messageId
+            messageId: item.messageId,
+            providerMessageId: item.providerMessageId
           }),
           ...(item.renderedHtml
             ? {
                 renderedHtml: await storeText(sessionId, item.renderedHtml, 120_000, {
                   kind: 'assistant_message',
-                  messageId: item.messageId
+                  messageId: item.messageId,
+                  providerMessageId: item.providerMessageId
                 })
               }
             : {}),
@@ -2856,13 +2853,15 @@ async function recordChatObservationsNow(
           // local transcript itself look truncated while the continuation carries more.
           message: await storeText(sessionId, item.text ?? '', 256_000, {
             kind: 'assistant_message',
-            messageId: item.messageId
+            messageId: item.messageId,
+            providerMessageId: item.providerMessageId
           }),
           ...(item.renderedHtml
             ? {
                 renderedHtml: await storeText(sessionId, item.renderedHtml, 120_000, {
                   kind: 'assistant_message',
-                  messageId: item.messageId
+                  messageId: item.messageId,
+                  providerMessageId: item.providerMessageId
                 })
               }
             : {}),

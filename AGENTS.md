@@ -2438,7 +2438,8 @@ are rewritten; a text that any other record (or a rewritten one) still names sta
 serialized image inventory, durable reference retirement and physical removal. A removed native
 provider tuple cannot silently refill the cache when the page is observed again.
 Opening the cleanup dialog reuses the store's maintained quota total; a cold read counts file
-metadata without opening image contents. Confirmed cleanup retains full image verification and
+metadata for the global total. The per-chat breakdown checks image headers to match image cleanup
+and keeps other binary assets in the quota total. Confirmed cleanup retains full verification and
 shows an immediate busy message until success or failure; its final recount is metadata-only and leaves `usedBytes` as `null` if a post-cleanup global recount fails so the completed cleanup still returns and emits `session:changed`.
 Cleanup choices and Close are available before usage loads. Closing the dialog leaves its one
 requested operation running; reopening while active rejoins that same promise, and reopening after a global cleanup fetches current usage while retaining the prior freed total. Completion toasts stay session-neutral so switching chats never attributes one chat's cleanup to another. No

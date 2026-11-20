@@ -353,10 +353,6 @@ function deniedAssetIds(sessionId: string, assets: readonly AssetRef[] | undefin
   return assets.filter((asset) => !admitted.has(asset.id)).map((asset) => asset.id);
 }
 
-function overflowTextAssetId(text: string): string {
-  return `${createHash('sha256').update(Buffer.from(text, 'utf8')).digest('hex').slice(0, 32)}.txt`;
-}
-
 function retireTextField(
   stored: StoredText,
   retired: ReadonlySet<string>
@@ -376,21 +372,21 @@ function retireTextField(
   };
 }
 
-/** True when a keyed message's overflow `.txt` asset was explicitly retired by cleanup. */
-export async function isRetiredMessageText(
-  sessionId: string,
-  kind: 'user_message' | 'assistant_message',
-  messageId: string,
-  text: string
-): Promise<boolean> {
-  if (text.length > MAX_OVERFLOW_ASSET_CHARS) return false;
-  const key = messageKey({ kind, messageId } as CanonicalEvent);
-  if (!key) return false;
+export interface RecordedTextOwner {
+  kind: 'user_message' | 'assistant_message';
+  messageId?: string;
+  providerMessageId?: string;
+}
+
+/** Check durable retirement by the same canonical identity used when the message is upserted. */
+async function isRetiredMessageText(sessionId: string, owner: RecordedTextOwner, assetId: string): Promise<boolean> {
+  const directKey = messageKey(owner);
+  if (!directKey) return false;
   const entry = await ensureOpen(sessionId);
+  const key = canonicalMessageKey(entry, directKey, owner.kind === 'assistant_message' ? owner.providerMessageId : undefined);
   const previous = entry.messages.get(key);
-  if (!previous || (previous.kind !== 'user_message' && previous.kind !== 'assistant_message')) return false;
-  if (!previous.retiredTextAssetIds?.length) return false;
-  return previous.retiredTextAssetIds.includes(overflowTextAssetId(text));
+  return (previous?.kind === 'user_message' || previous?.kind === 'assistant_message') &&
+    previous.retiredTextAssetIds?.includes(assetId) === true;
 }
 
 function mergedRetiredAssetIds(...groups: Array<readonly string[] | undefined>): string[] | undefined {
@@ -429,12 +425,23 @@ interface MetaCheckpoint {
   workerLineMissing: boolean;
 }
 
-function messageKey(event: SessionEvent | Omit<MessageEvent, 'seq'> | NewNativeImageEvent): string | null {
+function messageKey(event: SessionEvent | RecordedTextOwner | NewNativeImageEvent): string | null {
   if (event.kind === 'tool_call') return event.call?.callId ? `tool_call\u0000${event.call.callId}` : null;
   if (event.kind === 'native_image') return event.messageId && event.providerAssetId
     ? `native_image\u0000${event.messageId}\u0000${event.providerAssetId}` : null;
   return (event.kind === 'user_message' || event.kind === 'assistant_message') && event.messageId
     ? `${event.kind}\u0000${event.messageId}` : null;
+}
+
+function canonicalMessageKey(entry: OpenSession, directKey: string, providerMessageId?: string): string {
+  if (!providerMessageId || entry.messages.has(directKey)) return directKey;
+  let match: string | undefined;
+  for (const [key, candidate] of entry.messages) {
+    if (candidate.kind !== 'assistant_message' || candidate.providerMessageId !== providerMessageId) continue;
+    if (match !== undefined) return directKey;
+    match = key;
+  }
+  return match ?? directKey;
 }
 
 /** Exact equality for the fixed StoredText wire shape without serialising large prose. */
@@ -1489,11 +1496,7 @@ export function upsertMessageEvent(
       // evidence; never collapse distinct authored segments by working-turn tuple
       // or matching text. Legacy observations without a provider UUID keep their key.
       const providerMessageId = event.kind === 'assistant_message' ? event.providerMessageId : undefined;
-      const providerMatches = providerMessageId
-        ? [...entry.messages.entries()].filter(([, candidate]) => candidate.kind === 'assistant_message' &&
-            candidate.providerMessageId === providerMessageId)
-        : [];
-      const key = !entry.messages.has(directKey) && providerMatches.length === 1 ? providerMatches[0]![0] : directKey;
+      const key = canonicalMessageKey(entry, directKey, providerMessageId);
       const candidate = entry.messages.get(key);
       const previous = candidate?.kind === 'tool_call' ? undefined : candidate;
       // Confirmation follows a history read. A native revision may have queued since
@@ -4418,11 +4421,19 @@ export async function ensureCommittedResumeHandoff(
  * reason the log stays readable: a 300 KB PNG never becomes a 400 KB base64 string
  * inside a line that a summary pass then has to skip over.
  */
+export function writeAsset(sessionId: string, data: Buffer, mimeType: string): Promise<AssetRef>;
+export function writeAsset(
+  sessionId: string,
+  data: Buffer,
+  mimeType: 'text/plain',
+  owner: RecordedTextOwner | undefined
+): Promise<AssetRef | null>;
 export async function writeAsset(
   sessionId: string,
   data: Buffer,
-  mimeType: string
-): Promise<AssetRef> {
+  mimeType: string,
+  owner?: RecordedTextOwner
+): Promise<AssetRef | null> {
   assertSessionId(sessionId);
   if (data.length === 0 || data.length > MAX_ASSET_BYTES) throw new Error('Session asset exceeds the per-asset limit');
   const hash = createHash('sha256').update(data).digest('hex').slice(0, 32);
@@ -4440,6 +4451,8 @@ export async function writeAsset(
   // but its late reference cannot resurrect the retired file.
   const admittedAt = assetMutationEpoch;
   return enqueueAssetOperation(async () => {
+    // Cleanup ahead of this write may have just retired the canonical message's text.
+    if (owner && await isRetiredMessageText(sessionId, owner, id)) return null;
     const dir = path.join(sessionDir(sessionId), 'assets');
     await fs.mkdir(dir, { recursive: true });
     const target = path.join(dir, id);
@@ -4872,6 +4885,7 @@ async function chooseFromOldChats(inventory: { images: StoredImageFile[]; texts:
 async function sessionAssetBreakdown(sessionId: string): Promise<SessionImageStorageInfo> {
   assertSessionId(sessionId);
   const assetsDir = await verifiedAssetsDirectory(sessionId);
+  let usedBytes = 0;
   let imageBytes = 0;
   let textBytes = 0;
   if (assetsDir) {
@@ -4883,8 +4897,13 @@ async function sessionAssetBreakdown(sessionId: string): Promise<SessionImageSto
         try {
           const stat = await fs.lstat(path.join(assetsDir.path, entry.name));
           if (!stat.isFile() || stat.isSymbolicLink()) continue;
-          if (entry.name.toLowerCase().endsWith('.txt')) textBytes += stat.size;
-          else imageBytes += stat.size;
+          usedBytes += stat.size;
+          if (entry.name.toLowerCase().endsWith('.txt')) {
+            textBytes += stat.size;
+          } else {
+            const file = await inspectVerifiedAssetFile(assetsDir, entry.name);
+            if (file?.image) imageBytes += file.bytes;
+          }
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
         }
@@ -4895,7 +4914,7 @@ async function sessionAssetBreakdown(sessionId: string): Promise<SessionImageSto
       await entries?.close().catch(() => undefined);
     }
   }
-  return { sessionId, usedBytes: imageBytes + textBytes, limitBytes: MAX_SESSION_ASSET_BYTES, imageBytes, textBytes };
+  return { sessionId, usedBytes, limitBytes: MAX_SESSION_ASSET_BYTES, imageBytes, textBytes };
 }
 
 export function getImageStorage(sessionId?: string): Promise<ImageStorageInfo> {
@@ -5063,14 +5082,21 @@ export async function readAsset(
  * Stores text too long to sit inline, and returns the reference to put in the event.
  *
  * Content-addressed like any other asset, so a command run twice with the same enormous
- * output costs one file. Returns null only when the text is beyond even this — at which
- * point the event says so rather than pretending the record is complete.
+ * output costs one file. Returns null if the full text cannot be stored.
  */
 export async function writeOverflowText(sessionId: string, text: string): Promise<string | null> {
-  if (text.length > MAX_OVERFLOW_ASSET_CHARS) return null;
+  return (await writeRecordedOverflowText(sessionId, text)).assetId;
+}
+
+export async function writeRecordedOverflowText(
+  sessionId: string,
+  text: string,
+  owner?: RecordedTextOwner
+): Promise<{ assetId: string | null; retired: boolean }> {
+  if (text.length > MAX_OVERFLOW_ASSET_CHARS) return { assetId: null, retired: false };
   try {
-    const asset = await writeAsset(sessionId, Buffer.from(text, 'utf8'), 'text/plain');
-    return asset.id;
+    const asset = await writeAsset(sessionId, Buffer.from(text, 'utf8'), 'text/plain', owner);
+    return { assetId: asset?.id ?? null, retired: asset === null };
   } catch (err) {
     // The full store is reported once, as a state; every other reason is worth its own line.
     if ((err as Error).message === 'Session asset quota exceeded') {
@@ -5082,7 +5108,7 @@ export async function writeOverflowText(sessionId: string, text: string): Promis
     } else if ((err as Error).message !== GLOBAL_ASSET_QUOTA_EXCEEDED) {
       logWarn(`session ${sessionId}: overflow text not stored: ${(err as Error).message}`);
     }
-    return null;
+    return { assetId: null, retired: false };
   }
 }
 
