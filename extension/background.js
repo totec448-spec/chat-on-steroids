@@ -3728,6 +3728,7 @@ async function checkWebChatTitle(request) {
   if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id) || !conversationId) return;
   const intent = connectionEpoch;
   let title = null;
+  let reason = 'active-tab-mismatch';
   try {
     const active = () => chrome.tabs.query({ active: true, lastFocusedWindow: true });
     const usable = tab => tab && Number.isInteger(tab.id) && !tab.incognito && !tab.pendingUrl &&
@@ -3736,18 +3737,21 @@ async function checkWebChatTitle(request) {
     if (usable(tab)) {
       const documentId = tabDocuments[String(tab.id)];
       const epoch = tabEpochs[String(tab.id)];
+      reason = 'document-unregistered';
       if (documentId) {
         const answer = await tabReply(tab.id, { type: 'clf-check-web-chat-title', conversationId }, { documentId }, 3000);
         const [current] = await active();
+        reason = 'document-changed';
         if (usable(current) && current.id === tab.id && current.url === tab.url &&
             tabDocuments[String(tab.id)] === documentId && tabEpochs[String(tab.id)] === epoch) {
+          reason = answer ? 'title-unconfirmed' : 'page-unresponsive';
           if (typeof answer?.title === 'string' && answer.title.length <= 200) title = answer.title.trim() || null;
         }
       }
     }
-  } catch { /* A tab that switched or disappeared cannot supply a title. */ }
+  } catch { reason = 'browser-error'; }
   if (intent !== connectionEpoch || !token || disconnected) return;
-  await call('/browser/web-chat-title', { method: 'POST', body: JSON.stringify({ id, conversationId, title }) });
+  await call('/browser/web-chat-title', { method: 'POST', body: JSON.stringify({ id, conversationId, title, ...(title === null ? { reason } : {}) }) });
 }
 
 async function maintainOnce() {

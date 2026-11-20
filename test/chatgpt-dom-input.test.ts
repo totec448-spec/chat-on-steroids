@@ -83,6 +83,14 @@ it('confirms titles only from the exact visible conversation and sidebar row', (
   row.hidden = false;
   row.append(document.createElement('input'));
   expect(api.confirmedConversationTitle(current)).toBeNull();
+  row.remove();
+  Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+  document.body.insertAdjacentHTML('beforeend',
+    '<nav><a href="/c/' + current + '"><span dir="auto">New name</span></a></nav>');
+  expect(api.confirmedConversationTitle(current)).toBe('New name');
+  document.body.insertAdjacentHTML('beforeend',
+    '<nav><a href="/c/' + current + '"><span dir="auto">Older name</span></a></nav>');
+  expect(api.confirmedConversationTitle(current)).toBeNull();
 });
 
 it('reads the September search-unit renderer without legacy message attributes', () => {

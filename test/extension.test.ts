@@ -43,7 +43,10 @@ it.each([false, true])('checks the same live Web title document across the reply
   expect(query).toHaveBeenCalledTimes(2);
   expect(tabReply).toHaveBeenCalledExactlyOnceWith(7, { type: 'clf-check-web-chat-title', conversationId }, { documentId: 'doc-one' }, 3000);
   expect(call).toHaveBeenCalledExactlyOnceWith('/browser/web-chat-title', {
-    method: 'POST', body: JSON.stringify({ id, conversationId, title: switched ? null : 'Current Web title' })
+    method: 'POST', body: JSON.stringify({
+      id, conversationId, title: switched ? null : 'Current Web title',
+      ...(switched ? { reason: 'document-changed' } : {})
+    })
   });
 });
 
