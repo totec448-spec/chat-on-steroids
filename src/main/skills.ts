@@ -421,16 +421,18 @@ export function skillsDirectory(): string | null {
 }
 
 /** Disabled managed links must not re-enter discovery under hashed unmanaged IDs. */
-export async function disabledManagedSkillTargets(): Promise<string[]> {
-  if (!root || !disabledSkills.size) return [];
-  const config = getConfig();
-  if (!effectiveCapabilities(config).read) return [];
-  const targets: string[] = [];
-  for (const id of disabledSkills) {
-    const link = await approvedManagedSkillLink(root, id, config.roots);
-    if (link) targets.push(path.join(link.real, SKILL_FILENAME));
-  }
-  return targets;
+export function disabledManagedSkillTargets(): Promise<string[]> {
+  return serial(async () => {
+    if (!root || !disabledSkills.size) return [];
+    const config = getConfig();
+    if (!effectiveCapabilities(config).read) return [];
+    const targets: string[] = [];
+    for (const id of disabledSkills) {
+      const link = await approvedManagedSkillLink(root, id, config.roots);
+      if (link) targets.push(path.join(link.real, SKILL_FILENAME));
+    }
+    return targets;
+  });
 }
 
 /** Repair interrupted Trash/state transactions before any count-bound state write.
