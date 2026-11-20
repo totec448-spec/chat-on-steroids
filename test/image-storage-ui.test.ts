@@ -158,13 +158,26 @@ it('shows per-chat breakdown and cleans only the open chat when requested from a
   expect(document.body.textContent).toContain('This chat: 192.0 MB of 192 MB (0.0 MB images, 192.0 MB long texts).');
 
   const buttons = [...document.querySelectorAll('.image-storage-actions button')] as HTMLButtonElement[];
-  expect(buttons[0]?.textContent).toBe('Free oldest 1 GB');
+  const dialog = document.querySelector('.image-storage-dialog')!;
+  const groups = [...dialog.querySelectorAll('[role="group"]')];
+  expect(groups.map(group => document.getElementById(group.getAttribute('aria-labelledby')!)?.textContent))
+    .toEqual(['This chat', 'All chats']);
+  expect(groups[0]?.querySelectorAll('button.btn-quiet')).toHaveLength(2);
+  expect(groups[1]?.querySelectorAll('button.btn-quiet')).toHaveLength(3);
+  expect([...dialog.querySelectorAll('button.btn-solid')].map(button => button.textContent)).toEqual(['Close']);
   const clearTexts = buttons.find(button => button.textContent === 'Free long texts in this chat');
   const clearImages = buttons.find(button => button.textContent === 'Free images in this chat');
   expect(clearTexts).toBeTruthy();
   expect(clearImages).toBeTruthy();
 
-  dom.window.confirm = vi.fn(() => true);
+  const confirm = vi.fn((_question: string) => false);
+  dom.window.confirm = confirm;
+  clearTexts!.click();
+  expect(confirm).toHaveBeenCalledExactlyOnceWith(
+    'Free long texts in this chat? The full text stored by this app cannot be recovered. Only the beginning of each long message and tool result will remain.'
+  );
+  expect(cleanup).not.toHaveBeenCalled();
+  confirm.mockReturnValue(true);
   clearTexts!.click();
   await new Promise(resolve => setTimeout(resolve, 0));
   expect(cleanup).toHaveBeenCalledExactlyOnceWith('session-texts', sessionId);
