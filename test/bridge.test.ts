@@ -618,6 +618,48 @@ describe('direct browser control over the paired bridge', () => {
 });
 
 describe('who is allowed to talk to it', () => {
+  // 2026-11-20: the request window opened at a clock reading that was later corrected backwards (a
+  // wrong clock set right, a resumed VM). `now - start` stayed negative, the window never closed,
+  // and every later request counted against it until the clock caught up: the extension got 429 for
+  // as long as the correction was big.
+  it('does not lock the extension out when the clock is corrected backwards', async () => {
+    await pair();
+    const logger = await import('../src/main/logger.js');
+    const info = vi.spyOn(logger, 'logInfo');
+    const real = Date.now();
+    let now = real + 60 * 60_000;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      expect((await request('GET', '/status')).status).toBe(200);
+      now = real;
+      // Three minutes of ordinary traffic (400 a minute, 1,200 in all) after the correction.
+      const statuses = new Set<number>();
+      for (let minute = 0; minute < 3; minute += 1) {
+        for (let index = 0; index < 400; index += 1) statuses.add((await request('GET', '/status')).status);
+        now += 61_000;
+      }
+      expect([...statuses]).toEqual([200]);
+      // One line says why the count started again, not one per request.
+      expect(info.mock.calls.map(([line]) => String(line)).filter(line => line.includes('the clock moved back'))).toEqual([
+        'bridge: the clock moved back 3600 s; the request limit starts counting again'
+      ]);
+    } finally { clock.mockRestore(); info.mockRestore(); }
+  });
+
+  it('still refuses more than 900 requests inside one minute, and allows them again the next minute', async () => {
+    await pair();
+    const real = Date.now();
+    let now = real;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      let refused = 0;
+      for (let index = 0; index < 930; index += 1) if ((await request('GET', '/status')).status === 429) refused += 1;
+      expect(refused).toBeGreaterThan(0);
+      now += 61_000;
+      expect((await request('GET', '/status')).status).toBe(200);
+    } finally { clock.mockRestore(); }
+  });
+
   it('logs only bounded close-outbox decision codes and only once per extension report', async () => {
     await pair();
     const logger = await import('../src/main/logger.js');
