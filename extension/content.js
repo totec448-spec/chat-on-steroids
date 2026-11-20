@@ -12583,8 +12583,18 @@
       });
     };
     // Confirmed is what the picker proved; only that is ever reported as the chat's model.
+    // A choice ChatGPT takes back as the picker closes (`changed` at `close`, #2085) earns the same one
+    // more try; the picker read after that close is still the only proof, and a third never follows.
+    // Only a readable picker that shows a different choice than the one selected counts: an unreadable
+    // close read or a native reasoning control that disagrees with a picker that held leave `after`
+    // equal to `selected`, and a second attempt could pass on the picker alone.
+    const tookBack = () => {
+      const { failure, failedPhase, selected, after } = modelDiagnostic ?? {};
+      return failure === 'changed' && failedPhase === 'close' && !!selected && !!after &&
+        (selected.model !== after.model || selected.effort !== after.effort);
+    };
     const modelConfirmed = !!(boot.model || boot.reasoningEffort) && (await chooseModel() ||
-      ((await closeAnnouncements(stillOnTarget)).length > 0 && stillOnTarget() && await chooseModel()));
+      ((tookBack() || (await closeAnnouncements(stillOnTarget)).length > 0) && stillOnTarget() && await chooseModel()));
     let mayGoOn = !(boot.model || boot.reasoningEffort) || modelConfirmed;
     // A wake or a Compact & Resume goes out on ChatGPT's current model rather than not at all: a worker
     // that never wakes stops its whole run (#1952), and an abandoned resume stops its chat for good
