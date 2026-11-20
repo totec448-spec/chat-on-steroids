@@ -1060,6 +1060,46 @@ describe('a standalone recorded metric grid', () => {
     expect(rendered.textContent).toContain(edited);
   });
 
+  // The record draws plain values, so nothing it holds may drop the reply's own emphasis.
+  it.each([['*$24.8k*', '$24.8k', 'em'], ['**1,284**', '1,284', 'strong'], ['~~98.6%~~', '98.6%', 'del']])(
+    'keeps the canonical “%s” inline markup instead of drawing the plain recorded grid', (markdown, plain, tag) => {
+      const rendered = renderedGrid(capture(grid()), source().replace(`# ${plain}`, `# ${markdown}`));
+      expect(rendered.querySelector('.markdown-dil-grid-standalone, .markdown-dil-panel, .markdown-dil-card')).toBeNull();
+      expect(rendered.querySelector(`h1 > ${tag}`)?.textContent).toBe(plain);
+    });
+
+  it('restores the grid when its recorded value carries the same inline markup', () => {
+    const values = ['$24.8k', '1,284', '<del>98.6%</del>'];
+    const labels = ['Revenue', 'Active users', 'Availability'];
+    const notes = ['Monthly revenue', 'Monthly active users', 'Service uptime'];
+    const struck = grid(values.map((value, index) => cell(labels[index]!, value, notes[index]!)));
+    const rendered = renderedGrid(capture(struck), source('~~98.6%~~'));
+    const panel = rendered.querySelector<HTMLElement>('.markdown-dil-grid.markdown-dil-grid-standalone');
+    expect(panel).not.toBeNull();
+    expect(panel!.querySelector('.markdown-dil-title > del')?.textContent).toBe('98.6%');
+  });
+
+  it.each(['del', 'sup'])('keeps the canonical value when only the recording wraps it in <%s>', tag => {
+    const marked = grid().replace('>98.6%</h1>', `><${tag}>98.6%</${tag}></h1>`);
+    const rendered = renderedGrid(capture(marked));
+    expect(rendered.querySelector('.markdown-dil-grid-standalone, .markdown-dil-panel')).toBeNull();
+    expect(rendered.querySelector(tag)).toBeNull();
+    expect([...rendered.querySelectorAll('h1')].at(-1)?.textContent).toBe('98.6%');
+  });
+
+  it('preserves the canonical heading level when it differs from the recording', () => {
+    const rendered = renderedGrid(capture(grid()), source().replace('# $24.8k', '### $24.8k'));
+    expect(rendered.querySelector('.markdown-dil-grid-standalone')).toBeNull();
+    expect(rendered.querySelector('h3')?.textContent).toBe('$24.8k');
+  });
+
+  it('keeps the canonical field boundaries when the reply joins two recorded fields', () => {
+    const joined = renderedGrid(capture(grid()),
+      source().replace('# 1,284\n\nMonthly active users', '# 1,284<br>Monthly active users'));
+    expect(joined.querySelector('.markdown-dil-grid-standalone, .markdown-dil-panel')).toBeNull();
+    expect(joined.textContent).toContain('Monthly active users');
+  });
+
   it('keeps a prose paragraph with the same words but no metric field boundaries', () => {
     const body = source().split('\n\n').slice(1, -1).join(' ');
     const rendered = renderedGrid(capture(grid()), body);
