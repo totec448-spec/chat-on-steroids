@@ -217,6 +217,24 @@ function assertSessionId(id: string): void {
 
 // ------------------------------------------------------------------ state
 
+type AssistantWatermark = { time: number; docId?: string; docSeq?: number };
+
+function staleObservationReason(
+  obs: AssistantWatermark,
+  watermark: AssistantWatermark | undefined,
+  inclusiveSameDoc: boolean
+): 'docSeq' | 'timestamp' | null {
+  if (!watermark) return null;
+  if (
+    watermark.docId && obs.docId && watermark.docId === obs.docId &&
+    watermark.docSeq !== undefined && obs.docSeq !== undefined
+  ) {
+    const staleSeq = inclusiveSameDoc ? obs.docSeq <= watermark.docSeq : obs.docSeq < watermark.docSeq;
+    return staleSeq ? 'docSeq' : null;
+  }
+  return Number.isFinite(watermark.time) && obs.time < watermark.time ? 'timestamp' : null;
+}
+
 interface OpenSession {
   summary: SessionSummary;
   nextSeq: number;
@@ -231,6 +249,10 @@ interface OpenSession {
   queue: Promise<void>;
   /** Canonical messages and background calls, replaced by stable message/call identity. */
   messages: Map<string, CanonicalEvent>;
+  /** Latest positive observation watermark per assistant message key, for turn_messages fencing. */
+  assistantProvenance?: Map<string, AssistantWatermark>;
+  /** Latest retraction watermark per assistant message key, rejecting delayed re-observations. */
+  assistantRetractions?: Map<string, AssistantWatermark>;
   metaDirty: boolean;
   metaTimer: NodeJS.Timeout | null;
 }
@@ -1415,7 +1437,7 @@ function continuesFinalText(previous: StoredText, next: StoredText): boolean {
 export function upsertMessageEvent(
   sessionId: string,
   event: NewMessageEvent,
-  options: { preferTime?: boolean; work?: boolean; replacementOnly?: true } = {}
+  options: { preferTime?: boolean; work?: boolean; replacementOnly?: true; observation?: { time: number; docId?: string; docSeq?: number } } = {}
 ): Promise<{ event: MessageEvent; changed: boolean; contentChanged: boolean }> {
   const directKey = messageKey(event as MessageEvent);
   if (!directKey) throw new Error('Canonical message update requires ChatGPT messageId');
@@ -1561,6 +1583,24 @@ export function upsertMessageEvent(
         previous?.kind === 'assistant_message' && nextEvent.kind === 'assistant_message'
           ? previous.turnId ?? nextEvent.turnId ?? undefined
           : nextEvent.turnId ?? undefined;
+      if (event.kind === 'assistant_message' && options.observation) {
+        const nextObs = options.observation;
+        if (previous?.kind === 'assistant_message' && previous.retracted === true) {
+          const staleReason =
+            staleObservationReason(nextObs, entry.assistantRetractions?.get(key), true) ??
+            staleObservationReason(nextObs, entry.assistantProvenance?.get(key), false);
+          if (staleReason) {
+            logInfo(`session store: ${sessionId} ignored stale observation for retracted assistant message ${event.messageId} (${staleReason})`);
+            return { event: previous, changed: false, contentChanged: false };
+          }
+          entry.assistantRetractions?.delete(key);
+        }
+        entry.assistantProvenance ??= new Map();
+        const priorSeen = entry.assistantProvenance.get(key);
+        if (!staleObservationReason(nextObs, priorSeen, false)) {
+          entry.assistantProvenance.set(key, nextObs);
+        }
+      }
       if (
         previous &&
         previous.kind === nextEvent.kind &&
@@ -1573,6 +1613,7 @@ export function upsertMessageEvent(
             storedTextEqual(previous.renderedHtml, nextEvent.renderedHtml) &&
             previous.state === nextEvent.state &&
             previous.final === nextEvent.final &&
+            previous.retracted === nextEvent.retracted &&
             previous.goalEligible === nextEvent.goalEligible &&
             previous.providerMessageId === nextEvent.providerMessageId &&
             previous.resolvedModel === nextEvent.resolvedModel &&
@@ -1673,6 +1714,84 @@ export function upsertMessageEvent(
       (err: Error) => logError(`session message upsert failed: ${err.message}`)
     );
     return write;
+  });
+}
+
+/**
+ * Marks unfinalized extension assistant messages of `turnId` as retracted when a complete
+ * Fiber snapshot of that turn no longer contains their message id or provider UUID.
+ */
+export async function retractTurnStreamingMessages(
+  sessionId: string,
+  turnId: string,
+  presentIds: readonly string[],
+  evidence?: { observedAt?: number; docId?: string; docSeq?: number; settled?: boolean }
+): Promise<number> {
+  if (!turnId) return 0;
+  const entry = await ensureOpen(sessionId);
+  return enqueueSessionOperation(entry, 'retract discarded streaming messages', async () => {
+    const turns = entry.summary.timelineTurns;
+    const canonicalTurn = responseTurnId(turns, turnId);
+    if (turns?.[turnId]?.continued === true || turns?.[canonicalTurn]?.continued === true) return 0;
+    const present = new Set(presentIds);
+    const updates: Array<[string, Extract<CanonicalEvent, { kind: 'assistant_message' }>]> = [];
+    const skipped = { provenance: 0, doc: 0, rev: 0, time: 0 };
+    for (const [key, event] of entry.messages) {
+      if (event.kind !== 'assistant_message' || event.source !== 'extension' || !event.messageId) continue;
+      if (event.turnId !== turnId || event.final === true || event.state === 'final' || event.retracted === true) continue;
+      if (present.has(event.messageId) || (event.providerMessageId && present.has(event.providerMessageId))) continue;
+      const seen = entry.assistantProvenance?.get(key);
+      if (evidence) {
+        if (!seen && evidence.settled !== true) { skipped.provenance += 1; continue; }
+        const seenTime = seen?.time ?? event.time;
+        // An unsettled snapshot cannot retract a draft observed by another document; settled turns or newer snapshots can.
+        if (seen?.docId && evidence.docId && seen.docId !== evidence.docId && evidence.settled !== true) { skipped.doc += 1; continue; }
+        if (
+          seen?.docId && evidence.docId && seen.docId === evidence.docId &&
+          seen.docSeq !== undefined && evidence.docSeq !== undefined &&
+          evidence.docSeq <= seen.docSeq
+        ) { skipped.rev += 1; continue; }
+        if (evidence.observedAt !== undefined && Number.isFinite(seenTime) && evidence.observedAt < seenTime) { skipped.time += 1; continue; }
+      }
+      updates.push([key, event]);
+    }
+    const skippedTotal = skipped.provenance + skipped.doc + skipped.rev + skipped.time;
+    if (skippedTotal > 0) {
+      const reasons = [
+        skipped.provenance ? `unknown provenance: ${skipped.provenance}` : '',
+        skipped.doc ? `other document: ${skipped.doc}` : '',
+        skipped.rev ? `stale docSeq: ${skipped.rev}` : '',
+        skipped.time ? `older timestamp: ${skipped.time}` : ''
+      ].filter(Boolean);
+      logInfo(`session store: ${sessionId} skipped retracting ${skippedTotal} discarded streaming message(s) in turn ${turnId} (${reasons.join(', ')})`);
+    }
+    if (!updates.length) return 0;
+    if (evidence) entry.assistantRetractions ??= new Map();
+    for (const [key, event] of updates) {
+      if (evidence) {
+        const seenTime = entry.assistantProvenance?.get(key)?.time ?? event.time;
+        entry.assistantRetractions!.set(key, {
+          time: Math.max(Number.isFinite(seenTime) ? seenTime : 0, evidence.observedAt ?? 0),
+          ...(evidence.docId ? { docId: evidence.docId } : {}),
+          ...(evidence.docSeq !== undefined ? { docSeq: evidence.docSeq } : {})
+        });
+      }
+      const removedTokens = eventTokens(event);
+      const retracted: CanonicalEvent = {
+        ...event,
+        retracted: true,
+        origin: event.origin ?? event.seq,
+        seq: entry.nextSeq
+      };
+      await writeCanonicalMessage(sessionId, key, retracted);
+      entry.nextSeq += 1;
+      entry.messages.set(key, retracted);
+      entry.summary.estimatedTokens = Math.max(0, entry.summary.estimatedTokens - removedTokens);
+      entry.summary.contextTokens = Math.max(0, entry.summary.contextTokens - removedTokens);
+      entry.historySeq = retracted.seq;
+    }
+    scheduleMeta(entry);
+    return updates.length;
   });
 }
 
@@ -1957,6 +2076,7 @@ export async function readEvents(sessionId: string, options: ReadOptions = {}): 
   });
   for (const message of messages.values()) {
     if (message.seq < from) continue;
+    if (options.from === undefined && message.kind === 'assistant_message' && message.retracted === true) continue;
     if (options.kinds && !options.kinds.includes(message.kind)) continue;
     if (options.agent && message.agent !== options.agent) continue;
     out.push(message);
@@ -2576,6 +2696,7 @@ async function readRecentEventsFromDisk(
 
   const candidates: SessionEvent[] = [...rawTail];
   for (const message of messages.values()) {
+    if (message.kind === 'assistant_message' && message.retracted === true) continue;
     if (options.before !== undefined && sequence(message) >= options.before) continue;
     if (forward && sequence(message) <= options.after!) continue;
     if (options.kinds && !options.kinds.includes(message.kind)) continue;
@@ -2613,7 +2734,7 @@ export async function readActivityEvents(sessionId: string, since: number, limit
     const candidates = [...entry.tail, ...entry.messages.values()].sort((a, b) => a.seq - b.seq);
     const reset = cursor < entry.tailFrom && !(cursor === 0 && entry.tailFrom === 1);
     const selected = reset || cursor === 0
-      ? candidates.slice(-cap)
+      ? candidates.filter((event) => !(event.kind === 'assistant_message' && event.retracted === true)).slice(-cap)
       : candidates.filter((event) => event.seq >= cursor).slice(0, cap);
     // All canonical messages remain authoritative after tail eviction and message revision.
     let openingUserMessage: Extract<SessionEvent, { kind: 'user_message' }> | null = null;

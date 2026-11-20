@@ -250,6 +250,7 @@ interface TurnEvidence {
   conversationConflict?: boolean;
   endMessageId?: string | null;
   terminalWithoutFinal?: boolean;
+  messagesComplete?: boolean;
   calls: TurnCall[];
   codeModeCalls?: Array<{ messageId: string; requestId: string | null; answered: boolean }>;
   requests?: Array<{ requestId: string; messageId: string | null; createTime: number | null }>;
@@ -1895,5 +1896,62 @@ describe('what may leave the page', () => {
       [0, 'read_file'],
       [2, 'run_command']
     ]);
+  });
+
+  describe('reporting whether a turn exposed all of its assistant messages', () => {
+    it('marks complete turns complete and truncated long-work or budget-exhausted turns incomplete', async () => {
+      const complete = await scan([], [{
+        id: 'search-complete',
+        messages: [],
+        renderer: 'search',
+        viewStatus: 'complete',
+        viewItems: [
+          { type: 'user-message', messageId: 'u-1', message: 'Question', sentAtMs: 1_790_000_000_000 },
+          { type: 'chatgpt-reasoning-group', items: [
+            { type: 'assistant-message', messageId: 'interim-ok', content: 'Checking', phase: 'commentary', completed: true }
+          ] },
+          { type: 'assistant-message', messageId: 'final-ok', content: 'Done', completed: true, phase: 'final_answer' }
+        ],
+        rendered: ['Done']
+      }]);
+      expect(complete.turns[0]!.messagesComplete).toBe(true);
+
+      const overRows = await scan([], [{
+        id: 'search-over-rows',
+        messages: [],
+        renderer: 'search',
+        viewStatus: 'complete',
+        viewItems: [
+          { type: 'user-message', messageId: 'u-2', message: 'Question', sentAtMs: 1_790_000_000_000 },
+          { type: 'chatgpt-reasoning-group', items: [
+            ...Array.from({ length: 405 }, (_, index) => ({ type: 'mcp-tool-call', callId: `c-${index}`, invocation: { server: APP, tool: `${LINK}/read` } })),
+            { type: 'assistant-message', messageId: 'interim-cut', content: 'Cut past row limit', phase: 'commentary', completed: true }
+          ] },
+          { type: 'assistant-message', messageId: 'final-2', content: 'Done', completed: true, phase: 'final_answer' }
+        ],
+        rendered: ['Done']
+      }]);
+      expect(overRows.turns[0]!.messagesComplete).toBe(false);
+
+      const overBudget = await scan([], [{
+        id: 'search-over-budget',
+        messages: [],
+        renderer: 'search',
+        viewStatus: 'complete',
+        viewItems: [
+          { type: 'user-message', messageId: 'u-3', message: 'Question', sentAtMs: 1_790_000_000_000 },
+          { type: 'chatgpt-reasoning-group', items: Array.from({ length: 20 }, (_, index) => ({
+            type: 'assistant-message',
+            messageId: `interim-big-${index}`,
+            content: 'y'.repeat(16_000),
+            phase: 'commentary',
+            completed: true
+          })) },
+          { type: 'assistant-message', messageId: 'final-3', content: 'Done', completed: true, phase: 'final_answer' }
+        ],
+        rendered: ['Done']
+      }]);
+      expect(overBudget.turns[0]!.messagesComplete).toBe(false);
+    });
   });
 });
