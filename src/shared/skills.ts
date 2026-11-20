@@ -22,8 +22,6 @@ export interface ManagedSkill extends SkillSummary {
   origin: GitHubSkillOrigin | null;
   /** Local enablement, independent from the package's GitHub origin and files. */
   enabled?: boolean;
-  /** Exact match to a bundled COS recommended Skill, not an invented GitHub SKILL.md URL. */
-  bundled?: boolean;
 }
 
 /** Read-only GitHub observation, scoped to the installed package revision it checked. */

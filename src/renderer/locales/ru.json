@@ -1829,8 +1829,6 @@
   "Enable skill": "Включить скилл",
   "Skill disabled": "Скилл отключён",
   "Skill enabled": "Скилл включён",
-  "Bundled with COS": "Встроенный COS",
-  "This Skill exactly matches the bundled COS recommended version.": "Этот скилл полностью совпадает со встроенной рекомендованной версией COS.",
   "Managed Skill enablement file is invalid": "Файл состояния включения скиллов недействителен.",
   "Managed Skill enablement is invalid": "Состояние включения скиллов недействительно.",
   "Managed Skill enablement changed while reading": "Состояние включения скиллов изменилось во время чтения.",

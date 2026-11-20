@@ -1750,8 +1750,6 @@
   "Enable skill": "Bật kỹ năng",
   "Skill disabled": "Đã tắt kỹ năng",
   "Skill enabled": "Đã bật kỹ năng",
-  "Bundled with COS": "Đi kèm COS",
-  "This Skill exactly matches the bundled COS recommended version.": "Kỹ năng này khớp hoàn toàn với phiên bản được đề xuất đi kèm COS.",
   "Managed Skill enablement file is invalid": "Tệp trạng thái bật Skill không hợp lệ.",
   "Managed Skill enablement is invalid": "Trạng thái bật Skill không hợp lệ.",
   "Managed Skill enablement changed while reading": "Trạng thái bật Skill đã thay đổi trong khi đọc.",

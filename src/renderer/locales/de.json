@@ -1776,8 +1776,6 @@
   "Enable skill": "Skill aktivieren",
   "Skill disabled": "Skill deaktiviert",
   "Skill enabled": "Skill aktiviert",
-  "Bundled with COS": "In COS enthalten",
-  "This Skill exactly matches the bundled COS recommended version.": "Dieser Skill entspricht genau der in COS enthaltenen empfohlenen Version.",
   "Managed Skill enablement file is invalid": "Die Datei mit dem Aktivierungsstatus der Skills ist ungültig.",
   "Managed Skill enablement is invalid": "Der Aktivierungsstatus der Skills ist ungültig.",
   "Managed Skill enablement changed while reading": "Der Aktivierungsstatus der Skills hat sich während des Lesens geändert.",

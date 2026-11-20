@@ -25,10 +25,8 @@ export function initSkillsLibrary(api: AppApi): () => void {
     if (!source) return;
     if (!skill.origin) {
       source.className = 'skill-library-source is-local';
-      source.replaceChildren(icon('i-folder'), el('span', '', () => t(skill.bundled ? 'Bundled with COS' : 'Local')));
-      ui(source, 'title', () => t(skill.bundled
-        ? 'This Skill exactly matches the bundled COS recommended version.'
-        : 'Link a GitHub source from the card menu to check for updates.'));
+      source.replaceChildren(icon('i-folder'), el('span', '', () => t('Local')));
+      ui(source, 'title', () => t('Link a GitHub source from the card menu to check for updates.'));
       return;
     }
     const check = checks.get(skill.id);

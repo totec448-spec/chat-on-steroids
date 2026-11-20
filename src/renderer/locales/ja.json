@@ -1750,8 +1750,6 @@
   "Enable skill": "スキルを有効にする",
   "Skill disabled": "スキルを無効にしました",
   "Skill enabled": "スキルを有効にしました",
-  "Bundled with COS": "COS に同梱",
-  "This Skill exactly matches the bundled COS recommended version.": "このスキルは COS に同梱された推奨版と完全に一致します。",
   "Managed Skill enablement file is invalid": "Skill の有効状態ファイルが無効です。",
   "Managed Skill enablement is invalid": "Skill の有効状態が無効です。",
   "Managed Skill enablement changed while reading": "読み取り中に Skill の有効状態が変更されました。",
