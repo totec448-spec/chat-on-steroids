@@ -2478,14 +2478,36 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('sessions:checkWebTitle', async (payload) => {
     const { id } = z.object({ id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i) }).strict().parse(payload);
-    if (!getConfig().sessions.checkWebChatTitles) return 'unavailable';
+    const { ui: { chatBrowser }, sessions: settings } = getConfig();
+    if (!settings.checkWebChatTitles) {
+      logInfo('web chat title: check skipped (disabled)');
+      return 'unavailable';
+    }
     const chat = await getSession(id);
-    if (chat?.titleSource !== 'manual' || !chat.conversationId) return 'unavailable';
+    if (chat?.titleSource !== 'manual' || !chat.conversationId) {
+      logInfo('web chat title: check skipped (ineligible session)');
+      return 'unavailable';
+    }
+    if (getConfig().ui.chatBrowser !== chatBrowser) {
+      logInfo('web chat title: check skipped (browser changed)');
+      return 'unavailable';
+    }
     const title = await readWebChatTitle(chat.conversationId);
     if (title === null) return 'unavailable';
     const current = await getSession(id);
-    if (!getConfig().sessions.checkWebChatTitles || current?.titleSource !== 'manual' ||
-        current.conversationId !== chat.conversationId || current.title !== chat.title) return 'unavailable';
+    const config = getConfig();
+    if (config.ui.chatBrowser !== chatBrowser) {
+      logInfo('web chat title: comparison discarded (browser changed)');
+      return 'unavailable';
+    }
+    if (!config.sessions.checkWebChatTitles) {
+      logInfo('web chat title: comparison discarded (disabled)');
+      return 'unavailable';
+    }
+    if (current?.titleSource !== 'manual' || current.conversationId !== chat.conversationId || current.title !== chat.title) {
+      logInfo('web chat title: comparison discarded (session changed)');
+      return 'unavailable';
+    }
     return title === chat.title ? 'match' : 'different';
   });
   handle('sessions:rename', async (payload) => {

@@ -78,6 +78,17 @@ it('confirms titles only from the exact visible conversation and sidebar row', (
   document.title = 'New name - ChatGPT';
   expect(api.confirmedConversationTitle(current)).toBe('New name');
   const row = document.querySelector<HTMLAnchorElement>('a[href$="' + current + '"]')!;
+  row.title = 'New name';
+  const label = row.querySelector('span')!;
+  label.textContent = 'Stale name';
+  expect(api.confirmedConversationTitle(current)).toBeNull();
+  label.textContent = '';
+  expect(api.confirmedConversationTitle(current)).toBe('New name');
+  label.textContent = 'New name';
+  row.title = 'Stale name';
+  expect(api.confirmedConversationTitle(current)).toBeNull();
+  row.title = 'New name';
+  expect(api.confirmedConversationTitle(current)).toBe('New name');
   row.hidden = true;
   expect(api.confirmedConversationTitle(current)).toBeNull();
   row.hidden = false;

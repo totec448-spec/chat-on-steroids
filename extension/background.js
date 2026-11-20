@@ -3743,7 +3743,7 @@ async function checkWebChatTitle(request) {
         const [current] = await active();
         reason = 'document-changed';
         if (usable(current) && current.id === tab.id && current.url === tab.url &&
-            tabDocuments[String(tab.id)] === documentId && tabEpochs[String(tab.id)] === epoch) {
+            ownsDocument({ tab: tab.id, documentId, navigationEpoch: epoch })) {
           reason = answer ? 'title-unconfirmed' : 'page-unresponsive';
           if (typeof answer?.title === 'string' && answer.title.length <= 200) title = answer.title.trim() || null;
         }

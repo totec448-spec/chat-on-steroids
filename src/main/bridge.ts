@@ -789,8 +789,11 @@ function browserOf(req: http.IncomingMessage): string | null {
 function webTitleBrowser(req: http.IncomingMessage): string | null {
   const browser = browserOf(req);
   if (!browser || staleCompanion(req)) return null;
-  if (getConfig().ui.chatBrowser === 'cos') return chosenBuiltInBrowser(req) ? browser : null;
-  return req.headers['x-extension-host'] === 'browser' && externalExtension?.browserId === browser ? browser : null;
+  const selected = getConfig().ui.chatBrowser;
+  if (selected === 'cos') return chosenBuiltInBrowser(req) ? browser : null;
+  return req.headers['x-extension-host'] === 'browser' &&
+    geckoExtension(req) === (selected === 'firefox') &&
+    externalExtension?.browserId === browser ? browser : null;
 }
 const browserSeenAt = new Map<string, number>();
 /** Until when a browser's extension reloads into a new build; it takes no new message meanwhile. */
@@ -3494,8 +3497,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     return json(res, ok ? 200 : 409, { ok }, origin);
   }
   if (route === '/browser/web-chat-title' && req.method === 'POST') {
+    const body = await readBody(req, 2048);
     const browser = webTitleBrowser(req);
-    const accepted = browser !== null && acceptWebChatTitle(browser, await readBody(req, 2048));
+    const accepted = browser !== null && acceptWebChatTitle(browser, body);
     return json(res, accepted ? 200 : 409, { ok: accepted }, origin);
   }
 
