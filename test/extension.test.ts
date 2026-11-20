@@ -6536,6 +6536,30 @@ it('keeps the temporary destination URL when a normal tab starts navigating ther
   expect(call).toHaveBeenCalledExactlyOnceWith('/status?repaired=temporary-navigation&repairAction=preserved&preservedFor=temporary-chat');
 });
 
+it('uses a regular pending destination when a Temporary Chat tab is already navigating away', async () => {
+  const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  const tab = { id: 76,
+    url: `https://chatgpt.com/c/${conversationId}?temporary-chat=true`,
+    pendingUrl: `https://chatgpt.com/c/${conversationId}` };
+  const reload = vi.fn();
+  const call = vi.fn(async () => ({ ok: true }));
+  const source = backgroundSource.slice(backgroundSource.indexOf('async function performBrowserRepairs('),
+    backgroundSource.indexOf('\nfunction conversationStillOpen('));
+  const repair = vm.runInNewContext(`${source}\nperformBrowserRepairs`, {
+    tabConversations: { '76': conversationId }, tabDocuments: { '76': 'live-document' },
+    conversationForTab: (value: { url?: string }) => value.url?.split('/c/')[1]?.split(/[?#]/)[0] ?? null,
+    createChatTab: vi.fn(), call,
+    tabReply: async () => ({ ok: true, conversationId, streaming: false, assistantError: false }),
+    chrome: { tabs: { query: async () => [tab], reload, get: async () => tab, update: vi.fn() } },
+    CHATGPT_TAB_URLS: ['https://chatgpt.com/*']
+  });
+
+  await repair([{ conversationId, token: 'leaving-temporary-chat', reason: 'unattributed' }], {});
+
+  expect(reload).toHaveBeenCalledExactlyOnceWith(76);
+  expect(call).toHaveBeenCalledExactlyOnceWith('/status?repaired=leaving-temporary-chat&repairAction=reloaded');
+});
+
 /**
  * 2026-09-26: after an extension update, open tabs kept the old MAIN-world usage observer. The
  * worker asks usage.js to replace itself, and only while the page says it is not streaming.
