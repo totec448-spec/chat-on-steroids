@@ -489,6 +489,10 @@ Unlike a new worker, a wake whose model the picker cannot confirm is still typed
 step `model-unconfirmed` and the bridge logs which model it could not confirm. A Compact & Resume does the
 same (2026-11-01: an abandoned resume stopped its chat for good); its new chat then tries the model once more
 (`publishBootstrapSelection`).
+A bootstrap's model choice that ChatGPT takes back as the picker closes (receipt `failure=changed`,
+`failedPhase=close`, #2085) is tried once more, like an announcement over the picker: at most two attempts
+(receipt `attempt` 1 and 2), only for that outcome, and the picker read after the second close is still the only
+proof. An unreadable, unavailable, mid-selection or unclosed picker is not retried. Input sends keep one attempt.
 An effort-only request (no model) keeps ChatGPT's current model: `selectModelSettings` rounds the
 effort within that model only and never moves to another model offering the effort; with the current
 model unreadable it confirms nothing.

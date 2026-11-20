@@ -18159,6 +18159,67 @@ describe('the fresh chat the app opened', () => {
     expect(picks).toBe(when === 'over the model picker' ? 2 : 1);
   });
 
+  /**
+   * #2085: ChatGPT can take the choice back as the picker closes (two Windows receipts and one Mac run
+   * read `failure=changed`, `failedPhase=close`, `closed=true`). One further attempt is made for that
+   * outcome alone, never more, and nothing is claimed unless the second picker read confirms it.
+   */
+  describe('a choice ChatGPT takes back when the picker closes (#2085)', () => {
+    const run = async (outcomes: Array<{ confirmed: boolean; failure?: string; failedPhase?: string }>) => {
+      let release!: (value: unknown) => void;
+      const redeemed = new Promise(resolve => { release = resolve; });
+      const workerChat = '27272727-3838-4949-8a8a-909090909090';
+      live = await harness('https://chatgpt.com/?clf=cmd-takeback', {
+        redeem: () => redeemed,
+        command_step: () => ({ ok: true }),
+        page_note: () => ({ ok: true }),
+        fail: () => ({ ok: true }),
+        ack: () => ({ ok: true })
+      }, (document, dom) => {
+        document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+          dom.reconfigure({ url: `https://chatgpt.com/c/${workerChat}` });
+          userTurn(document, 'takeback-worker-user', 'Worker task', { sent: false });
+        });
+      });
+      let picks = 0;
+      (live.window as any).CLF_DOM.selectModelSettings = vi.fn(async (_model: string, _effort: string, _current: unknown, diagnostic: (trace: unknown) => void) => {
+        const outcome = outcomes[Math.min(picks, outcomes.length - 1)]!;
+        picks++;
+        diagnostic({ outcome: outcome.confirmed ? 'confirmed' : 'failed', failure: outcome.failure ?? null, failedPhase: outcome.failedPhase ?? null });
+        return outcome.confirmed;
+      });
+      release({ ok: true, command: { id: 'cmd-takeback', type: 'worker', text: 'Worker task', agent: 'worker-1', model: 'gpt-6-thinking', reasoningEffort: 'high' } });
+      await settle(600);
+      const steps = live.sent.filter(message => message.type === 'command_step').map(message => message.step);
+      return { picks, steps, attempts: live.sent.filter(message => message.step === 'model-diagnostic').map(message => message.modelSelection?.attempt) };
+    };
+
+    it('selects again once and goes on when the second pick holds', async () => {
+      const seen = await run([{ confirmed: false, failure: 'changed', failedPhase: 'close' }, { confirmed: true }]);
+      expect(seen.picks).toBe(2);
+      expect(seen.attempts).toEqual([1, 2]);
+      expect(seen.steps).toContain('sending');
+    });
+
+    it('stops after the second attempt when ChatGPT takes the choice back again', async () => {
+      const seen = await run([{ confirmed: false, failure: 'changed', failedPhase: 'close' }]);
+      expect(seen.picks).toBe(2);
+      expect(seen.attempts).toEqual([1, 2]);
+      expect(seen.steps).not.toContain('sending');
+    });
+
+    it.each([
+      ['an unreadable picker', 'unreadable', 'open'],
+      ['a choice that is not offered', 'unavailable', 'enumerate-version'],
+      ['a change before the close', 'changed', 'select-effort'],
+      ['a picker that did not close', 'close-failed', 'close']
+    ])('does not select again after %s', async (_name, failure, failedPhase) => {
+      const seen = await run([{ confirmed: false, failure, failedPhase }]);
+      expect(seen.picks).toBe(1);
+      expect(seen.steps).not.toContain('sending');
+    });
+  });
+
   // #1086 (2.1.41, VM at 255 MB free): three worker pages pressed Send 38–48 s into their 90 s, saw
   // their new chat only after their copy of the deadline, and returned without a word. The task was in
   // ChatGPT either way; the app takes a late receipt back (adoptLateWorker) and has to get one.
