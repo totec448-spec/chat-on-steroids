@@ -4934,7 +4934,13 @@ function metricFieldsMatch(canonical: Element[], panel: Element): boolean {
   const fields = canonical.filter(field => field.textContent?.trim());
   const recorded = [...panel.querySelectorAll(DIL_GRID_FIELD)]
     .filter(field => field.textContent?.trim() && !field.querySelector(DIL_GRID_FIELD));
-  return recorded.length === fields.length &&
+  // Markup around a whole field (a struck-through heading) is formatting the reply's field lacks.
+  const wrapped = (field: Element): boolean => {
+    for (let at = field.parentElement; at && at !== panel; at = at.parentElement)
+      if (DIL_INLINE_MARKUP.has(at.tagName)) return true;
+    return false;
+  };
+  return recorded.length === fields.length && !recorded.some(wrapped) &&
     fields.every((field, index) => metricFieldMatches(field, recorded[index]!));
 }
 
@@ -4968,6 +4974,11 @@ function restoreRecordedDilLayouts(box: HTMLElement, capture?: StoredText): void
       metricGrid = node;
       const columns = recordedMetricGridColumns(node);
       if (columns !== null) candidates.push({ node, kind: 'grid', columns });
+    } else if (node.matches(DIL_GRID) && !node.parentElement?.closest(`${DIL_GRID}, ${DIL_BORDERED_BOX}`) &&
+        node.querySelector(`${DIL_GRID} > ${DIL_GRID_ITEM} > ${DIL_BORDERED_BOX} ${DIL_TITLE}`)) {
+      // An outer grid that wraps a metric grid is a nested capture: its cards stay in Markdown
+      // instead of becoming separate panels that leave a short card bare.
+      metricGrid = node;
     } else {
       const kind = candidate(node);
       if (kind) candidates.push({ node, kind });
