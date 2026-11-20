@@ -82,7 +82,9 @@ function showImageStorage(sessionId?: string): void {
   };
   const choices = el('div', 'image-storage-actions');
   const cancel = el('button', 'btn btn-solid image-storage-close', () => t('Close')) as HTMLButtonElement;
-  cancel.type = 'button'; cancel.addEventListener('click', () => dialog.close());
+  cancel.type = 'button';
+  cancel.autofocus = true;
+  cancel.addEventListener('click', () => dialog.close());
   dialog.append(el('h3', '', () => t('Free recording storage')), summary,
     el('p', 'image-storage-note', () => t('Remove local recorded image copies. Chat text, original files and pending attachments stay. Removed previews will no longer be available in old chats.')),
     el('p', 'image-storage-note', () => t('Long texts can be freed from old chats too: chats unused for a week, oldest first. Long messages and tool results then keep only their beginning.')),
@@ -156,10 +158,10 @@ function showImageStorage(sessionId?: string): void {
     all: () => t('Permanently remove all local recorded images? Chat text and original files will stay.'),
     'old-chats-gib': () => t('Permanently remove about 1 GB of images and full long texts from chats unused for a week, oldest first? The chats stay, and long messages and tool results keep their beginning.'),
     'session-images': () => t('Permanently remove all local recorded images from this chat? Chat text, original files and long texts will stay.'),
-    'session-texts': () => t('Permanently remove all full long texts saved in this chat? Messages and tool results will keep their beginning.')
+    'session-texts': () => t('Free long texts in this chat? The full text stored by this app cannot be recovered. Only the beginning of each long message and tool result will remain.')
   };
-  const appendAction = (mode: ImageStorageClearMode, extraClass = '') => {
-    const action = el('button', `btn btn-solid${extraClass ? ` ${extraClass}` : ''}`, labels[mode]) as HTMLButtonElement;
+  const cleanupButton = (mode: ImageStorageClearMode) => {
+    const action = el('button', 'btn btn-quiet', labels[mode]) as HTMLButtonElement;
     action.type = 'button';
     action.addEventListener('click', () => {
       if (cleanup?.pending) return;
@@ -189,15 +191,21 @@ function showImageStorage(sessionId?: string): void {
         toast(cleanupResultText(result, mode, false));
       });
     });
-    choices.append(action);
+    return action;
   };
-  appendAction('oldest-gib');
-  appendAction('all');
-  appendAction('old-chats-gib', 'image-storage-span');
-  if (sessionId) {
-    choices.append(el('span', 'image-storage-group-label', () => t('This chat')));
-    for (const mode of ['session-images', 'session-texts'] as const) appendAction(mode);
-  }
+  const appendGroup = (scope: 'chat' | 'global', label: () => string, modes: ImageStorageClearMode[]) => {
+    const group = el('div', 'image-storage-action-group');
+    const heading = el('h4', 'image-storage-group-label', label);
+    heading.id = `image-storage-${scope}-label`;
+    group.setAttribute('role', 'group');
+    group.setAttribute('aria-labelledby', heading.id);
+    const buttons = el('div', 'image-storage-action-buttons');
+    buttons.append(...modes.map(cleanupButton));
+    group.append(heading, buttons);
+    choices.append(group);
+  };
+  if (sessionId) appendGroup('chat', () => t('This chat'), ['session-images', 'session-texts']);
+  appendGroup('global', () => t('All chats'), ['oldest-gib', 'all', 'old-chats-gib']);
   if (cleanup) {
     renderCleanup();
     if (cleanup.pending && cleanup.sessionId !== sessionId && sessionId) loadUsage();
