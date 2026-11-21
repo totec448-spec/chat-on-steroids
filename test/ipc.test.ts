@@ -1081,6 +1081,58 @@ it('opens exactly the saved project folder and refuses unknown, unapproved or un
   }
 });
 
+it('refuses an unreadable saved project folder without launching Explorer or leaking its path', async () => {
+  const { addProject } = await import('../src/main/projects.js');
+  const logger = await import('../src/main/logger.js');
+  const warning = vi.spyOn(logger, 'logWarn');
+  const root = await fs.realpath(dir);
+  const target = path.join(root, 'permission-denied-project');
+  await fs.mkdir(target);
+  await saveConfig({ ...defaultConfig(), roots: [{ name: 'approved', path: root }] });
+  const project = await addProject(target);
+  const shellCalls = vi.mocked(shell.openPath);
+  shellCalls.mockClear();
+  const originalStat = fs.stat.bind(fs);
+  const deny = vi.spyOn(fs, 'stat').mockImplementation(async (...args) => {
+    if (String(args[0]) === target && args[1]?.bigint) {
+      throw Object.assign(new Error('EACCES: private target path'), { code: 'EACCES' });
+    }
+    return originalStat(...args);
+  });
+  try {
+    const reply = await handlers.get('projects:openFolder')!(null, { projectId: project.id }) as any;
+    expect(reply).toMatchObject({ ok: false });
+    expect(shellCalls).not.toHaveBeenCalled();
+    expect(warning.mock.calls.map(call => call[0])).toContain('projects:openFolder refused: target_unavailable');
+    expect(warning.mock.calls.map(call => call[0]).join(' ')).not.toContain(target);
+  } finally {
+    deny.mockRestore();
+    warning.mockRestore();
+  }
+});
+
+it('fails closed on malformed persisted project catalog without overwriting its saved bytes', async () => {
+  const { addProject } = await import('../src/main/projects.js');
+  const root = await fs.realpath(dir);
+  const target = path.join(root, 'persisted-catalog-project');
+  await fs.mkdir(target);
+  await saveConfig({ ...defaultConfig(), roots: [{ name: 'approved', path: root }] });
+  const project = await addProject(target);
+  const original = await readDurable<unknown>('projects', { strict: true });
+  const damaged = [{ id: project.id, name: 'invalid saved row', path: 42, createdAt: Date.now() }];
+  await writeDurableNow('projects', damaged);
+  const shellCalls = vi.mocked(shell.openPath);
+  shellCalls.mockClear();
+  try {
+    expect(await handlers.get('projects:openFolder')!(null, { projectId: project.id })).toMatchObject({ ok: false });
+    expect(shellCalls).not.toHaveBeenCalled();
+    expect(await readDurable<unknown>('projects', { strict: true })).toEqual(damaged);
+  } finally {
+    await writeDurableNow('projects', original);
+  }
+  expect(await readDurable<unknown>('projects', { strict: true })).toEqual(original);
+});
+
 it('reads the chat edits channel and checks project ownership for a recorded diff', async () => {
   const { addProject } = await import('../src/main/projects.js');
   const { bindSessionProject, writeAsset } = await import('../src/main/session/store.js');
