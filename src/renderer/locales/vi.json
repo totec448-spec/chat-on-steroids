@@ -3973,5 +3973,17 @@
   "Chats update faster": "Chat cập nhật nhanh hơn",
   "A new message or tool call shows up in the open chat much sooner.": "Tin nhắn mới hoặc lệnh gọi công cụ hiện trong chat đang mở sớm hơn nhiều.",
   "What a chat edited": "Những gì một chat đã sửa",
-  "Review lists the files this chat changed and opens each recorded diff.": "Mục Xem lại liệt kê các tệp chat này đã thay đổi và mở từng diff đã ghi."
+  "Review lists the files this chat changed and opens each recorded diff.": "Mục Xem lại liệt kê các tệp chat này đã thay đổi và mở từng diff đã ghi.",
+  "This chat: {0} MB of {1} MB ({2} MB images, {3} MB long texts).": "Cuộc trò chuyện này: {0} MB / {1} MB ({2} MB ảnh, {3} MB văn bản dài).",
+  "Loading chat storage usage…": "Đang tải dung lượng lưu trữ của cuộc trò chuyện…",
+  "Global image cleanups do not remove long texts in active chats. You can clear images or long texts for this chat below.": "Dọn dẹp ảnh toàn cục không xóa văn bản dài trong các cuộc trò chuyện đang hoạt động. Bạn có thể xóa ảnh hoặc văn bản dài của cuộc trò chuyện này bên dưới.",
+  "Free images in this chat": "Giải phóng ảnh trong cuộc trò chuyện này",
+  "Free long texts in this chat": "Giải phóng văn bản dài trong cuộc trò chuyện này",
+  "Permanently remove all local recorded images from this chat? Chat text, original files and long texts will stay.": "Xóa vĩnh viễn tất cả ảnh đã ghi cục bộ khỏi cuộc trò chuyện này? Văn bản trò chuyện, tệp gốc và văn bản dài sẽ vẫn được giữ lại.",
+  "Free long texts in this chat? The full text stored by this app cannot be recovered. Only the beginning of each long message and tool result will remain.": "Xóa các văn bản dài trong cuộc trò chuyện này? Không thể khôi phục toàn bộ văn bản đã lưu trong ứng dụng này. Chỉ phần đầu của mỗi tin nhắn dài và mỗi kết quả công cụ được giữ lại.",
+  "All chats": "Tất cả cuộc trò chuyện",
+  "This chat": "Cuộc trò chuyện này",
+  "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "Đã giải phóng {0} MB khỏi cuộc trò chuyện này. Hiện đang dùng {1} MB / {2} MB.",
+  "Freed {0} MB. Storage usage could not be read.": "Đã giải phóng {0} MB. Không đọc được dung lượng sử dụng.",
+  "Last cleanup: Freed {0} MB.": "Lần dọn dẹp gần nhất: Đã giải phóng {0} MB."
 }

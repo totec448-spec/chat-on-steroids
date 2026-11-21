@@ -10,14 +10,18 @@ import {
   getImageStorage,
   initSessionStore,
   MAX_GLOBAL_ASSET_BYTES,
+  MAX_SESSION_ASSET_BYTES,
   readAsset,
   readEvents,
   recordingStorageFull,
   resetSessionStoreForTests,
   setRecordingStorageLimit,
   upsertMessageEvent,
-  writeAsset
+  writeAsset,
+  writeOverflowText,
+  writeRecordedOverflowText
 } from '../src/main/session/store.js';
+import { recordChatObservations, resetRecorderForTests } from '../src/main/session/recorder.js';
 import * as logger from '../src/main/logger.js';
 
 // #1406: the store held 2 GiB and could only shed images. Long texts (tool output, long answers)
@@ -37,6 +41,7 @@ beforeEach(async () => {
 afterEach(async () => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  resetRecorderForTests();
   resetSessionStoreForTests();
   await fs.rm(directory, { recursive: true, force: true });
 });
@@ -163,4 +168,437 @@ it('uses the chosen storage limit, and a larger one ends a full store at once', 
   expect(recordingStorageFull()).toBe(true);
   // Only the offered sizes are accepted.
   expect(() => setRecordingStorageLimit(3)).toThrow();
+});
+
+// #2198: a single chat hitting 192 MB (for example, from long tool outputs) needs per-chat breakdown and cleanup.
+it('reports per-chat image vs long-text breakdown without affecting global-only calls', async () => {
+  const target = await chatWithLongOutput('target', 1, 'long output '.repeat(100));
+  const png = await sharp({ create: { width: 5, height: 4, channels: 3, background: '#113355' } }).png().toBuffer();
+  const image = await writeAsset(target.session.id, png, 'image/png');
+  const other = await chatWithLongOutput('other', 1, 'other output '.repeat(150));
+  const textSize = (await fs.stat(path.join(directory, 'sessions', target.session.id, 'assets', target.asset.id))).size;
+  const otherSize = (await fs.stat(path.join(directory, 'sessions', other.session.id, 'assets', other.asset.id))).size;
+
+  const globalOnly = await getImageStorage();
+  expect(globalOnly).toEqual({ usedBytes: textSize + image.bytes + otherSize, limitBytes: MAX_GLOBAL_ASSET_BYTES });
+
+  const withSession = await getImageStorage(target.session.id);
+  expect(withSession.session).toEqual({
+    sessionId: target.session.id,
+    usedBytes: textSize + image.bytes,
+    limitBytes: MAX_SESSION_ASSET_BYTES,
+    imageBytes: image.bytes,
+    textBytes: textSize
+  });
+});
+
+it('counts only verified images in the breakdown while keeping other assets in the quota', async () => {
+  const session = await createSession({ title: 'Mixed asset bytes' });
+  const png = await sharp({ create: { width: 3, height: 3, channels: 3, background: '#113355' } }).png().toBuffer();
+  const legacyImage = await writeAsset(session.id, png, 'application/octet-stream');
+  const other = await writeAsset(session.id, Buffer.from('not an image'), 'application/octet-stream');
+
+  expect((await getImageStorage(session.id)).session).toMatchObject({
+    usedBytes: legacyImage.bytes + other.bytes, imageBytes: legacyImage.bytes, textBytes: 0
+  });
+  const cleared = await clearImageStorage('session-images', session.id);
+  expect(cleared.freedBytes).toBe(legacyImage.bytes);
+  expect(cleared.session).toMatchObject({ usedBytes: other.bytes, imageBytes: 0, textBytes: 0 });
+  expect(await readAsset(session.id, other.id)).not.toBeNull();
+});
+
+it('frees only images or only long texts from the chosen chat', async () => {
+  const target = await chatWithLongOutput('target', 1, 'target long output '.repeat(200));
+  const png = await sharp({ create: { width: 5, height: 4, channels: 3, background: '#113355' } }).png().toBuffer();
+  const targetImage = await writeAsset(target.session.id, png, 'image/png');
+  await upsertMessageEvent(target.session.id, {
+    time: Date.now(), source: 'app', kind: 'user_message', messageId: 'target-msg', message: plain('keep my text'), assets: [targetImage]
+  });
+
+  const other = await chatWithLongOutput('other', 1, 'other long output '.repeat(200));
+  const otherImage = await writeAsset(other.session.id, png, 'image/png');
+  await upsertMessageEvent(other.session.id, {
+    time: Date.now(), source: 'app', kind: 'user_message', messageId: 'other-msg', message: plain('other chat'), assets: [otherImage]
+  });
+
+  const afterImages = await clearImageStorage('session-images', target.session.id);
+  expect(afterImages.freedBytes).toBe(targetImage.bytes);
+  expect(await readAsset(target.session.id, targetImage.id)).toBeNull();
+  expect(await readAsset(target.session.id, target.asset.id)).not.toBeNull();
+  expect(await readAsset(other.session.id, otherImage.id)).not.toBeNull();
+  expect(afterImages.session?.imageBytes).toBe(0);
+  expect(afterImages.session?.textBytes).toBeGreaterThan(0);
+
+  const afterTexts = await clearImageStorage('session-texts', target.session.id);
+  expect(afterTexts.freedBytes).toBeGreaterThan(0);
+  expect(await readAsset(target.session.id, target.asset.id)).toBeNull();
+  expect(await readAsset(other.session.id, other.asset.id)).not.toBeNull();
+  expect(afterTexts.session?.usedBytes).toBe(0);
+  const tool = (await readEvents(target.session.id)).find(event => event.kind === 'tool_call');
+  expect(tool?.kind === 'tool_call' ? tool.call.result.text : null).toContain('removed to free storage');
+});
+
+it('never classifies a .txt asset starting with WebP magic bytes as an image during session-images cleanup', async () => {
+  const session = await createSession({ conversationId: 'webp-prefix-txt', title: 'WebP prefix text' });
+  const tricky = Buffer.concat([Buffer.from('RIFF\x00\x00\x00\x00WEBP'), Buffer.from(' tool output line '.repeat(40))]);
+  const textAsset = await writeAsset(session.id, tricky, 'text/plain');
+  await appendEvent(session.id, {
+    time: NOW, source: 'mcp', kind: 'tool_call', call: {
+      callId: '00000000-0000-4000-8000-000000000220', tool: 'exec_command', requestId: 'req-webp-txt',
+      conversationId: 'webp-prefix-txt', attribution: 'request_id', attributionMethod: 'request_id',
+      args: plain('{}'),
+      result: { text: `RIFF\n…[${tricky.length - 4} more characters stored in full as ${textAsset.id}]`, truncated: true, chars: tricky.length, assetId: textAsset.id },
+      outcome: 'ok', durationMs: 1, summary: { kind: 'run', title: 'Ran tool', tone: 'neutral' }
+    }
+  });
+
+  const before = await getImageStorage(session.id);
+  expect(before.session).toMatchObject({ imageBytes: 0, textBytes: tricky.length });
+
+  const after = await clearImageStorage('session-images', session.id);
+  expect(after.removedFiles).toBe(0);
+  expect(after.freedBytes).toBe(0);
+  expect(await readAsset(session.id, textAsset.id)).toEqual(tricky);
+
+  const clearedTexts = await clearImageStorage('session-texts', session.id);
+  expect(clearedTexts.removedFiles).toBe(1);
+  expect(clearedTexts.freedBytes).toBe(tricky.length);
+  expect(await readAsset(session.id, textAsset.id)).toBeNull();
+});
+
+it('handles malformed session IDs, symlinked assets dirs, ENOENT lstat races, and protected .txt records in per-chat flows', async () => {
+  await expect(getImageStorage('../bad')).rejects.toThrow('Invalid session id');
+  await expect(clearImageStorage('session-images', '../bad')).rejects.toThrow('Invalid session id');
+  await expect(clearImageStorage('session-texts', '../bad')).rejects.toThrow('Invalid session id');
+  await expect(clearImageStorage('old-chats-gib', '../bad')).rejects.toThrow('Invalid session id');
+
+  const symlinked = await createSession({ conversationId: 'symlink-breakdown', title: 'Symlinked assets' });
+  const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'cos-symlink-outside-'));
+  try {
+    await fs.writeFile(path.join(outside, 'deadbeef.txt'), 'secret outside text');
+    const assetsPath = path.join(directory, 'sessions', symlinked.id, 'assets');
+    await fs.mkdir(path.dirname(assetsPath), { recursive: true });
+    await fs.symlink(outside, assetsPath, process.platform === 'win32' ? 'junction' : 'dir');
+    const symInfo = await getImageStorage(symlinked.id);
+    expect(symInfo.session).toEqual({
+      sessionId: symlinked.id, usedBytes: 0, limitBytes: MAX_SESSION_ASSET_BYTES, imageBytes: 0, textBytes: 0
+    });
+  } finally {
+    await fs.rm(outside, { recursive: true, force: true });
+  }
+
+  const protectedChat = await chatWithLongOutput('protected-txt', 1, 'kept output '.repeat(120));
+  const extraTxt = await writeAsset(protectedChat.session.id, Buffer.from('disappearing text'), 'text/plain');
+  await appendEvent(protectedChat.session.id, {
+    time: NOW, source: 'app', kind: 'note',
+    message: { text: 'protected ref', truncated: true, chars: 1200, assetId: protectedChat.asset.id }
+  });
+
+  const realLstat = fs.lstat.bind(fs);
+  const lstatSpy = vi.spyOn(fs, 'lstat').mockImplementation(async (target, ...rest) => {
+    if (String(target).endsWith(extraTxt.id)) {
+      throw Object.assign(new Error('vanished'), { code: 'ENOENT' });
+    }
+    return (realLstat as (...args: unknown[]) => Promise<Awaited<ReturnType<typeof fs.lstat>>>)(target, ...rest);
+  });
+  try {
+    const raced = await getImageStorage(protectedChat.session.id);
+    expect(raced.session?.textBytes).toBe(protectedChat.asset.bytes);
+  } finally {
+    lstatSpy.mockRestore();
+  }
+
+  const vetoed = await clearImageStorage('session-texts', protectedChat.session.id);
+  expect(vetoed.removedFiles).toBe(1); // unreferenced extraTxt removed, protectedChat.asset kept
+  expect(await readAsset(protectedChat.session.id, protectedChat.asset.id)).not.toBeNull();
+
+  // Vetoed files stay admissible for subsequent message upserts (not poisoned in removedAssetEpoch).
+  const keptUpsert = await upsertMessageEvent(protectedChat.session.id, {
+    time: NOW + 1,
+    source: 'extension',
+    kind: 'assistant_message',
+    messageId: 'vetoed-kept-msg',
+    message: { text: `head\n…[1196 more characters stored in full as ${protectedChat.asset.id}]`, truncated: true, chars: 1200, assetId: protectedChat.asset.id },
+    state: 'final',
+    final: true
+  });
+  expect(keptUpsert.event.kind).toBe('assistant_message');
+  if (keptUpsert.event.kind === 'assistant_message') {
+    expect(keptUpsert.event.message.assetId).toBe(protectedChat.asset.id);
+    expect(keptUpsert.event.retiredTextAssetIds).toBeUndefined();
+  }
+});
+
+it('limits pre-cleanup inspection to the target chat so an unreadable asset elsewhere cannot block session cleanup', async () => {
+  const healthy = await createSession({ conversationId: 'healthy-chat-cleanup', title: 'Healthy chat' });
+  const png = await sharp({ create: { width: 4, height: 4, channels: 3, background: '#224466' } }).png().toBuffer();
+  const healthyImage = await writeAsset(healthy.id, png, 'image/png');
+  await upsertMessageEvent(healthy.id, {
+    time: NOW, source: 'app', kind: 'user_message', messageId: 'healthy-msg', message: plain('keep healthy text'), assets: [healthyImage]
+  });
+
+  const broken = await createSession({ conversationId: 'unreadable-chat-cleanup', title: 'Unreadable chat' });
+  const brokenAsset = await writeAsset(broken.id, png, 'image/png');
+
+  const realOpen = fs.open.bind(fs);
+  const openSpy = vi.spyOn(fs, 'open').mockImplementation(async (target, ...rest) => {
+    if (String(target).includes(broken.id) && String(target).endsWith(brokenAsset.id)) {
+      throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+    }
+    return (realOpen as (...args: unknown[]) => Promise<Awaited<ReturnType<typeof fs.open>>>)(target, ...rest);
+  });
+  try {
+    const cleared = await clearImageStorage('session-images', healthy.id);
+    expect(cleared).toMatchObject({ removedFiles: 1, freedBytes: png.length });
+    expect(await readAsset(healthy.id, healthyImage.id)).toBeNull();
+    expect(cleared.session).toEqual({
+      sessionId: healthy.id, usedBytes: 0, limitBytes: MAX_SESSION_ASSET_BYTES, imageBytes: 0, textBytes: 0
+    });
+  } finally {
+    openSpy.mockRestore();
+  }
+
+  const healthyText = await writeAsset(healthy.id, Buffer.from('healthy long text '.repeat(40)), 'text/plain');
+  await upsertMessageEvent(healthy.id, {
+    time: NOW, source: 'app', kind: 'user_message', messageId: 'healthy-txt-msg',
+    message: { text: 'head\n…[more]', truncated: true, chars: 700, assetId: healthyText.id }
+  });
+  const warnSpy = vi.spyOn(logger, 'logWarn').mockImplementation(() => undefined);
+  const realOpendir = fs.opendir.bind(fs);
+  const opendirSpy = vi.spyOn(fs, 'opendir').mockImplementation(async (target, ...rest) => {
+    if (String(target).includes(broken.id)) {
+      throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+    }
+    return (realOpendir as (...args: unknown[]) => Promise<Awaited<ReturnType<typeof fs.opendir>>>)(target, ...rest);
+  });
+  try {
+    const clearedWithUnreadablePeerDir = await clearImageStorage('session-texts', healthy.id);
+    expect(clearedWithUnreadablePeerDir).toMatchObject({
+      removedFiles: 1,
+      freedBytes: healthyText.bytes,
+      usedBytes: null,
+      session: { sessionId: healthy.id, usedBytes: 0, limitBytes: MAX_SESSION_ASSET_BYTES, imageBytes: 0, textBytes: 0 }
+    });
+    expect(await readAsset(healthy.id, healthyText.id)).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('global recount failed: permission denied'));
+  } finally {
+    opendirSpy.mockRestore();
+    warnSpy.mockRestore();
+  }
+});
+
+it('prevents repeated observations from re-spilling retired overflow text assets after session-texts cleanup and restart', async () => {
+  const conversationId = 'conv-retired-long-text';
+  const session = await createSession({ conversationId, title: 'Retired long texts' });
+  const longUserText = 'U'.repeat(260_000);
+  const longAssistantText = 'A'.repeat(260_000);
+  const longAssistantHtml = `<p>${'H'.repeat(125_000)}</p>`;
+
+  await recordChatObservations(conversationId, [
+    { kind: 'user_message', time: NOW + 1, messageId: 'msg-u-long', text: longUserText },
+    {
+      kind: 'assistant_message',
+      time: NOW + 2,
+      messageId: 'msg-a-long',
+      text: longAssistantText,
+      renderedHtml: longAssistantHtml,
+      state: 'final',
+      final: true
+    }
+  ]);
+
+  const assetsDir = path.join(directory, 'sessions', session.id, 'assets');
+  const beforeFiles = (await fs.readdir(assetsDir)).filter((name) => name.endsWith('.txt'));
+  expect(beforeFiles).toHaveLength(3);
+
+  const cleared = await clearImageStorage('session-texts', session.id);
+  expect(cleared.removedFiles).toBe(3);
+  expect(await fs.readdir(assetsDir)).toEqual([]);
+
+  const replaySame = async () => recordChatObservations(conversationId, [
+    { kind: 'user_message', time: NOW + 3, messageId: 'msg-u-long', text: longUserText },
+    {
+      kind: 'assistant_message',
+      time: NOW + 4,
+      messageId: 'msg-a-long',
+      text: longAssistantText,
+      renderedHtml: longAssistantHtml,
+      state: 'final',
+      final: true
+    }
+  ]);
+
+  await replaySame();
+  expect(await fs.readdir(assetsDir)).toEqual([]);
+
+  // Simulate app restart and replay the exact same page observations: retired texts must stay deleted.
+  resetRecorderForTests();
+  resetSessionStoreForTests();
+  initSessionStore(directory);
+
+  await replaySame();
+  expect(await fs.readdir(assetsDir)).toEqual([]);
+  const eventsAfterRestart = await readEvents(session.id);
+  const userAfter = eventsAfterRestart.find((ev) => ev.kind === 'user_message');
+  const assistantAfter = eventsAfterRestart.find((ev) => ev.kind === 'assistant_message');
+  expect(userAfter?.kind === 'user_message' ? userAfter.message.assetId : undefined).toBeUndefined();
+  expect(assistantAfter?.kind === 'assistant_message' ? assistantAfter.message.assetId : undefined).toBeUndefined();
+  expect(assistantAfter?.kind === 'assistant_message' ? assistantAfter.renderedHtml?.assetId : undefined).toBeUndefined();
+  expect(userAfter?.kind === 'user_message' ? userAfter.message.text : '').toContain('more characters removed to free storage');
+  expect(assistantAfter?.kind === 'assistant_message' ? assistantAfter.message.text : '').toContain('more characters removed to free storage');
+
+  // New edited content on the same message id (different hash) still spills normally.
+  await recordChatObservations(conversationId, [
+    {
+      kind: 'assistant_message',
+      time: NOW + 5,
+      messageId: 'msg-a-long',
+      text: `${longAssistantText} edited`,
+      state: 'final',
+      final: true
+    }
+  ]);
+  const afterEditFiles = (await fs.readdir(assetsDir)).filter((name) => name.endsWith('.txt'));
+  expect(afterEditFiles).toHaveLength(1);
+});
+
+it('keeps retired assistant texts off disk when the provider message is replayed under a new key', async () => {
+  const conversationId = 'conv-retired-provider-alias';
+  const session = await createSession({ conversationId, title: 'Provider alias' });
+  const observed = {
+    kind: 'assistant_message' as const,
+    time: NOW,
+    messageId: 'first-key',
+    providerMessageId: 'stable-provider-id',
+    text: 'A'.repeat(260_000),
+    renderedHtml: '<p>' + 'H'.repeat(125_000) + '</p>',
+    state: 'final' as const,
+    final: true
+  };
+  await recordChatObservations(conversationId, [observed]);
+  expect((await clearImageStorage('session-texts', session.id)).removedFiles).toBe(2);
+  resetRecorderForTests();
+  resetSessionStoreForTests();
+  initSessionStore(directory);
+
+  const alias = { ...observed, time: NOW + 1, messageId: 'reloaded-key' };
+  await recordChatObservations(conversationId, [alias]);
+  const assetsDir = path.join(directory, 'sessions', session.id, 'assets');
+  expect(await fs.readdir(assetsDir)).toEqual([]);
+
+  await recordChatObservations(conversationId, [{ ...alias, renderedHtml: undefined, text: alias.text + ' edited' }]);
+  expect(await fs.readdir(assetsDir)).toHaveLength(1);
+  const messages = (await readEvents(session.id)).filter((event) => event.kind === 'assistant_message');
+  expect(messages).toMatchObject([{ messageId: 'first-key', message: { assetId: expect.any(String) } }]);
+});
+
+it('keeps a queued text replay from recreating an asset removed by cleanup ahead of it', async () => {
+  const session = await createSession({ title: 'Queued cleanup' });
+  const body = 'old text '.repeat(30_000);
+  const { asset, stored } = await longText(session.id, body);
+  const owner = { kind: 'assistant_message' as const, messageId: 'queue-key', providerMessageId: 'queue-provider' };
+  await upsertMessageEvent(session.id, { ...owner, time: NOW, source: 'extension', message: stored, final: true });
+
+  const before = getImageStorage(session.id);
+  const cleanup = clearImageStorage('session-texts', session.id);
+  const replay = writeRecordedOverflowText(session.id, body, { ...owner, messageId: 'reloaded-queue-key' });
+  const after = getImageStorage(session.id);
+  const [initial, cleared, written, final] = await Promise.all([before, cleanup, replay, after]);
+
+  expect(initial.session?.textBytes).toBe(asset.bytes);
+  expect(cleared.freedBytes).toBe(asset.bytes);
+  expect(written).toEqual({ assetId: null, retired: true });
+  expect(final.session?.textBytes).toBe(0);
+  expect(await readAsset(session.id, asset.id)).toBeNull();
+
+  const edited = await writeRecordedOverflowText(session.id, body + ' edited', owner);
+  expect(edited).toEqual({ assetId: expect.any(String), retired: false });
+});
+
+it('rejects overflow text references removed between writeOverflowText and new message upsert', async () => {
+  const session = await createSession({ conversationId: 'conv-epoch-text-race', title: 'Epoch text race' });
+  const overflowBody = 'R'.repeat(260_000);
+  const proseAssetId = await writeOverflowText(session.id, overflowBody);
+  expect(proseAssetId).toBeTruthy();
+
+  const cleared = await clearImageStorage('session-texts', session.id);
+  expect(cleared.removedFiles).toBe(1);
+
+  const upserted = await upsertMessageEvent(session.id, {
+    time: NOW + 1,
+    source: 'extension',
+    kind: 'assistant_message',
+    messageId: 'msg-raced-before-upsert',
+    message: {
+      text: `${overflowBody.slice(0, 256_000)}\n…[${overflowBody.length - 256_000} more characters stored in full as ${proseAssetId}]`,
+      truncated: true,
+      chars: overflowBody.length,
+      assetId: proseAssetId!
+    },
+    state: 'final',
+    final: true
+  });
+
+  expect(upserted.event.kind).toBe('assistant_message');
+  if (upserted.event.kind === 'assistant_message') {
+    expect(upserted.event.message.assetId).toBeUndefined();
+    expect(upserted.event.message.text).toContain('more characters removed to free storage');
+    expect(upserted.event.retiredTextAssetIds).toEqual([proseAssetId]);
+  }
+});
+
+it('preserves removal epochs for already-deleted assets and clears only retained ones when a later unlink fails', async () => {
+  const session = await createSession({ conversationId: 'conv-partial-delete-abort', title: 'Partial delete abort' });
+  const bodyA = 'A'.repeat(260_000);
+  const bodyB = 'B'.repeat(260_000);
+  const assetA = await writeOverflowText(session.id, bodyA);
+  const assetB = await writeOverflowText(session.id, bodyB);
+  expect(assetA).toBeTruthy();
+  expect(assetB).toBeTruthy();
+
+  // Fail fs.rename on the second text file deletion after the first text file is already unlinked.
+  const sortedIds = [assetA!, assetB!].sort();
+  let deletedFirst = '';
+  const realRename = fs.rename.bind(fs);
+  const renameSpy = vi.spyOn(fs, 'rename').mockImplementation(async (oldPath, newPath, ...rest) => {
+    const oldStr = String(oldPath);
+    if (oldStr.endsWith(sortedIds[0]!) || oldStr.endsWith(sortedIds[1]!)) {
+      if (!deletedFirst) deletedFirst = oldStr.endsWith(sortedIds[0]!) ? sortedIds[0]! : sortedIds[1]!;
+      else throw Object.assign(new Error('disk error during second delete'), { code: 'EIO' });
+    }
+    return (realRename as (...args: unknown[]) => Promise<void>)(oldPath, newPath, ...rest);
+  });
+
+  try {
+    await expect(clearImageStorage('session-texts', session.id)).rejects.toThrow('disk error during second delete');
+  } finally {
+    renameSpy.mockRestore();
+  }
+
+  const keptSecond = deletedFirst === sortedIds[0] ? sortedIds[1]! : sortedIds[0]!;
+  expect(await readAsset(session.id, deletedFirst)).toBeNull();
+  expect(await readAsset(session.id, keptSecond)).not.toBeNull();
+
+  // Upserting the already-deleted asset must retire its missing assetId; the retained asset remains admissible.
+  const firstUpsert = await upsertMessageEvent(session.id, {
+    time: NOW + 2,
+    source: 'extension',
+    kind: 'assistant_message',
+    messageId: 'msg-after-abort-a',
+    message: { text: `head\n…[10 more characters stored in full as ${deletedFirst}]`, truncated: true, chars: 260_000, assetId: deletedFirst },
+    state: 'final',
+    final: true
+  });
+  expect(firstUpsert.event.kind === 'assistant_message' ? firstUpsert.event.message.assetId : undefined).toBeUndefined();
+
+  const secondUpsert = await upsertMessageEvent(session.id, {
+    time: NOW + 3,
+    source: 'extension',
+    kind: 'assistant_message',
+    messageId: 'msg-after-abort-b',
+    message: { text: `head\n…[10 more characters stored in full as ${keptSecond}]`, truncated: true, chars: 260_000, assetId: keptSecond },
+    state: 'final',
+    final: true
+  });
+  expect(secondUpsert.event.kind === 'assistant_message' ? secondUpsert.event.message.assetId : undefined).toBe(keptSecond);
 });
