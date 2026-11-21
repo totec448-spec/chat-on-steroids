@@ -9,6 +9,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
+import { clickFinishedChatNotification } from '../src/main/finished-notification-click.js';
 
 type Handler = (event: unknown, payload: unknown) => Promise<unknown>;
 const handlers = new Map<string, Handler>();
@@ -66,7 +67,7 @@ const {
   spawn,
   swarmStateForCaller
 } = await import('../src/main/agents.js');
-const { registerIpc, cleanSessionName, personsMessage } = await import('../src/main/ipc.js');
+const { registerIpc, cleanSessionName, personsMessage, openSessionChat } = await import('../src/main/ipc.js');
 const { openInPreferredBrowser } = await import('../src/main/browser.js');
 const bridgeModule = await import('../src/main/bridge.js');
 const { app, nativeTheme, safeStorage, shell, dialog } = await import('electron');
@@ -2750,6 +2751,49 @@ describe('session IPC contracts', () => {
       }
     }
   );
+
+  it('opens the exact recorded tab for each of two Linux notification clicks, reusing or opening as needed', async () => {
+    const original = getConfig();
+    const firstId = 'aaaaaaaa-1111-4222-8333-444444444444';
+    const secondId = 'bbbbbbbb-1111-4222-8333-444444444444';
+    const first = await createSession({ title: 'finished first', conversationId: firstId });
+    const second = await createSession({ title: 'finished second', conversationId: secondId });
+    const reveal = vi.spyOn(bridgeModule, 'revealChatInBrowser').mockImplementation(async id => id === secondId);
+    const failures = vi.fn();
+    const makeNotice = (sessionId: string): EventEmitter => {
+      const notice = new EventEmitter();
+      notice.on('click', () => clickFinishedChatNotification('linux', {
+        openAppChat: () => { throw new Error('Linux must select the browser tab, not CoS'); },
+        openBrowserChat: () => openSessionChat(sessionId),
+        onBrowserFailure: failures
+      }));
+      return notice;
+    };
+    try {
+      await saveConfig({ ...original, ui: { ...original.ui, chatBrowser: 'chrome' } });
+      vi.mocked(openInPreferredBrowser).mockClear();
+      const firstNotice = makeNotice(first.id);
+      const secondNotice = makeNotice(second.id);
+
+      // An existing tab for the second chat must not accidentally select the first one.
+      secondNotice.emit('click');
+      await vi.waitFor(() => expect(reveal).toHaveBeenCalledTimes(1));
+      expect(reveal).toHaveBeenNthCalledWith(1, secondId);
+      expect(openInPreferredBrowser).not.toHaveBeenCalled();
+
+      // The first chat has no matching tab: open only that recorded conversation's URL.
+      firstNotice.emit('click');
+      await vi.waitFor(() => expect(openInPreferredBrowser).toHaveBeenCalledTimes(1));
+      expect(reveal.mock.calls).toEqual([[secondId], [firstId]]);
+      expect(openInPreferredBrowser).toHaveBeenCalledWith(
+        `https://chatgpt.com/c/${firstId}`, { reveal: true }
+      );
+      expect(failures).not.toHaveBeenCalled();
+    } finally {
+      reveal.mockRestore();
+      await saveConfig(original);
+    }
+  });
 });
 
 it('follows only the newest chat selection when an earlier lookup finishes last (#1249, #1267)', async () => {
