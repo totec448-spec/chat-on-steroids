@@ -323,7 +323,7 @@ function runAction<T>(work: () => Promise<T>): Promise<T> {
     timer = setTimeout(() => {
       expired = true;
       reject(new RequestError(504, 'timeout', started
-        ? 'the action may still complete; check GET /v1/inputs before repeating it'
+        ? 'the action may still complete; check GET /v1/inputs/{id} before repeating it'
         : 'the action did not start and will not run; it is safe to send again'));
     }, actionDeadlineMs);
   });

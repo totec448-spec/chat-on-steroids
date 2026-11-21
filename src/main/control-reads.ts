@@ -24,7 +24,7 @@ import type { SessionControlsView } from './bridge.js';
 import { getChatModels } from './chat-models.js';
 import { getLog, logWarn } from './logger.js';
 import { redactSecretText } from './redaction.js';
-import { deliveryProof, listInputs } from './session/input.js';
+import { deliveryProof, readInputReceipts } from './session/input.js';
 import type { InputEntry } from './session/input.js';
 import { readSession, readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
 
@@ -470,8 +470,14 @@ export function selectInputs(rows: readonly InputEntry[], query: { state?: reado
 
 async function inputs(params: URLSearchParams): Promise<ControlApiInputs> {
   const query = parseQuery(params, { state: csv(keysOf(INPUT_STATES)).optional(), limit: integer(1, 500).optional() });
-  const selected = selectInputs(await listInputs(), { state: query.state, limit: query.limit ?? 100 });
+  const selected = selectInputs(await readInputReceipts(), { state: query.state, limit: query.limit ?? 100 });
   return { inputs: selected.rows.map(projectInput), total: selected.total };
+}
+
+async function inputById(id: string, params: URLSearchParams): Promise<{ input: ControlApiInput } | undefined> {
+  parseQuery(params, {});
+  const row = (await readInputReceipts()).find(entry => entry.id === id && entry.purpose !== 'decision');
+  return row ? { input: projectInput(row) } : undefined;
 }
 
 // ---------------------------------------------------------------- agents
@@ -539,6 +545,7 @@ function activityLog(params: URLSearchParams): ControlApiLog {
 // ---------------------------------------------------------------- routes
 
 const SESSION_ROUTE = /^\/v1\/sessions\/([0-9a-z-]{8,64})(\/events)?$/;
+const INPUT_ROUTE = /^\/v1\/inputs\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 
 /**
  * Undefined when the path is not one of these routes. Ids are generated lowercase, and a
@@ -548,6 +555,8 @@ const SESSION_ROUTE = /^\/v1\/sessions\/([0-9a-z-]{8,64})(\/events)?$/;
 export async function serveRead(route: string, params: URLSearchParams): Promise<unknown | undefined> {
   if (route === '/v1/sessions') return sessionList(params);
   if (route === '/v1/inputs') return inputs(params);
+  const input = INPUT_ROUTE.exec(route);
+  if (input) return inputById(input[1]!, params);
   if (route === '/v1/agents') {
     parseQuery(params, {});
     return projectAgents(swarmState());

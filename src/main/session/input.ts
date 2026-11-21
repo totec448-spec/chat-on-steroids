@@ -1404,6 +1404,21 @@ export function listInputs(): Promise<InputEntry[]> {
     });
   });
 }
+
+/**
+ * The control API reads an already-committed outbox snapshot. It must not join
+ * delivery's serial queue, repair sessions, publish history, or advance work.
+ * If this process has not yet loaded the outbox, read and validate its durable
+ * snapshot directly. A corrupt/unreadable store is an error, never an empty
+ * queue or proof that an input was not sent.
+ */
+export async function readInputReceipts(): Promise<readonly InputEntry[]> {
+  if (entries !== null) return entries;
+  const raw = await readDurable<unknown>(STATE, { strict: true });
+  const parsed = z.array(entrySchema).safeParse(raw ?? []);
+  if (!parsed.success) throw new Error('The message outbox could not be read safely');
+  return parsed.data;
+}
 export interface PickupRecoveryState { attempts: number; nextAt?: number; stoppedAt?: number }
 
 async function rowsForPickupSource(current: InputEntry[], sessionId: string, sourceTurnId: string): Promise<InputEntry[]> {
