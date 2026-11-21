@@ -68,6 +68,49 @@ export function shouldQuitOnWindowAllClosed(
 }
 
 /**
+ * On macOS, users can choose to turn off the menu bar (system tray) icon because the app remains
+ * accessible via the Dock and application menu. Other platforms (Windows/Linux) require the tray
+ * icon so background sessions and close-to-tray do not become headless and unreachable.
+ */
+export function shouldShowTrayIcon(
+  platform: NodeJS.Platform = process.platform,
+  showTrayIcon?: boolean
+): boolean {
+  return platform !== 'darwin' || showTrayIcon !== false;
+}
+
+/**
+ * Reconciles the system tray instance against desired visibility.
+ * Creates the tray when visibility is needed, refreshes an existing one,
+ * or destroys it when hidden.
+ */
+export function reconcileTrayState<T extends { destroy(): void }>(
+  current: T | null,
+  visible: boolean,
+  create: () => T,
+  refresh: (tray: T) => void,
+  log: (msg: string) => void
+): T | null {
+  if (visible) {
+    if (!current) {
+      const created = create();
+      log('tray icon: created');
+      refresh(created);
+      return created;
+    }
+    refresh(current);
+    return current;
+  }
+  if (current) {
+    current.destroy();
+    log('tray icon: destroyed');
+    return null;
+  }
+  log('tray icon: disabled by preference');
+  return null;
+}
+
+/**
  * macOS users return to a hidden app through the Dock, which Electron reports as `activate`.
  * Windows/Linux use the tray/second-instance paths and should not gain a synthetic handler.
  */

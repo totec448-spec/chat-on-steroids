@@ -416,6 +416,7 @@ describe('settings migration', () => {
     // an upgrade never moves a running Goal loop onto an endpoint nobody chose.
     expect(loaded.goal.provider).toEqual({ kind: 'openrouter', baseUrl: '' });
     expect(loaded.ui.autoConnect).toBe(true);
+    expect(loaded.ui.showTrayIcon).toBe(true);
     expect(loaded.ui.privacyScreenshots).toBe(false);
     // #1797: a config from before the secrets shield has it on.
     expect(loaded.ui.secretsShield).toBe(true);
@@ -1395,5 +1396,16 @@ it('logs a damaged saved chat style without its text, and nothing for an absent 
   await loadConfig();
   expect(warn.mock.calls.filter(call => String(call[0]).includes('chatPersonality'))).toEqual([]);
   warn.mockRestore();
+});
+
+it('loads showTrayIcon as on by default and falls back to true when damaged', async () => {
+  for (const [saved, loadedAs] of [[true, true], [false, false], [undefined, true]]) {
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...defaultConfig(), ui: { ...defaultConfig().ui, showTrayIcon: saved } }), 'utf8');
+    expect((await loadConfig()).ui.showTrayIcon).toBe(loadedAs);
+  }
+  for (const damaged of ['yes', 1, null, { on: true }]) {
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...defaultConfig(), ui: { ...defaultConfig().ui, showTrayIcon: damaged } }), 'utf8');
+    expect((await loadConfig()).ui.showTrayIcon).toBe(true);
+  }
 });
 

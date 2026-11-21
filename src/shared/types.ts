@@ -209,6 +209,8 @@ export interface UiPrefs {
   /** Set once the notice that the CoS browser hid to the tray, still running, was shown. */
   cosBrowserTrayHint?: boolean;
   minimizeToTray: boolean;
+  /** Whether to show the system tray / menu bar icon (macOS option, default true). */
+  showTrayIcon?: boolean;
   autoConnect: boolean;
   startAtLogin?: boolean;
   /** A notification when a chat finishes a turn while the window is in the background. Missing means on. */

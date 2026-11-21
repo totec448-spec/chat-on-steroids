@@ -10,7 +10,9 @@ import {
   registerNativeWindowActivation,
   trackNormalWindowBounds,
   shouldBeginAppBootstrap,
-  shouldQuitOnWindowAllClosed
+  shouldQuitOnWindowAllClosed,
+  shouldShowTrayIcon,
+  reconcileTrayState
 } from '../src/main/window-lifecycle.js';
 
 describe('native window activation', () => {
@@ -170,6 +172,66 @@ describe('native window activation', () => {
   it.each(['win32', 'linux'] as const)('keeps close-to-tray semantics on %s', (platform) => {
     expect(shouldQuitOnWindowAllClosed(platform, true)).toBe(false);
     expect(shouldQuitOnWindowAllClosed(platform, false)).toBe(true);
+  });
+
+  it('allows disabling the menu bar icon only on macOS', () => {
+    expect(shouldShowTrayIcon('darwin', true)).toBe(true);
+    expect(shouldShowTrayIcon('darwin', false)).toBe(false);
+    expect(shouldShowTrayIcon('darwin', undefined)).toBe(true);
+  });
+
+  it.each(['win32', 'linux'] as const)('always keeps the tray icon enabled on %s', (platform) => {
+    expect(shouldShowTrayIcon(platform, true)).toBe(true);
+    expect(shouldShowTrayIcon(platform, false)).toBe(true);
+    expect(shouldShowTrayIcon(platform, undefined)).toBe(true);
+  });
+
+  it('reconciles tray creation, refresh, destruction, and disabled-by-preference state', () => {
+    const logs: string[] = [];
+    const log = (msg: string) => logs.push(msg);
+
+    type FakeTray = { destroyed: boolean; destroy(): void };
+    const createTray = vi.fn<() => FakeTray>(() => ({
+      destroyed: false,
+      destroy() { this.destroyed = true; }
+    }));
+    const refresh = vi.fn<(t: FakeTray) => void>();
+
+    // 1. Visible with no tray: creates tray, logs created, calls refresh
+    let tray: FakeTray | null = null;
+    tray = reconcileTrayState(tray, true, createTray, refresh, log);
+    expect(createTray).toHaveBeenCalledOnce();
+    expect(refresh).toHaveBeenCalledWith(tray);
+    expect(logs).toEqual(['tray icon: created']);
+    expect(tray).not.toBeNull();
+
+    // 2. Visible with existing tray: refreshes without recreating
+    logs.length = 0;
+    const sameTray = reconcileTrayState(tray, true, createTray, refresh, log);
+    expect(createTray).toHaveBeenCalledOnce();
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(logs).toEqual([]);
+    expect(sameTray).toBe(tray);
+
+    // 3. Hidden with existing tray: destroys tray, logs destroyed, returns null
+    logs.length = 0;
+    tray = reconcileTrayState(tray, false, createTray, refresh, log);
+    expect(tray).toBeNull();
+    expect(sameTray?.destroyed).toBe(true);
+    expect(logs).toEqual(['tray icon: destroyed']);
+
+    // 4. Hidden with no tray: logs disabled by preference, returns null
+    logs.length = 0;
+    tray = reconcileTrayState(tray, false, createTray, refresh, log);
+    expect(tray).toBeNull();
+    expect(logs).toEqual(['tray icon: disabled by preference']);
+  });
+
+  it('wires syncTray in index.ts to reconcile with platform and preference', () => {
+    const source = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8');
+    expect(source).toContain('tray = reconcileTrayState(');
+    expect(source).toContain('const visible = shouldShowTrayIcon(process.platform, getConfig().ui.showTrayIcon);');
+    expect(source).toContain('refreshTray(target);');
   });
 
   it('persists normal bounds plus maximized presentation and ignores other transient native states', () => {

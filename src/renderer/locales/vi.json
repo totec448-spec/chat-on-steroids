@@ -809,6 +809,7 @@
   "Disconnect": "Ngắt kết nối",
   "Leave it running while you use its plugins in ChatGPT. It stays available from the menu bar and Dock when you close the window.": "Giữ ứng dụng chạy khi dùng các plugin của nó trong ChatGPT. Nó vẫn khả dụng từ thanh menu và Dock khi bạn đóng cửa sổ.",
   "Hide the window to the menu bar when closed": "Ẩn cửa sổ vào thanh menu khi đóng",
+  "Show icon in the menu bar": "Hiển thị biểu tượng trên thanh menu",
   "Leave it running while you use its plugins in ChatGPT. It stays in the tray when you close the window.": "Giữ ứng dụng chạy khi dùng các plugin của nó trong ChatGPT. Nó vẫn ở khay hệ thống khi đóng cửa sổ.",
   "Keep running in the tray when closed": "Tiếp tục chạy trong khay hệ thống khi đóng",
   "A key is stored with secure OS credential storage. Type a new one to replace it, or use Remove stored API key.": "Một key được lưu trong bộ lưu trữ thông tin xác thực an toàn của hệ điều hành. Nhập key mới để thay thế hoặc dùng Xóa API key đã lưu.",

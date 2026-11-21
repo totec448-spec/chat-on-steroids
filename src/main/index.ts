@@ -136,7 +136,9 @@ import {
   registerNativeWindowActivation,
   trackNormalWindowBounds,
   shouldBeginAppBootstrap,
-  shouldQuitOnWindowAllClosed
+  shouldQuitOnWindowAllClosed,
+  shouldShowTrayIcon,
+  reconcileTrayState
 } from './window-lifecycle.js';
 import { trayGuidArgsForPlatform, trayImageSpec } from './tray-image.js';
 import { browserWindowIconPath } from './window-icon.js';
@@ -398,19 +400,20 @@ function trayIcon(running: boolean): Electron.NativeImage {
   return image;
 }
 
-function refreshTray(): void {
-  if (!tray) return;
+function refreshTray(target?: unknown): void {
+  const current = target instanceof Tray ? target : tray;
+  if (!current) return;
   const state = getStatus().state;
   const connected = state === 'connected';
   const offline = state === 'offline';
   // Offline keeps the running icon: the bridge is up, the internet is not.
   const running = connected || offline;
   const label = mainText(connected ? 'Connected' : offline ? (getStatus().offlineCause === 'service' ? 'OpenAI outage' : 'No internet') : 'Not connected');
-  tray.setImage(trayIcon(running));
+  current.setImage(trayIcon(running));
   // Not lowercased: that would break translated nouns ("Keine Internetverbindung").
-  tray.setToolTip(`Chat On Steroids — ${label}`);
+  current.setToolTip(`Chat On Steroids — ${label}`);
   const cosBrowser = loadedCosBrowser();
-  tray.setContextMenu(
+  current.setContextMenu(
     Menu.buildFromTemplate([
       { label, enabled: false },
       { type: 'separator' },
@@ -437,6 +440,24 @@ function refreshTray(): void {
         }
       }
     ])
+  );
+}
+
+function syncTray(): void {
+  const visible = shouldShowTrayIcon(process.platform, getConfig().ui.showTrayIcon);
+  tray = reconcileTrayState(
+    tray,
+    visible,
+    () => {
+      const created = new Tray(trayIcon(false), ...trayGuidArgsForPlatform());
+      created.on('click', windowActivation.request);
+      return created;
+    },
+    target => {
+      tray = target;
+      refreshTray(target);
+    },
+    logInfo
   );
 }
 
@@ -822,7 +843,8 @@ void app.whenReady().then(async () => {
     () => {
       quitting = true;
       app.quit();
-    }
+    },
+    syncTray
   );
   // Chats are restored here; the window, once enabled, can ask for its state before the pet overlay is ready.
   markStartup('restored');
@@ -836,9 +858,7 @@ void app.whenReady().then(async () => {
   // Dock activation/re-launch can safely recreate or focus it.
   registerNativeWindowActivation(app, windowActivation.request);
 
-  tray = new Tray(trayIcon(false), ...trayGuidArgsForPlatform());
-  tray.on('click', windowActivation.request);
-  refreshTray();
+  syncTray();
   onStatusChange(refreshTray);
   // The built-in browser's own hooks live in its module, which loads only once it is selected.
   onCosBrowserLoaded(cosBrowser => { cosBrowser.onChange(refreshTray); refreshTray(); });

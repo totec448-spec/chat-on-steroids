@@ -298,6 +298,7 @@ const settingsPatch = z.object({
     autoSelectSkills: z.boolean().optional(),
     tabsToKeepOpen: z.number().int().min(1).max(50).optional(),
     minimizeToTray: z.boolean(),
+    showTrayIcon: z.boolean().optional(),
     autoConnect: z.boolean(),
     startAtLogin: z.boolean().optional(),
     turnNotifications: z.boolean().optional(),
@@ -541,6 +542,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       autoSelectSkills: pick(current.ui.autoSelectSkills, base.ui.autoSelectSkills, wanted.ui.autoSelectSkills),
       tabsToKeepOpen: pick(current.ui.tabsToKeepOpen, base.ui.tabsToKeepOpen, wanted.ui.tabsToKeepOpen),
       minimizeToTray: pick(current.ui.minimizeToTray, base.ui.minimizeToTray, wanted.ui.minimizeToTray),
+      showTrayIcon: pick(current.ui.showTrayIcon !== false, (base.ui as { showTrayIcon?: boolean }).showTrayIcon !== false, wanted.ui.showTrayIcon ?? current.ui.showTrayIcon !== false),
       autoConnect: pick(current.ui.autoConnect, base.ui.autoConnect, wanted.ui.autoConnect),
       startAtLogin: pick(current.ui.startAtLogin, base.ui.startAtLogin, wanted.ui.startAtLogin),
       turnNotifications: pick(current.ui.turnNotifications, base.ui.turnNotifications, wanted.ui.turnNotifications),
@@ -800,7 +802,7 @@ export function personsMessage(entry: InputEntry): boolean {
     (entry.authoredSource ?? 'text') !== 'none';
 }
 
-export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
+export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void, syncTrayVisibility?: () => void): void {
   registerWorkspaceTerminalIpc(getWindow);
   registerAgentOutputIpc(getWindow);
   registerDictationIpc(getWindow);
@@ -937,8 +939,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       else if (!config.goal.impulseMinutes && (proposed.goal.impulseMinutes ?? 0) > 0) await cancelFinishInputs(true);
       return proposed;
     }, async (published, previous) => {
-      if (previous.ui.finishTool && !published.ui.finishTool) await cancelFinishInputs(false);
-      else if ((previous.goal.impulseMinutes ?? 0) > 0 && !published.goal.impulseMinutes) await cancelFinishInputs(true);
+      try {
+        if (previous.ui.finishTool && !published.ui.finishTool) await cancelFinishInputs(false);
+        else if ((previous.goal.impulseMinutes ?? 0) > 0 && !published.goal.impulseMinutes) await cancelFinishInputs(true);
+      } finally {
+        if ((previous.ui.showTrayIcon !== false) !== (published.ui.showTrayIcon !== false)) syncTrayVisibility?.();
+      }
     }, publishBridgePortChange);
     // Renderer palette changes are immediate, so keep OS/Electron-owned chrome in lock-step too.
     // Without this, selecting Dark on macOS left the title bar, menus and file picker in the

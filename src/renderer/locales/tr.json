@@ -840,6 +840,7 @@
   "Disconnect": "Bağlantıyı kes",
   "Leave it running while you use its plugins in ChatGPT. It stays available from the menu bar and Dock when you close the window.": "ChatGPT'de eklentilerini kullanırken uygulamayı açık bırakın. Pencereyi kapattığınızda menü çubuğundan ve Dock'tan erişilebilir kalır.",
   "Hide the window to the menu bar when closed": "Kapatıldığında pencereyi menü çubuğuna gizle",
+  "Show icon in the menu bar": "Menü çubuğunda simgeyi göster",
   "Leave it running while you use its plugins in ChatGPT. It stays in the tray when you close the window.": "ChatGPT'de eklentilerini kullanırken uygulamayı açık bırakın. Pencereyi kapattığınızda sistem tepsisinde kalır.",
   "Keep running in the tray when closed": "Kapatıldığında sistem tepsisinde çalışmaya devam et",
   "A key is stored with secure OS credential storage. Type a new one to replace it, or use Remove stored API key.": "Bir anahtar, işletim sisteminin güvenli kimlik bilgisi deposunda saklanıyor. Değiştirmek için yeni bir anahtar girin veya Kaydedilen API anahtarını kaldır seçeneğini kullanın.",
