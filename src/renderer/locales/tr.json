@@ -61,6 +61,7 @@
   "Leave empty to use ChatGPT's title": "ChatGPT’deki başlığı kullanmak için boş bırakın",
   "Name for this chat": "Bu sohbetin adı",
   "Rename this chat in the app. Its title in ChatGPT stays the same.": "Bu sohbeti uygulamada yeniden adlandırın. ChatGPT’deki başlığı aynı kalır.",
+  "Rename this chat in the app. The new name may also be applied in ChatGPT.": "Bu sohbeti uygulamada yeniden adlandırın. Yeni ad ChatGPT’de de uygulanabilir.",
   "{0} more sources were not recorded with this reply.": "Bu yanıtla birlikte {0} kaynak daha kaydedilmedi.",
   "{0} more sources were not recorded with this reply.|one": "Bu yanıtla birlikte {0} kaynak daha kaydedilmedi.",
   "Thinking": "Düşünüyor",
@@ -4057,5 +4058,7 @@
   "What a chat edited": "Bir sohbetin düzenledikleri",
   "Review lists the files this chat changed and opens each recorded diff.": "İnceleme, bu sohbetin değiştirdiği dosyaları listeler ve kaydedilmiş her farkı açar.",
   "Steered active turn": "Etkin turu yönlendirdi",
-  "Worked for {0}{1}s · steered": "{0}{1} sn · Çalıştı · yönlendirildi"
+  "Worked for {0}{1}s · steered": "{0}{1} sn · Çalıştı · yönlendirildi",
+  "Sync manual chat titles to ChatGPT": "Elle değiştirilen sohbet başlıklarını ChatGPT ile eşitle",
+  "Push titles you rename here (including across Compact & Resume) to ChatGPT, unless ChatGPT already has a newer title.": "Burada yeniden adlandırdığınız başlıkları (Sıkıştır ve sürdür sonrasında da) ChatGPT’e gönderir; ancak ChatGPT’de zaten daha yeni bir başlık varsa üzerine yazmaz."
 }

@@ -63,6 +63,7 @@
   "Leave empty to use ChatGPT's title": "Laissez vide pour utiliser le titre de ChatGPT",
   "Name for this chat": "Nom de ce chat",
   "Rename this chat in the app. Its title in ChatGPT stays the same.": "Renommer ce chat dans l’app. Son titre dans ChatGPT ne change pas.",
+  "Rename this chat in the app. The new name may also be applied in ChatGPT.": "Renommer ce chat dans l’app. Le nouveau nom peut aussi être appliqué dans ChatGPT.",
   "{0} more sources were not recorded with this reply.": "{0} autres sources n’ont pas été enregistrées avec cette réponse.",
   "{0} more sources were not recorded with this reply.|one": "{0} autre source n’a pas été enregistrée avec cette réponse.",
   "{0} more sources were not recorded with this reply.|many": "{0} autres sources n’ont pas été enregistrées avec cette réponse.",
@@ -4141,5 +4142,7 @@
   "What a chat edited": "Ce qu'un chat a modifié",
   "Review lists the files this chat changed and opens each recorded diff.": "Revue liste les fichiers modifiés par ce chat et ouvre chaque diff enregistré.",
   "Steered active turn": "A réorienté le tour actif",
-  "Worked for {0}{1}s · steered": "A travaillé pendant {0}{1} s · réorienté"
+  "Worked for {0}{1}s · steered": "A travaillé pendant {0}{1} s · réorienté",
+  "Sync manual chat titles to ChatGPT": "Synchroniser les titres manuels de discussion avec ChatGPT",
+  "Push titles you rename here (including across Compact & Resume) to ChatGPT, unless ChatGPT already has a newer title.": "Envoyer vers ChatGPT les titres renommés ici (y compris via Compacter et reprendre), sauf si ChatGPT dispose déjà d’un titre plus récent."
 }

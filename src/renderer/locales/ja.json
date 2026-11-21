@@ -59,6 +59,7 @@
   "Leave empty to use ChatGPT's title": "空欄にすると ChatGPT のタイトルを使います",
   "Name for this chat": "このチャットの名前",
   "Rename this chat in the app. Its title in ChatGPT stays the same.": "このチャットの名前をアプリ内で変更します。ChatGPT でのタイトルは変わりません。",
+  "Rename this chat in the app. The new name may also be applied in ChatGPT.": "このチャットの名前をアプリ内で変更します。新しい名前は ChatGPT にも反映される場合があります。",
   "{0} more sources were not recorded with this reply.": "この返信では他の {0} 件のソースが記録されていません。",
   "Thinking": "考え中",
   "Copy answer": "回答をコピー",
@@ -3973,5 +3974,7 @@
   "What a chat edited": "チャットが編集した内容",
   "Review lists the files this chat changed and opens each recorded diff.": "レビューに、このチャットが変更したファイルが一覧表示され、記録された差分を開けます。",
   "Steered active turn": "実行中のターンを方向転換",
-  "Worked for {0}{1}s · steered": "作業済み · {0}{1}秒 · 方向転換"
+  "Worked for {0}{1}s · steered": "作業済み · {0}{1}秒 · 方向転換",
+  "Sync manual chat titles to ChatGPT": "手動のチャットタイトルを ChatGPT に同期",
+  "Push titles you rename here (including across Compact & Resume) to ChatGPT, unless ChatGPT already has a newer title.": "ここで変更したタイトル（「圧縮して再開」をまたぐ場合も含む）を ChatGPT に反映します。ただし、ChatGPT にすでに新しいタイトルがある場合は上書きしません。"
 }

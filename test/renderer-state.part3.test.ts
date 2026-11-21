@@ -1309,6 +1309,17 @@ it('offers archiving retired worker chats, off by default, and saves it', async 
   expect(mounted.calls.at(-1)?.multiAgent.archiveWorkerChats).toBe(true);
 });
 
+it('offers syncing manual chat titles to ChatGPT, off by default, and saves it', async () => {
+  const mounted = await mountChat({});
+  const w = mounted.window;
+  const syncTitles = w.document.getElementById('syncManualChatTitles') as HTMLInputElement;
+  expect(syncTitles.checked).toBe(false);
+  syncTitles.checked = true;
+  syncTitles.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls.at(-1)?.sessions.syncManualChatTitles).toBe(true);
+});
+
 describe('settings backup dialogs', () => {
   const choice = (over: Record<string, unknown> = {}) => ({ token: '6f9619ff-8b86-4d01-b42d-00cf4fc964ff', file: 'backup.json', appVersion: '2.1.46',
     exportedAt: '2026-10-23T08:00:00.000Z', changed: ['readOnly', 'ui.theme'], wider: [], keyCount: 1, ...over });

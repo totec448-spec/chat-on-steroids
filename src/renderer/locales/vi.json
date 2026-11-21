@@ -59,6 +59,7 @@
   "Leave empty to use ChatGPT's title": "Để trống để dùng tiêu đề của ChatGPT",
   "Name for this chat": "Tên cho cuộc trò chuyện này",
   "Rename this chat in the app. Its title in ChatGPT stays the same.": "Đổi tên cuộc trò chuyện này trong ứng dụng. Tiêu đề trong ChatGPT vẫn giữ nguyên.",
+  "Rename this chat in the app. The new name may also be applied in ChatGPT.": "Đổi tên cuộc trò chuyện này trong ứng dụng. Tên mới cũng có thể được áp dụng trong ChatGPT.",
   "{0} more sources were not recorded with this reply.": "Còn {0} nguồn chưa được ghi lại cùng phản hồi này.",
   "Thinking": "Đang suy luận",
   "Copy answer": "Sao chép câu trả lời",
@@ -3973,5 +3974,7 @@
   "Chats update faster": "Chat cập nhật nhanh hơn",
   "A new message or tool call shows up in the open chat much sooner.": "Tin nhắn mới hoặc lệnh gọi công cụ hiện trong chat đang mở sớm hơn nhiều.",
   "What a chat edited": "Những gì một chat đã sửa",
-  "Review lists the files this chat changed and opens each recorded diff.": "Mục Xem lại liệt kê các tệp chat này đã thay đổi và mở từng diff đã ghi."
+  "Review lists the files this chat changed and opens each recorded diff.": "Mục Xem lại liệt kê các tệp chat này đã thay đổi và mở từng diff đã ghi.",
+  "Sync manual chat titles to ChatGPT": "Đồng bộ tiêu đề chat thủ công sang ChatGPT",
+  "Push titles you rename here (including across Compact & Resume) to ChatGPT, unless ChatGPT already has a newer title.": "Đẩy các tiêu đề bạn đổi tên tại đây (kể cả qua Compact & Resume) lên ChatGPT, trừ khi ChatGPT đã có tiêu đề mới hơn."
 }

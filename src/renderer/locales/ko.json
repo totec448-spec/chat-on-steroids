@@ -59,6 +59,7 @@
   "Leave empty to use ChatGPT's title": "비워 두면 ChatGPT의 제목을 사용합니다",
   "Name for this chat": "이 채팅의 이름",
   "Rename this chat in the app. Its title in ChatGPT stays the same.": "앱에서 이 채팅의 이름을 바꿉니다. ChatGPT의 제목은 그대로입니다.",
+  "Rename this chat in the app. The new name may also be applied in ChatGPT.": "앱에서 이 채팅의 이름을 바꿉니다. 새 이름은 ChatGPT에도 적용될 수 있습니다.",
   "{0} more sources were not recorded with this reply.": "이 답변에는 다른 출처 {0}개가 기록되지 않았습니다.",
   "Thinking": "생각 중",
   "Copy answer": "답변 복사",
@@ -3973,5 +3974,7 @@
   "What a chat edited": "채팅이 수정한 내용",
   "Review lists the files this chat changed and opens each recorded diff.": "검토에서 이 채팅이 변경한 파일을 나열하고 기록된 diff를 각각 열 수 있습니다.",
   "Steered active turn": "현재 턴의 방향을 전환함",
-  "Worked for {0}{1}s · steered": "작업함 · {0}{1}초 · 방향 전환됨"
+  "Worked for {0}{1}s · steered": "작업함 · {0}{1}초 · 방향 전환됨",
+  "Sync manual chat titles to ChatGPT": "수동 채팅 제목을 ChatGPT에 동기화",
+  "Push titles you rename here (including across Compact & Resume) to ChatGPT, unless ChatGPT already has a newer title.": "여기에서 이름을 바꾼 제목(‘압축 후 계속’ 이후 포함)을 ChatGPT에 반영합니다. 단, ChatGPT에 이미 더 최신 제목이 있는 경우는 제외합니다."
 }

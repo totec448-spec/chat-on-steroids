@@ -1380,7 +1380,13 @@ function sessionRow(summary: SessionSummary): HTMLElement {
       }
     }
     items.push(
-      { action: 'rename', icon: 'i-pencil', label: () => t('Rename'), title: () => t("Rename this chat in the app. Its title in ChatGPT stays the same."), run: () => startRename(summary) },
+      {
+        action: 'rename', icon: 'i-pencil', label: () => t('Rename'),
+        title: () => deps.state()?.config.sessions.syncManualChatTitles === true
+          ? t('Rename this chat in the app. The new name may also be applied in ChatGPT.')
+          : t('Rename this chat in the app. Its title in ChatGPT stays the same.'),
+        run: () => startRename(summary)
+      },
       { action: 'open', icon: 'i-out', label: () => t('Open in browser'), title: () => t("Open this chat in your browser"), run: () => void run(api.openSessionChat(summary.id)) },
       // ChatGPT opens /c/<id> wherever the chat lives, a project included (#1107).
       { action: 'copy-link', icon: 'i-copy', label: () => t('Copy link'), title: () => t("Copy this chat's ChatGPT link"),
@@ -8472,7 +8478,8 @@ export function chatSettingsPatch(current: Config): {
       limitTokens: urgentFrom(threshold),
       storageLimitGiB: (RECORDING_STORAGE_LIMITS_GIB as readonly number[]).includes(Number($<HTMLSelectElement>('recordingStorageLimit').value))
         ? Number($<HTMLSelectElement>('recordingStorageLimit').value) as RecordingStorageLimitGiB
-        : current.sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB
+        : current.sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB,
+      syncManualChatTitles: $<HTMLInputElement>('syncManualChatTitles').checked
     },
     compaction: {
       auto: $<HTMLInputElement>('autoCompact').checked,
@@ -8958,6 +8965,7 @@ const CHAT_INPUTS = [
   'handoffPrompt',
   'handoffLength',
   'recordingStorageLimit',
+  'syncManualChatTitles',
   'goalPrompt',
   'goalObjectivePrompt',
   'goalLoopPrompt',
@@ -9052,6 +9060,11 @@ export function chatApply(state: AppState, previous?: Config): void {
     $<HTMLSelectElement>('recordingStorageLimit'),
     String(config.sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB),
     previous === undefined ? undefined : String(previous.sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB)
+  );
+  applyChatChecked(
+    $<HTMLInputElement>('syncManualChatTitles'),
+    config.sessions.syncManualChatTitles === true,
+    previous?.sessions.syncManualChatTitles
   );
   applyAutoCompactHint(config);
   $<HTMLInputElement>('autoCompactTokens').disabled = !config.compaction.auto;

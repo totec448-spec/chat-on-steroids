@@ -549,6 +549,24 @@ describe('settings migration', () => {
     expect((await loadConfig()).sessions.storageLimitGiB).toBe(20);
   });
 
+  it('keeps manual chat title syncing off by default for fresh, older, and damaged configs, and saves opt-in', async () => {
+    const config = defaultConfig();
+    expect(config.sessions.syncManualChatTitles).toBe(false);
+    const older = structuredClone(config) as Record<string, any>;
+    delete older.sessions.syncManualChatTitles;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(older), 'utf8');
+    expect((await loadConfig()).sessions.storageLimitGiB).toBe(2);
+    expect((await loadConfig()).sessions.syncManualChatTitles).toBe(false);
+    await fs.writeFile(
+      path.join(dir, 'config.json'),
+      JSON.stringify({ ...config, sessions: { ...config.sessions, syncManualChatTitles: 'yes' } }),
+      'utf8'
+    );
+    expect((await loadConfig()).sessions.syncManualChatTitles).toBe(false);
+    await saveConfig({ ...config, sessions: { ...config.sessions, syncManualChatTitles: true } });
+    expect((await loadConfig()).sessions.syncManualChatTitles).toBe(true);
+  });
+
   it('joins the running turn by default, and loads a broken follow-up behavior as that default', async () => {
     const config = defaultConfig();
     expect(config.ui.followUp).toBe('steer');

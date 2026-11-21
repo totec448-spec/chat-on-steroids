@@ -59,6 +59,7 @@
   "Leave empty to use ChatGPT's title": "留空則使用 ChatGPT 中的標題",
   "Name for this chat": "此聊天的名稱",
   "Rename this chat in the app. Its title in ChatGPT stays the same.": "在 App 中重新命名此聊天。它在 ChatGPT 中的標題維持不變。",
+  "Rename this chat in the app. The new name may also be applied in ChatGPT.": "在 App 中重新命名此聊天。新名稱也可能套用到 ChatGPT。",
   "{0} more sources were not recorded with this reply.": "此回覆未記錄另外 {0} 個來源。",
   "Thinking": "思考中",
   "Copy answer": "複製回答",
@@ -3973,5 +3974,7 @@
   "What a chat edited": "聊天修改了什麼",
   "Review lists the files this chat changed and opens each recorded diff.": "審查會列出此聊天更改的檔案，並可開啟每筆已記錄的差異。",
   "Steered active turn": "已引導目前回合",
-  "Worked for {0}{1}s · steered": "已工作 {0}{1} 秒 · 已引導"
+  "Worked for {0}{1}s · steered": "已工作 {0}{1} 秒 · 已引導",
+  "Sync manual chat titles to ChatGPT": "將手動聊天標題同步到 ChatGPT",
+  "Push titles you rename here (including across Compact & Resume) to ChatGPT, unless ChatGPT already has a newer title.": "將在此處重新命名的標題（包括跨「壓縮並繼續」沿用的標題）推送到 ChatGPT，除非 ChatGPT 已有更新的標題。"
 }
