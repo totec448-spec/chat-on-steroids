@@ -1940,12 +1940,18 @@ it('keeps a quick Disconnecting on screen long enough to read, then shows the re
   const mounted = await mountChat({ hasApiKey: true });
   const doc = mounted.window.document;
   const title = () => doc.getElementById('connectionPopoverTitle')!.textContent;
-  mounted.push({ ...mounted.state, status: { ...mounted.state.status, state: 'connected' } });
-  mounted.push({ ...mounted.state, status: { ...mounted.state.status, state: 'disconnecting' } });
-  expect(title()).toBe('Disconnecting');
-  // Over in a blink: the window still says Disconnecting for a moment.
-  mounted.push({ ...mounted.state, status: { ...mounted.state.status, state: 'disconnected' } });
-  expect(title()).toBe('Disconnecting');
+  const now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+  try {
+    mounted.push({ ...mounted.state, status: { ...mounted.state.status, state: 'connected' } });
+    mounted.push({ ...mounted.state, status: { ...mounted.state.status, state: 'disconnecting' } });
+    expect(title()).toBe('Disconnecting');
+    // Keep slow CI scheduling from consuming the hold between synchronous pushes.
+    mounted.push({ ...mounted.state, status: { ...mounted.state.status, state: 'disconnected' } });
+    expect(title()).toBe('Disconnecting');
+  } finally {
+    clock.mockRestore();
+  }
   await waitFor(() => expect(title()).toBe('Not connected'), { timeout: 2500 });
   expect(doc.getElementById('sidebarConnectionLabel')!.textContent).toBe('Connect');
 });

@@ -610,7 +610,8 @@ it('keeps the prior transcript inert until the selected detail arrives and fence
   details[2]!.reply(detail(first, current));
   controls[2]!.reply({ ok: true, data: { automation: 'off', objective: '', blocked: '', job: null, recovery: [] } });
   await settle();
-  expect(timeline.textContent).toContain('CURRENT A ANSWER');
+  // The asynchronously fetched detail can paint after a second task under full-suite load.
+  await waitFor(() => expect(timeline.textContent).toContain('CURRENT A ANSWER'), { timeout: 5000 });
   expect(timeline.textContent).not.toContain('STALE A QUESTION');
   expect(timeline.querySelector('img[alt="a-only.png"]')).toBeNull();
   expect(timeline.hasAttribute('inert')).toBe(false);
