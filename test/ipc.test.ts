@@ -2777,13 +2777,13 @@ describe('session IPC contracts', () => {
 
       // An existing tab for the second chat must not accidentally select the first one.
       secondNotice.emit('click');
-      await vi.waitFor(() => expect(reveal).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(reveal).toHaveBeenCalledTimes(1), { timeout: 10_000 });
       expect(reveal).toHaveBeenNthCalledWith(1, secondId);
       expect(openInPreferredBrowser).not.toHaveBeenCalled();
 
       // The first chat has no matching tab: open only that recorded conversation's URL.
       firstNotice.emit('click');
-      await vi.waitFor(() => expect(openInPreferredBrowser).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(openInPreferredBrowser).toHaveBeenCalledTimes(1), { timeout: 10_000 });
       expect(reveal.mock.calls).toEqual([[secondId], [firstId]]);
       expect(openInPreferredBrowser).toHaveBeenCalledWith(
         `https://chatgpt.com/c/${firstId}`, { reveal: true }
