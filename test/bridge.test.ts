@@ -545,6 +545,37 @@ describe('explicit CoS sign-in transfer over the paired bridge', () => {
   });
 });
 
+it('offers a one-shot Web title check over the paired bridge and rejects another browser', async () => {
+  await pair();
+  const before = getConfig();
+  const { acceptWebChatTitle, cancelWebChatTitleCheck, readWebChatTitle } = await import('../src/main/web-chat-title.js');
+  const conversationId = randomUUID();
+  const options = { browser: 'titlecheckbrowser001', host: 'browser' };
+  try {
+    await saveConfig({ ...before, ui: { ...before.ui, chatBrowser: 'chrome' },
+      sessions: { ...before.sessions, checkWebChatTitles: true } });
+    const check = readWebChatTitle(conversationId);
+    const body = { openConversations: [conversationId] };
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'firefox' } });
+    expect((await request('POST', '/status', { ...options, body })).body.webChatTitleCheck).toBeUndefined();
+    const firefox = { ...options, browser: 'firefoxtitlebrowser01', engine: 'gecko' };
+    const status = await request('POST', '/status', { ...firefox, body });
+    const offer = status.body.webChatTitleCheck;
+    expect(offer).toEqual({ id: expect.any(String), conversationId });
+    expect((await request('POST', '/status', { ...firefox, body })).body.webChatTitleCheck).toBeUndefined();
+    const answer = { ...offer, title: 'Sample Web title' };
+    expect((await request('POST', '/browser/web-chat-title', { ...firefox, auth: null, body: answer })).status).toBe(401);
+    expect((await request('POST', '/browser/web-chat-title', { ...firefox, browser: 'othercheckbrowser001', body: answer })).status).toBe(409);
+    expect((await request('POST', '/browser/web-chat-title', { ...firefox, engine: undefined, body: answer })).status).toBe(409);
+    expect((await request('POST', '/browser/web-chat-title', { ...firefox, body: answer })).status).toBe(200);
+    await expect(check).resolves.toBe('Sample Web title');
+    expect(acceptWebChatTitle(firefox.browser, answer)).toBe(false);
+  } finally {
+    cancelWebChatTitleCheck();
+    await saveConfig(before);
+  }
+});
+
 describe('direct browser control over the paired bridge', () => {
   it('recovers request-owned browser tabs only from exact server-side correlation, including a resumed session', async () => {
     browserControl.reset(); await pair();
