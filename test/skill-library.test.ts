@@ -4,7 +4,7 @@ import path from 'node:path';
 import { makeTempDir, removeTempDir } from './helpers.js';
 import { defaultConfig, getConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { disabledManagedSkillTargets, initSkillsPath, importSkillPackage, listSkills, removeSkill, setManagedSkillEnabled } from '../src/main/skills.js';
-import { listSkillLibrary, readLibrarySkill, skillLibraryInstructions } from '../src/main/skill-library.js';
+import { listDiscoveredUserSkills, listSkillLibrary, readLibrarySkill, skillLibraryInstructions } from '../src/main/skill-library.js';
 import type { LibrarySkill } from '../src/shared/skills.js';
 
 let root: string, project: string;
@@ -16,11 +16,33 @@ beforeEach(async () => {
   root = await makeTempDir('cos-skill-library-'); project = path.join(root, 'project');
   await fs.mkdir(project); await fs.mkdir(path.join(project, '.git'));
   vi.stubEnv('USERPROFILE', path.join(root, 'home')); vi.stubEnv('HOME', path.join(root, 'home'));
-  vi.stubEnv('CODEX_HOME', path.join(root, 'codex')); vi.stubEnv('ProgramData', path.join(root, 'admin'));
+  vi.stubEnv('CODEX_HOME', path.join(root, 'codex')); vi.stubEnv('CLAUDE_CONFIG_DIR', path.join(root, 'claude'));
+  vi.stubEnv('ProgramData', path.join(root, 'admin'));
   initConfigPath(root); await saveConfig({ ...defaultConfig(), roots: [{ name: 'workspace', path: root }] });
   await initSkillsPath(root);
 });
 afterEach(async () => { vi.unstubAllEnvs(); await removeTempDir(root); });
+
+it('lists only user-owned global Skills without changing managed enablement state', async () => {
+  await write(path.join(root, 'home/.agents/skills/personal/SKILL.md'), contents('Personal'));
+  await write(path.join(root, 'codex/skills/codex-own/SKILL.md'), contents('Codex Own'));
+  await write(path.join(root, 'claude/skills/claude-own/SKILL.md'), contents('Claude Own'));
+  await write(path.join(root, 'codex/skills/.system/bundled/SKILL.md'), contents('Bundled'));
+  await write(path.join(project, '.agents/skills/project/SKILL.md'), contents('Project'));
+  const installed = path.join(root, 'source/installed');
+  await write(path.join(installed, 'SKILL.md'), contents('Installed'));
+  await importSkillPackage(installed);
+  await setManagedSkillEnabled('installed', false);
+  const before = await fs.readFile(path.join(root, 'skills/.disabled-skills.json'), 'utf8');
+
+  const discovered = await listDiscoveredUserSkills();
+  expect(discovered.map(skill => [skill.name, skill.source])).toEqual([
+    ['Claude Own', 'claude-home'], ['Codex Own', 'codex-home'], ['Personal', 'user-agents']
+  ]);
+  expect(discovered.every(skill => skill.path.replace(/\\/g, '/').endsWith('/SKILL.md'))).toBe(true);
+  expect(discovered.some(skill => /installed|bundled|project/.test(skill.name.toLowerCase()))).toBe(false);
+  expect(await fs.readFile(path.join(root, 'skills/.disabled-skills.json'), 'utf8')).toBe(before);
+});
 
 it('imports every resource and removes the whole package so it can be imported again', async () => {
   const source = path.join(root, 'sources', 'review');
