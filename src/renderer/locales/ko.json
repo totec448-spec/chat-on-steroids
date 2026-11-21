@@ -3961,5 +3961,5 @@
   "Steered active turn": "현재 턴의 방향을 전환함",
   "Worked for {0}{1}s · steered": "작업함 · {0}{1}초 · 방향 전환됨",
   "Sync manual chat titles to ChatGPT": "수동 채팅 제목을 ChatGPT에 동기화",
-  "Push titles you rename here (including across Compact & Resume) to ChatGPT Web, unless ChatGPT already has a newer title.": "여기에서 이름을 바꾼 제목(‘압축 후 계속’ 이후 포함)을 ChatGPT Web에 반영합니다. 단, ChatGPT에 이미 더 최신 제목이 있는 경우는 제외합니다."
+  "Push titles you rename here (including across Compact & Resume) to ChatGPT, unless ChatGPT already has a newer title.": "여기에서 이름을 바꾼 제목(‘압축 후 계속’ 이후 포함)을 ChatGPT에 반영합니다. 단, ChatGPT에 이미 더 최신 제목이 있는 경우는 제외합니다."
 }

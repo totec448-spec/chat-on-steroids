@@ -4213,5 +4213,5 @@
   "Steered active turn": "Перенаправил активный ход",
   "Worked for {0}{1}s · steered": "Завершил работу — {0}{1} с · перенаправлен",
   "Sync manual chat titles to ChatGPT": "Синхронизировать ручные названия чатов с ChatGPT",
-  "Push titles you rename here (including across Compact & Resume) to ChatGPT Web, unless ChatGPT already has a newer title.": "Передавать переименованные здесь названия (включая перенос через «Сжать и продолжить») в ChatGPT Web, если в ChatGPT уже нет более нового названия."
+  "Push titles you rename here (including across Compact & Resume) to ChatGPT, unless ChatGPT already has a newer title.": "Передавать переименованные здесь названия (включая перенос через «Сжать и продолжить») в ChatGPT, если в ChatGPT уже нет более нового названия."
 }

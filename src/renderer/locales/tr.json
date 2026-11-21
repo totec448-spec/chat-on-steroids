@@ -4045,5 +4045,5 @@
   "Steered active turn": "Etkin turu yönlendirdi",
   "Worked for {0}{1}s · steered": "{0}{1} sn · Çalıştı · yönlendirildi",
   "Sync manual chat titles to ChatGPT": "Elle değiştirilen sohbet başlıklarını ChatGPT ile eşitle",
-  "Push titles you rename here (including across Compact & Resume) to ChatGPT Web, unless ChatGPT already has a newer title.": "Burada yeniden adlandırdığınız başlıkları (Sıkıştır ve sürdür sonrasında da) ChatGPT Web’e gönderir; ancak ChatGPT’de zaten daha yeni bir başlık varsa üzerine yazmaz."
+  "Push titles you rename here (including across Compact & Resume) to ChatGPT, unless ChatGPT already has a newer title.": "Burada yeniden adlandırdığınız başlıkları (Sıkıştır ve sürdür sonrasında da) ChatGPT’e gönderir; ancak ChatGPT’de zaten daha yeni bir başlık varsa üzerine yazmaz."
 }

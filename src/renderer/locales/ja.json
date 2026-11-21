@@ -3961,5 +3961,5 @@
   "Steered active turn": "実行中のターンを方向転換",
   "Worked for {0}{1}s · steered": "作業済み · {0}{1}秒 · 方向転換",
   "Sync manual chat titles to ChatGPT": "手動のチャットタイトルを ChatGPT に同期",
-  "Push titles you rename here (including across Compact & Resume) to ChatGPT Web, unless ChatGPT already has a newer title.": "ここで変更したタイトル（「圧縮して再開」をまたぐ場合も含む）を ChatGPT Web に反映します。ただし、ChatGPT にすでに新しいタイトルがある場合は上書きしません。"
+  "Push titles you rename here (including across Compact & Resume) to ChatGPT, unless ChatGPT already has a newer title.": "ここで変更したタイトル（「圧縮して再開」をまたぐ場合も含む）を ChatGPT に反映します。ただし、ChatGPT にすでに新しいタイトルがある場合は上書きしません。"
 }

@@ -4129,5 +4129,5 @@
   "Steered active turn": "A réorienté le tour actif",
   "Worked for {0}{1}s · steered": "A travaillé pendant {0}{1} s · réorienté",
   "Sync manual chat titles to ChatGPT": "Synchroniser les titres manuels de discussion avec ChatGPT",
-  "Push titles you rename here (including across Compact & Resume) to ChatGPT Web, unless ChatGPT already has a newer title.": "Envoyer vers ChatGPT Web les titres renommés ici (y compris via Compacter et reprendre), sauf si ChatGPT dispose déjà d’un titre plus récent."
+  "Push titles you rename here (including across Compact & Resume) to ChatGPT, unless ChatGPT already has a newer title.": "Envoyer vers ChatGPT les titres renommés ici (y compris via Compacter et reprendre), sauf si ChatGPT dispose déjà d’un titre plus récent."
 }
