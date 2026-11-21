@@ -4967,6 +4967,42 @@ describe('automatic compaction', () => {
     }
   });
 
+  it('keeps an asking compaction pending and retries after a Temporary Chat reload is skipped', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac0d';
+      await request('POST', '/events', {
+        body: { conversationId, events: [{ kind: 'user_message', time: Date.now(), text: 'manual handoff', messageId: 'temporary-pickup' }] }
+      });
+      const filed = await request('POST', '/compact', { body: { conversationId, ticket: true, automatic: true } });
+      const token = filed.body.token as string;
+
+      const takeRepair = async () => {
+        await sweepStaleSwarm(Date.now());
+        return (await request('GET', '/status')).body.repairs?.[0] as { conversationId: string; reason: string; token: string } | undefined;
+      };
+
+      await vi.advanceTimersByTimeAsync(2 * 60_000);
+      const first = await takeRepair();
+      expect(first).toMatchObject({ conversationId, reason: 'compaction' });
+      await request('GET', `/status?repaired=${first!.token}&repairAction=preserved&preservedFor=temporary-chat`);
+
+      expect(continuationByToken(token)).toMatchObject({ state: 'awaiting-summary' });
+      expect(getLog().some(entry => entry.message === `bridge: ${conversationId}: Temporary Chat, not reloaded`)).toBe(true);
+      expect(getLog().some(entry => entry.message.includes(`compaction ticket ${token.slice(0, 8)} asking pickup 1 of 5`))).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(2 * 60_000);
+      const retry = await takeRepair();
+      expect(retry).toMatchObject({ conversationId, reason: 'compaction' });
+      expect(retry!.token).not.toBe(first!.token);
+      expect(continuationByToken(token)).toMatchObject({ state: 'awaiting-summary' });
+      expect(getLog().some(entry => entry.message.includes(`compaction ticket ${token.slice(0, 8)} asking pickup 2 of 5`))).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   /**
    * #787: writing pickup 3/3 used to end in silence. The sent request stays protected and
    * collectable, no fourth reload is authorized, and the person is told exactly once.
@@ -13461,6 +13497,23 @@ describe('unattributed activity recovery', () => {
     const retry = await maintenance();
     expect(retry?.reason).toBe('assistant-error');
     expect((await request('POST', '/repairs/claim', { body: { token: retry!.token } })).body.allowed).toBe(true);
+  });
+
+  it('logs a Temporary Chat repair that the extension leaves open', async () => {
+    await pair();
+    await events(PRIME, [
+      { kind: 'user_message', time: Date.now(), messageId: 'temporary-question', text: 'Keep working' },
+      openTurn('temporary-answer'),
+      { kind: 'chat_error', time: Date.now(), turnId: 'temporary-answer', text: 'Connection interrupted', recoverable: true }
+    ]);
+    const repair = await maintenance();
+    expect(repair?.reason).toBe('assistant-error');
+    expect((await request('POST', '/repairs/claim', { body: { token: repair!.token } })).body.allowed).toBe(true);
+
+    await request('GET', `/status?repaired=${repair!.token}&repairAction=preserved&preservedFor=temporary-chat`);
+
+    expect(getLog().some(entry => entry.message === `bridge: ${PRIME}: Temporary Chat, not reloaded`)).toBe(true);
+    expect(await maintenance()).toBeNull();
   });
 
   it('does not refund error recovery when reload remints a generation for the same authored question', async () => {
