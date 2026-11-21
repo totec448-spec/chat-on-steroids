@@ -6,6 +6,46 @@ import type { ManagedSkill } from '../src/shared/skills.js';
 let dom: JSDOM | null = null;
 afterEach(() => { dom?.window.close(); dom = null; vi.unstubAllGlobals(); vi.resetModules(); });
 
+it('uses existing cards for discovered user Skills without offering managed actions', async () => {
+  dom = new JSDOM(`<!doctype html><body>
+    <input id="skillsSearch"><button id="skillsRefresh"></button>
+    <details class="plugin-menu"><summary>Import</summary><div class="plugin-menu-actions"><button id="skillsImportFolder"></button><button id="skillsImportFile"></button><button id="skillsImportGithub"></button></div></details>
+    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl"><p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
+    <span id="skillsCount"></span><div id="skillsInstalled"></div>
+  </body>`, { url: 'https://skills.test/' });
+  const w = dom.window;
+  for (const [key, value] of Object.entries({ window: w, document: w.document, HTMLElement: w.HTMLElement,
+    HTMLButtonElement: w.HTMLButtonElement, HTMLDialogElement: w.HTMLDialogElement })) vi.stubGlobal(key, value);
+  const managed: ManagedSkill = { id: 'installed', name: 'Installed', description: 'Managed package',
+    path: '/skills/installed/SKILL.md', origin: null, enabled: false };
+  const discovered = { id: 'personal--user-123', name: 'Personal', description: 'Personal instructions',
+    path: '/user-skills/agents/skills/personal/SKILL.md', source: 'user-agents' as const };
+  const listDiscoveredUserSkills = vi.fn(async () => ({ ok: true as const, data: [discovered] }));
+  const skillsSetEnabled = vi.fn(async () => ({ ok: true as const, data: [{ ...managed, enabled: true }] }));
+  const skillsRemove = vi.fn();
+  const skillsOpenFolder = vi.fn();
+  const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
+  initSkillsLibrary({ listManagedSkills: vi.fn(async () => ({ ok: true as const, data: [managed] })),
+    listDiscoveredUserSkills, skillsSetEnabled, skillsRemove, skillsOpenFolder } as any);
+  await vi.waitFor(() => expect(w.document.querySelectorAll('.skill-library-card')).toHaveLength(2), { timeout: 10_000 });
+  const external = w.document.querySelector<HTMLElement>('[data-skill-id="personal--user-123"]')!;
+  expect(external.classList.contains('pet-library-card')).toBe(true);
+  expect(external.querySelector('.skill-library-source')!.textContent).toContain('Agents');
+  expect(external.querySelector('button, .plugin-menu')).toBeNull();
+  expect(w.document.querySelector('[data-skill-id="installed"] .skill-library-disabled')?.textContent).toBe('Disabled');
+  expect(w.document.querySelector('[data-skill-id="installed"] .plugin-menu')).not.toBeNull();
+  const search = w.document.getElementById('skillsSearch') as HTMLInputElement;
+  search.value = 'Personal'; search.dispatchEvent(new w.Event('input'));
+  expect(w.document.querySelectorAll('.skill-library-card')).toHaveLength(1);
+  expect(w.document.getElementById('skillsCount')!.textContent).toContain('2 skills');
+  search.value = ''; search.dispatchEvent(new w.Event('input'));
+  (w.document.querySelector('#skillsRefresh') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(listDiscoveredUserSkills).toHaveBeenCalledTimes(2), { timeout: 10_000 });
+  expect(skillsSetEnabled).not.toHaveBeenCalled();
+  expect(skillsRemove).not.toHaveBeenCalled();
+  expect(skillsOpenFolder).not.toHaveBeenCalled();
+});
+
 it('shows the managed library, imports both source shapes, filters and removes only after confirmation', async () => {
   dom = new JSDOM(`<!doctype html><body>
     <input id="skillsSearch"><button id="skillsRefresh"></button>

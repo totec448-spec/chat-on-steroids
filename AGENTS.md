@@ -523,6 +523,13 @@ internal length and closing boundary; authored whitespace after the frame remain
 
 ### Text Skills
 
+The Skills page also lists discoverable global user Skills through `skills:discovered` on
+the fixed preload API. Main projects eligible `user-agents`, `codex-home`, and `claude-home`
+entries from the existing read-only `listSkillLibrary()` catalog into the same Skills cards,
+without menus or mutation authority for those external packages. Managed cards and their
+`<userData>/skills/.disabled-skills.json` version-1 enablement contract remain unchanged;
+project, plugin, system, and admin Skills stay out of this global overview.
+
 `main/skills.ts` owns the empty-by-default `<userData>/skills/<id>/SKILL.md` library,
 bounded to 128 valid packages with fail-closed overflow, UTF-8 import/read and metadata catalog.
 Its Core connector projection omits the redundant per-skill path, trims descriptions to 160
