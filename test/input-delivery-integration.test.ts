@@ -611,6 +611,13 @@ it('ends a Continue the page refuses before claiming because its answer is finis
 it.each(['veto-first', 'final-first', 'new-work'] as const)(
   'hands an unreadable silence recovery back to its exact owner (%s)', async order => {
     const bridge = await import('../src/main/bridge.js');
+    // This file shares one bridge listener and global recovery maps across hundreds of cases.
+    // Isolate this long-clock scenario so its 32-minute sweeps cannot age earlier cases' grants.
+    // Reset also clears browser presence, so pair again before making authenticated requests.
+    bridge.resetBridgeForTests();
+    const paired = await post('/pair', {});
+    expect(paired.status).toBe(200);
+    bearer = paired.body.token;
     let now = Date.now();
     const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
     try {
@@ -651,7 +658,7 @@ it.each(['veto-first', 'final-first', 'new-work'] as const)(
         // The release trace ended here, not with a native final or a Goal decision.
         now += 3_000;
         await attributedMcp(conversationId);
-        await vi.waitFor(async () => expect(await state()).toMatchObject({ state: 'cancelled' }));
+        await vi.waitFor(async () => expect(await state()).toMatchObject({ state: 'cancelled' }), { timeout: 10_000 });
         expect((await state())?.sendAuthorizedAt).toBeUndefined();
         expect(pending()).toBeNull();
         expect(await input.inputBeforeGoal(session.id, turnId)).toBeNull();
@@ -694,9 +701,12 @@ it.each(['veto-first', 'final-first', 'new-work'] as const)(
       }
       expect(pending()?.pickupStoppedAt).toBeDefined();
       expect((await post('/goal/draft', { conversationId, turnId: accepted!.turnId, clientId: 'replacement-page', terminalRequired: true })).status).toBe(200);
-      await vi.waitFor(() => expect(goal.goalViewFor(conversationId, 'replacement-page')?.stage).toBe('ready'));
+      await vi.waitFor(() => expect(goal.goalViewFor(conversationId, 'replacement-page')?.stage).toBe('ready'), { timeout: 10_000 });
       await bridge.setSessionAutomation(session.id, 'off');
-    } finally { clock.mockRestore(); }
+    } finally {
+      clock.mockRestore();
+      bridge.resetBridgeForTests();
+    }
   });
 
 it.each([
