@@ -2794,6 +2794,38 @@ describe('session IPC contracts', () => {
       await saveConfig(original);
     }
   });
+
+  it.each([
+    ['missing', null],
+    ['malformed', 'not-a-valid-chat!']
+  ] as const)('refuses a Linux notification click with a %s conversation ID without opening any tab', async (_kind, conversationId) => {
+    const original = getConfig();
+    const session = await createSession({ title: 'unbound notification', conversationId });
+    const reveal = vi.spyOn(bridgeModule, 'revealChatInBrowser').mockResolvedValue(true);
+    const openAppChat = vi.fn();
+    const onBrowserFailure = vi.fn();
+    try {
+      await saveConfig({ ...original, ui: { ...original.ui, chatBrowser: 'chrome' } });
+      vi.mocked(openInPreferredBrowser).mockClear();
+
+      clickFinishedChatNotification('linux', {
+        openAppChat,
+        openBrowserChat: () => openSessionChat(session.id),
+        onBrowserFailure
+      });
+
+      await vi.waitFor(() => expect(onBrowserFailure).toHaveBeenCalledOnce(), { timeout: 10_000 });
+      expect(onBrowserFailure.mock.calls[0]?.[0]).toMatchObject({
+        message: 'This session has no valid ChatGPT conversation'
+      });
+      expect(reveal).not.toHaveBeenCalled();
+      expect(openInPreferredBrowser).not.toHaveBeenCalled();
+      expect(openAppChat).not.toHaveBeenCalled();
+    } finally {
+      reveal.mockRestore();
+      await saveConfig(original);
+    }
+  });
 });
 
 it('follows only the newest chat selection when an earlier lookup finishes last (#1249, #1267)', async () => {
