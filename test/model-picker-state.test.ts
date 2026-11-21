@@ -252,11 +252,90 @@ it('rejects success when the post-close picker state becomes unreadable', async 
 // A route-owned native reasoning trigger provides independent machine evidence:
 // Fiber can keep High while the native control changes to Medium.
 function nativeReasoningTrigger() {
-  const trigger = page.window.document.querySelector('form button')!;
+  const trigger = page.window.document.querySelector<HTMLButtonElement>('form button')!;
   trigger.setAttribute('data-composer-navigation-target', 'reasoning');
   trigger.setAttribute('data-selected-reasoning-effort', 'high');
   return trigger;
 }
+it.each([['en', 'Medium'], ['ru', 'Средний']] as const)('does not passively confirm Fiber High against an owned native Medium (%s)', async (lang, caption) => {
+  const f = fixture(), doc = page.window.document, trigger = nativeReasoningTrigger();
+  doc.documentElement.lang = lang;
+  trigger.textContent = caption;
+  trigger.setAttribute('data-selected-reasoning-effort', 'medium');
+  const diagnostics: unknown[] = [];
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'high', () => true,
+    (record: unknown) => diagnostics.push(record))).toBe(false);
+  expect(trigger.getAttribute('data-clf-picker-route')).toBe(page.window.location.pathname);
+  expect(f.state.currentSelection.thinkingEffort).toBe('extended');
+  expect(modelSelectionDiagnostic.parse(diagnostics.at(-1))).toMatchObject({ outcome: 'failed', failure: 'changed', failedPhase: 'close', closed: true, selected: { model: 'gpt-5-6-thinking', effort: 'high' }, after: { model: 'gpt-5-6-thinking', effort: 'high' } });
+  expect(doc.querySelector('[data-testid="composer-intelligence-picker-content"]')).toBeNull();
+});
+it('keeps consistent native High on the passive path without opening a picker', async () => {
+  const f = fixture('', null), trigger = nativeReasoningTrigger();
+  const opened = vi.fn();
+  trigger.addEventListener('keydown', opened);
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'high')).toBe(true);
+  expect(opened).not.toHaveBeenCalled();
+  expect(page.window.document.querySelector('[data-testid="composer-intelligence-picker-content"]')).toBeNull();
+});
+it('rechecks a contradictory passive selection through the owned picker', async () => {
+  const f = fixture(), trigger = nativeReasoningTrigger();
+  trigger.setAttribute('data-selected-reasoning-effort', 'medium');
+  const opened = vi.fn(() => trigger.setAttribute('data-selected-reasoning-effort', 'high'));
+  trigger.addEventListener('keydown', event => { if (event.key === 'Enter') opened(); });
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'high')).toBe(true);
+  expect(opened).toHaveBeenCalledTimes(1);
+  expect(page.window.document.querySelector('[data-testid="composer-intelligence-picker-content"]')).toBeNull();
+});
+it('does not forget contradictory passive native evidence when the picker opens', async () => {
+  const f = fixture(), trigger = nativeReasoningTrigger();
+  trigger.setAttribute('data-selected-reasoning-effort', 'medium');
+  trigger.addEventListener('keydown', event => {
+    if (event.key === 'Enter') trigger.removeAttribute('data-composer-navigation-target');
+  });
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'high')).toBe(false);
+  expect(f.api.modelSelectionFailure()).toContain('after closing');
+});
+it.each([false, true])('retains native ownership lost during the first read (open=%s)', async initiallyOpen => {
+  const f = fixture(), win = page.window, trigger = nativeReasoningTrigger();
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'high')).toBe(true);
+  expect(trigger.getAttribute('data-clf-picker-route')).toBe(win.location.pathname);
+  trigger.setAttribute('data-selected-reasoning-effort', 'medium');
+  if (initiallyOpen) trigger.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter' }));
+  const post = win.postMessage;
+  let lost = false;
+  win.postMessage = (data: any, ...args: any[]) => {
+    if (!lost && data?.source === 'clf-picker-ask') {
+      lost = true;
+      trigger.removeAttribute('data-composer-navigation-target');
+    }
+    return (post as any).call(win, data, ...args);
+  };
+  const diagnostics: unknown[] = [];
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'high', () => true,
+    (record: unknown) => diagnostics.push(record))).toBe(false);
+  expect(lost).toBe(true);
+  expect(modelSelectionDiagnostic.parse(diagnostics.at(-1))).toMatchObject({ outcome: 'failed', failure: 'changed', failedPhase: 'close', closed: true });
+});
+it('corroborates native ownership first proved by the final close read', async () => {
+  const f = fixture(), win = page.window, doc = win.document;
+  const trigger = doc.querySelector('form button')!;
+  trigger.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter' }));
+  let closed = false, reads = 0;
+  doc.addEventListener('keydown', event => { if (event.key === 'Escape') closed = true; });
+  const post = win.postMessage;
+  win.postMessage = (data: any, ...args: any[]) => {
+    if (closed && data?.source === 'clf-picker-ask' && ++reads === 2) {
+      trigger.setAttribute('data-composer-navigation-target', 'reasoning');
+      trigger.setAttribute('data-selected-reasoning-effort', 'medium');
+    }
+    return (post as any).call(win, data, ...args);
+  };
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'high')).toBe(false);
+  expect(reads).toBe(2);
+  expect(trigger.getAttribute('data-clf-picker-route')).toBe(win.location.pathname);
+  expect(f.api.modelSelectionFailure()).toContain('after closing');
+});
 it('accepts unchanged High when its owned native reasoning trigger survives close', async () => {
   const f = fixture(), doc = page.window.document;
   nativeReasoningTrigger();
