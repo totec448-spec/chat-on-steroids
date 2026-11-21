@@ -130,7 +130,7 @@ describe('read routes', () => {
   it('are listed by health and need the token like every other route', async () => {
     const health = await call('/v1/health');
     expect(health.body.routes).toEqual([
-      '/v1/health', '/v1/status', '/v1/sessions', '/v1/sessions/{id}', '/v1/sessions/{id}/events', '/v1/sessions/{id}/events/stream', '/v1/inputs', '/v1/agents', '/v1/workers/{ownerId}', '/v1/workers/{ownerId}/reports', '/v1/log', '/v1/models'
+      '/v1/health', '/v1/status', '/v1/sessions', '/v1/sessions/{id}', '/v1/sessions/{id}/events', '/v1/sessions/{id}/events/stream', '/v1/inputs', '/v1/inputs/{id}', '/v1/agents', '/v1/workers/{ownerId}', '/v1/workers/{ownerId}/reports', '/v1/log', '/v1/models'
     ]);
     for (const route of ['/v1/sessions', `/v1/sessions/${sessionId}`, `/v1/sessions/${sessionId}/events`, '/v1/inputs', '/v1/agents', '/v1/log', '/v1/models']) {
       expect((await call(route, {})).status).toBe(401);
@@ -656,9 +656,17 @@ describe('input outbox', () => {
       'requiresAuthorization', 'sendAuthorizedAt', 'sessionId', 'state', 'text', 'transportIntent'
     ]);
     expect(row.delivery).toBe('pending');
+    const direct = await call(`/v1/inputs/${queued.id}`);
+    expect(direct.status).toBe(200);
+    expect(direct.body).toEqual({ input: row });
+    expect(JSON.stringify(direct.body)).not.toContain(apiKey);
+    expect((await call(`/v1/inputs/${randomUUID()}`)).status).toBe(404);
+    expect((await call(`/v1/inputs/${queued.id}?limit=1`)).status).toBe(400);
+    expect((await call(`/v1/inputs/${queued.id}`, {})).status).toBe(401);
 
     expect((await call(`/v1/inputs?state=${row.state}`)).body.inputs.map((input: { id: string }) => input.id)).toContain(queued.id);
     expect(await cancelInput(queued.id)).toBe(true);
+    expect((await call(`/v1/inputs/${queued.id}`)).body.input.delivery).toBe('not_sent');
     const cancelled = await call('/v1/inputs?state=cancelled');
     expect(cancelled.body.inputs.map((input: { id: string }) => input.id)).toContain(queued.id);
     expect(cancelled.body.inputs.every((input: { state: string }) => input.state === 'cancelled')).toBe(true);
@@ -939,7 +947,7 @@ describe('the deadline on reads', () => {
   });
 
   it('answers 504 when an owner never does, and health still answers meanwhile', async () => {
-    vi.spyOn(inputModule, 'listInputs').mockImplementation(stuck);
+    vi.spyOn(inputModule, 'readInputReceipts').mockImplementation(stuck);
     const started = Date.now();
     const reply = await call('/v1/inputs');
     expect(reply).toEqual({ status: 504, body: { error: 'timeout', detail: expect.any(String) } });
@@ -953,7 +961,7 @@ describe('the deadline on reads', () => {
   });
 
   it('leaves no rejection behind when the stuck read fails after it was answered', async () => {
-    vi.spyOn(inputModule, 'listInputs').mockImplementation(stuck);
+    vi.spyOn(inputModule, 'readInputReceipts').mockImplementation(stuck);
     expect((await call('/v1/inputs')).status).toBe(504);
     await release();
     expect(unhandled).toEqual([]);
@@ -974,7 +982,7 @@ describe('the deadline on reads', () => {
   });
 
   it('refuses new reads at once when enough are stuck, so polling cannot queue work behind an owner', async () => {
-    const owner = vi.spyOn(inputModule, 'listInputs').mockImplementation(stuck);
+    const owner = vi.spyOn(inputModule, 'readInputReceipts').mockImplementation(stuck);
     const answered = await Promise.all(Array.from({ length: 8 }, () => call('/v1/inputs')));
     expect(answered.map((reply) => reply.status)).toEqual(Array(8).fill(504));
     // Every place is held by a read that was answered but has not finished. A 503 and not a 504:
@@ -993,7 +1001,7 @@ describe('the deadline on reads', () => {
     controlApi.setReadDeadlineForTests(60_000);
     const set = vi.spyOn(globalThis, 'setTimeout');
     const cleared = vi.spyOn(globalThis, 'clearTimeout');
-    const owner = vi.spyOn(inputModule, 'listInputs');
+    const owner = vi.spyOn(inputModule, 'readInputReceipts');
     const cases: Array<[string, number]> = [
       ['/v1/inputs', 200],
       ['/v1/sessions/2026-01-01-deadbeef', 404],
@@ -1022,5 +1030,17 @@ describe('the deadline on reads', () => {
     controlApi.setReadDeadlineForTests(5_000);
     expect((await call('/v1/inputs')).status).toBe(200);
     expect((await call(events())).status).toBe(200);
+  });
+
+  it('reads an exact receipt without joining outbox reconciliation or history publication', async () => {
+    const reconciliation = vi.spyOn(inputModule, 'listInputs').mockImplementation(stuck);
+    controlApi.setReadDeadlineForTests(150);
+    const result = await call('/v1/inputs');
+    expect(result.status).toBe(200);
+    expect(result.body.inputs.length).toBeGreaterThan(0);
+    const id = result.body.inputs[0].id as string;
+    const direct = await call(`/v1/inputs/${id}`);
+    expect(direct).toMatchObject({ status: 200, body: { input: { id } } });
+    expect(reconciliation).not.toHaveBeenCalled();
   });
 });
