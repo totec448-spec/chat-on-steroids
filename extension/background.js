@@ -3728,22 +3728,28 @@ async function checkWebChatTitle(request) {
   if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id) || !conversationId) return;
   const intent = connectionEpoch;
   let title = null;
-  let reason = 'active-tab-mismatch';
+  let reason = 'no-matching-tab';
   try {
-    const active = () => chrome.tabs.query({ active: true, lastFocusedWindow: true });
-    const usable = tab => tab && Number.isInteger(tab.id) && !tab.incognito && !tab.pendingUrl &&
-      !tab.discarded && !tab.frozen && tab.status === 'complete' && conversationFromUrl(tab.url) === conversationId;
-    const [tab] = await active();
-    if (usable(tab)) {
+    const matchingTabs = async () => (await chrome.tabs.query({ url: CHATGPT_TAB_URLS })).filter(tab =>
+      Number.isInteger(tab.id) && !tab.incognito && conversationFromUrl(tab.url) === conversationId);
+    const ready = tab => tab && !tab.pendingUrl && !tab.discarded && !tab.frozen && tab.status === 'complete';
+    const tabs = await matchingTabs();
+    const [tab] = tabs;
+    if (tabs.length > 1) {
+      reason = 'multiple-matching-tabs';
+    } else if (tab && !ready(tab)) {
+      reason = 'tab-unavailable';
+    } else if (tab) {
       const documentId = tabDocuments[String(tab.id)];
-      const epoch = tabEpochs[String(tab.id)];
+      const source = { tab: tab.id, documentId, navigationEpoch: tabEpochs[String(tab.id)] };
       reason = 'document-unregistered';
-      if (documentId) {
+      if (ownsDocument(source)) {
         const answer = await tabReply(tab.id, { type: 'clf-check-web-chat-title', conversationId }, { documentId }, 3000);
-        const [current] = await active();
+        const currentTabs = await matchingTabs();
+        const [current] = currentTabs;
         reason = 'document-changed';
-        if (usable(current) && current.id === tab.id && current.url === tab.url &&
-            ownsDocument({ tab: tab.id, documentId, navigationEpoch: epoch })) {
+        if (currentTabs.length === 1 && ready(current) && current.id === tab.id && current.url === tab.url &&
+            ownsDocument(source)) {
           reason = answer ? 'title-unconfirmed' : 'page-unresponsive';
           if (typeof answer?.title === 'string' && answer.title.length <= 200) title = answer.title.trim() || null;
         }

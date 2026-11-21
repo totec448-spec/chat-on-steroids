@@ -8,7 +8,10 @@ const reply = z.object({
   id: z.string().uuid(),
   conversationId: z.string().regex(/^[0-9a-f-]{8,64}$/i),
   title: z.string().trim().min(1).max(200).nullable(),
-  reason: z.enum(['active-tab-mismatch', 'document-unregistered', 'document-changed', 'title-unconfirmed', 'page-unresponsive', 'browser-error']).optional()
+  reason: z.enum([
+    'active-tab-mismatch', 'no-matching-tab', 'multiple-matching-tabs', 'tab-unavailable',
+    'document-unregistered', 'document-changed', 'title-unconfirmed', 'page-unresponsive', 'browser-error'
+  ]).optional()
 }).strict();
 
 let pending: {
