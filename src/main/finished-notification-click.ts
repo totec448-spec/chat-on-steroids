@@ -1,3 +1,5 @@
+import { logInfo } from './logger.js';
+
 /**
  * A native finish notification is an explicit user request to see that chat.
  * On Linux it should reveal the recorded ChatGPT tab, not just the CoS window.
@@ -24,25 +26,40 @@ export function clickFinishedChatNotification(platform: NodeJS.Platform, actions
  */
 type NativeNotice = { once(event: 'click' | 'action', listener: () => void): unknown };
 
-export function createFinishedNoticeRetention(maxNotices = 128, keepMs = 24 * 60 * 60 * 1_000) {
+export function createFinishedNoticeRetention(
+  maxNotices = 128,
+  keepMs = 24 * 60 * 60 * 1_000,
+  logDecision: (message: string) => void = logInfo
+) {
   const retained = new Map<NativeNotice, NodeJS.Timeout>();
-  const release = (notice: NativeNotice): void => {
+  const release = (notice: NativeNotice, reason: 'click' | 'action' | 'capacity' | 'age'): void => {
     const timer = retained.get(notice);
-    if (timer) clearTimeout(timer);
+    if (!timer) return;
+    clearTimeout(timer);
     retained.delete(notice);
+    const decision = {
+      click: 'released (clicked)',
+      action: 'released (action selected)',
+      capacity: 'evicted (capacity limit)',
+      age: 'expired (age limit)'
+    }[reason];
+    logDecision(`finished notice retention: ${decision}`);
   };
   return {
     retain(notice: NativeNotice): void {
-      if (retained.has(notice)) return;
+      if (retained.has(notice)) {
+        logDecision('finished notice retention: skipped (already retained)');
+        return;
+      }
       if (retained.size >= maxNotices) {
         const oldest = retained.keys().next().value;
-        if (oldest) release(oldest);
+        if (oldest) release(oldest, 'capacity');
       }
-      const timer = setTimeout(() => release(notice), keepMs);
+      const timer = setTimeout(() => release(notice, 'age'), keepMs);
       timer.unref?.();
       retained.set(notice, timer);
-      notice.once('click', () => release(notice));
-      notice.once('action', () => release(notice));
+      notice.once('click', () => release(notice, 'click'));
+      notice.once('action', () => release(notice, 'action'));
     },
     has(notice: NativeNotice): boolean { return retained.has(notice); }
   };

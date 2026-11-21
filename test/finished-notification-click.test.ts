@@ -89,7 +89,8 @@ describe('retaining native finished-chat notifications', () => {
   it('bounds retained notifications and expires even when GNOME never sends close', () => {
     vi.useFakeTimers();
     try {
-      const active = createFinishedNoticeRetention(2, 1_000);
+      const logDecision = vi.fn();
+      const active = createFinishedNoticeRetention(2, 1_000, logDecision);
       const first = new EventEmitter(), second = new EventEmitter(), third = new EventEmitter();
       active.retain(first);
       active.retain(first);
@@ -101,6 +102,35 @@ describe('retaining native finished-chat notifications', () => {
       vi.advanceTimersByTime(1_000);
       expect(active.has(second)).toBe(false);
       expect(active.has(third)).toBe(false);
+      expect(logDecision.mock.calls.map(([message]) => message)).toEqual([
+        'finished notice retention: skipped (already retained)',
+        'finished notice retention: evicted (capacity limit)',
+        'finished notice retention: expired (age limit)',
+        'finished notice retention: expired (age limit)'
+      ]);
     } finally { vi.useRealTimers(); }
+  });
+
+  it('logs an activated notice once and never logs its title or chat identifier', () => {
+    const logDecision = vi.fn();
+    const active = createFinishedNoticeRetention(2, 1_000, logDecision);
+    const notice = Object.assign(new EventEmitter(), { title: 'PRIVATE_TITLE', sessionId: 'PRIVATE_CHAT_ID' });
+    active.retain(notice);
+    notice.emit('click');
+    notice.emit('action');
+    expect(active.has(notice)).toBe(false);
+    expect(logDecision).toHaveBeenCalledExactlyOnceWith('finished notice retention: released (clicked)');
+    expect(logDecision.mock.calls.flat().join(' ')).not.toMatch(/PRIVATE_TITLE|PRIVATE_CHAT_ID/);
+  });
+
+  it('logs an action release once even when the click arrives afterwards', () => {
+    const logDecision = vi.fn();
+    const active = createFinishedNoticeRetention(2, 1_000, logDecision);
+    const notice = new EventEmitter();
+    active.retain(notice);
+    notice.emit('action');
+    notice.emit('click');
+    expect(active.has(notice)).toBe(false);
+    expect(logDecision).toHaveBeenCalledExactlyOnceWith('finished notice retention: released (action selected)');
   });
 });
