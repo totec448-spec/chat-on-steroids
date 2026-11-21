@@ -607,11 +607,18 @@ it('keeps the prior transcript inert until the selected detail arrives and fence
   expect(w.document.getElementById('sessionControlStatus')!.textContent).toBe('');
 
   const current: SessionEvent[] = [{ seq: 3, time: T0 + 3, source: 'extension', kind: 'assistant_message', messageId: 'a-current', message: text('CURRENT A ANSWER'), state: 'final', final: true }];
+  // Once the current A reply is available, later automatic refreshes must see
+  // that same backend state. Leaving a fourth refresh unresolved can discard
+  // the third read's generation under a busy full-suite run, falsely leaving
+  // the retained old A transcript on screen forever.
+  api.getSession.mockImplementation((id: string) => Promise.resolve(
+    id === first.id ? detail(first, current) : { ok: false, error: 'B detail unavailable' }
+  ));
   details[2]!.reply(detail(first, current));
   controls[2]!.reply({ ok: true, data: { automation: 'off', objective: '', blocked: '', job: null, recovery: [] } });
   await settle();
   // The asynchronously fetched detail can paint after a second task under full-suite load.
-  await waitFor(() => expect(timeline.textContent).toContain('CURRENT A ANSWER'), { timeout: 5000 });
+  await waitFor(() => expect(timeline.textContent).toContain('CURRENT A ANSWER'));
   expect(timeline.textContent).not.toContain('STALE A QUESTION');
   expect(timeline.querySelector('img[alt="a-only.png"]')).toBeNull();
   expect(timeline.hasAttribute('inert')).toBe(false);
