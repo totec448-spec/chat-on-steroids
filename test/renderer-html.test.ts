@@ -909,3 +909,264 @@ it.each(['\n', '\r\n'])('renders a chart after a quoted code fence in the same l
   expect(rendered.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
   expect(rendered.textContent).not.toContain('\uE030');
 });
+
+// A whole reply and the recording of the same reply, as the store keeps both. The numbers are
+// fictional; only the typed structure and the exact words tie the captured grid to this revision.
+describe('a standalone recorded metric grid', () => {
+  const source = (availability = '98.6%'): string => [
+    '**Sample business overview**', '',
+    'Revenue', '', '# $24.8k', '', 'Monthly revenue', '',
+    'Active users', '', '# 1,284', '', 'Monthly active users', '',
+    'Availability', '', `# ${availability}`, '', 'Service uptime', '',
+    'All figures are illustrative.'
+  ].join('\n');
+  const cell = (label: string, value: string, note: string): string =>
+    '<div data-d-component="grid-item"><div data-d-component="box" data-d-has-border="">' +
+    `<p data-d-component="text" data-d-size="xs">${label}</p>` +
+    `<h1 data-d-component="title" data-d-size="xl">${value}</h1>` +
+    `<p data-d-component="text" data-d-size="sm">${note}</p></div></div>`;
+  const unavailableCell = '<div data-d-component="grid-item"><div data-d-component="box" data-d-has-border="">' +
+    '<p data-d-component="text">Availability</p><p data-d-component="text">98.6%</p>' +
+    '<p data-d-component="text">Service uptime</p></div></div>';
+  const cells = [
+    cell('Revenue', '$24.8k', 'Monthly revenue'),
+    cell('Active users', '1,284', 'Monthly active users'),
+    cell('Availability', '98.6%', 'Service uptime')
+  ];
+  const grid = (items: string[] = cells, columns = 3): string =>
+    `<div data-d-component="grid" style="grid-template-columns: repeat(${columns}, minmax(0px, 1fr))" onclick="alert(1)">` +
+    `${items.join('')}</div>`;
+  const capture = (markup: string): StoredText =>
+    whole(`<div><p>Sample business overview</p>${markup}<p>All figures are illustrative.</p></div>`);
+  const renderedGrid = (html: StoredText, body = source()): HTMLElement => renderedMarkdown(body, html);
+
+  it('restores the typed three-card grid as one bounded grid with every value and in order', () => {
+    const rendered = renderedGrid(capture(grid()));
+    const panel = rendered.querySelector<HTMLElement>('.markdown-dil-grid.markdown-dil-grid-standalone');
+    expect(panel).not.toBeNull();
+    expect(panel!.classList.contains('markdown-dil-grid-columns-3')).toBe(true);
+    // One shared grid, never the two longer child panels and a bare metric.
+    expect(rendered.querySelector('.markdown-dil-card, .markdown-dil-panel')).toBeNull();
+    expect(rendered.querySelectorAll('.markdown-dil-grid-item')).toHaveLength(3);
+    expect(rendered.querySelectorAll('.markdown-dil-bordered')).toHaveLength(3);
+    // Every card keeps its label, value and description, in the canonical order.
+    expect([...rendered.querySelectorAll('.markdown-dil-grid-item')].map(item =>
+      [...item.querySelectorAll('.markdown-dil-text, .markdown-dil-title')].map(node => node.textContent)))
+      .toEqual([['Revenue', '$24.8k', 'Monthly revenue'],
+        ['Active users', '1,284', 'Monthly active users'],
+        ['Availability', '98.6%', 'Service uptime']]);
+    // Only the grid's own span was replaced; prose on both sides is untouched.
+    expect([...rendered.children].map(node => node.tagName)).toEqual(['P', 'DIV', 'P']);
+    expect(rendered.firstElementChild?.textContent).toBe('Sample business overview');
+    expect(rendered.lastElementChild?.textContent).toBe('All figures are illustrative.');
+    expect(rendered.querySelector('[onclick], [style], svg, script')).toBeNull();
+  });
+
+  it('restores a compact recorded grid whose cells nest a header row and a value box', () => {
+    const metric = (label: string, value: string, note: string, symbol = ''): string =>
+      '<div data-d-component="grid-item"><div data-d-component="box" data-d-has-border="">' +
+      '<div data-d-component="row" data-d-justify="between">' +
+      `<p data-d-component="text"><span>${label}</span></p>${symbol}</div>` +
+      '<div data-d-component="box">' +
+      `<h1 data-d-component="title"><span><strong>${value}</strong></span></h1>` +
+      `<p data-d-component="text"><span>${note}</span></p></div></div></div>`;
+    const compact = '<div data-d-component="grid" data-cos-style="gap: 12px; grid-template-columns: repeat(3, minmax(0px, 1fr));">' +
+      metric('Revenue', '$24.8k', 'Monthly revenue',
+        '<span data-cos-icon=\'{"v":1,"paths":[{"d":"M19 7V4a1 1 0 0 0-1-1H5"}]}\'></span>') +
+      metric('Active users', '1,284', 'Monthly active users',
+        '<svg data-d-component="icon" aria-hidden="true" onload="alert(1)"><path d="M7.5 5a2.5 2.5 0 1 0"></path></svg>') +
+      metric('Availability', '98.6%', 'Service uptime') + '</div>';
+    const rendered = renderedGrid(capture(compact));
+    const panel = rendered.querySelector<HTMLElement>('.markdown-dil-grid.markdown-dil-grid-standalone');
+    expect(panel).not.toBeNull();
+    expect(panel!.classList.contains('markdown-dil-grid-columns-3')).toBe(true);
+    const tiles = [...panel!.querySelectorAll<HTMLElement>(':scope > .markdown-dil-grid-item')];
+    expect(tiles).toHaveLength(3);
+    // The compact recording keeps its header row and value box; only its recorded drawing is gone.
+    expect(tiles.map(tile => tile.querySelector('.markdown-dil-bordered > .markdown-dil-row')?.textContent))
+      .toEqual(['Revenue', 'Active users', 'Availability']);
+    expect(tiles.map(tile =>
+      tile.querySelector('.markdown-dil-bordered > .markdown-dil-box .markdown-dil-title')?.textContent))
+      .toEqual(['$24.8k', '1,284', '98.6%']);
+    expect(tiles.map(tile =>
+      tile.querySelector('.markdown-dil-bordered > .markdown-dil-box .markdown-dil-text')?.textContent))
+      .toEqual(['Monthly revenue', 'Monthly active users', 'Service uptime']);
+    // A decorative drawing is removed before aria-hidden could make the whole grid fall back.
+    expect(rendered.querySelector('svg, [data-cos-icon], [data-cos-style], [aria-hidden], [onload]')).toBeNull();
+    // The restored layout adds no keyboard stop or control of its own.
+    expect(panel!.querySelector('a, button, input, select, textarea, [tabindex], [contenteditable]')).toBeNull();
+  });
+
+  it.each([2, 4])('restores a recorded %i-column grid within the bounded range', columns => {
+    const items = Array.from({ length: columns }, (_, index) =>
+      cell(`Metric ${index + 1}`, `${index + 1}0%`, `Share ${index + 1}`));
+    const body = Array.from({ length: columns }, (_, index) =>
+      `Metric ${index + 1}\n\n# ${index + 1}0%\n\nShare ${index + 1}`).join('\n\n');
+    const rendered = renderedGrid(capture(grid(items, columns)), body);
+    const panel = rendered.querySelector<HTMLElement>('.markdown-dil-grid.markdown-dil-grid-standalone');
+    expect(panel).not.toBeNull();
+    expect(panel!.classList.contains(`markdown-dil-grid-columns-${columns}`)).toBe(true);
+    expect(panel!.querySelectorAll(':scope > .markdown-dil-grid-item')).toHaveLength(columns);
+  });
+
+  it('leaves the whole reply in Markdown when the recorded grid contains a nested grid', () => {
+    const nested = grid([cells[0]!, cells[1]!, `<div data-d-component="grid-item"><div data-d-component="grid">${cells[2]}</div></div>`]);
+    const rendered = renderedGrid(capture(nested));
+    expect(rendered.querySelector('.markdown-dil-grid-standalone, .markdown-dil-panel, .markdown-dil-card')).toBeNull();
+    expect(rendered.textContent).toContain('Availability');
+    expect(rendered.textContent).toContain('Service uptime');
+  });
+
+  it('leaves the whole reply in Markdown when an outer grid wraps the complete metric grid', () => {
+    const wrapped = `<div data-d-component="grid"><div data-d-component="grid-item">${grid()}</div></div>`;
+    const rendered = renderedGrid(capture(wrapped));
+    // Neither the whole grid nor its longer cards alone may stand in for the reply.
+    expect(rendered.querySelector('.markdown-dil-grid-standalone, .markdown-dil-panel, .markdown-dil-card')).toBeNull();
+    expect([...rendered.querySelectorAll('h1')].map(heading => heading.textContent)).toEqual(['$24.8k', '1,284', '98.6%']);
+  });
+
+  it('leaves the whole reply in Markdown when the recorded grid contains a nested grid', () => {
+    const rendered = renderedGrid(capture(grid(cells, 4)));
+    expect(rendered.querySelector('.markdown-dil-grid-standalone, .markdown-dil-panel, .markdown-dil-card')).toBeNull();
+    expect(rendered.textContent).toContain('Monthly active users');
+    // A column expression this app cannot draw exactly is no evidence for a replacement either.
+    const fixed = renderedGrid(capture(grid().replace('repeat(3, minmax(0px, 1fr))', '200px 200px 200px')));
+    expect(fixed.querySelector('.markdown-dil-grid-standalone, .markdown-dil-panel, .markdown-dil-card')).toBeNull();
+    const missing = renderedGrid(capture(grid().replace(/ style="[^"]*"/, '')));
+    expect(missing.querySelector('.markdown-dil-grid-standalone, .markdown-dil-panel, .markdown-dil-card')).toBeNull();
+  });
+
+  it('leaves a canonical paragraph whole when the recorded grid only matches its beginning', () => {
+    const body = source().replace('Service uptime', 'Service uptime in total');
+    const rendered = renderedGrid(capture(grid()), body);
+    expect(rendered.querySelector('.markdown-dil-grid-standalone, .markdown-dil-panel, .markdown-dil-card')).toBeNull();
+    expect(rendered.textContent).toContain('Service uptime in total');
+  });
+
+  it('leaves the whole reply in Markdown when one recorded card lost its typed title', () => {
+    const rendered = renderedGrid(capture(grid([cells[0]!, cells[1]!, unavailableCell])));
+    expect(rendered.querySelector('.markdown-dil-grid-standalone, .markdown-dil-panel, .markdown-dil-card')).toBeNull();
+    expect(rendered.textContent).toContain('Service uptime');
+  });
+
+  it('leaves the whole reply in Markdown when the canonical answer was edited after the capture', () => {
+    const rendered = renderedGrid(capture(grid()), source('98.7%'));
+    expect(rendered.querySelector('.markdown-dil-grid-standalone, .markdown-dil-panel, .markdown-dil-card')).toBeNull();
+    expect(rendered.textContent).toContain('98.7%');
+    expect(rendered.textContent).not.toContain('98.6%');
+  });
+
+  it('does not guess which identical canonical span a recorded grid belongs to', () => {
+    const rendered = renderedGrid(capture(grid()), `${source()}\n\n${source()}`);
+    expect(rendered.querySelector('.markdown-dil-grid-standalone, .markdown-dil-panel, .markdown-dil-card')).toBeNull();
+    expect(rendered.querySelectorAll('p').length).toBeGreaterThan(10);
+  });
+
+  it.each(['service uptime', 'Service uptime!'])('keeps an exact canonical edit to “%s”', edited => {
+    const rendered = renderedGrid(capture(grid()), source().replace('Service uptime', edited));
+    expect(rendered.querySelector('.markdown-dil-grid-standalone, .markdown-dil-panel')).toBeNull();
+    expect(rendered.textContent).toContain(edited);
+  });
+
+  // The record draws plain values, so nothing it holds may drop the reply's own emphasis.
+  it.each([['*$24.8k*', '$24.8k', 'em'], ['**1,284**', '1,284', 'strong'], ['~~98.6%~~', '98.6%', 'del']])(
+    'keeps the canonical “%s” inline markup instead of drawing the plain recorded grid', (markdown, plain, tag) => {
+      const rendered = renderedGrid(capture(grid()), source().replace(`# ${plain}`, `# ${markdown}`));
+      expect(rendered.querySelector('.markdown-dil-grid-standalone, .markdown-dil-panel, .markdown-dil-card')).toBeNull();
+      expect(rendered.querySelector(`h1 > ${tag}`)?.textContent).toBe(plain);
+    });
+
+  it('restores the grid when its recorded value carries the same inline markup', () => {
+    const values = ['$24.8k', '1,284', '<del>98.6%</del>'];
+    const labels = ['Revenue', 'Active users', 'Availability'];
+    const notes = ['Monthly revenue', 'Monthly active users', 'Service uptime'];
+    const struck = grid(values.map((value, index) => cell(labels[index]!, value, notes[index]!)));
+    const rendered = renderedGrid(capture(struck), source('~~98.6%~~'));
+    const panel = rendered.querySelector<HTMLElement>('.markdown-dil-grid.markdown-dil-grid-standalone');
+    expect(panel).not.toBeNull();
+    expect(panel!.querySelector('.markdown-dil-title > del')?.textContent).toBe('98.6%');
+  });
+
+  it.each(['del', 'sup'])('keeps the canonical value when only the recording wraps it in <%s>', tag => {
+    const marked = grid().replace('>98.6%</h1>', `><${tag}>98.6%</${tag}></h1>`);
+    const rendered = renderedGrid(capture(marked));
+    expect(rendered.querySelector('.markdown-dil-grid-standalone, .markdown-dil-panel')).toBeNull();
+    expect(rendered.querySelector(tag)).toBeNull();
+    expect([...rendered.querySelectorAll('h1')].at(-1)?.textContent).toBe('98.6%');
+  });
+
+  it('keeps the canonical value when the recording wraps its whole heading in <del>', () => {
+    const marked = grid().replace(/<h1([^>]*)>98\.6%<\/h1>/, '<del><h1$1>98.6%</h1></del>');
+    expect(marked).toContain('<del><h1');
+    const rendered = renderedGrid(capture(marked));
+    expect(rendered.querySelector('.markdown-dil-grid-standalone, .markdown-dil-panel')).toBeNull();
+    expect(rendered.querySelector('del')).toBeNull();
+    expect([...rendered.querySelectorAll('h1')].at(-1)?.textContent).toBe('98.6%');
+  });
+
+  it('preserves the canonical heading level when it differs from the recording', () => {
+    const rendered = renderedGrid(capture(grid()), source().replace('# $24.8k', '### $24.8k'));
+    expect(rendered.querySelector('.markdown-dil-grid-standalone')).toBeNull();
+    expect(rendered.querySelector('h3')?.textContent).toBe('$24.8k');
+  });
+
+  it('keeps the canonical field boundaries when the reply joins two recorded fields', () => {
+    const joined = renderedGrid(capture(grid()),
+      source().replace('# 1,284\n\nMonthly active users', '# 1,284<br>Monthly active users'));
+    expect(joined.querySelector('.markdown-dil-grid-standalone, .markdown-dil-panel')).toBeNull();
+    expect(joined.textContent).toContain('Monthly active users');
+  });
+
+  it('keeps a prose paragraph with the same words but no metric field boundaries', () => {
+    const body = source().split('\n\n').slice(1, -1).join(' ');
+    const rendered = renderedGrid(capture(grid()), body);
+    expect([...rendered.children].map(node => node.tagName)).toEqual(['P']);
+    expect(rendered.textContent?.trim()).toBe(body);
+  });
+
+  it('keeps an existing bordered prose panel inside an unrelated captured grid', () => {
+    const body = 'The archive index was verified today.';
+    const markup = '<div data-d-component="grid"><div data-d-component="grid-item">' +
+      '<div data-d-component="box" data-d-has-border><p>' + body + '</p></div></div></div>';
+    const rendered = renderedGrid(capture(markup), body);
+    expect(rendered.querySelector('.markdown-dil-grid-standalone')).toBeNull();
+    expect(rendered.querySelector('.markdown-dil-panel')?.textContent).toBe(body);
+  });
+
+  it('keeps the same words as a Markdown table instead of replacing the table with a grid', () => {
+    const table = [
+      '| Revenue | $24.8k | Monthly revenue |',
+      '| --- | --- | --- |',
+      '| Active users | 1,284 | Monthly active users |',
+      '| Availability | 98.6% | Service uptime |'
+    ].join('\n');
+    const rendered = renderedGrid(capture(grid()), `Sample business overview\n\n${table}\n\nAll figures are illustrative.`);
+    expect(rendered.querySelector('.markdown-dil-grid-standalone, .markdown-dil-panel')).toBeNull();
+    expect(rendered.querySelector('table')).not.toBeNull();
+    expect(rendered.textContent).toContain('Service uptime');
+  });
+
+  it('keeps fenced and inline code literal even when their words match a recorded grid', () => {
+    const fenced = ['Sample business overview', '', '```text',
+      'Revenue $24.8k Monthly revenue', 'Active users 1,284 Monthly active users',
+      'Availability 98.6% Service uptime', '```', '', 'All figures are illustrative.'].join('\n');
+    const code = renderedGrid(capture(grid()), fenced);
+    expect(code.querySelector('.markdown-dil-grid-standalone, .markdown-dil-panel')).toBeNull();
+    expect(code.querySelector('pre code')?.textContent).toContain('Availability 98.6% Service uptime');
+
+    const inline = source().replace(/(\$24\.8k|1,284|98\.6%)/g, '`$1`');
+    const inlineCode = renderedGrid(capture(grid()), inline);
+    expect(inlineCode.querySelector('.markdown-dil-grid-standalone, .markdown-dil-panel')).toBeNull();
+    expect([...inlineCode.querySelectorAll('code')].map(node => node.textContent))
+      .toEqual(['$24.8k', '1,284', '98.6%']);
+  });
+
+  it('keeps the five-token guard for a panel that is not part of a validated grid', () => {
+    const short = 'Availability\n\n98.6%\n\nService uptime';
+    const rendered = renderedMarkdown(short, whole('<div><div data-d-component="box" data-d-has-border="">' +
+      '<p data-d-component="text">Availability</p><h1 data-d-component="title">98.6%</h1>' +
+      '<p data-d-component="text">Service uptime</p></div></div>'));
+    expect(rendered.querySelector('.markdown-dil-grid-standalone, .markdown-dil-panel, .markdown-dil-card')).toBeNull();
+    expect(rendered.textContent).toContain('Service uptime');
+  });
+});
