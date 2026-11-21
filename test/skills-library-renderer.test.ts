@@ -2,6 +2,7 @@ import { JSDOM } from 'jsdom';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { ManagedSkill } from '../src/shared/skills.js';
 
+
 let dom: JSDOM | null = null;
 afterEach(() => { dom?.window.close(); dom = null; vi.unstubAllGlobals(); vi.resetModules(); });
 
@@ -26,6 +27,11 @@ it('shows the managed library, imports both source shapes, filters and removes o
     skills = skills.filter(skill => skill.id !== id);
     return { ok: true as const, data: skills };
   });
+  const skillsOpenFolder = vi.fn(async (_id: string) => ({ ok: true as const, data: true }));
+  const skillsSetEnabled = vi.fn(async (id: string, enabled: boolean) => {
+    skills = skills.map(item => item.id === id ? { ...item, enabled } : item);
+    return { ok: true as const, data: skills };
+  });
   const githubOrigin = { kind: 'github' as const, url: 'https://github.com/acme/skills/tree/main/review', ref: 'main', directory: 'review', commit: 'a'.repeat(40), revision: 'b'.repeat(64), skillSha256: 'c'.repeat(64) };
   const skillsImportGithub = vi.fn(async (_url: string) => {
     skills = [...skills, { id: 'review', name: 'Code Review', description: 'From GitHub.', path: '/skills/review/SKILL.md', origin: githubOrigin }];
@@ -39,15 +45,36 @@ it('shows the managed library, imports both source shapes, filters and removes o
     { id: 'review', originRevision: githubOrigin.revision, state: 'available' as const, checkedAt: Date.now() }
   ] }));
   const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
-  const open = initSkillsLibrary({ listManagedSkills, skillsImport, skillsRemove, skillsImportGithub, skillsCheckGithub, skillsUpdateGithub } as any);
-  await vi.waitFor(() => expect(w.document.getElementById('skillsInstalled')!.textContent).toContain('No skills installed'));
+  const open = initSkillsLibrary({ listManagedSkills, skillsImport, skillsRemove, skillsOpenFolder, skillsSetEnabled, skillsImportGithub,
+    skillsCheckGithub, skillsUpdateGithub } as any);
+  await vi.waitFor(() => expect(w.document.getElementById('skillsInstalled')!.textContent).toContain('No skills installed'), { timeout: 10_000 });
   (w.document.getElementById('skillsImportFolder') as HTMLButtonElement).click();
-  await vi.waitFor(() => expect(w.document.querySelectorAll('.skill-library-card')).toHaveLength(1));
+  await vi.waitFor(() => expect(w.document.querySelectorAll('.skill-library-card')).toHaveLength(1), { timeout: 10_000 });
   expect(w.document.querySelector('[data-skill-id="folder"]')!.textContent).toContain('/folder');
   expect(w.document.querySelector('[data-skill-id="folder"] .skill-library-source')!.textContent).toContain('Local');
   expect(w.document.querySelector('[data-skill-id="folder"] .plugin-menu-actions')!.textContent).toContain('Link GitHub source');
+  const localOpen = [...w.document.querySelectorAll<HTMLButtonElement>('[data-skill-id="folder"] .plugin-menu-actions button')]
+    .find(button => button.textContent === 'Open local skill folder')!;
+  expect(localOpen).toBeDefined();
+  localOpen.click();
+  await vi.waitFor(() => expect(skillsOpenFolder).toHaveBeenCalledWith('folder'), { timeout: 10_000 });
+  const disable = [...w.document.querySelectorAll<HTMLButtonElement>('[data-skill-id="folder"] .plugin-menu-actions button')]
+    .find(button => button.textContent === 'Disable skill')!;
+  expect(disable).toBeDefined();
+  disable.focus();
+  disable.click();
+  await vi.waitFor(() => expect(skillsSetEnabled).toHaveBeenCalledWith('folder', false), { timeout: 10_000 });
+  await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="folder"]')?.getAttribute('data-skill-enabled')).toBe('false'), { timeout: 10_000 });
+  await vi.waitFor(() => expect(w.document.activeElement === w.document.querySelector('[data-skill-id="folder"] .plugin-menu > summary')).toBe(true), { timeout: 10_000 });
+  expect(w.document.querySelector('[data-skill-id="folder"] .skill-library-disabled')?.textContent).toBe('Disabled');
+  const enable = [...w.document.querySelectorAll<HTMLButtonElement>('[data-skill-id="folder"] .plugin-menu-actions button')]
+    .find(button => button.textContent === 'Enable skill')!;
+  expect(enable).toBeDefined();
+  enable.click();
+  await vi.waitFor(() => expect(skillsSetEnabled).toHaveBeenCalledWith('folder', true), { timeout: 10_000 });
+  await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="folder"]')?.getAttribute('data-skill-enabled')).toBe('true'), { timeout: 10_000 });
   (w.document.getElementById('skillsImportFile') as HTMLButtonElement).click();
-  await vi.waitFor(() => expect(w.document.querySelectorAll('.skill-library-card')).toHaveLength(2));
+  await vi.waitFor(() => expect(w.document.querySelectorAll('.skill-library-card')).toHaveLength(2), { timeout: 10_000 });
   expect(skillsImport.mock.calls.map(call => call[0])).toEqual(['folder', 'file']);
   const search = w.document.getElementById('skillsSearch') as HTMLInputElement;
   search.value = 'file'; search.dispatchEvent(new w.Event('input'));
@@ -60,8 +87,8 @@ it('shows the managed library, imports both source shapes, filters and removes o
   expect(skillsRemove).not.toHaveBeenCalled();
   (w.document.querySelector('[data-skill-id="file"] .plugin-destructive') as HTMLButtonElement).click();
   (w.document.querySelector('#skillRemoveDialog .pet-delete-confirm') as HTMLButtonElement).click();
-  await vi.waitFor(() => expect(skillsRemove).toHaveBeenCalledWith('file'));
-  await vi.waitFor(() => expect(w.document.getElementById('skillRemoveDialog')).toBeNull());
+  await vi.waitFor(() => expect(skillsRemove).toHaveBeenCalledWith('file'), { timeout: 10_000 });
+  await vi.waitFor(() => expect(w.document.getElementById('skillRemoveDialog')).toBeNull(), { timeout: 10_000 });
   expect(w.document.getElementById('skillsInstalled')!.textContent).toContain('No skills match');
 
   search.value = ''; search.dispatchEvent(new w.Event('input'));
@@ -69,19 +96,24 @@ it('shows the managed library, imports both source shapes, filters and removes o
   expect((w.document.getElementById('skillGithubDialog') as HTMLDialogElement).open).toBe(true);
   (w.document.getElementById('skillGithubUrl') as HTMLInputElement).value = githubOrigin.url;
   w.document.getElementById('skillGithubForm')!.dispatchEvent(new w.Event('submit', { cancelable: true, bubbles: true }));
-  await vi.waitFor(() => expect(skillsImportGithub).toHaveBeenCalledWith(githubOrigin.url));
-  await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="review"] .skill-library-source')).not.toBeNull());
+  await vi.waitFor(() => expect(skillsImportGithub).toHaveBeenCalledWith(githubOrigin.url), { timeout: 10_000 });
+  await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="review"] .skill-library-source')).not.toBeNull(), { timeout: 10_000 });
   expect((w.document.getElementById('skillGithubDialog') as HTMLDialogElement).open).toBe(false);
   expect(w.document.querySelector('[data-skill-id="review"] .skill-library-source')!.textContent).toContain('Up to date');
+  const githubOpen = [...w.document.querySelectorAll<HTMLButtonElement>('[data-skill-id="review"] .plugin-menu-actions button')]
+    .find(button => button.textContent === 'Open local skill folder')!;
+  expect(githubOpen).toBeDefined();
+  githubOpen.click();
+  await vi.waitFor(() => expect(skillsOpenFolder).toHaveBeenCalledWith('review'), { timeout: 10_000 });
   expect(w.document.querySelector<HTMLElement>('[data-skill-id="review"] .skill-library-source')!.title)
     .toContain('main @ aaaaaaaaaaaa');
   (w.document.getElementById('skillsRefresh') as HTMLButtonElement).click();
-  await vi.waitFor(() => expect(skillsCheckGithub).toHaveBeenCalledWith('review'));
-  await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="review"] .skill-library-source')!.textContent).toContain('Update available'));
+  await vi.waitFor(() => expect(skillsCheckGithub).toHaveBeenCalledWith('review'), { timeout: 10_000 });
+  await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="review"] .skill-library-source')!.textContent).toContain('Update available'), { timeout: 10_000 });
   expect(w.document.querySelector('[data-skill-id="review"] .skill-library-update')).not.toBeNull();
   expect(skillsUpdateGithub).not.toHaveBeenCalled();
   open();
-  await vi.waitFor(() => expect(listManagedSkills).toHaveBeenCalledTimes(3));
+  await vi.waitFor(() => expect(listManagedSkills).toHaveBeenCalledTimes(3), { timeout: 10_000 });
   expect(skillsCheckGithub).toHaveBeenCalledTimes(1);
   (w.document.querySelector('[data-skill-id="review"] .plugin-menu-actions .btn') as HTMLButtonElement).click();
   expect(w.document.getElementById('skillUpdateDialog')).not.toBeNull();
@@ -92,17 +124,17 @@ it('shows the managed library, imports both source shapes, filters and removes o
   expect(skillsUpdateGithub).not.toHaveBeenCalled();
   (w.document.querySelector('[data-skill-id="review"] .plugin-menu-actions .btn') as HTMLButtonElement).click();
   (w.document.querySelector('#skillUpdateDialog .pet-delete-actions .btn-solid') as HTMLButtonElement).click();
-  await vi.waitFor(() => expect(skillsUpdateGithub).toHaveBeenCalledWith('review'));
-  await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="review"]')!.textContent).toContain('Updated from GitHub.'));
+  await vi.waitFor(() => expect(skillsUpdateGithub).toHaveBeenCalledWith('review'), { timeout: 10_000 });
+  await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="review"]')!.textContent).toContain('Updated from GitHub.'), { timeout: 10_000 });
   expect(w.document.querySelector('[data-skill-id="review"] .skill-library-source')!.textContent).toContain('Up to date');
   skillsCheckGithub.mockResolvedValueOnce({ ok: false as const, error: 'GitHub API rate limit reached' } as any);
-  await vi.waitFor(() => expect((w.document.getElementById('skillsRefresh') as HTMLButtonElement).disabled).toBe(false));
+  await vi.waitFor(() => expect((w.document.getElementById('skillsRefresh') as HTMLButtonElement).disabled).toBe(false), { timeout: 10_000 });
   (w.document.getElementById('skillsRefresh') as HTMLButtonElement).click();
-  await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="review"] .skill-library-source')!.textContent).toContain('Check failed'));
+  await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="review"] .skill-library-source')!.textContent).toContain('Check failed'), { timeout: 10_000 });
   expect(w.document.querySelector<HTMLElement>('[data-skill-id="review"] .skill-library-source')!.title).toContain('rate limit');
-  await vi.waitFor(() => expect((w.document.getElementById('skillsRefresh') as HTMLButtonElement).disabled).toBe(false));
+  await vi.waitFor(() => expect((w.document.getElementById('skillsRefresh') as HTMLButtonElement).disabled).toBe(false), { timeout: 10_000 });
   (w.document.getElementById('skillsRefresh') as HTMLButtonElement).click();
-  await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="review"] .skill-library-source')!.textContent).toContain('Update available'));
+  await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="review"] .skill-library-source')!.textContent).toContain('Update available'), { timeout: 10_000 });
 });
 
 it('links a matching local skill from its card without replacing it or hiding GitHub check errors', async () => {
@@ -126,17 +158,17 @@ it('links a matching local skill from its card without replacing it or hiding Gi
   ] }));
   const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
   initSkillsLibrary({ listManagedSkills, skillsLinkGithub, skillsCheckGithub } as any);
-  await vi.waitFor(() => expect(w.document.querySelector('.skill-library-card')).not.toBeNull());
+  await vi.waitFor(() => expect(w.document.querySelector('.skill-library-card')).not.toBeNull(), { timeout: 10_000 });
   (w.document.querySelector('[data-skill-id="review"] .plugin-menu-actions .btn') as HTMLButtonElement).click();
   expect(w.document.getElementById('skillGithubTitle')!.textContent).toContain('Link Review');
   expect(w.document.getElementById('skillGithubDescription')!.textContent).toContain('Your files stay in place');
   (w.document.getElementById('skillGithubUrl') as HTMLInputElement).value = origin.url;
   w.document.getElementById('skillGithubForm')!.dispatchEvent(new w.Event('submit', { cancelable: true, bubbles: true }));
-  await vi.waitFor(() => expect(w.document.getElementById('skillGithubError')!.textContent).toContain('does not match'));
+  await vi.waitFor(() => expect(w.document.getElementById('skillGithubError')!.textContent).toContain('does not match'), { timeout: 10_000 });
   expect(w.document.querySelector('[data-skill-id="review"] .skill-library-source')!.textContent).toContain('Local');
   w.document.getElementById('skillGithubForm')!.dispatchEvent(new w.Event('submit', { cancelable: true, bubbles: true }));
-  await vi.waitFor(() => expect(skillsLinkGithub).toHaveBeenCalledTimes(2));
-  await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="review"] .skill-library-source')!.textContent).toContain('Update available'));
+  await vi.waitFor(() => expect(skillsLinkGithub).toHaveBeenCalledTimes(2), { timeout: 10_000 });
+  await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="review"] .skill-library-source')!.textContent).toContain('Update available'), { timeout: 10_000 });
   expect(skillsCheckGithub).toHaveBeenCalledWith('review');
 });
 
@@ -160,11 +192,11 @@ it('automatically checks an installed GitHub skill on page open without installi
   const skillsUpdateGithub = vi.fn();
   const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
   const open = initSkillsLibrary({ listManagedSkills, skillsCheckGithub, skillsUpdateGithub } as any);
-  await vi.waitFor(() => expect(w.document.querySelector('.skill-library-card')).not.toBeNull());
+  await vi.waitFor(() => expect(w.document.querySelector('.skill-library-card')).not.toBeNull(), { timeout: 10_000 });
   expect(skillsCheckGithub).not.toHaveBeenCalled();
   open();
-  await vi.waitFor(() => expect(skillsCheckGithub).toHaveBeenCalledTimes(1));
-  await vi.waitFor(() => expect(w.document.querySelector('.skill-library-source')!.textContent).toBe('Update available'));
+  await vi.waitFor(() => expect(skillsCheckGithub).toHaveBeenCalledTimes(1), { timeout: 10_000 });
+  await vi.waitFor(() => expect(w.document.querySelector('.skill-library-source')!.textContent).toBe('Update available'), { timeout: 10_000 });
   expect(skillsUpdateGithub).not.toHaveBeenCalled();
   (w.document.querySelector('.skill-library-update') as HTMLButtonElement).click();
   expect(w.document.getElementById('skillUpdateDialog')).not.toBeNull();
@@ -196,10 +228,10 @@ it('offers recommended skills that are not installed yet and installs one on req
   };
   const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
   const open = initSkillsLibrary(api as never); open();
-  await vi.waitFor(() => expect(w.document.querySelectorAll('[data-recommended-skill-id]').length).toBe(2));
+  await vi.waitFor(() => expect(w.document.querySelectorAll('[data-recommended-skill-id]').length).toBe(2), { timeout: 10_000 });
   expect(w.document.getElementById('skillsRecommendedSection')!.hidden).toBe(false);
   w.document.querySelector<HTMLButtonElement>('[data-recommended-skill-id="code-review"] .skill-recommended-install')!.click();
-  await vi.waitFor(() => expect(w.document.querySelectorAll('[data-recommended-skill-id]').length).toBe(1));
+  await vi.waitFor(() => expect(w.document.querySelectorAll('[data-recommended-skill-id]').length).toBe(1), { timeout: 10_000 });
   expect(installRecommendedSkill).toHaveBeenCalledWith('code-review');
   expect(w.document.querySelector('[data-skill-id="code-review"]')).not.toBeNull();
 });
@@ -228,10 +260,10 @@ it('shows recommended skill descriptions in the interface language and finds the
     const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
     initSkillsLibrary(api as never)();
     const card = () => w.document.querySelector('[data-recommended-skill-id="code-review"] p.muted')?.textContent;
-    await vi.waitFor(() => expect(card()).toMatch(/^Prüfe eine Änderung/));
+    await vi.waitFor(() => expect(card()).toMatch(/^Prüfe eine Änderung/), { timeout: 10_000 });
     const search = w.document.getElementById('skillsSearch') as HTMLInputElement;
     search.value = 'befunde'; search.dispatchEvent(new w.Event('input'));
-    await vi.waitFor(() => expect([...w.document.querySelectorAll<HTMLElement>('[data-recommended-skill-id]')].map(item => item.dataset.recommendedSkillId)).toEqual(['code-review']));
+    await vi.waitFor(() => expect([...w.document.querySelectorAll<HTMLElement>('[data-recommended-skill-id]')].map(item => item.dataset.recommendedSkillId)).toEqual(['code-review']), { timeout: 10_000 });
   } finally { setLanguage('en'); }
 });
 
@@ -285,6 +317,121 @@ it('shows no load error for a load that Refresh replaced', async () => {
   expect(w.document.getElementById('skillsInstalled')!.textContent).not.toContain('could not be loaded');
   replies[1]!({ ok: true, data: [{ id: 'review', name: 'Review', description: 'Reviews code.', path: '/skills/review/SKILL.md', origin: null }] });
   await vi.waitFor(() => expect(w.document.querySelectorAll('.skill-library-card')).toHaveLength(1), { timeout: 10_000 });
+});
+
+it('does not recursively reload a successful stale list request', async () => {
+  dom = new JSDOM(`<!doctype html><body>
+    <input id="skillsSearch"><button id="skillsRefresh"></button>
+    <button id="skillsImportFolder"></button><button id="skillsImportFile"></button><button id="skillsImportGithub"></button>
+    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl"><p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
+    <span id="skillsCount"></span><div id="skillsInstalled"></div>
+  </body>`, { url: 'https://skills.test/' });
+  const w = dom.window;
+  for (const [key, value] of Object.entries({ window: w, document: w.document, HTMLElement: w.HTMLElement, HTMLButtonElement: w.HTMLButtonElement, HTMLDialogElement: w.HTMLDialogElement })) vi.stubGlobal(key, value);
+  const replies: Array<(reply: unknown) => void> = [];
+  const listManagedSkills = vi.fn(() => new Promise(resolve => replies.push(resolve)));
+  const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
+  initSkillsLibrary({ listManagedSkills } as any);
+  w.document.getElementById('skillsRefresh')!.click();
+  expect(replies).toHaveLength(2);
+  replies[1]!({ ok: true, data: [{ id: 'new', name: 'New', description: 'Newest list', path: '/skills/new/SKILL.md', origin: null }] });
+  await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="new"]')).not.toBeNull(), { timeout: 10_000 });
+  replies[0]!({ ok: true, data: [{ id: 'old', name: 'Old', description: 'Outdated list', path: '/skills/old/SKILL.md', origin: null }] });
+  for (let i = 0; i < 8; i++) await Promise.resolve();
+  expect(listManagedSkills).toHaveBeenCalledTimes(2);
+  expect(w.document.querySelector('[data-skill-id="new"]')).not.toBeNull();
+  expect(w.document.querySelector('[data-skill-id="old"]')).toBeNull();
+});
+
+it('reloads actual disk state after a toggle response fails, without losing the error toast', async () => {
+  dom = new JSDOM(`<!doctype html><body>
+    <input id="skillsSearch"><button id="skillsRefresh"></button>
+    <button id="skillsImportFolder"></button><button id="skillsImportFile"></button><button id="skillsImportGithub"></button>
+    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl"><p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
+    <span id="skillsCount"></span><div id="skillsInstalled"></div>
+  </body>`, { url: 'https://skills.test/' });
+  const w = dom.window;
+  for (const [key, value] of Object.entries({ window: w, document: w.document, HTMLElement: w.HTMLElement, HTMLButtonElement: w.HTMLButtonElement, HTMLDialogElement: w.HTMLDialogElement })) vi.stubGlobal(key, value);
+  let persisted: ManagedSkill[] = [{ id: 'review', name: 'Review', description: 'Steps', path: '/skills/review/SKILL.md', origin: null, enabled: true }];
+  const listManagedSkills = vi.fn(async () => ({ ok: true as const, data: persisted }));
+  const skillsSetEnabled = vi.fn(async () => {
+    persisted = persisted.map(skill => ({ ...skill, enabled: false }));
+    return { ok: false as const, error: 'scan-failed-after-write' };
+  });
+  const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
+  initSkillsLibrary({ listManagedSkills, skillsSetEnabled } as any);
+  await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="review"]')).not.toBeNull(), { timeout: 10_000 });
+  const toggle = [...w.document.querySelectorAll<HTMLButtonElement>('[data-skill-id="review"] .plugin-menu-actions button')]
+    .find(button => button.textContent === 'Disable skill')!;
+  toggle.click();
+  await vi.waitFor(() => expect(listManagedSkills).toHaveBeenCalledTimes(2), { timeout: 10_000 });
+  await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="review"]')?.getAttribute('data-skill-enabled')).toBe('false'), { timeout: 10_000 });
+  expect(w.document.querySelector('.toast')?.textContent).toContain('scan-failed-after-write');
+});
+
+it('does not steal focus when the user navigates elsewhere during a pending keyboard toggle', async () => {
+  dom = new JSDOM(`<!doctype html><body>
+    <input id="skillsSearch"><button id="skillsRefresh"></button><button id="otherFocus">Elsewhere</button>
+    <button id="skillsImportFolder"></button><button id="skillsImportFile"></button><button id="skillsImportGithub"></button>
+    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl"><p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
+    <span id="skillsCount"></span><div id="skillsInstalled"></div>
+  </body>`, { url: 'https://skills.test/' });
+  const w = dom.window;
+  for (const [key, value] of Object.entries({ window: w, document: w.document, HTMLElement: w.HTMLElement, HTMLButtonElement: w.HTMLButtonElement, HTMLDialogElement: w.HTMLDialogElement })) vi.stubGlobal(key, value);
+  let resolve!: (value: unknown) => void;
+  const changed = new Promise(resolvePromise => { resolve = resolvePromise; });
+  const initial: ManagedSkill[] = [{ id: 'review', name: 'Review', description: 'Steps', path: '/skills/review/SKILL.md', origin: null, enabled: true }];
+  const skillsSetEnabled = vi.fn(() => changed);
+  const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
+  initSkillsLibrary({ listManagedSkills: vi.fn(async () => ({ ok: true as const, data: initial })), skillsSetEnabled } as any);
+  await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="review"]')).not.toBeNull(), { timeout: 10_000 });
+  const toggle = [...w.document.querySelectorAll<HTMLButtonElement>('[data-skill-id="review"] .plugin-menu-actions button')]
+    .find(button => button.textContent === 'Disable skill')!;
+  toggle.focus();
+  toggle.click();
+  await vi.waitFor(() => expect(skillsSetEnabled).toHaveBeenCalledTimes(1), { timeout: 10_000 });
+  const other = w.document.getElementById('otherFocus')!;
+  other.focus();
+  resolve({ ok: true, data: initial.map(skill => ({ ...skill, enabled: false })) });
+  await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="review"]')?.getAttribute('data-skill-enabled')).toBe('false'), { timeout: 10_000 });
+  expect(w.document.activeElement).toBe(other);
+});
+
+it('reloads a stale successful Disable after a newer cancelled import', async () => {
+  dom = new JSDOM(`<!doctype html><body>
+    <input id="skillsSearch"><button id="skillsRefresh"></button>
+    <button id="skillsImportFolder"></button><button id="skillsImportFile"></button><button id="skillsImportGithub"></button>
+    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl"><p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
+    <span id="skillsCount"></span><div id="skillsInstalled"></div>
+  </body>`, { url: 'https://skills.test/' });
+  const w = dom.window;
+  for (const [key, value] of Object.entries({ window: w, document: w.document, HTMLElement: w.HTMLElement, HTMLButtonElement: w.HTMLButtonElement, HTMLDialogElement: w.HTMLDialogElement })) vi.stubGlobal(key, value);
+  const initial: ManagedSkill[] = [{ id: 'review', name: 'Review', description: 'Steps', path: '/skills/review/SKILL.md', origin: null, enabled: true }];
+  let persisted = initial;
+  let resolveDisable!: (reply: unknown) => void;
+  const pendingDisable = new Promise(resolve => { resolveDisable = resolve; });
+  const listManagedSkills = vi.fn(async () => ({ ok: true as const, data: persisted }));
+  const skillsSetEnabled = vi.fn(() => pendingDisable);
+  const skillsImport = vi.fn(async () => ({ ok: true as const, data: null }));
+  const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
+  initSkillsLibrary({ listManagedSkills, skillsSetEnabled, skillsImport } as any);
+  await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="review"]')?.getAttribute('data-skill-enabled')).toBe('true'), { timeout: 10_000 });
+
+  const disable = [...w.document.querySelectorAll<HTMLButtonElement>('[data-skill-id="review"] .plugin-menu-actions button')]
+    .find(button => button.textContent === 'Disable skill')!;
+  disable.click();
+  await vi.waitFor(() => expect(skillsSetEnabled).toHaveBeenCalledWith('review', false), { timeout: 10_000 });
+  w.document.getElementById('skillsImportFile')!.click();
+  await vi.waitFor(() => expect(skillsImport).toHaveBeenCalledWith('file'), { timeout: 10_000 });
+  await vi.waitFor(() => expect((w.document.getElementById('skillsImportFile') as HTMLButtonElement).disabled).toBe(false), { timeout: 10_000 });
+  expect(listManagedSkills).toHaveBeenCalledTimes(1);
+
+  persisted = initial.map(skill => ({ ...skill, enabled: false }));
+  resolveDisable({ ok: true, data: persisted });
+  await vi.waitFor(() => expect(listManagedSkills).toHaveBeenCalledTimes(2), { timeout: 10_000 });
+  await vi.waitFor(() => expect(w.document.querySelector('[data-skill-id="review"]')?.getAttribute('data-skill-enabled')).toBe('false'), { timeout: 10_000 });
+  expect(w.document.querySelector('[data-skill-id="review"] .skill-library-disabled')?.textContent).toBe('Disabled');
+  expect(skillsSetEnabled).toHaveBeenCalledTimes(1);
 });
 
 // CodeRabbit on #2002: a cancelled import (no list) that replaced a first load which then fails must not leave

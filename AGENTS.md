@@ -686,6 +686,33 @@ Retries/restarts reuse that record instead of rerouting. Prompt preparation read
 managed body through the existing selected-Skill path and rejects it if its revision changed.
 The Skill list in that prompt stays complete: managed Skills come from the published catalog
 (no body re-read), while personal, project and Codex plugin Skills are discovered as without routing.
+The installed managed card calls `skillsOpenFolder(id)` and `skillsSetEnabled(id, enabled)` on
+the fixed preload API. IPC validates `skills:openFolder { id }` and `skills:setEnabled { id, enabled }`
+and verifies the installed package in main. Folder opening returns success or an error. Linked
+directories require the current approved-root read capability and open their canonical target.
+The toggle returns the managed list with `ManagedSkill.enabled`; older entries that omit it
+display as enabled. Disabled cards stay visible. The published catalog, explicit selection
+and automatic routing omit disabled packages, including stale selections and discovered
+aliases of approved linked packages.
+
+`main/skills.ts` owns the local UTF-8 registry `<userData>/skills/.disabled-skills.json`.
+Version 1 has exactly the keys in `{"version":1,"disabled":["skill-id"]}`. The array holds up
+to 128 unique, valid managed installation IDs (the canonical lowercase directory basenames).
+The file is limited to 16,384 bytes and must be a regular file. Writes are serialized and
+publish a sorted array via same-directory atomic replacement before reporting success.
+Package files and origin metadata are independent of the registry. Successful uninstall ends
+that installation's entry. Startup and later writes reconcile interrupted uninstall cleanup
+only when no directory entry still owns the ID, including damaged packages and case variants.
+On upgrade from a profile with no registry, all managed Skills start enabled. Invalid,
+unreadable or unsupported state fails initialization with an empty catalog and a safe
+diagnostic rather than silently enabling packages.
+
+#2180 must use this registry and preserve existing managed IDs and their disabled status.
+Its draft `.cos-disabled-skills.json` and 512-entry policy are not part of the shipped contract.
+Before extending activation to discovered Skills, define stable identities and cleanup for
+each new scope so managed-directory cleanup cannot discard a discovered entry. Any change to
+the schema, identity namespace or accepted limits needs explicit, tested compatibility for
+existing v1 data and fail-closed handling by readers that cannot interpret the new state.
 An explicit queued-message edit clears the automatic record rather than silently rerouting changed
 text; a new explicit Skill directive in that edited text is still authoritative at preparation.
 Explicit slash/picker selection never combines with the automatic record. Routing grants no root,
