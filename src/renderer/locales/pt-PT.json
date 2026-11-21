@@ -63,6 +63,7 @@
   "Leave empty to use ChatGPT's title": "Deixe em branco para usar o título do ChatGPT",
   "Name for this chat": "Nome deste chat",
   "Rename this chat in the app. Its title in ChatGPT stays the same.": "Mudar o nome deste chat na app. O título no ChatGPT mantém-se.",
+  "Rename this chat in the app. The new name may also be applied in ChatGPT.": "Mudar o nome deste chat na app. O novo nome também pode ser aplicado no ChatGPT.",
   "{0} more sources were not recorded with this reply.": "Outras {0} fontes não foram gravadas com esta resposta.",
   "{0} more sources were not recorded with this reply.|one": "Mais {0} fonte não foi gravada com esta resposta.",
   "{0} more sources were not recorded with this reply.|many": "Outras {0} de fontes não foram gravadas com esta resposta.",

@@ -1490,6 +1490,39 @@ it('offers a chat\'s actions in one menu, by kind of row, and opens it with a ri
   expect(doc.querySelector('.row-menu')).toBeNull();
 });
 
+it('describes possible ChatGPT title sync only for a linked chat when enabled', async () => {
+  const linked = {
+    id: 'rename-tooltip-linked', title: 'Linked chat', conversationId: 'tooltip-conversation',
+    chatIds: ['tooltip-conversation'], startedAt: 1, updatedAt: 2, agents: []
+  };
+  const pending = {
+    ...linked, id: 'rename-tooltip-pending', title: 'Pending chat', conversationId: null, chatIds: [],
+    origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' }
+  };
+  const mounted = await mountChat({}, [], {
+    listSessions: async () => ({
+      ok: true, data: { sessions: [linked, pending], activeId: null, pressure: [], blocked: [], trusted: [] }
+    })
+  });
+  const doc = mounted.window.document;
+  const row = (id: string) => doc.querySelector<HTMLElement>(`.sess[data-id="${id}"]`)!;
+  const tooltip = (id: string) => rowMenuItem(row(id), 'rename')?.title;
+  const localOnly = 'Rename this chat in the app. Its title in ChatGPT stays the same.';
+  const enable = (enabled: boolean) => mounted.push({
+    ...mounted.state, config: {
+      ...mounted.state.config, sessions: { ...mounted.state.config.sessions, syncManualChatTitles: enabled }
+    }
+  });
+
+  await waitFor(() => expect(row(linked.id)).not.toBeNull());
+  expect(tooltip(linked.id)).toBe(localOnly);
+  enable(true);
+  expect(tooltip(linked.id)).toBe('Rename this chat in the app. The new name may also be applied in ChatGPT.');
+  expect(tooltip(pending.id)).toBe(localOnly);
+  enable(false);
+  expect(tooltip(linked.id)).toBe(localOnly);
+});
+
 it('names a chat in place: Enter saves, Escape keeps the old name, empty restores ChatGPT\'s title, repaints keep the field (#1107)', async () => {
   const session = {
     id: 'rename-session-0001', title: 'ChatGPT title', conversationId: 'rename-conversation-0001', chatIds: ['rename-conversation-0001'],

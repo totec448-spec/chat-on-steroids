@@ -1380,7 +1380,13 @@ function sessionRow(summary: SessionSummary): HTMLElement {
       }
     }
     items.push(
-      { action: 'rename', icon: 'i-pencil', label: () => t('Rename'), title: () => t("Rename this chat in the app. Its title in ChatGPT stays the same."), run: () => startRename(summary) },
+      {
+        action: 'rename', icon: 'i-pencil', label: () => t('Rename'),
+        title: () => deps.state()?.config.sessions.syncManualChatTitles === true
+          ? t('Rename this chat in the app. The new name may also be applied in ChatGPT.')
+          : t('Rename this chat in the app. Its title in ChatGPT stays the same.'),
+        run: () => startRename(summary)
+      },
       { action: 'open', icon: 'i-out', label: () => t('Open in browser'), title: () => t("Open this chat in your browser"), run: () => void run(api.openSessionChat(summary.id)) },
       // ChatGPT opens /c/<id> wherever the chat lives, a project included (#1107).
       { action: 'copy-link', icon: 'i-copy', label: () => t('Copy link'), title: () => t("Copy this chat's ChatGPT link"),

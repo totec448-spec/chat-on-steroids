@@ -61,6 +61,7 @@
   "Leave empty to use ChatGPT's title": "ChatGPT’deki başlığı kullanmak için boş bırakın",
   "Name for this chat": "Bu sohbetin adı",
   "Rename this chat in the app. Its title in ChatGPT stays the same.": "Bu sohbeti uygulamada yeniden adlandırın. ChatGPT’deki başlığı aynı kalır.",
+  "Rename this chat in the app. The new name may also be applied in ChatGPT.": "Bu sohbeti uygulamada yeniden adlandırın. Yeni ad ChatGPT’de de uygulanabilir.",
   "{0} more sources were not recorded with this reply.": "Bu yanıtla birlikte {0} kaynak daha kaydedilmedi.",
   "{0} more sources were not recorded with this reply.|one": "Bu yanıtla birlikte {0} kaynak daha kaydedilmedi.",
   "Thinking": "Düşünüyor",
