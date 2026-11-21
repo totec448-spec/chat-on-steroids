@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { PetLibraryState } from '../src/shared/pets.js';
 
 const mocks = vi.hoisted(() => ({
-  library: { pets: [] } as PetLibraryState,
+  library: { pets: [], standaloneTaskBadge: false } as PetLibraryState,
   read: vi.fn(),
   publish: null as ((state: PetLibraryState) => void) | null,
   windows: [] as any[],
@@ -61,8 +61,9 @@ import { petOverlayControlState, refreshPetOverlayActivities, setPetOverlayVisib
 import { windowsPetFocus } from '../src/main/pet-window-focus.js';
 
 function state(...ids: string[]): PetLibraryState {
-  return { pets: ids.map(id => ({ id, displayName: id, description: '', kind: 'cos', enabled: true, favorite: false })) };
+  return { pets: ids.map(id => ({ id, displayName: id, description: '', kind: 'cos', enabled: true, favorite: false })), standaloneTaskBadge: false };
 }
+function badgeState(...ids: string[]): PetLibraryState { return { ...state(...ids), standaloneTaskBadge: true }; }
 async function publish(next: PetLibraryState): Promise<void> {
   mocks.library = next;
   mocks.publish!(next);
@@ -155,6 +156,18 @@ it('starts empty without an overlay and accepts the first published enabled pet'
   expect(mocks.windows[0].isVisible()).toBe(true);
   await shutdownPetOverlay();
   expect(petOverlayControlState().activeCount).toBe(0);
+});
+
+it('keeps the existing activity overlay alive for a standalone badge with no enabled pet', async () => {
+  mocks.library = badgeState();
+  await startPetOverlay(() => null, () => undefined);
+  expect(mocks.windows).toHaveLength(1);
+  const win = mocks.windows[0];
+  publishIdleShape(win, [{ x: 1136, y: 4, width: 64, height: 64 }]);
+  expect(win.isVisible()).toBe(true);
+  expect(petOverlayControlState()).toMatchObject({ visible: true, activeCount: 0, activityCount: 0 });
+  await publish(state());
+  expect(win.isVisible()).toBe(false);
 });
 
 it.runIf(process.platform === 'win32')('keeps Windows pets when the native focus binding cannot load', async () => {

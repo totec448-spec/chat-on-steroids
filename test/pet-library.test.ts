@@ -31,7 +31,8 @@ import {
   loadPetAsset,
   petLibraryState,
   setPetEnabled,
-  setPetFavorite
+  setPetFavorite,
+  setStandaloneTaskBadge
 } from '../src/main/pet-library.js';
 
 let temporary = '';
@@ -80,6 +81,20 @@ describe('simple compatible pet library', () => {
     const next = setPetFavorite('moss', true);
     expect(next.pets.filter(pet => pet.enabled).map(pet => pet.id).toSorted()).toEqual([BUILTIN_PET_ID, 'moss', 'willow'].toSorted());
     expect(next.pets[0]).toMatchObject({ id: 'moss', favorite: true, enabled: true });
+  });
+
+  it('keeps the standalone task badge off for old or damaged saved data and persists an explicit choice', async () => {
+    expect(petLibraryState().standaloneTaskBadge).toBe(false);
+    expect(setStandaloneTaskBadge(true).standaloneTaskBadge).toBe(true);
+    expect((durable.value as any).standaloneTaskBadge).toBe(true);
+
+    durable.value = { version: 1, enabled: [], favorites: [], standaloneTaskBadge: 'yes' };
+    await initPetLibrary(temporary);
+    expect(petLibraryState().standaloneTaskBadge).toBe(false);
+
+    durable.value = { version: 1, enabled: [], favorites: [] };
+    await initPetLibrary(temporary);
+    expect(petLibraryState().standaloneTaskBadge).toBe(false);
   });
 
   it('deletes imported pets and never deletes the bundled pet', () => {

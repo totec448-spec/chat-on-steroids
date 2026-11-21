@@ -72,8 +72,8 @@ button { font:inherit; }
 .pet-bin.is-open { background-image:url('./pet-assets/bin-open.png'); }
 .pet-bin.is-hit { background-image:url('./pet-assets/bin-hit.png'); }
 
-.pet-badge {
-  position:absolute; z-index:30; top:6px; right:6px;
+.pet-badge,.pet-standalone-badge {
+  z-index:30;
   display:grid; place-items:center;
   min-width:24px; height:24px; padding:0 6px;
   border:1px solid var(--edge); border-radius:var(--pill);
@@ -81,8 +81,15 @@ button { font:inherit; }
   box-shadow:0 6px 20px #0003;
   font-size:11px; font-weight:650; cursor:pointer;
 }
-.pet-badge:hover,.pet-badge:focus-visible { background:var(--hover); outline:none; }
-.pet-badge[hidden] { display:none; }
+.pet-badge { position:absolute; top:6px; right:6px; }
+.pet-standalone-badge {
+  position:fixed; left:0; top:0;
+  width:30px; min-width:30px; height:30px; padding:0;
+  cursor:grab; touch-action:none; user-select:none;
+}
+.pet-standalone-badge[data-dragging='true'] { cursor:grabbing; }
+.pet-badge:hover,.pet-badge:focus-visible,.pet-standalone-badge:hover,.pet-standalone-badge:focus-visible { background:var(--hover); outline:none; }
+.pet-badge[hidden],.pet-standalone-badge[hidden] { display:none; }
 .pet-shell[data-level='running'] .pet-badge { border-color:var(--accent-edge); }
 .pet-shell[data-level='review'] .pet-badge {
   border-color:var(--green-line);
@@ -90,6 +97,9 @@ button { font:inherit; }
   color:var(--green);
 }
 .pet-shell[data-level='failed'] .pet-badge { border-color:var(--red-line); }
+.pet-standalone-badge[data-level='running'] { border-color:var(--accent-edge); }
+.pet-standalone-badge[data-level='review'] { border-color:var(--green-line); background:var(--green-wash); color:var(--green); }
+.pet-standalone-badge[data-level='failed'] { border-color:var(--red-line); }
 
 .pet-tray {
   position:fixed; z-index:40;

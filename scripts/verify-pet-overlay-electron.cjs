@@ -47,6 +47,24 @@ async function until(predicate, label, timeoutMs = 2500) {
   }
   throw new Error(`Timed out: ${label}`);
 }
+async function captureEvidence(win, file, selectors) {
+  const layout = await win.webContents.executeJavaScript(`(() => ({
+    dpr: devicePixelRatio,
+    rects: ${JSON.stringify(selectors)}.map(selector => document.querySelector(selector)?.getBoundingClientRect().toJSON()).filter(Boolean)
+  }))()`);
+  assert.ok(layout.rects.length === selectors.length, `Evidence elements missing for ${file}: ${JSON.stringify(layout)}`);
+  const png = (await win.webContents.capturePage()).toPNG();
+  const metadata = await sharp(png).metadata();
+  const padding = Math.ceil(24 * layout.dpr);
+  const left = Math.max(0, Math.floor(Math.min(...layout.rects.map(rect => rect.left)) * layout.dpr - padding));
+  const top = Math.max(0, Math.floor(Math.min(...layout.rects.map(rect => rect.top)) * layout.dpr - padding));
+  const right = Math.min(metadata.width, Math.ceil(Math.max(...layout.rects.map(rect => rect.right)) * layout.dpr + padding));
+  const bottom = Math.min(metadata.height, Math.ceil(Math.max(...layout.rects.map(rect => rect.bottom)) * layout.dpr + padding));
+  const output = await sharp(png).extract({ left, top, width: right - left, height: bottom - top }).png().toBuffer();
+  const destination = path.join(userData, file);
+  fs.writeFileSync(destination, output);
+  return { file: destination, width: right - left, height: bottom - top, bytes: output.length };
+}
 
 let found = false;
 const timeout = setTimeout(() => { console.error(`Pets overlay did not load; userData=${userData}`); app.exit(1); }, 30_000);
@@ -197,7 +215,10 @@ function attachOverlay(win) {
           alphaBounds: maxX < 0 ? null : { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 } }, null, 2));
         win.webContents.send('pet-overlay:snapshot', {
           visible: true, dismissedPetIds: [], level: 'running',
-          activities: [{ id: 'task-smoke', title: 'Prime', body: 'Working', level: 'running', sessionId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' }],
+          activities: [
+            { id: 'task-smoke-prime', title: 'Prime', body: 'Implementing badge', level: 'running', sessionId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' },
+            { id: 'task-smoke-worker', title: 'Worker', body: 'Reviewing UI', level: 'running', sessionId: 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff' }
+          ],
           theme: 'dark',
           appearance: {
             light: { background: '#f4f4f5', sidebar: '#e9edf2', accent: '#486f9d', contrast: 45 },
@@ -216,14 +237,195 @@ function attachOverlay(win) {
             cardRect: document.querySelector('.pet-card')?.getBoundingClientRect().toJSON() };
         })()`);
         assert.equal(task.badgeHidden, false);
-        assert.equal(task.badgeText, '1');
+        assert.equal(task.badgeText, '2');
         assert.equal(task.trayHidden, false);
-        assert.equal(task.card, 'PrimeWorking');
-        assert.ok(task.trayRect.width <= 256 && task.trayRect.height <= 72,
-          `A single active task must stay compact: ${JSON.stringify(task.trayRect)}`);
+        assert.equal(task.card, 'PrimeImplementing badge');
+        assert.ok(task.trayRect.width <= 256 && task.trayRect.height <= 110,
+          `Two active tasks must stay compact: ${JSON.stringify(task.trayRect)}`);
         assert.ok(task.cardRect.height <= 34, `Task rows must remain single-line: ${JSON.stringify(task.cardRect)}`);
-        fs.writeFileSync(path.join(userData, 'task-strip.png'), (await win.webContents.capturePage()).toPNG());
-        console.log(`task=${JSON.stringify(task)}`);
+        const beforeEvidence = await captureEvidence(win, 'before-pet-attached.png', ['.pet-shell', '#petTray']);
+        console.log(`beforeEvidence=${JSON.stringify(beforeEvidence)}; task=${JSON.stringify(task)}`);
+
+        const standaloneOwner = BrowserWindow.getAllWindows().find(candidate => candidate !== win && candidate.getTitle() === 'Chat On Steroids')
+          ?? BrowserWindow.getAllWindows().find(candidate => candidate !== win);
+        assert.ok(standaloneOwner, 'The standalone preference must be changed through the real owner IPC.');
+        const previousLibrary = await standaloneOwner.webContents.executeJavaScript('window.api.petsList()');
+        assert.equal(previousLibrary.ok, true);
+        assert.equal(previousLibrary.data.standaloneTaskBadge, false,
+          'A previous-version v1 library without the optional preference must restore it as Off.');
+        const enabledStandalone = await standaloneOwner.webContents.executeJavaScript('window.api.petsSetStandaloneTaskBadge(true)');
+        assert.equal(enabledStandalone.ok, true, JSON.stringify(enabledStandalone));
+        win.webContents.send('pet-overlay:snapshot', {
+          visible: true, dismissedPetIds: [], level: 'running',
+          activities: [{ id: 'task-smoke', title: 'Prime', body: 'Working', level: 'running', sessionId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' }],
+          theme: 'dark',
+          appearance: {
+            light: { background: '#f4f4f5', sidebar: '#e9edf2', accent: '#486f9d', contrast: 45 },
+            dark: { background: '#181818', sidebar: '#1a2129', accent: '#b0cbed', contrast: 60 },
+            font: 'system', fontSize: 14, translucentSidebar: true
+          }
+        });
+        await until(async () => win.webContents.executeJavaScript('!document.getElementById("petStandaloneBadge").hidden'), 'standalone badge visible beside an enabled pet');
+        const coexistence = await win.webContents.executeJavaScript(`(() => ({
+          petCount: document.querySelectorAll('.pet-shell').length,
+          visiblePetBadges: [...document.querySelectorAll('.pet-badge')].filter(badge => !badge.hidden).length,
+          standaloneHidden: document.getElementById('petStandaloneBadge').hidden,
+          visibleBadgeCount: [...document.querySelectorAll('.pet-badge, #petStandaloneBadge')].filter(badge => !badge.hidden).length
+        }))()`);
+        assert.deepEqual(coexistence, { petCount: 1, visiblePetBadges: 0, standaloneHidden: false, visibleBadgeCount: 1 });
+
+        const disabledPet = await standaloneOwner.webContents.executeJavaScript('window.api.petsSetEnabled("capy", false)');
+        assert.equal(disabledPet.ok, true, JSON.stringify(disabledPet));
+        await until(async () => win.webContents.executeJavaScript('document.querySelectorAll(".pet-shell").length === 0'), 'standalone badge without an enabled pet');
+        assert.equal(win.isVisible(), true, 'Standalone mode must keep the existing overlay visible without a pet.');
+        win.webContents.send('pet-overlay:snapshot', {
+          visible: true, dismissedPetIds: [], level: 'running',
+          activities: [
+            { id: 'task-smoke-prime', title: 'Prime', body: 'Implementing badge', level: 'running', sessionId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' },
+            { id: 'task-smoke-worker', title: 'Worker', body: 'Reviewing UI', level: 'running', sessionId: 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff' }
+          ],
+          theme: 'dark',
+          appearance: {
+            light: { background: '#f4f4f5', sidebar: '#e9edf2', accent: '#486f9d', contrast: 45 },
+            dark: { background: '#181818', sidebar: '#1a2129', accent: '#b0cbed', contrast: 60 },
+            font: 'system', fontSize: 14, translucentSidebar: true
+          }
+        });
+        await win.webContents.executeJavaScript('document.getElementById("petTrayClose").click()');
+        await until(async () => win.webContents.executeJavaScript('document.getElementById("petTray").hidden'), 'close the pet-anchored tray before testing standalone activation');
+        const standaloneRect = await win.webContents.executeJavaScript('document.getElementById("petStandaloneBadge").getBoundingClientRect().toJSON()');
+        const standaloneX = Math.round(standaloneRect.x + standaloneRect.width / 2);
+        const standaloneY = Math.round(standaloneRect.y + standaloneRect.height / 2);
+        win.setIgnoreMouseEvents(false);
+        win.webContents.sendInputEvent({ type: 'mouseMove', x: standaloneX, y: standaloneY });
+        win.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', x: standaloneX, y: standaloneY, clickCount: 1 });
+        win.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', x: standaloneX, y: standaloneY, clickCount: 1 });
+        await until(async () => win.webContents.executeJavaScript('!document.getElementById("petTray").hidden'), 'standalone badge opens the existing Tasks tray');
+        const standaloneTask = await win.webContents.executeJavaScript(`(() => ({
+          petCount: document.querySelectorAll('.pet-shell').length,
+          badgeHidden: document.getElementById('petStandaloneBadge').hidden,
+          badgeText: document.getElementById('petStandaloneBadge').textContent,
+          trayHidden: document.getElementById('petTray').hidden,
+          card: document.querySelector('.pet-card')?.textContent,
+          trayRect: document.getElementById('petTray').getBoundingClientRect().toJSON(),
+          cardRect: document.querySelector('.pet-card')?.getBoundingClientRect().toJSON()
+        }))()`);
+        assert.equal(standaloneTask.petCount, 0);
+        assert.equal(standaloneTask.badgeHidden, false);
+        assert.equal(standaloneTask.badgeText, '2');
+        assert.equal(standaloneTask.trayHidden, false);
+        assert.equal(standaloneTask.card, 'PrimeImplementing badge');
+        assert.ok(standaloneTask.trayRect.width <= 256 && standaloneTask.trayRect.height <= 110,
+          `The standalone tray must remain compact: ${JSON.stringify(standaloneTask.trayRect)}`);
+        assert.ok(standaloneTask.cardRect.height <= 34, `Standalone task rows must remain single-line: ${JSON.stringify(standaloneTask.cardRect)}`);
+        const afterEvidence = await captureEvidence(win, 'after-standalone-no-pet.png', ['#petStandaloneBadge', '#petTray']);
+        console.log(`afterEvidence=${JSON.stringify(afterEvidence)}`);
+        await win.webContents.executeJavaScript('document.getElementById("petTrayClose").click()');
+        await until(async () => win.webContents.executeJavaScript('document.getElementById("petTray").hidden'), 'close the tray before keyboard activation');
+        const keyboardRect = await win.webContents.executeJavaScript('document.getElementById("petStandaloneBadge").getBoundingClientRect().toJSON()');
+        const keyboardArea = win.getContentBounds();
+        sampledCursor = {
+          x: keyboardArea.x + keyboardRect.x + keyboardRect.width / 2,
+          y: keyboardArea.y + keyboardRect.y + keyboardRect.height / 2
+        };
+        win.setIgnoreMouseEvents(false);
+        win.focus();
+        win.webContents.focus();
+        await win.webContents.executeJavaScript(`(() => {
+          const badge = document.getElementById('petStandaloneBadge');
+          window.__standaloneKeyboardEvents = [];
+          for (const type of ['keydown', 'keyup', 'click']) badge.addEventListener(type, event =>
+            window.__standaloneKeyboardEvents.push({ type, key: event.key, code: event.code, detail: event.detail }));
+          badge.focus();
+        })()`);
+        await until(async () => win.isFocused() && win.webContents.executeJavaScript('document.hasFocus() && document.activeElement.id === "petStandaloneBadge"'), 'focus the standalone badge for keyboard activation');
+        win.webContents.sendInputEvent({ type: 'rawKeyDown', keyCode: 'Enter' });
+        win.webContents.sendInputEvent({ type: 'char', keyCode: '\r' });
+        win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' });
+        console.log(`standaloneKeyboardAfterEnter=${JSON.stringify({ winFocused: win.isFocused(), focusedTitle: BrowserWindow.getFocusedWindow()?.getTitle(), dom: await win.webContents.executeJavaScript('({ hasFocus: document.hasFocus(), active: document.activeElement.id, trayHidden: document.getElementById("petTray").hidden, events: window.__standaloneKeyboardEvents })') })}`);
+        await until(async () => win.webContents.executeJavaScript('!document.getElementById("petTray").hidden'), 'Enter activates the standalone badge');
+        win.webContents.sendInputEvent({ type: 'rawKeyDown', keyCode: 'Escape' });
+        win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });
+        await until(async () => win.webContents.executeJavaScript('document.getElementById("petTray").hidden'), 'Escape closes the standalone Tasks tray');
+        await win.webContents.executeJavaScript('document.getElementById("petStandaloneBadge").focus()');
+        win.webContents.sendInputEvent({ type: 'rawKeyDown', keyCode: 'Space' });
+        win.webContents.sendInputEvent({ type: 'char', keyCode: ' ' });
+        win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Space' });
+        await until(async () => win.webContents.executeJavaScript('!document.getElementById("petTray").hidden'), 'Space activates the standalone badge');
+        win.webContents.sendInputEvent({ type: 'rawKeyDown', keyCode: 'Escape' });
+        win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });
+        await until(async () => win.webContents.executeJavaScript('document.getElementById("petTray").hidden'), 'Escape closes the tray after Space activation');
+        console.log('standaloneKeyboard=Enter,Space; Escape closes the tray');
+
+        win.webContents.send('pet-overlay:snapshot', {
+          visible: true, dismissedPetIds: [], level: 'idle', activities: [], theme: 'dark',
+          appearance: {
+            light: { background: '#f4f4f5', sidebar: '#e9edf2', accent: '#486f9d', contrast: 45 },
+            dark: { background: '#181818', sidebar: '#1a2129', accent: '#b0cbed', contrast: 60 },
+            font: 'system', fontSize: 14, translucentSidebar: true
+          }
+        });
+        await until(async () => win.webContents.executeJavaScript('document.getElementById("petStandaloneBadge").textContent === "0"'), 'zero-task standalone badge');
+        const zeroBadgeRect = await win.webContents.executeJavaScript('document.getElementById("petStandaloneBadge").getBoundingClientRect().toJSON()');
+        const zeroX = Math.round(zeroBadgeRect.x + zeroBadgeRect.width / 2), zeroY = Math.round(zeroBadgeRect.y + zeroBadgeRect.height / 2);
+        win.webContents.sendInputEvent({ type: 'mouseMove', x: zeroX, y: zeroY });
+        win.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', x: zeroX, y: zeroY, clickCount: 1 });
+        win.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', x: zeroX, y: zeroY, clickCount: 1 });
+        await until(async () => win.webContents.executeJavaScript('!document.getElementById("petTray").hidden'), 'zero-task badge opens the existing Tasks tray');
+        const zeroTasks = await win.webContents.executeJavaScript(`(() => ({
+          badgeHidden: document.getElementById('petStandaloneBadge').hidden,
+          badgeText: document.getElementById('petStandaloneBadge').textContent,
+          trayCount: document.getElementById('petTrayCount').textContent,
+          trayHidden: document.getElementById('petTray').hidden
+        }))()`);
+        assert.deepEqual(zeroTasks, { badgeHidden: false, badgeText: '0', trayCount: '0 tasks', trayHidden: false });
+        await win.webContents.executeJavaScript('document.getElementById("petTrayClose").click()');
+
+        const dragRect = await win.webContents.executeJavaScript('document.getElementById("petStandaloneBadge").getBoundingClientRect().toJSON()');
+        const target = await win.webContents.executeJavaScript('({ x: Math.min(333, innerWidth - 34), y: Math.min(444, innerHeight - 34) })');
+        const dragFromX = Math.round(dragRect.x + dragRect.width / 2), dragFromY = Math.round(dragRect.y + dragRect.height / 2);
+        const dragToX = Math.round(target.x + dragRect.width / 2), dragToY = Math.round(target.y + dragRect.height / 2);
+        win.webContents.sendInputEvent({ type: 'mouseMove', x: dragFromX, y: dragFromY });
+        win.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', x: dragFromX, y: dragFromY, clickCount: 1 });
+        win.webContents.sendInputEvent({ type: 'mouseMove', x: dragToX, y: dragToY, movementX: dragToX - dragFromX, movementY: dragToY - dragFromY });
+        await until(async () => win.webContents.executeJavaScript('document.getElementById("petStandaloneBadge").dataset.dragging === "true"'), 'standalone drag starts');
+        win.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', x: dragToX, y: dragToY, clickCount: 1 });
+        const movedStandalone = await win.webContents.executeJavaScript(`(() => ({
+          rect: document.getElementById('petStandaloneBadge').getBoundingClientRect().toJSON(),
+          saved: localStorage.getItem('cos.ui.petTaskBadge.v1'),
+          trayHidden: document.getElementById('petTray').hidden
+        }))()`);
+        assert.ok(Math.abs(movedStandalone.rect.x - target.x) < 2 && Math.abs(movedStandalone.rect.y - target.y) < 2,
+          `Electron input drag did not move the standalone badge: ${JSON.stringify(movedStandalone)}`);
+        assert.deepEqual(JSON.parse(movedStandalone.saved), target, "A completed drag must persist the user's chosen position.");
+        assert.equal(movedStandalone.trayHidden, true, 'Dragging must not activate the Tasks tray.');
+
+        if (process.platform === 'win32') {
+          standaloneOwner.focus();
+          await until(async () => standaloneOwner.isFocused(), 'return focus to the owner before testing idle click-through');
+          const outside = { x: -1_000_000, y: -1_000_000 };
+          const idleStart = ignoredMouseCalls.length;
+          win.setIgnoreMouseEvents(false);
+          sampledCursor = outside;
+          await until(() => ignoredMouseCalls.slice(idleStart).some(call => call.ignore === true), 'standalone idle click-through');
+          assert.equal(win.isFocused(), false, 'An idle standalone badge must not retain window focus.');
+          const focusedOwner = BrowserWindow.getFocusedWindow();
+          assert.equal(focusedOwner, standaloneOwner, 'The idle overlay must leave focus with the CoS owner.');
+          const ticksBefore = await standaloneOwner.webContents.executeJavaScript('window.__petBehindTicks');
+          await sleep(300);
+          const ticksAfter = await standaloneOwner.webContents.executeJavaScript('window.__petBehindTicks');
+          assert.ok(ticksAfter - ticksBefore >= 4, `The owner must remain responsive behind an idle standalone badge: ${ticksBefore}->${ticksAfter}`);
+          assert.equal(BrowserWindow.getFocusedWindow(), focusedOwner, 'Idle click-through must not steal foreground focus.');
+          console.log(`standaloneIdleClickThrough=${JSON.stringify({ ticksBefore, ticksAfter, focused: !win.isFocused() })}`);
+        }
+
+        const restoredPet = await standaloneOwner.webContents.executeJavaScript('window.api.petsSetEnabled("capy", true)');
+        assert.equal(restoredPet.ok, true, JSON.stringify(restoredPet));
+        const disabledStandalone = await standaloneOwner.webContents.executeJavaScript('window.api.petsSetStandaloneTaskBadge(false)');
+        assert.equal(disabledStandalone.ok, true, JSON.stringify(disabledStandalone));
+        await until(async () => win.webContents.executeJavaScript('document.querySelectorAll(".pet-shell").length === 1 && document.getElementById("petStandaloneBadge").hidden'), 'restore the original pet-only overlay state');
+        console.log(`standalone=${JSON.stringify({ coexistence, standaloneTask, zeroTasks, movedStandalone })}`);
+
         win.webContents.send('pet-overlay:snapshot', {
           visible: true, dismissedPetIds: [], level: 'review',
           activities: [{ id: 'task-smoke', title: 'Prime', body: 'Ready for review', level: 'review', sessionId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' }],
@@ -253,6 +455,8 @@ function attachOverlay(win) {
           `Completed task badge must use the green surface: ${JSON.stringify(reviewBadge)}`);
         assert.equal(reviewBadge.color, reviewBadge.expectedColor);
         assert.equal(reviewBadge.border, reviewBadge.expectedBorder);
+        await win.webContents.executeJavaScript('document.querySelector(".pet-badge").click()');
+        await until(async () => win.webContents.executeJavaScript('!document.getElementById("petTray").hidden'), 'reopen the pet-anchored tray for the existing stacked-task check');
         win.webContents.send('pet-overlay:snapshot', {
           visible: true, dismissedPetIds: [], level: 'running',
           activities: Array.from({ length: 8 }, (_, index) => ({

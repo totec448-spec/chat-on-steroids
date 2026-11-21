@@ -36,7 +36,7 @@ let overlayInteractive: boolean | null = null;
 let globallyVisible = true;
 // Read-only projection of the library owner's publication. Catalog reads validate/decode
 // packages; pointer sampling and visibility checks must never perform that disk/image work.
-let library: PetLibraryState = { pets: [] };
+let library: PetLibraryState = { pets: [], standaloneTaskBadge: false };
 const dismissedPetIds = new Set<string>();
 let activities: PetActivity[] = [];
 let pointerTimer: NodeJS.Timeout | null = null;
@@ -52,7 +52,10 @@ let lastSnapshotSent: string | null = null;
 let lastControlSent: PetOverlayControlState | null = null;
 
 function activePets(): number { return library.pets.filter(pet => pet.enabled).length; }
-function shouldShow(): boolean { return globallyVisible && library.pets.some(pet => pet.enabled && !dismissedPetIds.has(pet.id)); }
+function hasActivitySurface(): boolean { return library.standaloneTaskBadge || activePets() > 0; }
+function shouldShow(): boolean {
+  return globallyVisible && (library.standaloneTaskBadge || library.pets.some(pet => pet.enabled && !dismissedPetIds.has(pet.id)));
+}
 
 export function petOverlayControlState(): PetOverlayControlState {
   return {
@@ -263,7 +266,7 @@ async function currentActivities(): Promise<{ rows: PetActivity[]; nextAt: numbe
 export function refreshPetOverlayActivities(): void {
   // Nothing to refresh before the overlay starts (and never before the library exists).
   if (!started) return;
-  if (activePets() === 0) {
+  if (!hasActivitySurface()) {
     activities = [];
     if (expiryTimer) clearTimeout(expiryTimer);
     expiryTimer = null;
@@ -274,11 +277,11 @@ export function refreshPetOverlayActivities(): void {
   refreshPending = true;
   queueMicrotask(() => {
     void currentActivities().then(({ rows, nextAt }) => {
-      const hasActivePets = activePets() > 0;
-      activities = hasActivePets ? rows : [];
+      const hasSurface = hasActivitySurface();
+      activities = hasSurface ? rows : [];
       if (expiryTimer) clearTimeout(expiryTimer);
       expiryTimer = null;
-      if (hasActivePets && nextAt !== null) {
+      if (hasSurface && nextAt !== null) {
         expiryTimer = setTimeout(refreshPetOverlayActivities, Math.max(50, nextAt - Date.now() + 50));
         expiryTimer.unref?.();
       }
@@ -437,7 +440,7 @@ export async function startPetOverlay(getOwner: () => BrowserWindow | null, requ
     const active = new Set(state.pets.filter(pet => pet.enabled).map(pet => pet.id));
     for (const id of dismissedPetIds) if (!active.has(id)) dismissedPetIds.delete(id);
     sendLibrary();
-    if (active.size > 0) refreshPetOverlayActivities();
+    if (state.standaloneTaskBadge || active.size > 0) refreshPetOverlayActivities();
     else { activities = []; sendSnapshot(); sendControl(); }
     void syncVisibility();
   });
@@ -463,7 +466,7 @@ export async function shutdownPetOverlay(): Promise<void> {
   const win = overlay; overlay = null; overlayReady = false; overlayShapeReady = false; overlayInteractive = null;
   if (win && !win.isDestroyed()) win.destroy();
   dismissedPetIds.clear();
-  library = { pets: [] };
+  library = { pets: [], standaloneTaskBadge: false };
   lastSnapshotSent = null; lastControlSent = null;
   ownerWindow = null; activateOwner = null; started = false;
 }

@@ -208,7 +208,7 @@ function preview(pet: PetRecord, api: AppApi): HTMLElement {
 
 export function initPets(api: AppApi, runtime: PetController): void {
   initCardMenuDismissal();
-  let state: PetLibraryState = { pets: [] };
+  let state: PetLibraryState = { pets: [], standaloneTaskBadge: false };
   let epoch = 0;
   let loaded = false;
   // The first load failed and no list arrived since: the list says so, also when the search repaints it.
@@ -219,10 +219,43 @@ export function initPets(api: AppApi, runtime: PetController): void {
   const apply = (next: PetLibraryState): void => {
     state = next; loaded = true; loadFailed = false; runtime.applyLibraryState(next); render();
   };
-  const mutate = async (request: ReturnType<AppApi['petsList']>): Promise<boolean> => {
-    const own = ++epoch; const next = await run(request);
-    if (!next || own !== epoch) return false;
-    apply(next); return true;
+  let pendingMutations = 0;
+  let needsLibraryRefresh = false;
+  let refreshingLibrary = false;
+  const refreshLibraryAfterMutations = async (): Promise<void> => {
+    if (pendingMutations || !needsLibraryRefresh || refreshingLibrary) return;
+    refreshingLibrary = true;
+    const own = epoch;
+    const next = await run(api.petsList());
+    refreshingLibrary = false;
+    if (own !== epoch || pendingMutations) {
+      needsLibraryRefresh = true;
+      if (!pendingMutations) await refreshLibraryAfterMutations();
+      return;
+    }
+    needsLibraryRefresh = false;
+    if (next) apply(next);
+  };
+  const mutate = async (request: ReturnType<AppApi['petsList']>, onLatestFailure?: () => void): Promise<boolean> => {
+    const own = ++epoch;
+    pendingMutations++;
+    const next = await run(request);
+    pendingMutations--;
+    if (own !== epoch) {
+      needsLibraryRefresh = true;
+      await refreshLibraryAfterMutations();
+      return false;
+    }
+    if (!next) {
+      if (pendingMutations || needsLibraryRefresh) {
+        needsLibraryRefresh = true;
+        await refreshLibraryAfterMutations();
+      } else onLatestFailure?.();
+      return false;
+    }
+    apply(next);
+    await refreshLibraryAfterMutations();
+    return true;
   };
   const renderCard = (pet: PetRecord): HTMLElement => {
       const card = el('article', 'plugin-card pet-library-card'); card.dataset.petId = pet.id;
@@ -250,6 +283,7 @@ export function initPets(api: AppApi, runtime: PetController): void {
       menu.append(summary, actions); card.append(entry, favorite, menu); return card;
   };
   const render = (): void => {
+    $<HTMLInputElement>('petsStandaloneTaskBadge').checked = state.standaloneTaskBadge;
     const favoritesList = $('petsFavorites'), libraryList = $('petsInstalled'); favoritesList.replaceChildren(); libraryList.replaceChildren();
     if (loadFailed) {
       ui($('petsCount'), 'textContent', () => '');
@@ -271,6 +305,11 @@ export function initPets(api: AppApi, runtime: PetController): void {
     if (!visible.length) libraryList.append(el('p', 'plugin-no-results muted', () => t('No pets match your search.')));
   };
 
+  $('petsStandaloneTaskBadge').addEventListener('change', () => void (async () => {
+    const input = $<HTMLInputElement>('petsStandaloneTaskBadge');
+    const wanted = input.checked;
+    await mutate(api.petsSetStandaloneTaskBadge(wanted), () => { input.checked = state.standaloneTaskBadge; });
+  })());
   $('petsSearch').addEventListener('input', render);
   const formatDialog = $<HTMLDialogElement>('petFormatDialog');
   $('petsFormatGuide').addEventListener('click', () => formatDialog.showModal());

@@ -92,6 +92,7 @@ export interface PetRecord {
 
 export interface PetLibraryState {
   pets: PetRecord[];
+  standaloneTaskBadge: boolean;
 }
 
 export interface PetRuntimeAsset {
