@@ -3813,26 +3813,29 @@ var CLF_DOM = (() => {
       return trigger?.getAttribute('data-composer-navigation-target') === 'reasoning' &&
         trigger.getAttribute('data-clf-picker-route') === location.pathname;
     };
+    const nativeReasoningMatches = (effort, nativeOwned) => {
+      // Fiber can retain High while the separate native control says Medium or
+      // disappears. Preserve the old layout and non-standard effort mappings.
+      const native = nativeOwned ? modelPickerTrigger() : null;
+      return !nativeOwned || !['none', 'low', 'medium', 'high'].includes(effort) ||
+        (native?.getAttribute('data-composer-navigation-target') === 'reasoning' &&
+          native.getAttribute('data-clf-picker-route') === location.pathname &&
+          native.getAttribute('data-selected-reasoning-effort') === effort);
+    };
     const confirmAfterClose = async (expected, version, nativeOwned) => {
       if (!stillCurrent()) return selectionFailed('the chat changed meanwhile', 'owner-lost');
       const after = await readPickerState(); observe(after);
       const current = after?.choices.find(choice => choice.bucket === after.currentBucket);
       if (!stillCurrent()) return selectionFailed('the chat changed meanwhile', 'owner-lost');
-      // Fiber can retain High after the separate native trigger says Medium or
-      // disappears. Preserve the old layout and non-standard effort mappings.
-      const native = nativeOwned ? modelPickerTrigger() : null;
-      const nativeMatches = !nativeOwned || !['none', 'low', 'medium', 'high'].includes(current?.effort) ||
-        (native?.getAttribute('data-composer-navigation-target') === 'reasoning' &&
-          native.getAttribute('data-clf-picker-route') === location.pathname &&
-          native.getAttribute('data-selected-reasoning-effort') === current.effort);
       return after?.version === version && current?.available === true &&
         current.id === expected.id && current.familyId === expected.familyId &&
-        current.effort === expected.effort && nativeMatches ||
+        current.effort === expected.effort && nativeReasoningMatches(current.effort, nativeOwned || nativeReasoningOwned()) ||
         selectionFailed('the model or reasoning effort changed after closing the picker', 'changed');
     };
     let result = false;
     const choose = async () => {
       if (!model && !effort) return true;
+      let nativeOwned = nativeReasoningOwned();
       // The page's own picker state, read without opening anything. A worker tab opens with its model
       // in the address and ChatGPT applies it; opening the picker only to prove that left its closing
       // animation unfinished in a hidden, throttled tab, its focus scope hid the composer, and every
@@ -3840,18 +3843,22 @@ var CLF_DOM = (() => {
       if (!document.querySelector(PICKER)) {
         const passive = await readPickerState(); observe(passive);
         const now = passive?.choices.find(choice => choice.bucket === passive.currentBucket);
-        if (now?.available && (!model || now.id === model || now.familyId === model) && (!effort || now.effort === effort)) {
+        nativeOwned = nativeOwned || nativeReasoningOwned();
+        if (!stillCurrent()) return selectionFailed('the chat changed meanwhile', 'owner-lost');
+        if (now?.available && (!model || now.id === model || now.familyId === model) &&
+            (!effort || now.effort === effort) && nativeReasoningMatches(now.effort, nativeOwned)) {
           trace.resolved = pair(now); trace.selected = pair(now); return stillCurrent();
         }
       }
       phase('open');
-      const ui = modelPickerAccess(stillCurrent, observe, phase), original = await ui.open();
+      const ui = modelPickerAccess(stillCurrent, state => { observe(state); nativeOwned = nativeOwned || nativeReasoningOwned(); }, phase), original = await ui.open();
       if (!original) {
         // Keep the existing user-visible failure wording; the structured log
         // distinguishes a guarded selection drift from an unreadable picker.
         selectionFailed('the picker did not open or could not be read', ui.openingRefusal() || 'unreadable');
         phase('close'); trace.closed = await ui.close(); return false;
       }
+      nativeOwned = nativeOwned || nativeReasoningOwned();
       // Account-evaluated exact selection is already proof; visiting unrelated
       // versions can reset it or fail unnecessarily. Captions and denied choices
       // do not qualify, and native closure still has to succeed.
@@ -3859,14 +3866,13 @@ var CLF_DOM = (() => {
       if (current?.available && (current.id === model || current.familyId === model) &&
           (!effort || current.effort === effort)) {
         trace.resolved = pair(current); trace.selected = pair(current);
-        const nativeOwned = nativeReasoningOwned();
         phase('close'); const closed = trace.closed = await ui.close();
         if (!closed) return selectionFailed('the picker did not close', 'close-failed');
         return confirmAfterClose(current, original.version, nativeOwned);
       }
       // A native control observed before selection must still be corroborated at close,
       // even if provider transitions remove its ownership marker in the meantime.
-      let selected = false, closed = false, expectedChoice = null, expectedVersion = null, nativeOwned = nativeReasoningOwned();
+      let selected = false, closed = false, expectedChoice = null, expectedVersion = null;
       try {
         // Exact provider slug is preferred. Existing saved display slugs may resolve
         // only to an actually observed, available pair; never to an account default.
