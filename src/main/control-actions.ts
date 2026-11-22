@@ -151,11 +151,18 @@ async function send(rawBody: unknown): Promise<ActionReply> {
 
   if (body.sessionId === undefined) {
     // The outbox keeps only its last 50 finished rows, so an old id finds none above. A new chat is
-    // named by its message id: when that chat already exists with its ChatGPT conversation, the
-    // message was delivered and admitting it again can only fail setup and stay queued (#2247).
-    if ((await readSession(body.id))?.conversationId) {
-      logInfo('control API: message ' + body.id + ' refused as already delivered: its chat exists with a ChatGPT conversation');
-      throw new RequestError(409, 'already_delivered', 'the chat ' + body.id + ' already exists: this message was delivered; read it from GET /v1/sessions/' + body.id);
+    // named by its message id, and admitting that id again for a chat that already holds its ChatGPT
+    // conversation can only fail setup and stay queued (#2247). The conversation is bound before the
+    // first send is proven, so delivery is read from the recorded first user message, which outlives
+    // the row; a bound chat without one was opened but never received it (CodeRabbit on #2248).
+    const held = await readSession(body.id);
+    if (held?.conversationId) {
+      const delivered = held.userMessages > 0;
+      logInfo('control API: message ' + body.id + (delivered ? ' refused as already delivered: its chat exists and recorded its first message'
+        : ' refused: its chat exists with a ChatGPT conversation but never recorded the first message'));
+      throw delivered
+        ? new RequestError(409, 'already_delivered', 'the chat ' + body.id + ' already exists: this message was delivered; read it from GET /v1/sessions/' + body.id)
+        : new RequestError(409, 'not_delivered', 'the chat ' + body.id + ' was opened but this message was not delivered; send it again to that chat with POST /v1/inputs {"sessionId":"' + body.id + '"} and a new id');
     }
     if (body.projectId !== undefined && !(await getProject(body.projectId))) throw new RequestError(404, 'project_not_found');
   } else {
