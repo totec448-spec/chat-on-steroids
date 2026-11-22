@@ -2649,6 +2649,10 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
   const userRequests = await userRequestViews(sessionId);
   const finishWaiting = await sessionFinishWaiting(sessionId, activeTurnId, id);
   const recovery = await sessionRecoveryCountdowns(sessionId, id);
+  // The diagnostic projection must use the current binding, not the snapshot
+  // captured before the asynchronous controls reads above.
+  const closeStatusSession = await getSession(sessionId);
+  if (closeStatusSession?.conversationId !== id) throw new Error('conversation_changed');
   return { sessionId, plan, userRequests, conversationId: id, activeTurnId, heldTurnId, finishHeld,
     recovery,
     queueAtFinish: !blocked && inputPolicy.queueAtFinish, canInject: !blocked && inputPolicy.canInject,
@@ -2664,7 +2668,7 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
     keepRunningWhenTabClosed: goalKeepsRunningWhenTabClosed(id),
     canKeepRunningWhenTabClosed: (control.own || goalKeepsRunningWhenTabClosed(id)) && blocked !== 'worker' &&
       (!blocked || goalKeepsRunningWhenTabClosed(id)) && !isSessionRemoving(sessionId),
-    closedTabRecoveryStatus: closedTabStatusFor(id, session),
+    closedTabRecoveryStatus: closedTabStatusFor(id, closeStatusSession),
     proLoopDelivery: control.enabled && getConfig().ui.finishTool === true && session.selectedModel?.conversationId === id &&
       supportsFinishAutomation(control.mode, session.selectedModel.model, session.selectedModel.reasoningEffort),
     automation: goalArmedFor(id) && !blocked ? control.enabled ? control.mode : 'goal' : 'off',
@@ -8853,6 +8857,7 @@ async function fileSilenceInputTicket(conversationId: string, now: number, liste
  * call or observed turn takes over the clock exactly as for any working chat.
  */
 function armResumedChat(sessionId: string, conversationId: string): void {
+  forgetClosedTabStatuses(sessionId);
   grantActivity(conversationId, sessionId);
   logInfo(`bridge: resumed chat ${conversationId} armed — expecting its first attributed call`);
 }
@@ -9270,15 +9275,55 @@ const CLOSE_STATUS = {
   unconfirmed: 'The browser did not confirm the reopen. No further attempt was authorized.'
 } as const;
 const closeStatuses = new Map<string, { sessionId: string; text: string }>();
+// The displayed reason can change independently of the repair decision (for
+// example on disconnect). Track diagnostic observations, never authorization.
+const loggedCloseStatuses = new Map<string, { sessionId: string; text: string }>();
+function logClosedTabStatus(id: string, sessionId: string, text: string | undefined): void {
+  const previous = loggedCloseStatuses.get(id);
+  if (text === undefined) {
+    loggedCloseStatuses.delete(id);
+    return;
+  }
+  if (previous?.sessionId === sessionId && previous.text === text) return;
+  loggedCloseStatuses.set(id, { sessionId, text });
+  if (loggedCloseStatuses.size > 500) loggedCloseStatuses.delete(loggedCloseStatuses.keys().next().value!);
+  logInfo(`bridge: ${id}: ${text}`);
+}
 function setClosedTabStatus(id: string, sessionId: string, text: string): void {
+  if (isSessionRemoving(sessionId)) return;
   const previous = closeStatuses.get(id);
   if (previous?.sessionId === sessionId && previous.text === text) return;
   closeStatuses.set(id, { sessionId, text });
   if (closeStatuses.size > 500) closeStatuses.delete(closeStatuses.keys().next().value!);
-  logInfo(`bridge: ${id}: ${text}`);
+  logClosedTabStatus(id, sessionId, text);
   changed();
 }
 function closedTabStatusFor(id: string, session: SessionSummary): string | undefined {
+  // A session can move to a replacement conversation. Never reuse the old
+  // diagnostic observation for the new binding.
+  for (const [other, row] of loggedCloseStatuses) {
+    if (other !== id && row.sessionId === session.id) loggedCloseStatuses.delete(other);
+  }
+  for (const [other, row] of closeStatuses) {
+    if (other !== id && row.sessionId === session.id) closeStatuses.delete(other);
+  }
+  if (isSessionRemoving(session.id)) {
+    forgetClosedTabStatuses(session.id);
+    return undefined;
+  }
+  const text = projectClosedTabStatus(id, session);
+  logClosedTabStatus(id, session.id, text);
+  return text;
+}
+export function forgetClosedTabStatuses(sessionId: string): void {
+  for (const [id, row] of loggedCloseStatuses) {
+    if (row.sessionId === sessionId) loggedCloseStatuses.delete(id);
+  }
+  for (const [id, row] of closeStatuses) {
+    if (row.sessionId === sessionId) closeStatuses.delete(id);
+  }
+}
+function projectClosedTabStatus(id: string, session: SessionSummary): string | undefined {
   const row = closeStatuses.get(id);
   if (row?.sessionId !== session.id) {
     // A restarted app has no open authorization to resume. Preserve the
@@ -13777,6 +13822,7 @@ export function resetBridgeForTests(): void {
   clearUnattributedIncident();
   closedTabOpenedAt.clear();
   closeStatuses.clear();
+  loggedCloseStatuses.clear();
   closedTabInitialHoldUntil = Number.NEGATIVE_INFINITY;
   providerHistoryBackoffUntil.clear();
   pageNotesLogged.clear();

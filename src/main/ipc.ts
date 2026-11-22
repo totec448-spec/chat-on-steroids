@@ -129,6 +129,7 @@ import {
   recoveryHeldByCalls, recoveryInputAllowed,
   sessionControlsFor, userRequestViews, cancelAssistantRecovery, pickupNow, stopSessionTurn, endOwnWorkAfterStop, setSessionAutomation, setSessionKeepRunningWhenClosed, setSessionObjective, compactSession, resumeFromSavedSummary, cancelSessionCompaction,
   cancelWorkerCommands,
+  forgetClosedTabStatuses,
   chatUrl,
   revealChatInBrowser,
   pendingCommands,
@@ -2558,6 +2559,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       if (summary) await forgetOwnSent([...new Set([...(summary.conversationId ? [summary.conversationId] : []), ...(summary.chatIds ?? [])])])
         .catch((error: Error) => logWarn(`session ${id}: its own-sent record could not be removed (${error.message})`));
       await deleteSession(id);
+      forgetClosedTabStatuses(id);
       // A deleted chat leaves its group too; the group itself stays.
       await forgetChatGroupMember(id);
       logInfo(

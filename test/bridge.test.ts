@@ -14766,7 +14766,7 @@ describe('unattributed activity recovery', () => {
     ['goal', 'default-off'], ['loop', 'legacy-close'], ['goal', 'no-ack'],
     ['loop', 'block-after-claim'], ['goal', 'pause-after-claim'], ['loop', 'opt-out-after-open'],
     ['goal', 'progress-write-failure'], ['goal', 'restart-unspent'], ['loop', 'restart-unconfirmed'],
-    ['goal', 'restart-during-close']
+    ['goal', 'restart-during-close'], ['goal', 'restart-status-log']
   ] as const)('reopens an opt-in %s tab with an owed final once (%s)', async (mode, scenario) => {
     const previous = getConfig();
     vi.useFakeTimers();
@@ -14827,6 +14827,28 @@ describe('unattributed activity recovery', () => {
       }
       if (scenario === 'concurrent-close') await Promise.all([close(), close(), close()]);
       else await close();
+      if (scenario === 'restart-status-log') {
+        // Process-local status and browser presence are gone, but the durable
+        // deliberate-close fence survives. Reading controls must not rearm it.
+        resetBridgeForTests();
+        const disconnected = 'The browser is closed or disconnected. Recovery waits until you open it.';
+        const notOwed = 'The tab was not reopened: no current authorized Goal or Loop work.';
+        const count = (status: string) => getLog().filter(entry => entry.message === `bridge: ${chat}: ${status}`).length;
+        expect((await sessionControlsFor(sessionId)).closedTabRecoveryStatus).toBe(disconnected);
+        expect((await sessionControlsFor(sessionId)).closedTabRecoveryStatus).toBe(disconnected);
+        expect(count(disconnected)).toBe(1);
+        await pair();
+        expect(await poll()).toEqual([]);
+        expect((await sessionControlsFor(sessionId)).closedTabRecoveryStatus).toBe(notOwed);
+        expect((await sessionControlsFor(sessionId)).closedTabRecoveryStatus).toBe(notOwed);
+        expect(count(notOwed)).toBe(1);
+        await unpair();
+        const disconnectedReads = await Promise.all(Array.from({ length: 4 }, () => sessionControlsFor(sessionId)));
+        expect(disconnectedReads.map(view => view.closedTabRecoveryStatus)).toEqual(Array(4).fill(disconnected));
+        expect(count(disconnected)).toBe(2);
+        expect((await getSession(sessionId))?.browserRecoveryDismissedAt).toBeDefined();
+        return;
+      }
       if (scenario === 'old-extension') {
         expect((await request('GET', '/status', { browser, openOnly: false })).body.repairs).toEqual([]);
       }
