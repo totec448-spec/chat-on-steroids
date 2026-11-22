@@ -5854,6 +5854,7 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
       const width = event.width ?? event.previewWidth ?? 1;
       const height = event.height ?? event.previewHeight ?? 1;
       frame.style.aspectRatio = `${Math.max(1, width)} / ${Math.max(1, height)}`;
+      const id = context?.id ?? selectedId;
       const unavailable = () => {
         frame.classList.toggle('is-unavailable', event.previewStatus !== 'pending');
         frame.replaceChildren(el('p', 'meta', () => {
@@ -5865,12 +5866,11 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
         return t("Image preview unavailable");
         }));
         // Freeing storage helps when global storage is full, a session hit its 192 MB cap, or an image was removed.
-        if (event.previewStatus !== 'pending' && (event.previewError === 'quota' || event.previewError === 'session_quota' || event.previewError === 'removed')) frame.append(imageStorageButton());
+        if (event.previewStatus !== 'pending' && (event.previewError === 'quota' || event.previewError === 'session_quota' || event.previewError === 'removed')) frame.append(imageStorageButton(id ?? undefined));
       };
       if (event.asset) frame.append(el('p', 'meta', () => t("Image preview is loading")));
       else unavailable();
       box.append(frame);
-      const id = context?.id ?? selectedId;
       if (event.asset && id) {
         const generation = selectionGeneration;
         void (async () => {

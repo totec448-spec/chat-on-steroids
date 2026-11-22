@@ -4141,5 +4141,17 @@
   "What a chat edited": "Ce qu'un chat a modifié",
   "Review lists the files this chat changed and opens each recorded diff.": "Revue liste les fichiers modifiés par ce chat et ouvre chaque diff enregistré.",
   "Steered active turn": "A réorienté le tour actif",
-  "Worked for {0}{1}s · steered": "A travaillé pendant {0}{1} s · réorienté"
+  "Worked for {0}{1}s · steered": "A travaillé pendant {0}{1} s · réorienté",
+  "This chat: {0} MB of {1} MB ({2} MB images, {3} MB long texts).": "Ce chat : {0} Mo sur {1} Mo ({2} Mo d'images, {3} Mo de longs textes).",
+  "Loading chat storage usage…": "Chargement de l'espace utilisé par ce chat…",
+  "Global image cleanups do not remove long texts in active chats. You can clear images or long texts for this chat below.": "Les nettoyages globaux d'images ne suppriment pas les longs textes des chats actifs. Vous pouvez effacer les images ou les longs textes de ce chat ci-dessous.",
+  "Free images in this chat": "Libérer les images de ce chat",
+  "Free long texts in this chat": "Libérer les longs textes de ce chat",
+  "Permanently remove all local recorded images from this chat? Chat text, original files and long texts will stay.": "Supprimer définitivement toutes les images locales enregistrées de ce chat ? Le texte du chat, les fichiers d'origine et les longs textes seront conservés.",
+  "Free long texts in this chat? The full text stored by this app cannot be recovered. Only the beginning of each long message and tool result will remain.": "Supprimer les textes longs de cette conversation ? Le texte intégral enregistré par cette application ne pourra pas être récupéré. Seul le début de chaque message long et de chaque résultat d’outil sera conservé.",
+  "All chats": "Toutes les conversations",
+  "This chat": "Ce chat",
+  "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "{0} Mo libérés de ce chat. {1} Mo sur {2} Mo sont maintenant utilisés ici.",
+  "Freed {0} MB. Storage usage could not be read.": "{0} Mo libérés. L'utilisation du stockage n'a pas pu être lue.",
+  "Last cleanup: Freed {0} MB.": "Dernier nettoyage : {0} Mo libérés."
 }
