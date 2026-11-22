@@ -1634,7 +1634,9 @@ export function createFilePanel(options: FilePanelOptions) {
     gitSnapshot = null;
     if (pane.hidden) await show(true);
     else { render(); void reconcileGitChanges(); }
-    return project?.id === projectId && !pane.hidden && selectedBaseRef === ref;
+    const opened = project?.id === projectId && !pane.hidden && selectedBaseRef === ref;
+    if (opened && (!document.activeElement || document.activeElement === document.body)) refresh.focus({ preventScroll: true });
+    return opened;
   }
 
   function render(): void {

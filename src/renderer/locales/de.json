@@ -4060,5 +4060,6 @@
   "Worked for {0}{1}s · steered": "Gearbeitet · {0}{1} s · umgelenkt",
   "Restore turn": "Zug wiederherstellen",
   "Undo in Review": "In Überprüfung rückgängig machen",
-  "Some of these files were also edited in a later turn.": "Einige dieser Dateien wurden auch in einem späteren Zug bearbeitet."
+  "Some of these files were also edited in a later turn.": "Einige dieser Dateien wurden auch in einem späteren Zug bearbeitet.",
+  "Restored {0} of {1} files|one": "{0} von {1} Datei wiederhergestellt"
 }

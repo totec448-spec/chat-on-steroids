@@ -13,9 +13,10 @@ import { currentCall } from '../mcp/call-context.js';
 import { projectRestoreTarget, revalidateProjectFileTarget } from '../project-files.js';
 import { decode, readProjectGitSnapshot, repositoryContext, runGit, withTemporaryIndex, type RepositoryContext } from '../project-git.js';
 import { rawPromises as fs } from '../rawfs.js';
-import { isContained, resolvePath } from '../sandbox.js';
+import { isContained } from '../sandbox.js';
 import { getSession, readEvents } from '../session/store.js';
 import { turnFileEdits } from '../session/turn-changes.js';
+import { projectWorkspace } from '../projects.js';
 import { addCheckpoint, findCheckpoint, findTurnCheckpoint, hasCheckpoint, type CodeCheckpoint } from './store.js';
 
 const OID = /^[0-9a-f]{40,64}$/;
@@ -386,13 +387,25 @@ export async function restoreTurnCheckpoint(
   const edits = turnFileEdits(events, turnId);
   if (!edits.length) refuse('no recorded edits in turn', 'This turn has no recorded edits to restore');
 
-  const roots = getConfig().roots;
-  const toProjectRelative = async (virtualOrNative: string): Promise<string | null> => {
+  const workspace = await projectWorkspace(projectId);
+  const virtualPrefix = `${workspace.virtual.replace(/\/+$/, '')}/`;
+  const toProjectRelative = async (recorded: string): Promise<string | null> => {
+    const normalised = recorded.replace(/\\/g, '/');
+    let relative: string | null = null;
+    if (normalised.startsWith(virtualPrefix)) {
+      relative = normalised.slice(virtualPrefix.length);
+    } else if (!normalised.startsWith('/')) {
+      const candidate = path.resolve(recorded);
+      if (isContained(context!.projectReal, candidate)) {
+        relative = path.relative(context!.projectReal, candidate).split(path.sep).join('/');
+      }
+    }
+    if (!relative || relative === '.' || relative.startsWith('../') || relative === '..') return null;
     try {
-      const resolved = await resolvePath(roots, virtualOrNative, { allowMissing: true });
-      if (!isContained(context!.projectReal, resolved.real)) return null;
-      const relative = path.relative(context!.projectReal, resolved.real).split(path.sep).join('/');
-      return relative && relative !== '.' ? relative : null;
+      // Validate containment and refuse any symlink segment without following it to another target.
+      const target = await projectRestoreTarget(projectId, relative);
+      if (target.kind !== null && target.kind !== 'file') return null;
+      return target.path;
     } catch {
       return null;
     }
@@ -410,6 +423,7 @@ export async function restoreTurnCheckpoint(
   if (snapshot.state !== 'ready' || !snapshot.comparison?.checkpoint) {
     refuse('checkpoint unavailable', snapshot.message || 'This checkpoint is no longer available');
   }
+  if (snapshot.truncated) refuse('comparison truncated', 'Too many changes to restore at once. Restore files one by one.');
   const changed = new Set(snapshot.changes.map(change => change.path));
   const selected = [...turnPaths].filter(relative => changed.has(relative));
   if (!selected.length) refuse('no remaining diff', 'These files no longer differ from the checkpoint');

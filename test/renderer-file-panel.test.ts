@@ -1632,4 +1632,14 @@ it('opens Review directly on a turn checkpoint ref and ignores mismatched projec
   expect(onShow).toHaveBeenCalledTimes(1);
   expect(window.api.getProjectGitSnapshot).toHaveBeenLastCalledWith(projectA.id, checkpointRef);
   expect(host.querySelector('.file-change-row[data-path="README.md"]')).not.toBeNull();
+  // When focus had fallen to document.body (e.g. after a toast closed), focus moves to refresh.
+  expect(document.activeElement).toBe(host.querySelector('.file-panel-refresh'));
+
+  // When a visible opener keeps focus, openCheckpoint preserves it.
+  const opener = document.createElement('button');
+  document.body.append(opener);
+  opener.focus();
+  expect(await review.openCheckpoint(projectA.id, checkpointRef)).toBe(true);
+  expect(document.activeElement).toBe(opener);
+  opener.remove();
 });

@@ -4228,5 +4228,8 @@
   "Worked for {0}{1}s · steered": "Завершил работу — {0}{1} с · перенаправлен",
   "Restore turn": "Восстановить ход",
   "Undo in Review": "Отменить в Проверке",
-  "Some of these files were also edited in a later turn.": "Некоторые из этих файлов также изменялись в более позднем ходе."
+  "Some of these files were also edited in a later turn.": "Некоторые из этих файлов также изменялись в более позднем ходе.",
+  "Restored {0} of {1} files|one": "Восстановлен {0} из {1} файла",
+  "Restored {0} of {1} files|few": "Восстановлено {0} из {1} файлов",
+  "Restored {0} of {1} files|many": "Восстановлено файлов: {0} из {1}"
 }
