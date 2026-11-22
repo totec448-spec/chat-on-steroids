@@ -4144,5 +4144,7 @@
   "Worked for {0}{1}s · steered": "Trabalhou por {0}{1}s · redirecionado",
   "Restore turn": "Restaurar turno",
   "Undo in Review": "Desfazer na Revisão",
-  "Some of these files were also edited in a later turn.": "Alguns desses arquivos também foram editados em um turno posterior."
+  "Some of these files were also edited in a later turn.": "Alguns desses arquivos também foram editados em um turno posterior.",
+  "Restored {0} of {1} files|one": "{0} de {1} arquivo restaurado",
+  "Restored {0} of {1} files|many": "{0} de {1} arquivos restaurados"
 }

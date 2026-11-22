@@ -4060,5 +4060,6 @@
   "Worked for {0}{1}s · steered": "{0}{1} sn · Çalıştı · yönlendirildi",
   "Restore turn": "Turu geri yükle",
   "Undo in Review": "İncelemede geri al",
-  "Some of these files were also edited in a later turn.": "Bu dosyalardan bazıları daha sonraki bir turda da düzenlendi."
+  "Some of these files were also edited in a later turn.": "Bu dosyalardan bazıları daha sonraki bir turda da düzenlendi.",
+  "Restored {0} of {1} files|one": "{1} dosyadan {0} tanesi geri yüklendi"
 }

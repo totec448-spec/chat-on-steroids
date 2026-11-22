@@ -116,7 +116,10 @@ export function renderTurnChanges(options: {
             if (!result || !options.current()) return;
             const conflicts = result.skipped.filter(item => item.reason === 'conflict').length;
             const messages: string[] = [];
-            if (result.confirmed) messages.push(t('Restored {0} of {1} files', [result.restored.length, result.restored.length + result.skipped.length]));
+            const totalFiles = result.restored.length + result.skipped.length;
+            if (result.confirmed) {
+              messages.push(tn('Restored {0} of {1} file', 'Restored {0} of {1} files', totalFiles, [result.restored.length, totalFiles]));
+            }
             if (conflicts) messages.push(t('Skipped {0} paths because files and folders share a name', [conflicts]));
             if (messages.length) {
               const undoRef = result.undoRef;
