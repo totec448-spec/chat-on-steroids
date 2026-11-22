@@ -12990,7 +12990,9 @@ function drop(command: Command, why: string, options: { startTimedOut?: boolean 
       if (command.timer) clearTimeout(command.timer);
       command.timer = null;
       commands = commands.filter(candidate => candidate !== command);
-      logWarn(`bridge: retired ${specKey(command.spec)} browser attempt — ${command.modelRecovery ? 'clean-address model recovery exhausted; ' : ''}${why}`);
+      logWarn(command.modelRecovery
+        ? `bridge: retired ${specKey(command.spec)} browser attempt — clean-address model recovery exhausted; ${why}`
+        : `bridge: released ${specKey(command.spec)} browser attempt without closing its ticket — ${why}`);
       changed();
       return true;
     }).then(retired => {
