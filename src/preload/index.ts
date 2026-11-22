@@ -388,11 +388,14 @@ const api = {
   }),
   restoreCheckpoint: (projectId: string, checkpointId: string, paths: string[] | null, expectedRevision: string) =>
     call<CheckpointRestoreResult>('checkpoints:restore', { projectId, checkpointId, paths, expectedRevision }),
+  restoreTurnCheckpoint: (sessionId: string, turnId: string, from: number) =>
+    call<CheckpointRestoreResult>('checkpoints:restoreTurn', { sessionId, turnId, from }),
   getChatEdits: (id: string, projectId: string) => call<ChatEdits | null>('sessions:chatEdits', { id, projectId }),
   getToolEditReview: (sessionId: string, callId: string, changeIndex: number, projectId?: string) =>
     call<ToolEditReview | null>('sessions:toolEditReview', { sessionId, callId, changeIndex, ...(projectId ? { projectId } : {}) }),
   /** #1827: what one answer changed, per file, read from the turn's first event (`from`, a sequence number) on. */
-  turnChanges: (sessionId: string, turnId: string, from: number) => call<{ changes: TurnFileChange[]; total: number }>('sessions:turnChanges', { sessionId, turnId, from }),
+  turnChanges: (sessionId: string, turnId: string, from: number) =>
+    call<{ changes: TurnFileChange[]; total: number; checkpointRef?: string }>('sessions:turnChanges', { sessionId, turnId, from }),
   turnFileDiff: (sessionId: string, turnId: string, from: number, path: string) => call<{ before: string; after: string } | null>('sessions:turnFileDiff', { sessionId, turnId, from, path }),
   onProjectGitChanged: (listener: (event: ProjectGitChanged) => void): (() => void) => {
     const wrapped = (_event: unknown, change: ProjectGitChanged): void => listener(change);

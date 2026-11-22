@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { checkpointBeforePatch, restoreCheckpoint } from '../src/main/checkpoints/index.js';
+import { checkpointBeforePatch, restoreCheckpoint, restoreTurnCheckpoint, turnCheckpointRef } from '../src/main/checkpoints/index.js';
 import { addCheckpoint, listCheckpoints, MAX_CHECKPOINTS_PER_PROJECT, resetCheckpointsForTests } from '../src/main/checkpoints/store.js';
 import * as checkpointStore from '../src/main/checkpoints/store.js';
 import { defaultConfig, getConfig, initConfigPath, saveConfig } from '../src/main/config.js';
@@ -629,5 +629,91 @@ it('logs a refused checkpoint comparison once, with the checkpoint and the reaso
   } finally {
     warn.mockRestore();
   }
+});
+
+it('resolves a turn checkpoint ref for the session\'s current project and response turn, even after checkpoints are turned off', async () => {
+  const turns = {
+    'turn-root': { origin: 1, time: 1 },
+    'turn-alias': { origin: 2, time: 2, responseTurnId: 'turn-root' }
+  };
+  session = { projectId, activeTurnId: 'turn-alias', timelineTurns: turns };
+  expect((await applyPatch(editApp('export const value = 1;', 'export const value = 2;'))).isError).not.toBe(true);
+  const [checkpoint] = await listCheckpoints(projectId);
+  expect(checkpoint).toBeDefined();
+
+  // Resolves by both the alias and the canonical response turn id.
+  expect(await turnCheckpointRef(SESSION, 'turn-alias')).toBe(`${CHECKPOINT_REF_PREFIX}${checkpoint!.id}`);
+  expect(await turnCheckpointRef(SESSION, 'turn-root')).toBe(`${CHECKPOINT_REF_PREFIX}${checkpoint!.id}`);
+
+  // Turning checkpoints off stops new captures only; existing turn refs remain reachable.
+  await setCodeCheckpoints(false);
+  expect(await turnCheckpointRef(SESSION, 'turn-root')).toBe(`${CHECKPOINT_REF_PREFIX}${checkpoint!.id}`);
+
+  // Different turn, different session, unfiled chat or a chat moved to another project returns null.
+  expect(await turnCheckpointRef(SESSION, 'turn-other')).toBeNull();
+  expect(await turnCheckpointRef('other-session', 'turn-root')).toBeNull();
+  session = { projectId: 'other-project-id', activeTurnId: 'turn-alias', timelineTurns: turns };
+  expect(await turnCheckpointRef(SESSION, 'turn-root')).toBeNull();
+  session = { activeTurnId: 'turn-alias', timelineTurns: {} };
+  expect(await turnCheckpointRef(SESSION, 'turn-root')).toBeNull();
+
+  // A restore checkpoint ("Before restore") is never returned as a turn checkpoint.
+  session = { projectId, activeTurnId: 'turn-2', timelineTurns: {} };
+  await addCheckpoint({
+    id: 'e'.repeat(32), projectId, sessionId: SESSION, key: 'turn:turn-2', reason: 'restore',
+    treeOid: checkpoint!.treeOid, headOid: checkpoint!.headOid, createdAt: Date.now()
+  });
+  expect(await turnCheckpointRef(SESSION, 'turn-2')).toBeNull();
+});
+
+it('restores only the files edited in that turn, leaves unrelated edits intact, and flags files edited in a later turn', async () => {
+  const realSession = await sessions.createSession({ title: 'Turn restore' });
+  session = { projectId, activeTurnId: 'turn-1', timelineTurns: {} };
+  vi.spyOn(sessions, 'getSession').mockImplementation(async id =>
+    id === realSession.id ? { ...realSession, projectId, activeTurnId: session?.activeTurnId, timelineTurns: session?.timelineTurns } as never : null);
+
+  // Turn 1 edits app.ts (checkpoint taken before this edit).
+  expect((await applyPatch(editApp('export const value = 1;', 'export const value = 2;'), realSession.id)).isError).not.toBe(true);
+  await sessions.appendEvent(realSession.id, {
+    time: Date.now(), source: 'mcp', kind: 'tool_call', turnId: 'turn-1',
+    call: {
+      callId: crypto.randomUUID(), tool: 'apply_patch', outcome: 'ok',
+      summary: { title: 'Edited', tone: 'good', kind: 'edit' }, durationMs: 1, attribution: 'request_id',
+      args: { text: '', truncated: false, chars: 0 }, result: { text: '', truncated: false, chars: 0 },
+      changes: [{ path: '/approved/project/app.ts', added: 1, removed: 1, approximate: false }]
+    } as never
+  } as never);
+
+  // Unrelated manual edit to kept.txt must NOT be touched when restoring turn-1.
+  await fs.writeFile(path.join(root, 'kept.txt'), 'manual edit by user\n');
+
+  // Later turn 2 also edits app.ts -> editedLater must be true.
+  await fs.writeFile(path.join(root, 'app.ts'), 'export const value = 3;\n');
+  await sessions.appendEvent(realSession.id, {
+    time: Date.now(), source: 'mcp', kind: 'tool_call', turnId: 'turn-2',
+    call: {
+      callId: crypto.randomUUID(), tool: 'apply_patch', outcome: 'ok',
+      summary: { title: 'Edited', tone: 'good', kind: 'edit' }, durationMs: 1, attribution: 'request_id',
+      args: { text: '', truncated: false, chars: 0 }, result: { text: '', truncated: false, chars: 0 },
+      changes: [{ path: '/approved/project/app.ts', added: 1, removed: 1, approximate: false }]
+    } as never
+  } as never);
+
+  const confirmations: Array<{ paths: string[]; editedLater: boolean }> = [];
+  const result = await restoreTurnCheckpoint(realSession.id, 'turn-1', 0, async (paths, opts) => {
+    confirmations.push({ paths, editedLater: opts.editedLater });
+    return true;
+  });
+
+  expect(confirmations).toEqual([{ paths: ['app.ts'], editedLater: true }]);
+  expect(result.confirmed).toBe(true);
+  expect(result.restored).toEqual(['app.ts']);
+  expect(result.undoRef).toMatch(/^checkpoint:[0-9a-f]{32}$/);
+  expect(await fs.readFile(path.join(root, 'app.ts'), 'utf8')).toBe('export const value = 1;\n');
+  expect(await fs.readFile(path.join(root, 'kept.txt'), 'utf8')).toBe('manual edit by user\n');
+
+  // Restoring again when app.ts already matches the checkpoint refuses cleanly.
+  await expect(restoreTurnCheckpoint(realSession.id, 'turn-1', 0, async () => true))
+    .rejects.toThrow('These files no longer differ from the checkpoint');
 });
 

@@ -1600,3 +1600,36 @@ it('offers no .gitignore action for an untracked name with a line break', async 
   row.dispatchEvent(new dom.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 60 }));
   expect(document.querySelector('.row-menu')).toBeNull();
 });
+
+it('opens Review directly on a turn checkpoint ref and ignores mismatched projects or non-checkpoint refs', async () => {
+  const checkpointRef = `checkpoint:${'a'.repeat(32)}`;
+  const checkpointSnapshot: ProjectGitSnapshot = {
+    projectId: projectA.id,
+    state: 'ready',
+    currentBranch: 'main',
+    changes: [{ status: 'M', path: 'README.md', additions: 2, deletions: 1, binary: false }],
+    truncated: false,
+    revision: 'r'.repeat(64),
+    comparison: { ref: checkpointRef, label: '', baseOid: 'b'.repeat(40), headOid: 'c'.repeat(40), checkpoint: true },
+    checkpoints: [{ ref: checkpointRef, createdAt: Date.now(), reason: 'turn', available: true }]
+  };
+  vi.mocked(window.api.getProjectGitSnapshot).mockImplementation((_id, baseRef) =>
+    ok(baseRef === checkpointRef ? checkpointSnapshot : cleanGit(projectA)));
+
+  const onShow = vi.fn();
+  const review = createFilePanel({ host, mount: host, toggle, reviewOnly: true, onShow });
+  review.update(projectA);
+
+  // Refuses wrong project or non-checkpoint ref without opening the panel.
+  expect(await review.openCheckpoint(projectB.id, checkpointRef)).toBe(false);
+  expect(await review.openCheckpoint(projectA.id, 'refs/heads/main')).toBe(false);
+  expect(review.visible()).toBe(false);
+
+  // Opens hidden Review panel directly on the requested checkpoint comparison.
+  expect(await review.openCheckpoint(projectA.id, checkpointRef)).toBe(true);
+  await tick();
+  expect(review.visible()).toBe(true);
+  expect(onShow).toHaveBeenCalledTimes(1);
+  expect(window.api.getProjectGitSnapshot).toHaveBeenLastCalledWith(projectA.id, checkpointRef);
+  expect(host.querySelector('.file-change-row[data-path="README.md"]')).not.toBeNull();
+});

@@ -11,7 +11,7 @@ import { setStopNoticeTranslations } from './stuck-notice.js';
 import { dialogLabel, mainText, setMainTextTranslations } from './main-texts.js';
 import { MAIN_TEXTS } from '../shared/main-texts.js';
 import { MAX_TASK_REQUEST_CHARS } from '../shared/task-progress.js';
-import { restoreCheckpoint } from './checkpoints/index.js';
+import { restoreCheckpoint, restoreTurnCheckpoint, turnCheckpointRef } from './checkpoints/index.js';
 import { applyLoginStartup, supportsLoginStartup } from './window-lifecycle.js';
 import { startControlApi, stopControlApi } from './control-api.js';
 import { appearanceSchema } from './appearance-schema.js';
@@ -1719,35 +1719,49 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   const reviewOf = (sessionId: string) => (at: EditAt) => at.assetId ? readEditReviewAsset(sessionId, at.assetId) : Promise.resolve(null);
   handle('sessions:turnChanges', async payload => {
     const request = turnRequest('sessions:turnChanges', turnChangesRequest.strict(), payload);
-    const files = await turnEdits(request);
-    return { changes: await netTurnChanges(files, reviewOf(request.sessionId)), total: files.length };
+    const [files, checkpointRef] = await Promise.all([
+      turnEdits(request),
+      turnCheckpointRef(request.sessionId, request.turnId)
+    ]);
+    return {
+      changes: await netTurnChanges(files, reviewOf(request.sessionId)),
+      total: files.length,
+      ...(checkpointRef ? { checkpointRef } : {})
+    };
   });
   handle('sessions:turnFileDiff', async payload => {
     const request = turnRequest('sessions:turnFileDiff', turnChangesRequest.extend({ path: z.string().min(1).max(4096) }).strict(), payload);
     return netTurnFileDiff(await turnEdits(request), request.path, reviewOf(request.sessionId));
   });
+  const confirmCheckpointRestore = async (selected: string[], note?: string): Promise<boolean> => {
+    const shown = selected.slice(0, 25).map(name => `  - ${name.replace(/[\x00-\x1f\x7f]/g, '?').slice(0, 180)}`);
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      title: mainText('Restore files from this checkpoint?'),
+      message: mainText('Restore files from this checkpoint?'),
+      detail: [
+        mainText('Files return to their checkpoint version; files added since are removed. Current files are saved first, so you can undo this in Review.'),
+        ...(note ? ['', note] : []),
+        '', ...shown, ...(selected.length > shown.length ? [mainText('More files are not shown.')] : [])
+      ].join('\n'),
+      buttons: [mainText('Keep current files'), mainText('Restore files')],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true
+    });
+    return response === 1;
+  };
   handle('checkpoints:restore', async payload => {
     const { projectId, checkpointId, paths, expectedRevision } = z.object({ projectId: projectFileId,
       checkpointId: z.string().regex(/^[0-9a-f]{32}$/), paths: z.array(projectRelativePath.min(1)).min(1).max(256).nullable(),
       expectedRevision: z.string().length(64).regex(/^[0-9a-f]+$/) }).strict().parse(payload);
     // Approval comes from this trusted dialog, never from a renderer boolean; the default keeps the files.
-    return restoreCheckpoint(projectId, checkpointId, paths, expectedRevision, async selected => {
-      const shown = selected.slice(0, 25).map(name => `  - ${name.replace(/[\x00-\x1f\x7f]/g, '?').slice(0, 180)}`);
-      const { response } = await dialog.showMessageBox({
-        type: 'warning',
-        title: mainText('Restore files from this checkpoint?'),
-        message: mainText('Restore files from this checkpoint?'),
-        detail: [
-          mainText('Files return to their checkpoint version; files added since are removed. Current files are saved first, so you can undo this in Review.'),
-          '', ...shown, ...(selected.length > shown.length ? [mainText('More files are not shown.')] : [])
-        ].join('\n'),
-        buttons: [mainText('Keep current files'), mainText('Restore files')],
-        defaultId: 0,
-        cancelId: 0,
-        noLink: true
-      });
-      return response === 1;
-    });
+    return restoreCheckpoint(projectId, checkpointId, paths, expectedRevision, selected => confirmCheckpointRestore(selected));
+  });
+  handle('checkpoints:restoreTurn', async payload => {
+    const request = turnRequest('checkpoints:restoreTurn', turnChangesRequest.strict(), payload);
+    return restoreTurnCheckpoint(request.sessionId, request.turnId, request.from, (selected, { editedLater }) =>
+      confirmCheckpointRestore(selected, editedLater ? mainText('Some of these files were also edited in a later turn.') : undefined));
   });
   handle('sessions:chatEdits', async payload => {
     const { id, projectId } = turnRequest('sessions:chatEdits', sessionIdArg.extend({ projectId: projectFileId }).strict(), payload);

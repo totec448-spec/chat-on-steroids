@@ -4057,5 +4057,8 @@
   "What a chat edited": "Bir sohbetin düzenledikleri",
   "Review lists the files this chat changed and opens each recorded diff.": "İnceleme, bu sohbetin değiştirdiği dosyaları listeler ve kaydedilmiş her farkı açar.",
   "Steered active turn": "Etkin turu yönlendirdi",
-  "Worked for {0}{1}s · steered": "{0}{1} sn · Çalıştı · yönlendirildi"
+  "Worked for {0}{1}s · steered": "{0}{1} sn · Çalıştı · yönlendirildi",
+  "Restore turn": "Turu geri yükle",
+  "Undo in Review": "İncelemede geri al",
+  "Some of these files were also edited in a later turn.": "Bu dosyalardan bazıları daha sonraki bir turda da düzenlendi."
 }

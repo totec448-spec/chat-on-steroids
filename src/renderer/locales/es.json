@@ -4141,5 +4141,8 @@
   "What a chat edited": "Lo que editó un chat",
   "Review lists the files this chat changed and opens each recorded diff.": "Revisión lista los archivos que cambió este chat y abre cada diff registrado.",
   "Steered active turn": "Redirigió el turno activo",
-  "Worked for {0}{1}s · steered": "Trabajó durante {0}{1}s · redirigido"
+  "Worked for {0}{1}s · steered": "Trabajó durante {0}{1}s · redirigido",
+  "Restore turn": "Restaurar turno",
+  "Undo in Review": "Deshacer en Revisión",
+  "Some of these files were also edited in a later turn.": "Algunos de estos archivos también se editaron en un turno posterior."
 }

@@ -5864,8 +5864,14 @@ never a `worker-N` agent's) and gives each file one net diff, the first edit's b
 last edit's after, read from the review assets by id (`readEditReviewAsset`), counted with
 `lineDelta`: `edited`, `created`, `deleted` or `unchanged` (put back, or made and removed). An end the
 recording did not keep falls back to the summed recorded counts, marked approximate, with `diff`
-saying why. At most 50 files; `total` says how many there are. `sessions:turnFileDiff` adds `path`
-and returns that net before/after. `from` is the turn's first sequence number, so the read starts there.
+saying why. At most 50 files; `total` says how many there are. When the turn has a recorded turn
+checkpoint in the session's current project (`turnCheckpointRef` in `main/checkpoints/index.ts`),
+`sessions:turnChanges` also returns `checkpointRef` (`checkpoint:<id>`) so the card offers a direct
+Restore turn action via `checkpoints:restoreTurn` (`restoreTurnCheckpoint` in
+`main/checkpoints/index.ts`), scoped to the project files edited in that turn, using the same native
+confirmation dialog (warning when a later turn also edited one of those files) and "Before restore"
+undo checkpoint (`undoRef`, opened in Review via `openCheckpoint` in `renderer/file-panel.ts`).
+`sessions:turnFileDiff` adds `path` and returns that net before/after. `from` is the turn's first sequence number, so the read starts there.
 
 Unchanged session/directory updates preserve preview DOM and pending code loads. File reads keep
 the previous accepted preview until replacement content is ready; hidden previews stay hidden.

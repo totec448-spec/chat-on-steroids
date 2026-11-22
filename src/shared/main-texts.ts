@@ -38,6 +38,7 @@ export const MAIN_TEXTS = [
   'Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.',
   'Restore files from this checkpoint?',
   'Files return to their checkpoint version; files added since are removed. Current files are saved first, so you can undo this in Review.',
+  'Some of these files were also edited in a later turn.',
   'More files are not shown.',
   'Keep current files',
   'Restore files',
