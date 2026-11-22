@@ -126,12 +126,12 @@ export function gitExecutable(
 }
 
 /**
- * What a call needs beyond a plain read: text on standard input (a commit message, a list for
+ * What a call needs beyond a plain read: text or bytes on standard input (a commit message, a list for
  * `--batch-check`), more time (a push over the network), extra environment (never prompt for a
  * password or a host key), and for checkpoint commands only a temporary index outside the
  * repository and no replacement objects.
  */
-export interface GitRunOptions { input?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv; indexFile?: string; noReplaceObjects?: boolean }
+export interface GitRunOptions { input?: string | Buffer; timeoutMs?: number; env?: NodeJS.ProcessEnv; indexFile?: string; noReplaceObjects?: boolean }
 /** The checkpoint code's name for the same options. */
 export type GitOptions = GitRunOptions;
 
