@@ -3973,5 +3973,8 @@
   "What a chat edited": "チャットが編集した内容",
   "Review lists the files this chat changed and opens each recorded diff.": "レビューに、このチャットが変更したファイルが一覧表示され、記録された差分を開けます。",
   "Steered active turn": "実行中のターンを方向転換",
-  "Worked for {0}{1}s · steered": "作業済み · {0}{1}秒 · 方向転換"
+  "Worked for {0}{1}s · steered": "作業済み · {0}{1}秒 · 方向転換",
+  "Restore turn": "ターンを復元",
+  "Undo in Review": "レビューで元に戻す",
+  "Some of these files were also edited in a later turn.": "これらのファイルの一部は後のターンでも編集されています。"
 }

@@ -7099,8 +7099,15 @@ function paintDetail(followBottom = historyBefore === null): void {
       item.kind === 'event' && item.event.kind === 'assistant_message' ? { text: item.event.message.text, time: item.event.time } : undefined));
     if (changedFiles && answerTurn && selectedId) {
       const sessionId = selectedId;
-      built.querySelector('.said')?.append(renderTurnChanges({ sessionId, turnId: answerTurn, from: turnFrom(events, answerTurn),
-        current: () => selectedId === sessionId, openReview: selectedLocalProject() ? () => void reviewPanel?.show() : null }));
+      const from = turnFrom(events, answerTurn);
+      built.querySelector('.said')?.append(renderTurnChanges({ sessionId, turnId: answerTurn, from,
+        current: () => selectedId === sessionId,
+        openReview: selectedLocalProject() ? () => void reviewPanel?.show() : null,
+        openCheckpoint: selectedLocalProject() ? ref => {
+          const project = selectedLocalProject();
+          if (project) void reviewPanel?.openCheckpoint(project.id, ref);
+        } : null,
+        restoreTurn: selectedLocalProject() ? () => run(api.restoreTurnCheckpoint(sessionId, answerTurn, from)) : null }));
     }
     if (item.kind === 'event' && editableQuestion(item.event, events)) {
       built.querySelector('.ev-body')?.append(questionActions(item.event, laterMessages.get(item.event.seq) ?? 0));

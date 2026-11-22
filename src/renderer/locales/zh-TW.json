@@ -3973,5 +3973,8 @@
   "What a chat edited": "聊天修改了什麼",
   "Review lists the files this chat changed and opens each recorded diff.": "審查會列出此聊天更改的檔案，並可開啟每筆已記錄的差異。",
   "Steered active turn": "已引導目前回合",
-  "Worked for {0}{1}s · steered": "已工作 {0}{1} 秒 · 已引導"
+  "Worked for {0}{1}s · steered": "已工作 {0}{1} 秒 · 已引導",
+  "Restore turn": "還原本輪",
+  "Undo in Review": "在審查中復原",
+  "Some of these files were also edited in a later turn.": "其中部分檔案在之後的輪次中也曾被編輯。"
 }

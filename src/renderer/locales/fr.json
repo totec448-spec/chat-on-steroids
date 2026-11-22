@@ -4141,5 +4141,8 @@
   "What a chat edited": "Ce qu'un chat a modifié",
   "Review lists the files this chat changed and opens each recorded diff.": "Revue liste les fichiers modifiés par ce chat et ouvre chaque diff enregistré.",
   "Steered active turn": "A réorienté le tour actif",
-  "Worked for {0}{1}s · steered": "A travaillé pendant {0}{1} s · réorienté"
+  "Worked for {0}{1}s · steered": "A travaillé pendant {0}{1} s · réorienté",
+  "Restore turn": "Restaurer le tour",
+  "Undo in Review": "Annuler dans Révision",
+  "Some of these files were also edited in a later turn.": "Certains de ces fichiers ont également été modifiés lors d’un tour ultérieur."
 }

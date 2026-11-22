@@ -4057,5 +4057,8 @@
   "What a chat edited": "Was ein Chat geändert hat",
   "Review lists the files this chat changed and opens each recorded diff.": "Die Prüfung listet die Dateien, die dieser Chat geändert hat, und öffnet jeden aufgezeichneten Diff.",
   "Steered active turn": "Laufenden Durchlauf umgelenkt",
-  "Worked for {0}{1}s · steered": "Gearbeitet · {0}{1} s · umgelenkt"
+  "Worked for {0}{1}s · steered": "Gearbeitet · {0}{1} s · umgelenkt",
+  "Restore turn": "Zug wiederherstellen",
+  "Undo in Review": "In Überprüfung rückgängig machen",
+  "Some of these files were also edited in a later turn.": "Einige dieser Dateien wurden auch in einem späteren Zug bearbeitet."
 }

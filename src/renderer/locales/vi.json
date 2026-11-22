@@ -3973,5 +3973,8 @@
   "Chats update faster": "Chat cập nhật nhanh hơn",
   "A new message or tool call shows up in the open chat much sooner.": "Tin nhắn mới hoặc lệnh gọi công cụ hiện trong chat đang mở sớm hơn nhiều.",
   "What a chat edited": "Những gì một chat đã sửa",
-  "Review lists the files this chat changed and opens each recorded diff.": "Mục Xem lại liệt kê các tệp chat này đã thay đổi và mở từng diff đã ghi."
+  "Review lists the files this chat changed and opens each recorded diff.": "Mục Xem lại liệt kê các tệp chat này đã thay đổi và mở từng diff đã ghi.",
+  "Restore turn": "Khôi phục lượt",
+  "Undo in Review": "Hoàn tác trong Xem lại",
+  "Some of these files were also edited in a later turn.": "Một số tệp này cũng đã được chỉnh sửa ở lượt sau."
 }

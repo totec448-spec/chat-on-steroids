@@ -1619,6 +1619,24 @@ export function createFilePanel(options: FilePanelOptions) {
     return false;
   }
 
+  async function openCheckpoint(projectId: string, ref: string): Promise<boolean> {
+    const projectGeneration = generation;
+    if (project?.id !== projectId || !ref.startsWith(CHECKPOINT_REF_PREFIX)) return false;
+    if (editingPath && !(await leaveEditorIfNeeded())) return false;
+    if (project?.id !== projectId || generation !== projectGeneration) return false;
+    closeBranchMenu();
+    if (mode === 'review') leaveReview();
+    mode = 'changes';
+    body.classList.remove('is-reading');
+    destroyCodeViewer(); destroyPdfViewer(); destroyDiffViewer();
+    selectedBaseRef = ref;
+    gitDiffGeneration++; gitDiffPath = null; gitDiffValue = null;
+    gitSnapshot = null;
+    if (pane.hidden) await show(true);
+    else { render(); void reconcileGitChanges(); }
+    return project?.id === projectId && !pane.hidden && selectedBaseRef === ref;
+  }
+
   function render(): void {
     const showingChanges = mode === 'changes';
     const showingReview = mode === 'review';
@@ -1918,6 +1936,7 @@ export function createFilePanel(options: FilePanelOptions) {
     show,
     mountAt(parent: HTMLElement): void { if (pane.parentElement !== parent) parent.append(pane); },
     openReview,
+    openCheckpoint,
     visible: () => !pane.hidden,
     refreshChatEdits: loadChatEdits,
     invalidateChatEdits(): void {
