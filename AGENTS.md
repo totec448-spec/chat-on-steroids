@@ -1499,7 +1499,11 @@ the port's explicit line-ending mode and readable parse/match failures.
 turn (standalone or intercepted from `exec_command`) in a session's own Local Project Git
 repository takes one checkpoint: a temporary index outside the repository, seeded as a copy of the
 repository's own index (`rev-parse --git-path index`) so its stat data lets `add -A` hash only
-what changed, then `add -A` of the project folder and `write-tree`. With no index to copy, or when
+what changed, then `add -A` of the project folder and `write-tree`. Before `add`, assume-unchanged
+flags for the project are cleared in the temporary index only, so they cannot hide pre-edit bytes;
+the user's index and its flags stay unchanged. NUL-delimited filename bytes stay opaque, including
+non-UTF-8 POSIX names. An unreadable/malformed flag inventory skips capture rather than discarding
+the seeded index and losing staged ignored files. With no index to copy, or when
 the seeded index cannot be written as a tree, it starts again from `read-tree` of HEAD. Paths
 outside the project keep what the seed holds; nothing compares or restores them. It writes Git objects only: no ref, branch, HEAD,
 user index or working file changes, and every checkpoint Git command passes
@@ -1924,6 +1928,13 @@ its reply is not read). Anything else is held as `draft` as before. A
 `repairHeld` reply stamps `claimAskedAt`, so a page that keeps holding never spends the no-page
 offer budget.
 
+Before a browser repair reloads an open chat, its fresh per-repair tab scan checks both Chrome's
+`pendingUrl` and `url` for ChatGPT's exact `temporary-chat=true` flag. If either has it, the
+extension leaves the page open and reports `repairAction=preserved&preservedFor=temporary-chat`;
+the bridge logs `Temporary Chat, not reloaded`. A Compact & Resume pickup may already count before
+that receipt, but the continuation stays pending and can queue its next scheduled pickup; its
+separate accounting is not changed here.
+
 Direct active-turn corrections freeze `directTurn` in the same outbox entry. The exact turn
 start decides eligibility; earlier or running MCP calls do not revoke it. Recheck the exact claim
 before Send. Navigation, a newer question or an occupied draft during preparation can revoke
@@ -2172,7 +2183,9 @@ transport; receipt loss cannot justify switching to browser Send.
 Renderer/browser receive opaque ids, names, sizes, MIME and bounded previews, never source paths.
 Up to 20 files and 512 MiB total per message are locally admitted; provider limits can still
 reject an upload. Staging has a 2 GiB quota, serialized pruning/admission, and preserves outbox-
-retained bytes. Thumbnails do not modify originals or prove provider upload success.
+retained bytes. A failed multi-file staging batch removes its own completed originals and metadata
+under the staging lock, never earlier drafts/outbox members; failed rollback removals are logged.
+Thumbnails do not modify originals or prove provider upload success.
 Image clipboard data and file drops anywhere in the window target the currently visible chat
 draft; the Folders card keeps its explicit folder-drop owner, and ordinary text paste/drop keeps
 its native editor behavior. Async import results carry both the draft key and its replacement
@@ -2462,21 +2475,21 @@ one state (`recordingStorageFull()`, set by a write the global limit refused, cl
 write or a clean-up that leaves room): it is logged once per change, travels as
 `AppState.recordingStorageFull`, and the window shows one dismissible notice that opens the clean-up.
 The same clean-up is in Settings → Browser → Browser & history (Recording storage), which
-reads the usage when Settings opens. There is no automatic
-eviction. The adjacent Free storage action offers explicit oldest-1-GiB or all-recorded-image
-cleanup with confirmation; chat text, original files and pending attachments remain. Its third mode,
-`old-chats-gib`, takes whole chats whose `updatedAt` is over 7 days old, oldest first, until about
-1 GiB is chosen, and removes their images and long-text (`.txt`) assets. A retired long text keeps
+reads the usage when Settings opens (`sessions:imageStorage`, preload `getImageStorage(id?)`). There is no automatic
+eviction. The adjacent Free storage action (`sessions:clearImageStorage`, preload `clearImageStorage(mode, id?)`) offers explicit oldest-1-GiB (`oldest-gib`), all-recorded-image (`all`), or 7-day-old chat (`old-chats-gib`, which takes whole chats whose `updatedAt` is over 7 days old, oldest first, until about 1 GiB is chosen, and removes their images and `.txt` long-text assets) cleanup with confirmation. When opened from a chat, `sessions:imageStorage { id }` also returns per-chat `session` usage (`imageBytes` vs `textBytes` against the chat's 192 MiB cap), clarifies that global image cleanups leave long texts in active chats untouched, and offers targeted per-chat cleanup (`session-images`, `session-texts`, publishing `{ sessionIds: [id] }` instead of `{ allTranscripts: true }`); chat text, original files and pending attachments remain. A retired long text keeps
 its `StoredText` head, loses `assetId` (or a change's `reviewAssetId`), and its note reads
-"…[N more characters removed to free storage]". Only keyed user/assistant messages and tool calls
+"…[N more characters removed to free storage]" and records `retiredTextAssetIds` on keyed user/assistant messages so repeated observations of an unchanged message cannot re-spill removed `.txt` assets (across reloads or restarts). Only keyed user/assistant messages and tool calls
 are rewritten; a text that any other record (or a rewritten one) still names stays on disk. Store owns
-serialized image inventory, durable reference retirement and physical removal. A removed native
+serialized image inventory, durable reference retirement and physical removal. Inventory and retirement
+failures reject the returned cleanup operation only; the cross-queue retirement handoff carries an
+outcome, never an unobserved rejection when inventory fails before selection. A removed native
 provider tuple cannot silently refill the cache when the page is observed again.
 Opening the cleanup dialog reuses the store's maintained quota total; a cold read counts file
-metadata without opening image contents. Confirmed cleanup retains full image verification and
-shows an immediate busy message until success or failure; its final recount is metadata-only.
+metadata for the global total. The per-chat breakdown checks image headers to match image cleanup
+and keeps other binary assets in the quota total. Confirmed cleanup retains full verification and
+shows an immediate busy message until success or failure; its final recount is metadata-only and leaves `usedBytes` as `null` if a post-cleanup global recount fails so the completed cleanup still returns and emits `session:changed`.
 Cleanup choices and Close are available before usage loads. Closing the dialog leaves its one
-requested operation running; reopening rejoins that same promise and retains its result. No
+requested operation running; reopening while active rejoins that same promise, and reopening after a global cleanup fetches current usage while retaining the prior freed total. Completion toasts stay session-neutral so switching chats never attributes one chat's cleanup to another. No
 poller or automatic cleanup loop is involved; completion also reports the actual freed bytes.
 The renderer groups adjacent same-response images into two columns, bounds loaded previews,
 and uses compact failure cards. Exact selection generations prevent old pages from filling a
@@ -6302,7 +6315,11 @@ reason, and answers with `Connection: close`.
 
 The action routes (`control-actions.ts`) are `POST /v1/inputs` (send a message to an existing chat,
 or without `sessionId` start a new chat with it, optionally in a `projectId`; the new session's id
-is the message id, as for the composer's New chat; an optional `model` and `reasoningEffort`, always
+is the message id, as for the composer's New chat, so a retry of an id whose row aged out of the outbox
+(it keeps the last 50 finished rows) while that chat already holds its ChatGPT conversation admits nothing: 409
+`already_delivered` when the chat recorded its first user message (that count outlives the row), else 409
+`not_delivered` naming the resend route (`sessionId` plus a new id), because the opening binds the conversation
+before the first send is proven (#2247, #2248); an optional `model` and `reasoningEffort`, always
 together, must resolve in the saved catalog to an entry offering that effort and are filed under its
 id, else 409 `models_unknown`, `model_unknown` or `effort_unavailable`; without them the row keeps
 null and ChatGPT its own selection), `POST /v1/inputs/{id}/cancel`, and

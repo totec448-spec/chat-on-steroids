@@ -3986,5 +3986,17 @@
   "What a chat edited": "チャットが編集した内容",
   "Review lists the files this chat changed and opens each recorded diff.": "レビューに、このチャットが変更したファイルが一覧表示され、記録された差分を開けます。",
   "Steered active turn": "実行中のターンを方向転換",
-  "Worked for {0}{1}s · steered": "作業済み · {0}{1}秒 · 方向転換"
+  "Worked for {0}{1}s · steered": "作業済み · {0}{1}秒 · 方向転換",
+  "This chat: {0} MB of {1} MB ({2} MB images, {3} MB long texts).": "このチャット: {0} MB / {1} MB（画像 {2} MB、長いテキスト {3} MB）。",
+  "Loading chat storage usage…": "このチャットのストレージ使用量を読み込み中…",
+  "Global image cleanups do not remove long texts in active chats. You can clear images or long texts for this chat below.": "全体の画像クリーンアップではアクティブなチャットの長いテキストは削除されません。下からこのチャットの画像または長いテキストを削除できます。",
+  "Free images in this chat": "このチャットの画像を削除",
+  "Free long texts in this chat": "このチャットの長いテキストを削除",
+  "Permanently remove all local recorded images from this chat? Chat text, original files and long texts will stay.": "このチャットにローカル保存された記録画像をすべて完全に削除しますか？チャットのテキスト、元のファイル、長いテキストは残ります。",
+  "Free long texts in this chat? The full text stored by this app cannot be recovered. Only the beginning of each long message and tool result will remain.": "このチャットの長いテキストを削除しますか？このアプリに保存された全文は復元できません。長いメッセージとツールの結果は、それぞれ冒頭部分だけが残ります。",
+  "All chats": "すべてのチャット",
+  "This chat": "このチャット",
+  "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "このチャットから {0} MB を解放しました。現在の使用量は {1} MB / {2} MB です。",
+  "Freed {0} MB. Storage usage could not be read.": "{0} MB を解放しました。ストレージの使用量を読み取れませんでした。",
+  "Last cleanup: Freed {0} MB.": "前回のクリーンアップ: {0} MB を解放しました。"
 }
