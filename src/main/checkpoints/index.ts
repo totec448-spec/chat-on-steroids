@@ -90,6 +90,19 @@ async function snapshotTree(context: RepositoryContext, indexFile: string, seede
     // A freshly read index has no stat data, so the add below hashes every tracked file.
     const read = await git(headOid ? ['read-tree', headOid] : ['read-tree', '--empty']);
     if (read.code !== 0) throw new Error(read.stderr || 'Git could not read HEAD');
+  } else {
+    // The user's index can deliberately hide working edits. Clear assume-unchanged only in
+    // our private index, for this project, so a successful checkpoint holds the actual bytes.
+    // NUL-delimited stdin preserves spaces, newlines and non-ASCII paths without argv limits.
+    const listed = await runGit(context.projectReal, ['ls-files', '-v', '-z', '--', '.'], undefined,
+      { indexFile, noReplaceObjects: true });
+    if (listed.code !== 0) throw new Error(listed.stderr || 'Git could not inspect checkpoint index flags');
+    const assumed = decode(listed.stdout).split('\0').filter(entry => /^[a-z] /.test(entry)).map(entry => entry.slice(2));
+    if (assumed.length) {
+      const cleared = await runGit(context.projectReal, ['update-index', '--no-assume-unchanged', '-z', '--stdin'], 64 * 1024,
+        { indexFile, noReplaceObjects: true, input: assumed.join('\0') + '\0' });
+      if (cleared.code !== 0) throw new Error(cleared.stderr || 'Git could not prepare checkpoint index flags');
+    }
   }
   // From the project folder, `.` limits the snapshot to the project. Outside it the tree keeps
   // what the seed holds (the user's staged state, or HEAD); nothing compares or restores there.
