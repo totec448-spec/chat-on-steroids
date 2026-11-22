@@ -14712,7 +14712,8 @@ describe('unattributed activity recovery', () => {
     ['loop', 'off-after-open'], ['goal', 'late-ack'], ['loop', 'cooldown'], ['goal', 'restart-cooldown'], ['loop', 'clock-cooldown'],
     ['goal', 'default-off'], ['loop', 'legacy-close'], ['goal', 'no-ack'],
     ['loop', 'block-after-claim'], ['goal', 'pause-after-claim'], ['loop', 'opt-out-after-open'],
-    ['goal', 'progress-write-failure']
+    ['goal', 'progress-write-failure'], ['goal', 'restart-unspent'], ['loop', 'restart-unconfirmed'],
+    ['goal', 'restart-during-close']
   ] as const)('reopens an opt-in %s tab with an owed final once (%s)', async (mode, scenario) => {
     const previous = getConfig();
     vi.useFakeTimers();
@@ -14737,6 +14738,40 @@ describe('unattributed activity recovery', () => {
       expect(pending).not.toBeNull();
       expect(goalKeepsRunningWhenTabClosed(chat)).toBe(scenario !== 'default-off');
       const close = () => request('POST', '/closed', { browser, openOnly: scenario !== 'legacy-close', body: { conversationId: chat, manual: true } });
+      if (scenario === 'restart-during-close') {
+        const gate = faultGate();
+        const original = sessionStoreModule.conversationWasSuperseded;
+        let held = false;
+        const lookup = vi.spyOn(sessionStoreModule, 'conversationWasSuperseded').mockImplementation(async id => {
+          if (id === chat && !held && (await getSession(sessionId))?.browserRecoveryDismissedAt !== undefined) {
+            held = true;
+            await gate.hold();
+          }
+          return original(id);
+        });
+        const closing = close();
+        let stopping: Promise<void> | undefined;
+        try {
+          await gate.entered;
+          stopping = stopBridge();
+          await vi.waitFor(() => expect(bridgePort()).toBeNull());
+          gate.release();
+          expect((await closing).body.ok).toBe(true);
+          await stopping;
+          await startBridge();
+          base = `http://127.0.0.1:${bridgePort()}`;
+          await pair();
+          expect(await poll()).toEqual([]);
+          expect((await sessionControlsFor(sessionId)).closedTabRecoveryStatus).toBe('The tab was not reopened: recovery permission was withdrawn.');
+          expect(goalPendingReplyFor(chat)).toMatchObject({ replyId: pending!.replyId });
+        } finally {
+          gate.release();
+          await closing.catch(() => undefined);
+          await stopping;
+          lookup.mockRestore();
+        }
+        return;
+      }
       if (scenario === 'concurrent-close') await Promise.all([close(), close(), close()]);
       else await close();
       if (scenario === 'old-extension') {
@@ -14781,6 +14816,16 @@ describe('unattributed activity recovery', () => {
       }
       expect((await claim(repair!.token)).body.allowed).toBe(true);
       expect((await claim(repair!.token)).body.allowed).toBe(false);
+      if (scenario === 'restart-unspent') {
+        await stopBridge(); await startBridge();
+        base = `http://127.0.0.1:${bridgePort()}`;
+        await pair();
+        expect(await poll()).toEqual([]);
+        expect((await open(repair!.token)).body.allowed).toBe(false);
+        expect((await sessionControlsFor(sessionId)).closedTabRecoveryStatus).toBe('The tab was not reopened: recovery permission was withdrawn.');
+        expect(goalPendingReplyFor(chat)).toMatchObject({ replyId: pending!.replyId });
+        return;
+      }
       if (scenario === 'off-after-claim' || scenario === 'opt-out-after-claim' ||
           scenario === 'block-after-claim' || scenario === 'pause-after-claim') {
         if (scenario === 'off-after-claim') await setSessionAutomation(sessionId, 'off', true);
@@ -14802,6 +14847,17 @@ describe('unattributed activity recovery', () => {
         expect(pair.filter(r => r.body.allowed)).toHaveLength(1);
       } else expect((await open(repair!.token)).body.allowed).toBe(true);
       expect((await open(repair!.token)).body.allowed).toBe(false);
+      if (scenario === 'restart-unconfirmed') {
+        await stopBridge(); await startBridge();
+        base = `http://127.0.0.1:${bridgePort()}`;
+        await pair();
+        expect(await poll()).toEqual([]);
+        expect((await open(repair!.token)).body.allowed).toBe(false);
+        await poll(`?repaired=${repair!.token}&repairAction=reopened`);
+        expect((await sessionControlsFor(sessionId)).closedTabRecoveryStatus).toBe('The browser did not confirm the reopen. No further attempt was authorized.');
+        expect(goalPendingReplyFor(chat)).toMatchObject({ replyId: pending!.replyId });
+        return;
+      }
       if (scenario === 'failure') {
         await poll(`?repairFailed=${repair!.token}&repairAction=reopened&why=error`);
         expect(await poll()).toEqual([]);

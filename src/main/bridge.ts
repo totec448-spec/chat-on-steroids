@@ -4298,6 +4298,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     const id = conversationId(body['conversationId']);
     if (id) {
+      const closeEpoch = bridgeLifecycleEpoch;
       // Do not acknowledge a second report before the first close's durable
       // write. Re-read after it settles; a genuine intervening return is new work.
       while (closingConversations.has(id)) await closingConversations.get(id);
@@ -4360,14 +4361,16 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         if (episode && session && closeBrowser && req.headers['x-extension-open-only'] === '1' &&
             !getConfig().ui.browserOnly && !notChosenBrowser(req) && !staleCompanion(req) &&
             !chatHeldElsewhere(id, closeBrowser) && !closedTabCooldown(session.id) &&
-            !await conversationWasSuperseded(id) && closeSwitch === goalSwitchIdentity(id) &&
+            !await conversationWasSuperseded(id) && bridgeDesiredRunning && closeEpoch === bridgeLifecycleEpoch &&
+            closeSwitch === goalSwitchIdentity(id) &&
             departureAllowsRepairFor(session, 'no-tab', episode) &&
             queueBrowserRecovery(id, session.id, episode, 'no-tab')) {
           repairsInFlight.get(id)!.automationSwitch = closeSwitch;
           repairsInFlight.get(id)!.closeBrowser = closeBrowser;
           setClosedTabStatus(id, session.id, CLOSE_STATUS.waiting);
         } else if (session && prior) {
-          setClosedTabStatus(id, session.id, closedTabCooldown(session.id) ? CLOSE_STATUS.cooldown :
+          setClosedTabStatus(id, session.id, !bridgeDesiredRunning || closeEpoch !== bridgeLifecycleEpoch ? CLOSE_STATUS.cancelled :
+            closedTabCooldown(session.id) ? CLOSE_STATUS.cooldown :
             !closeBrowser || req.headers['x-extension-open-only'] !== '1' ? CLOSE_STATUS.unavailable :
               automaticPauseRefusal() ? CLOSE_STATUS.paused : CLOSE_STATUS.notOwed);
         } else logInfo(`bridge: ${id} was closed deliberately; automatic browser recovery is paused until its page returns`);
@@ -7279,6 +7282,13 @@ export async function stopBridge(): Promise<void> {
     if (silenceTimer) clearTimeout(silenceTimer);
     silenceTimer = null;
     setCallAttributionListener(null);
+    // Teardown revokes every in-memory token. Publish the terminal state before
+    // clearing those tokens: an unspent offer is cancelled, while a committed
+    // browser call is ambiguous without its receipt and cannot be retried.
+    for (const [id, repair] of repairsInFlight) {
+      if (automationCloseRepair(repair) && repair.state !== 'done')
+        finishClosedTabRepair(id, repair, repair.openAuthorized ? CLOSE_STATUS.unconfirmed : CLOSE_STATUS.cancelled);
+    }
     clearUnattributedIncident();
     await Promise.all([drainBridgeListener(instance), ...bridgeDrains]);
     logInfo('bridge stopped');
