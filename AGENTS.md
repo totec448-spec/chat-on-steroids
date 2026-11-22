@@ -2182,8 +2182,8 @@ Renderer/browser receive opaque ids, names, sizes, MIME and bounded previews, ne
 Up to 20 files and 512 MiB total per message are locally admitted; provider limits can still
 reject an upload. Staging has a 2 GiB quota, serialized pruning/admission, and preserves outbox-
 retained bytes. A failed multi-file staging batch removes its own completed originals and metadata
-under the staging lock, never earlier drafts/outbox members; failed rollback removals are logged
-and remain subject to normal expiry. Thumbnails do not modify originals or prove provider upload success.
+under the staging lock, never earlier drafts/outbox members; failed rollback removals are logged.
+Thumbnails do not modify originals or prove provider upload success.
 Image clipboard data and file drops anywhere in the window target the currently visible chat
 draft; the Folders card keeps its explicit folder-drop owner, and ordinary text paste/drop keeps
 its native editor behavior. Async import results carry both the draft key and its replacement

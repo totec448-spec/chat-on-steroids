@@ -69,7 +69,7 @@ async function stageBatch(sources: AttachmentSource[], retained: RetainedAttachm
         });
       }
     }
-    if (failed) logWarn(`attachment staging: batch failed; ${failed} rollback file(s) could not be removed and remain until normal expiry`);
+    if (failed) logWarn(`attachment staging: batch failed; ${failed} rollback file(s) could not be removed`);
     else if (attachments.length) logInfo(`attachment staging: discarded ${attachments.length} staged attachment(s) because the batch failed`);
     throw error;
   }
