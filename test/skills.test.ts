@@ -7,7 +7,13 @@ import {
   importSkillPackage,
   initSkillsPath,
   listSkills,
+  listManagedSkills,
+  managedSkillDirectory,
   readSkill,
+  readSkillAtRevision,
+  removeSkill,
+  setManagedSkillEnabled,
+  skillCatalogSnapshot,
   skillCatalogInstructions,
   skillsDirectory
 } from '../src/main/skills.js';
@@ -39,6 +45,153 @@ async function sourceFile(relative: string, contents: string | Buffer): Promise<
 }
 
 describe('managed Skills store', () => {
+  it('persists disabled managed skills without editing contents, excluding both explicit and automatic selection', async () => {
+    const source = await sourceFile('review.md', '# Review\n\nSafe steps.');
+    await importSkillFile(source);
+    const before = skillCatalogSnapshot();
+    expect(before).toHaveLength(1);
+    expect((await listManagedSkills())[0]).toMatchObject({ id: 'review', enabled: true, origin: null });
+    const filename = path.join(userData, 'skills', 'review', 'SKILL.md');
+    const original = await fs.readFile(filename);
+    await setManagedSkillEnabled('review', false);
+    expect((await listManagedSkills())[0]).toMatchObject({ id: 'review', enabled: false, origin: null });
+    expect(await listSkills()).toEqual([]);
+    expect(skillCatalogSnapshot()).toEqual([]);
+    expect(skillCatalogInstructions()).not.toContain('"id":"review"');
+    await expect(readSkill('review')).rejects.toThrow(/disabled/i);
+    await expect(readSkillAtRevision('review', before[0]!.revision)).rejects.toThrow(/disabled/i);
+    expect(await fs.readFile(filename)).toEqual(original);
+    const statePath = path.join(userData, 'skills', '.disabled-skills.json');
+    expect(JSON.parse(await fs.readFile(statePath, 'utf8'))).toEqual({ version: 1, disabled: ['review'] });
+    // Simulate application restart: the disabled decision must not depend on
+    // a cached renderer, package file edits or the previously published catalog.
+    await initSkillsPath(userData);
+    expect((await listManagedSkills())[0]).toMatchObject({ id: 'review', enabled: false });
+    expect(skillCatalogSnapshot()).toEqual([]);
+    await expect(setManagedSkillEnabled('../review', true)).rejects.toThrow(/skill id/i);
+    await expect(setManagedSkillEnabled('missing', false)).rejects.toThrow(/no longer installed/i);
+    await setManagedSkillEnabled('review', true);
+    expect((await listManagedSkills())[0]).toMatchObject({ id: 'review', enabled: true });
+    expect(await listSkills()).toHaveLength(1);
+    expect((await readSkill('review')).text).toBe('# Review\n\nSafe steps.');
+    expect(JSON.parse(await fs.readFile(statePath, 'utf8'))).toEqual({ version: 1, disabled: [] });
+  });
+
+  it('refuses an unsafe persisted state instead of silently re-enabling disabled Skills', async () => {
+    const source = await sourceFile('review.md', '# Review');
+    await importSkillFile(source);
+    const stateFile = path.join(userData, 'skills', '.disabled-skills.json');
+    await fs.writeFile(stateFile, JSON.stringify({ version: 1, disabled: ['../review'] }));
+    await expect(initSkillsPath(userData)).rejects.toThrow(/enablement is invalid/i);
+  });
+
+  it('reports a safe error for malformed state and leaves the managed catalog unavailable', async () => {
+    await importSkillFile(await sourceFile('review.md', '# Review'));
+    await setManagedSkillEnabled('review', false);
+    await fs.writeFile(path.join(userData, 'skills', '.disabled-skills.json'), 'private fixture text');
+
+    await expect(initSkillsPath(userData)).rejects.toThrow(/^Managed Skill enablement is invalid$/);
+    expect(skillsDirectory()).toBeNull();
+    expect(skillCatalogSnapshot()).toEqual([]);
+  });
+
+  it('drops a disabled Skill from the published catalog even if the post-toggle scan fails', async () => {
+    const source = await sourceFile('review.md', '# Review');
+    await importSkillFile(source);
+    const rename = rawFs.rename.bind(rawFs);
+    const opendir = rawFs.opendir.bind(rawFs);
+    let committed = false;
+    const write = vi.spyOn(rawFs, 'rename').mockImplementation((async (from: Parameters<typeof rawFs.rename>[0], to: Parameters<typeof rawFs.rename>[1]) => {
+      const result = await rename(from, to);
+      if (String(to).endsWith('.disabled-skills.json')) committed = true;
+      return result;
+    }) as typeof rawFs.rename);
+    const scan = vi.spyOn(rawFs, 'opendir').mockImplementation((async (...args: Parameters<typeof rawFs.opendir>) => {
+      if (committed) throw new Error('scan-failed');
+      return opendir(...args);
+    }) as typeof rawFs.opendir);
+    try {
+      await expect(setManagedSkillEnabled('review', false)).rejects.toThrow('scan-failed');
+      expect(skillCatalogSnapshot()).toEqual([]);
+    } finally { write.mockRestore(); scan.mockRestore(); }
+    expect((await listManagedSkills())[0]).toMatchObject({ id: 'review', enabled: false });
+  });
+
+  it('removes stale disabled state when a disabled package is uninstalled and reimported', async () => {
+    const source = await sourceFile('review.md', '# Review\n\nMethod.');
+    await importSkillFile(source);
+    await setManagedSkillEnabled('review', false);
+    await removeSkill('review', directory => fs.rename(directory, path.join(userData, 'trashed-review')));
+    expect(JSON.parse(await fs.readFile(path.join(userData, 'skills', '.disabled-skills.json'), 'utf8')))
+      .toEqual({ version: 1, disabled: [] });
+    await importSkillFile(source);
+    expect((await listManagedSkills())[0]).toMatchObject({ id: 'review', enabled: true });
+    expect(await listSkills()).toHaveLength(1);
+  });
+
+  it('reconciles an orphaned disabled ID on import after removal was interrupted', async () => {
+    const source = await sourceFile('review.md', '# Review');
+    await importSkillFile(source);
+    await setManagedSkillEnabled('review', false);
+    const state = path.join(userData, 'skills', '.disabled-skills.json');
+    await expect(removeSkill('review', async () => { throw new Error('trash failed'); })).rejects.toThrow('trash failed');
+    expect((await listManagedSkills())[0]).toMatchObject({ id: 'review', enabled: false });
+    expect(JSON.parse(await fs.readFile(state, 'utf8')).disabled).toEqual(['review']);
+
+    // Simulate a crash after moving the folder to Trash, before clearing its toggle.
+    await fs.rename(path.join(userData, 'skills', 'review'), path.join(userData, 'trashed-review'));
+    await initSkillsPath(userData);
+    expect(await listSkills()).toEqual([]);
+    await importSkillFile(source);
+    expect((await listManagedSkills())[0]).toMatchObject({ id: 'review', enabled: true });
+    expect(JSON.parse(await fs.readFile(state, 'utf8')).disabled).toEqual([]);
+  });
+
+  it('recovers after Trash succeeds but writing the disabled-state file fails', async () => {
+    const source = await sourceFile('review.md', '# Review');
+    await importSkillFile(source);
+    await setManagedSkillEnabled('review', false);
+    const rename = rawFs.rename.bind(rawFs);
+    const spy = vi.spyOn(rawFs, 'rename').mockImplementation((async (from: Parameters<typeof rawFs.rename>[0], to: Parameters<typeof rawFs.rename>[1]) => {
+      if (String(from).includes('.skill-state-') && String(to).endsWith('.disabled-skills.json'))
+        throw new Error('state-write-failed');
+      return rename(from, to);
+    }) as typeof rawFs.rename);
+    try {
+      await expect(removeSkill('review', directory => fs.rename(directory, path.join(userData, 'trashed-review'))))
+        .rejects.toThrow('state-write-failed');
+      expect(JSON.parse(await fs.readFile(path.join(userData, 'skills', '.disabled-skills.json'), 'utf8')).disabled).toEqual(['review']);
+    } finally { spy.mockRestore(); }
+    // A restart following the interrupted post-Trash state write must recover
+    // the orphan, without requiring the old ID to be reimported first.
+    await initSkillsPath(userData);
+    expect(JSON.parse(await fs.readFile(path.join(userData, 'skills', '.disabled-skills.json'), 'utf8')).disabled).toEqual([]);
+    await importSkillFile(source);
+    expect((await listManagedSkills())[0]).toMatchObject({ id: 'review', enabled: true });
+  });
+
+  it('reconciles 128 orphaned disabled IDs before a count-bound toggle and import', async () => {
+    const managed = path.join(userData, 'skills');
+    const ids = Array.from({ length: MAX_SKILLS }, (_, index) => `old-${String(index).padStart(3, '0')}`);
+    // Simulate a valid saturated disabled state from which Trash moved packages,
+    // but writing the cleared state failed. The on-disk state is not corrupt.
+    for (const id of ids) {
+      const directory = path.join(managed, id);
+      await fs.mkdir(directory);
+      await fs.writeFile(path.join(directory, 'SKILL.md'), `# ${id}\n\nOld skill.`);
+    }
+    await fs.writeFile(path.join(managed, '.disabled-skills.json'), JSON.stringify({ version: 1, disabled: ids }));
+    await initSkillsPath(userData);
+    for (const id of ids) await fs.rm(path.join(managed, id), { recursive: true });
+    const review = await sourceFile('review.md', '# Review\n\nNew skill.');
+    await importSkillFile(review);
+    await setManagedSkillEnabled('review', false);
+    expect(JSON.parse(await fs.readFile(path.join(managed, '.disabled-skills.json'), 'utf8')).disabled).toEqual(['review']);
+    expect((await listManagedSkills())[0]).toMatchObject({ id: 'review', enabled: false });
+    await initSkillsPath(userData);
+    expect((await listManagedSkills())[0]).toMatchObject({ id: 'review', enabled: false });
+  }, 30_000);
+
   it('starts empty and publishes only the managed path contract', async () => {
     expect(skillsDirectory()).toBe(path.join(userData, 'skills'));
     expect(await listSkills()).toEqual([]);
@@ -79,6 +232,14 @@ describe('managed Skills store', () => {
     expect(advertised).not.toContain(JSON.stringify(summary.path));
     expect(advertised).not.toContain('Use the entire file');
     expect(advertised).toContain(JSON.stringify(path.join(userData, 'skills')));
+  });
+
+  it('opens only an installed, valid managed Skill directory', async () => {
+    const source = await sourceFile('review.md', '# Review\n\nMethod.');
+    await importSkillFile(source);
+    expect(await managedSkillDirectory('review')).toBe(path.join(userData, 'skills', 'review'));
+    await expect(managedSkillDirectory('../sources')).rejects.toThrow(/skill id/i);
+    await expect(managedSkillDirectory('missing')).rejects.toThrow(/not found/i);
   });
 
   it('falls back to heading and prose when relevant frontmatter is not simple scalar metadata', async () => {
@@ -220,10 +381,12 @@ describe('managed Skills store', () => {
         path: '/skills/shared-review/SKILL.md'
       }]);
       expect((await readSkill('shared-review')).text).toContain('Read the linked package.');
+      expect(await managedSkillDirectory('shared-review')).toBe(await fs.realpath(packageDirectory));
       const readDisabled = { ...getConfig(), capabilities: { ...getConfig().capabilities, read: false } };
       await saveConfig(readDisabled);
       expect(await listSkills()).toEqual([]);
       await expect(readSkill('shared-review')).rejects.toThrow(/not found/i);
+      await expect(managedSkillDirectory('shared-review')).rejects.toThrow(/not found|approved/i);
       await saveConfig({ ...readDisabled, capabilities: { ...readDisabled.capabilities, read: true } });
       expect(await listSkills()).toHaveLength(1);
     } finally {
@@ -334,6 +497,30 @@ describe('managed Skills store', () => {
     ].join('\n'));
     await expect(importSkillPackage(packageRoot)).rejects.toThrow(limitError);
   });
+
+  it('reserves disabled slots for damaged installed folders when importing either source type', async () => {
+    const managed = path.join(userData, 'skills');
+    const ids = Array.from({ length: MAX_SKILLS }, (_, index) => `reserved-${String(index).padStart(3, '0')}`);
+    for (const id of ids) {
+      const directory = path.join(managed, id);
+      await fs.mkdir(directory);
+      await fs.writeFile(path.join(directory, 'SKILL.md'), `# ${id}\n\nInstructions.`);
+    }
+    await fs.writeFile(path.join(managed, '.disabled-skills.json'), JSON.stringify({ version: 1, disabled: ids }));
+    await initSkillsPath(userData);
+    // The directory still owns the disabled ID, although scan() ignores its
+    // missing document. Reconciliation must NOT erase this installed slot.
+    await fs.unlink(path.join(managed, ids[0]!, 'SKILL.md'));
+    expect(await listManagedSkills()).toHaveLength(MAX_SKILLS - 1);
+    const extraFile = await sourceFile('extra.md', '# Extra\n\nMust be refused.');
+    await expect(importSkillFile(extraFile)).rejects.toThrow('The Skills library supports at most 128 skills');
+    const extraPackage = path.join(sources, 'extra-package');
+    await fs.mkdir(extraPackage);
+    await fs.writeFile(path.join(extraPackage, 'SKILL.md'), '---\nname: Extra Package\ndescription: Must be refused.\n---\n\nInstructions.');
+    await expect(importSkillPackage(extraPackage)).rejects.toThrow('The Skills library supports at most 128 skills');
+    expect(JSON.parse(await fs.readFile(path.join(managed, '.disabled-skills.json'), 'utf8')).disabled).toEqual(ids);
+    expect(await listManagedSkills()).toHaveLength(MAX_SKILLS - 1);
+  }, 30_000);
 
   it('fails closed instead of silently omitting a valid over-cap skill', async () => {
     const root = path.join(userData, 'skills');

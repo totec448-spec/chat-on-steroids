@@ -229,6 +229,8 @@ const api = {
   },
   listSkills: () => call<SkillSummary[]>('skills:list'),
   listManagedSkills: () => call<ManagedSkill[]>('skills:managed'),
+  skillsSetEnabled: (id: string, enabled: boolean) => call<ManagedSkill[]>('skills:setEnabled', { id, enabled }),
+  skillsOpenFolder: (id: string) => call<boolean>('skills:openFolder', { id }),
   listRecommendedSkills: () => call<Array<{ id: string; name: string; description: string; installed: boolean }>>('skills:recommended'),
   installRecommendedSkill: (id: string) => call<ManagedSkill[]>('skills:installRecommended', { id }),
   skillsImport: (kind: 'folder' | 'file') => call<ManagedSkill[] | null>('skills:import', { kind }),
@@ -398,8 +400,9 @@ const api = {
     return () => ipcRenderer.removeListener('projectGit:changed', wrapped);
   },
   getSessionImage: (id: string, assetId: string) => call<string | null>('sessions:image', { id, assetId }),
-  getImageStorage: () => call<ImageStorageInfo>('sessions:imageStorage'),
-  clearImageStorage: (mode: ImageStorageClearMode) => call<ImageStorageClearResult>('sessions:clearImageStorage', { mode }),
+  getImageStorage: (id?: string) => call<ImageStorageInfo>('sessions:imageStorage', id ? { id } : undefined),
+  clearImageStorage: (mode: ImageStorageClearMode, id?: string) =>
+    call<ImageStorageClearResult>('sessions:clearImageStorage', id ? { mode, id } : { mode }),
     getSession: (id: string, options?: { from?: number; before?: number; after?: number; limit?: number; actions?: boolean }) =>
     call<SessionDetail>('sessions:events', { id, ...options }),
   stopSessionTurn: (id: string, expectedTurnId: string, expectedConversationId?: string | null) =>

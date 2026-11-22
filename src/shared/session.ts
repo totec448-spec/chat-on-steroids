@@ -92,24 +92,37 @@ export interface AssetRef {
   height?: number;
 }
 
+export interface SessionImageStorageInfo {
+  sessionId: string;
+  usedBytes: number;
+  limitBytes: number;
+  imageBytes: number;
+  textBytes: number;
+}
+
 /** Recording-asset storage is global; cleanup never changes the configured ceiling. */
 export interface ImageStorageInfo {
   /** All bytes charged to the global session-asset quota, including preserved non-image assets. */
   usedBytes: number;
   limitBytes: number;
+  /** Usage within the requested chat when inspected from a chat (#2198). */
+  session?: SessionImageStorageInfo;
 }
 
-export interface ImageStorageClearResult extends ImageStorageInfo {
+export interface ImageStorageClearResult extends Omit<ImageStorageInfo, 'usedBytes'> {
+  /** Global bytes used after cleanup, or `null` when a post-cleanup global recount fails. */
+  usedBytes: number | null;
   /** Physical bytes removed by this explicit user operation. */
   freedBytes: number;
   removedFiles: number;
 }
 
 /**
- * `oldest-gib` and `all` remove images only. `old-chats-gib` empties whole chats unused for a
- * week, oldest first, of images and long texts until about 1 GiB is free (#1406).
+ * `oldest-gib` and `all` remove images only across all chats. `old-chats-gib` empties whole chats
+ * unused for a week, oldest first, of images and long texts until about 1 GiB is free (#1406).
+ * `session-images` and `session-texts` target only one chat (#2198).
  */
-export type ImageStorageClearMode = 'oldest-gib' | 'all' | 'old-chats-gib';
+export type ImageStorageClearMode = 'oldest-gib' | 'all' | 'old-chats-gib' | 'session-images' | 'session-texts';
 
 /** The recording storage sizes Settings offers, in GiB. The first is the default. */
 export const RECORDING_STORAGE_LIMITS_GIB = [2, 5, 10, 20, 50] as const;
@@ -420,6 +433,8 @@ export type SessionEvent =
       assets?: AssetRef[];
       /** Image assets explicitly removed from local recording storage; same-message replay cannot restore them. */
       retiredImageAssetIds?: string[];
+      /** Overflow text assets explicitly removed from local recording storage; same-message replay cannot restore them. */
+      retiredTextAssetIds?: string[];
       /** First sequence assigned to this stable website message; revisions keep this anchor. */
       origin?: number;
       /** Store-owned authored-content revision; metadata and rehydration preserve it. */
@@ -469,6 +484,8 @@ export type SessionEvent =
       origin?: number;
       /** Store-owned text/state revision, including interim progress before the final. */
       contentSeq?: number;
+      /** Overflow text assets explicitly removed from local recording storage; same-message replay cannot restore them. */
+      retiredTextAssetIds?: string[];
     })
   | (BaseEvent & {
       /** ChatGPT-native generated media, independent of assistant prose and local MCP calls. */

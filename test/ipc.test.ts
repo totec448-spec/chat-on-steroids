@@ -781,6 +781,65 @@ it('publishes the exact transcript owners of one recorder burst and an explicit 
   expect(send).toHaveBeenCalledWith('session:changed', { allTranscripts: true });
 });
 
+it('validates session-scoped storage inspection and old-chats / per-chat cleanup modes', async () => {
+  const store = await import('../src/main/session/store.js');
+  const first = await createSession({ title: 'Per-chat cleanup target' });
+  const textAsset = await store.writeAsset(first.id, Buffer.from('x'.repeat(2048)), 'text/plain');
+  await store.appendEvent(first.id, {
+    time: Date.now(), source: 'mcp', kind: 'tool_call', call: {
+      callId: '00000000-0000-4000-8000-000000000219', tool: 'exec_command', requestId: 'req-ipc-storage',
+      conversationId: first.conversationId!, attribution: 'request_id', attributionMethod: 'request_id',
+      args: { text: '{}', chars: 2, truncated: false },
+      result: { text: `x\n…[2047 more characters stored in full as ${textAsset.id}]`, truncated: true, chars: 2048, assetId: textAsset.id },
+      outcome: 'ok', durationMs: 1, summary: { kind: 'run', title: 'Ran npm test', tone: 'neutral' }
+    }
+  });
+  const send = vi.fn();
+  currentWindow = { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: { send } };
+
+  const scoped = await handlers.get('sessions:imageStorage')!(null, { id: first.id }) as { ok: boolean; data?: { session?: { sessionId: string; textBytes: number; imageBytes: number } } };
+  expect(scoped.ok).toBe(true);
+  expect(scoped.data?.session).toMatchObject({ sessionId: first.id, textBytes: 2048, imageBytes: 0 });
+
+  expect(await handlers.get('sessions:imageStorage')!(null, { id: '../bad' })).toMatchObject({ ok: false });
+  expect(await handlers.get('sessions:clearImageStorage')!(null, { mode: 'session-texts' })).toMatchObject({ ok: false });
+  expect(await handlers.get('sessions:clearImageStorage')!(null, { mode: 'session-texts', id: '../bad' })).toMatchObject({ ok: false });
+  expect(await handlers.get('sessions:clearImageStorage')!(null, { mode: 'old-chats-gib', id: '../bad' })).toMatchObject({ ok: false });
+  expect(await handlers.get('sessions:clearImageStorage')!(null, { mode: 'old-chats-gib' })).toMatchObject({ ok: true });
+  send.mockClear();
+
+  const cleared = await handlers.get('sessions:clearImageStorage')!(null, { mode: 'session-texts', id: first.id });
+  expect(cleared).toMatchObject({ ok: true, data: { freedBytes: 2048 } });
+  expect(send).toHaveBeenCalledWith('session:changed', { sessionIds: [first.id] });
+
+  // When another chat's assets directory denies metadata after deletion, IPC still returns the completed cleanup and emits session:changed.
+  send.mockClear();
+  const broken = await createSession({ title: 'Broken peer dir' });
+  const textAsset2 = await store.writeAsset(first.id, Buffer.from('y'.repeat(1024)), 'text/plain');
+  await store.writeAsset(broken.id, Buffer.from('z'.repeat(512)), 'text/plain');
+  await store.appendEvent(first.id, {
+    time: Date.now(), source: 'mcp', kind: 'tool_call', call: {
+      callId: '00000000-0000-4000-8000-000000000220', tool: 'exec_command', requestId: 'req-ipc-storage-2',
+      conversationId: first.conversationId!, attribution: 'request_id', attributionMethod: 'request_id',
+      args: { text: '{}', chars: 2, truncated: false },
+      result: { text: `y\n…[1023 more characters stored in full as ${textAsset2.id}]`, truncated: true, chars: 1024, assetId: textAsset2.id },
+      outcome: 'ok', durationMs: 1, summary: { kind: 'run', title: 'Ran npm test', tone: 'neutral' }
+    }
+  });
+  const realOpendir = fs.opendir.bind(fs);
+  const opendirSpy = vi.spyOn(fs, 'opendir').mockImplementation(async (target, ...rest) => {
+    if (String(target).includes(broken.id)) throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+    return (realOpendir as (...args: unknown[]) => Promise<Awaited<ReturnType<typeof fs.opendir>>>)(target, ...rest);
+  });
+  try {
+    const clearedDegraded = await handlers.get('sessions:clearImageStorage')!(null, { mode: 'session-texts', id: first.id });
+    expect(clearedDegraded).toMatchObject({ ok: true, data: { freedBytes: 1024, removedFiles: 1, usedBytes: null } });
+    expect(send).toHaveBeenCalledWith('session:changed', { sessionIds: [first.id] });
+  } finally {
+    opendirSpy.mockRestore();
+  }
+});
+
 it('publishes the owning session when delivered input history is revised in place', async () => {
   const input = await import('../src/main/session/input.js');
   const store = await import('../src/main/session/store.js');
@@ -1330,6 +1389,54 @@ describe('turning multi-agent mode off', () => {
 });
 
 describe('bounded IPC identities and OS launch results', () => {
+  it('toggles only installed managed Skills through the validated IPC interface', async () => {
+    const { initSkillsPath, importSkillFile, listSkills } = await import('../src/main/skills.js');
+    const skillData = path.join(dir, 'enable-skill-test');
+    const source = path.join(skillData, 'review.md');
+    await fs.mkdir(skillData, { recursive: true });
+    await fs.writeFile(source, '# Review\n\nNever delete files.');
+    await initSkillsPath(skillData);
+    await importSkillFile(source);
+    const toggle = (id: unknown, enabled: unknown) =>
+      handlers.get('skills:setEnabled')!(null, { id, enabled }) as Promise<any>;
+    expect(await toggle('review', false)).toMatchObject({
+      ok: true, data: [expect.objectContaining({ id: 'review', enabled: false })]
+    });
+    expect(await listSkills()).toEqual([]);
+    expect((await toggle('../review', true)).ok).toBe(false);
+    expect((await toggle('review', 'yes')).ok).toBe(false);
+    expect((await toggle('missing', false)).ok).toBe(false);
+    expect(await toggle('review', true)).toMatchObject({
+      ok: true, data: [expect.objectContaining({ id: 'review', enabled: true })]
+    });
+    expect(await listSkills()).toHaveLength(1);
+  });
+
+  it('opens only the installed managed Skill folder and propagates Explorer errors', async () => {
+    const { initSkillsPath, importSkillFile } = await import('../src/main/skills.js');
+    const skillData = path.join(dir, 'open-skill-test');
+    const source = path.join(skillData, 'review.md');
+    await fs.mkdir(skillData, { recursive: true });
+    await fs.writeFile(source, '# Review\n\nInstructions.');
+    await initSkillsPath(skillData);
+    await importSkillFile(source);
+    const folder = path.join(skillData, 'skills', 'review');
+    const open = (id: unknown) => handlers.get('skills:openFolder')!(null, { id }) as Promise<any>;
+    expect(await open('review')).toEqual({ ok: true, data: true });
+    expect(shell.openPath).toHaveBeenCalledWith(folder);
+    vi.mocked(shell.openPath).mockClear();
+    const missing = await open('does-not-exist');
+    expect(missing.ok).toBe(false);
+    expect(shell.openPath).not.toHaveBeenCalled();
+    const traversal = await open('../review');
+    expect(traversal.ok).toBe(false);
+    expect(shell.openPath).not.toHaveBeenCalled();
+    vi.mocked(shell.openPath).mockResolvedValueOnce('Access is denied');
+    const denied = await open('review');
+    expect(denied.ok).toBe(false);
+    expect(denied.error).toMatch(/could not open.*access is denied/i);
+  });
+
   it('reports shell.openPath failure instead of claiming the extension folder opened', async () => {
     vi.mocked(shell.openPath).mockResolvedValueOnce('Access is denied');
     const reply = (await handlers.get('bridge:openExtensionFolder')!(null, undefined)) as {

@@ -20,6 +20,8 @@ export interface GitHubSkillOrigin {
 
 export interface ManagedSkill extends SkillSummary {
   origin: GitHubSkillOrigin | null;
+  /** Local enablement, independent from the package's GitHub origin and files. */
+  enabled?: boolean;
 }
 
 /** Read-only GitHub observation, scoped to the installed package revision it checked. */
