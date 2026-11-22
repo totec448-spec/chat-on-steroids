@@ -481,10 +481,12 @@ final; the browser's `/activity` stream carries `endsActivity: true` on the dura
 Neither a sleeping broker slot nor a completed tool row authorizes a wake while ChatGPT is
 generating, waiting for approval or still executing work. The browser emits the existing
 `turn_end` without a synthetic assistant message and keeps the existing pre-redeem flush.
-While model discovery is pending, its retained catalog is display data, not a fresh denial:
+While model discovery is pending or a refresh fails with a retained nonempty catalog, its
+retained catalog is display data, not a fresh denial:
 `resume-model.ts` carries the requested model/effort to native confirmation unchanged, even when
-the old list lacks that model or effort. Completed discovery retains the existing availability
-fallback, including no readable picker; no extra discovery or Send is started by this resolver.
+the old list lacks that model or effort. A successful observation restores availability fallback;
+an unavailable catalog with no choices keeps the existing no-picker fallback. No extra discovery
+or Send is started by this resolver.
 Unlike a new worker, a wake whose model the picker cannot confirm is still typed: the page reports
 step `model-unconfirmed` and the bridge logs which model it could not confirm. A Compact & Resume does the
 same (2026-11-01: an abandoned resume stopped its chat for good); its new chat then tries the model once more

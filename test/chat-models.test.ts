@@ -80,6 +80,31 @@ describe('durable observed ChatGPT model catalog', () => {
     requestChatModels();
     observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models: null, error: 'picker_unavailable' });
     expect(getChatModels()).toMatchObject({ state: 'unavailable', models: [], error: expect.stringContaining('native model picker') });
+    for (const select of [resumeModelSelection, wakeModelSelection]) {
+      expect(select({ model: 'gpt-example', reasoningEffort: 'high' })).toEqual({ model: null, reasoningEffort: null });
+    }
+  });
+  it.each([
+    ['failed observation', 'effort'],
+    ['failed observation', 'model'],
+    ['expired refresh', 'effort'],
+    ['expired refresh', 'model']
+  ] as const)('preserves the request after %s with the old %s missing', (failure, missing) => {
+    const requested = { model: 'gpt-example', reasoningEffort: 'high' as const };
+    const oldModels = [{ id: missing === 'effort' ? requested.model : 'other-model', label: 'Old', efforts: ['medium'] }];
+    const fallback = { model: missing === 'effort' ? requested.model : null, reasoningEffort: null };
+    requestChatModels(); observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models: oldModels });
+    for (const select of [resumeModelSelection, wakeModelSelection]) expect(select(requested)).toEqual(fallback);
+    requestChatModels(false);
+    const pending = pendingChatModelRequest()!;
+    for (const select of [resumeModelSelection, wakeModelSelection]) expect(select(requested)).toEqual(requested);
+    if (failure === 'expired refresh') vi.advanceTimersByTime(120000);
+    else observeChatModels({ nonce: pending.nonce, models: null, error: 'picker_close_failed' });
+    expect(getChatModels()).toMatchObject({ state: 'ready', models: oldModels, error: expect.any(String) });
+    for (const select of [resumeModelSelection, wakeModelSelection]) expect(select(requested)).toEqual(requested);
+    expect(pendingChatModelRequest()).toBeNull();
+    requestChatModels(); observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models: oldModels });
+    for (const select of [resumeModelSelection, wakeModelSelection]) expect(select(requested)).toEqual(fallback);
   });
   it('rechecks browser startup when an unfinished discovery is explicitly opened again', async () => {
     const wake = vi.fn(async () => {}); configureChatModelDiscovery({ wake, changed: () => {} });
