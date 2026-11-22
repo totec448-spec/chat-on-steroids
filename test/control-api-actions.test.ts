@@ -767,6 +767,8 @@ describe('starting a new chat', () => {
   it('answers 409 already_delivered for a new chat id whose chat exists, after its row aged out', async () => {
     const id = randomUUID();
     await createSession({ reservedId: id, title: 'Delivered long ago', conversationId: 'conv-aged-out', origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } as never });
+    // The page recorded the first message: that count is the proof, and it outlives the outbox row.
+    await appendEvent(id, { kind: 'user_message', source: 'extension', time: Date.now(), messageId: 'first-' + id, message: { text: 'Start a new task: it was delivered.', truncated: false, chars: 35 } });
     await seed([]);
     const sends = vi.spyOn(startInput, 'sendDesktopInput');
     try {
@@ -777,6 +779,27 @@ describe('starting a new chat', () => {
       expect((await post('/v1/inputs', { id, text: 'Start a new task: it was delivered.' })).status).toBe(409);
       expect(sends).not.toHaveBeenCalled();
       expect((await outbox()).filter((entry) => entry.id === id)).toHaveLength(0);
+    } finally {
+      sends.mockRestore();
+    }
+  });
+
+  // CodeRabbit on #2248: the opening binds its conversation before delivery is proven, so a bound chat
+  // alone is not proof. A failed opening whose row was pruned must say so and name the way to resend.
+  it('answers 409 not_delivered, naming the resend route, for a bound chat that never recorded its first message', async () => {
+    const id = randomUUID();
+    await createSession({ reservedId: id, title: 'Opened, first send failed', conversationId: 'conv-never-sent', origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } as never });
+    await seed([]);
+    const sends = vi.spyOn(startInput, 'sendDesktopInput');
+    try {
+      const retry = await post('/v1/inputs', { id, text: 'Start a new task: it failed.' });
+      expect(retry.status).toBe(409);
+      expect(retry.body).toMatchObject({ error: 'not_delivered', detail: expect.stringContaining('"sessionId":"' + id + '"') });
+      expect(sends).not.toHaveBeenCalled();
+      expect((await outbox()).filter((entry) => entry.id === id)).toHaveLength(0);
+      // The route it names works: the same text goes into that chat under a new id.
+      const resend = await post('/v1/inputs', { id: randomUUID(), sessionId: id, text: 'Start a new task: it failed.' });
+      expect(resend.status).toBe(202);
     } finally {
       sends.mockRestore();
     }
