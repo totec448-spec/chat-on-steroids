@@ -1146,6 +1146,7 @@ function versionHeaders() {
   return {
     'x-extension-version': version,
     'x-extension-protocol': String(BRIDGE_PROTOCOL),
+    'x-extension-open-only': '1',
     ...(workerStampValue ? { 'x-extension-build': workerStampValue } : {}),
     ...(browserId ? { 'x-extension-browser': browserId } : {}),
     // The app tells the person's own browser apart from the CoS browser's copy of this extension.
@@ -2060,12 +2061,14 @@ async function groupTargetWindow() {
  * extension allowed in incognito, Chrome put it in whichever window was last focused, and ChatGPT
  * is signed out there. Without a regular window it opens one.
  */
-async function createUserWindowTab(url, active) {
+async function createUserWindowTab(url, active, authorize) {
   // Firefox for Android has no windows to choose from (and no incognito window beside them).
   if (typeof chrome.windows?.getLastFocused !== 'function' || typeof chrome.windows?.getAll !== 'function') {
+    if (authorize && !await authorize()) return null;
     return chrome.tabs.create({ url, active });
   }
   const windowId = await groupTargetWindow();
+  if (authorize && !await authorize()) return null;
   if (Number.isInteger(windowId)) return chrome.tabs.create({ url, windowId, active });
   const window = await chrome.windows.create({ url, type: 'normal', incognito: false, focused: active });
   if (!Number.isInteger(window?.id) || !window.tabs?.[0]) throw new Error('chat_window_not_ready');
@@ -2076,12 +2079,13 @@ async function createUserWindowTab(url, active) {
  * made here is collapsed: collapsing one that holds the window's active tab would switch the
  * user's tab. Null hands the tab to window mode before anything was created.
  */
-async function createGroupedTab(url) {
+async function createGroupedTab(url, authorize) {
   let group = await storedBackgroundGroup();
   const windowId = group ? group.windowId : await groupTargetWindow();
   if (!Number.isInteger(windowId)) return null;
   const members = group ? await chrome.tabs.query({ groupId: group.id }).catch(() => []) : [];
   const indexes = (Array.isArray(members) ? members : []).filter(tab => tab.windowId === windowId && Number.isInteger(tab.index)).map(tab => tab.index);
+  if (authorize && !await authorize()) return null;
   const tab = await chrome.tabs.create({ url, windowId, active: false, ...(indexes.length ? { index: Math.max(...indexes) + 1 } : {}) });
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
@@ -2191,15 +2195,16 @@ async function inAppGroup(tab) {
   return (await storedBackgroundGroup())?.id === tab.groupId;
 }
 /** Only app-owned windows are sized; no tab placement changes window focus/state. */
-async function createChatTab(url, background = false, active = !background) {
-  if (!background) return createUserWindowTab(url, active);
+async function createChatTab(url, background = false, active = !background, authorize) {
+  if (!background) return createUserWindowTab(url, active, authorize);
   return inBackgroundWindow(async () => {
     if (groupsAvailable()) {
       // A grouped tab is always inactive: selecting it would switch the user's own window.
-      const grouped = await createGroupedTab(url);
+      const grouped = await createGroupedTab(url, authorize);
       if (grouped) return grouped;
     }
     const existing = await storedBackgroundWindow();
+    if (authorize && !await authorize()) return null;
     if (existing) {
       return chrome.tabs.create({ url, windowId: existing.id, active });
     }
@@ -2210,6 +2215,42 @@ async function createChatTab(url, background = false, active = !background) {
     await rememberBackgroundWindow(window.id);
     await chrome.windows.update(window.id, { state: 'minimized', focused: false });
     return window.tabs[0];
+  });
+}
+
+/** The deliberate-close lane may use an existing window, never create a new
+ * window or ask the OS to start a browser. Explicit windowId is important:
+ * tabs.create without it can create a window when the last one just closed. */
+async function reopenClosedChat(conversationId, background, authorize) {
+  return inBackgroundWindow(async () => {
+    if (typeof chrome.windows?.getAll !== 'function' || typeof chrome.windows?.get !== 'function')
+      return { reason: 'browser-closed' };
+    const eligible = w => Number.isInteger(w?.id) && w.type === 'normal' && w.incognito !== true;
+    const present = async () => (await chrome.tabs.query({ url: CHATGPT_TAB_URLS }))
+      .some(tab => conversationForTab(tab) === conversationId);
+    if (await present()) return { present: true };
+    const windows = (await chrome.windows.getAll({ windowTypes: ['normal'] })).filter(eligible);
+    if (!windows.length) return { reason: 'browser-closed' };
+    const group = background && groupsAvailable() ? await storedBackgroundGroup() : null;
+    const preferred = background ? group?.windowId ?? (await storedBackgroundWindow())?.id : null;
+    const regular = await groupTargetWindow();
+    const window = windows.find(w => w.id === preferred) || windows.find(w => w.id === regular) ||
+      windows.sort((a, b) => a.id - b.id)[0];
+    if (await present()) return { present: true };
+    if (!await authorize()) return { reason: 'changed' };
+    // A person or another action may return the page while the permit is
+    // being committed. Spending it does not oblige us to open another copy.
+    if (await present()) return { present: true };
+    const current = await chrome.windows.get(window.id).catch(() => null);
+    if (!eligible(current) || current.id !== window.id) return { reason: 'browser-closed' };
+    if (await present()) return { present: true };
+    const tab = await chrome.tabs.create({ url: `https://chatgpt.com/c/${encodeURIComponent(conversationId)}`,
+      windowId: window.id, active: false });
+    if (!Number.isInteger(tab?.id)) throw new Error('closed_tab_not_ready');
+    // Grouping is placement only: the tab already exists. A disappearing
+    // group cannot purchase another create, move to a new window, or reload.
+    if (group?.windowId === window.id) await chrome.tabs.group({ groupId: group.id, tabIds: [tab.id] }).catch(() => undefined);
+    return { opened: true };
   });
 }
 
@@ -3836,6 +3877,7 @@ async function maintainOnce() {
       token: entry && typeof entry.token === 'string' ? entry.token : '',
       reason: typeof entry?.reason === 'string' ? entry.reason : '',
       requiresClaim: entry?.requiresClaim === true,
+      openOnly: entry?.openOnly === true,
       continueFollows: entry?.continueFollows === true,
       suspended: entry?.reason === 'stalled',
       focus: Boolean(entry && entry.focus === true),
@@ -3968,7 +4010,7 @@ function repairChangeDetail(latest) {
 }
 
 async function performBrowserRepairs(repairs, policy) {
-  for (const { conversationId, token, reason, focus, requiresClaim, continueFollows, suspended, ownSent } of repairs) {
+  for (const { conversationId, token, reason, focus, requiresClaim, continueFollows, suspended, ownSent, openOnly } of repairs) {
     // Re-scanned per repair rather than reused from above. Earlier entries in this same batch
     // may have created a tab, and the scan has to be the state immediately before the action or
     // the duplicate rule below is deciding on a tab list that no longer exists.
@@ -3989,6 +4031,24 @@ async function performBrowserRepairs(repairs, policy) {
     const repairAction = target ? 'reloaded' : 'reopened';
     try {
       const documentId = target ? tabDocuments[String(target.id)] : null;
+      // A deliberate-close opt-in buys one missing tab, not permission to
+      // reload a page the user or another browser command has already returned.
+      if (openOnly === true && reason === 'no-tab') {
+        if (target) {
+          await call(`/status?repaired=${encodeURIComponent(token)}&repairAction=present`);
+          continue;
+        }
+        if (policy.browserOnly === true || !requiresClaim) continue;
+        const claim = await call('/repairs/claim', { method: 'POST', body: JSON.stringify({ token }) });
+        if (!claim.ok || claim.data?.allowed !== true) continue;
+        const outcome = await reopenClosedChat(conversationId, policy.background === true, async () => {
+          const permit = await call('/repairs/open', { method: 'POST', body: JSON.stringify({ token }) });
+          return permit.ok && permit.data?.allowed === true;
+        });
+        if (outcome.opened || outcome.present) await call(`/status?repaired=${encodeURIComponent(token)}&repairAction=${outcome.opened ? 'reopened' : 'present'}`);
+        else await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=reopened&why=${outcome.reason}`);
+        continue;
+      }
       // Suspension grants a reload of a still-suspended shell, never a new tab.
       if (suspended) {
         if (!target) continue;

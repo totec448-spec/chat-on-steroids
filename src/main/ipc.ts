@@ -94,7 +94,7 @@ import { UI_LANGUAGES } from '../shared/ui-language.js';
 import { CHATGPT_PROJECT_ID, PROJECT_COLORS } from '../shared/projects.js';
 import { chatgptProjectChoices } from './chatgpt-project-catalog.js';
 import { bridgePortSelection } from './bridge-ports.js';
-import { clearAllGoalSwitches, draftTaskPlan, listGoalModels, MODEL_PAGE_SIZE, retireGoalDrafts, goalBackendFor, goalSwitchFor, setGoalSwitchNow, setGoalReplyActiveNow, setGoalObjectiveNow } from './goal.js';
+import { clearAllGoalSwitches, draftTaskPlan, listGoalModels, MODEL_PAGE_SIZE, retireGoalDrafts, goalBackendFor, goalSwitchFor, setGoalSwitchNow, setGoalReplyActiveNow, setGoalObjectiveNow, setGoalKeepRunningNow } from './goal.js';
 import { forgetExposedSurface } from './mcp/server.js';
 import { runningToolActivity } from './mcp/call-context.js';
 import { onBackgroundExecChange, runningExecProcesses, stopExecProcess } from './codex/ownership.js';
@@ -127,7 +127,7 @@ import {
   companionDiagnostics,
   sessionInputActivity,
   recoveryHeldByCalls, recoveryInputAllowed,
-  sessionControlsFor, userRequestViews, cancelAssistantRecovery, pickupNow, stopSessionTurn, endOwnWorkAfterStop, setSessionAutomation, setSessionObjective, compactSession, resumeFromSavedSummary, cancelSessionCompaction,
+  sessionControlsFor, userRequestViews, cancelAssistantRecovery, pickupNow, stopSessionTurn, endOwnWorkAfterStop, setSessionAutomation, setSessionKeepRunningWhenClosed, setSessionObjective, compactSession, resumeFromSavedSummary, cancelSessionCompaction,
   cancelWorkerCommands,
   chatUrl,
   revealChatInBrowser,
@@ -2238,6 +2238,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { id, automation, afterTurn } = sessionIdArg.extend({ automation: z.enum(['off', 'goal', 'loop']), afterTurn: z.boolean().optional() }).parse(payload);
     return setSessionAutomation(id, automation, afterTurn, 'the app');
   });
+  handle('sessions:keepRunningWhenClosed', async (payload) => {
+    const { id, enabled, expectedConversationId } = sessionIdArg.extend({
+      enabled: z.boolean(), expectedConversationId: z.string().min(8).max(256).regex(/^[0-9a-z-]+$/i)
+    }).strict().parse(payload);
+    return setSessionKeepRunningWhenClosed(id, enabled, expectedConversationId);
+  });
   handle('sessions:objective', async (payload) => {
     const { id, text, mode } = sessionIdArg.extend({ text: z.string().max(MAX_TASK_REQUEST_CHARS), mode: z.enum(['goal', 'loop']) }).parse(payload);
     return setSessionObjective(id, text, mode);
@@ -2514,6 +2520,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
           summary.conversationId,
           ...committedResumeAncestorsFromSummary(summary, summary.conversationId)
         ], false);
+        // Revoke close recovery before the record disappears. The removal fence
+        // rejects concurrent preference IPC and browser authorizations while
+        // the accepted ledger is being persisted, including older queued saves.
+        for (const conversationId of new Set([summary.conversationId, ...committedResumeAncestorsFromSummary(summary, summary.conversationId)]))
+          await setGoalKeepRunningNow(conversationId, false);
       }
       // An unbound desktop chat's opening can recreate the local reservation on startup.
       // Retire it under the outbox's claim/Send queue before deleting the history.

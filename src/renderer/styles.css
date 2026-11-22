@@ -4452,6 +4452,8 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 #automationSwitch [aria-checked=true] .mode-check { visibility: visible; }
 #composerSettings #loopDeliveryRow { flex-direction: column; align-items: stretch; gap: 7px; padding: 12px 9px 6px; }
 #loopDeliveryRow select { width: 100%; max-width: 100%; padding: 9px 11px; border-radius: 9px; line-height: 1.4; }
+#composerSettings #keepRunningWhenClosedRow { padding: 12px 9px 6px; }
+#keepRunningWhenClosedRow input { flex: none; }
 .session-controls-menu label { display: block; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); margin-bottom: 7px; }
 .session-controls-menu select { width: 100%; margin-bottom: 12px; }
 .session-controls-menu textarea { width: 100%; resize: vertical; min-height: 64px; margin-bottom: 6px; padding: 10px; border-radius: 8px; font: inherit; line-height: 1.45; }

@@ -3214,6 +3214,7 @@ function mergeDetailDelta(delta: SessionEvent[]): boolean {
 }
 
 let controlsGeneration = 0;
+const keepClosedWrites = new Set<string>();
 let lastSummaryTimer: ReturnType<typeof setTimeout> | null = null;
 /** The stuck compaction already asked again once after its deadline passed during a controls read. */
 let lastSummaryLateRefresh = '';
@@ -3761,7 +3762,15 @@ async function refreshSessionControls(): Promise<void> {
   if (planHost.dataset.sessionId !== (id ?? '')) renderAgentPlan(planHost, id, null);
   if ((userRequestsFor?.sessionId ?? null) !== id) applyUserRequests(id, null);
   const menu = $('sessionControls');
+  const keepClosed = $<HTMLInputElement>('keepRunningWhenClosed');
+  const keepClosedRow = $('keepRunningWhenClosedRow');
+  const closedTabStatus = $('closedTabRecoveryStatus');
   if (controlledSessionId !== id || controlledSelection !== selectionGeneration) {
+    keepClosedRow.hidden = true;
+    keepClosed.disabled = true;
+    keepClosed.checked = false;
+    closedTabStatus.hidden = true;
+    ui(closedTabStatus, 'textContent', () => '');
     // Retire the previous selection's projection before awaiting the new owner's IPC.
     // Replace the translation binding too, so a locale refresh cannot revive its status.
     ui($('sessionControlStatus'), 'textContent', () => '');
@@ -3771,12 +3780,16 @@ async function refreshSessionControls(): Promise<void> {
   }
   paintAutomationSwitch();
   if (!id) { controlledSessionId = null; controlledTurnId = null; controlledHeldTurnId = null; controlledPageless = false; paintDeliveryControls(); menu.hidden = false;
+    keepClosedRow.hidden = true; keepClosed.disabled = true;
+    closedTabStatus.hidden = true;
     $<HTMLTextAreaElement>('sessionObjective').disabled = false;
     paintTaskActions();
     for (const action of ['compactSession', 'cancelCompaction', 'resumeLastSummary']) $(action).hidden = true;
     return; }
   const opening = pendingComposerInputs.find(row => row.opening && row.sessionId === id && ['queued', 'browser'].includes(row.state));
   if (!sessions.find(row => row.id === id)?.conversationId) {
+    keepClosedRow.hidden = true; keepClosed.disabled = true;
+    closedTabStatus.hidden = true;
     controlledSessionId = id; controlledSelection = selectionGeneration; controlledTurnId = null; controlledHeldTurnId = null;
     controlledCanInject = false; controlledCanSendDirectly = false; controlledQueueAtFinish = false;
     controlledStopPending = false; controlledFinishWaiting = false; controlledPageless = false;
@@ -3817,6 +3830,11 @@ async function refreshSessionControls(): Promise<void> {
   paintStateLine();
   repaintHeld();
   menu.hidden = !controls;
+  keepClosedRow.hidden = !controls || !(controls.canKeepRunningWhenTabClosed || controls.keepRunningWhenTabClosed);
+  keepClosed.disabled = !controls?.canKeepRunningWhenTabClosed || keepClosedWrites.has(id);
+  if (!keepClosedWrites.has(id)) keepClosed.checked = controls?.keepRunningWhenTabClosed === true;
+  closedTabStatus.hidden = !controls?.closedTabRecoveryStatus;
+  ui(closedTabStatus, 'textContent', () => repairRowText(controls?.closedTabRecoveryStatus ?? ''));
   $('compactSession').hidden = !controls;
   if (!controls) { $('cancelCompaction').hidden = true; clearSummaryOffer(); return; }
   const objective = $<HTMLTextAreaElement>('sessionObjective');
@@ -5762,6 +5780,19 @@ function approvalRowText(text: string): string {
 }
 
 function repairRowText(text: string): string {
+  switch (text) {
+    case 'Waiting to reopen the closed tab once.': return t('Waiting to reopen the closed tab once.');
+    case 'The browser is closed or disconnected. Recovery waits until you open it.': return t('The browser is closed or disconnected. Recovery waits until you open it.');
+    case 'The tab was not reopened: recovery is limited to once every three minutes.': return t('The tab was not reopened: recovery is limited to once every three minutes.');
+    case 'The tab was not reopened: automatic work is paused.': return t('The tab was not reopened: automatic work is paused.');
+    case 'The tab was not reopened: no current authorized Goal or Loop work.': return t('The tab was not reopened: no current authorized Goal or Loop work.');
+    case 'The tab was not reopened: this browser cannot safely recover it.': return t('The tab was not reopened: this browser cannot safely recover it.');
+    case 'The tab was not reopened: recovery permission was withdrawn.': return t('The tab was not reopened: recovery permission was withdrawn.');
+    case 'The tab was already open again. Nothing was reloaded.': return t('The tab was already open again. Nothing was reloaded.');
+    case 'The app reopened the closed tab.': return t('The app reopened the closed tab.');
+    case 'The tab could not be reopened. Open it yourself to resume work.': return t('The tab could not be reopened. Open it yourself to resume work.');
+    case 'The browser did not confirm the reopen. No further attempt was authorized.': return t('The browser did not confirm the reopen. No further attempt was authorized.');
+  }
   return text === APPROVAL_REPAIR_DEFERRED_TEXT
     ? t('Reload was deferred because ChatGPT showed a tool approval card.') : text;
 }
@@ -10263,6 +10294,18 @@ export function initChat(next: Deps): void {
     finally {
       select.disabled = false;
       if (id === selectedId && generation === selectionGeneration) void refreshSessionControls();
+    }
+  });
+  $('keepRunningWhenClosed').addEventListener('change', async () => {
+    const id = selectedId, conversationId = controlledConversationId, generation = selectionGeneration;
+    const box = $<HTMLInputElement>('keepRunningWhenClosed');
+    if (!id || !conversationId || controlledSessionId !== id || controlledSelection !== generation || box.disabled || keepClosedWrites.has(id)) return;
+    keepClosedWrites.add(id);
+    box.disabled = true;
+    try { await run(api.setSessionKeepRunningWhenClosed(id, box.checked, conversationId)); }
+    finally {
+      keepClosedWrites.delete(id);
+      if (id === selectedId) void refreshSessionControls();
     }
   });
   $('sessionObjective').addEventListener('input', () => { cancelGoalRequest(); goalIntentGeneration++; $('sessionObjective').dataset.edited = 'true'; delete $('sessionObjective').dataset.saved; paintTaskActions(); });

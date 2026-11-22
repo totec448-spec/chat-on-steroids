@@ -128,6 +128,48 @@ it('keeps closed-tab recovery opt-in per chat through mode changes, restore and 
   expect(goal.goalSwitchFor(next).enabled).toBe(false);
 });
 
+it('keeps closed-tab recovery off for old, malformed and helper switch rows', () => {
+  const row = (conversationId: string, extra: object) => ({ conversationId, enabled: true, mode: 'goal' as const, at: 1, ...extra });
+  goal.restoreGoalSwitches({ version: 1, savedAt: 1, switches: [
+    row('old-closed-switch', {}), row('bad-closed-switch', { keepRunningWhenTabClosed: 'true' }),
+    row('helper-closed-switch', { role: 'decision', keepRunningWhenTabClosed: true }),
+    row('valid-closed-switch', { keepRunningWhenTabClosed: true })
+  ] });
+  for (const id of ['old-closed-switch', 'bad-closed-switch', 'helper-closed-switch'])
+    expect(goal.goalKeepsRunningWhenTabClosed(id)).toBe(false);
+  expect(goal.goalKeepsRunningWhenTabClosed('valid-closed-switch')).toBe(true);
+});
+
+it('keeps closed-tab recovery preference through a master stop without retaining authority', async () => {
+  const id = 'closed-master-stop', next = 'closed-master-resume';
+  await goal.setGoalSwitchNow(id, 'loop', true);
+  await goal.setGoalKeepRunningNow(id, true);
+  goal.clearAllGoalSwitches();
+  goal.restoreGoalSwitches(goal.snapshotGoalSwitches());
+  expect(goal.goalSwitchFor(id).own).toBe(false);
+  expect(goal.goalKeepsRunningWhenTabClosed(id)).toBe(true);
+  expect(goal.moveGoalSwitch(id, next)).toBe(true);
+  expect(goal.goalKeepsRunningWhenTabClosed(id)).toBe(false);
+  expect(goal.goalSwitchFor(next).own).toBe(false);
+  await goal.setGoalSwitchNow(next, 'goal', true);
+  expect(goal.goalKeepsRunningWhenTabClosed(next)).toBe(true);
+  await goal.setGoalKeepRunningNow(next, false);
+  goal.restoreGoalSwitches(goal.snapshotGoalSwitches());
+  expect(goal.goalKeepsRunningWhenTabClosed(next)).toBe(false);
+});
+
+it('keeps closed-tab recovery disabled when its durable opt-in fails', async () => {
+  const id = 'closed-write-failure';
+  await goal.setGoalSwitchNow(id, 'goal', true);
+  const durable = await import('../src/main/durable.js');
+  const fail = vi.spyOn(durable, 'writeDurableNow').mockRejectedValueOnce(new Error('closed preference write failed'));
+  try {
+    await expect(goal.setGoalKeepRunningNow(id, true)).rejects.toThrow('closed preference write failed');
+    expect(goal.goalKeepsRunningWhenTabClosed(id)).toBe(false);
+    expect(goal.goalSwitchFor(id)).toMatchObject({ own: true, enabled: true });
+  } finally { fail.mockRestore(); }
+});
+
 it('preserves the Astra delivery preference across Goal/Loop, restart and finish-setting changes', async () => {
   const config = (await import('../src/main/config.js')).getConfig();
   await saveConfig({ ...config, ui: { ...config.ui, finishTool: true } });
