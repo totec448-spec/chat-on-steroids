@@ -6280,7 +6280,9 @@ reason, and answers with `Connection: close`.
 
 The action routes (`control-actions.ts`) are `POST /v1/inputs` (send a message to an existing chat,
 or without `sessionId` start a new chat with it, optionally in a `projectId`; the new session's id
-is the message id, as for the composer's New chat; an optional `model` and `reasoningEffort`, always
+is the message id, as for the composer's New chat, so a retry of an id whose row aged out of the outbox
+(it keeps the last 50 finished rows) while that chat already holds its ChatGPT conversation answers 409
+`already_delivered` and admits nothing (#2247); an optional `model` and `reasoningEffort`, always
 together, must resolve in the saved catalog to an entry offering that effort and are filed under its
 id, else 409 `models_unknown`, `model_unknown` or `effort_unavailable`; without them the row keeps
 null and ChatGPT its own selection), `POST /v1/inputs/{id}/cancel`, and

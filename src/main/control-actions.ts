@@ -150,6 +150,13 @@ async function send(rawBody: unknown): Promise<ActionReply> {
   }
 
   if (body.sessionId === undefined) {
+    // The outbox keeps only its last 50 finished rows, so an old id finds none above. A new chat is
+    // named by its message id: when that chat already exists with its ChatGPT conversation, the
+    // message was delivered and admitting it again can only fail setup and stay queued (#2247).
+    if ((await readSession(body.id))?.conversationId) {
+      logInfo('control API: message ' + body.id + ' refused as already delivered: its chat exists with a ChatGPT conversation');
+      throw new RequestError(409, 'already_delivered', 'the chat ' + body.id + ' already exists: this message was delivered; read it from GET /v1/sessions/' + body.id);
+    }
     if (body.projectId !== undefined && !(await getProject(body.projectId))) throw new RequestError(404, 'project_not_found');
   } else {
     const session = await readSession(body.sessionId);

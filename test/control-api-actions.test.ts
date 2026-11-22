@@ -761,6 +761,44 @@ describe('starting a new chat', () => {
     expect((await outbox()).filter((entry) => entry.id === id)).toHaveLength(1);
   });
 
+  // #2247: the outbox keeps only the last 50 finished inputs. A retry of an older id then found no
+  // row, admitted a new input for a chat that already exists and bound to a conversation, and that
+  // input stayed queued for ever ("Reserved opening session belongs to another ChatGPT conversation").
+  it('answers 409 already_delivered for a new chat id whose chat exists, after its row aged out', async () => {
+    const id = randomUUID();
+    await createSession({ reservedId: id, title: 'Delivered long ago', conversationId: 'conv-aged-out', origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } as never });
+    await seed([]);
+    const sends = vi.spyOn(startInput, 'sendDesktopInput');
+    try {
+      const retry = await post('/v1/inputs', { id, text: 'Start a new task: it was delivered.' });
+      expect(retry.status).toBe(409);
+      expect(retry.body).toMatchObject({ error: 'already_delivered', detail: expect.stringContaining(id) });
+      // The same answer for every retry, and nothing is admitted, queued or woken.
+      expect((await post('/v1/inputs', { id, text: 'Start a new task: it was delivered.' })).status).toBe(409);
+      expect(sends).not.toHaveBeenCalled();
+      expect((await outbox()).filter((entry) => entry.id === id)).toHaveLength(0);
+    } finally {
+      sends.mockRestore();
+    }
+  });
+
+  it('still admits a new chat id when its session exists but has no ChatGPT chat yet', async () => {
+    const id = randomUUID();
+    await createSession({ reservedId: id, title: 'Reserved, never opened', origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } as never });
+    await seed([]);
+    const reply = await post('/v1/inputs', { id, text: 'Open it now.' });
+    expect(reply.status).toBe(202);
+    expect((await outbox()).filter((entry) => entry.id === id)).toMatchObject([{ sessionId: id, opening: true }]);
+  });
+
+  it('does not treat a message id that equals an existing chat as delivered when the message goes into a session', async () => {
+    const id = randomUUID();
+    await createSession({ reservedId: id, title: 'Another chat', conversationId: 'conv-other' });
+    await seed([]);
+    const reply = await post('/v1/inputs', { id, sessionId: chatSession, text: 'Keep going' });
+    expect(reply.status).toBe(202);
+  });
+
   it('starts it in a project only when that project exists, and never moves an existing chat', async () => {
     const unknown = await post('/v1/inputs', { id: randomUUID(), projectId: randomUUID(), text: 'In a project' });
     expect(unknown.status).toBe(404);
