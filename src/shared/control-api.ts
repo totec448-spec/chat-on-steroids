@@ -18,6 +18,7 @@ export const CONTROL_API_ROUTES = [
   '/v1/sessions/{id}/events/stream',
   '/v1/inputs',
   '/v1/inputs/{id}',
+  '/v1/inputs/{id}/answer',
   '/v1/agents',
   '/v1/workers/{ownerId}',
   '/v1/workers/{ownerId}/reports',

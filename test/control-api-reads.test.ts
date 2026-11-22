@@ -30,7 +30,7 @@ const { initConfigPath } = await import('../src/main/config.js');
 const { initSecretsPath } = await import('../src/main/secrets.js');
 const { initDurableStore, flushDurable } = await import('../src/main/durable.js');
 const { appendEvent, createSession, initSessionStore, resetSessionStoreForTests, upsertMessageEvent } = await import('../src/main/session/store.js');
-const { cancelInput, deliveryProof, enqueueInput } = await import('../src/main/session/input.js');
+const { acknowledgeBrowserInput, cancelInput, claimBrowserInput, deliveryProof, enqueueInput } = await import('../src/main/session/input.js');
 const { logInfo, logWarn, logError } = await import('../src/main/logger.js');
 const { redactSecretText } = await import('../src/main/redaction.js');
 const { prependUserPrompt } = await import('../src/shared/user-prompt.js');
@@ -130,7 +130,7 @@ describe('read routes', () => {
   it('are listed by health and need the token like every other route', async () => {
     const health = await call('/v1/health');
     expect(health.body.routes).toEqual([
-      '/v1/health', '/v1/status', '/v1/sessions', '/v1/sessions/{id}', '/v1/sessions/{id}/events', '/v1/sessions/{id}/events/stream', '/v1/inputs', '/v1/inputs/{id}', '/v1/agents', '/v1/workers/{ownerId}', '/v1/workers/{ownerId}/reports', '/v1/log', '/v1/models'
+      '/v1/health', '/v1/status', '/v1/sessions', '/v1/sessions/{id}', '/v1/sessions/{id}/events', '/v1/sessions/{id}/events/stream', '/v1/inputs', '/v1/inputs/{id}', '/v1/inputs/{id}/answer', '/v1/agents', '/v1/workers/{ownerId}', '/v1/workers/{ownerId}/reports', '/v1/log', '/v1/models'
     ]);
     for (const route of ['/v1/sessions', `/v1/sessions/${sessionId}`, `/v1/sessions/${sessionId}/events`, '/v1/inputs', '/v1/agents', '/v1/log', '/v1/models']) {
       expect((await call(route, {})).status).toBe(401);
@@ -632,6 +632,32 @@ describe('input outbox', () => {
     id: randomUUID(), sessionId: null, text: 'hello', mode: 'auto', dueAt: 1, model: null, reasoningEffort: null,
     state: 'queued', owner: null, createdAt: 1, conversationId: null, ...over
   }) as never;
+
+  it('returns only the full completed answer for the exact native input', async () => {
+    const id = randomUUID();
+    await enqueueInput({ id, sessionId: liveSessionId, text: 'Create a scene lesson',
+      mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null });
+    expect((await call(`/v1/inputs/${id}/answer`)).body.state).toBe('pending');
+    const claimed = await claimBrowserInput(id, 'browser-test-owner', 'chat-live-1');
+    expect(claimed).not.toBeNull();
+    expect(await acknowledgeBrowserInput(id, 'browser-test-owner', 'chat-live-1', 'scene-prompt')).toBe(true);
+    const timestamp = Date.now();
+    await appendEvent(liveSessionId, {kind:'user_message',source:'extension',time:timestamp,
+      messageId:'scene-prompt',inputId:id,conversationId:'chat-live-1',message:text('Create a scene lesson')});
+    await appendEvent(liveSessionId, {kind:'turn_start',source:'extension',time:timestamp+1,turnId:'lesson-turn'});
+    expect((await call(`/v1/inputs/${id}/answer`)).body.state).toBe('pending');
+    const lesson = '# Scene lesson\n' + 'A'.repeat(14_000);
+    await upsertMessageEvent(liveSessionId, {kind:'assistant_message',source:'extension',time:timestamp+2,
+      messageId:'lesson-answer',turnId:'lesson-turn',message:text(lesson),final:true,state:'final'});
+    await appendEvent(liveSessionId, {kind:'turn_end',source:'extension',time:timestamp+3,
+      turnId:'lesson-turn',outcome:'completed'});
+    const result = await call(`/v1/inputs/${id}/answer`);
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({state:'complete',inputId:id,turnId:'lesson-turn',text:lesson});
+    expect((await call(`/v1/inputs/${id}/answer?limit=1`)).status).toBe(400);
+    expect((await call(`/v1/inputs/${id}/answer`,{})).status).toBe(401);
+    expect((await call(`/v1/inputs/${randomUUID()}/answer`)).status).toBe(404);
+  });
 
   it('lists queued messages with text cut and redacted and without delivery internals', async () => {
     const queued = await enqueueInput({
