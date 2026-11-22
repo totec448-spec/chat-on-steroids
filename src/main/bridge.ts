@@ -7620,6 +7620,9 @@ async function finalizeCommand(command: Command, receipt: CommandReceipt): Promi
     command.timer = null;
     commands = commands.filter((entry) => entry !== command);
     commandReceipts = [...commandReceipts.filter((entry) => entry.id !== receipt.id), receipt].slice(-MAX_COMMAND_RECEIPTS);
+    if (command.modelRecovery && receipt.outcome === 'terminal-failure') {
+      logWarn('bridge: clean-address model recovery exhausted — terminal failure after the one permit; no further transfer');
+    }
     // A fresh-turn Stop the page could not send protects nothing any more: no stop and no continue
     // follow, so its chat's calls run again at once (CodeRabbit on #1954). A Stop that went out keeps
     // the fence until its stopped end is processed, which files the continue.
@@ -12987,7 +12990,7 @@ function drop(command: Command, why: string, options: { startTimedOut?: boolean 
       if (command.timer) clearTimeout(command.timer);
       command.timer = null;
       commands = commands.filter(candidate => candidate !== command);
-      logWarn(`bridge: retired ${specKey(command.spec)} browser attempt — ${why}`);
+      logWarn(`bridge: retired ${specKey(command.spec)} browser attempt — ${command.modelRecovery ? 'clean-address model recovery exhausted; ' : ''}${why}`);
       changed();
       return true;
     }).then(retired => {
@@ -13028,7 +13031,7 @@ function drop(command: Command, why: string, options: { startTimedOut?: boolean 
   // chat, so it goes back to sleeping with its inbox intact and its slot released, and the
   // prime is told the message it sent is still waiting to be delivered.
   if (command.spec.type === 'revive') failWorkerRevival(command.spec.agent, why, command.spec.runId);
-  logWarn(`bridge: gave up on ${specKey(command.spec)} — ${why}`);
+  logWarn(`bridge: gave up on ${specKey(command.spec)} — ${command.modelRecovery ? 'clean-address model recovery exhausted; ' : ''}${why}`);
   changed();
   persistCommands();
   // A timeout is another last-slot transition with no future MCP epilogue guaranteed. Once the

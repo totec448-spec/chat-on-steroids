@@ -9036,9 +9036,16 @@ describe('delivering a bootstrap', () => {
         expect((await checkpoint('new-resume', 'destinationAttempt')).body.allowed).toBe(true);
         expect((await checkpoint('new-resume', 'destinationDispatch')).body.armed).toBe(true);
       }
-      const result = await request('POST', '/commands/ack', { browser, body: { id, client: 'new-resume', ...ack } });
-      expect(result.status).toBe(200);
-      expect(result.body.committed).toBe(outcome === 'commit');
+      const logger = await import('../src/main/logger.js');
+      const warn = vi.spyOn(logger, 'logWarn');
+      try {
+        const result = await request('POST', '/commands/ack', { browser, body: { id, client: 'new-resume', ...ack } });
+        expect(result.status).toBe(200);
+        expect(result.body.committed).toBe(outcome === 'commit');
+        const repeated = await request('POST', '/commands/ack', { browser, body: { id, client: 'new-resume', ...ack } });
+        expect(repeated.status).toBe(200);
+        expect(warn.mock.calls.filter(([message]) => message.includes('clean-address model recovery exhausted'))).toHaveLength(outcome === 'commit' ? 0 : 1);
+      } finally { warn.mockRestore(); }
     }
     expect((await getSession(sessionId))?.conversationId).toBe(outcome === 'commit' ? to : from);
     expect(opened).toHaveLength(1);
