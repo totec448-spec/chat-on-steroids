@@ -4057,5 +4057,17 @@
   "What a chat edited": "Was ein Chat geändert hat",
   "Review lists the files this chat changed and opens each recorded diff.": "Die Prüfung listet die Dateien, die dieser Chat geändert hat, und öffnet jeden aufgezeichneten Diff.",
   "Steered active turn": "Laufenden Durchlauf umgelenkt",
-  "Worked for {0}{1}s · steered": "Gearbeitet · {0}{1} s · umgelenkt"
+  "Worked for {0}{1}s · steered": "Gearbeitet · {0}{1} s · umgelenkt",
+  "This chat: {0} MB of {1} MB ({2} MB images, {3} MB long texts).": "Dieser Chat: {0} MB von {1} MB ({2} MB Bilder, {3} MB lange Texte).",
+  "Loading chat storage usage…": "Speichernutzung dieses Chats wird geladen…",
+  "Global image cleanups do not remove long texts in active chats. You can clear images or long texts for this chat below.": "Globale Bildbereinigungen entfernen keine langen Texte in aktiven Chats. Unten kannst du Bilder oder lange Texte dieses Chats löschen.",
+  "Free images in this chat": "Bilder in diesem Chat freigeben",
+  "Free long texts in this chat": "Lange Texte in diesem Chat freigeben",
+  "Permanently remove all local recorded images from this chat? Chat text, original files and long texts will stay.": "Alle lokalen aufgezeichneten Bilder aus diesem Chat dauerhaft entfernen? Chat-Text, Originaldateien und lange Texte bleiben erhalten.",
+  "Free long texts in this chat? The full text stored by this app cannot be recovered. Only the beginning of each long message and tool result will remain.": "Lange Texte in diesem Chat entfernen? Der vollständige, von dieser App gespeicherte Text kann nicht wiederhergestellt werden. Nur der Anfang jeder langen Nachricht und jedes Werkzeugergebnisses bleibt erhalten.",
+  "All chats": "Alle Chats",
+  "This chat": "Dieser Chat",
+  "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "{0} MB aus diesem Chat freigegeben. Jetzt werden hier {1} MB von {2} MB verwendet.",
+  "Freed {0} MB. Storage usage could not be read.": "{0} MB freigegeben. Die Speichernutzung konnte nicht gelesen werden.",
+  "Last cleanup: Freed {0} MB.": "Letzte Bereinigung: {0} MB freigegeben."
 }
