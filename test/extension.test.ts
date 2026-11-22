@@ -6587,6 +6587,75 @@ it.each([true, false])('rejects another chat from the repair page check (streami
   expect(call).toHaveBeenCalledExactlyOnceWith('/status?repairFailed=switched-chat&repairAction=reloaded&why=changed&detail=other-chat');
 });
 
+it('leaves a Temporary Chat open when recovery would reload it', async () => {
+  const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  const tab = { id: 76, url: `https://chatgpt.com/c/${conversationId}?temporary-chat=true` };
+  const reload = vi.fn();
+  const call = vi.fn(async () => ({ ok: true }));
+  const source = backgroundSource.slice(backgroundSource.indexOf('async function performBrowserRepairs('),
+    backgroundSource.indexOf('\nfunction conversationStillOpen('));
+  const repair = vm.runInNewContext(`${source}\nperformBrowserRepairs`, {
+    URL,
+    tabConversations: { '76': conversationId }, tabDocuments: { '76': 'live-document' },
+    conversationForTab: (value: { url?: string }) => new URL(value.url!).pathname.split('/c/')[1] ?? null,
+    createChatTab: vi.fn(), call, tabReply: async () => ({ ok: true, conversationId, streaming: false, assistantError: false }),
+    chrome: { tabs: { query: async () => [tab], reload, get: async () => tab, update: vi.fn() } },
+    CHATGPT_TAB_URLS: ['https://chatgpt.com/*']
+  });
+
+  await repair([{ conversationId, token: 'temporary-repair', reason: 'unattributed' }], {});
+
+  expect(reload).not.toHaveBeenCalled();
+  expect(call).toHaveBeenCalledExactlyOnceWith('/status?repaired=temporary-repair&repairAction=preserved&preservedFor=temporary-chat');
+});
+
+it('keeps the temporary destination URL when a normal tab starts navigating there', async () => {
+  const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  const tab = { id: 76, url: `https://chatgpt.com/c/${conversationId}`,
+    pendingUrl: `https://chatgpt.com/c/${conversationId}?temporary-chat=true` };
+  const reload = vi.fn();
+  const call = vi.fn(async () => ({ ok: true }));
+  const source = backgroundSource.slice(backgroundSource.indexOf('async function performBrowserRepairs('),
+    backgroundSource.indexOf('\nfunction conversationStillOpen('));
+  const repair = vm.runInNewContext(`${source}\nperformBrowserRepairs`, {
+    tabConversations: { '76': conversationId }, tabDocuments: { '76': 'live-document' },
+    conversationForTab: (value: { url?: string }) => value.url?.split('/c/')[1]?.split(/[?#]/)[0] ?? null,
+    createChatTab: vi.fn(), call,
+    tabReply: async () => ({ ok: true, conversationId, streaming: false, assistantError: false }),
+    chrome: { tabs: { query: async () => [tab], reload, get: async () => tab, update: vi.fn() } },
+    CHATGPT_TAB_URLS: ['https://chatgpt.com/*']
+  });
+
+  await repair([{ conversationId, token: 'temporary-navigation', reason: 'unattributed' }], {});
+
+  expect(reload).not.toHaveBeenCalled();
+  expect(call).toHaveBeenCalledExactlyOnceWith('/status?repaired=temporary-navigation&repairAction=preserved&preservedFor=temporary-chat');
+});
+
+it('keeps a Temporary Chat open when its pending destination is a regular chat', async () => {
+  const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  const tab = { id: 76,
+    url: `https://chatgpt.com/c/${conversationId}?temporary-chat=true`,
+    pendingUrl: `https://chatgpt.com/c/${conversationId}` };
+  const reload = vi.fn();
+  const call = vi.fn(async () => ({ ok: true }));
+  const source = backgroundSource.slice(backgroundSource.indexOf('async function performBrowserRepairs('),
+    backgroundSource.indexOf('\nfunction conversationStillOpen('));
+  const repair = vm.runInNewContext(`${source}\nperformBrowserRepairs`, {
+    tabConversations: { '76': conversationId }, tabDocuments: { '76': 'live-document' },
+    conversationForTab: (value: { url?: string }) => value.url?.split('/c/')[1]?.split(/[?#]/)[0] ?? null,
+    createChatTab: vi.fn(), call,
+    tabReply: async () => ({ ok: true, conversationId, streaming: false, assistantError: false }),
+    chrome: { tabs: { query: async () => [tab], reload, get: async () => tab, update: vi.fn() } },
+    CHATGPT_TAB_URLS: ['https://chatgpt.com/*']
+  });
+
+  await repair([{ conversationId, token: 'leaving-temporary-chat', reason: 'unattributed' }], {});
+
+  expect(reload).not.toHaveBeenCalled();
+  expect(call).toHaveBeenCalledExactlyOnceWith('/status?repaired=leaving-temporary-chat&repairAction=preserved&preservedFor=temporary-chat');
+});
+
 /**
  * 2026-09-26: after an extension update, open tabs kept the old MAIN-world usage observer. The
  * worker asks usage.js to replace itself, and only while the page says it is not streaming.

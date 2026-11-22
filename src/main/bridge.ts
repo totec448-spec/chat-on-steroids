@@ -3597,8 +3597,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const repairAction = url.searchParams.get('repairAction');
     const action = repairAction === 'reloaded' || repairAction === 'reopened' || repairAction === 'resumed' ||
       repairAction === 'preserved' || repairAction === 'present' ? repairAction : null;
+    const temporaryChat = action === 'preserved' && url.searchParams.get('preservedFor') === 'temporary-chat';
     if (repaired) {
-      await confirmRepair(repaired.slice(0, 64), action);
+      await confirmRepair(repaired.slice(0, 64), action, temporaryChat);
     } else if (repairFailed) {
       await failRepairAttempt(repairFailed.slice(0, 64), action, url.searchParams.get('why'), url.searchParams.get('detail')?.slice(0, 80) ?? null, url.searchParams.get('approval') === '1');
     }
@@ -11954,10 +11955,11 @@ function attributionRepairCurrent(repair: Repair, session: SessionSummary | null
  * this app is no longer waiting on - an older turn's, or one already re-queued - matches
  * nothing and closes nothing, which is the only safe reading of it.
  */
-async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | 'resumed' | 'preserved' | 'present' | null): Promise<void> {
+async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | 'resumed' | 'preserved' | 'present' | null, temporaryChat = false): Promise<void> {
   for (const [conversationId, repair] of repairsInFlight) {
     if (repair.state === 'handed' && repair.token === token) {
       if (!compactionRepairCurrent(conversationId, repair)) { repairsInFlight.delete(conversationId); return; }
+      if (temporaryChat) logInfo(`bridge: ${conversationId}: Temporary Chat, not reloaded`);
       if (action === 'present') {
         // The chat had a tab again by the time the browser acted, usually the one a worker wake
         // just opened. Nothing was reloaded, so nothing is waiting to come back (#864).
@@ -12033,7 +12035,7 @@ async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | 'r
       await updateRepairProgress(
         conversationId,
         repair,
-        `${action === 'reopened' ? 'Reopened' : action === 'resumed' ? 'Resumed' : 'Reloaded'} chat to ${repairPurpose(repair).to}.`
+        temporaryChat ? `Kept the recovered chat open instead of reloading while ${repairPurpose(repair).during}.` : `${action === 'reopened' ? 'Reopened' : action === 'resumed' ? 'Resumed' : 'Reloaded'} chat to ${repairPurpose(repair).to}.`
       );
       return;
     }

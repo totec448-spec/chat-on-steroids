@@ -17,7 +17,7 @@ import { startControlApi, stopControlApi } from './control-api.js';
 import { appearanceSchema } from './appearance-schema.js';
 import { mergeAppearance } from '../shared/appearance.js';
 import { prepareSessionPrompt, prepareSkillFollowup } from './session/prompt.js';
-import { importSkillFile, importSkillPackage, listManagedSkills, listSkills, removeSkill } from './skills.js';
+import { importSkillFile, importSkillPackage, listManagedSkills, listSkills, managedSkillDirectory, removeSkill, setManagedSkillEnabled } from './skills.js';
 import { checkGitHubSkillUpdates, importGitHubSkill, linkGitHubSkill, updateGitHubSkill } from './skill-github.js';
 import { SKILL_ID_PATTERN } from '../shared/skills.js';
 import { listSkillLibrary } from './skill-library.js';
@@ -1358,6 +1358,31 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('skills:list', () => listSkills());
   handle('skills:managed', () => listManagedSkills());
+  handle('skills:setEnabled', async payload => {
+    const { id, enabled } = z.object({ id: z.string().regex(SKILL_ID_PATTERN), enabled: z.boolean() }).strict().parse(payload);
+    try {
+      const result = await setManagedSkillEnabled(id, enabled);
+      logInfo(`Managed Skill ${enabled ? 'enabled' : 'disabled'} by user`);
+      return result;
+    } catch (error) {
+      logWarn(`Managed Skill toggle refused: ${error instanceof Error && /no longer installed/.test(error.message) ? 'missing-package' : 'state-or-access-error'}`);
+      throw error;
+    }
+  });
+  handle('skills:openFolder', async payload => {
+    const { id } = z.object({ id: z.string().regex(SKILL_ID_PATTERN) }).strict().parse(payload);
+    try {
+      const directory = await managedSkillDirectory(id);
+      const error = await shell.openPath(directory);
+      // Keep the OS-facing error contract for callers. The separate diagnostic
+      // log below deliberately records only a reason code, never the shell text.
+      if (error) throw new Error(`Could not open the Skill folder: ${error}`);
+      return true;
+    } catch (error) {
+      logWarn(`Managed Skill folder refused: ${error instanceof Error && /not found or is invalid/.test(error.message) ? 'missing-package' : 'access-or-shell-error'}`);
+      throw error;
+    }
+  });
   handle('skills:recommended', () => listRecommendedSkills());
   handle('skills:installRecommended', async payload => {
     const { id } = z.object({ id: z.string().regex(SKILL_ID_PATTERN) }).strict().parse(payload);
@@ -2106,16 +2131,26 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return readSessionList({ cursor, limit: limit ?? 60, ...(projectId ? { projectId } : {}) });
   });
 
+  const sessionIdSchema = z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i);
   handle('sessions:image', async (payload) => {
-    const { id, assetId } = z.object({ id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i), assetId: z.string().max(100).regex(/^[a-f0-9]{8,64}\.(?:bin|png|jpg)$/) }).parse(payload);
+    const { id, assetId } = z.object({ id: sessionIdSchema, assetId: z.string().max(100).regex(/^[a-f0-9]{8,64}\.(?:bin|png|jpg)$/) }).parse(payload);
     return recordedInputImage(id, assetId);
   });
-  handle('sessions:imageStorage', async () => getImageStorage());
+  handle('sessions:imageStorage', async (payload) => {
+    const { id } = payload === undefined ? {} : z.object({ id: sessionIdSchema.optional() }).parse(payload);
+    return getImageStorage(id);
+  });
   handle('sessions:clearImageStorage', async (payload) => {
-    const { mode } = z.object({ mode: z.enum(['oldest-gib', 'all']) }).parse(payload);
-    const result = await clearImageStorage(mode);
-    // Retired images can belong to any transcript; this is the explicit global invalidation.
-    push('session:changed', { allTranscripts: true } satisfies SessionChange);
+    const parsed = z.discriminatedUnion('mode', [
+      z.object({ mode: z.enum(['oldest-gib', 'all', 'old-chats-gib']), id: sessionIdSchema.optional() }),
+      z.object({ mode: z.enum(['session-images', 'session-texts']), id: sessionIdSchema })
+    ]).parse(payload);
+    const result = await clearImageStorage(parsed.mode, parsed.id);
+    const change: SessionChange = parsed.mode === 'session-images' || parsed.mode === 'session-texts'
+      ? { sessionIds: [parsed.id] }
+      : { allTranscripts: true };
+    // Per-chat cleanup retires references in that chat only; global modes can touch any transcript.
+    push('session:changed', change);
     return result;
   });
   handle('sessions:events', async (payload) => {
