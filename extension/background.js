@@ -1385,12 +1385,13 @@ async function pairOnce(intent = connectionEpoch, reconnect = false) {
  * The app answers 404 for a command that has been cancelled, superseded, or already
  * sent, so a stale marker types nothing.
  */
-async function redeemCommand(id, client, conversationId = null, projectEntry = false) {
+async function redeemCommand(id, client, conversationId = null, projectEntry = false, modelRecoveryNonce = null) {
   await load();
   if (!id || settled.includes(id)) return { ok: true, command: null };
   const body = { id, client };
   if (projectEntry === true) body.projectEntry = true;
   if (typeof conversationId === 'string' && conversationId) body.conversationId = conversationId;
+  if (modelRecoveryNonce) body.modelRecoveryNonce = modelRecoveryNonce;
   const result = await call('/commands/redeem', { method: 'POST', body: JSON.stringify(body) });
   if (result.status === 404) return { ok: true, command: null, gone: true };
   // Another page already owns this command. Not an error to report: this page simply is not
@@ -1569,6 +1570,21 @@ async function ackDesktopInput(id, owner, conversationId, messageId) {
 function commandMarkerId(value) {
   const id = typeof value === 'string' ? value.trim() : '';
   return id && id.length <= 128 ? id : null;
+}
+
+/** A recovery may reload only its own marked fresh home, never a conversation or Project. */
+function modelRecoveryHome(tab, id, clean) {
+  if (!tab || tab.incognito || tab.pendingUrl) return false;
+  try {
+    const url = new URL(tab.url);
+    if (url.origin !== 'https://chatgpt.com' || url.pathname !== '/') return false;
+    const fragment = new URLSearchParams(url.hash.slice(1));
+    const queryId = url.searchParams.get('clf'), hashId = fragment.get('clf');
+    if ((queryId || hashId) !== id || (queryId && queryId !== id) || (hashId && hashId !== id)) return false;
+    const allowed = clean ? ['clf'] : ['clf', 'model', 'reasoning_effort'];
+    return [...url.searchParams.keys()].every(key => allowed.includes(key)) &&
+      [...fragment.keys()].every(key => key === 'clf');
+  } catch { return false; }
 }
 
 /**
@@ -5403,14 +5419,55 @@ const HANDLERS = {
     const result = await call('/commands/step', { method: 'POST', body: JSON.stringify(body) });
     return { ok: result.ok === true };
   },
+  /** Prepare only one same-tab, pre-Send handoff. No prompt or credential rides the URL. */
+  async model_recovery(message, _sender, source) {
+    const id = commandMarkerId(message.id), client = String(message.client || '');
+    if (!id || !client || client.length > 64 || !message.diagnostic ||
+        JSON.stringify(message.diagnostic).length > 8192 || !ownsDocument(source) || !browserId ||
+        !modelRecoveryHome(await chrome.tabs.get(source.tab).catch(() => null), id, false) ||
+        !ownsDocument(source)) return { ok: false };
+    const storageKey = 'clfModelRecovery:' + source.tab;
+    try {
+      const prior = (await chrome.storage.session.get(storageKey))[storageKey];
+      if (prior?.id === id) return { ok: false };
+      const nonce = [...globalThis.crypto.getRandomValues(new Uint8Array(16))].map(byte => byte.toString(16).padStart(2, '0')).join('');
+      // Session storage survives service-worker suspension, but not a browser
+      // restart. A duplicated tab or restarted browser has no such tab custody.
+      await chrome.storage.session.set({ [storageKey]: { id, nonce, documentId: source.documentId } });
+      if (!ownsDocument(source) || !modelRecoveryHome(await chrome.tabs.get(source.tab).catch(() => null), id, false) ||
+          !ownsDocument(source)) return { ok: false };
+      const result = await call('/commands/model-recovery', { method: 'POST', body: JSON.stringify({
+        id, client, nonce, diagnostic: message.diagnostic
+      }) });
+      return { ok: result.ok === true && result.data?.allowed === true && ownsDocument(source) };
+    } catch { return { ok: false }; }
+  },
   /** The marked page asking for the one command it was opened for. */
-  async redeem(message) {
-    return redeemCommand(
-      String(message.id || ''),
+  async redeem(message, _sender, source) {
+    const id = String(message.id || '');
+    let nonce = null;
+    const storageKey = 'clfModelRecovery:' + source?.tab;
+    if (!message.conversationId && !message.projectEntry && ownsDocument(source)) {
+      try {
+        const saved = (await chrome.storage.session.get(storageKey))[storageKey];
+        if (saved?.id === id && saved.documentId !== source.documentId &&
+            modelRecoveryHome(await chrome.tabs.get(source.tab).catch(() => null), id, true) &&
+            ownsDocument(source)) nonce = saved.nonce;
+      } catch { /* A missing proof cannot transfer a recovery lease. */ }
+    }
+    const result = await redeemCommand(
+      id,
       String(message.client || ''),
       typeof message.conversationId === 'string' ? message.conversationId : null,
-      message.projectEntry === true
+      message.projectEntry === true,
+      nonce
     );
+    if (nonce && result.command?.modelRecoveryUsed === true) {
+      // The app now owns the new RUN_ID. An idempotent retry from that document
+      // needs no nonce; another document cannot inherit it.
+      try { await chrome.storage.session.remove(storageKey); } catch {}
+    }
+    return result;
   },
   /**
    * A revival page has positively identified the exact target chat but it is not submit-ready
@@ -5626,6 +5683,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'settings_get',
     'repair_fiber',
     'redeem',
+    'model_recovery',
     'command_step',
     'defer_revival',
     'forget_revival',
@@ -5681,6 +5739,7 @@ chrome.tabs.onRemoved.addListener((id) => {
   }
   void serializeTab(id, async () => {
     await load();
+    try { await chrome.storage.session.remove('clfModelRecovery:' + id); } catch {}
     const key = String(id), removal = tabRemovals[key];
     const byExtension = Boolean(removal && removal.documentId === tabDocuments[key] &&
       removal.navigationEpoch === tabEpochs[key] && removal.conversationId === tabConversations[key]);

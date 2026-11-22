@@ -674,6 +674,7 @@ function loadWorker(options: {
     setTimeout: options.clock?.setTimeout ?? setTimeout,
     clearTimeout: options.clock?.clearTimeout ?? clearTimeout,
     URL,
+    URLSearchParams,
     TextEncoder,
     crypto: globalThis.crypto,
     console
@@ -2684,6 +2685,46 @@ describe('active agent tab discard protection', () => {
       { note: 'input-held', reason: 'recovery-question-changed', inputId, conversationId },
       { note: 'input-held', reason: 'recovery-question-changed', inputId, conversationId }
     ]);
+  });
+
+  it('passes the recovery nonce only to a new document on the same clean-address tab', async () => {
+    const session = new FakeStorageArea();
+    const local = new FakeStorageArea(paired);
+    const prepare: any[] = [], redeems: any[] = [];
+    const clean = 'https://chatgpt.com/?clf=cmd-recover#clf=cmd-recover';
+    const initial = 'https://chatgpt.com/?clf=cmd-recover&model=gpt-6&reasoning_effort=high';
+    const urls = new Map([[41, initial], [42, clean]]);
+    const options = { local, session, tabsGet: async (id: number) => ({ id, url: urls.get(id) }),
+      fetch: async (input: string, init?: Record<string, unknown>) => {
+        const path = new URL(input).pathname, body = JSON.parse(String(init?.body || '{}'));
+        if (path === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (path === '/commands/model-recovery') { prepare.push(body); return response(200, { allowed: true }); }
+        if (path === '/commands/redeem') { redeems.push(body); return response(200, { command: { id: 'cmd-recover', modelRecoveryUsed: !!body.modelRecoveryNonce } }); }
+        return response(200, { ok: true, repairs: [] });
+      } };
+    const first = loadWorker(options);
+    await first.registerTab(41, 'old-document');
+    const call = { type: 'model_recovery', id: 'cmd-recover', client: 'old-owner', diagnostic: { attempt: 2 } };
+    expect(await first.send(call, 41, 'old-document')).toEqual({ ok: true });
+    expect(await first.send(call, 41, 'old-document')).toEqual({ ok: false });
+    expect(prepare).toHaveLength(1);
+    expect(prepare[0].nonce).toMatch(/^[a-f0-9]{32}$/);
+    // A service worker can be suspended during navigation. Its replacement
+    // gets the one local storage.session record, not a URL credential.
+    const second = loadWorker(options);
+    const redeem = { type: 'redeem', id: 'cmd-recover', client: 'new-owner' };
+    await second.registerTab(42, 'copied-document');
+    await second.send(redeem, 42, 'copied-document');
+    expect(redeems.at(-1)?.modelRecoveryNonce).toBeUndefined();
+    urls.set(41, clean);
+    await second.registerTab(41, 'new-document');
+    await second.send(redeem, 41, 'new-document');
+    expect(redeems.at(-1)?.modelRecoveryNonce).toBe(prepare[0].nonce);
+    await second.send(redeem, 41, 'new-document');
+    expect(redeems.at(-1)?.modelRecoveryNonce).toBeUndefined();
+    expect(session.data['clfModelRecovery:41']).toBeUndefined();
+    expect(second.tabsCreate).not.toHaveBeenCalled();
+    expect(second.tabsReload).not.toHaveBeenCalled();
   });
 
   it('relays a page bootstrap step to the app by name and id only (#882)', async () => {

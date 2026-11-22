@@ -8871,6 +8871,132 @@ describe('delivering a bootstrap', () => {
     expect(opened[0]).not.toContain('model=');
   });
 
+  it.each(['ordinary', 'restart', 'concurrent', 'already-inserting', 'wrong-browser', 'wrong-choice', 'cancelled', 'cancel-race'] as const)(
+    'hands a repeated GPT-6 High take-back to one clean-address document (%s)', async scenario => {
+      await pair();
+      spawn({ workers: [{ task: 'recover one exact start', model: 'gpt-6', reasoning_effort: 'high' }],
+        caller: { conversationId: PRIME_CHAT } });
+      await waitForOpened(1);
+      const id = pendingCommands()[0]!.id, browser = 'a'.repeat(32), nonce = 'b'.repeat(32);
+      const read = (client: string, credentials: string | null = nonce, owner = browser) =>
+        request('POST', '/commands/redeem', { browser: owner, body: { id, client, ...(credentials ? { modelRecoveryNonce: credentials } : {}) } });
+      const initial = await read('old-doc', null);
+      expect(initial.status).toBe(200);
+      expect(initial.body.command).toMatchObject({ model: 'gpt-6', reasoningEffort: 'high' });
+      await request('POST', '/commands/step', { browser, body: { id, client: 'old-doc',
+        step: scenario === 'already-inserting' ? 'inserting' : 'model' } });
+      const high = { model: 'gpt-6-thinking', effort: 'high' }, instant = { model: 'gpt-6', effort: 'none' };
+      const diagnostic = { attempt: 2, phase: 'close', outcome: 'failed', failure: 'changed', failedPhase: 'close', failedVersion: null,
+        requested: { model: 'gpt-6', effort: 'high' }, resolved: high, before: instant, selected: high,
+        after: scenario === 'wrong-choice' ? high : instant, targetVersion: null, observedVersion: 'latest', restore: 'not-needed',
+        closed: true, offered: [{ ...high, available: true }], offeredTruncated: false, elapsedMs: 400, visibility: 'visible' };
+      const prepare = (n = nonce, client = 'old-doc', owner = browser) =>
+        request('POST', '/commands/model-recovery', { browser: owner, body: { id, client, nonce: n, diagnostic } });
+      if (scenario === 'already-inserting' || scenario === 'wrong-choice') {
+        expect((await prepare()).body.allowed).toBe(false);
+        expect((await read('foreign-doc')).status).toBe(409);
+        return;
+      }
+      if (scenario === 'wrong-browser') {
+        expect((await prepare(nonce, 'foreign-doc', 'c'.repeat(32))).body.allowed).toBe(false);
+      }
+      if (scenario === 'concurrent') {
+        const results = await Promise.all([prepare(), prepare('d'.repeat(32))]);
+        expect(results.filter(result => result.body.allowed)).toHaveLength(1);
+        if (!results[0]!.body.allowed) {
+          expect((await read('new-doc', 'd'.repeat(32))).status).toBe(200);
+          expect((await read('foreign-doc', nonce)).status).toBe(409);
+          return;
+        }
+      } else expect((await prepare()).body.allowed).toBe(true);
+      expect((await read('old-doc', null)).status).toBe(409);
+      expect((await read('foreign-doc', null)).status).toBe(409);
+      expect((await read('foreign-doc', nonce, 'c'.repeat(32))).status).toBe(409);
+      expect((await prepare()).body.allowed).toBe(false);
+      const cancel = () => request('POST', '/commands/ack', { browser, body: {
+        id, client: 'old-doc', status: 'failed', error: 'model recovery cancelled', detail: 'model-recovery-cancelled'
+      } });
+      if (scenario === 'cancelled') {
+        expect((await cancel()).status).toBe(200);
+        expect((await read('new-doc')).status).not.toBe(200);
+        return;
+      }
+      if (scenario === 'cancel-race') {
+        const [cancelled, adopted] = await Promise.all([cancel(), read('new-doc')]);
+        expect([cancelled, adopted].filter(result => result.status === 200)).toHaveLength(1);
+        return;
+      }
+      if (scenario === 'restart') {
+        await flushDurable();
+        resetBridgeForTests();
+        await restoreCommands();
+      }
+      const recovered = await read('new-doc');
+      expect(recovered.status).toBe(200);
+      expect(recovered.body.command).toMatchObject({ model: 'gpt-6', reasoningEffort: 'high', modelRecoveryUsed: true });
+      expect(recovered.body.command.expiresAt).toBeLessThanOrEqual(initial.body.command.expiresAt);
+      expect((await read('new-doc', null)).body.command?.modelRecoveryUsed).toBe(true);
+      expect((await read('copy-doc')).status).toBe(409);
+      expect((await prepare(nonce, 'new-doc')).body.allowed).toBe(false);
+      expect(opened).toHaveLength(1);
+    });
+
+  it.each(['commit', 'refuse', 'lost'] as const)('keeps the original resume brief and High through one clean-address document (%s)', async outcome => {
+    await pair();
+    const index = ['commit', 'refuse', 'lost'].indexOf(outcome);
+    const from = `9191919${index}-1111-4222-8333-444444444444`;
+    const to = `9191919${index}-1111-4222-8333-555555555555`;
+    const source = await request('POST', '/events', { body: { conversationId: from, events: [
+      { kind: 'user_message', time: Date.now(), text: 'original task', messageId: 'model-recover-source' },
+      { kind: 'model_selection', time: Date.now(), model: 'gpt-6-thinking', reasoningEffort: 'high' }
+    ] } });
+    const sessionId = source.body.sessionId;
+    const token = await readyContinuation(sessionId, 'KEEP THIS BRIEF', from);
+    const command = queueResume(sessionId, token)!;
+    await waitForOpened(1);
+    const id = command.id, browser = 'a'.repeat(32), nonce = 'b'.repeat(32);
+    const read = (client: string, recovery = false) => request('POST', '/commands/redeem', { browser, body: {
+      id, client, ...(recovery ? { modelRecoveryNonce: nonce } : {})
+    } });
+    const first = await read('old-resume');
+    expect(first.status).toBe(200);
+    expect(first.body.command).toMatchObject({ model: 'gpt-6-thinking', reasoningEffort: 'high' });
+    expect(first.body.command.text).toContain('KEEP THIS BRIEF');
+    await request('POST', '/commands/step', { browser, body: { id, client: 'old-resume', step: 'model' } });
+    const high = { model: 'gpt-6-thinking', effort: 'high' }, medium = { model: 'gpt-6-thinking', effort: 'medium' };
+    const diagnostic = { attempt: 2, phase: 'close', outcome: 'failed', failure: 'changed', failedPhase: 'close', failedVersion: null,
+      requested: high, resolved: high, before: medium, selected: high, after: medium, targetVersion: null, observedVersion: 'latest',
+      restore: 'not-needed', closed: true, offered: [{ ...high, available: true }], offeredTruncated: false, elapsedMs: 400, visibility: 'visible' };
+    const prepared = await request('POST', '/commands/model-recovery', { browser, body: { id, client: 'old-resume', nonce, diagnostic } });
+    expect(prepared.body.allowed).toBe(true);
+    const checkpoint = (client: string, flag: string) => request('POST', '/compact', { browser, body: {
+      token, commandId: id, client, [flag]: true
+    } });
+    expect((await checkpoint('old-resume', 'destinationAttempt')).status).toBe(409);
+    const second = await read('new-resume', true);
+    expect(second.status).toBe(200);
+    expect(second.body.command).toMatchObject({ model: 'gpt-6-thinking', reasoningEffort: 'high', modelRecoveryUsed: true });
+    expect(second.body.command.text).toBe(first.body.command.text);
+    expect((await checkpoint('old-resume', 'destinationDispatch')).status).toBe(409);
+    if (outcome === 'lost') {
+      expect((await checkpoint('new-resume', 'destinationAttempt')).body.allowed).toBe(true);
+      expect((await checkpoint('new-resume', 'destinationDispatch')).body.armed).toBe(true);
+      expect((await checkpoint('new-resume', 'destinationLost')).body.released).toBe(true);
+    } else {
+      const ack = outcome === 'commit' ? { status: 'sent', conversationId: to } : { status: 'failed', error: 'High was not confirmed' };
+      if (outcome === 'commit') {
+        expect((await checkpoint('new-resume', 'destinationAttempt')).body.allowed).toBe(true);
+        expect((await checkpoint('new-resume', 'destinationDispatch')).body.armed).toBe(true);
+      }
+      const result = await request('POST', '/commands/ack', { browser, body: { id, client: 'new-resume', ...ack } });
+      expect(result.status).toBe(200);
+      expect(result.body.committed).toBe(outcome === 'commit');
+    }
+    expect((await getSession(sessionId))?.conversationId).toBe(outcome === 'commit' ? to : from);
+    expect(opened).toHaveLength(1);
+    expect(pendingCommands()).toHaveLength(0);
+  });
+
   it('keeps a dropped worker transport durable until the failed broker state is durable', async () => {
     await pair();
     spawn({ workers: [{ task: 'overflow crash-order worker' }], caller: { conversationId: PRIME_CHAT } });

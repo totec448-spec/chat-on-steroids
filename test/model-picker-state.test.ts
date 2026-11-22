@@ -278,6 +278,18 @@ it('keeps consistent native High on the passive path without opening a picker', 
   expect(opened).not.toHaveBeenCalled();
   expect(page.window.document.querySelector('[data-testid="composer-intelligence-picker-content"]')).toBeNull();
 });
+it.each(['en', 'ru'])('re-proves the exact closed picker without selecting or opening it (%s)', async lang => {
+  const f = fixture('', null), trigger = nativeReasoningTrigger();
+  page.window.document.documentElement.lang = lang;
+  const opened = vi.fn();
+  trigger.addEventListener('keydown', opened);
+  expect(await f.api.confirmCurrentModelSettings('gpt-5-6-thinking', 'high')).toBe(true);
+  trigger.setAttribute('data-selected-reasoning-effort', 'medium');
+  expect(await f.api.confirmCurrentModelSettings('gpt-5-6-thinking', 'high')).toBe(false);
+  expect(await f.api.confirmCurrentModelSettings('gpt-5-6-thinking', 'medium')).toBe(false);
+  expect(await f.api.confirmCurrentModelSettings('gpt-5-6-thinking', 'high', () => false)).toBe(false);
+  expect(opened).not.toHaveBeenCalled();
+});
 it('rechecks a contradictory passive selection through the owned picker', async () => {
   const f = fixture(), trigger = nativeReasoningTrigger();
   trigger.setAttribute('data-selected-reasoning-effort', 'medium');
