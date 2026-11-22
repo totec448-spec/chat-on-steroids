@@ -56,6 +56,18 @@ it('freezes one literal unambiguous metadata match into the durable input owner'
   expect(row.autoSkills![0]!.revision).toMatch(/^[0-9a-f]{64}$/);
 });
 
+it('does not auto-select a managed Skill after it has been disabled', async () => {
+  const { setManagedSkillEnabled } = await import('../src/main/skills.js');
+  await install('code-review', 'Code Review', 'Review source code changes for correctness.');
+  await enableAutoRouting();
+  await setManagedSkillEnabled('code-review', false);
+  const row = await enqueueInput(request('Please use Code Review for this change.'));
+  expect(routedIds(row)).toEqual([]);
+  await setManagedSkillEnabled('code-review', true);
+  const next = await enqueueInput(request('Please use Code Review for this change.'));
+  expect(routedIds(next)).toEqual(['code-review']);
+});
+
 it('routes and injects a Japanese request with an attached particle through the real input owner', async () => {
   await install('code-review', 'Code Review', 'Review source code changes for correctness and maintainability.');
   await enableAutoRouting();

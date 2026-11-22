@@ -686,6 +686,33 @@ Retries/restarts reuse that record instead of rerouting. Prompt preparation read
 managed body through the existing selected-Skill path and rejects it if its revision changed.
 The Skill list in that prompt stays complete: managed Skills come from the published catalog
 (no body re-read), while personal, project and Codex plugin Skills are discovered as without routing.
+The installed managed card calls `skillsOpenFolder(id)` and `skillsSetEnabled(id, enabled)` on
+the fixed preload API. IPC validates `skills:openFolder { id }` and `skills:setEnabled { id, enabled }`
+and verifies the installed package in main. Folder opening returns success or an error. Linked
+directories require the current approved-root read capability and open their canonical target.
+The toggle returns the managed list with `ManagedSkill.enabled`; older entries that omit it
+display as enabled. Disabled cards stay visible. The published catalog, explicit selection
+and automatic routing omit disabled packages, including stale selections and discovered
+aliases of approved linked packages.
+
+`main/skills.ts` owns the local UTF-8 registry `<userData>/skills/.disabled-skills.json`.
+Version 1 has exactly the keys in `{"version":1,"disabled":["skill-id"]}`. The array holds up
+to 128 unique, valid managed installation IDs (the canonical lowercase directory basenames).
+The file is limited to 16,384 bytes and must be a regular file. Writes are serialized and
+publish a sorted array via same-directory atomic replacement before reporting success.
+Package files and origin metadata are independent of the registry. Successful uninstall ends
+that installation's entry. Startup and later writes reconcile interrupted uninstall cleanup
+only when no directory entry still owns the ID, including damaged packages and case variants.
+On upgrade from a profile with no registry, all managed Skills start enabled. Invalid,
+unreadable or unsupported state fails initialization with an empty catalog and a safe
+diagnostic rather than silently enabling packages.
+
+#2180 must use this registry and preserve existing managed IDs and their disabled status.
+Its draft `.cos-disabled-skills.json` and 512-entry policy are not part of the shipped contract.
+Before extending activation to discovered Skills, define stable identities and cleanup for
+each new scope so managed-directory cleanup cannot discard a discovered entry. Any change to
+the schema, identity namespace or accepted limits needs explicit, tested compatibility for
+existing v1 data and fail-closed handling by readers that cannot interpret the new state.
 An explicit queued-message edit clears the automatic record rather than silently rerouting changed
 text; a new explicit Skill directive in that edited text is still authoritative at preparation.
 Explicit slash/picker selection never combines with the automatic record. Routing grants no root,
@@ -1897,6 +1924,13 @@ its reply is not read). Anything else is held as `draft` as before. A
 `repairHeld` reply stamps `claimAskedAt`, so a page that keeps holding never spends the no-page
 offer budget.
 
+Before a browser repair reloads an open chat, its fresh per-repair tab scan checks both Chrome's
+`pendingUrl` and `url` for ChatGPT's exact `temporary-chat=true` flag. If either has it, the
+extension leaves the page open and reports `repairAction=preserved&preservedFor=temporary-chat`;
+the bridge logs `Temporary Chat, not reloaded`. A Compact & Resume pickup may already count before
+that receipt, but the continuation stays pending and can queue its next scheduled pickup; its
+separate accounting is not changed here.
+
 Direct active-turn corrections freeze `directTurn` in the same outbox entry. The exact turn
 start decides eligibility; earlier or running MCP calls do not revoke it. Recheck the exact claim
 before Send. Navigation, a newer question or an occupied draft during preparation can revoke
@@ -2435,21 +2469,19 @@ one state (`recordingStorageFull()`, set by a write the global limit refused, cl
 write or a clean-up that leaves room): it is logged once per change, travels as
 `AppState.recordingStorageFull`, and the window shows one dismissible notice that opens the clean-up.
 The same clean-up is in Settings → Browser → Browser & history (Recording storage), which
-reads the usage when Settings opens. There is no automatic
-eviction. The adjacent Free storage action offers explicit oldest-1-GiB or all-recorded-image
-cleanup with confirmation; chat text, original files and pending attachments remain. Its third mode,
-`old-chats-gib`, takes whole chats whose `updatedAt` is over 7 days old, oldest first, until about
-1 GiB is chosen, and removes their images and long-text (`.txt`) assets. A retired long text keeps
+reads the usage when Settings opens (`sessions:imageStorage`, preload `getImageStorage(id?)`). There is no automatic
+eviction. The adjacent Free storage action (`sessions:clearImageStorage`, preload `clearImageStorage(mode, id?)`) offers explicit oldest-1-GiB (`oldest-gib`), all-recorded-image (`all`), or 7-day-old chat (`old-chats-gib`, which takes whole chats whose `updatedAt` is over 7 days old, oldest first, until about 1 GiB is chosen, and removes their images and `.txt` long-text assets) cleanup with confirmation. When opened from a chat, `sessions:imageStorage { id }` also returns per-chat `session` usage (`imageBytes` vs `textBytes` against the chat's 192 MiB cap), clarifies that global image cleanups leave long texts in active chats untouched, and offers targeted per-chat cleanup (`session-images`, `session-texts`, publishing `{ sessionIds: [id] }` instead of `{ allTranscripts: true }`); chat text, original files and pending attachments remain. A retired long text keeps
 its `StoredText` head, loses `assetId` (or a change's `reviewAssetId`), and its note reads
-"…[N more characters removed to free storage]". Only keyed user/assistant messages and tool calls
+"…[N more characters removed to free storage]" and records `retiredTextAssetIds` on keyed user/assistant messages so repeated observations of an unchanged message cannot re-spill removed `.txt` assets (across reloads or restarts). Only keyed user/assistant messages and tool calls
 are rewritten; a text that any other record (or a rewritten one) still names stays on disk. Store owns
 serialized image inventory, durable reference retirement and physical removal. A removed native
 provider tuple cannot silently refill the cache when the page is observed again.
 Opening the cleanup dialog reuses the store's maintained quota total; a cold read counts file
-metadata without opening image contents. Confirmed cleanup retains full image verification and
-shows an immediate busy message until success or failure; its final recount is metadata-only.
+metadata for the global total. The per-chat breakdown checks image headers to match image cleanup
+and keeps other binary assets in the quota total. Confirmed cleanup retains full verification and
+shows an immediate busy message until success or failure; its final recount is metadata-only and leaves `usedBytes` as `null` if a post-cleanup global recount fails so the completed cleanup still returns and emits `session:changed`.
 Cleanup choices and Close are available before usage loads. Closing the dialog leaves its one
-requested operation running; reopening rejoins that same promise and retains its result. No
+requested operation running; reopening while active rejoins that same promise, and reopening after a global cleanup fetches current usage while retaining the prior freed total. Completion toasts stay session-neutral so switching chats never attributes one chat's cleanup to another. No
 poller or automatic cleanup loop is involved; completion also reports the actual freed bytes.
 The renderer groups adjacent same-response images into two columns, bounds loaded previews,
 and uses compact failure cards. Exact selection generations prevent old pages from filling a
@@ -6261,7 +6293,11 @@ reason, and answers with `Connection: close`.
 
 The action routes (`control-actions.ts`) are `POST /v1/inputs` (send a message to an existing chat,
 or without `sessionId` start a new chat with it, optionally in a `projectId`; the new session's id
-is the message id, as for the composer's New chat; an optional `model` and `reasoningEffort`, always
+is the message id, as for the composer's New chat, so a retry of an id whose row aged out of the outbox
+(it keeps the last 50 finished rows) while that chat already holds its ChatGPT conversation admits nothing: 409
+`already_delivered` when the chat recorded its first user message (that count outlives the row), else 409
+`not_delivered` naming the resend route (`sessionId` plus a new id), because the opening binds the conversation
+before the first send is proven (#2247, #2248); an optional `model` and `reasoningEffort`, always
 together, must resolve in the saved catalog to an entry offering that effort and are filed under its
 id, else 409 `models_unknown`, `model_unknown` or `effort_unavailable`; without them the row keeps
 null and ChatGPT its own selection), `POST /v1/inputs/{id}/cancel`, and
