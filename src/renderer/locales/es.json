@@ -1,11 +1,11 @@
 {
   "Keep running when the tab is closed": "Seguir trabajando con la pestaña cerrada",
-  "Closing the tab will not stop Goal or Loop. Stop, Pause or Block still do.": "Cerrar la pestaña no detendrá Goal ni Loop. Detener, pausar o bloquear sí lo harán.",
+  "Closing the tab will not stop Goal or Loop. Stop, Pause or Block still do.": "Cerrar la pestaña no detendrá Objetivo ni Bucle. Detener, pausar o bloquear sí lo harán.",
   "Waiting to reopen the closed tab once.": "Esperando a reabrir una vez la pestaña cerrada.",
   "The browser is closed or disconnected. Recovery waits until you open it.": "El navegador está cerrado o desconectado. La recuperación espera a que lo abras.",
   "The tab was not reopened: recovery is limited to once every three minutes.": "No se reabrió la pestaña: la recuperación se limita a una vez cada tres minutos.",
   "The tab was not reopened: automatic work is paused.": "No se reabrió la pestaña: el trabajo automático está en pausa.",
-  "The tab was not reopened: no current authorized Goal or Loop work.": "No se reabrió la pestaña: no hay trabajo actual autorizado de Goal o Loop.",
+  "The tab was not reopened: no current authorized Goal or Loop work.": "No se reabrió la pestaña: no hay trabajo actual autorizado de Objetivo o Bucle.",
   "The tab was not reopened: this browser cannot safely recover it.": "No se reabrió la pestaña: este navegador no puede recuperarla de forma segura.",
   "The tab was not reopened: recovery permission was withdrawn.": "No se reabrió la pestaña: se revocó el permiso de recuperación.",
   "The tab was already open again. Nothing was reloaded.": "La pestaña ya estaba abierta de nuevo. No se recargó nada.",

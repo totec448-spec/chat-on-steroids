@@ -1,11 +1,11 @@
 {
   "Keep running when the tab is closed": "關閉分頁後繼續工作",
-  "Closing the tab will not stop Goal or Loop. Stop, Pause or Block still do.": "關閉分頁不會停止 Goal 或 Loop。停止、暫停或封鎖仍然有效。",
+  "Closing the tab will not stop Goal or Loop. Stop, Pause or Block still do.": "關閉分頁不會停止目標或循環。停止、暫停或封鎖仍然有效。",
   "Waiting to reopen the closed tab once.": "正在等待重新開啟已關閉的分頁一次。",
   "The browser is closed or disconnected. Recovery waits until you open it.": "瀏覽器已關閉或中斷連線。復原將等到您開啟瀏覽器。",
   "The tab was not reopened: recovery is limited to once every three minutes.": "未重新開啟分頁：復原操作最多每三分鐘一次。",
   "The tab was not reopened: automatic work is paused.": "未重新開啟分頁：自動工作已暫停。",
-  "The tab was not reopened: no current authorized Goal or Loop work.": "未重新開啟分頁：目前沒有獲准的 Goal 或 Loop 工作。",
+  "The tab was not reopened: no current authorized Goal or Loop work.": "未重新開啟分頁：目前沒有獲准的目標或循環工作。",
   "The tab was not reopened: this browser cannot safely recover it.": "未重新開啟分頁：此瀏覽器無法安全復原分頁。",
   "The tab was not reopened: recovery permission was withdrawn.": "未重新開啟分頁：復原權限已撤銷。",
   "The tab was already open again. Nothing was reloaded.": "分頁已重新開啟。未重新載入任何內容。",

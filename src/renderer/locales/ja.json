@@ -1,11 +1,11 @@
 {
   "Keep running when the tab is closed": "タブを閉じても作業を続ける",
-  "Closing the tab will not stop Goal or Loop. Stop, Pause or Block still do.": "タブを閉じても Goal や Loop は停止しません。停止、一時停止、ブロックは引き続き有効です。",
+  "Closing the tab will not stop Goal or Loop. Stop, Pause or Block still do.": "タブを閉じてもゴールやループは停止しません。停止、一時停止、ブロックは引き続き有効です。",
   "Waiting to reopen the closed tab once.": "閉じたタブを一度だけ再度開くのを待っています。",
   "The browser is closed or disconnected. Recovery waits until you open it.": "ブラウザーが閉じているか、接続されていません。ブラウザーを開くまで復旧を待ちます。",
   "The tab was not reopened: recovery is limited to once every three minutes.": "タブを再度開きませんでした。復旧は3分に1回までです。",
   "The tab was not reopened: automatic work is paused.": "タブを再度開きませんでした。自動作業が一時停止中です。",
-  "The tab was not reopened: no current authorized Goal or Loop work.": "タブを再度開きませんでした。現在許可された Goal または Loop の作業がありません。",
+  "The tab was not reopened: no current authorized Goal or Loop work.": "タブを再度開きませんでした。現在許可されたゴールまたはループの作業がありません。",
   "The tab was not reopened: this browser cannot safely recover it.": "タブを再度開きませんでした。このブラウザーでは安全に復旧できません。",
   "The tab was not reopened: recovery permission was withdrawn.": "タブを再度開きませんでした。復旧の許可が取り消されました。",
   "The tab was already open again. Nothing was reloaded.": "タブはすでに開いていました。再読み込みはしていません。",

@@ -1,11 +1,11 @@
 {
   "Keep running when the tab is closed": "Sekme kapalıyken çalışmaya devam et",
-  "Closing the tab will not stop Goal or Loop. Stop, Pause or Block still do.": "Sekmeyi kapatmak Goal veya Loop'u durdurmaz. Durdurma, duraklatma ve engelleme hâlâ geçerlidir.",
+  "Closing the tab will not stop Goal or Loop. Stop, Pause or Block still do.": "Sekmeyi kapatmak Hedef veya Döngü'yü durdurmaz. Durdurma, duraklatma ve engelleme hâlâ geçerlidir.",
   "Waiting to reopen the closed tab once.": "Kapalı sekmenin bir kez yeniden açılması bekleniyor.",
   "The browser is closed or disconnected. Recovery waits until you open it.": "Tarayıcı kapalı veya bağlantısı kesilmiş. Kurtarma, tarayıcıyı açmanızı bekliyor.",
   "The tab was not reopened: recovery is limited to once every three minutes.": "Sekme yeniden açılmadı: kurtarma üç dakikada bir ile sınırlıdır.",
   "The tab was not reopened: automatic work is paused.": "Sekme yeniden açılmadı: otomatik çalışma duraklatıldı.",
-  "The tab was not reopened: no current authorized Goal or Loop work.": "Sekme yeniden açılmadı: şu anda yetkili Goal veya Loop işi yok.",
+  "The tab was not reopened: no current authorized Goal or Loop work.": "Sekme yeniden açılmadı: şu anda yetkili Hedef veya Döngü işi yok.",
   "The tab was not reopened: this browser cannot safely recover it.": "Sekme yeniden açılmadı: bu tarayıcı güvenli kurtarma yapamıyor.",
   "The tab was not reopened: recovery permission was withdrawn.": "Sekme yeniden açılmadı: kurtarma izni geri alındı.",
   "The tab was already open again. Nothing was reloaded.": "Sekme zaten yeniden açıktı. Hiçbir şey yeniden yüklenmedi.",

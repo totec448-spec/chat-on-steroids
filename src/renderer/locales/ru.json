@@ -1,11 +1,11 @@
 {
   "Keep running when the tab is closed": "Продолжать работу при закрытой вкладке",
-  "Closing the tab will not stop Goal or Loop. Stop, Pause or Block still do.": "Закрытие вкладки не остановит Goal или Loop. Stop, Pause и Block по-прежнему останавливают работу.",
+  "Closing the tab will not stop Goal or Loop. Stop, Pause or Block still do.": "Закрытие вкладки не остановит Цель или Цикл. Остановка, пауза и блокировка по-прежнему останавливают работу.",
   "Waiting to reopen the closed tab once.": "Ожидание однократного открытия закрытой вкладки.",
   "The browser is closed or disconnected. Recovery waits until you open it.": "Браузер закрыт или отключён. Восстановление ждёт, пока вы его откроете.",
   "The tab was not reopened: recovery is limited to once every three minutes.": "Вкладка не открыта: восстановление разрешено не чаще раза в три минуты.",
   "The tab was not reopened: automatic work is paused.": "Вкладка не открыта: автоматическая работа приостановлена.",
-  "The tab was not reopened: no current authorized Goal or Loop work.": "Вкладка не открыта: нет текущей разрешённой работы Goal или Loop.",
+  "The tab was not reopened: no current authorized Goal or Loop work.": "Вкладка не открыта: нет текущей разрешённой работы Цели или Цикла.",
   "The tab was not reopened: this browser cannot safely recover it.": "Вкладка не открыта: этот браузер не может безопасно её восстановить.",
   "The tab was not reopened: recovery permission was withdrawn.": "Вкладка не открыта: разрешение на восстановление отозвано.",
   "The tab was already open again. Nothing was reloaded.": "Вкладка уже открыта. Перезагрузки не было.",
