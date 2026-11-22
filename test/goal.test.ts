@@ -104,6 +104,30 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
+it('keeps closed-tab recovery opt-in per chat through mode changes, restore and continuation', async () => {
+  const first = 'c-keep-running-first', other = 'c-keep-running-other', next = 'c-keep-running-next';
+  await goal.setGoalSwitchNow(first, 'goal', true);
+  await goal.setGoalSwitchNow(other, 'loop', true);
+  expect(goal.goalKeepsRunningWhenTabClosed(first)).toBe(false);
+  expect(goal.goalKeepsRunningWhenTabClosed(other)).toBe(false);
+  await goal.setGoalKeepRunningNow(first, true);
+  expect(goal.goalKeepsRunningWhenTabClosed(first)).toBe(true);
+  expect(goal.goalKeepsRunningWhenTabClosed(other)).toBe(false);
+  await goal.setGoalSwitchNow(first, 'loop', true);
+  await goal.setGoalSwitchNow(first, 'loop', false);
+  expect(goal.goalSwitchFor(first).enabled).toBe(false);
+  const saved = goal.snapshotGoalSwitches();
+  goal.restoreGoalSwitches(saved);
+  expect(goal.goalKeepsRunningWhenTabClosed(first)).toBe(true);
+  expect(goal.goalSwitchFor(first).enabled).toBe(false);
+  expect(goal.moveGoalSwitch(first, next)).toBe(true);
+  expect(goal.goalKeepsRunningWhenTabClosed(first)).toBe(false);
+  expect(goal.goalKeepsRunningWhenTabClosed(next)).toBe(true);
+  await goal.setGoalKeepRunningNow(next, false);
+  expect(goal.goalKeepsRunningWhenTabClosed(next)).toBe(false);
+  expect(goal.goalSwitchFor(next).enabled).toBe(false);
+});
+
 it('preserves the Astra delivery preference across Goal/Loop, restart and finish-setting changes', async () => {
   const config = (await import('../src/main/config.js')).getConfig();
   await saveConfig({ ...config, ui: { ...config.ui, finishTool: true } });
