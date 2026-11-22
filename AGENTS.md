@@ -1501,7 +1501,9 @@ repository takes one checkpoint: a temporary index outside the repository, seede
 repository's own index (`rev-parse --git-path index`) so its stat data lets `add -A` hash only
 what changed, then `add -A` of the project folder and `write-tree`. Before `add`, assume-unchanged
 flags for the project are cleared in the temporary index only, so they cannot hide pre-edit bytes;
-the user's index and its flags stay unchanged. With no index to copy, or when
+the user's index and its flags stay unchanged. NUL-delimited filename bytes stay opaque, including
+non-UTF-8 POSIX names. An unreadable/malformed flag inventory skips capture rather than discarding
+the seeded index and losing staged ignored files. With no index to copy, or when
 the seeded index cannot be written as a tree, it starts again from `read-tree` of HEAD. Paths
 outside the project keep what the seed holds; nothing compares or restores them. It writes Git objects only: no ref, branch, HEAD,
 user index or working file changes, and every checkpoint Git command passes
