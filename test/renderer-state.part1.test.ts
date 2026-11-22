@@ -2458,3 +2458,77 @@ it('moves a chat to a project from its menu and undoes it from the toast (#1919)
   await waitFor(() => expect(toastText()).toBe('Moved out of its project. ChatGPT keeps it where it was.'));
   closeRowMenus(doc);
 });
+
+it('rebuilds the turn-changes card when the open chat moves into a project, and reuses it while the project stays the same', async () => {
+  const base = { startedAt: 1, updatedAt: 2, endedAt: null, events: 4, userMessages: 1, toolCalls: 1,
+    lastToolCallAt: 11_000, processExitNonzero: 0, toolRejected: 0, toolInternalErrors: 0, errors: 0,
+    estimatedTokens: 0, contextTokens: 0, lastTurnOutcome: 'completed' as const, activeTurnId: null, agents: [], origin: null };
+  const website = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000021';
+  let chat: Record<string, unknown> = { ...base, id: 'move-turn-0001', title: 'Checkpointed chat', conversationId: 'move-turn-conv-0001', chatIds: ['move-turn-conv-0001'] };
+  const events = [
+    { seq: 10, time: 10_000, source: 'extension', kind: 'turn_start', turnId: 't-1' },
+    { seq: 11, time: 11_000, source: 'app', kind: 'tool_call', turnId: 't-1', call: { id: 'c-1', tool: 'apply_patch',
+      outcome: 'ok', durationMs: 1, args: { text: '', chars: 0 }, result: { text: '', chars: 0 },
+      summary: { kind: 'edit', tone: 'good', title: 'Edited src/app.ts' },
+      changes: [{ path: 'src/app.ts', added: 1, removed: 0, approximate: false }] } },
+    { seq: 12, time: 12_000, source: 'extension', kind: 'assistant_message', turnId: 't-1', messageId: 'm-1',
+      message: { text: 'Done.', chars: 5 }, final: true, state: 'final' },
+    { seq: 13, time: 13_000, source: 'extension', kind: 'turn_end', turnId: 't-1', outcome: 'completed' }
+  ];
+  const groups = { version: 1, groups: [], members: {} };
+  const turnChanges = vi.fn(async () => ({
+    ok: true,
+    data: {
+      changes: [{ path: 'src/app.ts', state: 'edited', added: 1, removed: 0, approximate: false, diff: 'kept', edits: 1 }],
+      total: 1,
+      checkpointRef: 'cp-1'
+    }
+  }));
+  const restoreTurnCheckpoint = vi.fn(async () => ({
+    ok: true,
+    data: { confirmed: true, restored: ['src/app.ts'], skipped: [], undoRef: null }
+  }));
+  const moveChatProject = vi.fn(async (_id: string, projectId: string | null) => {
+    const from = (chat.projectId as string | undefined) ?? null;
+    chat = { ...chat, projectId: projectId ?? undefined };
+    return { ok: true, data: { from, fromGroup: null, groups, summaries: [chat] } };
+  });
+  const mounted = await mountChat({}, [], {
+    listProjects: async () => ({ ok: true, data: [{ id: website, name: 'Website', path: '/work/website', createdAt: 1 }] }),
+    listSessions: async () => ({ ok: true, data: { sessions: [chat], activeId: null, pressure: [], blocked: [], trusted: [] } }),
+    getSession: async () => ({ ok: true, data: { summary: chat, events, hasMore: false } }),
+    turnChanges,
+    restoreTurnCheckpoint,
+    moveChatProject
+  });
+  const doc = mounted.window.document;
+  const row = () => doc.querySelector<HTMLElement>(`[data-id="${chat.id}"]`)!;
+  await waitFor(() => expect(row()).not.toBeNull());
+  row().querySelector<HTMLElement>('.sess-top')!.click();
+  await waitFor(() => expect(doc.querySelector('.turn-changes')).not.toBeNull());
+  const cardBefore = doc.querySelector<HTMLDetailsElement>('.turn-changes')!;
+  cardBefore.open = true;
+  cardBefore.dispatchEvent(new mounted.window.Event('toggle'));
+  await waitFor(() => expect(cardBefore.querySelector('.turn-change')).not.toBeNull());
+  expect(cardBefore.querySelector('.turn-changes-restore')).toBeNull();
+
+  rowMenuItem(row(), 'move-to-project')!.click();
+  doc.querySelector<HTMLButtonElement>(`[data-row-action="project-${website}"]`)!.click();
+  await waitFor(() => expect(moveChatProject).toHaveBeenCalledWith(chat.id, website, undefined));
+  await waitFor(() => expect(doc.querySelector('.turn-changes')).not.toBe(cardBefore));
+
+  const cardAfter = doc.querySelector<HTMLDetailsElement>('.turn-changes')!;
+  const answerRowAfter = cardAfter.closest<HTMLElement>('[data-timeline-key]')!;
+  cardAfter.open = true;
+  cardAfter.dispatchEvent(new mounted.window.Event('toggle'));
+  await waitFor(() => expect(cardAfter.querySelector<HTMLButtonElement>('.turn-changes-restore')).not.toBeNull());
+  cardAfter.querySelector<HTMLButtonElement>('.turn-changes-restore')!.click();
+  await waitFor(() => expect(restoreTurnCheckpoint).toHaveBeenCalledWith(chat.id, 't-1', 10));
+
+  // Repainting while the project stays unchanged preserves the cached row and card.
+  mounted.push({ ...mounted.state });
+  await waitFor(() => expect(doc.querySelector<HTMLElement>('[data-timeline-key]')?.closest('#timeline')).not.toBeNull());
+  expect(doc.querySelector<HTMLDetailsElement>('.turn-changes')).toBe(cardAfter);
+  expect(doc.querySelector<HTMLDetailsElement>('.turn-changes')!.closest<HTMLElement>('[data-timeline-key]')).toBe(answerRowAfter);
+  closeRowMenus(doc);
+});

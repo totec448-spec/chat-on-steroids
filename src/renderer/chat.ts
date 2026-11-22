@@ -279,6 +279,8 @@ async function moveChatToProject(sessionId: string, projectId: string | null, gr
   // Rows the sidebar already shows take the moved chats' new summaries, also from older history.
   const shown = (moved.summaries ?? []).filter(summary => sessions.some(row => row.id === summary.id));
   if (shown.length) { mergeSessionRows(shown); paintSessions(); }
+  if (selectedId !== null && (selectedId === sessionId || shown.some(summary => summary.id === selectedId) ||
+      sessions.find(row => row.id === selectedId)?.origin?.fromSessionId === sessionId)) paintDetail(false);
   if (undo) { toast(t('Move undone')); return; }
   const project = projectId ? projects.find(row => row.id === projectId) : undefined;
   const linked = [moved.from, projectId].some(id => id && projects.find(row => row.id === id)?.chatgpt?.state === 'linked');
@@ -7207,7 +7209,7 @@ function paintDetail(followBottom = historyBefore === null): void {
     // Its final text is not held. The shown text itself is compared: a revision can rewrite it to the same length.
     const sig = (held ? `${itemSignature({ kind: 'event', event: { ...held, seq: 0, time: 0, renderedHtml: undefined } })}\u0000held${JSON.stringify(held.references ?? [])}\u0000${held.message.text}`
       : itemSignature(item)) + (item.kind === 'event' && item.event.kind === 'chat_error'
-      ? JSON.stringify(chatErrorPresentation(item.event, events)) : '') + (answerTurn || looseAnswer ? '\u0000answer' : '') + (changedFiles ? `\u0000changes:${loadedEdits}` : '') +
+      ? JSON.stringify(chatErrorPresentation(item.event, events)) : '') + (answerTurn || looseAnswer ? '\u0000answer' : '') + (changedFiles ? `\u0000changes:${loadedEdits}:${project?.id ?? ''}` : '') +
       (item.kind === 'event' && stoppedTurnEnd(item.event, events) ? '\u0000stopped' : '') +
       (item.kind === 'compaction' && item !== latestCompaction ? '\u0000superseded' : '') +
       (item.kind === 'event' && editableQuestion(item.event, events) ? `\u0000edit:${laterMessages.get(item.event.seq) ?? 0}` : '');
