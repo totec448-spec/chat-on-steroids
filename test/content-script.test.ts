@@ -18168,7 +18168,7 @@ describe('the fresh chat the app opened', () => {
     const gone = { model: 'gpt-6-thinking', effort: 'medium' }, chosen = { model: 'gpt-6-thinking', effort: 'high' };
     const run = async (outcomes: Array<{ confirmed: boolean; failure?: string; failedPhase?: string; after?: typeof gone }>,
       kind: 'worker' | 'resume' = 'worker', model = 'gpt-6-thinking', recovered = false,
-      permit = false, proofs = [true, true]) => {
+      permit = false, proofs = [true, true], interruptFirst = false) => {
       let release!: (value: unknown) => void;
       const redeemed = new Promise(resolve => { release = resolve; });
       const workerChat = '27272727-3838-4949-8a8a-909090909090';
@@ -18189,8 +18189,9 @@ describe('the fresh chat the app opened', () => {
       (live.window as any).CLF_DOM.selectModelSettings = vi.fn(async (_model: string, _effort: string, _current: unknown, diagnostic: (trace: unknown) => void) => {
         const outcome = outcomes[Math.min(picks, outcomes.length - 1)]!;
         picks++;
+        if (interruptFirst && picks === 1) announcement(live!.document);
         diagnostic({ outcome: outcome.confirmed ? 'confirmed' : 'failed', failure: outcome.failure ?? null, failedPhase: outcome.failedPhase ?? null,
-          resolved: chosen, selected: chosen, after: outcome.after ?? chosen });
+          closed: outcome.failedPhase === 'close', resolved: chosen, selected: chosen, after: outcome.after ?? chosen });
         return outcome.confirmed;
       });
       const confirm = vi.fn(async () => proofs.shift() ?? false);
@@ -18256,6 +18257,15 @@ describe('the fresh chat the app opened', () => {
       expect(seen.sent.filter(message => message.type === 'model_recovery')).toHaveLength(1);
       expect(seen.url).toBe('https://chatgpt.com/?clf=cmd-takeback#clf=cmd-takeback');
       expect(seen.steps).not.toContain('inserting');
+      expect(seen.steps).not.toContain('sending');
+    });
+
+    it('does not spend recovery when the first try was only interrupted by an announcement', async () => {
+      const seen = await run([{ confirmed: false, failure: 'changed', failedPhase: 'close', after: chosen },
+        { confirmed: false, failure: 'changed', failedPhase: 'close', after: gone }],
+        'worker', 'gpt-6', false, true, [true, true], true);
+      expect(seen.picks).toBe(2);
+      expect(seen.sent.filter(message => message.type === 'model_recovery')).toHaveLength(0);
       expect(seen.steps).not.toContain('sending');
     });
 

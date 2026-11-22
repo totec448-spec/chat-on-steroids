@@ -22,6 +22,7 @@ interface DomApi {
   stopGeneration(current: () => boolean): boolean;
   inspectModelSettings(current?: () => boolean, failure?: (reason: string) => void): Promise<Array<{id: string; label: string; efforts: string[]}> | null>;
   send(options?: { acceptanceTimeoutMs?: number; stillCurrent?: () => boolean; beforeSend?: () => Promise<boolean>;
+    beforeClick?: (current: () => boolean) => Promise<boolean>;
     mention?: { path: string; name: string } | null; explain?: (why: string) => void }): Promise<boolean>;
   selectModelSettings(model: string | null, effort: string | null, current?: () => boolean): Promise<boolean>;
   uploadImages(images: Array<{ name: string; dataUrl: string }>, current?: () => boolean, draft?: ReturnType<DomApi['captureComposerDraft']>, files?: File[]): Promise<boolean>;
@@ -1160,6 +1161,32 @@ describe('Core app mention on app-owned sends (#861)', () => {
     redraw.observe(box, { childList: true });
     expect(await sendMention({ beforeSend: async () => true })).toBe(true);
     expect(clicked).toBe(true);
+  });
+  it.each(['unchanged', 'replaced', 'route', 'revoked'])('binds final model proof to the post-mention Send control (%s)', async state => {
+    redrawingEditor();
+    const clicks = vi.fn(() => {
+      dom.reconfigure({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+      mentionedUser('Exact app prompt'); box.replaceChildren();
+    });
+    button.addEventListener('click', clicks);
+    let release!: (allowed: boolean) => void;
+    const proof = vi.fn((_current: () => boolean) => new Promise<boolean>(resolve => { release = resolve; }));
+    const sending = api.send({ mention, beforeSend: async () => true, beforeClick: proof, acceptanceTimeoutMs: 2000 });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(proof).toHaveBeenCalledTimes(1);
+    expect(box.querySelector('[app-mention-path][contenteditable="false"]')).not.toBeNull();
+    if (state === 'replaced') {
+      const fresh = button.cloneNode(true) as HTMLButtonElement;
+      fresh.addEventListener('click', clicks);
+      button.replaceWith(fresh);
+    }
+    if (state === 'route') dom.reconfigure({ url: 'https://chatgpt.com/c/bbbbbbbb-cccc-dddd-eeee-ffffffffffff' });
+    expect(proof.mock.calls[0]![0]()).toBe(state !== 'replaced' && state !== 'route');
+    release(state !== 'revoked');
+    await vi.advanceTimersByTimeAsync(2100);
+    expect(await sending).toBe(state === 'unchanged');
+    expect(proof).toHaveBeenCalledTimes(1);
+    expect(clicks).toHaveBeenCalledTimes(state === 'unchanged' ? 1 : 0);
   });
   it('sends exactly as before without a mention', async () => {
     const insert = vi.spyOn(document, 'execCommand');

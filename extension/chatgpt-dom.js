@@ -2891,10 +2891,11 @@ var CLF_DOM = (() => {
             if (provedControl && control !== provedControl) return finish(false, 'send-not-ready');
             // Authorization can await the app. The exact editor, text and native control
             // must still be the ones it authorized; a late answer cannot revive this send.
-            if (!stillCurrent() || conversationId() !== beforeConversation || composer() !== box ||
-                !box.isConnected || draftText() !== (mentionedDraft ?? submitted) || busy() || sendButton() !== control ||
-                !sendButtonEnabled(control) || box.getAttribute('aria-disabled') === 'true' ||
-                box.getAttribute('contenteditable') === 'false') return finish(false, 'send-not-ready');
+            const ready = () => !done && stillCurrent() && conversationId() === beforeConversation && composer() === box &&
+              box.isConnected && draftText() === (mentionedDraft ?? submitted) && !busy() && sendButton() === control &&
+              sendButtonEnabled(control) && box.getAttribute('aria-disabled') !== 'true' &&
+              box.getAttribute('contenteditable') !== 'false';
+            if (!ready()) return finish(false, 'send-not-ready');
             if (mention && !mentionTried) {
               mentionTried = true;
               priorMentions = new Set(box.querySelectorAll('[app-mention-path]'));
@@ -2918,8 +2919,7 @@ var CLF_DOM = (() => {
             if (beforeClick && !provedControl) {
               authorizing = true;
               try {
-                Promise.resolve(beforeClick(() => !done && stillCurrent() && composer() === box &&
-                  draftText() === (mentionedDraft ?? submitted) && !busy()))
+                Promise.resolve(beforeClick(ready))
                   .then(allowed => allowed === true ? click(resumed, control) : finish(false, 'not-authorized'),
                     () => finish(false, 'not-authorized'));
               } catch { finish(false, 'not-authorized'); }

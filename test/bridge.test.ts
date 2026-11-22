@@ -8871,7 +8871,7 @@ describe('delivering a bootstrap', () => {
     expect(opened[0]).not.toContain('model=');
   });
 
-  it.each(['ordinary', 'restart', 'concurrent', 'already-inserting', 'wrong-browser', 'wrong-choice', 'cancelled', 'cancel-race'] as const)(
+  it.each(['ordinary', 'restart', 'concurrent', 'already-inserting', 'late-model-step', 'foreign-step', 'wrong-browser', 'wrong-choice', 'foreign-ack', 'foreign-redeem', 'prepare-expired', 'cancelled', 'cancel-race'] as const)(
     'hands a repeated GPT-6 High take-back to one clean-address document (%s)', async scenario => {
       await pair();
       spawn({ workers: [{ task: 'recover one exact start', model: 'gpt-6', reasoning_effort: 'high' }],
@@ -8884,7 +8884,10 @@ describe('delivering a bootstrap', () => {
       expect(initial.status).toBe(200);
       expect(initial.body.command).toMatchObject({ model: 'gpt-6', reasoningEffort: 'high' });
       await request('POST', '/commands/step', { browser, body: { id, client: 'old-doc',
-        step: scenario === 'already-inserting' ? 'inserting' : 'model' } });
+        step: scenario === 'already-inserting' || scenario === 'late-model-step' || scenario === 'foreign-step' ? 'inserting' : 'model' } });
+      if (scenario === 'late-model-step' || scenario === 'foreign-step')
+        await request('POST', '/commands/step', { browser: scenario === 'foreign-step' ? 'c'.repeat(32) : browser,
+          body: { id, client: 'old-doc', step: 'model' } });
       const high = { model: 'gpt-6-thinking', effort: 'high' }, instant = { model: 'gpt-6', effort: 'none' };
       const diagnostic = { attempt: 2, phase: 'close', outcome: 'failed', failure: 'changed', failedPhase: 'close', failedVersion: null,
         requested: { model: 'gpt-6', effort: 'high' }, resolved: high, before: instant, selected: high,
@@ -8892,13 +8895,39 @@ describe('delivering a bootstrap', () => {
         closed: true, offered: [{ ...high, available: true }], offeredTruncated: false, elapsedMs: 400, visibility: 'visible' };
       const prepare = (n = nonce, client = 'old-doc', owner = browser) =>
         request('POST', '/commands/model-recovery', { browser: owner, body: { id, client, nonce: n, diagnostic } });
-      if (scenario === 'already-inserting' || scenario === 'wrong-choice') {
+      if (scenario === 'already-inserting' || scenario === 'late-model-step' || scenario === 'foreign-step' || scenario === 'wrong-choice') {
         expect((await prepare()).body.allowed).toBe(false);
         expect((await read('foreign-doc')).status).toBe(409);
         return;
       }
       if (scenario === 'wrong-browser') {
         expect((await prepare(nonce, 'foreign-doc', 'c'.repeat(32))).body.allowed).toBe(false);
+      }
+      if (scenario === 'foreign-redeem') {
+        expect((await read('old-doc', null, 'c'.repeat(32))).status).toBe(409);
+      }
+      if (scenario === 'foreign-ack') {
+        const rejected = await request('POST', '/commands/ack', { browser: 'c'.repeat(32), body: {
+          id, client: 'old-doc', status: 'failed', error: 'foreign browser' } });
+        expect(rejected.status).toBe(409);
+      }
+      if (scenario === 'prepare-expired') {
+        const durable = await import('../src/main/durable.js');
+        const original = durable.writeDurableNow;
+        const clock = vi.spyOn(Date, 'now');
+        const write = vi.spyOn(durable, 'writeDurableNow').mockImplementation(async (name, value) => {
+          await original(name, value);
+          if (name === 'bridge-commands' && (value as any)?.commands?.some((row: any) => row.modelRecovery?.nonce === nonce))
+            clock.mockReturnValue(initial.body.command.expiresAt + 1);
+        });
+        try {
+          const prepared = await prepare();
+          expect(prepared.body.allowed).toBe(false);
+        } finally { write.mockRestore(); clock.mockRestore(); }
+        // Even if the clock subsequently moves back, the refused permit is spent.
+        expect((await read('new-doc')).status).not.toBe(200);
+        expect(opened).toHaveLength(1);
+        return;
       }
       if (scenario === 'concurrent') {
         const results = await Promise.all([prepare(), prepare('d'.repeat(32))]);
@@ -8941,9 +8970,9 @@ describe('delivering a bootstrap', () => {
       expect(opened).toHaveLength(1);
     });
 
-  it.each(['commit', 'refuse', 'lost'] as const)('keeps the original resume brief and High through one clean-address document (%s)', async outcome => {
+  it.each(['commit', 'refuse', 'lost', 'expired-dispatch', 'attempted-source', 'foreign-checkpoint'] as const)('keeps the original resume brief and High through one clean-address document (%s)', async outcome => {
     await pair();
-    const index = ['commit', 'refuse', 'lost'].indexOf(outcome);
+    const index = ['commit', 'refuse', 'lost', 'expired-dispatch', 'attempted-source', 'foreign-checkpoint'].indexOf(outcome);
     const from = `9191919${index}-1111-4222-8333-444444444444`;
     const to = `9191919${index}-1111-4222-8333-555555555555`;
     const source = await request('POST', '/events', { body: { conversationId: from, events: [
@@ -8967,18 +8996,37 @@ describe('delivering a bootstrap', () => {
     const diagnostic = { attempt: 2, phase: 'close', outcome: 'failed', failure: 'changed', failedPhase: 'close', failedVersion: null,
       requested: high, resolved: high, before: medium, selected: high, after: medium, targetVersion: null, observedVersion: 'latest',
       restore: 'not-needed', closed: true, offered: [{ ...high, available: true }], offeredTruncated: false, elapsedMs: 400, visibility: 'visible' };
-    const prepared = await request('POST', '/commands/model-recovery', { browser, body: { id, client: 'old-resume', nonce, diagnostic } });
-    expect(prepared.body.allowed).toBe(true);
-    const checkpoint = (client: string, flag: string) => request('POST', '/compact', { browser, body: {
+    const checkpoint = (client: string, flag: string, owner = browser) => request('POST', '/compact', { browser: owner, body: {
       token, commandId: id, client, [flag]: true
     } });
+    if (outcome === 'foreign-checkpoint')
+      expect((await checkpoint('old-resume', 'destinationAttempt', 'c'.repeat(32))).status).toBe(409);
+    if (outcome === 'attempted-source')
+      expect((await checkpoint('old-resume', 'destinationAttempt')).body.allowed).toBe(true);
+    const prepared = await request('POST', '/commands/model-recovery', { browser, body: { id, client: 'old-resume', nonce, diagnostic } });
+    if (outcome === 'attempted-source') {
+      expect(prepared.body.allowed).toBe(false);
+      expect((await read('new-resume', true)).body.command?.modelRecoveryUsed).not.toBe(true);
+      expect((await getSession(sessionId))?.conversationId).toBe(from);
+      return;
+    }
+    expect(prepared.body.allowed).toBe(true);
     expect((await checkpoint('old-resume', 'destinationAttempt')).status).toBe(409);
     const second = await read('new-resume', true);
     expect(second.status).toBe(200);
     expect(second.body.command).toMatchObject({ model: 'gpt-6-thinking', reasoningEffort: 'high', modelRecoveryUsed: true });
     expect(second.body.command.text).toBe(first.body.command.text);
     expect((await checkpoint('old-resume', 'destinationDispatch')).status).toBe(409);
-    if (outcome === 'lost') {
+    if (outcome === 'expired-dispatch') {
+      expect((await checkpoint('new-resume', 'destinationAttempt')).body.allowed).toBe(true);
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(second.body.command.expiresAt + 1);
+      try {
+        expect((await checkpoint('new-resume', 'destinationDispatch')).status).toBe(409);
+        expect(continuationByToken(token)?.destinationSend.state).not.toBe('dispatched-unresolved');
+      } finally { clock.mockRestore(); }
+      expect((await request('POST', '/commands/ack', { browser, body: {
+        id, client: 'new-resume', status: 'failed', error: 'The recovery deadline expired' } })).status).toBe(200);
+    } else if (outcome === 'lost') {
       expect((await checkpoint('new-resume', 'destinationAttempt')).body.allowed).toBe(true);
       expect((await checkpoint('new-resume', 'destinationDispatch')).body.armed).toBe(true);
       expect((await checkpoint('new-resume', 'destinationLost')).body.released).toBe(true);
