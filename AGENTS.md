@@ -1499,7 +1499,9 @@ the port's explicit line-ending mode and readable parse/match failures.
 turn (standalone or intercepted from `exec_command`) in a session's own Local Project Git
 repository takes one checkpoint: a temporary index outside the repository, seeded as a copy of the
 repository's own index (`rev-parse --git-path index`) so its stat data lets `add -A` hash only
-what changed, then `add -A` of the project folder and `write-tree`. With no index to copy, or when
+what changed, then `add -A` of the project folder and `write-tree`. Before `add`, assume-unchanged
+flags for the project are cleared in the temporary index only, so they cannot hide pre-edit bytes;
+the user's index and its flags stay unchanged. With no index to copy, or when
 the seeded index cannot be written as a tree, it starts again from `read-tree` of HEAD. Paths
 outside the project keep what the seed holds; nothing compares or restores them. It writes Git objects only: no ref, branch, HEAD,
 user index or working file changes, and every checkpoint Git command passes
@@ -2179,7 +2181,9 @@ transport; receipt loss cannot justify switching to browser Send.
 Renderer/browser receive opaque ids, names, sizes, MIME and bounded previews, never source paths.
 Up to 20 files and 512 MiB total per message are locally admitted; provider limits can still
 reject an upload. Staging has a 2 GiB quota, serialized pruning/admission, and preserves outbox-
-retained bytes. Thumbnails do not modify originals or prove provider upload success.
+retained bytes. A failed multi-file staging batch removes its own completed originals and metadata
+under the staging lock, never earlier drafts/outbox members; failed rollback removals are logged
+and remain subject to normal expiry. Thumbnails do not modify originals or prove provider upload success.
 Image clipboard data and file drops anywhere in the window target the currently visible chat
 draft; the Folders card keeps its explicit folder-drop owner, and ordinary text paste/drop keeps
 its native editor behavior. Async import results carry both the draft key and its replacement
@@ -2474,7 +2478,9 @@ eviction. The adjacent Free storage action (`sessions:clearImageStorage`, preloa
 its `StoredText` head, loses `assetId` (or a change's `reviewAssetId`), and its note reads
 "…[N more characters removed to free storage]" and records `retiredTextAssetIds` on keyed user/assistant messages so repeated observations of an unchanged message cannot re-spill removed `.txt` assets (across reloads or restarts). Only keyed user/assistant messages and tool calls
 are rewritten; a text that any other record (or a rewritten one) still names stays on disk. Store owns
-serialized image inventory, durable reference retirement and physical removal. A removed native
+serialized image inventory, durable reference retirement and physical removal. Inventory and retirement
+failures reject the returned cleanup operation only; the cross-queue retirement handoff carries an
+outcome, never an unobserved rejection when inventory fails before selection. A removed native
 provider tuple cannot silently refill the cache when the page is observed again.
 Opening the cleanup dialog reuses the store's maintained quota total; a cold read counts file
 metadata for the global total. The per-chat breakdown checks image headers to match image cleanup
