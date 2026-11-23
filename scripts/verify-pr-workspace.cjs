@@ -270,13 +270,34 @@ app.whenReady().then(async () => {
     await js(`window.fixture.setLanguage('ja')`);
     assert.equal(await js('document.querySelector(".file-editor-save").disabled'),true);
     assert.ok(await js(`(()=>{const button=document.querySelector('.file-editor-refresh').getBoundingClientRect();const pane=document.querySelector('.file-preview').getBoundingClientRect();return button.left>=pane.left&&button.right<=pane.right})()`));
-    await screenshot('editor-saved-preview-unavailable-ja-narrow');
     await js(`document.querySelector('.file-editor-refresh').click()`);
     await until('!!document.querySelector(".file-editor-save") && !document.querySelector(".file-editor-save").disabled');
     assert.ok(await js('document.querySelector(".file-preview .cm-content").textContent.includes("value = 4")'));
     await js(`window.fixtureSaveWithoutPreview=false;document.querySelector('.file-editor-save').click()`);
     await until('!document.querySelector(".file-editor-save")');
     assert.equal(await js('window.fixtureSaves.at(-1).text'),'export const value = 4;');
+    // Generate the notice after switching to Japanese, rather than capturing an English
+    // notice that was already on screen. Exercise the complete recovery in this language.
+    await js(`window.fixtureSaveWithoutPreview=true;document.querySelector('.file-preview [title="'+window.fixture.t('Edit')+'"]').click()`);
+    await until('!!document.querySelector(".file-preview.is-editing .cm-editor")');
+    await js(`window.fixture.edit('export const value = 5;');document.querySelector('.file-editor-save').click()`);
+    await until('!!document.querySelector(".file-editor-refresh") && !!document.querySelector(".file-preview.is-editing .cm-editor")');
+    assert.equal(await js('document.querySelector(".toast")?.textContent'),
+      'example.tsを保存しました。もう一度保存する前にファイルを再読み込みしてください。');
+    assert.equal(await js('document.querySelector(".file-editor-refresh").getAttribute("aria-label")'),'ファイルを更新');
+    await js(`window.fixture.edit('export const value = 6;')`);
+    assert.equal(await js('document.querySelector(".file-editor-save").disabled'),true);
+    assert.ok(await js(`(()=>{const button=document.querySelector('.file-editor-refresh').getBoundingClientRect();const pane=document.querySelector('.file-preview').getBoundingClientRect();return button.left>=pane.left&&button.right<=pane.right})()`));
+    await screenshot('editor-saved-preview-unavailable-ja-narrow');
+    await js(`document.querySelector('.file-editor-refresh').click()`);
+    await until('!!document.querySelector(".file-editor-save") && !document.querySelector(".file-editor-save").disabled');
+    assert.ok(await js('document.querySelector(".file-preview .cm-content").textContent.includes("value = 6")'));
+    await js(`window.fixtureSaveWithoutPreview=false;document.querySelector('.file-editor-save').click()`);
+    await until('!document.querySelector(".file-editor-save")');
+    assert.equal(await js('window.fixtureSaves.at(-1).text'),'export const value = 6;');
+    await until('document.querySelector(".file-code-viewer-host .cm-content")?.textContent.includes("value = 6")');
+    assert.equal(await js('document.querySelector(".toast")?.textContent'),'example.tsを保存しました');
+    await screenshot('editor-resaved-ja-narrow');
     win.setSize(1500,1000);
     await js(`window.fixture.setLanguage('en')`);
     await js(`document.querySelector('.file-tree-row[data-path="preview.pdf"]').click()`);
@@ -395,8 +416,8 @@ app.whenReady().then(async () => {
     await until('!document.getElementById("sidebarConnection").classList.contains("has-label") && document.getElementById("sidebarConnection").classList.contains("is-connected")');
     const errors=await js('window.fixtureErrors');
     assert.deepEqual(errors,[]);
-    fs.writeFileSync(path.join(output,'results.json'),JSON.stringify({renderer:'current source in Chromium; synthetic backend',results,save:true,draftRoundTrip:true,gitChanges:true,pdf:true,connection:bounds,skillsDraftRoundTrip:true,sharedLibrary:true,sidebar:true,composer,agentMonitor:{latestActivity:true,actionCount:true},errors},null,2));
-    console.log('PASS: current renderer Files layouts, Agent Monitor activity/count, read-only Git Changes/diff, real editor draft navigation, PDF rendering, connection status, Skills chips/shared library, Projects/Chats, Spanish and Traditional Chinese. '+output);
+    fs.writeFileSync(path.join(output,'results.json'),JSON.stringify({renderer:'current source in Chromium; synthetic backend',results,save:true,japaneseSaveRecovery:true,draftRoundTrip:true,gitChanges:true,pdf:true,connection:bounds,skillsDraftRoundTrip:true,sharedLibrary:true,sidebar:true,composer,agentMonitor:{latestActivity:true,actionCount:true},errors},null,2));
+    console.log('PASS: current renderer Files layouts, Japanese save notice and refresh/resave recovery, Agent Monitor activity/count, read-only Git Changes/diff, real editor draft navigation, PDF rendering, connection status, Skills chips/shared library, Projects/Chats, Spanish and Traditional Chinese. '+output);
   } finally { win?.destroy(); await server?.close(); }
   app.exit(0);
 }).catch(error=>{console.error(error);app.exit(1)});
