@@ -3986,6 +3986,9 @@
   "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "このチャットから {0} MB を解放しました。現在の使用量は {1} MB / {2} MB です。",
   "Freed {0} MB. Storage usage could not be read.": "{0} MB を解放しました。ストレージの使用量を読み取れませんでした。",
   "Last cleanup: Freed {0} MB.": "前回のクリーンアップ: {0} MB を解放しました。",
+  "Check ChatGPT titles": "ChatGPT のタイトルを確認",
+  "Show a notice in the chat menu when the open ChatGPT chat has a different title.": "開いている ChatGPT チャットのタイトルが異なる場合、チャットメニューに通知を表示します。",
+  "ChatGPT title differs": "ChatGPT のタイトルが異なります",
   "Restore turn": "ターンを復元",
   "Undo in Review": "レビューで元に戻す",
   "Some of these files were also edited in a later turn.": "これらのファイルの一部は後のターンでも編集されています。"

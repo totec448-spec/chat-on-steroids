@@ -2303,6 +2303,8 @@ it('reads the models it understands when ChatGPT lists every model, and skips th
   expect(picker.choices.find((c: any) => c.bucket === 2)).toMatchObject({ id: 'gpt-6-thinking', effort: 'high', available: true });
   // The lane it cannot name is left out, not guessed.
   expect(picker.choices.some((c: any) => c.bucket === 3)).toBe(false);
+  // This catalog fixture selects High in both provider surfaces.
+  f.trigger.setAttribute('data-selected-reasoning-effort', 'high');
   // The content side accepts this picker too, so the send can confirm GPT-6 High.
   expect(await f.api.selectModelSettings('gpt-6-thinking', 'high')).toBe(true);
 });
@@ -2327,6 +2329,7 @@ it('reads a picker of exactly 48 models or lanes and refuses one of 49 (#1905)',
       f.props.powerSelections = lanes; f.props.selectedLabelCandidate = lanes[0]; f.props.selectedPowerSelection = lanes[0];
       const { picker } = await f.ask('clf-picker-ask');
       expect(picker === null, `${count} ${part}`).toBe(!readable);
+      f.trigger.setAttribute('data-selected-reasoning-effort', 'high');
       if (readable) expect(await f.api.selectModelSettings('gpt-6-thinking', 'high'), `${count} ${part}`).toBe(true);
     }
   }

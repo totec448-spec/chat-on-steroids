@@ -51,6 +51,7 @@ import { connectTelegram, disconnectTelegram, onTelegramChange, telegramView, te
 import { DEFAULT_PHONE_PUSH, type PhonePushSettings } from '../shared/phone-push.js';
 import { retryGoalBrowserHelper } from './goal.js';
 import { requestBrowserPreferences } from './browser-preferences.js';
+import { cancelWebChatTitleCheck, readWebChatTitle } from './web-chat-title.js';
 import { sendDesktopInput, cancelDesktopInput, retryQueuedInputBrowser, retireDesktopOpening } from './session/start-input.js';
 import { isSessionRemoving, withSessionRemoval } from './session/removal.js';
 import { wakeBrowserUrl } from './browser-startup.js';
@@ -116,7 +117,7 @@ import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFi
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
 import { hasSecret, isEncryptionAvailable, readSecretsFor, secureStorageStatus, setAsideUnreadableSecrets, setSecret, setSecrets, storedSecretsUnreadable, type SecretKey } from './secrets.js';
-import { BackupError, buildBackup, changedSettings, widerAccess, exportableSecret, openSecrets, overlaySettings, passphraseLongEnough, pickByShape, readBackup, settingsForBackup, type ParsedBackup } from './settings-backup.js';
+import { BackupError, buildBackup, changedSettings, widerAccess, exportableSecret, openSecrets, overlaySettings, passphraseLongEnough, pickByShape, readBackup, settingsForBackup, withoutPerComputer, type ParsedBackup } from './settings-backup.js';
 import { setupApiKeySlot } from '../shared/setup-profile.js';
 import { addSetupProfile, removeSetupProfile, switchSetupProfile } from './setup-profiles.js';
 import { bundledVersion, locateBinary } from './tunnel/locate.js';
@@ -325,6 +326,7 @@ const settingsPatch = z.object({
     retainDays: z.number().int().min(0).max(3650),
     advisoryTokens: z.number().int().min(10_000).max(4_000_000),
     limitTokens: z.number().int().min(10_000).max(4_000_000),
+    checkWebChatTitles: z.boolean().optional(),
     storageLimitGiB: z.number().refine(size => (RECORDING_STORAGE_LIMITS_GIB as readonly number[]).includes(size))
       .transform(size => size as RecordingStorageLimitGiB).optional()
   }),
@@ -570,6 +572,11 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         wanted.sessions.advisoryTokens
       ),
       limitTokens: pick(current.sessions.limitTokens, base.sessions.limitTokens, wanted.sessions.limitTokens),
+      checkWebChatTitles: pick(
+        current.sessions.checkWebChatTitles ?? false,
+        base.sessions.checkWebChatTitles ?? false,
+        wanted.sessions.checkWebChatTitles ?? base.sessions.checkWebChatTitles ?? false
+      ),
       storageLimitGiB: pick(current.sessions.storageLimitGiB, base.sessions.storageLimitGiB, wanted.sessions.storageLimitGiB)
     },
     compaction: {
@@ -909,7 +916,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
    * Saves the settings and reports, apart from the state, an error that came after they were
    * written (worker history, login item, control API). An error before the write is thrown.
    */
-  const saveSettingsReport = async (request: z.infer<typeof settingsSave>): Promise<{ state: AppState; lateError: unknown }> => {
+  const saveSettingsReport = async (request: z.infer<typeof settingsSave>, importing?: {
+    validate: (config: Config) => void; language: Config['ui']['language'];
+  }): Promise<{ state: AppState; lateError: unknown }> => {
     // The phone settings are checked only when this save changes them, and only while on: a damaged
     // stored value (hand-edited, or from an older version) must not block every other save, nor the
     // save that repairs it or switches it off.
@@ -917,12 +926,16 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const phoneChanged = !!push && JSON.stringify(push) !== JSON.stringify(request.base.ui.phonePush);
     const before = getConfig();
     const next = await updateConfig(async config => {
+      // An import's confirmation is tied to values, checked after earlier settings saves commit.
+      importing?.validate(config);
       if (request.patch.ui.browserBridgePort !== undefined &&
           request.patch.ui.browserBridgePort !== (request.base.ui.browserBridgePort ?? 'auto') &&
           bridgePortSelection().overridden) {
         throw new Error('Browser bridge port is controlled by CLF_BRIDGE_PORTS.');
       }
       const proposed = { ...config, ...mergeSettings(config, request.base, request.patch) };
+      // The normal form keeps language; only an import owns it, in this same guarded commit.
+      if (importing) proposed.ui = { ...proposed.ui, language: importing.language };
       // Checked as it will be saved: the form may be stale, and the merge keeps fields another
       // window changed meanwhile (a cleared topic stays cleared while this save turns it on).
       if (phoneChanged && proposed.ui.phonePush) {
@@ -937,6 +950,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       else if (!config.goal.impulseMinutes && (proposed.goal.impulseMinutes ?? 0) > 0) await cancelFinishInputs(true);
       return proposed;
     }, async (published, previous) => {
+      if (!published.sessions.checkWebChatTitles || published.ui.chatBrowser !== previous.ui.chatBrowser) cancelWebChatTitleCheck();
       if (previous.ui.finishTool && !published.ui.finishTool) await cancelFinishInputs(false);
       else if ((previous.goal.impulseMinutes ?? 0) > 0 && !published.goal.impulseMinutes) await cancelFinishInputs(true);
     }, publishBridgePortChange);
@@ -1072,10 +1086,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
 
   // Settings backup. The file is read and checked in the main process; the renderer sees only a
   // summary and a token, and saved keys never cross to it. Errors are sentences it translates.
-  let pendingImport: { token: string; backup: ParsedBackup; changed: string[]; wider: string[] } | null = null;
+  let pendingImport: { token: string; backup: ParsedBackup; baseline: ReturnType<typeof settingsForBackup> } | null = null;
   // What importing would change, as a save really applies it: mergeSettings keeps the fields the
-  // settings form does not own, so only changes that happen are counted. The interface language
-  // is applied beside the save, since the form never edits it.
+  // settings form does not own, so only changes that happen are counted. An import also applies
+  // the interface language in its guarded save, while ordinary form saves preserve it.
   const importPlan = (backup: ParsedBackup) => {
     const config = getConfig();
     const base = pickByShape(settingsPatch, config);
@@ -1147,7 +1161,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       throw new BackupError('invalid-settings', 'This backup has a setting this version does not accept, so nothing was imported.');
     }
     const { changed, wider } = plan;
-    pendingImport = { token: randomUUID(), backup, changed, wider };
+    pendingImport = { token: randomUUID(), backup, baseline: withoutPerComputer(settingsForBackup(settingsPatch, plan.base)) };
     return {
       token: pendingImport.token, file: path.basename(file), appVersion: backup.appVersion, exportedAt: backup.exportedAt,
       changed, wider, keyCount: backup.secretCount
@@ -1159,7 +1173,20 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       logInfo('settings backup: import refused, its choice is gone or was already used; nothing changed');
       throw new Error('Choose the backup file again.');
     }
-    const { backup } = pendingImport;
+    const choice = pendingImport;
+    const { backup } = choice;
+    const validateImport = (config: Config): void => {
+      // Decryption/preflight can yield while another file is picked or an earlier import ends.
+      if (pendingImport !== choice) {
+        logInfo('settings backup: import refused, its choice is gone or was already used; nothing changed');
+        throw new Error('Choose the backup file again.');
+      }
+      if (changedSettings(choice.baseline, withoutPerComputer(settingsForBackup(settingsPatch, config))).length) {
+        pendingImport = null;
+        logInfo('settings backup: import refused, the settings changed after the file was chosen; nothing changed');
+        throw new Error('Your settings changed after the file was chosen. Choose it again.');
+      }
+    };
     // Keys open first: a wrong passphrase changes nothing, and the dialog can ask again.
     let keys: Record<string, string> = {};
     if (includeKeys && backup.secrets) {
@@ -1168,15 +1195,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         throw error;
       }
     }
-    // Against the settings as they are now. If they changed since the file was chosen (a save still
-    // on its way, another window), the person confirmed a different import: it is refused, so more
-    // access is never granted without the warning the preview showed.
-    const { base, merged, language, changed, wider } = importPlan(backup);
-    if (JSON.stringify(changed) !== JSON.stringify(pendingImport.changed) || JSON.stringify(wider) !== JSON.stringify(pendingImport.wider)) {
-      pendingImport = null;
-      logInfo('settings backup: import refused, the settings changed after the file was chosen; nothing changed');
-      throw new Error('Your settings changed after the file was chosen. Choose it again.');
-    }
+    validateImport(getConfig());
+    const { base, merged, language, changed } = importPlan(backup);
     // Checked before anything changes, so a computer without secure storage gets a clear refusal
     // rather than its settings changed and its keys missing.
     if (Object.keys(keys).length && !(await isEncryptionAvailable())) {
@@ -1193,16 +1213,17 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // language and keys are not left out of a backup whose settings already changed.
     // Said after "Imported", each a sentence the renderer translates on its own.
     const warnings: string[] = [];
+    // Also covers a key-only import after asynchronous secure-storage preflight.
+    validateImport(getConfig());
     if (changed.length) {
       // This save's own report, never an inference from the config: another window's save may land meanwhile.
-      const { lateError } = await saveSettingsReport(settingsSave.parse({ base, patch: merged }));
+      const { lateError } = await saveSettingsReport(settingsSave.parse({ base, patch: merged }), { validate: validateImport, language });
       if (lateError) {
         const message = lateError instanceof Error ? lateError.message : String(lateError);
         warnings.push(message);
         logWarn(`settings backup: the settings were saved, but a later step of the save failed (${message}); the import goes on`);
       }
     }
-    if (language !== getConfig().ui.language) await updateConfig(config => ({ ...config, ui: { ...config.ui, language } }));
     // The settings are written by now: a key write that still fails is reported, never as a failed
     // import, and never by undoing settings (an undo that fails halfway would be worse).
     let keysFailed = false;
@@ -1213,7 +1234,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         warnings.push('The settings were imported, but the saved keys could not be stored. Add them again in Settings.');
       }
     }
-    pendingImport = null;
+    if (pendingImport === choice) pendingImport = null;
     const keyCount = keysFailed ? 0 : Object.keys(keys).length;
     logInfo(`settings backup: imported ${changed.length} changed setting${changed.length === 1 ? '' : 's'}` +
       `${keyCount ? ` and ${keyCount} saved key${keyCount === 1 ? '' : 's'}` : ''}${backup.appVersion ? ` from a ${backup.appVersion} backup` : ''}`);
@@ -1300,8 +1321,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('chatGroups:assign', async payload => {
     const { sessionId, groupId: target } = z.object({ sessionId: sessionIdArg.shape.id, groupId: groupId.nullable() }).strict().parse(payload);
-    const session = await getSession(sessionId);
-    return assignChatGroup(session ? { id: session.id, projectId: session.projectId ?? null, origin: session.origin ?? null } : null, target);
+    return assignChatGroup(() => getSession(sessionId), target);
   });
   // Move to project (#1919): the chat, its sub-agents and its group place change; nothing it does.
   handle('sessions:moveProject', async payload => {
@@ -2516,6 +2536,40 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     }).parse(payload);
     if (!await getSession(id)) throw new Error('Session not found');
     return setBookmark(id, { messageId, excerpt, messageTime }, on);
+  });
+  handle('sessions:checkWebTitle', async (payload) => {
+    const { id } = z.object({ id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i) }).strict().parse(payload);
+    const { ui: { chatBrowser }, sessions: settings } = getConfig();
+    if (!settings.checkWebChatTitles) {
+      logInfo('web chat title: check skipped (disabled)');
+      return 'unavailable';
+    }
+    const chat = await getSession(id);
+    if (chat?.titleSource !== 'manual' || !chat.conversationId) {
+      logInfo('web chat title: check skipped (ineligible session)');
+      return 'unavailable';
+    }
+    if (getConfig().ui.chatBrowser !== chatBrowser) {
+      logInfo('web chat title: check skipped (browser changed)');
+      return 'unavailable';
+    }
+    const title = await readWebChatTitle(chat.conversationId);
+    if (title === null) return 'unavailable';
+    const current = await getSession(id);
+    const config = getConfig();
+    if (config.ui.chatBrowser !== chatBrowser) {
+      logInfo('web chat title: comparison discarded (browser changed)');
+      return 'unavailable';
+    }
+    if (!config.sessions.checkWebChatTitles) {
+      logInfo('web chat title: comparison discarded (disabled)');
+      return 'unavailable';
+    }
+    if (current?.titleSource !== 'manual' || current.conversationId !== chat.conversationId || current.title !== chat.title) {
+      logInfo('web chat title: comparison discarded (session changed)');
+      return 'unavailable';
+    }
+    return title === chat.title ? 'match' : 'different';
   });
   handle('sessions:rename', async (payload) => {
     const { id, title } = sessionNameArg.parse(payload);

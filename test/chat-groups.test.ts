@@ -8,7 +8,8 @@ vi.mock('../src/main/durable.js', () => ({
     if (durable.slowSecondRead && durable.reads === 2) await new Promise(resolve => setTimeout(resolve, 20));
     return value;
   },
-  writeDurableSoon: (_name: string, value: unknown) => { durable.value = structuredClone(value); durable.writes++; }
+  writeDurableSoon: (_name: string, value: unknown) => { durable.value = structuredClone(value); durable.writes++; },
+  writeDurableNow: async (_name: string, value: unknown) => { durable.value = structuredClone(value); durable.writes++; }
 }));
 
 const groups = await import('../src/main/chat-groups.js');
@@ -124,4 +125,60 @@ it('keeps an explicit group choice for a moved chat, null included (#1965)', () 
   expect(groups.movedChatGroup('project-a', 'g1', 'project-a', 'g0')).toBe('g1');
   expect(groups.movedChatGroup('project-a', undefined, 'project-a', 'g0')).toBe('g0');
   expect(groups.movedChatGroup('project-b', undefined, 'project-a', 'g0')).toBeNull();
+});
+
+it('keeps group placement unchanged when the project write fails and releases the mutation queue', async () => {
+  const { group: a } = await groups.createChatGroup('project-a', 'A', exists);
+  const { group: b } = await groups.createChatGroup('project-b', 'B', exists);
+  await groups.assignChatGroup(chat('one'), a.id);
+  await expect(groups.moveChatGroup(chat('one'), 'project-b', b.id, async () => {
+    throw new Error('project write failed');
+  })).rejects.toThrow('project write failed');
+  expect((await groups.chatGroupsState()).members.one).toBe(a.id);
+  await expect(groups.deleteChatGroup(b.id)).resolves.toMatchObject({ members: { one: a.id } });
+});
+
+it('checks the membership limit before starting a project move', async () => {
+  const { MAX_CHAT_GROUP_MEMBERS } = await import('../src/shared/chat-groups.js');
+  durable.value = { version: 1, groups: [{ id: 'target', projectId: 'project-b', name: 'B', createdAt: 1 }],
+    members: Object.fromEntries(Array.from({ length: MAX_CHAT_GROUP_MEMBERS }, (_, index) => [`chat-${index}`, 'target'])) };
+  const move = vi.fn(async () => undefined);
+  await expect(groups.moveChatGroup(chat('one'), 'project-b', 'target', move)).rejects.toThrow('Too many grouped chats');
+  expect(move).not.toHaveBeenCalled();
+  // Existing members can still change projects/groups at the limit, without adding another membership.
+  expect((await groups.chatGroupsState()).members['chat-0']).toBe('target');
+  await expect(groups.moveChatGroup(chat('chat-0'), 'project-b', 'target', move)).resolves.toBeTruthy();
+  expect(move).toHaveBeenCalledTimes(1);
+});
+
+it('logs a queued group mutation once, but not an immediate one', async () => {
+  const { onLog } = await import('../src/main/logger.js');
+  const waits: string[] = [];
+  const stop = onLog(entry => { if (entry.message.startsWith('chat groups: waiting')) waits.push(entry.message); });
+  let release!: () => void, enter!: () => void;
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let moving: Promise<unknown> | undefined, deleting: Promise<unknown> | undefined;
+  try {
+    const { group } = await groups.createChatGroup('project-b', 'B', exists);
+    expect(waits).toEqual([]);
+    moving = groups.moveChatGroup(chat('one'), 'project-b', group.id, async () => { enter(); await gate; });
+    await entered;
+    deleting = groups.deleteChatGroup(group.id);
+    expect(waits).toHaveLength(1);
+    release(); await moving; await deleting;
+    await groups.createChatGroup('project-a', 'A', exists);
+    expect(waits).toHaveLength(1);
+  } finally { release(); await moving; await deleting; stop(); }
+});
+
+
+it.each([
+  { sessionId: '../../bad', fromProjectId: 'a', projectId: 'b', groupId: null },
+  { sessionId: 'valid-chat', fromProjectId: null, projectId: null, groupId: null },
+  { sessionId: 'valid-chat', fromProjectId: null, projectId: 'a'.repeat(36), groupId: 'missing' }
+])('ignores an invalid move intent without losing legacy groups (%j)', async move => {
+  const legacy = { version: 1, groups: [{ id: 'kept', projectId: 'project-a', name: 'Kept', createdAt: 1 }], members: { one: 'kept' } };
+  durable.value = { ...legacy, move };
+  expect(await groups.chatGroupsState()).toEqual(legacy);
 });

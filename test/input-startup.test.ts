@@ -1,16 +1,17 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import type { InputArgs, InputEntry } from '../src/main/session/input.js';
-const ports = vi.hoisted(() => ({ backgroundChats: false, running: false as boolean | null, connect: vi.fn(), status: { state: 'connected', detail: '' },
+const ports = vi.hoisted(() => ({ probe: vi.fn(), backgroundChats: false, running: false as boolean | null, connect: vi.fn(), status: { state: 'connected', detail: '' },
   browser: { connected: false, present: false, lastSeenAt: null as number | null }, open: vi.fn(), bridge: vi.fn(), enqueue: vi.fn(), cancel: vi.fn(), note: vi.fn(), rows: [] as InputEntry[], listeners: new Set<() => void>() }));
 vi.mock('../src/main/connection.js', () => ({ connect: ports.connect, getStatus: () => ports.status, onStatusChange: (fn: () => void) => { ports.listeners.add(fn); return () => ports.listeners.delete(fn); } }));
 vi.mock('../src/main/bridge.js', () => ({ bridgeStatus: async () => ports.browser, browserWakeConnected: () => ports.browser.connected, startBridge: ports.bridge }));
-vi.mock('../src/main/browser.js', () => ({ openInPreferredBrowser: ports.open, isPreferredBrowserRunning: async () => ports.running }));
+vi.mock('../src/main/browser.js', () => ({ openInPreferredBrowser: ports.open, isPreferredBrowserRunning: ports.probe }));
 vi.mock('../src/main/config.js', () => ({ getConfig: () => ({ ui: { backgroundChats: ports.backgroundChats } }) }));
 vi.mock('../src/main/session/input.js', () => ({ enqueueInput: ports.enqueue, cancelInput: ports.cancel, noteInputStartupError: ports.note, listInputs: async () => ports.rows }));
 import { sendDesktopInput, cancelDesktopInput, retryQueuedInputBrowser, resetInputStartupForTests, stopInputStartup } from '../src/main/session/start-input.js';
 const request: InputArgs = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', sessionId: null, text: 'Please start', mode: 'auto', dueAt: 0, model: null, reasoningEffort: null };
 beforeEach(() => {
   vi.resetAllMocks(); resetInputStartupForTests();
+  ports.probe.mockImplementation(async () => ports.running);
   ports.rows = []; ports.listeners.clear(); ports.backgroundChats = false; ports.running = false;
   ports.status = { state: 'connected', detail: '' }; ports.browser = { connected: false, present: false, lastSeenAt: null };
   ports.bridge.mockResolvedValue(8765); ports.open.mockResolvedValue('chrome.exe');
@@ -154,3 +155,31 @@ it.each(['cancel', 'shutdown'])('revokes explicit retry before readiness on %s',
   expect(ports.open).toHaveBeenCalledTimes(1);
   if (action === 'shutdown') await expect(sendDesktopInput({ ...request, id: 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff' })).rejects.toThrow('shutting down');
 });
+
+
+it.each([false, true].flatMap(retry => ['cancel', 'shutdown', 'claimed', 'none'].map(action => [retry, action] as const)))(
+  'revalidates input startup after the process probe (retry=%s, action=%s)', async (retry, action) => {
+    if (retry) {
+      ports.open.mockRejectedValueOnce(new Error('startup refused'));
+      await sendDesktopInput(request);
+      await vi.waitFor(() => expect(ports.rows[0]?.error).toContain('Browser startup failed'), { timeout: 5000 });
+      ports.open.mockClear(); ports.note.mockClear();
+    }
+    let enter!: () => void, release!: (running: boolean) => void;
+    const entered = new Promise<void>(resolve => { enter = resolve; });
+    const gate = new Promise<boolean>(resolve => { release = resolve; });
+    ports.probe.mockImplementation(() => { enter(); return gate; });
+    const pending = retry ? retryQueuedInputBrowser(request.id) : sendDesktopInput(request);
+    await entered;
+    if (action === 'cancel') expect(await cancelDesktopInput(request.id)).toBe(true);
+    else if (action === 'shutdown') stopInputStartup();
+    else if (action === 'claimed') ports.rows[0]!.state = 'browser';
+    const notes = ports.note.mock.calls.length;
+    release(false);
+    await pending;
+    await vi.waitFor(() => expect(ports.note.mock.calls.length).toBeGreaterThan(notes), { timeout: 5000 });
+    expect(ports.open).toHaveBeenCalledTimes(action === 'none' ? 1 : 0);
+    if (action === 'cancel') expect(ports.rows[0]?.state).toBe('cancelled');
+    if (action === 'claimed') expect(ports.rows[0]?.state).toBe('browser');
+  }
+);
