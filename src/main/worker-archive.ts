@@ -25,12 +25,13 @@
  */
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { getConfig } from './config.js';
 import { logInfo, logWarn } from './logger.js';
 
 export type WorkerArchiveOutcome = 'archived' | 'unarchived' | 'failed' | 'deferred';
 /** One request for the browser: archive the chat, or (`archive: false`) restore it. */
-export type WorkerArchiveJob = { conversationId: string; archive: boolean };
+export type WorkerArchiveJob = { conversationId: string; archive: boolean; attemptId?: string };
 type Entry = {
   conversationId: string;
   archive: boolean;
@@ -41,6 +42,8 @@ type Entry = {
   notBefore: number;
   /** Set while handed out: the browser is doing this job right now. */
   leased: boolean;
+  /** Opt-in receipt identity. Like the lease, this never survives a process restart. */
+  attemptId?: string;
   /** Archive again once this unarchive has finished: the run ended meanwhile. */
   rearchive: boolean;
 };
@@ -109,14 +112,20 @@ export async function loadWorkerArchive(): Promise<void> {
     }
     // Version 2 only remembered archives. Keep that field readable by older app versions;
     // restored states in version 3 also let a late result be corrected after a restart.
+    const now = Date.now();
+    let expired = 0;
     for (const [field, archived] of [['restored', false], ['archived', true]] as const) {
       for (const raw of Array.isArray(parsed[field]) ? parsed[field] : []) {
         if (!raw || typeof raw !== 'object') continue;
         const value = raw as { conversationId?: unknown; at?: unknown };
         const id = cleanId(value.conversationId);
-        if (id) rememberState(id, archived, count(value.at));
+        if (!id) continue;
+        const at = count(value.at);
+        if (now - at > STATE_KEEP_MS) { expired += 1; continue; }
+        rememberState(id, archived, at);
       }
     }
+    if (expired) logInfo(`worker archive: ignored ${expired} expired saved state(s)`);
   } catch (error) {
     // Missing until the first queued chat; an unreadable file only means chats stay in the list.
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') logWarn(`Worker archive queue unreadable: ${(error as Error).message}`);
@@ -129,7 +138,7 @@ function persist(): void {
   writing = writing.then(async () => {
     pending = false;
     const temporary = `${filePath}.tmp`;
-    const saved = [...entries.values()].map(({ notBefore: _notBefore, leased: _leased, ...entry }) => entry);
+    const saved = [...entries.values()].map(({ notBefore: _notBefore, leased: _leased, attemptId: _attemptId, ...entry }) => entry);
     const archived: { conversationId: string; at: number }[] = [];
     const restored: typeof archived = [];
     for (const [conversationId, state] of known) {
@@ -163,6 +172,17 @@ function rememberState(id: string, archived: boolean, now: number): void {
   }
 }
 
+function knownState(id: string, now: number): { archived: boolean; at: number } | undefined {
+  const state = known.get(id);
+  if (state && now - state.at > STATE_KEEP_MS) {
+    known.delete(id);
+    logInfo(`worker archive: forgot expired state for ${id}`);
+    persist();
+    return undefined;
+  }
+  return state;
+}
+
 /**
  * Queues worker chats to archive, when the setting is on: those of a run that just ended, or
  * (with `delayMs`) one whose worker just reported its task done. The delay lets that worker's
@@ -187,7 +207,7 @@ export function queueWorkerArchives(conversationIds: readonly string[], now = Da
       changed = true;
       continue;
     }
-    if (entry || known.get(id)?.archived || entries.size >= MAX_ENTRIES) continue;
+    if (entry || knownState(id, now)?.archived || entries.size >= MAX_ENTRIES) continue;
     entries.set(id, {
       conversationId: id, archive: true, queuedAt: now, dueAt: now + delayMs, attempts: 0, notBefore: 0, leased: false, rearchive: false
     });
@@ -212,7 +232,7 @@ export function readyForWake(conversationId: string, now = Date.now()): boolean 
     persist();
     return true;
   }
-  if (!entry && !known.get(id)?.archived) return true;
+  if (!entry && !knownState(id, now)?.archived) return true;
   if (gaveWay.has(id)) return true;
   if (!entry || entry.archive || entry.rearchive) {
     if (!entry) {
@@ -255,8 +275,8 @@ function release(id: string): void {
   for (const listener of readyListeners) listener(id);
 }
 
-/** The next job, leased to the caller; null when nothing is due. Restores go first. */
-export function nextWorkerArchive(now = Date.now()): WorkerArchiveJob | null {
+/** The next leased job; restores go first. New companions opt into attempt IDs; old callers keep their wire shape. */
+export function nextWorkerArchive(now = Date.now(), attemptIds = false): WorkerArchiveJob | null {
   let dropped = false;
   let next: Entry | null = null;
   for (const entry of entries.values()) {
@@ -274,16 +294,18 @@ export function nextWorkerArchive(now = Date.now()): WorkerArchiveJob | null {
   if (!next) return null;
   next.notBefore = now + WORKER_ARCHIVE_LEASE_MS;
   next.leased = true;
-  return { conversationId: next.conversationId, archive: next.archive };
+  next.attemptId = attemptIds ? randomUUID() : undefined;
+  return { conversationId: next.conversationId, archive: next.archive,
+    ...(next.attemptId ? { attemptId: next.attemptId } : {}) };
 }
 
-/** What the browser reported for one leased job. */
-export function settleWorkerArchive(conversationId: string, outcome: WorkerArchiveOutcome, now = Date.now()): void {
+/** Negotiated IDs fence retirement. A stale opposite success still requires correcting its possible remote effect. */
+export function settleWorkerArchive(conversationId: string, outcome: WorkerArchiveOutcome, now = Date.now(), attemptId?: string): void {
   const id = cleanId(conversationId);
   if (!id) return;
   let entry = entries.get(id);
   if (!entry && (outcome === 'archived' || outcome === 'unarchived')) {
-    const settled = known.get(id);
+    const settled = knownState(id, now);
     if (!settled || settled.archived === (outcome === 'archived')) return;
     // A lease expiring is not proof that its remote PATCH stopped. The newer job already
     // settled and retired this entry; restore its intent when the older PATCH lands last.
@@ -292,10 +314,27 @@ export function settleWorkerArchive(conversationId: string, outcome: WorkerArchi
       attempts: 0, notBefore: 0, leased: false, rearchive: false
     };
     entries.set(id, entry);
+    rememberState(id, outcome === 'archived', now);
     logInfo(`worker archive: late ${outcome} result; ${entry.archive ? 'archiving' : 'unarchiving'} ${id} again`);
+    persist();
+    return;
   }
   if (!entry) return;
+  if (!entry.leased || entry.attemptId !== attemptId) {
+    if ((outcome === 'archived' || outcome === 'unarchived') && (outcome === 'archived') !== entry.archive) {
+      // An opposite remote side effect may have landed after the current attempt's PATCH.
+      // Its still-pending receipt cannot prove ordering: require a fresh corrective attempt.
+      rememberState(id, outcome === 'archived', now);
+      entry.leased = false;
+      delete entry.attemptId;
+      entry.notBefore = 0;
+      logInfo(`worker archive: late ${outcome} result; ${entry.archive ? 'archiving' : 'unarchiving'} ${id} with a fresh attempt`);
+      persist();
+    } else logInfo(`worker archive: ignored superseded ${outcome} receipt for ${id}`);
+    return;
+  }
   entry.leased = false;
+  delete entry.attemptId;
   if (outcome === 'deferred') {
     // No ChatGPT tab to do it from: try again on a later pass, without spending an attempt.
     entry.notBefore = 0;

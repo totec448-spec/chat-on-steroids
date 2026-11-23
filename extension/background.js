@@ -6443,10 +6443,13 @@ if (chrome.runtime.onStartup && typeof chrome.runtime.onStartup.addListener === 
  */
 async function drainWorkerArchive() {
   await load();
-  const next = await call('/worker-archive/next', { method: 'POST', body: '{}' });
+  const next = await call('/worker-archive/next', { method: 'POST', body: JSON.stringify({ attemptIds: true }) });
   const unarchive = next.ok ? cleanConversationId(next.data?.unarchive) : null;
   const conversationId = unarchive || (next.ok ? cleanConversationId(next.data?.conversationId) : null);
   if (!conversationId) return;
+  // Old apps omit this field. A new app's receipt must identify the exact leased attempt.
+  const attemptId = next.data?.attemptId;
+  if (attemptId !== undefined && (typeof attemptId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(attemptId))) return;
   const archive = !unarchive;
   const done = archive ? 'archived' : 'unarchived';
   let outcome = 'deferred';
@@ -6459,7 +6462,7 @@ async function drainWorkerArchive() {
     outcome = reply?.outcome === done ? done : 'failed';
     break;
   }
-  await call('/worker-archive/result', { method: 'POST', body: JSON.stringify({ conversationId, outcome }) });
+  await call('/worker-archive/result', { method: 'POST', body: JSON.stringify({ conversationId, outcome, ...(attemptId ? { attemptId } : {}) }) });
 }
 
 if (chrome.alarms && chrome.alarms.onAlarm && typeof chrome.alarms.onAlarm.addListener === 'function') {

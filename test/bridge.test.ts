@@ -19942,6 +19942,43 @@ describe('a chat\'s Goal or Loop switch', () => {
 
 /** Worker chats of ended runs, archived in ChatGPT by the extension when the setting is on (#1460). */
 describe('archiving worker chats', () => {
+  it('fences delayed restore receipts with opt-in attempt ids over HTTP', async () => {
+    await pair();
+    const config = await import('../src/main/config.js');
+    const archive = await import('../src/main/worker-archive.js');
+    const before = config.getConfig();
+    await config.saveConfig({ ...before, multiAgent: { ...before.multiAgent, archiveWorkerChats: true } });
+    let now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const chat = randomUUID();
+      archive.queueWorkerArchives([chat]);
+      const next = async () => (await request('POST', '/worker-archive/next', { body: { attemptIds: true } })).body;
+      const result = async (attemptId: unknown, outcome: string) => request('POST', '/worker-archive/result', { body: { conversationId: chat, outcome, attemptId } });
+      const oldArchive = await next();
+      expect(oldArchive).toEqual({ conversationId: chat, attemptId: expect.any(String) });
+      expect(archive.readyForWake(chat)).toBe(false);
+      now += archive.WORKER_ARCHIVE_LEASE_MS;
+      const oldRestore = await next();
+      now += archive.WORKER_ARCHIVE_LEASE_MS;
+      const newRestore = await next();
+      expect(newRestore).toEqual({ conversationId: null, unarchive: chat, attemptId: expect.any(String) });
+      expect(newRestore.attemptId).not.toBe(oldRestore.attemptId);
+      expect((await result(newRestore.attemptId, 'unarchived')).status).toBe(200);
+      expect((await result(oldArchive.attemptId, 'archived')).status).toBe(200);
+      const correction = await next();
+      expect((await result(oldRestore.attemptId, 'unarchived')).status).toBe(200);
+      // A pre-upgrade browser's uncorrelated receipt cannot retire a tracked attempt either.
+      expect((await result(undefined, 'unarchived')).status).toBe(200);
+      expect(archive.readyForWake(chat)).toBe(false);
+      expect(await next()).toEqual({ conversationId: null });
+      for (const malformed of [null, 42, '', 'invalid']) expect((await result(malformed, 'unarchived')).status).toBe(400);
+      expect((await result(correction.attemptId, 'unarchived')).status).toBe(200);
+      expect(archive.readyForWake(chat)).toBe(true);
+      expect(await next()).toEqual({ conversationId: null });
+    } finally { clock.mockRestore(); await config.saveConfig(before); }
+  });
+
   it('hands the extension one leased chat at a time and takes its result', async () => {
     await pair();
     const config = await import('../src/main/config.js');
