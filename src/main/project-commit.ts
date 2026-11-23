@@ -189,6 +189,18 @@ export interface CommitRequest {
   expectedToken: string;
 }
 
+/** Null means Git could not prove the position, not an unborn branch or detached HEAD. */
+async function commitPosition(repo: RepositoryContext): Promise<{ ref: string | null; commit: string | null } | null> {
+  const symbolic = await runGit(repo.root, ['symbolic-ref', '--quiet', 'HEAD']);
+  if (symbolic.code !== 0 && symbolic.code !== 1) return null;
+  const ref = symbolic.code === 0 ? decode(symbolic.stdout).trim() : null;
+  if (ref === '') return null;
+  const head = await runGit(repo.root, ['rev-parse', '--verify', '--quiet', 'HEAD']);
+  if (head.code === 0) return { ref, commit: decode(head.stdout).trim() };
+  // rev-parse --quiet returns 1 for an unborn branch. A detached HEAD must have a commit.
+  return head.code === 1 && ref !== null ? { ref, commit: null } : null;
+}
+
 /** Commits exactly the chosen changes, as their files are now, and nothing else that is staged. */
 export async function commitProjectChanges(projectId: string, request: CommitRequest): Promise<{ commit: string; branch: string }> {
   const message = request.message.replace(/\r\n/g, '\n').trim();
@@ -214,7 +226,9 @@ export async function commitProjectChanges(projectId: string, request: CommitReq
   // there to stage; staging the old one fails ("did not match any files").
   const paths = [...new Set(chosen.flatMap(change => [change.path, ...(change.previousPath ? [change.previousPath] : [])]))].map(inRepository);
   const toStage = [...new Set(chosen.map(change => change.path))].map(inRepository);
-  let branch = await branchOf(repo);
+  const position = await commitPosition(repo);
+  if (!position) throw refusal('git commit', 'The changes changed. Review them again before committing.');
+  let branch = position.ref?.startsWith('refs/heads/') ? position.ref.slice('refs/heads/'.length) : null;
   const created = request.newBranch?.trim();
   const startedOn = branch;
   if (created) {
@@ -222,14 +236,33 @@ export async function commitProjectChanges(projectId: string, request: CommitReq
     if ((await runGit(repo.root, ['show-ref', '--verify', '--quiet', `refs/heads/${created}`])).code === 0) throw refusal('git commit', 'A branch with that name already exists.');
   } else if (!branch) throw refusal('git commit', 'This folder is not on a branch. Check out a branch first.');
   // Where HEAD was, to point it back to: its branch, or on a detached HEAD its commit.
-  const startCommit = created && !startedOn ? await text(repo, ['rev-parse', '--verify', 'HEAD']) : null;
+  const startCommit = position.commit;
   let switched = false;
   // The index as it was, once this commit starts staging: what the person staged by hand stays as it
   // was if the commit does not happen, a part of a file (git add -p) too. An index Git cannot write
   // as a tree (an unresolved conflict elsewhere) falls back to unstaging only what this commit staged.
   let index: { tree: string | null; staged: Set<string> } | null = null;
+  const removeCreatedBranch = async (): Promise<void> => {
+    if (!created || !startCommit) return;
+    const removed = await runGit(repo.root, ['update-ref', '-d', `refs/heads/${created}`, startCommit]);
+    if (removed.code === 0) await runGit(repo.root, ['config', '--remove-section', `branch.${created}`]);
+    else logWarn('git commit: kept the new branch because its starting commit could not be verified at removal');
+  };
   const putBack = async (): Promise<void> => {
+    if (!index && !switched) return;
     try {
+      const current = await commitPosition(repo);
+      const expectedRef = created && switched ? `refs/heads/${created}` : position.ref;
+      if (!current) {
+        logWarn('git commit: kept HEAD and index after failure because the outcome could not be verified');
+        return;
+      }
+      // Git can commit before a slow post-commit hook times out. That is not a failed
+      // transaction to undo; nor may a changed/detached HEAD borrow this rollback.
+      if (current.ref !== expectedRef || current.commit !== position.commit) {
+        logWarn('git commit: kept HEAD and index after failure because the commit position changed');
+        return;
+      }
       if (index) {
         const restored = index.tree ? await runGit(repo.root, ['read-tree', index.tree]) : null;
         if (!restored || restored.code !== 0) {
@@ -242,10 +275,11 @@ export async function commitProjectChanges(projectId: string, request: CommitReq
       if (created && switched) {
         const back = startedOn ? await runGit(repo.root, ['symbolic-ref', 'HEAD', `refs/heads/${startedOn}`])
           : startCommit ? await runGit(repo.root, ['update-ref', '--no-deref', 'HEAD', startCommit]) : null;
-        if (back?.code === 0) await runGit(repo.root, ['branch', '-D', created]);
+        // Compare-and-delete the unchanged ref, even if it advanced after the HEAD check.
+        if (back?.code === 0) await removeCreatedBranch();
       }
     } catch (error) {
-      logWarn(`git commit: could not put everything back (${error instanceof Error ? error.message : String(error)})`);
+      logWarn('git commit: kept the remaining state because rollback could not be verified or completed');
     }
   };
   try {
@@ -261,7 +295,7 @@ export async function commitProjectChanges(projectId: string, request: CommitReq
       if (made.code !== 0) {
         // A branch made but not checked out would refuse the next try as "already exists".
         if ((await branchOf(repo)) !== created && (await runGit(repo.root, ['show-ref', '--verify', '--quiet', `refs/heads/${created}`])).code === 0) {
-          await runGit(repo.root, ['branch', '-D', created]);
+          await removeCreatedBranch();
         }
         logWarn('git commit: not committed (Git could not create the branch)');
         throw new Error(`Git could not create the branch:\n${shown(made.stderr)}`);

@@ -19,14 +19,16 @@ vi.mock('../src/main/logger.js', async original => {
 });
 
 // Lets a test make one Git command reject (a timeout, a spawn failure) instead of exiting non-zero.
-const gitFault = vi.hoisted(() => ({ reject: null as null | ((args: string[]) => boolean), rejectAfter: null as null | ((args: string[]) => boolean) }));
+const gitFault = vi.hoisted(() => ({ reject: null as null | ((args: string[]) => boolean), rejectAfter: null as null | ((args: string[]) => boolean), before: null as null | ((cwd: string, args: string[]) => Promise<void>) }));
 vi.mock('../src/main/project-git.js', async original => {
   const real = await original<typeof import('../src/main/project-git.js')>();
-  return { ...real, runGit: (cwd: string, args: string[], ...rest: unknown[]) =>
-    gitFault.reject?.(args) ? Promise.reject(new Error('Git took too long to respond'))
-      // Git did its work but the app stopped waiting (a timeout after the fact).
-      : gitFault.rejectAfter?.(args) ? Promise.resolve((real.runGit as (...all: unknown[]) => Promise<unknown>)(cwd, args, ...rest)).then(() => { throw new Error('Git took too long to respond'); })
-      : (real.runGit as (...all: unknown[]) => unknown)(cwd, args, ...rest) };
+  return { ...real, runGit: async (cwd: string, args: string[], ...rest: unknown[]) => {
+    await gitFault.before?.(cwd, args);
+    if (gitFault.reject?.(args)) throw new Error('Git took too long to respond');
+    const result = await (real.runGit as (...all: unknown[]) => Promise<unknown>)(cwd, args, ...rest);
+    if (gitFault.rejectAfter?.(args)) throw new Error('Git took too long to respond');
+    return result;
+  } };
 });
 
 const exec = promisify(execFile);
@@ -50,6 +52,7 @@ beforeEach(async () => {
   setGhRunnerForTests(null);
   gitFault.reject = null;
   gitFault.rejectAfter = null;
+  gitFault.before = null;
 });
 
 afterEach(async () => {
@@ -59,7 +62,7 @@ afterEach(async () => {
 });
 
 /** A project with one commit on main, pushed to a bare "origin" whose HEAD is main. */
-async function project(options: { identity?: boolean; origin?: boolean } = {}): Promise<{ root: string; id: string; origin: string }> {
+async function project(options: { identity?: boolean; origin?: boolean; initial?: boolean } = {}): Promise<{ root: string; id: string; origin: string }> {
   const root = path.join(approved, 'project');
   const origin = path.join(directory, 'origin.git');
   await fs.mkdir(root, { recursive: true });
@@ -72,7 +75,7 @@ async function project(options: { identity?: boolean; origin?: boolean } = {}): 
   await fs.writeFile(path.join(root, 'gone.txt'), 'delete me\n');
   await fs.writeFile(path.join(root, 'other.ts'), 'export const other = 1;\n');
   await git(root, 'add', '.');
-  await git(root, '-c', 'user.email=t@example.com', '-c', 'user.name=T', 'commit', '-m', 'baseline');
+  if (options.initial !== false) await git(root, '-c', 'user.email=t@example.com', '-c', 'user.name=T', 'commit', '-m', 'baseline');
   if (options.origin !== false) {
     await git(directory, 'init', '--bare', '-b', 'main', origin);
     await git(root, 'remote', 'add', 'origin', origin);
@@ -251,6 +254,121 @@ describe('commit', () => {
     expect(await git(root, 'rev-parse', 'HEAD')).toBe(start);
     await expect(git(root, 'symbolic-ref', '-q', 'HEAD')).rejects.toThrow();
     expect(await git(root, 'branch', '--list', 'try-it')).toBe('');
+  });
+
+  it.each(['branch', 'detached'] as const)('keeps a committed new branch after a late Git failure (started on %s)', async start => {
+    const { root, id } = await project();
+    if (start === 'detached') await git(root, 'checkout', '--detach');
+    await change(root);
+    gitFault.rejectAfter = args => args[0] === 'commit';
+    await expect(commitProjectChanges(id, { message: 'Already committed', paths: ['kept.ts'], newBranch: 'keep-commit', expectedToken: await revision(id) }))
+      .rejects.toThrow('Git took too long to respond');
+    gitFault.rejectAfter = null;
+    expect(await git(root, 'branch', '--show-current')).toBe('keep-commit');
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('Already committed');
+    expect(await git(root, 'show', 'HEAD:kept.ts')).toBe('export const kept = 2;');
+    expect(await git(root, 'diff', '--cached', '--name-only')).toBe('');
+    expect(logged).toContain('git commit: kept HEAD and index after failure because the commit position changed');
+  });
+
+  it('does not rewind the index after a committed existing-branch operation reports a late failure', async () => {
+    const { root, id } = await project();
+    await change(root);
+    await git(root, 'add', 'other.ts');
+    await fs.writeFile(path.join(root, 'other.ts'), 'export const other = 3;\n');
+    gitFault.rejectAfter = args => args[0] === 'commit';
+    await expect(commitProjectChanges(id, { message: 'Already committed', paths: ['kept.ts'], expectedToken: await revision(id) }))
+      .rejects.toThrow('Git took too long to respond');
+    gitFault.rejectAfter = null;
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('Already committed');
+    expect(await git(root, 'diff', '--cached', '--name-only')).toBe('other.ts');
+    expect(await git(root, 'show', ':other.ts')).toBe('export const other = 2;');
+    expect(await fs.readFile(path.join(root, 'other.ts'), 'utf8')).toBe('export const other = 3;\n');
+  });
+
+  it('keeps the branch and index when the failed operation outcome cannot be verified', async () => {
+    const { root, id } = await project();
+    await change(root);
+    gitFault.rejectAfter = args => {
+      if (args[0] !== 'commit') return false;
+      gitFault.reject = read => read[0] === 'rev-parse' || read[0] === 'symbolic-ref';
+      return true;
+    };
+    await expect(commitProjectChanges(id, { message: 'Unverified outcome', paths: ['kept.ts'], newBranch: 'keep-unknown', expectedToken: await revision(id) }))
+      .rejects.toThrow('Git took too long to respond');
+    gitFault.reject = null; gitFault.rejectAfter = null;
+    expect(await git(root, 'branch', '--show-current')).toBe('keep-unknown');
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('Unverified outcome');
+    expect(await git(root, 'diff', '--cached', '--name-only')).toBe('');
+  });
+
+  it('distinguishes an unborn branch from an unreadable HEAD when rolling back or retaining its first commit', async () => {
+    const { root, id } = await project({ initial: false, origin: false });
+    const before = await git(root, 'diff', '--cached', '--name-only');
+    gitFault.reject = args => args[0] === 'commit';
+    await expect(commitProjectChanges(id, { message: 'First commit', paths: ['kept.ts'], expectedToken: await revision(id) }))
+      .rejects.toThrow('Git took too long to respond');
+    gitFault.reject = null;
+    expect(await git(root, 'branch', '--show-current')).toBe('main');
+    await expect(git(root, 'rev-parse', '--verify', 'HEAD')).rejects.toThrow();
+    expect(await git(root, 'diff', '--cached', '--name-only')).toBe(before);
+    gitFault.rejectAfter = args => args[0] === 'commit';
+    await expect(commitProjectChanges(id, { message: 'First commit', paths: ['kept.ts'], expectedToken: await revision(id) }))
+      .rejects.toThrow('Git took too long to respond');
+    gitFault.rejectAfter = null;
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('First commit');
+    expect(await git(root, 'diff', '--cached', '--name-only')).toBe('gone.txt\nother.ts');
+  });
+
+  it('does not delete a new branch that advanced after the rollback position check', async () => {
+    const { root, id } = await project();
+    await change(root);
+    const initial = await git(root, 'rev-parse', 'HEAD');
+    const tree = await git(root, 'rev-parse', 'HEAD^{tree}');
+    gitFault.reject = args => args[0] === 'commit';
+    gitFault.before = async (_cwd, args) => {
+      if (args[0] !== 'update-ref' || args[1] !== '-d') return;
+      const advanced = await git(root, 'commit-tree', tree, '-p', initial, '-m', 'Concurrent commit');
+      await git(root, 'update-ref', 'refs/heads/keep-race', advanced, initial);
+    };
+    await expect(commitProjectChanges(id, { message: 'Refused', paths: ['kept.ts'], newBranch: 'keep-race', expectedToken: await revision(id) }))
+      .rejects.toThrow('Git took too long to respond');
+    gitFault.reject = null; gitFault.before = null;
+    expect(await git(root, 'log', '-1', '--format=%s', 'keep-race')).toBe('Concurrent commit');
+    expect(await git(root, 'branch', '--show-current')).toBe('main');
+  });
+
+  it('removes the refused new branch and inherited tracking config even when its upstream is behind', async () => {
+    const { root, id } = await project();
+    await git(root, 'config', 'branch.autoSetupMerge', 'inherit');
+    await fs.writeFile(path.join(root, 'kept.ts'), 'export const kept = 2;\n');
+    await git(root, 'commit', '-am', 'Local ahead');
+    await change(root);
+    await fs.writeFile(path.join(root, 'kept.ts'), 'export const kept = 3;\n');
+    gitFault.reject = args => args[0] === 'commit';
+    await expect(commitProjectChanges(id, { message: 'Refused', paths: ['kept.ts'], newBranch: 'discard-attempt', expectedToken: await revision(id) }))
+      .rejects.toThrow('Git took too long to respond');
+    gitFault.reject = null;
+    expect(await git(root, 'branch', '--list', 'discard-attempt')).toBe('');
+    await expect(git(root, 'config', '--get', 'branch.discard-attempt.remote')).rejects.toThrow();
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('Local ahead');
+  });
+
+  it('keeps a committed branch that appeared while Git was creating the requested branch', async () => {
+    const { root, id } = await project();
+    await change(root);
+    const initial = await git(root, 'rev-parse', 'HEAD');
+    const tree = await git(root, 'rev-parse', 'HEAD^{tree}');
+    gitFault.before = async (_cwd, args) => {
+      if (args[0] !== 'switch') return;
+      const advanced = await git(root, 'commit-tree', tree, '-p', initial, '-m', 'Concurrent creation');
+      await git(root, 'update-ref', 'refs/heads/keep-created', advanced);
+    };
+    await expect(commitProjectChanges(id, { message: 'Refused', paths: ['kept.ts'], newBranch: 'keep-created', expectedToken: await revision(id) }))
+      .rejects.toThrow('Git could not create the branch');
+    gitFault.before = null;
+    expect(await git(root, 'log', '-1', '--format=%s', 'keep-created')).toBe('Concurrent creation');
+    expect(await git(root, 'branch', '--show-current')).toBe('main');
   });
 
   it('puts everything back when a Git command fails to finish, not only when it says no', async () => {
