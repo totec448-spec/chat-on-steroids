@@ -6755,19 +6755,20 @@ describe('archiving retired worker chats (#1460)', () => {
   const chat = 'aaaaaaaa-1111-4222-8333-444444444444';
   function archiveWorker(outcome: unknown, job: Record<string, unknown> = { conversationId: chat }) {
     const results: unknown[] = [];
+    const requests: unknown[] = [];
     let next: Record<string, unknown> | null = job;
     const worker = loadWorker({
       local: new FakeStorageArea({ port: 8765, token: 'paired-token' }), session: new FakeStorageArea(),
       fetch: async (input, init = {}) => {
         const route = new URL(input).pathname;
         if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
-        if (route === '/worker-archive/next') { const body = next ?? { conversationId: null }; next = null; return response(200, body); }
+        if (route === '/worker-archive/next') { requests.push(JSON.parse(String(init.body))); const body = next ?? { conversationId: null }; next = null; return response(200, body); }
         if (route === '/worker-archive/result') { results.push(JSON.parse(String(init.body))); return response(200, { ok: true }); }
         return response(200, {});
       },
       tabsSendMessage: async (_tabId, message) => message.type === 'clf-archive-chat' ? outcome : { ok: true }
     });
-    return { worker, results };
+    return { worker, results, requests };
   }
 
   it('archives the next chat from a registered ChatGPT page and reports what it said', async () => {
@@ -6814,6 +6815,28 @@ describe('archiving retired worker chats (#1460)', () => {
     await worker.registerTab(1);
     await worker.fireAlarm();
     expect(results).toEqual([{ conversationId: chat, outcome: 'failed' }]);
+  });
+
+  it.each(['archived', 'unarchived', 'failed', 'deferred'])('echoes the leased archive attempt on a %s result', async outcome => {
+    const attemptId = 'eeeeeeee-1111-4222-8333-444444444444';
+    const job = outcome === 'unarchived' ? { conversationId: null, unarchive: chat, attemptId } : { conversationId: chat, attemptId };
+    const { worker, results, requests } = archiveWorker({ outcome }, job);
+    if (outcome !== 'deferred') {
+      await worker.createTab({ id: 1, url: 'https://chatgpt.com/' });
+      await worker.registerTab(1);
+    }
+    await worker.fireAlarm();
+    expect(requests).toContainEqual({ attemptIds: true });
+    expect(results).toEqual([{ conversationId: chat, outcome, attemptId }]);
+  });
+
+  it('does not dispatch an archive job carrying a malformed attempt id', async () => {
+    const { worker, results } = archiveWorker({ outcome: 'archived' }, { conversationId: chat, attemptId: 'invalid' });
+    await worker.createTab({ id: 1, url: 'https://chatgpt.com/' });
+    await worker.registerTab(1);
+    await worker.fireAlarm();
+    expect(worker.tabsSendMessage).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ type: 'clf-archive-chat' }), expect.anything());
+    expect(results).toEqual([]);
   });
 });
 

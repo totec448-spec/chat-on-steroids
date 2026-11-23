@@ -34,10 +34,12 @@ beforeAll(async () => {
 });
 afterAll(async () => { await removeTempDir(dir); });
 beforeEach(async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(1_000);
   await archiving(true);
   resetWorkerArchiveForTests();
 });
-afterEach(() => { vi.useRealTimers(); });
+afterEach(async () => { await workerArchiveWritten(); vi.useRealTimers(); });
 
 /** The id of the next chat to archive, or null. */
 function nextArchive(now: number): string | null {
@@ -257,6 +259,108 @@ it('loads a version 2 archive record and skips damaged restored records', async 
   settleWorkerArchive(B, 'archived', 1_003);
   expect(nextWorkerArchive(1_003)).toEqual({ conversationId: B, archive: false });
   expect(readyForWake(A, 1_003)).toBe(false);
+});
+
+it.each(['load', 'lookup'])('expires both archived and restored state after 30 days at %s', async (boundary) => {
+  queueWorkerArchives([A, B], 1_000);
+  expect(nextArchive(1_000)).toBe(A);
+  settleWorkerArchive(A, 'archived', 1_000);
+  expect(nextArchive(1_000)).toBe(B);
+  settleWorkerArchive(B, 'archived', 1_000);
+  expect(readyForWake(B, 1_001)).toBe(false);
+  expect(nextWorkerArchive(1_001)?.archive).toBe(false);
+  settleWorkerArchive(B, 'unarchived', 1_001);
+  await workerArchiveWritten();
+  const later = 1_001 + 31 * 24 * 60 * 60_000;
+  vi.setSystemTime(later);
+  if (boundary === 'load') await loadWorkerArchive();
+  expect(readyForWake(A, later)).toBe(true);
+  settleWorkerArchive(B, 'archived', later);
+  expect(nextWorkerArchive(later)).toBeNull();
+  // The stale archive must not suppress new archive work either.
+  queueWorkerArchives([A], later);
+  expect(nextArchive(later)).toBe(A);
+});
+
+it('does not refresh a retained record timestamp when loading it', async () => {
+  queueWorkerArchives([A], 1_000);
+  expect(nextArchive(1_000)).toBe(A);
+  settleWorkerArchive(A, 'archived', 1_000);
+  await workerArchiveWritten();
+  const day = 24 * 60 * 60_000;
+  vi.setSystemTime(1_000 + 29 * day);
+  await loadWorkerArchive();
+  vi.setSystemTime(1_001 + 30 * day);
+  expect(readyForWake(A)).toBe(true);
+  expect(nextWorkerArchive()).toBeNull();
+});
+
+it.each(['queued', 'leased', 'reloaded'])('keeps a %s corrective restore when an older restore receipt arrives', async (stage) => {
+  queueWorkerArchives([A], 1_000);
+  const oldArchive = nextWorkerArchive(1_000, true)!;
+  expect(readyForWake(A, 1_001)).toBe(false);
+  const oldRestore = nextWorkerArchive(1_000 + WORKER_ARCHIVE_LEASE_MS, true)!;
+  const now = 1_000 + 2 * WORKER_ARCHIVE_LEASE_MS;
+  const newerRestore = nextWorkerArchive(now, true)!;
+  settleWorkerArchive(A, 'unarchived', now + 1, newerRestore.attemptId);
+  settleWorkerArchive(A, 'archived', now + 2, oldArchive.attemptId);
+  await workerArchiveWritten();
+  if (stage === 'reloaded') await loadWorkerArchive();
+  let correction = stage === 'leased' ? nextWorkerArchive(now + 3, true) : null;
+  // Its remote PATCH happened before the late archive, but this receipt arrives last.
+  settleWorkerArchive(A, 'unarchived', now + 4, oldRestore.attemptId);
+  expect(readyForWake(A, now + 5)).toBe(false);
+  correction ??= nextWorkerArchive(now + 5, true);
+  expect(correction).toMatchObject({ conversationId: A, archive: false, attemptId: expect.any(String) });
+  expect(correction!.attemptId).not.toBe(oldRestore.attemptId);
+  settleWorkerArchive(A, 'unarchived', now + 6, correction!.attemptId);
+  expect(readyForWake(A, now + 7)).toBe(true);
+  expect(nextWorkerArchive(now + 7, true)).toBeNull();
+});
+
+it('invalidates a current restore lease when an opposite late success makes its receipt uncertain', () => {
+  queueWorkerArchives([A], 1_000);
+  const oldArchive = nextWorkerArchive(1_000, true)!;
+  expect(readyForWake(A, 1_001)).toBe(false);
+  const now = 1_000 + WORKER_ARCHIVE_LEASE_MS;
+  const inFlightRestore = nextWorkerArchive(now, true)!;
+  settleWorkerArchive(A, 'archived', now + 1, oldArchive.attemptId);
+  settleWorkerArchive(A, 'unarchived', now + 2, inFlightRestore.attemptId);
+  expect(readyForWake(A, now + 3)).toBe(false);
+  const correction = nextWorkerArchive(now + 3, true)!;
+  expect(correction.attemptId).not.toBe(inFlightRestore.attemptId);
+  settleWorkerArchive(A, 'unarchived', now + 4, correction.attemptId);
+  expect(readyForWake(A, now + 5)).toBe(true);
+});
+
+it.each(['archived', 'failed', 'deferred'] as const)('does not let a superseded %s receipt retire or release the current lease', outcome => {
+  queueWorkerArchives([A], 1_000);
+  const first = nextWorkerArchive(1_000, true)!;
+  const now = 1_000 + WORKER_ARCHIVE_LEASE_MS;
+  const second = nextWorkerArchive(now, true)!;
+  expect(second.attemptId).not.toBe(first.attemptId);
+  settleWorkerArchive(A, outcome, now + 1, first.attemptId);
+  expect(nextWorkerArchive(now + 1, true)).toBeNull();
+  settleWorkerArchive(A, 'archived', now + 2, second.attemptId);
+  expect(nextWorkerArchive(now + 2, true)).toBeNull();
+  expect(readyForWake(A, now + 3)).toBe(false);
+});
+
+it('invalidates pre-restart receipt identities without saving an active lease', async () => {
+  queueWorkerArchives([A], 1_000);
+  const first = nextWorkerArchive(1_000, true)!;
+  await workerArchiveWritten();
+  const saved = JSON.parse(await fs.readFile(path.join(dir, 'state', 'worker-archive.json'), 'utf8'));
+  expect(saved.entries[0]).not.toHaveProperty('attemptId');
+  await loadWorkerArchive();
+  settleWorkerArchive(A, 'archived', 1_001, first.attemptId);
+  const second = nextWorkerArchive(1_002, true)!;
+  expect(second.attemptId).not.toBe(first.attemptId);
+  expect(second.archive).toBe(true);
+  settleWorkerArchive(A, 'archived', 1_003, first.attemptId);
+  expect(nextWorkerArchive(1_004, true)).toBeNull();
+  settleWorkerArchive(A, 'archived', 1_005, second.attemptId);
+  expect(readyForWake(A, 1_006)).toBe(false);
 });
 
 it('releases a held wake after the hold time when the chat cannot be unarchived in time', () => {

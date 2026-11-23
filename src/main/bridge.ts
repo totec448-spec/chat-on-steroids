@@ -3745,17 +3745,23 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   // before a wake (#1701). A restore travels as `unarchive`: an extension that predates it reads
   // no chat to archive and leaves the job for a newer one.
   if (route === '/worker-archive/next' && req.method === 'POST') {
-    const job = nextWorkerArchive();
-    if (job && !job.archive) return json(res, 200, { conversationId: null, unarchive: job.conversationId }, origin);
-    return json(res, 200, { conversationId: job?.conversationId ?? null }, origin);
+    const raw = await readBody(req);
+    const body = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+    if (body['attemptIds'] !== undefined && typeof body['attemptIds'] !== 'boolean') return json(res, 400, { error: 'invalid_request' }, origin);
+    const job = nextWorkerArchive(Date.now(), body['attemptIds'] === true);
+    const receipt = job?.attemptId ? { attemptId: job.attemptId } : {};
+    if (job && !job.archive) return json(res, 200, { conversationId: null, unarchive: job.conversationId, ...receipt }, origin);
+    return json(res, 200, { conversationId: job?.conversationId ?? null, ...receipt }, origin);
   }
   if (route === '/worker-archive/result' && req.method === 'POST') {
     const raw = await readBody(req);
     const body = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
     const id = conversationId(body['conversationId']);
     const outcome = body['outcome'];
+    const attemptId = typeof body['attemptId'] === 'string' ? body['attemptId'].toLowerCase() : undefined;
+    if (body['attemptId'] !== undefined && (!attemptId || !UUID_SHAPE.test(attemptId))) return json(res, 400, { error: 'invalid_request' }, origin);
     if (!id || (outcome !== 'archived' && outcome !== 'unarchived' && outcome !== 'failed' && outcome !== 'deferred')) return json(res, 400, { error: 'invalid_request' }, origin);
-    settleWorkerArchive(id, outcome);
+    settleWorkerArchive(id, outcome, Date.now(), attemptId);
     return json(res, 200, { ok: true }, origin);
   }
 
