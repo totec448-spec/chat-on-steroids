@@ -2086,6 +2086,7 @@ var CLF_DOM = (() => {
    * it times out. Nothing here can say what a person wrote, only what kind of draft it is and whether the app
    * knows it.
    */
+  const residueKind = text => RESUME_RESIDUE.test(text) ? 'brief' : FIRST_MESSAGE_RESIDUE.test(text) ? 'context' : HANDOFF_RESIDUE.test(text) ? 'handoff' : null;
   function draftEvidence() {
     return safe(() => {
       const box = composer();
@@ -2095,13 +2096,33 @@ var CLF_DOM = (() => {
       if (hasComposerAttachments()) return 'attachment';
       const text = compactDraft(editorText(box));
       if (!text) return 'empty';
-      const kind = RESUME_RESIDUE.test(text) ? 'brief' : FIRST_MESSAGE_RESIDUE.test(text) ? 'context' : HANDOFF_RESIDUE.test(text) ? 'handoff' : null;
+      const kind = residueKind(text);
       if (!kind) return 'other';
       const bare = ownMentionFreeText(box);
       return `${kind}-${ownBrief(text) || (bare !== null && ownBrief(bare)) ? 'own' : 'foreign'}`;
     }, 'unknown');
   }
   const mentionChipCount = () => safe(() => composer()?.querySelectorAll?.(APP_MENTION_CHIP).length ?? 0, 0);
+  /**
+   * What a draft the app keeps is measured against (#2159, 2026-11-23): a brief the page did not recognise is either
+   * one it never typed (another window or an emptied storage: `typed=0`, or lengths that are not this draft's) or
+   * one ChatGPT gave back changed (a length close to a typed one). Only numbers: the length of the draft as drafts are
+   * compared (compactDraft: without whitespace and without the escape backslashes ChatGPT adds), how many briefs this
+   * page remembers typing, and the lengths of the four newest of them, which are measured the same way. Clues, not
+   * proof: briefs older than the four newest are not listed. Only a draft of the app's kinds gets numbers, never a read-only, busy or
+   * attachment reason.
+   */
+  function draftSize() {
+    return safe(() => {
+      if (!/^(brief|context|handoff)-/.test(draftEvidence())) return '';
+      const box = composer();
+      const text = box?.isConnected ? compactDraft(editorText(box)) : '';
+      if (!text || !residueKind(text)) return '';
+      const known = [...new Set([...storedBriefs(), ...typedBriefs])];
+      const lengths = known.slice(-4).reverse().map(fingerprint => Number(fingerprint.split(':')[0])).filter(length => Number.isInteger(length) && length > 0);
+      return `:len=${text.length}:typed=${known.length}${lengths.length ? `:lens=${lengths.join('/')}` : ''}`;
+    }, '');
+  }
 
   /**
    * The Compact & Resume briefs the app typed, as short fingerprints of their compacted text. They are kept in
@@ -2147,10 +2168,11 @@ var CLF_DOM = (() => {
     const text = compactDraft(value);
     if (!OWN_RESIDUE.test(text)) return;
     const fingerprint = briefFingerprint(text);
-    if (!typedBriefs.includes(fingerprint)) {
-      typedBriefs.push(fingerprint);
-      if (typedBriefs.length > MAX_TYPED_BRIEFS) typedBriefs.shift();
-    }
+    // A brief typed again is the newest one again: the order is what #2159's diagnostic lists.
+    const known = typedBriefs.indexOf(fingerprint);
+    if (known !== -1) typedBriefs.splice(known, 1);
+    typedBriefs.push(fingerprint);
+    if (typedBriefs.length > MAX_TYPED_BRIEFS) typedBriefs.shift();
     try {
       const stored = storedBriefs().filter(value => value !== fingerprint);
       stored.push(fingerprint);
@@ -4079,7 +4101,7 @@ var CLF_DOM = (() => {
             // An earlier brief of the app's own that ChatGPT kept in this Project home (#2068).
             // ChatGPT can restore the draft after it was emptied, so this may happen again, a few times only.
             if (residueClears < 3 && clearResumeResidue()) { residueClears++; return check(); }
-            lastObservation = `composer-not-ready:draft=${draftEvidence()}:clears=${residueClears}:chips=${mentionChipCount()}`;
+            lastObservation = `composer-not-ready:draft=${draftEvidence()}:clears=${residueClears}:chips=${mentionChipCount()}${draftSize()}`;
             return;
           }
           if (turns().some(turn => !onKeptPage(turn.node))) {
@@ -4121,7 +4143,7 @@ var CLF_DOM = (() => {
           // The source chat's composer can hold the app's own text that ChatGPT put back as a draft (the handoff
           // request it just sent): emptied like the Project home's, never a person's.
           if (source?.isConnected && sourceResidueClears < 3 && clearResumeResidue()) { sourceResidueClears++; return check(); }
-          lastObservation = `source-not-ready:draft=${draftEvidence()}:clears=${sourceResidueClears}:chips=${mentionChipCount()}`;
+          lastObservation = `source-not-ready:draft=${draftEvidence()}:clears=${sourceResidueClears}:chips=${mentionChipCount()}${draftSize()}`;
           return;
         }
         const links = projectLinks();
