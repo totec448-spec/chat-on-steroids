@@ -116,7 +116,7 @@ import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFi
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
 import { hasSecret, isEncryptionAvailable, readSecretsFor, secureStorageStatus, setAsideUnreadableSecrets, setSecret, setSecrets, storedSecretsUnreadable, type SecretKey } from './secrets.js';
-import { BackupError, buildBackup, changedSettings, widerAccess, exportableSecret, openSecrets, overlaySettings, passphraseLongEnough, pickByShape, readBackup, settingsForBackup, type ParsedBackup } from './settings-backup.js';
+import { BackupError, buildBackup, changedSettings, widerAccess, exportableSecret, openSecrets, overlaySettings, passphraseLongEnough, pickByShape, readBackup, settingsForBackup, withoutPerComputer, type ParsedBackup } from './settings-backup.js';
 import { setupApiKeySlot } from '../shared/setup-profile.js';
 import { addSetupProfile, removeSetupProfile, switchSetupProfile } from './setup-profiles.js';
 import { bundledVersion, locateBinary } from './tunnel/locate.js';
@@ -909,7 +909,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
    * Saves the settings and reports, apart from the state, an error that came after they were
    * written (worker history, login item, control API). An error before the write is thrown.
    */
-  const saveSettingsReport = async (request: z.infer<typeof settingsSave>): Promise<{ state: AppState; lateError: unknown }> => {
+  const saveSettingsReport = async (request: z.infer<typeof settingsSave>, importing?: {
+    validate: (config: Config) => void; language: Config['ui']['language'];
+  }): Promise<{ state: AppState; lateError: unknown }> => {
     // The phone settings are checked only when this save changes them, and only while on: a damaged
     // stored value (hand-edited, or from an older version) must not block every other save, nor the
     // save that repairs it or switches it off.
@@ -917,12 +919,16 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const phoneChanged = !!push && JSON.stringify(push) !== JSON.stringify(request.base.ui.phonePush);
     const before = getConfig();
     const next = await updateConfig(async config => {
+      // An import's confirmation is tied to values, checked after earlier settings saves commit.
+      importing?.validate(config);
       if (request.patch.ui.browserBridgePort !== undefined &&
           request.patch.ui.browserBridgePort !== (request.base.ui.browserBridgePort ?? 'auto') &&
           bridgePortSelection().overridden) {
         throw new Error('Browser bridge port is controlled by CLF_BRIDGE_PORTS.');
       }
       const proposed = { ...config, ...mergeSettings(config, request.base, request.patch) };
+      // The normal form keeps language; only an import owns it, in this same guarded commit.
+      if (importing) proposed.ui = { ...proposed.ui, language: importing.language };
       // Checked as it will be saved: the form may be stale, and the merge keeps fields another
       // window changed meanwhile (a cleared topic stays cleared while this save turns it on).
       if (phoneChanged && proposed.ui.phonePush) {
@@ -1072,10 +1078,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
 
   // Settings backup. The file is read and checked in the main process; the renderer sees only a
   // summary and a token, and saved keys never cross to it. Errors are sentences it translates.
-  let pendingImport: { token: string; backup: ParsedBackup; changed: string[]; wider: string[] } | null = null;
+  let pendingImport: { token: string; backup: ParsedBackup; baseline: ReturnType<typeof settingsForBackup> } | null = null;
   // What importing would change, as a save really applies it: mergeSettings keeps the fields the
-  // settings form does not own, so only changes that happen are counted. The interface language
-  // is applied beside the save, since the form never edits it.
+  // settings form does not own, so only changes that happen are counted. An import also applies
+  // the interface language in its guarded save, while ordinary form saves preserve it.
   const importPlan = (backup: ParsedBackup) => {
     const config = getConfig();
     const base = pickByShape(settingsPatch, config);
@@ -1147,7 +1153,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       throw new BackupError('invalid-settings', 'This backup has a setting this version does not accept, so nothing was imported.');
     }
     const { changed, wider } = plan;
-    pendingImport = { token: randomUUID(), backup, changed, wider };
+    pendingImport = { token: randomUUID(), backup, baseline: withoutPerComputer(settingsForBackup(settingsPatch, plan.base)) };
     return {
       token: pendingImport.token, file: path.basename(file), appVersion: backup.appVersion, exportedAt: backup.exportedAt,
       changed, wider, keyCount: backup.secretCount
@@ -1159,7 +1165,20 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       logInfo('settings backup: import refused, its choice is gone or was already used; nothing changed');
       throw new Error('Choose the backup file again.');
     }
-    const { backup } = pendingImport;
+    const choice = pendingImport;
+    const { backup } = choice;
+    const validateImport = (config: Config): void => {
+      // Decryption/preflight can yield while another file is picked or an earlier import ends.
+      if (pendingImport !== choice) {
+        logInfo('settings backup: import refused, its choice is gone or was already used; nothing changed');
+        throw new Error('Choose the backup file again.');
+      }
+      if (changedSettings(choice.baseline, withoutPerComputer(settingsForBackup(settingsPatch, config))).length) {
+        pendingImport = null;
+        logInfo('settings backup: import refused, the settings changed after the file was chosen; nothing changed');
+        throw new Error('Your settings changed after the file was chosen. Choose it again.');
+      }
+    };
     // Keys open first: a wrong passphrase changes nothing, and the dialog can ask again.
     let keys: Record<string, string> = {};
     if (includeKeys && backup.secrets) {
@@ -1168,15 +1187,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         throw error;
       }
     }
-    // Against the settings as they are now. If they changed since the file was chosen (a save still
-    // on its way, another window), the person confirmed a different import: it is refused, so more
-    // access is never granted without the warning the preview showed.
-    const { base, merged, language, changed, wider } = importPlan(backup);
-    if (JSON.stringify(changed) !== JSON.stringify(pendingImport.changed) || JSON.stringify(wider) !== JSON.stringify(pendingImport.wider)) {
-      pendingImport = null;
-      logInfo('settings backup: import refused, the settings changed after the file was chosen; nothing changed');
-      throw new Error('Your settings changed after the file was chosen. Choose it again.');
-    }
+    validateImport(getConfig());
+    const { base, merged, language, changed } = importPlan(backup);
     // Checked before anything changes, so a computer without secure storage gets a clear refusal
     // rather than its settings changed and its keys missing.
     if (Object.keys(keys).length && !(await isEncryptionAvailable())) {
@@ -1193,16 +1205,17 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // language and keys are not left out of a backup whose settings already changed.
     // Said after "Imported", each a sentence the renderer translates on its own.
     const warnings: string[] = [];
+    // Also covers a key-only import after asynchronous secure-storage preflight.
+    validateImport(getConfig());
     if (changed.length) {
       // This save's own report, never an inference from the config: another window's save may land meanwhile.
-      const { lateError } = await saveSettingsReport(settingsSave.parse({ base, patch: merged }));
+      const { lateError } = await saveSettingsReport(settingsSave.parse({ base, patch: merged }), { validate: validateImport, language });
       if (lateError) {
         const message = lateError instanceof Error ? lateError.message : String(lateError);
         warnings.push(message);
         logWarn(`settings backup: the settings were saved, but a later step of the save failed (${message}); the import goes on`);
       }
     }
-    if (language !== getConfig().ui.language) await updateConfig(config => ({ ...config, ui: { ...config.ui, language } }));
     // The settings are written by now: a key write that still fails is reported, never as a failed
     // import, and never by undoing settings (an undo that fails halfway would be worse).
     let keysFailed = false;
@@ -1213,7 +1226,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         warnings.push('The settings were imported, but the saved keys could not be stored. Add them again in Settings.');
       }
     }
-    pendingImport = null;
+    if (pendingImport === choice) pendingImport = null;
     const keyCount = keysFailed ? 0 : Object.keys(keys).length;
     logInfo(`settings backup: imported ${changed.length} changed setting${changed.length === 1 ? '' : 's'}` +
       `${keyCount ? ` and ${keyCount} saved key${keyCount === 1 ? '' : 's'}` : ''}${backup.appVersion ? ` from a ${backup.appVersion} backup` : ''}`);
