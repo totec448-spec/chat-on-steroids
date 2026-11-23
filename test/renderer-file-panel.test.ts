@@ -1437,6 +1437,32 @@ it('leaves a revisionless saved baseline to explicit refresh rather than a new w
   expect(host.querySelector('.file-editor-refresh')).not.toBeNull();
 });
 
+it.each([false, true])('publishes only the newest overlapping watcher read (newest finishes first: %s)', async newestFirst => {
+  const panel = createFilePanel({ host, toggle });
+  panel.update(projectA); toggle.click(); await tick();
+  await editFile();
+  const finish: Array<(value: unknown) => void> = [];
+  (window.api.previewProjectFile as any).mockImplementation(() => new Promise(resolve => { finish.push(resolve); }));
+  projectFilesChanged?.({ projectId: projectA.id, directory: '' }); await tick();
+  projectFilesChanged?.({ projectId: projectA.id, directory: '' }); await tick();
+  expect(finish).toHaveLength(2);
+  const older = { ok: true, data: { ...preview, text: 'older update', revision: 'b'.repeat(64) } };
+  const newest = { ok: true, data: { ...preview, text: 'newest update', revision: 'c'.repeat(64) } };
+  if (newestFirst) {
+    finish[1]!(newest); await tick();
+    expect(host.querySelector<HTMLTextAreaElement>('.test-code-input')?.value).toBe('newest update');
+    finish[0]!(older); await tick();
+  } else {
+    finish[0]!(older); await tick();
+    expect(host.querySelector<HTMLTextAreaElement>('.test-code-input')?.value).toBe(preview.text);
+    finish[1]!(newest); await tick();
+  }
+  expect(host.querySelector<HTMLTextAreaElement>('.test-code-input')?.value).toBe('newest update');
+  typeEdit(host.querySelector<HTMLTextAreaElement>('.test-code-input')!, 'edited newest update');
+  host.querySelector<HTMLButtonElement>('.file-editor-save')!.click(); await tick();
+  expect(window.api.saveProjectFile).toHaveBeenLastCalledWith(projectA.id, 'README.md', 'edited newest update', preview.modifiedAt, preview.bytes, 'c'.repeat(64));
+});
+
 it('does not overwrite edits typed while a watcher preview read is in flight', async () => {
   const panel = createFilePanel({ host, toggle, onAttach: () => undefined });
   panel.update(projectA); toggle.click(); await tick();

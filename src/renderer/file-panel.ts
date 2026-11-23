@@ -268,6 +268,8 @@ export function createFilePanel(options: FilePanelOptions) {
 
   let project: LocalProject | null = null;
   let generation = 0;
+  /** Latest watcher preview request; accepting a save or explicit refresh retires earlier reads. */
+  let watcherReadGeneration = 0;
   /** Changes when the pane hides, its project changes or Review is left: a restore's follow-up then stops. */
   let viewEpoch = 0;
   let selection: Selection = { path: '', kind: 'root' };
@@ -863,6 +865,7 @@ export function createFilePanel(options: FilePanelOptions) {
       if ((token !== editorMountToken && !retainedMatches) || project?.id !== current.id ||
           previewPath !== value.path || editingPath !== value.path || previewValue?.revision !== value.revision) return;
       retainedDrafts.delete(current.id);
+      watcherReadGeneration++;
       previewValue = next;
       editorOriginalText = next.text ?? draft;
       editorDraft = codeEditor?.getValue() ?? editorDraft;
@@ -890,6 +893,7 @@ export function createFilePanel(options: FilePanelOptions) {
       // A new token can authorize the draft only when disk still contains the saved baseline.
       if (!editablePreview(fresh) || fresh.text !== value.text) { markEditorExternalChange(); return; }
       const draft = codeEditor?.getValue() ?? editorDraft;
+      watcherReadGeneration++;
       previewValue = fresh;
       retainedDrafts.delete(current.id);
       await startEditing(fresh, draft);
@@ -1771,12 +1775,12 @@ export function createFilePanel(options: FilePanelOptions) {
   async function reloadPreviewFromDisk(directory: string, expectedGeneration: number): Promise<void> {
     const current = project;
     const relative = previewPath;
-    const baseline = previewValue;
     if (!current || !relative || parentPath(relative) !== directory) return;
+    const read = ++watcherReadGeneration;
     const fresh = await run(window.api.previewProjectFile(current.id, relative));
-    if (!fresh || expectedGeneration !== generation || project?.id !== current.id || previewPath !== relative || previewValue !== baseline) return;
-    // A save or explicit refresh may have superseded this read. Watchers never restore a
-    // revisionless saved baseline; refreshSavedEditor owns its text comparison and new token.
+    if (!fresh || read !== watcherReadGeneration || expectedGeneration !== generation || project?.id !== current.id || previewPath !== relative) return;
+    // Only the latest request can publish; accepting a save or explicit refresh also invalidates
+    // pending reads. A revisionless saved baseline still belongs to refreshSavedEditor alone.
     if (editingPath === relative && !previewValue?.revision) return;
     if (editingPath === relative && editorDirty) {
       if (fresh.revision !== previewValue?.revision) markEditorExternalChange();
