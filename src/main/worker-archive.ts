@@ -12,16 +12,16 @@
  * Temporary Chats were checked instead (2026-10-14): tools work there, but a page reload
  * loses the conversation, and recovery reloads stuck tabs.
  *
- * A finished worker can still be given more work. ChatGPT offers no message box in an archived
- * chat, so a wake for a chat archived here is held until the browser has unarchived it
+ * A finished worker can still be given more work. A wake also asks to restore its chat in
+ * ChatGPT, so a wake for a chat archived here is held until the browser has unarchived it
  * ({@link readyForWake}), at most {@link WORKER_UNARCHIVE_HOLD_MS}. Unarchiving works with the
  * setting off too: turning it off must not strand a worker the app archived earlier.
  *
  * The queue and last settled chat states survive a restart. An expired lease does not cancel
  * the browser's PATCH: an opposite success arriving after an entry was retired queues a
  * correction to that settled state, rather than forgetting that the chat changed again.
- * Each entry is leased to one browser pass at a time; a failed attempt backs off, a pass without any ChatGPT tab is not an attempt, and an entry is dropped
- * after its last attempt or a week of waiting.
+ * Each entry is leased to one browser pass at a time; a failed attempt backs off, a pass without
+ * any ChatGPT tab is not an attempt, and an entry is dropped after its last attempt or a week of waiting.
  */
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -198,7 +198,7 @@ export function queueWorkerArchives(conversationIds: readonly string[], now = Da
 }
 
 /**
- * Whether a chat can be typed into now: a wake of its worker, or a message you send it. A queued
+ * Whether the app’s archive/restore gate lets new work proceed: a worker wake or a message. A queued
  * archive that has not started is simply dropped. A chat archived here (or being archived) is
  * unarchived first: the answer is false until then, and {@link onWorkerChatReady} names the chat
  * once it may go ahead. After {@link WORKER_UNARCHIVE_HOLD_MS} it goes ahead anyway.
