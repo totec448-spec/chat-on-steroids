@@ -320,6 +320,51 @@ it.each([false, true])('ignores receipts before the correction is leased (reload
   expect(nextWorkerArchive(now + 7)).toBeNull();
 });
 
+it('known limit: an older restore receipt can finish an already-leased correction', () => {
+  queueWorkerArchives([A], 1_000);
+  expect(nextArchive(1_000)).toBe(A); // Archive PATCH is held past its lease.
+  expect(readyForWake(A, 1_001)).toBe(false);
+  expect(nextWorkerArchive(1_000 + WORKER_ARCHIVE_LEASE_MS)?.archive).toBe(false);
+  const now = 1_000 + 2 * WORKER_ARCHIVE_LEASE_MS;
+  expect(nextWorkerArchive(now)?.archive).toBe(false);
+  settleWorkerArchive(A, 'unarchived', now + 1); // Newer restore completes first.
+  settleWorkerArchive(A, 'archived', now + 2); // Original archive PATCH lands last.
+  expect(readyForWake(A, now + 3)).toBe(false);
+  expect(nextWorkerArchive(now + 3)).toEqual({ conversationId: A, archive: false });
+  // The older restore PATCH ran before the archive; only its receipt arrives now.
+  // Once leased, the guard cannot distinguish this receipt from the correction's own.
+  settleWorkerArchive(A, 'unarchived', now + 4);
+  expect(nextWorkerArchive(now + 5)).toBeNull();
+  expect(readyForWake(A, now + 5)).toBe(true); // Remote chat can still be archived.
+});
+
+it.each(['archived', 'restored'])('keeps at most 2,000 %s records without evicting the other state', async state => {
+  const other = state === 'archived' ? 'restored' : 'archived';
+  const records = Array.from({ length: 2_000 }, (_, i) => ({
+    conversationId: `${i.toString(16).padStart(8, '0')}-1111-4222-8333-444444444444`, at: 1_000 + i
+  }));
+  await workerArchiveWritten();
+  const file = path.join(dir, 'state', 'worker-archive.json');
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, JSON.stringify({ version: 3, entries: [], [state]: records, [other]: [{ conversationId: B, at: 1_000 }] }));
+  vi.setSystemTime(4_000);
+  await loadWorkerArchive();
+  queueWorkerArchives([A]);
+  expect(nextArchive(4_000)).toBe(A);
+  settleWorkerArchive(A, 'archived');
+  if (state === 'restored') {
+    expect(readyForWake(A)).toBe(false);
+    expect(nextWorkerArchive()?.archive).toBe(false);
+    settleWorkerArchive(A, 'unarchived');
+  }
+  await workerArchiveWritten();
+  const saved = JSON.parse(await fs.readFile(file, 'utf8'));
+  expect(saved[state]).toHaveLength(2_000);
+  expect(saved[state]).not.toContainEqual(records[0]);
+  expect(saved[state]).toContainEqual({ conversationId: A, at: 4_000 });
+  expect(saved[other]).toEqual([{ conversationId: B, at: 1_000 }]);
+});
+
 it('releases a held wake after the hold time when the chat cannot be unarchived in time', () => {
   vi.useFakeTimers();
   vi.setSystemTime(1_000);
