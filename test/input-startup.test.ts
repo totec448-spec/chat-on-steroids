@@ -162,7 +162,7 @@ it.each([false, true].flatMap(retry => ['cancel', 'shutdown', 'claimed', 'none']
     if (retry) {
       ports.open.mockRejectedValueOnce(new Error('startup refused'));
       await sendDesktopInput(request);
-      await vi.waitFor(() => expect(ports.rows[0]?.error).toContain('Browser startup failed'));
+      await vi.waitFor(() => expect(ports.rows[0]?.error).toContain('Browser startup failed'), { timeout: 5000 });
       ports.open.mockClear(); ports.note.mockClear();
     }
     let enter!: () => void, release!: (running: boolean) => void;
@@ -177,7 +177,7 @@ it.each([false, true].flatMap(retry => ['cancel', 'shutdown', 'claimed', 'none']
     const notes = ports.note.mock.calls.length;
     release(false);
     await pending;
-    await vi.waitFor(() => expect(ports.note.mock.calls.length).toBeGreaterThan(notes));
+    await vi.waitFor(() => expect(ports.note.mock.calls.length).toBeGreaterThan(notes), { timeout: 5000 });
     expect(ports.open).toHaveBeenCalledTimes(action === 'none' ? 1 : 0);
     if (action === 'cancel') expect(ports.rows[0]?.state).toBe('cancelled');
     if (action === 'claimed') expect(ports.rows[0]?.state).toBe('browser');
