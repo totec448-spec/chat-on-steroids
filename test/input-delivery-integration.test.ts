@@ -45,10 +45,11 @@ const { makeTempDir, removeTempDir } = await import('./helpers.js');
 let directory: string;
 let bearer: string;
 const pushed = vi.fn();
-async function post(route: string, body: unknown) {
+async function post(route: string, body: unknown, extensionHeaders: Record<string, string> = {}) {
   const response = await fetch(`http://127.0.0.1:${bridgePort()}${route}`, {
     method: 'POST', headers: { 'content-type': 'application/json', 'x-extension-version': APP_VERSION,
-      'x-extension-protocol': String(BRIDGE_PROTOCOL), ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) }, body: JSON.stringify(body)
+      'x-extension-protocol': String(BRIDGE_PROTOCOL), ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+      ...extensionHeaders }, body: JSON.stringify(body)
   });
   return { status: response.status, body: await response.json() as any };
 }
@@ -2386,16 +2387,17 @@ describe('IPC input delivery and Goal control integration', () => {
   });
   it('publishes only nonce-bound catalog observations through HTTP and pushes completion', async () => {
     const { pendingChatModelRequest, resetChatModelsForTests } = await import('../src/main/chat-models.js');
+    const chosenBrowser = { 'x-extension-host': 'browser', 'x-extension-browser': 'catalogintegrationbrowser001' };
     resetChatModelsForTests();
     expect((await handlers.get('chatModels:request')!(null, {})).data.state).toBe('pending');
     const nonce = pendingChatModelRequest()!.nonce;
     const models = [{ id: 'gpt-observed', label: 'GPT Observed', efforts: ['none', 'medium', 'high', 'xhigh'] }];
-    expect((await post('/models', { nonce: randomUUID(), models })).status).toBe(409);
+    expect((await post('/models', { nonce: randomUUID(), models }, chosenBrowser)).status).toBe(409);
     pushed.mockClear();
-    expect((await post('/models', { nonce, models })).body.ok).toBe(true);
+    expect((await post('/models', { nonce, models }, chosenBrowser)).body.ok).toBe(true);
     expect((await handlers.get('chatModels:get')!(null, {})).data.models).toEqual(models);
     await vi.waitFor(() => expect(pushed).toHaveBeenCalledWith('state:changed', expect.anything()));
-    expect((await post('/models', { nonce, models })).status).toBe(409);
+    expect((await post('/models', { nonce, models }, chosenBrowser)).status).toBe(409);
   });
   it('releases only the expected actual turn through IPC', async () => {
     const conversationId = randomUUID();

@@ -9845,6 +9845,41 @@ describe('a worker chat that never opens', () => {
     }
   });
 
+  it.each([
+    { selected: 'cos', chosen: { host: 'cos', browser: 'b'.repeat(32) },
+      foreign: { host: 'browser', browser: 'c'.repeat(32) } },
+    { selected: 'firefox', chosen: { host: 'browser', browser: 'f'.repeat(32), engine: 'gecko' },
+      foreign: { host: 'browser', browser: 'c'.repeat(32) } }
+  ] as const)('offers and accepts model discovery only from the chosen %s browser kind', async ({ selected, chosen, foreign }) => {
+    const catalog = await import('../src/main/chat-models.js');
+    const previous = getConfig();
+    await pair();
+    try {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: selected } });
+      catalog.resetChatModelsForTests();
+      catalog.requestChatModels(false);
+      const pending = catalog.pendingChatModelRequest()!;
+      const observation = {
+        nonce: pending.nonce,
+        models: [{ id: 'gpt-6-thinking', label: 'GPT-6 Thinking', efforts: ['medium', 'high'] }]
+      };
+      // The selected CoS browser has not yet reported itself. A still-running
+      // external Chromium extension must not receive the request or complete it.
+      expect((await request('GET', '/status', foreign)).body.modelCatalogRequest).toBeNull();
+      expect((await request('POST', '/models', { ...foreign, body: observation })).status).toBe(409);
+      expect(catalog.pendingChatModelRequest()?.nonce).toBe(pending.nonce);
+      expect(catalog.getChatModels().models).toEqual([]);
+      expect((await request('GET', '/status', chosen)).body.modelCatalogRequest).toMatchObject({
+        nonce: pending.nonce, allowOpen: false
+      });
+      expect((await request('POST', '/models', { ...chosen, body: observation })).body.ok).toBe(true);
+      expect(catalog.getChatModels()).toMatchObject({ state: 'ready', models: observation.models });
+    } finally {
+      catalog.resetChatModelsForTests();
+      await saveConfig(previous);
+    }
+  });
+
   // #1852: with the built-in browser chosen, the prime chat still open in Chrome collected one of
   // three worker tabs through its page's /activity poll. Chrome opened it, and the redeem route then
   // refused that page as not the chosen browser, so the worker timed out.

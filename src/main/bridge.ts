@@ -3445,6 +3445,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     return json(res, 200, { ok: true, changed }, origin);
   }
   if (route === '/models' && req.method === 'POST') {
+    // The nonce proves which inspection was requested, not which account/browser
+    // produced it: installed companions share a pairing token. In particular,
+    // a still-running external Chromium must not confirm the CoS catalog while
+    // the built-in companion has not connected. Reject before consuming nonce.
+    if (!chosenCatalogReporter(req) || notChosenBrowser(req) || staleCompanion(req))
+      return json(res, 409, { ok: false, error: 'catalog_browser_not_selected' }, origin);
     const accepted = observeChatModels(await readBody(req));
     if (accepted) changed();
     return json(res, accepted ? 200 : 409, { ok: accepted }, origin);
@@ -3631,7 +3637,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         ok: true,
         conversations: live,
         stopTurns: await pendingStopCommands(),
-        modelCatalogRequest: otherBrowser ? null : pendingChatModelRequest(),
+        modelCatalogRequest: !otherBrowser && !refusedAsStale && chosenCatalogReporter(req)
+          ? pendingChatModelRequest() : null,
         // This install's connector names, so the extension recognizes exactly its own traffic.
         connectorNames: connectorNames(getConfig().connectorSuffix),
         // Apps proven to be this install's connectors, so a renamed connector is still recognized.
