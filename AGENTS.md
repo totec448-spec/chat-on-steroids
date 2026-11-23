@@ -5728,13 +5728,20 @@ browser action.
 The Files panel projects the current session's LocalProject through fixed IPC using a project
 UUID and relative paths. It does not change the main composer or grant additional filesystem
 access. Main re-resolves current approved roots and rejects traversal, symbolic links/junctions
-and project-root mutation. Files creates and renames share the `project-files.ts` entry-mutation
-queue from validation through publication: the next operation checks the preceding result, so
-competing renames or a create/rename cannot both claim an unused name and replace its contents.
-At most 32 operations (active included) are admitted in FIFO order; excess requests receive a
-translated retryable busy error without retaining their callbacks. A failed operation releases
-the queue; waiting and capacity refusal are logged. Windows case-only renames retain their
-existing native-path handling. This queue covers these app-owned operations, not external OS
+and project-root mutation. Files creates and renames use the `project-files.ts` entry-mutation
+queues from filesystem validation through publication. Admission keys use the catalog's canonical
+project roots, without resolving project folders first. Disjoint roots progress independently,
+even when another project's queue is full or stalled. Equal or parent/child roots wait for each
+other in admission order: the next operation checks the preceding result, so competing renames
+or a create/rename cannot both claim an unused name and replace its contents. Admission refuses
+when 32 operations (active included) are pending across the overlapping roots, using the
+translated retryable busy error without adding the callback to a mutation queue. Catalog lookups are
+ordered separately from filesystem work so async reads cannot reorder admission. Before a
+lookup, an app-wide cap of 6,400 (200 catalog projects × 32) also bounds unresolved requests,
+including invalid project ids. Queue keys come only from the bounded project catalog; drained
+keys are removed. A failed operation releases its queue; waiting and capacity refusal are
+logged. Windows case-only renames retain their existing native-path handling. These queues
+cover these app-owned operations, not external OS
 writers; the adjacent pathname/sandbox rechecks remain in force.
 The renderer's `workspace-docks.ts` owns the right tool dock and
 bottom terminal dock; Files, Review, Sub-agents and each Terminal view retain their own content

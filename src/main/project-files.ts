@@ -25,22 +25,46 @@ const MAX_PREVIEW_BYTES = 256 * 1024;
 const MAX_IMAGE_PREVIEW_BYTES = 5 * 1024 * 1024;
 const MAX_PDF_PREVIEW_BYTES = 20 * 1024 * 1024;
 const activeSaves = new Set<string>();
-// Files creates and renames share one namespace: both must see the preceding publication
-// before testing an unused name. In particular, two renames must never both replace it.
-let entryMutations: Promise<unknown> = Promise.resolve();
-let pendingEntryMutations = 0;
+// Use the catalog's canonical root before touching the project's filesystem. Disjoint projects
+// can progress independently; overlapping roots must still see each preceding publication.
+const entryMutations = new Map<string, { tail: Promise<unknown>; pending: number }>();
 const MAX_ENTRY_MUTATIONS = 32;
-function mutateEntries<T>(work: () => Promise<T>): Promise<T> {
-  if (pendingEntryMutations >= MAX_ENTRY_MUTATIONS) {
-    logInfo('project files: refused a create or rename because the pending operation limit was reached; retry after it drains');
-    return Promise.reject(new Error('Too many file operations are in progress. Try again when they finish.'));
-  }
-  if (pendingEntryMutations) logInfo('project files: waiting for an earlier create or rename to finish');
+// Resolve catalog identities in call order, but never await a filesystem mutation here.
+// Bound this admission stage too, including requests whose project id is not valid.
+const MAX_PENDING_ENTRY_MUTATIONS = 200 * MAX_ENTRY_MUTATIONS;
+let pendingEntryMutations = 0;
+let entryAdmissions: Promise<unknown> = Promise.resolve();
+function entryMutationBusy(): Error {
+  logInfo('project files: refused a create or rename because the pending operation limit was reached; retry after it drains');
+  return new Error('Too many file operations are in progress. Try again when they finish.');
+}
+
+function mutateEntries<T>(projectId: string, work: () => Promise<T>): Promise<T> {
+  if (pendingEntryMutations >= MAX_PENDING_ENTRY_MUTATIONS) return Promise.reject(entryMutationBusy());
   pendingEntryMutations++;
-  const result = entryMutations.then(work);
-  const settled = () => { pendingEntryMutations--; };
-  entryMutations = result.then(settled, settled);
-  return result;
+  const admitted = entryAdmissions.then(() => admitEntryMutation(projectId, work));
+  entryAdmissions = admitted.then(() => undefined, () => undefined);
+  return admitted.then(({ result }) => result).finally(() => { pendingEntryMutations--; });
+}
+
+async function admitEntryMutation<T>(projectId: string, work: () => Promise<T>): Promise<{ result: Promise<T> }> {
+  const project = await getProject(projectId);
+  if (!project) throw new Error('Project not found');
+  if (project.remote) throw new Error(SERVER_EDITS);
+  const key = nativePathIdentity(project.path);
+  const overlapping = [...entryMutations].filter(([root]) => isContained(root, key) || isContained(key, root));
+  const pending = overlapping.reduce((count, [, queue]) => count + queue.pending, 0);
+  if (pending >= MAX_ENTRY_MUTATIONS) throw entryMutationBusy();
+  if (pending) logInfo('project files: waiting for an earlier create or rename to finish');
+  const queue = entryMutations.get(key) ?? { tail: Promise.resolve(), pending: 0 };
+  queue.pending++;
+  const result = Promise.all(overlapping.map(([, earlier]) => earlier.tail)).then(work);
+  const settled = () => {
+    if (--queue.pending === 0) entryMutations.delete(key);
+  };
+  queue.tail = result.then(settled, settled);
+  entryMutations.set(key, queue);
+  return { result };
 }
 
 function sameFile(left: Stats, right: Stats): boolean {
@@ -568,7 +592,7 @@ async function previewServerFile(projectId: string, target: { projectName: strin
 
 export function createProjectEntry(projectId: string, relativeDirectory: string, nameInput: string,
   kind: 'file' | 'directory'): Promise<ProjectFileMutationResult> {
-  return mutateEntries(() => createEntry(projectId, relativeDirectory, nameInput, kind));
+  return mutateEntries(projectId, () => createEntry(projectId, relativeDirectory, nameInput, kind));
 }
 
 async function createEntry(
@@ -603,7 +627,7 @@ async function createEntry(
 }
 
 export function renameProjectEntry(projectId: string, relativePath: string, nameInput: string): Promise<ProjectFileMutationResult> {
-  return mutateEntries(() => renameEntry(projectId, relativePath, nameInput));
+  return mutateEntries(projectId, () => renameEntry(projectId, relativePath, nameInput));
 }
 
 async function renameEntry(
