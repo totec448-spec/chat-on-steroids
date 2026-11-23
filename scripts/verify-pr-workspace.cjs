@@ -90,7 +90,7 @@ app.whenReady().then(async () => {
         getProjectGitDiff:(id,name)=>ok({projectId:id,status:'M',path:name,additions:2,deletions:1,binary:false,tooLarge:false,
           baseText:'# Demo workspace\\n',currentText:'# Demo workspace\\n\\nUpdated in the working tree.\\n'}),
         attachProjectFile:(id,name)=>{window.fixtureAttached.push({id,name});return ok({id:'file-1',name,size:12,mimeType:'text/plain'});},
-        saveProjectFile:(id,name,text)=>{files[name]=text;window.fixtureSaves.push({id,name,text});return ok({preview:info(id,name)});},
+        saveProjectFile:(id,name,text)=>{files[name]=text;window.fixtureSaves.push({id,name,text});return ok({preview:window.fixtureSaveWithoutPreview?null:info(id,name)});},
         writeClipboard:()=>ok(true),connect:()=>{state.status.state='connected';return ok(state)},disconnect:()=>{state.status.state='disconnected';return ok(state)}
       },{get:(target,key)=>key in target?target[key]:String(key).startsWith('on')?()=>()=>{}:()=>ok(null)});
       await import('/main.ts');
@@ -255,6 +255,30 @@ app.whenReady().then(async () => {
     assert.equal(await js('window.fixtureSaves[0].text'),'export const value = 2;');
     await until('!document.querySelector(".file-editor-save")');
     await screenshot('editor-saved');
+    // A committed save remains successful when only its preview read failed. Real CodeMirror
+    // keeps the acknowledged baseline and offers refresh rather than retrying an obsolete token.
+    await js(`window.fixtureSaveWithoutPreview=true;document.querySelector('.file-preview [title="Edit"]').click()`);
+    await until('!!document.querySelector(".file-preview.is-editing .cm-editor")');
+    await js(`window.fixture.edit('export const value = 3;');document.querySelector('.file-editor-save').click()`);
+    await until('!!document.querySelector(".file-editor-refresh") && !!document.querySelector(".file-preview.is-editing .cm-editor")');
+    assert.equal(await js('document.querySelector(".file-editor-save").disabled'),true);
+    assert.equal(await js('document.querySelector(".file-editor-dirty").hidden'),true);
+    assert.equal(await js('window.fixtureSaves.at(-1).text'),'export const value = 3;');
+    await screenshot('editor-saved-preview-unavailable');
+    await js(`window.fixture.edit('export const value = 4;')`);
+    win.setSize(820,740);
+    await js(`window.fixture.setLanguage('ja')`);
+    assert.equal(await js('document.querySelector(".file-editor-save").disabled'),true);
+    assert.ok(await js(`(()=>{const button=document.querySelector('.file-editor-refresh').getBoundingClientRect();const pane=document.querySelector('.file-preview').getBoundingClientRect();return button.left>=pane.left&&button.right<=pane.right})()`));
+    await screenshot('editor-saved-preview-unavailable-ja-narrow');
+    await js(`document.querySelector('.file-editor-refresh').click()`);
+    await until('!!document.querySelector(".file-editor-save") && !document.querySelector(".file-editor-save").disabled');
+    assert.ok(await js('document.querySelector(".file-preview .cm-content").textContent.includes("value = 4")'));
+    await js(`window.fixtureSaveWithoutPreview=false;document.querySelector('.file-editor-save').click()`);
+    await until('!document.querySelector(".file-editor-save")');
+    assert.equal(await js('window.fixtureSaves.at(-1).text'),'export const value = 4;');
+    win.setSize(1500,1000);
+    await js(`window.fixture.setLanguage('en')`);
     await js(`document.querySelector('.file-tree-row[data-path="preview.pdf"]').click()`);
     await until('!!document.querySelector(".file-pdf-canvas:not([hidden])")');
     assert.ok(await js(`(()=>{const c=document.querySelector('.file-pdf-canvas');return c.width*c.height>100&&c.width*c.height<=16*1024*1024;})()`));

@@ -192,7 +192,72 @@ it('saves bounded text through the project sandbox and returns the new editor re
     text: 'export const value = 2;\n',
     truncated: false
   });
-  expect(saved.preview.modifiedAt).not.toBe('');
+  expect(saved.preview?.modifiedAt).not.toBe('');
+});
+
+it('acknowledges a committed save even when the following preview read fails', async () => {
+  const file = path.join(approved, 'project', 'notes.txt');
+  await fs.writeFile(file, 'original\n');
+  const project = await addProject(path.dirname(file));
+  const before = await previewProjectFile(project.id, 'notes.txt');
+  const rename = fs.rename.bind(fs), open = fs.open.bind(fs);
+  let committed = false;
+  vi.spyOn(fs, 'rename').mockImplementation(async (...args) => {
+    await rename(...args);
+    if (String(args[1]) === file) committed = true;
+  });
+  const read = vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+    if (committed && String(args[0]) === file && args[1] === 'r') {
+      throw Object.assign(new Error('Preview read failed'), { code: 'EIO' });
+    }
+    return open(...args);
+  });
+
+  await expect(saveProjectTextFile(project.id, 'notes.txt', 'saved\n', before.modifiedAt, before.bytes, before.revision!))
+    .resolves.toEqual({ preview: null });
+  expect(await fs.readFile(file, 'utf8')).toBe('saved\n');
+  expect((await fs.readdir(path.dirname(file))).some(name => name.endsWith('.tmp'))).toBe(false);
+  read.mockRestore();
+  const fresh = await previewProjectFile(project.id, 'notes.txt');
+  await expect(saveProjectTextFile(project.id, 'notes.txt', 'next\n', fresh.modifiedAt, fresh.bytes, fresh.revision!))
+    .resolves.toHaveProperty('preview.text', 'next\n');
+});
+
+it.skipIf(process.platform === 'win32').each([0o664, 0o775])('preserves mode %o after a restrictive creation umask', async mode => {
+  const file = path.join(approved, 'project', 'notes.txt');
+  await fs.writeFile(file, 'original\n');
+  await fs.chmod(file, mode);
+  const project = await addProject(path.dirname(file));
+  const before = await previewProjectFile(project.id, 'notes.txt');
+  const open = fs.open.bind(fs);
+  vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+    const handle = await open(...args);
+    // Model the OS's umask without changing the test worker's process-wide umask.
+    if (args[1] === 'wx') await handle.chmod(mode & ~0o022);
+    return handle;
+  });
+  await saveProjectTextFile(project.id, 'notes.txt', 'saved\n', before.modifiedAt, before.bytes, before.revision!);
+  expect((await fs.stat(file)).mode & 0o777).toBe(mode);
+  expect(await fs.readFile(file, 'utf8')).toBe('saved\n');
+});
+
+it.skipIf(process.platform === 'win32')('keeps the original file when restoring replacement permissions fails', async () => {
+  const file = path.join(approved, 'project', 'notes.txt');
+  await fs.writeFile(file, 'original\n');
+  await fs.chmod(file, 0o664);
+  const project = await addProject(path.dirname(file));
+  const before = await previewProjectFile(project.id, 'notes.txt');
+  const open = fs.open.bind(fs);
+  vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+    const handle = await open(...args);
+    if (args[1] === 'wx') vi.spyOn(handle, 'chmod').mockRejectedValue(Object.assign(new Error('Mode change failed'), { code: 'EPERM' }));
+    return handle;
+  });
+  await expect(saveProjectTextFile(project.id, 'notes.txt', 'saved\n', before.modifiedAt, before.bytes, before.revision!))
+    .rejects.toThrow('Mode change failed');
+  expect(await fs.readFile(file, 'utf8')).toBe('original\n');
+  expect((await fs.stat(file)).mode & 0o777).toBe(0o664);
+  expect((await fs.readdir(path.dirname(file))).some(name => name.endsWith('.tmp'))).toBe(false);
 });
 
 it('refuses to overwrite a text file that changed after the editor preview was opened', async () => {

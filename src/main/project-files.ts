@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { Stats } from 'node:fs';
 import sharp from 'sharp';
 import { imageMime } from './fsops.js';
-import { logInfo } from './logger.js';
+import { logInfo, logWarn } from './logger.js';
 import { getConfig } from './config.js';
 import { listDirectoryLevel, LongLineReadError, readTextFile, statInfo } from './codex/read-backend.js';
 import { getProject, projectWorkspace } from './projects.js';
@@ -646,6 +646,9 @@ export async function saveProjectTextFile(
     try {
       staged = await handle.stat();
       await handle.writeFile(text, { encoding: 'utf8' });
+      // Creation applies umask; restore the original ordinary permission bits before publication.
+      // Windows chmod cannot represent POSIX modes and can change the read-only attribute instead.
+      if (process.platform !== 'win32') await handle.chmod(original.stat.mode & 0o777);
       await handle.sync();
     } finally { await handle.close(); }
     const latest = await textSnapshot(target);
@@ -654,7 +657,13 @@ export async function saveProjectTextFile(
     // There is no truncation of the original. Write/flush/rename failures retain its bytes.
     await fs.rename(temporary, target.real);
     staged = null;
-    return { preview: await previewProjectFile(projectId, relativePath) };
+    // Rename is the commit boundary. A later read must not report a successful write as failed
+    // or supply the old revision as though it could authorize the next save.
+    try { return { preview: await previewProjectFile(projectId, relativePath) }; }
+    catch {
+      logWarn('files: saved the file, but could not refresh its preview; reload before the next save');
+      return { preview: null };
+    }
   } finally {
     activeSaves.delete(key);
     if (staged) {
