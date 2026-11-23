@@ -1771,9 +1771,13 @@ export function createFilePanel(options: FilePanelOptions) {
   async function reloadPreviewFromDisk(directory: string, expectedGeneration: number): Promise<void> {
     const current = project;
     const relative = previewPath;
+    const baseline = previewValue;
     if (!current || !relative || parentPath(relative) !== directory) return;
     const fresh = await run(window.api.previewProjectFile(current.id, relative));
-    if (!fresh || expectedGeneration !== generation || project?.id !== current.id || previewPath !== relative) return;
+    if (!fresh || expectedGeneration !== generation || project?.id !== current.id || previewPath !== relative || previewValue !== baseline) return;
+    // A save or explicit refresh may have superseded this read. Watchers never restore a
+    // revisionless saved baseline; refreshSavedEditor owns its text comparison and new token.
+    if (editingPath === relative && !previewValue?.revision) return;
     if (editingPath === relative && editorDirty) {
       if (fresh.revision !== previewValue?.revision) markEditorExternalChange();
       return;
