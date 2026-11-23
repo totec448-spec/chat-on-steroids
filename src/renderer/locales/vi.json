@@ -3988,5 +3988,8 @@
   "This chat": "Cuộc trò chuyện này",
   "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "Đã giải phóng {0} MB khỏi cuộc trò chuyện này. Hiện đang dùng {1} MB / {2} MB.",
   "Freed {0} MB. Storage usage could not be read.": "Đã giải phóng {0} MB. Không đọc được dung lượng sử dụng.",
-  "Last cleanup: Freed {0} MB.": "Lần dọn dẹp gần nhất: Đã giải phóng {0} MB."
+  "Last cleanup: Freed {0} MB.": "Lần dọn dẹp gần nhất: Đã giải phóng {0} MB.",
+  "Check ChatGPT titles": "Kiểm tra tiêu đề trên ChatGPT",
+  "Show a notice in the chat menu when the open ChatGPT chat has a different title.": "Hiện thông báo trong menu khi cuộc trò chuyện đang mở trên ChatGPT có tiêu đề khác.",
+  "ChatGPT title differs": "Tiêu đề trên ChatGPT khác"
 }

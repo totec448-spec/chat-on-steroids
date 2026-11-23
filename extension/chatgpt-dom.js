@@ -469,6 +469,32 @@ var CLF_DOM = (() => {
     }, '');
   }
 
+  /** Confirm the current page title against the sidebar link for this exact chat. */
+  function confirmedConversationTitle(expected) {
+    return safe(() => {
+      // The worker already verifies the browser's active tab. An app window covering Chrome
+      // can make the document hidden without invalidating its exact navigation links.
+      if (conversationId() !== expected) return null;
+      const title = conversationTitle();
+      if (!title) return null;
+      const selector = 'a[data-sidebar-item="true"][href], nav a[href], [role="navigation"] a[href], a[aria-current="page"][href]';
+      const rows = [...document.querySelectorAll(selector)].filter(link => {
+        const target = new URL(link.href, location.href);
+        return target.origin === location.origin && conversationFromPath(target.pathname) === expected &&
+          !link.closest('[hidden],[aria-hidden="true"],[inert]') && link.getClientRects().length > 0;
+      });
+      if (!rows.length || !rows.every(link => {
+        if (link.querySelector('input,textarea,[contenteditable="true"]')) return false;
+        const label = link.querySelector('[dir="auto"]') ?? link;
+        const visibleTitle = label.textContent?.trim();
+        const attributeTitle = link.getAttribute('title')?.trim();
+        if (visibleTitle && attributeTitle && visibleTitle !== attributeTitle) return false;
+        return (visibleTitle || attributeTitle) === title;
+      })) return null;
+      return title;
+    }, null);
+  }
+
   /**
    * Logical conversation turns, newest last.
    *
@@ -4353,6 +4379,7 @@ var CLF_DOM = (() => {
     conversationId,
     conversationFromPath,
     conversationTitle,
+    confirmedConversationTitle,
     turns,
     presentationTurns,
     messages,
