@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vite
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
+import { getLog } from '../src/main/logger.js';
 import {
   initWorkerArchivePath,
   loadWorkerArchive,
@@ -228,6 +229,8 @@ it('ignores duplicate settled results and never restores a chat it did not manag
   expect(nextArchive(1_000)).toBe(A);
   settleWorkerArchive(A, 'archived', 1_001);
   settleWorkerArchive(A, 'archived', 1_002);
+  expect(getLog().at(-1)?.message).toContain('ignored late archived result');
+  expect(getLog().at(-1)?.message).toContain('already matches remembered state');
   expect(nextWorkerArchive(1_002)).toBeNull();
   expect(readyForWake(A, 1_003)).toBe(false);
   expect(nextWorkerArchive(1_003)?.archive).toBe(false);
@@ -235,7 +238,11 @@ it('ignores duplicate settled results and never restores a chat it did not manag
   await workerArchiveWritten();
   await loadWorkerArchive();
   for (const outcome of ['unarchived', 'failed', 'deferred'] as const) settleWorkerArchive(A, outcome, 1_005);
-  for (const outcome of ['archived', 'unarchived'] as const) settleWorkerArchive(B, outcome, 1_005);
+  for (const outcome of ['archived', 'unarchived'] as const) {
+    settleWorkerArchive(B, outcome, 1_005);
+    expect(getLog().at(-1)?.message).toContain(`ignored late ${outcome} result`);
+    expect(getLog().at(-1)?.message).toContain('no remembered state');
+  }
   expect(nextWorkerArchive(1_005)).toBeNull();
   expect(readyForWake(A, 1_005)).toBe(true);
   expect(readyForWake(B, 1_005)).toBe(true);

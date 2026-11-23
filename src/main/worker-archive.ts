@@ -308,7 +308,10 @@ export function settleWorkerArchive(conversationId: string, outcome: WorkerArchi
   }
   if (!entry && (outcome === 'archived' || outcome === 'unarchived')) {
     const settled = knownState(id, now);
-    if (!settled || settled.archived === (outcome === 'archived')) return;
+    if (!settled || settled.archived === (outcome === 'archived')) {
+      logInfo(`worker archive: ignored late ${outcome} result for ${id}; ${settled ? 'already matches remembered state' : 'no remembered state'}`);
+      return;
+    }
     // A lease expiring is not proof that its remote PATCH stopped. The newer job already
     // settled and retired this entry; restore its intent when the older PATCH lands last.
     entry = {
