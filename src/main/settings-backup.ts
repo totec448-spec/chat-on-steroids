@@ -112,7 +112,8 @@ export function settingsForBackup(schema: z.ZodType, value: unknown): Settings {
   return out;
 }
 
-function withoutPerComputer(settings: Settings): Settings {
+/** Shared by the file format and the import preview value snapshot. */
+export function withoutPerComputer(settings: Settings): Settings {
   const out = structuredClone(settings);
   for (const path of PER_COMPUTER) {
     let parent: unknown = out;

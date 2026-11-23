@@ -369,10 +369,15 @@ changes nothing), then overlays the backup on today's settings (`overlaySettings
 keeps today's value, an unknown one is ignored, lists are whole) and runs the same `saveSettings`
 the form uses, with all its effects, then writes the keys with `setSecrets` in one commit. The
 preview counts only what that save really applies (`importPlan` runs `mergeSettings`), plus
-`ui.language`, which the import applies itself. A value the schema refuses refuses the whole file
-(`invalid-settings`); a preview whose `changed`/`wider` no longer match today's settings is refused
-and its token dropped. A save that fails after it wrote the settings (login item, control API,
-worker history) still gets the language and keys, and the reply carries its message in `warnings`.
+`ui.language`, which the import includes in its guarded settings commit. A value the schema
+refuses refuses the whole file (`invalid-settings`); a preview retains the portable setting
+values it confirmed, not just the changed/wider field names. If those values changed, even within the same field, the import is
+refused and its token dropped. The check runs again inside the config mutation queue, after
+any earlier save; per-computer fields excluded from backups do not invalidate the preview.
+The imported language commits with those settings, not in a later write that could overwrite
+a window's newer language choice. Ordinary form saves still preserve the current language.
+A save that fails after it wrote the settings (login item, control API, worker history) still
+gets the language and keys, and the reply carries its message in `warnings`.
 An unreadable key store refuses an import with keys before anything changes; a key write that
 still fails after the settings were written is a warning ("…could not be stored"), `keyCount` 0.
 A short export passphrase is refused before any key is read. Keys
