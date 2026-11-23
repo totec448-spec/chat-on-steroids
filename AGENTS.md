@@ -5943,8 +5943,9 @@ Creating an entry uses the same unsaved-edit guard as changing the selected file
 Text previews/editor input are bounded to 256 KiB; full editable previews retain exact UTF-8,
 BOM and line endings plus a content/file-identity revision. Save stages complete replacement bytes
 beside the original, flushes them, revalidates project access and the original revision, then
-renames. On POSIX, staging explicitly restores the original ordinary permission bits after writing
-and before flushing, so the creation umask does not narrow them; a chmod failure refuses publication.
+renames. On POSIX, staging restores the original ordinary permission bits after writing and before
+flushing only when the staged creation mode differs. Matching modes need no chmod, preserving saves
+on filesystems that refuse mode changes; a required chmod failure still refuses publication.
 Windows keeps its existing mode/attribute behavior. A failed staging write or rename never truncates
 the original. Rename commits the save: `ProjectFileSaveResult.preview` is null if the later preview
 read fails, with a diagnostic warning, rather than reporting that committed save as failed. The

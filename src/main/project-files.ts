@@ -646,9 +646,12 @@ export async function saveProjectTextFile(
     try {
       staged = await handle.stat();
       await handle.writeFile(text, { encoding: 'utf8' });
-      // Creation applies umask; restore the original ordinary permission bits before publication.
+      // Fix creation-mode differences (e.g. umask) before publication. Matching modes need no
+      // chmod, so filesystems that do not support mode changes can still save unchanged modes.
       // Windows chmod cannot represent POSIX modes and can change the read-only attribute instead.
-      if (process.platform !== 'win32') await handle.chmod(original.stat.mode & 0o777);
+      if (process.platform !== 'win32' && (staged.mode & 0o777) !== (original.stat.mode & 0o777)) {
+        await handle.chmod(original.stat.mode & 0o777);
+      }
       await handle.sync();
     } finally { await handle.close(); }
     const latest = await textSnapshot(target);
