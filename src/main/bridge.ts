@@ -778,6 +778,20 @@ function chosenBuiltInBrowser(req: http.IncomingMessage): boolean {
   return getConfig().ui.chatBrowser === 'cos' && req.headers['x-extension-host'] === 'cos';
 }
 /**
+ * A passive catalog retry spends its only page-return opportunity. Unlike
+ * ordinary /activity recording, it needs the selected browser *kind* itself.
+ * In particular, a Chrome companion must not spend it while the chosen CoS
+ * companion has not yet connected, or while Firefox is the chosen browser.
+ * Chromium's Chrome/Edge/Brave variants cannot be distinguished by these
+ * headers, so this is a conservative kind check, not a new identity grant.
+ */
+function chosenCatalogReporter(req: http.IncomingMessage): boolean {
+  const selected = getConfig().ui.chatBrowser;
+  if (selected === 'cos') return req.headers['x-extension-host'] === 'cos';
+  return req.headers['x-extension-host'] === 'browser' &&
+    geckoExtension(req) === (selected === 'firefox');
+}
+/**
  * Which browser a companion request comes from. Every browser shares one pairing token, so each
  * extension sends its own random id; requests without one (older builds) are not told apart.
  */
@@ -4319,11 +4333,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const pageGenerating = url.searchParams.get('generating');
     if (pageGenerating === '1' || pageGenerating === '0') notePageGenerating(id, pageGenerating === '1');
     // The original passive discovery may have expired while no ChatGPT tab existed.
-    // Only a current chosen-browser page returning while not *known* to generate
-    // may trigger one passive existing-tab retry. Old companions omit `generating`;
-    // the content-side catalog blocker still refuses busy/draft/attachment pages.
+    // Only a current selected-browser page explicitly reporting idle may trigger
+    // one passive existing-tab retry. Unknown generation state, including from an
+    // older companion, cannot spend this one-shot opportunity.
     // No new tab, Send authority or infinite wake/reconnect retry is introduced.
-    if (pageGenerating !== '1' && !notChosenBrowser(req) && !staleCompanion(req)) retryPassiveCatalogOnPageReturn();
+    if (pageGenerating === '0' && chosenCatalogReporter(req) &&
+        !notChosenBrowser(req) && !staleCompanion(req)) retryPassiveCatalogOnPageReturn();
     const retiredWorker = retiredWorkerForConversation(id);
     // A page in a browser that may not take new work is handed no tab to open (#1852).
     const opensWork = opensNewWork(req, '/activity', id);

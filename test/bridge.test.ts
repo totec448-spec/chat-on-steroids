@@ -9790,10 +9790,18 @@ describe('a worker chat that never opens', () => {
       expect(catalog.getChatModels().state).toBe('unavailable');
       vi.useRealTimers();
       expect(catalog.pendingChatModelRequest()).toBeNull();
+      // A foreign Chromium page cannot consume the one attempt before the
+      // built-in companion has even appeared on this bridge.
+      await request('GET', `/activity?conversationId=${chat}&generating=0`, { browser: foreign, host: 'browser' });
+      expect(catalog.pendingChatModelRequest()).toBeNull();
       await request('GET', '/status', { browser: builtIn, host: 'cos' });
       await request('GET', `/activity?conversationId=${chat}&generating=0`, { browser: foreign, host: 'browser' });
       expect(catalog.pendingChatModelRequest()).toBeNull();
       await request('GET', `/activity?conversationId=${chat}&generating=1`, { browser: builtIn, host: 'cos' });
+      expect(catalog.pendingChatModelRequest()).toBeNull();
+      // Old extensions that omit generation state may be busy. Do not spend
+      // the one retry until an explicit idle observation arrives.
+      await request('GET', `/activity?conversationId=${chat}`, { browser: builtIn, host: 'cos' });
       expect(catalog.pendingChatModelRequest()).toBeNull();
       await request('GET', `/activity?conversationId=${chat}&generating=0`, { browser: builtIn, host: 'cos' });
       expect(catalog.pendingChatModelRequest()).toMatchObject({ allowOpen: false });
@@ -9801,6 +9809,35 @@ describe('a worker chat that never opens', () => {
       await request('GET', `/activity?conversationId=${chat}&generating=0`, { browser: builtIn, host: 'cos' });
       expect(catalog.pendingChatModelRequest()?.nonce).toBe(second);
       expect(recoveryBrowserWake).not.toHaveBeenCalledWith(expect.stringContaining('cos-model-catalog='), true, true);
+    } finally {
+      vi.useRealTimers();
+      catalog.resetChatModelsForTests();
+      await saveConfig(previous);
+    }
+  });
+
+  it('does not spend the one passive catalog retry from Chromium when Firefox is chosen', async () => {
+    const catalog = await import('../src/main/chat-models.js');
+    const previous = getConfig();
+    const chat = '3e9891e1-c3b9-4378-a89f-725d06ad2714';
+    await pair();
+    try {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'firefox' } });
+      catalog.resetChatModelsForTests();
+      vi.useFakeTimers();
+      catalog.requestChatModels(false);
+      expect(catalog.observeChatModels({
+        nonce: catalog.pendingChatModelRequest()!.nonce, waiting: 'page_unreachable'
+      })).toBe(true);
+      vi.advanceTimersByTime(120000);
+      expect(catalog.getChatModels().state).toBe('unavailable');
+      vi.useRealTimers();
+      await request('GET', `/activity?conversationId=${chat}&generating=0`,
+        { browser: 'c'.repeat(32), host: 'browser' });
+      expect(catalog.pendingChatModelRequest()).toBeNull();
+      await request('GET', `/activity?conversationId=${chat}&generating=0`,
+        { browser: 'f'.repeat(32), host: 'browser', engine: 'gecko' });
+      expect(catalog.pendingChatModelRequest()).toMatchObject({ allowOpen: false });
     } finally {
       vi.useRealTimers();
       catalog.resetChatModelsForTests();
