@@ -10,7 +10,7 @@ import { SftpError, type SftpClient } from './remote/sftp.js';
 import type { RemoteFolder, Root } from '../shared/types.js';
 import { bindSessionProject, findSessionByConversation, getSession, indexedSessions, markProjectNote, moveSessionProject } from './session/store.js';
 import { workspaceForChat } from './workspace.js';
-import { chatGroupsState, movedChatGroup, placeMovedChat } from './chat-groups.js';
+import { moveChatGroup } from './chat-groups.js';
 import type { ChatGroupsState } from '../shared/chat-groups.js';
 import { logInfo, logWarn } from './logger.js';
 import { isListedChatgptProject } from './chatgpt-project-catalog.js';
@@ -434,10 +434,10 @@ export function moveChatToProject(sessionId: string, projectId: string | null): 
 export function moveChatWithGroup(sessionId: string, projectId: string | null, requested?: string | null):
   Promise<{ from: string | null; fromGroup: string | null; moved: string[]; groups: ChatGroupsState }> {
   return queueChatMove(sessionId, async () => {
-    const fromGroup = (await chatGroupsState()).members[sessionId] ?? null;
-    const { from, moved } = await moveChatNow(sessionId, projectId);
-    const groups = await placeMovedChat(sessionId, projectId, movedChatGroup(projectId, requested, from, fromGroup));
-    return { from, fromGroup, moved, groups };
+    const session = await getSession(sessionId);
+    if (!session) throw new Error('This chat no longer exists');
+    const { result, fromGroup, groups } = await moveChatGroup(session, projectId, requested, () => moveChatNow(sessionId, projectId));
+    return { ...result, fromGroup, groups };
   });
 }
 
