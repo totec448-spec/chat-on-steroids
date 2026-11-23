@@ -539,7 +539,7 @@ it('clears control projections on an existing-session switch and fences A to B t
   expect(w.document.getElementById('recoveryStatus')!.hidden).toBe(true);
 });
 
-it('keeps the prior transcript inert until the selected detail arrives and fences A to B to A', async () => {
+it.each(['immediate', 'deferred'] as const)('keeps the prior transcript inert until the selected detail arrives and fences A to B to A (%s traces)', async traceResponse => {
   const attachment = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'a-only.png', mimeType: 'image/png', size: 42, preview: 'data:image/webp;base64,YQ==' };
   const aEvents: SessionEvent[] = [
     { seq: 1, time: T0, source: 'extension', kind: 'user_message', messageId: 'a-question', message: text('A QUESTION'), attachments: [attachment] },
@@ -606,16 +606,23 @@ it('keeps the prior transcript inert until the selected detail arrives and fence
   expect(timeline.hasAttribute('inert')).toBe(true);
   expect(w.document.getElementById('sessionControlStatus')!.textContent).toBe('');
 
+  // A detail read also awaits turn traces before painting. Defer that reply past the old
+  // timer-only settle boundary so the test must wait for the resulting UI, not elapsed ticks.
+  api.turnTraces = vi.fn(async () => {
+    if (traceResponse === 'deferred') await settle();
+    return { ok: true, data: {} };
+  });
   const current: SessionEvent[] = [{ seq: 3, time: T0 + 3, source: 'extension', kind: 'assistant_message', messageId: 'a-current', message: text('CURRENT A ANSWER'), state: 'final', final: true }];
   details[2]!.reply(detail(first, current));
   controls[2]!.reply({ ok: true, data: { automation: 'off', objective: '', blocked: '', job: null, recovery: [] } });
-  await settle();
-  expect(timeline.textContent).toContain('CURRENT A ANSWER');
-  expect(timeline.textContent).not.toContain('STALE A QUESTION');
-  expect(timeline.querySelector('img[alt="a-only.png"]')).toBeNull();
-  expect(timeline.hasAttribute('inert')).toBe(false);
-  expect(timeline.hasAttribute('aria-busy')).toBe(false);
-  expect(w.document.getElementById('timelineEmpty')!.hidden).toBe(true);
+  await waitFor(() => {
+    expect(timeline.textContent).toContain('CURRENT A ANSWER');
+    expect(timeline.textContent).not.toContain('STALE A QUESTION');
+    expect(timeline.querySelector('img[alt="a-only.png"]')).toBeNull();
+    expect(timeline.hasAttribute('inert')).toBe(false);
+    expect(timeline.hasAttribute('aria-busy')).toBe(false);
+    expect(w.document.getElementById('timelineEmpty')!.hidden).toBe(true);
+  });
 });
 
 it.each(['failed', 'empty', 'new-chat'] as const)('retires retained rows after a %s destination without a welcome flash', async outcome => {
