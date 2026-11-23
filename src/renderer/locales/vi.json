@@ -2617,6 +2617,7 @@
   "A file or folder with that name already exists": "Đã có một tệp hoặc thư mục trùng tên",
   "Only regular files and folders can be renamed": "Chỉ có thể đổi tên tệp và thư mục thông thường",
   "A file save is already in progress. Try again when it finishes.": "Đang lưu một tệp khác. Hãy thử lại khi xong.",
+  "Too many file operations are in progress. Try again when they finish.": "Có quá nhiều thao tác tệp đang diễn ra. Hãy thử lại khi chúng hoàn tất.",
   "Project catalog is invalid": "Danh mục dự án không hợp lệ",
   "Choose an absolute local project folder": "Hãy chọn một thư mục dự án cục bộ có đường dẫn tuyệt đối",
   "Project catalog limit reached": "Đã đạt giới hạn số dự án",

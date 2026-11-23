@@ -567,3 +567,33 @@ it('logs a queued namespace mutation and keeps directory name collisions non-des
     expect(await fs.readdir(root)).toContain('second');
   } finally { stop(); }
 });
+
+it('bounds a stalled entry queue, retains accepted FIFO work, and admits a retry after draining', async () => {
+  const root = path.join(approved, 'project');
+  const project = await addProject(root);
+  await fs.writeFile(path.join(root, 'first.txt'), 'first');
+  await fs.writeFile(path.join(root, 'retry.txt'), 'retry');
+  let release!: () => void, started!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const entered = new Promise<void>(resolve => { started = resolve; });
+  const rename = fs.rename.bind(fs);
+  vi.spyOn(fs, 'rename').mockImplementationOnce(async (...args) => { started(); await gate; return rename(...args); });
+  const first = renameProjectEntry(project.id, 'first.txt', 'chosen.txt');
+  const accepted: Promise<unknown>[] = [];
+  const order: string[] = [];
+  const names = Array.from({ length: 31 }, (_, i) => `queued-${i}.txt`);
+  try {
+    await entered;
+    for (const name of names) accepted.push(createProjectEntry(project.id, '', name, 'file').then(value => { order.push(name); return value; }));
+    // The active operation counts too; neither kind can retain a 33rd callback.
+    await expect(renameProjectEntry(project.id, 'retry.txt', 'later.txt')).rejects.toThrow('Too many file operations are in progress. Try again when they finish.');
+    await expect(createProjectEntry(project.id, '', 'excess.txt', 'file')).rejects.toThrow('Too many file operations are in progress. Try again when they finish.');
+    expect(await fs.readFile(path.join(root, 'retry.txt'), 'utf8')).toBe('retry');
+  } finally {
+    release(); await first; await Promise.all(accepted);
+  }
+  expect(order).toEqual(names);
+  expect(await fs.readdir(root)).not.toContain('excess.txt');
+  await renameProjectEntry(project.id, 'retry.txt', 'later.txt');
+  expect(await fs.readFile(path.join(root, 'later.txt'), 'utf8')).toBe('retry');
+});
