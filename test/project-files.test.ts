@@ -241,7 +241,32 @@ it.skipIf(process.platform === 'win32').each([0o664, 0o775])('preserves mode %o 
   expect(await fs.readFile(file, 'utf8')).toBe('saved\n');
 });
 
-it.skipIf(process.platform === 'win32')('keeps the original file when restoring replacement permissions fails', async () => {
+it.skipIf(process.platform === 'win32')('saves without chmod when replacement permissions already match', async () => {
+  const file = path.join(approved, 'project', 'notes.txt');
+  await fs.writeFile(file, 'original\n');
+  await fs.chmod(file, 0o644);
+  const project = await addProject(path.dirname(file));
+  const before = await previewProjectFile(project.id, 'notes.txt');
+  const chmod = vi.fn(async () => { throw Object.assign(new Error('Mode changes unsupported'), { code: 'ENOTSUP' }); });
+  const open = fs.open.bind(fs);
+  vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+    const handle = await open(...args);
+    if (args[1] === 'wx') {
+      // Make the creation mode deterministic without changing the worker's umask.
+      await handle.chmod(0o644);
+      vi.spyOn(handle, 'chmod').mockImplementation(chmod);
+    }
+    return handle;
+  });
+  await expect(saveProjectTextFile(project.id, 'notes.txt', 'saved\n', before.modifiedAt, before.bytes, before.revision!))
+    .resolves.toHaveProperty('preview.text', 'saved\n');
+  expect(chmod).not.toHaveBeenCalled();
+  expect(await fs.readFile(file, 'utf8')).toBe('saved\n');
+  expect((await fs.stat(file)).mode & 0o777).toBe(0o644);
+  expect((await fs.readdir(path.dirname(file))).some(name => name.endsWith('.tmp'))).toBe(false);
+});
+
+it.skipIf(process.platform === 'win32')('keeps the original file when restoring different replacement permissions fails', async () => {
   const file = path.join(approved, 'project', 'notes.txt');
   await fs.writeFile(file, 'original\n');
   await fs.chmod(file, 0o664);
@@ -250,7 +275,10 @@ it.skipIf(process.platform === 'win32')('keeps the original file when restoring 
   const open = fs.open.bind(fs);
   vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
     const handle = await open(...args);
-    if (args[1] === 'wx') vi.spyOn(handle, 'chmod').mockRejectedValue(Object.assign(new Error('Mode change failed'), { code: 'EPERM' }));
+    if (args[1] === 'wx') {
+      await handle.chmod(0o644);
+      vi.spyOn(handle, 'chmod').mockRejectedValue(Object.assign(new Error('Mode change failed'), { code: 'EPERM' }));
+    }
     return handle;
   });
   await expect(saveProjectTextFile(project.id, 'notes.txt', 'saved\n', before.modifiedAt, before.bytes, before.revision!))
