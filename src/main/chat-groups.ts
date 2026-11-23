@@ -19,9 +19,13 @@ let loading: Promise<void> | null = null;
 // A project move holds this queue from group validation through placement. Other group mutations
 // cannot delete its destination or consume its membership slot while session writes are pending.
 let mutations: Promise<unknown> = Promise.resolve();
+let pendingMutations = 0;
 function mutate<T>(change: () => T | Promise<T>): Promise<T> {
+  if (pendingMutations) logInfo('chat groups: waiting for an earlier group mutation to finish');
+  pendingMutations++;
   const operation = mutations.then(async () => { await ready(); return change(); });
-  mutations = operation.catch(() => undefined);
+  const settled = () => { pendingMutations--; };
+  mutations = operation.then(settled, settled);
   return operation;
 }
 
@@ -107,25 +111,26 @@ export async function deleteChatGroup(id: string): Promise<ChatGroupsState> {
   });
 }
 
-/** Puts a chat into one of its project's groups, or takes it out with `groupId` null. */
-export async function assignChatGroup(session: ChatGroupSession | null, groupId: string | null): Promise<ChatGroupsState> {
-  return mutate(() => {
-    if (!session) throw new Error('This chat no longer exists');
+/** A live caller resolves the session inside the queue; snapshot callers keep their existing contract. */
+export async function assignChatGroup(session: ChatGroupSession | null | (() => Promise<ChatGroupSession | null>), groupId: string | null): Promise<ChatGroupsState> {
+  return mutate(async () => {
+    const current = typeof session === 'function' ? await session() : session;
+    if (!current) throw new Error('This chat no longer exists');
     if (groupId === null) {
-      if (!(session.id in state.members)) return snapshot();
-      delete state.members[session.id];
+      if (!(current.id in state.members)) return snapshot();
+      delete state.members[current.id];
       return save();
     }
     const group = state.groups.find(row => row.id === groupId);
     if (!group) throw new Error('This group no longer exists');
     // A sub-agent's chat follows its prime and is never listed on its own.
-    if (session.origin?.kind === 'worker') throw new Error('A sub-agent chat follows its main chat');
-    if (session.projectId !== group.projectId) throw new Error("This chat is not in that group's project");
-    if (state.members[session.id] === groupId) return snapshot();
-    if (!(session.id in state.members) && Object.keys(state.members).length >= MAX_CHAT_GROUP_MEMBERS) {
+    if (current.origin?.kind === 'worker') throw new Error('A sub-agent chat follows its main chat');
+    if (current.projectId !== group.projectId) throw new Error("This chat is not in that group's project");
+    if (state.members[current.id] === groupId) return snapshot();
+    if (!(current.id in state.members) && Object.keys(state.members).length >= MAX_CHAT_GROUP_MEMBERS) {
       throw new Error('Too many grouped chats');
     }
-    state.members[session.id] = groupId;
+    state.members[current.id] = groupId;
     return save();
   });
 }
@@ -192,4 +197,5 @@ export function resetChatGroupsForTests(): void {
   state = { version: 1, groups: [], members: {} };
   loading = null;
   mutations = Promise.resolve();
+  pendingMutations = 0;
 }

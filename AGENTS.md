@@ -1215,8 +1215,10 @@ The filter is window-local, like disclosure state.
 A local chat move validates its requested group and membership limit before any family project
 write. `chat-groups.ts::moveChatGroup` holds the group mutation queue through the project move
 and placement; deletion or assignment cannot invalidate the checked destination meanwhile.
-A rejected group choice leaves the chat and its workers in their previous project. A failed
-project write leaves group membership unchanged and releases the queue for retry.
+A rejected group choice leaves the chat and its workers in their previous project. IPC group
+assignments resolve the session inside that queue, so an assignment waiting behind a move checks
+the new project rather than a stale summary. A failed project write leaves group membership
+unchanged and releases the queue for retry; queued mutations log why they wait.
 
 Removing a project marks the catalog row `ungrouped`. Existing and unloaded sessions, pending
 inputs and workers keep their durable project association; their chats return to the ordinary
