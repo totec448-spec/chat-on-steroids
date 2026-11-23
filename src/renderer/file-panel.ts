@@ -853,11 +853,15 @@ export function createFilePanel(options: FilePanelOptions) {
       const next = saved.preview ?? { ...value, text: draft, bytes: new TextEncoder().encode(draft).length,
         modifiedAt: '', revision: undefined };
       const retained = retainedDrafts.get(current.id);
-      if (retained?.preview.path === value.path && retained.preview.revision === value.revision && textPreview(next)) {
+      const retainedMatches = retained?.preview.path === value.path && retained.preview.revision === value.revision;
+      if (retained && retainedMatches && textPreview(next)) {
         if (retained.text === draft) retainedDrafts.delete(current.id);
         else retained.preview = next;
       }
-      if (token !== editorMountToken || project?.id !== current.id || previewPath !== value.path) return;
+      // A retained draft may already have been remounted after A → B → A. Its exact old
+      // revision proves receipt ownership; a discarded/replaced draft has no such proof.
+      if ((token !== editorMountToken && !retainedMatches) || project?.id !== current.id ||
+          previewPath !== value.path || editingPath !== value.path || previewValue?.revision !== value.revision) return;
       retainedDrafts.delete(current.id);
       previewValue = next;
       editorOriginalText = next.text ?? draft;
