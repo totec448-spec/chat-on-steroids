@@ -249,7 +249,10 @@ export async function commitProjectChanges(projectId: string, request: CommitReq
   const execute = async (args: string[], options: GitRunOptions = {}) => {
     stopped = false;
     try {
-      const result = await runGit(repo.root, args, undefined, options);
+      // A private split-index writer must not expire a shared base still used by
+      // the untouched real index. This changes no repository configuration.
+      const result = await runGit(repo.root, args, undefined,
+        { ...options, config: { ...options.config, 'splitIndex.sharedIndexExpire': 'never' } });
       stopped = result.code >= 0;
       return result;
     } catch (error) {
