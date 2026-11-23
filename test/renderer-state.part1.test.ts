@@ -2494,6 +2494,9 @@ it('rebuilds the turn-changes card when the open chat moves into a project, and 
     lastToolCallAt: 11_000, processExitNonzero: 0, toolRejected: 0, toolInternalErrors: 0, errors: 0,
     estimatedTokens: 0, contextTokens: 0, lastTurnOutcome: 'completed' as const, activeTurnId: null, agents: [], origin: null };
   const website = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000021';
+  const otherProject = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000022';
+  const undoRef = 'checkpoint:' + 'b'.repeat(32);
+  let finishRestore!: (result: { ok: true; data: { confirmed: boolean; restored: string[]; skipped: never[]; undoRef: string; projectId: string } }) => void;
   let chat: Record<string, unknown> = { ...base, id: 'move-turn-0001', title: 'Checkpointed chat', conversationId: 'move-turn-conv-0001', chatIds: ['move-turn-conv-0001'] };
   const events = [
     { seq: 10, time: 10_000, source: 'extension', kind: 'turn_start', turnId: 't-1' },
@@ -2514,17 +2517,17 @@ it('rebuilds the turn-changes card when the open chat moves into a project, and 
       checkpointRef: 'cp-1'
     }
   }));
-  const restoreTurnCheckpoint = vi.fn(async () => ({
-    ok: true,
-    data: { confirmed: true, restored: ['src/app.ts'], skipped: [], undoRef: null }
-  }));
+  const restoreTurnCheckpoint = vi.fn(() => new Promise(resolve => { finishRestore = resolve; }));
   const moveChatProject = vi.fn(async (_id: string, projectId: string | null) => {
     const from = (chat.projectId as string | undefined) ?? null;
     chat = { ...chat, projectId: projectId ?? undefined };
     return { ok: true, data: { from, fromGroup: null, groups, summaries: [chat] } };
   });
   const mounted = await mountChat({}, [], {
-    listProjects: async () => ({ ok: true, data: [{ id: website, name: 'Website', path: '/work/website', createdAt: 1 }] }),
+    listProjects: async () => ({ ok: true, data: [
+      { id: website, name: 'Website', path: '/work/website', createdAt: 1 },
+      { id: otherProject, name: 'Other project', path: '/work/other', createdAt: 1 }
+    ] }),
     listSessions: async () => ({ ok: true, data: { sessions: [chat], activeId: null, pressure: [], blocked: [], trusted: [] } }),
     getSession: async () => ({ ok: true, data: { summary: chat, events, hasMore: false } }),
     turnChanges,
@@ -2560,5 +2563,13 @@ it('rebuilds the turn-changes card when the open chat moves into a project, and 
   await waitFor(() => expect(doc.querySelector<HTMLElement>('[data-timeline-key]')?.closest('#timeline')).not.toBeNull());
   expect(doc.querySelector<HTMLDetailsElement>('.turn-changes')).toBe(cardAfter);
   expect(doc.querySelector<HTMLDetailsElement>('.turn-changes')!.closest<HTMLElement>('[data-timeline-key]')).toBe(answerRowAfter);
+  rowMenuItem(row(), 'move-to-project')!.click();
+  doc.querySelector<HTMLButtonElement>(`[data-row-action="project-${otherProject}"]`)!.click();
+  await waitFor(() => expect(moveChatProject).toHaveBeenCalledWith(chat.id, otherProject, undefined));
+  await waitFor(() => expect(doc.querySelector('.turn-changes')).not.toBe(cardAfter));
+  finishRestore({ ok: true, data: { confirmed: true, restored: ['src/app.ts'], skipped: [], undoRef, projectId: website } });
+  await waitFor(() => expect(doc.querySelector('.toast-action')?.textContent).toBe('Undo in Review'));
+  doc.querySelector<HTMLButtonElement>('.toast-action')!.click();
+  expect(doc.querySelector('.toast')?.textContent).toBe('This checkpoint is no longer available');
   closeRowMenus(doc);
 });

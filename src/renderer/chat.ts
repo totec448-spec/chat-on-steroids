@@ -7262,12 +7262,15 @@ function paintDetail(followBottom = historyBefore === null): void {
       const from = turnFrom(events, answerTurn);
       built.querySelector('.said')?.append(renderTurnChanges({ sessionId, turnId: answerTurn, from,
         current: () => selectedId === sessionId,
-        openReview: selectedLocalProject() ? () => void reviewPanel?.show() : null,
-        openCheckpoint: selectedLocalProject() ? ref => {
-          const project = selectedLocalProject();
-          if (project) void reviewPanel?.openCheckpoint(project.id, ref);
+        openReview: project ? () => void reviewPanel?.show() : null,
+        openCheckpoint: project ? (ownerId, ref) => {
+          if (selectedLocalProject()?.id !== ownerId) {
+            toast(t('This checkpoint is no longer available'));
+            return;
+          }
+          void reviewPanel?.openCheckpoint(ownerId, ref);
         } : null,
-        restoreTurn: selectedLocalProject() ? () => run(api.restoreTurnCheckpoint(sessionId, answerTurn, from)) : null }));
+        restoreTurn: project ? () => run(api.restoreTurnCheckpoint(sessionId, answerTurn, from)) : null }));
     }
     if (item.kind === 'event' && editableQuestion(item.event, events)) {
       built.querySelector('.ev-body')?.append(questionActions(item.event, laterMessages.get(item.event.seq) ?? 0));

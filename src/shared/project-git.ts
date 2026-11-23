@@ -44,6 +44,11 @@ export interface CheckpointRestoreResult {
   undoRef: string | null;
 }
 
+export interface TurnCheckpointRestoreResult extends CheckpointRestoreResult {
+  /** Project that owns the restore and any Before restore checkpoint. */
+  projectId: string;
+}
+
 export interface ProjectGitDiff {
   projectId: string;
   status: ProjectGitStatus;
