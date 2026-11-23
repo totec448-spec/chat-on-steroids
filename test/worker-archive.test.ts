@@ -235,6 +235,7 @@ it('ignores duplicate settled results and never restores a chat it did not manag
   await workerArchiveWritten();
   await loadWorkerArchive();
   for (const outcome of ['unarchived', 'failed', 'deferred'] as const) settleWorkerArchive(A, outcome, 1_005);
+  expect(readyForWake(B, 1_005)).toBe(true); // A wake of an unmanaged chat creates no correction authority.
   for (const outcome of ['archived', 'unarchived'] as const) settleWorkerArchive(B, outcome, 1_005);
   expect(nextWorkerArchive(1_005)).toBeNull();
   expect(readyForWake(A, 1_005)).toBe(true);
@@ -316,6 +317,44 @@ it.each(['queued', 'leased', 'reloaded'])('keeps a %s corrective restore when an
   settleWorkerArchive(A, 'unarchived', now + 6, correction!.attemptId);
   expect(readyForWake(A, now + 7)).toBe(true);
   expect(nextWorkerArchive(now + 7, true)).toBeNull();
+});
+
+it.each([[false, false], [false, true], [true, false], [true, true]])(
+  'remembers a wake without an observation after a second browser defers (ids: %s, reload: %s)', async (ids, reload) => {
+    queueWorkerArchives([A], 1_000);
+    const browserA = nextWorkerArchive(1_000, ids)!;
+    const now = 1_000 + WORKER_ARCHIVE_LEASE_MS;
+    const browserB = nextWorkerArchive(now, ids)!;
+    settleWorkerArchive(A, 'deferred', now + 1, browserB.attemptId);
+    expect(readyForWake(A, now + 2)).toBe(true);
+    expect(nextWorkerArchive(now + 3, ids)).toBeNull();
+    await workerArchiveWritten();
+    if (reload) await loadWorkerArchive();
+    // A's PATCH was never cancelled when B reported no eligible ChatGPT page.
+    settleWorkerArchive(A, 'archived', now + 4, browserA.attemptId);
+    const correction = nextWorkerArchive(now + 5, ids)!;
+    expect(correction).toMatchObject({ conversationId: A, archive: false });
+    expect(readyForWake(A, now + 5)).toBe(false);
+    settleWorkerArchive(A, 'unarchived', now + 6, correction.attemptId);
+    expect(readyForWake(A, now + 7)).toBe(true);
+    expect(nextWorkerArchive(now + 7, ids)).toBeNull();
+  }
+);
+
+it.each(['load', 'lookup'])('expires unobserved requested targets after 30 days at %s', async boundary => {
+  queueWorkerArchives([A], 1_000);
+  expect(readyForWake(A, 1_001)).toBe(true);
+  await workerArchiveWritten();
+  const file = path.join(dir, 'state', 'worker-archive.json');
+  const saved = JSON.parse(await fs.readFile(file, 'utf8'));
+  expect(saved.archived).toEqual([]);
+  expect(saved.restored).toEqual([]);
+  expect(saved.requested).toEqual([{ conversationId: A, at: 1_001, targetArchived: false }]);
+  const now = 1_002 + 31 * 24 * 60 * 60_000;
+  vi.setSystemTime(now);
+  if (boundary === 'load') await loadWorkerArchive();
+  settleWorkerArchive(A, 'archived', now);
+  expect(nextWorkerArchive(now, true)).toBeNull();
 });
 
 it('invalidates a current restore lease when an opposite late success makes its receipt uncertain', () => {

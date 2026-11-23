@@ -60,14 +60,14 @@ const FIRST_BACKOFF_MS = 5 * 60_000;
 const FIRST_UNARCHIVE_BACKOFF_MS = 15_000;
 const MAX_WAIT_MS = 7 * 24 * 60 * 60_000;
 const MAX_ENTRIES = 500;
-/** Each settled state (archived/restored) is remembered this long, and at most this many. */
+/** Each observation category (archived/restored/unobserved) has this lifetime and size bound. */
 const STATE_KEEP_MS = 30 * 24 * 60 * 60_000;
 const MAX_KNOWN_PER_STATE = 2_000;
 const CONVERSATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 let filePath = '';
 const entries = new Map<string, Entry>();
-type KnownState = { archived: boolean; targetArchived: boolean; at: number };
+type KnownState = { archived: boolean | null; targetArchived: boolean; at: number };
 /** Observed state and latest requested target differ when an operation has not succeeded. */
 const known = new Map<string, KnownState>();
 /** Wakes waiting for their chat to be unarchived, with the timer that lets them go anyway. */
@@ -100,7 +100,9 @@ export async function loadWorkerArchive(): Promise<void> {
   known.clear();
   if (!filePath) return;
   try {
-    const parsed = JSON.parse(await fs.readFile(filePath, 'utf8')) as { entries?: unknown; archived?: unknown; restored?: unknown };
+    const parsed = JSON.parse(await fs.readFile(filePath, 'utf8')) as {
+      entries?: unknown; archived?: unknown; restored?: unknown; requested?: unknown
+    };
     for (const raw of Array.isArray(parsed.entries) ? parsed.entries : []) {
       const value = raw as Partial<Entry>;
       const id = cleanId(value.conversationId);
@@ -115,7 +117,7 @@ export async function loadWorkerArchive(): Promise<void> {
     // restored states in version 3 also let a late result be corrected after a restart.
     const now = Date.now();
     let expired = 0;
-    for (const [field, archived] of [['restored', false], ['archived', true]] as const) {
+    for (const [field, archived] of [['requested', null], ['restored', false], ['archived', true]] as const) {
       for (const raw of Array.isArray(parsed[field]) ? parsed[field] : []) {
         if (!raw || typeof raw !== 'object') continue;
         const value = raw as { conversationId?: unknown; at?: unknown; targetArchived?: unknown };
@@ -126,7 +128,14 @@ export async function loadWorkerArchive(): Promise<void> {
         const entry = entries.get(id);
         const target = entry ? entry.archive || entry.rearchive
           : typeof value.targetArchived === 'boolean' ? value.targetArchived : archived;
+        if (target === null) continue; // An unobserved record must name a real requested target.
         rememberState(id, archived, at, target);
+      }
+    }
+    // Older files can have a pending request without any remote observation or target record.
+    for (const entry of entries.values()) {
+      if (!known.has(entry.conversationId) && now - entry.queuedAt <= STATE_KEEP_MS) {
+        rememberState(entry.conversationId, null, entry.queuedAt, entry.archive || entry.rearchive);
       }
     }
     if (expired) logInfo(`worker archive: ignored ${expired} expired saved state(s)`);
@@ -145,12 +154,14 @@ function persist(): void {
     const saved = [...entries.values()].map(({ notBefore: _notBefore, leased: _leased, attemptId: _attemptId, ...entry }) => entry);
     const archived: { conversationId: string; at: number; targetArchived: boolean }[] = [];
     const restored: typeof archived = [];
+    const requested: typeof archived = [];
     for (const [conversationId, state] of known) {
-      (state.archived ? archived : restored).push({ conversationId, at: state.at, targetArchived: state.targetArchived });
+      const records = state.archived === null ? requested : state.archived ? archived : restored;
+      records.push({ conversationId, at: state.at, targetArchived: state.targetArchived });
     }
     try {
       await fs.mkdir(path.dirname(filePath), { recursive: true });
-      await fs.writeFile(temporary, JSON.stringify({ version: 3, entries: saved, archived, restored }), 'utf8');
+      await fs.writeFile(temporary, JSON.stringify({ version: 3, entries: saved, archived, restored, requested }), 'utf8');
       await fs.rename(temporary, filePath);
     } catch (error) {
       logWarn(`Worker archive queue not saved: ${(error as Error).message}`);
@@ -163,7 +174,7 @@ export function workerArchiveWritten(): Promise<void> {
   return writing;
 }
 
-function rememberState(id: string, archived: boolean, now: number, targetArchived = archived): void {
+function rememberState(id: string, archived: boolean | null, now: number, targetArchived = archived === true): void {
   known.delete(id);
   known.set(id, { archived, targetArchived, at: now });
   // Restored tombstones must not evict the archives which future wakes still need to know.
@@ -190,8 +201,9 @@ function knownState(id: string, now: number): KnownState | undefined {
 /** Preserve the remote observation for wake gating; a request alone does not prove it changed. */
 function requestTarget(id: string, archived: boolean, now: number): void {
   const state = knownState(id, now);
-  if (!state || state.targetArchived === archived) return;
-  rememberState(id, state.archived, now, archived);
+  if (state?.targetArchived === archived || (!state && !entries.has(id))) return;
+  rememberState(id, state?.archived ?? null, now, archived);
+  logInfo(`worker archive: requested ${archived ? 'archive' : 'restore'} for ${id}; ${state && state.archived !== null ? 'keeping the remote observation' : 'remote state not observed yet'}`);
   persist();
 }
 
@@ -223,10 +235,10 @@ export function queueWorkerArchives(conversationIds: readonly string[], now = Da
     }
     if (entry || knownState(id, now)?.archived) { requestTarget(id, true, now); continue; }
     if (entries.size >= MAX_ENTRIES) continue;
-    requestTarget(id, true, now);
     entries.set(id, {
       conversationId: id, archive: true, queuedAt: now, dueAt: now + delayMs, attempts: 0, notBefore: 0, leased: false, rearchive: false
     });
+    requestTarget(id, true, now);
     added += 1;
   }
   if (added) logInfo(`worker archive: queued ${added} worker chat(s)`);
