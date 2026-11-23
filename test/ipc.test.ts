@@ -3690,6 +3690,69 @@ describe('settings backup over IPC', () => {
     expect(getConfig()).toMatchObject({ readOnly: true, ui: { theme: 'light' } });
     expect(await apply({ token: picked.data.token, includeKeys: false })).toEqual({ ok: false, error: 'Choose the backup file again.' });
   });
+
+  it('refuses a same-field settings change after the import preview', async () => {
+    await saveConfig({ ...getConfig(), commandAllowlist: { enabled: true, mode: 'allow', rules: ['git status'] } });
+    const file = path.join(dir, 'stale-rules.json');
+    await exportTo(file, { includeKeys: false });
+    await saveConfig({ ...getConfig(), commandAllowlist: { enabled: true, mode: 'allow', rules: ['git diff'] } });
+    const picked = await pick(file);
+    expect(picked.data).toMatchObject({ changed: ['commandAllowlist.rules'], wider: ['commandAllowlist'] });
+    await saveConfig({ ...getConfig(), commandAllowlist: { enabled: true, mode: 'allow', rules: ['pwd'] } });
+    expect(await apply({ token: picked.data.token, includeKeys: false }))
+      .toEqual({ ok: false, error: 'Your settings changed after the file was chosen. Choose it again.' });
+    expect(getConfig().commandAllowlist.rules).toEqual(['pwd']);
+  });
+
+  it('checks the import preview inside the settings mutation queue', async () => {
+    const { updateConfig } = await import('../src/main/config.js');
+    await setUp('dark', tunnelA, false);
+    const file = path.join(dir, 'queued-save.json');
+    await exportTo(file, { includeKeys: false });
+    await setUp('light', tunnelA, false);
+    const picked = await pick(file);
+    let enter!: () => void, release!: () => void;
+    const entered = new Promise<void>(resolve => { enter = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const saving = updateConfig(async config => { enter(); await gate; return { ...config, readOnly: true }; });
+    await entered;
+    const importing = apply({ token: picked.data.token, includeKeys: false });
+    release(); await saving;
+    expect(await importing).toEqual({ ok: false, error: 'Your settings changed after the file was chosen. Choose it again.' });
+    expect(getConfig()).toMatchObject({ readOnly: true, ui: { theme: 'light' } });
+  });
+
+  it('keeps per-computer changes made after choosing a portable settings backup', async () => {
+    await setUp('dark', tunnelA, false);
+    const file = path.join(dir, 'portable-preview.json');
+    await exportTo(file, { includeKeys: false });
+    await setUp('light', tunnelA, false);
+    const picked = await pick(file);
+    await saveConfig({ ...getConfig(), connectorSuffix: 'Other', tunnel: { ...getConfig().tunnel, tunnelId: tunnelB } });
+    expect(await apply({ token: picked.data.token, includeKeys: false })).toMatchObject({ ok: true });
+    expect(getConfig()).toMatchObject({ connectorSuffix: 'Other', tunnel: { tunnelId: tunnelB }, ui: { theme: 'dark' } });
+  });
+
+  it('does not overwrite a newer language choice after the import settings commit', async () => {
+    const { updateConfig } = await import('../src/main/config.js');
+    const connection = await import('../src/main/connection.js');
+    await setUp('dark', tunnelA, false);
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, language: 'de' } });
+    const file = path.join(dir, 'language-commit.json');
+    await exportTo(file, { includeKeys: false });
+    await setUp('light', tunnelA, false);
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, language: 'en' } });
+    const picked = await pick(file);
+    const publish = vi.spyOn(connection, 'applySettings').mockImplementationOnce(async () => {
+      // A window changes language after the import's settings save, while its runtime effects finish.
+      await updateConfig(config => ({ ...config, ui: { ...config.ui, language: 'fr' } }));
+    });
+    try {
+      expect(await apply({ token: picked.data.token, includeKeys: false })).toMatchObject({ ok: true });
+      expect(getConfig().ui.language).toBe('fr');
+    } finally { publish.mockRestore(); }
+  });
+
 });
 
 describe('phone notifications over IPC', () => {
