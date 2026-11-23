@@ -2649,8 +2649,13 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
   const userRequests = await userRequestViews(sessionId);
   const finishWaiting = await sessionFinishWaiting(sessionId, activeTurnId, id);
   const recovery = await sessionRecoveryCountdowns(sessionId, id);
+  const goalWait = blocked || !goalActiveFor(id) ? null : draft ? draftReviewWait(id, draft.stage)
+    : await goalWaitFor(id, sessionId, Date.now(), session.browserRecoveryDismissedAt !== undefined);
+  const lastSummary = await stuckSummaryOffer(sessionId, session);
   // The diagnostic projection must use the current binding, not the snapshot
-  // captured before the asynchronous controls reads above.
+  // captured before the asynchronous controls reads above. No await is allowed
+  // after this check: a rebind between here and closedTabStatusFor would log
+  // the old conversation's status and publish stale controls.
   const closeStatusSession = await getSession(sessionId);
   if (closeStatusSession?.conversationId !== id) throw new Error('conversation_changed');
   return { sessionId, plan, userRequests, conversationId: id, activeTurnId, heldTurnId, finishHeld,
@@ -2660,8 +2665,7 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
     finishGoalDraft: getSessionFinishDraft(sessionId, activeTurnId),
     finishWaiting,
     goalDraft: draft ? { stage: draft.stage, model: draft.model, text: draft.text.slice(-8000), error: draft.error } : null,
-    goalWait: blocked || !goalActiveFor(id) ? null : draft ? draftReviewWait(id, draft.stage)
-      : await goalWaitFor(id, sessionId, Date.now(), session.browserRecoveryDismissedAt !== undefined),
+    goalWait,
     stopPending: commands.some(c => c.spec.type === 'stop' && c.spec.sessionId === sessionId && c.spec.turnId === activeTurnId),
     objective: goalObjectiveFor(id),
     loopAfterTurn: control.afterTurn,
@@ -2672,7 +2676,7 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
     proLoopDelivery: control.enabled && getConfig().ui.finishTool === true && session.selectedModel?.conversationId === id &&
       supportsFinishAutomation(control.mode, session.selectedModel.model, session.selectedModel.reasoningEffort),
     automation: goalArmedFor(id) && !blocked ? control.enabled ? control.mode : 'goal' : 'off',
-    blocked, job: resumeJobFor(sessionId), lastSummary: await stuckSummaryOffer(sessionId, session), pageless: pagelessChats.has(id) };
+    blocked, job: resumeJobFor(sessionId), lastSummary, pageless: pagelessChats.has(id) };
 }
 
 /**

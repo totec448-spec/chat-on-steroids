@@ -14753,6 +14753,34 @@ describe('unattributed activity recovery', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it('does not log an old closed-tab status after a last async controls read rebinds the session', async () => {
+    await pair();
+    const from = randomUUID(), to = randomUUID();
+    const session = await createSession({ conversationId: from });
+    await setSessionAutomation(session.id, 'loop', true);
+    const boundary = sessionStoreModule.readRecoveryBoundary;
+    const gate = faultGate();
+    let observations = 0;
+    const probe = vi.spyOn(sessionStoreModule, 'readRecoveryBoundary').mockImplementation(async (...args) => {
+      if (args[0] === session.id && ++observations === 2) await gate.hold();
+      return boundary(...args);
+    });
+    let pending: Promise<unknown> | undefined;
+    try {
+      pending = sessionControlsFor(session.id);
+      await gate.entered;
+      expect(await sessionStoreModule.rebindSession(session.id, from, to)).toBe(true);
+      gate.release();
+      await expect(pending).rejects.toThrow('conversation_changed');
+      expect((await getSession(session.id))?.conversationId).toBe(to);
+      expect(getLog().filter(entry => entry.message.includes(`bridge: ${from}: The tab was not reopened`))).toEqual([]);
+    } finally {
+      gate.release();
+      await pending?.catch(() => undefined);
+      probe.mockRestore();
+    }
+  });
+
   it.each([
     ['goal', 'reopen'], ['loop', 'reopen'], ['goal', 'off'], ['loop', 'off'],
     ['goal', 'return'], ['loop', 'return'], ['goal', 'duplicate'], ['loop', 'duplicate'],
