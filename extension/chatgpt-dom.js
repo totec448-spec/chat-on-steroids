@@ -2106,11 +2106,15 @@ var CLF_DOM = (() => {
   /**
    * What a draft the app keeps is measured against (#2159, 2026-11-23): a brief the page did not recognise is either
    * one it never typed (another window or an emptied storage: `typed=0`, or lengths that are not this draft's) or
-   * one ChatGPT gave back changed (a length close to a typed one). Only numbers: the length of the draft with its
-   * whitespace taken out, how many briefs this page remembers typing, and the lengths of the four newest of them.
+   * one ChatGPT gave back changed (a length close to a typed one). Only numbers: the length of the draft as drafts are
+   * compared (compactDraft: without whitespace and without the escape backslashes ChatGPT adds), how many briefs this
+   * page remembers typing, and the lengths of the four newest of them, which are measured the same way. Clues, not
+   * proof: briefs older than the four newest are not listed. Only a draft of the app's kinds gets numbers, never a read-only, busy or
+   * attachment reason.
    */
   function draftSize() {
     return safe(() => {
+      if (!/^(brief|context|handoff)-/.test(draftEvidence())) return '';
       const box = composer();
       const text = box?.isConnected ? compactDraft(editorText(box)) : '';
       if (!text || !residueKind(text)) return '';
@@ -2164,10 +2168,11 @@ var CLF_DOM = (() => {
     const text = compactDraft(value);
     if (!OWN_RESIDUE.test(text)) return;
     const fingerprint = briefFingerprint(text);
-    if (!typedBriefs.includes(fingerprint)) {
-      typedBriefs.push(fingerprint);
-      if (typedBriefs.length > MAX_TYPED_BRIEFS) typedBriefs.shift();
-    }
+    // A brief typed again is the newest one again: the order is what #2159's diagnostic lists.
+    const known = typedBriefs.indexOf(fingerprint);
+    if (known !== -1) typedBriefs.splice(known, 1);
+    typedBriefs.push(fingerprint);
+    if (typedBriefs.length > MAX_TYPED_BRIEFS) typedBriefs.shift();
     try {
       const stored = storedBriefs().filter(value => value !== fingerprint);
       stored.push(fingerprint);

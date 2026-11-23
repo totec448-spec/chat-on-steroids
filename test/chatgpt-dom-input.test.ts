@@ -595,6 +595,58 @@ describe('native Project entry readiness', () => {
     expect(await entered).toBe(false);
     expect(failure).toHaveBeenCalledWith(`transition-timeout:last=composer-not-ready:draft=brief-foreign:clears=0:chips=0:len=${brief.replace(/\s+/g, '').length}:typed=5:lens=105/104/103/102`);
   });
+  it('adds no numbers to a reason that is not about a draft the app knows, even when the editor holds a brief (#2159)', async () => {
+    const { resumeBootstrapText } = await import('../src/main/session/handoff.js');
+    const brief = resumeBootstrapText('# TASK — the original goal\n\nShip the mail service.', 'pTYR0VjLJ5Xtz2FHFqajqA');
+    const link = sourceLink();
+    box.textContent = '';
+    link.addEventListener('click', event => {
+      event.preventDefault();
+      dom.reconfigure({ url: projectUrl });
+      box.replaceChildren(...brief.split(/\n\n/).map(part => { const p = document.createElement('p'); p.textContent = part; return p; }));
+      box.setAttribute('contenteditable', 'false');
+    });
+    const failure = vi.fn();
+    const entered = api.enterProject(entry, undefined, failure);
+    await vi.advanceTimersByTimeAsync(12_500);
+    expect(await entered).toBe(false);
+    expect(failure).toHaveBeenCalledWith('transition-timeout:last=composer-not-ready:draft=readonly:clears=0:chips=0');
+  });
+  it('lists a brief typed again as the newest one even when the page storage is unavailable (#2159)', async () => {
+    const { resumeBootstrapText } = await import('../src/main/session/handoff.js');
+    const first = resumeBootstrapText('# TASK — A\n\nShip.', 'pTYR0VjLJ5Xtz2FHFqajqA');
+    const second = resumeBootstrapText('# TASK — B, a longer goal\n\nShip the mail service now.', 'pTYR0VjLJ5Xtz2FHFqajqA');
+    const compact = (text: string) => text.replace(/\s+/g, '').length;
+    expect(compact(first)).not.toBe(compact(second));
+    document.execCommand = (command: string, _ui?: boolean, value?: string) => {
+      const selection = document.getSelection();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+      if (!range) return false;
+      if (command === 'delete') { range.deleteContents(); return true; }
+      if (command !== 'insertHTML') return false;
+      range.deleteContents();
+      const template = document.createElement('template');
+      template.innerHTML = value || '';
+      range.insertNode(template.content);
+      return true;
+    };
+    vi.spyOn(dom.window.Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('storage unavailable'); });
+    vi.spyOn(dom.window.Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('storage unavailable'); });
+    const link = sourceLink();
+    box.textContent = '';
+    for (const text of [first, second, first]) { expect(api.insertPrompt(text, true)).toBe(true); box.textContent = ''; }
+    const kept = `${first}\n\nAlso check the SMTP port.`;
+    link.addEventListener('click', event => {
+      event.preventDefault();
+      dom.reconfigure({ url: projectUrl });
+      box.replaceChildren(...kept.split(/\n\n/).map(part => { const p = document.createElement('p'); p.textContent = part; return p; }));
+    });
+    const failure = vi.fn();
+    const entered = api.enterProject(entry, undefined, failure);
+    await vi.advanceTimersByTimeAsync(12_500);
+    expect(await entered).toBe(false);
+    expect(failure).toHaveBeenCalledWith(`transition-timeout:last=composer-not-ready:draft=brief-foreign:clears=0:chips=0:len=${compact(kept)}:typed=2:lens=${compact(first)}/${compact(second)}`);
+  });
 
   // 2026-11-12 (Windows VM, Project chat started through the app): ChatGPT also keeps the Project home's text
   // after the app's FIRST message of a chat was sent from there (its context block, the message and the
