@@ -1396,6 +1396,47 @@ it('marks a saved draft clean when only its preview is unavailable', async () =>
   expect(document.querySelector('.file-confirm-dialog')).toBeNull();
 });
 
+it.each([false, true])('keeps an older watcher read from replacing a saved baseline (after explicit refresh: %s)', async afterRefresh => {
+  const panel = createFilePanel({ host, toggle });
+  panel.update(projectA); toggle.click(); await tick();
+  const input = await editFile();
+  let finishRead!: (value: unknown) => void;
+  const fresh = { ...preview, text: 'saved draft', revision: 'b'.repeat(64) };
+  (window.api.previewProjectFile as any).mockImplementation(() => ok(fresh))
+    .mockImplementationOnce(() => new Promise(resolve => { finishRead = resolve; }));
+  projectFilesChanged?.({ projectId: projectA.id, directory: '' }); await tick();
+  expect(finishRead).toBeTypeOf('function');
+  typeEdit(input, 'saved draft');
+  (window.api.saveProjectFile as any).mockImplementationOnce(() => ok({ preview: null }));
+  host.querySelector<HTMLButtonElement>('.file-editor-save')!.click(); await tick();
+  if (afterRefresh) { host.querySelector<HTMLButtonElement>('.file-editor-refresh')!.click(); await tick(); }
+
+  finishRead({ ok: true, data: preview }); await tick();
+  expect(host.querySelector<HTMLTextAreaElement>('.test-code-input')?.value).toBe('saved draft');
+  expect(host.querySelector<HTMLButtonElement>('.file-editor-save')?.disabled).toBe(true);
+  if (!afterRefresh) {
+    expect(host.querySelector('.file-editor-refresh')).not.toBeNull();
+    host.querySelector<HTMLButtonElement>('.file-editor-refresh')!.click(); await tick();
+  }
+  expect(host.querySelector('.file-editor-refresh')).toBeNull();
+  typeEdit(host.querySelector<HTMLTextAreaElement>('.test-code-input')!, 'newer draft');
+  host.querySelector<HTMLButtonElement>('.file-editor-save')!.click(); await tick();
+  expect(window.api.saveProjectFile).toHaveBeenLastCalledWith(projectA.id, 'README.md', 'newer draft', fresh.modifiedAt, fresh.bytes, fresh.revision);
+});
+
+it('leaves a revisionless saved baseline to explicit refresh rather than a new watcher read', async () => {
+  const panel = createFilePanel({ host, toggle });
+  panel.update(projectA); toggle.click(); await tick();
+  typeEdit(await editFile(), 'saved draft');
+  (window.api.saveProjectFile as any).mockImplementationOnce(() => ok({ preview: null }));
+  host.querySelector<HTMLButtonElement>('.file-editor-save')!.click(); await tick();
+  (window.api.previewProjectFile as any).mockImplementation(() => ok({ ...preview, text: 'external edit', revision: 'c'.repeat(64) }));
+  projectFilesChanged?.({ projectId: projectA.id, directory: '' }); await tick();
+  expect(host.querySelector<HTMLTextAreaElement>('.test-code-input')?.value).toBe('saved draft');
+  expect(host.querySelector<HTMLButtonElement>('.file-editor-save')?.disabled).toBe(true);
+  expect(host.querySelector('.file-editor-refresh')).not.toBeNull();
+});
+
 it('does not overwrite edits typed while a watcher preview read is in flight', async () => {
   const panel = createFilePanel({ host, toggle, onAttach: () => undefined });
   panel.update(projectA); toggle.click(); await tick();

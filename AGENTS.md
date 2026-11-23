@@ -5951,8 +5951,11 @@ read fails, with a diagnostic warning, rather than reporting that committed save
 renderer keeps the acknowledged text as its baseline without a revision or invented timestamp;
 newer edits stay dirty, including across project navigation. Save stays disabled until Refresh files
 reads a valid revision whose text still matches that baseline. A failed refresh or external change
-keeps the draft and cannot authorize an overwrite. Duplicate saves are refused. Atomic replacement
-is not an OS-wide lock against an unrelated writer after the final revision check.
+keeps the draft and cannot authorize an overwrite. Watcher reads retain their exact preview owner
+across the read and cannot replace a revisionless saved baseline, including after an explicit refresh
+has superseded the read. Ordinary revision-bearing previews keep their existing watcher updates.
+Duplicate saves are refused. Atomic replacement is not an OS-wide lock against an unrelated writer
+after the final revision check.
 
 Images accept at most 5 MiB input and 16 megapixels, then decode to a bounded 1600-pixel thumbnail.
 PDF input is bounded to 20 MiB; bundled PDF.js renders one page with at most 16 megapixels and
