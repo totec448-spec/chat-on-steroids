@@ -221,7 +221,9 @@ export function moveChatGroup<T>(session: ChatGroupSession, projectId: string | 
       throw error;
     }
     const fromProjectId = session.projectId ?? null;
-    const journal = fromProjectId !== projectId && (fromGroup !== null || target !== null);
+    // Even an ungrouped move must commit the current snapshot: an earlier ungrouping may
+    // still be debounced on disk, and a project round trip must not revive that old group.
+    const journal = fromProjectId !== projectId;
     if (journal) {
       // Catalog, old membership and intended placement cross disk together, before the session.
       const intent: GroupMove = { sessionId: session.id, fromProjectId, projectId, groupId: target };
