@@ -17,7 +17,7 @@ import { MAX_CHATGPT_MESSAGE_CHARS, userPromptText } from '../shared/user-prompt
 import { CONVERSATION_DELETED } from '../shared/chat-error.js';
 import { prepareSessionPrompt } from './session/prompt.js';
 import { NEW_CHAT, noteAutomaticReply } from './session/automatic-replies.js';
-import { pendingChatModelRequest, observeChatModels, requestChatModels } from './chat-models.js';
+import { pendingChatModelRequest, observeChatModels, requestChatModels, retryPassiveCatalogOnPageReturn } from './chat-models.js';
 import { resumeModelSelection, wakeModelSelection } from './resume-model.js';
 import { isDeliberateEffort, isProModel } from '../shared/chat-models.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
@@ -4318,6 +4318,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // Older extensions omit it; they keep the plain three-minute silence rule.
     const pageGenerating = url.searchParams.get('generating');
     if (pageGenerating === '1' || pageGenerating === '0') notePageGenerating(id, pageGenerating === '1');
+    // The original passive discovery may have expired while no ChatGPT tab existed.
+    // Only a current chosen-browser page returning while not *known* to generate
+    // may trigger one passive existing-tab retry. Old companions omit `generating`;
+    // the content-side catalog blocker still refuses busy/draft/attachment pages.
+    // No new tab, Send authority or infinite wake/reconnect retry is introduced.
+    if (pageGenerating !== '1' && !notChosenBrowser(req) && !staleCompanion(req)) retryPassiveCatalogOnPageReturn();
     const retiredWorker = retiredWorkerForConversation(id);
     // A page in a browser that may not take new work is handed no tab to open (#1852).
     const opensWork = opensNewWork(req, '/activity', id);

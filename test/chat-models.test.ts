@@ -1,6 +1,6 @@
 import { REASONING_EFFORTS } from '../src/shared/session.js';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { getChatModels, requestChatModels, pendingChatModelRequest, observeChatModels, resetChatModelsForTests, configureChatModelDiscovery, startChatModelDiscovery, restoreChatModels, refreshForUnoffered } from '../src/main/chat-models.js';
+import { getChatModels, requestChatModels, pendingChatModelRequest, observeChatModels, resetChatModelsForTests, configureChatModelDiscovery, startChatModelDiscovery, restoreChatModels, refreshForUnoffered, retryPassiveCatalogOnPageReturn } from '../src/main/chat-models.js';
 import { resumeModelSelection, wakeModelSelection } from '../src/main/resume-model.js';
 const saved = vi.hoisted(() => ({ value: null as unknown }));
 vi.mock('../src/main/durable.js', () => ({ readDurable: async () => saved.value, writeDurableSoon: (_name: string, value: unknown) => { saved.value = structuredClone(value); } }));
@@ -8,6 +8,35 @@ const models = [{ id: 'gpt-example', label: 'GPT Example', efforts: ['none', 'me
 beforeEach(() => { resetChatModelsForTests(); saved.value = null; vi.useFakeTimers(); });
 afterEach(() => vi.useRealTimers());
 describe('durable observed ChatGPT model catalog', () => {
+  it('retries a missing-page startup once when an existing chosen page returns, without a browser-open grant', () => {
+    requestChatModels(false);
+    const first = pendingChatModelRequest()!;
+    expect(observeChatModels({ nonce: first.nonce, waiting: 'page_unreachable' })).toBe(true);
+    vi.advanceTimersByTime(120000);
+    expect(getChatModels()).toMatchObject({ state: 'unavailable', models: [], error: expect.any(String) });
+    expect(retryPassiveCatalogOnPageReturn()).toBe(true);
+    const second = pendingChatModelRequest()!;
+    expect(second).toMatchObject({ allowOpen: false });
+    expect(second.nonce).not.toBe(first.nonce);
+    expect(retryPassiveCatalogOnPageReturn()).toBe(false);
+    expect(observeChatModels({ nonce: second.nonce, waiting: 'page_unreachable' })).toBe(true);
+    vi.advanceTimersByTime(120000);
+    expect(retryPassiveCatalogOnPageReturn()).toBe(false);
+    expect(pendingChatModelRequest()).toBeNull();
+  });
+  it('never retries a genuinely unreadable picker or a retained failed refresh as if a page were missing', () => {
+    requestChatModels(false);
+    const unreadable = pendingChatModelRequest()!;
+    observeChatModels({ nonce: unreadable.nonce, models: null, error: 'picker_unavailable' });
+    expect(retryPassiveCatalogOnPageReturn()).toBe(false);
+    requestChatModels(false);
+    observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models });
+    requestChatModels(false);
+    observeChatModels({ nonce: pendingChatModelRequest()!.nonce, waiting: 'page_unreachable' });
+    vi.advanceTimersByTime(120000);
+    expect(getChatModels()).toMatchObject({ state: 'ready', models, error: expect.any(String) });
+    expect(retryPassiveCatalogOnPageReturn()).toBe(false);
+  });
   it('gives the first explicit promotion a fresh budget without extending repeated Refresh clicks', () => {
     requestChatModels(false); const passive = pendingChatModelRequest()!;
     vi.advanceTimersByTime(80000);

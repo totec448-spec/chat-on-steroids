@@ -9773,6 +9773,42 @@ describe('a worker chat that never opens', () => {
   });
 
   // #1852: with the built-in browser chosen, the prime chat still open in Chrome collected one of
+  it('revives a page-unreachable catalog only on a chosen idle page report, without opening a browser', async () => {
+    const catalog = await import('../src/main/chat-models.js');
+    const previous = getConfig();
+    const builtIn = 'd'.repeat(32), foreign = 'c'.repeat(32);
+    const chat = '4b7f32d9-a1c0-42ba-824c-ab0a99b7d270';
+    await pair();
+    try {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos' } });
+      catalog.resetChatModelsForTests();
+      vi.useFakeTimers();
+      catalog.requestChatModels(false);
+      const first = catalog.pendingChatModelRequest()!;
+      expect(catalog.observeChatModels({ nonce: first.nonce, waiting: 'page_unreachable' })).toBe(true);
+      vi.setSystemTime(Date.now() + 120001);
+      expect(catalog.getChatModels().state).toBe('unavailable');
+      vi.useRealTimers();
+      expect(catalog.pendingChatModelRequest()).toBeNull();
+      await request('GET', '/status', { browser: builtIn, host: 'cos' });
+      await request('GET', `/activity?conversationId=${chat}&generating=0`, { browser: foreign, host: 'browser' });
+      expect(catalog.pendingChatModelRequest()).toBeNull();
+      await request('GET', `/activity?conversationId=${chat}&generating=1`, { browser: builtIn, host: 'cos' });
+      expect(catalog.pendingChatModelRequest()).toBeNull();
+      await request('GET', `/activity?conversationId=${chat}&generating=0`, { browser: builtIn, host: 'cos' });
+      expect(catalog.pendingChatModelRequest()).toMatchObject({ allowOpen: false });
+      const second = catalog.pendingChatModelRequest()!.nonce;
+      await request('GET', `/activity?conversationId=${chat}&generating=0`, { browser: builtIn, host: 'cos' });
+      expect(catalog.pendingChatModelRequest()?.nonce).toBe(second);
+      expect(recoveryBrowserWake).not.toHaveBeenCalledWith(expect.stringContaining('cos-model-catalog='), true, true);
+    } finally {
+      vi.useRealTimers();
+      catalog.resetChatModelsForTests();
+      await saveConfig(previous);
+    }
+  });
+
+  // #1852: with the built-in browser chosen, the prime chat still open in Chrome collected one of
   // three worker tabs through its page's /activity poll. Chrome opened it, and the redeem route then
   // refused that page as not the chosen browser, so the worker timed out.
   it('hands a worker tab to no page in a browser that is not the chosen one', async () => {
