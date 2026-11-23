@@ -1,4 +1,7 @@
 {
+  "Another Git operation is in progress. Try again when it finishes.": "Выполняется другая операция Git. Повторите попытку после её завершения.",
+  "Git state needs recovery. Check this branch before retrying; index.lock was kept.": "Состояние Git требует восстановления. Проверьте эту ветку перед повторной попыткой; файл index.lock сохранён.",
+  "Git committed, but a later step failed. Check the commit before trying again.": "Git создал коммит, но последующий шаг завершился с ошибкой. Проверьте коммит перед повторной попыткой.",
   "Save here and replace any existing file?": "Сохранить здесь с заменой существующего файла?",
   "Replace this CSV file?": "Заменить этот CSV-файл?",
   "Replace file": "Заменить файл",
