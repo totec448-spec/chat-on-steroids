@@ -5709,7 +5709,13 @@ browser action.
 The Files panel projects the current session's LocalProject through fixed IPC using a project
 UUID and relative paths. It does not change the main composer or grant additional filesystem
 access. Main re-resolves current approved roots and rejects traversal, symbolic links/junctions
-and project-root mutation. The renderer's `workspace-docks.ts` owns the right tool dock and
+and project-root mutation. Files creates and renames share the `project-files.ts` entry-mutation
+queue from validation through publication: the next operation checks the preceding result, so
+competing renames or a create/rename cannot both claim an unused name and replace its contents.
+A failed operation releases the queue; waiting is logged. Windows case-only renames retain their
+existing native-path handling. This queue covers these app-owned operations, not external OS
+writers; the adjacent pathname/sandbox rechecks remain in force.
+The renderer's `workspace-docks.ts` owns the right tool dock and
 bottom terminal dock; Files, Review, Sub-agents and each Terminal view retain their own content
 and async lifetimes. Closing the right dock hides its active tool but retains its tab selection.
 Every dock track change (right column, bottom row) goes through `moveWorkDock`, which animates

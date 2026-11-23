@@ -496,3 +496,74 @@ it('does not retire a new watch when an obsolete A-B-A validation fails late', a
     expect(changed).toEqual([{ projectId: project.id, directory: '' }]);
   } finally { watches.close(); vi.useRealTimers(); }
 });
+
+it('keeps both file contents when concurrent renames choose one unused destination', async () => {
+  const root = path.join(approved, 'project');
+  const project = await addProject(root);
+  await fs.writeFile(path.join(root, 'first.txt'), 'first contents');
+  await fs.writeFile(path.join(root, 'second.txt'), 'second contents');
+  const results = await Promise.allSettled([
+    renameProjectEntry(project.id, 'first.txt', 'chosen.txt'),
+    renameProjectEntry(project.id, 'second.txt', 'chosen.txt')
+  ]);
+  expect(results.map(result => result.status)).toEqual(['fulfilled', 'rejected']);
+  expect((results[1] as PromiseRejectedResult).reason.message).toMatch(/already exists/);
+  expect(await fs.readFile(path.join(root, 'chosen.txt'), 'utf8')).toBe('first contents');
+  expect(await fs.readFile(path.join(root, 'second.txt'), 'utf8')).toBe('second contents');
+});
+
+it.each(['create', 'rename'] as const)('keeps a competing create and rename from replacing one another (%s first)', async first => {
+  const root = path.join(approved, 'project');
+  const project = await addProject(root);
+  await fs.writeFile(path.join(root, 'original.txt'), 'keep these bytes');
+  const create = () => createProjectEntry(project.id, '', 'chosen.txt', 'file');
+  const rename = () => renameProjectEntry(project.id, 'original.txt', 'chosen.txt');
+  const results = await Promise.allSettled(first === 'create' ? [create(), rename()] : [rename(), create()]);
+  expect(results.map(result => result.status)).toEqual(['fulfilled', 'rejected']);
+  expect((results[1] as PromiseRejectedResult).reason.message).toMatch(/already exists/);
+  expect(await fs.readFile(path.join(root, first === 'create' ? 'original.txt' : 'chosen.txt'), 'utf8')).toBe('keep these bytes');
+  if (first === 'create') expect(await fs.readFile(path.join(root, 'chosen.txt'), 'utf8')).toBe('');
+});
+
+it('releases the entry mutation queue after a failed rename', async () => {
+  const root = path.join(approved, 'project');
+  const project = await addProject(root);
+  await fs.writeFile(path.join(root, 'original.txt'), 'original');
+  vi.spyOn(fs, 'rename').mockRejectedValueOnce(Object.assign(new Error('rename refused'), { code: 'EACCES' }));
+  const results = await Promise.allSettled([
+    renameProjectEntry(project.id, 'original.txt', 'first.txt'),
+    renameProjectEntry(project.id, 'original.txt', 'second.txt')
+  ]);
+  expect(results.map(result => result.status)).toEqual(['rejected', 'fulfilled']);
+  expect(await fs.readFile(path.join(root, 'second.txt'), 'utf8')).toBe('original');
+});
+
+it.skipIf(process.platform !== 'win32')('keeps Windows case-only renames usable', async () => {
+  const root = path.join(approved, 'project');
+  const project = await addProject(root);
+  await fs.writeFile(path.join(root, 'name.txt'), 'same file');
+  await renameProjectEntry(project.id, 'name.txt', 'NAME.txt');
+  expect(await fs.readdir(root)).toContain('NAME.txt');
+  expect(await fs.readFile(path.join(root, 'NAME.txt'), 'utf8')).toBe('same file');
+});
+
+it('logs a queued namespace mutation and keeps directory name collisions non-destructive', async () => {
+  const { onLog } = await import('../src/main/logger.js');
+  const lines: string[] = [];
+  const stop = onLog(entry => { if (entry.message.startsWith('project files: waiting')) lines.push(entry.message); });
+  try {
+    const root = path.join(approved, 'project');
+    const project = await addProject(root);
+    await createProjectEntry(project.id, '', 'first', 'directory');
+    await createProjectEntry(project.id, '', 'second', 'directory');
+    expect(lines).toEqual([]);
+    const results = await Promise.allSettled([
+      renameProjectEntry(project.id, 'first', 'chosen'),
+      renameProjectEntry(project.id, 'second', 'chosen')
+    ]);
+    expect(results.map(result => result.status)).toEqual(['fulfilled', 'rejected']);
+    expect((results[1] as PromiseRejectedResult).reason.message).toMatch(/already exists/);
+    expect(lines).toEqual(['project files: waiting for an earlier create or rename to finish']);
+    expect(await fs.readdir(root)).toContain('second');
+  } finally { stop(); }
+});
