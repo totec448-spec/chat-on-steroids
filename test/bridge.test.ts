@@ -8970,9 +8970,9 @@ describe('delivering a bootstrap', () => {
       expect(opened).toHaveLength(1);
     });
 
-  it.each(['commit', 'refuse', 'lost', 'expired-dispatch', 'attempted-source', 'foreign-checkpoint'] as const)('keeps the original resume brief and High through one clean-address document (%s)', async outcome => {
+  it.each(['commit', 'refuse', 'lost', 'expired-dispatch', 'attempted-source', 'foreign-checkpoint', 'damaged-restart', 'damaged-write-fault', 'damaged-dispatched', 'damaged-stale'] as const)('keeps the original resume brief and High through one clean-address document (%s)', async outcome => {
     await pair();
-    const index = ['commit', 'refuse', 'lost', 'expired-dispatch', 'attempted-source', 'foreign-checkpoint'].indexOf(outcome);
+    const index = ['commit', 'refuse', 'lost', 'expired-dispatch', 'attempted-source', 'foreign-checkpoint', 'damaged-restart', 'damaged-write-fault', 'damaged-dispatched', 'damaged-stale'].indexOf(outcome);
     const from = `9191919${index}-1111-4222-8333-444444444444`;
     const to = `9191919${index}-1111-4222-8333-555555555555`;
     const source = await request('POST', '/events', { body: { conversationId: from, events: [
@@ -9011,6 +9011,45 @@ describe('delivering a bootstrap', () => {
       return;
     }
     expect(prepared.body.allowed).toBe(true);
+    if (outcome.startsWith('damaged-')) {
+      if (outcome === 'damaged-dispatched') {
+        expect((await read('new-resume', true)).status).toBe(200);
+        expect((await checkpoint('new-resume', 'destinationAttempt')).body.allowed).toBe(true);
+        expect((await checkpoint('new-resume', 'destinationDispatch')).body.armed).toBe(true);
+      }
+      await flushDurable();
+      const saved = await readDurable<any>('bridge-commands');
+      saved.commands.find((row: any) => row.id === id).modelRecovery.nonce = 'damaged';
+      if (outcome === 'damaged-stale')
+        saved.commands.find((row: any) => row.id === id).createdAt = Date.now() - 31 * 60_000;
+      const continuations = await readDurable<ContinuationSnapshot>(CONTINUATIONS_STATE);
+      resetBridgeForTests();
+      await restoreContinuations(continuations);
+      await writeDurableNow('bridge-commands', saved);
+      if (outcome === 'damaged-write-fault') {
+        const durable = await import('../src/main/durable.js');
+        const write = durable.writeDurableNow;
+        const failing = vi.spyOn(durable, 'writeDurableNow').mockImplementation(async (name, value) => {
+          if (name === CONTINUATIONS_STATE) throw new Error('test: continuation write refused');
+          await write(name, value);
+        });
+        try {
+          await expect(restoreCommands()).rejects.toThrow('test: continuation write refused');
+          expect((await readDurable<any>('bridge-commands')).commands).toContainEqual(expect.objectContaining({ id }));
+          expect(continuationByToken(token)?.state).toBe('claimed');
+        } finally { failing.mockRestore(); }
+      }
+      await restoreCommands();
+      setBrowserOpener(async url => { opened.push(url); });
+      expediteCompactionPickupForTests(from);
+      await sweepStaleSwarm();
+      expect(pendingCommands()).toHaveLength(0);
+      expect(continuationByToken(token)?.state).toBe(outcome === 'damaged-dispatched' ? 'claimed' : 'aborted');
+      if (outcome === 'damaged-dispatched')
+        expect(continuationByToken(token)?.destinationSend.state).toBe('dispatched-unresolved');
+      expect((await getSession(sessionId))?.conversationId).toBe(from);
+      return;
+    }
     expect((await checkpoint('old-resume', 'destinationAttempt')).status).toBe(409);
     const second = await read('new-resume', true);
     expect(second.status).toBe(200);

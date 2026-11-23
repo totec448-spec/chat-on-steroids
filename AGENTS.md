@@ -3231,6 +3231,11 @@ redeems with `modelRecoveryNonce` from the same tab; the marker in the URL is st
 correlation. The transferred command says `modelRecoveryUsed: true`; neither that document nor
 the old one can authorize another reset. Lost replies fail closed. Cancellation and adoption
 serialize through existing command custody; a durable cancelled permit cannot redeem again.
+On restore, a malformed or stale recovery record for a resume retires its still-unsent continuation
+durably before the command is pruned, so the ordinary pickup cannot create a fresh budget.
+A refused continuation write blocks restoration and leaves the old command for retry.
+An already-dispatched destination keeps its ambiguous-Send fence; corruption does not prove
+that nothing was sent. Legacy records without the recovery field keep their existing behavior.
 Older bridges decline the new route; older documents without a nonce cannot adopt the permit.
 No new store is needed in the app. No additional ChatGPT prompt, discovery or Send is authorized.
 Browser-session storage is not assumed to survive a whole browser shutdown.

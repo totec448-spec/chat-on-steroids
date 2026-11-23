@@ -13282,6 +13282,8 @@ interface CommandRestorePlan {
   }>;
   /** Resume tokens discovered in the durable command file, published only with the plan. */
   resumeTokens: Array<{ sessionId: string; token: string }>;
+  /** Damaged spent custody must retire its unsent WAL before command pruning. */
+  invalidRecoveryResumes: string[];
   /** Number of durable commands newly reconstructed rather than retained from this process. */
   restored: number;
 }
@@ -13461,6 +13463,7 @@ function planCommandRestore(
     { raw: Partial<DurableCommandRecord>; spec: CommandSpec; createdAt: number }
   >();
   let restored = 0;
+  const invalidRecoveryResumes: string[] = [];
 
   for (const raw of saved.commands as Array<Partial<DurableCommandRecord>>) {
     const specRaw = raw.spec as Partial<CommandSpec> | undefined;
@@ -13490,6 +13493,7 @@ function planCommandRestore(
       : now - createdAt > COMMAND_TTL_MS;
     if (stale) {
       if (spec.type === 'revive') expiredRevivals.push({ id: raw.id!, spec });
+      if (spec.type === 'resume' && raw.modelRecovery !== undefined) invalidRecoveryResumes.push(spec.token);
       continue;
     }
 
@@ -13501,7 +13505,10 @@ function planCommandRestore(
     let claimedAt = leased && typeof raw.claimedAt === 'number' && Number.isFinite(raw.claimedAt) ? raw.claimedAt : null;
     if (leased && claimedAt === null) claimedAt = now;
     if (claimedAt !== null && claimedAt > now + COMMAND_DEADLINE_MS) claimedAt = now;
-    if (raw.modelRecovery !== undefined && (!leased || !validModelRecovery(raw.modelRecovery))) continue;
+    if (raw.modelRecovery !== undefined && (!leased || !validModelRecovery(raw.modelRecovery))) {
+      if (spec.type === 'resume') invalidRecoveryResumes.push(spec.token);
+      continue;
+    }
     plannedCommands.push({
       id: raw.id!,
       spec,
@@ -13533,6 +13540,7 @@ function planCommandRestore(
     receipts: plannedReceipts.slice(-MAX_COMMAND_RECEIPTS),
     expiredRevivals,
     resumeTokens,
+    invalidRecoveryResumes,
     restored
   };
 }
@@ -13556,6 +13564,20 @@ export async function restoreCommands(): Promise<void> {
   const now = Date.now();
   const plan = planCommandRestore(saved, now);
   if (!plan) return;
+
+  // Skipping a damaged command alone leaves a claimed, unattempted continuation.
+  // Its ordinary pickup would recreate a command without the spent-recovery fence.
+  // Retire that WAL first; a failed write keeps the old command on disk for retry.
+  // A dispatched destination remains ambiguous and must keep its existing fence.
+  for (const token of plan.invalidRecoveryResumes) {
+    const entry = continuationByToken(token);
+    if (entry && sendUnattempted(entry.destinationSend) &&
+        entry.state !== 'committing' && entry.state !== 'committed' && entry.state !== 'aborted') {
+      if (!await abortContinuationNow(token, 'Model recovery exhausted; the destination lost its unsent brief') &&
+          continuationByToken(token)?.state !== 'aborted')
+        throw new Error('could not durably retire invalid model recovery; bridge startup must retry before pruning it');
+    }
+  }
 
   if (plan.expiredRevivals.length > 0) {
     let brokerRelevant = false;
