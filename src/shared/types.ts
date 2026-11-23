@@ -274,6 +274,7 @@ export interface SessionSettings {
   record: boolean;
   /** Compatibility projection. Canonical value is 0: recordings do not expire by age. */
   retainDays: number;
+  checkWebChatTitles?: boolean;
   /** Estimated tokens at which the app starts suggesting a compaction. */
   advisoryTokens: number;
   /** Estimated tokens at which that suggestion becomes urgent. */

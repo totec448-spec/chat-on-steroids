@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import sharp from 'sharp';
 import { sessionsRoot } from './store.js';
-import { logInfo } from '../logger.js';
+import { logInfo, logWarn } from '../logger.js';
 import type { InputAttachment } from '../../shared/input.js';
 import { injectableAttachments, MAX_INPUT_IMAGES } from '../../shared/input.js';
 import { normalizeInputImage } from './input-images.js';
@@ -51,12 +51,28 @@ async function stageBatch(sources: AttachmentSource[], retained: RetainedAttachm
   }
   if (keptExpired) logInfo(`attachment cleanup: kept ${keptExpired} expired attachment(s) still referenced by a draft or the outbox`);
   const attachments: InputAttachment[] = [];
-  for (const source of sources) {
-    const staged = await stageOne(source, used);
-    used += staged.size;
-    attachments.push(staged);
+  try {
+    for (const source of sources) {
+      const staged = await stageOne(source, used);
+      used += staged.size;
+      attachments.push(staged);
+    }
+    return attachments;
+  } catch (error) {
+    // None of this batch reached the renderer. Remove only its completed, newly owned files
+    // while holding the staging lock; earlier drafts and outbox members stay untouched.
+    let failed = 0;
+    for (const attachment of attachments) {
+      for (const suffix of ['', '.json']) {
+        await fs.unlink(path.join(dir, attachment.id + suffix)).catch((cleanup: NodeJS.ErrnoException) => {
+          if (cleanup.code !== 'ENOENT') failed++;
+        });
+      }
+    }
+    if (failed) logWarn(`attachment staging: batch failed; ${failed} rollback file(s) could not be removed`);
+    else if (attachments.length) logInfo(`attachment staging: discarded ${attachments.length} staged attachment(s) because the batch failed`);
+    throw error;
   }
-  return attachments;
 }
 async function stageOne(source: AttachmentSource, used: number): Promise<InputAttachment> {
   const stat = typeof source === 'string' ? await fs.stat(source) : null;

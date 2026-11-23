@@ -484,6 +484,7 @@ const api = {
     call<SessionBookmark[]>('sessions:bookmark', { id, messageId, excerpt, messageTime, on }),
   findInChat: (id: string, query: string) => call<SessionSearchLocation[]>('sessions:find', { id, query }),
   /** The chat's own name in the app; null clears it and ChatGPT's title shows again. */
+  checkWebChatTitle: (id: string) => call<'match' | 'different' | 'unavailable'>('sessions:checkWebTitle', { id }),
   renameSession: (id: string, title: string | null) => call<boolean>('sessions:rename', { id, title }),
   getHandoff: (id: string, handoffId?: string) => call<Handoff | null>('handoff:get', { id, handoffId }),
 

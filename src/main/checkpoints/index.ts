@@ -82,6 +82,26 @@ async function seedFromRepositoryIndex(context: RepositoryContext, indexFile: st
   }
 }
 
+/** Prepare only the temporary index; filename bytes are opaque on POSIX filesystems. */
+async function clearAssumedIndex(context: RepositoryContext, indexFile: string): Promise<void> {
+  const listed = await runGit(context.projectReal, ['ls-files', '-v', '-z', '--', '.'], undefined,
+    { indexFile, noReplaceObjects: true });
+  if (listed.code !== 0) throw new Error(listed.stderr || 'Git could not inspect checkpoint index flags');
+  const assumed: Buffer[] = [];
+  for (let start = 0; start < listed.stdout.length;) {
+    const end = listed.stdout.indexOf(0, start);
+    if (end < start + 3 || listed.stdout[start + 1] !== 0x20) throw new Error('Git returned invalid checkpoint index flags');
+    const tag = listed.stdout[start]!;
+    if (tag >= 0x61 && tag <= 0x7a) assumed.push(listed.stdout.subarray(start + 2, end + 1));
+    start = end + 1;
+  }
+  if (assumed.length) {
+    const cleared = await runGit(context.projectReal, ['update-index', '--no-assume-unchanged', '-z', '--stdin'], 64 * 1024,
+      { indexFile, noReplaceObjects: true, input: Buffer.concat(assumed) });
+    if (cleared.code !== 0) throw new Error(cleared.stderr || 'Git could not prepare checkpoint index flags');
+  }
+}
+
 async function snapshotTree(context: RepositoryContext, indexFile: string, seeded: boolean): Promise<{ treeOid: string; headOid: string | null }> {
   // A full index in the temporary file: a split index would write its shared part next to it.
   const git = (args: string[]) => runGit(context.projectReal, ['-c', 'core.splitIndex=false', ...args], 64 * 1024, { indexFile, noReplaceObjects: true });
@@ -106,6 +126,9 @@ async function snapshotTree(context: RepositoryContext, indexFile: string, seede
 async function captureTree(context: RepositoryContext): Promise<{ treeOid: string; headOid: string | null }> {
   return withTemporaryIndex(async indexFile => {
     if (await seedFromRepositoryIndex(context, indexFile)) {
+      // Inventory/preparation failure must skip capture, not discard a valid staged index:
+      // falling back to HEAD could lose a force-added ignored file that the patch will edit.
+      await clearAssumedIndex(context, indexFile);
       try { return await snapshotTree(context, indexFile, true); } catch (error) {
         // An index Git cannot write as a tree (an unresolved merge outside the project, say).
         logWarn(`code checkpoint: the repository index could not seed the snapshot, reading HEAD instead: ${error instanceof Error ? error.message : String(error)}`);
