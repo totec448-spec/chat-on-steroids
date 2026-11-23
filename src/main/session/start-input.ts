@@ -3,11 +3,20 @@ import { connect, getStatus, onStatusChange } from '../connection.js';
 import { startBridge } from '../bridge.js';
 import { wakeBrowserUrl, resetBrowserStartupForTests } from '../browser-startup.js';
 import { getConfig } from '../config.js';
+import { logInfo } from '../logger.js';
 import { enqueueInput, cancelInput, listInputs, noteInputStartupError, retireRemovedOpening, type InputArgs, type InputEntry } from './input.js';
 
-function wakeBrowser(entry: InputEntry, retry = false): Promise<void> {
+function wakeBrowser(entry: InputEntry, signal: AbortSignal, retry = false): Promise<void> {
   const marker = `cos-input=${encodeURIComponent(entry.id)}`;
-  return wakeBrowserUrl(entry.conversationId ? `https://chatgpt.com/c/${encodeURIComponent(entry.conversationId)}` : `https://chatgpt.com/?${marker}#${marker}`, retry, getConfig().ui.backgroundChats === true);
+  return wakeBrowserUrl(entry.conversationId ? `https://chatgpt.com/c/${encodeURIComponent(entry.conversationId)}` : `https://chatgpt.com/?${marker}#${marker}`, retry, getConfig().ui.backgroundChats === true, {
+    current: async () => {
+      const queued = !signal.aborted && (await listInputs()).some(row => row.id === entry.id && row.state === 'queued');
+      // Reading the outbox also yields: cancellation/shutdown may have revoked this exact attempt.
+      const current = !signal.aborted && queued;
+      if (!current) logInfo('input startup: skipped browser launch because the input was cancelled, claimed or startup stopped');
+      return current;
+    }
+  });
 }
 /**
  * Connection setup, not the browser, stopped this send (#882 VM test, 2026-10-04: a fresh install
@@ -44,9 +53,9 @@ async function ready(signal?: AbortSignal): Promise<void> {
   if (!await startBridge()) throw new Error('The browser bridge could not start.');
   signal?.throwIfAborted();
 }
-async function deliver(entry: InputEntry, retry = false): Promise<InputEntry> {
+async function deliver(entry: InputEntry, signal: AbortSignal, retry = false): Promise<InputEntry> {
   try {
-    await wakeBrowser(entry, retry);
+    await wakeBrowser(entry, signal, retry);
     return await noteInputStartupError(entry.id, null) ?? entry;
   } catch (error) {
     return await noteInputStartupError(entry.id, `Message queued. Browser startup failed: ${(error as Error).message}`) ?? entry;
@@ -69,7 +78,7 @@ async function startAcceptedInput(entry: InputEntry, controller: AbortController
     controller.signal.throwIfAborted();
     const current = (await listInputs()).find(row => row.id === entry.id);
     controller.signal.throwIfAborted();
-    if (current?.state === 'queued') await deliver(current);
+    if (current?.state === 'queued') await deliver(current, controller.signal);
   } catch (error) {
     if (!controller.signal.aborted) await noteInputStartupError(entry.id, startupError(error));
   } finally {
@@ -110,7 +119,7 @@ export async function retryQueuedInputBrowser(id: string): Promise<InputEntry | 
     await ready(controller.signal);
     const entry = (await listInputs()).find(row => row.id === id);
     controller.signal.throwIfAborted();
-    return entry?.state === 'queued' ? await deliver(entry, true) : null;
+    return entry?.state === 'queued' ? await deliver(entry, controller.signal, true) : null;
   } catch (error) {
     if (controller.signal.aborted) return null;
     return await noteInputStartupError(id, startupError(error));
