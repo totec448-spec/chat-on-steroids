@@ -20,6 +20,7 @@ import {
 import { validateNewRoot } from '../src/main/sandbox.js';
 import { ProjectFileWatchSet } from '../src/main/project-file-watcher.js';
 import * as projectFiles from '../src/main/project-files.js';
+import * as projects from '../src/main/projects.js';
 
 let directory: string;
 let approved: string;
@@ -571,6 +572,7 @@ it('logs a queued namespace mutation and keeps directory name collisions non-des
 it('bounds a stalled entry queue, retains accepted FIFO work, and admits a retry after draining', async () => {
   const root = path.join(approved, 'project');
   const project = await addProject(root);
+  const child = await addProject(path.join(root, 'src'));
   await fs.writeFile(path.join(root, 'first.txt'), 'first');
   await fs.writeFile(path.join(root, 'retry.txt'), 'retry');
   let release!: () => void, started!: () => void;
@@ -588,6 +590,7 @@ it('bounds a stalled entry queue, retains accepted FIFO work, and admits a retry
     // The active operation counts too; neither kind can retain a 33rd callback.
     await expect(renameProjectEntry(project.id, 'retry.txt', 'later.txt')).rejects.toThrow('Too many file operations are in progress. Try again when they finish.');
     await expect(createProjectEntry(project.id, '', 'excess.txt', 'file')).rejects.toThrow('Too many file operations are in progress. Try again when they finish.');
+    await expect(createProjectEntry(child.id, '', 'excess.txt', 'file')).rejects.toThrow('Too many file operations are in progress. Try again when they finish.');
     expect(await fs.readFile(path.join(root, 'retry.txt'), 'utf8')).toBe('retry');
   } finally {
     release(); await first; await Promise.all(accepted);
@@ -596,4 +599,68 @@ it('bounds a stalled entry queue, retains accepted FIFO work, and admits a retry
   expect(await fs.readdir(root)).not.toContain('excess.txt');
   await renameProjectEntry(project.id, 'retry.txt', 'later.txt');
   expect(await fs.readFile(path.join(root, 'later.txt'), 'utf8')).toBe('retry');
+});
+
+it('keeps another project usable while one project has a full stalled entry queue', async () => {
+  const root = path.join(approved, 'project');
+  const otherRoot = path.join(approved, 'sibling');
+  const project = await addProject(root);
+  const other = await addProject(otherRoot);
+  await fs.writeFile(path.join(root, 'first.txt'), 'first');
+  await fs.writeFile(path.join(otherRoot, 'original.txt'), 'other contents');
+  let release!: () => void, started!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const entered = new Promise<void>(resolve => { started = resolve; });
+  const rename = fs.rename.bind(fs);
+  vi.spyOn(fs, 'rename').mockImplementationOnce(async (...args) => { started(); await gate; return rename(...args); });
+  const first = renameProjectEntry(project.id, 'first.txt', 'chosen.txt');
+  const pending: Promise<unknown>[] = [first];
+  const outcomes: string[] = [];
+  try {
+    await entered;
+    for (let i = 0; i < 31; i++) pending.push(createProjectEntry(project.id, '', `queued-${i}.txt`, 'file'));
+    pending.push(createProjectEntry(other.id, '', 'new.txt', 'file').then(() => { outcomes.push('created'); }, () => { outcomes.push('refused create'); }));
+    pending.push(renameProjectEntry(other.id, 'original.txt', 'renamed.txt').then(() => { outcomes.push('renamed'); }, () => { outcomes.push('refused rename'); }));
+    await vi.waitFor(() => expect(outcomes).toEqual(['created', 'renamed']));
+    expect(await fs.readFile(path.join(otherRoot, 'renamed.txt'), 'utf8')).toBe('other contents');
+    expect(await fs.readFile(path.join(otherRoot, 'new.txt'), 'utf8')).toBe('');
+  } finally {
+    release(); await Promise.allSettled(pending);
+  }
+});
+
+it.each(['parent', 'child'] as const)('serializes competing mutations in overlapping projects (%s first)', async first => {
+  const root = path.join(approved, 'project');
+  const parent = await addProject(root);
+  const child = await addProject(path.join(root, 'src'));
+  await fs.writeFile(path.join(root, 'src', 'original.txt'), 'keep these bytes');
+  const create = () => createProjectEntry(parent.id, 'src', 'chosen.txt', 'file');
+  const rename = () => renameProjectEntry(child.id, 'original.txt', 'chosen.txt');
+  const results = await Promise.allSettled(first === 'parent' ? [create(), rename()] : [rename(), create()]);
+  expect(results.map(result => result.status)).toEqual(['fulfilled', 'rejected']);
+  expect((results[1] as PromiseRejectedResult).reason.message).toMatch(/already exists/);
+  expect(await fs.readFile(path.join(root, 'src', first === 'parent' ? 'original.txt' : 'chosen.txt'), 'utf8')).toBe('keep these bytes');
+});
+
+it('bounds admission before catalog lookup and releases it after invalid project requests', async () => {
+  const project = await addProject(path.join(approved, 'project'));
+  let release!: () => void, started!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const entered = new Promise<void>(resolve => { started = resolve; });
+  const lookup = vi.spyOn(projects, 'getProject').mockResolvedValue(null)
+    .mockImplementationOnce(async () => { started(); await gate; return null; });
+  const pending = Array.from({ length: 6400 }, () => createProjectEntry('missing', '', 'unused.txt', 'file')
+    .then(() => 'created', () => 'refused'));
+  try {
+    await entered;
+    await expect(createProjectEntry(project.id, '', 'excess.txt', 'file')).rejects.toThrow(/Too many file operations/);
+    await expect(renameProjectEntry(project.id, 'unused.txt', 'excess.txt')).rejects.toThrow(/Too many file operations/);
+    expect(lookup).toHaveBeenCalledTimes(1);
+  } finally {
+    release();
+    expect(await Promise.all(pending)).toEqual(Array(6400).fill('refused'));
+    lookup.mockRestore();
+  }
+  await createProjectEntry(project.id, '', 'retry.txt', 'file');
+  expect(await fs.readFile(path.join(approved, 'project', 'retry.txt'), 'utf8')).toBe('');
 });
