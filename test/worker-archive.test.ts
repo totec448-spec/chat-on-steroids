@@ -1,4 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import {
   initWorkerArchivePath,
@@ -174,6 +176,87 @@ it('unarchives a chat whose archive was already under way when the wake came', (
   expect(nextWorkerArchive(2_000)).toEqual({ conversationId: A, archive: false });
   settleWorkerArchive(A, 'unarchived', 2_500);
   expect(ready).toEqual([A]);
+});
+
+it.each([false, true])('restores again when an expired archive completes after the restore (reload: %s)', async (reload) => {
+  queueWorkerArchives([A], 1_000);
+  expect(nextWorkerArchive(1_000)).toEqual({ conversationId: A, archive: true });
+  expect(readyForWake(A, 1_001)).toBe(false);
+  const later = 1_000 + WORKER_ARCHIVE_LEASE_MS;
+  expect(nextWorkerArchive(later)).toEqual({ conversationId: A, archive: false });
+  settleWorkerArchive(A, 'unarchived', later + 1);
+  expect(readyForWake(A, later + 2)).toBe(true);
+  await workerArchiveWritten();
+  if (reload) await loadWorkerArchive();
+  // The old browser request applies its PATCH last, even though its lease expired.
+  settleWorkerArchive(A, 'archived', later + 3);
+  await workerArchiveWritten();
+  await loadWorkerArchive();
+  await archiving(false); // Finishing a restore must not depend on the setting.
+  expect(readyForWake(A, later + 4)).toBe(false);
+  expect(nextWorkerArchive(later + 4)).toEqual({ conversationId: A, archive: false });
+  settleWorkerArchive(A, 'unarchived', later + 5);
+  expect(readyForWake(A, later + 6)).toBe(true);
+  expect(nextWorkerArchive(later + 6)).toBeNull();
+});
+
+it('keeps a newer archive owed when an older restore finishes last', () => {
+  queueWorkerArchives([A], 1_000);
+  expect(nextArchive(1_000)).toBe(A);
+  settleWorkerArchive(A, 'archived', 1_001);
+  expect(readyForWake(A, 2_000)).toBe(false);
+  expect(nextWorkerArchive(2_000)?.archive).toBe(false);
+  const later = 2_000 + WORKER_ARCHIVE_LEASE_MS;
+  expect(nextWorkerArchive(later)?.archive).toBe(false);
+  queueWorkerArchives([A], later + 1);
+  settleWorkerArchive(A, 'unarchived', later + 2);
+  expect(nextArchive(later + 2)).toBe(A);
+  // The other restore lands before the newer archive finishes: it cannot retire that archive.
+  settleWorkerArchive(A, 'unarchived', later + 3);
+  expect(nextArchive(later + 3)).toBe(A);
+  settleWorkerArchive(A, 'archived', later + 4);
+  expect(nextWorkerArchive(later + 4)).toBeNull();
+  // Even after the entry is retired, a delayed restore must be corrected.
+  settleWorkerArchive(A, 'unarchived', later + 5);
+  expect(nextArchive(later + 5)).toBe(A);
+});
+
+it('ignores duplicate settled results and never restores a chat it did not manage', async () => {
+  queueWorkerArchives([A], 1_000);
+  expect(nextArchive(1_000)).toBe(A);
+  settleWorkerArchive(A, 'archived', 1_001);
+  settleWorkerArchive(A, 'archived', 1_002);
+  expect(nextWorkerArchive(1_002)).toBeNull();
+  expect(readyForWake(A, 1_003)).toBe(false);
+  expect(nextWorkerArchive(1_003)?.archive).toBe(false);
+  settleWorkerArchive(A, 'unarchived', 1_004);
+  await workerArchiveWritten();
+  await loadWorkerArchive();
+  for (const outcome of ['unarchived', 'failed', 'deferred'] as const) settleWorkerArchive(A, outcome, 1_005);
+  for (const outcome of ['archived', 'unarchived'] as const) settleWorkerArchive(B, outcome, 1_005);
+  expect(nextWorkerArchive(1_005)).toBeNull();
+  expect(readyForWake(A, 1_005)).toBe(true);
+  expect(readyForWake(B, 1_005)).toBe(true);
+});
+
+it('loads a version 2 archive record and skips damaged restored records', async () => {
+  await workerArchiveWritten();
+  const file = path.join(dir, 'state', 'worker-archive.json');
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, JSON.stringify({ version: 2, entries: [], archived: [{ conversationId: A, at: 1_000 }] }));
+  await loadWorkerArchive();
+  expect(readyForWake(A, 1_001)).toBe(false);
+  expect(nextWorkerArchive(1_001)?.archive).toBe(false);
+  await workerArchiveWritten();
+  await fs.writeFile(file, JSON.stringify({
+    version: 3, entries: [], archived: [{ conversationId: A, at: 1_000 }],
+    restored: [null, false, { conversationId: 'not-a-chat' }, { conversationId: B, at: 1_001 }]
+  }));
+  await loadWorkerArchive();
+  expect(readyForWake(B, 1_002)).toBe(true);
+  settleWorkerArchive(B, 'archived', 1_003);
+  expect(nextWorkerArchive(1_003)).toEqual({ conversationId: B, archive: false });
+  expect(readyForWake(A, 1_003)).toBe(false);
 });
 
 it('releases a held wake after the hold time when the chat cannot be unarchived in time', () => {
