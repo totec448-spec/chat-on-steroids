@@ -3368,6 +3368,64 @@ it('projects reloaded unreadable ledger health through state:get and recovers on
   expect(await fs.readFile(path.join(path.dirname(file), backups.at(-1)!), 'utf8')).toBe('{broken');
 });
 
+it('loads the Web title check as opt-in and preserves it when an older settings form saves', async () => {
+  const prior = getConfig();
+  const action = handlers.get('sessions:checkWebTitle')!;
+  try {
+    expect(await action(null, { id: 'unknown-session' })).toEqual({ ok: true, data: 'unavailable' });
+    const baseline = { ...prior, sessions: { ...prior.sessions } };
+    delete baseline.sessions.checkWebChatTitles;
+    expect(await save({ ...prior, sessions: { ...prior.sessions, checkWebChatTitles: true } })).toMatchObject({ ok: true });
+    expect(getConfig().sessions.checkWebChatTitles).toBe(true);
+    expect(await save(baseline, baseline)).toMatchObject({ ok: true });
+    expect(getConfig().sessions.checkWebChatTitles).toBe(true);
+    expect(await save({ ...getConfig(), sessions: { ...getConfig().sessions, checkWebChatTitles: false } })).toMatchObject({ ok: true });
+    expect(getConfig().sessions.checkWebChatTitles).toBe(false);
+    expect(await action(null, { id: 'unknown-session' })).toEqual({ ok: true, data: 'unavailable' });
+  } finally {
+    await saveConfig(prior);
+  }
+});
+
+it('rejects a Web title result when the selected browser changes during the final session read', async () => {
+  const prior = getConfig();
+  const store = await import('../src/main/session/store.js');
+  const webTitle = await import('../src/main/web-chat-title.js');
+  const { getLog } = await import('../src/main/logger.js');
+  const action = handlers.get('sessions:checkWebTitle')!;
+  const session = await createSession({ conversationId: '11111111-1111-4111-8111-111111111111' });
+  await store.renameSession(session.id, 'Manual title', 'manual');
+  const chat = await store.getSession(session.id);
+  const readTitle = vi.spyOn(webTitle, 'readWebChatTitle').mockResolvedValue('Web title');
+  const readSession = vi.spyOn(store, 'getSession');
+  try {
+    await saveConfig({ ...prior, ui: { ...prior.ui, chatBrowser: 'chrome' },
+      sessions: { ...prior.sessions, checkWebChatTitles: false } });
+    expect(await action(null, { id: session.id })).toEqual({ ok: true, data: 'unavailable' });
+    await saveConfig({ ...getConfig(), sessions: { ...getConfig().sessions, checkWebChatTitles: true } });
+    expect(await action(null, { id: 'unknown-session' })).toEqual({ ok: true, data: 'unavailable' });
+    expect(readTitle).not.toHaveBeenCalled();
+    expect(await action(null, { id: session.id })).toEqual({ ok: true, data: 'different' });
+    readSession.mockResolvedValueOnce(chat).mockResolvedValueOnce(null);
+    expect(await action(null, { id: session.id })).toEqual({ ok: true, data: 'unavailable' });
+    readSession.mockResolvedValueOnce(chat).mockImplementationOnce(async () => {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'edge' } });
+      return chat;
+    });
+    expect(await action(null, { id: session.id })).toEqual({ ok: true, data: 'unavailable' });
+    expect(getLog().map(entry => entry.message)).toEqual(expect.arrayContaining([
+      'web chat title: check skipped (disabled)',
+      'web chat title: check skipped (ineligible session)',
+      'web chat title: comparison discarded (session changed)',
+      'web chat title: comparison discarded (browser changed)'
+    ]));
+  } finally {
+    readSession.mockRestore();
+    readTitle.mockRestore();
+    await saveConfig(prior);
+  }
+});
+
 // #1406: the recording store held a fixed 2 GB. Settings now offers larger sizes, applied at once.
 it('saves the recording storage size and applies it to the store', async () => {
   const store = await import('../src/main/session/store.js');
