@@ -1508,6 +1508,10 @@ Its 512 KiB text budget is separate from its four-image/12 MiB base64 budget. Im
 `codex/filesystem.ts` is primitives; `sandbox.ts` is authorization. Do not push policy into
 low-level primitives and assume every public caller became safe. Search uses bundled-first
 ripgrep when commands are allowed, or `find` with `search.ts` when they are not.
+`search.ts` decodes ripgrep stdout as one UTF-8 stream before parsing its JSON lines, so a pipe
+boundary cannot corrupt a multibyte path or matching text. `search-ripgrep-stream.test.ts`
+feeds Japanese and emoji byte by byte, with and without a final newline; existing result limits,
+virtual paths and backend selection are unchanged.
 
 `apply_patch` accepts Codex V4A in the MCP `patch` string. Its parser, grammar, hunk matching,
 text/line-ending representation and replacement application live in `codex/apply-patch/*`.
