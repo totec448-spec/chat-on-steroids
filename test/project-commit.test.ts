@@ -310,6 +310,85 @@ describe('commit', () => {
     expect(logged).toContain('git commit: kept the accepted commit and published its private index after a late failure');
   });
 
+  it('retains a same-commit branch selected by another writer when our branch launch fails', async () => {
+    const { root, id } = await project();
+    await change(root);
+    gitFault.before = async (_cwd, args) => {
+      if (args[0] !== 'switch' || args[1] !== '-c') return;
+      await git(root, 'switch', '-c', 'foreign-creation');
+      throw Object.assign(new Error('Git could not launch'), { code: 'ENOENT', gitStopped: true });
+    };
+    await expect(commitProjectChanges(id, { message: 'Not launched', paths: ['kept.ts'], newBranch: 'foreign-creation', expectedToken: await revision(id) }))
+      .rejects.toThrow('Git could not launch');
+    gitFault.before = null;
+    expect(await git(root, 'branch', '--show-current')).toBe('foreign-creation');
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('baseline');
+  });
+
+  it('refuses a changed branch identity observed when admitting the private index', async () => {
+    const { root, id } = await project();
+    await change(root);
+    await git(root, 'branch', 'feature');
+    const open = fs.open.bind(fs), lock = path.join(root, '.git', 'index.lock');
+    let changed = false;
+    const fault = vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+      if (!changed && String(args[0]) === lock && args[1] === 'wx') { changed = true; await git(root, 'switch', 'feature'); }
+      return open(...args);
+    });
+    try {
+      await expect(commitProjectChanges(id, { message: 'Wrong branch refused', paths: ['kept.ts'], expectedToken: await revision(id) }))
+        .rejects.toThrow('The changes changed');
+    } finally { fault.mockRestore(); }
+    expect(changed).toBe(true);
+    expect(await git(root, 'branch', '--show-current')).toBe('feature');
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('baseline');
+    await fs.unlink(lock); // No commit was attempted; preserve the original index.
+  });
+
+  it.each([true, false])('does not substitute a later tip for its reported commit (reflogs: %s)', async reflogs => {
+    const { root, id } = await project();
+    if (!reflogs) { await git(root, 'config', 'core.logAllRefUpdates', 'false'); await fs.rm(path.join(root, '.git', 'logs'), { recursive: true }); }
+    const tree = await git(root, 'rev-parse', 'HEAD^{tree}');
+    await change(root);
+    let completed = false;
+    gitFault.rejectAfter = args => { if (args[0] === 'commit') completed = true; return false; };
+    gitFault.before = async (_cwd, args) => {
+      if (!completed || args[0] !== 'symbolic-ref') return;
+      gitFault.before = null;
+      const own = await git(root, 'rev-parse', 'HEAD');
+      const other = await git(root, 'commit-tree', tree, '-p', own, '-m', 'Later tip');
+      await git(root, 'update-ref', 'refs/heads/main', other, own);
+    };
+    await expect(commitProjectChanges(id, { message: 'Own commit', paths: ['kept.ts'], expectedToken: await revision(id) }))
+      .rejects.toThrow('Git state needs recovery');
+    gitFault.rejectAfter = null;
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('Later tip');
+    expect(await git(root, 'log', '-1', '--format=%s', 'HEAD^')).toBe('Own commit');
+    expect((await fs.stat(path.join(root, '.git', 'index.lock'))).size).toBeGreaterThan(0);
+  });
+
+  it.skipIf(process.platform === 'win32')('reports directory-sync failure after publication without claiming index.lock remains', async () => {
+    const { root, id } = await project();
+    await change(root);
+    const open = fs.open.bind(fs);
+    let synced = false;
+    const fault = vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+      const handle = await open(...args);
+      if (String(args[0]) === path.join(root, '.git')) {
+        handle.sync = async () => { synced = true; throw Object.assign(new Error('directory sync refused'), { code: 'EIO' }); };
+      }
+      return handle;
+    });
+    try {
+      await expect(commitProjectChanges(id, { message: 'Published before sync', paths: ['kept.ts'], expectedToken: await revision(id) }))
+        .rejects.toThrow('Git committed, but a later step failed');
+    } finally { fault.mockRestore(); }
+    expect(synced).toBe(true);
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('Published before sync');
+    expect(await git(root, 'diff', '--cached', '--name-only')).toBe('');
+    await expect(fs.stat(path.join(root, '.git', 'index.lock'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('does not undo a successful commit when an external soft reset returns HEAD to its starting position', async () => {
     const { root, id } = await project();
     const start = await git(root, 'rev-parse', 'HEAD');
@@ -624,19 +703,21 @@ describe('commit', () => {
     expect(await git(root, 'diff', '--cached', '--name-only')).toBe('');
   });
 
-  it('puts the branch back when creating it did not finish but Git had switched, and never removes a branch that was there before', async () => {
+  it('retains an unconfirmed branch creation, permits retry, and never removes a pre-existing branch', async () => {
     const { root, id } = await project();
     await change(root);
     gitFault.rejectAfter = args => args[0] === 'switch' && args[1] === '-c';
     await expect(commitProjectChanges(id, { message: 'x', paths: ['kept.ts'], newBranch: 'half-made', expectedToken: await revision(id) })).rejects.toThrow('Git took too long to respond');
     gitFault.rejectAfter = null;
-    expect(await git(root, 'branch', '--show-current')).toBe('main');
-    expect(await git(root, 'branch', '--list', 'half-made')).toBe('');
+    expect(await git(root, 'branch', '--show-current')).toBe('half-made');
+    expect(await git(root, 'branch', '--list', 'half-made')).toContain('half-made');
+    await commitProjectChanges(id, { message: 'Retry unconfirmed branch', paths: ['kept.ts'], expectedToken: await revision(id) });
     // A branch that already existed is refused and left alone.
+    await fs.writeFile(path.join(root, 'kept.ts'), 'export const kept = 3;\n');
     await git(root, 'branch', 'mine');
     await expect(commitProjectChanges(id, { message: 'x', paths: ['kept.ts'], newBranch: 'mine', expectedToken: await revision(id) })).rejects.toThrow('A branch with that name already exist');
     expect(await git(root, 'branch', '--list', 'mine')).toContain('mine');
-    expect(await git(root, 'branch', '--show-current')).toBe('main');
+    expect(await git(root, 'branch', '--show-current')).toBe('half-made');
   });
 
   it('refuses before reading when the changed files are too large to check', async () => {

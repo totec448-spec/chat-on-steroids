@@ -245,10 +245,11 @@ export async function commitProjectChanges(projectId: string, request: CommitReq
   const action = `commit (CoS ${randomUUID()})`;
   let leased = false, stopped = true, attempted = false, succeeded = false;
   let failure: unknown;
+  let reportedCommit: string | null = null;
   const execute = async (args: string[], options: GitRunOptions = {}) => {
     stopped = false;
     try {
-      const result = await runGit(repo.root, args, undefined, { ...options, settleOnFailure: true });
+      const result = await runGit(repo.root, args, undefined, options);
       stopped = true;
       return result;
     } catch (error) {
@@ -273,9 +274,8 @@ export async function commitProjectChanges(projectId: string, request: CommitReq
       let made: Awaited<ReturnType<typeof runGit>>;
       try { made = await execute(['switch', '-c', created]); }
       catch (error) {
-        // Restore only after a settled command and an unchanged position below.
-        // A pre-existing branch is refused by Git, never switched to.
-        switched = (await branchOf(repo).catch(() => null)) === created;
+        // An error never proves ownership, even when the requested name is now selected.
+        logWarn('git commit: kept any matching branch because branch creation was not confirmed');
         throw error;
       }
       if (made.code !== 0) {
@@ -315,6 +315,11 @@ export async function commitProjectChanges(projectId: string, request: CommitReq
       }
       await lock.sync();
     } finally { await lock.close(); }
+    const admitted = await commitPosition(repo);
+    const intendedRef = created && switched ? `refs/heads/${created}` : position.ref;
+    if (!admitted || admitted.ref !== intendedRef || admitted.commit !== startCommit) {
+      throw refusal('git commit', 'The changes changed. Review them again before committing.');
+    }
     // Git writes its private index via index.lock.lock; index.lock continuously
     // excludes new real-index writers, including hooks in other Git processes.
     const added = await execute(['add', '-A', '--pathspec-from-file=-', '--pathspec-file-nul'],
@@ -334,6 +339,10 @@ export async function commitProjectChanges(projectId: string, request: CommitReq
       throw new Error(`Git did not commit:\n${shown(output)}`);
     }
     succeeded = true;
+    // Git's final summary follows its foreground hooks. Resolve the reported
+    // object, never a later moving HEAD; no English words or reflogs are required.
+    const summary = [...decode(committed.stdout).matchAll(/^\[[^\r\n]* ([0-9a-f]{4,64})\](?: |$)/gm)].at(-1);
+    reportedCommit = summary ? await text(repo, ['rev-parse', '--verify', `${summary[1]}^{commit}`]) : null;
   } catch (error) { failure = error; }
   const current = await commitPosition(repo).catch(() => null);
   const expectedRef = created && switched ? `refs/heads/${created}` : position.ref;
@@ -342,8 +351,8 @@ export async function commitProjectChanges(projectId: string, request: CommitReq
   // reflogs on: disabled/unreadable receipts leave both indexes for recovery.
   const receipt = attempted && stopped ? await text(repo, ['reflog', 'show', '-1', '--format=%H%x00%gs', 'HEAD']).catch(() => null) : null;
   const [oid, subject] = receipt?.split('\0') ?? [];
-  const accepted = current?.ref === expectedRef && current.commit && stopped &&
-    ((oid === current.commit && subject?.startsWith(`${action}:`)) || (succeeded && !sameStart)) ? current.commit : null;
+  const ownCommit = reportedCommit ?? (subject?.startsWith(`${action}:`) ? oid : null);
+  const accepted = stopped && current?.ref === expectedRef && current.commit === ownCommit ? ownCommit : null;
   if (leased && accepted) {
     try {
       // A timeout in a post-commit hook can precede Git's private-index write.
@@ -355,13 +364,17 @@ export async function commitProjectChanges(projectId: string, request: CommitReq
       try { await ready.sync(); } finally { await ready.close(); }
       await fs.rename(indexFile, indexPath);
       leased = false;
-      if (failure) {
-        logWarn('git commit: kept the accepted commit and published its private index after a late failure');
-        const late = new Error('Git committed, but a later step failed. Check the commit before trying again.');
-        late.message += `\n${shown(failure instanceof Error ? failure.message : String(failure))}`;
-        failure = late;
+      if (process.platform !== 'win32') {
+        const directory = await fs.open(repo.gitDir, 'r');
+        try { await directory.sync(); } finally { await directory.close(); }
       }
     } catch (error) { failure = error; }
+    if (!leased && failure) {
+      logWarn('git commit: kept the accepted commit and published its private index after a late failure');
+      const late = new Error('Git committed, but a later step failed. Check the commit before trying again.');
+      late.message += `\n${shown(failure instanceof Error ? failure.message : String(failure))}`;
+      failure = late;
+    }
   } else if (!succeeded && stopped && sameStart) {
     // No write-back on refusal. An already-prepared external as-is commit can
     // still advance later, using the unchanged real index it originally read.
@@ -376,7 +389,9 @@ export async function commitProjectChanges(projectId: string, request: CommitReq
   }
   if (leased) {
     logWarn('git commit: kept the original index and private index.lock because completion needs recovery');
-    throw new Error('Git state needs recovery. Check this branch before retrying; index.lock was kept.');
+    const recovery = new Error('Git state needs recovery. Check this branch before retrying; index.lock was kept.');
+    if (failure) recovery.message += `\n${shown(failure instanceof Error ? failure.message : String(failure))}`;
+    throw recovery;
   }
   if (failure) throw failure;
   const commit = accepted ? (await text(repo, ['rev-parse', '--short', accepted])) ?? accepted : '';
