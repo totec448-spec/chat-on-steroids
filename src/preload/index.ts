@@ -14,7 +14,7 @@ import type { ProviderUsage } from '../shared/provider-usage.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
 import type { ChatgptProjectChoice, LocalProject, ProjectColor, RelatedFolderView } from '../shared/projects.js';
 import type { ProjectDirectoryListing, ProjectFileMutationResult, ProjectFilePreview, ProjectFileSaveResult, ProjectFilesChanged } from '../shared/project-files.js';
-import type { CheckpointRestoreResult, ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot } from '../shared/project-git.js';
+import type { CheckpointRestoreResult, ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot, TurnCheckpointRestoreResult } from '../shared/project-git.js';
 import type { PetLibraryState, PetOverlayControlState, PetRuntimeAsset } from '../shared/pets.js';
 import type { SkillSummary, ManagedSkill, GitHubSkillUpdateCheck, SkillLibrary, SkillsDraftScope } from '../shared/skills.js';
 import type { RunningToolActivity, SessionChange, SessionSearchReply, SessionSearchLocation, SessionBookmark, ChatEdits, ToolEditReview } from '../shared/session.js';
@@ -389,7 +389,7 @@ const api = {
   restoreCheckpoint: (projectId: string, checkpointId: string, paths: string[] | null, expectedRevision: string) =>
     call<CheckpointRestoreResult>('checkpoints:restore', { projectId, checkpointId, paths, expectedRevision }),
   restoreTurnCheckpoint: (sessionId: string, turnId: string, from: number) =>
-    call<CheckpointRestoreResult>('checkpoints:restoreTurn', { sessionId, turnId, from }),
+    call<TurnCheckpointRestoreResult>('checkpoints:restoreTurn', { sessionId, turnId, from }),
   getChatEdits: (id: string, projectId: string) => call<ChatEdits | null>('sessions:chatEdits', { id, projectId }),
   getToolEditReview: (sessionId: string, callId: string, changeIndex: number, projectId?: string) =>
     call<ToolEditReview | null>('sessions:toolEditReview', { sessionId, callId, changeIndex, ...(projectId ? { projectId } : {}) }),

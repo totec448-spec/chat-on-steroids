@@ -5942,8 +5942,9 @@ checkpoint in the session's current project (`turnCheckpointRef` in `main/checkp
 `sessions:turnChanges` also returns `checkpointRef` (`checkpoint:<id>`) so the card offers a direct
 Restore turn action via `checkpoints:restoreTurn` (`restoreTurnCheckpoint` in
 `main/checkpoints/index.ts`), scoped to the project files edited in that turn, using the same native
-confirmation dialog (warning when a later turn also edited one of those files) and "Before restore"
-undo checkpoint (`undoRef`, opened in Review via `openCheckpoint` in `renderer/file-panel.ts`).
+confirmation dialog. The warning uses turn order and history read after capturing the comparison.
+The result carries the restoring `projectId` with the "Before restore" `undoRef`. Review opens that
+checkpoint only while its owning project is current.
 `sessions:turnFileDiff` adds `path` and returns that net before/after. `from` is the turn's first sequence number, so the read starts there.
 
 Unchanged session/directory updates preserve preview DOM and pending code loads. File reads keep

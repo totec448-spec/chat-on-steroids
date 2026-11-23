@@ -6,7 +6,7 @@
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { responseTurnId } from '../../shared/chronology.js';
-import { CHECKPOINT_REF_PREFIX, type CheckpointRestoreResult, type ProjectGitSnapshot } from '../../shared/project-git.js';
+import { CHECKPOINT_REF_PREFIX, type CheckpointRestoreResult, type ProjectGitSnapshot, type TurnCheckpointRestoreResult } from '../../shared/project-git.js';
 import { getConfig } from '../config.js';
 import { logInfo, logWarn } from '../logger.js';
 import { currentCall } from '../mcp/call-context.js';
@@ -393,7 +393,7 @@ export async function restoreTurnCheckpoint(
   turnId: string,
   from: number,
   confirm: (paths: string[], options: { editedLater: boolean }) => Promise<boolean>
-): Promise<CheckpointRestoreResult> {
+): Promise<TurnCheckpointRestoreResult> {
   const refuse = (reason: string, message: string): never => {
     logInfo(`turn checkpoint restore refused: ${reason}`);
     throw new Error(message);
@@ -451,20 +451,32 @@ export async function restoreTurnCheckpoint(
   const selected = [...turnPaths].filter(relative => changed.has(relative));
   if (!selected.length) refuse('no remaining diff', 'These files no longer differ from the checkpoint');
 
-  const selectedSet = new Set(selected);
-  const turnLastSeq = events.reduce((max, event) =>
-    event.kind === 'tool_call' && event.turnId === turnId && event.seq > max ? event.seq : max, -1);
-  let editedLater = false;
-  for (const event of events) {
-    if (event.kind !== 'tool_call' || event.seq <= turnLastSeq || event.turnId === turnId) continue;
-    if (event.agent && WORKER.test(event.agent)) continue;
-    if (event.call.outcome !== 'ok' || !event.call.changes?.length) continue;
-    for (const change of event.call.changes) {
-      const relative = await toProjectRelative(change.path);
-      if (relative && selectedSet.has(relative)) { editedLater = true; break; }
+  const result = await restoreCheckpoint(projectId, entry!.id, selected, snapshot.revision, async paths => {
+    // Read again after the restore preflight, as the dialog is about to open. The original
+    // read still owns the selection and restore revalidates the comparison before writing.
+    const history = await readEvents(sessionId, { from, kinds: ['tool_call'] });
+    const turnOrigin = history.find(event => event.turnId === turnId && event.turnOrigin != null)?.turnOrigin;
+    // Legacy recordings can lack a turn start. A tool time describes when the call started,
+    // even when the recorder appends its completion later.
+    let firstEditTime = Infinity;
+    for (const event of events) {
+      if (event.kind !== 'tool_call' || event.turnId !== turnId || (event.agent && WORKER.test(event.agent))) continue;
+      if (event.call.outcome === 'ok' && event.call.changes?.length) firstEditTime = Math.min(firstEditTime, event.time);
     }
-    if (editedLater) break;
-  }
-
-  return restoreCheckpoint(projectId, entry!.id, selected, snapshot.revision, paths => confirm(paths, { editedLater }));
+    const restorable = new Set(paths);
+    for (const event of history) {
+      if (event.kind !== 'tool_call' || event.turnId === turnId || (event.agent && WORKER.test(event.agent))) continue;
+      if (event.call.outcome !== 'ok' || !event.call.changes?.length) continue;
+      const later = turnOrigin != null && event.turnOrigin != null
+        ? event.turnOrigin > turnOrigin
+        : Boolean(event.turnId) && event.time >= firstEditTime;
+      if (!later) continue;
+      for (const change of event.call.changes) {
+        const relative = await toProjectRelative(change.path);
+        if (relative && restorable.has(relative)) return confirm(paths, { editedLater: true });
+      }
+    }
+    return confirm(paths, { editedLater: false });
+  });
+  return { ...result, projectId };
 }

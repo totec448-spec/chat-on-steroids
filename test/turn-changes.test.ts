@@ -168,7 +168,8 @@ it('shows the Restore turn action only when the turn has a checkpoint ref, opens
     const openReview = vi.fn();
     const openCheckpoint = vi.fn();
     const undoRef = `checkpoint:${'b'.repeat(32)}`;
-    let resolveRestore!: (value: { confirmed: boolean; restored: string[]; skipped: Array<{ reason: string }>; undoRef: string | null }) => void;
+    const projectId = 'project-one';
+    let resolveRestore!: (value: { confirmed: boolean; restored: string[]; skipped: never[]; undoRef: string | null; projectId: string }) => void;
     const restoreTurn = vi.fn().mockImplementation(() => new Promise(resolve => { resolveRestore = resolve; }));
 
     const withCheckpoint = renderTurnChanges({
@@ -184,7 +185,7 @@ it('shows the Restore turn action only when the turn has a checkpoint ref, opens
     restoreButton!.click();
     expect(restoreTurn).toHaveBeenCalledTimes(1);
     expect(restoreButton!.disabled).toBe(true);
-    resolveRestore({ confirmed: true, restored: ['src/a.ts'], skipped: [], undoRef });
+    resolveRestore({ confirmed: true, restored: ['src/a.ts'], skipped: [], undoRef, projectId });
     await tick();
     expect(restoreButton!.disabled).toBe(false);
     expect(document.querySelector('.toast')?.textContent).toContain('Restored 1 of 1 file');
@@ -192,7 +193,7 @@ it('shows the Restore turn action only when the turn has a checkpoint ref, opens
     const undoButton = document.querySelector<HTMLButtonElement>('.toast-action');
     expect(undoButton).not.toBeNull();
     undoButton!.click();
-    expect(openCheckpoint).toHaveBeenCalledWith(undoRef);
+    expect(openCheckpoint).toHaveBeenCalledWith(projectId, undoRef);
 
     // Clicking after switching chats is ignored.
     active = false;

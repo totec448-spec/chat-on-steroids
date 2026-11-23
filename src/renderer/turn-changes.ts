@@ -1,3 +1,4 @@
+import type { TurnCheckpointRestoreResult } from '../shared/project-git.js';
 import type { SessionEvent } from '../shared/session.js';
 import type { TurnFileChange } from '../main/session/turn-changes.js';
 import { shortPath } from '../shared/virtual-path.js';
@@ -78,8 +79,8 @@ function headline(changes: readonly TurnFileChange[], total: number): string {
 
 export function renderTurnChanges(options: {
   sessionId: string; turnId: string; from: number; current: () => boolean; openReview: (() => void) | null;
-  openCheckpoint?: ((ref: string) => void) | null;
-  restoreTurn?: (() => Promise<{ confirmed: boolean; restored: string[]; skipped: Array<{ reason: string }>; undoRef: string | null } | null>) | null;
+  openCheckpoint?: ((projectId: string, ref: string) => void) | null;
+  restoreTurn?: (() => Promise<TurnCheckpointRestoreResult | null>) | null;
 }): HTMLElement {
   const card = document.createElement('details');
   card.className = 'turn-changes';
@@ -122,9 +123,9 @@ export function renderTurnChanges(options: {
             }
             if (conflicts) messages.push(t('Skipped {0} paths because files and folders share a name', [conflicts]));
             if (messages.length) {
-              const undoRef = result.undoRef;
+              const { projectId, undoRef } = result;
               toast(messages.join(' · '), undoRef && options.openCheckpoint
-                ? { label: t('Undo in Review'), run: () => { if (options.current()) options.openCheckpoint?.(undoRef); } }
+                ? { label: t('Undo in Review'), run: () => { if (options.current()) options.openCheckpoint?.(projectId, undoRef); } }
                 : undefined);
             }
           } finally {

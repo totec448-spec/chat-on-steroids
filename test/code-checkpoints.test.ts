@@ -666,38 +666,58 @@ it('resolves a turn checkpoint ref for the session\'s current project and respon
   expect(await turnCheckpointRef(SESSION, 'turn-2')).toBeNull();
 });
 
-it('restores only the files edited in that turn, leaves unrelated edits intact, and flags files edited in a later turn', async () => {
+it.each(['before snapshot', 'with a late call from the restored turn', 'during snapshot', 'without recorded turn starts', 'earlier, worker or failed edits only'])(
+  'restores only the turn files and reports later edits recorded %s', async timing => {
   const realSession = await sessions.createSession({ title: 'Turn restore' });
   session = { projectId, activeTurnId: 'turn-1', timelineTurns: {} };
   vi.spyOn(sessions, 'getSession').mockImplementation(async id =>
     id === realSession.id ? { ...realSession, projectId, activeTurnId: session?.activeTurnId, timelineTurns: session?.timelineTurns } as never : null);
 
+  const startTurn = (turnId: string, time: number) => sessions.appendEvent(realSession.id, {
+    kind: 'turn_start', source: 'extension', turnId, time
+  });
+  const recordEdit = (turnId: string, time: number, outcome: 'ok' | 'failed' = 'ok', agent?: string) =>
+    sessions.appendEvent(realSession.id, {
+      time, source: 'mcp', kind: 'tool_call', turnId, agent,
+      call: {
+        callId: crypto.randomUUID(), tool: 'apply_patch', outcome,
+        summary: { title: 'Edited', tone: 'good', kind: 'edit' }, durationMs: 1, attribution: 'request_id',
+        args: { text: '', truncated: false, chars: 0 }, result: { text: '', truncated: false, chars: 0 },
+        changes: [{ path: '/approved/project/app.ts', added: 1, removed: 1, approximate: false }]
+      } as never
+    });
+
+  if (timing === 'earlier, worker or failed edits only') await startTurn('turn-0', 1);
+  if (timing !== 'without recorded turn starts') await startTurn('turn-1', 10);
+
   // Turn 1 edits app.ts (checkpoint taken before this edit).
   expect((await applyPatch(editApp('export const value = 1;', 'export const value = 2;'), realSession.id)).isError).not.toBe(true);
-  await sessions.appendEvent(realSession.id, {
-    time: Date.now(), source: 'mcp', kind: 'tool_call', turnId: 'turn-1',
-    call: {
-      callId: crypto.randomUUID(), tool: 'apply_patch', outcome: 'ok',
-      summary: { title: 'Edited', tone: 'good', kind: 'edit' }, durationMs: 1, attribution: 'request_id',
-      args: { text: '', truncated: false, chars: 0 }, result: { text: '', truncated: false, chars: 0 },
-      changes: [{ path: '/approved/project/app.ts', added: 1, removed: 1, approximate: false }]
-    } as never
-  } as never);
+  await recordEdit('turn-1', 11);
 
   // Unrelated manual edit to kept.txt must NOT be touched when restoring turn-1.
   await fs.writeFile(path.join(root, 'kept.txt'), 'manual edit by user\n');
 
-  // Later turn 2 also edits app.ts -> editedLater must be true.
-  await fs.writeFile(path.join(root, 'app.ts'), 'export const value = 3;\n');
-  await sessions.appendEvent(realSession.id, {
-    time: Date.now(), source: 'mcp', kind: 'tool_call', turnId: 'turn-2',
-    call: {
-      callId: crypto.randomUUID(), tool: 'apply_patch', outcome: 'ok',
-      summary: { title: 'Edited', tone: 'good', kind: 'edit' }, durationMs: 1, attribution: 'request_id',
-      args: { text: '', truncated: false, chars: 0 }, result: { text: '', truncated: false, chars: 0 },
-      changes: [{ path: '/approved/project/app.ts', added: 1, removed: 1, approximate: false }]
-    } as never
-  } as never);
+  const laterEdit = async () => {
+    if (timing !== 'without recorded turn starts') await startTurn('turn-2', 20);
+    await fs.writeFile(path.join(root, 'app.ts'), 'export const value = 3;\n');
+    if (timing === 'earlier, worker or failed edits only') {
+      await recordEdit('turn-2', 21, 'ok', 'worker-1');
+      await recordEdit('turn-2', 22, 'failed');
+      await recordEdit('turn-0', 2);
+    } else {
+      await recordEdit('turn-2', 21);
+    }
+  };
+  if (timing === 'during snapshot') {
+    const readSnapshot = projectGit.readProjectGitSnapshot;
+    vi.spyOn(projectGit, 'readProjectGitSnapshot').mockImplementationOnce(async (id, ref) => {
+      await laterEdit();
+      return readSnapshot(id, ref);
+    });
+  } else {
+    await laterEdit();
+  }
+  if (timing === 'with a late call from the restored turn') await recordEdit('turn-1', 12, 'failed');
 
   const confirmations: Array<{ paths: string[]; editedLater: boolean }> = [];
   const result = await restoreTurnCheckpoint(realSession.id, 'turn-1', 0, async (paths, opts) => {
@@ -705,8 +725,8 @@ it('restores only the files edited in that turn, leaves unrelated edits intact, 
     return true;
   });
 
-  expect(confirmations).toEqual([{ paths: ['app.ts'], editedLater: true }]);
-  expect(result.confirmed).toBe(true);
+  expect(confirmations).toEqual([{ paths: ['app.ts'], editedLater: timing !== 'earlier, worker or failed edits only' }]);
+  expect(result).toMatchObject({ confirmed: true, projectId });
   expect(result.restored).toEqual(['app.ts']);
   expect(result.undoRef).toMatch(/^checkpoint:[0-9a-f]{32}$/);
   expect(await fs.readFile(path.join(root, 'app.ts'), 'utf8')).toBe('export const value = 1;\n');
