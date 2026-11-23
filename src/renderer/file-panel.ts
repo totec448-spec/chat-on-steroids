@@ -335,7 +335,7 @@ export function createFilePanel(options: FilePanelOptions) {
   let renderedGitDiffRevision: string | null = null;
   let conflictThreeWay = true;
   let gitReconcileTimer: number | null = null;
-  const retainedDrafts = new Map<string, { preview: ProjectFilePreview & { text: string; revision: string }; text: string }>();
+  const retainedDrafts = new Map<string, { preview: ProjectFilePreview & { text: string }; text: string }>();
   let expanded = new Set<string>(['']);
   const listings = new Map<string, ProjectDirectoryListing>();
   let watchSignature = '';
@@ -434,7 +434,7 @@ export function createFilePanel(options: FilePanelOptions) {
   }
 
   function updateEditorDirtyState(): void {
-    if (editorSaveButton) editorSaveButton.disabled = !editorDirty || saving;
+    if (editorSaveButton) editorSaveButton.disabled = !editorDirty || saving || !previewValue || !editablePreview(previewValue);
     if (editorDirtyBadge) {
       editorDirtyBadge.hidden = !editorDirty;
       editorDirtyBadge.classList.toggle('is-conflict', editorExternalChange);
@@ -451,8 +451,12 @@ export function createFilePanel(options: FilePanelOptions) {
     toast(t('This file changed on disk while you were editing it. Your unsaved edits were kept.'));
   }
 
+  function textPreview(value: ProjectFilePreview): value is ProjectFilePreview & { text: string } {
+    return !value.binary && value.text !== null && !value.truncated;
+  }
+
   function editablePreview(value: ProjectFilePreview): value is ProjectFilePreview & { text: string; revision: string } {
-    return !project?.remote && !value.binary && value.text !== null && !value.truncated && typeof value.revision === 'string';
+    return !project?.remote && textPreview(value) && typeof value.revision === 'string';
   }
 
   async function leaveEditorIfNeeded(): Promise<boolean> {
@@ -844,22 +848,27 @@ export function createFilePanel(options: FilePanelOptions) {
     try {
       const saved = await run(window.api.saveProjectFile(current.id, value.path, draft, value.modifiedAt, value.bytes, value.revision));
       if (!saved) return;
+      // With no readback, this is only the acknowledged editor baseline, not a fresh disk
+      // snapshot. Invalidate the old token; keep any newer draft until an explicit refresh.
+      const next = saved.preview ?? { ...value, text: draft, bytes: new TextEncoder().encode(draft).length,
+        modifiedAt: '', revision: undefined };
       const retained = retainedDrafts.get(current.id);
-      if (retained?.preview.revision === value.revision && editablePreview(saved.preview)) {
+      if (retained?.preview.path === value.path && retained.preview.revision === value.revision && textPreview(next)) {
         if (retained.text === draft) retainedDrafts.delete(current.id);
-        else retained.preview = saved.preview;
+        else retained.preview = next;
       }
       if (token !== editorMountToken || project?.id !== current.id || previewPath !== value.path) return;
       retainedDrafts.delete(current.id);
-      previewValue = saved.preview;
-      editorOriginalText = saved.preview.text ?? draft;
+      previewValue = next;
+      editorOriginalText = next.text ?? draft;
       editorDraft = codeEditor?.getValue() ?? editorDraft;
       editorDirty = editorDraft !== editorOriginalText;
       editorExternalChange = false;
-      if (!editorDirty) clearEditorState();
-      toast(t('Saved {0}', [saved.preview.name]));
+      if (!saved.preview) await startEditing(next, editorDraft);
+      else if (!editorDirty) clearEditorState();
+      toast(saved.preview ? t('Saved {0}', [value.name]) : t('Saved {0}. Refresh the file before saving again.', [value.name]));
       renderPreview();
-      await reloadDirectory(parentPath(saved.preview.path));
+      await reloadDirectory(parentPath(value.path));
       await reconcileGitChanges(true);
     } finally {
       saving = false;
@@ -867,8 +876,26 @@ export function createFilePanel(options: FilePanelOptions) {
     }
   }
 
+  async function refreshSavedEditor(): Promise<void> {
+    const current = project, value = previewValue, token = editorMountToken;
+    if (saving || !current || !value || value.revision || editingPath !== value.path) return;
+    saving = true; updateEditorDirtyState();
+    try {
+      const fresh = await run(window.api.previewProjectFile(current.id, value.path));
+      if (!fresh || token !== editorMountToken || project?.id !== current.id || previewPath !== value.path) return;
+      // A new token can authorize the draft only when disk still contains the saved baseline.
+      if (!editablePreview(fresh) || fresh.text !== value.text) { markEditorExternalChange(); return; }
+      const draft = codeEditor?.getValue() ?? editorDraft;
+      previewValue = fresh;
+      retainedDrafts.delete(current.id);
+      await startEditing(fresh, draft);
+    } finally {
+      saving = false; updateEditorDirtyState();
+    }
+  }
+
   async function startEditing(value: ProjectFilePreview, draft = value.text ?? ''): Promise<void> {
-    if (!editablePreview(value) || previewPath !== value.path || selection.path !== value.path) return;
+    if (project?.remote || !textPreview(value) || previewPath !== value.path || selection.path !== value.path) return;
     if (!project || (!retainedDrafts.has(project.id) && retainedDrafts.size >= 8)) {
       toast(t('Save or discard an existing project draft before editing another project.')); return;
     }
@@ -896,6 +923,11 @@ export function createFilePanel(options: FilePanelOptions) {
     editorSaveButton = save;
     const view = actionButton(() => t('View'), 'i-eye', stopEditing);
     actions.append(save, view, previewTreeButton(), previewCloseButton());
+    if (!value.revision) {
+      const refresh = actionButton(() => t('Refresh files'), 'i-retry', refreshSavedEditor);
+      refresh.classList.add('file-editor-refresh');
+      actions.prepend(refresh);
+    }
     head.append(titleWrap, actions);
 
     const languageLabel = el('span', 'file-editor-language', () => t('Detecting language…'));
@@ -985,7 +1017,7 @@ export function createFilePanel(options: FilePanelOptions) {
     const value = previewValue;
     const head = viewerHeader(value);
     const meta = el('div', 'file-preview-meta');
-    meta.append(el('span', '', `${value.path} · ${humanBytes(value.bytes)} · ${new Date(value.modifiedAt).toLocaleString(currentLanguage())}`));
+    meta.append(el('span', '', `${value.path} · ${humanBytes(value.bytes)}${value.modifiedAt ? ` · ${new Date(value.modifiedAt).toLocaleString(currentLanguage())}` : ''}`));
     let content: HTMLElement;
     let viewerHost: HTMLElement | null = null;
     let languageLabel: HTMLElement | null = null;
@@ -1937,7 +1969,7 @@ export function createFilePanel(options: FilePanelOptions) {
       }
       const changed = project?.id !== next?.id;
       const labelChanged = project?.name !== next?.name || project?.path !== next?.path;
-      if (changed && project && editingPath && editorDirty && previewValue && editablePreview(previewValue)) {
+      if (changed && project && editingPath && editorDirty && previewValue && textPreview(previewValue)) {
         retainedDrafts.set(project.id, { preview: previewValue, text: codeEditor?.getValue() ?? editorDraft });
       }
       project = next;

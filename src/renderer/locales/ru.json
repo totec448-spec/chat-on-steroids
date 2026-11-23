@@ -1370,6 +1370,7 @@
   "Discard": "Отменить изменения",
   "Detecting language…": "Определение языка…",
   "Saved {0}": "Сохранено: {0}",
+  "Saved {0}. Refresh the file before saving again.": "Файл {0} сохранён. Обновите файл перед повторным сохранением.",
   "Unsaved editor changes were discarded because the project changed.": "Несохранённые изменения редактора отменены, потому что проект изменился.",
   "Delete item?": "Удалить элемент?",
   "Move “{0}” to the Trash?": "Переместить «{0}» в корзину?",

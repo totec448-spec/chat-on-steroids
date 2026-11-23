@@ -1272,6 +1272,7 @@
   "Discard": "버리기",
   "Detecting language…": "언어 감지 중…",
   "Saved {0}": "{0} 저장됨",
+  "Saved {0}. Refresh the file before saving again.": "{0} 파일을 저장했습니다. 다시 저장하기 전에 파일을 새로고침하세요.",
   "Unsaved editor changes were discarded because the project changed.": "프로젝트가 변경되어 저장하지 않은 편집 내용이 버려졌습니다.",
   "Delete item?": "항목을 삭제할까요?",
   "Move “{0}” to the Trash?": "“{0}”을(를) 휴지통으로 이동할까요?",

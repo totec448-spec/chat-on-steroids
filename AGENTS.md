@@ -5943,9 +5943,16 @@ Creating an entry uses the same unsaved-edit guard as changing the selected file
 Text previews/editor input are bounded to 256 KiB; full editable previews retain exact UTF-8,
 BOM and line endings plus a content/file-identity revision. Save stages complete replacement bytes
 beside the original, flushes them, revalidates project access and the original revision, then
-renames. A failed staging write or rename never truncates the original. Duplicate saves are
-refused and newer edits typed during a pending save remain dirty. Atomic replacement is not an
-OS-wide lock against an unrelated writer after the final revision check.
+renames. On POSIX, staging explicitly restores the original ordinary permission bits after writing
+and before flushing, so the creation umask does not narrow them; a chmod failure refuses publication.
+Windows keeps its existing mode/attribute behavior. A failed staging write or rename never truncates
+the original. Rename commits the save: `ProjectFileSaveResult.preview` is null if the later preview
+read fails, with a diagnostic warning, rather than reporting that committed save as failed. The
+renderer keeps the acknowledged text as its baseline without a revision or invented timestamp;
+newer edits stay dirty, including across project navigation. Save stays disabled until Refresh files
+reads a valid revision whose text still matches that baseline. A failed refresh or external change
+keeps the draft and cannot authorize an overwrite. Duplicate saves are refused. Atomic replacement
+is not an OS-wide lock against an unrelated writer after the final revision check.
 
 Images accept at most 5 MiB input and 16 megapixels, then decode to a bounded 1600-pixel thumbnail.
 PDF input is bounded to 20 MiB; bundled PDF.js renders one page with at most 16 megapixels and
