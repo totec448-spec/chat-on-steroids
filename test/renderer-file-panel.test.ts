@@ -1346,7 +1346,7 @@ it('keeps edits typed while a save is pending and ignores a duplicate save', asy
   expect(save.disabled).toBe(false);
 });
 
-it.each([false, true])('recovers a saved file without a preview and keeps newer edits (project round trip: %s)', async roundTrip => {
+it.each(['none', 'after receipt', 'before receipt'])('recovers a saved file without a preview and keeps newer edits (project round trip: %s)', async roundTrip => {
   let finish!: (value: unknown) => void;
   (window.api.saveProjectFile as any) = vi.fn(() => new Promise(resolve => { finish = resolve; }));
   const panel = createFilePanel({ host, toggle });
@@ -1354,9 +1354,10 @@ it.each([false, true])('recovers a saved file without a preview and keeps newer 
   const input = await editFile(); typeEdit(input, 'saved draft');
   host.querySelector<HTMLButtonElement>('.file-editor-save')!.click(); await tick();
   typeEdit(input, 'newer draft');
-  if (roundTrip) { panel.update(projectB); await tick(); }
+  if (roundTrip !== 'none') { panel.update(projectB); await tick(); }
+  if (roundTrip === 'before receipt') { panel.update(projectA); await tick(); await tick(); }
   finish({ ok: true, data: { preview: null } }); await tick();
-  if (roundTrip) { panel.update(projectA); await tick(); await tick(); }
+  if (roundTrip === 'after receipt') { panel.update(projectA); await tick(); await tick(); }
 
   expect(host.querySelector<HTMLTextAreaElement>('.test-code-input')?.value).toBe('newer draft');
   expect(host.querySelector<HTMLButtonElement>('.file-editor-save')?.disabled).toBe(true);
