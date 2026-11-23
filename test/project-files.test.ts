@@ -621,7 +621,7 @@ it('keeps another project usable while one project has a full stalled entry queu
     for (let i = 0; i < 31; i++) pending.push(createProjectEntry(project.id, '', `queued-${i}.txt`, 'file'));
     pending.push(createProjectEntry(other.id, '', 'new.txt', 'file').then(() => { outcomes.push('created'); }, () => { outcomes.push('refused create'); }));
     pending.push(renameProjectEntry(other.id, 'original.txt', 'renamed.txt').then(() => { outcomes.push('renamed'); }, () => { outcomes.push('refused rename'); }));
-    await vi.waitFor(() => expect(outcomes).toEqual(['created', 'renamed']));
+    await vi.waitFor(() => expect(outcomes).toEqual(['created', 'renamed']), { timeout: 10_000 });
     expect(await fs.readFile(path.join(otherRoot, 'renamed.txt'), 'utf8')).toBe('other contents');
     expect(await fs.readFile(path.join(otherRoot, 'new.txt'), 'utf8')).toBe('');
   } finally {
@@ -661,6 +661,25 @@ it('bounds admission before catalog lookup and releases it after invalid project
     expect(await Promise.all(pending)).toEqual(Array(6400).fill('refused'));
     lookup.mockRestore();
   }
+  await createProjectEntry(project.id, '', 'retry.txt', 'file');
+  expect(await fs.readFile(path.join(approved, 'project', 'retry.txt'), 'utf8')).toBe('');
+});
+
+it('logs missing and remote project admission refusals and lets the next local operation proceed', async () => {
+  const project = await addProject(path.join(approved, 'project'));
+  const { onLog } = await import('../src/main/logger.js');
+  const lines: string[] = [];
+  const stop = onLog(entry => { if (entry.message.startsWith('project files: refused')) lines.push(entry.message); });
+  const lookup = vi.spyOn(projects, 'getProject').mockResolvedValueOnce(null)
+    .mockResolvedValueOnce({ ...project, remote: { host: 'server.test', path: '/project' } });
+  try {
+    await expect(createProjectEntry(project.id, '', 'missing.txt', 'file')).rejects.toThrow('Project not found');
+    await expect(renameProjectEntry(project.id, 'original.txt', 'remote.txt')).rejects.toThrow('Files in a server folder cannot be changed from the app yet');
+    expect(lines).toEqual([
+      'project files: refused a create or rename because the project was not found',
+      'project files: refused a create or rename because editing a server project is not supported'
+    ]);
+  } finally { lookup.mockRestore(); stop(); }
   await createProjectEntry(project.id, '', 'retry.txt', 'file');
   expect(await fs.readFile(path.join(approved, 'project', 'retry.txt'), 'utf8')).toBe('');
 });

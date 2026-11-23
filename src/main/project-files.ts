@@ -49,8 +49,14 @@ function mutateEntries<T>(projectId: string, work: () => Promise<T>): Promise<T>
 
 async function admitEntryMutation<T>(projectId: string, work: () => Promise<T>): Promise<{ result: Promise<T> }> {
   const project = await getProject(projectId);
-  if (!project) throw new Error('Project not found');
-  if (project.remote) throw new Error(SERVER_EDITS);
+  if (!project) {
+    logInfo('project files: refused a create or rename because the project was not found');
+    throw new Error('Project not found');
+  }
+  if (project.remote) {
+    logInfo('project files: refused a create or rename because editing a server project is not supported');
+    throw new Error(SERVER_EDITS);
+  }
   const key = nativePathIdentity(project.path);
   const overlapping = [...entryMutations].filter(([root]) => isContained(root, key) || isContained(key, root));
   const pending = overlapping.reduce((count, [, queue]) => count + queue.pending, 0);
