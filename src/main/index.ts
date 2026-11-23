@@ -50,6 +50,7 @@ import { flushSessions, getSession, getSessionOrNullIfMissing, initSessionStore,
 import { runDueSchedules, safeFailureReason, type RunnerDeps } from './scheduled-runs.js';
 import { deliveryProof, enqueueInput, listInputs } from './session/input.js';
 import { createTurnNotifier } from './turn-notifications.js';
+import { clickFinishedChatNotification, finishedNoticeRetention } from './finished-notification-click.js';
 import { DEFAULT_RECORDING_STORAGE_GIB } from '../shared/session.js';
 import { initSkillsPath } from './skills.js';
 import { initUvRuntime } from './plugins/uv-runtime.js';
@@ -335,11 +336,20 @@ setFinishNotifier((title, body, sessionId, turnId) => {
   const notice = new Notification({ title: shown(title), body: shown(body), actions: [
     { type: 'button', text: mainText('Send Automatic Goal') }, { type: 'button', text: mainText('Write Directly') }
   ] });
-  notice.on('click', write);
+  notice.on('click', () => clickFinishedChatNotification(process.platform, {
+    openAppChat: write,
+    openBrowserChat: async () => {
+      logInfo('finish notice: clicked; requesting the recorded browser chat');
+      await openSessionChat(sessionId);
+      logInfo('finish notice: browser reveal request dispatched (window focus not confirmed)');
+    },
+    onBrowserFailure: error => logWarn(`finish notice: browser activation failed (${safeFailureReason(error)})`)
+  }));
   notice.on('action', (details) => {
     if (details.actionIndex === 0) void requestSessionFinishGoal(sessionId, turnId).catch(error => logWarn(`Finish goal: ${error.message}`));
     else if (details.actionIndex === 1) write();
   });
+  finishedNoticeRetention.retain(notice);
   notice.show();
   return true;
 });
@@ -621,13 +631,22 @@ void app.whenReady().then(async () => {
     phone: event => { soundCue('finished', event.sessionId); void pushToPhone({ kind: 'finished', ...event }); },
     show: (title, body, sessionId) => {
       const notice = new Notification({ title, body });
-      notice.on('click', () => {
-        showWindow();
-        if (!window) return;
-        const target = window.webContents;
-        const open = (): void => { if (!target.isDestroyed()) target.send('session:write', sessionId); };
-        if (target.isLoadingMainFrame()) target.once('did-finish-load', open); else open();
-      });
+      notice.on('click', () => clickFinishedChatNotification(process.platform, {
+        openAppChat: () => {
+          showWindow();
+          if (!window) return;
+          const target = window.webContents;
+          const open = (): void => { if (!target.isDestroyed()) target.send('session:write', sessionId); };
+          if (target.isLoadingMainFrame()) target.once('did-finish-load', open); else open();
+        },
+        openBrowserChat: async () => {
+          logInfo('turn notice: clicked; requesting the recorded browser chat');
+          await openSessionChat(sessionId);
+          logInfo('turn notice: browser reveal request dispatched (window focus not confirmed)');
+        },
+        onBrowserFailure: error => logWarn(`turn notice: browser activation failed (${safeFailureReason(error)})`)
+      }));
+      finishedNoticeRetention.retain(notice);
       notice.show();
     }
   });
