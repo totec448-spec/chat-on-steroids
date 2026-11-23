@@ -128,10 +128,10 @@ export function gitExecutable(
 /**
  * What a call needs beyond a plain read: text or bytes on standard input (a commit message, a list for
  * `--batch-check`), more time (a push over the network), extra environment (never prompt for a
- * password or a host key), and for checkpoint commands only a temporary index outside the
- * repository and no replacement objects.
+ * password or a host key), command-scoped configuration (never persisted), private indexes for
+ * checkpoint/commit commands, and no replacement objects.
  */
-export interface GitRunOptions { input?: string | Buffer; timeoutMs?: number; env?: NodeJS.ProcessEnv; indexFile?: string; noReplaceObjects?: boolean }
+export interface GitRunOptions { input?: string | Buffer; timeoutMs?: number; env?: NodeJS.ProcessEnv; indexFile?: string; noReplaceObjects?: boolean; config?: Readonly<Record<string, string>> }
 /** The checkpoint code's name for the same options. */
 export type GitOptions = GitRunOptions;
 
@@ -140,7 +140,8 @@ export async function runGit(cwd: string, args: string[], maxBytes = MAX_GIT_OUT
   const env = { ...cleanGitEnvironment(), ...options.env };
   if (options.indexFile) env['GIT_INDEX_FILE'] = options.indexFile;
   return new Promise((resolve, reject) => {
-    const child = spawn(executable, ['--no-optional-locks', ...(options.noReplaceObjects ? ['--no-replace-objects'] : []), ...args], {
+    const child = spawn(executable, ['--no-optional-locks', ...(options.noReplaceObjects ? ['--no-replace-objects'] : []),
+      ...Object.entries(options.config ?? {}).flatMap(([key, value]) => ['-c', `${key}=${value}`]), ...args], {
       cwd, env, windowsHide: true, stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe']
     });
     if (options.input !== undefined) {

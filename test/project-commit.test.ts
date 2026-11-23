@@ -156,6 +156,85 @@ describe('commit', () => {
     expect(await git(root, 'diff', '--cached', '--name-only')).toBe('other.ts');
   });
 
+  it.skipIf(process.platform === 'win32')('commits hook-formatted chosen bytes and preserves unrelated partial staging', async () => {
+    const { root, id } = await project();
+    await change(root);
+    await git(root, 'add', 'other.ts');
+    await fs.writeFile(path.join(root, 'other.ts'), 'export const other = 3;\n');
+    await fs.writeFile(path.join(root, '.git', 'hooks', 'pre-commit'),
+      '#!/bin/sh\nprintf "export const kept = 20;\\n" > kept.ts\ngit add -- kept.ts\n', { mode: 0o755 });
+    await commitProjectChanges(id, { message: 'Formatted chosen file', paths: ['kept.ts'], expectedToken: await revision(id) });
+    expect(await git(root, 'show', 'HEAD:kept.ts')).toBe('export const kept = 20;');
+    expect(await git(root, 'show', ':kept.ts')).toBe('export const kept = 20;');
+    expect(await fs.readFile(path.join(root, 'kept.ts'), 'utf8')).toBe('export const kept = 20;\n');
+    expect(await git(root, 'diff', '--cached', '--name-only')).toBe('other.ts');
+    expect(await git(root, 'show', ':other.ts')).toBe('export const other = 2;');
+    expect(await fs.readFile(path.join(root, 'other.ts'), 'utf8')).toBe('export const other = 3;\n');
+    await expect(fs.stat(path.join(root, '.git', 'index.lock'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('preserves the sparse index and excluded directory when committing an included path', async () => {
+    const { root, id } = await project();
+    await fs.mkdir(path.join(root, 'included')); await fs.mkdir(path.join(root, 'excluded'));
+    await fs.writeFile(path.join(root, 'included', 'a.txt'), 'one\n');
+    await fs.writeFile(path.join(root, 'excluded', 'b.txt'), 'hidden\n');
+    await git(root, 'add', '.'); await git(root, 'commit', '-m', 'Sparse fixture');
+    await git(root, 'sparse-checkout', 'set', '--cone', '--sparse-index', 'included');
+    expect(await git(root, 'config', '--bool', 'index.sparse')).toBe('true');
+    expect(await git(root, 'ls-files', '--sparse')).toContain('excluded/');
+    await fs.writeFile(path.join(root, 'included', 'a.txt'), 'two\n');
+    await fs.writeFile(path.join(root, 'other.ts'), 'export const other = 2;\n');
+    await git(root, 'add', 'other.ts');
+    await fs.writeFile(path.join(root, 'other.ts'), 'export const other = 3;\n');
+    await commitProjectChanges(id, { message: 'Sparse selected path', paths: ['included/a.txt'], expectedToken: await revision(id) });
+    expect(await git(root, 'show', 'HEAD:included/a.txt')).toBe('two');
+    expect(await git(root, 'config', '--bool', 'index.sparse')).toBe('true');
+    expect(await git(root, 'ls-files', '--sparse')).toContain('excluded/');
+    await expect(fs.stat(path.join(root, 'excluded'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await git(root, 'show', ':other.ts')).toBe('export const other = 2;');
+    expect(await fs.readFile(path.join(root, 'other.ts'), 'utf8')).toBe('export const other = 3;\n');
+    await expect(fs.stat(path.join(root, '.git', 'index.lock'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('preserves split-index storage and unrelated partial staging after commit', async () => {
+    const { root, id } = await project();
+    await git(root, 'config', 'core.splitIndex', 'true');
+    await git(root, 'update-index', '--split-index');
+    expect(await git(root, 'rev-parse', '--shared-index-path')).not.toBe('');
+    await change(root);
+    await git(root, 'add', 'other.ts');
+    await fs.writeFile(path.join(root, 'other.ts'), 'export const other = 3;\n');
+    await commitProjectChanges(id, { message: 'Split selected path', paths: ['kept.ts'], expectedToken: await revision(id) });
+    expect(await git(root, 'show', 'HEAD:kept.ts')).toBe('export const kept = 2;');
+    expect(await git(root, 'config', '--bool', 'core.splitIndex')).toBe('true');
+    const shared = await git(root, 'rev-parse', '--shared-index-path');
+    expect(shared).not.toBe('');
+    expect((await fs.stat(path.resolve(root, shared))).size).toBeGreaterThan(0);
+    expect(await git(root, 'show', ':other.ts')).toBe('export const other = 2;');
+    expect(await fs.readFile(path.join(root, 'other.ts'), 'utf8')).toBe('export const other = 3;\n');
+    await expect(fs.stat(path.join(root, '.git', 'index.lock'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it.skipIf(process.platform === 'win32')('keeps a refusing split index byte-identical with shared-base expiry enabled', async () => {
+    const { root, id } = await project();
+    await change(root);
+    await git(root, 'add', 'other.ts');
+    await git(root, 'config', 'core.splitIndex', 'true');
+    await git(root, 'config', 'splitIndex.sharedIndexExpire', 'now');
+    await git(root, 'update-index', '--split-index');
+    const shared = path.resolve(root, await git(root, 'rev-parse', '--shared-index-path'));
+    await fs.utimes(shared, new Date(1000), new Date(1000));
+    const original = await fs.readFile(path.join(root, '.git', 'index'));
+    await fs.writeFile(path.join(root, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    await expect(commitProjectChanges(id, { message: 'Refused split', paths: ['kept.ts'], expectedToken: await revision(id) }))
+      .rejects.toThrow('Git did not commit');
+    expect(await fs.readFile(path.join(root, '.git', 'index'))).toEqual(original);
+    expect((await fs.stat(shared)).size).toBeGreaterThan(0);
+    expect(await git(root, 'config', 'splitIndex.sharedIndexExpire')).toBe('now');
+    expect(await git(root, 'show', ':other.ts')).toBe('export const other = 2;');
+    await expect(fs.stat(path.join(root, '.git', 'index.lock'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('refuses when the changes moved on since they were shown', async () => {
     const { root, id } = await project();
     await change(root);
@@ -209,8 +288,11 @@ describe('commit', () => {
     await git(root, 'add', 'kept.ts');
     // Staged: one version; in the folder: a newer one. Only the staged one was the person's choice.
     await fs.writeFile(path.join(root, 'kept.ts'), 'export const kept = 3;\n');
+    const original = await fs.readFile(path.join(root, '.git', 'index'));
     await fs.writeFile(path.join(root, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
     await expect(commitProjectChanges(id, { message: 'x', paths: ['kept.ts'], expectedToken: await revision(id) })).rejects.toThrow('Git did not commit');
+    expect(await fs.readFile(path.join(root, '.git', 'index'))).toEqual(original);
+    await expect(fs.stat(path.join(root, '.git', 'index.lock'))).rejects.toMatchObject({ code: 'ENOENT' });
     expect(await git(root, 'show', ':kept.ts')).toBe('export const kept = 2;');
     expect(await fs.readFile(path.join(root, 'kept.ts'), 'utf8')).toBe('export const kept = 3;\n');
   });
@@ -693,8 +775,9 @@ describe('commit', () => {
     expect(await git(root, 'log', '-1', '--format=%s')).toBe('Retry');
   });
 
-  it('initializes a missing real index privately and leaves it absent on refusal', async () => {
+  it.each([false, true])('initializes a missing real index privately and leaves it absent on refusal (split: %s)', async split => {
     const { root, id } = await project({ initial: false, origin: false });
+    if (split) await git(root, 'config', 'core.splitIndex', 'true');
     await fs.rm(path.join(root, '.git', 'index'));
     gitFault.reject = args => args[0] === 'commit';
     await expect(commitProjectChanges(id, { message: 'Refused', paths: ['kept.ts'], expectedToken: await revision(id) }))
@@ -703,6 +786,7 @@ describe('commit', () => {
     await expect(fs.stat(path.join(root, '.git', 'index'))).rejects.toMatchObject({ code: 'ENOENT' });
     await commitProjectChanges(id, { message: 'First', paths: ['kept.ts'], expectedToken: await revision(id) });
     expect(await git(root, 'show', '--name-only', '--format=', 'HEAD')).toBe('kept.ts');
+    if (split) expect(await git(root, 'rev-parse', '--shared-index-path')).not.toBe('');
   });
 
   it('locks and restores the linked worktree index without changing the main worktree index', async () => {

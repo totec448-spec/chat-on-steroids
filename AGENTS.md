@@ -5880,8 +5880,12 @@ add/commit and their hooks to it. Git atomically updates that private file via i
 The real index is never staged into or restored on failure: a plain competing commit may have
 released its index lock before hooks and later advance HEAD using its prepared original index.
 A definite refusal discards only our private files, preserving hand-picked partial staging byte
-for byte. A competing lock is never removed. Linked worktrees use their own index, not the common
-index. A Git timeout never proves that hook/filter descendants stopped, even when the parent's
+for byte. Sparse indexes retain their cone/collapsed entries; split indexes retain native shared
+bases and unrelated partial staging. Private writers use command-scoped `splitIndex.sharedIndexExpire=never`:
+expiry while the real index still points to a shared file would corrupt that untouched index on
+refusal. Stored Git settings are unchanged; later ordinary Git operations own normal expiry.
+A competing lock is never removed. Linked worktrees use their own index, not the common index.
+A Git timeout never proves that hook/filter descendants stopped, even when the parent's
 pipes close. Interrupted writers therefore retain recovery state; only a failed launch can
 attest that no child started. No process-tree kill or new runner timeout contract is introduced.
 An accepted commit reconciles only the chosen paths in the private index to its exact commit,

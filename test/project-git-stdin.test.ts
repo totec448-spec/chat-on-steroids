@@ -14,6 +14,17 @@ it('survives Git exiting before it read its input, instead of crashing on a clos
   await new Promise(resolve => setTimeout(resolve, 200));
 });
 
+it('applies command-scoped Git configuration without changing the stored configuration', async () => {
+  const args = ['config', '--get', 'cos-private-index-test.value'];
+  const original = await runGit(os.tmpdir(), args);
+  const configured = await runGit(os.tmpdir(), args, undefined, { config: { 'cos-private-index-test.value': "temporary 日本語 ' = value" } });
+  expect(configured.code).toBe(0);
+  expect(configured.stdout.toString('utf8').trim()).toBe("temporary 日本語 ' = value");
+  const after = await runGit(os.tmpdir(), args);
+  expect(after.code).toBe(original.code);
+  expect(after.stdout).toEqual(original.stdout);
+});
+
 it.skipIf(process.platform === 'win32')('marks an actual failed Git launch as having no started child', async () => {
   const previous = process.env['PATH'];
   process.env['PATH'] = '';
