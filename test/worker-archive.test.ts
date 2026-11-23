@@ -341,9 +341,97 @@ it.each(['archived', 'failed', 'deferred'] as const)('does not let a superseded 
   expect(second.attemptId).not.toBe(first.attemptId);
   settleWorkerArchive(A, outcome, now + 1, first.attemptId);
   expect(nextWorkerArchive(now + 1, true)).toBeNull();
-  settleWorkerArchive(A, 'archived', now + 2, second.attemptId);
+  settleWorkerArchive(A, 'deferred', now + 2, second.attemptId);
+  const third = nextWorkerArchive(now + 2, true)!;
+  expect(third).toMatchObject({ conversationId: A, archive: true, attemptId: expect.any(String) });
+  settleWorkerArchive(A, 'archived', now + 3, third.attemptId);
+  expect(nextWorkerArchive(now + 3, true)).toBeNull();
+  expect(readyForWake(A, now + 4)).toBe(false);
+});
+
+it.each([
+  ['archived', false], ['archived', true], ['unarchived', false], ['unarchived', true]
+] as const)('keeps the requested restore after retry exhaustion and late %s (reload: %s)', async (outcome, reload) => {
+  queueWorkerArchives([A], 1_000);
+  const oldArchive = nextWorkerArchive(1_000, true)!;
+  let now = 1_000 + WORKER_ARCHIVE_LEASE_MS;
+  const archive = nextWorkerArchive(now, true)!;
+  settleWorkerArchive(A, 'archived', now, archive.attemptId);
+  expect(readyForWake(A, now + 1)).toBe(false);
+  const oldRestore = nextWorkerArchive(now + 1, true)!;
+  now += WORKER_ARCHIVE_LEASE_MS + 1;
+  for (let attempt = 0; attempt < WORKER_ARCHIVE_MAX_ATTEMPTS; attempt += 1) {
+    const restore = nextWorkerArchive(now, true)!;
+    expect(restore.archive).toBe(false);
+    settleWorkerArchive(A, 'failed', now, restore.attemptId);
+    now += 60 * 60_000;
+  }
+  expect(nextWorkerArchive(now, true)).toBeNull();
+  await workerArchiveWritten();
+  const saved = JSON.parse(await fs.readFile(path.join(dir, 'state', 'worker-archive.json'), 'utf8'));
+  expect(saved.archived).toContainEqual({ conversationId: A, at: expect.any(Number), targetArchived: false });
+  if (reload) await loadWorkerArchive();
+  await archiving(false);
+  settleWorkerArchive(A, outcome, now + 1, outcome === 'archived' ? oldArchive.attemptId : oldRestore.attemptId);
+  if (outcome === 'archived') {
+    const correction = nextWorkerArchive(now + 2, true)!;
+    expect(correction).toMatchObject({ conversationId: A, archive: false, attemptId: expect.any(String) });
+    expect(readyForWake(A, now + 2)).toBe(false);
+    settleWorkerArchive(A, 'unarchived', now + 3, correction.attemptId);
+  }
+  await archiving(true); // Do not hide an incorrectly queued archive behind the setting.
+  expect(nextWorkerArchive(now + 4, true)).toBeNull();
+  expect(readyForWake(A, now + 4)).toBe(true);
+});
+
+it('retains the archived observation for wake gating when a restore exhausts its retries', () => {
+  queueWorkerArchives([A], 1_000);
+  const archive = nextWorkerArchive(1_000, true)!;
+  settleWorkerArchive(A, 'archived', 1_000, archive.attemptId);
+  expect(readyForWake(A, 1_001)).toBe(false);
+  let now = 1_001;
+  for (let attempt = 0; attempt < WORKER_ARCHIVE_MAX_ATTEMPTS; attempt += 1) {
+    const restore = nextWorkerArchive(now, true)!;
+    settleWorkerArchive(A, 'failed', now, restore.attemptId);
+    now += 60 * 60_000;
+  }
+  expect(nextWorkerArchive(now, true)).toBeNull();
+  expect(readyForWake(A, now)).toBe(false);
+  expect(nextWorkerArchive(now, true)).toMatchObject({ conversationId: A, archive: false });
+});
+
+it('infers a legacy saved restore target from the pending entry rather than its archived observation', async () => {
+  await workerArchiveWritten();
+  const file = path.join(dir, 'state', 'worker-archive.json');
+  await fs.writeFile(file, JSON.stringify({ version: 2,
+    entries: [{ conversationId: A, archive: false, queuedAt: 1_000, attempts: WORKER_ARCHIVE_MAX_ATTEMPTS - 1 }],
+    archived: [{ conversationId: A, at: 1_000 }]
+  }));
+  await loadWorkerArchive();
+  const restore = nextWorkerArchive(1_000, true)!;
+  settleWorkerArchive(A, 'failed', 1_001, restore.attemptId);
+  settleWorkerArchive(A, 'unarchived', 1_002, restore.attemptId);
+  expect(nextWorkerArchive(1_003, true)).toBeNull();
+  expect(readyForWake(A, 1_003)).toBe(true);
+});
+
+it('lets a newer wake replace an exhausted archive target even when the observed chat is restored', () => {
+  queueWorkerArchives([A], 1_000);
+  const archive = nextWorkerArchive(1_000, true)!;
+  settleWorkerArchive(A, 'archived', 1_000, archive.attemptId);
+  expect(readyForWake(A, 1_001)).toBe(false);
+  const restore = nextWorkerArchive(1_001, true)!;
+  settleWorkerArchive(A, 'unarchived', 1_002, restore.attemptId);
+  queueWorkerArchives([A], 1_003);
+  let now = 1_003;
+  for (let attempt = 0; attempt < WORKER_ARCHIVE_MAX_ATTEMPTS; attempt += 1) {
+    const job = nextWorkerArchive(now, true)!;
+    settleWorkerArchive(A, 'failed', now, job.attemptId);
+    now += 24 * 60 * 60_000;
+  }
+  expect(readyForWake(A, now)).toBe(true);
+  settleWorkerArchive(A, 'unarchived', now + 1, restore.attemptId);
   expect(nextWorkerArchive(now + 2, true)).toBeNull();
-  expect(readyForWake(A, now + 3)).toBe(false);
 });
 
 it('invalidates pre-restart receipt identities without saving an active lease', async () => {
