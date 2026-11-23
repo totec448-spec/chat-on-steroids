@@ -1227,7 +1227,9 @@ version-1 catalog/members via `writeDurableNow`. Success queues the final placem
 the intent in that same store snapshot. After a process crash, the first group read/mutation
 uses `getSessionOrNullIfMissing`: a committed destination restores the intended placement; an
 uncommitted move keeps the old membership; a missing chat loses its membership. Recovery is
-written immediately before the group queue resumes. It never moves a session or its workers.
+written immediately before the group queue resumes. A callback error retains the intent and
+requires this same check before the next read/mutation: an error after the main project commit
+must not discard its group placement. Recovery never moves a session or its workers.
 
 Unreadable session metadata, group-store I/O or recovery-write errors retain the disk record
 and refuse group mutations until retry succeeds. Readable legacy/malformed group data keeps

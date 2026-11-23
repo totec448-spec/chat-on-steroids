@@ -236,7 +236,12 @@ export function moveChatGroup<T>(session: ChatGroupSession, projectId: string | 
       const result = await move();
       return { result, fromGroup, groups: place(session.id, target, journal) };
     } catch (error) {
-      if (journal) save(); // The failed callback keeps its old placement, as before.
+      if (journal) {
+        // A callback can fail after the main project commit (for example a later worker write).
+        // Keep its receipt; the next read/mutation must resolve against session authority first.
+        loading = null;
+        logInfo('chat groups: retained the move intent after a project move error; recovery will check the saved project');
+      }
       throw error;
     }
   });
