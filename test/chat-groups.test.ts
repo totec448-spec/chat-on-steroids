@@ -125,3 +125,27 @@ it('keeps an explicit group choice for a moved chat, null included (#1965)', () 
   expect(groups.movedChatGroup('project-a', undefined, 'project-a', 'g0')).toBe('g0');
   expect(groups.movedChatGroup('project-b', undefined, 'project-a', 'g0')).toBeNull();
 });
+
+it('keeps group placement unchanged when the project write fails and releases the mutation queue', async () => {
+  const { group: a } = await groups.createChatGroup('project-a', 'A', exists);
+  const { group: b } = await groups.createChatGroup('project-b', 'B', exists);
+  await groups.assignChatGroup(chat('one'), a.id);
+  await expect(groups.moveChatGroup(chat('one'), 'project-b', b.id, async () => {
+    throw new Error('project write failed');
+  })).rejects.toThrow('project write failed');
+  expect((await groups.chatGroupsState()).members.one).toBe(a.id);
+  await expect(groups.deleteChatGroup(b.id)).resolves.toMatchObject({ members: { one: a.id } });
+});
+
+it('checks the membership limit before starting a project move', async () => {
+  const { MAX_CHAT_GROUP_MEMBERS } = await import('../src/shared/chat-groups.js');
+  durable.value = { version: 1, groups: [{ id: 'target', projectId: 'project-b', name: 'B', createdAt: 1 }],
+    members: Object.fromEntries(Array.from({ length: MAX_CHAT_GROUP_MEMBERS }, (_, index) => [`chat-${index}`, 'target'])) };
+  const move = vi.fn(async () => undefined);
+  await expect(groups.moveChatGroup(chat('one'), 'project-b', 'target', move)).rejects.toThrow('Too many grouped chats');
+  expect(move).not.toHaveBeenCalled();
+  // Existing members can still change projects/groups at the limit, without adding another membership.
+  expect((await groups.chatGroupsState()).members['chat-0']).toBe('target');
+  await expect(groups.moveChatGroup(chat('chat-0'), 'project-b', 'target', move)).resolves.toBeTruthy();
+  expect(move).toHaveBeenCalledTimes(1);
+});

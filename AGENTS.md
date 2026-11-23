@@ -1212,6 +1212,12 @@ and every chat that needs the person stay visible beyond the page. While that pr
 is unread its empty state says "Loading chats…", and after a failed read it offers Retry.
 The filter is window-local, like disclosure state.
 
+A local chat move validates its requested group and membership limit before any family project
+write. `chat-groups.ts::moveChatGroup` holds the group mutation queue through the project move
+and placement; deletion or assignment cannot invalidate the checked destination meanwhile.
+A rejected group choice leaves the chat and its workers in their previous project. A failed
+project write leaves group membership unchanged and releases the queue for retry.
+
 Removing a project marks the catalog row `ungrouped`. Existing and unloaded sessions, pending
 inputs and workers keep their durable project association; their chats return to the ordinary
 sidebar list. Adding that same folder again restores grouping. It does not delete files,

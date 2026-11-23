@@ -532,3 +532,62 @@ it('never gives a sub-agent chat the folder note: an isolated worker keeps its o
   expect((await getSession(worker.id))?.projectNotePending).toBeUndefined();
   expect((await getSession(chat.id))?.projectNotePending).toBe(true);
 });
+
+it.each(['deleted', 'other project'])('refuses a %s target group before moving a chat or its workers', async kind => {
+  const groups = await import('../src/main/chat-groups.js');
+  groups.resetChatGroupsForTests();
+  const first = await addProject(path.join(approved, 'first'));
+  const second = await addProject(path.join(approved, 'second'));
+  const chat = await createSession({ title: 'Main', conversationId: randomUUID() });
+  await assignSessionProject(chat.id, first.id);
+  const worker = await createSession({ title: 'Worker', conversationId: randomUUID() });
+  await setSessionOrigin(worker.id, { kind: 'worker', fromSessionId: chat.id, agentId: 'worker-1', task: 'Check' }, 'Worker');
+  const { group: original } = await groups.createChatGroup(first.id, 'Original', () => true);
+  await groups.assignChatGroup({ id: chat.id, projectId: first.id }, original.id);
+  const { group: target } = await groups.createChatGroup(kind === 'deleted' ? second.id : first.id, 'Target', () => true);
+  if (kind === 'deleted') await groups.deleteChatGroup(target.id);
+
+  await expect(moveChatWithGroup(chat.id, second.id, target.id)).rejects.toThrow("This chat is not in that group's project");
+  await flushDurable();
+  resetSessionStoreForTests(); initSessionStore(directory);
+  expect((await getSession(chat.id))?.projectId).toBe(first.id);
+  expect((await getSession(worker.id))?.projectId).toBe(first.id);
+  expect((await groups.chatGroupsState()).members[chat.id]).toBe(original.id);
+  // A rejected move releases both queues, so the next valid move still works.
+  await expect(moveChatWithGroup(chat.id, second.id)).resolves.toMatchObject({ from: first.id, fromGroup: original.id });
+});
+
+it('orders deletion of a target group after an in-flight project move', async () => {
+  const groups = await import('../src/main/chat-groups.js');
+  const store = await import('../src/main/session/store.js');
+  groups.resetChatGroupsForTests();
+  const first = await addProject(path.join(approved, 'first'));
+  const second = await addProject(path.join(approved, 'second'));
+  const chat = await createSession({ title: 'Main', conversationId: randomUUID() });
+  await assignSessionProject(chat.id, first.id);
+  const { group } = await groups.createChatGroup(second.id, 'Target', () => true);
+  let entered!: () => void, release!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const original = store.moveSessionProject;
+  const paused = vi.spyOn(store, 'moveSessionProject').mockImplementation(async (...args) => {
+    entered(); await gate; return original(...args);
+  });
+  const moving = moveChatWithGroup(chat.id, second.id, group.id);
+  const outcome = moving.then(result => ({ result, error: null }), error => ({ result: null, error }));
+  let deleting: Promise<unknown> | undefined;
+  try {
+    await started;
+    deleting = groups.deleteChatGroup(group.id);
+    expect((await groups.chatGroupsState()).groups).toContainEqual(group);
+    release();
+    const moved = await outcome;
+    expect(moved.error).toBeNull();
+    expect(moved.result?.groups.members[chat.id]).toBe(group.id);
+    await deleting;
+    expect((await groups.chatGroupsState()).members[chat.id]).toBeUndefined();
+    expect((await getSession(chat.id))?.projectId).toBe(second.id);
+  } finally {
+    release(); await outcome; await deleting; paused.mockRestore();
+  }
+});

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readDurable, writeDurableSoon } from './durable.js';
 import type { ChatGroup, ChatGroupsState } from '../shared/chat-groups.js';
+import { logInfo } from './logger.js';
 import { MAX_CHAT_GROUP_MEMBERS, MAX_CHAT_GROUPS_PER_PROJECT, chatGroupName } from '../shared/chat-groups.js';
 
 /**
@@ -15,6 +16,14 @@ const STORE = 'chat-groups';
 let state: ChatGroupsState = { version: 1, groups: [], members: {} };
 /** The one load of the store; every caller waits for the same one (two early actions once both loaded it). */
 let loading: Promise<void> | null = null;
+// A project move holds this queue from group validation through placement. Other group mutations
+// cannot delete its destination or consume its membership slot while session writes are pending.
+let mutations: Promise<unknown> = Promise.resolve();
+function mutate<T>(change: () => T | Promise<T>): Promise<T> {
+  const operation = mutations.then(async () => { await ready(); return change(); });
+  mutations = operation.catch(() => undefined);
+  return operation;
+}
 
 export interface ChatGroupSession { id: string; projectId?: string | null; origin?: { kind?: string } | null }
 
@@ -64,57 +73,61 @@ export async function chatGroupsState(): Promise<ChatGroupsState> {
 }
 
 export async function createChatGroup(projectId: string, name: string, projectExists: (id: string) => boolean): Promise<{ group: ChatGroup; state: ChatGroupsState }> {
-  await ready();
-  if (!projectExists(projectId)) throw new Error('This project is not available');
-  const clean = chatGroupName(name);
-  if (!clean) throw new Error('A group name needs 1 to 60 characters');
-  if (state.groups.filter(group => group.projectId === projectId).length >= MAX_CHAT_GROUPS_PER_PROJECT) {
-    throw new Error('A project can hold up to 100 groups');
-  }
-  const group: ChatGroup = { id: randomUUID(), projectId, name: clean, createdAt: Date.now() };
-  state.groups.push(group);
-  return { group: { ...group }, state: save() };
+  return mutate(() => {
+    if (!projectExists(projectId)) throw new Error('This project is not available');
+    const clean = chatGroupName(name);
+    if (!clean) throw new Error('A group name needs 1 to 60 characters');
+    if (state.groups.filter(group => group.projectId === projectId).length >= MAX_CHAT_GROUPS_PER_PROJECT) {
+      throw new Error('A project can hold up to 100 groups');
+    }
+    const group: ChatGroup = { id: randomUUID(), projectId, name: clean, createdAt: Date.now() };
+    state.groups.push(group);
+    return { group: { ...group }, state: save() };
+  });
 }
 
 export async function renameChatGroup(id: string, name: string): Promise<ChatGroupsState> {
-  await ready();
-  const group = state.groups.find(row => row.id === id);
-  if (!group) throw new Error('This group no longer exists');
-  const clean = chatGroupName(name);
-  if (!clean) throw new Error('A group name needs 1 to 60 characters');
-  group.name = clean;
-  return save();
+  return mutate(() => {
+    const group = state.groups.find(row => row.id === id);
+    if (!group) throw new Error('This group no longer exists');
+    const clean = chatGroupName(name);
+    if (!clean) throw new Error('A group name needs 1 to 60 characters');
+    group.name = clean;
+    return save();
+  });
 }
 
 /** Removes the group. Its chats stay in their project, ungrouped; nothing about them changes. */
 export async function deleteChatGroup(id: string): Promise<ChatGroupsState> {
-  await ready();
-  if (!state.groups.some(group => group.id === id)) return snapshot();
-  state.groups = state.groups.filter(group => group.id !== id);
-  for (const [sessionId, groupId] of Object.entries(state.members)) if (groupId === id) delete state.members[sessionId];
-  return save();
+  return mutate(() => {
+    if (!state.groups.some(group => group.id === id)) return snapshot();
+    state.groups = state.groups.filter(group => group.id !== id);
+    for (const [sessionId, groupId] of Object.entries(state.members)) if (groupId === id) delete state.members[sessionId];
+    return save();
+  });
 }
 
 /** Puts a chat into one of its project's groups, or takes it out with `groupId` null. */
 export async function assignChatGroup(session: ChatGroupSession | null, groupId: string | null): Promise<ChatGroupsState> {
-  await ready();
-  if (!session) throw new Error('This chat no longer exists');
-  if (groupId === null) {
-    if (!(session.id in state.members)) return snapshot();
-    delete state.members[session.id];
+  return mutate(() => {
+    if (!session) throw new Error('This chat no longer exists');
+    if (groupId === null) {
+      if (!(session.id in state.members)) return snapshot();
+      delete state.members[session.id];
+      return save();
+    }
+    const group = state.groups.find(row => row.id === groupId);
+    if (!group) throw new Error('This group no longer exists');
+    // A sub-agent's chat follows its prime and is never listed on its own.
+    if (session.origin?.kind === 'worker') throw new Error('A sub-agent chat follows its main chat');
+    if (session.projectId !== group.projectId) throw new Error("This chat is not in that group's project");
+    if (state.members[session.id] === groupId) return snapshot();
+    if (!(session.id in state.members) && Object.keys(state.members).length >= MAX_CHAT_GROUP_MEMBERS) {
+      throw new Error('Too many grouped chats');
+    }
+    state.members[session.id] = groupId;
     return save();
-  }
-  const group = state.groups.find(row => row.id === groupId);
-  if (!group) throw new Error('This group no longer exists');
-  // A sub-agent's chat follows its prime and is never listed on its own.
-  if (session.origin?.kind === 'worker') throw new Error('A sub-agent chat follows its main chat');
-  if (session.projectId !== group.projectId) throw new Error("This chat is not in that group's project");
-  if (state.members[session.id] === groupId) return snapshot();
-  if (!(session.id in state.members) && Object.keys(state.members).length >= MAX_CHAT_GROUP_MEMBERS) {
-    throw new Error('Too many grouped chats');
-  }
-  state.members[session.id] = groupId;
-  return save();
+  });
 }
 
 /**
@@ -127,32 +140,56 @@ export function movedChatGroup(projectId: string | null, requested: string | nul
   return from === projectId ? fromGroup : null;
 }
 
+function validatePlacement(sessionId: string, projectId: string | null, groupId: string | null): void {
+  const target = groupId ? state.groups.find(group => group.id === groupId) : undefined;
+  if (groupId && (!target || target.projectId !== projectId)) throw new Error("This chat is not in that group's project");
+  if (groupId && state.members[sessionId] === undefined && Object.keys(state.members).length >= MAX_CHAT_GROUP_MEMBERS) {
+    throw new Error('Too many grouped chats');
+  }
+}
+function place(sessionId: string, groupId: string | null): ChatGroupsState {
+  if (state.members[sessionId] === (groupId ?? undefined)) return snapshot();
+  if (groupId) state.members[sessionId] = groupId;
+  else delete state.members[sessionId];
+  return save();
+}
 /**
  * A chat the person moved to another project (#1919) leaves its old project's group, and joins
  * `groupId` when it was dropped onto a group of its new project.
  */
 export async function placeMovedChat(sessionId: string, projectId: string | null, groupId: string | null): Promise<ChatGroupsState> {
-  await ready();
-  const target = groupId ? state.groups.find(group => group.id === groupId) : undefined;
-  if (groupId && (!target || target.projectId !== projectId)) throw new Error("This chat is not in that group's project");
-  const current = state.members[sessionId];
-  if (current === (groupId ?? undefined)) return snapshot();
-  if (groupId) {
-    if (current === undefined && Object.keys(state.members).length >= MAX_CHAT_GROUP_MEMBERS) throw new Error('Too many grouped chats');
-    state.members[sessionId] = groupId;
-  } else delete state.members[sessionId];
-  return save();
+  return mutate(() => {
+    validatePlacement(sessionId, projectId, groupId);
+    return place(sessionId, groupId);
+  });
+}
+
+/** Validate organisation before changing a chat's project, and keep it valid until placement. */
+export function moveChatGroup<T>(session: ChatGroupSession, projectId: string | null, requested: string | null | undefined,
+  move: () => Promise<T>): Promise<{ result: T; fromGroup: string | null; groups: ChatGroupsState }> {
+  return mutate(async () => {
+    const fromGroup = state.members[session.id] ?? null;
+    const target = movedChatGroup(projectId, requested, session.projectId ?? null, fromGroup);
+    try { validatePlacement(session.id, projectId, target); } catch (error) {
+      logInfo(`chat groups: refused project move before changing the chat or its workers: ${(error as Error).message}`);
+      throw error;
+    }
+    const result = await move();
+    return { result, fromGroup, groups: place(session.id, target) };
+  });
 }
 
 /** A chat that no longer exists leaves its group. */
 export async function forgetChatGroupMember(sessionId: string): Promise<void> {
-  await ready();
-  if (!(sessionId in state.members)) return;
-  delete state.members[sessionId];
-  save();
+  return mutate(() => {
+    if (!(sessionId in state.members)) return;
+    delete state.members[sessionId];
+    save();
+  });
 }
 
 export function resetChatGroupsForTests(): void {
   state = { version: 1, groups: [], members: {} };
   loading = null;
+  mutations = Promise.resolve();
 }
