@@ -25,6 +25,18 @@ const MAX_PREVIEW_BYTES = 256 * 1024;
 const MAX_IMAGE_PREVIEW_BYTES = 5 * 1024 * 1024;
 const MAX_PDF_PREVIEW_BYTES = 20 * 1024 * 1024;
 const activeSaves = new Set<string>();
+// Files creates and renames share one namespace: both must see the preceding publication
+// before testing an unused name. In particular, two renames must never both replace it.
+let entryMutations: Promise<unknown> = Promise.resolve();
+let pendingEntryMutations = 0;
+function mutateEntries<T>(work: () => Promise<T>): Promise<T> {
+  if (pendingEntryMutations) logInfo('project files: waiting for an earlier create or rename to finish');
+  pendingEntryMutations++;
+  const result = entryMutations.then(work);
+  const settled = () => { pendingEntryMutations--; };
+  entryMutations = result.then(settled, settled);
+  return result;
+}
 
 function sameFile(left: Stats, right: Stats): boolean {
   return left.dev === right.dev && left.ino === right.ino && left.size === right.size &&
@@ -549,7 +561,12 @@ async function previewServerFile(projectId: string, target: { projectName: strin
   }
 }
 
-export async function createProjectEntry(
+export function createProjectEntry(projectId: string, relativeDirectory: string, nameInput: string,
+  kind: 'file' | 'directory'): Promise<ProjectFileMutationResult> {
+  return mutateEntries(() => createEntry(projectId, relativeDirectory, nameInput, kind));
+}
+
+async function createEntry(
   projectId: string,
   relativeDirectory: string,
   nameInput: string,
@@ -580,7 +597,11 @@ export async function createProjectEntry(
   return { projectId, path: relative, kind };
 }
 
-export async function renameProjectEntry(
+export function renameProjectEntry(projectId: string, relativePath: string, nameInput: string): Promise<ProjectFileMutationResult> {
+  return mutateEntries(() => renameEntry(projectId, relativePath, nameInput));
+}
+
+async function renameEntry(
   projectId: string,
   relativePath: string,
   nameInput: string
