@@ -1771,7 +1771,10 @@ or browser delivery. Each New Chat opening reserves its own local session in the
 materializes that exact desktop session. Another New Chat may be admitted immediately; pending
 delivery remains Queued. The existing browser election and exact claim still own native Send.
 Cancellation revokes both the outbox row and its transient startup controller; shutdown aborts
-startup and explicit retries before they can wake a browser later. Startup failure leaves the
+startup and explicit retries before they can wake a browser later. Both sends and retries pass their
+controller and a live queued-row check to the shared browser startup authority. It revalidates
+after the process query, so cancellation, shutdown or a browser claim during that query prevents
+an OS launch without changing absence-episode deduplication. Startup failure leaves the
 same queued input and an explicit retry action. An ordinary automatic browser input that was
 never claimed within sixty seconds carries a pre-Send pickup-failure timestamp. The bridge's
 bounded recovery sweep may requeue that same UUID once, after two minutes and before the input is
