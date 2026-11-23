@@ -29,7 +29,12 @@ const activeSaves = new Set<string>();
 // before testing an unused name. In particular, two renames must never both replace it.
 let entryMutations: Promise<unknown> = Promise.resolve();
 let pendingEntryMutations = 0;
+const MAX_ENTRY_MUTATIONS = 32;
 function mutateEntries<T>(work: () => Promise<T>): Promise<T> {
+  if (pendingEntryMutations >= MAX_ENTRY_MUTATIONS) {
+    logInfo('project files: refused a create or rename because the pending operation limit was reached; retry after it drains');
+    return Promise.reject(new Error('Too many file operations are in progress. Try again when they finish.'));
+  }
   if (pendingEntryMutations) logInfo('project files: waiting for an earlier create or rename to finish');
   pendingEntryMutations++;
   const result = entryMutations.then(work);

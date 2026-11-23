@@ -5712,7 +5712,9 @@ access. Main re-resolves current approved roots and rejects traversal, symbolic 
 and project-root mutation. Files creates and renames share the `project-files.ts` entry-mutation
 queue from validation through publication: the next operation checks the preceding result, so
 competing renames or a create/rename cannot both claim an unused name and replace its contents.
-A failed operation releases the queue; waiting is logged. Windows case-only renames retain their
+At most 32 operations (active included) are admitted in FIFO order; excess requests receive a
+translated retryable busy error without retaining their callbacks. A failed operation releases
+the queue; waiting and capacity refusal are logged. Windows case-only renames retain their
 existing native-path handling. This queue covers these app-owned operations, not external OS
 writers; the adjacent pathname/sandbox rechecks remain in force.
 The renderer's `workspace-docks.ts` owns the right tool dock and
