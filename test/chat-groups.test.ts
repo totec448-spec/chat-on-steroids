@@ -8,7 +8,8 @@ vi.mock('../src/main/durable.js', () => ({
     if (durable.slowSecondRead && durable.reads === 2) await new Promise(resolve => setTimeout(resolve, 20));
     return value;
   },
-  writeDurableSoon: (_name: string, value: unknown) => { durable.value = structuredClone(value); durable.writes++; }
+  writeDurableSoon: (_name: string, value: unknown) => { durable.value = structuredClone(value); durable.writes++; },
+  writeDurableNow: async (_name: string, value: unknown) => { durable.value = structuredClone(value); durable.writes++; }
 }));
 
 const groups = await import('../src/main/chat-groups.js');
@@ -169,4 +170,15 @@ it('logs a queued group mutation once, but not an immediate one', async () => {
     await groups.createChatGroup('project-a', 'A', exists);
     expect(waits).toHaveLength(1);
   } finally { release(); await moving; await deleting; stop(); }
+});
+
+
+it.each([
+  { sessionId: '../../bad', fromProjectId: 'a', projectId: 'b', groupId: null },
+  { sessionId: 'valid-chat', fromProjectId: null, projectId: null, groupId: null },
+  { sessionId: 'valid-chat', fromProjectId: null, projectId: 'a'.repeat(36), groupId: 'missing' }
+])('ignores an invalid move intent without losing legacy groups (%j)', async move => {
+  const legacy = { version: 1, groups: [{ id: 'kept', projectId: 'project-a', name: 'Kept', createdAt: 1 }], members: { one: 'kept' } };
+  durable.value = { ...legacy, move };
+  expect(await groups.chatGroupsState()).toEqual(legacy);
 });
