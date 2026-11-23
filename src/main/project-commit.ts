@@ -291,7 +291,7 @@ export async function commitProjectChanges(projectId: string, request: CommitReq
     let lock: import('node:fs/promises').FileHandle;
     try { lock = await fs.open(indexFile, 'wx', 0o600); }
     catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('Another Git operation is in progress. Try again when it finishes.');
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw refusal('git commit', 'Another Git operation is in progress. Try again when it finishes.');
       throw error;
     }
     leased = true;
@@ -362,15 +362,17 @@ export async function commitProjectChanges(projectId: string, request: CommitReq
         failure = late;
       }
     } catch (error) { failure = error; }
-  } else if (stopped && sameStart) {
+  } else if (!succeeded && stopped && sameStart) {
     // No write-back on refusal. An already-prepared external as-is commit can
     // still advance later, using the unchanged real index it originally read.
     if (leased) {
-      await fs.rm(`${indexFile}.lock`, { force: true });
-      await fs.unlink(indexFile);
-      leased = false;
+      try {
+        await fs.rm(`${indexFile}.lock`, { force: true });
+        await fs.unlink(indexFile);
+        leased = false;
+      } catch { logWarn('git commit: kept its private index because cleanup was refused'); }
     }
-    await putBack();
+    if (!leased) await putBack();
   }
   if (leased) {
     logWarn('git commit: kept the original index and private index.lock because completion needs recovery');
