@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { readDurable, writeDurableSoon } from './durable.js';
+import { readDurable, writeDurableNow, writeDurableSoon } from './durable.js';
 import type { ChatGroup, ChatGroupsState } from '../shared/chat-groups.js';
-import { logInfo } from './logger.js';
+import { logInfo, logWarn } from './logger.js';
 import { MAX_CHAT_GROUP_MEMBERS, MAX_CHAT_GROUPS_PER_PROJECT, chatGroupName } from '../shared/chat-groups.js';
 
 /**
@@ -13,6 +13,8 @@ import { MAX_CHAT_GROUP_MEMBERS, MAX_CHAT_GROUPS_PER_PROJECT, chatGroupName } fr
  * that leaves its project falls back to "no group" without anything here being rewritten.
  */
 const STORE = 'chat-groups';
+/** One in-flight move, serialized with the catalog/members in the same atomic store write. */
+interface GroupMove { sessionId: string; fromProjectId: string | null; projectId: string | null; groupId: string | null }
 let state: ChatGroupsState = { version: 1, groups: [], members: {} };
 /** The one load of the store; every caller waits for the same one (two early actions once both loaded it). */
 let loading: Promise<void> | null = null;
@@ -55,9 +57,48 @@ function clean(raw: unknown): ChatGroupsState {
   return out;
 }
 
+function savedMove(raw: unknown, groups: ChatGroupsState): GroupMove | null {
+  const value = raw && typeof raw === 'object' ? (raw as { move?: Partial<GroupMove> }).move : null;
+  const project = (id: unknown): id is string | null => id === null || (typeof id === 'string' && /^[a-f0-9-]{36}$/i.test(id));
+  if (!value || typeof value !== 'object' || typeof value.sessionId !== 'string' || !/^[0-9a-z-]{8,64}$/i.test(value.sessionId) ||
+      !project(value.fromProjectId) || !project(value.projectId) || value.fromProjectId === value.projectId ||
+      !(value.groupId === null || (typeof value.groupId === 'string' && groups.groups.some(group => group.id === value.groupId && group.projectId === value.projectId)))) return null;
+  // A valid prepare reserved this slot before any project write. Do not trust an edited overflow.
+  if (value.groupId && groups.members[value.sessionId] === undefined && Object.keys(groups.members).length >= MAX_CHAT_GROUP_MEMBERS) return null;
+  return { sessionId: value.sessionId, fromProjectId: value.fromProjectId, projectId: value.projectId, groupId: value.groupId };
+}
+
 function ready(): Promise<void> {
-  // A corrupt or unreadable store starts empty: grouping is never worth a sidebar that will not open.
-  loading ??= readDurable<unknown>(STORE).catch(() => null).then(raw => { state = clean(raw); });
+  if (!loading) loading = (async () => {
+    // Keep readable legacy/corrupt values tolerant, but never overwrite an unreadable recovery record.
+    const raw = await readDurable<unknown>(STORE, { strict: true }).catch(error => {
+      if (error?.damaged) {
+        logWarn('chat groups: saved grouping is damaged; starting with empty grouping');
+        return null;
+      }
+      throw error;
+    });
+    const restored = clean(raw);
+    const move = savedMove(raw, restored);
+    if (raw && typeof raw === 'object' && 'move' in raw && !move) logWarn('chat groups: ignored an invalid saved project move intent');
+    if (move) {
+      // The session's saved project decides the outcome; grouping never moves a chat itself.
+      const { getSessionOrNullIfMissing } = await import('./session/store.js');
+      const session = await getSessionOrNullIfMissing(move.sessionId);
+      const committed = !!session && (session.projectId ?? null) === move.projectId;
+      if (committed && move.groupId) restored.members[move.sessionId] = move.groupId;
+      else if (committed || !session) delete restored.members[move.sessionId];
+      // Retire the intent only after recovery is durable, before another group operation can start.
+      await writeDurableNow(STORE, restored);
+      logInfo(!session ? 'chat groups: retired a saved group move for a missing chat after restart'
+        : `chat groups: ${committed ? 'restored group placement for a committed' : 'retired an uncommitted'} project move after restart`);
+    }
+    state = restored;
+  })().catch(error => {
+    loading = null;
+    logWarn('chat groups: could not load or recover saved groups; kept the stored state for retry');
+    throw error;
+  });
   return loading;
 }
 
@@ -152,8 +193,8 @@ function validatePlacement(sessionId: string, projectId: string | null, groupId:
     throw new Error('Too many grouped chats');
   }
 }
-function place(sessionId: string, groupId: string | null): ChatGroupsState {
-  if (state.members[sessionId] === (groupId ?? undefined)) return snapshot();
+function place(sessionId: string, groupId: string | null, retireMove = false): ChatGroupsState {
+  if (state.members[sessionId] === (groupId ?? undefined)) return retireMove ? save() : snapshot();
   if (groupId) state.members[sessionId] = groupId;
   else delete state.members[sessionId];
   return save();
@@ -179,8 +220,32 @@ export function moveChatGroup<T>(session: ChatGroupSession, projectId: string | 
       logInfo(`chat groups: refused project move before changing the chat or its workers: ${(error as Error).message}`);
       throw error;
     }
-    const result = await move();
-    return { result, fromGroup, groups: place(session.id, target) };
+    const fromProjectId = session.projectId ?? null;
+    // Even an ungrouped move must commit the current snapshot: an earlier ungrouping may
+    // still be debounced on disk, and a project round trip must not revive that old group.
+    const journal = fromProjectId !== projectId;
+    if (journal) {
+      // Catalog, old membership and intended placement cross disk together, before the session.
+      const intent: GroupMove = { sessionId: session.id, fromProjectId, projectId, groupId: target };
+      try { await writeDurableNow(STORE, { ...snapshot(), move: intent }); } catch (error) {
+        // Supersede the durable writer's retained retry: no project write was admitted.
+        save();
+        logInfo('chat groups: refused project move because its recovery intent could not be saved');
+        throw error;
+      }
+    }
+    try {
+      const result = await move();
+      return { result, fromGroup, groups: place(session.id, target, journal) };
+    } catch (error) {
+      if (journal) {
+        // A callback can fail after the main project commit (for example a later worker write).
+        // Keep its receipt; the next read/mutation must resolve against session authority first.
+        loading = null;
+        logInfo('chat groups: retained the move intent after a project move error; recovery will check the saved project');
+      }
+      throw error;
+    }
   });
 }
 
