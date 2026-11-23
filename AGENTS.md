@@ -5840,15 +5840,23 @@ chosen pathspecs (literal, NUL-separated on stdin), so what the person staged fo
 staged. A rename commits both paths but stages only the new one. A commit that does not happen
 (Git cannot stage, a hook or Git refuses) reads the index back from a `git write-tree` taken
 before, so a hand-picked part of a file (`git add -p`) stays staged as it was; an index that cannot
-be written as a tree falls back to unstaging only what it staged. A branch it created is removed
-after HEAD is pointed back (`symbolic-ref`, which works while another program holds the index).
-Rollback first proves the symbolic HEAD and commit are still the attempt's starting position
-(on the requested new branch when created). A changed commit, changed HEAD or unreadable outcome
-keeps both the current index and branch and logs why: a post-commit hook can time out after Git
-already committed. The original failure remains visible; no success is inferred from unrelated
-HEAD movement. Unborn branches and detached starts remain distinct from an unreadable HEAD.
-Branch cleanup compare-and-deletes only the captured starting commit, so a later ref advance
-cannot be force-deleted; successful removal also removes that new branch's tracking config.
+be written as a tree falls back to unstaging only what it staged in a private index. Rollback
+uses current Git ownership and locking below, never a HEAD rewrite through a foreign index lock.
+Rollback acquires this worktree's real `index.lock` before proving the symbolic HEAD and commit
+are still the attempt's starting position (on the requested new branch when created). Under that
+lease it restores through `withTemporaryIndex` and atomically publishes a complete index, so a
+normal competing Git commit cannot advance HEAD between the check and restore. A changed or
+unreadable outcome, an existing index lock, or a refused index publication keeps the remaining
+state and logs why. An already-created commit is never guessed to be a failed transaction.
+An unborn branch stays distinct from an unreadable HEAD. Own lock files are retired on failure;
+a foreign lock is never removed. Linked worktrees lock their own index, not the common index.
+After restoring the index, normal `git switch --no-guess`/detached checkout restores HEAD only
+if Git permits it; a busy index or worktree therefore keeps the attempt branch for explicit retry
+instead of bypassing Git's guards. Safe `git branch -d` cleanup compares against restored HEAD
+with inherited upstream settings ignored for that command, preserving symbolic-ref and active
+worktree protections and removing tracking config on success. An unsuccessful branch creation
+proves no ownership: a matching branch is retained and logged, even at the starting commit.
+The original operation error remains visible; unrelated HEAD movement is never reported as success.
 Hooks run. Paths with `..` or an absolute start are refused before Git runs.
 `projectCommit:push` pushes the current branch (`-u <remote> HEAD:refs/heads/<branch>` when it has
 no upstream) with `GIT_TERMINAL_PROMPT=0` and, unless `GIT_SSH`, `GIT_SSH_COMMAND` or

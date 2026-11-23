@@ -4,7 +4,7 @@ import { createReadStream, promises as fs, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { logInfo, logWarn } from './logger.js';
-import { decode, readProjectGitSnapshot, repositoryContext, runGit, type RepositoryContext } from './project-git.js';
+import { decode, readProjectGitSnapshot, repositoryContext, runGit, withTemporaryIndex, type RepositoryContext } from './project-git.js';
 import type { CommitState, GhStatus, ProjectGitChange } from '../shared/project-git.js';
 
 export type { CommitState } from '../shared/project-git.js';
@@ -243,43 +243,91 @@ export async function commitProjectChanges(projectId: string, request: CommitReq
   // as a tree (an unresolved conflict elsewhere) falls back to unstaging only what this commit staged.
   let index: { tree: string | null; staged: Set<string> } | null = null;
   const removeCreatedBranch = async (): Promise<void> => {
-    if (!created || !startCommit) return;
-    const removed = await runGit(repo.root, ['update-ref', '-d', `refs/heads/${created}`, startCommit]);
-    if (removed.code === 0) await runGit(repo.root, ['config', '--remove-section', `branch.${created}`]);
-    else logWarn('git commit: kept the new branch because its starting commit could not be verified at removal');
+    if (!created || !switched) return;
+    // Git's own safe deletion keeps its symbolic-ref and checked-out-worktree guards.
+    // Ignore inherited upstream configuration for this command: compare with restored HEAD.
+    const removed = await runGit(repo.root, ['-c', `branch.${created}.remote=.`, '-c', `branch.${created}.merge=`, 'branch', '-d', created]);
+    if (removed.code !== 0) logWarn('git commit: kept the new branch because Git refused safe branch cleanup');
   };
-  const putBack = async (): Promise<void> => {
-    if (!index && !switched) return;
+  const restoreIndex = async (): Promise<boolean> => {
+    const indexPath = path.join(repo.gitDir, 'index'), lockPath = `${indexPath}.lock`;
+    let lock: import('node:fs/promises').FileHandle | null = null;
+    let owned: { dev: number; ino: number } | null = null;
+    let published = false;
     try {
+      // The real index lock must precede the HEAD check. A normal commit in this
+      // worktree cannot advance HEAD between the check and index publication.
+      lock = await fs.open(lockPath, 'wx', 0o600);
+      owned = await lock.stat();
       const current = await commitPosition(repo);
       const expectedRef = created && switched ? `refs/heads/${created}` : position.ref;
       if (!current) {
         logWarn('git commit: kept HEAD and index after failure because the outcome could not be verified');
-        return;
+        return false;
       }
-      // Git can commit before a slow post-commit hook times out. That is not a failed
-      // transaction to undo; nor may a changed/detached HEAD borrow this rollback.
       if (current.ref !== expectedRef || current.commit !== position.commit) {
         logWarn('git commit: kept HEAD and index after failure because the commit position changed');
-        return;
+        return false;
       }
-      if (index) {
-        const restored = index.tree ? await runGit(repo.root, ['read-tree', index.tree]) : null;
-        if (!restored || restored.code !== 0) {
-          const unstage = paths.filter(file => !index!.staged.has(file));
-          if (unstage.length) await runGit(repo.root, ['reset', '-q', '--pathspec-from-file=-', '--pathspec-file-nul'], undefined, { input: `${unstage.join('\0')}\0`, env: LITERAL });
-        }
+      const saved = index;
+      if (saved) {
+        const mode = await fs.stat(indexPath).then(stat => stat.mode & 0o777, (error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') return 0o600;
+          throw error;
+        });
+        await withTemporaryIndex(async indexFile => {
+          const restored = saved.tree ? await runGit(repo.root, ['read-tree', saved.tree], undefined, { indexFile }) : null;
+          if (!restored || restored.code !== 0) {
+            await fs.copyFile(indexPath, indexFile);
+            const unstage = paths.filter(file => !saved.staged.has(file));
+            if (unstage.length) {
+              const reset = await runGit(repo.root, ['reset', '-q', '--pathspec-from-file=-', '--pathspec-file-nul'], undefined,
+                { input: `${unstage.join('\0')}\0`, env: LITERAL, indexFile });
+              if (reset.code !== 0) throw new Error('Index rollback refused');
+            }
+          }
+          // Stream into our exclusively owned lock; never truncate the user's live index.
+          await lock!.writeFile(createReadStream(indexFile));
+          await lock!.chmod(mode);
+          await lock!.sync();
+        });
+        const held = await fs.lstat(lockPath);
+        if (held.dev !== owned.dev || held.ino !== owned.ino) throw new Error('Index lock changed');
+        await lock.close();
+        await fs.rename(lockPath, indexPath);
+        published = true;
       }
-      // The new branch is still the commit it started from, so pointing HEAD back is the whole
-      // switch; unlike `git switch` it works while another program holds the index.
-      if (created && switched) {
-        const back = startedOn ? await runGit(repo.root, ['symbolic-ref', 'HEAD', `refs/heads/${startedOn}`])
-          : startCommit ? await runGit(repo.root, ['update-ref', '--no-deref', 'HEAD', startCommit]) : null;
-        // Compare-and-delete the unchanged ref, even if it advanced after the HEAD check.
-        if (back?.code === 0) await removeCreatedBranch();
-      }
+      return true;
     } catch (error) {
-      logWarn('git commit: kept the remaining state because rollback could not be verified or completed');
+      logWarn((error as NodeJS.ErrnoException).code === 'EEXIST'
+        ? 'git commit: kept HEAD and index after failure because another Git operation owns the index lock'
+        : 'git commit: kept the remaining state because index rollback could not be verified or completed');
+      return false;
+    } finally {
+      await lock?.close().catch(() => undefined);
+      if (owned && !published) {
+        const ours = owned;
+        await fs.lstat(lockPath).then(async stat => {
+          if (stat.dev === ours.dev && stat.ino === ours.ino) await fs.unlink(lockPath);
+        }).catch((error: NodeJS.ErrnoException) => {
+          if (error.code !== 'ENOENT') logWarn('git commit: could not remove its rollback index lock; Git may need manual lock recovery');
+        });
+      }
+    }
+  };
+  const putBack = async (): Promise<void> => {
+    if ((!index && !switched) || !await restoreIndex()) return;
+    if (created && switched) {
+      try {
+        // Normal checkout protects another worktree and any changes that arrived
+        // after index publication; do not bypass its lock with symbolic-ref.
+        const back = startedOn ? await runGit(repo.root, ['switch', '--no-guess', startedOn])
+          : startCommit ? await runGit(repo.root, ['switch', '--detach', startCommit]) : null;
+        if (back?.code === 0) await removeCreatedBranch();
+        else logWarn('git commit: kept the new branch because Git refused rollback checkout');
+      } catch {
+        logWarn('git commit: kept the new branch because rollback checkout did not finish');
+      }
     }
   };
   try {
@@ -293,10 +341,9 @@ export async function commitProjectChanges(projectId: string, request: CommitReq
         throw error;
       }
       if (made.code !== 0) {
-        // A branch made but not checked out would refuse the next try as "already exists".
-        if ((await branchOf(repo)) !== created && (await runGit(repo.root, ['show-ref', '--verify', '--quiet', `refs/heads/${created}`])).code === 0) {
-          await removeCreatedBranch();
-        }
+        // A matching name may belong to another writer/worktree. Failure is not
+        // proof this attempt created it, so do not clean it up.
+        logWarn('git commit: kept any matching branch because branch creation was not confirmed');
         logWarn('git commit: not committed (Git could not create the branch)');
         throw new Error(`Git could not create the branch:\n${shown(made.stderr)}`);
       }
