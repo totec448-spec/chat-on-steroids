@@ -149,3 +149,24 @@ it('checks the membership limit before starting a project move', async () => {
   await expect(groups.moveChatGroup(chat('chat-0'), 'project-b', 'target', move)).resolves.toBeTruthy();
   expect(move).toHaveBeenCalledTimes(1);
 });
+
+it('logs a queued group mutation once, but not an immediate one', async () => {
+  const { onLog } = await import('../src/main/logger.js');
+  const waits: string[] = [];
+  const stop = onLog(entry => { if (entry.message.startsWith('chat groups: waiting')) waits.push(entry.message); });
+  let release!: () => void, enter!: () => void;
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let moving: Promise<unknown> | undefined, deleting: Promise<unknown> | undefined;
+  try {
+    const { group } = await groups.createChatGroup('project-b', 'B', exists);
+    expect(waits).toEqual([]);
+    moving = groups.moveChatGroup(chat('one'), 'project-b', group.id, async () => { enter(); await gate; });
+    await entered;
+    deleting = groups.deleteChatGroup(group.id);
+    expect(waits).toHaveLength(1);
+    release(); await moving; await deleting;
+    await groups.createChatGroup('project-a', 'A', exists);
+    expect(waits).toHaveLength(1);
+  } finally { release(); await moving; await deleting; stop(); }
+});

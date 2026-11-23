@@ -4062,3 +4062,34 @@ it('keeps an aged attachment when Send takes ownership during project-file stagi
     outbox.resetInputForTests();
   }
 });
+
+it('checks a group assignment against the project after a queued chat move completes', async () => {
+  const groups = await import('../src/main/chat-groups.js');
+  const projects = await import('../src/main/projects.js');
+  const store = await import('../src/main/session/store.js');
+  const { validateNewRoot } = await import('../src/main/sandbox.js');
+  groups.resetChatGroupsForTests();
+  const root = await validateNewRoot(await fs.mkdtemp(path.join(dir, 'group-race-')), []);
+  await fs.mkdir(path.join(root, 'first')); await fs.mkdir(path.join(root, 'second'));
+  await saveConfig({ ...getConfig(), roots: [{ name: 'work', path: root }] });
+  const first = await projects.addProject(path.join(root, 'first'));
+  const second = await projects.addProject(path.join(root, 'second'));
+  const chat = await store.createSession({ title: 'Group assignment race' });
+  await projects.assignSessionProject(chat.id, first.id);
+  const { group: oldGroup } = await groups.createChatGroup(first.id, 'Old', () => true);
+  const { group: newGroup } = await groups.createChatGroup(second.id, 'New', () => true);
+  let enter!: () => void, release!: () => void;
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const original = store.moveSessionProject;
+  const pause = vi.spyOn(store, 'moveSessionProject').mockImplementation(async (...args) => { enter(); await gate; return original(...args); });
+  const moving = projects.moveChatWithGroup(chat.id, second.id, newGroup.id);
+  let assigning: Promise<any> | undefined;
+  try {
+    await entered;
+    assigning = handlers.get('chatGroups:assign')!(null, { sessionId: chat.id, groupId: oldGroup.id });
+    release(); await moving;
+    expect(await assigning).toEqual({ ok: false, error: "This chat is not in that group's project" });
+    expect((await groups.chatGroupsState()).members[chat.id]).toBe(newGroup.id);
+  } finally { release(); await moving; await assigning; pause.mockRestore(); }
+});

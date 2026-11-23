@@ -1300,8 +1300,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('chatGroups:assign', async payload => {
     const { sessionId, groupId: target } = z.object({ sessionId: sessionIdArg.shape.id, groupId: groupId.nullable() }).strict().parse(payload);
-    const session = await getSession(sessionId);
-    return assignChatGroup(session ? { id: session.id, projectId: session.projectId ?? null, origin: session.origin ?? null } : null, target);
+    return assignChatGroup(() => getSession(sessionId), target);
   });
   // Move to project (#1919): the chat, its sub-agents and its group place change; nothing it does.
   handle('sessions:moveProject', async payload => {
