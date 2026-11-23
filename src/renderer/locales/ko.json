@@ -3987,6 +3987,9 @@
   "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "이 대화에서 {0} MB를 확보했습니다. 현재 {2} MB 중 {1} MB를 사용 중입니다.",
   "Freed {0} MB. Storage usage could not be read.": "{0} MB를 확보했습니다. 저장 공간 사용량을 확인할 수 없습니다.",
   "Last cleanup: Freed {0} MB.": "마지막 정리: {0} MB를 확보했습니다.",
+  "Check ChatGPT titles": "ChatGPT 제목 확인",
+  "Show a notice in the chat menu when the open ChatGPT chat has a different title.": "열려 있는 ChatGPT 채팅의 제목이 다르면 채팅 메뉴에 알림을 표시합니다.",
+  "ChatGPT title differs": "ChatGPT 제목이 다릅니다",
   "Sync manual chat titles to ChatGPT": "수동 채팅 제목을 ChatGPT에 동기화",
   "Push titles you rename here (including across Compact & Resume) to ChatGPT, unless ChatGPT already has a newer title.": "여기에서 이름을 바꾼 제목(‘압축 후 계속’ 이후 포함)을 ChatGPT에 반영합니다. 단, ChatGPT에 이미 더 최신 제목이 있는 경우는 제외합니다."
 }

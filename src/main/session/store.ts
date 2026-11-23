@@ -4975,13 +4975,15 @@ export async function clearImageStorage(mode: ImageStorageClearMode, sessionId?:
   const cleanupEpoch = ++assetMutationEpoch;
   let announceSelection!: (files: StoredImageFile[]) => void;
   let rejectSelection!: (error: unknown) => void;
-  let finishRetirement!: (files: Set<string>) => void;
-  let rejectRetirement!: (error: unknown) => void;
+  type Retirement = { files: Set<string> } | { error: unknown };
+  let finishRetirement!: (result: Retirement) => void;
   const selection = new Promise<StoredImageFile[]>((resolve, reject) => {
     announceSelection = resolve; rejectSelection = reject;
   });
-  const retirement = new Promise<Set<string>>((resolve, reject) => {
-    finishRetirement = resolve; rejectRetirement = reject;
+  // Inventory can fail before the asset queue awaits this result. Keep the handoff fulfilled;
+  // the cleanup owner alone throws failures, rather than leaking an unobserved rejection.
+  const retirement = new Promise<Retirement>((resolve) => {
+    finishRetirement = resolve;
   });
 
   // Claim the existing asset queue before inspecting disk. Prior writes finish first; later writes
@@ -5007,7 +5009,9 @@ export async function clearImageStorage(mode: ImageStorageClearMode, sessionId?:
       }
       for (const file of chosen) removedAssetEpoch.set(localAssetKey(file.sessionId, file.assetId), cleanupEpoch);
       announceSelection(chosen);
-      const deletable = await retirement;
+      const retired = await retirement;
+      if ('error' in retired) throw retired.error;
+      const deletable = retired.files;
       let freedBytes = 0;
       let removedFiles = 0;
       for (const file of chosen) {
@@ -5066,9 +5070,9 @@ export async function clearImageStorage(mode: ImageStorageClearMode, sessionId?:
     for (const [sessionId, ids] of bySession) {
       for (const assetId of await retireSessionAssets(sessionId, ids.images, ids.texts)) deletable.add(`${sessionId}\u0000${assetId}`);
     }
-    finishRetirement(deletable);
+    finishRetirement({ files: deletable });
   } catch (error) {
-    rejectRetirement(error);
+    finishRetirement({ error });
   }
   return cleanup;
 }

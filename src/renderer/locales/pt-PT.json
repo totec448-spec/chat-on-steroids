@@ -4155,6 +4155,9 @@
   "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "Foram libertados {0} MB desta conversa. Estão agora a ser usados {1} MB de {2} MB.",
   "Freed {0} MB. Storage usage could not be read.": "Foram libertados {0} MB. Não foi possível ler a utilização do armazenamento.",
   "Last cleanup: Freed {0} MB.": "Última limpeza: foram libertados {0} MB.",
+  "Check ChatGPT titles": "Verificar títulos no ChatGPT",
+  "Show a notice in the chat menu when the open ChatGPT chat has a different title.": "Mostra um aviso no menu se a conversa aberta no ChatGPT tiver outro título.",
+  "ChatGPT title differs": "O título é diferente no ChatGPT",
   "Sync manual chat titles to ChatGPT": "Sincronizar títulos manuais de chat com o ChatGPT",
   "Push titles you rename here (including across Compact & Resume) to ChatGPT, unless ChatGPT already has a newer title.": "Enviar para o ChatGPT os títulos renomeados aqui (incluindo ao usar Compactar e retomar), a menos que o ChatGPT já tenha um título mais recente."
 }

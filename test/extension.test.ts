@@ -25,6 +25,64 @@ beforeAll(async () => {
   backgroundSource = backgroundSource.replace(/\r\n/g, '\n');
 });
 
+it.each([
+  { state: 'active', replies: true, reason: null },
+  { state: 'background', replies: true, reason: null },
+  { state: 'replaced', replies: true, reason: 'document-changed' },
+  { state: 'navigated', replies: true, reason: 'document-changed' },
+  { state: 'terminal', replies: true, reason: 'document-changed' },
+  { state: 'duplicate after reply', replies: true, reason: 'document-changed' },
+  { state: 'duplicate', replies: false, reason: 'multiple-matching-tabs' },
+  { state: 'discarded', replies: false, reason: 'tab-unavailable' },
+  { state: 'private only', replies: false, reason: 'no-matching-tab' }
+])('checks only a uniquely matching live Web title document ($state)', async ({ state, replies, reason }) => {
+  const source = readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('async function checkWebChatTitle('), source.indexOf('async function maintainOnce()'));
+  const conversationId = '11111111-1111-4111-8111-111111111111';
+  const id = '22222222-2222-4222-8222-222222222222';
+  const target = { id: 7, status: 'complete', url: 'https://chatgpt.com/c/' + conversationId,
+    active: state === 'active', incognito: state === 'private only', discarded: state === 'discarded' };
+  const other = { ...target, id: 8, url: 'https://chatgpt.com/c/another-chat', active: !target.active, incognito: false };
+  const duplicate = { ...target, id: 9 };
+  const initial = [other, target, ...(state === 'duplicate' ? [duplicate] : [])];
+  const terminalDocuments: Record<string, string> = {};
+  let reads = 0;
+  const query = vi.fn(async ({ active }: { active?: boolean }) => {
+    const afterReply = reads++ > 0;
+    let tabs: Array<typeof target & { pendingUrl?: string }> = initial;
+    if (afterReply) {
+      if (state === 'terminal') terminalDocuments['7'] = 'doc-one';
+      if (state === 'replaced') tabs = [other, duplicate];
+      if (state === 'navigated') tabs = [other, { ...target, pendingUrl: other.url }];
+      if (state === 'duplicate after reply') tabs = [other, target, duplicate];
+    }
+    return active ? tabs.filter(tab => tab.active) : tabs;
+  });
+  const call = vi.fn(async () => ({ ok: true }));
+  const tabReply = vi.fn(async () => ({ title: 'Current Web title' }));
+  const ownerStart = source.indexOf('function ownsDocument(');
+  const ownership = source.slice(ownerStart, source.indexOf('async function markTerminal(', ownerStart));
+  const check = vm.runInNewContext(ownership + code + '\ncheckWebChatTitle', {
+    chrome: { tabs: { query } }, CHATGPT_TAB_URLS: ['https://chatgpt.com/*'],
+    connectionEpoch: 1, token: 'fixture', disconnected: false,
+    cleanConversationId: (value: string) => value, conversationFromUrl: (url: string) => url.split('/').at(-1),
+    tabDocuments: { '7': 'doc-one' }, tabEpochs: { '7': 1 },
+    terminalDocuments, retiredDocuments: {}, tabReply, call
+  });
+  await check({ id, conversationId });
+  if (replies) {
+    expect(tabReply).toHaveBeenCalledExactlyOnceWith(7, { type: 'clf-check-web-chat-title', conversationId }, { documentId: 'doc-one' }, 3000);
+  } else {
+    expect(tabReply).not.toHaveBeenCalled();
+  }
+  expect(call).toHaveBeenCalledExactlyOnceWith('/browser/web-chat-title', {
+    method: 'POST', body: JSON.stringify({
+      id, conversationId, title: reason ? null : 'Current Web title',
+      ...(reason ? { reason } : {})
+    })
+  });
+});
+
 describe('extension release metadata', () => {
   it('keeps the app package, bundled extension and bridge protocol on the same release', async () => {
     const pkg = JSON.parse(await fs.readFile(path.join(process.cwd(), 'package.json'), 'utf8')) as { version: string };

@@ -4239,6 +4239,9 @@
   "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "Из этого чата освобождено {0} МБ. Сейчас здесь занято {1} МБ из {2} МБ.",
   "Freed {0} MB. Storage usage could not be read.": "Освобождено {0} МБ. Не удалось прочитать использование хранилища.",
   "Last cleanup: Freed {0} MB.": "Последняя очистка: освобождено {0} МБ.",
+  "Check ChatGPT titles": "Проверять заголовки в ChatGPT",
+  "Show a notice in the chat menu when the open ChatGPT chat has a different title.": "Показывает уведомление в меню чата, если у открытого чата ChatGPT другой заголовок.",
+  "ChatGPT title differs": "Заголовок в ChatGPT отличается",
   "Sync manual chat titles to ChatGPT": "Синхронизировать ручные названия чатов с ChatGPT",
   "Push titles you rename here (including across Compact & Resume) to ChatGPT, unless ChatGPT already has a newer title.": "Передавать переименованные здесь названия (включая перенос через «Сжать и продолжить») в ChatGPT, если в ChatGPT уже нет более нового названия."
 }

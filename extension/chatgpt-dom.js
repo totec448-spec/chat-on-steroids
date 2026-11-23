@@ -469,6 +469,32 @@ var CLF_DOM = (() => {
     }, '');
   }
 
+  /** Confirm the current page title against the sidebar link for this exact chat. */
+  function confirmedConversationTitle(expected) {
+    return safe(() => {
+      // The worker already verifies the browser's active tab. An app window covering Chrome
+      // can make the document hidden without invalidating its exact navigation links.
+      if (conversationId() !== expected) return null;
+      const title = conversationTitle();
+      if (!title) return null;
+      const selector = 'a[data-sidebar-item="true"][href], nav a[href], [role="navigation"] a[href], a[aria-current="page"][href]';
+      const rows = [...document.querySelectorAll(selector)].filter(link => {
+        const target = new URL(link.href, location.href);
+        return target.origin === location.origin && conversationFromPath(target.pathname) === expected &&
+          !link.closest('[hidden],[aria-hidden="true"],[inert]') && link.getClientRects().length > 0;
+      });
+      if (!rows.length || !rows.every(link => {
+        if (link.querySelector('input,textarea,[contenteditable="true"]')) return false;
+        const label = link.querySelector('[dir="auto"]') ?? link;
+        const visibleTitle = label.textContent?.trim();
+        const attributeTitle = link.getAttribute('title')?.trim();
+        if (visibleTitle && attributeTitle && visibleTitle !== attributeTitle) return false;
+        return (visibleTitle || attributeTitle) === title;
+      })) return null;
+      return title;
+    }, null);
+  }
+
   /**
    * Mirrors a synced manual title onto the already-open ChatGPT tab's sidebar item and
    * document title so React's cached sidebar updates live without a manual reload.
@@ -2122,6 +2148,7 @@ var CLF_DOM = (() => {
    * it times out. Nothing here can say what a person wrote, only what kind of draft it is and whether the app
    * knows it.
    */
+  const residueKind = text => RESUME_RESIDUE.test(text) ? 'brief' : FIRST_MESSAGE_RESIDUE.test(text) ? 'context' : HANDOFF_RESIDUE.test(text) ? 'handoff' : null;
   function draftEvidence() {
     return safe(() => {
       const box = composer();
@@ -2131,13 +2158,33 @@ var CLF_DOM = (() => {
       if (hasComposerAttachments()) return 'attachment';
       const text = compactDraft(editorText(box));
       if (!text) return 'empty';
-      const kind = RESUME_RESIDUE.test(text) ? 'brief' : FIRST_MESSAGE_RESIDUE.test(text) ? 'context' : HANDOFF_RESIDUE.test(text) ? 'handoff' : null;
+      const kind = residueKind(text);
       if (!kind) return 'other';
       const bare = ownMentionFreeText(box);
       return `${kind}-${ownBrief(text) || (bare !== null && ownBrief(bare)) ? 'own' : 'foreign'}`;
     }, 'unknown');
   }
   const mentionChipCount = () => safe(() => composer()?.querySelectorAll?.(APP_MENTION_CHIP).length ?? 0, 0);
+  /**
+   * What a draft the app keeps is measured against (#2159, 2026-11-23): a brief the page did not recognise is either
+   * one it never typed (another window or an emptied storage: `typed=0`, or lengths that are not this draft's) or
+   * one ChatGPT gave back changed (a length close to a typed one). Only numbers: the length of the draft as drafts are
+   * compared (compactDraft: without whitespace and without the escape backslashes ChatGPT adds), how many briefs this
+   * page remembers typing, and the lengths of the four newest of them, which are measured the same way. Clues, not
+   * proof: briefs older than the four newest are not listed. Only a draft of the app's kinds gets numbers, never a read-only, busy or
+   * attachment reason.
+   */
+  function draftSize() {
+    return safe(() => {
+      if (!/^(brief|context|handoff)-/.test(draftEvidence())) return '';
+      const box = composer();
+      const text = box?.isConnected ? compactDraft(editorText(box)) : '';
+      if (!text || !residueKind(text)) return '';
+      const known = [...new Set([...storedBriefs(), ...typedBriefs])];
+      const lengths = known.slice(-4).reverse().map(fingerprint => Number(fingerprint.split(':')[0])).filter(length => Number.isInteger(length) && length > 0);
+      return `:len=${text.length}:typed=${known.length}${lengths.length ? `:lens=${lengths.join('/')}` : ''}`;
+    }, '');
+  }
 
   /**
    * The Compact & Resume briefs the app typed, as short fingerprints of their compacted text. They are kept in
@@ -2183,10 +2230,11 @@ var CLF_DOM = (() => {
     const text = compactDraft(value);
     if (!OWN_RESIDUE.test(text)) return;
     const fingerprint = briefFingerprint(text);
-    if (!typedBriefs.includes(fingerprint)) {
-      typedBriefs.push(fingerprint);
-      if (typedBriefs.length > MAX_TYPED_BRIEFS) typedBriefs.shift();
-    }
+    // A brief typed again is the newest one again: the order is what #2159's diagnostic lists.
+    const known = typedBriefs.indexOf(fingerprint);
+    if (known !== -1) typedBriefs.splice(known, 1);
+    typedBriefs.push(fingerprint);
+    if (typedBriefs.length > MAX_TYPED_BRIEFS) typedBriefs.shift();
     try {
       const stored = storedBriefs().filter(value => value !== fingerprint);
       stored.push(fingerprint);
@@ -3875,26 +3923,29 @@ var CLF_DOM = (() => {
       return trigger?.getAttribute('data-composer-navigation-target') === 'reasoning' &&
         trigger.getAttribute('data-clf-picker-route') === location.pathname;
     };
+    const nativeReasoningMatches = (effort, nativeOwned) => {
+      // Fiber can retain High while the separate native control says Medium or
+      // disappears. Preserve the old layout and non-standard effort mappings.
+      const native = nativeOwned ? modelPickerTrigger() : null;
+      return !nativeOwned || !['none', 'low', 'medium', 'high'].includes(effort) ||
+        (native?.getAttribute('data-composer-navigation-target') === 'reasoning' &&
+          native.getAttribute('data-clf-picker-route') === location.pathname &&
+          native.getAttribute('data-selected-reasoning-effort') === effort);
+    };
     const confirmAfterClose = async (expected, version, nativeOwned) => {
       if (!stillCurrent()) return selectionFailed('the chat changed meanwhile', 'owner-lost');
       const after = await readPickerState(); observe(after);
       const current = after?.choices.find(choice => choice.bucket === after.currentBucket);
       if (!stillCurrent()) return selectionFailed('the chat changed meanwhile', 'owner-lost');
-      // Fiber can retain High after the separate native trigger says Medium or
-      // disappears. Preserve the old layout and non-standard effort mappings.
-      const native = nativeOwned ? modelPickerTrigger() : null;
-      const nativeMatches = !nativeOwned || !['none', 'low', 'medium', 'high'].includes(current?.effort) ||
-        (native?.getAttribute('data-composer-navigation-target') === 'reasoning' &&
-          native.getAttribute('data-clf-picker-route') === location.pathname &&
-          native.getAttribute('data-selected-reasoning-effort') === current.effort);
       return after?.version === version && current?.available === true &&
         current.id === expected.id && current.familyId === expected.familyId &&
-        current.effort === expected.effort && nativeMatches ||
+        current.effort === expected.effort && nativeReasoningMatches(current.effort, nativeOwned || nativeReasoningOwned()) ||
         selectionFailed('the model or reasoning effort changed after closing the picker', 'changed');
     };
     let result = false;
     const choose = async () => {
       if (!model && !effort) return true;
+      let nativeOwned = nativeReasoningOwned();
       // The page's own picker state, read without opening anything. A worker tab opens with its model
       // in the address and ChatGPT applies it; opening the picker only to prove that left its closing
       // animation unfinished in a hidden, throttled tab, its focus scope hid the composer, and every
@@ -3902,18 +3953,22 @@ var CLF_DOM = (() => {
       if (!document.querySelector(PICKER)) {
         const passive = await readPickerState(); observe(passive);
         const now = passive?.choices.find(choice => choice.bucket === passive.currentBucket);
-        if (now?.available && (!model || now.id === model || now.familyId === model) && (!effort || now.effort === effort)) {
+        nativeOwned = nativeOwned || nativeReasoningOwned();
+        if (!stillCurrent()) return selectionFailed('the chat changed meanwhile', 'owner-lost');
+        if (now?.available && (!model || now.id === model || now.familyId === model) &&
+            (!effort || now.effort === effort) && nativeReasoningMatches(now.effort, nativeOwned)) {
           trace.resolved = pair(now); trace.selected = pair(now); return stillCurrent();
         }
       }
       phase('open');
-      const ui = modelPickerAccess(stillCurrent, observe, phase), original = await ui.open();
+      const ui = modelPickerAccess(stillCurrent, state => { observe(state); nativeOwned = nativeOwned || nativeReasoningOwned(); }, phase), original = await ui.open();
       if (!original) {
         // Keep the existing user-visible failure wording; the structured log
         // distinguishes a guarded selection drift from an unreadable picker.
         selectionFailed('the picker did not open or could not be read', ui.openingRefusal() || 'unreadable');
         phase('close'); trace.closed = await ui.close(); return false;
       }
+      nativeOwned = nativeOwned || nativeReasoningOwned();
       // Account-evaluated exact selection is already proof; visiting unrelated
       // versions can reset it or fail unnecessarily. Captions and denied choices
       // do not qualify, and native closure still has to succeed.
@@ -3921,14 +3976,13 @@ var CLF_DOM = (() => {
       if (current?.available && (current.id === model || current.familyId === model) &&
           (!effort || current.effort === effort)) {
         trace.resolved = pair(current); trace.selected = pair(current);
-        const nativeOwned = nativeReasoningOwned();
         phase('close'); const closed = trace.closed = await ui.close();
         if (!closed) return selectionFailed('the picker did not close', 'close-failed');
         return confirmAfterClose(current, original.version, nativeOwned);
       }
       // A native control observed before selection must still be corroborated at close,
       // even if provider transitions remove its ownership marker in the meantime.
-      let selected = false, closed = false, expectedChoice = null, expectedVersion = null, nativeOwned = nativeReasoningOwned();
+      let selected = false, closed = false, expectedChoice = null, expectedVersion = null;
       try {
         // Exact provider slug is preferred. Existing saved display slugs may resolve
         // only to an actually observed, available pair; never to an account default.
@@ -4109,7 +4163,7 @@ var CLF_DOM = (() => {
             // An earlier brief of the app's own that ChatGPT kept in this Project home (#2068).
             // ChatGPT can restore the draft after it was emptied, so this may happen again, a few times only.
             if (residueClears < 3 && clearResumeResidue()) { residueClears++; return check(); }
-            lastObservation = `composer-not-ready:draft=${draftEvidence()}:clears=${residueClears}:chips=${mentionChipCount()}`;
+            lastObservation = `composer-not-ready:draft=${draftEvidence()}:clears=${residueClears}:chips=${mentionChipCount()}${draftSize()}`;
             return;
           }
           if (turns().some(turn => !onKeptPage(turn.node))) {
@@ -4151,7 +4205,7 @@ var CLF_DOM = (() => {
           // The source chat's composer can hold the app's own text that ChatGPT put back as a draft (the handoff
           // request it just sent): emptied like the Project home's, never a person's.
           if (source?.isConnected && sourceResidueClears < 3 && clearResumeResidue()) { sourceResidueClears++; return check(); }
-          lastObservation = `source-not-ready:draft=${draftEvidence()}:clears=${sourceResidueClears}:chips=${mentionChipCount()}`;
+          lastObservation = `source-not-ready:draft=${draftEvidence()}:clears=${sourceResidueClears}:chips=${mentionChipCount()}${draftSize()}`;
           return;
         }
         const links = projectLinks();
@@ -4409,6 +4463,7 @@ var CLF_DOM = (() => {
     conversationId,
     conversationFromPath,
     conversationTitle,
+    confirmedConversationTitle,
     applyConversationTitle,
     turns,
     presentationTurns,

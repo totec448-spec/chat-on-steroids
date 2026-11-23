@@ -1490,6 +1490,36 @@ it('offers a chat\'s actions in one menu, by kind of row, and opens it with a ri
   expect(doc.querySelector('.row-menu')).toBeNull();
 });
 
+it('clears a Web title notice when the selected browser changes', async () => {
+  const chat = {
+    id: 'web-title-menu-0001', title: 'Manual title', titleSource: 'manual',
+    conversationId: '11111111-1111-4111-8111-111111111111', chatIds: [], startedAt: 1, updatedAt: 2, agents: []
+  };
+  const checkWebChatTitle = vi.fn(async () => ({ ok: true, data: 'different' }));
+  const mounted = await mountChat({}, [], {
+    listSessions: async () => ({ ok: true, data: { sessions: [chat], activeId: null, pressure: [], blocked: [], trusted: [] } }),
+    checkWebChatTitle
+  });
+  const doc = mounted.window.document;
+  const select = (chatBrowser: string) => mounted.push({
+    ...mounted.state, config: {
+      ...mounted.state.config, sessions: { ...mounted.state.config.sessions, checkWebChatTitles: true },
+      ui: { ...mounted.state.config.ui, chatBrowser }
+    }
+  });
+  select('chrome');
+  const row = () => doc.querySelector<HTMLElement>('.sess[data-id="' + chat.id + '"]');
+  await waitFor(() => expect(row()).not.toBeNull());
+  rowMenuItem(row()!, 'rename');
+  const rename = () => doc.querySelector('.row-menu [data-row-action="rename"]');
+  await waitFor(() => expect(rename()?.textContent).toContain('ChatGPT title differs'));
+  select('edge');
+  expect(rename()?.textContent).not.toContain('ChatGPT title differs');
+  select('chrome');
+  expect(rename()?.textContent).not.toContain('ChatGPT title differs');
+  expect(checkWebChatTitle).toHaveBeenCalledTimes(1);
+});
+
 it('describes possible ChatGPT title sync only for a linked chat when enabled', async () => {
   const linked = {
     id: 'rename-tooltip-linked', title: 'Linked chat', conversationId: 'tooltip-conversation',

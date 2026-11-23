@@ -119,7 +119,7 @@ import { browserExtensionRequired, type AppState, type Config } from '../shared/
 import { $, ago, clockTime, compactAgeText, compactNumber, disclosureChevron, el, elapsedDurationText, icon, rowTime, run, setIcon, toast } from './dom.js';
 import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_REPAIR_DEFERRED_TEXT, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
 import { STRICT_REFUSAL_PROGRESS_PREFIX, UNPROVEN_WORKER_NOTICE, UNTRUSTED_NOTICE, UNTRUSTED_WORKER_NOTICE } from '../shared/trust-notices.js';
-import { closeRowMenu, onRowMenuChange, openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem, type RowMenuOptions } from './row-menu.js';
+import { closeRowMenu, onRowMenuChange, openRowMenu, rowMenuOpenFor, refreshRowMenu, toggleRowMenu, type RowMenuItem, type RowMenuOptions } from './row-menu.js';
 import { createSearchPopup } from './search-popup.js';
 import { holdToTalkShortcut, holdToTalkSupported, primaryShortcut } from './shortcuts.js';
 import { initSshProjectDialog } from './ssh-project-dialog.js';
@@ -177,6 +177,7 @@ let deps: Deps;
 let visible = false;
 
 let sessions: SessionSummary[] = [];
+let webTitleSettingsRevision = 0;
 let pressure = new Map<string, TokenPressure>();
 let sessionTotal = 0;
 let sessionPageCursor: { updatedAt: number; id: string } | null = null;
@@ -1453,7 +1454,30 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   ui(more, 'title', () => t('More options'));
   ui(more, 'aria-label', () => t('More options'));
   const menu = (at?: { x: number; y: number }) => ({
-    owner, at, label: () => shownSessionTitle(summary), anchor: () => rowMenuButton(owner), items: () => items
+    owner, at, label: () => shownSessionTitle(summary), anchor: () => rowMenuButton(owner),
+    items: () => {
+      const config = deps.state()?.config;
+      if (summary.titleSource !== 'manual' || !summary.conversationId || !config?.sessions.checkWebChatTitles) return items;
+      const browser = config.ui.chatBrowser;
+      const revision = webTitleSettingsRevision;
+      let differs = false;
+      const matchesMenu = () => {
+        const settings = deps.state()?.config;
+        const current = sessions.find(chat => chat.id === summary.id);
+        return revision === webTitleSettingsRevision && settings?.sessions.checkWebChatTitles === true &&
+          settings.ui.chatBrowser === browser && current?.titleSource === 'manual' &&
+          current.title === summary.title && current.conversationId === summary.conversationId;
+      };
+      void api.checkWebChatTitle(summary.id).then(reply => {
+        if (reply?.ok && reply.data === 'different' && rowMenuOpenFor(owner) && matchesMenu()) {
+          differs = true;
+          refreshRowMenu();
+        }
+      }).catch(() => undefined);
+      return items.map(item => item.action === 'rename'
+        ? { ...item, description: () => differs && matchesMenu() ? t('ChatGPT title differs') : '' }
+        : item);
+    }
   });
   more.addEventListener('click', (event) => { event.stopPropagation(); removeSessionTooltip(); toggleRowMenu(menu()); });
   row.addEventListener('contextmenu', (event) => { event.preventDefault(); removeSessionTooltip(); openRowMenu(menu({ x: event.clientX, y: event.clientY })); });
@@ -8610,6 +8634,7 @@ export function chatSettingsPatch(current: Config): {
       // Both follow the single threshold above rather than being typed separately.
       advisoryTokens: threshold,
       limitTokens: urgentFrom(threshold),
+      checkWebChatTitles: $<HTMLInputElement>('checkWebChatTitles').checked,
       storageLimitGiB: (RECORDING_STORAGE_LIMITS_GIB as readonly number[]).includes(Number($<HTMLSelectElement>('recordingStorageLimit').value))
         ? Number($<HTMLSelectElement>('recordingStorageLimit').value) as RecordingStorageLimitGiB
         : current.sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB,
@@ -9099,6 +9124,7 @@ const CHAT_INPUTS = [
   'handoffPrompt',
   'handoffLength',
   'recordingStorageLimit',
+  'checkWebChatTitles',
   'syncManualChatTitles',
   'goalPrompt',
   'goalObjectivePrompt',
@@ -9200,6 +9226,12 @@ export function chatApply(state: AppState, previous?: Config): void {
     config.sessions.syncManualChatTitles === true,
     previous?.sessions.syncManualChatTitles
   );
+  applyChatChecked($<HTMLInputElement>('checkWebChatTitles'), config.sessions.checkWebChatTitles === true, previous?.sessions.checkWebChatTitles);
+  if (previous && (previous.ui.chatBrowser !== config.ui.chatBrowser ||
+      previous.sessions.checkWebChatTitles !== config.sessions.checkWebChatTitles)) {
+    webTitleSettingsRevision++;
+    refreshRowMenu();
+  }
   applyAutoCompactHint(config);
   $<HTMLInputElement>('autoCompactTokens').disabled = !config.compaction.auto;
 
