@@ -51,6 +51,7 @@ import { connectTelegram, disconnectTelegram, onTelegramChange, telegramView, te
 import { DEFAULT_PHONE_PUSH, type PhonePushSettings } from '../shared/phone-push.js';
 import { retryGoalBrowserHelper } from './goal.js';
 import { requestBrowserPreferences } from './browser-preferences.js';
+import { cancelWebChatTitleCheck, readWebChatTitle } from './web-chat-title.js';
 import { sendDesktopInput, cancelDesktopInput, retryQueuedInputBrowser, retireDesktopOpening } from './session/start-input.js';
 import { isSessionRemoving, withSessionRemoval } from './session/removal.js';
 import { wakeBrowserUrl } from './browser-startup.js';
@@ -325,6 +326,7 @@ const settingsPatch = z.object({
     retainDays: z.number().int().min(0).max(3650),
     advisoryTokens: z.number().int().min(10_000).max(4_000_000),
     limitTokens: z.number().int().min(10_000).max(4_000_000),
+    checkWebChatTitles: z.boolean().optional(),
     storageLimitGiB: z.number().refine(size => (RECORDING_STORAGE_LIMITS_GIB as readonly number[]).includes(size))
       .transform(size => size as RecordingStorageLimitGiB).optional()
   }),
@@ -570,6 +572,11 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         wanted.sessions.advisoryTokens
       ),
       limitTokens: pick(current.sessions.limitTokens, base.sessions.limitTokens, wanted.sessions.limitTokens),
+      checkWebChatTitles: pick(
+        current.sessions.checkWebChatTitles ?? false,
+        base.sessions.checkWebChatTitles ?? false,
+        wanted.sessions.checkWebChatTitles ?? base.sessions.checkWebChatTitles ?? false
+      ),
       storageLimitGiB: pick(current.sessions.storageLimitGiB, base.sessions.storageLimitGiB, wanted.sessions.storageLimitGiB)
     },
     compaction: {
@@ -943,6 +950,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       else if (!config.goal.impulseMinutes && (proposed.goal.impulseMinutes ?? 0) > 0) await cancelFinishInputs(true);
       return proposed;
     }, async (published, previous) => {
+      if (!published.sessions.checkWebChatTitles || published.ui.chatBrowser !== previous.ui.chatBrowser) cancelWebChatTitleCheck();
       if (previous.ui.finishTool && !published.ui.finishTool) await cancelFinishInputs(false);
       else if ((previous.goal.impulseMinutes ?? 0) > 0 && !published.goal.impulseMinutes) await cancelFinishInputs(true);
     }, publishBridgePortChange);
@@ -2514,6 +2522,40 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     }).parse(payload);
     if (!await getSession(id)) throw new Error('Session not found');
     return setBookmark(id, { messageId, excerpt, messageTime }, on);
+  });
+  handle('sessions:checkWebTitle', async (payload) => {
+    const { id } = z.object({ id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i) }).strict().parse(payload);
+    const { ui: { chatBrowser }, sessions: settings } = getConfig();
+    if (!settings.checkWebChatTitles) {
+      logInfo('web chat title: check skipped (disabled)');
+      return 'unavailable';
+    }
+    const chat = await getSession(id);
+    if (chat?.titleSource !== 'manual' || !chat.conversationId) {
+      logInfo('web chat title: check skipped (ineligible session)');
+      return 'unavailable';
+    }
+    if (getConfig().ui.chatBrowser !== chatBrowser) {
+      logInfo('web chat title: check skipped (browser changed)');
+      return 'unavailable';
+    }
+    const title = await readWebChatTitle(chat.conversationId);
+    if (title === null) return 'unavailable';
+    const current = await getSession(id);
+    const config = getConfig();
+    if (config.ui.chatBrowser !== chatBrowser) {
+      logInfo('web chat title: comparison discarded (browser changed)');
+      return 'unavailable';
+    }
+    if (!config.sessions.checkWebChatTitles) {
+      logInfo('web chat title: comparison discarded (disabled)');
+      return 'unavailable';
+    }
+    if (current?.titleSource !== 'manual' || current.conversationId !== chat.conversationId || current.title !== chat.title) {
+      logInfo('web chat title: comparison discarded (session changed)');
+      return 'unavailable';
+    }
+    return title === chat.title ? 'match' : 'different';
   });
   handle('sessions:rename', async (payload) => {
     const { id, title } = sessionNameArg.parse(payload);

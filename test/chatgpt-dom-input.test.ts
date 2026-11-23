@@ -30,6 +30,7 @@ interface DomApi {
   toolBlocks(turn: ReturnType<DomApi['turns']>[number]): HTMLElement[];
   hideActivity(turn: ReturnType<DomApi['turns']>[number], covered: HTMLElement[]): void;
   sidebarListsProject(id: string): boolean | null;
+  confirmedConversationTitle(id: string): string | null;
 }
 let dom: JSDOM;
 let document: Document;
@@ -58,6 +59,50 @@ function user(text: string) {
   message.textContent = text;
   section.append(message); document.body.append(section);
 }
+
+it('confirms titles only from the exact visible conversation and sidebar row', () => {
+  const previous = '11111111-1111-4111-8111-111111111111';
+  const current = '22222222-2222-4222-8222-222222222222';
+  dom.window.history.replaceState(null, '', '/c/' + previous);
+  document.title = 'Old name - ChatGPT';
+  document.body.insertAdjacentHTML('beforeend',
+    '<a data-sidebar-item="true" href="/c/' + previous + '"><span dir="auto">Old name</span></a>');
+  expect(api.confirmedConversationTitle(previous)).toBe('Old name');
+
+  dom.window.history.replaceState(null, '', '/g/project/c/' + current);
+  expect(api.confirmedConversationTitle(previous)).toBeNull();
+  expect(api.confirmedConversationTitle(current)).toBeNull();
+  document.body.insertAdjacentHTML('beforeend',
+    '<a data-sidebar-item="true" href="/g/project/c/' + current + '"><span dir="auto">New name</span></a>');
+  expect(api.confirmedConversationTitle(current)).toBeNull();
+  document.title = 'New name - ChatGPT';
+  expect(api.confirmedConversationTitle(current)).toBe('New name');
+  const row = document.querySelector<HTMLAnchorElement>('a[href$="' + current + '"]')!;
+  row.title = 'New name';
+  const label = row.querySelector('span')!;
+  label.textContent = 'Stale name';
+  expect(api.confirmedConversationTitle(current)).toBeNull();
+  label.textContent = '';
+  expect(api.confirmedConversationTitle(current)).toBe('New name');
+  label.textContent = 'New name';
+  row.title = 'Stale name';
+  expect(api.confirmedConversationTitle(current)).toBeNull();
+  row.title = 'New name';
+  expect(api.confirmedConversationTitle(current)).toBe('New name');
+  row.hidden = true;
+  expect(api.confirmedConversationTitle(current)).toBeNull();
+  row.hidden = false;
+  row.append(document.createElement('input'));
+  expect(api.confirmedConversationTitle(current)).toBeNull();
+  row.remove();
+  Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+  document.body.insertAdjacentHTML('beforeend',
+    '<nav><a href="/c/' + current + '"><span dir="auto">New name</span></a></nav>');
+  expect(api.confirmedConversationTitle(current)).toBe('New name');
+  document.body.insertAdjacentHTML('beforeend',
+    '<nav><a href="/c/' + current + '"><span dir="auto">Older name</span></a></nav>');
+  expect(api.confirmedConversationTitle(current)).toBeNull();
+});
 
 it('reads the September search-unit renderer without legacy message attributes', () => {
   const turn = document.createElement('div');

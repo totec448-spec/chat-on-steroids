@@ -4153,5 +4153,8 @@
   "This chat": "Este chat",
   "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "{0} MB liberados deste chat. Agora {1} MB de {2} MB estão em uso aqui.",
   "Freed {0} MB. Storage usage could not be read.": "Foram liberados {0} MB. Não foi possível ler o uso do armazenamento.",
-  "Last cleanup: Freed {0} MB.": "Última limpeza: foram liberados {0} MB."
+  "Last cleanup: Freed {0} MB.": "Última limpeza: foram liberados {0} MB.",
+  "Check ChatGPT titles": "Verificar títulos no ChatGPT",
+  "Show a notice in the chat menu when the open ChatGPT chat has a different title.": "Mostra um aviso no menu se o chat aberto no ChatGPT estiver com outro título.",
+  "ChatGPT title differs": "O título é diferente no ChatGPT"
 }

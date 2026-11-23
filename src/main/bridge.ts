@@ -39,6 +39,7 @@ let browserWake: ReturnType<typeof attachBrowserWake> | null = null;
 import { browserWindowBounds, currentBrowserWorkArea } from './browser-window-layout.js';
 export { setBrowserWorkArea } from './browser-window-layout.js';
 import { pendingBrowserPreferenceRequest, acknowledgeBrowserPreferences } from './browser-preferences.js';
+import { acceptWebChatTitle, offerWebChatTitleCheck } from './web-chat-title.js';
 import { sessionFinishHeld, releaseSessionFinish, getSessionFinishDraft, sessionFinishWaiting } from './session/finish.js';
 import { observeUsage } from './session/usage.js';
 import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, lostBrowserOpening, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, queuedInputOfferBlocker, continueAsOrdinaryMessage, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, withdrawOwnContinuesAfterStop, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation, ownUnsentTexts, ownSentResidue, retireMismatchedRecoveryInput, noteInputHeld } from './session/input.js';
@@ -784,6 +785,15 @@ function chosenBuiltInBrowser(req: http.IncomingMessage): boolean {
 function browserOf(req: http.IncomingMessage): string | null {
   const id = req.headers['x-extension-browser'];
   return typeof id === 'string' && /^[a-z0-9]{16,64}$/.test(id) ? id : null;
+}
+function webTitleBrowser(req: http.IncomingMessage): string | null {
+  const browser = browserOf(req);
+  if (!browser || staleCompanion(req)) return null;
+  const selected = getConfig().ui.chatBrowser;
+  if (selected === 'cos') return chosenBuiltInBrowser(req) ? browser : null;
+  return req.headers['x-extension-host'] === 'browser' &&
+    geckoExtension(req) === (selected === 'firefox') &&
+    externalExtension?.browserId === browser ? browser : null;
 }
 const browserSeenAt = new Map<string, number>();
 /** Until when a browser's extension reloads into a new build; it takes no new message meanwhile. */
@@ -3486,6 +3496,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     return json(res, ok ? 200 : 409, { ok }, origin);
   }
+  if (route === '/browser/web-chat-title' && req.method === 'POST') {
+    const body = await readBody(req, 2048);
+    const browser = webTitleBrowser(req);
+    const accepted = browser !== null && acceptWebChatTitle(browser, body);
+    return json(res, accepted ? 200 : 409, { ok: accepted }, origin);
+  }
+
   if (route === '/browser/preferences' && req.method === 'POST') {
     const accepted = acknowledgeBrowserPreferences(await readBody(req));
     return json(res, accepted ? 200 : 409, { ok: accepted }, origin);
@@ -3611,6 +3628,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const pendingInputs = otherBrowser ? [] : await pendingBrowserInputs();
     const pendingIds = new Set((await pendingBrowserInputs()).map(input => input.id));
     for (const id of openingCustody.keys()) if (!pendingIds.has(id)) openingCustody.delete(id);
+    const titleBrowser = req.method === 'POST' ? webTitleBrowser(req) : null;
+    const webChatTitleCheck = titleBrowser ? offerWebChatTitleCheck(titleBrowser) : undefined;
     return json(
       res,
       200,
@@ -3626,6 +3645,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           [surface, apps.map(({ appId, linkId, name }) => ({ appId, linkId, name }))])),
         pluginRefreshRequests: otherBrowser ? [] : (await authorizedPluginRefreshPublications(getConfig().ui.autoRefreshPlugins === true)).map(({ surface, schemaId, connectorName }) => ({ surface, schemaId, connectorName })),
         browserPreferenceRequest: pendingBrowserPreferenceRequest(),
+        ...(webChatTitleCheck ? { webChatTitleCheck } : {}),
         projectCreateRequests: otherBrowser ? [] : await pendingProjectCreates(),
         inputOpeningIds: inputRows.filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).map(row => row.id),
         // The ones being sent right now (handed to a browser), not those that only wait in the queue:
