@@ -19,7 +19,7 @@ vi.mock('../src/main/logger.js', async original => {
 });
 
 // Lets a test make one Git command reject (a timeout, a spawn failure) instead of exiting non-zero.
-const gitFault = vi.hoisted(() => ({ stopped: true, reject: null as null | ((args: string[]) => boolean), rejectAfter: null as null | ((args: string[]) => boolean), before: null as null | ((cwd: string, args: string[]) => Promise<void>) }));
+const gitFault = vi.hoisted(() => ({ signal: false, stopped: true, reject: null as null | ((args: string[]) => boolean), rejectAfter: null as null | ((args: string[]) => boolean), before: null as null | ((cwd: string, args: string[]) => Promise<void>) }));
 vi.mock('../src/main/project-git.js', async original => {
   const real = await original<typeof import('../src/main/project-git.js')>();
   return { ...real, runGit: async (cwd: string, args: string[], ...rest: unknown[]) => {
@@ -27,7 +27,7 @@ vi.mock('../src/main/project-git.js', async original => {
     if (gitFault.reject?.(args)) throw Object.assign(new Error('Git took too long to respond'), { gitStopped: gitFault.stopped });
     const result = await (real.runGit as (...all: unknown[]) => Promise<unknown>)(cwd, args, ...rest);
     if (gitFault.rejectAfter?.(args)) throw Object.assign(new Error('Git took too long to respond'), { gitStopped: gitFault.stopped });
-    return result;
+    return gitFault.signal && args[0] === 'commit' ? { ...(result as object), code: -1 } : result;
   } };
 });
 
@@ -54,6 +54,7 @@ beforeEach(async () => {
   gitFault.rejectAfter = null;
   gitFault.before = null;
   gitFault.stopped = true;
+  gitFault.signal = false;
 });
 
 afterEach(async () => {
@@ -642,6 +643,19 @@ describe('commit', () => {
     expect(await git(root, 'log', '-1', '--format=%s')).toBe('No receipt available');
     expect(await git(root, 'show', ':kept.ts')).toBe('export const kept = 2;');
     await expect(fs.stat(path.join(root, '.git', 'logs'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await fs.rename(path.join(root, '.git', 'index.lock'), path.join(root, '.git', 'index'));
+    expect(await git(root, 'diff', '--cached', '--name-only')).toBe('');
+  });
+
+  it('keeps recovery state when Git closes with a signal instead of an exit status', async () => {
+    const { root, id } = await project();
+    await change(root);
+    gitFault.signal = true;
+    await expect(commitProjectChanges(id, { message: 'Accepted before signal', paths: ['kept.ts'], expectedToken: await revision(id) }))
+      .rejects.toThrow('Git state needs recovery');
+    gitFault.signal = false;
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('Accepted before signal');
+    expect(await git(root, 'show', ':kept.ts')).toBe('export const kept = 1;');
     await fs.rename(path.join(root, '.git', 'index.lock'), path.join(root, '.git', 'index'));
     expect(await git(root, 'diff', '--cached', '--name-only')).toBe('');
   });
