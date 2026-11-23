@@ -5864,26 +5864,40 @@ The real index is never staged into or restored on failure: a plain competing co
 released its index lock before hooks and later advance HEAD using its prepared original index.
 A definite refusal discards only our private files, preserving hand-picked partial staging byte
 for byte. A competing lock is never removed. Linked worktrees use their own index, not the common
-index. Private-index writes opt into a bounded Git termination wait (close, not just parent exit);
-unconfirmed completion retains recovery state rather than discarding a possibly active index.
+index. A Git timeout never proves that hook/filter descendants stopped, even when the parent's
+pipes close. Interrupted writers therefore retain recovery state; only a failed launch can
+attest that no child started. No process-tree kill or new runner timeout contract is introduced.
 An accepted commit reconciles only the chosen paths in the private index to its exact commit,
-then syncs and atomically publishes the complete index. Each attempt uses a nonce in native
+then syncs and atomically publishes the complete index and syncs its directory on macOS/Linux.
+A directory-sync failure after rename reports a committed-but-later-failed result, not a missing
+recovery lock. Windows retains native file sync/rename without unsupported directory sync.
+Each attempt uses a nonce in native
 `GIT_REFLOG_ACTION` to identify its own accepted HEAD update after a late error; the commit
 message is unchanged, Git owns receipt expiry, and disabled reflogs stay disabled. A successful
-Git exit also confirms acceptance when reflogs are disabled; it never enters failure rollback
+Git exit resolves its own final summary's hex object ID through Git, including when reflogs are
+disabled; a later moving HEAD is never substituted. An unrecognized summary retains recovery
+state rather than guessing. A successful exit never enters failure rollback
 if a later external soft reset returns HEAD to the starting commit. Unknown HEAD/outcome, missing late
 receipt, unconfirmed termination or failed publication retains the original index AND prepared
 index.lock, preserves the branch, and shows a translated recovery error. Do not delete that
 recovery file as an empty stale lock: after stopping Git writers, inspect HEAD, both indexes and
 any index.lock.lock; publish the verified prepared index only after reconciling it with the
-accepted commit. No app recovery ledger or automatic guess is introduced.
+accepted commit. If no commit was accepted (including a crash during the initial copy), stop
+writers and verify ownership, then move the incomplete private lock aside without replacing the
+real index, allowing a retry while retaining the displaced bytes. If ownership or acceptance is
+uncertain, preserve both files and the lock. No app recovery ledger or automatic guess is introduced.
 After a definite refusal at the unchanged starting position, native `git switch --no-guess` or
 detached checkout restores HEAD only if Git permits it; busy checkout keeps the attempt branch.
 Safe `git branch -d` compares against restored HEAD with inherited upstream settings ignored for
 that command, preserving symbolic-ref and active-worktree guards. Failed branch creation proves
-no ownership: a matching branch is retained, even at the starting commit. An unborn branch is
+no ownership: a matching branch is retained, even at the starting commit, including after launch
+errors and interrupted switches; only a normal successful creation enables cleanup. An unborn branch is
 distinct from unreadable HEAD. Late failure reports that Git committed when receipt-confirmed;
 unrelated HEAD movement is never reported as success.
+Admission revalidates ref and parent after taking the index lease. This is not a general ref
+transaction: concurrent branch/ref rewrites (including Git's same-commit `switch -c` fast path)
+can bypass the index lock. The pre-existing mid-command wrong-branch race is a separate defect;
+this change detects final identity conflicts and retains recovery state rather than undoing them.
 Hooks run. Paths with `..` or an absolute start are refused before Git runs.
 `projectCommit:push` pushes the current branch (`-u <remote> HEAD:refs/heads/<branch>` when it has
 no upstream) with `GIT_TERMINAL_PROMPT=0` and, unless `GIT_SSH`, `GIT_SSH_COMMAND` or

@@ -128,10 +128,10 @@ export function gitExecutable(
 /**
  * What a call needs beyond a plain read: text or bytes on standard input (a commit message, a list for
  * `--batch-check`), more time (a push over the network), extra environment (never prompt for a
- * password or a host key), a private index for checkpoint/commit commands, no replacement objects,
- * and a bounded termination wait when a writer must prove it stopped before discarding recovery state.
+ * password or a host key), and for checkpoint commands only a temporary index outside the
+ * repository and no replacement objects.
  */
-export interface GitRunOptions { input?: string | Buffer; timeoutMs?: number; env?: NodeJS.ProcessEnv; indexFile?: string; noReplaceObjects?: boolean; settleOnFailure?: boolean }
+export interface GitRunOptions { input?: string | Buffer; timeoutMs?: number; env?: NodeJS.ProcessEnv; indexFile?: string; noReplaceObjects?: boolean }
 /** The checkpoint code's name for the same options. */
 export type GitOptions = GitRunOptions;
 
@@ -151,31 +151,23 @@ export async function runGit(cwd: string, args: string[], maxBytes = MAX_GIT_OUT
     }
     const stdout: Buffer[] = [], stderr: Buffer[] = [];
     let stdoutBytes = 0, stderrBytes = 0, settled = false;
-    let interrupted: Error | undefined;
-    let stopTimer: ReturnType<typeof setTimeout> | undefined;
     const finish = (error?: Error, code = -1): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      clearTimeout(stopTimer);
       if (error) reject(error);
       else resolve({ code, stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr).toString('utf8').trim() });
     };
-    const interrupt = (error: Error): void => {
-      if (interrupted || settled) return;
-      interrupted = error;
+    const timer = setTimeout(() => {
       child.kill();
-      if (!options.settleOnFailure) { finish(error); return; }
-      // Close, not just exit: a hook can retain the pipes and still be writing.
-      // Bound the wait; unknown completion must retain the caller's recovery index.
-      stopTimer = setTimeout(() => { child.kill('SIGKILL'); finish(error); }, 10_000);
-    };
-    const timer = setTimeout(() => interrupt(new Error('Git took too long to respond')), options.timeoutMs ?? GIT_TIMEOUT_MS);
+      finish(new Error('Git took too long to respond'));
+    }, options.timeoutMs ?? GIT_TIMEOUT_MS);
+    // A failed launch proves no Git child started; a timeout/closed pipe does not.
     child.once('error', error => finish(Object.assign(error, { gitStopped: !child.pid })));
     child.stdout!.on('data', (chunk: Buffer) => {
       stdoutBytes += chunk.length;
       if (stdoutBytes > maxBytes) {
-        interrupt(new Error('Git returned too much data')); return;
+        child.kill(); finish(new Error('Git returned too much data')); return;
       }
       stdout.push(chunk);
     });
@@ -183,7 +175,7 @@ export async function runGit(cwd: string, args: string[], maxBytes = MAX_GIT_OUT
       stderrBytes += chunk.length;
       if (stderrBytes <= 64 * 1024) stderr.push(chunk);
     });
-    child.once('close', code => finish(interrupted && Object.assign(interrupted, { gitStopped: true }), code ?? -1));
+    child.once('close', code => finish(undefined, code ?? -1));
   });
 }
 
