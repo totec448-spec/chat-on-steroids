@@ -250,7 +250,7 @@ export async function commitProjectChanges(projectId: string, request: CommitReq
     stopped = false;
     try {
       const result = await runGit(repo.root, args, undefined, options);
-      stopped = true;
+      stopped = result.code >= 0;
       return result;
     } catch (error) {
       stopped = (error as { gitStopped?: boolean }).gitStopped === true;
