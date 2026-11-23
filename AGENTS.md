@@ -5870,7 +5870,8 @@ An accepted commit reconciles only the chosen paths in the private index to its 
 then syncs and atomically publishes the complete index. Each attempt uses a nonce in native
 `GIT_REFLOG_ACTION` to identify its own accepted HEAD update after a late error; the commit
 message is unchanged, Git owns receipt expiry, and disabled reflogs stay disabled. A successful
-Git exit also confirms acceptance when reflogs are disabled. Unknown HEAD/outcome, missing late
+Git exit also confirms acceptance when reflogs are disabled; it never enters failure rollback
+if a later external soft reset returns HEAD to the starting commit. Unknown HEAD/outcome, missing late
 receipt, unconfirmed termination or failed publication retains the original index AND prepared
 index.lock, preserves the branch, and shows a translated recovery error. Do not delete that
 recovery file as an empty stale lock: after stopping Git writers, inspect HEAD, both indexes and
