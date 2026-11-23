@@ -5842,6 +5842,13 @@ staged. A rename commits both paths but stages only the new one. A commit that d
 before, so a hand-picked part of a file (`git add -p`) stays staged as it was; an index that cannot
 be written as a tree falls back to unstaging only what it staged. A branch it created is removed
 after HEAD is pointed back (`symbolic-ref`, which works while another program holds the index).
+Rollback first proves the symbolic HEAD and commit are still the attempt's starting position
+(on the requested new branch when created). A changed commit, changed HEAD or unreadable outcome
+keeps both the current index and branch and logs why: a post-commit hook can time out after Git
+already committed. The original failure remains visible; no success is inferred from unrelated
+HEAD movement. Unborn branches and detached starts remain distinct from an unreadable HEAD.
+Branch cleanup compare-and-deletes only the captured starting commit, so a later ref advance
+cannot be force-deleted; successful removal also removes that new branch's tracking config.
 Hooks run. Paths with `..` or an absolute start are refused before Git runs.
 `projectCommit:push` pushes the current branch (`-u <remote> HEAD:refs/heads/<branch>` when it has
 no upstream) with `GIT_TERMINAL_PROMPT=0` and, unless `GIT_SSH`, `GIT_SSH_COMMAND` or
