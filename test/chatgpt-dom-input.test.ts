@@ -569,9 +569,31 @@ describe('native Project entry readiness', () => {
     if (cleared) expect(box.textContent).toBe('');
     else {
       // What kept it is said in the reason (#2159): a person's words and a brief this page never typed are not the same thing.
-      expect(failure).toHaveBeenCalledWith(`transition-timeout:last=composer-not-ready:draft=${kind === 'person' ? 'other' : 'brief-foreign'}:clears=0:chips=0`);
+      // A brief also says how long the kept draft is and how many briefs this page remembers typing, with their
+      // lengths, never any of the text: a draft that is not one of those lengths was rewritten on its way back.
+      const compact = (text: string) => text.replace(/\\(?=\r?\n)/g, '').replace(/\\(?=[!-/:-@[-`{-~])/g, '').replace(/\s+/g, '');
+      const size = kind === 'person' ? '' : kind === 'foreign' ? `:len=${compact(left).length}:typed=0`
+        : `:len=${compact(left).length}:typed=1:lens=${compact(brief).length}`;
+      expect(failure).toHaveBeenCalledWith(`transition-timeout:last=composer-not-ready:draft=${kind === 'person' ? 'other' : 'brief-foreign'}:clears=0:chips=0${size}`);
       expect(box.textContent?.length).toBeGreaterThan(0);
     }
+  });
+  it('names the lengths of the four briefs this page typed most recently, newest first, when it keeps a brief (#2159)', async () => {
+    const { resumeBootstrapText } = await import('../src/main/session/handoff.js');
+    const brief = resumeBootstrapText('# TASK — the original goal\n\nShip the mail service.', 'pTYR0VjLJ5Xtz2FHFqajqA');
+    dom.window.localStorage.setItem('clf-typed-briefs-v1', JSON.stringify(['101:a', '102:b', '103:c', '104:d', '105:e']));
+    const link = sourceLink();
+    box.textContent = '';
+    link.addEventListener('click', event => {
+      event.preventDefault();
+      dom.reconfigure({ url: projectUrl });
+      box.replaceChildren(...brief.split(/\n\n/).map(part => { const p = document.createElement('p'); p.textContent = part; return p; }));
+    });
+    const failure = vi.fn();
+    const entered = api.enterProject(entry, undefined, failure);
+    await vi.advanceTimersByTimeAsync(12_500);
+    expect(await entered).toBe(false);
+    expect(failure).toHaveBeenCalledWith(`transition-timeout:last=composer-not-ready:draft=brief-foreign:clears=0:chips=0:len=${brief.replace(/\s+/g, '').length}:typed=5:lens=105/104/103/102`);
   });
 
   // 2026-11-12 (Windows VM, Project chat started through the app): ChatGPT also keeps the Project home's text
@@ -614,7 +636,7 @@ describe('native Project entry readiness', () => {
     expect(await entered).toBe(cleared);
     if (cleared) expect(box.textContent).toBe('');
     else {
-      expect(failure).toHaveBeenCalledWith('transition-timeout:last=composer-not-ready:draft=context-foreign:clears=0:chips=0');
+      expect(failure).toHaveBeenCalledWith(expect.stringMatching(/^transition-timeout:last=composer-not-ready:draft=context-foreign:clears=0:chips=0:len=\d+:typed=\d+(:lens=\d+(\/\d+)*)?$/));
       expect(box.textContent?.length).toBeGreaterThan(0);
     }
   });
@@ -663,7 +685,7 @@ describe('native Project entry readiness', () => {
     await vi.advanceTimersByTimeAsync(12_500);
     expect(await entered).toBe(cleared);
     // The app knows this brief and still gave up: the reason says it was the limit on clears, not the recognition.
-    if (!cleared) expect(failure).toHaveBeenCalledWith('transition-timeout:last=composer-not-ready:draft=brief-own:clears=3:chips=0');
+    if (!cleared) expect(failure).toHaveBeenCalledWith(expect.stringMatching(/^transition-timeout:last=composer-not-ready:draft=brief-own:clears=3:chips=0:len=\d+:typed=\d+(:lens=\d+(\/\d+)*)?$/));
   });
 
   // #2159 (2.1.53, the reporter's Project home): the draft ChatGPT keeps ends with the connector mention as a chip that
@@ -718,7 +740,7 @@ describe('native Project entry readiness', () => {
     expect(await entered).toBe(cleared);
     if (cleared) expect(box.textContent).toBe('');
     else {
-      expect(failure).toHaveBeenCalledWith(`transition-timeout:last=composer-not-ready:draft=${kind}:clears=0:chips=${chips}`);
+      expect(failure).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^transition-timeout:last=composer-not-ready:draft=${kind}:clears=0:chips=${chips}:len=\\d+:typed=1:lens=\\d+$`)));
       expect(box.textContent?.length).toBeGreaterThan(0);
     }
   });
@@ -824,7 +846,7 @@ describe('native Project entry readiness', () => {
     expect(await entered).toBe(cleared);
     expect(clicks).toBe(cleared ? 1 : 0);
     if (!cleared) {
-      expect(failure).toHaveBeenCalledWith('source-ready-timeout:last=source-not-ready:draft=handoff-foreign:clears=0:chips=0');
+      expect(failure).toHaveBeenCalledWith(expect.stringMatching(/^source-ready-timeout:last=source-not-ready:draft=handoff-foreign:clears=0:chips=0:len=\d+:typed=\d+(:lens=\d+(\/\d+)*)?$/));
       expect(box.textContent?.length).toBeGreaterThan(0);
     }
   });

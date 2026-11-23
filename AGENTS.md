@@ -4326,7 +4326,12 @@ read as not there, whatever its label (an app renamed in ChatGPT); another app's
 (#2159). A timeout in this step says what kept the editor, without any of its text:
 `transition-timeout:last=composer-not-ready:draft=<kind>:clears=<n>:chips=<n>`, `kind` one of `no-editor`,
 `readonly`, `busy`, `attachment`, `empty`, `other`, `brief-own`, `brief-foreign`, `context-own`, `context-foreign`
-(`…-own` with `clears=3` means the app knew the draft and ChatGPT kept putting it back). User interaction,
+(`…-own` with `clears=3` means the app knew the draft and ChatGPT kept putting it back). When the draft is one of
+the app's kinds the reason ends in `:len=<n>:typed=<n>[:lens=<a/b/c/d>]` (2026-11-23, #2159: one reporter's
+`brief-foreign` repeated for one chain of resumes): the draft's length without whitespace, how many briefs this
+page remembers typing, and the lengths of the four newest, newest first. Numbers only, no text of it. `typed=0`
+or no listed length near `len` means the page never typed it (another window, an emptied storage); a length a
+little off a listed one means ChatGPT gave it back changed. User interaction,
 cancellation or a foreign route revokes the attempt; no extra tab compensates for a missing result.
 When an automatic Compact & Resume's page acks `project-entry:source-ready-timeout…` or
 `…transition-timeout…` (nothing sent), the bridge releases that attempt's destination claim
