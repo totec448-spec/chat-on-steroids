@@ -289,6 +289,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Input and checkpoints | `input.ts` / `state/session-input.json` | Serialized acceptance, frozen payload, exclusive claim and receipt; stages belong here. |
 | Native upload originals | `input-attachments.ts` / `input-attachments/` | Immutable bytes, opaque ids; outbox owns membership and retention. |
 | Project catalog | `projects.ts` / `state/projects.json` | Serialized catalog mutation; session metadata owns association. |
+| Chat groups and pending group placement | `chat-groups.ts` / `state/chat-groups.json` | One optional `move` intent is saved with the catalog and old membership before a project-changing group move. The session's saved project decides recovery; groups never write a project. |
 | Code checkpoints | `checkpoints/store.ts` / `state/code-checkpoints.json`; tree objects in the project's own Git object store | Entry written only after `write-tree` returned its tree. Bounded per project (20); a restore's "Before restore" entry never evicts the checkpoint being restored (the oldest other one makes room). An evicted or pruned tree reads as unavailable, never as an empty comparison. |
 | Browser commands/results | `bridge.ts` / `state/bridge-commands.json`; extension ACK outbox | Intent and exact lease before text; receipt durable before ACK custody is retired. |
 | Direct browser tool calls | `browser-control.ts` process epoch/pending claims; extension `storage.session.cosBrowserControl` | One claim per command; browser incarnation plus local-session tab lease. MV3 retains custody/receipt, never replays input. App restart invalidates outstanding claims. |
@@ -1219,6 +1220,21 @@ A rejected group choice leaves the chat and its workers in their previous projec
 assignments resolve the session inside that queue, so an assignment waiting behind a move checks
 the new project rather than a stale summary. A failed project write leaves group membership
 unchanged and releases the queue for retry; queued mutations log why they wait.
+
+A project-changing move involving a group first saves an optional `move` intent with its session
+id, old/new project ids and intended group (null included), atomically alongside the existing
+version-1 catalog/members via `writeDurableNow`. Success queues the final placement and retires
+the intent in that same store snapshot. After a process crash, the first group read/mutation
+uses `getSessionOrNullIfMissing`: a committed destination restores the intended placement; an
+uncommitted move keeps the old membership; a missing chat loses its membership. Recovery is
+written immediately before the group queue resumes. It never moves a session or its workers.
+
+Unreadable session metadata, group-store I/O or recovery-write errors retain the disk record
+and refuse group mutations until retry succeeds. Readable legacy/malformed group data keeps
+its existing tolerant loading; invalid intents are ignored and logged. No IPC/shared type or
+session-metadata format changes are needed. `projects.test.ts` drops all volatile writes and
+reopens the real stores at the crash cut, including moves into a new group, out of grouping,
+uncommitted moves and failed recovery; `chat-groups.test.ts` covers legacy/corrupt group rows.
 
 Removing a project marks the catalog row `ungrouped`. Existing and unloaded sessions, pending
 inputs and workers keep their durable project association; their chats return to the ordinary
