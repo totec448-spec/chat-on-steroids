@@ -27,7 +27,7 @@ it.skipIf(process.platform === 'win32')('marks an actual failed Git launch as ha
 
 it.skipIf(process.platform === 'win32')('does not attest that delegated writers stopped when a timed-out Git hook closes its pipes', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cos-git-background-'));
-  const gate = path.join(root, 'release'), late = path.join(root, 'late'), finished = path.join(root, 'finished');
+  const gate = path.join(root, 'release'), foreground = path.join(root, 'foreground-release'), late = path.join(root, 'late'), finished = path.join(root, 'finished');
   const exec = promisify(execFile), env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^GIT_/i.test(key)));
   const git = (...args: string[]) => exec('git', args, { cwd: root, env });
   const until = async (file: string) => {
@@ -41,17 +41,20 @@ it.skipIf(process.platform === 'win32')('does not attest that delegated writers 
     await git('init', '-b', 'main');
     await git('config', 'user.name', 'Synthetic'); await git('config', 'user.email', 'synthetic@example.invalid');
     const script = path.join(root, 'writer.cjs'), hooks = path.join(root, '.git', 'hooks');
-    await fs.writeFile(script, `const fs = require('node:fs'), deadline = Date.now() + 10000;
-      const check = () => { if (fs.existsSync(${JSON.stringify(gate)})) { fs.writeFileSync(${JSON.stringify(late)}, 'late write'); return; }
+    await fs.writeFile(script, `const fs = require('node:fs'), [gate, target] = process.argv.slice(2), deadline = Date.now() + 20000;
+      const check = () => { if (fs.existsSync(gate)) { fs.writeFileSync(target, 'released'); return; }
       if (Date.now() > deadline) return; setTimeout(check, 10); }; check();`);
-    await fs.writeFile(path.join(hooks, 'post-commit'), `#!/bin/sh\n"${process.execPath}" "${script}" </dev/null >/dev/null 2>&1 &\nsleep 3\nprintf done > "${finished}"\n`, { mode: 0o755 });
+    await fs.writeFile(path.join(hooks, 'post-commit'), `#!/bin/sh\n"${process.execPath}" "${script}" "${gate}" "${late}" </dev/null >/dev/null 2>&1 &\n"${process.execPath}" "${script}" "${foreground}" "${finished}"\n`, { mode: 0o755 });
     const result = await runGit(root, ['commit', '--allow-empty', '-m', 'Delegated writer'], undefined, { timeoutMs: 2000 }).catch(error => error);
     expect(result).toBeInstanceOf(Error);
+    // Only a rejected runner releases the foreground hook. It cannot win a sleep/timer race.
+    await fs.writeFile(foreground, 'release');
     await until(finished); // Foreground hook/pipes end while the redirected child is still gated.
     await new Promise(resolve => setTimeout(resolve, 20));
     expect(result.gitStopped).not.toBe(true);
     await fs.writeFile(gate, 'release'); await until(late);
   } finally {
+    await fs.writeFile(foreground, 'release');
     await fs.writeFile(gate, 'release');
     await fs.rm(root, { recursive: true, force: true });
   }
