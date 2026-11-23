@@ -770,3 +770,26 @@ it('recovers committed group placement after a move callback reports a late fail
   initDurableStore(directory); initSessionStore(directory);
   expect((await groups.chatGroupsState()).members[chat.id]).toBe(target.id);
 });
+
+it('keeps a pending ungrouping across project-only round trips and a restart', async () => {
+  const groups = await import('../src/main/chat-groups.js');
+  groups.resetChatGroupsForTests();
+  const first = await addProject(path.join(approved, 'first'));
+  const second = await addProject(path.join(approved, 'second'));
+  const chat = await createSession({ title: 'Ungrouped round trip' });
+  await assignSessionProject(chat.id, first.id);
+  const { group } = await groups.createChatGroup(first.id, 'Original', () => true);
+  await groups.assignChatGroup({ id: chat.id, projectId: first.id }, group.id);
+  await flushDurable();
+  // Hold only the debounce timers; real project/session disk writes still run.
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    await groups.assignChatGroup(await getSession(chat.id), null);
+    await moveChatWithGroup(chat.id, second.id);
+    await moveChatWithGroup(chat.id, first.id);
+    resetDurableForTests(); resetSessionStoreForTests(); groups.resetChatGroupsForTests();
+  } finally { vi.useRealTimers(); }
+  initDurableStore(directory); initSessionStore(directory);
+  expect((await getSession(chat.id))?.projectId).toBe(first.id);
+  expect((await groups.chatGroupsState()).members[chat.id]).toBeUndefined();
+});

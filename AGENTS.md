@@ -1221,11 +1221,12 @@ assignments resolve the session inside that queue, so an assignment waiting behi
 the new project rather than a stale summary. A failed project write leaves group membership
 unchanged and releases the queue for retry; queued mutations log why they wait.
 
-A project-changing move involving a group first saves an optional `move` intent with its session
+`moveChatWithGroup` saves an optional `move` intent before every project change, with its session
 id, old/new project ids and intended group (null included), atomically alongside the existing
 version-1 catalog/members via `writeDurableNow`. Success queues the final placement and retires
-the intent in that same store snapshot. After a process crash, the first group read/mutation
-uses `getSessionOrNullIfMissing`: a committed destination restores the intended placement; an
+the intent in that same store snapshot. This includes moves with no group at either end: the
+snapshot commits a preceding debounced ungrouping so a round trip cannot revive an old group.
+After a process crash, the first group read/mutation uses `getSessionOrNullIfMissing`: a committed destination restores the intended placement; an
 uncommitted move keeps the old membership; a missing chat loses its membership. Recovery is
 written immediately before the group queue resumes. A callback error retains the intent and
 requires this same check before the next read/mutation: an error after the main project commit
