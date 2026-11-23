@@ -390,6 +390,21 @@ describe('commit', () => {
     await expect(fs.stat(path.join(root, '.git', 'index.lock'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('does not commit to a branch selected after private-index admission', async () => {
+    const { root, id } = await project();
+    await change(root);
+    gitFault.before = async (_cwd, args) => {
+      if (args[0] === 'commit') await git(root, 'switch', '-c', 'external-selection');
+    };
+    // A later error must not merely report that a wrong-branch commit already happened.
+    await commitProjectChanges(id, { message: 'Reviewed for main', paths: ['kept.ts'], expectedToken: await revision(id) }).catch(() => undefined);
+    gitFault.before = null;
+    expect(await git(root, 'log', '-1', '--format=%s', 'external-selection')).toBe('baseline');
+    expect(await git(root, 'log', '-1', '--format=%s', 'main')).toBe('baseline');
+    expect(await git(root, 'show', ':kept.ts')).toBe('export const kept = 1;');
+    expect(await fs.readFile(path.join(root, 'kept.ts'), 'utf8')).toBe('export const kept = 2;\n');
+  });
+
   it('does not undo a successful commit when an external soft reset returns HEAD to its starting position', async () => {
     const { root, id } = await project();
     const start = await git(root, 'rev-parse', 'HEAD');
