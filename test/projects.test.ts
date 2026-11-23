@@ -748,3 +748,25 @@ it.each(['legacy', 'broken JSON', 'null'] as const)('loads %s group data without
   await fs.writeFile(path.join(directory, 'state', 'chat-groups.json'), kind === 'legacy' ? JSON.stringify(legacy) : kind === 'null' ? 'null' : '{broken');
   expect(await groups.chatGroupsState()).toEqual(kind === 'legacy' ? legacy : { version: 1, groups: [], members: {} });
 });
+
+it('recovers committed group placement after a move callback reports a late failure', async () => {
+  const groups = await import('../src/main/chat-groups.js');
+  groups.resetChatGroupsForTests();
+  const first = await addProject(path.join(approved, 'first'));
+  const second = await addProject(path.join(approved, 'second'));
+  const chat = await createSession({ title: 'Late move failure' });
+  await assignSessionProject(chat.id, first.id);
+  const { group: original } = await groups.createChatGroup(first.id, 'Original', () => true);
+  const { group: target } = await groups.createChatGroup(second.id, 'Target', () => true);
+  await groups.assignChatGroup({ id: chat.id, projectId: first.id }, original.id);
+  await flushDurable();
+  await expect(groups.moveChatGroup({ id: chat.id, projectId: first.id }, second.id, target.id, async () => {
+    await moveSessionProject(chat.id, second.id);
+    throw new Error('later family write failed');
+  })).rejects.toThrow('later family write failed');
+  expect((await getSession(chat.id))?.projectId).toBe(second.id);
+  expect((await groups.chatGroupsState()).members[chat.id]).toBe(target.id);
+  resetDurableForTests(); resetSessionStoreForTests(); groups.resetChatGroupsForTests();
+  initDurableStore(directory); initSessionStore(directory);
+  expect((await groups.chatGroupsState()).members[chat.id]).toBe(target.id);
+});
