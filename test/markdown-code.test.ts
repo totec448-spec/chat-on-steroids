@@ -63,6 +63,10 @@ it('finds an indented code block that follows a heading or a thematic break dire
   for (const text of ['# Title\n    code\n', '# Title\n\tcode\n', '## T ##\n    code\n', 'Title\n---\n    code\n', '***\n    code\n', '- - -\n    code\n']) {
     expect(codeAt(text), JSON.stringify(text)).toHaveLength(1);
   }
+  // A thematic break repeats one marker; mixed markers are a paragraph.
+  for (const text of ['*-*\n    code\n', '-*-\n    code\n', '_ - _\n    code\n', '--\n    code\n']) {
+    expect(codeAt(text), JSON.stringify(text)).toHaveLength(0);
+  }
   for (const text of ['para\n    not code\n', '> quote\n    code\n', 'Title\n    code\n']) {
     expect(codeAt(text), JSON.stringify(text)).toHaveLength(0);
   }

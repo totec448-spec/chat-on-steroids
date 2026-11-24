@@ -15,7 +15,7 @@ function indentColumns(line: string): number {
 }
 
 /** A heading or thematic break is a block that is no paragraph: an indented line after it is code. */
-const LEAF_BLOCK = /^ {0,3}(?:#{1,6}(?:[ \t]|$)|(?:[-*_][ \t]*){3,}$)/;
+const LEAF_BLOCK = /^ {0,3}(?:#{1,6}(?:[ \t]|$)|(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$)/;
 /** A plain paragraph may lazily continue a list; a new block cannot. */
 function endsListParagraph(line: string, afterBlank: boolean): boolean {
   return afterBlank || /^ {0,3}(?:#{1,6}(?:[ \t]|$)|>|`{3,}|~{3,}|(?:[-*_][ \t]*){3,}$)/.test(line);
