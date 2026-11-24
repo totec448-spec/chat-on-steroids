@@ -92,24 +92,37 @@ export interface AssetRef {
   height?: number;
 }
 
+export interface SessionImageStorageInfo {
+  sessionId: string;
+  usedBytes: number;
+  limitBytes: number;
+  imageBytes: number;
+  textBytes: number;
+}
+
 /** Recording-asset storage is global; cleanup never changes the configured ceiling. */
 export interface ImageStorageInfo {
   /** All bytes charged to the global session-asset quota, including preserved non-image assets. */
   usedBytes: number;
   limitBytes: number;
+  /** Usage within the requested chat when inspected from a chat (#2198). */
+  session?: SessionImageStorageInfo;
 }
 
-export interface ImageStorageClearResult extends ImageStorageInfo {
+export interface ImageStorageClearResult extends Omit<ImageStorageInfo, 'usedBytes'> {
+  /** Global bytes used after cleanup, or `null` when a post-cleanup global recount fails. */
+  usedBytes: number | null;
   /** Physical bytes removed by this explicit user operation. */
   freedBytes: number;
   removedFiles: number;
 }
 
 /**
- * `oldest-gib` and `all` remove images only. `old-chats-gib` empties whole chats unused for a
- * week, oldest first, of images and long texts until about 1 GiB is free (#1406).
+ * `oldest-gib` and `all` remove images only across all chats. `old-chats-gib` empties whole chats
+ * unused for a week, oldest first, of images and long texts until about 1 GiB is free (#1406).
+ * `session-images` and `session-texts` target only one chat (#2198).
  */
-export type ImageStorageClearMode = 'oldest-gib' | 'all' | 'old-chats-gib';
+export type ImageStorageClearMode = 'oldest-gib' | 'all' | 'old-chats-gib' | 'session-images' | 'session-texts';
 
 /** The recording storage sizes Settings offers, in GiB. The first is the default. */
 export const RECORDING_STORAGE_LIMITS_GIB = [2, 5, 10, 20, 50] as const;
@@ -154,6 +167,21 @@ export interface FileChange {
   reviewAssetId?: string;
   /** Why no review was kept for this change, so the UI can say so instead of offering nothing. */
   reviewUnavailable?: 'too-large' | 'not-kept';
+}
+
+/** The latest recorded edit of a path within the selected chat's local project. */
+export interface ChatEdit {
+  path: string;
+  callId: string;
+  index: number;
+  position: number;
+  state: 'changed' | 'deleted' | 'missing' | 'unavailable';
+  reviewable: boolean;
+}
+
+export interface ChatEdits {
+  rows: ChatEdit[];
+  limited: boolean;
 }
 
 /** Historical edit evidence, independent of the current Git working tree. */
@@ -405,10 +433,14 @@ export type SessionEvent =
       assets?: AssetRef[];
       /** Image assets explicitly removed from local recording storage; same-message replay cannot restore them. */
       retiredImageAssetIds?: string[];
+      /** Overflow text assets explicitly removed from local recording storage; same-message replay cannot restore them. */
+      retiredTextAssetIds?: string[];
       /** First sequence assigned to this stable website message; revisions keep this anchor. */
       origin?: number;
       /** Store-owned authored-content revision; metadata and rehydration preserve it. */
       contentSeq?: number;
+      /** ChatGPT conversation id that observed this message, scoping multi-chat/rotated echo matching. */
+      conversationId?: string;
     })
   | (BaseEvent & {
       kind: 'assistant_message';
@@ -438,6 +470,8 @@ export type SessionEvent =
       state?: MessageState;
       /** Compatibility mirror for older consumers; equivalent to state === 'final'. */
       final: boolean;
+      /** ChatGPT withdrew this unfinalized streaming message from the turn before completing it. */
+      retracted?: true;
       /** This exact stable reply was proven terminal and may enter Goal policy. */
       goalEligible?: boolean;
       /** Store-owned sequence of the latest final text/state change; rendering/metadata cannot advance it. */
@@ -450,6 +484,8 @@ export type SessionEvent =
       origin?: number;
       /** Store-owned text/state revision, including interim progress before the final. */
       contentSeq?: number;
+      /** Overflow text assets explicitly removed from local recording storage; same-message replay cannot restore them. */
+      retiredTextAssetIds?: string[];
     })
   | (BaseEvent & {
       /** ChatGPT-native generated media, independent of assistant prose and local MCP calls. */
@@ -469,7 +505,7 @@ export type SessionEvent =
       previewWidth?: number;
       previewHeight?: number;
       previewStatus: 'pending' | 'available' | 'unavailable';
-      previewError?: 'not_loaded' | 'ambiguous' | 'tainted' | 'oversized' | 'invalid' | 'quota' | 'removed';
+      previewError?: 'not_loaded' | 'ambiguous' | 'tainted' | 'oversized' | 'invalid' | 'quota' | 'session_quota' | 'removed';
       asset?: AssetRef;
       /** First sequence assigned to this exact provider-message/asset tuple. */
       origin?: number;
@@ -1221,6 +1257,8 @@ export function eventTokens(event: SessionEvent): number {
         Number.isFinite(event.wireTokenEstimate) ? Math.max(0, Math.floor(event.wireTokenEstimate!)) : 0
       );
     case 'assistant_message':
+      if (event.retracted === true) return 0;
+      return storedTextTokens(event.message);
     case 'chat_error':
     case 'note':
       return storedTextTokens(event.message);

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseGitHubSkillUrl } from '../src/shared/skills.js';
 import { checkGitHubSkillUpdates, importGitHubSkill, linkGitHubSkill, updateGitHubSkill } from '../src/main/skill-github.js';
-import { importSkillPackage, initSkillsPath, listManagedSkills, removeSkill } from '../src/main/skills.js';
+import { importSkillPackage, initSkillsPath, linkSkillPackage, listManagedSkills, removeSkill, skillPackageRevision, updateSkillPackage } from '../src/main/skills.js';
 
 let userData = '';
 const json = (data: unknown): Response => new Response(JSON.stringify(data), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -26,14 +26,24 @@ function githubFixture() {
   ];
   const request = vi.fn(async (input: string) => {
     const url = new URL(input);
+    if (url.origin === 'https://raw.githubusercontent.com') {
+      const pinned = ['a', 'b', 'c'][version]!.repeat(40);
+      expect(url.pathname).toContain(`/acme/skills/${pinned}/`);
+      if (url.pathname.endsWith('/pet/SKILL.md')) return new Response(contents[version]!.skill);
+      if (url.pathname.endsWith('/pet/references/guide.md')) return new Response(contents[version]!.guide);
+      if (url.pathname.endsWith('/review/SKILL.md')) return new Response(review);
+      return new Response('Not found', { status: 404 });
+    }
     expect(url.origin).toBe('https://api.github.com');
     const files = contents[version]!;
     if (url.pathname.endsWith('/commits/main')) {
       if (blocked) { blocked(); await new Promise<void>(resolve => { release = resolve; }); blocked = null; }
       return json({ sha: ['a', 'b', 'c'][version]!.repeat(40) });
     }
-    if (url.pathname.endsWith('/git/trees/main')) {
-      if (blockTree) { blockTree(); await new Promise<void>(resolve => { releaseTree = resolve; }); blockTree = null; }
+    if (url.pathname.endsWith('/git/trees/main') || /^\/repos\/acme\/skills\/git\/trees\/[abc]{40}$/.test(url.pathname)) {
+      if (url.pathname.endsWith('/git/trees/main') && blockTree) {
+        blockTree(); await new Promise<void>(resolve => { releaseTree = resolve; }); blockTree = null;
+      }
       return json({ sha: 'd'.repeat(40), truncated, tree: [
         { path: 'pet', type: 'tree', mode: '040000', sha: 'e'.repeat(40) },
         { path: 'pet/SKILL.md', type: 'blob', mode: '100644', sha: blobSha(files.skill), size: files.skill.length },
@@ -71,6 +81,51 @@ function githubFixture() {
   };
 }
 
+/** A realistic size for one genealogy Skill: metadata remains on the GitHub API,
+ * while dozens of resource files must not exhaust its unauthenticated quota. */
+function largeGithubFixture(fileCount = 92, folder = 'kinship') {
+  const skill = Buffer.from('---\nname: Kinship\ndescription: Research family history.\n---\nUse the included references.\n');
+  const commit = 'a'.repeat(40);
+  const resources = Array.from({ length: fileCount - 1 }, (_, index) => ({
+    name: `resource-${String(index).padStart(3, '0')}.md`,
+    content: Buffer.from(`Family history reference ${index}\n`)
+  }));
+  const files = [{ name: 'SKILL.md', content: skill }, ...resources];
+  const fileForSha = new Map(files.map(file => [blobSha(file.content), file]));
+  const fileForName = new Map(files.map(file => [file.name, file]));
+  const request = vi.fn(async (input: string) => {
+    const url = new URL(input);
+    if (url.origin === 'https://api.github.com') {
+      if (url.pathname === '/repos/acme/skills') return json({ default_branch: 'main' });
+      if (url.pathname === '/repos/acme/skills/commits/main') return json({ sha: commit });
+      if (url.pathname === `/repos/acme/skills/contents/${folder}`) return json(files.map(file => ({
+        name: file.name, path: `${folder}/${file.name}`, type: 'file', sha: blobSha(file.content), size: file.content.length
+      })));
+      if (url.pathname === '/repos/acme/skills/git/trees/main' || url.pathname === `/repos/acme/skills/git/trees/${commit}`) return json({
+        sha: commit, truncated: false, tree: [
+          ...folder.split('/').map((_, index, segments) => ({
+            path: segments.slice(0, index + 1).join('/'), type: 'tree', mode: '040000', sha: 'e'.repeat(40)
+          })),
+          ...files.map(file => ({ path: `${folder}/${file.name}`, type: 'blob', mode: '100644',
+            sha: blobSha(file.content), size: file.content.length }))
+        ]
+      });
+      if (url.pathname === '/repos/acme/skills/contents' && folder.includes('/')) return json([
+        { name: folder.split('/')[0], path: folder.split('/')[0], type: 'dir', sha: 'e'.repeat(40), size: 0 }
+      ]);
+      const file = fileForSha.get(url.pathname.split('/').at(-1)!);
+      if (file) return json({ content: file.content.toString('base64'), encoding: 'base64',
+        sha: blobSha(file.content), size: file.content.length });
+    }
+    if (url.origin === 'https://raw.githubusercontent.com' && url.pathname.startsWith(`/acme/skills/${commit}/${folder}/`)) {
+      const file = fileForName.get(decodeURIComponent(url.pathname.split('/').at(-1)!));
+      if (file) return new Response(file.content);
+    }
+    return new Response('Not found', { status: 404 });
+  });
+  return { request, skill, files };
+}
+
 beforeEach(async () => {
   userData = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'cos-github-skills-test-')));
   await initSkillsPath(userData);
@@ -93,6 +148,258 @@ it('accepts only explicit GitHub skill folders or SKILL.md links', () => {
     'https://github.com/acme/skills/tree/main/pet?raw=1',
     'https://github.com/acme/skills/blob/main/pet/README.md'
   ]) expect(() => parseGitHubSkillUrl(url)).toThrow();
+});
+
+it('imports a bounded 92-file GitHub skill without one API blob request per file', async () => {
+  const github = largeGithubFixture();
+  vi.stubGlobal('fetch', github.request);
+  const installed = await importGitHubSkill('https://github.com/acme/skills/tree/main/kinship');
+  expect(installed[0]).toMatchObject({ id: 'kinship', origin: { kind: 'github', ref: 'main' } });
+  expect((await fs.readdir(path.join(userData, 'skills', 'kinship'))).length).toBe(github.files.length + 1); // origin metadata
+  expect(github.request.mock.calls.filter(([input]) => new URL(input).pathname.includes('/git/blobs/'))).toHaveLength(0);
+  expect(github.request.mock.calls.filter(([input]) => new URL(input).host === 'raw.githubusercontent.com')).toHaveLength(92);
+  expect(await checkGitHubSkillUpdates('kinship')).toMatchObject([{ state: 'current' }]);
+});
+
+it('links a locally installed SKILL.md against a 92-file GitHub package without copying resources', async () => {
+  const github = largeGithubFixture();
+  vi.stubGlobal('fetch', github.request);
+  const local = path.join(userData, 'sources', 'kinship');
+  await fs.mkdir(local, { recursive: true });
+  await fs.writeFile(path.join(local, 'SKILL.md'), github.skill);
+  await importSkillPackage(local);
+  const linked = await linkGitHubSkill('kinship', 'https://github.com/acme/skills/tree/main/kinship');
+  expect(linked[0]).toMatchObject({ id: 'kinship', origin: { kind: 'github', ref: 'main' } });
+  expect((await fs.readdir(path.join(userData, 'skills', 'kinship'))).sort()).toEqual(['.cos-github.json', 'SKILL.md']);
+  expect(github.request.mock.calls.filter(([input]) => new URL(input).pathname.includes('/git/blobs/'))).toHaveLength(1);
+  expect(await checkGitHubSkillUpdates('kinship')).toMatchObject([{ state: 'available' }]);
+});
+
+it('resolves a repository root containing exactly one nested SKILL.md and imports all 190 resources', async () => {
+  const github = largeGithubFixture(190, 'skills/last30days');
+  vi.stubGlobal('fetch', github.request);
+  const linked = await importGitHubSkill('https://github.com/acme/skills');
+  expect(linked).toHaveLength(1);
+  expect(linked[0]).toMatchObject({
+    id: 'last30days', origin: { kind: 'github', url: 'https://github.com/acme/skills/tree/main/skills/last30days',
+      directory: 'skills/last30days' }
+  });
+  expect((await fs.readdir(path.join(userData, 'skills', 'last30days'))).length).toBe(191);
+  const metadataCalls = github.request.mock.calls.map(([input]) => new URL(input)).filter(url => url.host === 'api.github.com');
+  expect(metadataCalls).toHaveLength(3); // repo default branch, commit, one recursive tree
+  expect(metadataCalls.filter(url => url.pathname.includes('/contents'))).toHaveLength(0);
+  expect(await checkGitHubSkillUpdates('last30days')).toMatchObject([{ state: 'current' }]);
+});
+
+// This checks 190 on-disk resources; allow for variable hosted Windows runner I/O.
+it('preserves 190 deeply nested commit-pinned resources and verifies every checksum', async () => {
+  const commit = 'a'.repeat(40);
+  const folder = 'skills/kinship';
+  const resources = new Map<string, Buffer>([['SKILL.md', Buffer.from('---\nname: Kinship\ndescription: Nested references.\n---\nRead references.\n')]]);
+  for (let index = 0; index < 189; index++) {
+    const group = String(index % 7).padStart(2, '0');
+    resources.set(`references/group-${group}/item-${String(index).padStart(3, '0')}.md`, Buffer.from(`Reference ${index}\n`));
+  }
+  const directories = new Set<string>([folder]);
+  for (const relative of resources.keys()) {
+    const segments = `${folder}/${relative}`.split('/');
+    for (let depth = 1; depth < segments.length; depth++) directories.add(segments.slice(0, depth).join('/'));
+  }
+  const tree = [
+    ...[...directories].map(name => ({ path: name, type: 'tree', mode: '040000', sha: 'b'.repeat(40) })),
+    ...[...resources].map(([relative, content]) => ({
+      path: `${folder}/${relative}`, type: 'blob', mode: '100644', sha: blobSha(content), size: content.length
+    }))
+  ];
+  const requests: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+    const url = new URL(input);
+    requests.push(url.href);
+    if (url.origin === 'https://api.github.com') {
+      if (url.pathname === '/repos/acme/skills/commits/main') return json({ sha: commit });
+      if (url.pathname === `/repos/acme/skills/git/trees/${commit}` || url.pathname === '/repos/acme/skills/git/trees/main')
+        return json({ sha: commit, truncated: false, tree });
+    }
+    if (url.origin === 'https://raw.githubusercontent.com' && url.pathname.startsWith(`/acme/skills/${commit}/${folder}/`)) {
+      const relative = decodeURIComponent(url.pathname.slice(`/acme/skills/${commit}/${folder}/`.length));
+      const content = resources.get(relative);
+      if (content) return new Response(new Uint8Array(content));
+    }
+    return new Response('Not found', { status: 404 });
+  }));
+  const installed = await importGitHubSkill(`https://github.com/acme/skills/tree/main/${folder}`);
+  expect(installed[0]).toMatchObject({ id: 'kinship', origin: { directory: folder, commit } });
+  for (const [relative, expected] of resources) {
+    expect(await fs.readFile(path.join(userData, 'skills', 'kinship', ...relative.split('/')))).toEqual(expected);
+  }
+  expect(requests.filter(url => new URL(url).origin === 'https://raw.githubusercontent.com')).toHaveLength(190);
+  expect(requests.filter(url => url.includes('/git/blobs/'))).toHaveLength(0);
+  expect(await checkGitHubSkillUpdates('kinship')).toMatchObject([{ state: 'current' }]);
+}, 120_000);
+
+it('accepts exactly 256 commit-pinned files at the package bound', async () => {
+  const github = largeGithubFixture(256);
+  vi.stubGlobal('fetch', github.request);
+  expect((await importGitHubSkill('https://github.com/acme/skills/tree/main/kinship'))[0]).toMatchObject({ id: 'kinship' });
+  expect(await checkGitHubSkillUpdates('kinship')).toMatchObject([{ state: 'current' }]);
+});
+
+it('links SHA-256 commit resources and updates untouched packages without a false local-edits conflict', async () => {
+  const first = Buffer.from('---\nname: SHA-256 Link\ndescription: First version.\n---\nOriginal.\n');
+  const second = Buffer.from('---\nname: SHA-256 Link\ndescription: Second version.\n---\nUpdated.\n');
+  const blobSha256 = (bytes: Buffer) => createHash('sha256').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
+  const revision = (bytes: Buffer) => skillPackageRevision([{ relative: 'SKILL.md', sha: blobSha256(bytes), size: bytes.length }]);
+  const originalFolder = path.join(userData, 'sources', 'sha256-linked');
+  await fs.mkdir(originalFolder, { recursive: true });
+  await fs.writeFile(path.join(originalFolder, 'SKILL.md'), first);
+  await importSkillPackage(originalFolder);
+  const source = { kind: 'github' as const, url: 'https://github.com/acme/skills/tree/main/sha256-linked',
+    ref: 'main', directory: 'sha256-linked', commit: 'a'.repeat(64), revision: 'b'.repeat(64),
+    skillSha256: createHash('sha256').update(first).digest('hex') };
+  await linkSkillPackage('sha256-linked', source);
+  const linked = (await listManagedSkills()).find(skill => skill.id === 'sha256-linked')?.origin;
+  expect(linked?.revision).toBe(revision(first));
+  if (!linked) throw new Error('The linked SHA-256 origin was not recorded');
+  const updatedFolder = path.join(userData, 'sources', 'sha256-linked-updated');
+  await fs.mkdir(updatedFolder, { recursive: true });
+  await fs.writeFile(path.join(updatedFolder, 'SKILL.md'), second);
+  const next = { ...source, commit: 'c'.repeat(64), revision: revision(second),
+    skillSha256: createHash('sha256').update(second).digest('hex') };
+  const result = await updateSkillPackage('sha256-linked', linked, updatedFolder, next,
+    directory => fs.rename(directory, path.join(userData, 'sha256-previous')));
+  expect(result).toMatchObject({ updated: true });
+  expect(await fs.readFile(path.join(userData, 'skills', 'sha256-linked', 'SKILL.md'))).toEqual(second);
+});
+it('links a differently named local skill by identical SKILL.md and updates without changing its ID', async () => {
+  const github = githubFixture();
+  vi.stubGlobal('fetch', github.request);
+  const local = path.join(userData, 'sources', 'personal-name');
+  await fs.mkdir(local, { recursive: true });
+  await fs.writeFile(path.join(local, 'SKILL.md'), Buffer.from('---\nname: Test Pet\ndescription: Version one.\n---\nUse guide.\n'));
+  await importSkillPackage(local);
+  const linked = await linkGitHubSkill('personal-name', 'https://github.com/acme/skills/tree/main/pet');
+  expect(linked[0]).toMatchObject({ id: 'personal-name', origin: { kind: 'github', directory: 'pet' } });
+  expect(await checkGitHubSkillUpdates('personal-name')).toMatchObject([{ state: 'available' }]);
+  github.next();
+  const update = await updateGitHubSkill('personal-name', async backup => {
+    await fs.rename(backup, path.join(userData, 'previous-personal-name'));
+  });
+  expect(update.status).toBe('updated');
+  expect((await listManagedSkills())[0]).toMatchObject({ id: 'personal-name', origin: { kind: 'github', directory: 'pet' } });
+  expect(await fs.readFile(path.join(userData, 'skills', 'personal-name', 'SKILL.md'), 'utf8')).toContain('Version two');
+  expect(await fs.readFile(path.join(userData, 'previous-personal-name', 'SKILL.md'), 'utf8')).toContain('Version one');
+});
+
+it('still refuses GitHub packages over the 256-file bound', async () => {
+  const github = largeGithubFixture(257);
+  vi.stubGlobal('fetch', github.request);
+  await expect(importGitHubSkill('https://github.com/acme/skills/tree/main/kinship')).rejects.toThrow('too many files');
+  expect(await listManagedSkills()).toEqual([]);
+});
+
+it('uses bounded contents for a selected folder when the recursive tree exceeds the response limit', async () => {
+  const github = largeGithubFixture(3);
+  vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+    if (new URL(input).pathname.includes('/git/trees/'))
+      return new Response('{}', { headers: { 'content-length': String(8 * 1024 * 1024 + 1) } });
+    return github.request(input);
+  }));
+  expect((await importGitHubSkill('https://github.com/acme/skills/tree/main/kinship'))[0]?.id).toBe('kinship');
+  expect((await listManagedSkills())).toHaveLength(1);
+  await expect(importGitHubSkill('https://github.com/acme/skills')).rejects.toThrow('too large');
+});
+
+it.each([
+  ['symlink', { path: 'kinship/link', type: 'blob', mode: '120000', sha: 'b'.repeat(40), size: 1 }, 'unsupported file'],
+  ['unsafe traversal', { path: 'kinship/../escape', type: 'blob', mode: '100644', sha: 'b'.repeat(40), size: 1 }, 'unsafe path'],
+  ['Windows reserved device name', { path: 'kinship/CON.md', type: 'blob', mode: '100644', sha: 'b'.repeat(40), size: 1 }, 'unsafe path'],
+  ['reserved metadata', { path: 'kinship/.cos-github.json', type: 'blob', mode: '100644', sha: 'b'.repeat(40), size: 1 }, 'reserved'],
+  ['oversized package', { path: 'kinship/huge', type: 'blob', mode: '100644', sha: 'b'.repeat(40), size: 32 * 1024 * 1024 + 1 }, '32 MiB']
+])('rejects %s in a GitHub tree before fetching resources', async (_name, invalid, error) => {
+  const github = largeGithubFixture(2);
+  const request = vi.fn(async (input: string) => {
+    const response = await github.request(input);
+    if (!new URL(input).pathname.includes('/git/trees/')) return response;
+    const payload = await response.json() as { tree: unknown[] };
+    return json({ ...payload, tree: [...payload.tree, invalid] });
+  });
+  vi.stubGlobal('fetch', request);
+  await expect(importGitHubSkill('https://github.com/acme/skills/tree/main/kinship')).rejects.toThrow(error);
+  expect(request.mock.calls.filter(([input]) => new URL(input).host === 'raw.githubusercontent.com')).toHaveLength(0);
+});
+
+it('rejects an unverified GitHub commit SHA', async () => {
+  const github = largeGithubFixture(2);
+  const request = vi.fn(async (input: string) =>
+    new URL(input).pathname.endsWith('/commits/main') ? json({ sha: 'unverified' }) : github.request(input));
+  vi.stubGlobal('fetch', request);
+  await expect(importGitHubSkill('https://github.com/acme/skills/tree/main/kinship')).rejects.toThrow('could not be verified');
+  expect(request.mock.calls.filter(([input]) => new URL(input).host === 'raw.githubusercontent.com')).toHaveLength(0);
+});
+
+it.each(['truncated', 'too-many-entries'] as const)(
+  'refuses %s repository-root trees without attempting an unsafe fallback',
+  async mode => {
+    const github = largeGithubFixture(2);
+    const request = vi.fn(async (input: string) => {
+      if (!new URL(input).pathname.includes('/git/trees/')) return github.request(input);
+      const response = await github.request(input);
+      const payload = await response.json() as { tree: unknown[] };
+      return json({ ...payload, truncated: mode === 'truncated',
+        tree: mode === 'too-many-entries' ? Array(20_001).fill(payload.tree[0]) : payload.tree });
+    });
+    vi.stubGlobal('fetch', request);
+    await expect(importGitHubSkill('https://github.com/acme/skills')).rejects.toThrow('too large or incomplete');
+    expect(await listManagedSkills()).toEqual([]);
+    expect(request.mock.calls.filter(([input]) => new URL(input).pathname.includes('/contents/'))).toHaveLength(0);
+  }
+);
+it('does not silently choose a skill when a repository root contains multiple SKILL.md files', async () => {
+  const commit = 'a'.repeat(40);
+  vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+    const url = new URL(input);
+    if (url.pathname === '/repos/acme/skills') return json({ default_branch: 'main' });
+    if (url.pathname === '/repos/acme/skills/commits/main') return json({ sha: commit });
+    if (url.pathname === '/repos/acme/skills/contents') return json([{ name: 'skills', type: 'dir' }]);
+    if (url.pathname === `/repos/acme/skills/git/trees/${commit}`) return json({
+      truncated: false, tree: [
+        { path: 'skills/one/SKILL.md', type: 'blob', mode: '100644', sha: 'b'.repeat(40), size: 1 },
+        { path: 'skills/two/SKILL.md', type: 'blob', mode: '100644', sha: 'c'.repeat(40), size: 1 }
+      ]
+    });
+    return new Response('Not found', { status: 404 });
+  }));
+  await expect(importGitHubSkill('https://github.com/acme/skills')).rejects.toThrow('multiple skills');
+  expect(await listManagedSkills()).toEqual([]);
+});
+
+it('rejects tampered commit-pinned raw files without publishing a partial skill', async () => {
+  const github = largeGithubFixture();
+  vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+    if (new URL(input).pathname.endsWith('/kinship/SKILL.md') && new URL(input).host === 'raw.githubusercontent.com') {
+      const tampered = Buffer.from(github.skill);
+      tampered[0] = 0x58; // same size, different Git blob digest
+      return new Response(tampered);
+    }
+    return github.request(input);
+  }));
+  await expect(importGitHubSkill('https://github.com/acme/skills/tree/main/kinship')).rejects.toThrow('checksum failed');
+  expect(await listManagedSkills()).toEqual([]);
+});
+
+it('checks decoded raw bytes rather than compressed Content-Length headers', async () => {
+  const github = githubFixture();
+  vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+    const result = await github.request(input);
+    if (new URL(input).host !== 'raw.githubusercontent.com' || !new URL(input).pathname.endsWith('SKILL.md'))
+      return result;
+    const decoded = Buffer.from(await result.arrayBuffer());
+    // Real raw.githubusercontent.com may return Content-Length for compressed
+    // transfer data even though fetch transparently delivers decoded bytes.
+    return new Response(decoded, { headers: { 'content-length': String(decoded.length + 20) } });
+  }));
+  const installed = await importGitHubSkill('https://github.com/acme/skills/tree/main/pet');
+  expect(installed).toMatchObject([{ id: 'pet', origin: { kind: 'github' } }]);
 });
 
 it('installs a complete public package, skips unchanged content and replaces changed content recoverably', async () => {
@@ -228,6 +535,54 @@ it('keeps local edits and rejects untrusted origins or unsupported repository li
   await expect(importGitHubSkill('https://github.com.evil.test/acme/skills/tree/main/pet')).rejects.toThrow();
 });
 
+it('refuses to overwrite a locally edited resource, added file, or deleted resource during GitHub update', async () => {
+  for (const change of ['edit', 'add', 'delete'] as const) {
+    const github = githubFixture(); vi.stubGlobal('fetch', github.request);
+    const id = `pet-${change}`;
+    const source = path.join(userData, 'sources', id);
+    await fs.mkdir(source, { recursive: true });
+    await fs.writeFile(path.join(source, 'SKILL.md'), '---\nname: Test Pet\ndescription: Version one.\n---\nUse guide.\n');
+    await importSkillPackage(source);
+    await linkGitHubSkill(id, 'https://github.com/acme/skills/tree/main/pet');
+    // Explicitly install the complete first version before modifying its resources.
+    await updateGitHubSkill(id, directory => fs.rename(directory, path.join(userData, `previous-${id}`)));
+    const directory = path.join(userData, 'skills', id);
+    const guide = path.join(directory, 'references', 'guide.md');
+    if (change === 'edit') await fs.writeFile(guide, 'My irreplaceable note');
+    if (change === 'add') await fs.writeFile(path.join(directory, 'personal.md'), 'My note');
+    if (change === 'delete') await fs.unlink(guide);
+    github.next();
+    const trash = vi.fn();
+    await expect(updateGitHubSkill(id, trash)).rejects.toThrow('local edits');
+    expect(trash).not.toHaveBeenCalled();
+    expect((await listManagedSkills()).find(skill => skill.id === id)?.origin?.ref).toBe('main');
+    if (change === 'edit') expect(await fs.readFile(guide, 'utf8')).toBe('My irreplaceable note');
+    if (change === 'add') expect(await fs.readFile(path.join(directory, 'personal.md'), 'utf8')).toBe('My note');
+    if (change === 'delete') await expect(fs.stat(guide)).rejects.toMatchObject({ code: 'ENOENT' });
+  }
+});
+
+it('preserves a user-created empty nested directory during update while accepting normal resource folders', async () => {
+  const github = githubFixture(); vi.stubGlobal('fetch', github.request);
+  await importGitHubSkill('https://github.com/acme/skills/tree/main/pet');
+  // Git-backed references/ contains a file: a normal tracked resource folder.
+  const directory = path.join(userData, 'skills', 'pet');
+  expect(await fs.readFile(path.join(directory, 'references', 'guide.md'), 'utf8')).toBe('First guide');
+  const localEmpty = path.join(directory, 'personal', 'notes');
+  await fs.mkdir(localEmpty, { recursive: true });
+  github.next();
+  const trash = vi.fn();
+  await expect(updateGitHubSkill('pet', trash)).rejects.toThrow('empty resource directory');
+  expect(trash).not.toHaveBeenCalled();
+  expect((await fs.stat(localEmpty)).isDirectory()).toBe(true);
+  expect(await fs.readFile(path.join(directory, 'references', 'guide.md'), 'utf8')).toBe('First guide');
+  await fs.rmdir(localEmpty);
+  await fs.rmdir(path.dirname(localEmpty));
+  const updated = await updateGitHubSkill('pet', directory => fs.rename(directory, path.join(userData, 'previous-pet')));
+  expect(updated.status).toBe('updated');
+  expect(await fs.readFile(path.join(directory, 'references', 'guide.md'), 'utf8')).toBe('Second guide');
+});
+
 it('restores the previous GitHub package after an interrupted directory swap', async () => {
   const github = githubFixture(); vi.stubGlobal('fetch', github.request);
   await importGitHubSkill('https://github.com/acme/skills/tree/main/pet');
@@ -256,9 +611,17 @@ it('imports from a branch whose name contains a slash, as the default branch or 
   vi.stubGlobal('fetch', vi.fn(async (input: string) => {
     const url = new URL(input);
     asked.push(url.pathname);
+    if (url.origin === 'https://raw.githubusercontent.com' && url.pathname.endsWith('/pet/SKILL.md'))
+      return new Response(skill);
     if (url.pathname === '/repos/acme/skills') return json({ default_branch: 'dev/main' });
     if (url.pathname === '/repos/acme/skills/commits/dev%2Fmain') return json({ sha: 'a'.repeat(40) });
     if (url.pathname === '/repos/acme/skills/contents') return json([]);
+    if (url.pathname === `/repos/acme/skills/git/trees/${'a'.repeat(40)}`) return json({
+      truncated: false, tree: [
+        { path: 'pet', type: 'tree', mode: '040000', sha: 'f'.repeat(40) },
+        { path: 'pet/SKILL.md', type: 'blob', mode: '100644', sha: blobSha(skill), size: skill.length }
+      ]
+    });
     if (url.pathname === '/repos/acme/skills/contents/pet') return json([
       { name: 'SKILL.md', path: 'pet/SKILL.md', type: 'file', sha: blobSha(skill), size: skill.length }
     ]);
@@ -270,6 +633,7 @@ it('imports from a branch whose name contains a slash, as the default branch or 
   // The link resolves its branch from the shortest prefix up, one request per candidate.
   expect(asked.filter(pathname => pathname.includes('/commits/'))).toEqual(['/repos/acme/skills/commits/dev', '/repos/acme/skills/commits/dev%2Fmain']);
   await removeSkill('pet', directory => fs.rename(directory, path.join(userData, 'removed-slash-pet')));
-  await expect(importGitHubSkill('https://github.com/acme/skills')).rejects.toThrow('needs SKILL.md');
+  const rootSkill = await importGitHubSkill('https://github.com/acme/skills');
+  expect(rootSkill[0]).toMatchObject({ id: 'pet', origin: { ref: 'dev/main', directory: 'pet' } });
   expect(asked).toContain('/repos/acme/skills/commits/dev%2Fmain');
 });

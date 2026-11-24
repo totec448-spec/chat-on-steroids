@@ -1458,7 +1458,7 @@ describe('settings backup dialogs', () => {
     const review = doc.getElementById('importSettingsReview') as HTMLDetailsElement;
     expect([review.hidden, review.open]).toEqual([false, false]);
     expect([...doc.querySelectorAll('#importSettingsChanges li')].map(item => item.textContent))
-      .toEqual(['Workspace: 2 settings', 'Appearance: 2 settings', 'Agents & automation: 1 setting', 'General: 1 setting']);
+      .toEqual(['Workspace: 2 settings', 'Appearance: 2 settings', 'Agents: 1 setting', 'General: 1 setting']);
   });
 
   it('shows why a chosen file cannot be imported, and switches the language a backup brings', async () => {

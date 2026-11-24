@@ -469,6 +469,32 @@ var CLF_DOM = (() => {
     }, '');
   }
 
+  /** Confirm the current page title against the sidebar link for this exact chat. */
+  function confirmedConversationTitle(expected) {
+    return safe(() => {
+      // The worker already verifies the browser's active tab. An app window covering Chrome
+      // can make the document hidden without invalidating its exact navigation links.
+      if (conversationId() !== expected) return null;
+      const title = conversationTitle();
+      if (!title) return null;
+      const selector = 'a[data-sidebar-item="true"][href], nav a[href], [role="navigation"] a[href], a[aria-current="page"][href]';
+      const rows = [...document.querySelectorAll(selector)].filter(link => {
+        const target = new URL(link.href, location.href);
+        return target.origin === location.origin && conversationFromPath(target.pathname) === expected &&
+          !link.closest('[hidden],[aria-hidden="true"],[inert]') && link.getClientRects().length > 0;
+      });
+      if (!rows.length || !rows.every(link => {
+        if (link.querySelector('input,textarea,[contenteditable="true"]')) return false;
+        const label = link.querySelector('[dir="auto"]') ?? link;
+        const visibleTitle = label.textContent?.trim();
+        const attributeTitle = link.getAttribute('title')?.trim();
+        if (visibleTitle && attributeTitle && visibleTitle !== attributeTitle) return false;
+        return (visibleTitle || attributeTitle) === title;
+      })) return null;
+      return title;
+    }, null);
+  }
+
   /**
    * Logical conversation turns, newest last.
    *
@@ -680,7 +706,9 @@ var CLF_DOM = (() => {
         const id = turnIdOf(node);
         if (node.matches?.(SHELL_TURN)) {
           const users = [...node.querySelectorAll('[data-content-search-unit-key$=":user"]')].filter(slot => slot.closest('[data-turn-key]') === node);
-          const answered = node.querySelector('[data-chatgpt-agent-turn-start], [data-content-search-unit-key$=":assistant"]');
+          const answered = [...node.querySelectorAll(
+            '[data-chatgpt-agent-turn-start], [data-content-search-unit-key$=":assistant"], [class~="group/imagegen-image"], [class~="group/generated-image-preview"], [data-clf-fiber-image]'
+          )].find(el => el.closest('[data-turn-key]') === node && !el.closest('[data-content-search-unit-key$=":user"]') && !el.closest(OWN_SURFACES));
           // Two slots with the same key in one exchange are ambiguous and stay unread. Slots with
           // their own keys are not: in a chat's later turns ChatGPT keeps a message sent into the
           // running answer in the question's exchange, as its own slot (#1662). Skipping such an
@@ -2004,7 +2032,13 @@ var CLF_DOM = (() => {
    * after it (2026-11-12): the app's own text, recognised like a brief.
    */
   const FIRST_MESSAGE_RESIDUE = /^\[\[COS_CONTEXT:\d{1,9}\]\]/;
-  const OWN_RESIDUE = new RegExp(`${RESUME_RESIDUE.source}|${FIRST_MESSAGE_RESIDUE.source}`);
+  /**
+   * How the app's handoff request begins (its marker, then the instruction). ChatGPT puts the text of a message it
+   * just sent back into that chat's composer as a draft too (2026-11-14: the source chat of a second Compact &
+   * Resume in one Project), so it is the app's own text like a brief.
+   */
+  const HANDOFF_RESIDUE = /^\[\[CLF-HANDOFF:[A-Za-z0-9_-]{16,64}\]\]/;
+  const OWN_RESIDUE = new RegExp(`${RESUME_RESIDUE.source}|${FIRST_MESSAGE_RESIDUE.source}|${HANDOFF_RESIDUE.source}`);
 
   /**
    * Empties a Project home editor that holds only an earlier Compact & Resume brief (#2068).
@@ -2018,7 +2052,76 @@ var CLF_DOM = (() => {
   function clearResumeResidue() {
     // Only a brief the app typed itself, word for word, here or on an earlier page of this tab: one a person
     // added to stays (CodeRabbit on #2069). The page that typed it may be gone (#2115), so the record is stored.
-    return clearOwnResidue(OWN_RESIDUE, text => ownBrief(text));
+    return clearOwnResidue(OWN_RESIDUE, text => ownBrief(text), ownMentionFreeText);
+  }
+
+  /** An app mention chip's app id ("app://asdk_app_…"), or null. */
+  function chipAppId(chip) {
+    const href = chip.getAttribute('app-mention-path') || chip.getAttribute('data-prompt-link-href') || '';
+    const match = /^app:\/\/(asdk_app_[A-Za-z0-9_-]{1,160})$/.exec(href);
+    return match ? match[1] : null;
+  }
+
+  /**
+   * The editor's words without the mention chips of this installation's own apps, compacted. The chip a restored
+   * draft ends with names the app as it is called now, so an app renamed in ChatGPT shows under a name the app does
+   * not list; the chip's id is what the app proved to be its own (#2159). Another app's chip stays in the text.
+   */
+  function ownMentionFreeText(box) {
+    if (!box?.querySelector?.(APP_MENTION_CHIP) || typeof box.cloneNode !== 'function') return null;
+    const own = new Set(ownApps.map(app => app.appId));
+    const clone = box.cloneNode(true);
+    let removed = 0;
+    for (const chip of clone.querySelectorAll(APP_MENTION_CHIP)) {
+      const id = chipAppId(chip);
+      if (id && own.has(id)) { chip.remove(); removed++; }
+    }
+    // Another app's chip left in the text: its label must not pass for a connector name once ours is gone (CodeRabbit on #2185).
+    if (!removed || clone.querySelector(APP_MENTION_CHIP)) return null;
+    return compactDraft(editorText(clone));
+  }
+
+  /**
+   * Why the editor is not ready, in a few words and no text of it (#2159): the reason a Project entry gives when
+   * it times out. Nothing here can say what a person wrote, only what kind of draft it is and whether the app
+   * knows it.
+   */
+  const residueKind = text => RESUME_RESIDUE.test(text) ? 'brief' : FIRST_MESSAGE_RESIDUE.test(text) ? 'context' : HANDOFF_RESIDUE.test(text) ? 'handoff' : null;
+  function draftEvidence() {
+    return safe(() => {
+      const box = composer();
+      if (!box?.isConnected) return 'no-editor';
+      if (!composerWritable()) return 'readonly';
+      if (generating() || stopButton()) return 'busy';
+      if (hasComposerAttachments()) return 'attachment';
+      const text = compactDraft(editorText(box));
+      if (!text) return 'empty';
+      const kind = residueKind(text);
+      if (!kind) return 'other';
+      const bare = ownMentionFreeText(box);
+      return `${kind}-${ownBrief(text) || (bare !== null && ownBrief(bare)) ? 'own' : 'foreign'}`;
+    }, 'unknown');
+  }
+  const mentionChipCount = () => safe(() => composer()?.querySelectorAll?.(APP_MENTION_CHIP).length ?? 0, 0);
+  /**
+   * What a draft the app keeps is measured against (#2159, 2026-11-23): a brief the page did not recognise is either
+   * one it never typed (another window or an emptied storage: `typed=0`, or lengths that are not this draft's) or
+   * one ChatGPT gave back changed (a length close to a typed one). Only numbers: the length of the draft as drafts are
+   * compared (compactDraft: without whitespace and without the escape backslashes ChatGPT adds), how many briefs this
+   * page remembers typing, and the lengths of the four newest of them, which are measured the same way. Clues, not
+   * proof: briefs older than the four newest are not listed. Only a draft of the app's kinds gets numbers, never a read-only, busy or
+   * attachment reason.
+   */
+  function draftSize() {
+    return safe(() => {
+      if (!/^(brief|context|handoff)-/.test(draftEvidence())) return '';
+      const box = composer();
+      const text = box?.isConnected ? compactDraft(editorText(box)) : '';
+      if (!text || !residueKind(text)) return '';
+      const known = [...new Set([...storedBriefs(), ...typedBriefs])];
+      const lengths = known.slice(-4).reverse().map(fingerprint => Number(fingerprint.split(':')[0])).filter(length => Number.isInteger(length) && length > 0);
+      return `:len=${text.length}:typed=${known.length}${lengths.length ? `:lens=${lengths.join('/')}` : ''}`;
+    }, '');
   }
 
   /**
@@ -2029,7 +2132,8 @@ var CLF_DOM = (() => {
    * of thousands of characters.
    */
   const TYPED_BRIEFS_KEY = 'clf-typed-briefs-v1';
-  const MAX_TYPED_BRIEFS = 24;
+  // Each Compact & Resume types two of the app's own texts, the handoff request and the brief.
+  const MAX_TYPED_BRIEFS = 48;
   const typedBriefs = [];
   function briefFingerprint(text) {
     // cyrb53: a fast 53-bit hash. Identity, not security; two briefs sharing one is not a concern.
@@ -2064,10 +2168,11 @@ var CLF_DOM = (() => {
     const text = compactDraft(value);
     if (!OWN_RESIDUE.test(text)) return;
     const fingerprint = briefFingerprint(text);
-    if (!typedBriefs.includes(fingerprint)) {
-      typedBriefs.push(fingerprint);
-      if (typedBriefs.length > MAX_TYPED_BRIEFS) typedBriefs.shift();
-    }
+    // A brief typed again is the newest one again: the order is what #2159's diagnostic lists.
+    const known = typedBriefs.indexOf(fingerprint);
+    if (known !== -1) typedBriefs.splice(known, 1);
+    typedBriefs.push(fingerprint);
+    if (typedBriefs.length > MAX_TYPED_BRIEFS) typedBriefs.shift();
     try {
       const stored = storedBriefs().filter(value => value !== fingerprint);
       stored.push(fingerprint);
@@ -2083,12 +2188,16 @@ var CLF_DOM = (() => {
     return String(value).replace(/\\(?=\r?\n)/g, '').replace(/\\(?=[!-/:-@[-`{-~])/g, '').replace(/\s+/g, '');
   }
 
-  function clearOwnResidue(pattern, owned = () => true) {
+  function clearOwnResidue(pattern, owned = () => true, withoutOwnMentions = () => null) {
     return safe(() => {
       const box = composer();
       if (!composerWritable() || generating() || stopButton() || hasComposerAttachments()) return false;
       const text = compactDraft(editorText(box));
-      if (!text || !pattern.test(text) || !owned(text)) return false;
+      if (!text || !pattern.test(text)) return false;
+      if (!owned(text)) {
+        const bare = withoutOwnMentions(box);
+        if (bare === null || !pattern.test(bare) || !owned(bare)) return false;
+      }
       box.focus();
       const selection = document.getSelection();
       if (!selection || document.activeElement !== box) return false;
@@ -3141,10 +3250,28 @@ var CLF_DOM = (() => {
   function pluginManagementIdle() {
     return safe(() => ![...document.querySelectorAll('textarea,input:not([type="hidden"]),[contenteditable="true"]')].some(node => node.getClientRects().length > 0 && String(node.value || node.textContent || '').trim()), false);
   }
+  function renamedPngPreview(host, button, file) {
+    const name = composerFileName(button);
+    const stem = file.name.slice(0, -4);
+    const extension = file.name.slice(-4);
+    if (!name?.startsWith(stem) || !name.endsWith(extension) ||
+        !/^\(\d{8}-\d{6}\)$/.test(name.slice(stem.length, -4))) return null;
+    const tile = button.closest('[data-composer-attachments] [role="button"][aria-label]');
+    const areas = host.querySelectorAll('[data-composer-attachments]');
+    if (!tile || areas.length !== 1 || areas[0].querySelectorAll('button').length !== 1) return null;
+    const previews = areas[0].querySelectorAll('img');
+    if (previews.length !== 1 || !tile.contains(previews[0]) || previews[0].getAttribute('alt') !== name) return null;
+    const source = previews[0].getAttribute('src');
+    const header = 'data:image/png;base64,';
+    return source?.startsWith(header) && source.length === header.length + Math.ceil(file.size / 3) * 4 ? source : null;
+  }
+
   async function uploadImages(images, stillCurrent = () => true, draft = null, files = []) {
     if (files.length) images = [...(images || []), ...files];
     if (!images?.length) return true;
     if (!Array.isArray(images) || images.length > 20 || !stillCurrent() || hasComposerAttachments()) return false;
+    const png = files.length === 1 && images.length === 1 && files[0].type === 'image/png' &&
+      /\.png$/i.test(files[0].name) ? files[0] : null;
     // The current shell uses React-generated ids. Elect by the native upload kind
     // inside this exact composer's form; a second matching input is ambiguous.
     const host = composerBox();
@@ -3166,10 +3293,18 @@ var CLF_DOM = (() => {
       input.dispatchEvent(new Event('change', { bubbles: true }));
     } catch { return false; }
     return new Promise((resolve) => {
-      let observer, timer;
+      let observer, timer, reader;
       let ownedTiles = null;
-      const finish = (ok) => { observer?.disconnect(); clearTimeout(timer); resolve(ok); };
+      let finished = false;
+      const finish = (ok) => {
+        finished = true;
+        observer?.disconnect();
+        clearTimeout(timer);
+        if (reader?.readyState === FileReader.LOADING) reader.abort();
+        resolve(ok);
+      };
       const check = () => {
+        if (finished) return;
         if (!stillCurrent()) return finish(false);
         const host = composerBox() || composerActions()?.host;
         if (!host) return;
@@ -3188,17 +3323,32 @@ var CLF_DOM = (() => {
             return true;
           })) ownedTiles = tiles;
         }
+        if (!ownedTiles && (!png || tiles.length !== 1)) return;
+        const ready = !host.querySelector('[aria-busy="true"], [role="progressbar"], [data-inline-file-uploading]') &&
+          sendButtonEnabled(sendButton());
+        if (!ownedTiles && ready) {
+          // ChatGPT can timestamp a pasted PNG before it exposes the first tile. The
+          // new tile must contain the original image bytes, even if its name looks right.
+          const preview = renamedPngPreview(host, tiles[0], png);
+          if (preview && !reader) {
+            reader = new FileReader();
+            reader.addEventListener('load', check, { once: true });
+            reader.readAsDataURL(png);
+          }
+          if (preview && preview === reader?.result) ownedTiles = tiles;
+        }
         if (!ownedTiles) return;
         // The provider can rename report.md to report(1).md during processing.
         // Bind once by exact original names, then retain those exact remove controls.
         if (tiles.length !== ownedTiles.length || tiles.some(node => !ownedTiles.includes(node))) return finish(false);
-        if (!host.querySelector('[aria-busy="true"], [role="progressbar"], [data-inline-file-uploading]') && sendButtonEnabled(sendButton())) {
+        if (ready) {
           draft?.attachments(ownedTiles);
           finish(true);
         }
       };
       observer = new MutationObserver(check);
-      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+      // A file tile can reveal its filename by changing an existing text node.
+      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, characterData: true });
       timer = setTimeout(() => finish(false), files.length ? 600000 : 60000);
       check();
     });
@@ -3410,7 +3560,7 @@ var CLF_DOM = (() => {
     const shown = node => node && !node.closest('[hidden],[aria-hidden="true"],[inert]') && node.getClientRects().length > 0;
     const picker = () => document.querySelector(PICKER);
     const trigger = modelPickerTrigger;
-    let motion = null;
+    let motion = null, openingRefusal = null;
     const openPicker = () => {
       const panel = picker();
       return panel && panel.closest('[role="menu"],[role="dialog"]')?.getAttribute('data-state') !== 'closed' ? panel : null;
@@ -3440,7 +3590,9 @@ var CLF_DOM = (() => {
     const key = (node, value) => { if (!node || !stillCurrent()) return false; node.focus(); node.dispatchEvent(new KeyboardEvent('keydown', { key: value, code: value, bubbles: true, cancelable: true })); return true; };
     return {
       state,
+      openingRefusal: () => openingRefusal,
       async open() {
+        openingRefusal = null;
         if (!stillCurrent()) return null;
         // Native Presence waits for the menu's exit animation. Chrome can suspend
         // that animation in a hidden window, retaining a closed picker and its
@@ -3463,6 +3615,9 @@ var CLF_DOM = (() => {
         if (!openPicker()) {
           progress('open');
           const button = await readyTrigger();
+          const beforeEnter = await read();
+          const selectedBefore = beforeEnter?.choices.find(choice => choice.bucket === beforeEnter.currentBucket);
+          const nativeBefore = button?.getAttribute('data-selected-reasoning-effort');
           if (!key(button, 'Enter')) return null;
           if (!await wait(openPicker, 1500)) {
             if (!stillCurrent()) return null;
@@ -3470,10 +3625,31 @@ var CLF_DOM = (() => {
             // without window focus; re-acquire the trigger and fall back once before failing.
             const retryButton = await readyTrigger();
             if (!retryButton) return null;
+            // A native Enter can change effort without mounting the menu.
+            // Do not toggle a changed selection again with a fallback Enter/click.
+            const afterEnter = await read();
+            const selectedAfter = afterEnter?.choices.find(choice => choice.bucket === afterEnter.currentBucket);
+            const changedSelection = selectedBefore && selectedAfter &&
+              (beforeEnter.version !== afterEnter.version || selectedBefore.id !== selectedAfter.id ||
+                selectedBefore.effort !== selectedAfter.effort);
+            if (changedSelection || nativeBefore !== retryButton.getAttribute('data-selected-reasoning-effort')) {
+              openingRefusal = 'changed'; return null;
+            }
             if (!openPicker()) {
               const reopened = retryButton !== button && key(retryButton, 'Enter') && await wait(openPicker, 1000);
               if (!stillCurrent()) return null;
               if (!reopened && !openPicker()) {
+                // A second Enter on a remounted trigger can change the selected
+                // effort without opening a portal, just like the first Enter.
+                const afterRetry = await read();
+                if (!stillCurrent()) return null;
+                const selectedRetry = afterRetry?.choices.find(choice => choice.bucket === afterRetry.currentBucket);
+                const retryChanged = selectedAfter && selectedRetry &&
+                  (afterEnter.version !== afterRetry.version || selectedAfter.id !== selectedRetry.id ||
+                    selectedAfter.effort !== selectedRetry.effort);
+                if (retryChanged || nativeBefore !== retryButton.getAttribute('data-selected-reasoning-effort')) {
+                  openingRefusal = 'changed'; return null;
+                }
                 retryButton.click();
                 if (!await wait(openPicker, 1500)) return null;
               }
@@ -3677,9 +3853,37 @@ var CLF_DOM = (() => {
       if (trace.failedPhase === null) { trace.failedPhase = trace.phase; trace.failedVersion = trace.targetVersion; trace.failure = !stillCurrent() ? 'owner-lost' : code || 'unknown'; }
       return false;
     };
+    // A separately reported native reasoning trigger is additional proof only
+    // when MAIN has stamped it as the owner of this route. Legacy pickers have
+    // no such control, and do not require one.
+    const nativeReasoningOwned = () => {
+      const trigger = modelPickerTrigger();
+      return trigger?.getAttribute('data-composer-navigation-target') === 'reasoning' &&
+        trigger.getAttribute('data-clf-picker-route') === location.pathname;
+    };
+    const nativeReasoningMatches = (effort, nativeOwned) => {
+      // Fiber can retain High while the separate native control says Medium or
+      // disappears. Preserve the old layout and non-standard effort mappings.
+      const native = nativeOwned ? modelPickerTrigger() : null;
+      return !nativeOwned || !['none', 'low', 'medium', 'high'].includes(effort) ||
+        (native?.getAttribute('data-composer-navigation-target') === 'reasoning' &&
+          native.getAttribute('data-clf-picker-route') === location.pathname &&
+          native.getAttribute('data-selected-reasoning-effort') === effort);
+    };
+    const confirmAfterClose = async (expected, version, nativeOwned) => {
+      if (!stillCurrent()) return selectionFailed('the chat changed meanwhile', 'owner-lost');
+      const after = await readPickerState(); observe(after);
+      const current = after?.choices.find(choice => choice.bucket === after.currentBucket);
+      if (!stillCurrent()) return selectionFailed('the chat changed meanwhile', 'owner-lost');
+      return after?.version === version && current?.available === true &&
+        current.id === expected.id && current.familyId === expected.familyId &&
+        current.effort === expected.effort && nativeReasoningMatches(current.effort, nativeOwned || nativeReasoningOwned()) ||
+        selectionFailed('the model or reasoning effort changed after closing the picker', 'changed');
+    };
     let result = false;
     const choose = async () => {
       if (!model && !effort) return true;
+      let nativeOwned = nativeReasoningOwned();
       // The page's own picker state, read without opening anything. A worker tab opens with its model
       // in the address and ChatGPT applies it; opening the picker only to prove that left its closing
       // animation unfinished in a hidden, throttled tab, its focus scope hid the composer, and every
@@ -3687,16 +3891,22 @@ var CLF_DOM = (() => {
       if (!document.querySelector(PICKER)) {
         const passive = await readPickerState(); observe(passive);
         const now = passive?.choices.find(choice => choice.bucket === passive.currentBucket);
-        if (now?.available && (!model || now.id === model || now.familyId === model) && (!effort || now.effort === effort)) {
+        nativeOwned = nativeOwned || nativeReasoningOwned();
+        if (!stillCurrent()) return selectionFailed('the chat changed meanwhile', 'owner-lost');
+        if (now?.available && (!model || now.id === model || now.familyId === model) &&
+            (!effort || now.effort === effort) && nativeReasoningMatches(now.effort, nativeOwned)) {
           trace.resolved = pair(now); trace.selected = pair(now); return stillCurrent();
         }
       }
       phase('open');
-      const ui = modelPickerAccess(stillCurrent, observe, phase), original = await ui.open();
+      const ui = modelPickerAccess(stillCurrent, state => { observe(state); nativeOwned = nativeOwned || nativeReasoningOwned(); }, phase), original = await ui.open();
       if (!original) {
-        selectionFailed('the picker did not open or could not be read', 'unreadable');
+        // Keep the existing user-visible failure wording; the structured log
+        // distinguishes a guarded selection drift from an unreadable picker.
+        selectionFailed('the picker did not open or could not be read', ui.openingRefusal() || 'unreadable');
         phase('close'); trace.closed = await ui.close(); return false;
       }
+      nativeOwned = nativeOwned || nativeReasoningOwned();
       // Account-evaluated exact selection is already proof; visiting unrelated
       // versions can reset it or fail unnecessarily. Captions and denied choices
       // do not qualify, and native closure still has to succeed.
@@ -3706,9 +3916,11 @@ var CLF_DOM = (() => {
         trace.resolved = pair(current); trace.selected = pair(current);
         phase('close'); const closed = trace.closed = await ui.close();
         if (!closed) return selectionFailed('the picker did not close', 'close-failed');
-        return stillCurrent();
+        return confirmAfterClose(current, original.version, nativeOwned);
       }
-      let selected = false, closed = false;
+      // A native control observed before selection must still be corroborated at close,
+      // even if provider transitions remove its ownership marker in the meantime.
+      let selected = false, closed = false, expectedChoice = null, expectedVersion = null;
       try {
         // Exact provider slug is preferred. Existing saved display slugs may resolve
         // only to an actually observed, available pair; never to an account default.
@@ -3779,6 +3991,7 @@ var CLF_DOM = (() => {
         const confirmed = after?.choices.find(c => c.bucket === after.currentBucket);
         trace.selected = pair(confirmed);
         selected = stillCurrent() && confirmed?.available === true && confirmed.id === choice.id && confirmed.effort === choice.effort;
+        if (selected) { expectedChoice = choice; expectedVersion = wanted.version; }
         if (!selected) selectionFailed(!stillCurrent() ? 'the chat changed meanwhile'
           : `the picker showed ${confirmed ? `${String(confirmed.id).slice(0, 24)}/${confirmed.effort}` : 'nothing readable'} after choosing ${String(choice.id).slice(0, 24)}/${choice.effort}`, !stillCurrent() ? 'owner-lost' : 'mismatch');
       } finally {
@@ -3795,10 +4008,11 @@ var CLF_DOM = (() => {
             }
           }
         }
+        if (selected) nativeOwned = nativeOwned || nativeReasoningOwned();
         phase('close'); closed = trace.closed = await ui.close();
       }
       if (selected && !closed) return selectionFailed('the picker did not close', 'close-failed');
-      return selected && closed && stillCurrent();
+      return selected && closed && confirmAfterClose(expectedChoice, expectedVersion, nativeOwned);
     };
     try { result = await choose(); return result; }
     finally {
@@ -3862,7 +4076,7 @@ var CLF_DOM = (() => {
       new URL(link.href, location.href).origin === location.origin &&
       projectHomeId(new URL(link.href, location.href).pathname) === entry.id);
     return new Promise(resolve => {
-      let clicked = false, done = false, lastObservation = 'source-not-ready', residueClears = 0;
+      let clicked = false, done = false, lastObservation = 'source-not-ready', residueClears = 0, sourceResidueClears = 0;
       // Where the source chat was when the link was clicked, and how many times its own route
       // rewrite has since taken that click away.
       let clickedPath = '', reclicks = 0;
@@ -3887,7 +4101,7 @@ var CLF_DOM = (() => {
             // An earlier brief of the app's own that ChatGPT kept in this Project home (#2068).
             // ChatGPT can restore the draft after it was emptied, so this may happen again, a few times only.
             if (residueClears < 3 && clearResumeResidue()) { residueClears++; return check(); }
-            lastObservation = 'composer-not-ready';
+            lastObservation = `composer-not-ready:draft=${draftEvidence()}:clears=${residueClears}:chips=${mentionChipCount()}${draftSize()}`;
             return;
           }
           if (turns().some(turn => !onKeptPage(turn.node))) {
@@ -3926,7 +4140,10 @@ var CLF_DOM = (() => {
         // actual editor is mounted and ready.
         const source = composer();
         if (!source?.isConnected || !composerSubmitReady() || hasComposerAttachments()) {
-          lastObservation = 'source-not-ready';
+          // The source chat's composer can hold the app's own text that ChatGPT put back as a draft (the handoff
+          // request it just sent): emptied like the Project home's, never a person's.
+          if (source?.isConnected && sourceResidueClears < 3 && clearResumeResidue()) { sourceResidueClears++; return check(); }
+          lastObservation = `source-not-ready:draft=${draftEvidence()}:clears=${sourceResidueClears}:chips=${mentionChipCount()}${draftSize()}`;
           return;
         }
         const links = projectLinks();
@@ -4184,6 +4401,7 @@ var CLF_DOM = (() => {
     conversationId,
     conversationFromPath,
     conversationTitle,
+    confirmedConversationTitle,
     turns,
     presentationTurns,
     messages,

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createFilePanel } from '../src/renderer/file-panel.js';
 import { setLanguage } from '../src/renderer/i18n.js';
 import { createAgentPanel } from '../src/renderer/agent-panel.js';
+import type { ChatEdit } from '../src/shared/session.js';
 import type { LocalProject } from '../src/shared/projects.js';
 import type { ProjectDirectoryListing, ProjectFilePreview, ProjectFilesChanged } from '../src/shared/project-files.js';
 import type { ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot } from '../src/shared/project-git.js';
@@ -660,6 +661,41 @@ it('shows Files and the read-only Review projection at once without a second fil
   expect(window.api.listProjectFiles).toHaveBeenCalledTimes(1);
   expect(window.api.watchProjectFiles).toHaveBeenCalledTimes(fileWatchCalls);
   expect(window.api.getProjectGitSnapshot).toHaveBeenCalled();
+});
+
+it.each([false, true])('uses the exact failed diff identity after a list refresh (newer edit: %s)', async newer => {
+  const edit: ChatEdit = { path: 'src/main.ts', callId: 'first-call', index: 0, position: 1, state: 'changed', reviewable: true };
+  const refreshed = newer ? { ...edit, callId: 'newer-call', position: 2 } : { ...edit };
+  let failDiff!: (result: { ok: true; data: null }) => void;
+  const failure = new Promise<{ ok: true; data: null }>(resolve => { failDiff = resolve; });
+  const onEditSource = vi.fn();
+  let current = edit;
+  const getToolEditReview = vi.fn().mockReturnValueOnce(failure).mockImplementation(() => ok({
+    callId: refreshed.callId, changeIndex: refreshed.index, path: refreshed.path,
+    added: 1, removed: 1, baseText: 'before', currentText: 'after'
+  }));
+  Object.assign(window.api, { getChatEdits: () => ok({ rows: [{ ...current }], limited: false }), getToolEditReview });
+  const panel = createFilePanel({ host, reviewOnly: true, onEditSource });
+  panel.update(projectA, 'session-id');
+  await panel.show();
+  await panel.refreshChatEdits();
+  const row = () => host.querySelector<HTMLButtonElement>('.review-chat-edits button')!;
+  row().click();
+  expect(getToolEditReview).toHaveBeenCalledOnce();
+  current = refreshed;
+  await panel.refreshChatEdits();
+  failDiff({ ok: true, data: null });
+  await tick();
+  expect(row().getAttribute('aria-label')).toContain(newer ? 'Review edit' : 'Go to recorded edit');
+  row().click();
+  if (newer) {
+    expect(getToolEditReview).toHaveBeenLastCalledWith('session-id', refreshed.callId, 0, projectA.id);
+    expect(onEditSource).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(host.querySelector('.test-diff-viewer')).not.toBeNull(), { timeout: 5_000 });
+  } else {
+    expect(getToolEditReview).toHaveBeenCalledOnce();
+    expect(onEditSource).toHaveBeenCalledWith('session-id', { ...edit, reviewable: false });
+  }
 });
 
 it('returns a recorded edit to Review rather than exposing Files actions', async () => {
@@ -1603,4 +1639,47 @@ it('offers no .gitignore action for an untracked name with a line break', async 
   expect(row.dataset.path).toBe('notes/a\nb.md');
   row.dispatchEvent(new dom.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 60 }));
   expect(document.querySelector('.row-menu')).toBeNull();
+});
+
+it('opens Review directly on a turn checkpoint ref and ignores mismatched projects or non-checkpoint refs', async () => {
+  const checkpointRef = `checkpoint:${'a'.repeat(32)}`;
+  const checkpointSnapshot: ProjectGitSnapshot = {
+    projectId: projectA.id,
+    state: 'ready',
+    currentBranch: 'main',
+    changes: [{ status: 'M', path: 'README.md', additions: 2, deletions: 1, binary: false }],
+    truncated: false,
+    revision: 'r'.repeat(64),
+    comparison: { ref: checkpointRef, label: '', baseOid: 'b'.repeat(40), headOid: 'c'.repeat(40), checkpoint: true },
+    checkpoints: [{ ref: checkpointRef, createdAt: Date.now(), reason: 'turn', available: true }]
+  };
+  vi.mocked(window.api.getProjectGitSnapshot).mockImplementation((_id, baseRef) =>
+    ok(baseRef === checkpointRef ? checkpointSnapshot : cleanGit(projectA)));
+
+  const onShow = vi.fn();
+  const review = createFilePanel({ host, mount: host, toggle, reviewOnly: true, onShow });
+  review.update(projectA);
+
+  // Refuses wrong project or non-checkpoint ref without opening the panel.
+  expect(await review.openCheckpoint(projectB.id, checkpointRef)).toBe(false);
+  expect(await review.openCheckpoint(projectA.id, 'refs/heads/main')).toBe(false);
+  expect(review.visible()).toBe(false);
+
+  // Opens hidden Review panel directly on the requested checkpoint comparison.
+  expect(await review.openCheckpoint(projectA.id, checkpointRef)).toBe(true);
+  await tick();
+  expect(review.visible()).toBe(true);
+  expect(onShow).toHaveBeenCalledTimes(1);
+  expect(window.api.getProjectGitSnapshot).toHaveBeenLastCalledWith(projectA.id, checkpointRef);
+  expect(host.querySelector('.file-change-row[data-path="README.md"]')).not.toBeNull();
+  // When focus had fallen to document.body (e.g. after a toast closed), focus moves to refresh.
+  expect(document.activeElement).toBe(host.querySelector('.file-panel-refresh'));
+
+  // When a visible opener keeps focus, openCheckpoint preserves it.
+  const opener = document.createElement('button');
+  document.body.append(opener);
+  opener.focus();
+  expect(await review.openCheckpoint(projectA.id, checkpointRef)).toBe(true);
+  expect(document.activeElement).toBe(opener);
+  opener.remove();
 });

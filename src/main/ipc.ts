@@ -11,13 +11,13 @@ import { setStopNoticeTranslations } from './stuck-notice.js';
 import { dialogLabel, mainText, setMainTextTranslations } from './main-texts.js';
 import { MAIN_TEXTS } from '../shared/main-texts.js';
 import { MAX_TASK_REQUEST_CHARS } from '../shared/task-progress.js';
-import { restoreCheckpoint } from './checkpoints/index.js';
+import { restoreCheckpoint, restoreTurnCheckpoint, turnCheckpointRef } from './checkpoints/index.js';
 import { applyLoginStartup, supportsLoginStartup } from './window-lifecycle.js';
 import { startControlApi, stopControlApi } from './control-api.js';
 import { appearanceSchema } from './appearance-schema.js';
 import { mergeAppearance } from '../shared/appearance.js';
 import { prepareSessionPrompt, prepareSkillFollowup } from './session/prompt.js';
-import { importSkillFile, importSkillPackage, listManagedSkills, listSkills, removeSkill } from './skills.js';
+import { importSkillFile, importSkillPackage, listManagedSkills, listSkills, managedSkillDirectory, removeSkill, setManagedSkillEnabled } from './skills.js';
 import { checkGitHubSkillUpdates, importGitHubSkill, linkGitHubSkill, updateGitHubSkill } from './skill-github.js';
 import { SKILL_ID_PATTERN } from '../shared/skills.js';
 import { listSkillLibrary } from './skill-library.js';
@@ -39,7 +39,7 @@ import { paintWindowTheme } from './theme.js';
 import { usageOverview } from './session/usage.js';
 import { exportUsageCsv } from './session/usage-export.js';
 import { readProviderUsage } from './provider-usage.js';
-import { inputArgs, deliveryProof, enqueueInput, listInputs, editQueuedInput, sendQueuedInputNow, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs, forgetOwnSent, type InputEntry } from './session/input.js';
+import { inputArgs, deliveryProof, enqueueInput, listInputs, outboxRetainsAttachment, editQueuedInput, sendQueuedInputNow, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs, forgetOwnSent, type InputEntry } from './session/input.js';
 import { draftOpeningMessage, onGoalChange, nativeGoalFailure } from './goal.js';
 import { cancelTaskRequest, runTaskRequest } from './task-request.js';
 import { randomUUID } from 'node:crypto';
@@ -51,6 +51,7 @@ import { connectTelegram, disconnectTelegram, onTelegramChange, telegramView, te
 import { DEFAULT_PHONE_PUSH, type PhonePushSettings } from '../shared/phone-push.js';
 import { retryGoalBrowserHelper } from './goal.js';
 import { requestBrowserPreferences } from './browser-preferences.js';
+import { cancelWebChatTitleCheck, readWebChatTitle } from './web-chat-title.js';
 import { sendDesktopInput, cancelDesktopInput, retryQueuedInputBrowser, retireDesktopOpening } from './session/start-input.js';
 import { isSessionRemoving, withSessionRemoval } from './session/removal.js';
 import { wakeBrowserUrl } from './browser-startup.js';
@@ -116,7 +117,7 @@ import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFi
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
 import { hasSecret, isEncryptionAvailable, readSecretsFor, secureStorageStatus, setAsideUnreadableSecrets, setSecret, setSecrets, storedSecretsUnreadable, type SecretKey } from './secrets.js';
-import { BackupError, buildBackup, changedSettings, widerAccess, exportableSecret, openSecrets, overlaySettings, passphraseLongEnough, pickByShape, readBackup, settingsForBackup, type ParsedBackup } from './settings-backup.js';
+import { BackupError, buildBackup, changedSettings, widerAccess, exportableSecret, openSecrets, overlaySettings, passphraseLongEnough, pickByShape, readBackup, settingsForBackup, withoutPerComputer, type ParsedBackup } from './settings-backup.js';
 import { setupApiKeySlot } from '../shared/setup-profile.js';
 import { addSetupProfile, removeSetupProfile, switchSetupProfile } from './setup-profiles.js';
 import { bundledVersion, locateBinary } from './tunnel/locate.js';
@@ -138,7 +139,8 @@ import {
   sweepStaleSwarm,
   unpair,
   followChatInBackground,
-  browserPickupContext
+  browserPickupContext,
+  notifyBrowserActivity
 } from './bridge.js';
 import { extensionDir } from './extension-path.js';
 import { APP_VERSION, extensionDownloadUrl } from './version.js';
@@ -158,6 +160,7 @@ import {
   readEvents,
   withSessionMutationFence
 } from './session/store.js';
+import { readChatEdits, reviewChatEditPath } from './session/chat-edits.js';
 import { netTurnChanges, netTurnFileDiff, turnFileEdits, type EditAt } from './session/turn-changes.js';
 import { forgetSession, notifyChanged, onSessionChange } from './session/recorder.js';
 import { findInSession, locateMessage, locateSearchMatch, searchSessions } from './session/search.js';
@@ -323,6 +326,7 @@ const settingsPatch = z.object({
     retainDays: z.number().int().min(0).max(3650),
     advisoryTokens: z.number().int().min(10_000).max(4_000_000),
     limitTokens: z.number().int().min(10_000).max(4_000_000),
+    checkWebChatTitles: z.boolean().optional(),
     storageLimitGiB: z.number().refine(size => (RECORDING_STORAGE_LIMITS_GIB as readonly number[]).includes(size))
       .transform(size => size as RecordingStorageLimitGiB).optional()
   }),
@@ -568,6 +572,11 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         wanted.sessions.advisoryTokens
       ),
       limitTokens: pick(current.sessions.limitTokens, base.sessions.limitTokens, wanted.sessions.limitTokens),
+      checkWebChatTitles: pick(
+        current.sessions.checkWebChatTitles ?? false,
+        base.sessions.checkWebChatTitles ?? false,
+        wanted.sessions.checkWebChatTitles ?? base.sessions.checkWebChatTitles ?? false
+      ),
       storageLimitGiB: pick(current.sessions.storageLimitGiB, base.sessions.storageLimitGiB, wanted.sessions.storageLimitGiB)
     },
     compaction: {
@@ -802,6 +811,19 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   registerWorkspaceTerminalIpc(getWindow);
   registerAgentOutputIpc(getWindow);
   registerDictationIpc(getWindow);
+  // The renderer owns the live draft references; the outbox owns admitted input.
+  // Look up the latest draft references at prune time, including after a native picker or SFTP wait.
+  const draftAttachments = new WeakMap<IpcMainInvokeEvent['sender'], Set<string>>();
+  handle('sessions:retainDraftAttachments', async (payload, event) => {
+    const { ids } = z.object({ ids: z.array(z.string().uuid()).max(20_000) }).strict().parse(payload);
+    draftAttachments.set(event.sender, new Set(ids));
+  });
+  const attachmentRetention = async (event: IpcMainInvokeEvent) => {
+    await listInputs(); // Load durable input before entering the staging lock.
+    return { has: (id: string) => outboxRetainsAttachment(id) || draftAttachments.get(event?.sender)?.has(id) === true };
+  };
+  const stageFiles = async (sources: AttachmentSource[], event: IpcMainInvokeEvent) =>
+    stageInputAttachments(sources, await attachmentRetention(event));
   let watchedWindow: BrowserWindow | null = null;
   const projectFileWatches = new ProjectFileWatchSet(event => {
     const target = getWindow();
@@ -894,7 +916,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
    * Saves the settings and reports, apart from the state, an error that came after they were
    * written (worker history, login item, control API). An error before the write is thrown.
    */
-  const saveSettingsReport = async (request: z.infer<typeof settingsSave>): Promise<{ state: AppState; lateError: unknown }> => {
+  const saveSettingsReport = async (request: z.infer<typeof settingsSave>, importing?: {
+    validate: (config: Config) => void; language: Config['ui']['language'];
+  }): Promise<{ state: AppState; lateError: unknown }> => {
     // The phone settings are checked only when this save changes them, and only while on: a damaged
     // stored value (hand-edited, or from an older version) must not block every other save, nor the
     // save that repairs it or switches it off.
@@ -902,12 +926,16 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const phoneChanged = !!push && JSON.stringify(push) !== JSON.stringify(request.base.ui.phonePush);
     const before = getConfig();
     const next = await updateConfig(async config => {
+      // An import's confirmation is tied to values, checked after earlier settings saves commit.
+      importing?.validate(config);
       if (request.patch.ui.browserBridgePort !== undefined &&
           request.patch.ui.browserBridgePort !== (request.base.ui.browserBridgePort ?? 'auto') &&
           bridgePortSelection().overridden) {
         throw new Error('Browser bridge port is controlled by CLF_BRIDGE_PORTS.');
       }
       const proposed = { ...config, ...mergeSettings(config, request.base, request.patch) };
+      // The normal form keeps language; only an import owns it, in this same guarded commit.
+      if (importing) proposed.ui = { ...proposed.ui, language: importing.language };
       // Checked as it will be saved: the form may be stale, and the merge keeps fields another
       // window changed meanwhile (a cleared topic stays cleared while this save turns it on).
       if (phoneChanged && proposed.ui.phonePush) {
@@ -922,6 +950,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       else if (!config.goal.impulseMinutes && (proposed.goal.impulseMinutes ?? 0) > 0) await cancelFinishInputs(true);
       return proposed;
     }, async (published, previous) => {
+      if (!published.sessions.checkWebChatTitles || published.ui.chatBrowser !== previous.ui.chatBrowser) cancelWebChatTitleCheck();
       if (previous.ui.finishTool && !published.ui.finishTool) await cancelFinishInputs(false);
       else if ((previous.goal.impulseMinutes ?? 0) > 0 && !published.goal.impulseMinutes) await cancelFinishInputs(true);
     }, publishBridgePortChange);
@@ -1057,10 +1086,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
 
   // Settings backup. The file is read and checked in the main process; the renderer sees only a
   // summary and a token, and saved keys never cross to it. Errors are sentences it translates.
-  let pendingImport: { token: string; backup: ParsedBackup; changed: string[]; wider: string[] } | null = null;
+  let pendingImport: { token: string; backup: ParsedBackup; baseline: ReturnType<typeof settingsForBackup> } | null = null;
   // What importing would change, as a save really applies it: mergeSettings keeps the fields the
-  // settings form does not own, so only changes that happen are counted. The interface language
-  // is applied beside the save, since the form never edits it.
+  // settings form does not own, so only changes that happen are counted. An import also applies
+  // the interface language in its guarded save, while ordinary form saves preserve it.
   const importPlan = (backup: ParsedBackup) => {
     const config = getConfig();
     const base = pickByShape(settingsPatch, config);
@@ -1132,7 +1161,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       throw new BackupError('invalid-settings', 'This backup has a setting this version does not accept, so nothing was imported.');
     }
     const { changed, wider } = plan;
-    pendingImport = { token: randomUUID(), backup, changed, wider };
+    pendingImport = { token: randomUUID(), backup, baseline: withoutPerComputer(settingsForBackup(settingsPatch, plan.base)) };
     return {
       token: pendingImport.token, file: path.basename(file), appVersion: backup.appVersion, exportedAt: backup.exportedAt,
       changed, wider, keyCount: backup.secretCount
@@ -1144,7 +1173,20 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       logInfo('settings backup: import refused, its choice is gone or was already used; nothing changed');
       throw new Error('Choose the backup file again.');
     }
-    const { backup } = pendingImport;
+    const choice = pendingImport;
+    const { backup } = choice;
+    const validateImport = (config: Config): void => {
+      // Decryption/preflight can yield while another file is picked or an earlier import ends.
+      if (pendingImport !== choice) {
+        logInfo('settings backup: import refused, its choice is gone or was already used; nothing changed');
+        throw new Error('Choose the backup file again.');
+      }
+      if (changedSettings(choice.baseline, withoutPerComputer(settingsForBackup(settingsPatch, config))).length) {
+        pendingImport = null;
+        logInfo('settings backup: import refused, the settings changed after the file was chosen; nothing changed');
+        throw new Error('Your settings changed after the file was chosen. Choose it again.');
+      }
+    };
     // Keys open first: a wrong passphrase changes nothing, and the dialog can ask again.
     let keys: Record<string, string> = {};
     if (includeKeys && backup.secrets) {
@@ -1153,15 +1195,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         throw error;
       }
     }
-    // Against the settings as they are now. If they changed since the file was chosen (a save still
-    // on its way, another window), the person confirmed a different import: it is refused, so more
-    // access is never granted without the warning the preview showed.
-    const { base, merged, language, changed, wider } = importPlan(backup);
-    if (JSON.stringify(changed) !== JSON.stringify(pendingImport.changed) || JSON.stringify(wider) !== JSON.stringify(pendingImport.wider)) {
-      pendingImport = null;
-      logInfo('settings backup: import refused, the settings changed after the file was chosen; nothing changed');
-      throw new Error('Your settings changed after the file was chosen. Choose it again.');
-    }
+    validateImport(getConfig());
+    const { base, merged, language, changed } = importPlan(backup);
     // Checked before anything changes, so a computer without secure storage gets a clear refusal
     // rather than its settings changed and its keys missing.
     if (Object.keys(keys).length && !(await isEncryptionAvailable())) {
@@ -1178,16 +1213,17 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // language and keys are not left out of a backup whose settings already changed.
     // Said after "Imported", each a sentence the renderer translates on its own.
     const warnings: string[] = [];
+    // Also covers a key-only import after asynchronous secure-storage preflight.
+    validateImport(getConfig());
     if (changed.length) {
       // This save's own report, never an inference from the config: another window's save may land meanwhile.
-      const { lateError } = await saveSettingsReport(settingsSave.parse({ base, patch: merged }));
+      const { lateError } = await saveSettingsReport(settingsSave.parse({ base, patch: merged }), { validate: validateImport, language });
       if (lateError) {
         const message = lateError instanceof Error ? lateError.message : String(lateError);
         warnings.push(message);
         logWarn(`settings backup: the settings were saved, but a later step of the save failed (${message}); the import goes on`);
       }
     }
-    if (language !== getConfig().ui.language) await updateConfig(config => ({ ...config, ui: { ...config.ui, language } }));
     // The settings are written by now: a key write that still fails is reported, never as a failed
     // import, and never by undoing settings (an undo that fails halfway would be worse).
     let keysFailed = false;
@@ -1198,7 +1234,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         warnings.push('The settings were imported, but the saved keys could not be stored. Add them again in Settings.');
       }
     }
-    pendingImport = null;
+    if (pendingImport === choice) pendingImport = null;
     const keyCount = keysFailed ? 0 : Object.keys(keys).length;
     logInfo(`settings backup: imported ${changed.length} changed setting${changed.length === 1 ? '' : 's'}` +
       `${keyCount ? ` and ${keyCount} saved key${keyCount === 1 ? '' : 's'}` : ''}${backup.appVersion ? ` from a ${backup.appVersion} backup` : ''}`);
@@ -1285,8 +1321,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('chatGroups:assign', async payload => {
     const { sessionId, groupId: target } = z.object({ sessionId: sessionIdArg.shape.id, groupId: groupId.nullable() }).strict().parse(payload);
-    const session = await getSession(sessionId);
-    return assignChatGroup(session ? { id: session.id, projectId: session.projectId ?? null, origin: session.origin ?? null } : null, target);
+    return assignChatGroup(() => getSession(sessionId), target);
   });
   // Move to project (#1919): the chat, its sub-agents and its group place change; nothing it does.
   handle('sessions:moveProject', async payload => {
@@ -1335,6 +1370,31 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('skills:list', () => listSkills());
   handle('skills:managed', () => listManagedSkills());
+  handle('skills:setEnabled', async payload => {
+    const { id, enabled } = z.object({ id: z.string().regex(SKILL_ID_PATTERN), enabled: z.boolean() }).strict().parse(payload);
+    try {
+      const result = await setManagedSkillEnabled(id, enabled);
+      logInfo(`Managed Skill ${enabled ? 'enabled' : 'disabled'} by user`);
+      return result;
+    } catch (error) {
+      logWarn(`Managed Skill toggle refused: ${error instanceof Error && /no longer installed/.test(error.message) ? 'missing-package' : 'state-or-access-error'}`);
+      throw error;
+    }
+  });
+  handle('skills:openFolder', async payload => {
+    const { id } = z.object({ id: z.string().regex(SKILL_ID_PATTERN) }).strict().parse(payload);
+    try {
+      const directory = await managedSkillDirectory(id);
+      const error = await shell.openPath(directory);
+      // Keep the OS-facing error contract for callers. The separate diagnostic
+      // log below deliberately records only a reason code, never the shell text.
+      if (error) throw new Error(`Could not open the Skill folder: ${error}`);
+      return true;
+    } catch (error) {
+      logWarn(`Managed Skill folder refused: ${error instanceof Error && /not found or is invalid/.test(error.message) ? 'missing-package' : 'access-or-shell-error'}`);
+      throw error;
+    }
+  });
   handle('skills:recommended', () => listRecommendedSkills());
   handle('skills:installRecommended', async payload => {
     const { id } = z.object({ id: z.string().regex(SKILL_ID_PATTERN) }).strict().parse(payload);
@@ -1679,43 +1739,69 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   const reviewOf = (sessionId: string) => (at: EditAt) => at.assetId ? readEditReviewAsset(sessionId, at.assetId) : Promise.resolve(null);
   handle('sessions:turnChanges', async payload => {
     const request = turnRequest('sessions:turnChanges', turnChangesRequest.strict(), payload);
-    const files = await turnEdits(request);
-    return { changes: await netTurnChanges(files, reviewOf(request.sessionId)), total: files.length };
+    const [files, checkpointRef] = await Promise.all([
+      turnEdits(request),
+      turnCheckpointRef(request.sessionId, request.turnId)
+    ]);
+    return {
+      changes: await netTurnChanges(files, reviewOf(request.sessionId)),
+      total: files.length,
+      ...(checkpointRef ? { checkpointRef } : {})
+    };
   });
   handle('sessions:turnFileDiff', async payload => {
     const request = turnRequest('sessions:turnFileDiff', turnChangesRequest.extend({ path: z.string().min(1).max(4096) }).strict(), payload);
     return netTurnFileDiff(await turnEdits(request), request.path, reviewOf(request.sessionId));
   });
+  const confirmCheckpointRestore = async (selected: string[], note?: string): Promise<boolean> => {
+    const shown = selected.slice(0, 25).map(name => `  - ${name.replace(/[\x00-\x1f\x7f]/g, '?').slice(0, 180)}`);
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      title: mainText('Restore files from this checkpoint?'),
+      message: mainText('Restore files from this checkpoint?'),
+      detail: [
+        mainText('Files return to their checkpoint version; files added since are removed. Current files are saved first, so you can undo this in Review.'),
+        ...(note ? ['', note] : []),
+        '', ...shown, ...(selected.length > shown.length ? [mainText('More files are not shown.')] : [])
+      ].join('\n'),
+      buttons: [mainText('Keep current files'), mainText('Restore files')],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true
+    });
+    return response === 1;
+  };
   handle('checkpoints:restore', async payload => {
     const { projectId, checkpointId, paths, expectedRevision } = z.object({ projectId: projectFileId,
       checkpointId: z.string().regex(/^[0-9a-f]{32}$/), paths: z.array(projectRelativePath.min(1)).min(1).max(256).nullable(),
       expectedRevision: z.string().length(64).regex(/^[0-9a-f]+$/) }).strict().parse(payload);
     // Approval comes from this trusted dialog, never from a renderer boolean; the default keeps the files.
-    return restoreCheckpoint(projectId, checkpointId, paths, expectedRevision, async selected => {
-      const shown = selected.slice(0, 25).map(name => `  - ${name.replace(/[\x00-\x1f\x7f]/g, '?').slice(0, 180)}`);
-      const { response } = await dialog.showMessageBox({
-        type: 'warning',
-        title: mainText('Restore files from this checkpoint?'),
-        message: mainText('Restore files from this checkpoint?'),
-        detail: [
-          mainText('Files return to their checkpoint version; files added since are removed. Current files are saved first, so you can undo this in Review.'),
-          '', ...shown, ...(selected.length > shown.length ? [mainText('More files are not shown.')] : [])
-        ].join('\n'),
-        buttons: [mainText('Keep current files'), mainText('Restore files')],
-        defaultId: 0,
-        cancelId: 0,
-        noLink: true
-      });
-      return response === 1;
-    });
+    return restoreCheckpoint(projectId, checkpointId, paths, expectedRevision, selected => confirmCheckpointRestore(selected));
+  });
+  handle('checkpoints:restoreTurn', async payload => {
+    const request = turnRequest('checkpoints:restoreTurn', turnChangesRequest.strict(), payload);
+    return restoreTurnCheckpoint(request.sessionId, request.turnId, request.from, (selected, { editedLater }) =>
+      confirmCheckpointRestore(selected, editedLater ? mainText('Some of these files were also edited in a later turn.') : undefined));
+  });
+  handle('sessions:chatEdits', async payload => {
+    const { id, projectId } = turnRequest('sessions:chatEdits', sessionIdArg.extend({ projectId: projectFileId }).strict(), payload);
+    return readChatEdits(id, projectId);
   });
   handle('sessions:toolEditReview', async payload => {
-    const { sessionId, callId, changeIndex } = z.object({
-      sessionId: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
+    const { sessionId, callId, changeIndex, projectId } = z.object({
+      sessionId: sessionIdArg.shape.id,
       callId: z.string().uuid(),
-      changeIndex: z.number().int().min(0).max(63)
+      changeIndex: z.number().int().min(0).max(63),
+      projectId: projectFileId.optional()
     }).strict().parse(payload);
-    return readToolEditReview(sessionId, callId, changeIndex);
+    if (!projectId) return readToolEditReview(sessionId, callId, changeIndex);
+    let path: string | null = null;
+    const value = await readToolEditReview(sessionId, callId, changeIndex, async (event, index) => {
+      path = await reviewChatEditPath(sessionId, projectId, event, index);
+      return path !== null;
+    });
+    if (!value || path === null) { logInfo('chat edits: recorded diff unavailable or outside current scope'); return null; }
+    return { ...value, path };
   });
   handle('projectFiles:preview', async payload => {
     const { projectId, path } = z.object({ projectId: projectFileId, path: projectRelativePath.min(1) }).strict().parse(payload);
@@ -1750,16 +1836,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     shell.showItemInFolder(target.real);
     return true;
   });
-  handle('projectFiles:attach', async payload => {
+  handle('projectFiles:attach', async (payload, event) => {
     const { projectId, path } = z.object({ projectId: projectFileId, path: projectRelativePath.min(1) }).strict().parse(payload);
     // A file in a project on a server (#1469) is copied over SFTP first.
     const snapshot = await serverFileSnapshot(projectId, path);
     if (snapshot) {
-      const retained = new Set((await listInputs()).filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).flatMap(row => row.attachments?.map(file => file.id) ?? []));
-      try { return await stageInputAttachment(snapshot.file, retained); } finally { await snapshot.cleanup(); }
+      try { return (await stageFiles([snapshot.file], event))[0]!; } finally { await snapshot.cleanup(); }
     }
     const target = await projectFileTarget(projectId, path, { allowRoot: false, fileOnly: true });
-    const retained = new Set((await listInputs()).filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).flatMap(row => row.attachments?.map(file => file.id) ?? []));
+    const retained = await attachmentRetention(event);
     const checked = await projectFileTarget(projectId, path, { allowRoot: false, fileOnly: true });
     if (checked.real !== target.real) throw new Error('The project file changed location');
     return stageInputAttachment(checked.real, retained);
@@ -2072,16 +2157,26 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return readSessionList({ cursor, limit: limit ?? 60, ...(projectId ? { projectId } : {}) });
   });
 
+  const sessionIdSchema = z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i);
   handle('sessions:image', async (payload) => {
-    const { id, assetId } = z.object({ id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i), assetId: z.string().max(100).regex(/^[a-f0-9]{8,64}\.(?:bin|png|jpg)$/) }).parse(payload);
+    const { id, assetId } = z.object({ id: sessionIdSchema, assetId: z.string().max(100).regex(/^[a-f0-9]{8,64}\.(?:bin|png|jpg)$/) }).parse(payload);
     return recordedInputImage(id, assetId);
   });
-  handle('sessions:imageStorage', async () => getImageStorage());
+  handle('sessions:imageStorage', async (payload) => {
+    const { id } = payload === undefined ? {} : z.object({ id: sessionIdSchema.optional() }).parse(payload);
+    return getImageStorage(id);
+  });
   handle('sessions:clearImageStorage', async (payload) => {
-    const { mode } = z.object({ mode: z.enum(['oldest-gib', 'all']) }).parse(payload);
-    const result = await clearImageStorage(mode);
-    // Retired images can belong to any transcript; this is the explicit global invalidation.
-    push('session:changed', { allTranscripts: true } satisfies SessionChange);
+    const parsed = z.discriminatedUnion('mode', [
+      z.object({ mode: z.enum(['oldest-gib', 'all', 'old-chats-gib']), id: sessionIdSchema.optional() }),
+      z.object({ mode: z.enum(['session-images', 'session-texts']), id: sessionIdSchema })
+    ]).parse(payload);
+    const result = await clearImageStorage(parsed.mode, parsed.id);
+    const change: SessionChange = parsed.mode === 'session-images' || parsed.mode === 'session-texts'
+      ? { sessionIds: [parsed.id] }
+      : { allTranscripts: true };
+    // Per-chat cleanup retires references in that chat only; global modes can touch any transcript.
+    push('session:changed', change);
     return result;
   });
   handle('sessions:events', async (payload) => {
@@ -2102,26 +2197,22 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return page;
   });
 
-  const stageFiles = async (sources: AttachmentSource[]) => {
-    const retained = new Set((await listInputs()).filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).flatMap(row => row.attachments?.map(file => file.id) ?? []));
-    return stageInputAttachments(sources, retained);
-  };
-  handle('sessions:files', async () => {
+  handle('sessions:files', async (_payload, event) => {
     const chosen = await dialog.showOpenDialog({ ...dialogLabel('Attach files'), properties: ['openFile', 'multiSelections'] });
     if (chosen.canceled) return [];
     if (chosen.filePaths.length > 20) throw new Error('Attach up to 20 files per message');
-    return stageFiles(chosen.filePaths);
+    return stageFiles(chosen.filePaths, event);
   });
-  handle('sessions:dropFiles', async payload => {
+  handle('sessions:dropFiles', async (payload, event) => {
     const { files } = z.object({ files: z.array(z.union([
       z.string().min(1).max(32768),
       z.object({ name: z.string().min(1).max(255), bytes: z.instanceof(Uint8Array).refine(bytes => bytes.byteLength > 0 && bytes.byteLength <= 12 * 1024 * 1024) }).strict()
     ])).min(1).max(20) }).strict().parse(payload);
-    return stageFiles(files);
+    return stageFiles(files, event);
   });
-  handle('sessions:attachText', async payload => {
+  handle('sessions:attachText', async (payload, event) => {
     const { text } = z.object({ text: z.string().min(1).max(4 * 1024 * 1024) }).parse(payload);
-    return (await stageFiles([{ text }]))[0]!;
+    return (await stageFiles([{ text }], event))[0]!;
   });
   handle('sessions:stopTurn', async payload => {
     const { id, expectedTurnId, expectedConversationId } = sessionIdArg.extend({ expectedTurnId: z.string().min(1).max(256),
@@ -2295,6 +2386,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const answer = requestApprovalAnswer(conversationId, cardId, choice);
     if (answer.ok) {
       logInfo(`approval card: the user chose ${choice} in the app for ${conversationId}`);
+      notifyBrowserActivity(conversationId);
       return { ok: true as const };
     }
     return answer;
@@ -2359,6 +2451,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     );
     // A blocked worker chat frees its swarm slot now, not on the next 30-second pass: the
     // user pressing Block on a worker is usually about to start something in its place.
+    notifyBrowserActivity(conversationId);
     if (blocked) await sweepStaleSwarm().catch(() => undefined);
     refreshPetOverlayActivities();
     return blockedChatIds();
@@ -2443,6 +2536,40 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     }).parse(payload);
     if (!await getSession(id)) throw new Error('Session not found');
     return setBookmark(id, { messageId, excerpt, messageTime }, on);
+  });
+  handle('sessions:checkWebTitle', async (payload) => {
+    const { id } = z.object({ id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i) }).strict().parse(payload);
+    const { ui: { chatBrowser }, sessions: settings } = getConfig();
+    if (!settings.checkWebChatTitles) {
+      logInfo('web chat title: check skipped (disabled)');
+      return 'unavailable';
+    }
+    const chat = await getSession(id);
+    if (chat?.titleSource !== 'manual' || !chat.conversationId) {
+      logInfo('web chat title: check skipped (ineligible session)');
+      return 'unavailable';
+    }
+    if (getConfig().ui.chatBrowser !== chatBrowser) {
+      logInfo('web chat title: check skipped (browser changed)');
+      return 'unavailable';
+    }
+    const title = await readWebChatTitle(chat.conversationId);
+    if (title === null) return 'unavailable';
+    const current = await getSession(id);
+    const config = getConfig();
+    if (config.ui.chatBrowser !== chatBrowser) {
+      logInfo('web chat title: comparison discarded (browser changed)');
+      return 'unavailable';
+    }
+    if (!config.sessions.checkWebChatTitles) {
+      logInfo('web chat title: comparison discarded (disabled)');
+      return 'unavailable';
+    }
+    if (current?.titleSource !== 'manual' || current.conversationId !== chat.conversationId || current.title !== chat.title) {
+      logInfo('web chat title: comparison discarded (session changed)');
+      return 'unavailable';
+    }
+    return title === chat.title ? 'match' : 'different';
   });
   handle('sessions:rename', async (payload) => {
     const { id, title } = sessionNameArg.parse(payload);

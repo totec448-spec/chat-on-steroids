@@ -14,6 +14,24 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.55': {
+    lead: () => t("Restore a turn's edited files, manage Skills from their cards, free storage per chat, and safer saves after a crash."),
+    highlights: [
+      { icon: 'i-retry', title: () => t("Restore a turn"), text: () => t("Changed files can put a turn's edited files back, with Undo in Review.") },
+      { icon: 'i-skill', title: () => t("Manage installed Skills"), text: () => t("Pause, re-enable or reveal an installed Skill from its card menu.") },
+      { icon: 'i-chart', title: () => t("Free space per chat"), text: () => t("The storage dialog shows what one chat uses and frees its images or long texts.") },
+      { icon: 'i-lock', title: () => t("Safer after a crash"), text: () => t("Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.") }
+    ]
+  },
+  '2.1.54': {
+    lead: () => t("Goal chats that don't stand idle, a tidier Settings, faster chat updates, and the files a chat edited."),
+    highlights: [
+      { icon: 'i-agents', title: () => t("Goal chats don't stand idle"), text: () => t("A Goal or Loop chat whose Compact & Resume got stuck goes on from its saved summary.") },
+      { icon: 'i-gear', title: () => t("A tidier Settings"), text: () => t("Agents settings are split into five short pages instead of one very long one.") },
+      { icon: 'i-retry', title: () => t("Chats update faster"), text: () => t("A new message or tool call shows up in the open chat much sooner.") },
+      { icon: 'i-git-diff', title: () => t("What a chat edited"), text: () => t("Review lists the files this chat changed and opens each recorded diff.") }
+    ]
+  },
   '2.1.53': {
     lead: () => t("Compact & Resume in Projects, Goal chats that recover, and safer saves over SSH."),
     highlights: [

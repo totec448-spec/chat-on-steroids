@@ -649,7 +649,10 @@
       if (thoughtMessage(candidate)) thoughtParents.set(str(candidate.id), candidate);
     }
     for (let index = 0; index < messages.length; index++) {
-      if (!budget || budget.remaining <= 0) break;
+      if (!budget || budget.remaining <= 0) {
+        if (budget) budget.truncated = true;
+        break;
+      }
       const message = messages[index];
       if (!message || typeof message !== 'object') continue;
       const author = message.author;
@@ -663,7 +666,9 @@
       // Private reasoning, by ChatGPT's own routing. Never a transcript row.
       if (analysisMessage(message)) continue;
       const id = str(message.id);
-      const rawText = budgetedText(authoredText(message), budget, MAX_RENDERED_TEXT);
+      const authored = authoredText(message);
+      const rawText = budgetedText(authored, budget, MAX_RENDERED_TEXT);
+      if (authored && !rawText && budget) budget.truncated = true;
       // A native final can be textless (for example after generated images).
       // Preserve its exact end_turn proof through the normal message pipeline.
       if (!id || (!rawText && id !== terminalId)) continue;
@@ -752,7 +757,10 @@
     const seen = new Set();
     if (!Array.isArray(messages)) return out;
     for (let index = 0; index < messages.length; index++) {
-      if (!budget || budget.remaining <= 0) break;
+      if (!budget || budget.remaining <= 0) {
+        if (budget) budget.truncated = true;
+        break;
+      }
       const message = messages[index];
       if (!message || typeof message !== 'object') continue;
       const author = message.author;
@@ -1800,13 +1808,16 @@
   function messagesFromTurnView(turn) {
     if (!turn || typeof turn !== 'object' || !Array.isArray(turn.items) || turn.items.length > MAX_TURN_ITEMS) return null;
     const out = [], seen = new Set(), interim = { remaining: MAX_TRACE_TEXT };
+    let messagesComplete = true;
     const topLevel = new Set(turn.items.filter(item => item?.type === 'assistant-message').map(item => str(item.messageId) || str(item.latestMessageId)).filter(Boolean));
     const assistant = (item, nested) => {
       const id = str(item.messageId) || str(item.latestMessageId);
       if (!id || seen.has(id) || (nested && topLevel.has(id))) return;
+      const rawContent = typeof item.content === 'string' ? item.content : '';
       // Interim updates share a small text budget, so they cannot use up the turn's own for its final answer.
-      const body = nested ? budgetedText(typeof item.content === 'string' ? item.content : '', interim, MAX_TRACE_SAY)
-        : typeof item.content === 'string' ? item.content.slice(0, MAX_RENDERED_TEXT) : '';
+      const body = nested ? budgetedText(rawContent, interim, MAX_TRACE_SAY)
+        : rawContent.slice(0, MAX_RENDERED_TEXT);
+      if (nested && rawContent && !ONLY_CONTENT_REFERENCES.test(rawContent) && !body) messagesComplete = false;
       if (nested && (!body || ONLY_CONTENT_REFERENCES.test(body))) return;
       const phase = str(item.phase), complete = item.completed === true;
       const terminal = !nested && complete && phase === 'final_answer' && turn.status === 'complete';
@@ -1826,7 +1837,7 @@
     const working = items => {
       if (!Array.isArray(items)) return;
       for (const item of items) {
-        if (++work > MAX_ROWS) return;
+        if (++work > MAX_ROWS) { messagesComplete = false; return; }
         if (!item || typeof item !== 'object') continue;
         if (item.type === 'chatgpt-reasoning-group') working(item.items);
         else if (item.type === 'assistant-message') assistant(item, true);
@@ -1847,6 +1858,7 @@
       } else if (item.type === 'assistant-message') assistant(item, false);
       else if (item.type === 'chatgpt-reasoning-group') working(item.items);
     }
+    if (!messagesComplete) out.incomplete = true;
     return out;
   }
 
@@ -2305,13 +2317,14 @@
     }
     if (!entry || !turnId || entry.id !== turnId || entry.turn.items.length > MAX_TURN_ITEMS) return null;
     const place = shellQuestionPlace(entryFiber, entry, section);
-    const messages = [], calls = [], slots = [], seen = new Set(), callSources = new Map(), executionIds = [], images = new Map();
-    let lastAnswer = null, previousId = null;
+    const messages = [], calls = [], slots = [], seen = new Set(), callSources = new Map(), executionIds = [], images = new Map(), generatedImages = [];
+    let lastAnswer = null, previousId = null, unfinishedImageSkipped = false, anyImageSkipped = false;
     const remember = id => { if (!id || seen.has(id)) return false; seen.add(id); return true; };
     // GPT-6 (2026-10-12) writes each interim sentence as an assistant message inside the working
     // group while the turn runs. A top-level item owns its id; a nested copy of it is not read twice.
     const topLevel = new Set(entry.turn.items.filter(item => item?.type === 'assistant-message').map(item => str(item.messageId)).filter(Boolean));
     let work = 0;
+    let messagesComplete = true;
     const interim = { remaining: MAX_TRACE_TEXT };
     const interimText = value => typeof value === 'string' && value ? budgetedText(value, interim, MAX_TRACE_SAY) : '';
     // ChatGPT's own times for this turn (#2005): a question found in older history was recorded at the
@@ -2325,14 +2338,19 @@
       const asset = typeof item.src === 'string' && /^sediment:\/\/(file_[A-Za-z0-9_-]{8,100})$/.exec(item.src)?.[1];
       if (!id || !asset || !Array.isArray(entry.turn.messageIds) || !entry.turn.messageIds.includes(id)) return;
       images.set(item, asset);
-      // Only typed public output metadata crosses this boundary, wherever the
-      // page places that output. A nested image is not a top-level final answer.
+      // Typed generated output metadata crosses this boundary wherever the shell places it,
+      // and a completed nested image closes an image-only working group when no final prose follows.
       const made = item.status === 'completed' && item.isPreview !== true && entry.turn.status === 'complete' ? completedAt : undefined;
       messages.push({ id, author: { role: 'tool' }, recipient: 'all', channel: 'final',
         ...(made !== undefined ? { create_time: made } : {}),
         status: item.status === 'completed' && item.isPreview !== true ? 'finished_successfully' : 'in_progress',
         content: { content_type: 'multimodal_text', parts: [{ content_type: 'image_asset_pointer',
           asset_pointer: item.src, width: item.width, height: item.height }] } });
+    };
+    const recordGeneratedImage = item => {
+      lastAnswer = item;
+      generatedImages.push(item);
+      appendGeneratedImage(item);
     };
     // The turn's start is its opening question's; its end is its last answer's. A follow-up sent into the
     // running answer, or an answer a retry replaced, keeps only a time of its own.
@@ -2366,8 +2384,7 @@
           node.closest('[data-turn-key]') === section && node.getAttribute('data-content-search-unit-key') === key);
         if (nodes.length === 1) slots.push({ node: nodes[0], id });
       } else if (item?.type === 'generated-image') {
-        lastAnswer = item;
-        appendGeneratedImage(item);
+        recordGeneratedImage(item);
       } else {
         const steps = item?.type === 'chatgpt-reasoning-group' && Array.isArray(item.items) ? item.items : [item];
         for (const step of steps) {
@@ -2376,6 +2393,11 @@
           // still checked, so a repeated one refuses the turn however far down it sits.
           if (++work > MAX_ROWS) {
             if (work > MAX_TURN_ITEMS) return null;
+            if (step?.type === 'assistant-message') messagesComplete = false;
+            if (step?.type === 'generated-image') {
+              anyImageSkipped = true;
+              if (step.status !== 'completed' || step.isPreview === true) unfinishedImageSkipped = true;
+            }
             const counted = step?.type === 'dynamic-tool-call' ? step.tool === 'exec'
               : step?.type === 'mcp-tool-call' && ownServerName(step.invocation?.server);
             const spare = counted ? str(step.callId) : null;
@@ -2383,7 +2405,7 @@
             continue;
           }
           if (step?.type === 'generated-image') {
-            appendGeneratedImage(step);
+            recordGeneratedImage(step);
             continue;
           }
           if (step?.type === 'assistant-message' && item !== step) {
@@ -2394,7 +2416,11 @@
             const shown = shellItemText(step);
             if (!shown || ONLY_CONTENT_REFERENCES.test(shown)) continue;
             const text = interimText(shown);
-            if (!text || !remember(id)) continue;
+            if (!text) {
+              messagesComplete = false;
+              continue;
+            }
+            if (!remember(id)) continue;
             messages.push({ id, author: { role: 'assistant' }, content: { content_type: 'text', parts: [text] },
               channel: 'commentary', end_turn: false, status: step.completed === true ? 'finished_successfully' : 'in_progress', metadata: {} });
             continue;
@@ -2420,14 +2446,18 @@
     // Media may share a provider message with other media, never an authored row
     // or local call. Keep malformed cross-kind identities out of the whole scan.
     if ([...images.keys()].some(item => seen.has(item.chatGptMessageId))) return null;
-    // Image-only answers have no assistant final item. Both the selected public
-    // images and the containing turn must finish; previews/retries cannot settle it.
+    // Image-only answers have no assistant final item, whether placed at the top level or
+    // inside a completed working group. Every group, image and the turn itself must finish.
     const imageAnswer = lastAnswer?.type === 'generated-image';
-    const imageEnd = imageAnswer && entry.turn.status === 'complete' && images.has(lastAnswer) &&
-      entry.turn.items.filter(item => item?.type === 'generated-image').every(item =>
+    const incompleteGroup = entry.turn.items.some(item => item?.type === 'chatgpt-reasoning-group' &&
+      (item.completed === false || (item.activeReasoning && item.activeReasoning.completed !== true)));
+    const imageEnd = imageAnswer && entry.turn.status === 'complete' && !incompleteGroup && !unfinishedImageSkipped &&
+      images.has(lastAnswer) && generatedImages.length > 0 && generatedImages.every(item =>
         images.has(item) && item.status === 'completed' && item.isPreview !== true)
       ? lastAnswer.chatGptMessageId : null;
     return { entry, place, messages, calls, slots, callSources, executionIds, images,
+      messagesComplete,
+      hasGeneratedImage: generatedImages.length > 0 || anyImageSkipped,
       endMessageId: imageAnswer ? imageEnd : turnEndMessageId(messages) };
   }
   /**
@@ -2540,14 +2570,27 @@
         const exactAnchors = new Map();
         const exactThoughtRows = new Map();
         const exactImageNodes = new Map();
-        const turnBudget = { remaining: Math.min(MAX_TURN_TEXT, responseBudget.remaining) };
+        const turnBudget = { remaining: Math.min(MAX_TURN_TEXT, responseBudget.remaining), truncated: false };
         const before = turnBudget.remaining;
         const renderedMessages = renderedMessagesOf(group.sections, messages, turnBudget, exactAnchors, conversation.conversationId);
+        const messagesComplete = Boolean(
+          Array.isArray(messages) &&
+          !messages.incomplete &&
+          (!shell || shell.messagesComplete) &&
+          !turnBudget.truncated &&
+          before > 0
+        );
         const nativeActivities = shell ? shellPublicActivity(shell, metadata, renderedMessages, turnBudget, section, exactAnchors) : nativeActivitiesOf(group.sections, messages, exactThoughtRows);
         responseBudget.remaining -= before - turnBudget.remaining;
         const generatedImages = generatedImagesOf(group.sections, messages, exactImageNodes, shell?.images);
         const activities = nativeActivities.events;
         const endMessageId = shell ? shell.endMessageId : turnEndMessageId(messages);
+        // A tool-only exchange can be complete without any final message to name.
+        // Do not use this for an unreadable/unfinished text or image answer.
+        const terminalWithoutFinal = shell?.entry.turn.status === 'complete' && !endMessageId &&
+          !shell.hasGeneratedImage &&
+          !shell.entry.turn.items.some(item => item?.type === 'assistant-message' && item.phase === 'final_answer') &&
+          shell.images.size === 0;
         const trace = shell ? shellTurnTrace(shell) : [];
         // The shell supplies the completed final item's own exact message id,
         // without the classic thought-parent/timestamp tuple. Preserve that
@@ -2570,6 +2613,8 @@
           conversationConflict: conversation.conflict,
           ...(shell && !conversation.conversationId ? { requestOwnerRequired: true } : {}),
           endMessageId,
+          messagesComplete,
+          ...(terminalWithoutFinal ? { terminalWithoutFinal: true } : {}),
           calls,
           codeModeCalls,
           requests,

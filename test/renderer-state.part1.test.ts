@@ -1490,6 +1490,36 @@ it('offers a chat\'s actions in one menu, by kind of row, and opens it with a ri
   expect(doc.querySelector('.row-menu')).toBeNull();
 });
 
+it('clears a Web title notice when the selected browser changes', async () => {
+  const chat = {
+    id: 'web-title-menu-0001', title: 'Manual title', titleSource: 'manual',
+    conversationId: '11111111-1111-4111-8111-111111111111', chatIds: [], startedAt: 1, updatedAt: 2, agents: []
+  };
+  const checkWebChatTitle = vi.fn(async () => ({ ok: true, data: 'different' }));
+  const mounted = await mountChat({}, [], {
+    listSessions: async () => ({ ok: true, data: { sessions: [chat], activeId: null, pressure: [], blocked: [], trusted: [] } }),
+    checkWebChatTitle
+  });
+  const doc = mounted.window.document;
+  const select = (chatBrowser: string) => mounted.push({
+    ...mounted.state, config: {
+      ...mounted.state.config, sessions: { ...mounted.state.config.sessions, checkWebChatTitles: true },
+      ui: { ...mounted.state.config.ui, chatBrowser }
+    }
+  });
+  select('chrome');
+  const row = () => doc.querySelector<HTMLElement>('.sess[data-id="' + chat.id + '"]');
+  await waitFor(() => expect(row()).not.toBeNull());
+  rowMenuItem(row()!, 'rename');
+  const rename = () => doc.querySelector('.row-menu [data-row-action="rename"]');
+  await waitFor(() => expect(rename()?.textContent).toContain('ChatGPT title differs'));
+  select('edge');
+  expect(rename()?.textContent).not.toContain('ChatGPT title differs');
+  select('chrome');
+  expect(rename()?.textContent).not.toContain('ChatGPT title differs');
+  expect(checkWebChatTitle).toHaveBeenCalledTimes(1);
+});
+
 it('names a chat in place: Enter saves, Escape keeps the old name, empty restores ChatGPT\'s title, repaints keep the field (#1107)', async () => {
   const session = {
     id: 'rename-session-0001', title: 'ChatGPT title', conversationId: 'rename-conversation-0001', chatIds: ['rename-conversation-0001'],
@@ -2098,11 +2128,12 @@ it('searches every settings page from the sidebar and opens the setting it finds
   expect([field.value, pages.hidden, results.hidden]).toEqual(['', false, true]);
   expect(doc.getElementById('developerMode')!.closest('.setting')!.classList.contains('is-found')).toBe(true);
   expect(doc.activeElement).toBe(doc.getElementById('developerMode'));
-  // Enter opens the best match, here on Agents & automation.
+  // Enter opens the best match, here on the Goal & Loop page.
   type('session finish');
   field.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await frame();
   expect(doc.querySelector('[data-panel="chat"]')!.classList.contains('is-active')).toBe(true);
   expect(doc.querySelector<HTMLElement>('[data-view="settings"]')!.hidden).toBe(false);
+  expect(doc.querySelector<HTMLElement>('.automation-content')!.dataset.agentsCurrent).toBe('goal');
   expect(doc.activeElement).toBe(doc.getElementById('finishTool'));
   // Nothing found says so; Escape empties the field and brings the list back.
   type('no-such-setting-123');
@@ -2455,5 +2486,90 @@ it('moves a chat to a project from its menu and undoes it from the toast (#1919)
   doc.querySelector<HTMLButtonElement>('[data-row-action="project-none"]')!.click();
   await waitFor(() => expect(moveChatProject).toHaveBeenLastCalledWith(chat.id, null, undefined));
   await waitFor(() => expect(toastText()).toBe('Moved out of its project. ChatGPT keeps it where it was.'));
+  closeRowMenus(doc);
+});
+
+it('rebuilds the turn-changes card when the open chat moves into a project, and reuses it while the project stays the same', async () => {
+  const base = { startedAt: 1, updatedAt: 2, endedAt: null, events: 4, userMessages: 1, toolCalls: 1,
+    lastToolCallAt: 11_000, processExitNonzero: 0, toolRejected: 0, toolInternalErrors: 0, errors: 0,
+    estimatedTokens: 0, contextTokens: 0, lastTurnOutcome: 'completed' as const, activeTurnId: null, agents: [], origin: null };
+  const website = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000021';
+  const otherProject = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000022';
+  const undoRef = 'checkpoint:' + 'b'.repeat(32);
+  let finishRestore!: (result: { ok: true; data: { confirmed: boolean; restored: string[]; skipped: never[]; undoRef: string; projectId: string } }) => void;
+  let chat: Record<string, unknown> = { ...base, id: 'move-turn-0001', title: 'Checkpointed chat', conversationId: 'move-turn-conv-0001', chatIds: ['move-turn-conv-0001'] };
+  const events = [
+    { seq: 10, time: 10_000, source: 'extension', kind: 'turn_start', turnId: 't-1' },
+    { seq: 11, time: 11_000, source: 'app', kind: 'tool_call', turnId: 't-1', call: { id: 'c-1', tool: 'apply_patch',
+      outcome: 'ok', durationMs: 1, args: { text: '', chars: 0 }, result: { text: '', chars: 0 },
+      summary: { kind: 'edit', tone: 'good', title: 'Edited src/app.ts' },
+      changes: [{ path: 'src/app.ts', added: 1, removed: 0, approximate: false }] } },
+    { seq: 12, time: 12_000, source: 'extension', kind: 'assistant_message', turnId: 't-1', messageId: 'm-1',
+      message: { text: 'Done.', chars: 5 }, final: true, state: 'final' },
+    { seq: 13, time: 13_000, source: 'extension', kind: 'turn_end', turnId: 't-1', outcome: 'completed' }
+  ];
+  const groups = { version: 1, groups: [], members: {} };
+  const turnChanges = vi.fn(async () => ({
+    ok: true,
+    data: {
+      changes: [{ path: 'src/app.ts', state: 'edited', added: 1, removed: 0, approximate: false, diff: 'kept', edits: 1 }],
+      total: 1,
+      checkpointRef: 'cp-1'
+    }
+  }));
+  const restoreTurnCheckpoint = vi.fn(() => new Promise(resolve => { finishRestore = resolve; }));
+  const moveChatProject = vi.fn(async (_id: string, projectId: string | null) => {
+    const from = (chat.projectId as string | undefined) ?? null;
+    chat = { ...chat, projectId: projectId ?? undefined };
+    return { ok: true, data: { from, fromGroup: null, groups, summaries: [chat] } };
+  });
+  const mounted = await mountChat({}, [], {
+    listProjects: async () => ({ ok: true, data: [
+      { id: website, name: 'Website', path: '/work/website', createdAt: 1 },
+      { id: otherProject, name: 'Other project', path: '/work/other', createdAt: 1 }
+    ] }),
+    listSessions: async () => ({ ok: true, data: { sessions: [chat], activeId: null, pressure: [], blocked: [], trusted: [] } }),
+    getSession: async () => ({ ok: true, data: { summary: chat, events, hasMore: false } }),
+    turnChanges,
+    restoreTurnCheckpoint,
+    moveChatProject
+  });
+  const doc = mounted.window.document;
+  const row = () => doc.querySelector<HTMLElement>(`[data-id="${chat.id}"]`)!;
+  await waitFor(() => expect(row()).not.toBeNull());
+  row().querySelector<HTMLElement>('.sess-top')!.click();
+  await waitFor(() => expect(doc.querySelector('.turn-changes')).not.toBeNull());
+  const cardBefore = doc.querySelector<HTMLDetailsElement>('.turn-changes')!;
+  cardBefore.open = true;
+  cardBefore.dispatchEvent(new mounted.window.Event('toggle'));
+  await waitFor(() => expect(cardBefore.querySelector('.turn-change')).not.toBeNull());
+  expect(cardBefore.querySelector('.turn-changes-restore')).toBeNull();
+
+  rowMenuItem(row(), 'move-to-project')!.click();
+  doc.querySelector<HTMLButtonElement>(`[data-row-action="project-${website}"]`)!.click();
+  await waitFor(() => expect(moveChatProject).toHaveBeenCalledWith(chat.id, website, undefined));
+  await waitFor(() => expect(doc.querySelector('.turn-changes')).not.toBe(cardBefore));
+
+  const cardAfter = doc.querySelector<HTMLDetailsElement>('.turn-changes')!;
+  const answerRowAfter = cardAfter.closest<HTMLElement>('[data-timeline-key]')!;
+  cardAfter.open = true;
+  cardAfter.dispatchEvent(new mounted.window.Event('toggle'));
+  await waitFor(() => expect(cardAfter.querySelector<HTMLButtonElement>('.turn-changes-restore')).not.toBeNull());
+  cardAfter.querySelector<HTMLButtonElement>('.turn-changes-restore')!.click();
+  await waitFor(() => expect(restoreTurnCheckpoint).toHaveBeenCalledWith(chat.id, 't-1', 10));
+
+  // Repainting while the project stays unchanged preserves the cached row and card.
+  mounted.push({ ...mounted.state });
+  await waitFor(() => expect(doc.querySelector<HTMLElement>('[data-timeline-key]')?.closest('#timeline')).not.toBeNull());
+  expect(doc.querySelector<HTMLDetailsElement>('.turn-changes')).toBe(cardAfter);
+  expect(doc.querySelector<HTMLDetailsElement>('.turn-changes')!.closest<HTMLElement>('[data-timeline-key]')).toBe(answerRowAfter);
+  rowMenuItem(row(), 'move-to-project')!.click();
+  doc.querySelector<HTMLButtonElement>(`[data-row-action="project-${otherProject}"]`)!.click();
+  await waitFor(() => expect(moveChatProject).toHaveBeenCalledWith(chat.id, otherProject, undefined));
+  await waitFor(() => expect(doc.querySelector('.turn-changes')).not.toBe(cardAfter));
+  finishRestore({ ok: true, data: { confirmed: true, restored: ['src/app.ts'], skipped: [], undoRef, projectId: website } });
+  await waitFor(() => expect(doc.querySelector('.toast-action')?.textContent).toBe('Undo in Review'));
+  doc.querySelector<HTMLButtonElement>('.toast-action')!.click();
+  expect(doc.querySelector('.toast')?.textContent).toBe('This checkpoint is no longer available');
   closeRowMenus(doc);
 });

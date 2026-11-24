@@ -36,6 +36,7 @@ const TIMEOUT_MS = Number.isFinite(requestedTimeout) && requestedTimeout >= 15_0
 
 // How each check has to be started, where that differs from `electron <script>`.
 const special = {
+  'verify-chat-edits.cjs': { command: process.execPath, args: linuxTestFlags },
   'verify-shell-runtime.cjs': { command: process.execPath, args: [] },
   'verify-pet-performance.cjs': { command: process.execPath, args: ['current', '--check'] }
 };

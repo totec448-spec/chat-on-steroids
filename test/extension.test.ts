@@ -25,6 +25,64 @@ beforeAll(async () => {
   backgroundSource = backgroundSource.replace(/\r\n/g, '\n');
 });
 
+it.each([
+  { state: 'active', replies: true, reason: null },
+  { state: 'background', replies: true, reason: null },
+  { state: 'replaced', replies: true, reason: 'document-changed' },
+  { state: 'navigated', replies: true, reason: 'document-changed' },
+  { state: 'terminal', replies: true, reason: 'document-changed' },
+  { state: 'duplicate after reply', replies: true, reason: 'document-changed' },
+  { state: 'duplicate', replies: false, reason: 'multiple-matching-tabs' },
+  { state: 'discarded', replies: false, reason: 'tab-unavailable' },
+  { state: 'private only', replies: false, reason: 'no-matching-tab' }
+])('checks only a uniquely matching live Web title document ($state)', async ({ state, replies, reason }) => {
+  const source = readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8');
+  const code = source.slice(source.indexOf('async function checkWebChatTitle('), source.indexOf('async function maintainOnce()'));
+  const conversationId = '11111111-1111-4111-8111-111111111111';
+  const id = '22222222-2222-4222-8222-222222222222';
+  const target = { id: 7, status: 'complete', url: 'https://chatgpt.com/c/' + conversationId,
+    active: state === 'active', incognito: state === 'private only', discarded: state === 'discarded' };
+  const other = { ...target, id: 8, url: 'https://chatgpt.com/c/another-chat', active: !target.active, incognito: false };
+  const duplicate = { ...target, id: 9 };
+  const initial = [other, target, ...(state === 'duplicate' ? [duplicate] : [])];
+  const terminalDocuments: Record<string, string> = {};
+  let reads = 0;
+  const query = vi.fn(async ({ active }: { active?: boolean }) => {
+    const afterReply = reads++ > 0;
+    let tabs: Array<typeof target & { pendingUrl?: string }> = initial;
+    if (afterReply) {
+      if (state === 'terminal') terminalDocuments['7'] = 'doc-one';
+      if (state === 'replaced') tabs = [other, duplicate];
+      if (state === 'navigated') tabs = [other, { ...target, pendingUrl: other.url }];
+      if (state === 'duplicate after reply') tabs = [other, target, duplicate];
+    }
+    return active ? tabs.filter(tab => tab.active) : tabs;
+  });
+  const call = vi.fn(async () => ({ ok: true }));
+  const tabReply = vi.fn(async () => ({ title: 'Current Web title' }));
+  const ownerStart = source.indexOf('function ownsDocument(');
+  const ownership = source.slice(ownerStart, source.indexOf('async function markTerminal(', ownerStart));
+  const check = vm.runInNewContext(ownership + code + '\ncheckWebChatTitle', {
+    chrome: { tabs: { query } }, CHATGPT_TAB_URLS: ['https://chatgpt.com/*'],
+    connectionEpoch: 1, token: 'fixture', disconnected: false,
+    cleanConversationId: (value: string) => value, conversationFromUrl: (url: string) => url.split('/').at(-1),
+    tabDocuments: { '7': 'doc-one' }, tabEpochs: { '7': 1 },
+    terminalDocuments, retiredDocuments: {}, tabReply, call
+  });
+  await check({ id, conversationId });
+  if (replies) {
+    expect(tabReply).toHaveBeenCalledExactlyOnceWith(7, { type: 'clf-check-web-chat-title', conversationId }, { documentId: 'doc-one' }, 3000);
+  } else {
+    expect(tabReply).not.toHaveBeenCalled();
+  }
+  expect(call).toHaveBeenCalledExactlyOnceWith('/browser/web-chat-title', {
+    method: 'POST', body: JSON.stringify({
+      id, conversationId, title: reason ? null : 'Current Web title',
+      ...(reason ? { reason } : {})
+    })
+  });
+});
+
 describe('extension release metadata', () => {
   it('keeps the app package, bundled extension and bridge protocol on the same release', async () => {
     const pkg = JSON.parse(await fs.readFile(path.join(process.cwd(), 'package.json'), 'utf8')) as { version: string };
@@ -531,6 +589,8 @@ function loadWorker(options: {
   debuggerApi?: Record<string, unknown>;
   /** Chrome's tab-group API with these groups; omitted, the browser has none. */
   tabGroups?: Array<{ id: number; windowId: number; title?: string; collapsed?: boolean }>;
+  clock?: { Date?: DateConstructor; setTimeout?: typeof setTimeout; clearTimeout?: typeof clearTimeout };
+  WebSocket?: unknown;
 }): WorkerHarness {
   let listener: ((message: any, sender: any, sendResponse: (value: any) => void) => boolean) | null = null;
   const tabRemovedListeners: Array<(tabId: number) => void> = [];
@@ -664,11 +724,13 @@ function loadWorker(options: {
   vm.runInNewContext(activeTabsSource + backgroundSource.replace(/^import .*$/gm, ''), {
     // The browser-control module is imported in the real worker; with a debugger it is asked for one.
     ...(options.debuggerApi ? { createBrowserControl: () => ({ pump: async () => undefined, event: async () => undefined }) } : {}),
+    ...(options.WebSocket ? { WebSocket: options.WebSocket } : {}),
+    ...(options.clock?.Date ? { Date: options.clock.Date } : {}),
     chrome,
     fetch,
     AbortController,
-    setTimeout,
-    clearTimeout,
+    setTimeout: options.clock?.setTimeout ?? setTimeout,
+    clearTimeout: options.clock?.clearTimeout ?? clearTimeout,
     URL,
     TextEncoder,
     crypto: globalThis.crypto,
@@ -2646,6 +2708,40 @@ describe('active agent tab discard protection', () => {
       { nonce: NONCE_CLOSED, error: 'not_open' }
     ]));
     expect(delivered).toHaveLength(2);
+  });
+
+  // #2184: only the question-changed hold names the question the page read and when its document loaded; anything
+  // else on the note, a malformed id, or the same fields on another reason never reach the app.
+  it('forwards the question a page read and its document start only on the question-changed hold', async () => {
+    const notes: Array<Record<string, unknown>> = [];
+    const worker = loadWorker({
+      local: new FakeStorageArea(paired),
+      session: new FakeStorageArea(),
+      fetch: vi.fn(async (input: string, init?: Record<string, unknown>) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/page-note') { notes.push(JSON.parse(String(init?.body || '{}'))); return response(200, { ok: true }); }
+        return response(200, { ok: true, repairs: [] });
+      })
+    });
+    await worker.createTab({ id: 42, url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' });
+    await worker.registerTab(42);
+    const inputId = '11111111-2222-4333-8444-555555555555', conversationId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const send = (extra: Record<string, unknown>) => worker.send({ type: 'page_note', note: 'input-held', inputId, conversationId, text: 'never forwarded', ...extra }, 42);
+    await send({ reason: 'recovery-question-changed', newestUser: 'm-older', documentSince: 1_700_000_000_123.9 });
+    await send({ reason: 'still-answering', newestUser: 'm-older', documentSince: 1_700_000_000_123 });
+    await send({ reason: 'recovery-question-changed', newestUser: 'm-\u0007bad', documentSince: 1_700_000_000_123 });
+    await send({ reason: 'recovery-question-changed', newestUser: 'm-'.padEnd(300, 'x'), documentSince: 1_700_000_000_123 });
+    await send({ reason: 'recovery-question-changed', newestUser: 'm-older', documentSince: -1 });
+    // The notes go out detached from send(): a loaded release runner needs more than waitFor's one-second default.
+    await vi.waitFor(() => expect(notes).toHaveLength(5), { timeout: 10_000 });
+    expect(notes).toEqual([
+      { note: 'input-held', reason: 'recovery-question-changed', inputId, conversationId, newestUser: 'm-older', documentSince: 1_700_000_000_123 },
+      { note: 'input-held', reason: 'still-answering', inputId, conversationId },
+      { note: 'input-held', reason: 'recovery-question-changed', inputId, conversationId },
+      { note: 'input-held', reason: 'recovery-question-changed', inputId, conversationId },
+      { note: 'input-held', reason: 'recovery-question-changed', inputId, conversationId }
+    ]);
   });
 
   it('relays a page bootstrap step to the app by name and id only (#882)', async () => {
@@ -6491,6 +6587,75 @@ it.each([true, false])('rejects another chat from the repair page check (streami
   expect(call).toHaveBeenCalledExactlyOnceWith('/status?repairFailed=switched-chat&repairAction=reloaded&why=changed&detail=other-chat');
 });
 
+it('leaves a Temporary Chat open when recovery would reload it', async () => {
+  const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  const tab = { id: 76, url: `https://chatgpt.com/c/${conversationId}?temporary-chat=true` };
+  const reload = vi.fn();
+  const call = vi.fn(async () => ({ ok: true }));
+  const source = backgroundSource.slice(backgroundSource.indexOf('async function performBrowserRepairs('),
+    backgroundSource.indexOf('\nfunction conversationStillOpen('));
+  const repair = vm.runInNewContext(`${source}\nperformBrowserRepairs`, {
+    URL,
+    tabConversations: { '76': conversationId }, tabDocuments: { '76': 'live-document' },
+    conversationForTab: (value: { url?: string }) => new URL(value.url!).pathname.split('/c/')[1] ?? null,
+    createChatTab: vi.fn(), call, tabReply: async () => ({ ok: true, conversationId, streaming: false, assistantError: false }),
+    chrome: { tabs: { query: async () => [tab], reload, get: async () => tab, update: vi.fn() } },
+    CHATGPT_TAB_URLS: ['https://chatgpt.com/*']
+  });
+
+  await repair([{ conversationId, token: 'temporary-repair', reason: 'unattributed' }], {});
+
+  expect(reload).not.toHaveBeenCalled();
+  expect(call).toHaveBeenCalledExactlyOnceWith('/status?repaired=temporary-repair&repairAction=preserved&preservedFor=temporary-chat');
+});
+
+it('keeps the temporary destination URL when a normal tab starts navigating there', async () => {
+  const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  const tab = { id: 76, url: `https://chatgpt.com/c/${conversationId}`,
+    pendingUrl: `https://chatgpt.com/c/${conversationId}?temporary-chat=true` };
+  const reload = vi.fn();
+  const call = vi.fn(async () => ({ ok: true }));
+  const source = backgroundSource.slice(backgroundSource.indexOf('async function performBrowserRepairs('),
+    backgroundSource.indexOf('\nfunction conversationStillOpen('));
+  const repair = vm.runInNewContext(`${source}\nperformBrowserRepairs`, {
+    tabConversations: { '76': conversationId }, tabDocuments: { '76': 'live-document' },
+    conversationForTab: (value: { url?: string }) => value.url?.split('/c/')[1]?.split(/[?#]/)[0] ?? null,
+    createChatTab: vi.fn(), call,
+    tabReply: async () => ({ ok: true, conversationId, streaming: false, assistantError: false }),
+    chrome: { tabs: { query: async () => [tab], reload, get: async () => tab, update: vi.fn() } },
+    CHATGPT_TAB_URLS: ['https://chatgpt.com/*']
+  });
+
+  await repair([{ conversationId, token: 'temporary-navigation', reason: 'unattributed' }], {});
+
+  expect(reload).not.toHaveBeenCalled();
+  expect(call).toHaveBeenCalledExactlyOnceWith('/status?repaired=temporary-navigation&repairAction=preserved&preservedFor=temporary-chat');
+});
+
+it('keeps a Temporary Chat open when its pending destination is a regular chat', async () => {
+  const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  const tab = { id: 76,
+    url: `https://chatgpt.com/c/${conversationId}?temporary-chat=true`,
+    pendingUrl: `https://chatgpt.com/c/${conversationId}` };
+  const reload = vi.fn();
+  const call = vi.fn(async () => ({ ok: true }));
+  const source = backgroundSource.slice(backgroundSource.indexOf('async function performBrowserRepairs('),
+    backgroundSource.indexOf('\nfunction conversationStillOpen('));
+  const repair = vm.runInNewContext(`${source}\nperformBrowserRepairs`, {
+    tabConversations: { '76': conversationId }, tabDocuments: { '76': 'live-document' },
+    conversationForTab: (value: { url?: string }) => value.url?.split('/c/')[1]?.split(/[?#]/)[0] ?? null,
+    createChatTab: vi.fn(), call,
+    tabReply: async () => ({ ok: true, conversationId, streaming: false, assistantError: false }),
+    chrome: { tabs: { query: async () => [tab], reload, get: async () => tab, update: vi.fn() } },
+    CHATGPT_TAB_URLS: ['https://chatgpt.com/*']
+  });
+
+  await repair([{ conversationId, token: 'leaving-temporary-chat', reason: 'unattributed' }], {});
+
+  expect(reload).not.toHaveBeenCalled();
+  expect(call).toHaveBeenCalledExactlyOnceWith('/status?repaired=leaving-temporary-chat&repairAction=preserved&preservedFor=temporary-chat');
+});
+
 /**
  * 2026-09-26: after an extension update, open tabs kept the old MAIN-world usage observer. The
  * worker asks usage.js to replace itself, and only while the page says it is not streaming.
@@ -6694,4 +6859,241 @@ it('waits for rendering leases only through renderingLeases', () => {
   const source = readFileSync('extension/background.js', 'utf8');
   const raw = source.split('\n').filter(line => /await\s+activeTabs/.test(line) && !line.includes('renderingLeases'));
   expect(raw).toEqual([]);
+});
+
+describe('activity push wakes over /wake', () => {
+  const convA = '11111111-1111-4111-8111-111111111111';
+  const convB = '22222222-2222-4222-8222-222222222222';
+
+  it('forwards targeted activity wakes only to matching bound tabs and global wakes to all known tabs', async () => {
+    const sockets: any[] = [];
+    class FakeWebSocket {
+      url: string;
+      readyState = 0;
+      onopen: (() => void) | null = null;
+      onmessage: ((event: { data: unknown }) => void) | null = null;
+      onerror: (() => void) | null = null;
+      onclose: (() => void) | null = null;
+      sent: unknown[] = [];
+      constructor(url: string) {
+        this.url = url;
+        sockets.push(this);
+        queueMicrotask(() => {
+          this.readyState = 1;
+          this.onopen?.();
+        });
+      }
+      send(data: unknown) { this.sent.push(data); }
+      close() { this.readyState = 3; this.onclose?.(); }
+    }
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }),
+      session: new FakeStorageArea(),
+      WebSocket: FakeWebSocket,
+      fetch: async (input) => {
+        const pathName = new URL(input).pathname;
+        if (pathName === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (pathName === '/status') return response(200, { inputs: [], commands: [] });
+        if (pathName === '/bind') return response(200, { ok: true, sessionId: 'sess-1' });
+        return response(200, { ok: true });
+      }
+    });
+    await worker.registerTab(10, 'doc-10', `https://chatgpt.com/c/${convA}`);
+    await worker.send({ type: 'bind', conversationId: convA }, 10, 'doc-10');
+    await worker.registerTab(20, 'doc-20', `https://chatgpt.com/c/${convB}`);
+    await worker.send({ type: 'bind', conversationId: convB }, 20, 'doc-20');
+    await worker.startup();
+    await vi.waitFor(() => expect(sockets.length).toBeGreaterThan(0), { timeout: 5_000 });
+    const socket = sockets.at(-1)!;
+    expect(socket.sent).toContain('paired-token');
+
+    worker.tabsSendMessage.mockClear();
+    socket.onmessage?.({ data: `activity:${convA}` });
+    await vi.waitFor(() => expect(worker.tabsSendMessage).toHaveBeenCalledTimes(1), { timeout: 5_000 });
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(10, { type: 'clf-activity-wake', conversationId: convA });
+    expect(worker.tabsSendMessage).not.toHaveBeenCalledWith(20, expect.anything());
+
+    worker.tabsSendMessage.mockClear();
+    socket.onmessage?.({ data: 'activity' });
+    await vi.waitFor(() => expect(worker.tabsSendMessage).toHaveBeenCalledTimes(2), { timeout: 5_000 });
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(10, { type: 'clf-activity-wake' });
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(20, { type: 'clf-activity-wake' });
+
+    // Malformed non-empty activity:<id> payloads must not wake any tab.
+    worker.tabsSendMessage.mockClear();
+    socket.onmessage?.({ data: 'activity:not valid!' });
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(worker.tabsSendMessage).not.toHaveBeenCalled();
+  });
+
+  it('unions unregistered queried tabs with bound tabs and paces sustained cross-tab wakes', async () => {
+    const sockets: any[] = [];
+    class FakeWebSocket {
+      url: string;
+      readyState = 0;
+      onopen: (() => void) | null = null;
+      onmessage: ((event: { data: unknown }) => void) | null = null;
+      onerror: (() => void) | null = null;
+      onclose: (() => void) | null = null;
+      constructor(url: string) {
+        this.url = url;
+        sockets.push(this);
+        queueMicrotask(() => {
+          this.readyState = 1;
+          this.onopen?.();
+        });
+      }
+      send() {}
+      close() { this.readyState = 3; this.onclose?.(); }
+    }
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }),
+      session: new FakeStorageArea(),
+      WebSocket: FakeWebSocket,
+      tabsQuery: async () => [
+        { id: 10, url: `https://chatgpt.com/c/${convA}` },
+        { id: 30, url: `https://chatgpt.com/c/${convA}` },
+        { id: 20, url: `https://chatgpt.com/c/${convB}` }
+      ],
+      fetch: async (input) => {
+        const pathName = new URL(input).pathname;
+        if (pathName === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (pathName === '/status') return response(200, { inputs: [], commands: [] });
+        if (pathName === '/bind') return response(200, { ok: true, sessionId: 'sess-1' });
+        return response(200, { ok: true });
+      }
+    });
+    await worker.registerTab(10, 'doc-10', `https://chatgpt.com/c/${convA}`);
+    await worker.send({ type: 'bind', conversationId: convA }, 10, 'doc-10');
+    await worker.startup();
+    await vi.waitFor(() => expect(sockets.length).toBeGreaterThan(0), { timeout: 5_000 });
+    const socket = sockets.at(-1)!;
+
+    // Tab 10 is registered while tab 30 is only discovered via tabs.query: both receive the wake once.
+    worker.tabsSendMessage.mockClear();
+    socket.onmessage?.({ data: `activity:${convA}` });
+    await vi.waitFor(() => expect(worker.tabsSendMessage).toHaveBeenCalledTimes(2), { timeout: 5_000 });
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(10, { type: 'clf-activity-wake', conversationId: convA });
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(30, { type: 'clf-activity-wake', conversationId: convA });
+
+    // A burst of 20 cross-tab wakes coalesces and stays bounded within the shared token bucket budget.
+    worker.tabsSendMessage.mockClear();
+    for (let i = 0; i < 10; i += 1) {
+      socket.onmessage?.({ data: `activity:${convA}` });
+      socket.onmessage?.({ data: `activity:${convB}` });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 260));
+    expect(worker.tabsSendMessage.mock.calls.length).toBeLessThanOrEqual(8);
+    await vi.waitFor(() => {
+      const sentTabIds = worker.tabsSendMessage.mock.calls.map((call) => call[0]);
+      expect(sentTabIds).toContain(10);
+      expect(sentTabIds).toContain(30);
+      expect(sentTabIds).toContain(20);
+    }, { timeout: 5_000 });
+    socket.close();
+  });
+
+  it('merges queued wakes with differing conversation targets for the same tab into an unfiltered wake', async () => {
+    const sockets: any[] = [];
+    class FakeWebSocket {
+      url: string;
+      readyState = 0;
+      onopen: (() => void) | null = null;
+      onmessage: ((event: { data: unknown }) => void) | null = null;
+      onerror: (() => void) | null = null;
+      onclose: (() => void) | null = null;
+      constructor(url: string) {
+        this.url = url;
+        sockets.push(this);
+        queueMicrotask(() => {
+          this.readyState = 1;
+          this.onopen?.();
+        });
+      }
+      send() {}
+      close() { this.readyState = 3; this.onclose?.(); }
+    }
+    let navigated = false;
+    let fakeNow = 1_000_000;
+    let nextTimerId = 1;
+    const timers = new Map<number, { due: number; fn: () => void }>();
+    const FakeDate = class extends Date {
+      constructor(...args: unknown[]) {
+        if (args.length === 0) super(fakeNow);
+        else super(...(args as [number]));
+      }
+      static override now() { return fakeNow; }
+    } as unknown as DateConstructor;
+    const fakeSetTimeout = ((fn: () => void, ms = 0) => {
+      const id = nextTimerId++;
+      timers.set(id, { due: fakeNow + Math.max(0, ms), fn });
+      return id as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout;
+    const fakeClearTimeout = ((id: ReturnType<typeof setTimeout>) => {
+      timers.delete(id as unknown as number);
+    }) as typeof clearTimeout;
+    const advanceClock = async (ms: number) => {
+      fakeNow += ms;
+      for (const [id, entry] of [...timers.entries()].sort((a, b) => a[1].due - b[1].due)) {
+        if (entry.due <= fakeNow && timers.delete(id)) entry.fn();
+      }
+      for (let i = 0; i < 8; i += 1) await Promise.resolve();
+    };
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }),
+      session: new FakeStorageArea(),
+      WebSocket: FakeWebSocket,
+      clock: { Date: FakeDate, setTimeout: fakeSetTimeout, clearTimeout: fakeClearTimeout },
+      tabsQuery: async () => [{ id: 10, url: `https://chatgpt.com/c/${navigated ? convB : convA}` }],
+      fetch: async (input) => {
+        const pathName = new URL(input).pathname;
+        if (pathName === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (pathName === '/status') return response(200, { inputs: [], commands: [] });
+        if (pathName === '/bind') return response(200, { ok: true, sessionId: 'sess-1' });
+        return response(200, { ok: true });
+      }
+    });
+    await worker.registerTab(10, 'doc-10', `https://chatgpt.com/c/${convA}`);
+    await worker.send({ type: 'bind', conversationId: convA }, 10, 'doc-10');
+    await worker.startup();
+    await vi.waitFor(() => expect(sockets.length).toBeGreaterThan(0), { timeout: 5_000 });
+    const socket = sockets.at(-1)!;
+
+    // Drain initial token bucket with the VM clock pinned below refill so subsequent wakes queue.
+    for (let i = 0; i < 6; i += 1) socket.onmessage?.({ data: `activity:${convA}` });
+    await advanceClock(10);
+    worker.tabsSendMessage.mockClear();
+
+    // Tab navigated to convB while still bound to convA; queueing convB then convA must merge to unfiltered.
+    navigated = true;
+    socket.onmessage?.({ data: `activity:${convB}` });
+    socket.onmessage?.({ data: `activity:${convA}` });
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
+    expect(worker.tabsSendMessage).not.toHaveBeenCalled();
+
+    await advanceClock(250);
+    expect(worker.tabsSendMessage).toHaveBeenCalledTimes(1);
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(10, { type: 'clf-activity-wake' });
+
+    // Peer socket close clears queued wakes and discards in-flight tab discovery from the closed epoch.
+    for (let i = 0; i < 6; i += 1) socket.onmessage?.({ data: `activity:${convA}` });
+    await advanceClock(10);
+    worker.tabsSendMessage.mockClear();
+
+    let resolveDelayedQuery: ((tabs: Array<{ id: number; url: string }>) => void) | null = null;
+    worker.tabsQuery.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveDelayedQuery = resolve; })
+    );
+    socket.onmessage?.({ data: `activity:${convB}` });
+    await vi.waitFor(() => expect(resolveDelayedQuery).not.toBeNull(), { timeout: 5_000 });
+
+    // Also queue a wake before the peer closes the socket: onclose must cancel the drain timer and clear the queue.
+    socket.onmessage?.({ data: `activity:${convA}` });
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
+    socket.close();
+
+    resolveDelayedQuery!([{ id: 99, url: `https://chatgpt.com/c/${convB}` }]);
+    await advanceClock(400);
+    expect(worker.tabsSendMessage).not.toHaveBeenCalled();
+  });
 });

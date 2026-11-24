@@ -414,16 +414,21 @@ function protocolFor(request: Pick<GoalRequest, 'mode' | 'shorter'>): string {
 /** Chats whose last helper message failed as reply_too_long; cleared by the next one that fits. */
 const tooLongReplies = new Set<string>();
 
+export interface GoalChange {
+  conversationId?: string;
+  streaming?: boolean;
+}
+
 const drafts = new Map<string, GoalDraft>();
-const goalListeners = new Set<() => void>();
-export function onGoalChange(listener: () => void): () => void {
+const goalListeners = new Set<(change?: GoalChange) => void>();
+export function onGoalChange(listener: (change?: GoalChange) => void): () => void {
   goalListeners.add(listener); return () => goalListeners.delete(listener);
 }
 export function nativeGoalFailure(error: string, backend: GoalBackend, retryAfterMs?: number): TaskRequestError {
   return new TaskRequestError(error, backend === 'api' && retryableGoalFailure(error) &&
     /^(?:rate_limited|http_(?:408|425|5\d\d)|request_failed|timeout_or_cancelled)(?:$|:)/.test(error), retryAfterMs);
 }
-function notifyGoalChange(): void { for (const listener of goalListeners) listener(); }
+function notifyGoalChange(change?: GoalChange): void { for (const listener of goalListeners) listener(change); }
 
 /**
  * The stable ChatGPT reply that still needs one terminal Goal decision.
@@ -1272,7 +1277,7 @@ export async function setGoalSwitchNow(
           if (changed || armedBefore !== goalArmedFor(targetConversationId)) {
             logInfo(`goal: ${targetConversationId} switched to ${next.enabled ? next.mode : 'Normal'}${from ? ` by ${from}` : ''}`);
           }
-          notifyGoalChange();
+          notifyGoalChange({ conversationId: targetConversationId });
           // Goal stopped here, or turned to Loop: a step review in progress is cancelled (#1832).
           if (!next.enabled || next.mode !== 'goal') void import('./goal-reviewer.js')
             .then(({ cancelStepReview }) => cancelStepReview(targetConversationId)).catch(() => undefined);
@@ -1634,13 +1639,13 @@ export async function deferSilenceGoalReplyNow(conversationId: string, turnId: s
     draft.acknowledged = true;
     draft.abort?.abort();
     drafts.delete(conversationId);
-    notifyGoalChange();
+    notifyGoalChange({ conversationId });
   }
   if (listenUntil === undefined && (reply.listenUntil ?? 0) > Date.now()) return true;
   const deadline = listenUntil ?? Date.now() + 5 * 60_000;
   if ((reply.listenUntil ?? 0) >= deadline) return true;
   reply.listenUntil = deadline;
-  notifyGoalChange();
+  notifyGoalChange({ conversationId });
   try { await writeDurableNow(GOAL_REPLIES_STATE, snapshotGoalReplies()); }
   catch (error) { persistGoalRepliesSoon(); throw error; }
   return goalReplies.get(conversationId) === reply;
@@ -1754,7 +1759,7 @@ export function startGoalDraft(input: StartGoalDraftInput): GoalDraftView {
   };
   drafts.set(input.conversationId, draft);
   forgetGoalOutcome(input.conversationId);
-  notifyGoalChange();
+  notifyGoalChange({ conversationId: input.conversationId });
   if (!input.deferStart) beginGoalDraft(input.conversationId, draft.token);
   return view(draft);
 }
@@ -1813,7 +1818,7 @@ function settle(draft: GoalDraft, stage: GoalStage, error: string | null = null)
   // acknowledgement would. A page closed meanwhile never acknowledges, the draft dies with the
   // process, and the turn stayed owed for the ledger's twelve hours ("Answer settling").
   if (stage === 'no-reply') handleGoalReply(draft.conversationId, draft.turnId);
-  notifyGoalChange();
+  notifyGoalChange({ conversationId: draft.conversationId });
   // A failed helper has not answered the source. Keep its debt; the failed draft
   // retains the transport's retry/ambiguity fence until a deliberate retry or change.
 }
@@ -2237,7 +2242,10 @@ async function run(draft: GoalDraft): Promise<void> {
       signal: abort.signal,
       publish: (text) => {
         draft.stage = 'answering';
-        if (drafts.get(draft.conversationId) === draft) { draft.text = text; notifyGoalChange(); }
+        if (drafts.get(draft.conversationId) === draft) {
+          draft.text = text;
+          notifyGoalChange({ conversationId: draft.conversationId, streaming: true });
+        }
       }
     });
     if (draft.acknowledged || drafts.get(draft.conversationId) !== draft) return;

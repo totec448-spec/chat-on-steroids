@@ -264,6 +264,40 @@ describe('completed request ownership', () => {
     expect(await readCompletedFinal(id, chat)).toMatchObject({ messageId: 'answer' });
   });
 
+  it.each([false, true])('keeps a final complete when a non-final note of the same turn is updated between the final and turn_end completed (restart %s)', async restart => {
+    const began = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(began);
+    const opened = await recordChatObservations(chat, [
+      { kind: 'user_message', time: began, messageId: 'question', text: 'Inspect the source.' },
+      { kind: 'turn_start', time: began + 1, turnId: turn }
+    ]);
+    const id = opened.sessionId!;
+    clock.mockReturnValue(began + 5);
+    await recordChatObservations(chat, [
+      { kind: 'assistant_message', time: Date.now(), turnId: turn, messageId: 'progress-note',
+        providerMessageId: '66666666-7777-4888-8999-000000000000', text: 'I’ll inspect', state: 'streaming', activeNow: true }
+    ]);
+    clock.mockReturnValue(began + 10);
+    await call(Date.now());
+    clock.mockReturnValue(began + 20);
+    await recordChatObservations(chat, [
+      { kind: 'assistant_message', time: Date.now(), turnId: turn, messageId: 'answer',
+        providerMessageId: '11111111-2222-4333-8444-555555555555', text: 'The source is checked.',
+        final: true, state: 'final', activeNow: true },
+      { kind: 'assistant_message', time: began + 12, turnId: turn, messageId: 'progress-note',
+        providerMessageId: '66666666-7777-4888-8999-000000000000', text: 'I’ll inspect the source first.',
+        state: 'streaming', activeNow: true },
+      { kind: 'turn_end', time: Date.now(), turnId: turn, outcome: 'completed' }
+    ]);
+    if (restart) { await flushSessions(); resetRecorderForTests(); resetSessionStoreForTests(); }
+    expect(await readCompletedFinal(id, chat, turn)).toMatchObject({ messageId: 'answer', turnId: turn });
+    expect(await readCompletedFinal(id, chat)).toMatchObject({ messageId: 'answer' });
+    // If that same turn later reopens with a new turn_start, the final no longer settles it.
+    clock.mockReturnValue(began + 30);
+    await appendEvent(id, { kind: 'turn_start', source: 'extension', time: Date.now(), turnId: turn });
+    expect(await readCompletedFinal(id, chat, turn)).toBeNull();
+  });
+
   it('still counts a progress note as work once the same request reopened its turn', async () => {
     // No native final: the same request calling tools after the end reopens the turn.
     const { id, began, clock } = await completed(false);

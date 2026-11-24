@@ -112,12 +112,15 @@ export function initSkillsLibrary(api: AppApi): () => void {
     for (const skill of visible) {
       const card = el('article', 'plugin-card pet-library-card skill-library-card');
       card.dataset.skillId = skill.id;
+      card.dataset.skillEnabled = String(skill.enabled !== false);
+      if (skill.enabled === false) card.classList.add('is-disabled');
       const entry = el('div', 'plugin-entry pet-library-entry');
       const artwork = el('div', 'skill-library-icon'); artwork.append(icon('i-skill'));
       const title = el('div', 'plugin-card-title');
       title.append(el('h2', '', skill.name), el('p', 'muted', skill.description || t('Reusable instructions for this workspace.')));
       const foot = el('div', 'plugin-card-foot');
       foot.append(el('span', 'skill-library-id', `/${skill.id}`));
+      if (skill.enabled === false) foot.append(el('span', 'skill-library-disabled', () => t('Disabled')));
       const source = el('span', 'skill-library-source');
       source.setAttribute('aria-live', 'polite');
       foot.append(source);
@@ -136,6 +139,40 @@ export function initSkillsLibrary(api: AppApi): () => void {
         link.type = 'button'; link.addEventListener('click', () => { menu.open = false; openGithubDialog(skill); });
         actions.append(link);
       }
+      const openFolder = el('button', 'btn', () => t('Open local skill folder')) as HTMLButtonElement;
+      openFolder.type = 'button';
+      openFolder.addEventListener('click', () => {
+        menu.open = false;
+        void run(api.skillsOpenFolder(skill.id));
+      });
+      actions.append(openFolder);
+      const toggleEnabled = el('button', 'btn', () => t(skill.enabled === false ? 'Enable skill' : 'Disable skill')) as HTMLButtonElement;
+      toggleEnabled.type = 'button';
+      toggleEnabled.addEventListener('click', event => {
+        const keyboardFocus = event.detail === 0 && document.activeElement === toggleEnabled;
+        menu.open = false;
+        toggleEnabled.disabled = true;
+        const focusAfterDisable = document.activeElement;
+        void (async () => {
+          let applied = false;
+          try {
+            if (await update(api.skillsSetEnabled(skill.id, skill.enabled === false), false, true)) {
+              applied = true;
+              toast(t(skill.enabled === false ? 'Skill enabled' : 'Skill disabled'));
+            }
+          } finally {
+            if (toggleEnabled.isConnected) toggleEnabled.disabled = false;
+            if (keyboardFocus && applied &&
+                (document.activeElement === focusAfterDisable || document.activeElement === document.body)) {
+              // A successful repaint replaces the menu that held keyboard focus.
+              const current = [...document.querySelectorAll<HTMLElement>('.skill-library-card')]
+                .find(card => card.dataset.skillId === skill.id);
+              current?.querySelector<HTMLElement>('.plugin-menu > summary')?.focus();
+            }
+          }
+        })();
+      });
+      actions.append(toggleEnabled);
       const remove = el('button', 'btn plugin-destructive', () => t('Remove skill')) as HTMLButtonElement;
       remove.type = 'button'; remove.addEventListener('click', () => confirmRemove(skill));
       actions.append(remove); menu.append(summary, actions); card.append(entry, menu); host.append(card);
@@ -157,12 +194,21 @@ export function initSkillsLibrary(api: AppApi): () => void {
    * decides what the page shows: a failed load says so, and a change that ended without a list (a cancelled
    * import) loads again rather than leaving "Loading…" for good. An older request says nothing (CodeRabbit on #2002).
    */
-  const update = async (request: Promise<{ ok: true; data: ManagedSkill[] | null } | { ok: false; error: string }>, load = false): Promise<boolean> => {
+  const update = async (request: Promise<{ ok: true; data: ManagedSkill[] | null } | { ok: false; error: string }>, load = false, reloadOnFailure = false): Promise<boolean> => {
     const own = ++epoch;
     const next = await run(request);
-    if (own !== epoch) return false;
+    if (own !== epoch) {
+      // A cancelled newer import can supersede a successful older mutation's response.
+      // Read the authoritative catalog again after that mutation finishes.
+      // A superseded read must not start another read: concurrent refreshes
+      // would otherwise keep invalidating each other indefinitely. Only a
+      // successful superseded mutation needs authoritative reconciliation.
+      if (!load && (next || reloadOnFailure)) void loadList();
+      return false;
+    }
     if (next) { setSkills(next); return true; }
-    if (!loaded) { if (load) { loadFailed = true; render(); } else void loadList(); }
+    if (reloadOnFailure) void loadList();
+    else if (!loaded) { if (load) { loadFailed = true; render(); } else void loadList(); }
     return false;
   };
 
@@ -222,7 +268,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
     const close = el('button', 'btn', () => t('Close')) as HTMLButtonElement;
     close.type = 'button'; close.addEventListener('click', () => dialog.close()); head.append(title, close);
     const body = el('div', 'plugin-dialog-body');
-    body.append(el('p', '', () => t('Check this GitHub source for changes. If it changed, CoS replaces the whole skill folder and moves the previous version to Trash. Local edits to resources will be replaced.')));
+    body.append(el('p', '', () => t('Check this GitHub source for changes. If it changed, CoS can replace the whole skill folder and move the previous version to Trash. Updates are blocked when local files or resource folders have changed.')));
     body.append(el('p', 'skill-source-url', skill.origin.url));
     body.append(el('p', 'skill-source-revision', installedRevision(skill)));
     const actions = el('div', 'pet-delete-actions');

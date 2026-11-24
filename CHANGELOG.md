@@ -9,6 +9,78 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.55] — Restore a turn's files, manage Skills from their cards, and safer saves after a crash
+A turn's edited files can be put back from the Changed files card, installed Skills can be paused from their cards, storage can be freed for one chat, and chat groups, settings imports and edit checkpoints survive an interruption.
+### 👉 After updating
+- Nothing to do. The browser extension updates itself.
+### ✨ New
+- **Restore a turn's files.** When a code checkpoint exists, the Changed files card under an answer has a Restore turn button. It asks first, puts the files that turn edited back as they were, warns when a later turn also edited one of them, and Undo in Review opens the "Before restore" checkpoint.
+- **Manage installed Skills from their card.** The card menu of an installed Skill can pause it, turn it on again and show it in your file manager.
+- **Free storage for one chat.** The recording storage dialog shows what the open chat uses and frees only its images or only its long texts. The choices for all chats stay.
+- **A notice when a chat title differs from ChatGPT.** With the new "Check ChatGPT titles" setting on, the chat menu shows a quiet line under Rename when the open ChatGPT chat has another title. Both titles are kept.
+- **Linux: a finished-chat notification opens its tab.** Clicking it selects the matching ChatGPT tab in your browser.
+### 💪 Better
+- **A recorded metric grid shows every card**, including cards with short labels.
+- **The model choice is steadier.** The app tries the requested model once more when ChatGPT takes the choice back as the picker closes, and confirms the reasoning effort against the page's own control before sending when the picker is already closed.
+- **Temporary Chats stay open** while the app recovers a chat.
+- **A settings backup asks again** when a value changed after you looked at the preview, even a change inside the same setting.
+- **Chat groups survive interruptions.** A move to an invalid group is refused before the chat's project changes, and after a crash between moving a chat to another project and saving its group, the group you chose comes back.
+- **Saves hold up.** Edit checkpoints keep a file's content from before the edit, and a failed cleanup of a recording or a failed attachment save recovers cleanly.
+- **A cancelled message does not launch the browser.** Neither does shutting the app down while it looks for a browser.
+- **File search keeps Japanese and other multibyte text intact** in its results.
+- **No more "rate limited" after the clock moved back.** The app answered the browser extension that way for as long as the computer's clock had been corrected backwards.
+- **A retried Local Control API send** for a chat that was already delivered now answers 409 `already_delivered` instead of leaving a stuck queued input.
+- **Clearer diagnostics.** When Compact & Resume cannot open a Project because an old draft stays in the message box, the report now says how long that draft is and how many briefs the page remembers typing.
+### Thank you
+This release is mostly your work. Thank you:
+- **@Neinndall** for restoring a turn's edited files from the Changed files card (with its warning and Undo in Review), for the chat-title notice, for the per-chat storage choices, and for the report on the misleading storage wording that started them.
+- **@atsu6** for six fixes that keep your data safe when something is interrupted: edit checkpoints, recording cleanup and attachment saves (#2249), the chat-group move checks and crash recovery (#2253, #2256), the settings-import re-check (#2255), the cancelled message that launched a browser (#2254) and Japanese and other multibyte text in file search (#2257), plus the steadier timeline test (#2261).
+- **@lavalava45** for pausing, re-enabling and revealing installed Skills from their cards.
+- **@27mfp** for the recorded metric grids that now show every card.
+- **@Kdevaulo** for confirming the model choice against the page's own control, for the test coverage of silent-chat recovery, and for the careful signed-in diagnostics that keep narrowing down the High-turns-into-Medium problem (#2085).
+- **@debxylen** for keeping Temporary Chats open during recovery.
+- **@k-spit** for the Linux notification click that opens the finished chat's tab.
+- **@rockomania-dot**, **@dashielllubsen** and **@digitalscalvia** for their reports and diagnostics on Compact & Resume (#2159, #2223) and on the model confirmation (#2241); **@domenicomassafra** for the replayed-input report that became the `already_delivered` answer (#2247).
+- **@Haz4rdovisk** for the product reviews of every visible change, and everyone who reviewed, tested and filed an issue this round.
+
+## [2.1.54] — Goal chats that don't stand idle, a tidier Settings, and faster chat updates
+
+A Goal or Loop chat whose Compact & Resume got stuck now goes on by itself, Settings is easier to move around in, a chat shows new messages sooner, and Review lists the files a chat edited.
+
+### 👉 After updating
+
+- Nothing to do. The browser extension updates itself.
+
+### ✨ New
+
+- **Review shows what this chat edited.** The Review panel lists the files this chat changed, newest first, and opens each recorded diff. A deleted file says so, a renamed file's old name shows as missing, and a chat with no recorded edits shows nothing extra.
+- **Settings in five pages for Agents.** The long Agents page is now Goal & Loop, Models, Workers, Tools & access and Browser, each short enough to read.
+- **A GitHub skill can be bigger.** Importing a Skill from GitHub takes up to 256 files and a nested Skill folder, downloads from pinned, checked copies, and an update refuses when you edited any of its files.
+
+### 💪 Better
+
+- **Goal and Loop chats do not stand idle.** When Compact & Resume asked for its summary and none came back, or opened its new chat and never heard from it, the chat now goes on in a new chat from its last saved summary. The same happens when ChatGPT stops saving a very long chat and the page keeps showing an older one.
+- **Compact & Resume in a Project is steadier.** The app now recognises its own restored draft, also when the connector was renamed in ChatGPT, empties the handoff request ChatGPT put back, and says what kept the message box when it still cannot open the Project.
+- **Chats update sooner.** A new message or tool call appears in the open chat in a fraction of a second, and the browser tab is told at once when the app has something for it.
+- **A message you steer into a running answer is marked**, and the time worked before it keeps its meaning ("Worked for 45s · steered").
+- **A long answer keeps its place.** A steered answer that is still streaming stays below your message, a discarded half-written note disappears once ChatGPT drops it, and your sent message no longer shows twice for a moment.
+- **A worker that finished with a tool call alone can be woken again**, and a turn that ends with a generated image or a remounted page closes by itself.
+- **The model picker is steadier.** The app confirms the choice after the picker closes and no longer clicks a second time when the first Enter already changed it.
+- **Remote tools reconnect.** A remote MCP plugin whose server started late or dropped comes back by itself, with a growing wait, and a failed call is never sent again.
+- **Attachments stay while a draft needs them**, and an image whose preview ChatGPT renamed with a time stamp is still sent.
+- **The bundled tunnel client is OpenAI's current 0.0.21**, which adds regional control-plane endpoints (unset by default, so nothing changes unless you set one).
+- **The app's own "continue" after a long turn** is no longer shown as something you sent.
+- **A message sent after a turn** is no longer held for minutes when ChatGPT already finished.
+- **Clearer messages.** The `agents` tool says its workers are separate ChatGPT chats, and a chat that reaches its own 192 MiB storage limit says so instead of blaming the global storage.
+
+### 🛠 Fixed
+
+- **Image previews for a very long chat** say the chat reached its own limit, and the storage warning in the log appears once per chat.
+
+### Thank you
+
+To **@Neinndall** for the steered-answer ordering, the retracted half-written notes, the doubled message bubble, the settled-turn closes for remounted pages and generated images, the attachment fixes, the per-chat storage wording and the faster chat updates; **@atsu6** for the worker wake after a tool-only finish, the attachments that stay while a draft needs them, and Review showing what a chat edited; **@Kdevaulo** for the model and effort picker fixes and the quota-warning fix, and for the careful signed-in diagnostics on #2085; **@Akilaydin** for the report and the fix that brings remote plugins back by themselves; and **@lavalava45** for bigger GitHub Skills. And to **@0xConsole**, **@rockomania-dot**, **@WQuendry**, **@ColinKiiim**, **@artcraftfan1**, **@oysOYSoys**, **@kjm0202**, **@ahmedali5696**, **@dashielllubsen**, **@toannv216-oss**, **@fengnaiouo** and **@ralphchristianeclipse** for their reports and diagnostics, which found the stalled Compact & Resume cases fixed here and the ones still being worked on; and to **@Haz4rdovisk** for the product reviews.
+
 ## [2.1.53] — Compact & Resume in Projects, Goal chats that recover, and safer saves over SSH
 Compact & Resume now works in Projects where the app started chats, a Goal chat no longer stalls after a failed Continue, and saving a file over SSH can no longer lose the original. A message sent while ChatGPT answers goes out on pages in any language.
 
