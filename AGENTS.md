@@ -1597,6 +1597,9 @@ running. For an exactly attributed launch, the process instance's exit promise r
 same canonical call UUID with exit time/code; numeric terminal-id reuse cannot retarget it.
 This revision neither drains output nor creates model work, a new tool call or a turn boundary.
 Legacy launches without exit evidence display `started`; never invent a retrospective success.
+An exec summary whose evidence says `running: false` with exit 0 carries `ended: true`; only then does the
+browser transcript show its `✓ <duration>` (#2239). A `✓ <duration>` without `ended` (recorded before the app kept
+that state, or with unknown process state) stays hidden there, since it may be a yield window.
 
 `env.ts` is the shared child-environment authority: Windows key names are case-insensitive,
 so use its accessors rather than creating both `Path` and `PATH`. Preserve inherited values.

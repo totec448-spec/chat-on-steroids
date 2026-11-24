@@ -8280,6 +8280,32 @@ describe('the app-owned chronological stream', () => {
     expect(overwriteText(section)).toContain('✕ exit 1');
   });
 
+  it('shows the duration of a command whose recorded summary says it ended, and still hides an unmarked one (#2239)', async () => {
+    const endedActivity = () => ({
+      ok: true,
+      data: {
+        entries: [],
+        userAnchors: [{ seq: 0, time: 50, messageId: ownerMessageId }],
+        stream: [
+          { seq: 1, time: 100, kind: 'turn_start', turnId, agent: null },
+          { seq: 2, time: 110, kind: 'tool_call', turnId, agent: null, tool: 'exec_command', callId: 'ended-call',
+            requestId: 'wfr-ended-stream', outcome: 'ok', durationMs: 1200,
+            summary: { kind: 'run', tone: 'good', title: 'Ran quick check', metric: '✓ 1.2s', ended: true } },
+          { seq: 3, time: 120, kind: 'tool_call', turnId, agent: null, tool: 'exec_command', callId: 'old-call',
+            requestId: 'wfr-ended-stream', outcome: 'ok', durationMs: 10_000,
+            summary: { kind: 'run', tone: 'good', title: 'Ran older check', metric: '✓ 10.0s' } }
+        ],
+        job: null
+      }
+    });
+    live = await harness(undefined, { activity: endedActivity });
+    renderingOn();
+    const section = ownedStreamTurn();
+    await bindFiberRequest(section, 'wfr-ended-stream', 'exec_command');
+    live.hook.renderStreams();
+    expect(overwriteText(section)).toContain('✓ 1.2s');
+    expect(overwriteText(section)).not.toContain('✓ 10.0s');
+  });
   it('updates a background process in its existing stream row when its exit arrives', async () => {
     let completed = false;
     const processActivity = () => ({ ok: true, data: { entries: [], nextSince: completed ? 10 : 3,
