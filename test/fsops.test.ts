@@ -442,3 +442,10 @@ describe('bounds helpers', () => {
     expect(formatBytes(5 * 1024 * 1024)).toBe('5.0 MB');
   });
 });
+
+it('formatBytes never shows 1024.0 of a unit when the next unit is meant', () => {
+  expect(formatBytes(1023)).toBe('1023 B');
+  expect(formatBytes(1024 * 1024 - 1)).toBe('1.0 MB');
+  expect(formatBytes(1024 * 1024 * 1024 - 1)).toBe('1.00 GB');
+  expect(formatBytes(1024 * 1024 - 100)).toBe('1023.9 KB');
+});
