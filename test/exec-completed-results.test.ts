@@ -124,4 +124,6 @@ it('marks only a command that recorded its own end as ended, so the browser may 
   // A failed or timed-out command shows its failure, never an ended duration.
   expect(summarize({ running: false, exitCode: 2 })).not.toHaveProperty('ended');
   expect(summarize({ running: false, timedOut: true })).not.toHaveProperty('ended');
+  // A command killed by a signal has no exit code: its end is known, its success is not.
+  expect(summarize({ running: false, exitCode: null })).not.toHaveProperty('ended');
 });

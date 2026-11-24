@@ -350,7 +350,8 @@ function build(
             ? `✕ exit ${evidence.exitCode}`
             : `✓ ${formatDuration(took)}`,
         // Only evidence the app recorded explicitly proves the end; a null state stays ambiguous.
-        ...(evidence.running === false && !failed && !evidence.timedOut ? { ended: true as const } : {})
+        // A known exit code too: a command killed by a signal ended without succeeding.
+        ...(evidence.running === false && !failed && !evidence.timedOut && evidence.exitCode !== null ? { ended: true as const } : {})
       };
     }
     case 'write_stdin': {

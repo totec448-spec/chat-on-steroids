@@ -3817,7 +3817,7 @@
   function displayMetric(summary) {
     const metric = summary && typeof summary.metric === 'string' ? summary.metric.trim() : '';
     if (!metric) return '';
-    if (summary.kind === 'run' && summary.ended !== true && /^✓\s+\d+(?:\.\d+)?(?:ms|s|m)$/.test(metric)) return '';
+    if (summary.kind === 'run' && summary.ended !== true && /^✓\s+\d+(?:\.\d+)?(?:ms|s|m|h|d)(?:\s+\d+(?:ms|s|m|h|d))?$/.test(metric)) return '';
     return metric;
   }
 
