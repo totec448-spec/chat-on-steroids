@@ -16,6 +16,8 @@ function indentColumns(line: string): number {
 
 /** A heading or thematic break is a block that is no paragraph: an indented line after it is code. */
 const LEAF_BLOCK = /^ {0,3}(?:#{1,6}(?:[ \t]|$)|(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$)/;
+/** The opening of a raw HTML block of the block-level tags CommonMark lists: it runs to the next blank line. */
+const HTML_BLOCK = /^ {0,3}<\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:\s|\/?>|$)/i;
 /** A plain paragraph may lazily continue a list; a new block cannot. */
 function endsListParagraph(line: string, afterBlank: boolean): boolean {
   return afterBlank || /^ {0,3}(?:#{1,6}(?:[ \t]|$)|>|`{3,}|~{3,}|(?:[-*_][ \t]*){3,}$)/.test(line);
@@ -171,6 +173,8 @@ export function markdownCodeRanges(text: string): Array<{ start: number; end: nu
   // Only a paragraph keeps an indented line from starting a code block, so a heading or a thematic
   // break allows one as a blank line does, without changing how lists end.
   let afterLeaf = false;
+  // Inside a raw HTML block a "#" or "---" line is HTML, not a heading or a break.
+  let inHtmlBlock = false;
   let fenceIndex = 0;
   let listContentIndent: number | null = null;
   for (let at = 0; at < text.length;) {
@@ -213,7 +217,8 @@ export function markdownCodeRanges(text: string): Array<{ start: number; end: nu
         indentedStart = null;
       }
       afterBlank = !line.trim();
-      afterLeaf = LEAF_BLOCK.test(line);
+      inHtmlBlock = line.trim() !== '' && (inHtmlBlock || HTML_BLOCK.test(line));
+      afterLeaf = !inHtmlBlock && LEAF_BLOCK.test(line);
     }
     at = end;
   }
