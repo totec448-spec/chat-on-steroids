@@ -70,6 +70,13 @@ it('finds an indented code block that follows a heading or a thematic break dire
   for (const text of ['<div>\n\n# Heading\n    code\n', '<!-- c -->\n# H\n    code\n', '<span>x</span> y\n# H\n    code\n']) {
     expect(codeAt(text), JSON.stringify(text)).toHaveLength(1);
   }
+  // An HTML comment ends at its own '-->', whatever tags and blank lines it holds; an open one runs on.
+  for (const text of ['<!--\n<div>\n-->\n# H\n    code\n', '<!--\n\n-->\n# H\n    code\n']) {
+    expect(codeAt(text), JSON.stringify(text)).toHaveLength(1);
+  }
+  for (const text of ['<!--\n# H\n    code\n', '<div>\n<!-- x -->\n# H\n    code\n']) {
+    expect(codeAt(text), JSON.stringify(text)).toHaveLength(0);
+  }
   // A thematic break repeats one marker; mixed markers are a paragraph.
   for (const text of ['*-*\n    code\n', '-*-\n    code\n', '_ - _\n    code\n', '--\n    code\n']) {
     expect(codeAt(text), JSON.stringify(text)).toHaveLength(0);
