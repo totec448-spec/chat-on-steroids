@@ -4106,8 +4106,9 @@ async function performBrowserRepairs(repairs, policy) {
         // where the watchdog keeps interrupting the recovery it is meant to help. Ask the current
         // document to retry its own ticket first; only an unavailable/stale page falls through to
         // the reload path below. The content script still has to pass every source Stop/Send fence.
+        // The page may wait up to six seconds for its in-flight activity request (#2245).
         const resumed = await tabReply(target.id,
-          { type: 'clf-resume-compaction', conversationId }, documentId ? { documentId } : undefined);
+          { type: 'clf-resume-compaction', conversationId }, documentId ? { documentId } : undefined, 8000);
         if (resumed?.accepted === true) {
           await call(`/status?repaired=${encodeURIComponent(token)}&repairAction=resumed`);
           continue;

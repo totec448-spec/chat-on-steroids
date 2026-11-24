@@ -14976,8 +14976,11 @@
         // A desktop Compact hands its pickup ~90 ms after opening the ticket, before this page's
         // feed has carried the job. Declining then reloaded a healthy chat, and the handoff request
         // met a composer that was not ready yet (VM 2026-10-09). Read the feed once, then decide.
+        // A request already in flight may carry the ticket: wait for it (#2245), up to six seconds, which the
+        // worker's reply timeout for this message allows. Asking again while it is open returns at
+        // once and the page would decide on the state from before that response.
         void (async () => {
-          for (let wait = 0; pulling && wait < 15; wait++) await new Promise(resolve => setTimeout(resolve, 100));
+          for (let wait = 0; pulling && wait < 60; wait++) await new Promise(resolve => setTimeout(resolve, 100));
           await pullActivity();
         })().catch(() => {}).then(() => sendResponse({ accepted: resumePendingCompactionFromRepair(message.conversationId) }));
         return true;
