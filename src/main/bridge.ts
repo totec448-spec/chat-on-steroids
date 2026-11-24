@@ -6031,6 +6031,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (!step) return json(res, 200, { ok: false }, origin);
     // Final failure details share the continuation step, so a delayed telemetry RPC cannot lose them.
     if (step === 'model-unconfirmed') observeModelSelection(command, body.modelSelection);
+    const previousStep = command.progress?.step;
+    const advanced = previousStep === undefined || COMMAND_STEPS.indexOf(step) > COMMAND_STEPS.indexOf(previousStep);
     command.progress = { ...command.progress, step, stepAt: Date.now() };
     if (step === 'model-unconfirmed' && command.spec.type === 'revive') {
       const wanted = commandModelSelection(command);
@@ -6042,7 +6044,14 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         `${[wanted?.model, wanted?.reasoningEffort].filter(Boolean).join(' ') || 'its model'} could not be confirmed in the picker, and a resume is not abandoned for it`);
     }
     if (command.spec.type === 'resume' && command.timer && continuationByToken(command.spec.token)?.automatic) armDeadline(command);
-    // A worker about to send gets its receipt window, and its page learns the new deadline (#1086).
+    // A fresh worker page that is genuinely moving through bootstrap is alive. Hidden/background
+    // tabs can spend most of the ordinary window mounting the composer or picker; killing one
+    // while it just advanced to the next stage creates a false failed worker which may start
+    // seconds later through the late-ACK path. Re-arm only when the stage changed, so repeating
+    // one stuck report can never keep the invitation alive indefinitely. The absolute bootstrap
+    // limit in commandDeadlineDelay() still fences the whole attempt.
+    if (command.spec.type === 'worker' && advanced) armDeadline(command);
+    // A worker about to send gets its longer receipt window, and its page learns the new deadline (#1086).
     if (command.spec.type === 'worker' && step === 'sending') {
       armDeadline(command);
       return json(res, 200, { ok: true, expiresAt: Date.now() + Math.max(1, commandDeadlineDelay(command)) }, origin);
@@ -12487,9 +12496,13 @@ function commandDeadlineDelay(command: Command, now = Date.now()): number {
       const redeemBy = Math.max(command.claimedAt + WORKER_REDEEM_MS, lastBrowserLaunchAt + BROWSER_LAUNCH_GRACE_MS);
       return Math.min(redeemBy, limit) - now;
     }
-    const ordinary = Math.min(command.claimedAt + COMMAND_DEADLINE_MS, limit);
-    // A page that said it is sending may already have delivered the task; its receipt gets a window.
     const { step, stepAt } = command.progress ?? {};
+    // Once the page owns the command, each *new* bootstrap stage is concrete liveness. Give that
+    // stage the ordinary page/send budget instead of timing from the original redemption forever.
+    // The invitation's absolute limit remains the ceiling, so a stalled stage cannot extend itself.
+    const progressed = stepAt !== undefined ? stepAt + COMMAND_DEADLINE_MS : command.claimedAt + COMMAND_DEADLINE_MS;
+    const ordinary = Math.min(Math.max(command.claimedAt + COMMAND_DEADLINE_MS, progressed), limit);
+    // A page that said it is sending may already have delivered the task; its receipt gets a window.
     return (step === 'sending' && stepAt !== undefined ? Math.max(ordinary, stepAt + WORKER_SENDING_GRACE_MS) : ordinary) - now;
   }
   const claimedAt = command.claimedAt ?? now;
@@ -12938,9 +12951,18 @@ const isLeased = (command: Command): boolean => {
  */
 function nextDeliverable(): Command | null {
   if (commandWrites.size > 0) return null;
+  // Bootstrap fresh workers one at a time. The workers themselves still run concurrently once
+  // bound; this only prevents a spawn burst from asking Chrome to hydrate several hidden New Chat
+  // pages, model pickers and command markers at the same instant. That burst is the state in which
+  // pages were observed opened-but-never-redeemed. A resume is independent and may still proceed.
+  const pendingWorkers = new Set(pendingWorkerSpawns().map((worker) => `${worker.runId}:${worker.id}`));
+  const workerOpening = commands.some((entry) =>
+    entry.spec.type === 'worker' && entry.claimedAt !== null &&
+    pendingWorkers.has(`${entry.spec.runId}:${entry.spec.agent}`)
+  );
   // A spent lease stays spent even after its deadline; only expiry settles it.
   return commands.find((command) => command.claimedAt === null &&
-    (command.spec.type === 'worker' || command.spec.type === 'resume')) ?? null;
+    (command.spec.type === 'resume' || (command.spec.type === 'worker' && !workerOpening))) ?? null;
 }
 
 /**
