@@ -8293,7 +8293,10 @@ describe('the app-owned chronological stream', () => {
             summary: { kind: 'run', tone: 'good', title: 'Ran quick check', metric: '✓ 1.2s', ended: true } },
           { seq: 3, time: 120, kind: 'tool_call', turnId, agent: null, tool: 'exec_command', callId: 'old-call',
             requestId: 'wfr-ended-stream', outcome: 'ok', durationMs: 10_000,
-            summary: { kind: 'run', tone: 'good', title: 'Ran older check', metric: '✓ 10.0s' } }
+            summary: { kind: 'run', tone: 'good', title: 'Ran older check', metric: '✓ 10.0s' } },
+          { seq: 4, time: 130, kind: 'tool_call', turnId, agent: null, tool: 'exec_command', callId: 'old-long-call',
+            requestId: 'wfr-ended-stream', outcome: 'ok', durationMs: 245_000,
+            summary: { kind: 'run', tone: 'good', title: 'Ran older long check', metric: '✓ 4m 5s' } }
         ],
         job: null
       }
@@ -8305,6 +8308,8 @@ describe('the app-owned chronological stream', () => {
     live.hook.renderStreams();
     expect(overwriteText(section)).toContain('✓ 1.2s');
     expect(overwriteText(section)).not.toContain('✓ 10.0s');
+    // The producer writes two units from one minute on; an unmarked one is just as ambiguous.
+    expect(overwriteText(section)).not.toContain('✓ 4m 5s');
   });
   it('updates a background process in its existing stream row when its exit arrives', async () => {
     let completed = false;
