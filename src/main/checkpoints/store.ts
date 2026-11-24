@@ -54,6 +54,11 @@ export async function findCheckpoint(projectId: string, id: string): Promise<Cod
   return entries.find(entry => entry.projectId === projectId && entry.id === id) ?? null;
 }
 
+export async function findTurnCheckpoint(projectId: string, sessionId: string, key: string): Promise<CodeCheckpoint | null> {
+  await load();
+  return entries.find(entry => entry.projectId === projectId && entry.sessionId === sessionId && entry.key === key && entry.reason === 'turn') ?? null;
+}
+
 export async function hasCheckpoint(projectId: string, sessionId: string, key: string): Promise<boolean> {
   await load();
   return entries.some(entry => entry.projectId === projectId && entry.sessionId === sessionId && entry.key === key);

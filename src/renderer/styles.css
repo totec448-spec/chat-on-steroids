@@ -5736,5 +5736,6 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .turn-change[data-state='unchanged'] .turn-change-path { color: var(--faint); }
 .turn-change > .unified-diff { border-top: 1px solid var(--line); }
 .turn-change > .unified-diff > .meta { margin: 0; padding: 8px 10px; }
-.turn-changes-review { justify-self: start; }
+.turn-changes-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-self: start; }
+.turn-changes-review, .turn-changes-restore { justify-self: start; }
 @media (prefers-reduced-motion: reduce) { .turn-changes-chevron { transition: none; } }

@@ -4072,5 +4072,9 @@
   "Last cleanup: Freed {0} MB.": "Letzte Bereinigung: {0} MB freigegeben.",
   "Check ChatGPT titles": "Titel in ChatGPT prüfen",
   "Show a notice in the chat menu when the open ChatGPT chat has a different title.": "Zeigt im Chatmenü einen Hinweis, wenn der geöffnete ChatGPT-Chat einen anderen Titel hat.",
-  "ChatGPT title differs": "Titel in ChatGPT weicht ab"
+  "ChatGPT title differs": "Titel in ChatGPT weicht ab",
+  "Restore turn": "Zug wiederherstellen",
+  "Undo in Review": "In Überprüfung rückgängig machen",
+  "Some of these files were also edited in a later turn.": "Einige dieser Dateien wurden auch in einem späteren Zug bearbeitet.",
+  "Restored {0} of {1} files|one": "{0} von {1} Datei wiederhergestellt"
 }

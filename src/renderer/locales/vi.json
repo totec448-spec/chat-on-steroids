@@ -3988,5 +3988,8 @@
   "Last cleanup: Freed {0} MB.": "Lần dọn dẹp gần nhất: Đã giải phóng {0} MB.",
   "Check ChatGPT titles": "Kiểm tra tiêu đề trên ChatGPT",
   "Show a notice in the chat menu when the open ChatGPT chat has a different title.": "Hiện thông báo trong menu khi cuộc trò chuyện đang mở trên ChatGPT có tiêu đề khác.",
-  "ChatGPT title differs": "Tiêu đề trên ChatGPT khác"
+  "ChatGPT title differs": "Tiêu đề trên ChatGPT khác",
+  "Restore turn": "Khôi phục lượt",
+  "Undo in Review": "Hoàn tác trong Xem lại",
+  "Some of these files were also edited in a later turn.": "Một số tệp này cũng đã được chỉnh sửa ở lượt sau."
 }

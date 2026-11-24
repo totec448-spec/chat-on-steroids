@@ -142,3 +142,75 @@ it('says once why a recorded edit could not be shown, never its content (CodeRab
   } finally { warn.mockRestore(); store.resetSessionStoreForTests(); await removeTempDir(dir); }
 });
 
+it('shows the Restore turn action only when the turn has a checkpoint ref, opens undoRef in Review, and honors current()', async () => {
+  const { JSDOM } = await import('jsdom');
+  const { renderTurnChanges } = await import('../src/renderer/turn-changes.js');
+  const dom = new JSDOM('<body><div id="root"></div></body>', { url: 'https://cos.local/' });
+  vi.stubGlobal('window', dom.window);
+  vi.stubGlobal('document', dom.window.document);
+  vi.stubGlobal('HTMLElement', dom.window.HTMLElement);
+  vi.stubGlobal('HTMLButtonElement', dom.window.HTMLButtonElement);
+  const tick = async () => { await Promise.resolve(); await Promise.resolve(); await new Promise(resolve => setTimeout(resolve, 0)); };
+  const checkpointRef = `checkpoint:${'a'.repeat(32)}`;
+  const turnChanges = vi.fn()
+    .mockResolvedValueOnce({
+      ok: true,
+      data: { changes: [{ path: 'src/a.ts', state: 'edited', added: 2, removed: 1, approximate: false, diff: 'kept', edits: 1 }], total: 1, checkpointRef }
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      data: { changes: [{ path: 'src/b.ts', state: 'edited', added: 1, removed: 0, approximate: false, diff: 'kept', edits: 1 }], total: 1 }
+    });
+  Object.assign(dom.window, { api: { turnChanges } });
+  try {
+    const root = document.getElementById('root')!;
+    let active = true;
+    const openReview = vi.fn();
+    const openCheckpoint = vi.fn();
+    const undoRef = `checkpoint:${'b'.repeat(32)}`;
+    const projectId = 'project-one';
+    let resolveRestore!: (value: { confirmed: boolean; restored: string[]; skipped: never[]; undoRef: string | null; projectId: string }) => void;
+    const restoreTurn = vi.fn().mockImplementation(() => new Promise(resolve => { resolveRestore = resolve; }));
+
+    const withCheckpoint = renderTurnChanges({
+      sessionId: 'session-1', turnId: 'turn-1', from: 0, current: () => active, openReview, openCheckpoint, restoreTurn
+    });
+    root.append(withCheckpoint);
+    await tick();
+
+    const restoreButton = withCheckpoint.querySelector<HTMLButtonElement>('.turn-changes-restore');
+    expect(restoreButton).not.toBeNull();
+    // A second click while the first restore is still pending is ignored.
+    restoreButton!.click();
+    restoreButton!.click();
+    expect(restoreTurn).toHaveBeenCalledTimes(1);
+    expect(restoreButton!.disabled).toBe(true);
+    resolveRestore({ confirmed: true, restored: ['src/a.ts'], skipped: [], undoRef, projectId });
+    await tick();
+    expect(restoreButton!.disabled).toBe(false);
+    expect(document.querySelector('.toast')?.textContent).toContain('Restored 1 of 1 file');
+    expect(document.querySelector('.toast')?.textContent).not.toContain('Restored 1 of 1 files');
+    const undoButton = document.querySelector<HTMLButtonElement>('.toast-action');
+    expect(undoButton).not.toBeNull();
+    undoButton!.click();
+    expect(openCheckpoint).toHaveBeenCalledWith(projectId, undoRef);
+
+    // Clicking after switching chats is ignored.
+    active = false;
+    restoreButton!.click();
+    expect(restoreTurn).toHaveBeenCalledTimes(1);
+
+    // Without checkpointRef, no restore button is rendered.
+    active = true;
+    const withoutCheckpoint = renderTurnChanges({
+      sessionId: 'session-1', turnId: 'turn-2', from: 0, current: () => active, openReview, openCheckpoint, restoreTurn
+    });
+    root.append(withoutCheckpoint);
+    await tick();
+    expect(withoutCheckpoint.querySelector('.turn-changes-review')).not.toBeNull();
+    expect(withoutCheckpoint.querySelector('.turn-changes-restore')).toBeNull();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+

@@ -1,7 +1,8 @@
+import type { TurnCheckpointRestoreResult } from '../shared/project-git.js';
 import type { SessionEvent } from '../shared/session.js';
 import type { TurnFileChange } from '../main/session/turn-changes.js';
 import { shortPath } from '../shared/virtual-path.js';
-import { disclosureChevron, el, run } from './dom.js';
+import { disclosureChevron, el, run, toast } from './dom.js';
 import { t, tn, ui } from './i18n.js';
 
 /**
@@ -78,6 +79,8 @@ function headline(changes: readonly TurnFileChange[], total: number): string {
 
 export function renderTurnChanges(options: {
   sessionId: string; turnId: string; from: number; current: () => boolean; openReview: (() => void) | null;
+  openCheckpoint?: ((projectId: string, ref: string) => void) | null;
+  restoreTurn?: (() => Promise<TurnCheckpointRestoreResult | null>) | null;
 }): HTMLElement {
   const card = document.createElement('details');
   card.className = 'turn-changes';
@@ -88,16 +91,51 @@ export function renderTurnChanges(options: {
   void (async () => {
     const reply = await run(window.api.turnChanges(options.sessionId, options.turnId, options.from));
     if (!reply || !reply.changes.length || !options.current() || !card.isConnected) return;
-    const { changes, total } = reply;
+    const { changes, total, checkpointRef } = reply;
     head.replaceChildren(el('span', 'turn-changes-title', () => headline(changes, total)), disclosureChevron('turn-changes-chevron'));
     const labels = turnChangeLabels(changes.map(change => change.path));
     changes.forEach((change, index) => list.append(fileRow(change, labels[index]!, options)));
     if (total > changes.length) list.append(el('p', 'meta', () => tn('and {0} more', 'and {0} more', total - changes.length)));
-    if (options.openReview) {
-      const review = el('button', 'btn btn-quiet turn-changes-review', () => t('Open in Review')) as HTMLButtonElement;
-      review.type = 'button';
-      review.addEventListener('click', () => { if (options.current()) options.openReview?.(); });
-      list.append(review);
+    if (options.openReview || (checkpointRef && options.restoreTurn)) {
+      const actions = el('div', 'turn-changes-actions');
+      if (options.openReview) {
+        const review = el('button', 'btn btn-quiet turn-changes-review', () => t('Open in Review')) as HTMLButtonElement;
+        review.type = 'button';
+        review.addEventListener('click', () => { if (options.current()) options.openReview?.(); });
+        actions.append(review);
+      }
+      if (checkpointRef && options.restoreTurn) {
+        const restore = el('button', 'btn btn-quiet turn-changes-restore', () => t('Restore turn')) as HTMLButtonElement;
+        restore.type = 'button';
+        let restoring = false;
+        restore.addEventListener('click', async () => {
+          if (restoring || !options.current()) return;
+          restoring = true;
+          restore.disabled = true;
+          try {
+            const result = await options.restoreTurn?.();
+            if (!result || !options.current()) return;
+            const conflicts = result.skipped.filter(item => item.reason === 'conflict').length;
+            const messages: string[] = [];
+            const totalFiles = result.restored.length + result.skipped.length;
+            if (result.confirmed) {
+              messages.push(tn('Restored {0} of {1} file', 'Restored {0} of {1} files', totalFiles, [result.restored.length, totalFiles]));
+            }
+            if (conflicts) messages.push(t('Skipped {0} paths because files and folders share a name', [conflicts]));
+            if (messages.length) {
+              const { projectId, undoRef } = result;
+              toast(messages.join(' · '), undoRef && options.openCheckpoint
+                ? { label: t('Undo in Review'), run: () => { if (options.current()) options.openCheckpoint?.(projectId, undoRef); } }
+                : undefined);
+            }
+          } finally {
+            restoring = false;
+            restore.disabled = false;
+          }
+        });
+        actions.append(restore);
+      }
+      list.append(actions);
     }
     card.hidden = false;
   })();

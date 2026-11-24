@@ -3988,5 +3988,8 @@
   "Last cleanup: Freed {0} MB.": "上次清理：已釋出 {0} MB。",
   "Check ChatGPT titles": "檢查 ChatGPT 標題",
   "Show a notice in the chat menu when the open ChatGPT chat has a different title.": "若在 ChatGPT 中開啟的聊天使用不同標題，便在聊天選單中顯示提示。",
-  "ChatGPT title differs": "ChatGPT 標題不同"
+  "ChatGPT title differs": "ChatGPT 標題不同",
+  "Restore turn": "還原本輪",
+  "Undo in Review": "在審查中復原",
+  "Some of these files were also edited in a later turn.": "其中部分檔案在之後的輪次中也曾被編輯。"
 }

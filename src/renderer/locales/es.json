@@ -4156,5 +4156,10 @@
   "Last cleanup: Freed {0} MB.": "Última limpieza: se liberaron {0} MB.",
   "Check ChatGPT titles": "Comprobar títulos en ChatGPT",
   "Show a notice in the chat menu when the open ChatGPT chat has a different title.": "Muestra un aviso en el menú si el chat abierto en ChatGPT tiene otro título.",
-  "ChatGPT title differs": "El título difiere en ChatGPT"
+  "ChatGPT title differs": "El título difiere en ChatGPT",
+  "Restore turn": "Restaurar turno",
+  "Undo in Review": "Deshacer en Revisión",
+  "Some of these files were also edited in a later turn.": "Algunos de estos archivos también se editaron en un turno posterior.",
+  "Restored {0} of {1} files|one": "Se restauró {0} de {1} archivo",
+  "Restored {0} of {1} files|many": "Se restauraron {0} de {1} archivos"
 }
