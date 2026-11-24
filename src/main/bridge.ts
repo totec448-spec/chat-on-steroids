@@ -310,10 +310,11 @@ const RATE_LIMIT = 900;
 export const COMMAND_DEADLINE_MS = 90_000;
 /** A missing redemption ends this one opening attempt; it never licenses another tab.
  * The absolute invitation lifetime also bounds commands waiting behind another bootstrap.
- * 45 s, not the original 20: a fresh ChatGPT tab on a slower machine takes about 15 s at the
- * 90th percentile, and two worker tabs loading beside other tabs both missed 20 s (VM, 2026-10-06). */
-export const WORKER_REDEEM_MS = 45_000;
-export const WORKER_BOOTSTRAP_LIMIT_MS = 120_000;
+ * Keep the full bootstrap window here: browser placement may spend a minute before the tab
+ * exists, and a hidden background page can still be mounting after that. */
+export const WORKER_REDEEM_MS = 120_000;
+/** Absolute fresh-worker lifetime: page redemption, then the ordinary page/send deadline. */
+export const WORKER_BOOTSTRAP_LIMIT_MS = WORKER_REDEEM_MS + COMMAND_DEADLINE_MS;
 /**
  * How long a worker's page that reported Send has for its receipt (#1086). On a loaded machine
  * pages said "sending the task" and the app gave the workers up at the ordinary deadline anyway,
@@ -6195,7 +6196,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           // Only the first two are this revival's to undo. A worker that stopped waking on its
           // own has already been put somewhere by whatever did that, and failWorkerRevival()
           // ignores anything that is not still `waking`, so this cannot invent a failure.
-          failWorkerRevival(revive.agent, why, revive.runId);
+          failWorkerRevival(revive.agent, why, revive.runId, { countFailure: false });
           receipt = {
             id,
             client: client || command.owner,
@@ -6385,7 +6386,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       const why = error
         ? `the worker's chat did not take the message — ${error}`
         : "the browser could not reopen the worker's chat";
-      failWorkerRevival(command.spec.agent, why, command.spec.runId, { transient: transientFailure && !!error });
+      failWorkerRevival(command.spec.agent, why, command.spec.runId, {
+        transient: transientFailure && !!error,
+        countFailure: false
+      });
       receipt = {
         id,
         client: client || command.owner,
@@ -12346,6 +12350,8 @@ async function deliverOne(): Promise<void> {
  * racing its own expiry.
  */
 const PLACEMENT_FALLBACK_MS = 60_000;
+/** Worker placement is push-driven and normally immediate; leave most of redemption for a fallback tab. */
+const WORKER_PLACEMENT_FALLBACK_MS = 30_000;
 
 /**
  * Opens the chat here when the browser was offered it and did nothing with it.
@@ -12356,18 +12362,19 @@ const PLACEMENT_FALLBACK_MS = 60_000;
  * proof a page took it, and the lookup by id is what makes a stale timer harmless.
  */
 function armPlacementFallback(command: Command): void {
+  const delay = command.spec.type === 'worker' ? WORKER_PLACEMENT_FALLBACK_MS : PLACEMENT_FALLBACK_MS;
   const timer = setTimeout(() => {
     const current = commands.find((entry) => entry.id === command.id);
-    if (!current || current.owner !== null) return;
+    if (!current || current.owner !== null || !current.placement) return;
     // Withdraw an offer nobody ever collected, so a late poll cannot open a second chat for a
     // command this app is about to open itself.
     delete current.placement;
     logInfo(
       `bridge: the browser did not open ${specKey(current.spec)} within ` +
-        `${Math.round(PLACEMENT_FALLBACK_MS / 1000)}s — opening it from here instead`
+        `${Math.round(delay / 1000)}s — opening it from here instead`
     );
     void openFreshChatInBrowser(current);
-  }, PLACEMENT_FALLBACK_MS);
+  }, delay);
   timer.unref?.();
 }
 
@@ -12580,7 +12587,8 @@ function expire(command: Command): void {
   // A page that claimed its worker and reported no failure may still have sent its task: its
   // reports can be minutes late on a starved machine (#1086). Its late receipt is adopted.
   drop(command, commandExpiryReason(command), {
-    startTimedOut: spec.type === 'worker' && command.owner !== null && !command.lastError
+    startTimedOut: spec.type === 'worker' && command.owner !== null && !command.lastError,
+    countWakeFailure: spec.type !== 'revive' || revivalDeliveryProven(command)
   });
   deliver();
 }
@@ -12775,7 +12783,7 @@ function describe(command: Command, client: string | null, claimedSummary?: stri
   };
 }
 
-function drop(command: Command, why: string, options: { startTimedOut?: boolean } = {}): boolean {
+function drop(command: Command, why: string, options: { startTimedOut?: boolean; countWakeFailure?: boolean } = {}): boolean {
   if (!commands.includes(command)) return false;
   const automaticEntry = command.spec.type === 'resume' ? continuationByToken(command.spec.token) : null;
   const automaticResume =
@@ -12834,7 +12842,11 @@ function drop(command: Command, why: string, options: { startTimedOut?: boolean 
   // A revival that never happened is not a worker that failed. Nothing was typed into its
   // chat, so it goes back to sleeping with its inbox intact and its slot released, and the
   // prime is told the message it sent is still waiting to be delivered.
-  if (command.spec.type === 'revive') failWorkerRevival(command.spec.agent, why, command.spec.runId);
+  if (command.spec.type === 'revive') {
+    failWorkerRevival(command.spec.agent, why, command.spec.runId, {
+      countFailure: options.countWakeFailure !== false
+    });
+  }
   logWarn(`bridge: gave up on ${specKey(command.spec)} — ${why}`);
   changed();
   persistCommands();
@@ -13373,7 +13385,9 @@ export async function restoreCommands(): Promise<void> {
         (entry) => entry.id === revive.agent && entry.conversationId === revive.conversationId && entry.runId === revive.runId
       );
       if (!owed) continue;
-      failWorkerRevival(revive.agent, 'its durable revival expired while the app was not running', revive.runId);
+      failWorkerRevival(revive.agent, 'its durable revival expired while the app was not running', revive.runId, {
+        countFailure: false
+      });
     }
 
     if (brokerRelevant) {

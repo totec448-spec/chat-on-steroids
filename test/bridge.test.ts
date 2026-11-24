@@ -9725,7 +9725,7 @@ describe('a command that runs out of time says how far its page got', () => {
       spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
       await vi.waitFor(() => expect(opened.length).toBeGreaterThan(0));
       const prior = new Set(getLog());
-      await vi.advanceTimersByTimeAsync(COMMAND_DEADLINE_MS + 1_000);
+      await vi.advanceTimersByTimeAsync(WORKER_REDEEM_MS + 1_000);
       expect(giveUp(prior, 'worker:')).toContain('opened through the operating system, and no page with the extension picked up its task');
     } finally { vi.useRealTimers(); }
   });
@@ -10019,7 +10019,7 @@ describe('a worker chat that never opens', () => {
       await vi.advanceTimersByTimeAsync(WORKER_REDEEM_MS + 1_000);
       await vi.waitFor(() => expect(opened).toHaveLength(2));
       expect(second).not.toBe(first);
-      expect(swarmState().agents.find(agent => agent.id === 'worker-1')?.state).toBe('failed');
+      expect(getLog().some(line => line.message.includes('multi-agent: worker-1 failed'))).toBe(true);
       expect((await request('POST', '/commands/redeem', { body: { id: first, client: 'late-page' } })).status).toBe(404);
       await vi.advanceTimersByTimeAsync(WORKER_REDEEM_MS + 1_000);
       expect(opened).toHaveLength(2);

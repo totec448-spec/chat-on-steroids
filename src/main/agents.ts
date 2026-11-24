@@ -4078,15 +4078,16 @@ function returnWakingWorkerToStopped(agent: Agent, sleptAt: number, reason: stri
   return null;
 }
 
-/** Consecutive failed wakes, with no sign of life from the chat between them, that end a worker. */
+/** Consecutive delivered wakes, with no sign of life from the chat between them, that end a worker. */
 export const WAKE_FAILURES_BEFORE_GIVING_UP = 2;
 /** Failed wakes per worker conversation since that chat last proved alive. Memory-only: a restart forgives one. */
 const consecutiveWakeFailures = new Map<string, number>();
 /**
  * Wakes the app repeats by itself after a page that redeemed the wake and failed before Send
  * (#1086: no message box after choosing the model, or its own draft refused as changed). Those
- * pages loaded the chat and typed nothing, so the chat is not in doubt: only after these does such
- * a failure count as a strike. A chat that never loads still counts at once.
+ * pages loaded the chat and typed nothing, so the chat is not in doubt: only after these does the
+ * transport attempt end. It still is not a worker strike unless the wake text was actually
+ * delivered. Transport failures simply return the worker to sleeping/revivable.
  */
 export const TRANSIENT_WAKE_RETRIES = 2;
 export const TRANSIENT_WAKE_RETRY_MS = 15_000;
@@ -4100,7 +4101,12 @@ const transientWakeRetries = new Map<string, number>();
  * moment ago — so it returns to `sleeping` and the prime can try again. The prime is told,
  * because it is holding a message it believes was delivered.
  */
-export function failWorkerRevival(id: string, why: string, runId?: string, options: { transient?: boolean } = {}): AgentMessage | null {
+export function failWorkerRevival(
+  id: string,
+  why: string,
+  runId?: string,
+  options: { transient?: boolean; countFailure?: boolean } = {}
+): AgentMessage | null {
   const run = scopedRun(runId);
   const agent = run?.agents.get(id);
   if (!agent || agent.info.state !== 'waking') return null;
@@ -4121,9 +4127,9 @@ export function failWorkerRevival(id: string, why: string, runId?: string, optio
     }
     transientWakeRetries.delete(chat);
   }
-  const strikes = (consecutiveWakeFailures.get(chat) ?? 0) + 1;
-  consecutiveWakeFailures.set(chat, strikes);
-  if (strikes >= WAKE_FAILURES_BEFORE_GIVING_UP && !ceilingCrossed(agent.info)) {
+  const strikes = options.countFailure === false ? 0 : (consecutiveWakeFailures.get(chat) ?? 0) + 1;
+  if (options.countFailure !== false) consecutiveWakeFailures.set(chat, strikes);
+  if (options.countFailure !== false && strikes >= WAKE_FAILURES_BEFORE_GIVING_UP && !ceilingCrossed(agent.info)) {
     // The second failed wake with nothing heard from the chat in between is the verdict on the
     // chat, not on the browser. On 2026-09-03 worker-7's ChatGPT conversation answered every
     // load with "This content is unavailable"; four wakes each waited out their deadline and
