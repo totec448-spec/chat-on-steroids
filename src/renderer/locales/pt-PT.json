@@ -4161,5 +4161,14 @@
   "Undo in Review": "Desfazer na Revisão",
   "Some of these files were also edited in a later turn.": "Alguns destes ficheiros também foram editados num turno posterior.",
   "Restored {0} of {1} files|one": "{0} de {1} ficheiro restaurado",
-  "Restored {0} of {1} files|many": "{0} de {1} ficheiros restaurados"
+  "Restored {0} of {1} files|many": "{0} de {1} ficheiros restaurados",
+  "Restore a turn's edited files, manage Skills from their cards, free storage per chat, and safer saves after a crash.": "Restaure os ficheiros editados de um turno, gira os Skills pelos cartões, liberte espaço por conversa e guarde com mais segurança após uma falha.",
+  "Restore a turn": "Restaurar um turno",
+  "Changed files can put a turn's edited files back, with Undo in Review.": "Ficheiros alterados pode repor os ficheiros editados de um turno, com Desfazer na Revisão.",
+  "Manage installed Skills": "Gerir os Skills instalados",
+  "Pause, re-enable or reveal an installed Skill from its card menu.": "Pause, reative ou mostre um Skill instalado a partir do menu do cartão.",
+  "Free space per chat": "Libertar espaço por conversa",
+  "The storage dialog shows what one chat uses and frees its images or long texts.": "A caixa de armazenamento mostra o que uma conversa usa e liberta as suas imagens ou textos longos.",
+  "Safer after a crash": "Mais seguro após uma falha",
+  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Os grupos de conversas, as importações de definições e os pontos de controlo das edições mantêm-se coerentes se uma gravação ou uma mudança for interrompida."
 }

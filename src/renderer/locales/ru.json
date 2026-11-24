@@ -4246,5 +4246,14 @@
   "Some of these files were also edited in a later turn.": "Некоторые из этих файлов также изменялись в более позднем ходе.",
   "Restored {0} of {1} files|one": "Восстановлен {0} из {1} файла",
   "Restored {0} of {1} files|few": "Восстановлено {0} из {1} файлов",
-  "Restored {0} of {1} files|many": "Восстановлено файлов: {0} из {1}"
+  "Restored {0} of {1} files|many": "Восстановлено файлов: {0} из {1}",
+  "Restore a turn's edited files, manage Skills from their cards, free storage per chat, and safer saves after a crash.": "Восстановление файлов, изменённых за ход, управление Skills с карточек, освобождение места по чатам и более надёжное сохранение после сбоя.",
+  "Restore a turn": "Восстановить ход",
+  "Changed files can put a turn's edited files back, with Undo in Review.": "В «Изменённых файлах» можно вернуть файлы, изменённые за ход, и отменить это в Проверке.",
+  "Manage installed Skills": "Управление установленными Skills",
+  "Pause, re-enable or reveal an installed Skill from its card menu.": "Приостановите, снова включите или покажите установленный Skill из меню его карточки.",
+  "Free space per chat": "Освободить место по чатам",
+  "The storage dialog shows what one chat uses and frees its images or long texts.": "Диалог хранилища показывает, сколько занимает один чат, и освобождает его изображения или длинные тексты.",
+  "Safer after a crash": "Надёжнее после сбоя",
+  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Группы чатов, импорт настроек и контрольные точки правок остаются согласованными, если сохранение или перемещение прервано."
 }

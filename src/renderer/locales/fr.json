@@ -4161,5 +4161,14 @@
   "Undo in Review": "Annuler dans Révision",
   "Some of these files were also edited in a later turn.": "Certains de ces fichiers ont également été modifiés lors d’un tour ultérieur.",
   "Restored {0} of {1} files|one": "{0} fichier sur {1} restauré",
-  "Restored {0} of {1} files|many": "{0} fichiers sur {1} restaurés"
+  "Restored {0} of {1} files|many": "{0} fichiers sur {1} restaurés",
+  "Restore a turn's edited files, manage Skills from their cards, free storage per chat, and safer saves after a crash.": "Restaurer les fichiers modifiés d'un tour, gérer les Compétences depuis leurs cartes, libérer de l'espace par chat et des enregistrements plus sûrs après un plantage.",
+  "Restore a turn": "Restaurer un tour",
+  "Changed files can put a turn's edited files back, with Undo in Review.": "Fichiers modifiés peut remettre en place les fichiers modifiés d'un tour, avec Annuler dans Révision.",
+  "Manage installed Skills": "Gérer les Compétences installées",
+  "Pause, re-enable or reveal an installed Skill from its card menu.": "Suspendez, réactivez ou affichez une Compétence installée depuis le menu de sa carte.",
+  "Free space per chat": "Libérer de l'espace par chat",
+  "The storage dialog shows what one chat uses and frees its images or long texts.": "La boîte de dialogue de stockage montre ce qu'un chat utilise et libère ses images ou ses textes longs.",
+  "Safer after a crash": "Plus sûr après un plantage",
+  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Les groupes de chats, les imports de réglages et les points de contrôle des modifications restent cohérents si un enregistrement ou un déplacement est interrompu."
 }
