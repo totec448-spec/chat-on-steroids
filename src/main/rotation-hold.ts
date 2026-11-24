@@ -12,11 +12,14 @@
  * made while that call is recorded, attaches its delivery wait to the hold. Closing the hold
  * waits for that work, which is bounded by its owner.
  */
-const holds = new Map<string, { calls: number; work: Promise<void> | null }>();
+type Hold = { calls: number; work: Promise<void> | null; after: Array<() => void> };
+const holds = new Map<string, Hold>();
+/** The longest work registered for after the answers waits, so overlapping calls cannot hold it back for ever. */
+export const AFTER_ANSWERS_MAX_MS = 10_000;
 
 /** Opens a hold for one call of this chat; the returned close waits for any work attached meanwhile. */
 export function openCallHold(conversationId: string): () => Promise<void> {
-  const hold = holds.get(conversationId) ?? { calls: 0, work: null };
+  const hold = holds.get(conversationId) ?? { calls: 0, work: null, after: [] };
   hold.calls += 1;
   holds.set(conversationId, hold);
   let closed = false;
@@ -28,6 +31,7 @@ export function openCallHold(conversationId: string): () => Promise<void> {
     } finally {
       hold.calls -= 1;
       if (hold.calls <= 0 && holds.get(conversationId) === hold) holds.delete(conversationId);
+      if (hold.calls <= 0) for (const run of hold.after.splice(0)) run();
     }
   };
 }
@@ -46,6 +50,22 @@ export function holdCalls(conversationId: string, work: Promise<unknown>): boole
   return true;
 }
 
+/**
+ * Runs `work` once no call of this chat is being answered any more (#2238), and at the latest after
+ * AFTER_ANSWERS_MAX_MS. False when no call is open: nothing to wait for, so the caller runs it itself.
+ * A Stop sent while a call still runs makes the model run that call again, so a Stop that follows a
+ * result starts only after the answers have gone out.
+ */
+export function afterCallsAnswered(conversationId: string, work: () => void): boolean {
+  const hold = holds.get(conversationId);
+  if (!hold || hold.calls <= 0) return false;
+  let done = false;
+  const once = () => { if (done) return; done = true; clearTimeout(timer); work(); };
+  const timer = setTimeout(() => { const at = hold.after.indexOf(once); if (at !== -1) hold.after.splice(at, 1); once(); }, AFTER_ANSWERS_MAX_MS);
+  timer.unref?.();
+  hold.after.push(once);
+  return true;
+}
 /** Test seam. */
 export function resetCallHoldsForTests(): void {
   holds.clear();
