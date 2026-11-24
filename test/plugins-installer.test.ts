@@ -29,7 +29,7 @@ it('imports and validates a real MCPB ZIP with upstream schema tooling', async (
   expect(await extractBundle(file, path.join(dir, 'extracted'))).toMatchObject({ name: 'fixture', version: '1.0.0' });
   expect(await fs.readFile(path.join(dir, 'extracted', 'server.js'), 'utf8')).toBe('console.log(1)');
 });
-it.each(['../escape', '/absolute', 'C:/drive', 'a\\escape', 'NUL.txt', 'trailing.'])(
+it.each(['../escape', '/absolute', 'C:/drive', 'a\\escape', 'NUL.txt', 'trailing.', 'conin$', 'sub/CONOUT$.log', 'com0', 'sub/lpt0.txt'])(
   'rejects unsafe archive name %s before writing',
   async (name) => {
     const file = path.join(dir, 'bad.mcpb');

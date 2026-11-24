@@ -88,7 +88,7 @@ export async function extractBundle(input: string, directory: string): Promise<u
       (mode & 0xf000) === 0xa000 ||
       /(^[\\/]|[\\:]|(^|\/)\.\.?($|\/))/.test(name) ||
       name.includes('\0') ||
-      name.split('/').some((p) => /[. ]$/.test(p) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i.test(p))
+      name.split('/').some((p) => /[. ]$/.test(p) || /^(con|prn|aux|nul|conin\$|conout\$|com[0-9]|lpt[0-9])(\.|$)/i.test(p))
     )
       throw new Error('MCPB contains an unsafe archive path or symbolic link');
     const key = name.toLowerCase();
