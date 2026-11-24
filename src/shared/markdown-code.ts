@@ -175,6 +175,8 @@ export function markdownCodeRanges(text: string): Array<{ start: number; end: nu
   let afterLeaf = false;
   // Inside a raw HTML block a "#" or "---" line is HTML, not a heading or a break.
   let inHtmlBlock = false;
+  // A comment block ends at its own "-->" whatever it holds, blank lines and tags included.
+  let inComment = false;
   let fenceIndex = 0;
   let listContentIndent: number | null = null;
   for (let at = 0; at < text.length;) {
@@ -217,8 +219,16 @@ export function markdownCodeRanges(text: string): Array<{ start: number; end: nu
         indentedStart = null;
       }
       afterBlank = !line.trim();
-      inHtmlBlock = line.trim() !== '' && (inHtmlBlock || HTML_BLOCK.test(line));
-      afterLeaf = !inHtmlBlock && LEAF_BLOCK.test(line);
+      if (inComment) {
+        if (line.includes('-->')) inComment = false;
+        inHtmlBlock = false; afterLeaf = false;
+      } else if (!inHtmlBlock && /^ {0,3}<!--/.test(line)) {
+        inComment = !line.slice(line.indexOf('<!--') + 4).includes('-->');
+        afterLeaf = false;
+      } else {
+        inHtmlBlock = line.trim() !== '' && (inHtmlBlock || HTML_BLOCK.test(line));
+        afterLeaf = !inHtmlBlock && LEAF_BLOCK.test(line);
+      }
     }
     at = end;
   }
