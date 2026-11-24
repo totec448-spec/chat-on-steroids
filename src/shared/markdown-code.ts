@@ -14,6 +14,8 @@ function indentColumns(line: string): number {
   return columns;
 }
 
+/** A heading or thematic break is a block that is no paragraph: an indented line after it is code. */
+const LEAF_BLOCK = /^ {0,3}(?:#{1,6}(?:[ \t]|$)|(?:[-*_][ \t]*){3,}$)/;
 /** A plain paragraph may lazily continue a list; a new block cannot. */
 function endsListParagraph(line: string, afterBlank: boolean): boolean {
   return afterBlank || /^ {0,3}(?:#{1,6}(?:[ \t]|$)|>|`{3,}|~{3,}|(?:[-*_][ \t]*){3,}$)/.test(line);
@@ -166,6 +168,9 @@ export function markdownCodeRanges(text: string): Array<{ start: number; end: nu
   // one, but an unindented nonblank line ends it before its own content.
   let indentedStart: number | null = null;
   let afterBlank = true;
+  // Only a paragraph keeps an indented line from starting a code block, so a heading or a thematic
+  // break allows one as a blank line does, without changing how lists end.
+  let afterLeaf = false;
   let fenceIndex = 0;
   let listContentIndent: number | null = null;
   for (let at = 0; at < text.length;) {
@@ -189,7 +194,8 @@ export function markdownCodeRanges(text: string): Array<{ start: number; end: nu
     } else {
       // Indented list content begins at the marker's text column. Its code
       // blocks need *another* four columns, unlike a plain four-space continuation.
-      const marker = /^([ ]*)(?:[-*+]|\d{1,9}[.)])([ \t]+)/.exec(line);
+      // "- - -" and "* * *" are thematic breaks, not list items.
+      const marker = LEAF_BLOCK.test(line) ? null : /^([ ]*)(?:[-*+]|\d{1,9}[.)])([ \t]+)/.exec(line);
       const codeIndent = listContentIndent !== null && indentColumns(line) >= listContentIndent + 4;
       if (marker && !(codeIndent && (afterBlank || indentedStart !== null)) && (marker[1]!.length <= 3 ||
           (listContentIndent !== null && indentColumns(marker[1]!) >= listContentIndent))) {
@@ -199,7 +205,7 @@ export function markdownCodeRanges(text: string): Array<{ start: number; end: nu
         listContentIndent = null;
       }
       if (indentedStart === null) {
-        if (afterBlank && CODE_LINE.test(line) &&
+        if ((afterBlank || afterLeaf) && CODE_LINE.test(line) &&
             (listContentIndent === null || indentColumns(line) >= listContentIndent + 4)) indentedStart = at;
       } else if (line.trim() && (listContentIndent === null
         ? !CODE_LINE.test(line) : indentColumns(line) < listContentIndent + 4)) {
@@ -207,6 +213,7 @@ export function markdownCodeRanges(text: string): Array<{ start: number; end: nu
         indentedStart = null;
       }
       afterBlank = !line.trim();
+      afterLeaf = LEAF_BLOCK.test(line);
     }
     at = end;
   }

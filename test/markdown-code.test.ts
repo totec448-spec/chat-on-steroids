@@ -56,3 +56,14 @@ it.each(['\n', '\r\n'])('keeps inline matching inside Markdown blocks without re
     start: text.indexOf(span), end: text.indexOf(span) + span.length
   })));
 });
+
+it('finds an indented code block that follows a heading or a thematic break directly, and not one that continues a paragraph', () => {
+  const codeAt = (text: string) => markdownCodeRanges(text).filter(range => text.slice(range.start, range.end).includes('code'));
+  // CommonMark: only a paragraph keeps an indented line from starting a code block.
+  for (const text of ['# Title\n    code\n', '# Title\n\tcode\n', '## T ##\n    code\n', 'Title\n---\n    code\n', '***\n    code\n', '- - -\n    code\n']) {
+    expect(codeAt(text), JSON.stringify(text)).toHaveLength(1);
+  }
+  for (const text of ['para\n    not code\n', '> quote\n    code\n', 'Title\n    code\n']) {
+    expect(codeAt(text), JSON.stringify(text)).toHaveLength(0);
+  }
+});
