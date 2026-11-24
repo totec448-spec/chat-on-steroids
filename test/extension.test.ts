@@ -1899,6 +1899,25 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
         .toEqual({ revision: 1, turnId: 'source', questionId: 'question' });
     });
 
+  it('reloads the registry-bound copy when one chat has two tabs', async () => {
+    const { fetch, asked } = appWith(CHAT);
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
+    await worker.registerTab(31);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 31);
+    await worker.registerTab(32);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 32);
+
+    await worker.fireAlarm();
+    expect(worker.tabsReload).toHaveBeenCalledTimes(1);
+    expect(worker.tabsReload).toHaveBeenCalledWith(31);
+    expect(worker.tabsCreate).not.toHaveBeenCalled();
+    expect(asked).toContain(`repaired:${CHAT}`);
+
+    // Reported, so nothing outstanding remains and the duplicate is never reloaded after it.
+    await worker.fireAlarm();
+    expect(worker.tabsReload).toHaveBeenCalledTimes(1);
+  });
+
   it.each([['another chat', 'other-chat'], ['a temporary chat', 'temporary-chat']] as const)(
     'does not reload a tab that moved to %s while its page was being asked about its state', async (_name, kind) => {
       // The reload follows the page's reply, which can take seconds. The scan it started from is
@@ -1935,25 +1954,6 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
       expect(worker.tabsReload).not.toHaveBeenCalled();
       expect([...failed, ...kept]).toEqual(kind === 'other-chat' ? ['changed:other-chat'] : ['preserved:temporary-chat']);
     });
-  it('reloads the registry-bound copy when one chat has two tabs', async () => {
-    const { fetch, asked } = appWith(CHAT);
-    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
-    await worker.registerTab(31);
-    await worker.send({ type: 'bind', conversationId: CHAT }, 31);
-    await worker.registerTab(32);
-    await worker.send({ type: 'bind', conversationId: CHAT }, 32);
-
-    await worker.fireAlarm();
-    expect(worker.tabsReload).toHaveBeenCalledTimes(1);
-    expect(worker.tabsReload).toHaveBeenCalledWith(31);
-    expect(worker.tabsCreate).not.toHaveBeenCalled();
-    expect(asked).toContain(`repaired:${CHAT}`);
-
-    // Reported, so nothing outstanding remains and the duplicate is never reloaded after it.
-    await worker.fireAlarm();
-    expect(worker.tabsReload).toHaveBeenCalledTimes(1);
-  });
-
   /** A reload that throws reports that attempt as failed, then the next pass retries it. */
   it('retries a repair whose reload failed', async () => {
     const { fetch, asked, failedActions, arm } = appWith(null);
