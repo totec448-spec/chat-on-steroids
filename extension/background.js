@@ -4106,10 +4106,20 @@ async function performBrowserRepairs(repairs, policy) {
         // where the watchdog keeps interrupting the recovery it is meant to help. Ask the current
         // document to retry its own ticket first; only an unavailable/stale page falls through to
         // the reload path below. The content script still has to pass every source Stop/Send fence.
+        // The page may wait up to four seconds for its in-flight activity request, then read the feed once (#2245).
         const resumed = await tabReply(target.id,
-          { type: 'clf-resume-compaction', conversationId }, documentId ? { documentId } : undefined);
+          { type: 'clf-resume-compaction', conversationId }, documentId ? { documentId } : undefined, 8000);
         if (resumed?.accepted === true) {
           await call(`/status?repaired=${encodeURIComponent(token)}&repairAction=resumed`);
+          continue;
+        }
+        // That wait can be seconds long: the person may have moved this tab since the check above, and
+        // the reload below must not land on another chat.
+        const afterAsk = await chrome.tabs.get(target.id);
+        const movedOn = afterAsk.pendingUrl ? 'navigating' : conversationForTab(afterAsk) !== conversationId ? 'other-chat'
+          : tabDocuments[String(target.id)] !== documentId ? 'new-document' : null;
+        if (movedOn) {
+          await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}&why=changed&detail=${encodeURIComponent(movedOn)}`);
           continue;
         }
       }
