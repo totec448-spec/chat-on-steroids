@@ -4383,10 +4383,10 @@
   "Models for Goal, Loop and Plan": "نماذج الهدف والتكرار والخطة",
   "The ChatGPT model that writes their messages and plans.": "نموذج ChatGPT الذي يكتب رسائلها وخططها.",
   "Handoffs": "تسليم السياق",
-  "What Compact & Resume carries over.": "ما الذي تنقله ميزة الاختصار والاستئناف.",
+  "What Compact & Resume carries over.": "ما الذي تنقله ميزة ضغط المحادثة واستئنافها.",
   "Goal chats that don't stand idle, a tidier Settings, faster chat updates, and the files a chat edited.": "محادثات الهدف التي لا تتوقف بلا عمل، وإعدادات أكثر تنظيمًا، وتحديثات محادثات أسرع، والملفات التي عدّلتها المحادثة.",
   "Goal chats don't stand idle": "محادثات الهدف لا تتوقف بلا عمل",
-  "A Goal or Loop chat whose Compact & Resume got stuck goes on from its saved summary.": "تستمر محادثة الهدف أو التكرار التي علقت فيها ميزة الاختصار والاستئناف انطلاقًا من ملخصها المحفوظ.",
+  "A Goal or Loop chat whose Compact & Resume got stuck goes on from its saved summary.": "تستمر محادثة الهدف أو التكرار التي علقت فيها ميزة ضغط المحادثة واستئنافها انطلاقًا من ملخصها المحفوظ.",
   "A tidier Settings": "إعدادات أكثر تنظيمًا",
   "Agents settings are split into five short pages instead of one very long one.": "تنقسم إعدادات الوكلاء إلى خمس صفحات قصيرة بدلًا من صفحة واحدة طويلة جدًا.",
   "Chats update faster": "تحديث المحادثات أسرع",
@@ -4422,9 +4422,9 @@
   "The storage dialog shows what one chat uses and frees its images or long texts.": "يعرض مربع حوار التخزين المساحة التي تستخدمها المحادثة ويحرر مساحة صورها أو نصوصها الطويلة.",
   "Safer after a crash": "أمان أكبر بعد التعطل",
   "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "تظل مجموعات المحادثات واستيرادات الإعدادات ونقاط حفظ التعديلات متسقة عند انقطاع الحفظ أو النقل.",
-  "Restored {0} of {1} files|zero": "لم يُستعد أي ملف ({0} من {1})",
-  "Restored {0} of {1} files|one": "استُعيد ملف واحد ({0} من {1})",
-  "Restored {0} of {1} files|two": "استُعيد ملفان ({0} من {1})",
-  "Restored {0} of {1} files|few": "استُعيدت {0} ملفات من أصل {1}",
-  "Restored {0} of {1} files|many": "استُعيد {0} ملفًا من أصل {1}"
+  "Restored {0} of {1} files|zero": "الملفات المستعادة: {0} من أصل {1}",
+  "Restored {0} of {1} files|one": "استُعيد {0} من أصل {1} ملف واحد",
+  "Restored {0} of {1} files|two": "استُعيد {0} من أصل {1} ملفين",
+  "Restored {0} of {1} files|few": "استُعيد {0} من أصل {1} ملفات",
+  "Restored {0} of {1} files|many": "استُعيد {0} من أصل {1} ملفًا"
 }
