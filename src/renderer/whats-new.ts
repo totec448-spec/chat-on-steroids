@@ -14,6 +14,15 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.55': {
+    lead: () => t("Restore a turn's edited files, manage Skills from their cards, free storage per chat, and safer saves after a crash."),
+    highlights: [
+      { icon: 'i-retry', title: () => t("Restore a turn"), text: () => t("Changed files can put a turn's edited files back, with Undo in Review.") },
+      { icon: 'i-skill', title: () => t("Manage installed Skills"), text: () => t("Pause, re-enable or reveal an installed Skill from its card menu.") },
+      { icon: 'i-chart', title: () => t("Free space per chat"), text: () => t("The storage dialog shows what one chat uses and frees its images or long texts.") },
+      { icon: 'i-lock', title: () => t("Safer after a crash"), text: () => t("Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.") }
+    ]
+  },
   '2.1.54': {
     lead: () => t("Goal chats that don't stand idle, a tidier Settings, faster chat updates, and the files a chat edited."),
     highlights: [

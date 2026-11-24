@@ -4076,5 +4076,14 @@
   "Restore turn": "Turu geri yükle",
   "Undo in Review": "İncelemede geri al",
   "Some of these files were also edited in a later turn.": "Bu dosyalardan bazıları daha sonraki bir turda da düzenlendi.",
-  "Restored {0} of {1} files|one": "{1} dosyadan {0} tanesi geri yüklendi"
+  "Restored {0} of {1} files|one": "{1} dosyadan {0} tanesi geri yüklendi",
+  "Restore a turn's edited files, manage Skills from their cards, free storage per chat, and safer saves after a crash.": "Bir turun düzenlediği dosyaları geri yükleme, Becerileri kartlarından yönetme, sohbet başına depolama alanı açma ve çökmeden sonra daha güvenli kayıt.",
+  "Restore a turn": "Bir turu geri yükle",
+  "Changed files can put a turn's edited files back, with Undo in Review.": "Değişen dosyalar, bir turun düzenlediği dosyaları geri getirebilir; İncelemede geri al da kullanılabilir.",
+  "Manage installed Skills": "Yüklü Becerileri yönet",
+  "Pause, re-enable or reveal an installed Skill from its card menu.": "Yüklü bir Beceriyi kartının menüsünden duraklatın, yeniden etkinleştirin veya gösterin.",
+  "Free space per chat": "Sohbet başına alan aç",
+  "The storage dialog shows what one chat uses and frees its images or long texts.": "Depolama iletişim kutusu bir sohbetin ne kadar yer kapladığını gösterir ve görsellerini veya uzun metinlerini temizler.",
+  "Safer after a crash": "Çökmeden sonra daha güvenli",
+  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Kayıt veya taşıma yarıda kesilse bile sohbet grupları, ayar içe aktarmaları ve düzenleme kontrol noktaları tutarlı kalır."
 }

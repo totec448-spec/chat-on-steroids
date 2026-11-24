@@ -3991,5 +3991,14 @@
   "ChatGPT title differs": "Tiêu đề trên ChatGPT khác",
   "Restore turn": "Khôi phục lượt",
   "Undo in Review": "Hoàn tác trong Xem lại",
-  "Some of these files were also edited in a later turn.": "Một số tệp này cũng đã được chỉnh sửa ở lượt sau."
+  "Some of these files were also edited in a later turn.": "Một số tệp này cũng đã được chỉnh sửa ở lượt sau.",
+  "Restore a turn's edited files, manage Skills from their cards, free storage per chat, and safer saves after a crash.": "Khôi phục tệp đã sửa của một lượt, quản lý Kỹ năng từ thẻ của chúng, giải phóng dung lượng theo từng cuộc trò chuyện và lưu an toàn hơn sau sự cố.",
+  "Restore a turn": "Khôi phục một lượt",
+  "Changed files can put a turn's edited files back, with Undo in Review.": "Tệp đã thay đổi có thể đưa các tệp mà một lượt đã sửa về như cũ, kèm Hoàn tác trong Xem lại.",
+  "Manage installed Skills": "Quản lý Kỹ năng đã cài",
+  "Pause, re-enable or reveal an installed Skill from its card menu.": "Tạm dừng, bật lại hoặc hiện một Kỹ năng đã cài từ menu của thẻ.",
+  "Free space per chat": "Giải phóng dung lượng theo cuộc trò chuyện",
+  "The storage dialog shows what one chat uses and frees its images or long texts.": "Hộp thoại bộ nhớ cho biết một cuộc trò chuyện dùng bao nhiêu và giải phóng ảnh hoặc văn bản dài của nó.",
+  "Safer after a crash": "An toàn hơn sau sự cố",
+  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Nhóm cuộc trò chuyện, nhập cài đặt và điểm kiểm tra chỉnh sửa vẫn nhất quán khi việc lưu hoặc di chuyển bị gián đoạn."
 }
