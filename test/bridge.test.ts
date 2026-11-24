@@ -8707,16 +8707,27 @@ describe('delivering a bootstrap', () => {
       caller: { conversationId: PRIME_CHAT }
     });
 
-    await waitForOpened(2);
+    await waitForOpened(1);
     const first = await redeem();
     expect(first.agent).toBe('worker-1');
+    const firstConversation = '11111111-2222-3333-4444-555555555555';
+    // Bind worker-1 from exact lost-ACK evidence without settling its command. That releases
+    // the serialized bootstrap lane while preserving the delayed first receipt this test needs.
+    expect((await request('POST', '/events', {
+      body: {
+        conversationId: firstConversation,
+        agent: 'worker-1',
+        agentCommandId: first.id,
+        events: [{ kind: 'turn_start', time: Date.now(), turnId: 'first-early-turn' }]
+      }
+    })).status).toBe(200);
+    await waitForOpened(2);
     const second = await redeem();
     expect(second.agent).toBe('worker-2');
     const secondConversation = '22222222-3333-4444-5555-666666666666';
     await request('POST', '/commands/ack', {
       body: { id: second.id, status: 'sent', conversationId: secondConversation, agent: 'worker-2' }
     });
-    const firstConversation = '11111111-2222-3333-4444-555555555555';
     await request('POST', '/commands/ack', {
       body: { id: first.id, status: 'sent', conversationId: firstConversation, agent: 'worker-1' }
     });
@@ -8746,9 +8757,22 @@ describe('delivering a bootstrap', () => {
   it('preserves both concurrent command claims and final receipts in the durable ledger', async () => {
     await pair();
     spawn({ workers: [{ task: 'Concurrent first' }, { task: 'Concurrent second' }], caller: { conversationId: PRIME_CHAT } });
+    await waitForOpened(1);
+    const firstId = new URL(opened[0]!).searchParams.get('clf')!;
+    await redeem(firstId, 'concurrent-page-0');
+    const firstConversation = 'cafe0491-0000-4000-8000-000000000490';
+    expect((await request('POST', '/events', {
+      body: {
+        conversationId: firstConversation,
+        agent: 'worker-1',
+        agentCommandId: firstId,
+        events: [{ kind: 'turn_start', time: Date.now(), turnId: 'concurrent-first-turn' }]
+      }
+    })).status).toBe(200);
     await waitForOpened(2);
-    const ids = opened.map(url => new URL(url).searchParams.get('clf')!);
-    await Promise.all(ids.map((id, index) => redeem(id, `concurrent-page-${index}`)));
+    const secondId = new URL(opened[1]!).searchParams.get('clf')!;
+    await redeem(secondId, 'concurrent-page-1');
+    const ids = [firstId, secondId];
     const claimed = await readDurable<any>('bridge-commands');
     for (const [index, id] of ids.entries())
       expect(claimed.commands.find((row: any) => row.id === id)?.owner).toBe(`concurrent-page-${index}`);
@@ -9797,11 +9821,13 @@ describe('a worker chat that never opens', () => {
       expect(placement.background === true).toBe(backgroundChats);
     });
     expect(opened).toEqual([]);
-    let second: any;
-    await vi.waitFor(async () => { second ||= (await request('GET', '/status')).body.placement; expect(second?.id).toBeTruthy(); });
+    // Fresh worker bootstrap is serialized: worker-2 is withheld until worker-1 has bound,
+    // rather than asking Chrome to hydrate two hidden New Chat/model-picker flows together.
     expect((await request('GET', '/status')).body.placement).toBeNull();
     expect((await redeem(placement.id)).agent).toBe('worker-1');
     await request('POST', '/commands/ack', { body: { id: placement.id, status: 'sent', agent: 'worker-1', conversationId: 'abababab-1111-4222-8333-444444444444' } });
+    let second: any;
+    await vi.waitFor(async () => { second ||= (await request('GET', '/status')).body.placement; expect(second?.id).toBeTruthy(); });
     expect(second.id).not.toBe(placement.id);
     expect(second.active).toBe(false);
     expect((await redeem(second.id)).agent).toBe('worker-2');
@@ -10012,12 +10038,12 @@ describe('a worker chat that never opens', () => {
     try {
       await pair();
       spawn({ workers: [{ task: 'first' }, { task: 'second' }], caller: { conversationId: PRIME_CHAT } });
-      await vi.waitFor(() => expect(opened).toHaveLength(2));
+      await vi.waitFor(() => expect(opened).toHaveLength(1));
       const first = new URL(opened[0]!).searchParams.get('clf')!;
-      const second = new URL(opened[1]!).searchParams.get('clf')!;
-      expect((await redeem(second)).agent).toBe('worker-2');
       await vi.advanceTimersByTimeAsync(WORKER_REDEEM_MS + 1_000);
       await vi.waitFor(() => expect(opened).toHaveLength(2));
+      const second = new URL(opened[1]!).searchParams.get('clf')!;
+      expect((await redeem(second)).agent).toBe('worker-2');
       expect(second).not.toBe(first);
       expect(getLog().some(line => line.message.includes('multi-agent: worker-1 failed'))).toBe(true);
       expect((await request('POST', '/commands/redeem', { body: { id: first, client: 'late-page' } })).status).toBe(404);
@@ -10030,9 +10056,9 @@ describe('a worker chat that never opens', () => {
    * The absolute clock a still-`invited` worker lives under.
    *
    * A command still in line has no clock of its own; the limit is absolute from the invitation,
-   * so no combination of a late hand-out and a fresh lease can keep the slot past two minutes.
+   * so no combination of a late hand-out and a fresh lease can keep the slot past the bootstrap limit.
    */
-  it('stops holding a slot invited two minutes after the invitation, however late its chat opens', async () => {
+  it('stops holding queued slots at the absolute bootstrap limit, however late their chats open', async () => {
     vi.useFakeTimers();
     const previous = getConfig();
     try {
@@ -10049,10 +10075,11 @@ describe('a worker chat that never opens', () => {
         await vi.advanceTimersByTimeAsync(ms);
         elapsed += ms;
       };
-      await vi.waitFor(() => expect(opened).toHaveLength(3));
+      await vi.waitFor(() => expect(opened).toHaveLength(1));
       await request('GET', '/status');
       await advance(WORKER_REDEEM_MS + 1_000);
-      expect(new Set(opened.map(url => new URL(url).searchParams.get('clf'))).size).toBe(3);
+      await vi.waitFor(() => expect(opened).toHaveLength(2));
+      expect(new Set(opened.map(url => new URL(url).searchParams.get('clf'))).size).toBe(2);
 
       await advance(WORKER_BOOTSTRAP_LIMIT_MS + 1_000 - elapsed);
       // No zombie slot left behind: nothing is still owed a tab, and nothing is still invited.
@@ -10088,13 +10115,14 @@ describe('a worker whose chat starts after the app gave up on it', () => {
     try {
       await pair();
       spawn({ workers: [{ task: 'first half' }, { task: 'second half' }], caller: { conversationId: PRIME_CHAT } });
-      await vi.waitFor(() => expect(opened).toHaveLength(2));
+      await vi.waitFor(() => expect(opened).toHaveLength(1));
       const first = await redeem(new URL(opened[0]!).searchParams.get('clf')!);
+      await vi.advanceTimersByTimeAsync(COMMAND_DEADLINE_MS + 1_000);
+      expect(workerOne()?.state).toBe('failed');
+      await vi.waitFor(() => expect(opened).toHaveLength(2));
       const second = await redeem(new URL(opened[1]!).searchParams.get('clf')!, 'tab-2');
       expect((await request('POST', '/commands/ack', { body: { id: second.id, status: 'sent',
         conversationId: 'cdcdcdcd-5555-4444-3333-222222222222', agent: second.agent, client: 'tab-2' } })).status).toBe(200);
-      await vi.advanceTimersByTimeAsync(COMMAND_DEADLINE_MS + 1_000);
-      expect(workerOne()?.state).toBe('failed');
 
       const late = await ack(first.id, LATE_CHAT);
       expect(late.status).toBe(200);
@@ -10129,12 +10157,13 @@ describe('a worker whose chat starts after the app gave up on it', () => {
     try {
       await pair();
       spawn({ workers: [{ task: 'first half' }, { task: 'second half' }], caller: { conversationId: PRIME_CHAT } });
-      await vi.waitFor(() => expect(opened).toHaveLength(2));
+      await vi.waitFor(() => expect(opened).toHaveLength(1));
       const first = await redeem(new URL(opened[0]!).searchParams.get('clf')!);
+      await vi.advanceTimersByTimeAsync(COMMAND_DEADLINE_MS + 1_000);
+      await vi.waitFor(() => expect(opened).toHaveLength(2));
       const second = await redeem(new URL(opened[1]!).searchParams.get('clf')!, 'tab-2');
       await request('POST', '/commands/ack', { body: { id: second.id, status: 'sent',
         conversationId: 'cdcdcdcd-5555-4444-3333-222222222222', agent: second.agent, client: 'tab-2' } });
-      await vi.advanceTimersByTimeAsync(COMMAND_DEADLINE_MS + 1_000);
       // The prime did what the failure report told it to: it started a replacement.
       spawn({ workers: [{ task: 'first half, again' }], caller: { conversationId: PRIME_CHAT } });
       await vi.waitFor(() => expect(opened).toHaveLength(3));
