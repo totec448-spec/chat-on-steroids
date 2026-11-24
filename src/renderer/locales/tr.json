@@ -4072,5 +4072,9 @@
   "Last cleanup: Freed {0} MB.": "Son temizleme: {0} MB alan açıldı.",
   "Check ChatGPT titles": "ChatGPT başlıklarını kontrol et",
   "Show a notice in the chat menu when the open ChatGPT chat has a different title.": "Açık ChatGPT sohbetinin başlığı farklıysa sohbet menüsünde bir bildirim gösterir.",
-  "ChatGPT title differs": "ChatGPT başlığı farklı"
+  "ChatGPT title differs": "ChatGPT başlığı farklı",
+  "Restore turn": "Turu geri yükle",
+  "Undo in Review": "İncelemede geri al",
+  "Some of these files were also edited in a later turn.": "Bu dosyalardan bazıları daha sonraki bir turda da düzenlendi.",
+  "Restored {0} of {1} files|one": "{1} dosyadan {0} tanesi geri yüklendi"
 }

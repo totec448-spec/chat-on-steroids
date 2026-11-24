@@ -3988,5 +3988,8 @@
   "Last cleanup: Freed {0} MB.": "마지막 정리: {0} MB를 확보했습니다.",
   "Check ChatGPT titles": "ChatGPT 제목 확인",
   "Show a notice in the chat menu when the open ChatGPT chat has a different title.": "열려 있는 ChatGPT 채팅의 제목이 다르면 채팅 메뉴에 알림을 표시합니다.",
-  "ChatGPT title differs": "ChatGPT 제목이 다릅니다"
+  "ChatGPT title differs": "ChatGPT 제목이 다릅니다",
+  "Restore turn": "턴 복원",
+  "Undo in Review": "검토에서 실행 취소",
+  "Some of these files were also edited in a later turn.": "이 파일 중 일부는 이후 턴에서도 편집되었습니다."
 }

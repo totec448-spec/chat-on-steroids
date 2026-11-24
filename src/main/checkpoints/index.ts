@@ -6,7 +6,7 @@
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { responseTurnId } from '../../shared/chronology.js';
-import { CHECKPOINT_REF_PREFIX, type CheckpointRestoreResult, type ProjectGitSnapshot } from '../../shared/project-git.js';
+import { CHECKPOINT_REF_PREFIX, type CheckpointRestoreResult, type ProjectGitSnapshot, type TurnCheckpointRestoreResult } from '../../shared/project-git.js';
 import { getConfig } from '../config.js';
 import { logInfo, logWarn } from '../logger.js';
 import { currentCall } from '../mcp/call-context.js';
@@ -14,8 +14,10 @@ import { projectRestoreTarget, revalidateProjectFileTarget } from '../project-fi
 import { decode, readProjectGitSnapshot, repositoryContext, runGit, withTemporaryIndex, type RepositoryContext } from '../project-git.js';
 import { rawPromises as fs } from '../rawfs.js';
 import { isContained } from '../sandbox.js';
-import { getSession } from '../session/store.js';
-import { addCheckpoint, findCheckpoint, hasCheckpoint, type CodeCheckpoint } from './store.js';
+import { getSession, readEvents } from '../session/store.js';
+import { turnFileEdits } from '../session/turn-changes.js';
+import { projectWorkspace } from '../projects.js';
+import { addCheckpoint, findCheckpoint, findTurnCheckpoint, hasCheckpoint, type CodeCheckpoint } from './store.js';
 
 const OID = /^[0-9a-f]{40,64}$/;
 const CAPTURE_BUDGET_MS = 10_000;
@@ -163,6 +165,21 @@ async function captureWithinBudget(context: RepositoryContext, sessionId: string
   } finally { clearTimeout(timer); }
 }
 
+function turnCheckpointKey(timelineTurns: Parameters<typeof responseTurnId>[0], turnId: string): string {
+  return `turn:${responseTurnId(timelineTurns, turnId)}`;
+}
+
+/**
+ * The Review comparison ref (`checkpoint:<id>`) for the snapshot taken before this turn's first
+ * patch, or null when no matching turn checkpoint exists for the session's current project.
+ */
+export async function turnCheckpointRef(sessionId: string, turnId: string): Promise<string | null> {
+  const session = await getSession(sessionId);
+  if (!session?.projectId) return null;
+  const entry = await findTurnCheckpoint(session.projectId, sessionId, turnCheckpointKey(session.timelineTurns, turnId));
+  return entry ? `${CHECKPOINT_REF_PREFIX}${entry.id}` : null;
+}
+
 /**
  * Called after a patch verified and before it executes. Never fails the patch: an unproven
  * caller, a chat without a Git project or a capture failure simply takes no checkpoint. With
@@ -177,7 +194,7 @@ export async function checkpointBeforePatch(realPaths: readonly string[]): Promi
     if (!sessionId) return;
     const session = await getSession(sessionId);
     if (!session?.projectId) return;
-    const key = session.activeTurnId ? `turn:${responseTurnId(session.timelineTurns, session.activeTurnId)}`
+    const key = session.activeTurnId ? turnCheckpointKey(session.timelineTurns, session.activeTurnId)
       : caller.requestId ? `request:${caller.requestId}` : null;
     if (!key) return;
     const flight = `${session.projectId}\0${sessionId}\0${key}`;
@@ -362,4 +379,104 @@ export function restoreCheckpoint(projectId: string, checkpointId: string, paths
   });
   restores.set(projectId, operation);
   return operation;
+}
+
+const WORKER = /^worker-\d+$/;
+
+/**
+ * Restores only the project files edited in `turnId` back to that turn's checkpoint, leaving
+ * unrelated files untouched. Delegates final confirmation, undo-checkpoint creation and atomic
+ * writes to `restoreCheckpoint`.
+ */
+export async function restoreTurnCheckpoint(
+  sessionId: string,
+  turnId: string,
+  from: number,
+  confirm: (paths: string[], options: { editedLater: boolean }) => Promise<boolean>
+): Promise<TurnCheckpointRestoreResult> {
+  const refuse = (reason: string, message: string): never => {
+    logInfo(`turn checkpoint restore refused: ${reason}`);
+    throw new Error(message);
+  };
+  const session = await getSession(sessionId);
+  if (!session?.projectId) refuse('no project', 'This chat is not in a project');
+  const projectId = session!.projectId!;
+  const entry = await findTurnCheckpoint(projectId, sessionId, turnCheckpointKey(session!.timelineTurns, turnId));
+  if (!entry) refuse('no turn checkpoint', 'This checkpoint is no longer available');
+  const context = await repositoryContext(projectId);
+  if (!context) refuse('not a git repository', 'This folder is not a Git repository');
+
+  const events = await readEvents(sessionId, { from, kinds: ['tool_call'] });
+  const edits = turnFileEdits(events, turnId);
+  if (!edits.length) refuse('no recorded edits in turn', 'This turn has no recorded edits to restore');
+
+  const workspace = await projectWorkspace(projectId);
+  const virtualPrefix = `${workspace.virtual.replace(/\/+$/, '')}/`;
+  const toProjectRelative = async (recorded: string): Promise<string | null> => {
+    const normalised = recorded.replace(/\\/g, '/');
+    let relative: string | null = null;
+    if (normalised.startsWith(virtualPrefix)) {
+      relative = normalised.slice(virtualPrefix.length);
+    } else if (!normalised.startsWith('/')) {
+      const candidate = path.resolve(recorded);
+      if (isContained(context!.projectReal, candidate)) {
+        relative = path.relative(context!.projectReal, candidate).split(path.sep).join('/');
+      }
+    }
+    if (!relative || relative === '.' || relative.startsWith('../') || relative === '..') return null;
+    try {
+      // Validate containment and refuse any symlink segment without following it to another target.
+      const target = await projectRestoreTarget(projectId, relative);
+      if (target.kind !== null && target.kind !== 'file') return null;
+      return target.path;
+    } catch {
+      return null;
+    }
+  };
+
+  const turnPaths = new Set<string>();
+  for (const edit of edits) {
+    const relative = await toProjectRelative(edit.path);
+    if (relative) turnPaths.add(relative);
+  }
+  if (!turnPaths.size) refuse('edits outside project', 'These files are outside the project');
+
+  const ref = `${CHECKPOINT_REF_PREFIX}${entry!.id}`;
+  const snapshot = await readProjectGitSnapshot(projectId, ref);
+  if (snapshot.state !== 'ready' || !snapshot.comparison?.checkpoint) {
+    refuse('checkpoint unavailable', snapshot.message || 'This checkpoint is no longer available');
+  }
+  if (snapshot.truncated) refuse('comparison truncated', 'Too many changes to restore at once. Restore files one by one.');
+  const changed = new Set(snapshot.changes.map(change => change.path));
+  const selected = [...turnPaths].filter(relative => changed.has(relative));
+  if (!selected.length) refuse('no remaining diff', 'These files no longer differ from the checkpoint');
+
+  const result = await restoreCheckpoint(projectId, entry!.id, selected, snapshot.revision, async paths => {
+    // Read again after the restore preflight, as the dialog is about to open. The original
+    // read still owns the selection and restore revalidates the comparison before writing.
+    const history = await readEvents(sessionId, { from, kinds: ['tool_call'] });
+    const turnOrigin = history.find(event => event.turnId === turnId && event.turnOrigin != null)?.turnOrigin;
+    // Legacy recordings can lack a turn start. A tool time describes when the call started,
+    // even when the recorder appends its completion later.
+    let firstEditTime = Infinity;
+    for (const event of events) {
+      if (event.kind !== 'tool_call' || event.turnId !== turnId || (event.agent && WORKER.test(event.agent))) continue;
+      if (event.call.outcome === 'ok' && event.call.changes?.length) firstEditTime = Math.min(firstEditTime, event.time);
+    }
+    const restorable = new Set(paths);
+    for (const event of history) {
+      if (event.kind !== 'tool_call' || event.turnId === turnId || (event.agent && WORKER.test(event.agent))) continue;
+      if (event.call.outcome !== 'ok' || !event.call.changes?.length) continue;
+      const later = turnOrigin != null && event.turnOrigin != null
+        ? event.turnOrigin > turnOrigin
+        : Boolean(event.turnId) && event.time >= firstEditTime;
+      if (!later) continue;
+      for (const change of event.call.changes) {
+        const relative = await toProjectRelative(change.path);
+        if (relative && restorable.has(relative)) return confirm(paths, { editedLater: true });
+      }
+    }
+    return confirm(paths, { editedLater: false });
+  });
+  return { ...result, projectId };
 }
