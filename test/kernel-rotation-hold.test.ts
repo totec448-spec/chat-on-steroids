@@ -24,6 +24,7 @@ import { createRegistrar, ok } from '../src/main/mcp/kernel.js';
 import { withInboundRequestId } from '../src/main/mcp/inbound.js';
 import { defaultConfig } from '../src/main/config.js';
 import { afterCallsAnswered, callHoldOpen, holdCalls, openCallHold, resetCallHoldsForTests } from '../src/main/rotation-hold.js';
+import { getLog } from '../src/main/logger.js';
 
 function handler() {
   let call!: (args: object) => Promise<{ content: Array<{ text?: string }> }>;
@@ -62,6 +63,7 @@ it('runs work registered for after the answers once the last open call of the ch
   const ran: string[] = [];
   const first = openCallHold('chat-b'), second = openCallHold('chat-b');
   expect(afterCallsAnswered('chat-b', () => ran.push('after'))).toBe(true);
+  expect(getLog().some(entry => entry.message.includes('chat-b') && entry.message.includes('waits for 2 call answer'))).toBe(true);
   await first();
   expect(ran).toEqual([]);
   await second();
@@ -79,6 +81,7 @@ it('does not wait for ever on a chat whose calls keep overlapping (#2238)', asyn
     afterCallsAnswered('chat-c', () => ran.push('after'));
     await vi.advanceTimersByTimeAsync(30_000);
     expect(ran).toEqual(['after']);
+    expect(getLog().some(entry => entry.message.includes('chat-c') && entry.message.includes('still held') && entry.message.includes('going ahead'))).toBe(true);
     await open();
     expect(ran).toEqual(['after']);
   } finally { vi.useRealTimers(); }

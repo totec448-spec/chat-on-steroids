@@ -13,6 +13,7 @@
  * waits for that work, which is bounded by its owner.
  */
 type Hold = { calls: number; work: Promise<void> | null; after: Array<() => void> };
+import { logInfo } from './logger.js';
 const holds = new Map<string, Hold>();
 /** The longest work registered for after the answers waits, so overlapping calls cannot hold it back for ever. */
 export const AFTER_ANSWERS_MAX_MS = 10_000;
@@ -61,9 +62,16 @@ export function afterCallsAnswered(conversationId: string, work: () => void): bo
   if (!hold || hold.calls <= 0) return false;
   let done = false;
   const once = () => { if (done) return; done = true; clearTimeout(timer); work(); };
-  const timer = setTimeout(() => { const at = hold.after.indexOf(once); if (at !== -1) hold.after.splice(at, 1); once(); }, AFTER_ANSWERS_MAX_MS);
+  const timer = setTimeout(() => {
+    const at = hold.after.indexOf(once);
+    if (at !== -1) hold.after.splice(at, 1);
+    // Said so that a Stop which follows a call that was never answered can be explained from the log.
+    logInfo(`rotation hold: ${conversationId} — a call answer is still held after ${AFTER_ANSWERS_MAX_MS / 1000} s; going ahead without waiting for it`);
+    once();
+  }, AFTER_ANSWERS_MAX_MS);
   timer.unref?.();
   hold.after.push(once);
+  logInfo(`rotation hold: ${conversationId} — work waits for ${hold.calls} call answer(s) to go out`);
   return true;
 }
 /** Test seam. */
