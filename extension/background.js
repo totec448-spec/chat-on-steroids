@@ -4177,7 +4177,11 @@ async function performBrowserRepairs(repairs, policy) {
         await call(`/status?repaired=${encodeURIComponent(token)}&repairAction=preserved&preservedFor=temporary-chat`);
         continue;
       }
-      const movedOn = !fresh ? null : fresh.pendingUrl ? 'navigating' : conversationForTab(fresh) !== conversationId ? 'other-chat'
+      // conversationForTab falls back to the registry for a page without a chat in its address: a tab the
+      // scan saw in a chat and that now shows another route (the new-chat page) is not that chat any more.
+      const scannedInChat = Boolean(target && /\/c\/[^/?#]+/.test(target.url || ''));
+      const movedOn = !fresh ? null : fresh.pendingUrl ? 'navigating'
+        : (scannedInChat && !String(fresh.url || '').includes(`/c/${conversationId}`)) || conversationForTab(fresh) !== conversationId ? 'other-chat'
         : documentId && tabDocuments[String(target.id)] !== documentId ? 'new-document' : null;
       if (movedOn) {
         await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}&why=changed&detail=${encodeURIComponent(movedOn)}`);
