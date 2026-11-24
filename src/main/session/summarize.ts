@@ -348,7 +348,9 @@ function build(
           ? '✕ timed out'
           : failed
             ? `✕ exit ${evidence.exitCode}`
-            : `✓ ${formatDuration(took)}`
+            : `✓ ${formatDuration(took)}`,
+        // Only evidence the app recorded explicitly proves the end; a null state stays ambiguous.
+        ...(evidence.running === false && !failed && !evidence.timedOut ? { ended: true as const } : {})
       };
     }
     case 'write_stdin': {
