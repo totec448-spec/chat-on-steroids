@@ -1918,13 +1918,14 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
     expect(worker.tabsReload).toHaveBeenCalledTimes(1);
   });
 
-  it.each([['another chat', 'other-chat'], ['a temporary chat', 'temporary-chat']] as const)(
+  it.each([['another chat', 'other-chat'], ['the new-chat page', 'new-chat'], ['a temporary chat', 'temporary-chat']] as const)(
     'does not reload a tab that moved to %s while its page was being asked about its state', async (_name, kind) => {
       // The reload follows the page's reply, which can take seconds. The scan it started from is
       // older than that, so the tab is read again right before the reload.
       let armed = false, handed = false, moved = false;
       const failed: string[] = [], kept: string[] = [];
-      const here = () => moved ? (kind === 'other-chat' ? `https://chatgpt.com/c/${OTHER}` : `https://chatgpt.com/c/${CHAT}?temporary-chat=true`) : `https://chatgpt.com/c/${CHAT}`;
+      const here = () => !moved ? `https://chatgpt.com/c/${CHAT}` : kind === 'other-chat' ? `https://chatgpt.com/c/${OTHER}`
+        : kind === 'new-chat' ? 'https://chatgpt.com/' : `https://chatgpt.com/c/${CHAT}?temporary-chat=true`;
       const fetch = vi.fn(async (input: string) => {
         const url = new URL(input);
         if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
@@ -1952,7 +1953,7 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
       await worker.send({ type: 'bind', conversationId: CHAT }, 21);
       await worker.fireAlarm(); armed = true; await worker.fireAlarm();
       expect(worker.tabsReload).not.toHaveBeenCalled();
-      expect([...failed, ...kept]).toEqual(kind === 'other-chat' ? ['changed:other-chat'] : ['preserved:temporary-chat']);
+      expect([...failed, ...kept]).toEqual(kind === 'temporary-chat' ? ['preserved:temporary-chat'] : ['changed:other-chat']);
     });
   /** A reload that throws reports that attempt as failed, then the next pass retries it. */
   it('retries a repair whose reload failed', async () => {
