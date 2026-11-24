@@ -1899,6 +1899,42 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
         .toEqual({ revision: 1, turnId: 'source', questionId: 'question' });
     });
 
+  it.each([['another chat', 'other-chat'], ['a temporary chat', 'temporary-chat']] as const)(
+    'does not reload a tab that moved to %s while its page was being asked about its state', async (_name, kind) => {
+      // The reload follows the page's reply, which can take seconds. The scan it started from is
+      // older than that, so the tab is read again right before the reload.
+      let armed = false, handed = false, moved = false;
+      const failed: string[] = [], kept: string[] = [];
+      const here = () => moved ? (kind === 'other-chat' ? `https://chatgpt.com/c/${OTHER}` : `https://chatgpt.com/c/${CHAT}?temporary-chat=true`) : `https://chatgpt.com/c/${CHAT}`;
+      const fetch = vi.fn(async (input: string) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/repairs/claim') return response(200, { allowed: true });
+        if (url.pathname === '/status') {
+          if (url.searchParams.has('repairFailed')) failed.push(`${url.searchParams.get('why')}:${url.searchParams.get('detail')}`);
+          if (url.searchParams.has('repaired')) kept.push(`${url.searchParams.get('repairAction')}:${url.searchParams.get('preservedFor') ?? ''}`);
+          if (armed && !handed) {
+            handed = true;
+            return response(200, { repairs: [{ conversationId: CHAT, token: 'moved-after-status', reason: 'unattributed', requiresClaim: false }] });
+          }
+          return response(200, { repairs: [] });
+        }
+        return response(200, {});
+      });
+      const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch,
+        tabsQuery: async () => [{ id: 21, url: `https://chatgpt.com/c/${CHAT}` }],
+        tabsGet: async () => ({ id: 21, url: here() }),
+        tabsSendMessage: async (_id, message) => {
+          // The page answers from the document it was: still the old chat, not streaming.
+          if (message.type === 'clf-page-status') { moved = true; return { ok: true, conversationId: CHAT, streaming: false, assistantError: true }; }
+          return { ok: true };
+        } });
+      await worker.registerTab(21);
+      await worker.send({ type: 'bind', conversationId: CHAT }, 21);
+      await worker.fireAlarm(); armed = true; await worker.fireAlarm();
+      expect(worker.tabsReload).not.toHaveBeenCalled();
+      expect([...failed, ...kept]).toEqual(kind === 'other-chat' ? ['changed:other-chat'] : ['preserved:temporary-chat']);
+    });
   it('reloads the registry-bound copy when one chat has two tabs', async () => {
     const { fetch, asked } = appWith(CHAT);
     const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
