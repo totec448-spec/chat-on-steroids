@@ -4076,5 +4076,14 @@
   "Restore turn": "Zug wiederherstellen",
   "Undo in Review": "In Überprüfung rückgängig machen",
   "Some of these files were also edited in a later turn.": "Einige dieser Dateien wurden auch in einem späteren Zug bearbeitet.",
-  "Restored {0} of {1} files|one": "{0} von {1} Datei wiederhergestellt"
+  "Restored {0} of {1} files|one": "{0} von {1} Datei wiederhergestellt",
+  "Restore a turn's edited files, manage Skills from their cards, free storage per chat, and safer saves after a crash.": "Dateien eines Zugs wiederherstellen, Skills über ihre Karten verwalten, Speicher pro Chat freigeben und sicherer nach einem Absturz.",
+  "Restore a turn": "Einen Zug wiederherstellen",
+  "Changed files can put a turn's edited files back, with Undo in Review.": "In „Geänderte Dateien“ lassen sich die bearbeiteten Dateien eines Zugs zurückholen, mit „In Überprüfung rückgängig machen“.",
+  "Manage installed Skills": "Installierte Skills verwalten",
+  "Pause, re-enable or reveal an installed Skill from its card menu.": "Pausiere oder aktiviere einen installierten Skill wieder, oder zeige ihn im Dateimanager, über das Menü seiner Karte.",
+  "Free space per chat": "Speicher pro Chat freigeben",
+  "The storage dialog shows what one chat uses and frees its images or long texts.": "Der Speicherdialog zeigt, was ein Chat belegt, und gibt dessen Bilder oder lange Texte frei.",
+  "Safer after a crash": "Sicherer nach einem Absturz",
+  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Chat-Gruppen, Einstellungsimporte und Bearbeitungs-Checkpoints bleiben konsistent, wenn ein Speichern oder Verschieben unterbrochen wird."
 }

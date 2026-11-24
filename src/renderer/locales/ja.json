@@ -3991,5 +3991,14 @@
   "ChatGPT title differs": "ChatGPT のタイトルが異なります",
   "Restore turn": "ターンを復元",
   "Undo in Review": "レビューで元に戻す",
-  "Some of these files were also edited in a later turn.": "これらのファイルの一部は後のターンでも編集されています。"
+  "Some of these files were also edited in a later turn.": "これらのファイルの一部は後のターンでも編集されています。",
+  "Restore a turn's edited files, manage Skills from their cards, free storage per chat, and safer saves after a crash.": "ターンの編集ファイルの復元、カードからのスキル管理、チャットごとの容量解放、クラッシュ後も安心な保存。",
+  "Restore a turn": "ターンを復元",
+  "Changed files can put a turn's edited files back, with Undo in Review.": "変更されたファイルから、ターンが編集したファイルを元に戻せます。レビューで元に戻すこともできます。",
+  "Manage installed Skills": "インストール済みのスキルを管理",
+  "Pause, re-enable or reveal an installed Skill from its card menu.": "インストール済みのスキルを、カードのメニューから一時停止、再有効化、または表示できます。",
+  "Free space per chat": "チャットごとに容量を解放",
+  "The storage dialog shows what one chat uses and frees its images or long texts.": "ストレージのダイアログに、1 つのチャットが使っている容量が表示され、その画像や長いテキストを解放できます。",
+  "Safer after a crash": "クラッシュ後も安心",
+  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "保存や移動が中断されても、チャットグループ、設定のインポート、編集のチェックポイントは整合性を保ちます。"
 }
