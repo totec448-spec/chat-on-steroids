@@ -1899,6 +1899,37 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
         .toEqual({ revision: 1, turnId: 'source', questionId: 'question' });
     });
 
+  it('does not reload a tab that moved to another chat while the page was asked to resume (#2245)', async () => {
+    // The page may take seconds to answer the resume ask. The earlier check of the tab is older than
+    // that, so the reload that follows a declined ask looks at the tab again.
+    let armed = false, handed = false, moved = false, failed: string[] = [];
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/repairs/claim') return response(200, { allowed: true });
+      if (url.pathname === '/status') {
+        if (url.searchParams.has('repairFailed')) failed.push(`${url.searchParams.get('why')}:${url.searchParams.get('detail')}`);
+        if (armed && !handed) {
+          handed = true;
+          return response(200, { repairs: [{ conversationId: CHAT, token: 'compaction-moved', reason: 'compaction', requiresClaim: true }] });
+        }
+        return response(200, { repairs: [] });
+      }
+      return response(200, {});
+    });
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch,
+      tabsQuery: async () => [{ id: 21, url: `https://chatgpt.com/c/${moved ? OTHER : CHAT}` }],
+      tabsGet: async () => ({ id: 21, url: `https://chatgpt.com/c/${moved ? OTHER : CHAT}` }),
+      tabsSendMessage: async (_id, message) => {
+        if (message.type === 'clf-resume-compaction') { moved = true; return { accepted: false }; }
+        return message.type === 'clf-repair-check' ? { safe: true, revision: 1, turnId: 'source', questionId: 'question' } : { ok: true };
+      } });
+    await worker.registerTab(21);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 21);
+    await worker.fireAlarm(); armed = true; await worker.fireAlarm();
+    expect(worker.tabsReload).not.toHaveBeenCalled();
+    expect(failed).toEqual(['changed:other-chat']);
+  });
   it('reloads the registry-bound copy when one chat has two tabs', async () => {
     const { fetch, asked } = appWith(CHAT);
     const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
