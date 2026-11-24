@@ -20314,6 +20314,41 @@ describe('the context meter and automatic compaction', () => {
     })).toEqual({ accepted: true });
   });
 
+  it('waits for the activity request that is still in flight before it declines a compaction pickup (#2245)', async () => {
+    // The pickup waited 1.5 s for the feed's request, then asked again; the second ask returns at once
+    // while the first is open, so the page read the old state, declined, and the worker reloaded a
+    // healthy chat whose ticket was already on its way in that very response.
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let held = false, opened = false;
+    const reply = () => withContext(50_000, settings({ auto: false, threshold: 200_000 }),
+      opened ? { job: { ...automaticTicket('not-attempted').job, automatic: false } } : {});
+    live = await harness(undefined, { activity: () => held ? gate.then(reply) : reply() });
+    live.hook.injectControl();
+    await live.hook.pullActivity();
+    await settle();
+    held = true;
+    const inFlight = live.hook.pullActivity();
+    const pickup = live.runtimeMessage({ type: 'clf-resume-compaction', conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+    // Long enough for the old fifteen 100 ms waits to be over, far inside the new bound.
+    await settle(70);
+    opened = true; held = false;
+    release();
+    expect(await pickup).toEqual({ accepted: true });
+    await inFlight;
+  });
+  it('still declines a compaction pickup whose in-flight activity request never answers (#2245)', async () => {
+    let held = false;
+    live = await harness(undefined, { activity: () => held ? new Promise(() => {}) : withContext(50_000, settings({ auto: false, threshold: 200_000 }), {}) });
+    live.hook.injectControl();
+    await live.hook.pullActivity();
+    await settle();
+    held = true;
+    void live.hook.pullActivity();
+    const pickup = live.runtimeMessage({ type: 'clf-resume-compaction', conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+    await settle(400);
+    expect(await pickup).toEqual({ accepted: false });
+  });
   it.each(['broken', 'streaming'] as const)('leaves a compaction pickup to the reload while the source answer is broken (%s)', async state => {
     // 2026-10-02, live: an automatic ticket waited behind "Connection interrupted. Waiting for the
     // complete answer". Every pickup asked the page first, the page said it would retry its own
