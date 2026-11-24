@@ -4,7 +4,8 @@ const { withoutScripts } = require('./ui-check-page.cjs');
 const { app, BrowserWindow } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
-const LANGUAGES = 1 + require('node:fs').readdirSync(path.join(__dirname, '../src/renderer/locales')).filter(name => name.endsWith('.json')).length;
+const LANGUAGES = new Set(['en', ...fs.readdirSync(path.join(__dirname, '../src/renderer/locales'))
+  .filter(name => name.endsWith('.json')).map(name => name.slice(0, -5))]).size;
 const assert = require('node:assert/strict');
 app.setPath('userData', path.resolve(__dirname, '../outputs/setup-guide-runtime'));
 
