@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { zipSync, strToU8 } from 'fflate';
 import { extractBundle, resolveGithub, installSource } from '../src/main/plugins/installer.js';
+import { getLog } from '../src/main/logger.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 let dir: string;
 beforeEach(async () => {
@@ -39,6 +40,8 @@ it.each(['../escape', '/absolute', 'C:/drive', 'a\\escape', 'NUL.txt', 'trailing
     );
     await expect(extractBundle(file, path.join(dir, 'extracted'))).rejects.toThrow();
     await expect(fs.stat(path.join(dir, 'extracted'))).rejects.toThrow();
+    // The refusal says which entry and why, with no content of the archive.
+    expect(getLog().some(entry => entry.message.startsWith('plugins: refused a bundle entry') && entry.message.includes(JSON.stringify(name)))).toBe(true);
   },
 );
 it('rejects file/directory collisions and malformed manifests', async () => {
