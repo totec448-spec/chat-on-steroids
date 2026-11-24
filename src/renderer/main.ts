@@ -5,6 +5,7 @@ import { initBrowserSetup } from './setup-browser.js';
 import { currentLanguage, ui, uiText, t, tn, initLanguage, onLanguageChange, setLanguage, type Language } from './i18n.js';
 import { initSettingsBackup } from './settings-backup-dialog.js';
 import { initLayoutPreviews } from './layout-previews.js';
+import { applyAppBrand } from './app-brand.js';
 import { workerName } from './agent-panel.js';
 import { primaryShiftShortcut, primaryShortcut } from './shortcuts.js';
 import { desktopAccessProblem, paintDesktopAccessNotice } from './desktop-access-notice.js';
@@ -1669,6 +1670,7 @@ function presentedStatus(status: AppState['status']): AppState['status'] {
 }
 
 function apply(next: AppState): void {
+  if (next.displayName) applyAppBrand(next.displayName);
   // An older key/status response must not restore a profile retired by a newer switch.
   if ((next.config.tunnel.profileEpoch ?? 0) < (state?.config.tunnel.profileEpoch ?? 0)) return;
   applyPluginsState(next);
