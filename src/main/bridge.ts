@@ -7009,7 +7009,7 @@ async function startBridgeOnce(epoch: number, prepared?: PreparedBridge): Promis
   dropReviveRequestListener?.();
   dropReviveRequestListener = onReviveRequest((revivals: WorkerRevival[]) => {
     for (const revival of revivals) {
-      // ChatGPT shows no message box in an archived chat: one this app archived is restored first.
+      // Restore a chat archived here before queuing more work for its worker.
       if (!readyForWake(revival.conversationId)) continue;
       queueWorkerRevival(revival.id, revival.conversationId, revival.messageIds, revival.runId);
     }
