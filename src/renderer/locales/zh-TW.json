@@ -3990,6 +3990,18 @@
   "Check ChatGPT titles": "檢查 ChatGPT 標題",
   "Show a notice in the chat menu when the open ChatGPT chat has a different title.": "若在 ChatGPT 中開啟的聊天使用不同標題，便在聊天選單中顯示提示。",
   "ChatGPT title differs": "ChatGPT 標題不同",
+  "Restore turn": "還原本輪",
+  "Undo in Review": "在審查中復原",
+  "Some of these files were also edited in a later turn.": "其中部分檔案在之後的輪次中也曾被編輯。",
+  "Restore a turn's edited files, manage Skills from their cards, free storage per chat, and safer saves after a crash.": "還原一輪編輯過的檔案、在卡片上管理技能、依聊天釋出空間，當機後儲存更安全。",
+  "Restore a turn": "還原一輪",
+  "Changed files can put a turn's edited files back, with Undo in Review.": "在「已變更的檔案」中可以還原一輪編輯過的檔案，並可在審查中復原。",
+  "Manage installed Skills": "管理已安裝的技能",
+  "Pause, re-enable or reveal an installed Skill from its card menu.": "在卡片選單中暫停、重新啟用或顯示已安裝的技能。",
+  "Free space per chat": "依聊天釋出空間",
+  "The storage dialog shows what one chat uses and frees its images or long texts.": "儲存空間對話框會顯示單一聊天佔用的空間，並可清理其圖片或長文字。",
+  "Safer after a crash": "當機後更安全",
+  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "即使儲存或移動被中斷，聊天群組、設定匯入和編輯檢查點也會保持一致。",
   "Sync manual chat titles to ChatGPT": "將手動聊天標題同步到 ChatGPT",
   "Push titles you rename here (including across Compact & Resume) to ChatGPT, unless ChatGPT already has a newer title.": "將在此處重新命名的標題（包括跨「壓縮並繼續」沿用的標題）推送到 ChatGPT，除非 ChatGPT 已有更新的標題。"
 }

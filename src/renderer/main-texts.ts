@@ -42,6 +42,7 @@ export function mainTexts(): Record<MainText, string> {
     'Restore files from this checkpoint?': t('Restore files from this checkpoint?'),
     'Files return to their checkpoint version; files added since are removed. Current files are saved first, so you can undo this in Review.':
       t('Files return to their checkpoint version; files added since are removed. Current files are saved first, so you can undo this in Review.'),
+    'Some of these files were also edited in a later turn.': t('Some of these files were also edited in a later turn.'),
     'More files are not shown.': t('More files are not shown.'),
     'Keep current files': t('Keep current files'),
     'Restore files': t('Restore files'),
