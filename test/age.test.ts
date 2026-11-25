@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { ageOf, countdownClock, elapsedText } from '../src/shared/age.js';
+import { ageOf, byteSize, compactCount, countdownClock, elapsedText } from '../src/shared/age.js';
 
 /**
  * 2.1.47 round (the user): "389h ago". Every age, duration and countdown the app shows reads
@@ -60,4 +60,18 @@ it('writes counts and sizes at every size, never "1000k", "2000.0M", "NaN" or "2
     .toEqual(['0', '999', '1.0k', '9.9k', '10k', '12k', '999k', '1.0M', '1.3M', '1.0B', '2.0B', '0', '0', '0']);
   expect([0, 1023, 1024, 10_239, 1_048_575, 1_048_576, 2 * 1024 ** 3, 3 * 1024 ** 4, -1, Number.NaN].map(byteSize))
     .toEqual(['0 B', '1023 B', '1.0 KB', '10 KB', '1.0 MB', '1.0 MB', '2.0 GB', '3.0 TB', '0 B', '0 B']);
+});
+
+it('never rounds a count or a size up into the next unit\'s number (999.5 is 1.0k, 1023.5 B is 1.0 KB)', () => {
+  expect(compactCount(999.4)).toBe('999');
+  expect(compactCount(999.5)).toBe('1.0k');
+  expect(compactCount(999_499)).toBe('999k');
+  expect(compactCount(999_500)).toBe('1.0M');
+  expect(byteSize(1023.4)).toBe('1023 B');
+  expect(byteSize(1023.5)).toBe('1.0 KB');
+  expect(byteSize(1_048_575.9)).toBe('1.0 MB');
+  for (const value of [999.5, 999.9, 999_999.4, 1023.5, 1023.99, 1_048_575.9, 1_073_741_823.9]) {
+    expect(compactCount(value)).not.toMatch(/^1000(?!\d)/);
+    expect(byteSize(value)).not.toMatch(/^1024(?!\d)/);
+  }
 });

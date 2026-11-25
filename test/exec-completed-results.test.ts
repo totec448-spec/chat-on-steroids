@@ -87,6 +87,16 @@ it('keeps benign exit classification, batch labels and numeric wait ids consiste
   }
 });
 
+it('keeps a command duration from reading 1000ms or 60.0s at a unit boundary', () => {
+  const shown = (durationMs: number) => summarizeToolCall({ tool: 'exec_command', args: { cmd: 'x' },
+    evidence: { ...emptyEvidence(), durationMs, running: false, exitCode: 0 }, outcome: 'ok', durationMs }).metric;
+  expect(shown(999.4)).toBe('✓ 999ms');
+  expect(shown(999.5)).toBe('✓ 1.0s');
+  expect(shown(59_940)).toBe('✓ 59.9s');
+  expect(shown(59_960)).toBe('✓ 1m 0s');
+  expect(shown(60_000)).toBe('✓ 1m 0s');
+});
+
 it('carries the same proven classification through asynchronous completion and rereads', async () => {
   const m = manager(), id = m.allocateProcessId();
   const first = await m.execCommand({ processId: id,

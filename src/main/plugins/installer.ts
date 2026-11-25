@@ -9,6 +9,7 @@ import { getDefaultEnvironment } from '@modelcontextprotocol/client/stdio';
 import { terminateProcessTree } from '../exec.js';
 import { envValue, pathEntries, setEnvValue } from '../env.js';
 import { ensureManagedUv, managedUvDirectory } from './uv-runtime.js';
+import { logWarn } from '../logger.js';
 
 /** One minimal environment for runtime discovery, installation and plugin startup. */
 export function pluginEnvironment(inherited = getDefaultEnvironment(), platform = process.platform): Record<string, string> {
@@ -88,9 +89,14 @@ export async function extractBundle(input: string, directory: string): Promise<u
       (mode & 0xf000) === 0xa000 ||
       /(^[\\/]|[\\:]|(^|\/)\.\.?($|\/))/.test(name) ||
       name.includes('\0') ||
-      name.split('/').some((p) => /[. ]$/.test(p) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i.test(p))
-    )
+      name.split('/').some((p) => /[. ]$/.test(p) || /^(con|prn|aux|nul|conin\$|conout\$|com[0-9]|lpt[0-9])(\.|$)/i.test(p))
+    ) {
+      // Which entry and why, never any of the archive's content.
+      const why = (mode & 0xf000) === 0xa000 ? 'a symbolic link' : name.includes('\0') ? 'a NUL character'
+        : /(^[\\/]|[\\:]|(^|\/)\.\.?($|\/))/.test(name) ? 'a path that leaves the folder or names a drive' : 'a name Windows does not allow (device name, trailing dot or space)';
+      logWarn(`plugins: refused a bundle entry ${JSON.stringify(name.slice(0, 120))}: ${why}`);
       throw new Error('MCPB contains an unsafe archive path or symbolic link');
+    }
     const key = name.toLowerCase();
     if (seen.has(key) || zip.readUInt16LE(i + 8) & 1)
       throw new Error('MCPB contains duplicate paths or encrypted files');

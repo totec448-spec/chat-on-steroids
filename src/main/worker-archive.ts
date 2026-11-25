@@ -12,14 +12,16 @@
  * Temporary Chats were checked instead (2026-10-14): tools work there, but a page reload
  * loses the conversation, and recovery reloads stuck tabs.
  *
- * A finished worker can still be given more work. ChatGPT offers no message box in an archived
- * chat, so a wake for a chat archived here is held until the browser has unarchived it
+ * A finished worker can still be given more work. A wake also asks to restore its chat in
+ * ChatGPT, so a wake for a chat archived here is held until the browser has unarchived it
  * ({@link readyForWake}), at most {@link WORKER_UNARCHIVE_HOLD_MS}. Unarchiving works with the
  * setting off too: turning it off must not strand a worker the app archived earlier.
  *
- * The queue survives a restart. Each entry is leased to one browser pass at a time; a failed
- * attempt backs off, a pass without any ChatGPT tab is not an attempt, and an entry is dropped
- * after its last attempt or a week of waiting.
+ * The queue and last settled chat states survive a restart. An expired lease does not cancel
+ * the browser's PATCH: an opposite success arriving after an entry was retired queues a
+ * correction to that settled state, rather than forgetting that the chat changed again.
+ * Each entry is leased to one browser pass at a time; a failed attempt backs off, a pass without
+ * any ChatGPT tab is not an attempt, and an entry is dropped after its last attempt or a week of waiting.
  */
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -39,6 +41,8 @@ type Entry = {
   notBefore: number;
   /** Set while handed out: the browser is doing this job right now. */
   leased: boolean;
+  /** A late-result correction ignores receipts until a browser has actually taken it. */
+  correction?: true;
   /** Archive again once this unarchive has finished: the run ended meanwhile. */
   rearchive: boolean;
 };
@@ -55,15 +59,15 @@ const FIRST_BACKOFF_MS = 5 * 60_000;
 const FIRST_UNARCHIVE_BACKOFF_MS = 15_000;
 const MAX_WAIT_MS = 7 * 24 * 60 * 60_000;
 const MAX_ENTRIES = 500;
-/** Chats archived here are remembered this long, and at most this many. */
-const ARCHIVED_KEEP_MS = 30 * 24 * 60 * 60_000;
-const MAX_ARCHIVED = 2_000;
+/** Each settled state (archived/restored) is remembered this long, and at most this many. */
+const STATE_KEEP_MS = 30 * 24 * 60 * 60_000;
+const MAX_KNOWN_PER_STATE = 2_000;
 const CONVERSATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 let filePath = '';
 const entries = new Map<string, Entry>();
-/** Chats this app archived and has not restored since, with when. */
-const archived = new Map<string, number>();
+/** Last settled state of chats managed here, used as the target for late-result corrections. */
+const known = new Map<string, { archived: boolean; at: number }>();
 /** Wakes waiting for their chat to be unarchived, with the timer that lets them go anyway. */
 const held = new Map<string, ReturnType<typeof setTimeout>>();
 /** Chats whose hold ran out while their unarchive is still owed: they no longer wait. */
@@ -91,10 +95,10 @@ export function initWorkerArchivePath(userDataDir: string): void {
 
 export async function loadWorkerArchive(): Promise<void> {
   entries.clear();
-  archived.clear();
+  known.clear();
   if (!filePath) return;
   try {
-    const parsed = JSON.parse(await fs.readFile(filePath, 'utf8')) as { entries?: unknown; archived?: unknown };
+    const parsed = JSON.parse(await fs.readFile(filePath, 'utf8')) as { entries?: unknown; archived?: unknown; restored?: unknown };
     for (const raw of Array.isArray(parsed.entries) ? parsed.entries : []) {
       const value = raw as Partial<Entry>;
       const id = cleanId(value.conversationId);
@@ -102,14 +106,26 @@ export async function loadWorkerArchive(): Promise<void> {
       // A lease never outlives the process that took it. Version 1 files only held archives.
       entries.set(id, {
         conversationId: id, archive: value.archive !== false, queuedAt: count(value.queuedAt), dueAt: count(value.dueAt),
-        attempts: count(value.attempts), notBefore: 0, leased: false, rearchive: value.rearchive === true
+        attempts: count(value.attempts), notBefore: 0, leased: false, rearchive: value.rearchive === true,
+        ...(value.correction === true ? { correction: true } : {})
       });
     }
-    for (const raw of Array.isArray(parsed.archived) ? parsed.archived : []) {
-      const value = raw as { conversationId?: unknown; at?: unknown };
-      const id = cleanId(value.conversationId);
-      if (id) archived.set(id, count(value.at));
+    // Version 2 only remembered archives. Keep that field readable by older app versions;
+    // restored states in version 3 also let a late result be corrected after a restart.
+    const now = Date.now();
+    let expired = 0;
+    for (const [field, archived] of [['restored', false], ['archived', true]] as const) {
+      for (const raw of Array.isArray(parsed[field]) ? parsed[field] : []) {
+        if (!raw || typeof raw !== 'object') continue;
+        const value = raw as { conversationId?: unknown; at?: unknown };
+        const id = cleanId(value.conversationId);
+        if (!id) continue;
+        const at = count(value.at);
+        if (now - at > STATE_KEEP_MS) { expired += 1; continue; }
+        rememberState(id, archived, at);
+      }
     }
+    if (expired) logInfo(`worker archive: ignored ${expired} expired saved state(s)`);
   } catch (error) {
     // Missing until the first queued chat; an unreadable file only means chats stay in the list.
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') logWarn(`Worker archive queue unreadable: ${(error as Error).message}`);
@@ -123,10 +139,14 @@ function persist(): void {
     pending = false;
     const temporary = `${filePath}.tmp`;
     const saved = [...entries.values()].map(({ notBefore: _notBefore, leased: _leased, ...entry }) => entry);
-    const known = [...archived].map(([conversationId, at]) => ({ conversationId, at }));
+    const archived: { conversationId: string; at: number }[] = [];
+    const restored: typeof archived = [];
+    for (const [conversationId, state] of known) {
+      (state.archived ? archived : restored).push({ conversationId, at: state.at });
+    }
     try {
       await fs.mkdir(path.dirname(filePath), { recursive: true });
-      await fs.writeFile(temporary, JSON.stringify({ version: 2, entries: saved, archived: known }), 'utf8');
+      await fs.writeFile(temporary, JSON.stringify({ version: 3, entries: saved, archived, restored }), 'utf8');
       await fs.rename(temporary, filePath);
     } catch (error) {
       logWarn(`Worker archive queue not saved: ${(error as Error).message}`);
@@ -139,13 +159,28 @@ export function workerArchiveWritten(): Promise<void> {
   return writing;
 }
 
-function rememberArchived(id: string, now: number): void {
-  archived.delete(id);
-  archived.set(id, now);
-  for (const [old, at] of archived) {
-    if (archived.size <= MAX_ARCHIVED && now - at <= ARCHIVED_KEEP_MS) break;
-    archived.delete(old);
+function rememberState(id: string, archived: boolean, now: number): void {
+  known.delete(id);
+  known.set(id, { archived, at: now });
+  // Restored tombstones must not evict the archives which future wakes still need to know.
+  let size = [...known.values()].filter(state => state.archived === archived).length;
+  for (const [old, state] of known) {
+    if (state.archived !== archived) continue;
+    if (size <= MAX_KNOWN_PER_STATE && now - state.at <= STATE_KEEP_MS) break;
+    known.delete(old);
+    size -= 1;
   }
+}
+
+function knownState(id: string, now: number): { archived: boolean; at: number } | undefined {
+  const state = known.get(id);
+  if (state && now - state.at > STATE_KEEP_MS) {
+    known.delete(id);
+    logInfo(`worker archive: forgot expired state for ${id}`);
+    persist();
+    return undefined;
+  }
+  return state;
 }
 
 /**
@@ -172,7 +207,7 @@ export function queueWorkerArchives(conversationIds: readonly string[], now = Da
       changed = true;
       continue;
     }
-    if (entry || archived.has(id) || entries.size >= MAX_ENTRIES) continue;
+    if (entry || knownState(id, now)?.archived || entries.size >= MAX_ENTRIES) continue;
     entries.set(id, {
       conversationId: id, archive: true, queuedAt: now, dueAt: now + delayMs, attempts: 0, notBefore: 0, leased: false, rearchive: false
     });
@@ -183,7 +218,7 @@ export function queueWorkerArchives(conversationIds: readonly string[], now = Da
 }
 
 /**
- * Whether a chat can be typed into now: a wake of its worker, or a message you send it. A queued
+ * Whether the app’s archive/restore gate lets new work proceed: a worker wake or a message. A queued
  * archive that has not started is simply dropped. A chat archived here (or being archived) is
  * unarchived first: the answer is false until then, and {@link onWorkerChatReady} names the chat
  * once it may go ahead. After {@link WORKER_UNARCHIVE_HOLD_MS} it goes ahead anyway.
@@ -197,7 +232,7 @@ export function readyForWake(conversationId: string, now = Date.now()): boolean 
     persist();
     return true;
   }
-  if (!entry && !archived.has(id)) return true;
+  if (!entry && !knownState(id, now)?.archived) return true;
   if (gaveWay.has(id)) return true;
   if (!entry || entry.archive || entry.rearchive) {
     if (!entry) {
@@ -265,7 +300,27 @@ export function nextWorkerArchive(now = Date.now()): WorkerArchiveJob | null {
 /** What the browser reported for one leased job. */
 export function settleWorkerArchive(conversationId: string, outcome: WorkerArchiveOutcome, now = Date.now()): void {
   const id = cleanId(conversationId);
-  const entry = id ? entries.get(id) : undefined;
+  if (!id) return;
+  let entry = entries.get(id);
+  if (entry?.correction && !entry.leased) {
+    logInfo(`worker archive: ignored stale ${outcome} receipt for ${id}; correction not leased yet`);
+    return;
+  }
+  if (!entry && (outcome === 'archived' || outcome === 'unarchived')) {
+    const settled = knownState(id, now);
+    if (!settled || settled.archived === (outcome === 'archived')) {
+      logInfo(`worker archive: ignored late ${outcome} result for ${id}; ${settled ? 'already matches remembered state' : 'no remembered state'}`);
+      return;
+    }
+    // A lease expiring is not proof that its remote PATCH stopped. The newer job already
+    // settled and retired this entry; restore its intent when the older PATCH lands last.
+    entry = {
+      conversationId: id, archive: settled.archived, queuedAt: now, dueAt: now,
+      attempts: 0, notBefore: 0, leased: false, rearchive: false, correction: true
+    };
+    entries.set(id, entry);
+    logInfo(`worker archive: late ${outcome} result; ${entry.archive ? 'archiving' : 'unarchiving'} ${id} again`);
+  }
   if (!entry) return;
   entry.leased = false;
   if (outcome === 'deferred') {
@@ -274,7 +329,7 @@ export function settleWorkerArchive(conversationId: string, outcome: WorkerArchi
     return;
   }
   if (outcome === 'archived') {
-    rememberArchived(entry.conversationId, now);
+    rememberState(entry.conversationId, true, now);
     if (entry.archive) {
       entries.delete(entry.conversationId);
       logInfo(`worker archive: archived ${entry.conversationId}`);
@@ -283,11 +338,15 @@ export function settleWorkerArchive(conversationId: string, outcome: WorkerArchi
       entry.notBefore = 0;
     }
   } else if (outcome === 'unarchived') {
-    archived.delete(entry.conversationId);
+    rememberState(entry.conversationId, false, now);
     gaveWay.delete(entry.conversationId);
     logInfo(`worker archive: unarchived ${entry.conversationId}`);
     if (entry.rearchive) {
       Object.assign(entry, { archive: true, queuedAt: now, dueAt: now, attempts: 0, notBefore: 0, rearchive: false });
+    } else if (entry.archive) {
+      // A late restore cannot consume the newer archive which is still owed.
+      entry.notBefore = 0;
+      logInfo(`worker archive: late unarchived result; archiving ${id} again`);
     } else entries.delete(entry.conversationId);
     release(entry.conversationId);
   } else {
@@ -306,7 +365,7 @@ export function settleWorkerArchive(conversationId: string, outcome: WorkerArchi
 
 export function resetWorkerArchiveForTests(): void {
   entries.clear();
-  archived.clear();
+  known.clear();
   for (const timer of held.values()) clearTimeout(timer);
   held.clear();
   gaveWay.clear();
