@@ -338,7 +338,11 @@ export function createFilePanel(options: FilePanelOptions) {
   const retainedDrafts = new Map<string, { preview: ProjectFilePreview & { text: string; revision: string }; text: string }>();
   let expanded = new Set<string>(['']);
   const listings = new Map<string, ProjectDirectoryListing>();
+  const directoryReads = new Map<string, symbol>();
   let watchSignature = '';
+  let watchRequest: Promise<void> | undefined;
+  let watchVisibilityEpoch = 0;
+  let watchPreviewRequest = 0;
   let previewHeight: number | null = null;
   try {
     const saved = Number(window.localStorage.getItem(PREVIEW_HEIGHT_KEY));
@@ -527,12 +531,13 @@ export function createFilePanel(options: FilePanelOptions) {
     if (!project) return;
     options.onShow?.();
     pane.hidden = false;
+    const stillVisible = watchReadGuard();
     if (!options.mount) options.host.classList.add('has-file-panel');
     options.toggle?.setAttribute('aria-expanded', 'true');
     if (mode === 'files' && !listings.has('')) await loadDirectory('');
     else render();
     if (reconcile) {
-      void reconcileGitChanges();
+      if (project?.remote || stillVisible()) void reconcileGitChanges();
       void loadChatEdits();
     }
     const draft = project && retainedDrafts.get(project.id);
@@ -574,13 +579,25 @@ export function createFilePanel(options: FilePanelOptions) {
     newFolder.disabled = newFile.disabled;
   }
 
-  async function loadDirectory(relative: string, expectedGeneration = generation): Promise<void> {
+  async function readDirectory(relative: string, stillCurrent: () => boolean): Promise<ProjectDirectoryListing | undefined> {
     const current = project;
-    if (!current) return;
-    const listing = await run(window.api.listProjectFiles(current.id, relative));
-    if (!listing || expectedGeneration !== generation || project?.id !== current.id) return;
-    listings.set(relative, listing);
-    render();
+    if (!current || !stillCurrent()) return;
+    const request = Symbol();
+    directoryReads.set(relative, request);
+    try {
+      const listing = await run(window.api.listProjectFiles(current.id, relative));
+      if (!listing || directoryReads.get(relative) !== request || !stillCurrent()) return;
+      listings.set(relative, listing);
+      return listing;
+    } finally {
+      if (directoryReads.get(relative) === request) directoryReads.delete(relative);
+    }
+  }
+
+  async function loadDirectory(relative: string, expectedGeneration = generation): Promise<void> {
+    const stillVisible = watchReadGuard();
+    if (await readDirectory(relative, () => expectedGeneration === generation &&
+      (Boolean(project?.remote) || stillVisible()))) render();
   }
 
   function forgetDirectory(relative: string): void {
@@ -859,7 +876,7 @@ export function createFilePanel(options: FilePanelOptions) {
       if (!editorDirty) clearEditorState();
       toast(t('Saved {0}', [saved.preview.name]));
       renderPreview();
-      await reloadDirectory(parentPath(saved.preview.path));
+      await loadDirectory(parentPath(saved.preview.path));
       await reconcileGitChanges(true);
     } finally {
       saving = false;
@@ -1299,7 +1316,7 @@ export function createFilePanel(options: FilePanelOptions) {
     if (!saved) return;
     toast(t('Added {0} to .gitignore', [entry]));
     if (expected !== generation || project?.id !== current.id) return;
-    if (!options.reviewOnly) await reloadDirectory('');
+    if (!options.reviewOnly) await loadDirectory('');
     await reconcileGitChanges(true);
     // The ignored row is gone after the refresh, taking focus with it: continue at the row now in its place.
     if (document.activeElement && document.activeElement !== document.body) return;
@@ -1561,12 +1578,13 @@ export function createFilePanel(options: FilePanelOptions) {
   }
 
   function scheduleGitReconcile(): void {
+    if (!projectPaneVisible()) return;
     if (gitReconcileTimer !== null) window.clearTimeout(gitReconcileTimer);
     // The renderer window owns this debounce. Closing the document must retire it instead of
     // leaving a Node timer that can call back after the preload/DOM authority is gone.
     gitReconcileTimer = window.setTimeout(() => {
       gitReconcileTimer = null;
-      if (!pane.isConnected || pane.hidden) return;
+      if (!projectPaneVisible()) return;
       void reconcileGitChanges(Boolean(gitDiffPath));
     }, 120);
   }
@@ -1732,16 +1750,28 @@ export function createFilePanel(options: FilePanelOptions) {
     return result;
   }
 
-  function syncWatches(): void {
+  function projectPaneVisible(): boolean {
+    return pane.isConnected && !pane.hidden && !document.hidden;
+  }
+
+  function watchReadGuard(): () => boolean {
+    const expectedView = viewEpoch;
+    const expectedVisibility = watchVisibilityEpoch;
+    return () => viewEpoch === expectedView && watchVisibilityEpoch === expectedVisibility && projectPaneVisible();
+  }
+
+  function syncWatches(): Promise<void> | undefined {
     if (options.reviewOnly) return;
-    const current = pane.hidden ? null : project;
+    const current = projectPaneVisible() ? project : null;
     const directories = current ? watchedDirectories() : [];
     const signature = current ? `${current.id}\0${directories.join('\0')}` : '<none>';
-    if (signature === watchSignature) return;
+    if (signature === watchSignature) return watchRequest;
     watchSignature = signature;
-    void window.api.watchProjectFiles(current?.id ?? null, directories).then(reply => {
-      if (!reply.ok && watchSignature === signature) watchSignature = '';
+    const request = window.api.watchProjectFiles(current?.id ?? null, directories).then(reply => {
+      if (!reply.ok && watchRequest === request) watchSignature = '';
     });
+    watchRequest = request;
+    return request;
   }
 
   function firstChildWithin(directory: string, candidate: string): string | null {
@@ -1752,12 +1782,15 @@ export function createFilePanel(options: FilePanelOptions) {
     return first ? `${prefix}${first}` : null;
   }
 
-  async function reloadPreviewFromDisk(directory: string, expectedGeneration: number): Promise<void> {
+  async function reloadPreviewFromDisk(directory: string, stillCurrent: () => boolean): Promise<void> {
     const current = project;
     const relative = previewPath;
-    if (!current || !relative || parentPath(relative) !== directory) return;
+    if (!current || !relative || parentPath(relative) !== directory || !stillCurrent()) return;
+    const request = ++watchPreviewRequest;
+    const expectedGeneration = generation;
     const fresh = await run(window.api.previewProjectFile(current.id, relative));
-    if (!fresh || expectedGeneration !== generation || project?.id !== current.id || previewPath !== relative) return;
+    if (!fresh || request !== watchPreviewRequest || generation !== expectedGeneration ||
+        !stillCurrent() || previewPath !== relative) return;
     if (editingPath === relative && editorDirty) {
       if (fresh.revision !== previewValue?.revision) markEditorExternalChange();
       return;
@@ -1773,37 +1806,65 @@ export function createFilePanel(options: FilePanelOptions) {
   }
 
   async function handleWatchedChange(change: ProjectFilesChanged): Promise<void> {
-    const current = project;
-    if (!current || change.projectId !== current.id) return;
+    if (change.projectId !== project?.id || !projectPaneVisible()) return;
     if (change.watchLost) { watchSignature = ''; syncWatches(); }
     scheduleGitReconcile();
-    const expectedGeneration = generation;
-    const listing = await run(window.api.listProjectFiles(current.id, change.directory));
-    if (!listing || expectedGeneration !== generation || project?.id !== current.id) return;
-    listings.set(change.directory, listing);
+    await refreshWatchedDirectory(change.directory, watchReadGuard());
+  }
 
-    const child = firstChildWithin(change.directory, selection.path);
+  async function refreshWatchedDirectory(directory: string, stillCurrent: () => boolean): Promise<boolean> {
+    const listing = await readDirectory(directory, stillCurrent);
+    if (!listing || !stillCurrent()) return false;
+
+    const child = firstChildWithin(directory, selection.path);
     if (child && !listing.entries.some(entry => entry.path === child)) {
-      if (editingPath && editorDirty && firstChildWithin(change.directory, editingPath) === child) {
+      if (editingPath && editorDirty && firstChildWithin(directory, editingPath) === child) {
         markEditorExternalChange();
       } else {
         if (editingPath) clearEditorState();
-        selection = { path: change.directory, kind: change.directory ? 'directory' : 'root' };
+        selection = { path: directory, kind: directory ? 'directory' : 'root' };
         previewPath = null;
         previewValue = null;
       }
     }
     render();
-    await reloadPreviewFromDisk(change.directory, expectedGeneration);
+    await reloadPreviewFromDisk(directory, stillCurrent);
+    return true;
   }
 
-  async function reloadDirectory(relative: string): Promise<void> {
-    const current = project;
-    if (!current) return;
-    const request = generation;
-    const listing = await run(window.api.listProjectFiles(current.id, relative));
-    if (!listing || request !== generation || project?.id !== current.id) return;
-    listings.set(relative, listing); render();
+  async function syncWatchVisibility(): Promise<void> {
+    if (!project || project.remote) return;
+    watchVisibilityEpoch++;
+    if (!projectPaneVisible()) {
+      if (gitReconcileTimer !== null) window.clearTimeout(gitReconcileTimer);
+      gitReconcileTimer = null;
+      gitGeneration++;
+      gitDiffGeneration++;
+      gitLoading = false;
+      await syncWatches();
+      return;
+    }
+    const stillCurrent = watchReadGuard();
+    // Rearm before reading so a write during catch-up will still produce a live event.
+    await syncWatches();
+    if (!stillCurrent()) return;
+    void reconcileGitChanges(Boolean(gitDiffPath));
+    if (options.reviewOnly) return;
+
+    // A watched child can precede its parent in the Git portion of the watcher budget.
+    const directories = watchedDirectories().filter(directory => expanded.has(directory));
+    const depth = (directory: string): number => directory ? directory.split('/').length : 0;
+    directories.sort((left, right) => depth(left) - depth(right));
+    const present = new Set<string>();
+    for (const directory of directories) {
+      if (!stillCurrent()) return;
+      const parent = parentPath(directory);
+      if (directory && (!present.has(parent) || !listings.get(parent)?.entries.some(entry => entry.path === directory))) continue;
+      if (await refreshWatchedDirectory(directory, stillCurrent)) present.add(directory);
+    }
+    if (previewPath && !present.has(parentPath(previewPath))) {
+      await reloadPreviewFromDisk(parentPath(previewPath), stillCurrent);
+    }
   }
 
   async function createEntry(kind: 'file' | 'directory'): Promise<void> {
@@ -1828,7 +1889,7 @@ export function createFilePanel(options: FilePanelOptions) {
     if (!created || expected !== generation || project?.id !== current.id) return;
     expanded.add(directory);
     selection = { path: created.path, kind: created.kind };
-    await reloadDirectory(directory);
+    await loadDirectory(directory);
     if (expected !== generation || project?.id !== current.id) return;
     if (created.kind === 'directory' && expanded.size < 128) {
       expanded.add(created.path);
@@ -1859,7 +1920,7 @@ export function createFilePanel(options: FilePanelOptions) {
     if (wasExpanded && renamed.kind === 'directory') expanded.add(renamed.path);
     selection = { path: renamed.path, kind: renamed.kind };
     previewPath = null; previewValue = null;
-    await reloadDirectory(parent);
+    await loadDirectory(parent);
     if (expected !== generation || project?.id !== current.id) return;
     if (wasExpanded && renamed.kind === 'directory') await loadDirectory(renamed.path, expected);
     await reconcileGitChanges(true);
@@ -1884,7 +1945,7 @@ export function createFilePanel(options: FilePanelOptions) {
     forgetDirectory(oldPath);
     selection = { path: parent, kind: parent ? 'directory' : 'root' };
     previewPath = null; previewValue = null;
-    await reloadDirectory(parent);
+    await loadDirectory(parent);
     await reconcileGitChanges(true);
   }
 
@@ -1898,10 +1959,11 @@ export function createFilePanel(options: FilePanelOptions) {
     if (editingPath && !(await leaveEditorIfNeeded())) return;
     generation++;
     watchSignature = '';
+    directoryReads.clear();
     listings.clear(); expanded = new Set(['']);
     selection = { path: '', kind: 'root' }; previewPath = null; previewValue = null;
     render();
-    await loadDirectory('', generation);
+    await loadDirectory('');
     await reconcileGitChanges(true);
   }
 
@@ -1927,6 +1989,7 @@ export function createFilePanel(options: FilePanelOptions) {
     if (options.onEscape) options.onEscape(); else options.toggle?.focus();
   });
   if (options.toggle) options.toggle.onclick = () => { if (pane.hidden) void show(); else hide(); };
+  document.addEventListener('visibilitychange', () => { void syncWatchVisibility(); });
   if (!options.reviewOnly) window.api.onProjectFilesChanged?.(change => { void handleWatchedChange(change); });
   window.api.onProjectGitChanged?.((change: ProjectGitChanged) => {
     if (change.projectId === project?.id) scheduleGitReconcile();
@@ -1984,6 +2047,7 @@ export function createFilePanel(options: FilePanelOptions) {
       gitSnapshot = null; gitLoading = false; gitDiffPath = null; gitDiffValue = null;
       reviewGeneration++; fromChat = null; reviewSource = null; reviewValue = null; mode = options.reviewOnly ? 'changes' : 'files';
       generation++; viewEpoch++;
+      directoryReads.clear();
       listings.clear(); expanded = new Set(['']); selection = { path: '', kind: 'root' };
       previewPath = null; previewValue = null;
       if (!next) { hide(); render(); return; }
