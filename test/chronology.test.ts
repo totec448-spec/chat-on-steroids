@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { chronological, projectTimeline, residenceOf } from '../src/shared/chronology.js';
+import { applyTurnIdentity, chronological, projectTimeline, residenceOf, type Chronological, type TurnIdentity } from '../src/shared/chronology.js';
 
 interface Row {
   seq: number;
@@ -399,5 +399,44 @@ describe('residenceOf', () => {
     // Never earlier than its position.
     expect(residenceOf({ ...base, final: true, contentSeq: 100 })).toBe(180);
     expect(residenceOf({ kind: 'tool_call', time: 1, seq: 9, origin: 4 })).toBe(4);
+  });
+});
+describe('replaying a journal into the turn identity projection', () => {
+  const call = (seq: number, time: number, turnId: string, requestId: string): Chronological => ({
+    seq, time, kind: 'tool_call', source: 'mcp', turnId, call: { requestId, conversationId: 'chat-1', attribution: 'request_id' }
+  });
+  const events: Chronological[] = [
+    { seq: 1, time: 10, kind: 'user_message', messageId: 'q1' },
+    { seq: 2, time: 11, kind: 'turn_start', turnId: 'a' },
+    call(3, 12, 'a', 'req-1'),
+    call(4, 13, 'a', '__proto__'),
+    { seq: 5, time: 20, kind: 'turn_end', turnId: 'a', continued: true },
+    { seq: 6, time: 21, kind: 'turn_start', turnId: 'b' },
+    call(7, 22, 'b', 'req-1'),
+    call(8, 23, 'b', 'req-2'),
+    { seq: 9, time: 30, kind: 'turn_end', turnId: 'b' },
+    { seq: 10, time: 31, kind: 'turn_start', turnId: 'b' },
+    call(11, 32, 'b', 'req-3'),
+    call(12, 33, 'a', 'req-2')
+  ];
+  const replay = (inPlace: boolean): TurnIdentity => {
+    const identity: TurnIdentity = { timelineTurns: {}, requestTurns: {}, nativeQuestion: null };
+    for (const event of events) applyTurnIdentity(identity, event, { inPlace });
+    return identity;
+  };
+  it('builds the same projection in place as by copying, including an id named __proto__', () => {
+    const copied = replay(false), inPlace = replay(true);
+    expect(inPlace).toEqual(copied);
+    expect(Object.hasOwn(inPlace.requestTurns!, '__proto__')).toBe(true);
+    expect(Object.getPrototypeOf(inPlace.requestTurns!)).toBe(Object.prototype);
+    expect(Object.keys(inPlace.requestTurns!).sort()).toEqual(['__proto__', 'req-1', 'req-2', 'req-3']);
+  });
+  it('leaves a map a reader holds untouched unless asked to replay in place', () => {
+    const identity: TurnIdentity = { timelineTurns: {}, requestTurns: {}, nativeQuestion: null };
+    applyTurnIdentity(identity, events[1]!);
+    const held = identity.timelineTurns;
+    applyTurnIdentity(identity, events[5]!);
+    expect(identity.timelineTurns).not.toBe(held);
+    expect(Object.keys(held!)).toEqual(['a']);
   });
 });
