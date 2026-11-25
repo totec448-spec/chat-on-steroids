@@ -1,4 +1,6 @@
 {
+  "Suppress unattributed call notices": "隱藏未歸屬呼叫提示",
+  "For standalone MCP clients: omit the informational identity notice when unattributed calls are allowed. Permissions and tool errors are unchanged.": "適用於獨立 MCP 用戶端：允許未歸屬呼叫時，省略身分識別提示。權限和工具錯誤維持不變。",
   "Another Git operation is in progress. Try again when it finishes.": "另一個 Git 操作正在進行。請在完成後重試。",
   "Git state needs recovery. Check this branch before retrying; index.lock was kept.": "Git 狀態需要復原。重試前請檢查此分支；index.lock 已保留。",
   "Git committed, but a later step failed. Check the commit before trying again.": "Git 已建立提交，但後續步驟失敗。請在重試前檢查該提交。",

@@ -1,4 +1,6 @@
 {
+  "Suppress unattributed call notices": "Ẩn thông báo về lệnh gọi chưa được gán",
+  "For standalone MCP clients: omit the informational identity notice when unattributed calls are allowed. Permissions and tool errors are unchanged.": "Dành cho ứng dụng MCP độc lập: bỏ qua thông báo nhận dạng khi cho phép lệnh gọi chưa được gán. Quyền và lỗi công cụ không thay đổi.",
   "Another Git operation is in progress. Try again when it finishes.": "Một thao tác Git khác đang chạy. Hãy thử lại khi thao tác đó hoàn tất.",
   "Git state needs recovery. Check this branch before retrying; index.lock was kept.": "Trạng thái Git cần được khôi phục. Hãy kiểm tra nhánh này trước khi thử lại; index.lock đã được giữ lại.",
   "Git committed, but a later step failed. Check the commit before trying again.": "Git đã tạo commit nhưng một bước sau đó thất bại. Hãy kiểm tra commit trước khi thử lại.",
