@@ -2618,6 +2618,7 @@
   "A file or folder with that name already exists": "その名前のファイルまたはフォルダーはすでに存在します",
   "Only regular files and folders can be renamed": "名前を変更できるのは通常のファイルとフォルダーだけです",
   "A file save is already in progress. Try again when it finishes.": "すでにファイルを保存中です。完了してからもう一度お試しください。",
+  "Too many file operations are in progress. Try again when they finish.": "ファイル操作が混み合っています。完了してからもう一度お試しください。",
   "Project catalog is invalid": "プロジェクトカタログが無効です",
   "Choose an absolute local project folder": "絶対パスのローカルプロジェクトフォルダーを選択してください",
   "Project catalog limit reached": "プロジェクト数の上限に達しました",

@@ -2655,6 +2655,7 @@
   "A file or folder with that name already exists": "Es gibt bereits eine Datei oder einen Ordner mit diesem Namen",
   "Only regular files and folders can be renamed": "Nur normale Dateien und Ordner können umbenannt werden",
   "A file save is already in progress. Try again when it finishes.": "Es wird bereits eine Datei gespeichert. Versuche es erneut, wenn das abgeschlossen ist.",
+  "Too many file operations are in progress. Try again when they finish.": "Es laufen zu viele Dateivorgänge. Versuche es erneut, wenn sie abgeschlossen sind.",
   "Project catalog is invalid": "Der Projektkatalog ist ungültig",
   "Choose an absolute local project folder": "Wähle einen lokalen Projektordner mit absolutem Pfad",
   "Project catalog limit reached": "Die Höchstzahl an Projekten ist erreicht",
