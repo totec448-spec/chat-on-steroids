@@ -36,17 +36,20 @@ it.each(['en', 'ja', 'de', 'es', 'fr', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi',
     expect(document.querySelector('.chat-head .title')?.textContent).toContain(displayName);
     const { mainTexts } = await import('../src/renderer/main-texts.js');
     expect(mainTexts()[displayName]).toBe(displayName);
-    expect(mainTexts()[about]).toBe(language === 'ja' ? `${name}について` : about);
+    const catalog = language === 'en' ? null : JSON.parse(read(`src/renderer/locales/${language}.json`));
+    expect(mainTexts()[about]).toBe(catalog ? catalog[about] : about);
   }
 });
 
-it('registers all display keys directly in Japanese and English', () => {
+it('registers display keys in every translated catalog and keeps English as source text', () => {
   for (const key of [name, APP_DISPLAY_NAME, about]) {
     expect(MAIN_TEXTS).toContain(key);
-    for (const language of ['en', 'ja']) {
+    for (const language of ['ja', 'de', 'es', 'fr', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'zh-CN', 'zh-TW']) {
       const catalog = JSON.parse(read(`src/renderer/locales/${language}.json`));
       expect(Object.hasOwn(catalog, key)).toBe(true);
-      expect(catalog[key]).toBe(key === about && language === 'ja' ? `${name}について` : key);
+      expect(catalog[key]?.trim()).toBeTruthy();
+      if (key !== about) expect(catalog[key]).toBe(key);
+      if (key === about && language === 'ja') expect(catalog[key]).toBe(`${name}について`);
     }
   }
 });
@@ -76,6 +79,7 @@ it.each([
 });
 
 it('preserves literal package identity and the production tooltip status', () => {
+  expect(APP_DISPLAY_NAME).toBe('Chat On Steroids');
   const pkg = JSON.parse(read('package.json'));
   const builder = loadYaml(read('electron-builder.yml')) as Record<string, unknown>;
   expect(pkg.name).toBe('chat-on-steroids'); expect(pkg.productName).toBeUndefined();
@@ -83,7 +87,7 @@ it('preserves literal package identity and the production tooltip status', () =>
   const main = read('src/main/index.ts');
   expect(main).toContain('tray.setToolTip(appBrand.development ? mainText(appBrand.displayName) : `Chat On Steroids — ${label}`)');
   expect(read('src/main/ipc.ts')).toContain('displayName: appBrand.displayName');
-  expect(read('src/renderer/main.ts')).toContain('if (next.displayName) applyAppBrand(next.displayName)');
+  expect(read('src/renderer/main.ts')).toContain('applyAppBrand(next.displayName ?? APP_DISPLAY_NAME)');
   expect(read('src/renderer/index.html')).not.toContain('(dev)');
   expect((main + read('src/main/app-brand.ts')).replace(/\/\/[^\n]*/g, '')).not.toMatch(/app\.setName\s*\(|app\.setPath\s*\(|app\.name\s*=/);
 });

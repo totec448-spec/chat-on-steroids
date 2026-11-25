@@ -8,8 +8,6 @@ import { RECOMMENDED_SKILLS } from '../src/shared/recommended-skills.js';
  * most of them chosen with `t(cond ? 'a' : 'b')`. This reads the renderer sources instead.
  */
 const LOCALES = ['de', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'zh-CN', 'zh-TW'];
-// Only the two new development keys are ja/en-only; all pre-existing UI keys keep the twelve-locale checks.
-const brandKeys = new Set(['Chat On Steroids (dev)', 'About Chat On Steroids (dev)']);
 // Not interface text: a Git ref name passed through t() alongside the branch.
 const UNTRANSLATED = new Set(['HEAD']);
 
@@ -42,7 +40,7 @@ it('has every literal interface string of the renderer in every catalog', () => 
   expect(keys.size).toBeGreaterThan(500);
   for (const locale of LOCALES) {
     const catalog = JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8')) as Record<string, string>;
-    expect([...keys].filter(([key]) => (!brandKeys.has(key) || locale === 'ja') && !Object.hasOwn(catalog, key)).map(([key, file]) => `${file}: ${key}`), locale).toEqual([]);
+    expect([...keys].filter(([key]) => !Object.hasOwn(catalog, key)).map(([key, file]) => `${file}: ${key}`), locale).toEqual([]);
   }
 });
 
@@ -55,7 +53,7 @@ it('keeps every catalog complete, nonempty and free of duplicate keys or changed
   const union = [...new Set(entries.flatMap(({ catalog }) => Object.keys(catalog).filter(key => !PLURAL_FORM.test(key))))].sort();
   const args = (value: string) => (value.match(/\{\d+\}/g) ?? []).sort();
   for (const { locale, source, catalog } of entries) {
-    expect(Object.keys(catalog).filter(key => !PLURAL_FORM.test(key)).sort(), locale).toEqual(union.filter(key => !brandKeys.has(key) || locale === 'ja'));
+    expect(Object.keys(catalog).filter(key => !PLURAL_FORM.test(key)).sort(), locale).toEqual(union);
     const rawKeys = [...source.matchAll(/^\s{2}("(?:[^"\\]|\\.)*")\s*:/gm)].map(match => JSON.parse(match[1]!));
     expect(rawKeys, locale).toHaveLength(Object.keys(catalog).length);
     expect(new Set(rawKeys).size, locale).toBe(rawKeys.length);
