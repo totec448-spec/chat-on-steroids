@@ -1243,6 +1243,28 @@ it('saves unattributed notice suppression independently of the stable URL settin
   }
 });
 
+it.each([false, true])('restores focused unattributed notice suppression after a failed save (saved: %s)', async (saved) => {
+  const saveSettings = vi.fn(async (_patch: any) => ({ ok: false, error: 'Settings could not be saved.' }));
+  const mounted = await mountChat({}, [], { saveSettings });
+  const w = mounted.window;
+  mounted.state.config.mcp = { instructions: '', persistentUrls: false, suppressUnattributedNotices: saved };
+  mounted.push(mounted.state);
+  const box = w.document.getElementById('mcpSuppressUnattributedNotices') as HTMLInputElement;
+  expect(box.checked).toBe(saved);
+  box.focus();
+  expect(w.document.activeElement).toBe(box);
+  box.checked = !saved;
+  box.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await waitFor(() => expect(saveSettings).toHaveBeenCalledTimes(1));
+  expect(saveSettings.mock.calls[0]?.[0].mcp.suppressUnattributedNotices).toBe(!saved);
+  await waitFor(() => expect(box.checked).toBe(saved));
+  const developer = w.document.getElementById('developerMode') as HTMLInputElement;
+  developer.checked = !developer.checked;
+  developer.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await waitFor(() => expect(saveSettings).toHaveBeenCalledTimes(2));
+  expect(saveSettings.mock.calls[1]?.[0].mcp.suppressUnattributedNotices).toBe(saved);
+});
+
 it('always requires the live browser because recording is an invariant', async () => {
   const mounted = await mountChat({
     hasApiKey: true,
