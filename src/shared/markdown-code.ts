@@ -14,6 +14,10 @@ function indentColumns(line: string): number {
   return columns;
 }
 
+/** A heading or thematic break is a block that is no paragraph: an indented line after it is code. */
+const LEAF_BLOCK = /^ {0,3}(?:#{1,6}(?:[ \t]|$)|(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$)/;
+/** The opening of a raw HTML block of the block-level tags CommonMark lists: it runs to the next blank line. */
+const HTML_BLOCK = /^ {0,3}<\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:\s|\/?>|$)/i;
 /** A plain paragraph may lazily continue a list; a new block cannot. */
 function endsListParagraph(line: string, afterBlank: boolean): boolean {
   return afterBlank || /^ {0,3}(?:#{1,6}(?:[ \t]|$)|>|`{3,}|~{3,}|(?:[-*_][ \t]*){3,}$)/.test(line);
@@ -166,6 +170,13 @@ export function markdownCodeRanges(text: string): Array<{ start: number; end: nu
   // one, but an unindented nonblank line ends it before its own content.
   let indentedStart: number | null = null;
   let afterBlank = true;
+  // Only a paragraph keeps an indented line from starting a code block, so a heading or a thematic
+  // break allows one as a blank line does, without changing how lists end.
+  let afterLeaf = false;
+  // Inside a raw HTML block a "#" or "---" line is HTML, not a heading or a break.
+  let inHtmlBlock = false;
+  // A comment block ends at its own "-->" whatever it holds, blank lines and tags included.
+  let inComment = false;
   let fenceIndex = 0;
   let listContentIndent: number | null = null;
   for (let at = 0; at < text.length;) {
@@ -189,7 +200,8 @@ export function markdownCodeRanges(text: string): Array<{ start: number; end: nu
     } else {
       // Indented list content begins at the marker's text column. Its code
       // blocks need *another* four columns, unlike a plain four-space continuation.
-      const marker = /^([ ]*)(?:[-*+]|\d{1,9}[.)])([ \t]+)/.exec(line);
+      // "- - -" and "* * *" are thematic breaks, not list items.
+      const marker = LEAF_BLOCK.test(line) ? null : /^([ ]*)(?:[-*+]|\d{1,9}[.)])([ \t]+)/.exec(line);
       const codeIndent = listContentIndent !== null && indentColumns(line) >= listContentIndent + 4;
       if (marker && !(codeIndent && (afterBlank || indentedStart !== null)) && (marker[1]!.length <= 3 ||
           (listContentIndent !== null && indentColumns(marker[1]!) >= listContentIndent))) {
@@ -199,7 +211,7 @@ export function markdownCodeRanges(text: string): Array<{ start: number; end: nu
         listContentIndent = null;
       }
       if (indentedStart === null) {
-        if (afterBlank && CODE_LINE.test(line) &&
+        if ((afterBlank || afterLeaf) && CODE_LINE.test(line) &&
             (listContentIndent === null || indentColumns(line) >= listContentIndent + 4)) indentedStart = at;
       } else if (line.trim() && (listContentIndent === null
         ? !CODE_LINE.test(line) : indentColumns(line) < listContentIndent + 4)) {
@@ -207,6 +219,18 @@ export function markdownCodeRanges(text: string): Array<{ start: number; end: nu
         indentedStart = null;
       }
       afterBlank = !line.trim();
+      if (inComment) {
+        if (line.includes('-->')) inComment = false;
+        inHtmlBlock = false; afterLeaf = false;
+      } else if (!inHtmlBlock && /^ {0,3}<!--/.test(line)) {
+        // Marked treats `<!-->` and `<!--->` as complete comments, as it does `<!-- x -->`.
+        const rest = line.slice(line.indexOf('<!--') + 4);
+        inComment = !(/^-?>/.test(rest) || rest.includes('-->'));
+        afterLeaf = false;
+      } else {
+        inHtmlBlock = line.trim() !== '' && (inHtmlBlock || HTML_BLOCK.test(line));
+        afterLeaf = !inHtmlBlock && LEAF_BLOCK.test(line);
+      }
     }
     at = end;
   }
