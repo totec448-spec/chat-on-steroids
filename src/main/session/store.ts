@@ -971,7 +971,7 @@ async function rebuildSummaryFromHistory(
           event.call.conversationId && event.call.conversationId !== checkpoint.conversationId) {
         historicalReturnReduction += Math.max(0, storedTextTokens(event.call.result) - MAX_TOOL_RESULT_TOKENS);
       }
-      applyToSummary(rebuilt, event, 'later');
+      applyToSummary(rebuilt, event, 'in-place');
       collectIdentity(event);
       sawProjected = true;
     } catch {
@@ -1009,7 +1009,7 @@ async function rebuildSummaryFromHistory(
       rebuilt.startedAt = message.time;
       rebuilt.updatedAt = message.time;
     }
-    applyToSummary(rebuilt, message, 'later');
+    applyToSummary(rebuilt, message, 'in-place');
     collectIdentity(message);
     sawProjected = true;
   }
@@ -1228,10 +1228,11 @@ export function answerLine(text: string): string | null {
 
 /**
  * `identity` says how the turn and request maps follow the event: copied (a live summary others may
- * hold), built in place (a summary nobody has yet), or left to a later replay in positional order.
+ * hold) or built in place (a summary nobody has yet, as a rebuild's). Either way the maps are current for
+ * the finish accounting below, which resolves a turn through them.
  */
-function applyToSummary(summary: SessionSummary, event: SessionEvent, identity: 'copy' | 'in-place' | 'later' = 'copy'): void {
-  if (identity !== 'later') applyTurnIdentity(summary, event, { inPlace: identity === 'in-place' });
+function applyToSummary(summary: SessionSummary, event: SessionEvent, identity: 'copy' | 'in-place' = 'copy'): void {
+  applyTurnIdentity(summary, event, { inPlace: identity === 'in-place' });
   summary.events += 1;
   // Never backwards. A tool call is written once the app knows which chat it belongs to,
   // which can be after the page has already reported the end of the turn it ran in, and
