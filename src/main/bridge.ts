@@ -2909,7 +2909,8 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string,
     // The record holds a turn open that no page runs or holds, and none reports this chat: ChatGPT cannot be
     // asked to stop anything, and nothing else would ever end it (#2284). The person's Stop ends it in the record.
     const before = await sessionControlsFor(sessionId);
-    if (await endUnreachableTurn(sessionId, id, expectedTurnId, 'the person stopped this turn; no browser page held the chat')) {
+    if (await endUnreachableTurn(sessionId, id, expectedTurnId, 'the person stopped this turn; no browser page held the chat',
+        () => chatHolders(id).length === 0 && runningToolCalls(id) === 0)) {
       await endOwnWorkAfterStop(sessionId, expectedTurnId, before, options.from ?? 'the app');
       logInfo(`bridge: Stop for turn ${expectedTurnId} in ${id} ended it in the record: no browser page held the chat`);
       changed();

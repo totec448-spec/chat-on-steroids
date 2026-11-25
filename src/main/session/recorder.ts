@@ -2063,9 +2063,23 @@ async function endQuietReopenedStop(sessionId: string, conversationId: string, l
  * ever end such a turn, so the app does, as stopped, and what waited behind it (queued messages,
  * Goal) is released. False when the turn is not the session's open turn any more.
  */
-export async function endUnreachableTurn(sessionId: string, conversationId: string, turnId: string, detail: string): Promise<boolean> {
+const endingUnreachableTurns = new Set<string>();
+export async function endUnreachableTurn(sessionId: string, conversationId: string, turnId: string, detail: string,
+  /** Checked again right before the end is written: a browser that reported the chat meanwhile holds it. */
+  stillUnheld: () => boolean = () => true): Promise<boolean> {
+  // One end at a time per turn: a second Stop that arrives meanwhile finds it taken and is refused, as one that arrives after.
+  const key = `${sessionId}\0${turnId}`;
+  if (endingUnreachableTurns.has(key)) return false;
+  endingUnreachableTurns.add(key);
+  try {
+    return await endUnreachableTurnNow(sessionId, conversationId, turnId, detail, stillUnheld);
+  } finally {
+    endingUnreachableTurns.delete(key);
+  }
+}
+async function endUnreachableTurnNow(sessionId: string, conversationId: string, turnId: string, detail: string, stillUnheld: () => boolean): Promise<boolean> {
   const session = await getSession(sessionId);
-  if (!session || session.conversationId !== conversationId || session.activeTurnId !== turnId) return false;
+  if (!session || session.conversationId !== conversationId || session.activeTurnId !== turnId || !stillUnheld()) return false;
   const time = Date.now();
   await appendEvent(sessionId, { time, source: 'app', kind: 'turn_end', turnId, outcome: 'stopped', detail });
   const live = conversations.get(conversationId);
