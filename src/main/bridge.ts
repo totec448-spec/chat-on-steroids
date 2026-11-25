@@ -2896,14 +2896,16 @@ async function turnNoPageHolds(sessionId: string, conversationId: string, turnId
 }
 export async function stopSessionTurn(sessionId: string, expectedTurnId: string,
   /** `from` names who sent a person's Stop (the app or the control API), for the log (#1882). */
-  options: { rotation?: boolean; from?: string } = {}): Promise<SessionControlsView> {
+  options: { rotation?: boolean; from?: string; expectedConversationId?: string } = {}): Promise<SessionControlsView> {
   const id = await controlledConversation(sessionId);
   const assertCurrent = async () => {
     const latest = await getSession(sessionId);
     if (latest?.conversationId !== id || latest.activeTurnId !== expectedTurnId || !expectedTurnId ||
         await conversationWasSuperseded(id) || await stoppableTurn(sessionId) !== expectedTurnId) throw new Error('active_turn_changed');
   };
-  if (!options.rotation && await turnNoPageHolds(sessionId, id, expectedTurnId)) {
+  // A Stop shown for another chat than the session's now (a Compact & Resume moved it) is not this chat's to end.
+  if (!options.rotation && (options.expectedConversationId === undefined || options.expectedConversationId === id) &&
+      await turnNoPageHolds(sessionId, id, expectedTurnId)) {
     // The record holds a turn open that no page runs or holds, and none reports this chat: ChatGPT cannot be
     // asked to stop anything, and nothing else would ever end it (#2284). The person's Stop ends it in the record.
     const before = await sessionControlsFor(sessionId);

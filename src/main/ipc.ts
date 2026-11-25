@@ -2225,7 +2225,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const before = found ? { ...found, conversationId: expectedConversationId ?? found.conversationId }
       : expectedConversationId ? { conversationId: expectedConversationId, automation: 'off' as const } : null;
     try {
-      return await stopSessionTurn(id, expectedTurnId);
+      return await stopSessionTurn(id, expectedTurnId, expectedConversationId ? { expectedConversationId } : {});
     } catch (error) {
       if (!(error instanceof Error) || error.message !== 'active_turn_changed') throw error;
       // The answer Stop showed for is no longer running: the app's own work still stops (Haz on #1883),
