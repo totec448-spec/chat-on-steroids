@@ -791,6 +791,9 @@ function chosenCatalogReporter(req: http.IncomingMessage): boolean {
   return req.headers['x-extension-host'] === 'browser' &&
     geckoExtension(req) === (selected === 'firefox');
 }
+function catalogReporterAllowed(req: http.IncomingMessage): boolean {
+  return chosenCatalogReporter(req) && !notChosenBrowser(req) && !staleCompanion(req);
+}
 /**
  * Which browser a companion request comes from. Every browser shares one pairing token, so each
  * extension sends its own random id; requests without one (older builds) are not told apart.
@@ -3449,9 +3452,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // produced it: installed companions share a pairing token. In particular,
     // a still-running external Chromium must not confirm the CoS catalog while
     // the built-in companion has not connected. Reject before consuming nonce.
-    if (!chosenCatalogReporter(req) || notChosenBrowser(req) || staleCompanion(req))
+    if (!catalogReporterAllowed(req))
       return json(res, 409, { ok: false, error: 'catalog_browser_not_selected' }, origin);
-    const accepted = observeChatModels(await readBody(req));
+    const observation = await readBody(req);
+    // The person may select another browser while the request body is in flight.
+    if (!catalogReporterAllowed(req))
+      return json(res, 409, { ok: false, error: 'catalog_browser_not_selected' }, origin);
+    const accepted = observeChatModels(observation);
     if (accepted) changed();
     return json(res, accepted ? 200 : 409, { ok: accepted }, origin);
   }
@@ -3637,8 +3644,6 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         ok: true,
         conversations: live,
         stopTurns: await pendingStopCommands(),
-        modelCatalogRequest: !otherBrowser && !refusedAsStale && chosenCatalogReporter(req)
-          ? pendingChatModelRequest() : null,
         // This install's connector names, so the extension recognizes exactly its own traffic.
         connectorNames: connectorNames(getConfig().connectorSuffix),
         // Apps proven to be this install's connectors, so a renamed connector is still recognized.
@@ -3698,7 +3703,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         language: getConfig().ui.language ?? null,
         // And its popup in the app's colors and theme (extension-appearance.ts).
         appearance: extensionAppearance(),
-        browserPreferences: getConfig().ui.browserPreferences ?? null
+        browserPreferences: getConfig().ui.browserPreferences ?? null,
+        // Read current authority after the last asynchronous response field.
+        modelCatalogRequest: catalogReporterAllowed(req) ? pendingChatModelRequest() : null
       },
       origin
     );
@@ -4344,8 +4351,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // one passive existing-tab retry. Unknown generation state, including from an
     // older companion, cannot spend this one-shot opportunity.
     // No new tab, Send authority or infinite wake/reconnect retry is introduced.
-    if (pageGenerating === '0' && chosenCatalogReporter(req) &&
-        !notChosenBrowser(req) && !staleCompanion(req)) retryPassiveCatalogOnPageReturn();
+    if (pageGenerating === '0' && catalogReporterAllowed(req)) retryPassiveCatalogOnPageReturn();
     const retiredWorker = retiredWorkerForConversation(id);
     // A page in a browser that may not take new work is handed no tab to open (#1852).
     const opensWork = opensNewWork(req, '/activity', id);

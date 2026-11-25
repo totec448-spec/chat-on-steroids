@@ -9772,6 +9772,88 @@ describe('a worker chat that never opens', () => {
     }
   });
 
+  it('refuses an in-flight catalog report when the chosen browser changes during its body read', async () => {
+    const catalog = await import('../src/main/chat-models.js');
+    const previous = getConfig();
+    await pair();
+    let client: http.ClientRequest | undefined;
+    let response: Promise<number> | undefined;
+    const on = http.IncomingMessage.prototype.on;
+    let entered!: () => void;
+    const reading = new Promise<void>(resolve => { entered = resolve; });
+    const probe = vi.spyOn(http.IncomingMessage.prototype, 'on').mockImplementation(function (
+      this: http.IncomingMessage, event: string | symbol, listener: (...args: any[]) => void
+    ) {
+      const result = on.call(this, event, listener);
+      if (this.url === '/models' && event === 'data') entered();
+      return result;
+    });
+    try {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'chrome' } });
+      catalog.resetChatModelsForTests();
+      catalog.requestChatModels(false);
+      const nonce = catalog.pendingChatModelRequest()!.nonce;
+      const observation = { nonce, models: [{ id: 'gpt-6-thinking', label: 'GPT-6 Thinking', efforts: ['high'] }] };
+      const payload = Buffer.from(JSON.stringify(observation));
+      response = new Promise<number>((resolve, reject) => {
+        client = http.request(`${base}/models`, { method: 'POST', headers: {
+          origin: EXTENSION_ORIGIN, authorization: `Bearer ${token}`,
+          'content-type': 'application/json', 'content-length': String(payload.length),
+          'x-extension-host': 'browser', 'x-extension-browser': 'c'.repeat(32),
+          'x-extension-version': APP_VERSION, 'x-extension-protocol': String(BRIDGE_PROTOCOL)
+        } }, res => { res.resume(); res.on('end', () => resolve(res.statusCode ?? 0)); });
+        client.on('error', reject);
+        client.write(payload.subarray(0, payload.length - 1));
+      });
+      await reading;
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'firefox' } });
+      client!.end(payload.subarray(payload.length - 1));
+      expect(await response).toBe(409);
+      expect(catalog.pendingChatModelRequest()?.nonce).toBe(nonce);
+      const chosen = { host: 'browser', browser: 'f'.repeat(32), engine: 'gecko' };
+      expect((await request('POST', '/models', { ...chosen, body: observation })).status).toBe(200);
+      expect((await request('POST', '/models', { ...chosen, body: observation })).status).toBe(409);
+      expect(catalog.getChatModels().models).toEqual(observation.models);
+    } finally {
+      probe.mockRestore();
+      client?.destroy();
+      await response?.catch(() => undefined);
+      catalog.resetChatModelsForTests();
+      await saveConfig(previous);
+    }
+  }, 15_000);
+
+  it('does not disclose a catalog nonce after the selected browser changes during an async status response', async () => {
+    const catalog = await import('../src/main/chat-models.js');
+    const plugins = await import('../src/main/plugin-refresh.js');
+    const previous = getConfig();
+    const gate = faultGate();
+    let pending: Promise<Reply> | undefined;
+    await pair();
+    const probe = vi.spyOn(plugins, 'authorizedPluginRefreshPublications').mockImplementation(async () => {
+      await gate.hold();
+      return [];
+    });
+    try {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'chrome' } });
+      catalog.resetChatModelsForTests();
+      catalog.requestChatModels(false);
+      const nonce = catalog.pendingChatModelRequest()!.nonce;
+      pending = request('GET', '/status', { host: 'browser', browser: 'c'.repeat(32) });
+      await gate.entered;
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'firefox' } });
+      gate.release();
+      expect((await pending).body.modelCatalogRequest).toBeNull();
+      expect(catalog.pendingChatModelRequest()?.nonce).toBe(nonce);
+    } finally {
+      gate.release();
+      await pending?.catch(() => undefined);
+      probe.mockRestore();
+      catalog.resetChatModelsForTests();
+      await saveConfig(previous);
+    }
+  }, 15_000);
+
   // #1852: with the built-in browser chosen, the prime chat still open in Chrome collected one of
   it('revives a page-unreachable catalog only on a chosen idle page report, without opening a browser', async () => {
     const catalog = await import('../src/main/chat-models.js');
