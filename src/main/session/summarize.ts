@@ -20,8 +20,13 @@ import { shortPath } from '../../shared/virtual-path.js';
 export { shortPath };
 
 function formatDuration(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  // Rounding must not reach the next unit's number: 999.5 ms is "1.0s", 59.96 s is "1m 0s".
+  if (ms < 1000 && Math.round(ms) < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60_000) {
+    const seconds = (ms / 1000).toFixed(1);
+    if (Number(seconds) < 60) return `${seconds}s`;
+    return elapsedText(60, 2);
+  }
   // "4m 5s", "3h 0m", "2d 1h": a command that ran for hours never reads "180m".
   return elapsedText(ms / 1000, 2);
 }

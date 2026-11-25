@@ -28,7 +28,7 @@ import { messageReferences } from '../shared/session.js';
 import { turnTrace } from '../shared/turn-trace.js';
 import { checkAutomaticSend, SEND_CHECK_RETRY_MS } from './send-check.js';
 import { publishBrowserDecision, authorizeBrowserInput, sessionInputPolicy, collectRecordedBrowserDecision, fileRotationInput, fileRotationContinueAfterStop, rotationDelivery, withdrawUnsentRotation, type InputActivity } from './session/input.js';
-import { callHoldOpen, holdCalls } from './rotation-hold.js';
+import { afterCallsAnswered, callHoldOpen, holdCalls } from './rotation-hold.js';
 import { authorizedPluginRefreshPublications, hasRequestedPluginRefresh, pendingPluginRefreshes, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh } from './plugin-refresh.js';
 import { attachBrowserWake, wakeActivityWork, wakeBrowserWork } from './browser-wake.js';
 import { noteRouteExistingChatSend, tunnelRouteSettling } from './tunnel/route-settle.js';
@@ -7009,7 +7009,7 @@ async function startBridgeOnce(epoch: number, prepared?: PreparedBridge): Promis
   dropReviveRequestListener?.();
   dropReviveRequestListener = onReviveRequest((revivals: WorkerRevival[]) => {
     for (const revival of revivals) {
-      // ChatGPT shows no message box in an archived chat: one this app archived is restored first.
+      // Restore a chat archived here before queuing more work for its worker.
       if (!readyForWake(revival.conversationId)) continue;
       queueWorkerRevival(revival.id, revival.conversationId, revival.messageIds, revival.runId);
     }
@@ -11549,7 +11549,9 @@ function noteCallAttribution(
         // still find it and file the continue (CodeRabbit on #1954).
         const fenceSaved = armRotationFence(conversationId, sourceTurnId);
         logInfo(`turn rotation: ${conversationId} — ChatGPT offered no Send for the continue; stopping turn ${sourceTurnId} after this result to continue in a fresh one`);
-        const timer = setTimeout(() => {
+        // Half a second after the answers have gone out, not after this call was attributed: a slow
+        // recording kept the answer back past that, and a Stop during a running call reruns it (#2238).
+        const startStop = () => { const timer = setTimeout(() => {
           void fenceSaved.then(saved => {
             if (!saved) {
               void clearRotationFence(conversationId);
@@ -11563,7 +11565,8 @@ function noteCallAttribution(
             logWarn(`turn rotation: ${conversationId} — could not stop turn ${sourceTurnId}: ${String(error)}`);
           });
         }, ROTATION_STOP_DELAY_MS);
-        timer.unref?.();
+        timer.unref?.(); };
+        if (!afterCallsAnswered(conversationId, startStop)) startStop();
       } else {
       let filedId: string | null = null;
       const deps: RotationDeps = { ...turnRotationDeps, file: async (session, turn) => {
