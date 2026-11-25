@@ -9288,17 +9288,21 @@ function logClosedTabStatus(id: string, sessionId: string, text: string | undefi
     loggedCloseStatuses.delete(id);
     return;
   }
-  if (previous?.sessionId === sessionId && previous.text === text) return;
+  // A repeated observation keeps its bounded diagnostic receipt recent. Map.set
+  // alone does not move an existing key to the end of insertion order.
+  loggedCloseStatuses.delete(id);
   loggedCloseStatuses.set(id, { sessionId, text });
   if (loggedCloseStatuses.size > 500) loggedCloseStatuses.delete(loggedCloseStatuses.keys().next().value!);
+  if (previous?.sessionId === sessionId && previous.text === text) return;
   logInfo(`bridge: ${id}: ${text}`);
 }
 function setClosedTabStatus(id: string, sessionId: string, text: string): void {
   if (isSessionRemoving(sessionId)) return;
   const previous = closeStatuses.get(id);
-  if (previous?.sessionId === sessionId && previous.text === text) return;
+  closeStatuses.delete(id);
   closeStatuses.set(id, { sessionId, text });
   if (closeStatuses.size > 500) closeStatuses.delete(closeStatuses.keys().next().value!);
+  if (previous?.sessionId === sessionId && previous.text === text) return;
   logClosedTabStatus(id, sessionId, text);
   changed();
 }
@@ -9336,6 +9340,8 @@ function projectClosedTabStatus(id: string, session: SessionSummary): string | u
       return !browserPresent() && !browserWakeConnected() ? CLOSE_STATUS.browserClosed : CLOSE_STATUS.notOwed;
     return undefined;
   }
+  closeStatuses.delete(id);
+  closeStatuses.set(id, row);
   if (row.text === CLOSE_STATUS.waiting && session.browserRecoveryDismissedAt !== undefined &&
       !browserPresent() && !browserWakeConnected()) return CLOSE_STATUS.browserClosed;
   return row.text;

@@ -14753,6 +14753,43 @@ describe('unattributed activity recovery', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it('retains a frequently observed closed-tab reason across more than 500 distinct observations', async () => {
+    const goal = await import('../src/main/goal.js');
+    const { onLog } = await import('../src/main/logger.js');
+    const saved = goal.snapshotGoalSwitches();
+    const chats = Array.from({ length: 501 }, () => randomUUID());
+    const sessions = [];
+    const status = 'The browser is closed or disconnected. Recovery waits until you open it.';
+    let hotLogs = 0;
+    const off = onLog(entry => {
+      if (entry.message === `bridge: ${chats[0]}: ${status}`) hotLogs++;
+    });
+    try {
+      for (const conversationId of chats) {
+        const session = await createSession({ conversationId });
+        sessions.push(session);
+        await sessionStoreModule.endSession(session.id, true, conversationId);
+      }
+      const preferences = (ids: string[]) => goal.restoreGoalSwitches({ version: 1, savedAt: Date.now(), switches: ids.map(conversationId => ({
+        conversationId, enabled: true, mode: 'loop', keepRunningWhenTabClosed: true, at: Date.now()
+      })) });
+      preferences([chats[0]!]);
+      expect(goal.goalKeepsRunningWhenTabClosed(chats[0]!)).toBe(true);
+      expect((await getSession(sessions[0]!.id))?.browserRecoveryDismissedAt).toBeDefined();
+      expect((await sessionControlsFor(sessions[0]!.id)).closedTabRecoveryStatus).toBe(status);
+      expect(hotLogs).toBe(1);
+      for (const cold of sessions.slice(1)) {
+        preferences([chats[0]!, cold.conversationId!]);
+        expect((await sessionControlsFor(cold.id)).closedTabRecoveryStatus).toBe(status);
+        expect((await sessionControlsFor(sessions[0]!.id)).closedTabRecoveryStatus).toBe(status);
+      }
+      expect(hotLogs).toBe(1);
+    } finally {
+      off();
+      goal.restoreGoalSwitches(saved);
+    }
+  }, 120_000);
+
   it('does not log an old closed-tab status after a last async controls read rebinds the session', async () => {
     await pair();
     const from = randomUUID(), to = randomUUID();
