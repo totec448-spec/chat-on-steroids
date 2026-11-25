@@ -6378,7 +6378,8 @@ null and ChatGPT its own selection), `POST /v1/inputs/{id}/cancel`, and
 `POST /v1/sessions/{id}/stop` with `{ "turnId" }` from `live.activeTurnId`, which calls
 `stopSessionTurn` exactly as the Stop button does (Goal/Loop off, a 202 with the chat's `live`,
 409 `turn_not_running` when that answer is no longer running; the recorded `turn_end` is the proof
-it ended). They need a second switch, `controlApi.allowActions`, off by
+it ended. When the record holds the turn open and no browser holds the chat, `endUnreachableTurn` ends it
+as `stopped` in the record, since no page ever will, and the Stop's own cleanup follows, #2284). They need a second switch, `controlApi.allowActions`, off by
 default, which never outlives `enabled`: the config schema enforces it on load and on every write
 (`enabled:false` stores `allowActions:false`, and each field repairs on its own), and the settings
 merge mirrors it. Turning the API off revokes actions, and turning it back on leaves them off. The
