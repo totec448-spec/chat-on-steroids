@@ -4181,7 +4181,7 @@ async function performBrowserRepairs(repairs, policy) {
       // scan saw in a chat and that now shows another route (the new-chat page) is not that chat any more.
       const scannedInChat = Boolean(target && /\/c\/[^/?#]+/.test(target.url || ''));
       const movedOn = !fresh ? null : fresh.pendingUrl ? 'navigating'
-        : (scannedInChat && !String(fresh.url || '').includes(`/c/${conversationId}`)) || conversationForTab(fresh) !== conversationId ? 'other-chat'
+        : (scannedInChat && conversationFromUrl(fresh.url) !== conversationId) || conversationForTab(fresh) !== conversationId ? 'other-chat'
         : documentId && tabDocuments[String(target.id)] !== documentId ? 'new-document' : null;
       if (movedOn) {
         await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}&why=changed&detail=${encodeURIComponent(movedOn)}`);
