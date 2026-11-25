@@ -223,7 +223,9 @@ export function markdownCodeRanges(text: string): Array<{ start: number; end: nu
         if (line.includes('-->')) inComment = false;
         inHtmlBlock = false; afterLeaf = false;
       } else if (!inHtmlBlock && /^ {0,3}<!--/.test(line)) {
-        inComment = !line.slice(line.indexOf('<!--') + 4).includes('-->');
+        // Marked treats `<!-->` and `<!--->` as complete comments, as it does `<!-- x -->`.
+        const rest = line.slice(line.indexOf('<!--') + 4);
+        inComment = !(/^-?>/.test(rest) || rest.includes('-->'));
         afterLeaf = false;
       } else {
         inHtmlBlock = line.trim() !== '' && (inHtmlBlock || HTML_BLOCK.test(line));
