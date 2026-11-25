@@ -7907,18 +7907,20 @@ export function commandUrl(
   // so a copied link, a history entry or a synced tab is worth nothing on its own.
   // A requested model rides the query only: it selects the chat's model at open and is
   // never part of the identity the page redeems with. An unknown slug is ChatGPT's to
-  // ignore — the chat then opens with the account default. Reasoning rides beside it as
-  // declared creation intent, forwarded independently: it never selects or changes the
-  // model, and whether ChatGPT applies it is proven by the chat's own picker state, not
-  // by this URL.
+  // ignore — the chat then opens with the account default. A requested reasoning level
+  // rides instead of it, as declared creation intent: the page picks and verifies the model
+  // itself in the picker, and whether ChatGPT applied the level is proven by the chat's own
+  // picker state, not by this URL.
   //
   // A cold Project-home load can fail in ChatGPT's locked-chat loader. Enter through the
   // source chat and let its native Project link initialize the fresh Project composer.
   const entry = normalizeProjectId(project) && conversationId(sourceConversationId);
   const marker = `clf=${encodeURIComponent(id)}${entry ? '&clf_project=1' : ''}`;
   const params = [marker];
-  if (model) params.push(`model=${encodeURIComponent(model)}`);
+  // A reasoning level rides alone: with a model param beside it ChatGPT reverts the level when the
+  // picker closes (#2085, #2287). The page selects and verifies the model itself in the picker.
   if (reasoningEffort) params.push(`reasoning_effort=${encodeURIComponent(reasoningEffort)}`);
+  else if (model) params.push(`model=${encodeURIComponent(model)}`);
   const base = entry ? chatUrl(entry) : 'https://chatgpt.com/';
   return `${base}?${params.join('&')}#${marker}`;
 }
