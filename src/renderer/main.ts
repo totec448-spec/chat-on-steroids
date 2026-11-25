@@ -963,7 +963,11 @@ function save(over: { readOnly?: boolean; theme?: ThemeChoice; appearance?: Appe
     projects: { codeCheckpoints: $<HTMLInputElement>('codeCheckpoints').checked },
     ...chatPatch,
     // After the chat patch, which still carries the stored mcp settings it no longer edits.
-    mcp: { instructions: previous.mcp?.instructions ?? '', persistentUrls: $<HTMLInputElement>('mcpPersistentUrls').checked }
+    mcp: {
+      instructions: previous.mcp?.instructions ?? '',
+      persistentUrls: $<HTMLInputElement>('mcpPersistentUrls').checked,
+      suppressUnattributedNotices: $<HTMLInputElement>('mcpSuppressUnattributedNotices').checked
+    }
   };
   requestedSettings = patch;
 
@@ -1978,6 +1982,7 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('controlApiEnabled'), config.controlApi?.enabled === true, previousState?.config.controlApi?.enabled);
   applyChecked($<HTMLInputElement>('codeCheckpoints'), config.projects?.codeCheckpoints === true, previousState?.config.projects?.codeCheckpoints);
   applyChecked($<HTMLInputElement>('mcpPersistentUrls'), config.mcp?.persistentUrls === true, previousState?.config.mcp?.persistentUrls);
+  applyChecked($<HTMLInputElement>('mcpSuppressUnattributedNotices'), config.mcp?.suppressUnattributedNotices === true, previousState?.config.mcp?.suppressUnattributedNotices);
   // Stable URLs live only in the OS-backed secret store; without it they keep rotating.
   $<HTMLInputElement>('mcpPersistentUrls').disabled = next.secureStorage?.available === false && config.mcp?.persistentUrls !== true;
   // Another program held the kept port at this start: the tunnel must follow the new one.
@@ -3114,6 +3119,7 @@ for (const id of [
   'controlApiAllowActions',
   'codeCheckpoints',
   'mcpPersistentUrls',
+  'mcpSuppressUnattributedNotices',
   'privacyScreenshots',
   'phonePushEnabled',
   'phonePushTopic',

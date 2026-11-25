@@ -1,4 +1,6 @@
 {
+  "Suppress unattributed call notices": "Скрывать уведомления о вызовах без привязки к чату",
+  "For standalone MCP clients: omit the informational identity notice when unattributed calls are allowed. Permissions and tool errors are unchanged.": "Для самостоятельных MCP-клиентов: не добавлять информационное уведомление о принадлежности вызова, если вызовы без привязки к чату разрешены. Разрешения и ошибки инструментов не меняются.",
   "Another Git operation is in progress. Try again when it finishes.": "Выполняется другая операция Git. Повторите попытку после её завершения.",
   "Git state needs recovery. Check this branch before retrying; index.lock was kept.": "Состояние Git требует восстановления. Проверьте эту ветку перед повторной попыткой; файл index.lock сохранён.",
   "Git committed, but a later step failed. Check the commit before trying again.": "Git создал коммит, но последующий шаг завершился с ошибкой. Проверьте коммит перед повторной попыткой.",

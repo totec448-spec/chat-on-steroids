@@ -296,7 +296,7 @@ const capabilitiesSchema = z
  * honour in front of the model.
  */
 export const MAX_MCP_INSTRUCTIONS_CHARS = 4000;
-const DEFAULT_MCP = { instructions: '', persistentUrls: false } as const;
+const DEFAULT_MCP = { instructions: '', persistentUrls: false, suppressUnattributedNotices: false } as const;
 /** Off for fresh installs and for every config written before the switches existed. */
 const DEFAULT_CONTROL_API = { enabled: false, allowActions: false } as const;
 /** Off for fresh installs and for every config written before the switch existed. */
@@ -656,7 +656,8 @@ const configSchema = z.object({
         .transform((value) => value.slice(0, MAX_MCP_INSTRUCTIONS_CHARS).trim())
         .catch(DEFAULT_MCP.instructions),
       // Opt-in only: a malformed value repairs to off, the rotating default.
-      persistentUrls: z.boolean().optional().default(false).catch(false)
+      persistentUrls: z.boolean().optional().default(false).catch(false),
+      suppressUnattributedNotices: z.boolean().optional().default(false).catch(false)
     })
     .optional()
     .default({ ...DEFAULT_MCP })

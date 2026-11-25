@@ -1207,6 +1207,40 @@ describe('surface boundaries', () => {
     expect(read).toContain('Identity notice');
   });
 
+  it('optionally suppresses unattributed MCP notices without changing tool results or access', async () => {
+    everything();
+    const config = getConfig();
+    const previous = config.mcp.suppressUnattributedNotices;
+    const previousAllowance = config.multiAgent.allowUnattributedCalls;
+    const read = () => core('tools/call', { name: 'read', arguments: { paths: ['/workspace/notes.txt:1-1'] } });
+    try {
+      config.multiAgent.allowUnattributedCalls = true;
+      config.mcp.suppressUnattributedNotices = false;
+      const normal = (await read()).body.result;
+      expect(normal.isError).toBeFalsy();
+      expect(JSON.stringify(normal.content)).toContain('note line 1');
+      expect(normal.content.at(-1).text).toContain('Identity notice');
+
+      config.mcp.suppressUnattributedNotices = true;
+      const quiet = (await read()).body.result;
+      expect(quiet).toEqual({ ...normal, content: normal.content.slice(0, -1) });
+
+      config.multiAgent.strictChatAllowlist = true;
+      const refused = (await read()).body.result;
+      expect(refused.isError).toBe(true);
+      expect(JSON.stringify(refused.content)).toContain('CHAT_NOT_TRUSTED');
+      expect(JSON.stringify(refused.content)).not.toContain('note line 1');
+
+      config.multiAgent.strictChatAllowlist = false;
+      config.multiAgent.allowUnattributedCalls = false;
+      expect(JSON.stringify((await read()).body.result.content)).toContain('Identity notice');
+    } finally {
+      config.mcp.suppressUnattributedNotices = previous;
+      config.multiAgent.allowUnattributedCalls = previousAllowance;
+      config.multiAgent.strictChatAllowlist = false;
+    }
+  });
+
   it('describes write_stdin by what it does, never by how its output should be treated', async () => {
     everything();
     // ChatGPT's safety check flagged "including automatic delivery; never reruns work" as a
