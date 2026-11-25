@@ -1205,12 +1205,21 @@ describe('stopping an answer', () => {
     }
   });
 
-  it('refuses an answer that is not running, by the same check as the Stop button', async () => {
-    // Recorded as started, but no browser reports it running, so the app's Stop refuses it too.
-    const answering = await answeringSession('Stopped already', 'chat-stop-1', 'turn-old');
-    const reply = await post('/v1/sessions/' + answering + '/stop', { turnId: 'turn-old' });
+  it('refuses a turnId that is not the answer the record holds open, by the same check as the Stop button', async () => {
+    const answering = await answeringSession('Another turn', 'chat-stop-1', 'turn-old');
+    const reply = await post('/v1/sessions/' + answering + '/stop', { turnId: 'turn-other' });
     expect(reply.status).toBe(409);
     expect(reply.body.error).toBe('turn_not_running');
+  });
+  it('ends an answer in the record when it is recorded as running but no browser page holds the chat (#2284)', async () => {
+    // Recorded as started, no browser reports the chat or the turn: ChatGPT cannot be asked to stop anything,
+    // and nothing else would end the turn, so queued messages would wait behind it for good.
+    const answering = await answeringSession('Page gone', 'chat-stop-2', 'turn-gone');
+    const reply = await post('/v1/sessions/' + answering + '/stop', { turnId: 'turn-gone' });
+    expect(reply.status).toBe(202);
+    expect(reply.body.live).toMatchObject({ activeTurnId: null });
+    // It is closed now, so a second Stop finds no running answer.
+    expect((await post('/v1/sessions/' + answering + '/stop', { turnId: 'turn-gone' })).body.error).toBe('turn_not_running');
   });
 
   it('refuses a bad body, an unknown chat, a chat without ChatGPT and a worker chat before stopping anything', async () => {

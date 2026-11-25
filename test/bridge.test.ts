@@ -19237,6 +19237,33 @@ describe('app requests to stop one exact active turn', () => {
     expect((await getSession(sessionId))?.activeTurnId).toBe('stop-turn-two');
     expect((await getSession(sessionId))?.finishTurn?.released).toBe(false);
   });
+  it('ends a turn in the record when Stop names it and no page holds the chat, and releases what waited behind it (#2284)', async () => {
+    // Seen 2026-11-25: recovery gave up with no page, the app restarted, and the record kept the turn open
+    // for 71 minutes: queued messages were never offered and Stop answered "not running".
+    const { stopSessionTurn, sessionControlsFor, setSessionAutomation } = await import('../src/main/bridge.js');
+    const conversationId = 'e8888888-aaaa-4bbb-8ccc-111111111111';
+    vi.useFakeTimers();
+    try {
+      const sessionId = await active(conversationId, 'orphan-turn');
+      await setSessionAutomation(sessionId, 'loop');
+      resetRecorderForTests(); // The restart: the process no longer remembers a page that ran the turn.
+      await vi.advanceTimersByTimeAsync(3 * 60 * 60_000);
+      expect(await sessionControlsFor(sessionId)).toMatchObject({ activeTurnId: null, heldTurnId: null });
+      expect((await getSession(sessionId))?.activeTurnId).toBe('orphan-turn');
+      await expect(stopSessionTurn(sessionId, 'another-turn')).rejects.toThrow('active_turn_changed');
+      await stopSessionTurn(sessionId, 'orphan-turn');
+      expect((await getSession(sessionId))?.activeTurnId).toBeNull();
+      const ended = (await readEvents(sessionId, { kinds: ['turn_end'] })).filter(event => event.kind === 'turn_end');
+      expect(ended).toEqual([expect.objectContaining({ turnId: 'orphan-turn', outcome: 'stopped', source: 'app' })]);
+      // The app's own work ends as a Stop ends it, and no Stop is left for a page that is not there.
+      expect((await sessionControlsFor(sessionId)).automation).toBe('off');
+      expect((await request('GET', '/status')).body.stopTurns).toEqual([]);
+      // A second Stop finds nothing open.
+      await expect(stopSessionTurn(sessionId, 'orphan-turn')).rejects.toThrow('active_turn_changed');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it('ends the app\'s own Loop when Stop names a turn no longer running, and asks ChatGPT to stop nothing (Haz on #1883)', async () => {
     const { stopSessionTurn, endOwnWorkAfterStop, sessionControlsFor } = await import('../src/main/bridge.js');
     const sessionId = await active(randomUUID());

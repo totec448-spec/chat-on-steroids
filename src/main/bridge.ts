@@ -135,6 +135,7 @@ import {
   recordNote,
   recordProgress,
   ResumeDestinationPendingError,
+  endUnreachableTurn,
   restoreRecordedConversation,
   setCallAttributionListener,
   type ChatObservation,
@@ -2881,6 +2882,18 @@ export async function endOwnWorkAfterStop(sessionId: string, expectedTurnId: str
   changed();
   return { ended: ended.length > 0, resumeGoesOn };
 }
+/**
+ * Whether the record's open turn is one nobody can end: it is not running, no page holds it, no tool call of it
+ * runs, no Stop is already queued for it, and no browser reports the chat open.
+ */
+async function turnNoPageHolds(sessionId: string, conversationId: string, turnId: string): Promise<boolean> {
+  if (!turnId) return false;
+  const session = await getSession(sessionId);
+  if (session?.conversationId !== conversationId || session.activeTurnId !== turnId || await conversationWasSuperseded(conversationId)) return false;
+  if (chatHolders(conversationId).length > 0 || runningToolCalls(conversationId) > 0) return false;
+  if (commands.some(entry => entry.spec.type === 'stop' && entry.spec.sessionId === sessionId && entry.spec.turnId === turnId)) return false;
+  return await stoppableTurn(sessionId) === null;
+}
 export async function stopSessionTurn(sessionId: string, expectedTurnId: string,
   /** `from` names who sent a person's Stop (the app or the control API), for the log (#1882). */
   options: { rotation?: boolean; from?: string } = {}): Promise<SessionControlsView> {
@@ -2890,6 +2903,17 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string,
     if (latest?.conversationId !== id || latest.activeTurnId !== expectedTurnId || !expectedTurnId ||
         await conversationWasSuperseded(id) || await stoppableTurn(sessionId) !== expectedTurnId) throw new Error('active_turn_changed');
   };
+  if (!options.rotation && await turnNoPageHolds(sessionId, id, expectedTurnId)) {
+    // The record holds a turn open that no page runs or holds, and none reports this chat: ChatGPT cannot be
+    // asked to stop anything, and nothing else would ever end it (#2284). The person's Stop ends it in the record.
+    const before = await sessionControlsFor(sessionId);
+    if (await endUnreachableTurn(sessionId, id, expectedTurnId, 'the person stopped this turn; no browser page held the chat')) {
+      await endOwnWorkAfterStop(sessionId, expectedTurnId, before, options.from ?? 'the app');
+      logInfo(`bridge: Stop for turn ${expectedTurnId} in ${id} ended it in the record: no browser page held the chat`);
+      changed();
+      return sessionControlsFor(sessionId);
+    }
+  }
   await assertCurrent();
   if (!options.rotation) {
     // A turn the stopped request reopened is the person's to stop: what the app still owed after its own

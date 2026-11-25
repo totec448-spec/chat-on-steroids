@@ -2057,6 +2057,35 @@ async function endQuietReopenedStop(sessionId: string, conversationId: string, l
   logInfo(`session ${sessionId} ended turn ${turnId} again as ${mark.outcome} — after the page's end its request made no call for ${Math.round(quiet / 60_000)} min`);
 }
 
+/**
+ * The person stopped a turn that the record holds open but that no browser page holds (#2284):
+ * recovery gave up with no page, or the app restarted and nothing reported the chat since. No page will
+ * ever end such a turn, so the app does, as stopped, and what waited behind it (queued messages,
+ * Goal) is released. False when the turn is not the session's open turn any more.
+ */
+export async function endUnreachableTurn(sessionId: string, conversationId: string, turnId: string, detail: string): Promise<boolean> {
+  const session = await getSession(sessionId);
+  if (!session || session.conversationId !== conversationId || session.activeTurnId !== turnId) return false;
+  const time = Date.now();
+  await appendEvent(sessionId, { time, source: 'app', kind: 'turn_end', turnId, outcome: 'stopped', detail });
+  const live = conversations.get(conversationId);
+  if (live && live.sessionId === sessionId && live.turnId === turnId) {
+    if (live.reopenedStop?.timer) clearTimeout(live.reopenedStop.timer);
+    live.reopenedStop = null;
+    live.openTurns.delete(turnId);
+    live.knownTurnEnds.add(turnId);
+    live.lastTurnOutcome = 'stopped';
+    if (live.turnStartedAt !== null) {
+      live.lastTurnStartedAt = live.turnStartedAt;
+      live.endedTurn = { turnId, startedAt: live.turnStartedAt, endedAt: time, requestIds: live.turnRequestIds, outcome: 'stopped' };
+    }
+    live.turnRequestIds = new Set<string>();
+    live.turnStartedAt = null;
+    live.turnId = null;
+  }
+  logInfo(`session ${sessionId} ended turn ${turnId} as stopped: ${detail}`);
+  return true;
+}
 interface Target {
   conversationId: string | null;
   /** Exact durable session epoch carried by request correlation, when proven. */
