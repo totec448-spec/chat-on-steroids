@@ -1,4 +1,7 @@
 {
+  "Another Git operation is in progress. Try again when it finishes.": "另一個 Git 操作正在進行。請在完成後重試。",
+  "Git state needs recovery. Check this branch before retrying; index.lock was kept.": "Git 狀態需要復原。重試前請檢查此分支；index.lock 已保留。",
+  "Git committed, but a later step failed. Check the commit before trying again.": "Git 已建立提交，但後續步驟失敗。請在重試前檢查該提交。",
   "Save here and replace any existing file?": "要儲存在此處並取代任何現有檔案嗎？",
   "Replace this CSV file?": "要取代此 CSV 檔案嗎？",
   "Replace file": "取代檔案",
