@@ -798,6 +798,7 @@
   "Discard": "放弃",
   "Detecting language…": "正在检测语言…",
   "Saved {0}": "已保存 {0}",
+  "Saved {0}. Refresh the file before saving again.": "已保存 {0}。再次保存前，请刷新文件。",
   "Unsaved editor changes were discarded because the project changed.": "由于项目已更改，未保存的编辑器更改已被放弃。",
   "Delete item?": "删除此项目？",
   "Move “{0}” to the Trash?": "将“{0}”移到回收站？",

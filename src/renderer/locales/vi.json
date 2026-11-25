@@ -1283,6 +1283,7 @@
   "Discard": "Bỏ",
   "Detecting language…": "Đang nhận diện ngôn ngữ…",
   "Saved {0}": "Đã lưu {0}",
+  "Saved {0}. Refresh the file before saving again.": "Đã lưu {0}. Hãy làm mới tệp trước khi lưu lại.",
   "Unsaved editor changes were discarded because the project changed.": "Các thay đổi chưa lưu trong trình chỉnh sửa đã bị bỏ vì dự án đã thay đổi.",
   "Delete item?": "Xóa mục?",
   "Move “{0}” to the Trash?": "Chuyển “{0}” vào Thùng rác?",
