@@ -156,40 +156,62 @@ export function turnOpenAt(turns: TimelineTurns | undefined, at: number): string
   return found ? responseTurnId(turns, found) : undefined;
 }
 
-/** Store-owned, rebuildable identity projection. Raw events and MCP attribution stay intact. */
-export function applyTurnIdentity(identity: TurnIdentity, event: Chronological): void {
+/** Sets an own key, even a name like `__proto__`, as an object literal's computed key does. */
+function defineEntry<T>(target: Record<string, T>, key: string, value: T): void {
+  Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
+}
+/**
+ * Store-owned, rebuildable identity projection. Raw events and MCP attribution stay intact.
+ *
+ * Each change replaces the two maps with a copy, so a reader holding the old map (the latest-question
+ * cache compares `timelineTurns` by identity) never sees it change. Copying the whole map for every
+ * call made replaying a long journal quadratic: 83 MB (22,000 calls) took 94 s. A replay builds the
+ * projection nobody else holds yet, so it passes `inPlace` and each event costs one assignment.
+ */
+export function applyTurnIdentity(identity: TurnIdentity, event: Chronological, options: { inPlace?: boolean } = {}): void {
+  const inPlace = options.inPlace === true;
   const origin = positionOf(event);
   if (event.kind === 'user_message' && event.messageId && !injectedUserMessage(event, identity.timelineTurns) &&
       (!identity.nativeQuestion || origin > identity.nativeQuestion.origin)) {
     identity.nativeQuestion = { messageId: event.messageId, origin };
   }
   let turns = identity.timelineTurns ?? {};
+  if (inPlace) identity.timelineTurns = turns;
+  const setTurn = (id: string, value: TimelineTurns[string]): void => {
+    if (inPlace) defineEntry(turns, id, value);
+    else identity.timelineTurns = turns = { ...turns, [id]: value };
+  };
   if (event.turnId && event.kind === 'turn_start' && !Object.hasOwn(turns, event.turnId)) {
-    identity.timelineTurns = turns = { ...turns, [event.turnId]: { origin, time: event.time,
-      ...(identity.nativeQuestion ? { questionId: identity.nativeQuestion.messageId } : {}) } };
+    setTurn(event.turnId, { origin, time: event.time,
+      ...(identity.nativeQuestion ? { questionId: identity.nativeQuestion.messageId } : {}) });
   } else if (event.turnId && event.kind === 'turn_start' && turns[event.turnId]?.endOrigin !== undefined &&
       origin > turns[event.turnId]!.endOrigin!) {
     // The turn reopened after an end its page reported too early (the same request kept calling
     // tools). Held as ended, untagged rows of its reopened stretch (worker reports) had no turn and
     // were drawn after its final answer (2026-10-12). It is open until its next end.
     const { endTime: _endTime, endOrigin: _endOrigin, ...open } = turns[event.turnId]!;
-    identity.timelineTurns = turns = { ...turns, [event.turnId]: open };
+    setTurn(event.turnId, open);
   } else if (event.turnId && event.kind === 'turn_end' && turns[event.turnId]) {
     const start = turns[event.turnId]!;
-    identity.timelineTurns = turns = { ...turns, [event.turnId]: { ...start,
+    setTurn(event.turnId, { ...start,
       endTime: Math.max(start.endTime ?? 0, event.time), endOrigin: Math.min(start.endOrigin ?? Infinity, origin),
-      ...(event.continued === true || start.continued ? { continued: true as const } : {}) } };
+      ...(event.continued === true || start.continued ? { continued: true as const } : {}) });
   }
   if (event.kind !== 'tool_call' || event.source !== 'mcp' || !event.turnId ||
       event.call?.attribution !== 'request_id' || !event.call.requestId || !event.call.conversationId) return;
   const { requestId, conversationId } = event.call;
   const requests = identity.requestTurns ?? {};
+  if (inPlace) identity.requestTurns = requests;
+  const setRequest = (value: RequestTurns[string]): void => {
+    if (inPlace) defineEntry(requests, requestId, value);
+    else identity.requestTurns = { ...requests, [requestId]: value };
+  };
   const held = recordedRequestTurn(requests, requestId, conversationId);
   let owner = responseTurnId(turns, event.turnId);
   if (held && responseTurnId(turns, held.turnId) !== owner &&
       continuedRequestTurn(turns, held.turnId, owner, event.time) === owner) {
     // The request continued into a newer turn (#1301): later calls of it belong there.
-    identity.requestTurns = { ...requests, [requestId]: { turnId: owner, conversationId, origin } };
+    setRequest({ turnId: owner, conversationId, origin });
     return;
   }
   const heldTurn = held ? turns[responseTurnId(turns, held.turnId)] : undefined;
@@ -202,29 +224,26 @@ export function applyTurnIdentity(identity: TurnIdentity, event: Chronological):
   }
   if (held && responseTurnId(turns, held.turnId) !== owner) {
     if (!overlappingRequestTurns(turns, held.turnId, owner, requests, requestId)) {
-      identity.requestTurns = { ...requests, [requestId]: null };
+      setRequest(null);
       return;
     }
     const prior = responseTurnId(turns, held.turnId);
     const earlier = turns[prior]!.origin <= turns[owner]!.origin ? prior : owner;
     const later = earlier === prior ? owner : prior;
-    const joined = { ...turns };
+    const joined: TimelineTurns = inPlace ? turns : { ...turns };
     for (const [id, turn] of Object.entries(turns)) {
-      if (id === later || turn.responseTurnId === later) joined[id] = { ...turn, responseTurnId: earlier };
+      if (id === later || turn.responseTurnId === later) defineEntry<TimelineTurns[string]>(joined, id, { ...turn, responseTurnId: earlier });
     }
     identity.timelineTurns = turns = joined;
     owner = earlier;
   }
   if (held === null) {
-    if (requests[requestId] !== null) identity.requestTurns = { ...requests, [requestId]: null };
+    if (requests[requestId] !== null) setRequest(null);
     return;
   }
   if (held && held.turnId === owner && held.origin <= origin) return;
-  identity.requestTurns = { ...requests, [requestId]: {
-    turnId: owner, conversationId, origin: Math.min(held?.origin ?? Infinity, origin)
-  } };
+  setRequest({ turnId: owner, conversationId, origin: Math.min(held?.origin ?? Infinity, origin) });
 }
-
 /** Derived from exact, already turn-owned MCP records. Null retains contradictory proof. */
 export type RequestTurns = Record<string, { turnId: string; conversationId: string; origin: number } | null>;
 
