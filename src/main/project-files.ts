@@ -25,6 +25,53 @@ const MAX_PREVIEW_BYTES = 256 * 1024;
 const MAX_IMAGE_PREVIEW_BYTES = 5 * 1024 * 1024;
 const MAX_PDF_PREVIEW_BYTES = 20 * 1024 * 1024;
 const activeSaves = new Set<string>();
+// Use the catalog's canonical root before touching the project's filesystem. Disjoint projects
+// can progress independently; overlapping roots must still see each preceding publication.
+const entryMutations = new Map<string, { tail: Promise<unknown>; pending: number }>();
+const MAX_ENTRY_MUTATIONS = 32;
+// Resolve catalog identities in call order, but never await a filesystem mutation here.
+// Bound this admission stage too, including requests whose project id is not valid.
+const MAX_PENDING_ENTRY_MUTATIONS = 200 * MAX_ENTRY_MUTATIONS;
+let pendingEntryMutations = 0;
+let entryAdmissions: Promise<unknown> = Promise.resolve();
+function entryMutationBusy(): Error {
+  logInfo('project files: refused a create or rename because the pending operation limit was reached; retry after it drains');
+  return new Error('Too many file operations are in progress. Try again when they finish.');
+}
+
+function mutateEntries<T>(projectId: string, work: () => Promise<T>): Promise<T> {
+  if (pendingEntryMutations >= MAX_PENDING_ENTRY_MUTATIONS) return Promise.reject(entryMutationBusy());
+  pendingEntryMutations++;
+  const admitted = entryAdmissions.then(() => admitEntryMutation(projectId, work));
+  entryAdmissions = admitted.then(() => undefined, () => undefined);
+  return admitted.then(({ result }) => result).finally(() => { pendingEntryMutations--; });
+}
+
+async function admitEntryMutation<T>(projectId: string, work: () => Promise<T>): Promise<{ result: Promise<T> }> {
+  const project = await getProject(projectId);
+  if (!project) {
+    logInfo('project files: refused a create or rename because the project was not found');
+    throw new Error('Project not found');
+  }
+  if (project.remote) {
+    logInfo('project files: refused a create or rename because editing a server project is not supported');
+    throw new Error(SERVER_EDITS);
+  }
+  const key = nativePathIdentity(project.path);
+  const overlapping = [...entryMutations].filter(([root]) => isContained(root, key) || isContained(key, root));
+  const pending = overlapping.reduce((count, [, queue]) => count + queue.pending, 0);
+  if (pending >= MAX_ENTRY_MUTATIONS) throw entryMutationBusy();
+  if (pending) logInfo('project files: waiting for an earlier create or rename to finish');
+  const queue = entryMutations.get(key) ?? { tail: Promise.resolve(), pending: 0 };
+  queue.pending++;
+  const result = Promise.all(overlapping.map(([, earlier]) => earlier.tail)).then(work);
+  const settled = () => {
+    if (--queue.pending === 0) entryMutations.delete(key);
+  };
+  queue.tail = result.then(settled, settled);
+  entryMutations.set(key, queue);
+  return { result };
+}
 
 function sameFile(left: Stats, right: Stats): boolean {
   return left.dev === right.dev && left.ino === right.ino && left.size === right.size &&
@@ -549,7 +596,12 @@ async function previewServerFile(projectId: string, target: { projectName: strin
   }
 }
 
-export async function createProjectEntry(
+export function createProjectEntry(projectId: string, relativeDirectory: string, nameInput: string,
+  kind: 'file' | 'directory'): Promise<ProjectFileMutationResult> {
+  return mutateEntries(projectId, () => createEntry(projectId, relativeDirectory, nameInput, kind));
+}
+
+async function createEntry(
   projectId: string,
   relativeDirectory: string,
   nameInput: string,
@@ -580,7 +632,11 @@ export async function createProjectEntry(
   return { projectId, path: relative, kind };
 }
 
-export async function renameProjectEntry(
+export function renameProjectEntry(projectId: string, relativePath: string, nameInput: string): Promise<ProjectFileMutationResult> {
+  return mutateEntries(projectId, () => renameEntry(projectId, relativePath, nameInput));
+}
+
+async function renameEntry(
   projectId: string,
   relativePath: string,
   nameInput: string

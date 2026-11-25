@@ -2655,6 +2655,7 @@
   "A file or folder with that name already exists": "Bu adda bir dosya veya klasör zaten var",
   "Only regular files and folders can be renamed": "Yalnızca normal dosya ve klasörler yeniden adlandırılabilir",
   "A file save is already in progress. Try again when it finishes.": "Bir dosya zaten kaydediliyor. Bittiğinde yeniden deneyin.",
+  "Too many file operations are in progress. Try again when they finish.": "Çok fazla dosya işlemi devam ediyor. İşlemler tamamlandığında yeniden deneyin.",
   "Project catalog is invalid": "Proje kataloğu geçersiz",
   "Choose an absolute local project folder": "Mutlak yollu yerel bir proje klasörü seçin",
   "Project catalog limit reached": "Proje sınırına ulaşıldı",

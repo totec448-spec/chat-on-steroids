@@ -2732,6 +2732,7 @@
   "A file or folder with that name already exists": "Файл или папка с таким именем уже существует",
   "Only regular files and folders can be renamed": "Переименовывать можно только обычные файлы и папки",
   "A file save is already in progress. Try again when it finishes.": "Файл уже сохраняется. Повторите попытку, когда это закончится.",
+  "Too many file operations are in progress. Try again when they finish.": "Выполняется слишком много операций с файлами. Повторите попытку после их завершения.",
   "Project catalog is invalid": "Каталог проектов недействителен",
   "Choose an absolute local project folder": "Выберите локальную папку проекта с абсолютным путём",
   "Project catalog limit reached": "Достигнут предел числа проектов",

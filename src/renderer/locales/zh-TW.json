@@ -2618,6 +2618,7 @@
   "A file or folder with that name already exists": "已存在同名的檔案或資料夾",
   "Only regular files and folders can be renamed": "只能重新命名一般檔案和資料夾",
   "A file save is already in progress. Try again when it finishes.": "已有檔案正在儲存。請在完成後重試。",
+  "Too many file operations are in progress. Try again when they finish.": "進行中的檔案操作過多。請在完成後重試。",
   "Project catalog is invalid": "專案目錄無效",
   "Choose an absolute local project folder": "請選擇使用絕對路徑的本機專案資料夾",
   "Project catalog limit reached": "已達專案數量上限",

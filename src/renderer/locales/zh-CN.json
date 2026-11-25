@@ -2618,6 +2618,7 @@
   "A file or folder with that name already exists": "已存在同名的文件或文件夹",
   "Only regular files and folders can be renamed": "只能重命名普通文件和文件夹",
   "A file save is already in progress. Try again when it finishes.": "已有文件正在保存。请在完成后重试。",
+  "Too many file operations are in progress. Try again when they finish.": "正在进行的文件操作过多。请在完成后重试。",
   "Project catalog is invalid": "项目目录无效",
   "Choose an absolute local project folder": "请选择使用绝对路径的本地项目文件夹",
   "Project catalog limit reached": "已达到项目数量上限",
