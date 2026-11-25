@@ -1,53 +1,69 @@
-// Real main branding module, built preload and renderer; synthetic state, no provider traffic.
-const { app, BrowserWindow, ipcMain, session } = require('electron');
-const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
-const root = path.resolve(__dirname, '..'), output = path.join(root, 'outputs/app-display-name');
-fs.mkdirSync(output, { recursive: true });
-app.setPath('userData', fs.mkdtempSync(path.join(output, 'runtime-')));
-app.whenReady().then(async () => {
-  const bundle = path.join(output, 'main-brand.cjs');
-  require('esbuild').buildSync({ stdin: { contents: `export {appBrand} from './src/main/app-brand.ts';`, resolveDir: root },
-    outfile: bundle, bundle: true, platform: 'node', format: 'cjs', packages: 'external', logLevel: 'silent' });
-  const { appBrand } = require(bundle);
-  assert.equal(appBrand.displayName, 'Chat On Steroids (dev)');
-  const config = require('./fixtures/app-defaults.cjs').defaultConfig();
-  config.ui = { ...config.ui, theme: 'light', autoConnect: false, lastSeenVersion: '2.1.55' };
-  const base = { config, hasApiKey: false, hasGoalKey: false, resolvedBinary: null,
-    status: { state: 'disconnected', surfaces: [] }, bridge: { running: false, paired: false, present: false },
-    update: { current: '2.1.55', latest: null, stage: 'idle' } };
-  let state = base;
-  const preload = path.join(root, 'out/preload/index.js');
-  const channels = new Set([...fs.readFileSync(preload, 'utf8').matchAll(/\bcall\(\s*["']([^"']+)["']/g)].map(x => x[1]));
-  const arrays = new Set(['log:get', 'projects:list', 'sessions:outbox', 'sessions:pausedHelpers', 'sessions:runningTools']);
-  for (const channel of channels) ipcMain.handle(channel, () => {
-    let data = null;
-    if (channel === 'state:get') data = state;
-    else if (arrays.has(channel)) data = [];
-    else if (channel === 'sessions:list') data = { sessions: [], total: 0, nextCursor: null, activeId: null, pressure: [], blocked: [] };
-    else if (channel === 'swarm:get') data = { running: false, agents: [], pendingReports: 0 };
-    else if (channel === 'chatModels:get') data = { state: 'unknown', models: [] };
-    return { ok: true, data };
-  });
-  session.defaultSession.webRequest.onBeforeRequest((request, done) => done({ cancel: /^https?:/.test(request.url) }));
-  const proof = [];
-  for (const legacy of [true, false]) {
-    state = legacy ? base : { ...base, displayName: appBrand.displayName };
-    const expected = legacy ? 'Chat On Steroids' : appBrand.displayName;
-    const errors = [], win = new BrowserWindow({ show: true, width: 1180, height: 820, title: expected,
-      webPreferences: { preload, sandbox: true, contextIsolation: true, nodeIntegration: false } });
-    win.webContents.on('console-message', details => { if (details.level === 'error') errors.push(details.message); });
-    await win.loadFile(path.join(root, 'out/renderer/index.html'));
-    const js = code => win.webContents.executeJavaScript(code);
-    const until = async code => { const end = Date.now() + 15000; while (Date.now() < end) { if (await js(code)) return; await new Promise(resolve => setTimeout(resolve, 50)); } throw new Error('Timeout: ' + code); };
-    await until(`document.title === ${JSON.stringify(expected)}`);
-    await js(`(() => {const s=document.getElementById('uiLanguage');s.value='en';s.dispatchEvent(new Event('change',{bubbles:true}));const back=document.getElementById('backToChat');if(back.checkVisibility())back.click()})()`);
-    await until(`document.querySelector('.sidebar-brand strong').checkVisibility() && document.querySelector('.sidebar-brand strong').textContent === ${JSON.stringify(expected)}`);
-    await js('document.fonts.ready'); await js('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
-    assert.equal(win.getTitle(), expected); assert.deepEqual(errors, []);
-    const rendererTitle = await js('document.title'), header = await js(`document.querySelector('.sidebar-brand strong').textContent`);
-    fs.writeFileSync(path.join(output, legacy ? 'before.png' : 'after.png'), (await win.webContents.capturePage()).toPNG());
-    proof.push({ legacy, nativeTitle: win.getTitle(), rendererTitle, header, errors }); win.destroy();
+// Node owns acceptance: Electron exiting zero is not proof of completed captures.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+const root = path.resolve(__dirname, '..');
+const filenames = ['before.png', 'after.png', 'result.json'];
+const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+
+function validateProof(directory) {
+  // Check the entire triplet before reading any content or accepting a result.
+  for (const file of filenames) {
+    const full = path.join(directory, file);
+    assert.ok(fs.existsSync(full), `Missing proof: ${file}`);
+    assert.ok(fs.statSync(full).isFile(), `Not a proof file: ${file}`);
   }
-  fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify(proof, null, 2));
-  console.log(JSON.stringify(proof)); app.quit();
-}).catch(error => { console.error(error); app.exit(1); });
+  const images = filenames.slice(0, 2).map(file => {
+    const bytes = fs.readFileSync(path.join(directory, file));
+    assert.ok(bytes.length > pngSignature.length, `Empty or invalid PNG: ${file}`);
+    assert.ok(bytes.subarray(0, pngSignature.length).equals(pngSignature), `Invalid PNG: ${file}`);
+    return bytes;
+  });
+  assert.ok(!images[0].equals(images[1]), 'Before and after PNGs are identical');
+  const proof = JSON.parse(fs.readFileSync(path.join(directory, 'result.json'), 'utf8'));
+  assert.equal(proof.length, 2, 'Both display states are required');
+  for (const [index, expected] of ['Chat On Steroids', 'Chat On Steroids (dev)'].entries()) {
+    const state = proof[index];
+    assert.equal(state.legacy, index === 0);
+    for (const field of ['nativeTitle', 'rendererTitle', 'header']) assert.equal(state[field], expected, field);
+    assert.deepEqual(state.errors, []);
+  }
+  return filenames.map(file => ({ file: path.join(directory, file), bytes: fs.statSync(path.join(directory, file)).size }));
+}
+
+function renderWithElectron(directory) {
+  const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
+  const result = spawnSync(require('electron'), [path.join(__dirname, 'fixtures/app-display-name-runtime.cjs'),
+    directory, '--lang=en-US', ...process.argv.slice(2)], {
+    cwd: root, env, encoding: 'utf8', timeout: 60_000, maxBuffer: 2 * 1024 * 1024
+  });
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  if (result.error) throw result.error;
+  assert.equal(result.status, 0, `Electron capture failed: ${result.signal ?? result.status}`);
+}
+
+function runDisplayNameCheck({ output = path.join(root, 'outputs/app-display-name'), render = renderWithElectron,
+  log = console.log } = {}) {
+  fs.mkdirSync(output, { recursive: true });
+  // Never accept stale captures left by an earlier run, even if Electron exits zero.
+  const directory = fs.mkdtempSync(path.join(output, 'run-'));
+  render(directory);
+  validateProof(directory);
+  for (const file of filenames) fs.copyFileSync(path.join(directory, file), path.join(output, file));
+  const artifacts = validateProof(output);
+  log(JSON.stringify({ artifacts }));
+  log('PASS app-display-name: both states and all three artifacts verified');
+  return artifacts;
+}
+
+if (require.main === module) {
+  // Loads out/renderer/index.html and the built preload; retain the runner's build freshness gate.
+  import('./ui-build-state.mjs').then(({ buildProblem }) => {
+    const problem = buildProblem(root);
+    assert.equal(problem, null, problem);
+    runDisplayNameCheck();
+  }).catch(error => { console.error(error); process.exitCode = 1; });
+}
+module.exports = { validateProof, runDisplayNameCheck };
