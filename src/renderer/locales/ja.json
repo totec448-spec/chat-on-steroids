@@ -798,6 +798,7 @@
   "Discard": "破棄",
   "Detecting language…": "言語を検出中…",
   "Saved {0}": "{0}を保存しました",
+  "Saved {0}. Refresh the file before saving again.": "{0}を保存しました。もう一度保存する前にファイルを再読み込みしてください。",
   "Unsaved editor changes were discarded because the project changed.": "プロジェクトが変更されたため、エディターの未保存の変更を破棄しました。",
   "Delete item?": "項目を削除しますか？",
   "Move “{0}” to the Trash?": "「{0}」をゴミ箱に移動しますか？",

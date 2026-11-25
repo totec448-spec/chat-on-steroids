@@ -1344,6 +1344,7 @@
   "Discard": "Descartar",
   "Detecting language…": "Detectando lenguaje…",
   "Saved {0}": "Se guardó {0}",
+  "Saved {0}. Refresh the file before saving again.": "Se ha guardado {0}. Actualiza el archivo antes de volver a guardarlo.",
   "Unsaved editor changes were discarded because the project changed.": "Se descartaron los cambios sin guardar del editor porque cambió el proyecto.",
   "Delete item?": "¿Eliminar el elemento?",
   "Move “{0}” to the Trash?": "¿Mover «{0}» a la papelera?",

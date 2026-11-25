@@ -42,10 +42,10 @@ export interface ProjectFileMutationResult {
   kind: 'file' | 'directory';
 }
 
-/** Result of an in-place text edit. Returning a fresh preview refreshes size/mtime/text atomically
- * from the renderer's point of view and gives the next save a new optimistic-concurrency token. */
+/** Success means the replacement was committed. A null preview means only the subsequent read
+ * failed; reload before another save to obtain a fresh optimistic-concurrency token. */
 export interface ProjectFileSaveResult {
-  preview: ProjectFilePreview;
+  preview: ProjectFilePreview | null;
 }
 
 /** A watched project directory changed on disk. Paths stay project-relative. */
