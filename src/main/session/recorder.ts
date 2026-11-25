@@ -809,6 +809,13 @@ let attributionRepairRetryUsed = false;
 const repairRequestIds = new Set<string>();
 // Derived negative-read cache only: exact ownership still comes from correlation.ts.
 const repairBuckets = new Map<string, { toolCalls: number; updatedAt: number; requestIds: Set<string> }>();
+/**
+ * Chats whose provisional calls the last repair pass read and found without proof, by the revision it read. A call
+ * that never gets proof stays provisional for good, and every later page-evidence trigger rescanned the chat's whole
+ * journal for it (20 such chats of 113 MB: 133 MB read per pass). A pass triggered by other request ids skips a chat
+ * whose revision is unchanged and whose unproved ids it does not name.
+ */
+const provisionalScans = new Map<string, { revision: string; requestIds: Set<string> }>();
 const MAX_REPAIR_BUCKETS = 128;
 const MAX_REPAIR_REQUEST_IDS = 50_000;
 let attributionRepairChain: Promise<void> = Promise.resolve();
@@ -1039,13 +1046,23 @@ async function repairAttributionNow(affected?: ReadonlySet<string>): Promise<{ s
 
   for (const summary of await indexedSessions()) try {
     if ((summary.provisionalToolCalls ?? 0) > 0 || (summary.providerSessionToolCalls ?? 0) > 0) {
+      const revision = `${summary.toolCalls}:${summary.updatedAt}:${summary.provisionalToolCalls ?? 0}:${summary.providerSessionToolCalls ?? 0}`;
+      const scanned = provisionalScans.get(summary.id);
+      if (!(affected && scanned?.revision === revision && ![...affected].some(id => scanned.requestIds.has(id)))) {
+      provisionalScans.delete(summary.id);
       const events = await readEvents(summary.id, { kinds: ['tool_call'] });
       let repaired = 0;
+      // Whether nothing here still needs another look, and the ids of the provisional calls that were read.
+      let unproved = true;
+      const unprovedIds = new Set<string>();
       for (const event of events) {
         if (event.kind !== 'tool_call' || event.call.attributionMethod !== 'generation' && !event.call.providerSessionAnchor || !event.call.requestId) continue;
         try {
+          // Every id counts, proved or not: new evidence for any of them is a reason to look again.
+          unprovedIds.add(event.call.requestId);
           const proof = requestCorrelation(event.call.requestId);
-          if (!proof || !await getSession(proof.sessionId)) continue;
+          if (!proof) continue;
+          if (!await getSession(proof.sessionId)) { unproved = false; continue; }
           if (event.call.providerSessionAnchor && proof.providerSessionAnchor === event.call.providerSessionAnchor &&
             proof.sessionId === summary.id && proof.conversationId === event.call.conversationId) continue;
           const same = proof.sessionId === summary.id;
@@ -1089,6 +1106,17 @@ async function repairAttributionNow(affected?: ReadonlySet<string>): Promise<{ s
         }
       }
       if (repaired) { repairedSessions++; logInfo(`request attribution: corrected ${repaired} provisional call(s) with exact request proof`); }
+      else if (unproved && !storageFailed && unprovedIds.size <= MAX_REPAIR_REQUEST_IDS) {
+        let kept = unprovedIds.size;
+        for (const scan of provisionalScans.values()) kept += scan.requestIds.size;
+        while (provisionalScans.size > 0 && (provisionalScans.size >= MAX_REPAIR_BUCKETS || kept > MAX_REPAIR_REQUEST_IDS)) {
+          const oldest = provisionalScans.keys().next().value!;
+          kept -= provisionalScans.get(oldest)!.requestIds.size;
+          provisionalScans.delete(oldest);
+        }
+        provisionalScans.set(summary.id, { revision, requestIds: unprovedIds });
+      }
+      }
     }
     if (!isUnattributedSession(summary)) continue;
     const cached = repairBuckets.get(summary.id);
@@ -3505,6 +3533,7 @@ export function resetRecorderForTests(): void {
   fullAttributionRepair = false;
   repairRequestIds.clear();
   repairBuckets.clear();
+  provisionalScans.clear();
   attributionRepairRetryUsed = false;
   agentConversationLookup = () => null;
   agentBinder = () => undefined;
