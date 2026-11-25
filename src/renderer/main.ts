@@ -1054,6 +1054,9 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     if (state && (!requestedSettings || requestedSettings.projects?.codeCheckpoints === patch.projects?.codeCheckpoints)) {
       $<HTMLInputElement>('codeCheckpoints').checked = state.config.projects?.codeCheckpoints === true;
     }
+    if (state && (!requestedSettings || requestedSettings.mcp?.suppressUnattributedNotices === patch.mcp?.suppressUnattributedNotices)) {
+      $<HTMLInputElement>('mcpSuppressUnattributedNotices').checked = state.config.mcp?.suppressUnattributedNotices === true;
+    }
     // And the secrets shield: an unticked switch left by a refused save must not turn it off later.
     if (state && (!requestedSettings || requestedSettings.ui.secretsShield === patch.ui.secretsShield)) {
       $<HTMLInputElement>('secretsShield').checked = state.config.ui.secretsShield !== false;
