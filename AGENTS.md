@@ -5777,7 +5777,11 @@ directories through the normal project sandbox. Ordinary changes remain debounce
 callbacks or asynchronous validations from retired watcher generations may not affect newer
 watchers.
 
-Hiding Files retires its watches without discarding an unsaved draft. Hiding the bottom dock
+Hiding Files or minimizing or hiding its Electron window retires the Files subscription and
+its Git watchers without discarding an unsaved draft. When the window becomes visible again,
+Files re-arms the watches before refreshing the expanded tree and preview. Review refreshes
+Git without acquiring its own Files subscription. Hidden-window notifications and stale
+read results cannot refresh the resumed panel. Hiding the bottom dock
 does not retire its PTYs; closing a terminal tab does. Closing the last bottom tab hides that
 dock. The layout control group sits at the right end of the title bar (`.app-topbar`) and orders
 right expansion (shown only while right is open), bottom, then right; the latter two buttons toggle

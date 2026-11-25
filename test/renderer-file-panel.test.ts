@@ -68,6 +68,10 @@ const cleanGit = (project = projectA): ProjectGitSnapshot => ({
   projectId: project.id, state: 'ready', changes: [], truncated: false, revision: 'clean'
 });
 const tick = async (): Promise<void> => { await Promise.resolve(); await Promise.resolve(); await new Promise(resolve => setTimeout(resolve, 0)); };
+function setWindowHidden(hidden: boolean): void {
+  Object.defineProperty(document, 'hidden', { configurable: true, value: hidden });
+  document.dispatchEvent(new dom.window.Event('visibilitychange'));
+}
 const submitEntryDialog = async (value: string): Promise<void> => {
   const dialog = document.querySelector<HTMLDialogElement>('.file-entry-dialog')!;
   const input = dialog.querySelector<HTMLInputElement>('.file-entry-dialog-input')!;
@@ -94,9 +98,109 @@ it('rearms a lost watch without resending watches for ordinary file changes or a
   expect(window.api.watchProjectFiles).toHaveBeenLastCalledWith(projectA.id, ['']);
 });
 
+it('suspends Files and Git watches while the window is hidden and reconciles on return', async () => {
+  const panel = createFilePanel({ host, toggle });
+  panel.update(projectA);
+  await panel.show();
+  const watch = vi.mocked(window.api.watchProjectFiles);
+  const list = vi.mocked(window.api.listProjectFiles);
+  const snapshot = vi.mocked(window.api.getProjectGitSnapshot);
+  expect(watch).toHaveBeenLastCalledWith(projectA.id, ['']);
+  list.mockClear();
+  snapshot.mockClear();
+
+  vi.useFakeTimers();
+  try {
+    projectGitChanged!({ projectId: projectA.id });
+    setWindowHidden(true);
+    expect(watch).toHaveBeenLastCalledWith(null, []);
+    projectFilesChanged!({ projectId: projectA.id, directory: '', watchLost: true });
+    projectGitChanged!({ projectId: projectA.id });
+    await vi.advanceTimersByTimeAsync(120);
+    expect(watch).toHaveBeenLastCalledWith(null, []);
+    expect(list).not.toHaveBeenCalled();
+    expect(snapshot).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+
+  setWindowHidden(false);
+  await tick();
+  expect(watch).toHaveBeenLastCalledWith(projectA.id, ['']);
+  expect(list).toHaveBeenCalledExactlyOnceWith(projectA.id, '');
+  expect(snapshot).toHaveBeenCalledExactlyOnceWith(projectA.id, undefined);
+  expect(watch.mock.invocationCallOrder.at(-1)).toBeLessThan(list.mock.invocationCallOrder[0]);
+});
+
+it('discards a Files listing issued before a hide and show cycle', async () => {
+  const panel = createFilePanel({ host, toggle });
+  panel.update(projectA);
+  await panel.show();
+  let finish!: (value: Awaited<ReturnType<typeof window.api.listProjectFiles>>) => void;
+  vi.mocked(window.api.listProjectFiles).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  projectFilesChanged!({ projectId: projectA.id, directory: '' });
+  setWindowHidden(true);
+  setWindowHidden(false);
+  await tick();
+  finish({ ok: true, data: { ...rootListing(), entries: [] } });
+  await tick();
+  expect(host.textContent).toContain('README.md');
+});
+
+it('keeps the resumed tree when an earlier opening read finishes last', async () => {
+  const panel = createFilePanel({ host, toggle });
+  panel.update(projectA);
+  let finish!: (value: Awaited<ReturnType<typeof window.api.listProjectFiles>>) => void;
+  vi.mocked(window.api.listProjectFiles).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const opening = panel.show();
+  setWindowHidden(true);
+  setWindowHidden(false);
+  await tick();
+  finish({ ok: true, data: { ...rootListing(), entries: [] } });
+  await opening;
+  expect(host.textContent).toContain('README.md');
+});
+
+it('reconciles the tree when a file is selected while the watches rearm', async () => {
+  const panel = createFilePanel({ host, toggle });
+  panel.update(projectA);
+  await panel.show();
+  setWindowHidden(true);
+
+  let rearmed!: (value: Awaited<ReturnType<typeof window.api.watchProjectFiles>>) => void;
+  vi.mocked(window.api.watchProjectFiles).mockImplementationOnce(() => new Promise(resolve => { rearmed = resolve; }));
+  vi.mocked(window.api.listProjectFiles).mockImplementationOnce(() => ok({
+    ...rootListing(), entries: rootListing().entries.filter(entry => entry.kind === 'file')
+  }));
+  setWindowHidden(false);
+  host.querySelector<HTMLButtonElement>('[data-path="README.md"]')!.click();
+  await tick();
+  rearmed({ ok: true, data: true });
+  await tick();
+  expect(host.querySelector('[data-path="src"]')).toBeNull();
+});
+
+it('lets an outstanding SSH Review snapshot settle across a hide and show cycle', async () => {
+  const panel = createFilePanel({ host, toggle, reviewOnly: true });
+  const remote = { ...projectA, remote: { host: 'example.invalid', path: '/project' } };
+  panel.update(remote);
+  let finish!: (value: Awaited<ReturnType<typeof window.api.getProjectGitSnapshot>>) => void;
+  const snapshot = vi.mocked(window.api.getProjectGitSnapshot);
+  snapshot.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  await panel.show();
+  setWindowHidden(true);
+  setWindowHidden(false);
+  finish({ ok: true, data: { ...cleanGit(remote), state: 'unavailable' } });
+  await tick();
+  expect(snapshot).toHaveBeenCalledTimes(1);
+  expect(host.textContent).not.toContain('Reading Git changes');
+});
+
 beforeEach(() => {
   codeMount.wait = null; codeMount.calls = 0;
-  dom = new JSDOM('<body><section id="host"></section><button id="toggle"></button></body>', { url: 'https://cos.local/' });
+  dom = new JSDOM('<body><section id="host"></section><button id="toggle"></button></body>', {
+    url: 'https://cos.local/', pretendToBeVisual: true
+  });
   vi.stubGlobal('window', dom.window);
   vi.stubGlobal('document', dom.window.document);
   vi.stubGlobal('HTMLElement', dom.window.HTMLElement);
@@ -1291,6 +1395,21 @@ async function editFile(): Promise<HTMLTextAreaElement> {
 function typeEdit(input: HTMLTextAreaElement, text: string): void {
   input.value = text; input.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
 }
+
+it('preserves an unsaved draft when its file changes while the window is hidden', async () => {
+  const panel = createFilePanel({ host, toggle });
+  panel.update(projectA);
+  await panel.show();
+  typeEdit(await editFile(), 'local draft');
+  setWindowHidden(true);
+  vi.mocked(window.api.previewProjectFile).mockResolvedValueOnce({
+    ok: true, data: { ...preview, text: 'changed on disk', revision: 'b'.repeat(64) }
+  });
+  setWindowHidden(false);
+  await tick();
+  expect(window.api.previewProjectFile).toHaveBeenCalledTimes(2);
+  expect(host.querySelector<HTMLTextAreaElement>('.test-code-input')?.value).toBe('local draft');
+});
 
 it.each(['New file', 'New folder'])('protects the active draft before %s changes selection', async label => {
   const panel = createFilePanel({ host, toggle, onAttach: () => undefined });
