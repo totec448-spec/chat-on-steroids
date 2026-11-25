@@ -24,6 +24,12 @@ beforeAll(async () => {
   ]);
   backgroundSource = backgroundSource.replace(/\r\n/g, '\n');
 });
+/** The worker's own conversationFromUrl, for the sandboxes that run one slice of the worker. */
+const conversationFromUrl = (value: string): string | null => {
+  const start = backgroundSource.indexOf('function conversationFromUrl(');
+  const source = backgroundSource.slice(start, backgroundSource.indexOf('\n}\n', start) + 3);
+  return (vm.runInNewContext(`${source}\nconversationFromUrl`, { URL }) as (v: string) => string | null)(value);
+};
 
 it.each([
   { state: 'active', replies: true, reason: null },
@@ -1099,7 +1105,7 @@ it.each(['discarded', 'frozen', 'woke', 'navigated', 'loading', 'closed', 'missi
       backgroundSource.indexOf('\nfunction conversationStillOpen('));
     const repair = vm.runInNewContext(`${source}\nperformBrowserRepairs`, {
       tabConversations: { '71': conversationId }, tabDocuments: { '71': 'suspended-document' },
-      conversationForTab: (value: { url?: string }) => value.url?.split('/c/')[1] ?? null,
+      conversationFromUrl, conversationForTab: (value: { url?: string }) => value.url?.split('/c/')[1] ?? null,
       createChatTab: create, call,
       chrome: { tabs: {
         query: async () => state === 'missing' ? [] : [tab], reload,
@@ -1135,7 +1141,7 @@ it.each(['still-frozen', 'woke', 'navigated', 'new-document'] as const)(
       backgroundSource.indexOf('\nfunction conversationStillOpen('));
     const repair = vm.runInNewContext(`${source}\nperformBrowserRepairs`, {
       tabConversations: { '71': conversationId }, tabDocuments: documents,
-      conversationForTab: (value: { url?: string }) => value.url?.split('/c/')[1] ?? null,
+      conversationFromUrl, conversationForTab: (value: { url?: string }) => value.url?.split('/c/')[1] ?? null,
       createChatTab: vi.fn(), call,
       chrome: { tabs: { query: async () => [tab], reload, get: async () => ({ ...tab,
         frozen: !(claimed && state === 'woke'),
@@ -1949,6 +1955,44 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
     expect(worker.tabsReload).toHaveBeenCalledTimes(1);
   });
 
+  it.each([['another chat', 'other-chat'], ['the new-chat page', 'new-chat'], ['a temporary chat', 'temporary-chat'], ['a public snapshot of the same chat', 'snapshot']] as const)(
+    'does not reload a tab that moved to %s while its page was being asked about its state', async (_name, kind) => {
+      // The reload follows the page's reply, which can take seconds. The scan it started from is
+      // older than that, so the tab is read again right before the reload.
+      let armed = false, handed = false, moved = false;
+      const failed: string[] = [], kept: string[] = [];
+      const here = () => !moved ? `https://chatgpt.com/c/${CHAT}` : kind === 'other-chat' ? `https://chatgpt.com/c/${OTHER}`
+        : kind === 'new-chat' ? 'https://chatgpt.com/' : kind === 'snapshot' ? `https://chatgpt.com/share/c/${CHAT}`
+        : `https://chatgpt.com/c/${CHAT}?temporary-chat=true`;
+      const fetch = vi.fn(async (input: string) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/repairs/claim') return response(200, { allowed: true });
+        if (url.pathname === '/status') {
+          if (url.searchParams.has('repairFailed')) failed.push(`${url.searchParams.get('why')}:${url.searchParams.get('detail')}`);
+          if (url.searchParams.has('repaired')) kept.push(`${url.searchParams.get('repairAction')}:${url.searchParams.get('preservedFor') ?? ''}`);
+          if (armed && !handed) {
+            handed = true;
+            return response(200, { repairs: [{ conversationId: CHAT, token: 'moved-after-status', reason: 'unattributed', requiresClaim: false }] });
+          }
+          return response(200, { repairs: [] });
+        }
+        return response(200, {});
+      });
+      const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch,
+        tabsQuery: async () => [{ id: 21, url: `https://chatgpt.com/c/${CHAT}` }],
+        tabsGet: async () => ({ id: 21, url: here() }),
+        tabsSendMessage: async (_id, message) => {
+          // The page answers from the document it was: still the old chat, not streaming.
+          if (message.type === 'clf-page-status') { moved = true; return { ok: true, conversationId: CHAT, streaming: false, assistantError: true }; }
+          return { ok: true };
+        } });
+      await worker.registerTab(21);
+      await worker.send({ type: 'bind', conversationId: CHAT }, 21);
+      await worker.fireAlarm(); armed = true; await worker.fireAlarm();
+      expect(worker.tabsReload).not.toHaveBeenCalled();
+      expect([...failed, ...kept]).toEqual(kind === 'temporary-chat' ? ['preserved:temporary-chat'] : ['changed:other-chat']);
+    });
   /** A reload that throws reports that attempt as failed, then the next pass retries it. */
   it('retries a repair whose reload failed', async () => {
     const { fetch, asked, failedActions, arm } = appWith(null);
@@ -6567,7 +6611,7 @@ it.each([
     backgroundSource.indexOf('\nfunction conversationStillOpen('));
   const repair = vm.runInNewContext(`${source}\nperformBrowserRepairs`, {
     tabConversations: { '76': conversationId }, tabDocuments: { '76': 'live-document' },
-    conversationForTab: (value: { url?: string }) => value.url?.split('/c/')[1] ?? null,
+    conversationFromUrl, conversationForTab: (value: { url?: string }) => value.url?.split('/c/')[1] ?? null,
     createChatTab: vi.fn(), call, tabReply: async () => status && { ...status, conversationId },
     chrome: { tabs: { query: async () => [tab], reload, get: async () => tab, update: vi.fn() } },
     CHATGPT_TAB_URLS: ['https://chatgpt.com/*']
@@ -6603,7 +6647,7 @@ it.each([true, false])('rejects another chat from the repair page check (streami
     backgroundSource.indexOf('\nfunction conversationStillOpen('));
   const repair = vm.runInNewContext(`${source}\nperformBrowserRepairs`, {
     tabConversations: { '76': conversationId }, tabDocuments: { '76': 'live-document' },
-    conversationForTab: (value: { url?: string }) => value.url?.split('/c/')[1] ?? null,
+    conversationFromUrl, conversationForTab: (value: { url?: string }) => value.url?.split('/c/')[1] ?? null,
     createChatTab: vi.fn(), call,
     tabReply: async () => {
       // The selected tab changes chat while the page-status request is in flight.
@@ -6628,7 +6672,7 @@ it('leaves a Temporary Chat open when recovery would reload it', async () => {
   const repair = vm.runInNewContext(`${source}\nperformBrowserRepairs`, {
     URL,
     tabConversations: { '76': conversationId }, tabDocuments: { '76': 'live-document' },
-    conversationForTab: (value: { url?: string }) => new URL(value.url!).pathname.split('/c/')[1] ?? null,
+    conversationFromUrl, conversationForTab: (value: { url?: string }) => new URL(value.url!).pathname.split('/c/')[1] ?? null,
     createChatTab: vi.fn(), call, tabReply: async () => ({ ok: true, conversationId, streaming: false, assistantError: false }),
     chrome: { tabs: { query: async () => [tab], reload, get: async () => tab, update: vi.fn() } },
     CHATGPT_TAB_URLS: ['https://chatgpt.com/*']
@@ -6650,7 +6694,7 @@ it('keeps the temporary destination URL when a normal tab starts navigating ther
     backgroundSource.indexOf('\nfunction conversationStillOpen('));
   const repair = vm.runInNewContext(`${source}\nperformBrowserRepairs`, {
     tabConversations: { '76': conversationId }, tabDocuments: { '76': 'live-document' },
-    conversationForTab: (value: { url?: string }) => value.url?.split('/c/')[1]?.split(/[?#]/)[0] ?? null,
+    conversationFromUrl, conversationForTab: (value: { url?: string }) => value.url?.split('/c/')[1]?.split(/[?#]/)[0] ?? null,
     createChatTab: vi.fn(), call,
     tabReply: async () => ({ ok: true, conversationId, streaming: false, assistantError: false }),
     chrome: { tabs: { query: async () => [tab], reload, get: async () => tab, update: vi.fn() } },
@@ -6674,7 +6718,7 @@ it('keeps a Temporary Chat open when its pending destination is a regular chat',
     backgroundSource.indexOf('\nfunction conversationStillOpen('));
   const repair = vm.runInNewContext(`${source}\nperformBrowserRepairs`, {
     tabConversations: { '76': conversationId }, tabDocuments: { '76': 'live-document' },
-    conversationForTab: (value: { url?: string }) => value.url?.split('/c/')[1]?.split(/[?#]/)[0] ?? null,
+    conversationFromUrl, conversationForTab: (value: { url?: string }) => value.url?.split('/c/')[1]?.split(/[?#]/)[0] ?? null,
     createChatTab: vi.fn(), call,
     tabReply: async () => ({ ok: true, conversationId, streaming: false, assistantError: false }),
     chrome: { tabs: { query: async () => [tab], reload, get: async () => tab, update: vi.fn() } },
