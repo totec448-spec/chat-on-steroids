@@ -1,4 +1,7 @@
 {
+  "Another Git operation is in progress. Try again when it finishes.": "Ein anderer Git-Vorgang läuft. Versuche es erneut, wenn er abgeschlossen ist.",
+  "Git state needs recovery. Check this branch before retrying; index.lock was kept.": "Der Git-Zustand muss wiederhergestellt werden. Prüfe diesen Branch vor einem erneuten Versuch; index.lock wurde beibehalten.",
+  "Git committed, but a later step failed. Check the commit before trying again.": "Git hat den Commit erstellt, aber ein späterer Schritt ist fehlgeschlagen. Prüfe den Commit vor einem erneuten Versuch.",
   "Save here and replace any existing file?": "Hier speichern und eine vorhandene Datei ersetzen?",
   "Replace this CSV file?": "Diese CSV-Datei ersetzen?",
   "Replace file": "Datei ersetzen",

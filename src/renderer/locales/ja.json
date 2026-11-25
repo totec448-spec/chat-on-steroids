@@ -1,4 +1,7 @@
 {
+  "Another Git operation is in progress. Try again when it finishes.": "別のGit操作が進行中です。完了してから再試行してください。",
+  "Git state needs recovery. Check this branch before retrying; index.lock was kept.": "Gitの状態を復旧する必要があります。再試行する前に、このブランチを確認してください。index.lockは保持されています。",
+  "Git committed, but a later step failed. Check the commit before trying again.": "Gitのコミットは作成されましたが、その後の処理に失敗しました。再試行する前にコミットを確認してください。",
   "Save here and replace any existing file?": "ここに保存し、同じ名前のファイルがあれば置き換えますか？",
   "Replace this CSV file?": "このCSVファイルを置き換えますか？",
   "Replace file": "ファイルを置き換える",
