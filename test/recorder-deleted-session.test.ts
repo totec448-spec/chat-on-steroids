@@ -69,12 +69,9 @@ it('files a provider-session call of a deleted session once, without retrying wi
   expect(requestCorrelation('anchor-derived')?.providerSessionAnchor).toBe('anchor-native');
   forgetSession(first);
   await deleteSession(first);
-  const recorded = await Promise.race([
-    recordToolCall({ tool: 'read', args: {}, content: [{ type: 'text', text: 'ok' }], outcome: 'ok', durationMs: 1, startedAt: Date.now(),
-      requestId: 'anchor-derived', conversationId: 'anchored-live-chat', providerSessionAnchor: 'anchor-native' }),
-    new Promise<'hung'>(resolve => setTimeout(() => resolve('hung'), 4_000))
-  ]);
-  expect(recorded).not.toBe('hung');
+  // Awaited directly: before the fix this never settled and the test's own timeout ended it.
+  const recorded = await recordToolCall({ tool: 'read', args: {}, content: [{ type: 'text', text: 'ok' }], outcome: 'ok', durationMs: 1, startedAt: Date.now(),
+    requestId: 'anchor-derived', conversationId: 'anchored-live-chat', providerSessionAnchor: 'anchor-native' });
   expect(recorded).not.toBeNull();
   const next = await findSessionByConversation('anchored-live-chat');
   expect(next?.id).not.toBe(first);
