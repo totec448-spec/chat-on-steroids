@@ -16,13 +16,13 @@ app.whenReady().then(async () => {
   const base = { config, hasApiKey: false, hasGoalKey: false, resolvedBinary: null,
     status: { state: 'disconnected', surfaces: [] }, bridge: { running: false, paired: false, present: false },
     update: { current: '2.1.55', latest: null, stage: 'idle' } };
-  let state = base;
+  let state = base, stateReady = Promise.resolve(), stateRequested = () => {};
   const preload = path.join(root, 'out/preload/index.js');
   const channels = new Set([...fs.readFileSync(preload, 'utf8').matchAll(/\bcall\(\s*["']([^"']+)["']/g)].map(x => x[1]));
   const arrays = new Set(['log:get', 'projects:list', 'sessions:outbox', 'sessions:pausedHelpers', 'sessions:runningTools']);
-  for (const channel of channels) ipcMain.handle(channel, () => {
+  for (const channel of channels) ipcMain.handle(channel, async () => {
     let data = null;
-    if (channel === 'state:get') data = state;
+    if (channel === 'state:get') { stateRequested(); await stateReady; data = state; }
     else if (arrays.has(channel)) data = [];
     else if (channel === 'sessions:list') data = { sessions: [], total: 0, nextCursor: null, activeId: null, pressure: [], blocked: [] };
     else if (channel === 'swarm:get') data = { running: false, agents: [], pendingReports: 0 };
@@ -38,9 +38,20 @@ app.whenReady().then(async () => {
   for (const legacy of [true, false]) {
     state = legacy ? base : { ...base, displayName: appBrand.displayName };
     const expected = legacy ? 'Chat On Steroids' : appBrand.displayName;
+    let releaseState;
+    stateReady = new Promise(resolve => { releaseState = resolve; });
+    const requested = new Promise(resolve => { stateRequested = resolve; });
     await win.loadFile(path.join(root, 'out/renderer/index.html'));
     const js = code => win.webContents.executeJavaScript(code);
     const until = async code => { const end = Date.now() + 15000; while (Date.now() < end) { if (await js(code)) return; await new Promise(resolve => setTimeout(resolve, 50)); } throw new Error('Timeout: ' + code); };
+    // Hold the actual startup IPC response through painted frames, not a fixed delay.
+    await requested;
+    await js('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+    const initial = await js(`Array.from(document.querySelectorAll('[data-app-display-name]'), node => node.textContent)`);
+    assert.deepEqual(initial, ['Chat On Steroids', 'Chat On Steroids', 'Chat On Steroids']);
+    assert.equal(win.getTitle(), 'Chat On Steroids');
+    console.log(JSON.stringify({ beforeState: initial, legacy }));
+    releaseState();
     await until(`document.title === ${JSON.stringify(expected)}`);
     await js(`(() => {const s=document.getElementById('uiLanguage');s.value='en';s.dispatchEvent(new Event('change',{bubbles:true}));const back=document.getElementById('backToChat');if(back.checkVisibility())back.click()})()`);
     await until(`document.querySelector('.sidebar-brand strong').checkVisibility() && document.querySelector('.sidebar-brand strong').textContent === ${JSON.stringify(expected)}`);
