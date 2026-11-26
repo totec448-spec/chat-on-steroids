@@ -599,6 +599,9 @@ code {
 .row-menu-item > .ico { --ico: 15px; flex: none; color: var(--soft); }
 .row-menu-item.is-danger, .row-menu-item.is-danger > .ico { color: var(--red); }
 .row-menu-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-menu-text { display: grid; flex: 1; min-width: 0; }
+.row-menu-description { margin-top: 2px; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); overflow-wrap: anywhere; }
+.row-menu-description:empty { display: none; }
 .row-menu-gap { flex: none; width: 15px; }
 .row-menu-item > .row-menu-chevron, .row-menu-item > .row-menu-check { --ico: 13px; margin-inline-start: auto; color: var(--faint); }
 .row-menu-separator { height: 1px; margin: 4px 6px; background: var(--line); }
@@ -5735,5 +5738,6 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .turn-change[data-state='unchanged'] .turn-change-path { color: var(--faint); }
 .turn-change > .unified-diff { border-top: 1px solid var(--line); }
 .turn-change > .unified-diff > .meta { margin: 0; padding: 8px 10px; }
-.turn-changes-review { justify-self: start; }
+.turn-changes-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-self: start; }
+.turn-changes-review, .turn-changes-restore { justify-self: start; }
 @media (prefers-reduced-motion: reduce) { .turn-changes-chevron { transition: none; } }

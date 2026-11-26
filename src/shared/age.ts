@@ -84,13 +84,15 @@ function scaled(value: number, base: number, units: readonly string[], separator
 /** A count in a few characters: "999", "1.0k", "12k", "1.3M", "2.0B"; anything not a count reads "0". */
 export function compactCount(value: number): string {
   if (!Number.isFinite(value) || value < 0) return '0';
-  if (value < 1000) return String(Math.round(value));
+  // 999.5 rounds to 1000: that is "1.0k", not a four-digit count.
+  if (value < 1000 && Math.round(value) < 1000) return String(Math.round(value));
   return scaled(value / 1000, 1000, ['k', 'M', 'B', 'T'], '');
 }
 
 /** A file size: "1023 B", "1.0 KB", "10 KB", "1.0 MB", "2.0 GB", "3.0 TB"; anything not a size reads "0 B". */
 export function byteSize(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return '0 B';
-  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  // 1023.5 rounds to 1024: that is "1.0 KB", not "1024 B".
+  if (bytes < 1024 && Math.round(bytes) < 1024) return `${Math.round(bytes)} B`;
   return scaled(bytes / 1024, 1024, ['KB', 'MB', 'GB', 'TB'], ' ');
 }

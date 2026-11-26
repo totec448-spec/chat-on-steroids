@@ -1,10 +1,10 @@
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, promises as fs, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { logInfo, logWarn } from './logger.js';
-import { decode, readProjectGitSnapshot, repositoryContext, runGit, type RepositoryContext } from './project-git.js';
+import { decode, readProjectGitSnapshot, repositoryContext, runGit, withTemporaryIndex, type RepositoryContext, type GitRunOptions } from './project-git.js';
 import type { CommitState, GhStatus, ProjectGitChange } from '../shared/project-git.js';
 
 export type { CommitState } from '../shared/project-git.js';
@@ -189,6 +189,18 @@ export interface CommitRequest {
   expectedToken: string;
 }
 
+/** Null means Git could not prove the position, not an unborn branch or detached HEAD. */
+async function commitPosition(repo: RepositoryContext): Promise<{ ref: string | null; commit: string | null } | null> {
+  const symbolic = await runGit(repo.root, ['symbolic-ref', '--quiet', 'HEAD']);
+  if (symbolic.code !== 0 && symbolic.code !== 1) return null;
+  const ref = symbolic.code === 0 ? decode(symbolic.stdout).trim() : null;
+  if (ref === '') return null;
+  const head = await runGit(repo.root, ['rev-parse', '--verify', '--quiet', 'HEAD']);
+  if (head.code === 0) return { ref, commit: decode(head.stdout).trim() };
+  // rev-parse --quiet returns 1 for an unborn branch. A detached HEAD must have a commit.
+  return head.code === 1 && ref !== null ? { ref, commit: null } : null;
+}
+
 /** Commits exactly the chosen changes, as their files are now, and nothing else that is staged. */
 export async function commitProjectChanges(projectId: string, request: CommitRequest): Promise<{ commit: string; branch: string }> {
   const message = request.message.replace(/\r\n/g, '\n').trim();
@@ -214,84 +226,178 @@ export async function commitProjectChanges(projectId: string, request: CommitReq
   // there to stage; staging the old one fails ("did not match any files").
   const paths = [...new Set(chosen.flatMap(change => [change.path, ...(change.previousPath ? [change.previousPath] : [])]))].map(inRepository);
   const toStage = [...new Set(chosen.map(change => change.path))].map(inRepository);
-  let branch = await branchOf(repo);
+  const position = await commitPosition(repo);
+  if (!position) throw refusal('git commit', 'The changes changed. Review them again before committing.');
+  let branch = position.ref?.startsWith('refs/heads/') ? position.ref.slice('refs/heads/'.length) : null;
   const created = request.newBranch?.trim();
   const startedOn = branch;
   if (created) {
     if ((await runGit(repo.root, ['check-ref-format', '--branch', created])).code !== 0 || created.startsWith('-')) throw refusal('git commit', 'That branch name is not allowed.');
     if ((await runGit(repo.root, ['show-ref', '--verify', '--quiet', `refs/heads/${created}`])).code === 0) throw refusal('git commit', 'A branch with that name already exists.');
   } else if (!branch) throw refusal('git commit', 'This folder is not on a branch. Check out a branch first.');
-  // Where HEAD was, to point it back to: its branch, or on a detached HEAD its commit.
-  const startCommit = created && !startedOn ? await text(repo, ['rev-parse', '--verify', 'HEAD']) : null;
+  // Starting branch/commit for native checkout after a definitely unaccepted attempt.
+  const startCommit = position.commit;
   let switched = false;
-  // The index as it was, once this commit starts staging: what the person staged by hand stays as it
-  // was if the commit does not happen, a part of a file (git add -p) too. An index Git cannot write
-  // as a tree (an unresolved conflict elsewhere) falls back to unstaging only what this commit staged.
-  let index: { tree: string | null; staged: Set<string> } | null = null;
-  const putBack = async (): Promise<void> => {
+  // Keep the user's index untouched until our commit is accepted. A plain external
+  // commit may already have released its index lock before running its hooks;
+  // restoring a saved tree after failure can therefore undo its staging.
+  const indexPath = path.join(repo.gitDir, 'index'), indexFile = `${indexPath}.lock`;
+  const action = `commit (CoS ${randomUUID()})`;
+  let leased = false, stopped = true, attempted = false, succeeded = false;
+  let failure: unknown;
+  let reportedCommit: string | null = null;
+  const execute = async (args: string[], options: GitRunOptions = {}) => {
+    stopped = false;
     try {
-      if (index) {
-        const restored = index.tree ? await runGit(repo.root, ['read-tree', index.tree]) : null;
-        if (!restored || restored.code !== 0) {
-          const unstage = paths.filter(file => !index!.staged.has(file));
-          if (unstage.length) await runGit(repo.root, ['reset', '-q', '--pathspec-from-file=-', '--pathspec-file-nul'], undefined, { input: `${unstage.join('\0')}\0`, env: LITERAL });
-        }
-      }
-      // The new branch is still the commit it started from, so pointing HEAD back is the whole
-      // switch; unlike `git switch` it works while another program holds the index.
-      if (created && switched) {
-        const back = startedOn ? await runGit(repo.root, ['symbolic-ref', 'HEAD', `refs/heads/${startedOn}`])
-          : startCommit ? await runGit(repo.root, ['update-ref', '--no-deref', 'HEAD', startCommit]) : null;
-        if (back?.code === 0) await runGit(repo.root, ['branch', '-D', created]);
-      }
+      // A private split-index writer must not expire a shared base still used by
+      // the untouched real index. This changes no repository configuration.
+      const result = await runGit(repo.root, args, undefined,
+        { ...options, config: { ...options.config, 'splitIndex.sharedIndexExpire': 'never' } });
+      stopped = result.code >= 0;
+      return result;
     } catch (error) {
-      logWarn(`git commit: could not put everything back (${error instanceof Error ? error.message : String(error)})`);
+      stopped = (error as { gitStopped?: boolean }).gitStopped === true;
+      throw error;
     }
+  };
+  const putBack = async (): Promise<void> => {
+    if (!created || !switched) return;
+    try {
+      const back = startedOn ? await runGit(repo.root, ['switch', '--no-guess', startedOn])
+        : startCommit ? await runGit(repo.root, ['switch', '--detach', startCommit]) : null;
+      if (back?.code !== 0) { logWarn('git commit: kept the new branch because Git refused rollback checkout'); return; }
+      // Native deletion keeps symbolic-ref/worktree guards. Compare with restored
+      // HEAD, not an inherited upstream, and remove tracking config on success.
+      const removed = await runGit(repo.root, ['-c', `branch.${created}.remote=.`, '-c', `branch.${created}.merge=`, 'branch', '-d', created]);
+      if (removed.code !== 0) logWarn('git commit: kept the new branch because Git refused safe branch cleanup');
+    } catch { logWarn('git commit: kept the new branch because rollback checkout did not finish'); }
   };
   try {
     if (created) {
       let made: Awaited<ReturnType<typeof runGit>>;
-      try { made = await runGit(repo.root, ['switch', '-c', created]); }
+      try { made = await execute(['switch', '-c', created]); }
       catch (error) {
-        // It never said how it ended (a timeout): if Git did switch, HEAD is on the new branch, which
-        // the rollback below takes back. A branch that was there before is refused by Git, never switched to.
-        switched = (await branchOf(repo).catch(() => null)) === created;
+        // An error never proves ownership, even when the requested name is now selected.
+        logWarn('git commit: kept any matching branch because branch creation was not confirmed');
         throw error;
       }
       if (made.code !== 0) {
-        // A branch made but not checked out would refuse the next try as "already exists".
-        if ((await branchOf(repo)) !== created && (await runGit(repo.root, ['show-ref', '--verify', '--quiet', `refs/heads/${created}`])).code === 0) {
-          await runGit(repo.root, ['branch', '-D', created]);
-        }
+        // A matching name may belong to another writer/worktree. Failure is not
+        // proof this attempt created it, so do not clean it up.
+        logWarn('git commit: kept any matching branch because branch creation was not confirmed');
         logWarn('git commit: not committed (Git could not create the branch)');
         throw new Error(`Git could not create the branch:\n${shown(made.stderr)}`);
       }
       switched = true;
       branch = created;
     }
-    const savedIndex = await runGit(repo.root, ['write-tree']);
-    const staged = new Set(decode((await runGit(repo.root, ['diff', '--cached', '--name-only', '-z', '--no-renames'])).stdout).split('\0').filter(Boolean));
-    index = { tree: savedIndex.code === 0 ? decode(savedIndex.stdout).trim() : null, staged };
-    const added = await runGit(repo.root, ['add', '-A', '--pathspec-from-file=-', '--pathspec-file-nul'], undefined, { input: `${toStage.join('\0')}\0`, env: LITERAL });
+    let lock: import('node:fs/promises').FileHandle;
+    try { lock = await fs.open(indexFile, 'wx', 0o600); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw refusal('git commit', 'Another Git operation is in progress. Try again when it finishes.');
+      throw error;
+    }
+    leased = true;
+    try {
+      const original = await fs.stat(indexPath).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return null;
+        throw error;
+      });
+      if (original) {
+        await lock.writeFile(createReadStream(indexPath));
+        await lock.chmod(original.mode & 0o777);
+        // A fresh copy's timestamp would hide same-tick edits from Git's racy
+        // stat cache. Keep it conservatively older than the source index.
+        await lock.utimes(original.atime, new Date(Math.max(1000, original.mtimeMs - 1000)));
+      } else {
+        await withTemporaryIndex(async empty => {
+          const initialized = await execute(['read-tree', '--empty'], { indexFile: empty });
+          if (initialized.code !== 0) throw new Error(`Git did not commit:\n${shown(initialized.stderr)}`);
+          await lock.writeFile(createReadStream(empty));
+        });
+      }
+      await lock.sync();
+    } finally { await lock.close(); }
+    const admitted = await commitPosition(repo);
+    const intendedRef = created && switched ? `refs/heads/${created}` : position.ref;
+    if (!admitted || admitted.ref !== intendedRef || admitted.commit !== startCommit) {
+      throw refusal('git commit', 'The changes changed. Review them again before committing.');
+    }
+    // Git writes its private index via index.lock.lock; index.lock continuously
+    // excludes new real-index writers, including hooks in other Git processes.
+    const added = await execute(['add', '-A', '--pathspec-from-file=-', '--pathspec-file-nul'],
+      { input: `${toStage.join('\0')}\0`, env: LITERAL, indexFile });
     if (added.code !== 0) {
       logWarn('git commit: not committed (Git could not stage the chosen files)');
       throw new Error(`Git did not commit:\n${shown(added.stderr)}`);
     }
-    const committed = await runGit(repo.root, ['commit', '--cleanup=whitespace', '-m', message, '--pathspec-from-file=-', '--pathspec-file-nul'], undefined,
-      { input: `${paths.join('\0')}\0`, env: LITERAL, timeoutMs: 120_000 });
+    attempted = true;
+    const committed = await execute(['commit', '--cleanup=whitespace', '-m', message, '--pathspec-from-file=-', '--pathspec-file-nul'],
+      { input: `${paths.join('\0')}\0`, env: { ...LITERAL, GIT_REFLOG_ACTION: action }, indexFile, timeoutMs: 120_000 });
     if (committed.code !== 0) {
       const output = `${committed.stderr}\n${decode(committed.stdout)}`;
       const noIdentity = /Please tell me who you are|Author identity unknown|unable to auto-detect email/i.test(output);
-      logWarn(`git commit: not committed (${noIdentity ? 'no Git identity' : 'Git or a hook refused'})`);
+      logWarn(`git commit: command failed (${noIdentity ? 'no Git identity' : 'checking whether Git accepted the commit'})`);
       if (noIdentity) throw new Error('Git does not know your name and email yet. Set them once with git config --global user.name and user.email, then commit again.');
       throw new Error(`Git did not commit:\n${shown(output)}`);
     }
-  } catch (error) {
-    // One rollback for a refusal and for a Git call that never finished (a timeout, a failed spawn).
-    await putBack();
-    throw error;
+    succeeded = true;
+    // Git's final summary follows its foreground hooks. Resolve the reported
+    // object, never a later moving HEAD; no English words or reflogs are required.
+    const summary = [...decode(committed.stdout).matchAll(/^\[[^\r\n]* ([0-9a-f]{4,64})\](?: |$)/gm)].at(-1);
+    reportedCommit = summary ? await text(repo, ['rev-parse', '--verify', `${summary[1]}^{commit}`]) : null;
+  } catch (error) { failure = error; }
+  const current = await commitPosition(repo).catch(() => null);
+  const expectedRef = created && switched ? `refs/heads/${created}` : position.ref;
+  const sameStart = current?.ref === expectedRef && current.commit === position.commit;
+  // Native reflogs identify OUR accepted HEAD update after an error. Never force
+  // reflogs on: disabled/unreadable receipts leave both indexes for recovery.
+  const receipt = attempted && stopped ? await text(repo, ['reflog', 'show', '-1', '--format=%H%x00%gs', 'HEAD']).catch(() => null) : null;
+  const [oid, subject] = receipt?.split('\0') ?? [];
+  const ownCommit = reportedCommit ?? (subject?.startsWith(`${action}:`) ? oid : null);
+  const accepted = stopped && current?.ref === expectedRef && current.commit === ownCommit ? ownCommit : null;
+  if (leased && accepted) {
+    try {
+      // A timeout in a post-commit hook can precede Git's private-index write.
+      // Reconcile only our paths to the exact receipt; keep unrelated staging.
+      const reset = await execute(['reset', '-q', accepted, '--pathspec-from-file=-', '--pathspec-file-nul'],
+        { input: `${paths.join('\0')}\0`, env: LITERAL, indexFile });
+      if (reset.code !== 0) throw new Error(`Git did not commit:\n${shown(reset.stderr)}`);
+      const ready = await fs.open(indexFile, 'r+');
+      try { await ready.sync(); } finally { await ready.close(); }
+      await fs.rename(indexFile, indexPath);
+      leased = false;
+      if (process.platform !== 'win32') {
+        const directory = await fs.open(repo.gitDir, 'r');
+        try { await directory.sync(); } finally { await directory.close(); }
+      }
+    } catch (error) { failure = error; }
+    if (!leased && failure) {
+      logWarn('git commit: kept the accepted commit and published its private index after a late failure');
+      const late = new Error('Git committed, but a later step failed. Check the commit before trying again.');
+      late.message += `\n${shown(failure instanceof Error ? failure.message : String(failure))}`;
+      failure = late;
+    }
+  } else if (!succeeded && stopped && sameStart) {
+    // No write-back on refusal. An already-prepared external as-is commit can
+    // still advance later, using the unchanged real index it originally read.
+    if (leased) {
+      try {
+        await fs.rm(`${indexFile}.lock`, { force: true });
+        await fs.unlink(indexFile);
+        leased = false;
+      } catch { logWarn('git commit: kept its private index because cleanup was refused'); }
+    }
+    if (!leased) await putBack();
   }
-  const commit = (await text(repo, ['rev-parse', '--short', 'HEAD'])) ?? '';
+  if (leased) {
+    logWarn('git commit: kept the original index and private index.lock because completion needs recovery');
+    const recovery = new Error('Git state needs recovery. Check this branch before retrying; index.lock was kept.');
+    if (failure) recovery.message += `\n${shown(failure instanceof Error ? failure.message : String(failure))}`;
+    throw recovery;
+  }
+  if (failure) throw failure;
+  const commit = accepted ? (await text(repo, ['rev-parse', '--short', accepted])) ?? accepted : '';
   logInfo(`git commit: committed ${chosen.length} change(s)${created ? ' on a new branch' : ''}`);
   // Committed on the new branch, or on the branch it was on (a detached HEAD without one was refused).
   return { commit, branch: created ?? branch ?? '' };

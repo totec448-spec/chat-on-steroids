@@ -318,8 +318,11 @@ async function searchWithRipgrep(
       }
     };
 
-    child.stdout.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString('utf8');
+    // A pipe chunk may end inside a Japanese character or emoji. Keep decoder state
+    // across chunks before parsing JSON, including its path and matching text.
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      stdout += chunk;
       let consumed = 0;
       for (;;) {
         const newline = stdout.indexOf('\n', consumed);

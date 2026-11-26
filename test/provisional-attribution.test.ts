@@ -231,6 +231,54 @@ it('gives exact request evidence precedence, even when it identifies another cha
   expect(await recording).toMatchObject({ attributionMethod: 'request_id', conversationId: 'chat-b' });
 });
 
+it('does not reread a chat\'s journal on every repair pass while its provisional call still lacks proof', async () => {
+  // A call with no proof stays provisional for good. Each later page-evidence trigger used to rescan the whole
+  // journal of every such chat (113 MB across 20 chats: 133 MB read per pass), a sustained CPU and disk load.
+  const sessionId = await begin();
+  await record('never-proved');
+  const journal = path.join(directory, 'sessions', sessionId, 'events.jsonl');
+  const open = vi.spyOn(fs, 'open');
+  const opens = () => open.mock.calls.filter(([file]) => String(file) === journal).length;
+  await repairDeterministicAttribution(new Set(['evidence-1']));
+  const first = opens();
+  expect(first).toBeGreaterThan(0);
+  await repairDeterministicAttribution(new Set(['evidence-2']));
+  await repairDeterministicAttribution(new Set(['evidence-3']));
+  expect(opens()).toBe(first);
+});
+it('still repairs a cached provisional call when the proof for its own request id arrives', async () => {
+  const sessionId = await begin();
+  await record('proved-later');
+  await repairDeterministicAttribution(new Set(['evidence-1']));
+  expect((await calls(sessionId)).map(row => row.call.attributionMethod)).toEqual(['generation']);
+  await prove('chat-a', 'proved-later');
+  await repairDeterministicAttribution(new Set(['proved-later']));
+  expect((await calls(sessionId)).map(row => row.call.attributionMethod)).toEqual(['request_id']);
+});
+it('does not cache a chat whose proved call could not be repaired because its source asset is missing', async () => {
+  const source = await begin();
+  const original = (await record('stuck-asset', captureRecordingContext(Date.now()), 'overflow result\n'.repeat(30_000)))!;
+  await fs.rm(path.join(directory, 'sessions', source, 'assets', original.result.assetId!));
+  const target = (await sessionForConversation('chat-b'))!;
+  await prove('chat-b', 'stuck-asset');
+  await repairDeterministicAttribution(new Set(['evidence-1']));
+  expect(await calls(target)).toHaveLength(0);
+  const journal = path.join(directory, 'sessions', source, 'events.jsonl');
+  const open = vi.spyOn(fs, 'open');
+  // A pass for other ids must still retry it, as before the cache existed.
+  await repairDeterministicAttribution(new Set(['evidence-2']));
+  expect(open.mock.calls.filter(([file]) => String(file) === journal).length).toBeGreaterThan(0);
+});
+it('rescans a chat whose journal grew since its provisional calls were last checked', async () => {
+  const sessionId = await begin();
+  await record('first-open');
+  await repairDeterministicAttribution(new Set(['evidence-1']));
+  await record('second-open');
+  const journal = path.join(directory, 'sessions', sessionId, 'events.jsonl');
+  const open = vi.spyOn(fs, 'open');
+  await repairDeterministicAttribution(new Set(['evidence-2']));
+  expect(open.mock.calls.filter(([file]) => String(file) === journal).length).toBeGreaterThan(0);
+});
 it('upgrades late same-chat proof without duplicating the call or losing turn boundaries', async () => {
   const id = await begin();
   const original = await record();

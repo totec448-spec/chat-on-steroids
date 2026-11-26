@@ -698,8 +698,11 @@ export function assertWritableSize(content: string): void {
 
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  // A size that rounds up to 1024.0 of a unit is one of the next unit.
+  const kilobytes = (bytes / 1024).toFixed(1);
+  if (bytes < 1024 * 1024 && Number(kilobytes) < 1024) return `${kilobytes} KB`;
+  const megabytes = (bytes / (1024 * 1024)).toFixed(1);
+  if (bytes < 1024 * 1024 * 1024 && Number(megabytes) < 1024) return `${megabytes} MB`;
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 

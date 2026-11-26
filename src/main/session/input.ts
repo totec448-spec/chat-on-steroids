@@ -2190,7 +2190,7 @@ export function pendingBrowserInputs(): Promise<Array<{ id: string; conversation
       if (!(await browserInputAllowed(entry))) { pauseScheduledPickup(); continue; }
       try {
         const conversationId = await target(entry);
-        // A worker chat this app archived in ChatGPT has no message box until it is restored (#1701).
+        // A message to a worker chat archived here waits for its restore gate (#1701).
         if (conversationId && !readyForWake(conversationId)) { pauseScheduledPickup(); continue; }
         // A new chat of a project with a native ChatGPT Project opens in that Project and nowhere
         // else: it waits while the Project is being created or could not be, never the root.

@@ -28,7 +28,7 @@ import { messageReferences } from '../shared/session.js';
 import { turnTrace } from '../shared/turn-trace.js';
 import { checkAutomaticSend, SEND_CHECK_RETRY_MS } from './send-check.js';
 import { publishBrowserDecision, authorizeBrowserInput, sessionInputPolicy, collectRecordedBrowserDecision, fileRotationInput, fileRotationContinueAfterStop, rotationDelivery, withdrawUnsentRotation, type InputActivity } from './session/input.js';
-import { callHoldOpen, holdCalls } from './rotation-hold.js';
+import { afterCallsAnswered, callHoldOpen, holdCalls } from './rotation-hold.js';
 import { authorizedPluginRefreshPublications, hasRequestedPluginRefresh, pendingPluginRefreshes, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh } from './plugin-refresh.js';
 import { attachBrowserWake, wakeActivityWork, wakeBrowserWork } from './browser-wake.js';
 import { noteRouteExistingChatSend, tunnelRouteSettling } from './tunnel/route-settle.js';
@@ -39,6 +39,7 @@ let browserWake: ReturnType<typeof attachBrowserWake> | null = null;
 import { browserWindowBounds, currentBrowserWorkArea } from './browser-window-layout.js';
 export { setBrowserWorkArea } from './browser-window-layout.js';
 import { pendingBrowserPreferenceRequest, acknowledgeBrowserPreferences } from './browser-preferences.js';
+import { acceptWebChatTitle, offerWebChatTitleCheck } from './web-chat-title.js';
 import { sessionFinishHeld, releaseSessionFinish, getSessionFinishDraft, sessionFinishWaiting } from './session/finish.js';
 import { observeUsage } from './session/usage.js';
 import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, lostBrowserOpening, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, queuedInputOfferBlocker, continueAsOrdinaryMessage, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, withdrawOwnContinuesAfterStop, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation, ownUnsentTexts, ownSentResidue, retireMismatchedRecoveryInput, noteInputHeld } from './session/input.js';
@@ -788,6 +789,15 @@ function chosenBuiltInBrowser(req: http.IncomingMessage): boolean {
 function browserOf(req: http.IncomingMessage): string | null {
   const id = req.headers['x-extension-browser'];
   return typeof id === 'string' && /^[a-z0-9]{16,64}$/.test(id) ? id : null;
+}
+function webTitleBrowser(req: http.IncomingMessage): string | null {
+  const browser = browserOf(req);
+  if (!browser || staleCompanion(req)) return null;
+  const selected = getConfig().ui.chatBrowser;
+  if (selected === 'cos') return chosenBuiltInBrowser(req) ? browser : null;
+  return req.headers['x-extension-host'] === 'browser' &&
+    geckoExtension(req) === (selected === 'firefox') &&
+    externalExtension?.browserId === browser ? browser : null;
 }
 const browserSeenAt = new Map<string, number>();
 /** Until when a browser's extension reloads into a new build; it takes no new message meanwhile. */
@@ -3523,6 +3533,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     return json(res, ok ? 200 : 409, { ok }, origin);
   }
+  if (route === '/browser/web-chat-title' && req.method === 'POST') {
+    const body = await readBody(req, 2048);
+    const browser = webTitleBrowser(req);
+    const accepted = browser !== null && acceptWebChatTitle(browser, body);
+    return json(res, accepted ? 200 : 409, { ok: accepted }, origin);
+  }
+
   if (route === '/browser/preferences' && req.method === 'POST') {
     const accepted = acknowledgeBrowserPreferences(await readBody(req));
     return json(res, accepted ? 200 : 409, { ok: accepted }, origin);
@@ -3648,6 +3665,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const pendingInputs = otherBrowser ? [] : await pendingBrowserInputs();
     const pendingIds = new Set((await pendingBrowserInputs()).map(input => input.id));
     for (const id of openingCustody.keys()) if (!pendingIds.has(id)) openingCustody.delete(id);
+    const titleBrowser = req.method === 'POST' ? webTitleBrowser(req) : null;
+    const webChatTitleCheck = titleBrowser ? offerWebChatTitleCheck(titleBrowser) : undefined;
     return json(
       res,
       200,
@@ -3663,6 +3682,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           [surface, apps.map(({ appId, linkId, name }) => ({ appId, linkId, name }))])),
         pluginRefreshRequests: otherBrowser ? [] : (await authorizedPluginRefreshPublications(getConfig().ui.autoRefreshPlugins === true)).map(({ surface, schemaId, connectorName }) => ({ surface, schemaId, connectorName })),
         browserPreferenceRequest: pendingBrowserPreferenceRequest(),
+        ...(webChatTitleCheck ? { webChatTitleCheck } : {}),
         projectCreateRequests: otherBrowser ? [] : await pendingProjectCreates(),
         inputOpeningIds: inputRows.filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).map(row => row.id),
         // The ones being sent right now (handed to a browser), not those that only wait in the queue:
@@ -7117,7 +7137,7 @@ async function startBridgeOnce(epoch: number, prepared?: PreparedBridge): Promis
   dropReviveRequestListener?.();
   dropReviveRequestListener = onReviveRequest((revivals: WorkerRevival[]) => {
     for (const revival of revivals) {
-      // ChatGPT shows no message box in an archived chat: one this app archived is restored first.
+      // Restore a chat archived here before queuing more work for its worker.
       if (!readyForWake(revival.conversationId)) continue;
       queueWorkerRevival(revival.id, revival.conversationId, revival.messageIds, revival.runId);
     }
@@ -11863,7 +11883,9 @@ function noteCallAttribution(
         // still find it and file the continue (CodeRabbit on #1954).
         const fenceSaved = armRotationFence(conversationId, sourceTurnId);
         logInfo(`turn rotation: ${conversationId} — ChatGPT offered no Send for the continue; stopping turn ${sourceTurnId} after this result to continue in a fresh one`);
-        const timer = setTimeout(() => {
+        // Half a second after the answers have gone out, not after this call was attributed: a slow
+        // recording kept the answer back past that, and a Stop during a running call reruns it (#2238).
+        const startStop = () => { const timer = setTimeout(() => {
           void fenceSaved.then(saved => {
             if (!saved) {
               void clearRotationFence(conversationId);
@@ -11877,7 +11899,8 @@ function noteCallAttribution(
             logWarn(`turn rotation: ${conversationId} — could not stop turn ${sourceTurnId}: ${String(error)}`);
           });
         }, ROTATION_STOP_DELAY_MS);
-        timer.unref?.();
+        timer.unref?.(); };
+        if (!afterCallsAnswered(conversationId, startStop)) startStop();
       } else {
       let filedId: string | null = null;
       const deps: RotationDeps = { ...turnRotationDeps, file: async (session, turn) => {

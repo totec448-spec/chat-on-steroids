@@ -203,7 +203,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Unattributed allowance | True on first launch. | Relaxes ambiguity fences only; known blocked/retired/superseded ownership stays enforced. |
 | Auto-select Skills | Off. | When on, ordinary human-authored input with no explicit Skill directive may select at most one managed/imported Skill whose full id/name/display name is literally present after case and hyphen/whitespace normalization. Recognized Japanese particles may touch the full name; other word continuations and outer hyphen-joined compounds do not count as that name. Direct English/Japanese usage exclusions next to a name suppress that Skill, including coordinated lists and conflicting positive mentions. This is literal routing, not topic or general natural-language intent classification. If multiple matches remain or no name is present, nothing is selected; explicit `/id` or `/prompt id` always wins. |
 | Strict chat allowlist | Off. | When on, every model-facing tool call needs exact attribution. Existing/direct browser chats require explicit Trust from the chat list. A fresh chat opened by the CoS composer gains an explicit Trust entry only after its exact opening row authoritatively binds to the new conversation. Broker-owned workers follow their exact owning prime and a committed Compact & Resume successor follows its durable source lineage. Block still wins, revocation is dynamic, and unattributed calls are refused even when the ordinary unattributed allowance is on. |
-| Archive worker chats | Off (`multiAgent.archiveWorkerChats`). | #1460, #1701. A worker chat queues 2 min after its worker reports done (`onWorkerFinished`, from `publishFinish`; `dueAt`), and every chat the broker retires for good queues at once (`onWorkerChatsRetired`: an ended run, Clear workers retiring parked histories, or a parked history expiring after 7 days), in `worker-archive.ts` (`state/worker-archive.json`, which also remembers the chats it archived). A wake for such a chat is held in the bridge's `onReviveRequest` (`readyForWake`): a not-yet-started archive is dropped; an archived (or being-archived) chat gets an unarchive job first, handed out before archives as `{ conversationId: null, unarchive }` (an old extension reads nothing), retried from 15 s, and the wake is queued on `onWorkerChatReady` (unarchived, given up, or 90 s at most). Unarchiving ignores the setting. The extension's alarm pass takes one via `POST /worker-archive/next` (leased 2 min), asks any registered ChatGPT page (`clf-archive-chat`) to `PATCH /backend-api/conversation/<id>` `{ is_archived: true }` with the signed-in account, and reports `archived`/`unarchived`/`failed`/`deferred` to `POST /worker-archive/result`. `deferred` (no page) costs no attempt; failures back off from 5 min, 6 attempts or a week at most. ChatGPT's own reversible archive: nothing is deleted. Temporary Chats were rejected: tools work there, but a reload loses the conversation (2026-10-14). |
+| Archive worker chats | Off (`multiAgent.archiveWorkerChats`). | #1460, #1701. A worker chat queues 2 min after its worker reports done (`onWorkerFinished`, from `publishFinish`; `dueAt`), and every chat the broker retires for good queues at once (`onWorkerChatsRetired`: an ended run, Clear workers retiring parked histories, or a parked history expiring after 7 days), in `worker-archive.ts` (`state/worker-archive.json`, version 3: queued jobs plus last archived/restored states, bounded to 2,000 of each for 30 days; expired records are ignored at load and lookup against the current clock without refreshing saved timestamps; version 2 archive records still load). A wake for such a chat is held in the bridge's `onReviveRequest` (`readyForWake`): a not-yet-started archive is dropped; an archived (or being-archived) chat gets an unarchive job first, handed out before archives as `{ conversationId: null, unarchive }` (an old extension reads nothing), retried from 15 s, and the wake is queued on `onWorkerChatReady` (unarchived, given up, or 90 s at most). Unarchiving ignores the setting. The extension's alarm pass takes one via `POST /worker-archive/next` (leased 2 min), asks any registered ChatGPT page (`clf-archive-chat`) to `PATCH /backend-api/conversation/<id>` `{ is_archived: true }` with the signed-in account, and reports `archived`/`unarchived`/`failed`/`deferred` to `POST /worker-archive/result`. An expired lease does not cancel a remote PATCH: a late success opposite to a retired job’s last settled state queues a corrective archive/unarchive, even after restart; unknown-chat and duplicate same-state results do nothing. The saved correction marker makes an unleased correction ignore stale receipts (logged), including after restart; once leased, receipts count as before. No bridge/extension wire fields change. A late unarchive also cannot consume a newer pending archive. `deferred` (no page) costs no attempt; failures back off from 5 min, 6 attempts or a week at most. ChatGPT's own reversible archive: nothing is deleted. Temporary Chats were rejected: tools work there, but a reload loses the conversation (2026-10-14). |
 | Recover ordinary/agent tabs | Off. | Goal/Loop can independently justify recovery; history alone cannot. |
 | Automatic Continue | On. | Unfinished-response recovery also serves enabled Goal/Loop. This switch controls ordinary chats; explicit Off survives and malformed config disables it. See §14. |
 | Continue prompt | Built-in phrases (`ui.customContinue` unset). | Settings › Goal & Loop. The person's text (trimmed, at most 500 characters, `CUSTOM_CONTINUE_MAX_CHARS`) replaces only the Continue phrase of a silence-recovery Continue (`recoveryMessage({ custom })`, frozen in the outbox row when it is filed); the notice to check existing work and the optional playful aside stay. Empty, too long or damaged reads as unset. Fresh-turn rotation keeps `rotationMessage()`, which `goal.ts` recognises by its text. |
@@ -213,7 +213,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Shell/UI | Dark theme, minimize to tray, no automatic connector connection/login startup by default. | Optional browser/finish/plan choices are resolved by current config and their consumer, not invented from absent fields. |
 | Command policy | Off, in Allowlist mode, with no rules. | Missing legacy settings stay Off; a missing mode defaults to Allowlist. Rules and mode persist while Off. An enabled empty Allowlist rejects every launch; an enabled empty Denylist permits simple supported commands. |
 | Plugin auto-refresh | On. | Configs written before the setting existed read Off (schema default); conservative recovery also turns it off. While it is off and `ui.autoRefreshPluginsAsked` is not set, the window offers it once (`pluginRefresh:offer`); either answer sets `autoRefreshPluginsAsked`, which a settings save never clears. Local status/discovery never claims ChatGPT refreshed its connector snapshot. |
-| Turn-done notifications | On (`ui.turnNotifications`, missing means on). | Codex's turn-completion notification. `turn-notifications.ts` watches session changes and notifies once per newer `lastTurnEndAt` of a top-level chat whose outcome is `completed` and has no new active turn, while the window is unfocused. Seeded from the session list at startup, so older turns never notify. Workers, helpers, chats whose Goal/Loop switch is on, and chats that got a Session-finish or stuck notice in the last 2 minutes stay quiet. The body is the answer's first paragraph as plain text (140 characters); a click opens the chat. |
+| Turn-done notifications | On (`ui.turnNotifications`, missing means on). | Codex's turn-completion notification. `turn-notifications.ts` watches session changes and notifies once per newer `lastTurnEndAt` of a top-level chat whose outcome is `completed` and has no new active turn, while the window is unfocused. Seeded from the session list at startup, so older turns never notify. Workers, helpers, chats whose Goal/Loop switch is on, and chats that got a Session-finish or stuck notice in the last 2 minutes stay quiet. The body is the answer's first paragraph as plain text (140 characters). On Linux, clicking this or a Session-finish notification explicitly requests the recorded ChatGPT conversation in the selected browser (`openSessionChat`: reuse the existing tab, otherwise open one). A missing or malformed recorded conversation ID is refused without opening a tab or focusing CoS. Windows/macOS still open the chat in CoS. The Session-finish notification's **Write Directly** action always opens the CoS composer. The native notice objects are retained for clicks/actions (bounded to 128 notices/24 hours) so a GC'd Electron wrapper cannot silently lose the click; logs distinguish the received click from the dispatched browser reveal, which does not guarantee OS window focus. Notice objects and click handlers belong to the current Electron process: a notification left visible by GNOME across an app restart cannot be relied on to respond to clicks; only notifications issued by the new process are actionable. No automatic browser activation happens until the user clicks. |
 | Phone notifications | Off (`ui.phonePush`, missing means off). | ntfy (`phone-push.ts`, Settings → General → Phone notifications). Three kinds: needs you (the Session finish and stuck/approval notifiers), failures (tunnel loss), finished (the turn notifier hands every completed top-level chat over with `workedMs` from the turn's `turn_start` event, whether or not the window is focused). The phone keeps its own rules: kind switches, finished only after `finishedAfterMinutes` (null never, 0 always; an unknown length counts as long), quiet hours (local, may wrap midnight), away = `powerMonitor.getSystemIdleState(180)` is idle/locked/unknown, at most once per chat and kind in 2 min and 20 an hour; a message that did not arrive does not count. JSON publish to the server root (UTF-8 safe), optional Bearer token from secure storage (`ntfyToken`, IPC `phonePush:token`, `AppState.hasPhonePushToken`). By default a message only says what happened; `includeDetails` adds the chat's name, the answer's start and a `click` link to the ChatGPT chat. One `phone push:` log line per decision, never the message. `phonePush:test` sends now regardless of the rules. |
 | Telegram (#1934) | Off: no token, no link. | A second phone destination beside ntfy, under the same rules and limits (`ui.phonePush.ntfy`, missing means on, turns ntfy alone off; its topic and server are checked only while it is on). `telegram.ts` (bot), `telegram-status.ts` (`/status`), `telegram-app.ts` (wiring). The person's own @BotFather token is in secure storage (`telegramBotToken`, IPC `telegram:connect`), never in `AppState`, a log line or a settings backup; Telegram's address carries it, so a network error quoting the address has it replaced by `<token>`. `connect` checks it with `getMe`, skips earlier updates, and shows an 8-character code for 10 minutes; `/start <code>` from a private chat links exactly that account (durable store `telegram-link`: user id, chat id, names). Linked: long polling (`getUpdates`, 50 s, outgoing only); messages and buttons from any other account are ignored and logged once a minute; commands older than 2 min (sent while the app was closed) are not answered; `/status` (counts, or with `includeDetails` up to eight named chats) and `/help` (also `/start`); anything else gets the command list. A needs-you message for a waiting approval card carries **Deny** only (never Allow: its own security review first); pressing it calls `requestApprovalAnswer(…, 'deny')` for exactly that card, answers "Already answered." when it is gone, and marks the message. 401/404 from Telegram stops the bot (`token-refused`); 409 (another app polls the bot) shows `conflict` and retries every minute. Unlink (`telegram:disconnect`) forgets the link and the token. `AppState.telegram` carries state, bot and account names and the pairing code. No desktop-question button: that question shows only while someone is at the computer and declines itself after 60 s. **Phase 2 (2026-10-31):** each notification about a chat is remembered with Telegram's message id (500 at most), so a reply acts on that chat. `/stop` (the app's Stop on its running or held turn, `stopSessionTurn`), `/pause` (Goal/Loop off, keeping which; the chat is saved in durable `telegram-paused` first) and `/resume` (back on, only for a chat paused from Telegram and still off) act on the replied-to chat, or else on the only chat they can mean (`telegramTargets`, own chats only): none or several get a sentence and nothing happens. A worker or helper chat is never a target and never gets a reply, also when its notification is replied to (`act` and `steer` look the chat up again); a held turn (`sessionHoldsTurn`: the stored open turn and the live recorder agree) counts as running for a bare `/stop`, a stored open turn alone never does. `/pause` means the running Goal/Loop chats first; its marker is kept only if the switch really went off, and any other control that turns the switch on (`onSessionAutomationChange`, `noteAutomationChanged`) ends it. Connecting a new token forgets the old bot's remembered notices. A settings import that turns `ui.phonePush.telegramSteer` on is listed as wider access; the form leaves an absent `telegramSteer` absent until the switch is touched, and shows it as saved after a refused save. Any other reply to a notification goes through `telegram-steer.ts` as the person's message (`sendDesktopInput`, mode by `ui.followUp` while the chat works), only with `ui.phonePush.telegramSteer` on (missing: off; a message can make ChatGPT run tools here), never to a worker or helper chat; its words never reach the log. A reply to an unknown or forgotten message does nothing and says so. |
 | Sounds (#1802) | Off (`ui.sounds`, missing means off). | Settings → General → Chats → Play sounds. `main/sound-cues.ts` decides at the same three points that hand events to the phone (needs you, failed, finished): finished only while the window is not focused, nothing during phone notifications' quiet hours while those are on, at most once per chat and kind in 2 min. It sends `sound:cue` (`SoundCue` in `shared/sound-cues.ts`) to the window, which plays a short Web Audio tone (`renderer/sound-cues.ts`, no audio files); with no window (tray only) nothing plays. One `sound:` log line per decision except when off. Turning the setting on plays the finished sound once as a preview. |
@@ -221,7 +221,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Stop fallback for fresh turns | On since 2.1.49 (`ui.rotateStopFallback`; disabled while fresh turns are off). Earlier configs are turned on once (`adoptStopFallback`, marked `ui.rotateStopFallbackAdopted`), because every earlier save wrote the old default; a later off stays off. | Where ChatGPT shows only Stop at a tool result it offers no Send for the continue (`ROTATION_DECLINED`, `no-send`). After `STOP_FALLBACK_AFTER_DECLINES` (2) such declines in one turn and the usual minute, the next held result takes the fallback instead of a third continue (`stopFallbackDue`/`noteStopFallback`, once per turn): `rotation-fence.ts` arms a fence (the kernel refuses that chat's calls with `ROTATION_FENCE_REFUSAL`, nothing runs, so a Stop landing mid-call cannot repeat a call, #1662), and 500 ms later `stopSessionTurn(…, { rotation: true })` queues the native Stop without turning Goal/Loop off or cancelling Compact & Resume. The stopped end of exactly that turn lifts the fence and files `fileRotationContinueAfterStop`: a `purpose: 'rotation'`, `afterStop: true` ordinary message (no `directTurn`), which `typedAfterStop` lets through once the turn shows stopped and nothing runs. The fence lifts at the processed stopped end (which files the continue), at once when the page reports it could not send that Stop (a terminal-failure receipt) or when the person's own Stop takes the turn over (no continue follows; the pending Stop is first saved without its `rotation` mark, `withdrawStopRotation`, so a restart restores neither it nor its fence), or after the Stop's 120 s budget plus 15 s (`FENCE_MS`) without a stopped end; fences are kept in the durable store `rotation-fences` (`[{ conversationId,
 turnId, until }]`) and `restoreCommands` brings back what is left of each (`restoreRotationFences`), so a restart
 after ChatGPT took the Stop but before its stopped end still files the continue; the fresh-turn Stop
-goes out only once its fence is on disk (`armRotationFence` resolves), and not at all when it cannot be saved; a fresh-turn Stop carries `rotation: true`, so after a restart a pending one re-arms its fence for what is left of that time. With fresh turns at 0 minutes no fallback Stop is taken, even after declines. The after-Stop continue stays owed until it is sent (`owed-continue.ts`, #2131): the stopped end that files it also notes the obligation, and while the chat is quiet for 45 s (any page report or tool call of that chat restarts the wait) a continue the page refused before Send is filed again, at most 4 times in all and for at most 2 hours; it ends when the continue was sent, anything else was written in the chat (the person's message, here or in ChatGPT), the chat is gone, or the person's own Stop. A running turn only postpones it. Live 2026-10-20 (VM): Stop 1 s after a result, then "continue", repeated no step (2 runs). |
+goes out only once its fence is on disk (`armRotationFence` resolves) and half a second after every call answer of the chat has gone out (`afterCallsAnswered` in `rotation-hold.ts`, at the latest 10 s; a Stop while a call still runs makes the model run it again, #2238), and not at all when it cannot be saved; a fresh-turn Stop carries `rotation: true`, so after a restart a pending one re-arms its fence for what is left of that time. With fresh turns at 0 minutes no fallback Stop is taken, even after declines. The after-Stop continue stays owed until it is sent (`owed-continue.ts`, #2131): the stopped end that files it also notes the obligation, and while the chat is quiet for 45 s (any page report or tool call of that chat restarts the wait) a continue the page refused before Send is filed again, at most 4 times in all and for at most 2 hours; it ends when the continue was sent, anything else was written in the chat (the person's message, here or in ChatGPT), the chat is gone, or the person's own Stop. A running turn only postpones it. Live 2026-10-20 (VM): Stop 1 s after a result, then "continue", repeated no step (2 runs). |
 | Follow-up behavior | Join the running turn (`ui.followUp: 'steer'`; a broken value loads as that). | Codex's "Follow-up behavior". Each running turn starts the composer's delivery choice from this default (`queue` selects After this turn); a choice made in the send menu lasts for that turn. Cmd/Ctrl+Shift+Enter sends the other way (`sendComposer('auto' \| 'after-turn')`); with no running turn it is an ordinary send. |
 | Enter key | Enter sends (`ui.enterSends`, missing means true). | Codex's "Enter key behavior". With `false`, Enter adds a line in the composer and Cmd/Ctrl+Enter sends; Shift+Enter always adds a line and Cmd/Ctrl+Shift+Enter keeps sending the other way (Follow-up behavior). |
 | Code checkpoints | Off (`projects.codeCheckpoints`; missing or malformed means Off). | Settings → Workspace, Folders: “Save a checkpoint before each turn's first edit”. `checkpointBeforePatch` reads `getConfig()` in the main process at capture time (never a renderer claim), so a flip applies to the next patch without a restart. Off stops new turn checkpoints only: existing ones stay listed in Review and Restore, including its own “Before restore” undo entry, keeps working. §10. |
@@ -289,6 +289,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Input and checkpoints | `input.ts` / `state/session-input.json` | Serialized acceptance, frozen payload, exclusive claim and receipt; stages belong here. |
 | Native upload originals | `input-attachments.ts` / `input-attachments/` | Immutable bytes, opaque ids; outbox owns membership and retention. |
 | Project catalog | `projects.ts` / `state/projects.json` | Serialized catalog mutation; session metadata owns association. |
+| Chat groups and pending group placement | `chat-groups.ts` / `state/chat-groups.json` | One optional `move` intent is saved with the catalog and old membership before a project-changing group move. The session's saved project decides recovery; groups never write a project. |
 | Code checkpoints | `checkpoints/store.ts` / `state/code-checkpoints.json`; tree objects in the project's own Git object store | Entry written only after `write-tree` returned its tree. Bounded per project (20); a restore's "Before restore" entry never evicts the checkpoint being restored (the oldest other one makes room). An evicted or pruned tree reads as unavailable, never as an empty comparison. |
 | Browser commands/results | `bridge.ts` / `state/bridge-commands.json`; extension ACK outbox | Intent and exact lease before text; receipt durable before ACK custody is retired. |
 | Direct browser tool calls | `browser-control.ts` process epoch/pending claims; extension `storage.session.cosBrowserControl` | One claim per command; browser incarnation plus local-session tab lease. MV3 retains custody/receipt, never replays input. App restart invalidates outstanding claims. |
@@ -369,10 +370,15 @@ changes nothing), then overlays the backup on today's settings (`overlaySettings
 keeps today's value, an unknown one is ignored, lists are whole) and runs the same `saveSettings`
 the form uses, with all its effects, then writes the keys with `setSecrets` in one commit. The
 preview counts only what that save really applies (`importPlan` runs `mergeSettings`), plus
-`ui.language`, which the import applies itself. A value the schema refuses refuses the whole file
-(`invalid-settings`); a preview whose `changed`/`wider` no longer match today's settings is refused
-and its token dropped. A save that fails after it wrote the settings (login item, control API,
-worker history) still gets the language and keys, and the reply carries its message in `warnings`.
+`ui.language`, which the import includes in its guarded settings commit. A value the schema
+refuses refuses the whole file (`invalid-settings`); a preview retains the portable setting
+values it confirmed, not just the changed/wider field names. If those values changed, even within the same field, the import is
+refused and its token dropped. The check runs again inside the config mutation queue, after
+any earlier save; per-computer fields excluded from backups do not invalidate the preview.
+The imported language commits with those settings, not in a later write that could overwrite
+a window's newer language choice. Ordinary form saves still preserve the current language.
+A save that fails after it wrote the settings (login item, control API, worker history) still
+gets the language and keys, and the reply carries its message in `warnings`.
 An unreadable key store refuses an import with keys before anything changes; a key write that
 still fails after the settings were written is a warning ("…could not be stored"), `keyCount` 0.
 A short export passphrase is refused before any key is read. Keys
@@ -1212,6 +1218,32 @@ and every chat that needs the person stay visible beyond the page. While that pr
 is unread its empty state says "Loading chats…", and after a failed read it offers Retry.
 The filter is window-local, like disclosure state.
 
+A local chat move validates its requested group and membership limit before any family project
+write. `chat-groups.ts::moveChatGroup` holds the group mutation queue through the project move
+and placement; deletion or assignment cannot invalidate the checked destination meanwhile.
+A rejected group choice leaves the chat and its workers in their previous project. IPC group
+assignments resolve the session inside that queue, so an assignment waiting behind a move checks
+the new project rather than a stale summary. A failed project write leaves group membership
+unchanged and releases the queue for retry; queued mutations log why they wait.
+
+`moveChatWithGroup` saves an optional `move` intent before every project change, with its session
+id, old/new project ids and intended group (null included), atomically alongside the existing
+version-1 catalog/members via `writeDurableNow`. Success queues the final placement and retires
+the intent in that same store snapshot. This includes moves with no group at either end: the
+snapshot commits a preceding debounced ungrouping so a round trip cannot revive an old group.
+After a process crash, the first group read/mutation uses `getSessionOrNullIfMissing`: a committed destination restores the intended placement; an
+uncommitted move keeps the old membership; a missing chat loses its membership. Recovery is
+written immediately before the group queue resumes. A callback error retains the intent and
+requires this same check before the next read/mutation: an error after the main project commit
+must not discard its group placement. Recovery never moves a session or its workers.
+
+Unreadable session metadata, group-store I/O or recovery-write errors retain the disk record
+and refuse group mutations until retry succeeds. Readable legacy/malformed group data keeps
+its existing tolerant loading; invalid intents are ignored and logged. No IPC/shared type or
+session-metadata format changes are needed. `projects.test.ts` drops all volatile writes and
+reopens the real stores at the crash cut, including moves into a new group, out of grouping,
+uncommitted moves and failed recovery; `chat-groups.test.ts` covers legacy/corrupt group rows.
+
 Removing a project marks the catalog row `ungrouped`. Existing and unloaded sessions, pending
 inputs and workers keep their durable project association; their chats return to the ordinary
 sidebar list. Adding that same folder again restores grouping. It does not delete files,
@@ -1476,6 +1508,10 @@ Its 512 KiB text budget is separate from its four-image/12 MiB base64 budget. Im
 `codex/filesystem.ts` is primitives; `sandbox.ts` is authorization. Do not push policy into
 low-level primitives and assume every public caller became safe. Search uses bundled-first
 ripgrep when commands are allowed, or `find` with `search.ts` when they are not.
+`search.ts` decodes ripgrep stdout as one UTF-8 stream before parsing its JSON lines, so a pipe
+boundary cannot corrupt a multibyte path or matching text. `search-ripgrep-stream.test.ts`
+feeds Japanese and emoji byte by byte, with and without a final newline; existing result limits,
+virtual paths and backend selection are unchanged.
 
 `apply_patch` accepts Codex V4A in the MCP `patch` string. Its parser, grammar, hunk matching,
 text/line-ending representation and replacement application live in `codex/apply-patch/*`.
@@ -1561,6 +1597,9 @@ running. For an exactly attributed launch, the process instance's exit promise r
 same canonical call UUID with exit time/code; numeric terminal-id reuse cannot retarget it.
 This revision neither drains output nor creates model work, a new tool call or a turn boundary.
 Legacy launches without exit evidence display `started`; never invent a retrospective success.
+An exec summary whose evidence says `running: false` with exit 0 carries `ended: true`; only then does the
+browser transcript show its `✓ <duration>` (#2239). A `✓ <duration>` without `ended` (recorded before the app kept
+that state, or with unknown process state) stays hidden there, since it may be a yield window.
 
 `env.ts` is the shared child-environment authority: Windows key names are case-insensitive,
 so use its accessors rather than creating both `Path` and `PATH`. Preserve inherited values.
@@ -1771,7 +1810,10 @@ or browser delivery. Each New Chat opening reserves its own local session in the
 materializes that exact desktop session. Another New Chat may be admitted immediately; pending
 delivery remains Queued. The existing browser election and exact claim still own native Send.
 Cancellation revokes both the outbox row and its transient startup controller; shutdown aborts
-startup and explicit retries before they can wake a browser later. Startup failure leaves the
+startup and explicit retries before they can wake a browser later. Both sends and retries pass their
+controller and a live queued-row check to the shared browser startup authority. It revalidates
+after the process query, so cancellation, shutdown or a browser claim during that query prevents
+an OS launch without changing absence-episode deduplication. Startup failure leaves the
 same queued input and an explicit retry action. An ordinary automatic browser input that was
 never claimed within sixty seconds carries a pre-Send pickup-failure timestamp. The bridge's
 bounded recovery sweep may requeue that same UUID once, after two minutes and before the input is
@@ -4314,7 +4356,15 @@ read as not there, whatever its label (an app renamed in ChatGPT); another app's
 (#2159). A timeout in this step says what kept the editor, without any of its text:
 `transition-timeout:last=composer-not-ready:draft=<kind>:clears=<n>:chips=<n>`, `kind` one of `no-editor`,
 `readonly`, `busy`, `attachment`, `empty`, `other`, `brief-own`, `brief-foreign`, `context-own`, `context-foreign`
-(`…-own` with `clears=3` means the app knew the draft and ChatGPT kept putting it back). User interaction,
+(`…-own` with `clears=3` means the app knew the draft and ChatGPT kept putting it back). When the draft is one of
+the app's kinds (`brief`, `context`, `handoff`; not a `readonly`, `busy` or `attachment` reason) the reason ends in
+`:len=<n>:typed=<n>[:lens=<a/b/c/d>]` (2026-11-23, #2159: one reporter's `brief-foreign` repeated for one chain of
+resumes): the draft's length as drafts are compared (without whitespace and without the escape backslashes ChatGPT
+adds), how many briefs this page remembers typing, and the lengths of the four newest, newest first, measured the
+same way. Numbers only, no text of it. They are clues, not proof: `typed=0`, or no listed length near `len`, points
+at a draft this page never typed (another window, an emptied storage) but an older brief is not listed, and a draft
+that was edited a lot looks the same; a length a little off a listed one points at ChatGPT giving it back changed.
+User interaction,
 cancellation or a foreign route revokes the attempt; no extra tab compensates for a missing result.
 When an automatic Compact & Resume's page acks `project-entry:source-ready-timeout…` or
 `…transition-timeout…` (nothing sent), the bridge releases that attempt's destination claim
@@ -5437,6 +5487,19 @@ That row remains visible and says awaiting attribution/check unless the original
 conditions already permit a reload. Its label then names the reload without changing its schedule.
 Exact MCP proof removes only its chat; later chats stay out.
 
+The optional `sessions.checkWebChatTitles` setting defaults off. Opening a manually named
+chat's menu uses `sessions:checkWebTitle` and only shows a confirmed mismatch below Rename.
+The check compares the app's manual name with a freshly confirmed title from the one already-open
+tab for that exact conversation in the selected paired browser. The tab can be in the background.
+One in-memory nonce is offered in `POST /status` and settled by that browser's
+`POST /browser/web-chat-title` response. The bridge checks the built-in host or the external browser
+engine and paired browser ID. The document must still own the exact conversation, and the title must
+agree with the visible navigation label or its fallback attribute. A missing, duplicate, discarded
+or changed tab, a retired document, conflicting title evidence or a changed local name or binding
+yields an unavailable result. Turning the setting off or changing browser cancels a pending check
+and clears the open menu's notice. The check never opens, focuses or reloads a tab, and makes no
+provider API calls, title writes or title cache.
+
 Session metadata owns `titleSource` (authored fallback, provider, manual). The preview uses only
 the first authored user message, at one 80-character bound; injected instructions/AGENTS frames
 never become preview text. `session/title.ts` supplies presentation and legacy recognition;
@@ -5720,7 +5783,22 @@ browser action.
 The Files panel projects the current session's LocalProject through fixed IPC using a project
 UUID and relative paths. It does not change the main composer or grant additional filesystem
 access. Main re-resolves current approved roots and rejects traversal, symbolic links/junctions
-and project-root mutation. The renderer's `workspace-docks.ts` owns the right tool dock and
+and project-root mutation. Files creates and renames use the `project-files.ts` entry-mutation
+queues from filesystem validation through publication. Admission keys use the catalog's canonical
+project roots, without resolving project folders first. Disjoint roots progress independently,
+even when another project's queue is full or stalled. Equal or parent/child roots wait for each
+other in admission order: the next operation checks the preceding result, so competing renames
+or a create/rename cannot both claim an unused name and replace its contents. Admission refuses
+when 32 operations (active included) are pending across the overlapping roots, using the
+translated retryable busy error without adding the callback to a mutation queue. Catalog lookups are
+ordered separately from filesystem work so async reads cannot reorder admission. Before a
+lookup, an app-wide cap of 6,400 (200 catalog projects × 32) also bounds unresolved requests,
+including invalid project ids. Queue keys come only from the bounded project catalog; drained
+keys are removed. A failed operation releases its queue; waiting and capacity refusal are
+logged. Windows case-only renames retain their existing native-path handling. These queues
+cover these app-owned operations, not external OS
+writers; the adjacent pathname/sandbox rechecks remain in force.
+The renderer's `workspace-docks.ts` owns the right tool dock and
 bottom terminal dock; Files, Review, Sub-agents and each Terminal view retain their own content
 and async lifetimes. Closing the right dock hides its active tool but retains its tab selection.
 Every dock track change (right column, bottom row) goes through `moveWorkDock`, which animates
@@ -5848,11 +5926,52 @@ message, paths, newBranch?, expectedToken }` refuses with "The changes changed�
 are exactly what the dialog listed. It refuses conflicts, a merge/cherry-pick/revert in progress
 and a detached HEAD without `newBranch`. It runs `git add -A` and `git commit` on exactly the
 chosen pathspecs (literal, NUL-separated on stdin), so what the person staged for other files stays
-staged. A rename commits both paths but stages only the new one. A commit that does not happen
-(Git cannot stage, a hook or Git refuses) reads the index back from a `git write-tree` taken
-before, so a hand-picked part of a file (`git add -p`) stays staged as it was; an index that cannot
-be written as a tree falls back to unstaging only what it staged. A branch it created is removed
-after HEAD is pointed back (`symbolic-ref`, which works while another program holds the index).
+staged. A rename commits both paths but stages only the new one. This worktree's real
+`index.lock` is acquired exclusively before staging. It holds a complete private copy of the
+person's original index (or a native empty index when absent); `GIT_INDEX_FILE` directs our
+add/commit and their hooks to it. Git atomically updates that private file via index.lock.lock.
+The real index is never staged into or restored on failure: a plain competing commit may have
+released its index lock before hooks and later advance HEAD using its prepared original index.
+A definite refusal discards only our private files, preserving hand-picked partial staging byte
+for byte. Sparse indexes retain their cone/collapsed entries; split indexes retain native shared
+bases and unrelated partial staging. Private writers use command-scoped `splitIndex.sharedIndexExpire=never`:
+expiry while the real index still points to a shared file would corrupt that untouched index on
+refusal. Stored Git settings are unchanged; later ordinary Git operations own normal expiry.
+A competing lock is never removed. Linked worktrees use their own index, not the common index.
+A Git timeout never proves that hook/filter descendants stopped, even when the parent's
+pipes close. Interrupted writers therefore retain recovery state; only a failed launch can
+attest that no child started. No process-tree kill or new runner timeout contract is introduced.
+An accepted commit reconciles only the chosen paths in the private index to its exact commit,
+then syncs and atomically publishes the complete index and syncs its directory on macOS/Linux.
+A directory-sync failure after rename reports a committed-but-later-failed result, not a missing
+recovery lock. Windows retains native file sync/rename without unsupported directory sync.
+Each attempt uses a nonce in native
+`GIT_REFLOG_ACTION` to identify its own accepted HEAD update after a late error; the commit
+message is unchanged, Git owns receipt expiry, and disabled reflogs stay disabled. A successful
+Git exit resolves its own final summary's hex object ID through Git, including when reflogs are
+disabled; a later moving HEAD is never substituted. An unrecognized summary retains recovery
+state rather than guessing. A successful exit never enters failure rollback
+if a later external soft reset returns HEAD to the starting commit. Unknown HEAD/outcome, missing late
+receipt, unconfirmed termination or failed publication retains the original index AND prepared
+index.lock, preserves the branch, and shows a translated recovery error. Do not delete that
+recovery file as an empty stale lock: after stopping Git writers, inspect HEAD, both indexes and
+any index.lock.lock; publish the verified prepared index only after reconciling it with the
+accepted commit. If no commit was accepted (including a crash during the initial copy), stop
+writers and verify ownership, then move the incomplete private lock aside without replacing the
+real index, allowing a retry while retaining the displaced bytes. If ownership or acceptance is
+uncertain, preserve both files and the lock. No app recovery ledger or automatic guess is introduced.
+After a definite refusal at the unchanged starting position, native `git switch --no-guess` or
+detached checkout restores HEAD only if Git permits it; busy checkout keeps the attempt branch.
+Safe `git branch -d` compares against restored HEAD with inherited upstream settings ignored for
+that command, preserving symbolic-ref and active-worktree guards. Failed branch creation proves
+no ownership: a matching branch is retained, even at the starting commit, including after launch
+errors and interrupted switches; only a normal successful creation enables cleanup. An unborn branch is
+distinct from unreadable HEAD. Late failure reports that Git committed when receipt-confirmed;
+unrelated HEAD movement is never reported as success.
+Admission revalidates ref and parent after taking the index lease. This is not a general ref
+transaction: concurrent branch/ref rewrites (including Git's same-commit `switch -c` fast path)
+can bypass the index lock. The pre-existing mid-command wrong-branch race is a separate defect;
+this change detects final identity conflicts and retains recovery state rather than undoing them.
 Hooks run. Paths with `..` or an absolute start are refused before Git runs.
 `projectCommit:push` pushes the current branch (`-u <remote> HEAD:refs/heads/<branch>` when it has
 no upstream) with `GIT_TERMINAL_PROMPT=0` and, unless `GIT_SSH`, `GIT_SSH_COMMAND` or
@@ -5904,8 +6023,15 @@ never a `worker-N` agent's) and gives each file one net diff, the first edit's b
 last edit's after, read from the review assets by id (`readEditReviewAsset`), counted with
 `lineDelta`: `edited`, `created`, `deleted` or `unchanged` (put back, or made and removed). An end the
 recording did not keep falls back to the summed recorded counts, marked approximate, with `diff`
-saying why. At most 50 files; `total` says how many there are. `sessions:turnFileDiff` adds `path`
-and returns that net before/after. `from` is the turn's first sequence number, so the read starts there.
+saying why. At most 50 files; `total` says how many there are. When the turn has a recorded turn
+checkpoint in the session's current project (`turnCheckpointRef` in `main/checkpoints/index.ts`),
+`sessions:turnChanges` also returns `checkpointRef` (`checkpoint:<id>`) so the card offers a direct
+Restore turn action via `checkpoints:restoreTurn` (`restoreTurnCheckpoint` in
+`main/checkpoints/index.ts`), scoped to the project files edited in that turn, using the same native
+confirmation dialog. The warning uses turn order and history read after capturing the comparison.
+The result carries the restoring `projectId` with the "Before restore" `undoRef`. Review opens that
+checkpoint only while its owning project is current.
+`sessions:turnFileDiff` adds `path` and returns that net before/after. `from` is the turn's first sequence number, so the read starts there.
 
 Unchanged session/directory updates preserve preview DOM and pending code loads. File reads keep
 the previous accepted preview until replacement content is ready; hidden previews stay hidden.
@@ -5918,9 +6044,21 @@ Creating an entry uses the same unsaved-edit guard as changing the selected file
 Text previews/editor input are bounded to 256 KiB; full editable previews retain exact UTF-8,
 BOM and line endings plus a content/file-identity revision. Save stages complete replacement bytes
 beside the original, flushes them, revalidates project access and the original revision, then
-renames. A failed staging write or rename never truncates the original. Duplicate saves are
-refused and newer edits typed during a pending save remain dirty. Atomic replacement is not an
-OS-wide lock against an unrelated writer after the final revision check.
+renames. On POSIX, staging restores the original ordinary permission bits after writing and before
+flushing only when the staged creation mode differs. Matching modes need no chmod, preserving saves
+on filesystems that refuse mode changes; a required chmod failure still refuses publication.
+Windows keeps its existing mode/attribute behavior. A failed staging write or rename never truncates
+the original. Rename commits the save: `ProjectFileSaveResult.preview` is null if the later preview
+read fails, with a diagnostic warning, rather than reporting that committed save as failed. The
+renderer keeps the acknowledged text as its baseline without a revision or invented timestamp;
+newer edits stay dirty, including across project navigation. Save stays disabled until Refresh files
+reads a valid revision whose text still matches that baseline. A failed refresh or external change
+keeps the draft and cannot authorize an overwrite. Overlapping watcher preview reads publish only
+the latest-started request, in either completion order. An accepted save or explicit refresh
+invalidates pending watcher reads through that same request generation. Watcher reads cannot replace
+a revisionless saved baseline; ordinary revision-bearing previews retain automatic updates.
+Duplicate saves are refused. Atomic replacement is not an OS-wide lock against an unrelated writer
+after the final revision check.
 
 Images accept at most 5 MiB input and 16 megapixels, then decode to a bounded 1600-pixel thumbnail.
 PDF input is bounded to 20 MiB; bundled PDF.js renders one page with at most 16 megapixels and
@@ -7021,6 +7159,13 @@ shared-tree change may already have addressed them.
   and phase rather than ordinary-turn idleness. Suspended-tab repair retains its separate
   existing action checks.
   Keep their operation-specific authority current through the browser action boundary.
+- **Archive receipt overlap:** without per-attempt IDs, the guard only protects a correction before
+  it is leased. Three or more PATCHes overlapping past their two-minute leases can still let an
+  older restore receipt finish the leased correction, leaving the chat archived. A later wake
+  retries when the remembered state is archived; if the stale receipt marked it restored, use
+  ChatGPT Settings to unarchive it. Cancellation before any settled state has no remembered
+  target; after retry exhaustion, a late correction follows the last settled state, which may
+  differ from the failed request. There is no separate requested-target ledger.
 - **Goal reply publication:** reply-obligation mutations such as `acceptGoalReplyNow` still
   change the shared reply map before their durable write. A refused save puts back only that
   chat's own row (and rows it pruned), never the whole map, and an acceptance re-checks the

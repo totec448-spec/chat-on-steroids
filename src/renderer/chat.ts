@@ -119,7 +119,7 @@ import { browserExtensionRequired, type AppState, type Config } from '../shared/
 import { $, ago, clockTime, compactAgeText, compactNumber, disclosureChevron, el, elapsedDurationText, icon, rowTime, run, setIcon, toast } from './dom.js';
 import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_REPAIR_DEFERRED_TEXT, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
 import { STRICT_REFUSAL_PROGRESS_PREFIX, UNPROVEN_WORKER_NOTICE, UNTRUSTED_NOTICE, UNTRUSTED_WORKER_NOTICE } from '../shared/trust-notices.js';
-import { closeRowMenu, onRowMenuChange, openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem, type RowMenuOptions } from './row-menu.js';
+import { closeRowMenu, onRowMenuChange, openRowMenu, rowMenuOpenFor, refreshRowMenu, toggleRowMenu, type RowMenuItem, type RowMenuOptions } from './row-menu.js';
 import { createSearchPopup } from './search-popup.js';
 import { holdToTalkShortcut, holdToTalkSupported, primaryShortcut } from './shortcuts.js';
 import { initSshProjectDialog } from './ssh-project-dialog.js';
@@ -177,6 +177,7 @@ let deps: Deps;
 let visible = false;
 
 let sessions: SessionSummary[] = [];
+let webTitleSettingsRevision = 0;
 let pressure = new Map<string, TokenPressure>();
 let sessionTotal = 0;
 let sessionPageCursor: { updatedAt: number; id: string } | null = null;
@@ -279,6 +280,8 @@ async function moveChatToProject(sessionId: string, projectId: string | null, gr
   // Rows the sidebar already shows take the moved chats' new summaries, also from older history.
   const shown = (moved.summaries ?? []).filter(summary => sessions.some(row => row.id === summary.id));
   if (shown.length) { mergeSessionRows(shown); paintSessions(); }
+  if (selectedId !== null && (selectedId === sessionId || shown.some(summary => summary.id === selectedId) ||
+      sessions.find(row => row.id === selectedId)?.origin?.fromSessionId === sessionId)) paintDetail(false);
   if (undo) { toast(t('Move undone')); return; }
   const project = projectId ? projects.find(row => row.id === projectId) : undefined;
   const linked = [moved.from, projectId].some(id => id && projects.find(row => row.id === id)?.chatgpt?.state === 'linked');
@@ -1447,7 +1450,30 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   ui(more, 'title', () => t('More options'));
   ui(more, 'aria-label', () => t('More options'));
   const menu = (at?: { x: number; y: number }) => ({
-    owner, at, label: () => shownSessionTitle(summary), anchor: () => rowMenuButton(owner), items: () => items
+    owner, at, label: () => shownSessionTitle(summary), anchor: () => rowMenuButton(owner),
+    items: () => {
+      const config = deps.state()?.config;
+      if (summary.titleSource !== 'manual' || !summary.conversationId || !config?.sessions.checkWebChatTitles) return items;
+      const browser = config.ui.chatBrowser;
+      const revision = webTitleSettingsRevision;
+      let differs = false;
+      const matchesMenu = () => {
+        const settings = deps.state()?.config;
+        const current = sessions.find(chat => chat.id === summary.id);
+        return revision === webTitleSettingsRevision && settings?.sessions.checkWebChatTitles === true &&
+          settings.ui.chatBrowser === browser && current?.titleSource === 'manual' &&
+          current.title === summary.title && current.conversationId === summary.conversationId;
+      };
+      void api.checkWebChatTitle(summary.id).then(reply => {
+        if (reply?.ok && reply.data === 'different' && rowMenuOpenFor(owner) && matchesMenu()) {
+          differs = true;
+          refreshRowMenu();
+        }
+      }).catch(() => undefined);
+      return items.map(item => item.action === 'rename'
+        ? { ...item, description: () => differs && matchesMenu() ? t('ChatGPT title differs') : '' }
+        : item);
+    }
   });
   more.addEventListener('click', (event) => { event.stopPropagation(); removeSessionTooltip(); toggleRowMenu(menu()); });
   row.addEventListener('contextmenu', (event) => { event.preventDefault(); removeSessionTooltip(); openRowMenu(menu({ x: event.clientX, y: event.clientY })); });
@@ -7238,7 +7264,7 @@ function paintDetail(followBottom = historyBefore === null): void {
     // Its final text is not held. The shown text itself is compared: a revision can rewrite it to the same length.
     const sig = (held ? `${itemSignature({ kind: 'event', event: { ...held, seq: 0, time: 0, renderedHtml: undefined } })}\u0000held${JSON.stringify(held.references ?? [])}\u0000${held.message.text}`
       : itemSignature(item)) + (item.kind === 'event' && item.event.kind === 'chat_error'
-      ? JSON.stringify(chatErrorPresentation(item.event, events)) : '') + (answerTurn || looseAnswer ? '\u0000answer' : '') + (changedFiles ? `\u0000changes:${loadedEdits}` : '') +
+      ? JSON.stringify(chatErrorPresentation(item.event, events)) : '') + (answerTurn || looseAnswer ? '\u0000answer' : '') + (changedFiles ? `\u0000changes:${loadedEdits}:${project?.id ?? ''}` : '') +
       (item.kind === 'event' && stoppedTurnEnd(item.event, events) ? '\u0000stopped' : '') +
       (item.kind === 'compaction' && item !== latestCompaction ? '\u0000superseded' : '') +
       (item.kind === 'event' && editableQuestion(item.event, events) ? `\u0000edit:${laterMessages.get(item.event.seq) ?? 0}` : '');
@@ -7264,8 +7290,18 @@ function paintDetail(followBottom = historyBefore === null): void {
       item.kind === 'event' && item.event.kind === 'assistant_message' ? { text: item.event.message.text, time: item.event.time } : undefined));
     if (changedFiles && answerTurn && selectedId) {
       const sessionId = selectedId;
-      built.querySelector('.said')?.append(renderTurnChanges({ sessionId, turnId: answerTurn, from: turnFrom(events, answerTurn),
-        current: () => selectedId === sessionId, openReview: selectedLocalProject() ? () => void reviewPanel?.show() : null }));
+      const from = turnFrom(events, answerTurn);
+      built.querySelector('.said')?.append(renderTurnChanges({ sessionId, turnId: answerTurn, from,
+        current: () => selectedId === sessionId,
+        openReview: project ? () => void reviewPanel?.show() : null,
+        openCheckpoint: project ? (ownerId, ref) => {
+          if (selectedLocalProject()?.id !== ownerId) {
+            toast(t('This checkpoint is no longer available'));
+            return;
+          }
+          void reviewPanel?.openCheckpoint(ownerId, ref);
+        } : null,
+        restoreTurn: project ? () => run(api.restoreTurnCheckpoint(sessionId, answerTurn, from)) : null }));
     }
     if (item.kind === 'event' && editableQuestion(item.event, events)) {
       built.querySelector('.ev-body')?.append(questionActions(item.event, laterMessages.get(item.event.seq) ?? 0));
@@ -8635,6 +8671,7 @@ export function chatSettingsPatch(current: Config): {
       // Both follow the single threshold above rather than being typed separately.
       advisoryTokens: threshold,
       limitTokens: urgentFrom(threshold),
+      checkWebChatTitles: $<HTMLInputElement>('checkWebChatTitles').checked,
       storageLimitGiB: (RECORDING_STORAGE_LIMITS_GIB as readonly number[]).includes(Number($<HTMLSelectElement>('recordingStorageLimit').value))
         ? Number($<HTMLSelectElement>('recordingStorageLimit').value) as RecordingStorageLimitGiB
         : current.sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB
@@ -9123,6 +9160,7 @@ const CHAT_INPUTS = [
   'handoffPrompt',
   'handoffLength',
   'recordingStorageLimit',
+  'checkWebChatTitles',
   'goalPrompt',
   'goalObjectivePrompt',
   'goalLoopPrompt',
@@ -9218,6 +9256,12 @@ export function chatApply(state: AppState, previous?: Config): void {
     String(config.sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB),
     previous === undefined ? undefined : String(previous.sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB)
   );
+  applyChatChecked($<HTMLInputElement>('checkWebChatTitles'), config.sessions.checkWebChatTitles === true, previous?.sessions.checkWebChatTitles);
+  if (previous && (previous.ui.chatBrowser !== config.ui.chatBrowser ||
+      previous.sessions.checkWebChatTitles !== config.sessions.checkWebChatTitles)) {
+    webTitleSettingsRevision++;
+    refreshRowMenu();
+  }
   applyAutoCompactHint(config);
   $<HTMLInputElement>('autoCompactTokens').disabled = !config.compaction.auto;
 
