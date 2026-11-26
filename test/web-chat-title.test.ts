@@ -1,17 +1,48 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-const state = vi.hoisted(() => ({ enabled: false, wake: vi.fn() }));
-vi.mock('../src/main/config.js', () => ({ getConfig: () => ({ sessions: { checkWebChatTitles: state.enabled } }) }));
+const state = vi.hoisted(() => ({ enabled: false, rename: false, wake: vi.fn() }));
+vi.mock('../src/main/config.js', () => ({
+  getConfig: () => ({ sessions: { checkWebChatTitles: state.enabled, renameWebChatTitles: state.rename } })
+}));
 vi.mock('../src/main/browser-wake.js', () => ({ wakeBrowserWork: state.wake }));
 
-import { acceptWebChatTitle, cancelWebChatTitleCheck, offerWebChatTitleCheck, readWebChatTitle } from '../src/main/web-chat-title.js';
+import { acceptWebChatTitle, authorizeWebChatRename, cancelWebChatTitleCheck, offerWebChatTitleCheck, readWebChatTitle,
+  renameWebChatTitle } from '../src/main/web-chat-title.js';
 
 const conversationId = '11111111-1111-4111-8111-111111111111';
 
 beforeEach(() => {
   state.enabled = false;
+  state.rename = false;
   state.wake.mockClear();
   vi.useFakeTimers();
+});
+
+it('requires independent opt-in and permits one commit from the offered browser only', async () => {
+  state.enabled = true;
+  const canCommit = vi.fn(async () => true);
+  await expect(renameWebChatTitle(conversationId, 'Before', 'After', canCommit)).resolves.toBe(false);
+  expect(state.wake).not.toHaveBeenCalled();
+  state.rename = true;
+  const result = renameWebChatTitle(conversationId, 'Before', 'After', canCommit);
+  const { id, rename } = offerWebChatTitleCheck('browser')!;
+  expect(rename).toMatchObject({ expectedTitle: 'Before', title: 'After' });
+  const claim = { id, conversationId, commit: true };
+  await expect(authorizeWebChatRename('other', claim)).resolves.toBe(false);
+  await expect(authorizeWebChatRename('browser', claim)).resolves.toBe(true);
+  await expect(authorizeWebChatRename('browser', claim)).resolves.toBe(false);
+  expect(canCommit).toHaveBeenCalledOnce();
+  expect(acceptWebChatTitle('browser', { id, conversationId, title: 'After' })).toBe(true);
+  await expect(result).resolves.toBe(true);
+});
+
+it('refuses to commit a renamed session that rebound or became ineligible', async () => {
+  state.rename = true;
+  const result = renameWebChatTitle(conversationId, 'Before', 'After', async () => false);
+  const { id } = offerWebChatTitleCheck('browser')!;
+  await expect(authorizeWebChatRename('browser', { id, conversationId, commit: true })).resolves.toBe(false);
+  expect(acceptWebChatTitle('browser', { id, conversationId, title: null, reason: 'rename-canceled' })).toBe(true);
+  await expect(result).resolves.toBe(false);
 });
 afterEach(() => {
   cancelWebChatTitleCheck();

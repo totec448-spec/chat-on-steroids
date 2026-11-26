@@ -1427,3 +1427,15 @@ it('defaults the manual Web title check off for new, old and damaged settings', 
   expect(getLog().map(entry => entry.message)).toContain('config: repaired invalid Web title check setting (defaulted to off)');
 });
 
+it('defaults native Web renaming off for new, old and damaged settings', async () => {
+  const fresh = defaultConfig();
+  expect(fresh.sessions.renameWebChatTitles).toBe(false);
+  const { renameWebChatTitles: _setting, ...legacy } = fresh.sessions;
+  for (const sessions of [legacy, { ...legacy, renameWebChatTitles: 'true' }]) {
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...fresh, sessions }), 'utf8');
+    expect((await loadConfig()).sessions.renameWebChatTitles).toBe(false);
+  }
+  await saveConfig({ ...fresh, sessions: { ...fresh.sessions, renameWebChatTitles: true } });
+  expect((await loadConfig()).sessions.renameWebChatTitles).toBe(true);
+});
+

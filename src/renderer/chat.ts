@@ -1383,7 +1383,9 @@ function sessionRow(summary: SessionSummary): HTMLElement {
       }
     }
     items.push(
-      { action: 'rename', icon: 'i-pencil', label: () => t('Rename'), title: () => t("Rename this chat in the app. Its title in ChatGPT stays the same."), run: () => startRename(summary) },
+      { action: 'rename', icon: 'i-pencil', label: () => t('Rename'), title: () => deps.state()?.config.sessions.renameWebChatTitles
+        ? t('When you rename a chat here, also rename it in its open ChatGPT tab if the previous title still matches.')
+        : t("Rename this chat in the app. Its title in ChatGPT stays the same."), run: () => startRename(summary) },
       { action: 'open', icon: 'i-out', label: () => t('Open in browser'), title: () => t("Open this chat in your browser"), run: () => void run(api.openSessionChat(summary.id)) },
       // ChatGPT opens /c/<id> wherever the chat lives, a project included (#1107).
       { action: 'copy-link', icon: 'i-copy', label: () => t('Copy link'), title: () => t("Copy this chat's ChatGPT link"),
@@ -1487,7 +1489,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
  * The chat being named in the sidebar (#1107). Kept outside the row because activity repaints the
  * sidebar many times a second: the field, its text and its caret survive every repaint.
  */
-let renaming: { id: string; original: string; value: string; start: number; end: number } | null = null;
+let renaming: { id: string; original: string; value: string; start: number; end: number; editId?: string } | null = null;
 
 /** Slash commands that act on the open chat; New Chat does not offer them. */
 const CHAT_COMMANDS = new Set(['rename', 'pin', 'status', 'compact', 'copy', 'export', 'share', 'find']);
@@ -1615,6 +1617,11 @@ function openSharePage(sessionId: string): void {
 function startRename(summary: SessionSummary): void {
   const current = summary.title || '';
   renaming = { id: summary.id, original: current, value: current, start: 0, end: current.length };
+  if (summary.conversationId && deps.state()?.config.sessions.renameWebChatTitles) {
+    const editId = crypto.randomUUID();
+    renaming.editId = editId;
+    void api.prepareWebRename(summary.id, editId).catch(() => undefined);
+  }
   removeSessionTooltip();
   paintSessions();
 }
@@ -1665,7 +1672,7 @@ async function finishRename(save: boolean): Promise<void> {
   paintSessions();
   if (!save || value === edit.original.trim()) return;
   // Empty asks for the title the app would show without a name: ChatGPT's own.
-  await run(api.renameSession(edit.id, value || null));
+  await run(edit.editId ? api.renameSession(edit.id, value || null, edit.editId) : api.renameSession(edit.id, value || null));
   await loadSessions('changed');
 }
 
@@ -8641,6 +8648,7 @@ export function chatSettingsPatch(current: Config): {
       advisoryTokens: threshold,
       limitTokens: urgentFrom(threshold),
       checkWebChatTitles: $<HTMLInputElement>('checkWebChatTitles').checked,
+      renameWebChatTitles: $<HTMLInputElement>('renameWebChatTitles').checked,
       storageLimitGiB: (RECORDING_STORAGE_LIMITS_GIB as readonly number[]).includes(Number($<HTMLSelectElement>('recordingStorageLimit').value))
         ? Number($<HTMLSelectElement>('recordingStorageLimit').value) as RecordingStorageLimitGiB
         : current.sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB
@@ -9130,6 +9138,7 @@ const CHAT_INPUTS = [
   'handoffLength',
   'recordingStorageLimit',
   'checkWebChatTitles',
+  'renameWebChatTitles',
   'goalPrompt',
   'goalObjectivePrompt',
   'goalLoopPrompt',
@@ -9226,6 +9235,7 @@ export function chatApply(state: AppState, previous?: Config): void {
     previous === undefined ? undefined : String(previous.sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB)
   );
   applyChatChecked($<HTMLInputElement>('checkWebChatTitles'), config.sessions.checkWebChatTitles === true, previous?.sessions.checkWebChatTitles);
+  applyChatChecked($<HTMLInputElement>('renameWebChatTitles'), config.sessions.renameWebChatTitles === true, previous?.sessions.renameWebChatTitles);
   if (previous && (previous.ui.chatBrowser !== config.ui.chatBrowser ||
       previous.sessions.checkWebChatTitles !== config.sessions.checkWebChatTitles)) {
     webTitleSettingsRevision++;

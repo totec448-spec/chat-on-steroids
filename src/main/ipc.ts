@@ -52,7 +52,7 @@ import { connectTelegram, disconnectTelegram, onTelegramChange, telegramView, te
 import { DEFAULT_PHONE_PUSH, type PhonePushSettings } from '../shared/phone-push.js';
 import { retryGoalBrowserHelper } from './goal.js';
 import { requestBrowserPreferences } from './browser-preferences.js';
-import { cancelWebChatTitleCheck, readWebChatTitle } from './web-chat-title.js';
+import { cancelWebChatTitleCheck, captureWebChatTitleForRename, readWebChatTitle, renameWebChatTitle } from './web-chat-title.js';
 import { sendDesktopInput, cancelDesktopInput, retryQueuedInputBrowser, retireDesktopOpening } from './session/start-input.js';
 import { isSessionRemoving, withSessionRemoval } from './session/removal.js';
 import { wakeBrowserUrl } from './browser-startup.js';
@@ -328,6 +328,7 @@ const settingsPatch = z.object({
     advisoryTokens: z.number().int().min(10_000).max(4_000_000),
     limitTokens: z.number().int().min(10_000).max(4_000_000),
     checkWebChatTitles: z.boolean().optional(),
+    renameWebChatTitles: z.boolean().optional(),
     storageLimitGiB: z.number().refine(size => (RECORDING_STORAGE_LIMITS_GIB as readonly number[]).includes(size))
       .transform(size => size as RecordingStorageLimitGiB).optional()
   }),
@@ -587,6 +588,11 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         base.sessions.checkWebChatTitles ?? false,
         wanted.sessions.checkWebChatTitles ?? base.sessions.checkWebChatTitles ?? false
       ),
+      renameWebChatTitles: pick(
+        current.sessions.renameWebChatTitles ?? false,
+        base.sessions.renameWebChatTitles ?? false,
+        wanted.sessions.renameWebChatTitles ?? base.sessions.renameWebChatTitles ?? false
+      ),
       storageLimitGiB: pick(current.sessions.storageLimitGiB, base.sessions.storageLimitGiB, wanted.sessions.storageLimitGiB)
     },
     compaction: {
@@ -679,7 +685,16 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
 
 const sessionIdArg = z.object({ id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i) });
 /** A chat's own name in the app (#1107): one line, no control characters; null or blank clears it. */
-const sessionNameArg = sessionIdArg.extend({ title: z.string().max(2000).nullable() });
+const webRenameEditArg = sessionIdArg.extend({ editId: z.string().uuid() });
+const sessionNameArg = sessionIdArg.extend({ title: z.string().max(2000).nullable(), editId: z.string().uuid().optional() });
+type WebRenameEdit = {
+  id: string;
+  editId: string;
+  expiresAt: number;
+  baseline: { conversationId: string; title: string; browser: Config['ui']['chatBrowser'] } | null;
+};
+let webRenameEdit: WebRenameEdit | null = null;
+let webRenameSettingsRevision = 0;
 export function cleanSessionName(title: string | null): string | null {
   const clean = (title ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120).trim();
   return clean || null;
@@ -961,7 +976,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       else if (!config.goal.impulseMinutes && (proposed.goal.impulseMinutes ?? 0) > 0) await cancelFinishInputs(true);
       return proposed;
     }, async (published, previous) => {
-      if (!published.sessions.checkWebChatTitles || published.ui.chatBrowser !== previous.ui.chatBrowser) cancelWebChatTitleCheck();
+      if (published.sessions.checkWebChatTitles !== previous.sessions.checkWebChatTitles ||
+          published.sessions.renameWebChatTitles !== previous.sessions.renameWebChatTitles ||
+          published.ui.chatBrowser !== previous.ui.chatBrowser) cancelWebChatTitleCheck();
+      if (published.sessions.renameWebChatTitles !== previous.sessions.renameWebChatTitles ||
+          published.ui.chatBrowser !== previous.ui.chatBrowser) {
+        webRenameEdit = null;
+        webRenameSettingsRevision++;
+      }
       if (previous.ui.finishTool && !published.ui.finishTool) await cancelFinishInputs(false);
       else if ((previous.goal.impulseMinutes ?? 0) > 0 && !published.goal.impulseMinutes) await cancelFinishInputs(true);
     }, publishBridgePortChange);
@@ -2582,13 +2604,47 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     }
     return title === chat.title ? 'match' : 'different';
   });
+  handle('sessions:prepareWebRename', async (payload) => {
+    const { id, editId } = webRenameEditArg.parse(payload);
+    if (!getConfig().sessions.renameWebChatTitles) return false;
+    const browser = getConfig().ui.chatBrowser;
+    const revision = webRenameSettingsRevision;
+    const edit: WebRenameEdit = { id, editId, baseline: null, expiresAt: Date.now() + 120_000 };
+    webRenameEdit = edit;
+    void (async () => {
+      const chat = await getSession(id);
+      if (!chat?.conversationId || webRenameEdit !== edit || revision !== webRenameSettingsRevision) return;
+      const title = await captureWebChatTitleForRename(chat.conversationId);
+      if (title && webRenameEdit === edit && revision === webRenameSettingsRevision) {
+        edit.baseline = { conversationId: chat.conversationId, title, browser };
+      }
+    })().catch(() => logInfo('web chat title: native rename baseline unavailable'));
+    return true;
+  });
   handle('sessions:rename', async (payload) => {
-    const { id, title } = sessionNameArg.parse(payload);
-    if (!await getSession(id)) throw new Error('Session not found');
+    const { id, title, editId } = sessionNameArg.parse(payload);
+    const edit = webRenameEdit?.id === id && webRenameEdit.editId === editId ? webRenameEdit : null;
+    if (edit) webRenameEdit = null;
+    const baseline = edit && Date.now() < edit.expiresAt ? edit.baseline : null;
+    const chat = await getSession(id);
+    if (!chat) throw new Error('Session not found');
     const name = cleanSessionName(title);
+    const revision = webRenameSettingsRevision;
     if (name) await renameSession(id, name, 'manual');
     else await clearSessionName(id);
     notifyChanged(id);
+    if (name && name !== chat.title && edit && getConfig().sessions.renameWebChatTitles) {
+      if (!baseline || baseline.conversationId !== chat.conversationId ||
+            revision !== webRenameSettingsRevision || baseline.browser !== getConfig().ui.chatBrowser) {
+        logInfo('web chat title: native rename skipped (no current edit baseline)');
+      } else {
+        void renameWebChatTitle(baseline.conversationId, baseline.title, name, async () => {
+          const current = await getSession(id);
+          return revision === webRenameSettingsRevision && current?.conversationId === baseline.conversationId &&
+            current.titleSource === 'manual' && current.title === name;
+        });
+      }
+    }
     return true;
   });
   handle('sessions:delete', async (payload) => {

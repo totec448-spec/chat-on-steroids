@@ -4163,6 +4163,8 @@
   "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "Foram libertados {0} MB desta conversa. Estão agora a ser usados {1} MB de {2} MB.",
   "Freed {0} MB. Storage usage could not be read.": "Foram libertados {0} MB. Não foi possível ler a utilização do armazenamento.",
   "Last cleanup: Freed {0} MB.": "Última limpeza: foram libertados {0} MB.",
+  "Rename open chats in ChatGPT": "Mudar o nome de conversas abertas no ChatGPT",
+  "When you rename a chat here, also rename it in its open ChatGPT tab if the previous title still matches.": "Ao mudar aqui o nome de uma conversa, altere-o também no separador aberto do ChatGPT se o título anterior ainda coincidir.",
   "Check ChatGPT titles": "Verificar títulos no ChatGPT",
   "Show a notice in the chat menu when the open ChatGPT chat has a different title.": "Mostra um aviso no menu se a conversa aberta no ChatGPT tiver outro título.",
   "ChatGPT title differs": "O título é diferente no ChatGPT",

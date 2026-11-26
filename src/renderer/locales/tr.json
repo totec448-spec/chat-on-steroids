@@ -4079,6 +4079,8 @@
   "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "Bu sohbetten {0} MB alan açıldı. Burada şimdi {1} MB / {2} MB kullanılıyor.",
   "Freed {0} MB. Storage usage could not be read.": "{0} MB alan açıldı. Depolama kullanımı okunamadı.",
   "Last cleanup: Freed {0} MB.": "Son temizleme: {0} MB alan açıldı.",
+  "Rename open chats in ChatGPT": "ChatGPT’de açık sohbetleri yeniden adlandır",
+  "When you rename a chat here, also rename it in its open ChatGPT tab if the previous title still matches.": "Burada bir sohbeti yeniden adlandırdığında, önceki başlık hâlâ eşleşiyorsa açık ChatGPT sekmesinde de adını değiştir.",
   "Check ChatGPT titles": "ChatGPT başlıklarını kontrol et",
   "Show a notice in the chat menu when the open ChatGPT chat has a different title.": "Açık ChatGPT sohbetinin başlığı farklıysa sohbet menüsünde bir bildirim gösterir.",
   "ChatGPT title differs": "ChatGPT başlığı farklı",

@@ -5499,6 +5499,20 @@ yields an unavailable result. Turning the setting off or changing browser cancel
 and clears the open menu's notice. The check never opens, focuses or reloads a tab, and makes no
 provider API calls, title writes or title cache.
 
+`sessions.renameWebChatTitles` is a separate opt-in and defaults off. Only a saved, nonempty
+manual rename in CoS can offer a one-shot native rename to the exact already-open conversation.
+It uses the same browser/document custody as the title check. Starting the edit sends
+`sessions:prepareWebRename` with a local edit nonce and captures the exact page's confirmed title.
+The matching `sessions:rename` save consumes the nonce. A baseline confirmed before Save
+can produce one offer carrying that Web title and a 15-second deadline. A Web rename after
+the snapshot invalidates the offer.
+A separate commit request on `/browser/web-chat-title`
+checks that the setting, browser, session binding and saved manual title still match. The
+companion checks the previous title against the page and navigation label, then uses the
+same native title editor as a browser user. It acknowledges only a confirmed title and
+logs the outcome without title text. It neither calls a provider endpoint directly nor
+stores or retries the work. Clearing a name or Compact & Resume never causes a Web rename.
+
 Session metadata owns `titleSource` (authored fallback, provider, manual). The preview uses only
 the first authored user message, at one 80-character bound; injected instructions/AGENTS frames
 never become preview text. `session/title.ts` supplies presentation and legacy recognition;

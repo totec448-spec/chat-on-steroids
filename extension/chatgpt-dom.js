@@ -469,6 +469,17 @@ var CLF_DOM = (() => {
     }, '');
   }
 
+  const CHAT_TITLE_LINK = 'a[data-sidebar-item="true"][href], nav a[href], [role="navigation"] a[href], a[aria-current="page"][href]';
+
+  function chatTitleLinkId(link) {
+    const url = new URL(link.href, location.href);
+    return url.origin === location.origin ? conversationFromPath(url.pathname) : null;
+  }
+
+  function chatTitleVisible(node) {
+    return node.getClientRects().length > 0 && !node.closest('[hidden],[aria-hidden="true"],[inert]');
+  }
+
   /** Confirm the current page title against the sidebar link for this exact chat. */
   function confirmedConversationTitle(expected) {
     return safe(() => {
@@ -477,12 +488,8 @@ var CLF_DOM = (() => {
       if (conversationId() !== expected) return null;
       const title = conversationTitle();
       if (!title) return null;
-      const selector = 'a[data-sidebar-item="true"][href], nav a[href], [role="navigation"] a[href], a[aria-current="page"][href]';
-      const rows = [...document.querySelectorAll(selector)].filter(link => {
-        const target = new URL(link.href, location.href);
-        return target.origin === location.origin && conversationFromPath(target.pathname) === expected &&
-          !link.closest('[hidden],[aria-hidden="true"],[inert]') && link.getClientRects().length > 0;
-      });
+      const rows = [...document.querySelectorAll(CHAT_TITLE_LINK)].filter(link =>
+        chatTitleLinkId(link) === expected && chatTitleVisible(link));
       if (!rows.length || !rows.every(link => {
         if (link.querySelector('input,textarea,[contenteditable="true"]')) return false;
         const label = link.querySelector('[dir="auto"]') ?? link;
@@ -493,6 +500,60 @@ var CLF_DOM = (() => {
       })) return null;
       return title;
     }, null);
+  }
+
+  const CHAT_RENAME_LABELS = new Set([
+    'rename', 'cambiar nombre', 'cambiar el nombre', 'renombrar', 'umbenennen', 'renommer', '名前を変更', '이름 바꾸기',
+    '이름 변경', 'renomear', 'переименовать', 'yeniden adlandır', 'đổi tên', '重命名', '重新命名'
+  ]);
+
+  function nativeChatRenameControl(expected, oldTitle) {
+    if (confirmedConversationTitle(expected) !== oldTitle) return null;
+    const eligible = new Map();
+    for (const link of document.querySelectorAll(CHAT_TITLE_LINK)) {
+      if (!chatTitleVisible(link) || chatTitleLinkId(link) !== expected) continue;
+      // Some sidebars put the options inside the link. Others put it next to the link in
+      // the row wrapper, which can also outlive the link when the editor replaces it.
+      const rows = new Set([link, link.parentElement, link.parentElement?.parentElement, link.closest('[role="group"]')]);
+      for (const row of rows) {
+        if (!row || row.matches('nav,[role="navigation"],body')) continue;
+        const links = row === link ? [link] : [...row.querySelectorAll('a[href]')].filter(chatTitleVisible);
+        if (links.length !== 1 || links[0] !== link) continue;
+        const triggers = [...row.querySelectorAll('button[aria-haspopup="menu"],[role="button"][aria-haspopup="menu"],button[data-testid^="history-item-"][data-testid$="-options"]')]
+          .filter(button => !button.disabled && button.getAttribute('aria-disabled') !== 'true' &&
+            button.getAttribute('aria-expanded') !== 'true' && chatTitleVisible(button));
+        if (triggers.length === 1) eligible.set(triggers[0], { trigger: triggers[0], row });
+      }
+    }
+    return eligible.size === 1 ? eligible.values().next().value : null;
+  }
+
+  function nativeChatRenameItem(trigger) {
+    const menuId = trigger.getAttribute('aria-controls');
+    if (!trigger.isConnected) return null;
+    const menus = [...document.querySelectorAll('[role="menu"]')].filter(menu =>
+      chatTitleVisible(menu) && (menuId && menu.id === menuId ||
+        trigger.id && menu.getAttribute('aria-labelledby') === trigger.id));
+    if (menus.length !== 1) return null;
+    const [menu] = menus;
+    const items = [...menu.querySelectorAll('[role="menuitem"]')].filter(item => {
+      if (item.closest('[role="menu"]') !== menu || item.getAttribute('aria-disabled') === 'true' ||
+          item.disabled || !chatTitleVisible(item)) return false;
+      if (item.matches('[data-testid="rename-chat"],[data-testid="rename-chat-menu-item"]')) return true;
+      const label = item.cloneNode(true);
+      label.querySelectorAll('[aria-hidden="true"],kbd').forEach(node => node.remove());
+      return CHAT_RENAME_LABELS.has(label.textContent.trim().replace(/\s+/g, ' ').toLowerCase());
+    });
+    return items.length === 1 ? items[0] : null;
+  }
+
+  function nativeChatRenameInput(row, oldTitle, previousInputs) {
+    if (!row.isConnected || conversationTitle() !== oldTitle) return null;
+    const inputs = [...row.querySelectorAll('input:not([type]),input[type="text"]')].filter(input =>
+      !previousInputs.has(input) && !input.disabled && !input.readOnly && chatTitleVisible(input));
+    const active = document.activeElement;
+    return inputs.length === 1 && inputs[0].value === oldTitle &&
+      (active === inputs[0] || active === document.body || row.contains(active)) ? inputs[0] : null;
   }
 
   /**
@@ -4346,15 +4407,15 @@ var CLF_DOM = (() => {
     }, null);
   }
 
-  /** Types a Project name the way React sees a person typing it. */
-  function fillProjectName(input, name) {
+  /** Sets a native text input the way React sees a person typing it. */
+  function fillNativeTextInput(input, value) {
     return safe(() => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
       if (!setter) return false;
       input.focus();
-      setter.call(input, name);
+      setter.call(input, value);
       input.dispatchEvent(new Event('input', { bubbles: true }));
-      return input.value === name;
+      return input.value === value;
     }, false);
   }
 
@@ -4407,7 +4468,7 @@ var CLF_DOM = (() => {
     revealSidebar,
     projectIdsShown,
     projectsShown,
-    fillProjectName,
+    fillNativeTextInput,
     projectHomeId,
     sidebarListsProject,
     enterProject,
@@ -4466,6 +4527,9 @@ var CLF_DOM = (() => {
     conversationFromPath,
     conversationTitle,
     confirmedConversationTitle,
+    nativeChatRenameControl,
+    nativeChatRenameItem,
+    nativeChatRenameInput,
     turns,
     presentationTurns,
     messages,
