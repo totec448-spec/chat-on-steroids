@@ -6051,11 +6051,14 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // false failed worker that starts seconds later through the late-ACK path. Re-armed only when the
     // stage is a later one, so one stuck report repeated can never keep an invitation alive; the
     // absolute bootstrap limit in commandDeadlineDelay() still ends the whole attempt.
-    if (command.spec.type === 'worker' && advanced) armDeadline(command);
-    // A worker about to send gets its receipt window, and its page learns the new deadline (#1086).
-    if (command.spec.type === 'worker' && step === 'sending') {
+    // A worker about to send gets its receipt window. Its page learns the new deadline from the reply, for
+    // every stage that moved it, not only for `sending`: a page that kept the deadline it redeemed under
+    // would give up while the app still allows it to run (#1086, #2270).
+    if (command.spec.type === 'worker' && (advanced || step === 'sending')) {
       armDeadline(command);
-      return json(res, 200, { ok: true, expiresAt: Date.now() + Math.max(1, commandDeadlineDelay(command)) }, origin);
+      const delay = Math.max(1, commandDeadlineDelay(command));
+      logInfo(`bridge: ${specKey(command.spec)} reported ${step}; its deadline is ${Math.round(delay / 1000)}s from now`);
+      return json(res, 200, { ok: true, expiresAt: Date.now() + delay }, origin);
     }
     return json(res, 200, { ok: true }, origin);
   }

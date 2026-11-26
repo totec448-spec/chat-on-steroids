@@ -12435,7 +12435,7 @@
     // This runs before the first status reply: the command brings this install's Core identity,
     // so the bootstrap mentions this computer's own Core (see applyCoreIdentity).
     if (reply.identity) applyCoreIdentity(reply.identity);
-    const commandExpiresAt = Number.isFinite(boot.expiresAt) ? boot.expiresAt : null;
+    let commandExpiresAt = Number.isFinite(boot.expiresAt) ? boot.expiresAt : null;
     const commandAlive = () => commandExpiresAt === null || Date.now() < commandExpiresAt;
     const commandWaitMs = (fallbackMs, reserveMs = 0) => commandExpiresAt === null
       ? fallbackMs
@@ -12463,7 +12463,11 @@
     // awaited: a report must not slow or block the bootstrap, and older apps ignore it.
     let modelDiagnostic = null, modelAttempt = 0;
     const step = (name, modelSelection) => { void ask({ type: 'command_step', id: boot.id, client: RUN_ID, step: name,
-      ...(modelSelection ? { modelSelection } : {}) }).catch(() => undefined); };
+      ...(modelSelection ? { modelSelection } : {}) }).then(reply => {
+      // The app moves a worker's deadline when it reports a later stage. Take only a later one, so a
+      // delayed older reply can never shorten what a newer one granted.
+      if (reply && Number.isFinite(reply.expiresAt) && (commandExpiresAt === null || reply.expiresAt > commandExpiresAt)) commandExpiresAt = reply.expiresAt;
+    }).catch(() => undefined); };
     // What this command is for, as the app states it. A revival names the conversation and
     // will not be typed anywhere else; the two chat-opening commands name none, and their
     // precondition is the opposite one — that this page still has no conversation at all.

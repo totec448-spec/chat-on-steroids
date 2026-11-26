@@ -5465,7 +5465,8 @@ const HANDLERS = {
         ? { modelSelection: message.modelSelection } : {}) };
     if (step === 'model-diagnostic') return { ok: queueModelDiagnostic(body, source) };
     const result = await call('/commands/step', { method: 'POST', body: JSON.stringify(body) });
-    return { ok: result.ok === true };
+    // A worker's later stage can move its deadline; the page needs the new one (older apps send none).
+    return { ok: result.ok === true, ...(Number.isFinite(result.expiresAt) ? { expiresAt: result.expiresAt } : {}) };
   },
   /** The marked page asking for the one command it was opened for. */
   async redeem(message) {
