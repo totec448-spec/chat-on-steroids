@@ -4453,8 +4453,8 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 #automationSwitch { display: flex; flex-direction: column; gap: 2px; padding: 0; background: transparent; }
 #automationSwitch button { justify-content: flex-start; padding: 10px; gap: 10px; box-shadow: none; background: transparent; transition: none; }
 #automationSwitch button[aria-checked=true] { background: var(--control-selected); }
-#automationSwitch .mode-copy { flex: 1; min-width: 0; }
-#automationSwitch small { display: block; margin-top: 4px; font-size: calc(11px * var(--text-scale, 1)); font-weight: 400; line-height: 1.5; color: var(--soft); }
+#automationSwitch .mode-copy, #keepRunningWhenClosedRow .mode-copy { flex: 1; min-width: 0; }
+#automationSwitch small, #keepRunningWhenClosedRow small { display: block; margin-top: 4px; font-size: calc(11px * var(--text-scale, 1)); font-weight: 400; line-height: 1.5; color: var(--soft); }
 #automationSwitch .mode-check { visibility: hidden; }
 #automationSwitch .mode-option { display: flex; align-items: center; gap: 2px; padding-right: 4px; border-radius: 8px; }
 #automationSwitch .mode-option:has(> [role=radio]:hover:not(:disabled)) { background: var(--hover); }
