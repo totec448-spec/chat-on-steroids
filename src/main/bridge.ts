@@ -310,10 +310,13 @@ const RATE_LIMIT = 900;
 export const COMMAND_DEADLINE_MS = 90_000;
 /** A missing redemption ends this one opening attempt; it never licenses another tab.
  * The absolute invitation lifetime also bounds commands waiting behind another bootstrap.
- * 45 s, not the original 20: a fresh ChatGPT tab on a slower machine takes about 15 s at the
- * 90th percentile, and two worker tabs loading beside other tabs both missed 20 s (VM, 2026-10-06). */
-export const WORKER_REDEEM_MS = 45_000;
-export const WORKER_BOOTSTRAP_LIMIT_MS = 120_000;
+ * 120 s: it was 20 s, then 45 s (a fresh tab takes about 15 s at the 90th percentile, and two worker
+ * tabs beside other tabs both missed 20 s, VM 2026-10-06). 45 s still cut off real runs: two
+ * reports (#2270, #2298) show fresh workers failed at exactly 45 s, 15 s before the 60 s fallback
+ * tab could run, and a worker that did start on the same machine took 62 s to its first call. */
+export const WORKER_REDEEM_MS = 120_000;
+/** Absolute fresh-worker lifetime from the invitation: page redemption, then the ordinary page/send deadline. */
+export const WORKER_BOOTSTRAP_LIMIT_MS = WORKER_REDEEM_MS + COMMAND_DEADLINE_MS;
 /**
  * How long a worker's page that reported Send has for its receipt (#1086). On a loaded machine
  * pages said "sending the task" and the app gave the workers up at the ordinary deadline anyway,
@@ -6030,6 +6033,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (!step) return json(res, 200, { ok: false }, origin);
     // Final failure details share the continuation step, so a delayed telemetry RPC cannot lose them.
     if (step === 'model-unconfirmed') observeModelSelection(command, body.modelSelection);
+    const previousStep = command.progress?.step;
+    const advanced = previousStep === undefined || COMMAND_STEPS.indexOf(step) > COMMAND_STEPS.indexOf(previousStep);
     command.progress = { ...command.progress, step, stepAt: Date.now() };
     if (step === 'model-unconfirmed' && command.spec.type === 'revive') {
       const wanted = commandModelSelection(command);
@@ -6041,6 +6046,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         `${[wanted?.model, wanted?.reasoningEffort].filter(Boolean).join(' ') || 'its model'} could not be confirmed in the picker, and a resume is not abandoned for it`);
     }
     if (command.spec.type === 'resume' && command.timer && continuationByToken(command.spec.token)?.automatic) armDeadline(command);
+    // A fresh worker page that moves on to a later stage is alive: a hidden tab can spend most of the
+    // ordinary window mounting the composer or the picker, and failing it the moment it advances makes a
+    // false failed worker that starts seconds later through the late-ACK path. Re-armed only when the
+    // stage is a later one, so one stuck report repeated can never keep an invitation alive; the
+    // absolute bootstrap limit in commandDeadlineDelay() still ends the whole attempt.
+    if (command.spec.type === 'worker' && advanced) armDeadline(command);
     // A worker about to send gets its receipt window, and its page learns the new deadline (#1086).
     if (command.spec.type === 'worker' && step === 'sending') {
       armDeadline(command);
@@ -12483,9 +12494,13 @@ function commandDeadlineDelay(command: Command, now = Date.now()): number {
       const redeemBy = Math.max(command.claimedAt + WORKER_REDEEM_MS, lastBrowserLaunchAt + BROWSER_LAUNCH_GRACE_MS);
       return Math.min(redeemBy, limit) - now;
     }
-    const ordinary = Math.min(command.claimedAt + COMMAND_DEADLINE_MS, limit);
-    // A page that said it is sending may already have delivered the task; its receipt gets a window.
     const { step, stepAt } = command.progress ?? {};
+    // Once the page owns the command, each later stage it reports gets the ordinary budget from its
+    // own report instead of from the offer, so a page that redeemed late is not failed at once. The
+    // invitation's absolute limit stays the ceiling.
+    const progressed = stepAt !== undefined ? stepAt + COMMAND_DEADLINE_MS : command.claimedAt + COMMAND_DEADLINE_MS;
+    const ordinary = Math.min(Math.max(command.claimedAt + COMMAND_DEADLINE_MS, progressed), limit);
+    // A page that said it is sending may already have delivered the task; its receipt gets a window.
     return (step === 'sending' && stepAt !== undefined ? Math.max(ordinary, stepAt + WORKER_SENDING_GRACE_MS) : ordinary) - now;
   }
   const claimedAt = command.claimedAt ?? now;
