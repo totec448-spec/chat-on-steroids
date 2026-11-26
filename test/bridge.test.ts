@@ -9496,6 +9496,26 @@ describe('targeted open', () => {
     expect((await redeem(second.id, 'tab-2')).text).toContain('the kept brief');
   });
 
+  // #2159 (2026-11-25, 2.1.55): a Compact & Resume failed on the Project entry and the log said only "ChatGPT
+  // could not open the source Project", never which step. The page's reason was dropped when it was longer
+  // than 146 characters or held a character outside the narrow set, and the reasons carry draft and chip evidence.
+  it.each([
+    ['a long reason', 'transition-timeout:last=composer-not-ready:draft=handoff-residue:clears=2:chips=1:typed=54160:brief=54160:tail=unrelated-text-after-the-brief:route=source-conversation:attempt=3'],
+    ['a reason with other characters', 'source-ready-timeout:last=Composer_Not_Ready (draft=brief)'],
+  ] as const)('logs why the Project entry failed, also for %s', async (_name, reason) => {
+    setBrowserOpener(async (url) => { opened.push(url); });
+    await pair();
+    const { sessionId, token } = await compactedSession('68888888-7777-8888-9999-abcdef012345', 'the logged brief');
+    const first = queueResume(sessionId, token)!;
+    await waitForOpened(1, 10_000);
+    await redeem(first.id, 'tab-1');
+    const prior = new Set(getLog());
+    const ack = await request('POST', '/commands/ack', { body: { id: first.id, client: 'tab-1', status: 'failed',
+      error: 'ChatGPT could not open the source Project through its native link; nothing was sent', detail: `project-entry:${reason}` } });
+    expect(ack.status).toBe(200);
+    const line = getLog().find(entry => !prior.has(entry) && entry.level === 'warn' && entry.message.includes('failed: project entry'))?.message ?? '';
+    expect(line).toContain('composer');
+  });
   // #1882: after its three quick tries, an automatic ticket with a written brief stopped trying to
   // open its new chat at all, and while open it owns the chat's recovery: the chat stopped for good.
   it('keeps opening the new chat of an automatic Compact & Resume once an hour after its quick tries', async () => {
