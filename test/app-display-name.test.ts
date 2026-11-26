@@ -25,11 +25,18 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); dom.window.close(); });
 
+it('renders production branding in all three HTML surfaces before any AppState arrives', () => {
+  expect([...document.querySelectorAll('[data-app-display-name]')].map(node => [node.tagName, node.textContent])).toEqual([
+    ['TITLE', APP_DISPLAY_NAME], ['STRONG', APP_DISPLAY_NAME], ['SPAN', APP_DISPLAY_NAME]
+  ]);
+  expect(document.title).toBe(APP_DISPLAY_NAME);
+});
+
 it.each(['en', 'ja', 'de', 'es', 'fr', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'zh-CN', 'zh-TW'] as const)('binds main-selected names through %s localization', async language => {
   const i18n = await import('../src/renderer/i18n.js');
   const { applyAppBrand } = await import('../src/renderer/app-brand.js');
   i18n.initLanguage();
-  expect(document.title).toBe('');
+  expect(document.title).toBe(APP_DISPLAY_NAME);
   for (const displayName of [name, APP_DISPLAY_NAME] as const) {
     applyAppBrand(displayName); i18n.setLanguage(language);
     expect(document.title).toBe(displayName);
