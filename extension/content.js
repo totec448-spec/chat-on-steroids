@@ -12243,7 +12243,10 @@
     return closed;
   }
 
-  function waitForComposer(timeoutMs = 12_000, stillCurrent = () => true) {
+  // `until` names the time this wait may last until, as a clock time, or null when the command has no deadline. The
+  // app can move it later while the wait runs (a stage report is answered with a later deadline), and the wait then
+  // goes on until the new time instead of ending at the one it started with (#2300).
+  function waitForComposer(timeoutMs = 12_000, stillCurrent = () => true, until = null) {
     if (!stillCurrent()) return Promise.resolve(null);
     const current = CLF_DOM.composer();
     if (current && current.isConnected && CLF_DOM.composerWritable()) return Promise.resolve(current);
@@ -12271,7 +12274,13 @@
           'data-chatgpt-composer', 'data-composer-markdown'
         ]
       });
-      timer = setTimeout(() => finish(null), timeoutMs);
+      let armedUntil = until ? until() : null;
+      const onTimer = () => {
+        const later = until ? until() : null;
+        if (later !== null && armedUntil !== null && later > armedUntil) { armedUntil = later; timer = setTimeout(onTimer, Math.max(1, later - Date.now())); return; }
+        finish(null);
+      };
+      timer = setTimeout(onTimer, timeoutMs);
       // Close the tiny race between the first lookup and installing the observer.
       check();
     });
@@ -12568,7 +12577,8 @@
     if (!(CLF_DOM.composerVisible() && CLF_DOM.composerWritable())) await closeAnnouncements(stillOnTarget);
     // A worker's hidden tab can take longer than 12 s to show the box on a busy machine; it has the
     // rest of its own budget, less what model, insert and Send need (#1086). A resume or wake keeps 12 s.
-    let readyComposer = await waitForComposer(boot.type === 'worker' ? commandWaitMs(12_000, 20_000) : 12_000);
+    let readyComposer = await waitForComposer(boot.type === 'worker' ? commandWaitMs(12_000, 20_000) : 12_000, () => true,
+      boot.type === 'worker' ? () => commandExpiresAt === null ? null : commandExpiresAt - 20_000 : null);
     // One that opened after the page loaded gets the same treatment, once.
     if (!readyComposer && (await closeAnnouncements(stillOnTarget)).length) readyComposer = await waitForComposer(5_000, stillOnTarget);
     // `transient`: this page redeemed the command, loaded the chat and typed nothing, so a wake
@@ -12623,7 +12633,7 @@
     // The app's reply to the stage just reported may carry a later deadline. Give it a moment to land, so the
     // wait below is sized by the deadline the app now allows and not by the one this page redeemed under.
     if (boot.model || boot.reasoningEffort) await Promise.race([lastStepReply, new Promise(resolve => setTimeout(resolve, 1_500))]);
-    if ((boot.model || boot.reasoningEffort) && !(await waitForComposer(commandWaitMs(12_000, 5_000), stillOnTarget))) {
+    if ((boot.model || boot.reasoningEffort) && !(await waitForComposer(commandWaitMs(12_000, 5_000), stillOnTarget, () => commandExpiresAt === null ? null : commandExpiresAt - 5_000))) {
       if (await failIfRetargeted()) return;
       return void (await fail(t(
         'content_bootstrap_composer_unavailable',

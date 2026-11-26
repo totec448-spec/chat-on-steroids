@@ -10060,6 +10060,46 @@ describe('a worker chat that never opens', () => {
     expect(window).toBe(WORKER_REDEEM_MS);
   });
 
+  // CodeRabbit on #2300: with the 120 s window, the 60 s fallback of the offered placement now runs for a worker
+  // whose tab the browser took and is only slow (a real worker took 62 s from opening to its first call). It
+  // opened the task a second time. A placement nobody collected still falls back to the app's own opening.
+  describe('the 60 s placement fallback', () => {
+    const withWake = async (body: (socket: WebSocket) => Promise<void>) => {
+      await pair();
+      await request('GET', '/status');
+      const socket = new WebSocket(base.replace('http:', 'ws:') + '/wake', { origin: EXTENSION_ORIGIN });
+      await once(socket, 'open');
+      const authenticated = once(socket, 'message'); socket.send(token!); await authenticated;
+      try { await body(socket); } finally { const closed = once(socket, 'close'); socket.close(); await closed; }
+    };
+
+    it('does not open a second tab for a worker the browser took and whose tab is only slow', async () => {
+      vi.useFakeTimers();
+      try {
+        await withWake(async () => {
+          spawn({ workers: [{ task: 'slow tab' }], caller: { conversationId: PRIME_CHAT } });
+          let placement: any;
+          await vi.waitFor(async () => { placement ||= (await request('GET', '/status')).body.placement; expect(placement?.id).toBeTruthy(); }, { timeout: 10_000 });
+          await vi.advanceTimersByTimeAsync(70_000);
+          expect(opened, 'the browser opened that tab itself; a second one would run the task twice').toEqual([]);
+          expect((await redeem(placement.id)).agent).toBe('worker-1');
+        });
+      } finally { vi.useRealTimers(); }
+    });
+
+    it('opens a worker nobody collected from here after a minute', async () => {
+      vi.useFakeTimers();
+      try {
+        await withWake(async () => {
+          spawn({ workers: [{ task: 'nobody polls' }], caller: { conversationId: PRIME_CHAT } });
+          await vi.waitFor(() => expect(pendingCommands()).toHaveLength(1), { timeout: 10_000 });
+          await vi.advanceTimersByTimeAsync(61_000);
+          await vi.waitFor(() => expect(opened).toHaveLength(1), { timeout: 10_000 });
+        });
+      } finally { vi.useRealTimers(); }
+    });
+  });
+
   it('fails an unredeemed opening without duplicating it or holding its sibling', async () => {
     vi.useFakeTimers();
     try {
@@ -16573,7 +16613,7 @@ describe('restarting the bridge', () => {
   it('keeps the stage deadline after a stop/start when the same stage was reported again', async () => {
     await pair();
     spawn({ workers: [{ task: 'work' }], caller: { conversationId: PRIME_CHAT } });
-    await waitForOpened(1);
+    await waitForOpened(1, 10_000);
     const leased = await redeem();
     const realNow = Date.now;
     const leasedAt = realNow();

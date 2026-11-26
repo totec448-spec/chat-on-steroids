@@ -12376,6 +12376,10 @@ function armPlacementFallback(command: Command): void {
   const timer = setTimeout(() => {
     const current = commands.find((entry) => entry.id === command.id);
     if (!current || current.owner !== null) return;
+    // A worker's placement the browser already took is that browser's own tab, opened and only slow:
+    // a second one would run the task twice (a real worker took 62 s from opening to its first call, and
+    // the redeem window is now 120 s). The command ends at its deadline if that tab never comes (#2300).
+    if (current.spec.type === 'worker' && current.placement === undefined) return;
     // Withdraw an offer nobody ever collected, so a late poll cannot open a second chat for a
     // command this app is about to open itself.
     delete current.placement;
