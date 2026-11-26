@@ -3912,8 +3912,9 @@ var CLF_DOM = (() => {
           if (stillCurrent() && now?.available && (!model || now.id === model || now.familyId === model) &&
               (!effort || now.effort === effort) && nativeReasoningMatches(now.effort, nativeOwned)) {
             trace.resolved = pair(now); trace.selected = pair(now);
-            phase('close'); trace.closed = await ui.close();
-            return stillCurrent();
+            phase('close'); const closed = trace.closed = await ui.close();
+            if (!closed) return selectionFailed('the picker did not close', 'close-failed');
+            return confirmAfterClose(now, passive.version, nativeOwned);
           }
         }
         // Keep the existing user-visible failure wording; the structured log
