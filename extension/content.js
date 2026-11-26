@@ -3811,12 +3811,13 @@
    * of the command the user thinks the row represents. That number is useful forensic data
    * and stays in the session record, but presenting it as a completion badge is misleading.
    * Keep concrete output metrics (line deltas, hit counts, exit failures) and suppress only
-   * the green success-duration shape in the extension. See TODO T-129.
+   * the green success-duration shape in the extension, unless the app marked the summary
+   * `ended`: it recorded that the command finished, so the duration is its own (#2239).
    */
   function displayMetric(summary) {
     const metric = summary && typeof summary.metric === 'string' ? summary.metric.trim() : '';
     if (!metric) return '';
-    if (summary.kind === 'run' && /^✓\s+\d+(?:\.\d+)?(?:ms|s|m)$/.test(metric)) return '';
+    if (summary.kind === 'run' && summary.ended !== true && /^✓\s+\d+(?:\.\d+)?(?:ms|s|m|h|d)(?:\s+\d+(?:ms|s|m|h|d))?$/.test(metric)) return '';
     return metric;
   }
 
