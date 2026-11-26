@@ -515,7 +515,7 @@ interface Command {
    * only step names and times: never text, titles or addresses. `opened` says who was asked to
    * open the tab; `step` is the last stage the page reported after it picked up the command.
    */
-  progress?: { opened?: 'browser' | 'os'; step?: CommandStep; stepAt?: number };
+  progress?: { opened?: 'browser' | 'os'; step?: CommandStep; stepAt?: number; /** When a stage that moved the deadline was reported; a repeated stage leaves it alone. */ stageAt?: number };
   /** Ephemeral picker telemetry: never persisted, replayed, or used to extend a deadline. */
   modelSelection?: ModelSelectionDiagnostic;
 }
@@ -6035,7 +6035,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (step === 'model-unconfirmed') observeModelSelection(command, body.modelSelection);
     const previousStep = command.progress?.step;
     const advanced = previousStep === undefined || COMMAND_STEPS.indexOf(step) > COMMAND_STEPS.indexOf(previousStep);
-    command.progress = { ...command.progress, step, stepAt: Date.now() };
+    command.progress = { ...command.progress, step, stepAt: Date.now(), ...(advanced || step === 'sending' ? { stageAt: Date.now() } : {}) };
     if (step === 'model-unconfirmed' && command.spec.type === 'revive') {
       const wanted = commandModelSelection(command);
       logWarn(`bridge: ${command.spec.agent}'s wake in ${command.spec.conversationId} goes out on ChatGPT's current model: ` +
@@ -12501,7 +12501,7 @@ function commandDeadlineDelay(command: Command, now = Date.now()): number {
     // Once the page owns the command, each later stage it reports gets the ordinary budget from its
     // own report instead of from the offer, so a page that redeemed late is not failed at once. The
     // invitation's absolute limit stays the ceiling.
-    const progressed = stepAt !== undefined ? stepAt + COMMAND_DEADLINE_MS : command.claimedAt + COMMAND_DEADLINE_MS;
+    const progressed = command.progress?.stageAt !== undefined ? command.progress.stageAt + COMMAND_DEADLINE_MS : command.claimedAt + COMMAND_DEADLINE_MS;
     const ordinary = Math.min(Math.max(command.claimedAt + COMMAND_DEADLINE_MS, progressed), limit);
     // A page that said it is sending may already have delivered the task; its receipt gets a window.
     return (step === 'sending' && stepAt !== undefined ? Math.max(ordinary, stepAt + WORKER_SENDING_GRACE_MS) : ordinary) - now;
