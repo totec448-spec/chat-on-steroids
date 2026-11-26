@@ -9500,9 +9500,10 @@ describe('targeted open', () => {
   // could not open the source Project", never which step. The page's reason was dropped when it was longer
   // than 146 characters or held a character outside the narrow set, and the reasons carry draft and chip evidence.
   it.each([
-    ['a long reason', 'transition-timeout:last=composer-not-ready:draft=handoff-residue:clears=2:chips=1:typed=54160:brief=54160:tail=unrelated-text-after-the-brief:route=source-conversation:attempt=3'],
-    ['a reason with other characters', 'source-ready-timeout:last=Composer_Not_Ready (draft=brief)'],
-  ] as const)('logs why the Project entry failed, also for %s', async (_name, reason) => {
+    ['a long reason', 'transition-timeout:last=composer-not-ready:draft=handoff-residue:clears=2:chips=1:typed=54160:brief=54160:tail=unrelated-text-after-the-brief:route=source-conversation:attempt=3',
+      'transition-timeout:last=composer-not-ready:draft=handoff-residue:clears=2:chips=1:typed=54160:brief=54160:tail=unrelated-text-after-the-brief:route=source-conversation:attempt=3'],
+    ['a reason with other characters', 'source-ready-timeout:last=Composer_Not_Ready (draft=brief)', 'source-ready-timeout:last=Composer_Not_Ready__draft=brief_'],
+  ] as const)('logs why the Project entry failed, also for %s', async (_name, reason, logged) => {
     setBrowserOpener(async (url) => { opened.push(url); });
     await pair();
     const { sessionId, token } = await compactedSession('68888888-7777-8888-9999-abcdef012345', 'the logged brief');
@@ -9514,7 +9515,7 @@ describe('targeted open', () => {
       error: 'ChatGPT could not open the source Project through its native link; nothing was sent', detail: `project-entry:${reason}` } });
     expect(ack.status).toBe(200);
     const line = getLog().find(entry => !prior.has(entry) && entry.level === 'warn' && entry.message.includes('failed: project entry'))?.message ?? '';
-    expect(line.toLowerCase()).toContain('composer');
+    expect(line).toMatch(new RegExp(`failed: project entry ${logged}$`));
   });
   // #1882: after its three quick tries, an automatic ticket with a written brief stopped trying to
   // open its new chat at all, and while open it owns the chat's recovery: the chat stopped for good.
