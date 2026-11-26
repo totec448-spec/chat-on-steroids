@@ -3901,6 +3901,22 @@ var CLF_DOM = (() => {
       phase('open');
       const ui = modelPickerAccess(stillCurrent, state => { observe(state); nativeOwned = nativeOwned || nativeReasoningOwned(); }, phase), original = await ui.open();
       if (!original) {
+        // A native Enter on the trigger can move the effort without mounting the menu, and the
+        // guard rightly refuses a second Enter after that. When the move landed exactly on what was
+        // asked for, the page already shows the request: the same passive proof as before opening
+        // confirms it, and the wake or worker start is not reported as an unreadable picker (#2298).
+        if (ui.openingRefusal() === 'changed') {
+          const passive = await readPickerState(); observe(passive);
+          const now = passive?.choices.find(choice => choice.bucket === passive.currentBucket);
+          nativeOwned = nativeOwned || nativeReasoningOwned();
+          if (stillCurrent() && now?.available && (!model || now.id === model || now.familyId === model) &&
+              (!effort || now.effort === effort) && nativeReasoningMatches(now.effort, nativeOwned)) {
+            trace.resolved = pair(now); trace.selected = pair(now);
+            phase('close'); const closed = trace.closed = await ui.close();
+            if (!closed) return selectionFailed('the picker did not close', 'close-failed');
+            return confirmAfterClose(now, passive.version, nativeOwned);
+          }
+        }
         // Keep the existing user-visible failure wording; the structured log
         // distinguishes a guarded selection drift from an unreadable picker.
         selectionFailed('the picker did not open or could not be read', ui.openingRefusal() || 'unreadable');
