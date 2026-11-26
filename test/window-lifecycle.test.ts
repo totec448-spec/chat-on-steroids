@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { mainText } from '../src/main/main-texts.js';
 import {
   applyLoginStartup,
   isBackgroundLaunch,
@@ -21,11 +22,12 @@ describe('native window activation', () => {
     let options: Record<string, unknown> | undefined;
     vm.runInNewContext(constructor, {
       BrowserWindow: function (value: Record<string, unknown>) { options = value; },
-      layout: {}, icon: null, process: { platform },
+      layout: {}, icon: null, process: { platform }, mainText, appBrand: { displayName: 'Chat On Steroids (dev)' },
       titleBarOverlayForTheme: () => ({}), windowBackgroundForTheme: () => '#181818', getConfig: () => ({ ui: { theme: 'dark' } }), shownTheme: (theme: string) => theme,
       UI_BASE_ZOOM: 1, path: { join: () => 'preload.js' }, __dirname: '/app'
     });
     expect(options?.fullscreenable).toBe(platform === 'darwin');
+    expect(options?.title).toBe('Chat On Steroids (dev)');
     expect(options?.webPreferences).toMatchObject({ sandbox: true, contextIsolation: true, nodeIntegration: false });
     // macOS and Windows draw the app's own top bar as the title bar; Linux keeps its native frame.
     expect(options?.titleBarStyle).toBe(platform === 'linux' ? undefined : 'hidden');
