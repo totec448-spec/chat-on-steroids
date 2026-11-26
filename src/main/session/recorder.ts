@@ -1797,7 +1797,9 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
     } else if (call.providerSessionAnchor) {
       const admitted = await recordProcessCall(sessionId, event, () => {
         const proof = requestCorrelation(input.requestId);
-        return proof?.sessionId === sessionId && proof.conversationId === target.conversationId &&
+        // Unchanged since this call resolved its owner: the proof names target.sessionId, which is not the
+        // session filed in when that one was deleted and the chat's current session took the call (#2301).
+        return proof?.sessionId === (target.sessionId ?? sessionId) && proof.conversationId === target.conversationId &&
           proof.providerSessionAnchor === call.providerSessionAnchor;
       });
       if (!admitted) {
@@ -2178,16 +2180,29 @@ function agentConversation(agent: string): string | null {
  * the dangerous one: with two workers generating at once it appended one agent's calls
  * into the other's raw history, and nothing downstream could tell that had happened.
  */
+/** Deleted sessions already named in the log, so a running request logs the decision once, not per call. */
+const deletedSessionsNoted = new Set<string>();
 async function targetSession(target: Target): Promise<string | null> {
   if (target.attribution === 'superseded') return ensureUnattributedSession();
   if (target.conversationId) {
     if (target.sessionId) {
       const exact = await getSession(target.sessionId);
       if (exact && exact.chatIds.includes(target.conversationId)) return exact.id;
-      logWarn(
-        `request attribution session ${target.sessionId} for conversation ${target.conversationId} is unavailable; refusing to downgrade to a newer conversation epoch`
-      );
-      return null;
+      // A session that still exists but no longer holds this chat is a newer conversation epoch: refuse.
+      // One that was deleted is not an epoch at all. Its running request goes on calling, and its calls
+      // belong to the chat's new session, which the conversation already started (#2298: 18 calls over six
+      // minutes were left out of the record after a person deleted the session of a running turn).
+      if (exact) {
+        logWarn(
+          `request attribution session ${target.sessionId} for conversation ${target.conversationId} is unavailable; refusing to downgrade to a newer conversation epoch`
+        );
+        return null;
+      }
+      if (!deletedSessionsNoted.has(target.sessionId)) {
+        deletedSessionsNoted.add(target.sessionId);
+        if (deletedSessionsNoted.size > 64) deletedSessionsNoted.delete(deletedSessionsNoted.values().next().value!);
+        logInfo(`request attribution: session ${target.sessionId} was deleted; filing its running request's calls under the chat's current session`);
+      }
     }
     const live = conversations.get(target.conversationId);
     if (live) return live.sessionId;
