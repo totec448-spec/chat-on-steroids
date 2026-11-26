@@ -6009,7 +6009,11 @@ async function placeSuccessorChat(raw, tabId) {
     if (effort) query.push(`reasoning_effort=${encodeURIComponent(effort)}`);
     let created;
     try {
-      created = await createChatTab(`https://chatgpt.com/?${query.join('&')}#${marker}`, true);
+      // Fresh worker bootstrap is serialized by the app, so this is the only command tab
+      // currently waiting for ChatGPT's New Chat composer. Make it the selected tab inside
+      // CoS's own minimized background window so Chrome fully hydrates that editor; the window
+      // itself remains minimized and unfocused, so this never steals the user's foreground.
+      created = await createChatTab(`https://chatgpt.com/?${query.join('&')}#${marker}`, true, true);
     } catch (error) {
       await failPlacement(`successor_tab_create_failed: ${placementError(error)}`);
       return;
@@ -6365,6 +6369,39 @@ async function restoreChatgptTab(id, current = () => true, documentId = null) {
     // Injection failure does not transfer ownership to a replacement tab.
     return false;
   }
+}
+
+function markedCommandForTab(tab) {
+  try {
+    const url = new URL(tab?.url || '');
+    const query = commandMarkerId(url.searchParams.get('clf'));
+    const hash = commandMarkerId(new URLSearchParams(url.hash.slice(1)).get('clf'));
+    if (query && hash && query !== hash) return null;
+    return query || hash;
+  } catch {
+    return null;
+  }
+}
+
+async function restoreMarkedCommandRecorder(tab) {
+  const commandId = markedCommandForTab(tab);
+  if (!commandId || !Number.isInteger(tab?.id) || tab.incognito || tab.pendingUrl ||
+      tab.status !== 'complete' || tab.discarded || tab.frozen) return;
+
+  const live = await tabReply(tab.id, { type: 'clf-recorder-ping' });
+  if (live?.ok === true && live.recorderVersion === PAGE_RECORDER_VERSION) return;
+
+  const current = await chrome.tabs.get(tab.id).catch(() => null);
+  if (!current || current.pendingUrl || current.status !== 'complete' || current.discarded || current.frozen ||
+      markedCommandForTab(current) !== commandId) return;
+  await restoreChatgptTab(tab.id);
+}
+
+if (chrome.tabs?.onUpdated && typeof chrome.tabs.onUpdated.addListener === 'function') {
+  chrome.tabs.onUpdated.addListener((_id, changeInfo, tab) => {
+    if (changeInfo.status !== 'complete' || !markedCommandForTab(tab)) return;
+    void restoreMarkedCommandRecorder(tab).catch(() => undefined);
+  });
 }
 
 // The existing maintenance owner repairs missing observers without reloading or opening pages.

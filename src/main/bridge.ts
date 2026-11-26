@@ -310,10 +310,11 @@ const RATE_LIMIT = 900;
 export const COMMAND_DEADLINE_MS = 90_000;
 /** A missing redemption ends this one opening attempt; it never licenses another tab.
  * The absolute invitation lifetime also bounds commands waiting behind another bootstrap.
- * 45 s, not the original 20: a fresh ChatGPT tab on a slower machine takes about 15 s at the
- * 90th percentile, and two worker tabs loading beside other tabs both missed 20 s (VM, 2026-10-06). */
-export const WORKER_REDEEM_MS = 45_000;
-export const WORKER_BOOTSTRAP_LIMIT_MS = 120_000;
+ * Keep the full bootstrap window here: browser placement may spend a minute before the tab
+ * exists, and a hidden background page can still be mounting after that. */
+export const WORKER_REDEEM_MS = 120_000;
+/** Absolute fresh-worker lifetime: page redemption, then the ordinary page/send deadline. */
+export const WORKER_BOOTSTRAP_LIMIT_MS = WORKER_REDEEM_MS + COMMAND_DEADLINE_MS;
 /**
  * How long a worker's page that reported Send has for its receipt (#1086). On a loaded machine
  * pages said "sending the task" and the app gave the workers up at the ordinary deadline anyway,
@@ -675,7 +676,7 @@ let commandReceipts: CommandReceipt[] = [];
  * use this same boundary so a worker cannot begin MCP work in a gap where attribution already
  * knows its conversation but the agent dispatcher still sees a stranger.
  */
-function bindLeasedWorkerCommand(agent: string | null, commandId: string | null, conversation: string): boolean {
+async function bindLeasedWorkerCommand(agent: string | null, commandId: string | null, conversation: string): Promise<boolean> {
   if (!agent || !commandId) return false;
   const pending = commands.find(
     (command) =>
@@ -685,7 +686,14 @@ function bindLeasedWorkerCommand(agent: string | null, commandId: string | null,
       swarmRunning(command.spec.runId) &&
       command.claimedAt !== null
   );
-  return pending?.spec.type === 'worker' ? bindConversation(agent, conversation, pending.spec.runId) : false;
+  if (pending?.spec.type !== 'worker' || !bindConversation(agent, conversation, pending.spec.runId)) return false;
+  // Lost-ACK recovery can be the event that turns the worker from invited into active.
+  // Fresh worker bootstraps are serialized, so that transition is also what makes the next
+  // queued worker eligible. Persist the broker half before opening that sibling: after a crash,
+  // the active binding must never roll back to invited while a later worker has already started.
+  if (!(await persistCriticalSwarmNow())) return false;
+  scheduleDeliver();
+  return true;
 }
 /**
  * Worker/revival transports already removed from live delivery but still kept in durable
@@ -4000,7 +4008,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       ? body['agent']
       : null;
     const reportedCommandId = typeof body['agentCommandId'] === 'string' ? body['agentCommandId'] : null;
-    bindLeasedWorkerCommand(reportedAgent, reportedCommandId, id);
+    await bindLeasedWorkerCommand(reportedAgent, reportedCommandId, id);
 
     // This is the live-turn ownership handshake, deliberately separate from transcript
     // delivery. A fresh ChatGPT conversation can expose metadata.request_id before its
@@ -4065,7 +4073,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       ? body['agent']
       : null;
     const reportedCommandId = typeof body['agentCommandId'] === 'string' ? body['agentCommandId'] : null;
-    bindLeasedWorkerCommand(reportedAgent, reportedCommandId, id);
+    await bindLeasedWorkerCommand(reportedAgent, reportedCommandId, id);
     // This reports attachment only. The recorder below owns actual work and replay deduplication.
     const revived = noteAgentAlive(id, 'page');
     if (revived?.report) await recordAgentMessage(revived.report, 'sent', id);
@@ -6030,6 +6038,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (!step) return json(res, 200, { ok: false }, origin);
     // Final failure details share the continuation step, so a delayed telemetry RPC cannot lose them.
     if (step === 'model-unconfirmed') observeModelSelection(command, body.modelSelection);
+    const previousStep = command.progress?.step;
+    const advanced = previousStep === undefined || COMMAND_STEPS.indexOf(step) > COMMAND_STEPS.indexOf(previousStep);
     command.progress = { ...command.progress, step, stepAt: Date.now() };
     if (step === 'model-unconfirmed' && command.spec.type === 'revive') {
       const wanted = commandModelSelection(command);
@@ -6041,7 +6051,14 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         `${[wanted?.model, wanted?.reasoningEffort].filter(Boolean).join(' ') || 'its model'} could not be confirmed in the picker, and a resume is not abandoned for it`);
     }
     if (command.spec.type === 'resume' && command.timer && continuationByToken(command.spec.token)?.automatic) armDeadline(command);
-    // A worker about to send gets its receipt window, and its page learns the new deadline (#1086).
+    // A fresh worker page that is genuinely moving through bootstrap is alive. Hidden/background
+    // tabs can spend most of the ordinary window mounting the composer or picker; killing one
+    // while it just advanced to the next stage creates a false failed worker which may start
+    // seconds later through the late-ACK path. Re-arm only when the stage changed, so repeating
+    // one stuck report can never keep the invitation alive indefinitely. The absolute bootstrap
+    // limit in commandDeadlineDelay() still fences the whole attempt.
+    if (command.spec.type === 'worker' && advanced) armDeadline(command);
+    // A worker about to send gets its longer receipt window, and its page learns the new deadline (#1086).
     if (command.spec.type === 'worker' && step === 'sending') {
       armDeadline(command);
       return json(res, 200, { ok: true, expiresAt: Date.now() + Math.max(1, commandDeadlineDelay(command)) }, origin);
@@ -6198,7 +6215,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           // Only the first two are this revival's to undo. A worker that stopped waking on its
           // own has already been put somewhere by whatever did that, and failWorkerRevival()
           // ignores anything that is not still `waking`, so this cannot invent a failure.
-          failWorkerRevival(revive.agent, why, revive.runId);
+          failWorkerRevival(revive.agent, why, revive.runId, { countFailure: false });
           receipt = {
             id,
             client: client || command.owner,
@@ -6388,7 +6405,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       const why = error
         ? `the worker's chat did not take the message — ${error}`
         : "the browser could not reopen the worker's chat";
-      failWorkerRevival(command.spec.agent, why, command.spec.runId, { transient: transientFailure && !!error });
+      failWorkerRevival(command.spec.agent, why, command.spec.runId, {
+        transient: transientFailure && !!error,
+        countFailure: false
+      });
       receipt = {
         id,
         client: client || command.owner,
@@ -12352,6 +12372,8 @@ async function deliverOne(): Promise<void> {
  * racing its own expiry.
  */
 const PLACEMENT_FALLBACK_MS = 60_000;
+/** Worker placement is push-driven and normally immediate; leave most of redemption for a fallback tab. */
+const WORKER_PLACEMENT_FALLBACK_MS = 30_000;
 
 /**
  * Opens the chat here when the browser was offered it and did nothing with it.
@@ -12362,18 +12384,19 @@ const PLACEMENT_FALLBACK_MS = 60_000;
  * proof a page took it, and the lookup by id is what makes a stale timer harmless.
  */
 function armPlacementFallback(command: Command): void {
+  const delay = command.spec.type === 'worker' ? WORKER_PLACEMENT_FALLBACK_MS : PLACEMENT_FALLBACK_MS;
   const timer = setTimeout(() => {
     const current = commands.find((entry) => entry.id === command.id);
-    if (!current || current.owner !== null) return;
+    if (!current || current.owner !== null || !current.placement) return;
     // Withdraw an offer nobody ever collected, so a late poll cannot open a second chat for a
     // command this app is about to open itself.
     delete current.placement;
     logInfo(
       `bridge: the browser did not open ${specKey(current.spec)} within ` +
-        `${Math.round(PLACEMENT_FALLBACK_MS / 1000)}s — opening it from here instead`
+        `${Math.round(delay / 1000)}s — opening it from here instead`
     );
     void openFreshChatInBrowser(current);
-  }, PLACEMENT_FALLBACK_MS);
+  }, delay);
   timer.unref?.();
 }
 
@@ -12486,9 +12509,13 @@ function commandDeadlineDelay(command: Command, now = Date.now()): number {
       const redeemBy = Math.max(command.claimedAt + WORKER_REDEEM_MS, lastBrowserLaunchAt + BROWSER_LAUNCH_GRACE_MS);
       return Math.min(redeemBy, limit) - now;
     }
-    const ordinary = Math.min(command.claimedAt + COMMAND_DEADLINE_MS, limit);
-    // A page that said it is sending may already have delivered the task; its receipt gets a window.
     const { step, stepAt } = command.progress ?? {};
+    // Once the page owns the command, each *new* bootstrap stage is concrete liveness. Give that
+    // stage the ordinary page/send budget instead of timing from the original redemption forever.
+    // The invitation's absolute limit remains the ceiling, so a stalled stage cannot extend itself.
+    const progressed = stepAt !== undefined ? stepAt + COMMAND_DEADLINE_MS : command.claimedAt + COMMAND_DEADLINE_MS;
+    const ordinary = Math.min(Math.max(command.claimedAt + COMMAND_DEADLINE_MS, progressed), limit);
+    // A page that said it is sending may already have delivered the task; its receipt gets a window.
     return (step === 'sending' && stepAt !== undefined ? Math.max(ordinary, stepAt + WORKER_SENDING_GRACE_MS) : ordinary) - now;
   }
   const claimedAt = command.claimedAt ?? now;
@@ -12586,7 +12613,8 @@ function expire(command: Command): void {
   // A page that claimed its worker and reported no failure may still have sent its task: its
   // reports can be minutes late on a starved machine (#1086). Its late receipt is adopted.
   drop(command, commandExpiryReason(command), {
-    startTimedOut: spec.type === 'worker' && command.owner !== null && !command.lastError
+    startTimedOut: spec.type === 'worker' && command.owner !== null && !command.lastError,
+    countWakeFailure: spec.type !== 'revive' || revivalDeliveryProven(command)
   });
   deliver();
 }
@@ -12781,7 +12809,7 @@ function describe(command: Command, client: string | null, claimedSummary?: stri
   };
 }
 
-function drop(command: Command, why: string, options: { startTimedOut?: boolean } = {}): boolean {
+function drop(command: Command, why: string, options: { startTimedOut?: boolean; countWakeFailure?: boolean } = {}): boolean {
   if (!commands.includes(command)) return false;
   const automaticEntry = command.spec.type === 'resume' ? continuationByToken(command.spec.token) : null;
   const automaticResume =
@@ -12840,7 +12868,11 @@ function drop(command: Command, why: string, options: { startTimedOut?: boolean 
   // A revival that never happened is not a worker that failed. Nothing was typed into its
   // chat, so it goes back to sleeping with its inbox intact and its slot released, and the
   // prime is told the message it sent is still waiting to be delivered.
-  if (command.spec.type === 'revive') failWorkerRevival(command.spec.agent, why, command.spec.runId);
+  if (command.spec.type === 'revive') {
+    failWorkerRevival(command.spec.agent, why, command.spec.runId, {
+      countFailure: options.countWakeFailure !== false
+    });
+  }
   logWarn(`bridge: gave up on ${specKey(command.spec)} — ${why}`);
   changed();
   persistCommands();
@@ -12932,9 +12964,18 @@ const isLeased = (command: Command): boolean => {
  */
 function nextDeliverable(): Command | null {
   if (commandWrites.size > 0) return null;
+  // Bootstrap fresh workers one at a time. The workers themselves still run concurrently once
+  // bound; this only prevents a spawn burst from asking Chrome to hydrate several hidden New Chat
+  // pages, model pickers and command markers at the same instant. That burst is the state in which
+  // pages were observed opened-but-never-redeemed. A resume is independent and may still proceed.
+  const pendingWorkers = new Set(pendingWorkerSpawns().map((worker) => `${worker.runId}:${worker.id}`));
+  const workerOpening = commands.some((entry) =>
+    entry.spec.type === 'worker' && entry.claimedAt !== null &&
+    pendingWorkers.has(`${entry.spec.runId}:${entry.spec.agent}`)
+  );
   // A spent lease stays spent even after its deadline; only expiry settles it.
   return commands.find((command) => command.claimedAt === null &&
-    (command.spec.type === 'worker' || command.spec.type === 'resume')) ?? null;
+    (command.spec.type === 'resume' || (command.spec.type === 'worker' && !workerOpening))) ?? null;
 }
 
 /**
@@ -13379,7 +13420,9 @@ export async function restoreCommands(): Promise<void> {
         (entry) => entry.id === revive.agent && entry.conversationId === revive.conversationId && entry.runId === revive.runId
       );
       if (!owed) continue;
-      failWorkerRevival(revive.agent, 'its durable revival expired while the app was not running', revive.runId);
+      failWorkerRevival(revive.agent, 'its durable revival expired while the app was not running', revive.runId, {
+        countFailure: false
+      });
     }
 
     if (brokerRelevant) {
