@@ -5759,7 +5759,22 @@ browser action.
 The Files panel projects the current session's LocalProject through fixed IPC using a project
 UUID and relative paths. It does not change the main composer or grant additional filesystem
 access. Main re-resolves current approved roots and rejects traversal, symbolic links/junctions
-and project-root mutation. The renderer's `workspace-docks.ts` owns the right tool dock and
+and project-root mutation. Files creates and renames use the `project-files.ts` entry-mutation
+queues from filesystem validation through publication. Admission keys use the catalog's canonical
+project roots, without resolving project folders first. Disjoint roots progress independently,
+even when another project's queue is full or stalled. Equal or parent/child roots wait for each
+other in admission order: the next operation checks the preceding result, so competing renames
+or a create/rename cannot both claim an unused name and replace its contents. Admission refuses
+when 32 operations (active included) are pending across the overlapping roots, using the
+translated retryable busy error without adding the callback to a mutation queue. Catalog lookups are
+ordered separately from filesystem work so async reads cannot reorder admission. Before a
+lookup, an app-wide cap of 6,400 (200 catalog projects Ã— 32) also bounds unresolved requests,
+including invalid project ids. Queue keys come only from the bounded project catalog; drained
+keys are removed. A failed operation releases its queue; waiting and capacity refusal are
+logged. Windows case-only renames retain their existing native-path handling. These queues
+cover these app-owned operations, not external OS
+writers; the adjacent pathname/sandbox rechecks remain in force.
+The renderer's `workspace-docks.ts` owns the right tool dock and
 bottom terminal dock; Files, Review, Sub-agents and each Terminal view retain their own content
 and async lifetimes. Closing the right dock hides its active tool but retains its tab selection.
 Every dock track change (right column, bottom row) goes through `moveWorkDock`, which animates
@@ -5887,11 +5902,52 @@ message, paths, newBranch?, expectedToken }` refuses with "The changes changedâ€
 are exactly what the dialog listed. It refuses conflicts, a merge/cherry-pick/revert in progress
 and a detached HEAD without `newBranch`. It runs `git add -A` and `git commit` on exactly the
 chosen pathspecs (literal, NUL-separated on stdin), so what the person staged for other files stays
-staged. A rename commits both paths but stages only the new one. A commit that does not happen
-(Git cannot stage, a hook or Git refuses) reads the index back from a `git write-tree` taken
-before, so a hand-picked part of a file (`git add -p`) stays staged as it was; an index that cannot
-be written as a tree falls back to unstaging only what it staged. A branch it created is removed
-after HEAD is pointed back (`symbolic-ref`, which works while another program holds the index).
+staged. A rename commits both paths but stages only the new one. This worktree's real
+`index.lock` is acquired exclusively before staging. It holds a complete private copy of the
+person's original index (or a native empty index when absent); `GIT_INDEX_FILE` directs our
+add/commit and their hooks to it. Git atomically updates that private file via index.lock.lock.
+The real index is never staged into or restored on failure: a plain competing commit may have
+released its index lock before hooks and later advance HEAD using its prepared original index.
+A definite refusal discards only our private files, preserving hand-picked partial staging byte
+for byte. Sparse indexes retain their cone/collapsed entries; split indexes retain native shared
+bases and unrelated partial staging. Private writers use command-scoped `splitIndex.sharedIndexExpire=never`:
+expiry while the real index still points to a shared file would corrupt that untouched index on
+refusal. Stored Git settings are unchanged; later ordinary Git operations own normal expiry.
+A competing lock is never removed. Linked worktrees use their own index, not the common index.
+A Git timeout never proves that hook/filter descendants stopped, even when the parent's
+pipes close. Interrupted writers therefore retain recovery state; only a failed launch can
+attest that no child started. No process-tree kill or new runner timeout contract is introduced.
+An accepted commit reconciles only the chosen paths in the private index to its exact commit,
+then syncs and atomically publishes the complete index and syncs its directory on macOS/Linux.
+A directory-sync failure after rename reports a committed-but-later-failed result, not a missing
+recovery lock. Windows retains native file sync/rename without unsupported directory sync.
+Each attempt uses a nonce in native
+`GIT_REFLOG_ACTION` to identify its own accepted HEAD update after a late error; the commit
+message is unchanged, Git owns receipt expiry, and disabled reflogs stay disabled. A successful
+Git exit resolves its own final summary's hex object ID through Git, including when reflogs are
+disabled; a later moving HEAD is never substituted. An unrecognized summary retains recovery
+state rather than guessing. A successful exit never enters failure rollback
+if a later external soft reset returns HEAD to the starting commit. Unknown HEAD/outcome, missing late
+receipt, unconfirmed termination or failed publication retains the original index AND prepared
+index.lock, preserves the branch, and shows a translated recovery error. Do not delete that
+recovery file as an empty stale lock: after stopping Git writers, inspect HEAD, both indexes and
+any index.lock.lock; publish the verified prepared index only after reconciling it with the
+accepted commit. If no commit was accepted (including a crash during the initial copy), stop
+writers and verify ownership, then move the incomplete private lock aside without replacing the
+real index, allowing a retry while retaining the displaced bytes. If ownership or acceptance is
+uncertain, preserve both files and the lock. No app recovery ledger or automatic guess is introduced.
+After a definite refusal at the unchanged starting position, native `git switch --no-guess` or
+detached checkout restores HEAD only if Git permits it; busy checkout keeps the attempt branch.
+Safe `git branch -d` compares against restored HEAD with inherited upstream settings ignored for
+that command, preserving symbolic-ref and active-worktree guards. Failed branch creation proves
+no ownership: a matching branch is retained, even at the starting commit, including after launch
+errors and interrupted switches; only a normal successful creation enables cleanup. An unborn branch is
+distinct from unreadable HEAD. Late failure reports that Git committed when receipt-confirmed;
+unrelated HEAD movement is never reported as success.
+Admission revalidates ref and parent after taking the index lease. This is not a general ref
+transaction: concurrent branch/ref rewrites (including Git's same-commit `switch -c` fast path)
+can bypass the index lock. The pre-existing mid-command wrong-branch race is a separate defect;
+this change detects final identity conflicts and retains recovery state rather than undoing them.
 Hooks run. Paths with `..` or an absolute start are refused before Git runs.
 `projectCommit:push` pushes the current branch (`-u <remote> HEAD:refs/heads/<branch>` when it has
 no upstream) with `GIT_TERMINAL_PROMPT=0` and, unless `GIT_SSH`, `GIT_SSH_COMMAND` or
@@ -5964,9 +6020,21 @@ Creating an entry uses the same unsaved-edit guard as changing the selected file
 Text previews/editor input are bounded to 256 KiB; full editable previews retain exact UTF-8,
 BOM and line endings plus a content/file-identity revision. Save stages complete replacement bytes
 beside the original, flushes them, revalidates project access and the original revision, then
-renames. A failed staging write or rename never truncates the original. Duplicate saves are
-refused and newer edits typed during a pending save remain dirty. Atomic replacement is not an
-OS-wide lock against an unrelated writer after the final revision check.
+renames. On POSIX, staging restores the original ordinary permission bits after writing and before
+flushing only when the staged creation mode differs. Matching modes need no chmod, preserving saves
+on filesystems that refuse mode changes; a required chmod failure still refuses publication.
+Windows keeps its existing mode/attribute behavior. A failed staging write or rename never truncates
+the original. Rename commits the save: `ProjectFileSaveResult.preview` is null if the later preview
+read fails, with a diagnostic warning, rather than reporting that committed save as failed. The
+renderer keeps the acknowledged text as its baseline without a revision or invented timestamp;
+newer edits stay dirty, including across project navigation. Save stays disabled until Refresh files
+reads a valid revision whose text still matches that baseline. A failed refresh or external change
+keeps the draft and cannot authorize an overwrite. Overlapping watcher preview reads publish only
+the latest-started request, in either completion order. An accepted save or explicit refresh
+invalidates pending watcher reads through that same request generation. Watcher reads cannot replace
+a revisionless saved baseline; ordinary revision-bearing previews retain automatic updates.
+Duplicate saves are refused. Atomic replacement is not an OS-wide lock against an unrelated writer
+after the final revision check.
 
 Images accept at most 5 MiB input and 16 megapixels, then decode to a bounded 1600-pixel thumbnail.
 PDF input is bounded to 20 MiB; bundled PDF.js renders one page with at most 16 megapixels and

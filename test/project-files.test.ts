@@ -20,6 +20,7 @@ import {
 import { validateNewRoot } from '../src/main/sandbox.js';
 import { ProjectFileWatchSet } from '../src/main/project-file-watcher.js';
 import * as projectFiles from '../src/main/project-files.js';
+import * as projects from '../src/main/projects.js';
 
 let directory: string;
 let approved: string;
@@ -192,7 +193,100 @@ it('saves bounded text through the project sandbox and returns the new editor re
     text: 'export const value = 2;\n',
     truncated: false
   });
-  expect(saved.preview.modifiedAt).not.toBe('');
+  expect(saved.preview?.modifiedAt).not.toBe('');
+});
+
+it('acknowledges a committed save even when the following preview read fails', async () => {
+  const file = path.join(approved, 'project', 'notes.txt');
+  await fs.writeFile(file, 'original\n');
+  const project = await addProject(path.dirname(file));
+  const before = await previewProjectFile(project.id, 'notes.txt');
+  const rename = fs.rename.bind(fs), open = fs.open.bind(fs);
+  let committed = false;
+  vi.spyOn(fs, 'rename').mockImplementation(async (...args) => {
+    await rename(...args);
+    if (String(args[1]) === file) committed = true;
+  });
+  const read = vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+    if (committed && String(args[0]) === file && args[1] === 'r') {
+      throw Object.assign(new Error('Preview read failed'), { code: 'EIO' });
+    }
+    return open(...args);
+  });
+
+  await expect(saveProjectTextFile(project.id, 'notes.txt', 'saved\n', before.modifiedAt, before.bytes, before.revision!))
+    .resolves.toEqual({ preview: null });
+  expect(await fs.readFile(file, 'utf8')).toBe('saved\n');
+  expect((await fs.readdir(path.dirname(file))).some(name => name.endsWith('.tmp'))).toBe(false);
+  read.mockRestore();
+  const fresh = await previewProjectFile(project.id, 'notes.txt');
+  await expect(saveProjectTextFile(project.id, 'notes.txt', 'next\n', fresh.modifiedAt, fresh.bytes, fresh.revision!))
+    .resolves.toHaveProperty('preview.text', 'next\n');
+});
+
+it.skipIf(process.platform === 'win32').each([0o664, 0o775])('preserves mode %o after a restrictive creation umask', async mode => {
+  const file = path.join(approved, 'project', 'notes.txt');
+  await fs.writeFile(file, 'original\n');
+  await fs.chmod(file, mode);
+  const project = await addProject(path.dirname(file));
+  const before = await previewProjectFile(project.id, 'notes.txt');
+  const open = fs.open.bind(fs);
+  vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+    const handle = await open(...args);
+    // Model the OS's umask without changing the test worker's process-wide umask.
+    if (args[1] === 'wx') await handle.chmod(mode & ~0o022);
+    return handle;
+  });
+  await saveProjectTextFile(project.id, 'notes.txt', 'saved\n', before.modifiedAt, before.bytes, before.revision!);
+  expect((await fs.stat(file)).mode & 0o777).toBe(mode);
+  expect(await fs.readFile(file, 'utf8')).toBe('saved\n');
+});
+
+it.skipIf(process.platform === 'win32')('saves without chmod when replacement permissions already match', async () => {
+  const file = path.join(approved, 'project', 'notes.txt');
+  await fs.writeFile(file, 'original\n');
+  await fs.chmod(file, 0o644);
+  const project = await addProject(path.dirname(file));
+  const before = await previewProjectFile(project.id, 'notes.txt');
+  const chmod = vi.fn(async () => { throw Object.assign(new Error('Mode changes unsupported'), { code: 'ENOTSUP' }); });
+  const open = fs.open.bind(fs);
+  vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+    const handle = await open(...args);
+    if (args[1] === 'wx') {
+      // Make the creation mode deterministic without changing the worker's umask.
+      await handle.chmod(0o644);
+      vi.spyOn(handle, 'chmod').mockImplementation(chmod);
+    }
+    return handle;
+  });
+  await expect(saveProjectTextFile(project.id, 'notes.txt', 'saved\n', before.modifiedAt, before.bytes, before.revision!))
+    .resolves.toHaveProperty('preview.text', 'saved\n');
+  expect(chmod).not.toHaveBeenCalled();
+  expect(await fs.readFile(file, 'utf8')).toBe('saved\n');
+  expect((await fs.stat(file)).mode & 0o777).toBe(0o644);
+  expect((await fs.readdir(path.dirname(file))).some(name => name.endsWith('.tmp'))).toBe(false);
+});
+
+it.skipIf(process.platform === 'win32')('keeps the original file when restoring different replacement permissions fails', async () => {
+  const file = path.join(approved, 'project', 'notes.txt');
+  await fs.writeFile(file, 'original\n');
+  await fs.chmod(file, 0o664);
+  const project = await addProject(path.dirname(file));
+  const before = await previewProjectFile(project.id, 'notes.txt');
+  const open = fs.open.bind(fs);
+  vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+    const handle = await open(...args);
+    if (args[1] === 'wx') {
+      await handle.chmod(0o644);
+      vi.spyOn(handle, 'chmod').mockRejectedValue(Object.assign(new Error('Mode change failed'), { code: 'EPERM' }));
+    }
+    return handle;
+  });
+  await expect(saveProjectTextFile(project.id, 'notes.txt', 'saved\n', before.modifiedAt, before.bytes, before.revision!))
+    .rejects.toThrow('Mode change failed');
+  expect(await fs.readFile(file, 'utf8')).toBe('original\n');
+  expect((await fs.stat(file)).mode & 0o777).toBe(0o664);
+  expect((await fs.readdir(path.dirname(file))).some(name => name.endsWith('.tmp'))).toBe(false);
 });
 
 it('refuses to overwrite a text file that changed after the editor preview was opened', async () => {
@@ -495,4 +589,190 @@ it('does not retire a new watch when an obsolete A-B-A validation fails late', a
     vi.advanceTimersByTime(180);
     expect(changed).toEqual([{ projectId: project.id, directory: '' }]);
   } finally { watches.close(); vi.useRealTimers(); }
+});
+
+it('keeps both file contents when concurrent renames choose one unused destination', async () => {
+  const root = path.join(approved, 'project');
+  const project = await addProject(root);
+  await fs.writeFile(path.join(root, 'first.txt'), 'first contents');
+  await fs.writeFile(path.join(root, 'second.txt'), 'second contents');
+  const results = await Promise.allSettled([
+    renameProjectEntry(project.id, 'first.txt', 'chosen.txt'),
+    renameProjectEntry(project.id, 'second.txt', 'chosen.txt')
+  ]);
+  expect(results.map(result => result.status)).toEqual(['fulfilled', 'rejected']);
+  expect((results[1] as PromiseRejectedResult).reason.message).toMatch(/already exists/);
+  expect(await fs.readFile(path.join(root, 'chosen.txt'), 'utf8')).toBe('first contents');
+  expect(await fs.readFile(path.join(root, 'second.txt'), 'utf8')).toBe('second contents');
+});
+
+it.each(['create', 'rename'] as const)('keeps a competing create and rename from replacing one another (%s first)', async first => {
+  const root = path.join(approved, 'project');
+  const project = await addProject(root);
+  await fs.writeFile(path.join(root, 'original.txt'), 'keep these bytes');
+  const create = () => createProjectEntry(project.id, '', 'chosen.txt', 'file');
+  const rename = () => renameProjectEntry(project.id, 'original.txt', 'chosen.txt');
+  const results = await Promise.allSettled(first === 'create' ? [create(), rename()] : [rename(), create()]);
+  expect(results.map(result => result.status)).toEqual(['fulfilled', 'rejected']);
+  expect((results[1] as PromiseRejectedResult).reason.message).toMatch(/already exists/);
+  expect(await fs.readFile(path.join(root, first === 'create' ? 'original.txt' : 'chosen.txt'), 'utf8')).toBe('keep these bytes');
+  if (first === 'create') expect(await fs.readFile(path.join(root, 'chosen.txt'), 'utf8')).toBe('');
+});
+
+it('releases the entry mutation queue after a failed rename', async () => {
+  const root = path.join(approved, 'project');
+  const project = await addProject(root);
+  await fs.writeFile(path.join(root, 'original.txt'), 'original');
+  vi.spyOn(fs, 'rename').mockRejectedValueOnce(Object.assign(new Error('rename refused'), { code: 'EACCES' }));
+  const results = await Promise.allSettled([
+    renameProjectEntry(project.id, 'original.txt', 'first.txt'),
+    renameProjectEntry(project.id, 'original.txt', 'second.txt')
+  ]);
+  expect(results.map(result => result.status)).toEqual(['rejected', 'fulfilled']);
+  expect(await fs.readFile(path.join(root, 'second.txt'), 'utf8')).toBe('original');
+});
+
+it.skipIf(process.platform !== 'win32')('keeps Windows case-only renames usable', async () => {
+  const root = path.join(approved, 'project');
+  const project = await addProject(root);
+  await fs.writeFile(path.join(root, 'name.txt'), 'same file');
+  await renameProjectEntry(project.id, 'name.txt', 'NAME.txt');
+  expect(await fs.readdir(root)).toContain('NAME.txt');
+  expect(await fs.readFile(path.join(root, 'NAME.txt'), 'utf8')).toBe('same file');
+});
+
+it('logs a queued namespace mutation and keeps directory name collisions non-destructive', async () => {
+  const { onLog } = await import('../src/main/logger.js');
+  const lines: string[] = [];
+  const stop = onLog(entry => { if (entry.message.startsWith('project files: waiting')) lines.push(entry.message); });
+  try {
+    const root = path.join(approved, 'project');
+    const project = await addProject(root);
+    await createProjectEntry(project.id, '', 'first', 'directory');
+    await createProjectEntry(project.id, '', 'second', 'directory');
+    expect(lines).toEqual([]);
+    const results = await Promise.allSettled([
+      renameProjectEntry(project.id, 'first', 'chosen'),
+      renameProjectEntry(project.id, 'second', 'chosen')
+    ]);
+    expect(results.map(result => result.status)).toEqual(['fulfilled', 'rejected']);
+    expect((results[1] as PromiseRejectedResult).reason.message).toMatch(/already exists/);
+    expect(lines).toEqual(['project files: waiting for an earlier create or rename to finish']);
+    expect(await fs.readdir(root)).toContain('second');
+  } finally { stop(); }
+});
+
+it('bounds a stalled entry queue, retains accepted FIFO work, and admits a retry after draining', async () => {
+  const root = path.join(approved, 'project');
+  const project = await addProject(root);
+  const child = await addProject(path.join(root, 'src'));
+  await fs.writeFile(path.join(root, 'first.txt'), 'first');
+  await fs.writeFile(path.join(root, 'retry.txt'), 'retry');
+  let release!: () => void, started!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const entered = new Promise<void>(resolve => { started = resolve; });
+  const rename = fs.rename.bind(fs);
+  vi.spyOn(fs, 'rename').mockImplementationOnce(async (...args) => { started(); await gate; return rename(...args); });
+  const first = renameProjectEntry(project.id, 'first.txt', 'chosen.txt');
+  const accepted: Promise<unknown>[] = [];
+  const order: string[] = [];
+  const names = Array.from({ length: 31 }, (_, i) => `queued-${i}.txt`);
+  try {
+    await entered;
+    for (const name of names) accepted.push(createProjectEntry(project.id, '', name, 'file').then(value => { order.push(name); return value; }));
+    // The active operation counts too; neither kind can retain a 33rd callback.
+    await expect(renameProjectEntry(project.id, 'retry.txt', 'later.txt')).rejects.toThrow('Too many file operations are in progress. Try again when they finish.');
+    await expect(createProjectEntry(project.id, '', 'excess.txt', 'file')).rejects.toThrow('Too many file operations are in progress. Try again when they finish.');
+    await expect(createProjectEntry(child.id, '', 'excess.txt', 'file')).rejects.toThrow('Too many file operations are in progress. Try again when they finish.');
+    expect(await fs.readFile(path.join(root, 'retry.txt'), 'utf8')).toBe('retry');
+  } finally {
+    release(); await first; await Promise.all(accepted);
+  }
+  expect(order).toEqual(names);
+  expect(await fs.readdir(root)).not.toContain('excess.txt');
+  await renameProjectEntry(project.id, 'retry.txt', 'later.txt');
+  expect(await fs.readFile(path.join(root, 'later.txt'), 'utf8')).toBe('retry');
+});
+
+it('keeps another project usable while one project has a full stalled entry queue', async () => {
+  const root = path.join(approved, 'project');
+  const otherRoot = path.join(approved, 'sibling');
+  const project = await addProject(root);
+  const other = await addProject(otherRoot);
+  await fs.writeFile(path.join(root, 'first.txt'), 'first');
+  await fs.writeFile(path.join(otherRoot, 'original.txt'), 'other contents');
+  let release!: () => void, started!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const entered = new Promise<void>(resolve => { started = resolve; });
+  const rename = fs.rename.bind(fs);
+  vi.spyOn(fs, 'rename').mockImplementationOnce(async (...args) => { started(); await gate; return rename(...args); });
+  const first = renameProjectEntry(project.id, 'first.txt', 'chosen.txt');
+  const pending: Promise<unknown>[] = [first];
+  const outcomes: string[] = [];
+  try {
+    await entered;
+    for (let i = 0; i < 31; i++) pending.push(createProjectEntry(project.id, '', `queued-${i}.txt`, 'file'));
+    pending.push(createProjectEntry(other.id, '', 'new.txt', 'file').then(() => { outcomes.push('created'); }, () => { outcomes.push('refused create'); }));
+    pending.push(renameProjectEntry(other.id, 'original.txt', 'renamed.txt').then(() => { outcomes.push('renamed'); }, () => { outcomes.push('refused rename'); }));
+    await vi.waitFor(() => expect(outcomes).toEqual(['created', 'renamed']), { timeout: 10_000 });
+    expect(await fs.readFile(path.join(otherRoot, 'renamed.txt'), 'utf8')).toBe('other contents');
+    expect(await fs.readFile(path.join(otherRoot, 'new.txt'), 'utf8')).toBe('');
+  } finally {
+    release(); await Promise.allSettled(pending);
+  }
+});
+
+it.each(['parent', 'child'] as const)('serializes competing mutations in overlapping projects (%s first)', async first => {
+  const root = path.join(approved, 'project');
+  const parent = await addProject(root);
+  const child = await addProject(path.join(root, 'src'));
+  await fs.writeFile(path.join(root, 'src', 'original.txt'), 'keep these bytes');
+  const create = () => createProjectEntry(parent.id, 'src', 'chosen.txt', 'file');
+  const rename = () => renameProjectEntry(child.id, 'original.txt', 'chosen.txt');
+  const results = await Promise.allSettled(first === 'parent' ? [create(), rename()] : [rename(), create()]);
+  expect(results.map(result => result.status)).toEqual(['fulfilled', 'rejected']);
+  expect((results[1] as PromiseRejectedResult).reason.message).toMatch(/already exists/);
+  expect(await fs.readFile(path.join(root, 'src', first === 'parent' ? 'original.txt' : 'chosen.txt'), 'utf8')).toBe('keep these bytes');
+});
+
+it('bounds admission before catalog lookup and releases it after invalid project requests', async () => {
+  const project = await addProject(path.join(approved, 'project'));
+  let release!: () => void, started!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const entered = new Promise<void>(resolve => { started = resolve; });
+  const lookup = vi.spyOn(projects, 'getProject').mockResolvedValue(null)
+    .mockImplementationOnce(async () => { started(); await gate; return null; });
+  const pending = Array.from({ length: 6400 }, () => createProjectEntry('missing', '', 'unused.txt', 'file')
+    .then(() => 'created', () => 'refused'));
+  try {
+    await entered;
+    await expect(createProjectEntry(project.id, '', 'excess.txt', 'file')).rejects.toThrow(/Too many file operations/);
+    await expect(renameProjectEntry(project.id, 'unused.txt', 'excess.txt')).rejects.toThrow(/Too many file operations/);
+    expect(lookup).toHaveBeenCalledTimes(1);
+  } finally {
+    release();
+    expect(await Promise.all(pending)).toEqual(Array(6400).fill('refused'));
+    lookup.mockRestore();
+  }
+  await createProjectEntry(project.id, '', 'retry.txt', 'file');
+  expect(await fs.readFile(path.join(approved, 'project', 'retry.txt'), 'utf8')).toBe('');
+});
+
+it('logs missing and remote project admission refusals and lets the next local operation proceed', async () => {
+  const project = await addProject(path.join(approved, 'project'));
+  const { onLog } = await import('../src/main/logger.js');
+  const lines: string[] = [];
+  const stop = onLog(entry => { if (entry.message.startsWith('project files: refused')) lines.push(entry.message); });
+  const lookup = vi.spyOn(projects, 'getProject').mockResolvedValueOnce(null)
+    .mockResolvedValueOnce({ ...project, remote: { host: 'server.test', path: '/project' } });
+  try {
+    await expect(createProjectEntry(project.id, '', 'missing.txt', 'file')).rejects.toThrow('Project not found');
+    await expect(renameProjectEntry(project.id, 'original.txt', 'remote.txt')).rejects.toThrow('Files in a server folder cannot be changed from the app yet');
+    expect(lines).toEqual([
+      'project files: refused a create or rename because the project was not found',
+      'project files: refused a create or rename because editing a server project is not supported'
+    ]);
+  } finally { lookup.mockRestore(); stop(); }
+  await createProjectEntry(project.id, '', 'retry.txt', 'file');
+  expect(await fs.readFile(path.join(approved, 'project', 'retry.txt'), 'utf8')).toBe('');
 });
