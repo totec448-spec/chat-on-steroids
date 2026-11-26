@@ -12462,7 +12462,8 @@
     // Where this page is, so a command that runs out of time can say where it stopped. Never
     // awaited: a report must not slow or block the bootstrap, and older apps ignore it.
     let modelDiagnostic = null, modelAttempt = 0;
-    const step = (name, modelSelection) => { void ask({ type: 'command_step', id: boot.id, client: RUN_ID, step: name,
+    let lastStepReply = Promise.resolve();
+    const step = (name, modelSelection) => { lastStepReply = ask({ type: 'command_step', id: boot.id, client: RUN_ID, step: name,
       ...(modelSelection ? { modelSelection } : {}) }).then(reply => {
       // The app moves a worker's deadline when it reports a later stage. Take only a later one, so a
       // delayed older reply can never shorten what a newer one granted.
@@ -12619,6 +12620,9 @@
     // same route/command fence before inserting authored text. This is deliberately
     // after selection, because the pre-selection composer is no longer authoritative.
     if (boot.model || boot.reasoningEffort) step('composer-after-model');
+    // The app's reply to the stage just reported may carry a later deadline. Give it a moment to land, so the
+    // wait below is sized by the deadline the app now allows and not by the one this page redeemed under.
+    if (boot.model || boot.reasoningEffort) await Promise.race([lastStepReply, new Promise(resolve => setTimeout(resolve, 1_500))]);
     if ((boot.model || boot.reasoningEffort) && !(await waitForComposer(commandWaitMs(12_000, 5_000), stillOnTarget))) {
       if (await failIfRetargeted()) return;
       return void (await fail(t(

@@ -16568,6 +16568,33 @@ describe('restarting the bridge', () => {
       Date.now = realNow;
     }
   });
+
+  // CodeRabbit on #2300: a repeated stage must not move the deadline, also not when a stop/start recomputes it.
+  it('keeps the stage deadline after a stop/start when the same stage was reported again', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'work' }], caller: { conversationId: PRIME_CHAT } });
+    await waitForOpened(1);
+    const leased = await redeem();
+    const realNow = Date.now;
+    const leasedAt = realNow();
+    const at = (seconds: number) => { Date.now = () => leasedAt + seconds * 1000; };
+    try {
+      at(20);
+      expect((await request('POST', '/commands/step', { body: { id: leased.id, client: 'tab-1', step: 'model' } })).body.expiresAt).toBeGreaterThan(0);
+      at(80);
+      // The same stage again: no new deadline, and nothing the restart below may count from.
+      expect((await request('POST', '/commands/step', { body: { id: leased.id, client: 'tab-1', step: 'model' } })).body.expiresAt).toBeUndefined();
+      await stopBridge();
+      at(115);
+      const port = await startBridge();
+      base = `http://127.0.0.1:${port}`;
+      // The model stage was reported at 20 s, so its 90 s ended at 110 s.
+      expect(pendingCommands()).toEqual([]);
+      expect(swarmStateForCaller({ conversationId: PRIME_CHAT }).agents.find((entry) => entry.id === 'worker-1')?.state).toBe('failed');
+    } finally {
+      Date.now = realNow;
+    }
+  });
 });
 
 // -------------------------------------------------------------------- goal loop

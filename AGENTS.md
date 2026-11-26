@@ -4546,12 +4546,12 @@ older pages send `revival-waiting`), then
 `composer`, `model`, `composer-after-model`, `inserting`, `sending` from the redeeming page.
 Reports are fire-and-forget and advisory: they change no lease or outcome, a report from a page
 that does not own the command is ignored, and they never carry text, titles or addresses. Two
-change a worker's deadline: a later stage than the last reported one gives the ordinary
-`COMMAND_DEADLINE_MS` from that report, and `sending` gives its receipt `WORKER_SENDING_GRACE_MS`
-(bounded), because a page that pressed Send may already have delivered the task (#1086). Both are
-capped by `WORKER_BOOTSTRAP_LIMIT_MS` (`WORKER_REDEEM_MS` + `COMMAND_DEADLINE_MS`) from the
-invitation, a repeated stage moves nothing, and the reply to a report that moved the deadline
-carries `expiresAt`, which the page keeps if later than its own (#2270).
+change a worker's deadline. A later stage than the last reported one gives the ordinary
+`COMMAND_DEADLINE_MS` from that report, capped at `WORKER_BOOTSTRAP_LIMIT_MS`
+(`WORKER_REDEEM_MS` + `COMMAND_DEADLINE_MS`) from the invitation; a repeated stage moves nothing.
+`sending` gives its receipt `WORKER_SENDING_GRACE_MS` from that report, which is not capped at that
+limit, because a page that pressed Send may already have delivered the task (#1086). The reply to a
+report that moved the deadline carries `expiresAt`, which the page keeps if later than its own (#2270).
 Expiry names the last one, or whether the browser or the OS opened the chat and no
 page picked it up, so "did not report back in time" says where a start stopped (#882 worker-11).
 ChatGPT announcements over a page (2026-10-30: "Premium seats just got better" over a fresh chat
