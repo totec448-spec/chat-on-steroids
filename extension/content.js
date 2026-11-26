@@ -12243,7 +12243,10 @@
     return closed;
   }
 
-  function waitForComposer(timeoutMs = 12_000, stillCurrent = () => true) {
+  // `until` names the time this wait may last until, as a clock time, or null when the command has no deadline. The
+  // app can move it later while the wait runs (a stage report is answered with a later deadline), and the wait then
+  // goes on until the new time instead of ending at the one it started with (#2300).
+  function waitForComposer(timeoutMs = 12_000, stillCurrent = () => true, until = null) {
     if (!stillCurrent()) return Promise.resolve(null);
     const current = CLF_DOM.composer();
     if (current && current.isConnected && CLF_DOM.composerWritable()) return Promise.resolve(current);
@@ -12271,7 +12274,13 @@
           'data-chatgpt-composer', 'data-composer-markdown'
         ]
       });
-      timer = setTimeout(() => finish(null), timeoutMs);
+      let armedUntil = until ? until() : null;
+      const onTimer = () => {
+        const later = until ? until() : null;
+        if (later !== null && armedUntil !== null && later > armedUntil) { armedUntil = later; timer = setTimeout(onTimer, Math.max(1, later - Date.now())); return; }
+        finish(null);
+      };
+      timer = setTimeout(onTimer, timeoutMs);
       // Close the tiny race between the first lookup and installing the observer.
       check();
     });
@@ -12334,7 +12343,7 @@
   }
 
   /** Matches the app's WORKER_REDEEM_MS: past it the app has already failed the command. */
-  const REDEEM_RETRY_WINDOW_MS = 45_000;
+  const REDEEM_RETRY_WINDOW_MS = 120_000;
 
   async function deliverCommand(id, fromUrl = true, reportClaim = () => undefined, attempt = null) {
     // Which conversation, if any, this delivery is entitled to type into.
@@ -12435,7 +12444,7 @@
     // This runs before the first status reply: the command brings this install's Core identity,
     // so the bootstrap mentions this computer's own Core (see applyCoreIdentity).
     if (reply.identity) applyCoreIdentity(reply.identity);
-    const commandExpiresAt = Number.isFinite(boot.expiresAt) ? boot.expiresAt : null;
+    let commandExpiresAt = Number.isFinite(boot.expiresAt) ? boot.expiresAt : null;
     const commandAlive = () => commandExpiresAt === null || Date.now() < commandExpiresAt;
     const commandWaitMs = (fallbackMs, reserveMs = 0) => commandExpiresAt === null
       ? fallbackMs
@@ -12462,8 +12471,13 @@
     // Where this page is, so a command that runs out of time can say where it stopped. Never
     // awaited: a report must not slow or block the bootstrap, and older apps ignore it.
     let modelDiagnostic = null, modelAttempt = 0;
-    const step = (name, modelSelection) => { void ask({ type: 'command_step', id: boot.id, client: RUN_ID, step: name,
-      ...(modelSelection ? { modelSelection } : {}) }).catch(() => undefined); };
+    let lastStepReply = Promise.resolve();
+    const step = (name, modelSelection) => { lastStepReply = ask({ type: 'command_step', id: boot.id, client: RUN_ID, step: name,
+      ...(modelSelection ? { modelSelection } : {}) }).then(reply => {
+      // The app moves a worker's deadline when it reports a later stage. Take only a later one, so a
+      // delayed older reply can never shorten what a newer one granted.
+      if (reply && Number.isFinite(reply.expiresAt) && (commandExpiresAt === null || reply.expiresAt > commandExpiresAt)) commandExpiresAt = reply.expiresAt;
+    }).catch(() => undefined); };
     // What this command is for, as the app states it. A revival names the conversation and
     // will not be typed anywhere else; the two chat-opening commands name none, and their
     // precondition is the opposite one — that this page still has no conversation at all.
@@ -12563,7 +12577,8 @@
     if (!(CLF_DOM.composerVisible() && CLF_DOM.composerWritable())) await closeAnnouncements(stillOnTarget);
     // A worker's hidden tab can take longer than 12 s to show the box on a busy machine; it has the
     // rest of its own budget, less what model, insert and Send need (#1086). A resume or wake keeps 12 s.
-    let readyComposer = await waitForComposer(boot.type === 'worker' ? commandWaitMs(12_000, 20_000) : 12_000);
+    let readyComposer = await waitForComposer(boot.type === 'worker' ? commandWaitMs(12_000, 20_000) : 12_000, () => true,
+      boot.type === 'worker' ? () => commandExpiresAt === null ? null : commandExpiresAt - 20_000 : null);
     // One that opened after the page loaded gets the same treatment, once.
     if (!readyComposer && (await closeAnnouncements(stillOnTarget)).length) readyComposer = await waitForComposer(5_000, stillOnTarget);
     // `transient`: this page redeemed the command, loaded the chat and typed nothing, so a wake
@@ -12615,7 +12630,10 @@
     // same route/command fence before inserting authored text. This is deliberately
     // after selection, because the pre-selection composer is no longer authoritative.
     if (boot.model || boot.reasoningEffort) step('composer-after-model');
-    if ((boot.model || boot.reasoningEffort) && !(await waitForComposer(commandWaitMs(12_000, 5_000), stillOnTarget))) {
+    // The app's reply to the stage just reported may carry a later deadline. Give it a moment to land, so the
+    // wait below is sized by the deadline the app now allows and not by the one this page redeemed under.
+    if (boot.model || boot.reasoningEffort) await Promise.race([lastStepReply, new Promise(resolve => setTimeout(resolve, 1_500))]);
+    if ((boot.model || boot.reasoningEffort) && !(await waitForComposer(commandWaitMs(12_000, 5_000), stillOnTarget, () => commandExpiresAt === null ? null : commandExpiresAt - 5_000))) {
       if (await failIfRetargeted()) return;
       return void (await fail(t(
         'content_bootstrap_composer_unavailable',

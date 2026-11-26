@@ -2844,6 +2844,43 @@ describe('active agent tab discard protection', () => {
     await vi.waitFor(() => expect(steps.at(-1)).toEqual({ id: 'cmd-steps', client: 'doc-1', step: 'model-diagnostic' }));
   });
 
+  // #2270 / CodeRabbit on #2300: the app's reply to a worker's later stage carries the deadline it now allows. The
+  // extension read it from the wrong place (the fetch wrapper nests the body under `data`) and never passed it on.
+  it('hands the app\'s new command deadline to the page, and nothing else from the reply', async () => {
+    const worker = loadWorker({
+      local: new FakeStorageArea(paired),
+      session: new FakeStorageArea(),
+      fetch: vi.fn(async (input: string) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/commands/step') return response(200, { ok: true, expiresAt: 1_900_000_000_000, secret: 'never forwarded' });
+        return response(200, { ok: true, repairs: [] });
+      })
+    });
+    await worker.createTab({ id: 41, url: 'https://chatgpt.com/?clf=cmd-steps' });
+    await worker.registerTab(41);
+    expect(await worker.send({ type: 'command_step', id: 'cmd-steps', client: 'doc-1', step: 'composer' }, 41))
+      .toEqual({ ok: true, expiresAt: 1_900_000_000_000 });
+  });
+
+  it('forwards no deadline when the app sends none or an invalid one', async () => {
+    for (const expiresAt of [undefined, 'soon', null, -5]) {
+      const worker = loadWorker({
+        local: new FakeStorageArea(paired),
+        session: new FakeStorageArea(),
+        fetch: vi.fn(async (input: string) => {
+          const url = new URL(input);
+          if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+          if (url.pathname === '/commands/step') return response(200, { ok: true, ...(expiresAt === undefined ? {} : { expiresAt }) });
+          return response(200, { ok: true, repairs: [] });
+        })
+      });
+      await worker.createTab({ id: 41, url: 'https://chatgpt.com/?clf=cmd-steps' });
+      await worker.registerTab(41);
+      expect(await worker.send({ type: 'command_step', id: 'cmd-steps', client: 'doc-1', step: 'composer' }, 41)).toEqual({ ok: true });
+    }
+  });
+
   it('coalesces model diagnostics without delaying a resume permit or command ACK', async () => {
     const reports: any[] = [], critical: string[] = [], work: Promise<unknown>[] = [];
     let release = () => {};

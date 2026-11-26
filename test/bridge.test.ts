@@ -9659,8 +9659,9 @@ describe('a command that runs out of time says how far its page got', () => {
       await pair();
       spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
       const bootstrap = await redeem();
-      expect((await step(bootstrap.id, 'composer')).body).toEqual({ ok: true });
-      expect((await step(bootstrap.id, 'model')).body).toEqual({ ok: true });
+      // Each stage that moves a worker on tells its page the new deadline (the page keeps the latest).
+      expect((await step(bootstrap.id, 'composer')).body).toEqual({ ok: true, expiresAt: expect.any(Number) });
+      expect((await step(bootstrap.id, 'model')).body).toEqual({ ok: true, expiresAt: expect.any(Number) });
       const prior = new Set(getLog());
       await vi.advanceTimersByTimeAsync(COMMAND_DEADLINE_MS - 1_000);
       expect((await request('POST', '/commands/step', { body: { id: bootstrap.id, client: 'tab-1',
@@ -9749,7 +9750,7 @@ describe('a command that runs out of time says how far its page got', () => {
       spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
       await vi.waitFor(() => expect(opened.length).toBeGreaterThan(0));
       const prior = new Set(getLog());
-      await vi.advanceTimersByTimeAsync(COMMAND_DEADLINE_MS + 1_000);
+      await vi.advanceTimersByTimeAsync(WORKER_REDEEM_MS + 1_000);
       expect(giveUp(prior, 'worker:')).toContain('opened through the operating system, and no page with the extension picked up its task');
     } finally { vi.useRealTimers(); }
   });
@@ -10025,10 +10026,104 @@ describe('a worker chat that never opens', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  // #2270 and #2298: two reports of the same cut-off. Fresh workers were declared failed exactly 45 s after
+  // the browser was offered their chat, 15 s before the app's own fallback tab could run, and a successful
+  // worker on the same machine took 62 s from opening to its first call. A worker whose page redeems
+  // after the old window is a worker, not a failure.
+  it('lets a page that is slower than 45 s still pick up its worker task', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'very slow page' }], caller: { conversationId: PRIME_CHAT } });
+      await vi.waitFor(() => expect(opened).toHaveLength(1), { timeout: 10_000 });
+      const id = new URL(opened[0]!).searchParams.get('clf')!;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(swarmState().agents.find(agent => agent.id === 'worker-1')?.state).not.toBe('failed');
+      expect((await redeem(id)).agent).toBe('worker-1');
+      expect(opened).toHaveLength(1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  // The same reports: a page that redeems after 90 s (the ordinary deadline counted from the offer) was
+  // failed at once, however much it still had to do. Each new stage it reports is proof it is alive.
+  it('gives a late-redeeming page the ordinary time for each new stage it reports, and tells the page', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'late page' }], caller: { conversationId: PRIME_CHAT } });
+      await vi.waitFor(() => expect(opened).toHaveLength(1), { timeout: 10_000 });
+      const id = new URL(opened[0]!).searchParams.get('clf')!;
+      await vi.advanceTimersByTimeAsync(100_000);
+      expect((await redeem(id, 'tab-late')).agent).toBe('worker-1');
+      const state = () => swarmState().agents.find(agent => agent.id === 'worker-1')?.state;
+      const stage = (step: string) => request('POST', '/commands/step', { body: { id, client: 'tab-late', step } });
+      const composer = await stage('composer');
+      expect(composer.body.ok).toBe(true);
+      // The page is told its new deadline (about 90 s from this report), not only a worker about to send:
+      // a page that kept the deadline it redeemed under would give up while the app still waits.
+      expect(composer.body.expiresAt).toBeGreaterThan(Date.now() + 80_000);
+      expect(getLog().some(line => line.message.includes('reported composer; its deadline is'))).toBe(true);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(state()).toBe('invited');
+      const model = await stage('model');
+      expect(model.body.ok).toBe(true);
+      // The same stage again moves nothing: no new deadline, nothing kept alive by repeating it.
+      expect((await stage('model')).body.expiresAt).toBeUndefined();
+      // Capped by the invitation's absolute limit (210 s), not by the stage's own 90 s.
+      expect(model.body.expiresAt).toBeLessThanOrEqual(Date.now() + 50_000 + 1_000);
+      await vi.advanceTimersByTimeAsync(WORKER_BOOTSTRAP_LIMIT_MS - 160_000 - 1_000);
+      expect(state()).toBe('invited');
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(state()).not.toBe('invited');
+    } finally { vi.useRealTimers(); }
+  });
+
   it("keeps the page's redeem retries as long as the app waits for them", () => {
     const content = readFileSync('extension/content.js', 'utf8');
     const window = Number(/const REDEEM_RETRY_WINDOW_MS = ([\d_]+);/.exec(content)?.[1]?.replace(/_/g, ''));
     expect(window).toBe(WORKER_REDEEM_MS);
+  });
+
+  // CodeRabbit on #2300: with the 120 s window, the 60 s fallback of the offered placement now runs for a worker
+  // whose tab the browser took and is only slow (a real worker took 62 s from opening to its first call). It
+  // opened the task a second time. A placement nobody collected still falls back to the app's own opening.
+  describe('the 60 s placement fallback', () => {
+    const withWake = async (body: (socket: WebSocket) => Promise<void>) => {
+      await pair();
+      await request('GET', '/status');
+      const socket = new WebSocket(base.replace('http:', 'ws:') + '/wake', { origin: EXTENSION_ORIGIN });
+      await once(socket, 'open');
+      const authenticated = once(socket, 'message'); socket.send(token!); await authenticated;
+      try { await body(socket); } finally { const closed = once(socket, 'close'); socket.close(); await closed; }
+    };
+
+    it('does not open a second tab for a worker the browser took and whose tab is only slow', async () => {
+      vi.useFakeTimers();
+      try {
+        await withWake(async () => {
+          spawn({ workers: [{ task: 'slow tab' }], caller: { conversationId: PRIME_CHAT } });
+          let placement: any;
+          await vi.waitFor(async () => { placement ||= (await request('GET', '/status')).body.placement; expect(placement?.id).toBeTruthy(); }, { timeout: 10_000 });
+          await vi.advanceTimersByTimeAsync(70_000);
+          expect(opened, 'the browser opened that tab itself; a second one would run the task twice').toEqual([]);
+          expect(getLog().some(entry => entry.message.includes('collected') && entry.message.includes('command deadline')),
+            'a skipped fallback writes one line that says it waits and why').toBe(true);
+          expect((await redeem(placement.id)).agent).toBe('worker-1');
+        });
+      } finally { vi.useRealTimers(); }
+    });
+
+    it('opens a worker nobody collected from here after a minute', async () => {
+      vi.useFakeTimers();
+      try {
+        await withWake(async () => {
+          spawn({ workers: [{ task: 'nobody polls' }], caller: { conversationId: PRIME_CHAT } });
+          await vi.waitFor(() => expect(pendingCommands()).toHaveLength(1), { timeout: 10_000 });
+          await vi.advanceTimersByTimeAsync(61_000);
+          await vi.waitFor(() => expect(opened).toHaveLength(1), { timeout: 10_000 });
+        });
+      } finally { vi.useRealTimers(); }
+    });
   });
 
   it('fails an unredeemed opening without duplicating it or holding its sibling', async () => {
@@ -10040,6 +10135,9 @@ describe('a worker chat that never opens', () => {
       const first = new URL(opened[0]!).searchParams.get('clf')!;
       const second = new URL(opened[1]!).searchParams.get('clf')!;
       expect((await redeem(second)).agent).toBe('worker-2');
+      // worker-2's page sent its task: it is a running worker, so only the unredeemed opening runs out.
+      expect((await request('POST', '/commands/ack', { body: { id: second, status: 'sent', agent: 'worker-2',
+        conversationId: 'cdcdcdcd-6666-4444-3333-222222222222' } })).status).toBe(200);
       await vi.advanceTimersByTimeAsync(WORKER_REDEEM_MS + 1_000);
       await vi.waitFor(() => expect(opened).toHaveLength(2));
       expect(second).not.toBe(first);
@@ -10054,9 +10152,9 @@ describe('a worker chat that never opens', () => {
    * The absolute clock a still-`invited` worker lives under.
    *
    * A command still in line has no clock of its own; the limit is absolute from the invitation,
-   * so no combination of a late hand-out and a fresh lease can keep the slot past two minutes.
+   * so no combination of a late hand-out and a fresh lease can keep the slot past WORKER_BOOTSTRAP_LIMIT_MS.
    */
-  it('stops holding a slot invited two minutes after the invitation, however late its chat opens', async () => {
+  it('stops holding a slot invited at the absolute bootstrap limit after the invitation, however late its chat opens', async () => {
     vi.useFakeTimers();
     const previous = getConfig();
     try {
@@ -16531,6 +16629,33 @@ describe('restarting the bridge', () => {
       expect(opened).toHaveLength(1);
       expect(pendingCommands()).toEqual([]);
       expect(swarmState().running).toBe(false);
+      expect(swarmStateForCaller({ conversationId: PRIME_CHAT }).agents.find((entry) => entry.id === 'worker-1')?.state).toBe('failed');
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  // CodeRabbit on #2300: a repeated stage must not move the deadline, also not when a stop/start recomputes it.
+  it('keeps the stage deadline after a stop/start when the same stage was reported again', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'work' }], caller: { conversationId: PRIME_CHAT } });
+    await waitForOpened(1, 10_000);
+    const leased = await redeem();
+    const realNow = Date.now;
+    const leasedAt = realNow();
+    const at = (seconds: number) => { Date.now = () => leasedAt + seconds * 1000; };
+    try {
+      at(20);
+      expect((await request('POST', '/commands/step', { body: { id: leased.id, client: 'tab-1', step: 'model' } })).body.expiresAt).toBeGreaterThan(0);
+      at(80);
+      // The same stage again: no new deadline, and nothing the restart below may count from.
+      expect((await request('POST', '/commands/step', { body: { id: leased.id, client: 'tab-1', step: 'model' } })).body.expiresAt).toBeUndefined();
+      await stopBridge();
+      at(115);
+      const port = await startBridge();
+      base = `http://127.0.0.1:${port}`;
+      // The model stage was reported at 20 s, so its 90 s ended at 110 s.
+      expect(pendingCommands()).toEqual([]);
       expect(swarmStateForCaller({ conversationId: PRIME_CHAT }).agents.find((entry) => entry.id === 'worker-1')?.state).toBe('failed');
     } finally {
       Date.now = realNow;
