@@ -2069,7 +2069,10 @@ export async function endUnreachableTurn(sessionId: string, conversationId: stri
   stillUnheld: () => boolean = () => true): Promise<boolean> {
   // One end at a time per turn: a second Stop that arrives meanwhile finds it taken and is refused, as one that arrives after.
   const key = `${sessionId}\0${turnId}`;
-  if (endingUnreachableTurns.has(key)) return false;
+  if (endingUnreachableTurns.has(key)) {
+    logInfo(`session ${sessionId}: a Stop for turn ${turnId} is refused: another Stop is already ending that turn in the record`);
+    return false;
+  }
   endingUnreachableTurns.add(key);
   try {
     return await endUnreachableTurnNow(sessionId, conversationId, turnId, detail, stillUnheld);
