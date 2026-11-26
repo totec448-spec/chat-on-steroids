@@ -9503,6 +9503,9 @@ describe('targeted open', () => {
     ['a long reason', 'transition-timeout:last=composer-not-ready:draft=handoff-residue:clears=2:chips=1:typed=54160:brief=54160:tail=unrelated-text-after-the-brief:route=source-conversation:attempt=3',
       'transition-timeout:last=composer-not-ready:draft=handoff-residue:clears=2:chips=1:typed=54160:brief=54160:tail=unrelated-text-after-the-brief:route=source-conversation:attempt=3'],
     ['a reason with other characters', 'source-ready-timeout:last=Composer_Not_Ready (draft=brief)', 'source-ready-timeout:last=Composer_Not_Ready__draft=brief_'],
+    // The cap: only the first 400 characters are kept, so one reason cannot fill the log (colons keep the
+    // filler from being masked as a long opaque token by the logger's own redaction).
+    ['a reason over 400 characters', `transition-timeout:${'ab:'.repeat(127)}TAIL`, `transition-timeout:${'ab:'.repeat(127)}`],
   ] as const)('logs why the Project entry failed, also for %s', async (_name, reason, logged) => {
     setBrowserOpener(async (url) => { opened.push(url); });
     await pair();
