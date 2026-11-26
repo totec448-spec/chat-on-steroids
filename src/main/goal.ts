@@ -1101,7 +1101,7 @@ export interface GoalSwitchesSnapshot {
  * old conversation is retired: turning Goal off where it pops up writes `enabled: false` for
  * that chat alone, and no later app-wide change can revive it.
  */
-type GoalSwitchRow = { enabled: boolean; mode: GoalMode; afterTurn?: boolean; at: number; role?: 'decision'; sourceSessionId?: string;
+type GoalSwitchRow = { enabled: boolean; mode: GoalMode; afterTurn?: boolean; keepRunningWhenTabClosed?: boolean; preferenceOnly?: true; at: number; role?: 'decision'; sourceSessionId?: string;
   context?: { count: number; hash: string; instructions: string } };
 const goalSwitches = new Map<string, GoalSwitchRow>();
 let goalSwitchWrites: Promise<unknown> = Promise.resolve();
@@ -1159,8 +1159,17 @@ export function restoreGoalSwitches(snapshot: GoalSwitchesSnapshot | null): void
       && ![...goalSwitches.values()].some(row => row.sourceSessionId === raw.sourceSessionId) ? raw.sourceSessionId : undefined;
     const context = sourceSessionId && raw.context && Number.isSafeInteger(raw.context.count) && raw.context.count >= 0
       && /^[a-f0-9]{64}$/.test(raw.context.hash) && /^[a-f0-9]{64}$/.test(raw.context.instructions) ? raw.context : undefined;
+    // A master stop clears the mode override, not the saved close preference.
+    // An older build sees this row as Off, never as an automation grant.
+    if (raw.preferenceOnly === true && raw.role !== 'decision') {
+      if (raw.keepRunningWhenTabClosed === true) goalSwitches.set(raw.conversationId, {
+        enabled: false, mode: raw.mode, at, preferenceOnly: true, keepRunningWhenTabClosed: true
+      });
+      continue;
+    }
     goalSwitches.set(raw.conversationId, { enabled: raw.role === 'decision' ? false : raw.enabled, mode: raw.mode, at,
       ...(raw.afterTurn === true && raw.role !== 'decision' ? { afterTurn: true } : {}),
+      ...(raw.keepRunningWhenTabClosed === true && raw.role !== 'decision' ? { keepRunningWhenTabClosed: true } : {}),
       ...(raw.role === 'decision' ? { role: 'decision' as const, sourceSessionId, context } : {}) });
   }
   boundGoalSwitches();
@@ -1173,9 +1182,44 @@ function persistGoalSwitches(): void {
 /** This chat's switch: its own override when it has one, otherwise the app-wide setting. */
 export function goalSwitchFor(conversationId: string): { enabled: boolean; mode: GoalMode; own: boolean; afterTurn: boolean } {
   const own = goalSwitches.get(conversationId);
-  if (own) return { enabled: own.role !== 'decision' && own.enabled, mode: own.mode, own: true, afterTurn: own.afterTurn === true };
+  if (own && !own.preferenceOnly) return { enabled: own.role !== 'decision' && own.enabled, mode: own.mode, own: true, afterTurn: own.afterTurn === true };
   const goal = getConfig().goal;
   return { enabled: goal.enabled, mode: goal.mode, own: false, afterTurn: false };
+}
+
+/** Identity of the accepted per-chat switch, not a wall-clock generation. */
+export function goalSwitchIdentity(conversationId: string): object | undefined {
+  return goalSwitches.get(conversationId);
+}
+
+/** An inherited global switch or a decision/helper row cannot authorize reopening. */
+export function goalKeepsRunningWhenTabClosed(conversationId: string): boolean {
+  const row = goalSwitches.get(conversationId);
+  return row?.role !== 'decision' && row?.keepRunningWhenTabClosed === true;
+}
+
+/** Save only a preference; never enable or change the mode as a side effect. */
+export async function setGoalKeepRunningNow(conversationId: string, enabled: boolean): Promise<boolean> {
+  return saveGoalControl<boolean>(pendingGoalSwitches, conversationId, GOAL_SWITCHES_STATE, snapshotGoalSwitches, id => {
+    const before = goalSwitches.get(id);
+    if (!before || before.role === 'decision') {
+      if (enabled) throw new Error('goal_switch_required');
+      return { result: false };
+    }
+    if ((before.keepRunningWhenTabClosed === true) === enabled) return { result: enabled };
+    const staged = new Map(goalSwitches);
+    if (!enabled && before.preferenceOnly) staged.delete(id);
+    else {
+      const { keepRunningWhenTabClosed: _previous, ...row } = before;
+      staged.set(id, { ...row, ...(enabled ? { keepRunningWhenTabClosed: true } : {}), at: Date.now() });
+    }
+    return { snapshot: goalSwitchesSnapshot(staged), publish: () => {
+      publishGoalSwitches(staged);
+      logInfo(`goal: ${id} keep running when closed ${enabled ? 'enabled' : 'disabled'} by the person`);
+      notifyGoalChange({ conversationId: id });
+      return enabled;
+    } };
+  });
 }
 
 /** One authority for finish generation and the lifetime of its queued instruction. */
@@ -1262,7 +1306,8 @@ export async function setGoalSwitchNow(
       const next = applyGoalSwitch(was, which, on);
       const staged = new Map(goalSwitches);
       staged.set(targetConversationId, { enabled: next.enabled, mode: next.mode,
-        afterTurn: afterTurn ?? before?.afterTurn ?? false, at: Date.now() });
+        afterTurn: afterTurn ?? before?.afterTurn ?? false,
+        ...(before?.keepRunningWhenTabClosed === true ? { keepRunningWhenTabClosed: true } : {}), at: Date.now() });
       boundGoalSwitches(staged);
       return {
         snapshot: goalSwitchesSnapshot(staged),
@@ -1299,7 +1344,13 @@ export function clearAllGoalSwitches(): void {
   invalidateGoalControlWrites(pendingGoalSwitches);
   if (goalSwitches.size === 0) return;
   let cleared = 0;
-  for (const [id, row] of goalSwitches) if (row.role !== 'decision' && goalSwitches.delete(id)) cleared++;
+  for (const [id, row] of goalSwitches) {
+    if (row.role === 'decision' || row.preferenceOnly) continue;
+    if (row.keepRunningWhenTabClosed === true)
+      goalSwitches.set(id, { enabled: false, mode: row.mode, at: row.at, preferenceOnly: true, keepRunningWhenTabClosed: true });
+    else goalSwitches.delete(id);
+    cleared++;
+  }
   persistGoalSwitches();
   // #1882: a chat whose Loop later reads Normal can be traced to this master stop.
   if (cleared) logInfo(`goal: the app's own switch was turned off; ${cleared} chat(s) went back to the app-wide setting`);
@@ -1324,7 +1375,9 @@ export function moveGoalSwitch(fromConversationId: string, toConversationId: str
   goalSwitches.set(toConversationId, row);
   persistGoalSwitches();
   // #1882: which mode the replacement chat took over, so a page that later shows another can be compared.
-  logInfo(`goal: ${fromConversationId}'s own ${row.enabled ? row.mode : 'Normal'} switch moved to ${toConversationId} (Compact & Resume)`);
+  logInfo(row.preferenceOnly
+    ? `goal: ${fromConversationId}'s closed-tab preference moved to ${toConversationId} (Compact & Resume)`
+    : `goal: ${fromConversationId}'s own ${row.enabled ? row.mode : 'Normal'} switch moved to ${toConversationId} (Compact & Resume)`);
   return true;
 }
 

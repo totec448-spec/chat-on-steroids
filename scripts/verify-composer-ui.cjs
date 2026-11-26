@@ -14,7 +14,7 @@ app.whenReady().then(async () => {
   server = await createServer({ configFile: false, root: path.join(root, 'src/renderer'),
     cacheDir: path.join(output, 'vite'), logLevel: 'error',
     resolve: { alias: { '@phosphor-icons/web': path.join(root, 'node_modules/@phosphor-icons/web/src') } },
-    server: { host: '127.0.0.1', port: 4420, strictPort: true, fs: { allow: [root] } },
+    server: { host: '127.0.0.1', port: 4420, strictPort: true, fs: { allow: [root, fs.realpathSync(path.join(root, 'node_modules'))] } },
     plugins: [{ name: 'ipc-fixture', transformIndexHtml(html) {
       return html.replace('</head>', '<script src="/composer-fixture.js"></script></head>');
     }, configureServer(vite) { vite.middlewares.use((req, res, next) => {
@@ -47,6 +47,16 @@ app.whenReady().then(async () => {
   const click = async selector => { await js(`document.querySelector(${JSON.stringify(selector)}).click()`); await pause(200); };
   const type = async text => { await js(`(() => { const input = document.getElementById('chatInput'); input.value=${JSON.stringify(text)}; input.focus(); input.dispatchEvent(new Event('input', {bubbles:true})); })()`); await pause(260); };
   const capture = async name => { await js('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))'); fs.mkdirSync(output, {recursive:true}); fs.writeFileSync(path.join(output, name + '.png'), (await win.webContents.capturePage()).toPNG()); };
+  // The closed-tab opt-in sits outside #automationSwitch but shares its two-line copy.
+  await js(`Object.assign(composerFixture.controls,{automation:'loop',canKeepRunningWhenTabClosed:true,keepRunningWhenTabClosed:false});composerFixture.notify()`);
+  await until(`!document.getElementById('keepRunningWhenClosed').disabled`);
+  await click('#composerSettings > summary');
+  await check('Closed-tab opt-in has a separate readable help line', `(()=>{const row=document.getElementById('keepRunningWhenClosedRow'),title=row.querySelector('.mode-copy > span'),help=row.querySelector('small'),box=row.querySelector('input'),a=title.getBoundingClientRect(),b=help.getBoundingClientRect(),c=box.getBoundingClientRect();return !row.hidden&&!box.checked&&getComputedStyle(help).display==='block'&&a.height>0&&b.height>0&&b.top>=a.bottom&&b.right<=c.left})()`);
+  await capture('closed-tab-layout');
+  await click('#composerSettings > summary');
+  await js(`Object.assign(composerFixture.controls,{automation:'off',canKeepRunningWhenTabClosed:false,keepRunningWhenTabClosed:false});composerFixture.notify()`);
+  await until(`document.getElementById('keepRunningWhenClosedRow').hidden`);
+  if (process.argv.includes('--closed-tab-layout-only')) { console.log(JSON.stringify({passed:checks.length,checks,captures:output})); win.destroy(); await server.close(); app.quit(); return; }
   const startDisclosureSample = () => js(`(()=>{window.__composerDisclosureSample=new Promise(resolve=>{const start=performance.now(),frames=[];const sample=()=>{frames.push({time:performance.now()-start,list:document.getElementById('composerModelChoices').getBoundingClientRect().height,popover:document.querySelector('#modelMenu > .composer-popover').getBoundingClientRect().height,chevron:getComputedStyle(document.querySelector('#composerModelToggle .picker-chevron')).transform});if(performance.now()-start>=320)resolve(frames);else requestAnimationFrame(sample)};sample()});return true})()`);
   const sampleDisclosure = () => js(`window.__composerDisclosureSample`);
   // Animation time follows rendered frames, not the hosted runner's wall clock.

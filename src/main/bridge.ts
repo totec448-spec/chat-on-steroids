@@ -72,6 +72,7 @@ import { BROWSER_PICKUP_ATTEMPT_LIMIT, BROWSER_PICKUP_BACKOFF_MS, BROWSER_PICKUP
 import { CHAT_ACTIVE_MS, CHAT_SILENCE_MS, continuationMarkerOf, isReasoningEffort, normalizedToolOutcome, toolCallSummary, unescapeMarkdown,
   type ReasoningEffort, type SessionEvent, type SessionOrigin, type StoredText, type ToolCallRecord } from '../shared/session.js';
 import { blockedChatIds, isChatBlocked, chatBlockedAt } from './session/blocked-chats.js';
+import { isSessionRemoving } from './session/removal.js';
 export { CHAT_ACTIVE_MS, CHAT_SILENCE_MS } from '../shared/session.js';
 import { extensionAppearance } from './extension-appearance.js';
 import { effectiveCapabilities, getConfig, updateConfig } from './config.js';
@@ -105,6 +106,9 @@ import {
   goalReplySourceTurn,
   consumeGoalReplyForInputNow,
   goalSwitchFor,
+  goalSwitchIdentity,
+  goalKeepsRunningWhenTabClosed,
+  setGoalKeepRunningNow,
   goalViewFor, goalOutcomeFor,
   pendingGoalReplies,
   recordGoalPickupAttemptNow,
@@ -167,7 +171,7 @@ import {
   requestTurnOwnershipCutoff
 } from './session/store.js';
 import { inFlightMcpRequests, inFlightToolCalls, onRunningToolChange, runningToolCalls, runningToolConversations, runningToolProgress, sentResults, settlingToolCalls } from './mcp/call-context.js';
-import { automaticSendRefusal, chatsAtOnceStatus, noteChatLimit, restoreChatsAtOnce, setWorkingChatsSource } from './chats-at-once.js';
+import { automaticPauseRefusal, automaticSendRefusal, chatsAtOnceStatus, noteChatLimit, restoreChatsAtOnce, setWorkingChatsSource } from './chats-at-once.js';
 import { nativeHandoffPrompt } from './session/handoff-prompt.js';
 import { DEFAULT_HANDOFF_PROMPT } from '../shared/handoff.js';
 import { briefShortfall, resumeBootstrapText } from './session/handoff.js';
@@ -2546,6 +2550,9 @@ export type SessionControlsView = {
   conversationId: string;
   automation: 'off' | 'goal' | 'loop';
   loopAfterTurn?: boolean;
+  keepRunningWhenTabClosed?: boolean;
+  canKeepRunningWhenTabClosed?: boolean;
+  closedTabRecoveryStatus?: string;
   proLoopDelivery?: boolean;
   objective: string;
   activeTurnId: string | null;
@@ -2652,6 +2659,15 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
   const userRequests = await userRequestViews(sessionId);
   const finishWaiting = await sessionFinishWaiting(sessionId, activeTurnId, id);
   const recovery = await sessionRecoveryCountdowns(sessionId, id);
+  const goalWait = blocked || !goalActiveFor(id) ? null : draft ? draftReviewWait(id, draft.stage)
+    : await goalWaitFor(id, sessionId, Date.now(), session.browserRecoveryDismissedAt !== undefined);
+  const lastSummary = await stuckSummaryOffer(sessionId, session);
+  // The diagnostic projection must use the current binding, not the snapshot
+  // captured before the asynchronous controls reads above. No await is allowed
+  // after this check: a rebind between here and closedTabStatusFor would log
+  // the old conversation's status and publish stale controls.
+  const closeStatusSession = await getSession(sessionId);
+  if (closeStatusSession?.conversationId !== id) throw new Error('conversation_changed');
   return { sessionId, plan, userRequests, conversationId: id, activeTurnId, heldTurnId, finishHeld,
     recovery,
     queueAtFinish: !blocked && inputPolicy.queueAtFinish, canInject: !blocked && inputPolicy.canInject,
@@ -2659,15 +2675,18 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
     finishGoalDraft: getSessionFinishDraft(sessionId, activeTurnId),
     finishWaiting,
     goalDraft: draft ? { stage: draft.stage, model: draft.model, text: draft.text.slice(-8000), error: draft.error } : null,
-    goalWait: blocked || !goalActiveFor(id) ? null : draft ? draftReviewWait(id, draft.stage)
-      : await goalWaitFor(id, sessionId, Date.now(), session.browserRecoveryDismissedAt !== undefined),
+    goalWait,
     stopPending: commands.some(c => c.spec.type === 'stop' && c.spec.sessionId === sessionId && c.spec.turnId === activeTurnId),
     objective: goalObjectiveFor(id),
     loopAfterTurn: control.afterTurn,
+    keepRunningWhenTabClosed: goalKeepsRunningWhenTabClosed(id),
+    canKeepRunningWhenTabClosed: (control.own || goalKeepsRunningWhenTabClosed(id)) && blocked !== 'worker' &&
+      (!blocked || goalKeepsRunningWhenTabClosed(id)) && !isSessionRemoving(sessionId),
+    closedTabRecoveryStatus: closedTabStatusFor(id, closeStatusSession),
     proLoopDelivery: control.enabled && getConfig().ui.finishTool === true && session.selectedModel?.conversationId === id &&
       supportsFinishAutomation(control.mode, session.selectedModel.model, session.selectedModel.reasoningEffort),
     automation: goalArmedFor(id) && !blocked ? control.enabled ? control.mode : 'goal' : 'off',
-    blocked, job: resumeJobFor(sessionId), lastSummary: await stuckSummaryOffer(sessionId, session), pageless: pagelessChats.has(id) };
+    blocked, job: resumeJobFor(sessionId), lastSummary, pageless: pagelessChats.has(id) };
 }
 
 /**
@@ -3040,6 +3059,24 @@ export function onSessionAutomationChange(listener: (sessionId: string, on: bool
   automationListeners.add(listener);
   return () => { automationListeners.delete(listener); };
 }
+export async function setSessionKeepRunningWhenClosed(sessionId: string, enabled: boolean, expectedConversationId: string): Promise<SessionControlsView> {
+  const id = await controlledConversation(sessionId);
+  if (id !== expectedConversationId || isSessionRemoving(sessionId)) throw new Error('conversation_changed');
+  if (enabled && goalBlockReason(id)) throw new Error('chat_blocked');
+  await setGoalKeepRunningNow(id, enabled);
+  // This preference controls only close recovery, not ordinary Goal pickup.
+  // Re-read the committed preference in case a concurrent setter superseded us.
+  if (!goalKeepsRunningWhenTabClosed(id)) {
+    const repair = repairsInFlight.get(id);
+    if (repair && automationCloseRepair(repair) && !repair.openAuthorized && repair.state !== 'done') {
+      finishClosedTabRepair(id, repair, CLOSE_STATUS.cancelled);
+    }
+  }
+  if (await controlledConversation(sessionId) !== id) throw new Error('conversation_changed');
+  changed();
+  return sessionControlsFor(sessionId);
+}
+
 export async function setSessionAutomation(sessionId: string, automation: SessionControlsView['automation'], afterTurn?: boolean,
   /** Who changed it, for the log (#1882). */
   from?: string): Promise<SessionControlsView> {
@@ -3226,7 +3263,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (!origin) return json(res, 403, { error: 'forbidden_origin' }, null);
     res.writeHead(204, {
       'access-control-allow-origin': origin,
-      'access-control-allow-headers': 'authorization, content-type, x-extension-version, x-extension-protocol, x-extension-build, x-extension-browser, x-extension-host, x-extension-engine',
+      'access-control-allow-headers': 'authorization, content-type, x-extension-version, x-extension-protocol, x-extension-build, x-extension-browser, x-extension-host, x-extension-engine, x-extension-open-only',
       'access-control-allow-methods': 'GET, POST, OPTIONS',
       // Chrome asks for this before letting an extension reach a loopback address.
       'access-control-allow-private-network': 'true',
@@ -3599,9 +3636,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       repairAction === 'preserved' || repairAction === 'present' ? repairAction : null;
     const temporaryChat = action === 'preserved' && url.searchParams.get('preservedFor') === 'temporary-chat';
     if (repaired) {
-      await confirmRepair(repaired.slice(0, 64), action, temporaryChat);
+      await confirmRepair(repaired.slice(0, 64), action, req, temporaryChat);
     } else if (repairFailed) {
-      await failRepairAttempt(repairFailed.slice(0, 64), action, url.searchParams.get('why'), url.searchParams.get('detail')?.slice(0, 80) ?? null, url.searchParams.get('approval') === '1');
+      await failRepairAttempt(repairFailed.slice(0, 64), action, url.searchParams.get('why'), url.searchParams.get('detail')?.slice(0, 80) ?? null, url.searchParams.get('approval') === '1', req);
     }
     const repairHeld = url.searchParams.get('repairHeld');
     if (repairHeld) noteRepairHeld(repairHeld.slice(0, 64), url.searchParams.get('why'));
@@ -3687,7 +3724,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         ...(req.method === 'POST' && imageExportRequested ? { imageExports: pendingImageExports() } : {}),
         // A failure report closes this request. Reissuing the repair in the same response would
         // replace the visible failure with "Trying" before a renderer could ever observe it.
-        repairs: repairFailed || repairHeld || repairCleared ? [] : await takePendingRepairs(Date.now(), browser, takesWork, chosenBuiltIn),
+        repairs: repairFailed || repairHeld || repairCleared ? [] : await takePendingRepairs(Date.now(), browser, takesWork, chosenBuiltIn, req.headers['x-extension-open-only'] === '1'),
         ...tabPolicy,
         recoveryMonitoring: browserRecoveryMonitoring(),
         // A newer extension build ships with this app. The extension reloads into it on its own
@@ -3926,6 +3963,42 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
   }
 
+  if (route === '/repairs/open' && req.method === 'POST') {
+    if (staleCompanion(req) || notChosenBrowser(req) || req.headers['x-extension-open-only'] !== '1' || getConfig().ui.browserOnly === true)
+      return json(res, 200, { allowed: false }, origin);
+    let body: unknown;
+    try { body = await readBody(req); } catch { return json(res, 400, { error: 'bad_request' }, origin); }
+    const token = body && typeof body === 'object' ? (body as Record<string, unknown>).token : null;
+    const found = typeof token === 'string' && token.length <= 128
+      ? [...repairsInFlight].find(([, repair]) => automationCloseRepair(repair) && repair.token === token && repair.state === 'handed' && repair.claimed)
+      : undefined;
+    if (!found) return json(res, 200, { allowed: false }, origin);
+    const [id, repair] = found;
+    const browser = browserOf(req);
+    if (!browser || repair.claimBrowser !== browser || repair.closeBrowser !== browser)
+      return json(res, 200, { allowed: false }, origin);
+    const allowed =
+      await automationCloseRepairCurrent(id, repair) &&
+      observationWritesInFlight === 0 && repairsInFlight.get(id) === repair &&
+      repair.state === 'handed' && repair.claimed === true && repair.openAuthorized !== true &&
+      !staleCompanion(req) && !notChosenBrowser(req) && getConfig().ui.browserOnly !== true &&
+      !chatHeldElsewhere(id, browser) && !closedTabCooldown(repair.sessionId) &&
+      closePolicyCurrent(id, repair);
+    // Linearization point: this is a one-shot commitment to opening a page,
+    // not to sending a message. Later Off/Stop cancels future automation, not
+    // an already committed browser call. Never close a potentially adopted tab.
+    if (allowed) {
+      repair.openAuthorized = true;
+      // Charge at authorization, not ACK. A failed or ambiguous browser call cannot
+      // refund the cooldown. Monotonic time survives wall-clock corrections.
+      closedTabOpenedAt.set(repair.sessionId, performance.now());
+      for (const sessionId of closedTabOpenedAt.keys()) if (!closedTabCooldown(sessionId)) closedTabOpenedAt.delete(sessionId);
+    } else if (repairsInFlight.get(id) === repair && repair.state === 'handed' && !repair.openAuthorized) {
+      finishClosedTabRepair(id, repair, closedTabCooldown(repair.sessionId) ? CLOSE_STATUS.cooldown : CLOSE_STATUS.cancelled);
+    }
+    return json(res, 200, { allowed }, origin);
+  }
+
   if (route === '/repairs/claim' && req.method === 'POST') {
     if (staleCompanion(req)) return json(res, 200, { allowed: false }, origin);
     const unchosen = notChosenBrowser(req);
@@ -3936,6 +4009,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const found = [...repairsInFlight].find(([, repair]) => repairNeedsClaim(repair) && repair.token === token && repair.state === 'handed');
     if (!found) return json(res, 200, { allowed: false }, origin);
     const [conversationId, repair] = found;
+    if (automationCloseRepair(repair) && (req.headers['x-extension-open-only'] !== '1' ||
+        !browserOf(req) || repair.closeBrowser !== browserOf(req) ||
+        chatHeldElsewhere(conversationId, browserOf(req)) || getConfig().ui.browserOnly === true))
+      return json(res, 200, { allowed: false }, origin);
     // A browser that is not the chosen one takes no new work (#1516), except thawing its own frozen
     // tab: only the browser holding that tab can, and it opens nothing new (CodeRabbit on #1963).
     if (unchosen && !holdsStalledTab(repair, conversationId, browserOf(req))) {
@@ -3957,7 +4034,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       compactionRepairCurrent(conversationId, repair);
     // An observation still publishing can revoke this handout. Refuse this
     // claim transiently; the same unclaimed token remains eligible to be checked.
-    const allowed = current && observationWritesInFlight === 0 && repairsInFlight.get(conversationId) === repair && repair.state === 'handed' && !repair.claimed;
+    const allowed = current && (!automationCloseRepair(repair) || await automationCloseRepairCurrent(conversationId, repair)) &&
+      observationWritesInFlight === 0 && repairsInFlight.get(conversationId) === repair && repair.state === 'handed' && !repair.claimed &&
+      (!automationCloseRepair(repair) || (closePolicyCurrent(conversationId, repair) && !closedTabCooldown(repair.sessionId) &&
+        !staleCompanion(req) && !notChosenBrowser(req) && !chatHeldElsewhere(conversationId, browserOf(req))));
     if (!allowed) {
       // The page is there and asked: this offer is not one nobody picked up (#1922). Say why it
       // was refused, once a minute per chat and reason, so "never asked" and "refused" differ.
@@ -3976,6 +4056,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     if (allowed) {
       repair.claimed = true;
+      if (automationCloseRepair(repair)) {
+        repair.claimBrowser = browserOf(req);
+        repair.closeClaimedAt = performance.now();
+      }
       if (repair.reason === 'assistant-error' && repair.assistantSource)
         turnRepairSpent.set(conversationId, { sessionId: repair.sessionId, turnKey: repair.assistantSource.key, token, at: Date.now() });
       if (repair.attribution && repair.attribution.incident.firstAttemptAt === null)
@@ -4243,6 +4327,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     const id = conversationId(body['conversationId']);
     if (id) {
+      const closeEpoch = bridgeLifecycleEpoch;
+      // Do not acknowledge a second report before the first close's durable
+      // write. Re-read after it settles; a genuine intervening return is new work.
+      while (closingConversations.has(id)) await closingConversations.get(id);
+      let finished!: () => void, failed!: (error: unknown) => void;
+      const flight = new Promise<void>((resolve, reject) => { finished = resolve; failed = reject; });
+      void flight.catch(() => undefined);
+      closingConversations.set(id, flight);
+      try {
       // Preserve the page's last exact turn verdict before closeConversation removes its live
       // recorder entry. Agent ownership outlives a tab; an open turn is the narrower fact that
       // authorises reopening it.
@@ -4253,6 +4346,17 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       // left open days ago only wakes the ten-minute watchdog (2026-10-09).
       const working = chatIsWorkingNow(id);
       const manual = body['manual'] === true;
+      const closeSwitch = goalSwitchIdentity(id);
+      const closeBrowser = browserOf(req);
+      const prior = manual && goalKeepsRunningWhenTabClosed(id)
+        ? await findSessionByConversation(id, { requireUnique: true }) : null;
+      // A redelivered close is not another departure. A real page return clears
+      // dismissal and can earn a new, independently owned episode.
+      if (prior?.browserRecoveryDismissedAt !== undefined) {
+        return json(res, 200, { ok: true }, origin);
+      }
+      const closeSource = prior && prior.browserRecoveryDismissedAt === undefined && prior.endedAt === null
+        ? automationCloseSources(prior, working)[0] : undefined;
       if (manual) {
         // User departure withdraws activity and pending browser actions. Preserve
         // confirmed receipts so returning cannot refund a reload already carried out.
@@ -4281,8 +4385,32 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         const session = await findSessionByConversation(id);
         if (session) await revokeSilenceInputs(session.id);
         if (repairsInFlight.get(id)?.state !== 'done') repairsInFlight.delete(id);
-        logInfo(`bridge: ${id} was closed deliberately; automatic browser recovery is paused until its page returns`);
+        const episode = closeSource && session && prior && session.id === prior.id && session.browserRecoveryDismissedAt !== undefined
+          ? automationCloseEpisode(session.browserRecoveryDismissedAt, closeSource) : null;
+        if (episode && session && closeBrowser && req.headers['x-extension-open-only'] === '1' &&
+            !getConfig().ui.browserOnly && !notChosenBrowser(req) && !staleCompanion(req) &&
+            !chatHeldElsewhere(id, closeBrowser) && !closedTabCooldown(session.id) &&
+            !await conversationWasSuperseded(id) && bridgeDesiredRunning && closeEpoch === bridgeLifecycleEpoch &&
+            closeSwitch === goalSwitchIdentity(id) &&
+            departureAllowsRepairFor(session, 'no-tab', episode) &&
+            queueBrowserRecovery(id, session.id, episode, 'no-tab')) {
+          repairsInFlight.get(id)!.automationSwitch = closeSwitch;
+          repairsInFlight.get(id)!.closeBrowser = closeBrowser;
+          setClosedTabStatus(id, session.id, CLOSE_STATUS.waiting);
+        } else if (session && prior) {
+          setClosedTabStatus(id, session.id, !bridgeDesiredRunning || closeEpoch !== bridgeLifecycleEpoch ? CLOSE_STATUS.cancelled :
+            closedTabCooldown(session.id) ? CLOSE_STATUS.cooldown :
+            !closeBrowser || req.headers['x-extension-open-only'] !== '1' ? CLOSE_STATUS.unavailable :
+              automaticPauseRefusal() ? CLOSE_STATUS.paused : CLOSE_STATUS.notOwed);
+        } else logInfo(`bridge: ${id} was closed deliberately; automatic browser recovery is paused until its page returns`);
       } else await queueMissingTab(id, working);
+      } catch (error) {
+        failed(error);
+        throw error;
+      } finally {
+        if (closingConversations.get(id) === flight) closingConversations.delete(id);
+        finished();
+      }
     }
     return json(res, 200, { ok: true }, origin);
   }
@@ -7186,6 +7314,13 @@ export async function stopBridge(): Promise<void> {
     if (silenceTimer) clearTimeout(silenceTimer);
     silenceTimer = null;
     setCallAttributionListener(null);
+    // Teardown revokes every in-memory token. Publish the terminal state before
+    // clearing those tokens: an unspent offer is cancelled, while a committed
+    // browser call is ambiguous without its receipt and cannot be retried.
+    for (const [id, repair] of repairsInFlight) {
+      if (automationCloseRepair(repair) && repair.state !== 'done')
+        finishClosedTabRepair(id, repair, repair.openAuthorized ? CLOSE_STATUS.unconfirmed : CLOSE_STATUS.cancelled);
+    }
     clearUnattributedIncident();
     await Promise.all([drainBridgeListener(instance), ...bridgeDrains]);
     logInfo('bridge stopped');
@@ -8749,6 +8884,7 @@ async function fileSilenceInputTicket(conversationId: string, now: number, liste
  * call or observed turn takes over the clock exactly as for any working chat.
  */
 function armResumedChat(sessionId: string, conversationId: string): void {
+  forgetClosedTabStatuses(sessionId);
   grantActivity(conversationId, sessionId);
   logInfo(`bridge: resumed chat ${conversationId} armed — expecting its first attributed call`);
 }
@@ -9071,6 +9207,12 @@ const UNATTRIBUTED_REQUEST_MEMORY = 500;
 
 /** One existing browser-action owner per chat: queued, issued, or acknowledged. */
 interface Repair {
+  automationSwitch?: object;
+  closeBrowser?: string;
+  claimBrowser?: string | null;
+  openAuthorized?: boolean;
+  closeClaimedAt?: number;
+  closeProgressWrite?: Promise<void>;
   /** Reference to the existing work owner, invalidated when genuine activity replaces it. */
   silenceGrant?: ActivityGrant;
   /** The authored question owns transport recovery across document-local generation changes. */
@@ -9133,6 +9275,121 @@ interface Repair {
 const TURN_SCOPED_REPAIRS: ReadonlySet<Repair['reason']> = new Set(['unattributed', 'assistant-error']);
 
 const repairsInFlight = new Map<string, Repair>();
+const closingConversations = new Map<string, Promise<void>>();
+// Existing three-minute browser recovery interval; <=20 permits in any rolling
+// hour. Key by the stable session so C&R does not reset the budget. A new
+// process conservatively refuses permits for a full interval: restarting
+// after a lost ACK or failed browser call cannot refund a previous permit.
+export const CLOSED_TAB_MAX_REOPENS_PER_HOUR = 60 * 60_000 / BROWSER_RECOVERY_COOLDOWN_MS;
+const closedTabOpenedAt = new Map<string, number>();
+let closedTabInitialHoldUntil = performance.now() + BROWSER_RECOVERY_COOLDOWN_MS;
+function closedTabCooldown(sessionId: string): boolean {
+  const at = closedTabOpenedAt.get(sessionId);
+  const now = performance.now();
+  return now < closedTabInitialHoldUntil || (at !== undefined && now - at < BROWSER_RECOVERY_COOLDOWN_MS);
+}
+const CLOSE_STATUS = {
+  waiting: 'Waiting to reopen the closed tab once.',
+  browserClosed: 'The browser is closed or disconnected. Recovery waits until you open it.',
+  cooldown: 'The tab was not reopened: recovery is limited to once every three minutes.',
+  paused: 'The tab was not reopened: automatic work is paused.',
+  notOwed: 'The tab was not reopened: no current authorized Goal or Loop work.',
+  unavailable: 'The tab was not reopened: this browser cannot safely recover it.',
+  cancelled: 'The tab was not reopened: recovery permission was withdrawn.',
+  present: 'The tab was already open again. Nothing was reloaded.',
+  reopened: 'The app reopened the closed tab.',
+  failed: 'The tab could not be reopened. Open it yourself to resume work.',
+  unconfirmed: 'The browser did not confirm the reopen. No further attempt was authorized.'
+} as const;
+const closeStatuses = new Map<string, { sessionId: string; text: string }>();
+// The displayed reason can change independently of the repair decision (for
+// example on disconnect). Track diagnostic observations, never authorization.
+const loggedCloseStatuses = new Map<string, { sessionId: string; text: string }>();
+function logClosedTabStatus(id: string, sessionId: string, text: string | undefined): void {
+  const previous = loggedCloseStatuses.get(id);
+  if (text === undefined) {
+    loggedCloseStatuses.delete(id);
+    return;
+  }
+  // A repeated observation keeps its bounded diagnostic receipt recent. Map.set
+  // alone does not move an existing key to the end of insertion order.
+  loggedCloseStatuses.delete(id);
+  loggedCloseStatuses.set(id, { sessionId, text });
+  if (loggedCloseStatuses.size > 500) loggedCloseStatuses.delete(loggedCloseStatuses.keys().next().value!);
+  if (previous?.sessionId === sessionId && previous.text === text) return;
+  logInfo(`bridge: ${id}: ${text}`);
+}
+function setClosedTabStatus(id: string, sessionId: string, text: string): void {
+  if (isSessionRemoving(sessionId)) return;
+  const previous = closeStatuses.get(id);
+  closeStatuses.delete(id);
+  closeStatuses.set(id, { sessionId, text });
+  if (closeStatuses.size > 500) closeStatuses.delete(closeStatuses.keys().next().value!);
+  if (previous?.sessionId === sessionId && previous.text === text) return;
+  logClosedTabStatus(id, sessionId, text);
+  changed();
+}
+function closedTabStatusFor(id: string, session: SessionSummary): string | undefined {
+  // A session can move to a replacement conversation. Never reuse the old
+  // diagnostic observation for the new binding.
+  for (const [other, row] of loggedCloseStatuses) {
+    if (other !== id && row.sessionId === session.id) loggedCloseStatuses.delete(other);
+  }
+  for (const [other, row] of closeStatuses) {
+    if (other !== id && row.sessionId === session.id) closeStatuses.delete(other);
+  }
+  if (isSessionRemoving(session.id)) {
+    forgetClosedTabStatuses(session.id);
+    return undefined;
+  }
+  const text = projectClosedTabStatus(id, session);
+  logClosedTabStatus(id, session.id, text);
+  return text;
+}
+export function forgetClosedTabStatuses(sessionId: string): void {
+  for (const [id, row] of loggedCloseStatuses) {
+    if (row.sessionId === sessionId) loggedCloseStatuses.delete(id);
+  }
+  for (const [id, row] of closeStatuses) {
+    if (row.sessionId === sessionId) closeStatuses.delete(id);
+  }
+}
+function projectClosedTabStatus(id: string, session: SessionSummary): string | undefined {
+  const row = closeStatuses.get(id);
+  if (row?.sessionId !== session.id) {
+    // A restarted app has no open authorization to resume. Preserve the
+    // deliberate-close fence and explain why a disconnected browser waits.
+    if (session.browserRecoveryDismissedAt !== undefined && goalKeepsRunningWhenTabClosed(id))
+      return !browserPresent() && !browserWakeConnected() ? CLOSE_STATUS.browserClosed : CLOSE_STATUS.notOwed;
+    return undefined;
+  }
+  closeStatuses.delete(id);
+  closeStatuses.set(id, row);
+  if (row.text === CLOSE_STATUS.waiting && session.browserRecoveryDismissedAt !== undefined &&
+      !browserPresent() && !browserWakeConnected()) return CLOSE_STATUS.browserClosed;
+  return row.text;
+}
+function finishClosedTabRepair(id: string, repair: Repair, text: string): void {
+  if (repairsInFlight.get(id) !== repair || repair.state === 'done') return;
+  repair.state = 'done';
+  setClosedTabStatus(id, repair.sessionId, text);
+  // Receipt/progress failure cannot re-arm a spent permit.
+  void writeClosedTabProgress(id, repair, text);
+}
+function writeClosedTabProgress(id: string, repair: Repair, text: string): Promise<void> {
+  // The terminal decision can arrive during the waiting-row write. Serialize
+  // this one row so a delayed success/failure cannot repaint it as waiting.
+  const write = (repair.closeProgressWrite ?? Promise.resolve()).then(() =>
+    updateRepairProgress(id, repair, text)).catch(() => logWarn('bridge: closed-tab recovery status could not be saved'));
+  repair.closeProgressWrite = write;
+  return write;
+}
+function closePolicyCurrent(id: string, repair: Repair): boolean {
+  return bridgeDesiredRunning && !bridgeShutdownRequested && !isSessionRemoving(repair.sessionId) && repair.automationSwitch !== undefined &&
+    repair.automationSwitch === goalSwitchIdentity(id) && goalKeepsRunningWhenTabClosed(id) &&
+    goalSwitchFor(id).own && goalActiveFor(id) && !stopRequestedFor(id) && !approvalCardWaiting(id) &&
+    !automaticPauseRefusal() && !continuationForSession(repair.sessionId) && !goalDraftNeedsIntervention(id);
+}
 /** Exact provider Retry-After deadline for conversation-history reads. It delays browser recovery; it never creates one. */
 const providerHistoryBackoffUntil = new Map<string, number>();
 /*
@@ -9253,12 +9510,75 @@ function departureAllowsRepair(session: SessionSummary): boolean {
   return session.browserRecoveryDismissedAt === undefined;
 }
 
+const AUTOMATION_CLOSE_PREFIX = 'no-tab:automation-close:';
+function automationCloseRepair(repair: Pick<Repair, 'reason' | 'episode'>): boolean {
+  return repair.reason === 'no-tab' && repair.episode.startsWith(AUTOMATION_CLOSE_PREFIX);
+}
+
+function automationCloseEpisode(at: number, source: string): string {
+  return `${AUTOMATION_CLOSE_PREFIX}${at}:${source}`;
+}
+
+/** The opt-in is not a blanket tab lease. Only explicit per-chat automation and
+ * its exact running turn or accepted reply can earn a reopen. */
+function automationCloseSources(session: SessionSummary, working: boolean): string[] {
+  const id = session.conversationId;
+  if (!id || isSessionRemoving(session.id) || !goalKeepsRunningWhenTabClosed(id) || !goalSwitchFor(id).own ||
+      !goalActiveFor(id) || session.origin?.kind === 'worker' || session.origin?.kind === 'helper' ||
+      stopRequestedFor(id) || approvalCardWaiting(id) || automaticPauseRefusal() || (!session.activeTurnId && session.lastTurnOutcome === 'stopped') ||
+      continuationForSession(session.id) || goalDraftNeedsIntervention(id)) return [];
+  const pending = goalPendingReplyFor(id);
+  const sources: string[] = [];
+  if (pending && !pending.pickupStoppedAt && (!session.activeTurnId || session.activeTurnId === (pending.silenceSourceTurnId ?? pending.turnId))) {
+    sources.push(`reply:${pending.acceptedAt}:${pending.replyId}`);
+    // A running source may finish while its page is away. Its own final still
+    // authorizes the same reopen, never a later turn's reply.
+    sources.push(`turn:${pending.silenceSourceTurnId ?? pending.turnId}`);
+  }
+  if (working && session.activeTurnId) sources.push(`turn:${session.activeTurnId}`);
+  return sources;
+}
+
+/** Recheck the exact source after asynchronous reads and before the browser acts. */
+async function automationCloseRepairCurrent(id: string, repair: Repair): Promise<boolean> {
+  if (!automationCloseRepair(repair)) return true;
+  const current = async (): Promise<SessionSummary | null> => {
+    const session = await getSession(repair.sessionId);
+    return session?.conversationId === id && departureAllowsRepairFor(session, repair.reason, repair.episode) &&
+      repairsInFlight.get(id) === repair && repair.automationSwitch !== undefined &&
+      repair.automationSwitch === goalSwitchIdentity(id) ? session : null;
+  };
+  const session = await current();
+  if (!session || await conversationWasSuperseded(id)) return false;
+  const pending = goalPendingReplyFor(id);
+  const mode = goalSwitchFor(id).mode;
+  if (pending && session.browserRecoveryDismissedAt !== undefined &&
+      (repair.episode === automationCloseEpisode(session.browserRecoveryDismissedAt, `reply:${pending.acceptedAt}:${pending.replyId}`) ||
+       repair.episode === automationCloseEpisode(session.browserRecoveryDismissedAt, `turn:${pending.silenceSourceTurnId ?? pending.turnId}`))) {
+    const source = await goalReplySourceTurn(session.id, pending.silenceSourceTurnId ?? pending.turnId);
+    if (!source || !await loopReplyHasAuthority(session.id, id, pending.turnId)) return false;
+    const [latest] = await readRecentEvents(session.id, 1, { kinds: ['user_message', 'turn_start'], orderByOrigin: true });
+    const position = latest?.kind === 'user_message' ? latest.origin ?? latest.seq : latest?.seq ?? 0;
+    if (latest && ((pending.eventSeq > 0 && position > pending.eventSeq) ||
+        (latest.kind === 'turn_start' && latest.turnId !== source))) return false;
+  }
+  const final = await current();
+  const reply = goalPendingReplyFor(id);
+  return Boolean(final) && closePolicyCurrent(id, repair) && goalSwitchFor(id).mode === mode &&
+    (pending?.replyId === reply?.replyId && pending?.acceptedAt === reply?.acceptedAt) &&
+    providerHistoryBackoff(id) === null && !isChatBlocked(id) && !stopRequestedFor(id);
+}
+
 /**
  * Whether this repair may act on a chat the user closed. Automatic repairs wait for the page to
  * return. A Compact & resume the user pressed is that return: dropping it at handout left the
  * ticket to expire ten minutes later as "it took too long" (2026-09-30, live on 2.1.22).
  */
 function departureAllowsRepairFor(session: SessionSummary, reason: Repair['reason'], episode: string): boolean {
+  if (automationCloseRepair({ reason, episode })) {
+    const at = session.browserRecoveryDismissedAt;
+    return at !== undefined && automationCloseSources(session, true).some(source => episode === automationCloseEpisode(at, source));
+  }
   return departureAllowsRepair(session) || (reason === 'compaction' && episode.endsWith(':manual'));
 }
 
@@ -9564,6 +9884,9 @@ export function unclaimedChatShowFailed(conversationId: string, now = Date.now()
  * (CodeRabbit on #2027). Worker chats and chats nobody automates are never brought forward.
  */
 function showUnclaimedChatOnce(conversationId: string, repair: Repair): boolean {
+  // The opted-in close already names one exact reopen. A separate reveal
+  // would bypass its source/claim fence and could create another tab.
+  if (automationCloseRepair(repair)) return false;
   const key = `${repair.sessionId}:${repair.episode}`;
   if (unclaimedChatShown.has(key) || !goalActiveFor(conversationId) || isChatBlocked(conversationId) ||
       stopRequestedFor(conversationId) || getConfig().ui.browserOnly === true ||
@@ -9822,6 +10145,13 @@ const owedContinueDeps: OwedDeps = {
 function noteRecoveryActivity(conversationId: string): void {
   const held = repairsInFlight.get(conversationId);
   if (!held) return;
+  if (automationCloseRepair(held)) {
+    // A genuine return is enough to revoke an unspent permit. A committed
+    // reopen may still receive its receipt; do not confuse return with ACK.
+    if (held.state !== 'done' && !held.openAuthorized)
+      finishClosedTabRepair(conversationId, held, CLOSE_STATUS.present);
+    return;
+  }
   if (held.reason === 'unattributed' || held.reason === 'assistant-error') return;
   repairsInFlight.delete(conversationId);
 }
@@ -9859,7 +10189,8 @@ async function noteRecoveryObservations(
   if (recorded?.browserRecoveryDismissedAt !== undefined) {
     // Departure already consumed the old activity. A late page batch cannot
     // erase newer server-side work which arrived while its tab was closed.
-    if (repairsInFlight.get(conversationId)?.state !== 'done') repairsInFlight.delete(conversationId);
+    const held = repairsInFlight.get(conversationId);
+    if (held?.state !== 'done' && (!held || !automationCloseRepair(held))) repairsInFlight.delete(conversationId);
     return;
   }
   const ended = observations.findLast(item => item.kind === 'turn_end');
@@ -10748,7 +11079,10 @@ export { expediteCompactionPickup as expediteCompactionPickupForTests };
 function forgetGoalWatch(conversationId: string): void {
   // An input can be queued immediately before Off, before the next watch sweep sees it.
   // Retain the source tombstone even then; only a new source or expiry replaces it.
-  if (repairsInFlight.get(conversationId)?.reason === 'goal') repairsInFlight.delete(conversationId);
+  const repair = repairsInFlight.get(conversationId);
+  if (repair?.reason === 'goal') repairsInFlight.delete(conversationId);
+  else if (repair && automationCloseRepair(repair) && !repair.openAuthorized)
+    finishClosedTabRepair(conversationId, repair, CLOSE_STATUS.cancelled);
 }
 
 /**
@@ -11747,7 +12081,8 @@ async function takePendingRepairs(
   /** Whether this browser may claim what it is offered; only its offers count toward the no-page budget. */
   canClaim = true,
   /** The chosen built-in browser, which takes a repair over from a browser that is not chosen (#1960). */
-  chosen = false
+  chosen = false,
+  supportsOpenOnly = false
 ): Promise<Array<{ conversationId: string; token: string; reason: Repair['reason']; focus: boolean }>> {
   retireSpentRepairs();
   const pickupFloor = pickupWatchFloor;
@@ -11771,6 +12106,23 @@ async function takePendingRepairs(
   for (const [conversationId, repair] of [...repairsInFlight]) {
     const session = await getSession(repair.sessionId);
     const superseded = await conversationWasSuperseded(conversationId);
+    if (automationCloseRepair(repair)) {
+      // A page returning before ACK may already be doing its ordinary pickup.
+      // A late receipt is evidence only; it must not create another send or
+      // retire that pickup. Never run the generic no-tab fallback for this lane.
+      if (repair.state === 'done') continue;
+      if (repairsInFlight.get(conversationId) !== repair) continue;
+      if (repair.closeClaimedAt !== undefined && performance.now() - repair.closeClaimedAt >= BROWSER_RECOVERY_COOLDOWN_MS) {
+        finishClosedTabRepair(conversationId, repair, CLOSE_STATUS.unconfirmed);
+        continue;
+      }
+      if (superseded || session?.conversationId !== conversationId ||
+          !departureAllowsRepairFor(session, repair.reason, repair.episode) || !closePolicyCurrent(conversationId, repair)) {
+        if (!repair.openAuthorized) finishClosedTabRepair(conversationId, repair, CLOSE_STATUS.cancelled);
+        continue;
+      }
+      continue;
+    }
     if (!isChatBlocked(conversationId) && !superseded && session?.conversationId === conversationId &&
         !(repair.reason !== 'compaction' && !session.activeTurnId && session.lastTurnOutcome === 'stopped') &&
         !stopRequestedFor(conversationId, session.activeTurnId)) {
@@ -11816,6 +12168,8 @@ async function takePendingRepairs(
     /** Raise the tab (or open the chat in front) before acting: a background tab is throttled. */
     focus: boolean;
     requiresClaim?: boolean;
+    /** An opted-in deliberate close authorizes opening only, never reloading a returned tab. */
+    openOnly?: boolean;
     /** A silence repair whose confirmation files an automatic Continue, so an error page may be kept. */
     continueFollows?: boolean;
   }> = [];
@@ -11823,6 +12177,8 @@ async function takePendingRepairs(
     // Another browser holds this chat. Offered here, a reload finds no tab and opens a copy. Not for
     // the chosen built-in browser: the holder may not claim it, and the chat would sit (#1960, as
     // inputs do since #1516).
+    if (automationCloseRepair(repair) && (!supportsOpenOnly || !browser || repair.closeBrowser !== browser ||
+        getConfig().ui.browserOnly === true || chatHeldElsewhere(conversationId, browser))) continue;
     if (!(chosen && repair.reason !== 'stalled') && chatHeldElsewhere(conversationId, browser)) continue;
     // The chosen browser has no tab for a chat another browser holds, and with "browser only" it may
     // not open one: offered, it would skip the repair unclaimed and spend the no-page budget on a chat
@@ -11855,6 +12211,10 @@ async function takePendingRepairs(
       // its polls would use up the budget while the chosen page keeps asking (CodeRabbit on #1953).
       const askedRecently = repair.claimAskedAt !== undefined && now - repair.claimAskedAt < CLAIM_ASKED_FRESH_MS;
       repair.offers = (repair.offers ?? 1) + (canClaim && !askedRecently ? 1 : 0);
+      if (automationCloseRepair(repair) && repair.offers > UNCLAIMED_REPAIR_OFFERS) {
+        finishClosedTabRepair(conversationId, repair, CLOSE_STATUS.unconfirmed);
+        continue;
+      }
       if (repair.offers > UNCLAIMED_REPAIR_OFFERS && showUnclaimedChatOnce(conversationId, repair)) continue;
       if (repair.offers > UNCLAIMED_REPAIR_OFFERS) {
         // Nothing is listening. Say that, rather than go on offering into an empty room until
@@ -11888,7 +12248,9 @@ async function takePendingRepairs(
     } else {
       repair.state = 'handed';
       repair.token = randomBytes(9).toString('base64url');
-      if (!repair.awaitingStream) await updateRepairProgress(conversationId, repair, `Trying to reload chat to ${repairPurpose(repair).to}…`);
+      if (automationCloseRepair(repair)) {
+        await writeClosedTabProgress(conversationId, repair, CLOSE_STATUS.waiting);
+      } else if (!repair.awaitingStream) await updateRepairProgress(conversationId, repair, `Trying to reload chat to ${repairPurpose(repair).to}…`);
     }
     // A missed pre-action claim may retry the same offer. Once claimed, ambiguous
     // acknowledgement keeps custody and cannot authorize a second browser action.
@@ -11914,9 +12276,12 @@ async function takePendingRepairs(
         !stopRequestedFor(conversationId) && !heldByApproval)
       {
         const ownSent = await ownSentResidue(conversationId).catch(() => []);
+        if (automationCloseRepair(repair) && (!await automationCloseRepairCurrent(conversationId, repair) ||
+            repair.state !== 'handed' || repair.claimed || !closePolicyCurrent(conversationId, repair))) continue;
         ready.push({ conversationId, token: repair.token, reason: repair.reason, focus: repair.reason === 'compaction',
           ...(ownSent.length ? { ownSent } : {}),
           ...(repairNeedsClaim(repair) ? { requiresClaim: true } : {}),
+          ...(automationCloseRepair(repair) ? { openOnly: true } : {}),
           ...(repair.reason === 'silence' && recoveryInputAllowed(repair.sessionId, conversationId) ? { continueFollows: true } : {}) });
       }
   }
@@ -11961,9 +12326,17 @@ function attributionRepairCurrent(repair: Repair, session: SessionSummary | null
  * this app is no longer waiting on - an older turn's, or one already re-queued - matches
  * nothing and closes nothing, which is the only safe reading of it.
  */
-async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | 'resumed' | 'preserved' | 'present' | null, temporaryChat = false): Promise<void> {
+async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | 'resumed' | 'preserved' | 'present' | null, req: http.IncomingMessage, temporaryChat = false): Promise<void> {
   for (const [conversationId, repair] of repairsInFlight) {
     if (repair.state === 'handed' && repair.token === token) {
+      if (automationCloseRepair(repair)) {
+        const browser = browserOf(req);
+        if (!browser || repair.closeBrowser !== browser || req.headers['x-extension-open-only'] !== '1' ||
+            staleCompanion(req) || (repair.claimed && repair.claimBrowser !== browser) ||
+            (action !== 'present' && (action !== 'reopened' || repair.openAuthorized !== true))) return;
+        finishClosedTabRepair(conversationId, repair, action === 'reopened' ? CLOSE_STATUS.reopened : CLOSE_STATUS.present);
+        return;
+      }
       if (!compactionRepairCurrent(conversationId, repair)) { repairsInFlight.delete(conversationId); return; }
       if (temporaryChat) logInfo(`bridge: ${conversationId}: Temporary Chat, not reloaded`);
       if (action === 'present') {
@@ -12145,10 +12518,21 @@ async function failRepairAttempt(
   action: 'reloaded' | 'reopened' | 'resumed' | 'preserved' | 'present' | null,
   why: string | null = null,
   changeDetail: string | null = null,
-  approval = false
+  approval = false,
+  req?: http.IncomingMessage
 ): Promise<void> {
   for (const [conversationId, repair] of repairsInFlight) {
     if (repair.state !== 'handed' || repair.token !== token) continue;
+    if (automationCloseRepair(repair)) {
+      if (!req || req.headers['x-extension-open-only'] !== '1' || staleCompanion(req) ||
+          !browserOf(req) || repair.closeBrowser !== browserOf(req) ||
+          (repair.claimed && repair.claimBrowser !== browserOf(req))) return;
+      // A reported failure (including an ambiguous API outcome) spends this
+      // departure before any async progress write can race another receipt.
+      finishClosedTabRepair(conversationId, repair, why === 'browser-closed' ? CLOSE_STATUS.browserClosed :
+        why === 'changed' ? CLOSE_STATUS.cancelled : CLOSE_STATUS.failed);
+      return;
+    }
     // ChatGPT recovered by itself and is answering: the page keeps the reload for after the answer
     // instead of ending it. Nothing failed, so it is neither a warning nor a "Reload failed" row.
     const streaming = why === 'streaming';
@@ -12161,7 +12545,7 @@ async function failRepairAttempt(
     } else if (streaming) {
       if (!repair.awaitingStream)
         logInfo(`bridge: ChatGPT is answering again in ${conversationId}; the ${repair.reason} repair waits until it finishes`);
-    } else if (why === 'changed' && changeDetail === 'navigating' && NAVIGATION_RETRIED.has(repair.reason)) {
+    } else if (why === 'changed' && changeDetail === 'navigating' && NAVIGATION_RETRIED.has(repair.reason) && !automationCloseRepair(repair)) {
       // A tab that is still loading (often the one a worker's wake just opened) is no failure: the
       // same repair tries again after the short cooldown below. As a warning it counted as a problem
       // in Activity, sixteen times in two days on the maintainer's Mac (2026-11-01).
@@ -12177,7 +12561,7 @@ async function failRepairAttempt(
       repair,
       heldByApproval ? APPROVAL_REPAIR_DEFERRED_TEXT : streaming
         ? repair.attribution ? 'Not reloaded: ChatGPT is answering.' : 'ChatGPT is answering again; recovery waits until it finishes.'
-        : `${action === 'reopened' ? 'Reopen' : action === 'resumed' ? 'Resume' : 'Reload'} failed while ${repairPurpose(repair).during}${repair.attribution ? '.' : '; will retry.'}`
+        : `${action === 'reopened' ? 'Reopen' : action === 'resumed' ? 'Resume' : 'Reload'} failed while ${repairPurpose(repair).during}${repair.attribution || automationCloseRepair(repair) ? '.' : '; will retry.'}`
     );
     if (repairsInFlight.get(conversationId) !== repair) return;
     if (repair.reason === 'assistant-error' && turnRepairSpent.get(conversationId)?.token === token)
@@ -12186,7 +12570,7 @@ async function failRepairAttempt(
       // Navigation is transient; keep the same repair episode and retry after the short navigation cooldown.
       repair.notBefore = Math.max(repair.notBefore, Date.now() + NAVIGATION_RECOVERY_COOLDOWN_MS);
     }
-    if (repair.reason === 'unattributed' && !heldByApproval) repair.state = 'done';
+    if ((repair.reason === 'unattributed' && !heldByApproval) || automationCloseRepair(repair)) repair.state = 'done';
     else {
       repair.state = 'queued';
       repair.claimed = false;
@@ -12260,6 +12644,8 @@ function clearUnattributedIncident(): void {
   unattributedTimer = null;
   unattributedIncidents.clear();
   repairsInFlight.clear();
+  // An ordinary bridge stop/restart is not an app restart and cannot refund
+  // its consumed permits or erase the status of a completed browser operation.
   lastBrowserRecoveryAt.clear();
   turnRepairSpent.clear();
   assistantRecoveryCancelled.clear();
@@ -13470,6 +13856,10 @@ export function resetBridgeForTests(): void {
   bridgeShutdownRequested = false;
   bridgeError = null;
   clearUnattributedIncident();
+  closedTabOpenedAt.clear();
+  closeStatuses.clear();
+  loggedCloseStatuses.clear();
+  closedTabInitialHoldUntil = Number.NEGATIVE_INFINITY;
   providerHistoryBackoffUntil.clear();
   pageNotesLogged.clear();
   claimRefusalsLogged.clear();

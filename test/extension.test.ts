@@ -590,7 +590,9 @@ function loadWorker(options: {
     Array<{ id?: number; windowId?: number; url?: string; pendingUrl?: string; status?: string; autoDiscardable?: boolean; active?: boolean; discarded?: boolean; frozen?: boolean }>
   >;
   tabsSendMessage?: (tabId: number, message: Record<string, unknown>) => Promise<unknown>;
-  windowsGet?: (windowId: number) => Promise<{ focused?: boolean }>;
+  tabsCreate?: (properties: { url?: string; windowId?: number; active?: boolean }) => Promise<{ id: number }>;
+  windowsGet?: (windowId: number) => Promise<{ focused?: boolean; id?: number; type?: string; incognito?: boolean }>;
+  windowsGetAll?: () => Promise<Array<{ id: number; type: string; incognito?: boolean }>>;
   /** A Chrome debugger API: the worker then keeps background tabs rendering with the real active-tabs.js. */
   debuggerApi?: Record<string, unknown>;
   /** Chrome's tab-group API with these groups; omitted, the browser has none. */
@@ -609,10 +611,10 @@ function loadWorker(options: {
     number,
     { id: number; windowId: number; url?: string; pendingUrl?: string; autoDiscardable?: boolean }
   >();
-  const tabsCreate = vi.fn(async ({ url }: { url?: string } = {}) => {
+  const tabsCreate = vi.fn(options.tabsCreate ?? (async ({ url }: { url?: string } = {}) => {
     knownTabs.set(99, { id: 99, windowId: 7, ...(url ? { url } : {}) });
     return { id: 99 };
-  });
+  }));
   const tabsQuery = vi.fn(options.tabsQuery ?? (async () => [...knownTabs.values()]));
   const tabsUpdate = vi.fn(async (id: number, properties: { autoDiscardable?: boolean } = {}) => {
     const tab = knownTabs.get(id);
@@ -679,7 +681,8 @@ function loadWorker(options: {
       onStartup: { addListener(fn: () => void) { startupListeners.push(fn); } }
     },
     windows: { update: windowsUpdate, get: options.windowsGet ?? (async () => ({ focused: true })),
-      ...(groupApi ? { getLastFocused: groupApi.getLastFocused, getAll: groupApi.getAll } : {}) },
+      ...(groupApi ? { getLastFocused: groupApi.getLastFocused, getAll: groupApi.getAll } : {}),
+      ...(options.windowsGetAll ? { getAll: options.windowsGetAll } : {}) },
     ...(groupApi ? { tabGroups: groupApi.tabGroups } : {}),
     scripting: {
       executeScript: scriptingExecuteScript,
@@ -1715,6 +1718,66 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
     expect(worker.tabsCreate).not.toHaveBeenCalled();
     expect(actions).toEqual([reload ? 'reloaded' : 'present']);
   });
+
+  it.each(['present', 'returned-during-claim', 'missing', 'revoked', 'revoked-before-open',
+    'browser-closed', 'window-lost-after-open', 'returned-during-open', 'browser-api-failure', 'ack-lost'] as const)(
+    'only opens a missing opted-in automation tab: %s', async scenario => {
+      let armed = false, handed = false, claimed = false, permitted = false;
+      const actions: string[] = [];
+      const failures: string[] = [];
+      const fetch = vi.fn(async (input: string) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/repairs/claim') {
+          claimed = true;
+          return response(200, { allowed: scenario !== 'revoked' });
+        }
+        if (url.pathname === '/repairs/open') {
+          permitted = true;
+          return response(200, { allowed: scenario !== 'revoked-before-open' });
+        }
+        if (url.pathname === '/status') {
+          if (url.searchParams.has('repaired')) {
+            actions.push(url.searchParams.get('repairAction')!);
+            if (scenario === 'ack-lost') return response(503, {});
+          }
+          if (url.searchParams.has('repairFailed')) failures.push(url.searchParams.get('why')!);
+          if (armed && !handed) {
+            handed = true;
+            return response(200, { repairs: [{ conversationId: CHAT, token: 'opted-in-close',
+              reason: 'no-tab', openOnly: true, requiresClaim: true }] });
+          }
+          return response(200, { repairs: [] });
+        }
+        return response(200, {});
+      });
+      const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch,
+        tabsQuery: async () => scenario === 'present' || (claimed && scenario === 'returned-during-claim') ||
+          (permitted && scenario === 'returned-during-open')
+          ? [{ id: 21, url: `https://chatgpt.com/c/${CHAT}`, status: 'complete' }] : [],
+        windowsGetAll: async () => scenario === 'browser-closed' ? [] : [{ id: 7, type: 'normal', incognito: false }],
+        windowsGet: async () => {
+          if (scenario === 'window-lost-after-open' && permitted) throw Error('window closed');
+          return { id: 7, type: 'normal', incognito: false };
+        },
+        ...(scenario === 'browser-api-failure' ? { tabsCreate: async () => { throw Error('create refused'); } } : {}),
+        tabsGet: async () => ({ id: 21, url: `https://chatgpt.com/c/${CHAT}`, status: 'complete' }),
+        tabsSendMessage: async () => undefined });
+      await worker.fireAlarm();
+      armed = true;
+      await worker.fireAlarm();
+      await worker.fireAlarm();
+      expect(worker.tabsReload).not.toHaveBeenCalled();
+      expect(worker.tabsCreate).toHaveBeenCalledTimes(['missing', 'browser-api-failure', 'ack-lost'].includes(scenario) ? 1 : 0);
+      if (scenario === 'missing' || scenario === 'ack-lost')
+        expect(worker.tabsCreate).toHaveBeenCalledWith(expect.objectContaining({ windowId: 7 }));
+      expect(actions).toEqual(['missing', 'ack-lost'].includes(scenario) ? ['reopened'] :
+        ['present', 'returned-during-claim', 'returned-during-open'].includes(scenario) ? ['present'] : []);
+      expect(failures).toEqual(scenario === 'revoked-before-open' ? ['changed'] :
+        ['browser-closed', 'window-lost-after-open'].includes(scenario) ? ['browser-closed'] :
+        scenario === 'browser-api-failure' ? ['error'] : []);
+      if (scenario === 'browser-closed') expect(permitted).toBe(false);
+    });
 
   it('tells the app why the page held a repair, and neither claims nor reloads it', async () => {
     let handed = false;

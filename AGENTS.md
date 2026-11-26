@@ -3864,6 +3864,33 @@ and confirmed repair receipts. Exact running or newly started MCP work remains v
 its normal activity deadline, but cannot wake workers, clear departure or grant browser recovery.
 All automatic error/no-tab/stalled/attribution, silence, Goal/queue and compaction pickups remain
 suspended until a real page return. This is local departure, not a fabricated provider turn end.
+The optional, default-off per-conversation `GoalSwitchRow.keepRunningWhenTabClosed` preference allows one exact missing-tab
+open for explicitly enabled per-chat Goal/Loop with a current turn or owed reply. It does not
+authorize a reload or clear dismissal. Only a companion advertising `x-extension-open-only: 1`
+on its own requests receives this special `openOnly` repair. Its claim reserves browser custody;
+`POST /repairs/open` with the same token and browser identity revalidates the accepted switch,
+session, source and recovery policy, and spends the opening permission once. No older companion
+receives this repair, and no ordinary repair falls back from a refused open-only authorization.
+The browser that reported the deliberate close owns its handout; missing or other browser ids
+cannot claim, open or acknowledge it. The existing three-minute cooldown is charged when the
+open permit is committed, even if the browser call fails or its receipt is lost. This bounds
+one stable session to at most 20 reopen authorizations per rolling hour. The monotonic
+cooldown carries through a chat transfer or bridge stop/start; a new app process starts
+with a conservative full three-minute hold, so restarting cannot refund a prior permit.
+Closing again during that interval waits for a manual page return, not a delayed automatic open.
+Only an already-running browser can collect the repair. Never cold-start the browser for this
+opt-in. The companion checks for a normal window where the window API is available before the
+open permit. A closed/disconnected browser waits for the person to open it. Accepted preferences
+are stored in the existing GoalSwitchRow, strict true only; global master Off removes its mode
+override but keeps the saved preference (never authority to reopen on its own). Removal revokes
+the preference before deleting the session. The app exposes the per-chat preference and the
+last recovery decision through session controls; statuses and log lines use the same message.
+The successful final authorization is the linearization point of the open operation, not a
+permission to send. A subsequent Off/Stop may race the browser API response: it revokes future
+automation and discards the old repair receipt, but cannot undo a committed open across processes.
+Never close a returned tab as compensation: it may already contain user work. An ambiguous
+authorization response is not retried; a newly observed page return and departure are required
+for another open. No delivery or Goal activation is authorized by an open receipt.
 MCP results, broker reports, generic session reattachment and old page reads cannot clear the
 departure marker. A newer native page poll can; Compact & Resume clears it only when committing
 the successor frontend. The session queue rechecks the expected conversation so closing source A

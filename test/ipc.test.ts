@@ -2578,6 +2578,26 @@ describe('session IPC contracts', () => {
     expect(await outbox.ownSentResidue(conversationId)).toEqual([]);
   });
 
+  it('saves a closed-tab preference only for the exact chat and removes it durably on deletion', async () => {
+    const goal = await import('../src/main/goal.js');
+    const conversationId = 'c1c1c1c1-1111-2222-3333-444444444444', other = 'c2c2c2c2-1111-2222-3333-444444444444';
+    const session = await createSession({ title: 'closed opt-in deleted', conversationId });
+    await goal.setGoalSwitchNow(conversationId, 'goal', true);
+    await goal.setGoalSwitchNow(other, 'loop', true);
+    await goal.setGoalKeepRunningNow(other, true);
+    const setter = handlers.get('sessions:keepRunningWhenClosed')!;
+    expect(await setter(null, { id: session.id, expectedConversationId: other, enabled: true })).toMatchObject({ ok: false });
+    expect(goal.goalKeepsRunningWhenTabClosed(conversationId)).toBe(false);
+    expect(await setter(null, { id: session.id, expectedConversationId: conversationId, enabled: true })).toMatchObject({ ok: true });
+    expect(goal.goalKeepsRunningWhenTabClosed(conversationId)).toBe(true);
+    const deleted = await handlers.get('sessions:delete')!(null, { id: session.id });
+    expect(deleted).toMatchObject({ ok: true });
+    expect(await getSession(session.id)).toBeNull();
+    goal.restoreGoalSwitches(await readDurable<import('../src/main/goal.js').GoalSwitchesSnapshot>(goal.GOAL_SWITCHES_STATE));
+    expect(goal.goalKeepsRunningWhenTabClosed(conversationId)).toBe(false);
+    expect(goal.goalKeepsRunningWhenTabClosed(other)).toBe(true);
+  });
+
   it('releases a block when the row that carries its button is deleted', async () => {
     const { isChatBlocked, resetBlockedChatsForTests } = await import('../src/main/session/blocked-chats.js');
     resetBlockedChatsForTests();

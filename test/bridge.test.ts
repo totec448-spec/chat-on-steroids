@@ -292,7 +292,7 @@ interface Reply {
 function request(
   method: string,
   path: string,
-  options: { body?: unknown; origin?: string | null; auth?: string | null; raw?: string; extensionVersion?: string; protocol?: number; extensionBuild?: string; browser?: string; host?: string; engine?: string; userAgent?: string } = {}
+  options: { body?: unknown; origin?: string | null; auth?: string | null; raw?: string; extensionVersion?: string; protocol?: number; extensionBuild?: string; browser?: string; host?: string; engine?: string; userAgent?: string; openOnly?: boolean } = {}
 ): Promise<Reply> {
   const url = new URL(path, base);
   const payload = options.raw ?? (options.body === undefined ? null : JSON.stringify(options.body));
@@ -302,6 +302,7 @@ function request(
   // only produce confusing downstream failures.
   headers['x-extension-version'] = options.extensionVersion ?? APP_VERSION;
   headers['x-extension-protocol'] = String(options.protocol ?? BRIDGE_PROTOCOL);
+  if (options.openOnly !== false) headers['x-extension-open-only'] = '1';
   if (options.extensionBuild) headers['x-extension-build'] = options.extensionBuild;
   if (options.browser) headers['x-extension-browser'] = options.browser;
   if (options.host) headers['x-extension-host'] = options.host;
@@ -14805,6 +14806,328 @@ describe('unattributed activity recovery', () => {
       expect((await getSession(sessionId))?.activeTurnId).toBe('next-native-turn');
       expect(sessionActivityExpiresAt((await getSession(sessionId))!)).toBe(nextExpiry);
     } finally { vi.useRealTimers(); }
+  });
+
+  it('retains a frequently observed closed-tab reason across more than 500 distinct observations', async () => {
+    const goal = await import('../src/main/goal.js');
+    const { onLog } = await import('../src/main/logger.js');
+    const saved = goal.snapshotGoalSwitches();
+    const chats = Array.from({ length: 501 }, () => randomUUID());
+    const sessions = [];
+    const status = 'The browser is closed or disconnected. Recovery waits until you open it.';
+    let hotLogs = 0;
+    const off = onLog(entry => {
+      if (entry.message === `bridge: ${chats[0]}: ${status}`) hotLogs++;
+    });
+    try {
+      for (const conversationId of chats) {
+        const session = await createSession({ conversationId });
+        sessions.push(session);
+        await sessionStoreModule.endSession(session.id, true, conversationId);
+      }
+      const preferences = (ids: string[]) => goal.restoreGoalSwitches({ version: 1, savedAt: Date.now(), switches: ids.map(conversationId => ({
+        conversationId, enabled: true, mode: 'loop', keepRunningWhenTabClosed: true, at: Date.now()
+      })) });
+      preferences([chats[0]!]);
+      expect(goal.goalKeepsRunningWhenTabClosed(chats[0]!)).toBe(true);
+      expect((await getSession(sessions[0]!.id))?.browserRecoveryDismissedAt).toBeDefined();
+      expect((await sessionControlsFor(sessions[0]!.id)).closedTabRecoveryStatus).toBe(status);
+      expect(hotLogs).toBe(1);
+      for (const cold of sessions.slice(1)) {
+        preferences([chats[0]!, cold.conversationId!]);
+        expect((await sessionControlsFor(cold.id)).closedTabRecoveryStatus).toBe(status);
+        expect((await sessionControlsFor(sessions[0]!.id)).closedTabRecoveryStatus).toBe(status);
+      }
+      expect(hotLogs).toBe(1);
+    } finally {
+      off();
+      goal.restoreGoalSwitches(saved);
+    }
+  }, 120_000);
+
+  it('does not log an old closed-tab status after a last async controls read rebinds the session', async () => {
+    await pair();
+    const from = randomUUID(), to = randomUUID();
+    const session = await createSession({ conversationId: from });
+    await setSessionAutomation(session.id, 'loop', true);
+    const boundary = sessionStoreModule.readRecoveryBoundary;
+    const gate = faultGate();
+    let observations = 0;
+    const probe = vi.spyOn(sessionStoreModule, 'readRecoveryBoundary').mockImplementation(async (...args) => {
+      if (args[0] === session.id && ++observations === 2) await gate.hold();
+      return boundary(...args);
+    });
+    let pending: Promise<unknown> | undefined;
+    try {
+      pending = sessionControlsFor(session.id);
+      await gate.entered;
+      expect(await sessionStoreModule.rebindSession(session.id, from, to)).toBe(true);
+      gate.release();
+      await expect(pending).rejects.toThrow('conversation_changed');
+      expect((await getSession(session.id))?.conversationId).toBe(to);
+      expect(getLog().filter(entry => entry.message.includes(`bridge: ${from}: The tab was not reopened`))).toEqual([]);
+    } finally {
+      gate.release();
+      await pending?.catch(() => undefined);
+      probe.mockRestore();
+    }
+  });
+
+  it.each([
+    ['goal', 'reopen'], ['loop', 'reopen'], ['goal', 'off'], ['loop', 'off'],
+    ['goal', 'return'], ['loop', 'return'], ['goal', 'duplicate'], ['loop', 'duplicate'],
+    ['goal', 'old-extension'], ['loop', 'old-extension'],
+    ['goal', 'concurrent-close'], ['loop', 'concurrent-close'],
+    ['goal', 'mode-change'], ['loop', 'mode-change'],
+    ['goal', 'off-after-claim'], ['loop', 'off-after-claim'],
+    ['goal', 'opt-out-after-claim'], ['loop', 'opt-out-after-claim'],
+    ['goal', 'browser-identity'], ['loop', 'concurrent-open'], ['goal', 'failure'],
+    ['loop', 'off-after-open'], ['goal', 'late-ack'], ['loop', 'cooldown'], ['goal', 'restart-cooldown'], ['loop', 'clock-cooldown'],
+    ['goal', 'default-off'], ['loop', 'legacy-close'], ['goal', 'no-ack'],
+    ['loop', 'block-after-claim'], ['goal', 'pause-after-claim'], ['loop', 'opt-out-after-open'],
+    ['goal', 'progress-write-failure'], ['goal', 'restart-unspent'], ['loop', 'restart-unconfirmed'],
+    ['goal', 'restart-during-close'], ['goal', 'restart-status-log']
+  ] as const)('reopens an opt-in %s tab with an owed final once (%s)', async (mode, scenario) => {
+    const previous = getConfig();
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = randomUUID(), turn = 'keep-running-final';
+      const browser = 'automationclosebrowser1', foreignBrowser = 'automationclosebrowser2';
+      const claim = (token: string, other = browser, openOnly = true) => request('POST', '/repairs/claim', { browser: other, body: { token }, openOnly });
+      const open = (token: string, other = browser, openOnly = true) => request('POST', '/repairs/open', { browser: other, body: { token }, openOnly });
+      const poll = async (query = '', other = browser) => (await request('GET', '/status' + query, { browser: other })).body.repairs ?? [];
+      await events(chat, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn(turn)]);
+      const sessionId = (await request('GET', `/activity?conversationId=${chat}`)).body.sessionId;
+      const { setSessionAutomation, setSessionKeepRunningWhenClosed } = await import('../src/main/bridge.js');
+      const { goalPendingReplyFor, goalKeepsRunningWhenTabClosed } = await import('../src/main/goal.js');
+      await setSessionAutomation(sessionId, mode, true);
+      if (scenario !== 'default-off') await setSessionKeepRunningWhenClosed(sessionId, true, chat);
+      await attributed(chat, false, Date.now());
+      await vi.advanceTimersByTimeAsync(1000);
+      await events(chat, [{ kind: 'assistant_message', messageId: 'keep-running-answer', turnId: turn, time: Date.now(),
+        text: 'Work remains.', final: true, state: 'final', activeNow: true, goalEligible: true }, endTurn(turn, 'completed')]);
+      const pending = goalPendingReplyFor(chat);
+      expect(pending).not.toBeNull();
+      expect(goalKeepsRunningWhenTabClosed(chat)).toBe(scenario !== 'default-off');
+      const close = () => request('POST', '/closed', { browser, openOnly: scenario !== 'legacy-close', body: { conversationId: chat, manual: true } });
+      if (scenario === 'restart-during-close') {
+        const gate = faultGate();
+        const original = sessionStoreModule.conversationWasSuperseded;
+        let held = false;
+        const lookup = vi.spyOn(sessionStoreModule, 'conversationWasSuperseded').mockImplementation(async id => {
+          if (id === chat && !held && (await getSession(sessionId))?.browserRecoveryDismissedAt !== undefined) {
+            held = true;
+            await gate.hold();
+          }
+          return original(id);
+        });
+        const closing = close();
+        let stopping: Promise<void> | undefined;
+        try {
+          await gate.entered;
+          stopping = stopBridge();
+          await vi.waitFor(() => expect(bridgePort()).toBeNull());
+          gate.release();
+          expect((await closing).body.ok).toBe(true);
+          await stopping;
+          await startBridge();
+          base = `http://127.0.0.1:${bridgePort()}`;
+          await pair();
+          expect(await poll()).toEqual([]);
+          expect((await sessionControlsFor(sessionId)).closedTabRecoveryStatus).toBe('The tab was not reopened: recovery permission was withdrawn.');
+          expect(goalPendingReplyFor(chat)).toMatchObject({ replyId: pending!.replyId });
+        } finally {
+          gate.release();
+          await closing.catch(() => undefined);
+          await stopping;
+          lookup.mockRestore();
+        }
+        return;
+      }
+      if (scenario === 'concurrent-close') await Promise.all([close(), close(), close()]);
+      else await close();
+      if (scenario === 'restart-status-log') {
+        // Process-local status and browser presence are gone, but the durable
+        // deliberate-close fence survives. Reading controls must not rearm it.
+        resetBridgeForTests();
+        const disconnected = 'The browser is closed or disconnected. Recovery waits until you open it.';
+        const notOwed = 'The tab was not reopened: no current authorized Goal or Loop work.';
+        const count = (status: string) => getLog().filter(entry => entry.message === `bridge: ${chat}: ${status}`).length;
+        expect((await sessionControlsFor(sessionId)).closedTabRecoveryStatus).toBe(disconnected);
+        expect((await sessionControlsFor(sessionId)).closedTabRecoveryStatus).toBe(disconnected);
+        expect(count(disconnected)).toBe(1);
+        await pair();
+        expect(await poll()).toEqual([]);
+        expect((await sessionControlsFor(sessionId)).closedTabRecoveryStatus).toBe(notOwed);
+        expect((await sessionControlsFor(sessionId)).closedTabRecoveryStatus).toBe(notOwed);
+        expect(count(notOwed)).toBe(1);
+        await unpair();
+        const disconnectedReads = await Promise.all(Array.from({ length: 4 }, () => sessionControlsFor(sessionId)));
+        expect(disconnectedReads.map(view => view.closedTabRecoveryStatus)).toEqual(Array(4).fill(disconnected));
+        expect(count(disconnected)).toBe(2);
+        expect((await getSession(sessionId))?.browserRecoveryDismissedAt).toBeDefined();
+        return;
+      }
+      if (scenario === 'old-extension') {
+        expect((await request('GET', '/status', { browser, openOnly: false })).body.repairs).toEqual([]);
+      }
+      if (scenario === 'default-off' || scenario === 'legacy-close') {
+        expect(await poll()).toEqual([]);
+        expect((await getSession(sessionId))?.browserRecoveryDismissedAt).toBeDefined();
+        return;
+      }
+      const [repair] = await poll();
+      expect(repair).toMatchObject({ conversationId: chat, reason: 'no-tab', openOnly: true, requiresClaim: true });
+      expect(goalPendingReplyFor(chat)).toEqual(pending);
+      if (scenario === 'mode-change') {
+        const { setGoalSwitchNow } = await import('../src/main/goal.js');
+        await setGoalSwitchNow(chat, mode === 'goal' ? 'loop' : 'goal', true);
+        expect((await claim(repair!.token)).body.allowed).toBe(false);
+        return;
+      }
+      if (scenario === 'old-extension') {
+        expect((await claim(repair!.token, browser, false)).body.allowed).toBe(false);
+      }
+      if (scenario === 'off') {
+        await setSessionAutomation(sessionId, 'off', true);
+        expect((await claim(repair!.token)).body.allowed).toBe(false);
+        expect(await poll()).toEqual([]);
+        return;
+      }
+      if (scenario === 'return') {
+        await vi.advanceTimersByTimeAsync(1);
+        await request('GET', `/activity?conversationId=${chat}`);
+        expect((await claim(repair!.token)).body.allowed).toBe(false);
+        return;
+      }
+      if (scenario === 'duplicate') {
+        await close();
+      }
+      if (scenario === 'browser-identity') {
+        expect(await poll('', foreignBrowser)).toEqual([]);
+        expect((await claim(repair!.token, foreignBrowser)).body.allowed).toBe(false);
+        expect((await request('POST', '/repairs/claim', { body: { token: repair!.token } })).body.allowed).toBe(false);
+      }
+      expect((await claim(repair!.token)).body.allowed).toBe(true);
+      expect((await claim(repair!.token)).body.allowed).toBe(false);
+      if (scenario === 'restart-unspent') {
+        await stopBridge(); await startBridge();
+        base = `http://127.0.0.1:${bridgePort()}`;
+        await pair();
+        expect(await poll()).toEqual([]);
+        expect((await open(repair!.token)).body.allowed).toBe(false);
+        expect((await sessionControlsFor(sessionId)).closedTabRecoveryStatus).toBe('The tab was not reopened: recovery permission was withdrawn.');
+        expect(goalPendingReplyFor(chat)).toMatchObject({ replyId: pending!.replyId });
+        return;
+      }
+      if (scenario === 'off-after-claim' || scenario === 'opt-out-after-claim' ||
+          scenario === 'block-after-claim' || scenario === 'pause-after-claim') {
+        if (scenario === 'off-after-claim') await setSessionAutomation(sessionId, 'off', true);
+        else if (scenario === 'opt-out-after-claim') await setSessionKeepRunningWhenClosed(sessionId, false, chat);
+        else if (scenario === 'block-after-claim') setChatBlocked(chat, true);
+        else {
+          const { noteChatLimit } = await import('../src/main/chats-at-once.js');
+          await saveConfig({ ...previous, multiAgent: { ...previous.multiAgent, chatsAtOnce: 2 } });
+          noteChatLimit(chat, Date.now() + 60_000, Date.now());
+          noteChatLimit(foreignBrowser, Date.now() + 60_000, Date.now());
+        }
+        expect((await open(repair!.token)).body.allowed).toBe(false);
+        return;
+      }
+      expect((await open(repair!.token, browser, false)).body.allowed).toBe(false);
+      if (scenario === 'browser-identity') expect((await open(repair!.token, foreignBrowser)).body.allowed).toBe(false);
+      if (scenario === 'concurrent-open') {
+        const pair = await Promise.all([open(repair!.token), open(repair!.token)]);
+        expect(pair.filter(r => r.body.allowed)).toHaveLength(1);
+      } else expect((await open(repair!.token)).body.allowed).toBe(true);
+      expect((await open(repair!.token)).body.allowed).toBe(false);
+      if (scenario === 'restart-unconfirmed') {
+        await stopBridge(); await startBridge();
+        base = `http://127.0.0.1:${bridgePort()}`;
+        await pair();
+        expect(await poll()).toEqual([]);
+        expect((await open(repair!.token)).body.allowed).toBe(false);
+        await poll(`?repaired=${repair!.token}&repairAction=reopened`);
+        expect((await sessionControlsFor(sessionId)).closedTabRecoveryStatus).toBe('The browser did not confirm the reopen. No further attempt was authorized.');
+        expect(goalPendingReplyFor(chat)).toMatchObject({ replyId: pending!.replyId });
+        return;
+      }
+      if (scenario === 'failure') {
+        await poll(`?repairFailed=${repair!.token}&repairAction=reopened&why=error`);
+        expect(await poll()).toEqual([]);
+        expect((await open(repair!.token)).body.allowed).toBe(false);
+        expect((await sessionControlsFor(sessionId)).closedTabRecoveryStatus).toContain('could not be reopened');
+        return;
+      }
+      if (scenario === 'no-ack') {
+        await vi.advanceTimersByTimeAsync(180001);
+        expect(await poll()).toEqual([]);
+        expect((await open(repair!.token)).body.allowed).toBe(false);
+        expect((await sessionControlsFor(sessionId)).closedTabRecoveryStatus).toContain('did not confirm');
+        return;
+      }
+      if (scenario === 'off-after-open') {
+        await setSessionAutomation(sessionId, 'off', true);
+        await poll(`?repaired=${repair!.token}&repairAction=reopened`);
+        expect((await open(repair!.token)).body.allowed).toBe(false);
+        expect(goalPendingReplyFor(chat)).toBeNull();
+        return;
+      }
+      if (scenario === 'opt-out-after-open') {
+        await setSessionKeepRunningWhenClosed(sessionId, false, chat);
+        await poll(`?repaired=${repair!.token}&repairAction=reopened`);
+        expect((await open(repair!.token)).body.allowed).toBe(false);
+        expect(goalKeepsRunningWhenTabClosed(chat)).toBe(false);
+        expect(goalPendingReplyFor(chat)).toMatchObject({ replyId: pending!.replyId });
+        expect((await sessionControlsFor(sessionId)).closedTabRecoveryStatus).toBe('The app reopened the closed tab.');
+        return;
+      }
+      if (scenario === 'progress-write-failure') {
+        const recorder = await import('../src/main/session/recorder.js');
+        const fail = vi.spyOn(recorder, 'recordProgress').mockRejectedValueOnce(new Error('terminal progress write failed'));
+        try {
+          await poll(`?repaired=${repair!.token}&repairAction=reopened`);
+          await vi.advanceTimersByTimeAsync(1);
+          await poll(`?repaired=${repair!.token}&repairAction=reopened`);
+          expect((await open(repair!.token)).body.allowed).toBe(false);
+          expect(await poll()).toEqual([]);
+          expect((await sessionControlsFor(sessionId)).closedTabRecoveryStatus).toBe('The app reopened the closed tab.');
+          expect(fail).toHaveBeenCalled();
+        } finally { fail.mockRestore(); }
+        return;
+      }
+      if (scenario !== 'late-ack') await poll(`?repaired=${repair!.token}&repairAction=reopened`);
+      await vi.advanceTimersByTimeAsync(1);
+      await request('GET', `/activity?conversationId=${chat}`);
+      expect((await getSession(sessionId))?.browserRecoveryDismissedAt).toBeUndefined();
+      if (scenario === 'late-ack') {
+        await poll(`?repaired=${repair!.token}&repairAction=reopened`);
+        await poll(`?repaired=${repair!.token}&repairAction=reopened`);
+      }
+      expect(goalPendingReplyFor(chat)).toMatchObject({ replyId: pending!.replyId, acceptedAt: pending!.acceptedAt });
+      if (scenario === 'restart-cooldown') {
+        await stopBridge(); await startBridge();
+        base = `http://127.0.0.1:${bridgePort()}`;
+        await pair();
+      }
+      if (scenario === 'clock-cooldown') {
+        // Wall time moves forward, but fewer than three real minutes elapsed.
+        vi.setSystemTime(Date.now() + 60 * 60_000);
+      }
+      if (scenario === 'cooldown' || scenario === 'restart-cooldown' || scenario === 'clock-cooldown') {
+        await close();
+        expect(await poll()).toEqual([]);
+        expect((await sessionControlsFor(sessionId)).closedTabRecoveryStatus).toContain('three minutes');
+      }
+      expect(await poll()).toEqual([]);
+    } finally {
+      if (scenario === 'pause-after-claim') {
+        const { resumeAutomaticSends } = await import('../src/main/chats-at-once.js');
+        await resumeAutomaticSends();
+      }
+      vi.useRealTimers(); await saveConfig(previous);
+    }
   });
 
   it('says a Goal waits for the closed chat to open again, instead of "Answer settling"', async () => {

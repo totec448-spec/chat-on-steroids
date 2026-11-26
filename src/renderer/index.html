@@ -1552,6 +1552,8 @@
                         <div class="mode-option"><button type="button" role="radio" aria-checked="false" data-mode="loop"><i class="ico ph ph-arrows-clockwise" aria-hidden="true"></i><span class="mode-copy"><span>Loop</span><small>Keep working within the brief until paused.</small></span><i class="ico ph ph-check mode-check" aria-hidden="true"></i></button><button type="button" class="mode-edit" data-edit-mode="loop" data-keep-menu="true" aria-label="Edit task" title="Edit task"><i class="ico ph ph-pencil-simple" aria-hidden="true"></i></button></div>
                         </div><select hidden id="chatAutomation" aria-label="Chat automation"><option value="off">Off</option><option value="goal">Goal</option><option value="loop">Loop</option></select>
                       <label id="loopDeliveryRow" hidden>When to continue<select id="loopDelivery"><option value="finish">Session Finish only</option><option value="after-turn">Also after the turn</option></select></label>
+                      <label id="keepRunningWhenClosedRow" hidden><span class="mode-copy"><span>Keep running when the tab is closed</span><small>Closing the tab will not stop Goal or Loop. Stop, Pause or Block still do.</small></span><input id="keepRunningWhenClosed" type="checkbox" disabled /></label>
+                      <p id="closedTabRecoveryStatus" class="meta" role="status" hidden></p>
               <div id="sessionControls" hidden>
                 <div class="session-controls-menu">
                   <label for="sessionObjective">This chat's goal</label>
