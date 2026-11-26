@@ -4178,8 +4178,23 @@ async function performBrowserRepairs(repairs, policy) {
           continue;
         }
       }
-      if (target && [target.pendingUrl, target.url].some(url => /[?&]temporary-chat=true(?:[&#]|$)/.test(url || ''))) {
+      // The scan is older than the page replies above, which can take seconds each: read the tab again
+      // for the reload and for the temporary-chat rule, so neither acts on where the tab used to be.
+      // A tab that cannot be read now is gone or unreadable: the scan's view stands, as the reload will say.
+      const fresh = target ? await chrome.tabs.get(target.id).catch(() => null) : null;
+      const seen = fresh ?? target;
+      if (seen && [seen.pendingUrl, seen.url].some(url => /[?&]temporary-chat=true(?:[&#]|$)/.test(url || ''))) {
         await call(`/status?repaired=${encodeURIComponent(token)}&repairAction=preserved&preservedFor=temporary-chat`);
+        continue;
+      }
+      // conversationForTab falls back to the registry for a page without a chat in its address: a tab the
+      // scan saw in a chat and that now shows another route (the new-chat page) is not that chat any more.
+      const scannedInChat = Boolean(target && /\/c\/[^/?#]+/.test(target.url || ''));
+      const movedOn = !fresh ? null : fresh.pendingUrl ? 'navigating'
+        : (scannedInChat && conversationFromUrl(fresh.url) !== conversationId) || conversationForTab(fresh) !== conversationId ? 'other-chat'
+        : documentId && tabDocuments[String(target.id)] !== documentId ? 'new-document' : null;
+      if (movedOn) {
+        await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}&why=changed&detail=${encodeURIComponent(movedOn)}`);
         continue;
       }
       if (target) await chrome.tabs.reload(target.id);
