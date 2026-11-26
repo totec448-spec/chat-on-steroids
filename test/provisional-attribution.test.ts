@@ -255,6 +255,20 @@ it('still repairs a cached provisional call when the proof for its own request i
   await repairDeterministicAttribution(new Set(['proved-later']));
   expect((await calls(sessionId)).map(row => row.call.attributionMethod)).toEqual(['request_id']);
 });
+it('does not cache a chat whose proved call could not be repaired because its source asset is missing', async () => {
+  const source = await begin();
+  const original = (await record('stuck-asset', captureRecordingContext(Date.now()), 'overflow result\n'.repeat(30_000)))!;
+  await fs.rm(path.join(directory, 'sessions', source, 'assets', original.result.assetId!));
+  const target = (await sessionForConversation('chat-b'))!;
+  await prove('chat-b', 'stuck-asset');
+  await repairDeterministicAttribution(new Set(['evidence-1']));
+  expect(await calls(target)).toHaveLength(0);
+  const journal = path.join(directory, 'sessions', source, 'events.jsonl');
+  const open = vi.spyOn(fs, 'open');
+  // A pass for other ids must still retry it, as before the cache existed.
+  await repairDeterministicAttribution(new Set(['evidence-2']));
+  expect(open.mock.calls.filter(([file]) => String(file) === journal).length).toBeGreaterThan(0);
+});
 it('rescans a chat whose journal grew since its provisional calls were last checked', async () => {
   const sessionId = await begin();
   await record('first-open');

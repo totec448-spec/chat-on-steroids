@@ -1048,7 +1048,9 @@ async function repairAttributionNow(affected?: ReadonlySet<string>): Promise<{ s
     if ((summary.provisionalToolCalls ?? 0) > 0 || (summary.providerSessionToolCalls ?? 0) > 0) {
       const revision = `${summary.toolCalls}:${summary.updatedAt}:${summary.provisionalToolCalls ?? 0}:${summary.providerSessionToolCalls ?? 0}`;
       const scanned = provisionalScans.get(summary.id);
-      if (!(affected && scanned?.revision === revision && ![...affected].some(id => scanned.requestIds.has(id)))) {
+      if (affected && scanned?.revision === revision && ![...affected].some(id => scanned.requestIds.has(id))) {
+        logInfo(`request attribution: not rereading ${summary.id} for its provisional call(s): unchanged since the last pass and none of its request ids has new evidence`);
+      } else {
       provisionalScans.delete(summary.id);
       const events = await readEvents(summary.id, { kinds: ['tool_call'] });
       let repaired = 0;
@@ -1087,6 +1089,8 @@ async function repairAttributionNow(affected?: ReadonlySet<string>): Promise<{ s
             }
             if (!complete) {
               logInfo(`request attribution: skipped provisional repair for call ${event.call.callId}, request ${event.call.requestId}; source asset is missing`);
+              // Not "without proof": this call has proof and must be retried by the next pass, so the chat is not cached.
+              unproved = false;
               continue;
             }
             const existing = await readEvents(proof.sessionId, { kinds: ['tool_call'] });
