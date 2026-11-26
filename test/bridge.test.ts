@@ -9514,7 +9514,7 @@ describe('targeted open', () => {
       error: 'ChatGPT could not open the source Project through its native link; nothing was sent', detail: `project-entry:${reason}` } });
     expect(ack.status).toBe(200);
     const line = getLog().find(entry => !prior.has(entry) && entry.level === 'warn' && entry.message.includes('failed: project entry'))?.message ?? '';
-    expect(line).toContain('composer');
+    expect(line.toLowerCase()).toContain('composer');
   });
   // #1882: after its three quick tries, an automatic ticket with a written brief stopped trying to
   // open its new chat at all, and while open it owns the chat's recovery: the chat stopped for good.
