@@ -18470,6 +18470,48 @@ describe('the fresh chat the app opened', () => {
     }
   });
 
+  // #2270: the app moves a worker's deadline when its page reports a later stage, and says so in the reply. A
+  // page that kept the deadline it redeemed under gave up while the app still allowed it to run.
+  it.each([true, false])('takes the deadline the app grants for a later stage (granted=%s)', async granted => {
+    let release!: (value: unknown) => void;
+    const redeemed = new Promise(resolve => { release = resolve; });
+    const workerChat = '34343434-4545-4656-8787-909090909091';
+    let submitted = '';
+    live = await harness('https://chatgpt.com/?clf=cmd-stage-deadline', {
+      redeem: () => redeemed,
+      command_step: () => ({ ok: true, ...(granted ? { expiresAt: live!.window.Date.now() + 60_000 } : {}) }),
+      ack: () => ({ ok: true })
+    }, (document, dom) => {
+      document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+        submitted = composerText(document);
+        dom.reconfigure({ url: `https://chatgpt.com/c/${workerChat}` });
+        userTurn(document, 'stage-deadline-user', 'Worker task after a slow model step', { sent: false });
+      });
+    });
+    // The page's waits run a hundred times faster than the clock, so a slow page fits in a test.
+    const instantTimer = live.window.setTimeout;
+    live.window.setTimeout = ((fn: () => void, ms?: number) => globalThis.setTimeout(fn, Math.max(1, Number(ms ?? 0) / 100))) as unknown as typeof live.window.setTimeout;
+    (live.window as any).CLF_DOM.selectModelSettings = vi.fn(async () => {
+      // The composer remounts after the model step, as it does on a slow page; the page waits for it
+      // for as long as its deadline allows. The picker takes a moment, so the app's reply to the model
+      // step has reached the page by the time it is done.
+      await new Promise(resolve => globalThis.setTimeout(resolve, 50));
+      const old = live!.document.querySelector('#prompt-textarea')!;
+      const parent = old.parentElement!;
+      const replacement = old.cloneNode(true);
+      old.remove();
+      globalThis.setTimeout(() => parent.prepend(replacement), 300);
+      return true;
+    });
+    try {
+      release({ ok: true, command: { id: 'cmd-stage-deadline', type: 'worker', text: 'Worker task after a slow model step',
+        agent: 'worker-1', model: 'gpt-5.6-sol', reasoningEffort: 'high', expiresAt: live.window.Date.now() + 1_000 } });
+      await vi.waitFor(() => expect(live!.sent.filter((message) => message.type === 'ack')).toContainEqual(expect.objectContaining({
+        id: 'cmd-stage-deadline', status: granted ? 'sent' : 'failed' })), { timeout: 10_000, interval: 20 });
+      expect(submitted === 'Worker task after a slow model step').toBe(granted);
+    } finally { live.window.setTimeout = instantTimer; }
+  });
+
   it('keeps waiting past the old 12s post-picker cutoff while the redeemed worker lease is live', async () => {
     let release!: (value: unknown) => void;
     const redeemed = new Promise(resolve => { release = resolve; });

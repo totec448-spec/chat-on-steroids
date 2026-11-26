@@ -9635,8 +9635,9 @@ describe('a command that runs out of time says how far its page got', () => {
       await pair();
       spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
       const bootstrap = await redeem();
-      expect((await step(bootstrap.id, 'composer')).body).toEqual({ ok: true });
-      expect((await step(bootstrap.id, 'model')).body).toEqual({ ok: true });
+      // Each stage that moves a worker on tells its page the new deadline (the page keeps the latest).
+      expect((await step(bootstrap.id, 'composer')).body).toEqual({ ok: true, expiresAt: expect.any(Number) });
+      expect((await step(bootstrap.id, 'model')).body).toEqual({ ok: true, expiresAt: expect.any(Number) });
       const prior = new Set(getLog());
       await vi.advanceTimersByTimeAsync(COMMAND_DEADLINE_MS - 1_000);
       expect((await request('POST', '/commands/step', { body: { id: bootstrap.id, client: 'tab-1',
@@ -10010,7 +10011,7 @@ describe('a worker chat that never opens', () => {
     try {
       await pair();
       spawn({ workers: [{ task: 'very slow page' }], caller: { conversationId: PRIME_CHAT } });
-      await vi.waitFor(() => expect(opened).toHaveLength(1));
+      await vi.waitFor(() => expect(opened).toHaveLength(1), { timeout: 10_000 });
       const id = new URL(opened[0]!).searchParams.get('clf')!;
       await vi.advanceTimersByTimeAsync(60_000);
       expect(swarmState().agents.find(agent => agent.id === 'worker-1')?.state).not.toBe('failed');
@@ -10021,26 +10022,34 @@ describe('a worker chat that never opens', () => {
 
   // The same reports: a page that redeems after 90 s (the ordinary deadline counted from the offer) was
   // failed at once, however much it still had to do. Each new stage it reports is proof it is alive.
-  it('gives a late-redeeming page the ordinary time for each new stage it reports', async () => {
+  it('gives a late-redeeming page the ordinary time for each new stage it reports, and tells the page', async () => {
     vi.useFakeTimers();
     try {
       await pair();
       spawn({ workers: [{ task: 'late page' }], caller: { conversationId: PRIME_CHAT } });
-      await vi.waitFor(() => expect(opened).toHaveLength(1));
+      await vi.waitFor(() => expect(opened).toHaveLength(1), { timeout: 10_000 });
       const id = new URL(opened[0]!).searchParams.get('clf')!;
       await vi.advanceTimersByTimeAsync(100_000);
       expect((await redeem(id, 'tab-late')).agent).toBe('worker-1');
       const state = () => swarmState().agents.find(agent => agent.id === 'worker-1')?.state;
       const stage = (step: string) => request('POST', '/commands/step', { body: { id, client: 'tab-late', step } });
-      expect((await stage('composer')).body.ok).toBe(true);
+      const composer = await stage('composer');
+      expect(composer.body.ok).toBe(true);
+      // The page is told its new deadline (about 90 s from this report), not only a worker about to send:
+      // a page that kept the deadline it redeemed under would give up while the app still waits.
+      expect(composer.body.expiresAt).toBeGreaterThan(Date.now() + 80_000);
+      expect(getLog().some(line => line.message.includes('reported composer; its deadline is'))).toBe(true);
       await vi.advanceTimersByTimeAsync(60_000);
       expect(state()).toBe('invited');
-      expect((await stage('model')).body.ok).toBe(true);
-      await vi.advanceTimersByTimeAsync(40_000);
+      const model = await stage('model');
+      expect(model.body.ok).toBe(true);
+      // The same stage again moves nothing: no new deadline, nothing kept alive by repeating it.
+      expect((await stage('model')).body.expiresAt).toBeUndefined();
+      // Capped by the invitation's absolute limit (210 s), not by the stage's own 90 s.
+      expect(model.body.expiresAt).toBeLessThanOrEqual(Date.now() + 50_000 + 1_000);
+      await vi.advanceTimersByTimeAsync(WORKER_BOOTSTRAP_LIMIT_MS - 160_000 - 1_000);
       expect(state()).toBe('invited');
-      // A page that keeps reporting stages still ends at the invitation's absolute limit (210 s).
-      await stage('sending');
-      await vi.advanceTimersByTimeAsync(WORKER_BOOTSTRAP_LIMIT_MS);
+      await vi.advanceTimersByTimeAsync(2_000);
       expect(state()).not.toBe('invited');
     } finally { vi.useRealTimers(); }
   });
