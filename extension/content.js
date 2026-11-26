@@ -8745,6 +8745,7 @@
       const reply = await ask({ type: 'goal_objective', conversationId: where.id, text: goal, mode: which });
       if (!reply || reply.ok !== true) {
         objectiveError = replyError(reply) || t('content_app_did_not_answer_lower', 'the app did not answer');
+        expediteActivityPull(); // repaint the accepted mode after a failed/superseded save
         return;
       }
       const stored = reply.data && typeof reply.data.objective === 'string' ? reply.data.objective : goal;

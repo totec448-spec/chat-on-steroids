@@ -115,6 +115,7 @@ import {
   setGoalReplyActiveNow,
   withdrawSilenceGoalReplyNow,
   setGoalObjectiveNow,
+  beginNamedGoalSave, commitNamedGoalSave, namedGoalSaveCurrent,
   setGoalSwitchNow,
   startGoalDraft,
   onGoalChange
@@ -2988,7 +2989,7 @@ async function pendingStopCommands(): Promise<Array<{ id: string; conversationId
   return pending;
 }
 /** Switch activation cannot spend a live generation or silence-recovery window. */
-function activateConversationGoalReply(id: string, active: boolean): Promise<boolean> {
+function activateConversationGoalReply(id: string, active: boolean, stagedToken?: string): Promise<boolean> {
   const grant = activeUntil.get(id);
   const idle = (silenceSourceTurnId?: string) => {
     const live = liveConversations().find(row => row.conversationId === id);
@@ -2996,10 +2997,10 @@ function activateConversationGoalReply(id: string, active: boolean): Promise<boo
       (!chatIsWorking(id) || (!!silenceSourceTurnId && live?.activeTurnId === silenceSourceTurnId)) &&
       observationWritesInFlight === 0 && (!grant || grant.until <= Date.now());
   };
-  return setGoalReplyActiveNow(id, active, idle);
+  return setGoalReplyActiveNow(id, active, idle, stagedToken);
 }
 
-/** Both UIs write the existing objective/switch/ticket authorities in the same order. */
+/** Both UIs keep a named save paused until its objective and ticket are durable. */
 async function saveConversationObjective(id: string, text: string, named: 'goal' | 'loop' | null,
   assertCurrent: () => Promise<void> = async () => undefined, from = 'the ChatGPT page') {
   await assertCurrent();
@@ -3007,22 +3008,45 @@ async function saveConversationObjective(id: string, text: string, named: 'goal'
   if (text.trim() && await conversationWasSuperseded(id)) throw new Error('conversation_superseded');
   if (text.trim() && isChatBlocked(id)) throw new Error('chat_blocked');
   let chatSwitch: { enabled: boolean; mode: 'goal' | 'loop' } | null = null;
+  let staged: string | undefined;
+  const on = text.trim().length > 0;
   if (named) {
     const held = goalSwitchFor(id);
-    const on = text.trim().length > 0;
     const which = on ? named : held.enabled ? held.mode : named;
     await assertCurrent();
-    try { chatSwitch = await setGoalSwitchNow(id, which, on, undefined, `${from} (objective saved)`); }
-    catch { throw new Error('goal_switch_not_durable'); }
+    try { staged = await beginNamedGoalSave(id, which); }
+    catch { logWarn(`goal: ${id} could not stage named objective save`); throw new Error('goal_switch_not_durable'); }
   }
-  await assertCurrent();
-  const objective = await setGoalObjectiveNow(id, text);
-  await assertCurrent();
+  const assertSaveCurrent = async () => {
+    await assertCurrent();
+    if (staged && (await conversationWasSuperseded(id) || !namedGoalSaveCurrent(id, staged) || goalWorkerChat(id) || (on && isChatBlocked(id)))) {
+      logInfo(`goal: ${id} named objective save superseded or fenced`);
+      throw new Error('conversation_changed');
+    }
+  };
+  await assertSaveCurrent();
+  let objective: string;
+  try { objective = await setGoalObjectiveNow(id, text, staged); }
+  catch (error) {
+    if (!staged) throw error;
+    logWarn(`goal: ${id} named objective was not accepted; automation remains paused`);
+    throw new Error('goal_objective_not_durable');
+  }
+  await assertSaveCurrent();
   try {
-    await activateConversationGoalReply(id,
-      goalActiveFor(id) && getConfig().sessions.record && await goalKeyPresent(goalModeFor(id)));
+    const active = (staged ? on && !goalFencedChat(id) : goalActiveFor(id)) && getConfig().sessions.record && await goalKeyPresent(goalModeFor(id));
+    await assertSaveCurrent();
+    await activateConversationGoalReply(id, active, staged);
     forgetGoalWatch(id);
-  } catch { throw new Error('goal_ticket_not_durable'); }
+  } catch {
+    if (staged) logWarn(`goal: ${id} named objective ticket was not accepted`);
+    throw new Error('goal_ticket_not_durable');
+  }
+  await assertSaveCurrent();
+  if (staged) {
+    try { chatSwitch = await commitNamedGoalSave(id, staged, on, from); }
+    catch { logWarn(`goal: ${id} named objective switch was not accepted`); throw new Error('goal_switch_not_durable'); }
+  }
   notifyBrowserActivity(id);
   changed();
   return { objective, ...(chatSwitch ? { enabled: chatSwitch.enabled, own: true, mode: chatSwitch.mode } : {}) };
