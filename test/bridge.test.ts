@@ -9725,7 +9725,7 @@ describe('a command that runs out of time says how far its page got', () => {
       spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
       await vi.waitFor(() => expect(opened.length).toBeGreaterThan(0));
       const prior = new Set(getLog());
-      await vi.advanceTimersByTimeAsync(COMMAND_DEADLINE_MS + 1_000);
+      await vi.advanceTimersByTimeAsync(WORKER_REDEEM_MS + 1_000);
       expect(giveUp(prior, 'worker:')).toContain('opened through the operating system, and no page with the extension picked up its task');
     } finally { vi.useRealTimers(); }
   });
@@ -10001,6 +10001,50 @@ describe('a worker chat that never opens', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  // #2270 and #2298: two reports of the same cut-off. Fresh workers were declared failed exactly 45 s after
+  // the browser was offered their chat, 15 s before the app's own fallback tab could run, and a successful
+  // worker on the same machine took 62 s from opening to its first call. A worker whose page redeems
+  // after the old window is a worker, not a failure.
+  it('lets a page that is slower than 45 s still pick up its worker task', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'very slow page' }], caller: { conversationId: PRIME_CHAT } });
+      await vi.waitFor(() => expect(opened).toHaveLength(1));
+      const id = new URL(opened[0]!).searchParams.get('clf')!;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(swarmState().agents.find(agent => agent.id === 'worker-1')?.state).not.toBe('failed');
+      expect((await redeem(id)).agent).toBe('worker-1');
+      expect(opened).toHaveLength(1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  // The same reports: a page that redeems after 90 s (the ordinary deadline counted from the offer) was
+  // failed at once, however much it still had to do. Each new stage it reports is proof it is alive.
+  it('gives a late-redeeming page the ordinary time for each new stage it reports', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'late page' }], caller: { conversationId: PRIME_CHAT } });
+      await vi.waitFor(() => expect(opened).toHaveLength(1));
+      const id = new URL(opened[0]!).searchParams.get('clf')!;
+      await vi.advanceTimersByTimeAsync(100_000);
+      expect((await redeem(id, 'tab-late')).agent).toBe('worker-1');
+      const state = () => swarmState().agents.find(agent => agent.id === 'worker-1')?.state;
+      const stage = (step: string) => request('POST', '/commands/step', { body: { id, client: 'tab-late', step } });
+      expect((await stage('composer')).body.ok).toBe(true);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(state()).toBe('invited');
+      expect((await stage('model')).body.ok).toBe(true);
+      await vi.advanceTimersByTimeAsync(40_000);
+      expect(state()).toBe('invited');
+      // A page that keeps reporting stages still ends at the invitation's absolute limit (210 s).
+      await stage('sending');
+      await vi.advanceTimersByTimeAsync(WORKER_BOOTSTRAP_LIMIT_MS);
+      expect(state()).not.toBe('invited');
+    } finally { vi.useRealTimers(); }
+  });
+
   it("keeps the page's redeem retries as long as the app waits for them", () => {
     const content = readFileSync('extension/content.js', 'utf8');
     const window = Number(/const REDEEM_RETRY_WINDOW_MS = ([\d_]+);/.exec(content)?.[1]?.replace(/_/g, ''));
@@ -10016,6 +10060,9 @@ describe('a worker chat that never opens', () => {
       const first = new URL(opened[0]!).searchParams.get('clf')!;
       const second = new URL(opened[1]!).searchParams.get('clf')!;
       expect((await redeem(second)).agent).toBe('worker-2');
+      // worker-2's page sent its task: it is a running worker, so only the unredeemed opening runs out.
+      expect((await request('POST', '/commands/ack', { body: { id: second, status: 'sent', agent: 'worker-2',
+        conversationId: 'cdcdcdcd-6666-4444-3333-222222222222' } })).status).toBe(200);
       await vi.advanceTimersByTimeAsync(WORKER_REDEEM_MS + 1_000);
       await vi.waitFor(() => expect(opened).toHaveLength(2));
       expect(second).not.toBe(first);
@@ -10030,9 +10077,9 @@ describe('a worker chat that never opens', () => {
    * The absolute clock a still-`invited` worker lives under.
    *
    * A command still in line has no clock of its own; the limit is absolute from the invitation,
-   * so no combination of a late hand-out and a fresh lease can keep the slot past two minutes.
+   * so no combination of a late hand-out and a fresh lease can keep the slot past WORKER_BOOTSTRAP_LIMIT_MS.
    */
-  it('stops holding a slot invited two minutes after the invitation, however late its chat opens', async () => {
+  it('stops holding a slot invited at the absolute bootstrap limit after the invitation, however late its chat opens', async () => {
     vi.useFakeTimers();
     const previous = getConfig();
     try {
