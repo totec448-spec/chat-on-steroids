@@ -4,7 +4,7 @@ import os from 'node:os';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { flushDurable, initDurableStore, resetDurableForTests } from '../src/main/durable.js';
-import { observeRequestCorrelation, resetCorrelationRegistryForTests } from '../src/main/session/correlation.js';
+import { observeProviderSessionRequest, observeRequestCorrelation, requestCorrelation, resetCorrelationRegistryForTests } from '../src/main/session/correlation.js';
 import { flushRecorder, forgetSession, recordToolCall, resetRecorderForTests, sessionForConversation } from '../src/main/session/recorder.js';
 import { deleteSession, findSessionByConversation, flushSessions, initSessionStore, readEvents, resetSessionStoreForTests, unsetSessionRootForTests } from '../src/main/session/store.js';
 import { getLog } from '../src/main/logger.js';
@@ -54,3 +54,30 @@ it('still refuses a call pinned to a session that exists but no longer holds the
   expect(await call('moved-request', 'moved-chat')).toBeNull();
   expect(getLog().some(entry => entry.message.includes('refusing to downgrade'))).toBe(true);
 });
+
+// CodeRabbit on #2301: a provider-session proof names the deleted session too. Admission compared it with the
+// replacement session, never matched, and the rejection re-read the same deleted id: an endless retry that
+// recorded nothing. The proof is unchanged, so the call is admitted to the chat's current session.
+it('files a provider-session call of a deleted session once, without retrying without end', async () => {
+  const KEY = 'a'.repeat(64);
+  const first = (await sessionForConversation('anchored-live-chat'))!;
+  // A native request proves the chat and learns the host's provider-session key; a later request
+  // carrying only that key is derived from it and names the same (soon deleted) session.
+  observeRequestCorrelation({ requestId: 'anchor-native', sessionId: first, conversationId: 'anchored-live-chat',
+    messageId: 'anchor-native', tool: 'read', observedAt: Date.now(), providerSessionKeys: [KEY] });
+  expect(await observeProviderSessionRequest('anchor-derived', KEY)).toBe('known');
+  expect(requestCorrelation('anchor-derived')?.providerSessionAnchor).toBe('anchor-native');
+  forgetSession(first);
+  await deleteSession(first);
+  const recorded = await Promise.race([
+    recordToolCall({ tool: 'read', args: {}, content: [{ type: 'text', text: 'ok' }], outcome: 'ok', durationMs: 1, startedAt: Date.now(),
+      requestId: 'anchor-derived', conversationId: 'anchored-live-chat', providerSessionAnchor: 'anchor-native' }),
+    new Promise<'hung'>(resolve => setTimeout(() => resolve('hung'), 4_000))
+  ]);
+  expect(recorded).not.toBe('hung');
+  expect(recorded).not.toBeNull();
+  const next = await findSessionByConversation('anchored-live-chat');
+  expect(next?.id).not.toBe(first);
+  expect((await readEvents(next!.id, { kinds: ['tool_call'] })).length).toBe(1);
+  expect(getLog().filter(entry => entry.message.includes('rereading its owner')).length).toBeLessThanOrEqual(1);
+}, 15_000);

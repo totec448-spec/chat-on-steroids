@@ -1797,7 +1797,9 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
     } else if (call.providerSessionAnchor) {
       const admitted = await recordProcessCall(sessionId, event, () => {
         const proof = requestCorrelation(input.requestId);
-        return proof?.sessionId === sessionId && proof.conversationId === target.conversationId &&
+        // Unchanged since this call resolved its owner: the proof names target.sessionId, which is not the
+        // session filed in when that one was deleted and the chat's current session took the call (#2301).
+        return proof?.sessionId === (target.sessionId ?? sessionId) && proof.conversationId === target.conversationId &&
           proof.providerSessionAnchor === call.providerSessionAnchor;
       });
       if (!admitted) {
