@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 import { JSDOM } from 'jsdom';
 import { load as loadYaml } from 'js-yaml';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -66,6 +67,27 @@ it.each([
   const { appBrand, refreshNativeBrand } = await import('../src/main/app-brand.js');
   const displayName = development ? name : APP_DISPLAY_NAME;
   expect(appBrand).toEqual({ development, displayName });
+  // Exercise the actual tooltip path with both branding modes and localized status labels.
+  const { mainText, setMainTextTranslations } = await import('../src/main/main-texts.js');
+  const source = read('src/main/index.ts');
+  const tooltip = source.slice(source.indexOf('function refreshTray(): void'), source.indexOf('  const cosBrowser = loadedCosBrowser();'))
+    .replace('function refreshTray(): void', 'function refreshTray()') + '\n}';
+  const tray = { setImage: vi.fn(), setToolTip: vi.fn() };
+  const status = { state: 'disconnected', offlineCause: '' };
+  const context = vm.createContext({ appBrand, mainText, tray, getStatus: () => status, trayIcon: vi.fn() });
+  vm.runInContext(tooltip, context);
+  const languages: Record<string, string>[] = [{}, { Connected: '接続済み', 'Not connected': '未接続', 'No internet': 'インターネット接続なし', 'OpenAI outage': 'OpenAIの障害' }];
+  for (const translations of languages) {
+    setMainTextTranslations(translations);
+    for (const [state, offlineCause, label] of [
+      ['connected', '', 'Connected'], ['disconnected', '', 'Not connected'],
+      ['offline', 'internet', 'No internet'], ['offline', 'service', 'OpenAI outage']
+    ] as const) {
+      Object.assign(status, { state, offlineCause });
+      vm.runInContext('refreshTray()', context);
+      expect(tray.setToolTip).toHaveBeenLastCalledWith(`${displayName} — ${translations[label] ?? label}`);
+    }
+  }
   const window = { isDestroyed: () => false, setTitle: vi.fn() };
   refreshNativeBrand(window as never);
   expect(native.app.setAboutPanelOptions).toHaveBeenCalledWith({ applicationName: displayName, applicationVersion: '2.1.55' });
@@ -78,14 +100,13 @@ it.each([
   } else expect(native.Menu.setApplicationMenu).not.toHaveBeenCalled();
 });
 
-it('preserves literal package identity and the production tooltip status', () => {
+it('preserves literal package identity and the display-only state projection', () => {
   expect(APP_DISPLAY_NAME).toBe('Chat On Steroids');
   const pkg = JSON.parse(read('package.json'));
   const builder = loadYaml(read('electron-builder.yml')) as Record<string, unknown>;
   expect(pkg.name).toBe('chat-on-steroids'); expect(pkg.productName).toBeUndefined();
   expect(builder.productName).toBe('Chat On Steroids'); expect(builder.appId).toBe('com.chatonsteroids.app');
   const main = read('src/main/index.ts');
-  expect(main).toContain('tray.setToolTip(appBrand.development ? mainText(appBrand.displayName) : `Chat On Steroids — ${label}`)');
   expect(read('src/main/ipc.ts')).toContain('displayName: appBrand.displayName');
   expect(read('src/renderer/main.ts')).toContain('applyAppBrand(next.displayName ?? APP_DISPLAY_NAME)');
   expect(read('src/renderer/index.html')).not.toContain('(dev)');

@@ -3,24 +3,33 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const sharp = require('sharp');
 const root = path.resolve(__dirname, '..');
 const filenames = ['before.png', 'after.png', 'result.json'];
 const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 
-function validateProof(directory) {
+async function validateProof(directory) {
   // Check the entire triplet before reading any content or accepting a result.
   for (const file of filenames) {
     const full = path.join(directory, file);
     assert.ok(fs.existsSync(full), `Missing proof: ${file}`);
     assert.ok(fs.statSync(full).isFile(), `Not a proof file: ${file}`);
   }
-  const images = filenames.slice(0, 2).map(file => {
+  const images = await Promise.all(filenames.slice(0, 2).map(async file => {
     const bytes = fs.readFileSync(path.join(directory, file));
     assert.ok(bytes.length > pngSignature.length, `Empty or invalid PNG: ${file}`);
     assert.ok(bytes.subarray(0, pngSignature.length).equals(pngSignature), `Invalid PNG: ${file}`);
-    return bytes;
-  });
-  assert.ok(!images[0].equals(images[1]), 'Before and after PNGs are identical');
+    let image;
+    try {
+      image = await sharp(bytes, { failOn: 'warning' }).toColourspace('srgb').ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    } catch (error) {
+      throw new Error(`Invalid PNG: ${file}`, { cause: error });
+    }
+    assert.ok(image.info.width > 0 && image.info.height > 0, `Empty or invalid PNG: ${file}`);
+    return image;
+  }));
+  assert.ok(images[0].info.width !== images[1].info.width || images[0].info.height !== images[1].info.height
+    || !images[0].data.equals(images[1].data), 'Before and after PNGs are identical');
   const proof = JSON.parse(fs.readFileSync(path.join(directory, 'result.json'), 'utf8'));
   assert.equal(proof.length, 2, 'Both display states are required');
   for (const [index, expected] of ['Chat On Steroids', 'Chat On Steroids (dev)'].entries()) {
@@ -44,15 +53,15 @@ function renderWithElectron(directory) {
   assert.equal(result.status, 0, `Electron capture failed: ${result.signal ?? result.status}`);
 }
 
-function runDisplayNameCheck({ output = path.join(root, 'outputs/app-display-name'), render = renderWithElectron,
+async function runDisplayNameCheck({ output = path.join(root, 'outputs/app-display-name'), render = renderWithElectron,
   log = console.log } = {}) {
   fs.mkdirSync(output, { recursive: true });
   // Never accept stale captures left by an earlier run, even if Electron exits zero.
   const directory = fs.mkdtempSync(path.join(output, 'run-'));
-  render(directory);
-  validateProof(directory);
+  await render(directory);
+  await validateProof(directory);
   for (const file of filenames) fs.copyFileSync(path.join(directory, file), path.join(output, file));
-  const artifacts = validateProof(output);
+  const artifacts = await validateProof(output);
   log(JSON.stringify({ artifacts }));
   log('PASS app-display-name: both states and all three artifacts verified');
   return artifacts;
@@ -63,7 +72,7 @@ if (require.main === module) {
   import('./ui-build-state.mjs').then(({ buildProblem }) => {
     const problem = buildProblem(root);
     assert.equal(problem, null, problem);
-    runDisplayNameCheck();
+    return runDisplayNameCheck();
   }).catch(error => { console.error(error); process.exitCode = 1; });
 }
 module.exports = { validateProof, runDisplayNameCheck };
