@@ -6065,8 +6065,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const rawDetail = typeof body['detail'] === 'string' ? body['detail'] : '';
     // The page loaded the chat, redeemed the command and failed before Send (#1086).
     const transientFailure = rawDetail === 'transient';
-    const projectEntryDetail = /^project-entry:[a-z0-9:=.-]{1,146}$/.test(rawDetail)
-      ? rawDetail.slice('project-entry:'.length)
+    // The page's reason for a Project-entry failure carries draft and chip evidence, so it can be long and hold
+    // characters beyond the old narrow set; dropping the whole reason for that left the log saying only that the
+    // entry failed (#2159). It is kept, with anything outside plain characters replaced and the length capped.
+    const projectEntryDetail = rawDetail.startsWith('project-entry:') && rawDetail.length > 'project-entry:'.length
+      ? rawDetail.slice('project-entry:'.length, 'project-entry:'.length + 400).replace(/[^A-Za-z0-9:=._-]/g, '_')
       : null;
     const client = typeof body['client'] === 'string' ? body['client'].slice(0, 64) : '';
     const conversation = conversationId(body['conversationId']);
