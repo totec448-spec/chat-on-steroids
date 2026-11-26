@@ -2626,10 +2626,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const edit = webRenameEdit?.id === id && webRenameEdit.editId === editId ? webRenameEdit : null;
     if (edit) webRenameEdit = null;
     const baseline = edit && Date.now() < edit.expiresAt ? edit.baseline : null;
+    const revision = webRenameSettingsRevision;
     const chat = await getSession(id);
     if (!chat) throw new Error('Session not found');
     const name = cleanSessionName(title);
-    const revision = webRenameSettingsRevision;
     if (name) await renameSession(id, name, 'manual');
     else await clearSessionName(id);
     notifyChanged(id);
