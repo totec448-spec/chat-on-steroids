@@ -1,4 +1,7 @@
 {
+  "Another Git operation is in progress. Try again when it finishes.": "Выполняется другая операция Git. Повторите попытку после её завершения.",
+  "Git state needs recovery. Check this branch before retrying; index.lock was kept.": "Состояние Git требует восстановления. Проверьте эту ветку перед повторной попыткой; файл index.lock сохранён.",
+  "Git committed, but a later step failed. Check the commit before trying again.": "Git создал коммит, но последующий шаг завершился с ошибкой. Проверьте коммит перед повторной попыткой.",
   "Save here and replace any existing file?": "Сохранить здесь с заменой существующего файла?",
   "Replace this CSV file?": "Заменить этот CSV-файл?",
   "Replace file": "Заменить файл",
@@ -1371,6 +1374,7 @@
   "Discard": "Отменить изменения",
   "Detecting language…": "Определение языка…",
   "Saved {0}": "Сохранено: {0}",
+  "Saved {0}. Refresh the file before saving again.": "Файл {0} сохранён. Обновите файл перед повторным сохранением.",
   "Unsaved editor changes were discarded because the project changed.": "Несохранённые изменения редактора отменены, потому что проект изменился.",
   "Delete item?": "Удалить элемент?",
   "Move “{0}” to the Trash?": "Переместить «{0}» в корзину?",
@@ -2732,6 +2736,7 @@
   "A file or folder with that name already exists": "Файл или папка с таким именем уже существует",
   "Only regular files and folders can be renamed": "Переименовывать можно только обычные файлы и папки",
   "A file save is already in progress. Try again when it finishes.": "Файл уже сохраняется. Повторите попытку, когда это закончится.",
+  "Too many file operations are in progress. Try again when they finish.": "Выполняется слишком много операций с файлами. Повторите попытку после их завершения.",
   "Project catalog is invalid": "Каталог проектов недействителен",
   "Choose an absolute local project folder": "Выберите локальную папку проекта с абсолютным путём",
   "Project catalog limit reached": "Достигнут предел числа проектов",

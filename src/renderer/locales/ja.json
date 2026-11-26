@@ -1,4 +1,7 @@
 {
+  "Another Git operation is in progress. Try again when it finishes.": "別のGit操作が進行中です。完了してから再試行してください。",
+  "Git state needs recovery. Check this branch before retrying; index.lock was kept.": "Gitの状態を復旧する必要があります。再試行する前に、このブランチを確認してください。index.lockは保持されています。",
+  "Git committed, but a later step failed. Check the commit before trying again.": "Gitのコミットは作成されましたが、その後の処理に失敗しました。再試行する前にコミットを確認してください。",
   "Save here and replace any existing file?": "ここに保存し、同じ名前のファイルがあれば置き換えますか？",
   "Replace this CSV file?": "このCSVファイルを置き換えますか？",
   "Replace file": "ファイルを置き換える",
@@ -799,6 +802,7 @@
   "Discard": "破棄",
   "Detecting language…": "言語を検出中…",
   "Saved {0}": "{0}を保存しました",
+  "Saved {0}. Refresh the file before saving again.": "{0}を保存しました。もう一度保存する前にファイルを再読み込みしてください。",
   "Unsaved editor changes were discarded because the project changed.": "プロジェクトが変更されたため、エディターの未保存の変更を破棄しました。",
   "Delete item?": "項目を削除しますか？",
   "Move “{0}” to the Trash?": "「{0}」をゴミ箱に移動しますか？",
@@ -2618,6 +2622,7 @@
   "A file or folder with that name already exists": "その名前のファイルまたはフォルダーはすでに存在します",
   "Only regular files and folders can be renamed": "名前を変更できるのは通常のファイルとフォルダーだけです",
   "A file save is already in progress. Try again when it finishes.": "すでにファイルを保存中です。完了してからもう一度お試しください。",
+  "Too many file operations are in progress. Try again when they finish.": "ファイル操作が混み合っています。完了してからもう一度お試しください。",
   "Project catalog is invalid": "プロジェクトカタログが無効です",
   "Choose an absolute local project folder": "絶対パスのローカルプロジェクトフォルダーを選択してください",
   "Project catalog limit reached": "プロジェクト数の上限に達しました",

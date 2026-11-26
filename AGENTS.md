@@ -203,7 +203,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Unattributed allowance | True on first launch. | Relaxes ambiguity fences only; known blocked/retired/superseded ownership stays enforced. |
 | Auto-select Skills | Off. | When on, ordinary human-authored input with no explicit Skill directive may select at most one managed/imported Skill whose full id/name/display name is literally present after case and hyphen/whitespace normalization. Recognized Japanese particles may touch the full name; other word continuations and outer hyphen-joined compounds do not count as that name. Direct English/Japanese usage exclusions next to a name suppress that Skill, including coordinated lists and conflicting positive mentions. This is literal routing, not topic or general natural-language intent classification. If multiple matches remain or no name is present, nothing is selected; explicit `/id` or `/prompt id` always wins. |
 | Strict chat allowlist | Off. | When on, every model-facing tool call needs exact attribution. Existing/direct browser chats require explicit Trust from the chat list. A fresh chat opened by the CoS composer gains an explicit Trust entry only after its exact opening row authoritatively binds to the new conversation. Broker-owned workers follow their exact owning prime and a committed Compact & Resume successor follows its durable source lineage. Block still wins, revocation is dynamic, and unattributed calls are refused even when the ordinary unattributed allowance is on. |
-| Archive worker chats | Off (`multiAgent.archiveWorkerChats`). | #1460, #1701. A worker chat queues 2 min after its worker reports done (`onWorkerFinished`, from `publishFinish`; `dueAt`), and every chat the broker retires for good queues at once (`onWorkerChatsRetired`: an ended run, Clear workers retiring parked histories, or a parked history expiring after 7 days), in `worker-archive.ts` (`state/worker-archive.json`, which also remembers the chats it archived). A wake for such a chat is held in the bridge's `onReviveRequest` (`readyForWake`): a not-yet-started archive is dropped; an archived (or being-archived) chat gets an unarchive job first, handed out before archives as `{ conversationId: null, unarchive }` (an old extension reads nothing), retried from 15 s, and the wake is queued on `onWorkerChatReady` (unarchived, given up, or 90 s at most). Unarchiving ignores the setting. The extension's alarm pass takes one via `POST /worker-archive/next` (leased 2 min), asks any registered ChatGPT page (`clf-archive-chat`) to `PATCH /backend-api/conversation/<id>` `{ is_archived: true }` with the signed-in account, and reports `archived`/`unarchived`/`failed`/`deferred` to `POST /worker-archive/result`. `deferred` (no page) costs no attempt; failures back off from 5 min, 6 attempts or a week at most. ChatGPT's own reversible archive: nothing is deleted. Temporary Chats were rejected: tools work there, but a reload loses the conversation (2026-10-14). |
+| Archive worker chats | Off (`multiAgent.archiveWorkerChats`). | #1460, #1701. A worker chat queues 2 min after its worker reports done (`onWorkerFinished`, from `publishFinish`; `dueAt`), and every chat the broker retires for good queues at once (`onWorkerChatsRetired`: an ended run, Clear workers retiring parked histories, or a parked history expiring after 7 days), in `worker-archive.ts` (`state/worker-archive.json`, version 3: queued jobs plus last archived/restored states, bounded to 2,000 of each for 30 days; expired records are ignored at load and lookup against the current clock without refreshing saved timestamps; version 2 archive records still load). A wake for such a chat is held in the bridge's `onReviveRequest` (`readyForWake`): a not-yet-started archive is dropped; an archived (or being-archived) chat gets an unarchive job first, handed out before archives as `{ conversationId: null, unarchive }` (an old extension reads nothing), retried from 15 s, and the wake is queued on `onWorkerChatReady` (unarchived, given up, or 90 s at most). Unarchiving ignores the setting. The extension's alarm pass takes one via `POST /worker-archive/next` (leased 2 min), asks any registered ChatGPT page (`clf-archive-chat`) to `PATCH /backend-api/conversation/<id>` `{ is_archived: true }` with the signed-in account, and reports `archived`/`unarchived`/`failed`/`deferred` to `POST /worker-archive/result`. An expired lease does not cancel a remote PATCH: a late success opposite to a retired job’s last settled state queues a corrective archive/unarchive, even after restart; unknown-chat and duplicate same-state results do nothing. The saved correction marker makes an unleased correction ignore stale receipts (logged), including after restart; once leased, receipts count as before. No bridge/extension wire fields change. A late unarchive also cannot consume a newer pending archive. `deferred` (no page) costs no attempt; failures back off from 5 min, 6 attempts or a week at most. ChatGPT's own reversible archive: nothing is deleted. Temporary Chats were rejected: tools work there, but a reload loses the conversation (2026-10-14). |
 | Sync manual chat titles to ChatGPT Web | Off (`sessions.syncManualChatTitles`). | When opted in (`Settings › Browser › Browser & history`), manually naming a chat in CoS (`renameSession(..., 'manual')`) or attaching/re-binding a manually named session (`rebindSession`) queues `{ conversationId, title, expectedRemoteTitle? }` in `chat-title-sync.ts` (`state/chat-title-sync.json`, woken via `wakeBrowserWork('wake')`, cleared by `clearSessionName` / session deletion / disabling the setting). `/status` signals `chatTitlePending: true` while due; the extension takes at most one job per pass via `POST /chat-title/next` (1 lease at a time, 60 s lease, 2 s min spacing between dispatches, coalesced per conversation), asks a registered ChatGPT page (`clf-rename-chat`, preferring that chat's tab) to pre-check `GET /backend-api/conversation/<id>` before `PATCH` `{ title }`, and reports `synced`/`failed`/`deferred`/`conflict` to `POST /chat-title/result`. Newer ChatGPT Web titles are never overwritten: if ChatGPT's title diverged from `expectedRemoteTitle` (detected either live via `noteProviderChatTitle` or during pre-check `GET`), any pending push—including a newer manual rename queued behind an in-flight `conflict`—is dropped without converting the Web change into a new `expectedRemoteTitle`, and ChatGPT's title is kept in `autoTitle`; an unsettled `rebind` waits with `expectedRemoteTitle` unset so initial placeholder/`gen_title` transitions before its first `PATCH` do not drop the sync, while settled `rebind` or `manual-rename` chats preserve any subsequent Web change without auto-requeuing. HTTP 429 sets a global cooldown honoring `Retry-After` (default 60 s); other failures back off from 5 s up to 5 attempts; every queue transition (`queued`, `leased`, `deferred`, `sent`, `failed`, `dropped`) logs one structured line. |
 | Recover ordinary/agent tabs | Off. | Goal/Loop can independently justify recovery; history alone cannot. |
 | Automatic Continue | On. | Unfinished-response recovery also serves enabled Goal/Loop. This switch controls ordinary chats; explicit Off survives and malformed config disables it. See §14. |
@@ -222,7 +222,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Stop fallback for fresh turns | On since 2.1.49 (`ui.rotateStopFallback`; disabled while fresh turns are off). Earlier configs are turned on once (`adoptStopFallback`, marked `ui.rotateStopFallbackAdopted`), because every earlier save wrote the old default; a later off stays off. | Where ChatGPT shows only Stop at a tool result it offers no Send for the continue (`ROTATION_DECLINED`, `no-send`). After `STOP_FALLBACK_AFTER_DECLINES` (2) such declines in one turn and the usual minute, the next held result takes the fallback instead of a third continue (`stopFallbackDue`/`noteStopFallback`, once per turn): `rotation-fence.ts` arms a fence (the kernel refuses that chat's calls with `ROTATION_FENCE_REFUSAL`, nothing runs, so a Stop landing mid-call cannot repeat a call, #1662), and 500 ms later `stopSessionTurn(…, { rotation: true })` queues the native Stop without turning Goal/Loop off or cancelling Compact & Resume. The stopped end of exactly that turn lifts the fence and files `fileRotationContinueAfterStop`: a `purpose: 'rotation'`, `afterStop: true` ordinary message (no `directTurn`), which `typedAfterStop` lets through once the turn shows stopped and nothing runs. The fence lifts at the processed stopped end (which files the continue), at once when the page reports it could not send that Stop (a terminal-failure receipt) or when the person's own Stop takes the turn over (no continue follows; the pending Stop is first saved without its `rotation` mark, `withdrawStopRotation`, so a restart restores neither it nor its fence), or after the Stop's 120 s budget plus 15 s (`FENCE_MS`) without a stopped end; fences are kept in the durable store `rotation-fences` (`[{ conversationId,
 turnId, until }]`) and `restoreCommands` brings back what is left of each (`restoreRotationFences`), so a restart
 after ChatGPT took the Stop but before its stopped end still files the continue; the fresh-turn Stop
-goes out only once its fence is on disk (`armRotationFence` resolves), and not at all when it cannot be saved; a fresh-turn Stop carries `rotation: true`, so after a restart a pending one re-arms its fence for what is left of that time. With fresh turns at 0 minutes no fallback Stop is taken, even after declines. The after-Stop continue stays owed until it is sent (`owed-continue.ts`, #2131): the stopped end that files it also notes the obligation, and while the chat is quiet for 45 s (any page report or tool call of that chat restarts the wait) a continue the page refused before Send is filed again, at most 4 times in all and for at most 2 hours; it ends when the continue was sent, anything else was written in the chat (the person's message, here or in ChatGPT), the chat is gone, or the person's own Stop. A running turn only postpones it. Live 2026-10-20 (VM): Stop 1 s after a result, then "continue", repeated no step (2 runs). |
+goes out only once its fence is on disk (`armRotationFence` resolves) and half a second after every call answer of the chat has gone out (`afterCallsAnswered` in `rotation-hold.ts`, at the latest 10 s; a Stop while a call still runs makes the model run it again, #2238), and not at all when it cannot be saved; a fresh-turn Stop carries `rotation: true`, so after a restart a pending one re-arms its fence for what is left of that time. With fresh turns at 0 minutes no fallback Stop is taken, even after declines. The after-Stop continue stays owed until it is sent (`owed-continue.ts`, #2131): the stopped end that files it also notes the obligation, and while the chat is quiet for 45 s (any page report or tool call of that chat restarts the wait) a continue the page refused before Send is filed again, at most 4 times in all and for at most 2 hours; it ends when the continue was sent, anything else was written in the chat (the person's message, here or in ChatGPT), the chat is gone, or the person's own Stop. A running turn only postpones it. Live 2026-10-20 (VM): Stop 1 s after a result, then "continue", repeated no step (2 runs). |
 | Follow-up behavior | Join the running turn (`ui.followUp: 'steer'`; a broken value loads as that). | Codex's "Follow-up behavior". Each running turn starts the composer's delivery choice from this default (`queue` selects After this turn); a choice made in the send menu lasts for that turn. Cmd/Ctrl+Shift+Enter sends the other way (`sendComposer('auto' \| 'after-turn')`); with no running turn it is an ordinary send. |
 | Enter key | Enter sends (`ui.enterSends`, missing means true). | Codex's "Enter key behavior". With `false`, Enter adds a line in the composer and Cmd/Ctrl+Enter sends; Shift+Enter always adds a line and Cmd/Ctrl+Shift+Enter keeps sending the other way (Follow-up behavior). |
 | Code checkpoints | Off (`projects.codeCheckpoints`; missing or malformed means Off). | Settings → Workspace, Folders: “Save a checkpoint before each turn's first edit”. `checkpointBeforePatch` reads `getConfig()` in the main process at capture time (never a renderer claim), so a flip applies to the next patch without a restart. Off stops new turn checkpoints only: existing ones stay listed in Review and Restore, including its own “Before restore” undo entry, keeps working. §10. |
@@ -1598,6 +1598,9 @@ running. For an exactly attributed launch, the process instance's exit promise r
 same canonical call UUID with exit time/code; numeric terminal-id reuse cannot retarget it.
 This revision neither drains output nor creates model work, a new tool call or a turn boundary.
 Legacy launches without exit evidence display `started`; never invent a retrospective success.
+An exec summary whose evidence says `running: false` with exit 0 carries `ended: true`; only then does the
+browser transcript show its `✓ <duration>` (#2239). A `✓ <duration>` without `ended` (recorded before the app kept
+that state, or with unknown process state) stays hidden there, since it may be a yield window.
 
 `env.ts` is the shared child-environment authority: Windows key names are case-insensitive,
 so use its accessors rather than creating both `Path` and `PATH`. Preserve inherited values.
@@ -5754,7 +5757,22 @@ browser action.
 The Files panel projects the current session's LocalProject through fixed IPC using a project
 UUID and relative paths. It does not change the main composer or grant additional filesystem
 access. Main re-resolves current approved roots and rejects traversal, symbolic links/junctions
-and project-root mutation. The renderer's `workspace-docks.ts` owns the right tool dock and
+and project-root mutation. Files creates and renames use the `project-files.ts` entry-mutation
+queues from filesystem validation through publication. Admission keys use the catalog's canonical
+project roots, without resolving project folders first. Disjoint roots progress independently,
+even when another project's queue is full or stalled. Equal or parent/child roots wait for each
+other in admission order: the next operation checks the preceding result, so competing renames
+or a create/rename cannot both claim an unused name and replace its contents. Admission refuses
+when 32 operations (active included) are pending across the overlapping roots, using the
+translated retryable busy error without adding the callback to a mutation queue. Catalog lookups are
+ordered separately from filesystem work so async reads cannot reorder admission. Before a
+lookup, an app-wide cap of 6,400 (200 catalog projects × 32) also bounds unresolved requests,
+including invalid project ids. Queue keys come only from the bounded project catalog; drained
+keys are removed. A failed operation releases its queue; waiting and capacity refusal are
+logged. Windows case-only renames retain their existing native-path handling. These queues
+cover these app-owned operations, not external OS
+writers; the adjacent pathname/sandbox rechecks remain in force.
+The renderer's `workspace-docks.ts` owns the right tool dock and
 bottom terminal dock; Files, Review, Sub-agents and each Terminal view retain their own content
 and async lifetimes. Closing the right dock hides its active tool but retains its tab selection.
 Every dock track change (right column, bottom row) goes through `moveWorkDock`, which animates
@@ -5882,11 +5900,52 @@ message, paths, newBranch?, expectedToken }` refuses with "The changes changed�
 are exactly what the dialog listed. It refuses conflicts, a merge/cherry-pick/revert in progress
 and a detached HEAD without `newBranch`. It runs `git add -A` and `git commit` on exactly the
 chosen pathspecs (literal, NUL-separated on stdin), so what the person staged for other files stays
-staged. A rename commits both paths but stages only the new one. A commit that does not happen
-(Git cannot stage, a hook or Git refuses) reads the index back from a `git write-tree` taken
-before, so a hand-picked part of a file (`git add -p`) stays staged as it was; an index that cannot
-be written as a tree falls back to unstaging only what it staged. A branch it created is removed
-after HEAD is pointed back (`symbolic-ref`, which works while another program holds the index).
+staged. A rename commits both paths but stages only the new one. This worktree's real
+`index.lock` is acquired exclusively before staging. It holds a complete private copy of the
+person's original index (or a native empty index when absent); `GIT_INDEX_FILE` directs our
+add/commit and their hooks to it. Git atomically updates that private file via index.lock.lock.
+The real index is never staged into or restored on failure: a plain competing commit may have
+released its index lock before hooks and later advance HEAD using its prepared original index.
+A definite refusal discards only our private files, preserving hand-picked partial staging byte
+for byte. Sparse indexes retain their cone/collapsed entries; split indexes retain native shared
+bases and unrelated partial staging. Private writers use command-scoped `splitIndex.sharedIndexExpire=never`:
+expiry while the real index still points to a shared file would corrupt that untouched index on
+refusal. Stored Git settings are unchanged; later ordinary Git operations own normal expiry.
+A competing lock is never removed. Linked worktrees use their own index, not the common index.
+A Git timeout never proves that hook/filter descendants stopped, even when the parent's
+pipes close. Interrupted writers therefore retain recovery state; only a failed launch can
+attest that no child started. No process-tree kill or new runner timeout contract is introduced.
+An accepted commit reconciles only the chosen paths in the private index to its exact commit,
+then syncs and atomically publishes the complete index and syncs its directory on macOS/Linux.
+A directory-sync failure after rename reports a committed-but-later-failed result, not a missing
+recovery lock. Windows retains native file sync/rename without unsupported directory sync.
+Each attempt uses a nonce in native
+`GIT_REFLOG_ACTION` to identify its own accepted HEAD update after a late error; the commit
+message is unchanged, Git owns receipt expiry, and disabled reflogs stay disabled. A successful
+Git exit resolves its own final summary's hex object ID through Git, including when reflogs are
+disabled; a later moving HEAD is never substituted. An unrecognized summary retains recovery
+state rather than guessing. A successful exit never enters failure rollback
+if a later external soft reset returns HEAD to the starting commit. Unknown HEAD/outcome, missing late
+receipt, unconfirmed termination or failed publication retains the original index AND prepared
+index.lock, preserves the branch, and shows a translated recovery error. Do not delete that
+recovery file as an empty stale lock: after stopping Git writers, inspect HEAD, both indexes and
+any index.lock.lock; publish the verified prepared index only after reconciling it with the
+accepted commit. If no commit was accepted (including a crash during the initial copy), stop
+writers and verify ownership, then move the incomplete private lock aside without replacing the
+real index, allowing a retry while retaining the displaced bytes. If ownership or acceptance is
+uncertain, preserve both files and the lock. No app recovery ledger or automatic guess is introduced.
+After a definite refusal at the unchanged starting position, native `git switch --no-guess` or
+detached checkout restores HEAD only if Git permits it; busy checkout keeps the attempt branch.
+Safe `git branch -d` compares against restored HEAD with inherited upstream settings ignored for
+that command, preserving symbolic-ref and active-worktree guards. Failed branch creation proves
+no ownership: a matching branch is retained, even at the starting commit, including after launch
+errors and interrupted switches; only a normal successful creation enables cleanup. An unborn branch is
+distinct from unreadable HEAD. Late failure reports that Git committed when receipt-confirmed;
+unrelated HEAD movement is never reported as success.
+Admission revalidates ref and parent after taking the index lease. This is not a general ref
+transaction: concurrent branch/ref rewrites (including Git's same-commit `switch -c` fast path)
+can bypass the index lock. The pre-existing mid-command wrong-branch race is a separate defect;
+this change detects final identity conflicts and retains recovery state rather than undoing them.
 Hooks run. Paths with `..` or an absolute start are refused before Git runs.
 `projectCommit:push` pushes the current branch (`-u <remote> HEAD:refs/heads/<branch>` when it has
 no upstream) with `GIT_TERMINAL_PROMPT=0` and, unless `GIT_SSH`, `GIT_SSH_COMMAND` or
@@ -5959,9 +6018,21 @@ Creating an entry uses the same unsaved-edit guard as changing the selected file
 Text previews/editor input are bounded to 256 KiB; full editable previews retain exact UTF-8,
 BOM and line endings plus a content/file-identity revision. Save stages complete replacement bytes
 beside the original, flushes them, revalidates project access and the original revision, then
-renames. A failed staging write or rename never truncates the original. Duplicate saves are
-refused and newer edits typed during a pending save remain dirty. Atomic replacement is not an
-OS-wide lock against an unrelated writer after the final revision check.
+renames. On POSIX, staging restores the original ordinary permission bits after writing and before
+flushing only when the staged creation mode differs. Matching modes need no chmod, preserving saves
+on filesystems that refuse mode changes; a required chmod failure still refuses publication.
+Windows keeps its existing mode/attribute behavior. A failed staging write or rename never truncates
+the original. Rename commits the save: `ProjectFileSaveResult.preview` is null if the later preview
+read fails, with a diagnostic warning, rather than reporting that committed save as failed. The
+renderer keeps the acknowledged text as its baseline without a revision or invented timestamp;
+newer edits stay dirty, including across project navigation. Save stays disabled until Refresh files
+reads a valid revision whose text still matches that baseline. A failed refresh or external change
+keeps the draft and cannot authorize an overwrite. Overlapping watcher preview reads publish only
+the latest-started request, in either completion order. An accepted save or explicit refresh
+invalidates pending watcher reads through that same request generation. Watcher reads cannot replace
+a revisionless saved baseline; ordinary revision-bearing previews retain automatic updates.
+Duplicate saves are refused. Atomic replacement is not an OS-wide lock against an unrelated writer
+after the final revision check.
 
 Images accept at most 5 MiB input and 16 megapixels, then decode to a bounded 1600-pixel thumbnail.
 PDF input is bounded to 20 MiB; bundled PDF.js renders one page with at most 16 megapixels and
@@ -7062,6 +7133,13 @@ shared-tree change may already have addressed them.
   and phase rather than ordinary-turn idleness. Suspended-tab repair retains its separate
   existing action checks.
   Keep their operation-specific authority current through the browser action boundary.
+- **Archive receipt overlap:** without per-attempt IDs, the guard only protects a correction before
+  it is leased. Three or more PATCHes overlapping past their two-minute leases can still let an
+  older restore receipt finish the leased correction, leaving the chat archived. A later wake
+  retries when the remembered state is archived; if the stale receipt marked it restored, use
+  ChatGPT Settings to unarchive it. Cancellation before any settled state has no remembered
+  target; after retry exhaustion, a late correction follows the last settled state, which may
+  differ from the failed request. There is no separate requested-target ledger.
 - **Goal reply publication:** reply-obligation mutations such as `acceptGoalReplyNow` still
   change the shared reply map before their durable write. A refused save puts back only that
   chat's own row (and rows it pruned), never the whole map, and an acceptance re-checks the

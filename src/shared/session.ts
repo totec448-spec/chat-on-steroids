@@ -137,6 +137,12 @@ export interface ActivitySummary {
   detail?: string;
   /** Optional right-aligned metric: "+18 −4", "✓ 4.8s", "✕ exit 1". */
   metric?: string;
+  /**
+   * An exec the app recorded as having ended (exit 0, not timed out): its `✓ <duration>` is the
+   * command's own. A `✓ <duration>` without this flag may be the yield window of a command that
+   * was still running (recorded before the app kept that state), so the browser hides it (#2239).
+   */
+  ended?: true;
   tone: 'neutral' | 'good' | 'bad' | 'warn';
   /** Family the entry belongs to, for icons and filtering. */
   kind:

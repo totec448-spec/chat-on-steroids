@@ -1,4 +1,7 @@
 {
+  "Another Git operation is in progress. Try again when it finishes.": "다른 Git 작업이 진행 중입니다. 완료된 후 다시 시도하세요.",
+  "Git state needs recovery. Check this branch before retrying; index.lock was kept.": "Git 상태를 복구해야 합니다. 다시 시도하기 전에 이 브랜치를 확인하세요. index.lock은 보존되었습니다.",
+  "Git committed, but a later step failed. Check the commit before trying again.": "Git 커밋은 생성되었지만 이후 단계에서 실패했습니다. 다시 시도하기 전에 커밋을 확인하세요.",
   "Save here and replace any existing file?": "여기에 저장하고 기존 파일이 있으면 바꾸시겠습니까?",
   "Replace this CSV file?": "이 CSV 파일을 바꾸시겠습니까?",
   "Replace file": "파일 바꾸기",
@@ -1273,6 +1276,7 @@
   "Discard": "버리기",
   "Detecting language…": "언어 감지 중…",
   "Saved {0}": "{0} 저장됨",
+  "Saved {0}. Refresh the file before saving again.": "{0} 파일을 저장했습니다. 다시 저장하기 전에 파일을 새로고침하세요.",
   "Unsaved editor changes were discarded because the project changed.": "프로젝트가 변경되어 저장하지 않은 편집 내용이 버려졌습니다.",
   "Delete item?": "항목을 삭제할까요?",
   "Move “{0}” to the Trash?": "“{0}”을(를) 휴지통으로 이동할까요?",
@@ -2618,6 +2622,7 @@
   "A file or folder with that name already exists": "같은 이름의 파일 또는 폴더가 이미 있습니다",
   "Only regular files and folders can be renamed": "일반 파일과 폴더만 이름을 바꿀 수 있습니다",
   "A file save is already in progress. Try again when it finishes.": "이미 파일을 저장하는 중입니다. 완료된 후 다시 시도하세요.",
+  "Too many file operations are in progress. Try again when they finish.": "진행 중인 파일 작업이 너무 많습니다. 완료된 후 다시 시도하세요.",
   "Project catalog is invalid": "프로젝트 카탈로그가 잘못되었습니다",
   "Choose an absolute local project folder": "절대 경로의 로컬 프로젝트 폴더를 선택하세요",
   "Project catalog limit reached": "프로젝트 수 한도에 도달했습니다",

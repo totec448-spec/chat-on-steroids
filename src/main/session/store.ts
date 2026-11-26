@@ -972,7 +972,7 @@ async function rebuildSummaryFromHistory(
           event.call.conversationId && event.call.conversationId !== checkpoint.conversationId) {
         historicalReturnReduction += Math.max(0, storedTextTokens(event.call.result) - MAX_TOOL_RESULT_TOKENS);
       }
-      applyToSummary(rebuilt, event);
+      applyToSummary(rebuilt, event, 'in-place');
       collectIdentity(event);
       sawProjected = true;
     } catch {
@@ -995,7 +995,9 @@ async function rebuildSummaryFromHistory(
           accept(joined.subarray(start, newline));
           start = newline + 1;
         }
-        carry = joined.subarray(start);
+        // A copy: with no carry, `joined` views `chunk`, and the next read overwrites the bytes of
+        // the line this block ended in, so that line was parsed from the wrong bytes and dropped.
+        carry = Buffer.from(joined.subarray(start));
         if (carry.length > MAX_LINE_BYTES) carry = Buffer.alloc(0);
       }
       accept(carry);
@@ -1008,7 +1010,7 @@ async function rebuildSummaryFromHistory(
       rebuilt.startedAt = message.time;
       rebuilt.updatedAt = message.time;
     }
-    applyToSummary(rebuilt, message);
+    applyToSummary(rebuilt, message, 'in-place');
     collectIdentity(message);
     sawProjected = true;
   }
@@ -1017,7 +1019,7 @@ async function rebuildSummaryFromHistory(
   }
 
   rebuilt.timelineTurns = {}; rebuilt.requestTurns = {}; rebuilt.nativeQuestion = null;
-  for (const event of identities.sort((a, b) => positionOf(a) - positionOf(b))) applyTurnIdentity(rebuilt, event);
+  for (const event of identities.sort((a, b) => positionOf(a) - positionOf(b))) applyTurnIdentity(rebuilt, event, { inPlace: true });
 
   const summary = checkpoint
     ? {
@@ -1225,8 +1227,13 @@ export function answerLine(text: string): string | null {
   return null;
 }
 
-function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
-  applyTurnIdentity(summary, event);
+/**
+ * `identity` says how the turn and request maps follow the event: copied (a live summary others may
+ * hold) or built in place (a summary nobody has yet, as a rebuild's). Either way the maps are current for
+ * the finish accounting below, which resolves a turn through them.
+ */
+function applyToSummary(summary: SessionSummary, event: SessionEvent, identity: 'copy' | 'in-place' = 'copy'): void {
+  applyTurnIdentity(summary, event, { inPlace: identity === 'in-place' });
   summary.events += 1;
   // Never backwards. A tool call is written once the app knows which chat it belongs to,
   // which can be after the page has already reported the end of the turn it ran in, and
@@ -3027,7 +3034,7 @@ export async function rewriteUnattributedToolCalls(
       lastTurnOutcome: null,
       agents: []
     };
-    for (const event of kept) applyToSummary(staged, event);
+    for (const event of kept) applyToSummary(staged, event, 'in-place');
     const rewrittenHistorySeq = kept.at(-1)?.seq ?? 0;
     await writeSummary(staged, rewrittenHistorySeq);
 

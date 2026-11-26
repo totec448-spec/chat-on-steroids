@@ -4107,10 +4107,20 @@ async function performBrowserRepairs(repairs, policy) {
         // where the watchdog keeps interrupting the recovery it is meant to help. Ask the current
         // document to retry its own ticket first; only an unavailable/stale page falls through to
         // the reload path below. The content script still has to pass every source Stop/Send fence.
+        // The page may wait up to four seconds for its in-flight activity request, then read the feed once (#2245).
         const resumed = await tabReply(target.id,
-          { type: 'clf-resume-compaction', conversationId }, documentId ? { documentId } : undefined);
+          { type: 'clf-resume-compaction', conversationId }, documentId ? { documentId } : undefined, 8000);
         if (resumed?.accepted === true) {
           await call(`/status?repaired=${encodeURIComponent(token)}&repairAction=resumed`);
+          continue;
+        }
+        // That wait can be seconds long: the person may have moved this tab since the check above, and
+        // the reload below must not land on another chat.
+        const afterAsk = await chrome.tabs.get(target.id);
+        const movedOn = afterAsk.pendingUrl ? 'navigating' : conversationForTab(afterAsk) !== conversationId ? 'other-chat'
+          : tabDocuments[String(target.id)] !== documentId ? 'new-document' : null;
+        if (movedOn) {
+          await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}&why=changed&detail=${encodeURIComponent(movedOn)}`);
           continue;
         }
       }
@@ -4169,8 +4179,23 @@ async function performBrowserRepairs(repairs, policy) {
           continue;
         }
       }
-      if (target && [target.pendingUrl, target.url].some(url => /[?&]temporary-chat=true(?:[&#]|$)/.test(url || ''))) {
+      // The scan is older than the page replies above, which can take seconds each: read the tab again
+      // for the reload and for the temporary-chat rule, so neither acts on where the tab used to be.
+      // A tab that cannot be read now is gone or unreadable: the scan's view stands, as the reload will say.
+      const fresh = target ? await chrome.tabs.get(target.id).catch(() => null) : null;
+      const seen = fresh ?? target;
+      if (seen && [seen.pendingUrl, seen.url].some(url => /[?&]temporary-chat=true(?:[&#]|$)/.test(url || ''))) {
         await call(`/status?repaired=${encodeURIComponent(token)}&repairAction=preserved&preservedFor=temporary-chat`);
+        continue;
+      }
+      // conversationForTab falls back to the registry for a page without a chat in its address: a tab the
+      // scan saw in a chat and that now shows another route (the new-chat page) is not that chat any more.
+      const scannedInChat = Boolean(target && /\/c\/[^/?#]+/.test(target.url || ''));
+      const movedOn = !fresh ? null : fresh.pendingUrl ? 'navigating'
+        : (scannedInChat && conversationFromUrl(fresh.url) !== conversationId) || conversationForTab(fresh) !== conversationId ? 'other-chat'
+        : documentId && tabDocuments[String(target.id)] !== documentId ? 'new-document' : null;
+      if (movedOn) {
+        await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}&why=changed&detail=${encodeURIComponent(movedOn)}`);
         continue;
       }
       if (target) await chrome.tabs.reload(target.id);

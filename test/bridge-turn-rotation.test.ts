@@ -435,6 +435,33 @@ describe('stop fallback for fresh turns', () => {
     } finally { spy.mockRestore(); setRotationHoldForTests(15_000); await saveConfig({ ...config, sessions: { ...config.sessions, record: true } }); }
   });
 
+  // #2238: the Stop fallback waited a fixed half second after the call was attributed, but the call's
+  // answer goes out only after its recording is finished. A slow recording let the Stop reach ChatGPT
+  // while the call still ran, and a Stop during a running call makes the model run the call again.
+  it('does not stop the turn while the call it follows is still being answered (#2238)', async () => {
+    const config = defaultConfig();
+    await saveConfig({ ...config, sessions: { ...config.sessions, record: true }, ui: { ...config.ui, rotateStopFallback: true } });
+    setRotationHoldForTests(5_000);
+    const clock = { now: Date.now() };
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock.now);
+    try {
+      const chat = 'f0f00003-1111-4111-8111-000000000499', turn = 'g-stopfb-0-slow';
+      const sessionId = await turnFor(chat, turn, 31);
+      await setGoalSwitchNow(chat, 'loop', true);
+      await declineTwice(chat, sessionId, clock);
+      const close = await heldCall(chat);
+      // The answer is still held (a slow recording): well past the old half second, no Stop is queued.
+      await new Promise(resolve => setTimeout(resolve, 900));
+      expect((await request('GET', '/status')).body.stopTurns).toEqual([]);
+      await close();
+      await vi.waitFor(async () => {
+        expect((await request('GET', '/status')).body.stopTurns).toEqual([expect.objectContaining({ conversationId: chat, turnId: turn })]);
+      }, { timeout: 10_000, interval: 50 });
+      // End the stopped turn like the sibling test, so this chat's fence does not outlive the test.
+      await events(chat, [{ kind: 'turn_end', time: clock.now, turnId: turn, outcome: 'stopped' }]);
+      await vi.waitFor(() => expect(rotationFenced(chat)).toBe(false), { timeout: 10_000, interval: 50 });
+    } finally { spy.mockRestore(); setRotationHoldForTests(15_000); await saveConfig({ ...config, sessions: { ...config.sessions, record: true } }); }
+  });
   // #2131: the page refused the after-Stop continue before Send ("The composer changed; your draft was
   // preserved") and nothing filed it again, so the chat sat idle once the stopped request went quiet.
   it('files the continue again when the page refused it before Send and the chat has gone quiet', async () => {

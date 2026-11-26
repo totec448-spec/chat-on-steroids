@@ -1,4 +1,7 @@
 {
+  "Another Git operation is in progress. Try again when it finishes.": "另一個 Git 操作正在進行。請在完成後重試。",
+  "Git state needs recovery. Check this branch before retrying; index.lock was kept.": "Git 狀態需要復原。重試前請檢查此分支；index.lock 已保留。",
+  "Git committed, but a later step failed. Check the commit before trying again.": "Git 已建立提交，但後續步驟失敗。請在重試前檢查該提交。",
   "Save here and replace any existing file?": "要儲存在此處並取代任何現有檔案嗎？",
   "Replace this CSV file?": "要取代此 CSV 檔案嗎？",
   "Replace file": "取代檔案",
@@ -174,6 +177,7 @@
   "Discard": "捨棄",
   "Detecting language…": "正在偵測語言…",
   "Saved {0}": "已儲存 {0}",
+  "Saved {0}. Refresh the file before saving again.": "已儲存 {0}。再次儲存前，請重新整理檔案。",
   "Unsaved editor changes were discarded because the project changed.": "由於專案已變更，尚未儲存的編輯已捨棄。",
   "Delete item?": "刪除此項目？",
   "Move “{0}” to the Trash?": "將「{0}」移至資源回收筒？",
@@ -2618,6 +2622,7 @@
   "A file or folder with that name already exists": "已存在同名的檔案或資料夾",
   "Only regular files and folders can be renamed": "只能重新命名一般檔案和資料夾",
   "A file save is already in progress. Try again when it finishes.": "已有檔案正在儲存。請在完成後重試。",
+  "Too many file operations are in progress. Try again when they finish.": "進行中的檔案操作過多。請在完成後重試。",
   "Project catalog is invalid": "專案目錄無效",
   "Choose an absolute local project folder": "請選擇使用絕對路徑的本機專案資料夾",
   "Project catalog limit reached": "已達專案數量上限",

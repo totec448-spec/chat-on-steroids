@@ -87,6 +87,16 @@ it('keeps benign exit classification, batch labels and numeric wait ids consiste
   }
 });
 
+it('keeps a command duration from reading 1000ms or 60.0s at a unit boundary', () => {
+  const shown = (durationMs: number) => summarizeToolCall({ tool: 'exec_command', args: { cmd: 'x' },
+    evidence: { ...emptyEvidence(), durationMs, running: false, exitCode: 0 }, outcome: 'ok', durationMs }).metric;
+  expect(shown(999.4)).toBe('✓ 999ms');
+  expect(shown(999.5)).toBe('✓ 1.0s');
+  expect(shown(59_940)).toBe('✓ 59.9s');
+  expect(shown(59_960)).toBe('✓ 1m 0s');
+  expect(shown(60_000)).toBe('✓ 1m 0s');
+});
+
 it('carries the same proven classification through asynchronous completion and rereads', async () => {
   const m = manager(), id = m.allocateProcessId();
   const first = await m.execCommand({ processId: id,
@@ -108,4 +118,22 @@ it('carries the same proven classification through asynchronous completion and r
   expect(draw).toHaveBeenCalledTimes(2);
   await m.terminateAllProcesses();
   await expect(poll(m, id)).rejects.toThrow('Unknown process id');
+});
+
+it('marks only a command that recorded its own end as ended, so the browser may show its duration (#2239)', () => {
+  const summarize = (evidence: Partial<ReturnType<typeof emptyEvidence>>, durationMs = 1200) =>
+    summarizeToolCall({ tool: 'exec_command', args: { cmd: 'npm run verify' }, evidence: { ...emptyEvidence(), durationMs, ...evidence },
+      outcome: 'ok', durationMs });
+  // Recorded as finished with exit 0: the duration is the command's own.
+  expect(summarize({ running: false, exitCode: 0 })).toMatchObject({ metric: '✓ 1.2s', ended: true });
+  // The yield window of a command that is still alive: no completion claim.
+  expect(summarize({ running: true })).toMatchObject({ metric: 'started' });
+  expect(summarize({ running: true })).not.toHaveProperty('ended');
+  // Legacy evidence (nothing recorded about the process) stays ambiguous.
+  expect(summarize({ running: null })).not.toHaveProperty('ended');
+  // A failed or timed-out command shows its failure, never an ended duration.
+  expect(summarize({ running: false, exitCode: 2 })).not.toHaveProperty('ended');
+  expect(summarize({ running: false, timedOut: true })).not.toHaveProperty('ended');
+  // A command killed by a signal has no exit code: its end is known, its success is not.
+  expect(summarize({ running: false, exitCode: null })).not.toHaveProperty('ended');
 });
