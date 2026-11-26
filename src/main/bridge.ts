@@ -12379,7 +12379,13 @@ function armPlacementFallback(command: Command): void {
     // A worker's placement the browser already took is that browser's own tab, opened and only slow:
     // a second one would run the task twice (a real worker took 62 s from opening to its first call, and
     // the redeem window is now 120 s). The command ends at its deadline if that tab never comes (#2300).
-    if (current.spec.type === 'worker' && current.placement === undefined) return;
+    if (current.spec.type === 'worker' && current.placement === undefined) {
+      logInfo(
+        `bridge: the browser collected ${specKey(current.spec)} and its page has not redeemed yet — ` +
+          'waiting for it until the command deadline instead of opening a second tab'
+      );
+      return;
+    }
     // Withdraw an offer nobody ever collected, so a late poll cannot open a second chat for a
     // command this app is about to open itself.
     delete current.placement;
