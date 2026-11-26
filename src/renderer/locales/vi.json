@@ -1,4 +1,6 @@
 {
+  "Chat On Steroids (dev)": "Chat On Steroids (dev)",
+  "About Chat On Steroids (dev)": "Giới thiệu về Chat On Steroids (dev)",
   "Another Git operation is in progress. Try again when it finishes.": "Một thao tác Git khác đang chạy. Hãy thử lại khi thao tác đó hoàn tất.",
   "Git state needs recovery. Check this branch before retrying; index.lock was kept.": "Trạng thái Git cần được khôi phục. Hãy kiểm tra nhánh này trước khi thử lại; index.lock đã được giữ lại.",
   "Git committed, but a later step failed. Check the commit before trying again.": "Git đã tạo commit nhưng một bước sau đó thất bại. Hãy kiểm tra commit trước khi thử lại.",

@@ -1,4 +1,6 @@
 {
+  "Chat On Steroids (dev)": "Chat On Steroids (dev)",
+  "About Chat On Steroids (dev)": "Acerca de Chat On Steroids (dev)",
   "Another Git operation is in progress. Try again when it finishes.": "Hay otra operación de Git en curso. Inténtalo de nuevo cuando termine.",
   "Git state needs recovery. Check this branch before retrying; index.lock was kept.": "El estado de Git necesita recuperación. Revisa esta rama antes de volver a intentarlo; se conservó index.lock.",
   "Git committed, but a later step failed. Check the commit before trying again.": "Git creó el commit, pero falló un paso posterior. Revisa el commit antes de volver a intentarlo.",

@@ -1,4 +1,6 @@
 {
+  "Chat On Steroids (dev)": "Chat On Steroids (dev)",
+  "About Chat On Steroids (dev)": "Chat On Steroids (dev) 정보",
   "Another Git operation is in progress. Try again when it finishes.": "다른 Git 작업이 진행 중입니다. 완료된 후 다시 시도하세요.",
   "Git state needs recovery. Check this branch before retrying; index.lock was kept.": "Git 상태를 복구해야 합니다. 다시 시도하기 전에 이 브랜치를 확인하세요. index.lock은 보존되었습니다.",
   "Git committed, but a later step failed. Check the commit before trying again.": "Git 커밋은 생성되었지만 이후 단계에서 실패했습니다. 다시 시도하기 전에 커밋을 확인하세요.",

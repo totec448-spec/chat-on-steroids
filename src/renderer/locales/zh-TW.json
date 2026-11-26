@@ -1,4 +1,6 @@
 {
+  "Chat On Steroids (dev)": "Chat On Steroids (dev)",
+  "About Chat On Steroids (dev)": "關於 Chat On Steroids (dev)",
   "Another Git operation is in progress. Try again when it finishes.": "另一個 Git 操作正在進行。請在完成後重試。",
   "Git state needs recovery. Check this branch before retrying; index.lock was kept.": "Git 狀態需要復原。重試前請檢查此分支；index.lock 已保留。",
   "Git committed, but a later step failed. Check the commit before trying again.": "Git 已建立提交，但後續步驟失敗。請在重試前檢查該提交。",

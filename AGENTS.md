@@ -308,6 +308,12 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 **Intent:** open a usable local workspace, restore accepted work consistently, and exit without
 leaving an invisible process, tool, writer or installer competing with the next launch.
 
+Display branding is presentation only. `src/main/app-brand.ts` owns the development predicate
+(`!app.isPackaged || COS_DEV_BRAND === '1'`) and composes the display label from
+`src/shared/app-brand-name.ts`. `state:get` adds optional `AppState.displayName`; the renderer
+uses that label, or the production base name for older snapshots. Do not derive app.name,
+appId, productName or userData from it. The macOS application menu keeps its native identity.
+
 The single-instance lock must be won before touching shared userData. The losing process marks
 itself quitting immediately; `app.quit()` alone does not stop module evaluation. Activation from
 second-instance/tray/Dock is gated until restore, CSP, permissions and IPC are ready. Once quit

@@ -896,6 +896,8 @@ export function browserExtensionRequired(_config: Pick<Config, 'sessions' | 'mul
 }
 
 export interface AppState {
+  /** Main-owned display key. Optional for older state snapshots; never a profile identity. */
+  displayName?: 'Chat On Steroids' | 'Chat On Steroids (dev)';
   config: Config;
   status: ConnectionStatus;
   /**

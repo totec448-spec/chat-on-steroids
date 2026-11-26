@@ -1,3 +1,4 @@
+import { appBrand } from './app-brand.js';
 import { registerAgentOutputIpc } from './agent-output-ipc.js';
 import { onChatsAtOnceChange, resumeAutomaticSends } from './chats-at-once.js';
 import { MAX_CHAT_STYLE_CHARS } from '../shared/chat-style.js';
@@ -694,6 +695,7 @@ function resolvedBinary(config: Config): string | null {
 async function buildState(): Promise<AppState> {
   const config = getConfig();
   return {
+    displayName: appBrand.displayName,
     config,
     status: getStatus(),
     connectorSchemas: Object.fromEntries(
