@@ -10082,6 +10082,8 @@ describe('a worker chat that never opens', () => {
           await vi.waitFor(async () => { placement ||= (await request('GET', '/status')).body.placement; expect(placement?.id).toBeTruthy(); }, { timeout: 10_000 });
           await vi.advanceTimersByTimeAsync(70_000);
           expect(opened, 'the browser opened that tab itself; a second one would run the task twice').toEqual([]);
+          expect(getLog().some(entry => entry.message.includes('collected') && entry.message.includes('command deadline')),
+            'a skipped fallback writes one line that says it waits and why').toBe(true);
           expect((await redeem(placement.id)).agent).toBe('worker-1');
         });
       } finally { vi.useRealTimers(); }
