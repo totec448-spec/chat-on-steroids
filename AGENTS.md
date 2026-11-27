@@ -5507,7 +5507,9 @@ The matching `sessions:rename` save consumes the nonce. A baseline confirmed bef
 can produce one offer carrying that Web title and a 15-second deadline. A Web rename after
 the snapshot invalidates the offer.
 The MAIN-world read requires an exact personal conversation in the account-scoped sidebar history and
-agreement with the active navigation rail's committed account context. Only a hashed scope
+agreement with the active navigation rail's committed account context. If the preloaded list lacks the
+chat, the exact visible row must carry a personal conversation record under a committed sidebar keyed
+to that same account. The row's own ID remains available when the link is replaced by the editor. Only a hashed scope
 crosses into the companion and local bridge. It stays in memory for the edit and is rechecked
 before opening the editor and before submitting. A different or unproven account stops the
 operation without opening or retrying the chat. Workspace membership alone cannot prove

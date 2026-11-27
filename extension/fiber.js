@@ -283,7 +283,7 @@
   function committedPath(fiber) {
     const path = [], seen = new Set();
     let at = fiber, base = null, paired = false;
-    const view = (node, parent) => ({ memoizedProps: node.memoizedProps,
+    const view = (node, parent) => ({ key: node.key, memoizedProps: node.memoizedProps,
       memoizedState: node.memoizedState, updateQueue: node.updateQueue, dependencies: node.dependencies, return: parent });
     const remember = (node, value) => {
       currentPaths?.set(node, value);
@@ -3261,7 +3261,28 @@
     return identity;
   }
 
-  /** Match the active signed-in profile against the provider's exact account-scoped chat list. */
+  /** A new personal chat can reach the rendered account sidebar before its preload catches up. */
+  function renderedRenameAccount(id) {
+    const rows = document.querySelectorAll(`[role="group"][data-sidebar-archive-chatgpt-id="${id}"]`);
+    const visible = [...rows].filter(row => row.getClientRects().length > 0 &&
+      !row.closest('[hidden],[aria-hidden="true"],[inert]'));
+    if (visible.length !== 1) return null;
+    let personal = false;
+    for (let fiber = fiberOf(visible[0]), depth = 0; fiber && depth < 140; fiber = fiber.return, depth++) {
+      const props = fiber.memoizedProps;
+      if (props?.conversationId === id && props.conversation?.id === id) {
+        if (props.conversation.workspace_id !== null || props.conversation.is_temporary_chat !== false) return null;
+        personal = true;
+      }
+      if (typeof props?.accountKey === 'string' && fiber.key === props.accountKey) {
+        if (!personal || props.isPeek === true || props.isPreview === true) return null;
+        return /^chatgpt:([0-9a-f-]{36})$/i.exec(props.accountKey)?.[1] ?? null;
+      }
+    }
+    return null;
+  }
+
+  /** Match the active signed-in profile against the provider's account-scoped sidebar. */
   async function renameAccountProof(id) {
     const unconfirmed = { reason: 'account-unconfirmed' };
     const route = location.pathname;
@@ -3276,11 +3297,14 @@
       .finally(() => clearTimeout(timer));
     if (!Array.isArray(chats?.items) || chats.items.length > 500) return unconfirmed;
     const matches = chats.items.filter(chat => chat?.id === id);
-    if (matches.length !== 1) return unconfirmed;
-    const workspace = matches[0].workspace_id;
-    // The history proves ownership for a personal chat. Workspace membership can
-    // be shared by different people and does not prove who owns that chat.
-    if (workspace !== null) {
+    if (matches.length > 1) return unconfirmed;
+    if (!matches.length) {
+      const rendered = renderedRenameAccount(id);
+      if (!rendered) return unconfirmed;
+      if (rendered !== identity.accountId) return { reason: 'account-mismatch' };
+    } else if (matches[0].workspace_id !== null) {
+      // Shared workspace membership cannot prove who owns that chat.
+      const workspace = matches[0].workspace_id;
       return typeof workspace === 'string' && workspace !== identity.accountId
         ? { reason: 'account-mismatch' } : unconfirmed;
     }
@@ -3290,6 +3314,11 @@
     if (!current || route !== location.pathname) return unconfirmed;
     if (current.accountId !== identity.accountId || current.userId !== identity.userId) return { reason: 'account-mismatch' };
     if (history !== readHistory()) return unconfirmed;
+    if (!matches.length) {
+      const rendered = renderedRenameAccount(id);
+      if (!rendered) return unconfirmed;
+      if (rendered !== current.accountId) return { reason: 'account-mismatch' };
+    }
     return { accountKey: Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('') };
   }
 

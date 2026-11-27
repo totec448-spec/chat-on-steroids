@@ -87,6 +87,38 @@ it('requires the native rename target in the active account history and returns 
     history.accountId = accountB;
     history.chats = Promise.resolve({ items: [] });
     await expect(proof()).resolves.toEqual({ reason: 'account-unconfirmed' });
+
+    const row = page.document.createElement('div');
+    row.setAttribute('role', 'group');
+    row.setAttribute('data-sidebar-archive-chatgpt-id', THREAD);
+    row.getClientRects = () => ({ length: 1 }) as DOMRectList;
+    page.document.body.append(row);
+    const scope = {
+      key: 'chatgpt:' + accountA,
+      memoizedProps: { accountKey: 'chatgpt:' + accountA, isPeek: false, isPreview: false },
+      return: null
+    };
+    const chat = { id: THREAD, workspace_id: null as string | null, is_temporary_chat: false };
+    (row as unknown as Record<string, unknown>)['__reactFiber$fixture'] = {
+      return: { memoizedProps: { conversationId: THREAD, conversation: chat }, return: scope }
+    };
+    await expect(proof()).resolves.toEqual({ reason: 'account-mismatch' });
+
+    scope.key = scope.memoizedProps.accountKey = 'chatgpt:' + accountB;
+    const fresh = await proof();
+    expect(fresh).toEqual({ accountKey: expect.stringMatching(/^[a-f0-9]{64}$/) });
+    expect(fresh).not.toEqual(first);
+
+    // The native editor replaces the link, while the owning row and account stay mounted.
+    row.append(page.document.createElement('input'));
+    await expect(proof()).resolves.toEqual(fresh);
+    const duplicate = row.cloneNode() as HTMLDivElement;
+    duplicate.getClientRects = row.getClientRects;
+    page.document.body.append(duplicate);
+    await expect(proof()).resolves.toEqual({ reason: 'account-unconfirmed' });
+    duplicate.remove();
+    chat.workspace_id = accountB;
+    await expect(proof()).resolves.toEqual({ reason: 'account-unconfirmed' });
   } finally { dom.window.close(); }
 });
 /**
