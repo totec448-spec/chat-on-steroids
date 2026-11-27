@@ -3675,7 +3675,9 @@ var CLF_DOM = (() => {
         return closed && stillCurrent();
         } finally { motion?.remove(); motion = null; }
       },
-      async version(version) {
+      // `home` is the version to come back to: with no row for it in the list there is no way back, so the
+      // list is not used to leave it (#2305: a version in the "Older models" submenu has no row at all).
+      async version(version, home) {
         const before = await state(); if (!before) return null;
         const versionRows = () => [...(picker()?.querySelectorAll('[role="menuitemradio"]') || [])].filter(shown);
         if (before.version === version && !versionRows().length) return before;
@@ -3691,9 +3693,11 @@ var CLF_DOM = (() => {
           if (toggle.length !== 1) return null;
           toggle[0].click();
         }
+        const homeLabel = home && home !== version ? before.versions.find(v => v.id === home)?.label : undefined;
+        if (home && home !== version && !homeLabel) return null;
         const option = await wait(() => {
           const rows = versionRows().filter(node => pickerVersionNamed(node, label) && node.getAttribute('aria-disabled') !== 'true');
-          return rows.length === 1 ? rows[0] : null;
+          return rows.length === 1 && (!homeLabel || versionRows().some(node => pickerVersionNamed(node, homeLabel))) ? rows[0] : null;
         }, listWasOpen ? 600 : 3000);
         if (!key(option, 'Enter')) return null;
         return state(next => next.version === version && !versionRows().length);
@@ -3793,9 +3797,13 @@ var CLF_DOM = (() => {
       // include account/workspace denials which the raw global preset list does not prove.
       // A version that cannot be read (#2305: ChatGPT's older models sit in a submenu with no row in the
       // version list) is skipped and named; one such version used to fail the whole catalog.
+      // The version the picker opened on is read as it stands. Leaving it needs a row to come back to: a
+      // current version with none (also in the submenu) is never left, so the picker is not moved off it.
       let skipped = 0;
+      collectModelChoices(result, original);
       for (const version of original.versions) {
-        const state = await ui.version(version.id);
+        if (version.id === original.version) continue;
+        const state = await ui.version(version.id, original.version);
         if (!state) { skipped += 1; continue; }
         collectModelChoices(result, state);
       }
@@ -3803,7 +3811,9 @@ var CLF_DOM = (() => {
       if (skipped) failure('versions_skipped');
     } catch { failure('model_unconfirmed'); result.clear(); }
     finally {
-      if (stillCurrent() && await ui.version(original.version)) {
+      // A picker that never left the opening version is already home, whichever view it shows.
+      const at = stillCurrent() ? await ui.state() : null;
+      if (stillCurrent() && (at?.version === original.version || await ui.version(original.version))) {
         const state = await ui.bucket(original.currentBucket);
         const previous = original.choices.find(c => c.bucket === original.currentBucket);
         const selected = state?.choices.find(c => c.bucket === state.currentBucket);

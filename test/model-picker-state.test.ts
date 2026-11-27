@@ -958,6 +958,16 @@ it('keeps the current version\'s models when every other version has no row (#23
   expect(await result).toEqual([{ id: 'gpt-5-6-thinking', label: 'GPT-5.6 Sol', efforts: ['medium', 'high'], aliases: ['gpt-5-6-thinking'] }]);
   expect(failures).toEqual(['versions_skipped']);
 });
+it('never leaves the picker on another version when the current version has no row to return to (#2305)', async () => {
+  vi.useFakeTimers();
+  const f = fixture(), failures: string[] = [];
+  f.unreachable.add('latest');
+  const result = f.api.inspectModelSettings(() => true, (reason: string) => failures.push(reason));
+  await vi.runAllTimersAsync();
+  expect(await result).toEqual([{ id: 'gpt-5-6-thinking', label: 'GPT-5.6 Sol', efforts: ['medium', 'high'], aliases: ['gpt-5-6-thinking'] }]);
+  expect(failures).toEqual(['versions_skipped']);
+  expect(f.state.selectedVersionEntry.id).toBe('latest'); expect(f.state.currentBucket).toBe(2);
+});
 
 // #2085: diagnostic callbacks observe the real selector, including early returns and cleanup.
 it('reports the failed selection phase and exact restoration without leaking provider props', async () => {
