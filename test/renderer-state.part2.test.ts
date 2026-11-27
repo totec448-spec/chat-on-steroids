@@ -1243,6 +1243,40 @@ it('saves unattributed notice suppression independently of the stable URL settin
   }
 });
 
+it.each([false, true])('keeps the newer queued unattributed notice choice after an older save succeeds (saved: %s)', async (saved) => {
+  const pending: Array<() => void> = [];
+  const calls: any[] = [];
+  const mounted = await mountChat({}, [], { saveSettings: (patch: any) => {
+    calls.push(structuredClone(patch));
+    return new Promise(resolve => pending.push(() => {
+      resolve({ ok: true, data: { ...mounted.state, config: { ...mounted.state.config, ...structuredClone(patch) } } });
+    }));
+  } });
+  const w = mounted.window;
+  mounted.state.config.mcp = { instructions: '', persistentUrls: false, suppressUnattributedNotices: saved };
+  mounted.push(mounted.state);
+  const box = w.document.getElementById('mcpSuppressUnattributedNotices') as HTMLInputElement;
+  expect(box.checked).toBe(saved);
+  box.checked = !saved;
+  box.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await waitFor(() => expect(calls).toHaveLength(1));
+  box.checked = saved;
+  box.dispatchEvent(new w.Event('change', { bubbles: true }));
+  pending.shift()!();
+  await waitFor(() => expect(calls).toHaveLength(2));
+  expect(calls[1].mcp.suppressUnattributedNotices).toBe(saved);
+  expect(box.checked).toBe(saved);
+  const developer = w.document.getElementById('developerMode') as HTMLInputElement;
+  developer.checked = !developer.checked;
+  developer.dispatchEvent(new w.Event('change', { bubbles: true }));
+  pending.shift()!();
+  await waitFor(() => expect(calls).toHaveLength(3));
+  expect(calls[2].mcp.suppressUnattributedNotices).toBe(saved);
+  pending.shift()!();
+  await settle();
+  expect(box.checked).toBe(saved);
+});
+
 it.each([false, true])('restores focused unattributed notice suppression after a failed save (saved: %s)', async (saved) => {
   const saveSettings = vi.fn(async (_patch: any) => ({ ok: false, error: 'Settings could not be saved.' }));
   const mounted = await mountChat({}, [], { saveSettings });

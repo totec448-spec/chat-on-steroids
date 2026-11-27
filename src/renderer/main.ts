@@ -1988,7 +1988,12 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('controlApiEnabled'), config.controlApi?.enabled === true, previousState?.config.controlApi?.enabled);
   applyChecked($<HTMLInputElement>('codeCheckpoints'), config.projects?.codeCheckpoints === true, previousState?.config.projects?.codeCheckpoints);
   applyChecked($<HTMLInputElement>('mcpPersistentUrls'), config.mcp?.persistentUrls === true, previousState?.config.mcp?.persistentUrls);
-  applyChecked($<HTMLInputElement>('mcpSuppressUnattributedNotices'), config.mcp?.suppressUnattributedNotices === true, previousState?.config.mcp?.suppressUnattributedNotices);
+  // The form owns this choice while snapshots are queued, even when a second click returns it
+  // to the previous saved value. A stale acknowledgement must not repaint it in that case.
+  // saveSnapshot restores the persisted value explicitly if a save is refused.
+  if (!requestedSettings) {
+    applyChecked($<HTMLInputElement>('mcpSuppressUnattributedNotices'), config.mcp?.suppressUnattributedNotices === true, previousState?.config.mcp?.suppressUnattributedNotices);
+  }
   // Stable URLs live only in the OS-backed secret store; without it they keep rotating.
   $<HTMLInputElement>('mcpPersistentUrls').disabled = next.secureStorage?.available === false && config.mcp?.persistentUrls !== true;
   // Another program held the kept port at this start: the tunnel must follow the new one.
