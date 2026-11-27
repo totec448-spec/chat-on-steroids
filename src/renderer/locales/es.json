@@ -1,4 +1,6 @@
 {
+  "Chat On Steroids (dev)": "Chat On Steroids (dev)",
+  "About Chat On Steroids (dev)": "Acerca de Chat On Steroids (dev)",
   "Suppress unattributed call notices": "Omitir avisos de llamadas sin atribución",
   "For standalone MCP clients: omit the informational identity notice when unattributed calls are allowed. Permissions and tool errors are unchanged.": "Para clientes MCP independientes: omite el aviso informativo de identidad cuando se permiten llamadas sin atribución. Los permisos y los errores de las herramientas no cambian.",
   "Another Git operation is in progress. Try again when it finishes.": "Hay otra operación de Git en curso. Inténtalo de nuevo cuando termine.",

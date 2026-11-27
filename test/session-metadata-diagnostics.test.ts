@@ -80,3 +80,58 @@ describe('metadata migration diagnostics', () => {
     expect(JSON.parse(await fs.readFile(file, 'utf8')).timelineTurns).toBeUndefined();
   });
 });
+
+describe('rebuilding a long session\'s metadata', () => {
+  it('loses no event when a line straddles the 64 KiB read block', async () => {
+    const conversationId = '11111111-2222-4333-8444-555555555555';
+    const session = await createSession({ title: 'Straddle', conversationId });
+    await appendEvent(session.id, { time: 100, source: 'extension', kind: 'turn_start', turnId: 'straddle-turn' });
+    for (let i = 0; i < 400; i++) {
+      await appendEvent(session.id, { time: 200 + i, source: 'mcp', kind: 'tool_call', turnId: 'straddle-turn', call: {
+        callId: `call-${i}`, requestId: `request-${i}`, tool: 'read', attribution: 'request_id', attributionMethod: 'request_id', conversationId,
+        args: { text: '{}', chars: 2, truncated: false }, result: { text: 'ok', chars: 2, truncated: false }, durationMs: 1, outcome: 'ok',
+        summary: { title: 'Read', tone: 'neutral', kind: 'read' }
+      } } as never);
+    }
+    await flushSessions();
+    const file = path.join(sessionsRoot(), session.id, 'meta.json');
+    const checkpoint = JSON.parse(await fs.readFile(file, 'utf8'));
+    const toolCalls = checkpoint.toolCalls;
+    resetSessionStoreForTests();
+    checkpoint.__historySeq = 0;
+    delete checkpoint.requestTurns;
+    await fs.writeFile(file, JSON.stringify(checkpoint));
+    const rebuilt = await getSession(session.id);
+    // The journal is larger than one read block, so a line ends up split between two reads.
+    expect((await fs.stat(path.join(sessionsRoot(), session.id, 'events.jsonl'))).size).toBeGreaterThan(64 * 1024);
+    const have = new Set(Object.keys(rebuilt?.requestTurns ?? {}));
+    expect(Array.from({ length: 400 }, (_, i) => `request-${i}`).filter(id => !have.has(id))).toEqual([]);
+    expect(rebuilt?.toolCalls).toBe(toolCalls);
+  });
+  it('replays thousands of attributed calls in linear time (a 83 MB journal took 94 s)', async () => {
+    const conversationId = '11111111-2222-4333-8444-555555555555';
+    const session = await createSession({ title: 'Long session', conversationId });
+    await appendEvent(session.id, { time: 100, source: 'extension', kind: 'turn_start', turnId: 'long-turn' });
+    for (let i = 0; i < 6000; i++) {
+      await appendEvent(session.id, { time: 200 + i, source: 'mcp', kind: 'tool_call', turnId: 'long-turn', call: {
+        callId: `call-${i}`, requestId: `request-${i}`, tool: 'read', attribution: 'request_id', attributionMethod: 'request_id', conversationId,
+        args: { text: '{}', chars: 2, truncated: false }, result: { text: 'ok', chars: 2, truncated: false }, durationMs: 1, outcome: 'ok',
+        summary: { title: 'Read', tone: 'neutral', kind: 'read' }
+      } } as never);
+    }
+    await flushSessions();
+    const file = path.join(sessionsRoot(), session.id, 'meta.json');
+    const checkpoint = JSON.parse(await fs.readFile(file, 'utf8'));
+    resetSessionStoreForTests();
+    // A checkpoint that lags the journal (a crash, or a migration) makes the next open replay every event.
+    checkpoint.__historySeq = 0;
+    delete checkpoint.requestTurns;
+    await fs.writeFile(file, JSON.stringify(checkpoint));
+    const started = Date.now();
+    const rebuilt = await getSession(session.id);
+    expect(Date.now() - started).toBeLessThan(3000);
+    const have = new Set(Object.keys(rebuilt?.requestTurns ?? {}));
+    expect(Array.from({ length: 6000 }, (_, i) => `request-${i}`).filter(id => !have.has(id))).toEqual([]);
+    expect(rebuilt?.requestTurns?.['request-5999']).toMatchObject({ turnId: 'long-turn', conversationId });
+  }, 120_000);
+});

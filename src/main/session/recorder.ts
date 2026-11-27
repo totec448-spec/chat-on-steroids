@@ -809,6 +809,13 @@ let attributionRepairRetryUsed = false;
 const repairRequestIds = new Set<string>();
 // Derived negative-read cache only: exact ownership still comes from correlation.ts.
 const repairBuckets = new Map<string, { toolCalls: number; updatedAt: number; requestIds: Set<string> }>();
+/**
+ * Chats whose provisional calls the last repair pass read and found without proof, by the revision it read. A call
+ * that never gets proof stays provisional for good, and every later page-evidence trigger rescanned the chat's whole
+ * journal for it (20 such chats of 113 MB: 133 MB read per pass). A pass triggered by other request ids skips a chat
+ * whose revision is unchanged and whose unproved ids it does not name.
+ */
+const provisionalScans = new Map<string, { revision: string; requestIds: Set<string> }>();
 const MAX_REPAIR_BUCKETS = 128;
 const MAX_REPAIR_REQUEST_IDS = 50_000;
 let attributionRepairChain: Promise<void> = Promise.resolve();
@@ -1039,13 +1046,25 @@ async function repairAttributionNow(affected?: ReadonlySet<string>): Promise<{ s
 
   for (const summary of await indexedSessions()) try {
     if ((summary.provisionalToolCalls ?? 0) > 0 || (summary.providerSessionToolCalls ?? 0) > 0) {
+      const revision = `${summary.toolCalls}:${summary.updatedAt}:${summary.provisionalToolCalls ?? 0}:${summary.providerSessionToolCalls ?? 0}`;
+      const scanned = provisionalScans.get(summary.id);
+      if (affected && scanned?.revision === revision && ![...affected].some(id => scanned.requestIds.has(id))) {
+        logInfo(`request attribution: not rereading ${summary.id} for its provisional call(s): unchanged since the last pass and none of its request ids has new evidence`);
+      } else {
+      provisionalScans.delete(summary.id);
       const events = await readEvents(summary.id, { kinds: ['tool_call'] });
       let repaired = 0;
+      // Whether nothing here still needs another look, and the ids of the provisional calls that were read.
+      let unproved = true;
+      const unprovedIds = new Set<string>();
       for (const event of events) {
         if (event.kind !== 'tool_call' || event.call.attributionMethod !== 'generation' && !event.call.providerSessionAnchor || !event.call.requestId) continue;
         try {
+          // Every id counts, proved or not: new evidence for any of them is a reason to look again.
+          unprovedIds.add(event.call.requestId);
           const proof = requestCorrelation(event.call.requestId);
-          if (!proof || !await getSession(proof.sessionId)) continue;
+          if (!proof) continue;
+          if (!await getSession(proof.sessionId)) { unproved = false; continue; }
           if (event.call.providerSessionAnchor && proof.providerSessionAnchor === event.call.providerSessionAnchor &&
             proof.sessionId === summary.id && proof.conversationId === event.call.conversationId) continue;
           const same = proof.sessionId === summary.id;
@@ -1070,6 +1089,8 @@ async function repairAttributionNow(affected?: ReadonlySet<string>): Promise<{ s
             }
             if (!complete) {
               logInfo(`request attribution: skipped provisional repair for call ${event.call.callId}, request ${event.call.requestId}; source asset is missing`);
+              // Not "without proof": this call has proof and must be retried by the next pass, so the chat is not cached.
+              unproved = false;
               continue;
             }
             const existing = await readEvents(proof.sessionId, { kinds: ['tool_call'] });
@@ -1089,6 +1110,17 @@ async function repairAttributionNow(affected?: ReadonlySet<string>): Promise<{ s
         }
       }
       if (repaired) { repairedSessions++; logInfo(`request attribution: corrected ${repaired} provisional call(s) with exact request proof`); }
+      else if (unproved && !storageFailed && unprovedIds.size <= MAX_REPAIR_REQUEST_IDS) {
+        let kept = unprovedIds.size;
+        for (const scan of provisionalScans.values()) kept += scan.requestIds.size;
+        while (provisionalScans.size > 0 && (provisionalScans.size >= MAX_REPAIR_BUCKETS || kept > MAX_REPAIR_REQUEST_IDS)) {
+          const oldest = provisionalScans.keys().next().value!;
+          kept -= provisionalScans.get(oldest)!.requestIds.size;
+          provisionalScans.delete(oldest);
+        }
+        provisionalScans.set(summary.id, { revision, requestIds: unprovedIds });
+      }
+      }
     }
     if (!isUnattributedSession(summary)) continue;
     const cached = repairBuckets.get(summary.id);
@@ -1765,7 +1797,9 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
     } else if (call.providerSessionAnchor) {
       const admitted = await recordProcessCall(sessionId, event, () => {
         const proof = requestCorrelation(input.requestId);
-        return proof?.sessionId === sessionId && proof.conversationId === target.conversationId &&
+        // Unchanged since this call resolved its owner: the proof names target.sessionId, which is not the
+        // session filed in when that one was deleted and the chat's current session took the call (#2301).
+        return proof?.sessionId === (target.sessionId ?? sessionId) && proof.conversationId === target.conversationId &&
           proof.providerSessionAnchor === call.providerSessionAnchor;
       });
       if (!admitted) {
@@ -2146,16 +2180,29 @@ function agentConversation(agent: string): string | null {
  * the dangerous one: with two workers generating at once it appended one agent's calls
  * into the other's raw history, and nothing downstream could tell that had happened.
  */
+/** Deleted sessions already named in the log, so a running request logs the decision once, not per call. */
+const deletedSessionsNoted = new Set<string>();
 async function targetSession(target: Target): Promise<string | null> {
   if (target.attribution === 'superseded') return ensureUnattributedSession();
   if (target.conversationId) {
     if (target.sessionId) {
       const exact = await getSession(target.sessionId);
       if (exact && exact.chatIds.includes(target.conversationId)) return exact.id;
-      logWarn(
-        `request attribution session ${target.sessionId} for conversation ${target.conversationId} is unavailable; refusing to downgrade to a newer conversation epoch`
-      );
-      return null;
+      // A session that still exists but no longer holds this chat is a newer conversation epoch: refuse.
+      // One that was deleted is not an epoch at all. Its running request goes on calling, and its calls
+      // belong to the chat's new session, which the conversation already started (#2298: 18 calls over six
+      // minutes were left out of the record after a person deleted the session of a running turn).
+      if (exact) {
+        logWarn(
+          `request attribution session ${target.sessionId} for conversation ${target.conversationId} is unavailable; refusing to downgrade to a newer conversation epoch`
+        );
+        return null;
+      }
+      if (!deletedSessionsNoted.has(target.sessionId)) {
+        deletedSessionsNoted.add(target.sessionId);
+        if (deletedSessionsNoted.size > 64) deletedSessionsNoted.delete(deletedSessionsNoted.values().next().value!);
+        logInfo(`request attribution: session ${target.sessionId} was deleted; filing its running request's calls under the chat's current session`);
+      }
     }
     const live = conversations.get(target.conversationId);
     if (live) return live.sessionId;
@@ -3505,6 +3552,7 @@ export function resetRecorderForTests(): void {
   fullAttributionRepair = false;
   repairRequestIds.clear();
   repairBuckets.clear();
+  provisionalScans.clear();
   attributionRepairRetryUsed = false;
   agentConversationLookup = () => null;
   agentBinder = () => undefined;

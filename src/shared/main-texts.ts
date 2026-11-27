@@ -10,6 +10,9 @@
  * text without a published translation is shown as written.
  */
 export const MAIN_TEXTS = [
+  'Chat On Steroids (dev)',
+  'Chat On Steroids',
+  'About Chat On Steroids (dev)',
   'Open',
   'Show browser',
   'Hide browser',

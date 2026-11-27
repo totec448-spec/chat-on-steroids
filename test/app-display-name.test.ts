@@ -1,0 +1,121 @@
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+import { JSDOM } from 'jsdom';
+import { load as loadYaml } from 'js-yaml';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { APP_DISPLAY_NAME } from '../src/shared/app-brand-name.js';
+import { MAIN_TEXTS } from '../src/shared/main-texts.js';
+
+const name = `${APP_DISPLAY_NAME} (dev)` as const;
+const about = `About ${APP_DISPLAY_NAME} (dev)` as const;
+const read = (file: string) => readFileSync(file, 'utf8');
+const native = vi.hoisted(() => ({
+  app: { isPackaged: false, setAboutPanelOptions: vi.fn(), setName: vi.fn(), getVersion: () => '2.1.55' },
+  Menu: { getApplicationMenu: vi.fn(), buildFromTemplate: vi.fn((items: unknown[]) => ({ items })), setApplicationMenu: vi.fn() }
+}));
+vi.mock('electron', () => native);
+let dom: JSDOM;
+beforeEach(() => {
+  vi.resetModules(); vi.clearAllMocks(); native.app.isPackaged = false;
+  vi.stubEnv('COS_DEV_BRAND', '');
+  dom = new JSDOM(read('src/renderer/index.html'), { url: 'https://local.test/' });
+  for (const key of ['window', 'document', 'Node', 'Element', 'HTMLElement'] as const) {
+    vi.stubGlobal(key, key === 'window' ? dom.window : dom.window[key]);
+  }
+});
+afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); dom.window.close(); });
+
+it('renders production branding in all three HTML surfaces before any AppState arrives', () => {
+  expect([...document.querySelectorAll('[data-app-display-name]')].map(node => [node.tagName, node.textContent])).toEqual([
+    ['TITLE', APP_DISPLAY_NAME], ['STRONG', APP_DISPLAY_NAME], ['SPAN', APP_DISPLAY_NAME]
+  ]);
+  expect(document.title).toBe(APP_DISPLAY_NAME);
+});
+
+it.each(['en', 'ja', 'de', 'es', 'fr', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'zh-CN', 'zh-TW'] as const)('binds main-selected names through %s localization', async language => {
+  const i18n = await import('../src/renderer/i18n.js');
+  const { applyAppBrand } = await import('../src/renderer/app-brand.js');
+  i18n.initLanguage();
+  expect(document.title).toBe(APP_DISPLAY_NAME);
+  for (const displayName of [name, APP_DISPLAY_NAME] as const) {
+    applyAppBrand(displayName); i18n.setLanguage(language);
+    expect(document.title).toBe(displayName);
+    expect(document.querySelector('.sidebar-brand strong')?.textContent).toBe(displayName);
+    expect(document.querySelector('.chat-head .title')?.textContent).toContain(displayName);
+    const { mainTexts } = await import('../src/renderer/main-texts.js');
+    expect(mainTexts()[displayName]).toBe(displayName);
+    const catalog = language === 'en' ? null : JSON.parse(read(`src/renderer/locales/${language}.json`));
+    expect(mainTexts()[about]).toBe(catalog ? catalog[about] : about);
+  }
+});
+
+it('registers display keys in every translated catalog and keeps English as source text', () => {
+  for (const key of [name, APP_DISPLAY_NAME, about]) {
+    expect(MAIN_TEXTS).toContain(key);
+    for (const language of ['ja', 'de', 'es', 'fr', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'zh-CN', 'zh-TW']) {
+      const catalog = JSON.parse(read(`src/renderer/locales/${language}.json`));
+      expect(Object.hasOwn(catalog, key)).toBe(true);
+      expect(catalog[key]?.trim()).toBeTruthy();
+      if (key !== about) expect(catalog[key]).toBe(key);
+      if (key === about && language === 'ja') expect(catalog[key]).toBe(`${name}について`);
+    }
+  }
+});
+
+it.each([
+  { packaged: false, override: '', development: true },
+  { packaged: true, override: '', development: false },
+  { packaged: true, override: '1', development: true },
+  { packaged: true, override: '0', development: false }
+])('selects native labels for packaged=$packaged override=$override', async ({ packaged, override, development }) => {
+  native.app.isPackaged = packaged; vi.stubEnv('COS_DEV_BRAND', override);
+  const otherMenu = { label: 'File' }, quit = { role: 'quit' };
+  native.Menu.getApplicationMenu.mockReturnValue({ items: [{ label: 'Electron', submenu: { items: [{ role: 'about' }, quit] } }, otherMenu] });
+  const { appBrand, refreshNativeBrand } = await import('../src/main/app-brand.js');
+  const displayName = development ? name : APP_DISPLAY_NAME;
+  expect(appBrand).toEqual({ development, displayName });
+  // Exercise the actual tooltip path with both branding modes and localized status labels.
+  const { mainText, setMainTextTranslations } = await import('../src/main/main-texts.js');
+  const source = read('src/main/index.ts');
+  const tooltip = source.slice(source.indexOf('function refreshTray(): void'), source.indexOf('  const cosBrowser = loadedCosBrowser();'))
+    .replace('function refreshTray(): void', 'function refreshTray()') + '\n}';
+  const tray = { setImage: vi.fn(), setToolTip: vi.fn() };
+  const status = { state: 'disconnected', offlineCause: '' };
+  const context = vm.createContext({ appBrand, mainText, tray, getStatus: () => status, trayIcon: vi.fn() });
+  vm.runInContext(tooltip, context);
+  const languages: Record<string, string>[] = [{}, { Connected: '接続済み', 'Not connected': '未接続', 'No internet': 'インターネット接続なし', 'OpenAI outage': 'OpenAIの障害' }];
+  for (const translations of languages) {
+    setMainTextTranslations(translations);
+    for (const [state, offlineCause, label] of [
+      ['connected', '', 'Connected'], ['disconnected', '', 'Not connected'],
+      ['offline', 'internet', 'No internet'], ['offline', 'service', 'OpenAI outage']
+    ] as const) {
+      Object.assign(status, { state, offlineCause });
+      vm.runInContext('refreshTray()', context);
+      expect(tray.setToolTip).toHaveBeenLastCalledWith(`${displayName} — ${translations[label] ?? label}`);
+    }
+  }
+  const window = { isDestroyed: () => false, setTitle: vi.fn() };
+  refreshNativeBrand(window as never);
+  expect(native.app.setAboutPanelOptions).toHaveBeenCalledWith({ applicationName: displayName, applicationVersion: '2.1.55' });
+  expect(window.setTitle).toHaveBeenCalledWith(displayName);
+  expect(native.app.setName).not.toHaveBeenCalled();
+  if (development && process.platform === 'darwin') {
+    expect(native.Menu.setApplicationMenu).toHaveBeenCalledWith({ items: [
+      { label: 'Electron', submenu: { items: [{ role: 'about', label: about }, quit] } }, otherMenu
+    ] });
+  } else expect(native.Menu.setApplicationMenu).not.toHaveBeenCalled();
+});
+
+it('preserves literal package identity and the display-only state projection', () => {
+  expect(APP_DISPLAY_NAME).toBe('Chat On Steroids');
+  const pkg = JSON.parse(read('package.json'));
+  const builder = loadYaml(read('electron-builder.yml')) as Record<string, unknown>;
+  expect(pkg.name).toBe('chat-on-steroids'); expect(pkg.productName).toBeUndefined();
+  expect(builder.productName).toBe('Chat On Steroids'); expect(builder.appId).toBe('com.chatonsteroids.app');
+  const main = read('src/main/index.ts');
+  expect(read('src/main/ipc.ts')).toContain('displayName: appBrand.displayName');
+  expect(read('src/renderer/main.ts')).toContain('applyAppBrand(next.displayName ?? APP_DISPLAY_NAME)');
+  expect(read('src/renderer/index.html')).not.toContain('(dev)');
+  expect((main + read('src/main/app-brand.ts')).replace(/\/\/[^\n]*/g, '')).not.toMatch(/app\.setName\s*\(|app\.setPath\s*\(|app\.name\s*=/);
+});
