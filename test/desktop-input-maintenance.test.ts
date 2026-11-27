@@ -1291,7 +1291,9 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     expect(h.windows.update).toHaveBeenCalledWith(80, { state: 'minimized', focused: false });
     expect(h.windows.update).toHaveBeenCalledTimes(1);
     expect(h.update).toHaveBeenCalledWith(1, { autoDiscardable: false });
-    expect(String(h.create.mock.calls[0]?.[0]?.url)).toContain('model=gpt-5.6-sol&reasoning_effort=medium');
+    // A requested level rides alone: a model param beside it makes ChatGPT revert the level at picker close.
+    expect(String(h.create.mock.calls[0]?.[0]?.url)).toContain('reasoning_effort=medium');
+    expect(String(h.create.mock.calls[0]?.[0]?.url)).not.toContain('model=');
     await h.maintain();
     expect(h.create).toHaveBeenCalledTimes(1);
   });
