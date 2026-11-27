@@ -17,8 +17,11 @@ export function watchSetupRailLabels(rail: HTMLElement | null): (() => void) | n
   const schedule = (): void => { if (!frame) frame = requestAnimationFrame(fit); };
   // Only the rail's width matters to the resize watch: showing or hiding the labels changes its height.
   new ResizeObserver(() => { if (rail.clientWidth !== width) { width = rail.clientWidth; schedule(); } }).observe(rail);
-  new MutationObserver(schedule).observe(rail, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['hidden'] });
-  void rail.ownerDocument.fonts?.ready.then(schedule);
+  new MutationObserver(schedule).observe(rail, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['hidden', 'aria-current'] });
+  // A font that arrives after the first measurement (swap) changes every label's width, with the rail's unchanged.
+  const fonts = rail.ownerDocument.fonts;
+  void fonts?.ready.then(schedule);
+  fonts?.addEventListener?.('loadingdone', schedule);
   schedule();
   return schedule;
 }

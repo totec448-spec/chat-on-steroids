@@ -321,15 +321,20 @@ app.whenReady().then(async () => {
     await js(railCode);
     await showPage('setup');
     await js(`window.refitRail = railFit.watchSetupRailLabels(document.querySelector('.setup-rail')); 0`);
-    const russian = ['Браузер', 'Папка', 'Доступ', 'Туннель', 'API-ключ', 'Подключение', 'ChatGPT', 'Готово'];
-    const english = ['Browser', 'Folder', 'Access', 'Tunnel', 'API key', 'Connect', 'ChatGPT', 'Ready'];
-    for (const [width, height, names, whole] of [[820, 656, russian, false], [1000, 700, russian, false], [700, 560, english, false], [1440, 950, english, true]]) {
+    // The step names of each language, as two fixed scripts: nothing is built from a value.
+    const setNames = {
+      russian: `(() => { const names = ['Браузер', 'Папка', 'Доступ', 'Туннель', 'API-ключ', 'Подключение', 'ChatGPT', 'Готово'];
+        document.querySelectorAll('.setup-rail .setup-rail-label').forEach((label, index) => { label.textContent = names[index] ?? label.textContent; });
+        document.getElementById('setupProgressText').textContent = 'Выполнены все 7 шагов'; })()`,
+      english: `(() => { const names = ['Browser', 'Folder', 'Access', 'Tunnel', 'API key', 'Connect', 'ChatGPT', 'Ready'];
+        document.querySelectorAll('.setup-rail .setup-rail-label').forEach((label, index) => { label.textContent = names[index] ?? label.textContent; });
+        document.getElementById('setupProgressText').textContent = 'All 7 steps done'; })()`
+    };
+    for (const [width, height, language, whole] of [[820, 656, 'russian', false], [1000, 700, 'russian', false], [700, 560, 'english', false], [1440, 950, 'english', true]]) {
       win.setSize(width, height); win.webContents.setZoomFactor(1);
       await showPage('setup');
       // The labels and the progress line a window shows in that language, in the same markup.
-      await js(`(() => { const names = ${JSON.stringify(names)};
-        document.querySelectorAll('.setup-rail .setup-rail-label').forEach((label, index) => { label.textContent = names[index] ?? label.textContent; });
-        document.getElementById('setupProgressText').textContent = 'Выполнены все 7 шагов'; })()`);
+      await js(setNames[language]);
       await js(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 100))))`);
       const rail = await js(`(() => [...document.querySelectorAll('.setup-rail li:not([hidden]) button')].map(button => {
         const label = button.querySelector('.setup-rail-label'), box = label.getBoundingClientRect(), style = getComputedStyle(label);
