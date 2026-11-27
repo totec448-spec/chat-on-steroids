@@ -308,6 +308,12 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 **Intent:** open a usable local workspace, restore accepted work consistently, and exit without
 leaving an invisible process, tool, writer or installer competing with the next launch.
 
+Display branding is presentation only. `src/main/app-brand.ts` owns the development predicate
+(`!app.isPackaged || COS_DEV_BRAND === '1'`) and composes the display label from
+`src/shared/app-brand-name.ts`. `state:get` adds optional `AppState.displayName`; the renderer
+uses that label, or the production base name for older snapshots. Do not derive app.name,
+appId, productName or userData from it. The macOS application menu keeps its native identity.
+
 The single-instance lock must be won before touching shared userData. The losing process marks
 itself quitting immediately; `app.quit()` alone does not stop module evaluation. Activation from
 second-instance/tray/Dock is gated until restore, CSP, permissions and IPC are ready. Once quit
@@ -1601,6 +1607,9 @@ running. For an exactly attributed launch, the process instance's exit promise r
 same canonical call UUID with exit time/code; numeric terminal-id reuse cannot retarget it.
 This revision neither drains output nor creates model work, a new tool call or a turn boundary.
 Legacy launches without exit evidence display `started`; never invent a retrospective success.
+An exec summary whose evidence says `running: false` with exit 0 carries `ended: true`; only then does the
+browser transcript show its `✓ <duration>` (#2239). A `✓ <duration>` without `ended` (recorded before the app kept
+that state, or with unknown process state) stays hidden there, since it may be a yield window.
 
 `env.ts` is the shared child-environment authority: Windows key names are case-insensitive,
 so use its accessors rather than creating both `Path` and `PATH`. Preserve inherited values.
@@ -4546,9 +4555,13 @@ answering, a non-empty editor, or no usable editor yet; re-reported when the rea
 older pages send `revival-waiting`), then
 `composer`, `model`, `composer-after-model`, `inserting`, `sending` from the redeeming page.
 Reports are fire-and-forget and advisory: they change no lease or outcome, a report from a page
-that does not own the command is ignored, and they never carry text, titles or addresses. One
-changes a deadline: a worker's `sending` gives its receipt `WORKER_SENDING_GRACE_MS` from that
-report (bounded), because a page that pressed Send may already have delivered the task (#1086).
+that does not own the command is ignored, and they never carry text, titles or addresses. Two
+change a worker's deadline. A later stage than the last reported one gives the ordinary
+`COMMAND_DEADLINE_MS` from that report, capped at `WORKER_BOOTSTRAP_LIMIT_MS`
+(`WORKER_REDEEM_MS` + `COMMAND_DEADLINE_MS`) from the invitation; a repeated stage moves nothing.
+`sending` gives its receipt `WORKER_SENDING_GRACE_MS` from that report, which is not capped at that
+limit, because a page that pressed Send may already have delivered the task (#1086). The reply to a
+report that moved the deadline carries `expiresAt`, which the page keeps if later than its own (#2270).
 Expiry names the last one, or whether the browser or the OS opened the chat and no
 page picked it up, so "did not report back in time" says where a start stopped (#882 worker-11).
 ChatGPT announcements over a page (2026-10-30: "Premium seats just got better" over a fresh chat

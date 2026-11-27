@@ -1120,6 +1120,48 @@ it.each([false, true])('uses bounded fallback with unreadable pre-Enter Fiber st
   if (!hydrates) expect(diagnostic).toMatchObject({ failure: 'unreadable', failedPhase: 'read' });
 });
 
+// #2298: a native Enter that moves the effort without mounting the menu was refused as drift even when it moved
+// the effort to exactly the one asked for, so a wake or a worker start reported an unconfirmed picker while the
+// page already showed the request.
+it('accepts a native Enter that moves the effort to the requested one without opening the menu', async () => {
+  vi.useFakeTimers();
+  const f = fixture(), doc = page.window.document, trigger = nativeReasoningTrigger();
+  trigger.setAttribute('data-selected-reasoning-effort', 'medium');
+  f.state.currentBucket = 1; f.state.currentSelection = f.selections[0]![0]!;
+  const clicks = vi.fn(); trigger.addEventListener('click', clicks);
+  doc.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' || event.target !== trigger) return;
+    event.stopImmediatePropagation();
+    trigger.setAttribute('data-selected-reasoning-effort', 'high');
+    f.state.currentBucket = 2; f.state.currentSelection = f.selections[0]![1]!;
+  }, true);
+  const reports: unknown[] = [];
+  const result = f.api.selectModelSettings('gpt-5-6-thinking', 'high', () => true, (value: unknown) => reports.push(value));
+  await vi.runAllTimersAsync();
+  expect(await result).toBe(true);
+  expect(clicks).not.toHaveBeenCalled();
+  expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({ outcome: 'confirmed', selected: { model: 'gpt-5-6-thinking', effort: 'high' } });
+  expect(doc.querySelector('[data-testid="composer-intelligence-picker-content"]')).toBeNull();
+});
+
+it('still refuses a native Enter that moves the effort while the requested model is another one', async () => {
+  vi.useFakeTimers();
+  const f = fixture(), doc = page.window.document, trigger = nativeReasoningTrigger();
+  const clicks = vi.fn(); trigger.addEventListener('click', clicks);
+  doc.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' || event.target !== trigger) return;
+    event.stopImmediatePropagation();
+    trigger.setAttribute('data-selected-reasoning-effort', 'medium');
+    f.state.currentBucket = 1; f.state.currentSelection = f.selections[0]![0]!;
+  }, true);
+  const reports: unknown[] = [];
+  const result = f.api.selectModelSettings('future-model', 'low', () => true, (value: unknown) => reports.push(value));
+  await vi.runAllTimersAsync();
+  expect(await result).toBe(false);
+  expect(clicks).not.toHaveBeenCalled();
+  expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({ outcome: 'failed', failedPhase: 'open', failure: 'changed' });
+});
+
 it('refuses click when previously absent native effort appears after Enter without a portal', async () => {
   vi.useFakeTimers();
   const f = fixture(), trigger = page.window.document.querySelector('button')!;

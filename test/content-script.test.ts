@@ -8280,6 +8280,37 @@ describe('the app-owned chronological stream', () => {
     expect(overwriteText(section)).toContain('✕ exit 1');
   });
 
+  it('shows the duration of a command whose recorded summary says it ended, and still hides an unmarked one (#2239)', async () => {
+    const endedActivity = () => ({
+      ok: true,
+      data: {
+        entries: [],
+        userAnchors: [{ seq: 0, time: 50, messageId: ownerMessageId }],
+        stream: [
+          { seq: 1, time: 100, kind: 'turn_start', turnId, agent: null },
+          { seq: 2, time: 110, kind: 'tool_call', turnId, agent: null, tool: 'exec_command', callId: 'ended-call',
+            requestId: 'wfr-ended-stream', outcome: 'ok', durationMs: 1200,
+            summary: { kind: 'run', tone: 'good', title: 'Ran quick check', metric: '✓ 1.2s', ended: true } },
+          { seq: 3, time: 120, kind: 'tool_call', turnId, agent: null, tool: 'exec_command', callId: 'old-call',
+            requestId: 'wfr-ended-stream', outcome: 'ok', durationMs: 10_000,
+            summary: { kind: 'run', tone: 'good', title: 'Ran older check', metric: '✓ 10.0s' } },
+          { seq: 4, time: 130, kind: 'tool_call', turnId, agent: null, tool: 'exec_command', callId: 'old-long-call',
+            requestId: 'wfr-ended-stream', outcome: 'ok', durationMs: 245_000,
+            summary: { kind: 'run', tone: 'good', title: 'Ran older long check', metric: '✓ 4m 5s' } }
+        ],
+        job: null
+      }
+    });
+    live = await harness(undefined, { activity: endedActivity });
+    renderingOn();
+    const section = ownedStreamTurn();
+    await bindFiberRequest(section, 'wfr-ended-stream', 'exec_command');
+    live.hook.renderStreams();
+    expect(overwriteText(section)).toContain('✓ 1.2s');
+    expect(overwriteText(section)).not.toContain('✓ 10.0s');
+    // The producer writes two units from one minute on; an unmarked one is just as ambiguous.
+    expect(overwriteText(section)).not.toContain('✓ 4m 5s');
+  });
   it('updates a background process in its existing stream row when its exit arrives', async () => {
     let completed = false;
     const processActivity = () => ({ ok: true, data: { entries: [], nextSince: completed ? 10 : 3,
@@ -18437,6 +18468,84 @@ describe('the fresh chat the app opened', () => {
     } finally {
       live.window.setTimeout = instantTimer;
     }
+  });
+
+  // #2270: the app moves a worker's deadline when its page reports a later stage, and says so in the reply. A
+  // page that kept the deadline it redeemed under gave up while the app still allowed it to run.
+  it.each([true, false])('takes the deadline the app grants for a later stage (granted=%s)', async granted => {
+    let release!: (value: unknown) => void;
+    const redeemed = new Promise(resolve => { release = resolve; });
+    const workerChat = '34343434-4545-4656-8787-909090909091';
+    let submitted = '';
+    live = await harness('https://chatgpt.com/?clf=cmd-stage-deadline', {
+      redeem: () => redeemed,
+      command_step: () => ({ ok: true, ...(granted ? { expiresAt: live!.window.Date.now() + 60_000 } : {}) }),
+      ack: () => ({ ok: true })
+    }, (document, dom) => {
+      document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+        submitted = composerText(document);
+        dom.reconfigure({ url: `https://chatgpt.com/c/${workerChat}` });
+        userTurn(document, 'stage-deadline-user', 'Worker task after a slow model step', { sent: false });
+      });
+    });
+    // The page's waits run a hundred times faster than the clock, so a slow page fits in a test.
+    const instantTimer = live.window.setTimeout;
+    live.window.setTimeout = ((fn: () => void, ms?: number) => globalThis.setTimeout(fn, Math.max(1, Number(ms ?? 0) / 100))) as unknown as typeof live.window.setTimeout;
+    (live.window as any).CLF_DOM.selectModelSettings = vi.fn(async () => {
+      // The composer remounts after the model step, as it does on a slow page; the page waits for it
+      // for as long as its deadline allows. The picker takes a moment, so the app's reply to the model
+      // step has reached the page by the time it is done.
+      await new Promise(resolve => globalThis.setTimeout(resolve, 50));
+      const old = live!.document.querySelector('#prompt-textarea')!;
+      const parent = old.parentElement!;
+      const replacement = old.cloneNode(true);
+      old.remove();
+      globalThis.setTimeout(() => parent.prepend(replacement), 300);
+      return true;
+    });
+    try {
+      release({ ok: true, command: { id: 'cmd-stage-deadline', type: 'worker', text: 'Worker task after a slow model step',
+        agent: 'worker-1', model: 'gpt-5.6-sol', reasoningEffort: 'high', expiresAt: live.window.Date.now() + 1_000 } });
+      await vi.waitFor(() => expect(live!.sent.filter((message) => message.type === 'ack')).toContainEqual(expect.objectContaining({
+        id: 'cmd-stage-deadline', status: granted ? 'sent' : 'failed' })), { timeout: 10_000, interval: 20 });
+      expect(submitted === 'Worker task after a slow model step').toBe(granted);
+    } finally { live.window.setTimeout = instantTimer; }
+  });
+
+  // CodeRabbit on #2300: the first composer wait fixed its bound when it began, so a composer that showed up after
+  // that bound failed the bootstrap although the app had just granted more time with the `composer` stage report.
+  it.each([true, false])('waits for a late composer up to the deadline the composer stage was granted (granted=%s)', async granted => {
+    let release!: (value: unknown) => void;
+    const redeemed = new Promise(resolve => { release = resolve; });
+    const workerChat = '35353535-4545-4656-8787-909090909092';
+    let submitted = '';
+    live = await harness('https://chatgpt.com/?clf=cmd-late-composer', {
+      redeem: () => redeemed,
+      command_step: () => ({ ok: true, ...(granted ? { expiresAt: live!.window.Date.now() + 60_000 } : {}) }),
+      ack: () => ({ ok: true })
+    }, (document, dom) => {
+      document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+        submitted = composerText(document);
+        dom.reconfigure({ url: `https://chatgpt.com/c/${workerChat}` });
+        userTurn(document, 'late-composer-user', 'Worker task for a late composer', { sent: false });
+      });
+    });
+    // The page's waits run a hundred times faster than the clock, so a slow page fits in a test.
+    const instantTimer = live.window.setTimeout;
+    live.window.setTimeout = ((fn: () => void, ms?: number) => globalThis.setTimeout(fn, Math.max(1, Number(ms ?? 0) / 100))) as unknown as typeof live.window.setTimeout;
+    const editor = live.document.querySelector('#prompt-textarea')!;
+    const parent = editor.parentElement!;
+    editor.remove();
+    try {
+      // The first bound is about 10 s of page time (100 ms here); the composer comes at 150 ms, inside what the
+      // `composer` report grants (about 40 s) and past what the page redeemed with.
+      release({ ok: true, command: { id: 'cmd-late-composer', type: 'worker', text: 'Worker task for a late composer',
+        agent: 'worker-1', expiresAt: live.window.Date.now() + 30_000 } });
+      globalThis.setTimeout(() => parent.prepend(editor), 150);
+      await vi.waitFor(() => expect(live!.sent.filter((message) => message.type === 'ack')).toContainEqual(expect.objectContaining({
+        id: 'cmd-late-composer', status: granted ? 'sent' : 'failed' })), { timeout: 10_000, interval: 20 });
+      expect(submitted === 'Worker task for a late composer').toBe(granted);
+    } finally { live.window.setTimeout = instantTimer; }
   });
 
   it('keeps waiting past the old 12s post-picker cutoff while the redeemed worker lease is live', async () => {

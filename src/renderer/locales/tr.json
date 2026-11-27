@@ -1,4 +1,6 @@
 {
+  "Chat On Steroids (dev)": "Chat On Steroids (dev)",
+  "About Chat On Steroids (dev)": "Chat On Steroids (dev) Hakkında",
   "Suppress unattributed call notices": "İlişkilendirilmemiş çağrı bildirimlerini gizle",
   "For standalone MCP clients: omit the informational identity notice when unattributed calls are allowed. Permissions and tool errors are unchanged.": "Bağımsız MCP istemcileri için: ilişkilendirilmemiş çağrılara izin verildiğinde bilgilendirici kimlik bildirimini atla. İzinler ve araç hataları değişmez.",
   "Another Git operation is in progress. Try again when it finishes.": "Başka bir Git işlemi sürüyor. İşlem tamamlandığında yeniden deneyin.",
