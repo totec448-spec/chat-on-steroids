@@ -13,7 +13,7 @@ const code = source.slice(start, source.indexOf('\n/** Snapshot sent only to the
 type Tab = { id: number; windowId: number; url: string; status?: string; discarded?: boolean; frozen?: boolean; groupId?: number; incognito?: boolean; lastAccessed?: number };
 function environment(options: { tabs: Tab[]; browser?: unknown; navigator?: unknown; backgroundWindow?: number | null; reply?: (id: number) => unknown }) {
   const tabReply = vi.fn(async (id: number) => {
-    const answer = options.reply ? options.reply(id) : { composer: true, sendArea: true, modelMenu: true, plusMenu: true, language: 'de-DE' };
+    const answer = options.reply ? options.reply(id) : { composer: true, sendArea: true, modelMenu: true, plusMenu: true, renameControl: false, language: 'de-DE' };
     if (answer instanceof Error) throw answer;
     return answer;
   });
@@ -44,7 +44,7 @@ it('names Chrome-family browsers by their brand and counts ChatGPT tabs by state
   expect(await run()).toEqual({
     browser: { name: 'Google Chrome', version: '154.0.7400.12' },
     tabs: { open: 5, discarded: 1, frozen: 1, loading: 1, grouped: 2, inBackgroundWindow: 2 },
-    page: { composer: true, sendArea: true, modelMenu: true, plusMenu: true, language: 'de-DE' }
+    page: { composer: true, sendArea: true, modelMenu: true, plusMenu: true, renameControl: false, language: 'de-DE' }
   });
   // The most recently used tab that is awake and loaded answers, not a discarded or frozen one.
   expect(tabReply).toHaveBeenCalledExactlyOnceWith(6, { type: 'clf-page-checks' });
@@ -59,7 +59,7 @@ it('names Firefox from its own browser info', async () => {
 it('keeps only names, versions and booleans, whatever a page or the browser answers', async () => {
   const navigator = { userAgentData: { brands: [{ brand: 'Evil <b>Brand</b> with a very long name that goes on', version: '1' }] } };
   const { run } = environment({ tabs: [tabs[0]!], navigator,
-    reply: () => ({ composer: 'yes', sendArea: true, modelMenu: 1, plusMenu: false, language: 'en', text: 'private chat text' }) });
+    reply: () => ({ composer: 'yes', sendArea: true, modelMenu: 1, plusMenu: false, renameControl: 'private text', language: 'en', text: 'private chat text' }) });
   expect(await run()).toEqual({ browser: { name: 'unknown', version: null },
     tabs: { open: 1, discarded: 0, frozen: 0, loading: 0, grouped: 0, inBackgroundWindow: 0 },
     page: { composer: false, sendArea: true, modelMenu: false, plusMenu: false, language: 'en' } });

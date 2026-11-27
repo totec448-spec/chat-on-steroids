@@ -5506,12 +5506,22 @@ It uses the same browser/document custody as the title check. Starting the edit 
 The matching `sessions:rename` save consumes the nonce. A baseline confirmed before Save
 can produce one offer carrying that Web title and a 15-second deadline. A Web rename after
 the snapshot invalidates the offer.
+The MAIN-world read requires an exact personal conversation in the account-scoped sidebar history and
+agreement with the active navigation rail's committed account context. Only a hashed scope
+crosses into the companion and local bridge. It stays in memory for the edit and is rechecked
+before opening the editor and before submitting. A different or unproven account stops the
+operation without opening or retrying the chat. Workspace membership alone cannot prove
+the chat belongs to the signed-in person. The checks make no provider requests.
 A separate commit request on `/browser/web-chat-title`
 checks that the setting, browser, session binding and saved manual title still match. The
 companion checks the previous title against the page and navigation label, then uses the
 same native title editor as a browser user. It acknowledges only a confirmed title and
 logs the outcome without title text. It neither calls a provider endpoint directly nor
 stores or retries the work. Clearing a name or Compact & Resume never causes a Web rename.
+The diagnostics report passively checks the sidebar row and options control on the most
+recently used awake ChatGPT tab. A menu item and its editor are checked only when an opted-in
+rename opens them. When any stage is unavailable, the local rename is retained and the
+Web attempt logs the specific stage. The comparison notice remains independently opt-in.
 
 Session metadata owns `titleSource` (authored fallback, provider, manual). The preview uses only
 the first authored user message, at one 80-character bound; injected instructions/AGENTS frames

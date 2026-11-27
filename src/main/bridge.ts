@@ -1145,6 +1145,7 @@ function diagnosticEnvironment(value: unknown): CompanionEnvironment | null {
       inBackgroundWindow: count('inBackgroundWindow') },
     page: page ? {
       composer: page.composer === true, sendArea: page.sendArea === true, modelMenu: page.modelMenu === true, plusMenu: page.plusMenu === true,
+      ...(typeof page.renameControl === 'boolean' ? { renameControl: page.renameControl } : {}),
       language: typeof page.language === 'string' && /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(page.language) ? page.language : null
     } : null
   };

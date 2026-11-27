@@ -16,6 +16,7 @@
  */
 
 import { promises as fs } from 'node:fs';
+import { webcrypto } from 'node:crypto';
 import path from 'node:path';
 import { JSDOM } from 'jsdom';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -46,6 +47,48 @@ interface Descriptor {
 // ------------------------------------------------------------------ fixtures
 
 const THREAD = 'f0f00004-1111-4111-8111-111111111111';
+
+it('requires the native rename target in the active account history and returns only an opaque scope', async () => {
+  const accountA = '11111111-1111-4111-8111-111111111111';
+  const accountB = '22222222-2222-4222-8222-222222222222';
+  const person = 'user-ABCDEFGHIJKLMNOPQRSTUVWX';
+  const dom = new JSDOM('<nav data-app-navigation-rail><button aria-haspopup="menu"></button></nav>',
+    { url: 'https://chatgpt.com/c/' + THREAD, runScripts: 'outside-only' });
+  try {
+    const page = dom.window;
+    const button = page.document.querySelector('button')! as unknown as Record<string, unknown>;
+    let context = { accountId: accountA, userId: person, email: 'private@example.test' };
+    button['__reactFiber$fixture'] = { return: null, get dependencies() { return { firstContext: { memoizedValue: context } }; } };
+    const history = { accountId: accountA, chats: Promise.resolve<{ items: Array<{ id: string; workspace_id: string | null }> }>(
+      { items: [{ id: THREAD, workspace_id: null }] }) };
+    const pageRecord = page as unknown as Record<string, unknown>;
+    pageRecord.__reactRouterDataRouter = { state: { loaderData: { 'authenticated-layout.route': { sidebarHistory: history } } } };
+    Object.defineProperty(page.crypto, 'subtle', { value: webcrypto.subtle });
+    pageRecord.TextEncoder = TextEncoder;
+    let respond: (proof: unknown) => void;
+    page.postMessage = (message: { source?: string; proof?: unknown }) => {
+      if (message?.source === 'clf-rename-account-reply') respond(message.proof);
+    };
+    page.eval(source);
+    const proof = () => new Promise(resolve => {
+      respond = resolve;
+      page.dispatchEvent(new page.MessageEvent('message', { source: page as unknown as Window,
+        data: { source: 'clf-rename-account-ask', nonce: 'account-proof', conversationId: THREAD } }));
+    });
+    const first = await proof();
+    expect(first).toEqual({ accountKey: expect.stringMatching(/^[a-f0-9]{64}$/) });
+    expect(JSON.stringify(first)).not.toContain(person);
+    expect(JSON.stringify(first)).not.toContain(accountA);
+
+    history.chats = Promise.resolve({ items: [{ id: THREAD, workspace_id: accountA }] });
+    await expect(proof()).resolves.toEqual({ reason: 'account-unconfirmed' });
+    context = { ...context, accountId: accountB };
+    await expect(proof()).resolves.toEqual({ reason: 'account-mismatch' });
+    history.accountId = accountB;
+    history.chats = Promise.resolve({ items: [] });
+    await expect(proof()).resolves.toEqual({ reason: 'account-unconfirmed' });
+  } finally { dom.window.close(); }
+});
 /**
  * The connector name the live page actually holds, taken from a real conversation.
  *

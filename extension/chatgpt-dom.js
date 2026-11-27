@@ -556,6 +556,28 @@ var CLF_DOM = (() => {
       (active === inputs[0] || active === document.body || row.contains(active)) ? inputs[0] : null;
   }
 
+  function readRenameAccount(conversation) {
+    return new Promise(resolve => {
+      const nonce = crypto.randomUUID();
+      const finish = proof => {
+        clearTimeout(timer);
+        window.removeEventListener('message', receive);
+        resolve(proof);
+      };
+      const receive = event => {
+        const data = event.data;
+        if (event.source !== window || event.origin !== location.origin ||
+            data?.source !== 'clf-rename-account-reply' || data.nonce !== nonce) return;
+        const key = data.proof?.accountKey;
+        if (typeof key === 'string' && /^[a-f0-9]{64}$/.test(key)) finish({ accountKey: key });
+        else finish({ reason: data.proof?.reason === 'account-mismatch' ? 'account-mismatch' : 'account-unconfirmed' });
+      };
+      const timer = setTimeout(() => finish({ reason: 'account-unconfirmed' }), 1000);
+      window.addEventListener('message', receive);
+      window.postMessage({ source: 'clf-rename-account-ask', nonce, conversationId: conversation }, location.origin);
+    });
+  }
+
   /**
    * Logical conversation turns, newest last.
    *
@@ -3582,12 +3604,14 @@ var CLF_DOM = (() => {
   function pageChecks() {
     return safe(() => {
       const language = document.documentElement.getAttribute('lang') || '';
+      const chat = conversationId(), title = chat && conversationTitle();
       return {
         composer: Boolean(composer()),
         sendArea: Boolean(composerActions()),
         modelMenu: Boolean(modelPickerTrigger()),
         // The October 2026 composer marks it only as its add-context navigation target.
         plusMenu: Boolean(document.querySelector('[data-composer-navigation-target="add-context"],#composer-plus-btn,[data-testid="composer-plus-btn"]')),
+        ...(title ? { renameControl: Boolean(nativeChatRenameControl(chat, title)) } : {}),
         language: /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(language) ? language : null
       };
     }, { composer: false, sendArea: false, modelMenu: false, plusMenu: false, language: null });
@@ -4530,6 +4554,7 @@ var CLF_DOM = (() => {
     nativeChatRenameControl,
     nativeChatRenameItem,
     nativeChatRenameInput,
+    readRenameAccount,
     turns,
     presentationTurns,
     messages,

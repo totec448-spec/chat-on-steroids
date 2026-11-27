@@ -3740,6 +3740,7 @@ async function checkWebChatTitle(request) {
   if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id) || !conversationId) return;
   const intent = connectionEpoch;
   let title = null;
+  let accountKey;
   let reason = 'no-matching-tab';
   try {
     const matchingTabs = async () => (await chrome.tabs.query({ url: CHATGPT_TAB_URLS })).filter(tab =>
@@ -3761,7 +3762,8 @@ async function checkWebChatTitle(request) {
         try {
           answer = await tabReply(tab.id, request.rename
             ? { type: 'clf-rename-web-chat', id, conversationId, ...request.rename }
-            : { type: 'clf-check-web-chat-title', conversationId }, { documentId }, request.rename ? 6500 : 3000);
+            : { type: 'clf-check-web-chat-title', conversationId, ...(request.accountProof ? { accountProof: true } : {}) },
+          { documentId }, request.rename ? 9000 : 3000);
         } finally {
           if (request.rename && webChatRenameOwner?.id === id) webChatRenameOwner = null;
         }
@@ -3772,16 +3774,24 @@ async function checkWebChatTitle(request) {
             ownsDocument(source)) {
           reason = answer ? 'title-unconfirmed' : 'page-unresponsive';
           if (typeof answer?.title === 'string' && answer.title.length <= 200) title = answer.title.trim() || null;
-            if (request.rename && ['title-changed', 'native-rename-unavailable', 'native-rename-unconfirmed', 'rename-canceled',
-              'native-trigger-unavailable', 'native-menu-unavailable', 'native-editor-unavailable', 'native-input-rejected'].includes(answer?.reason)) {
-              reason = answer.reason;
-            }
+          if ((request.accountProof || request.rename) && ['account-unconfirmed', 'account-mismatch'].includes(answer?.reason))
+            reason = answer.reason;
+          if (request.accountProof) {
+            if (typeof answer?.accountKey === 'string' && /^[a-f0-9]{64}$/.test(answer.accountKey)) accountKey = answer.accountKey;
+            else title = null;
+          }
+          if (request.rename && ['title-changed', 'native-rename-unavailable', 'native-rename-unconfirmed', 'rename-canceled',
+            'native-trigger-unavailable', 'native-menu-unavailable', 'native-editor-unavailable', 'native-input-rejected'].includes(answer?.reason)) {
+            reason = answer.reason;
+          }
         }
       }
     }
   } catch { reason = 'browser-error'; }
   if (intent !== connectionEpoch || !token || disconnected) return;
-  await call('/browser/web-chat-title', { method: 'POST', body: JSON.stringify({ id, conversationId, title, ...(title === null ? { reason } : {}) }) });
+  await call('/browser/web-chat-title', { method: 'POST', body: JSON.stringify({
+    id, conversationId, title, ...(title === null ? { reason } : accountKey ? { accountKey } : {})
+  }) });
 }
 
 async function maintainOnce() {
@@ -5605,6 +5615,7 @@ async function environmentDiagnostics() {
       if (reply && typeof reply === 'object') {
         page = {
           composer: reply.composer === true, sendArea: reply.sendArea === true, modelMenu: reply.modelMenu === true, plusMenu: reply.plusMenu === true,
+          ...(typeof reply.renameControl === 'boolean' ? { renameControl: reply.renameControl } : {}),
           language: typeof reply.language === 'string' && /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(reply.language) ? reply.language : null
         };
       }

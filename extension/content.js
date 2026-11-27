@@ -14564,11 +14564,19 @@
 
   /** The page's own editor saves the title. The companion makes no provider API calls here. */
   async function renameWebChatFromMenu(request) {
-    const { id, conversationId: target, expectedTitle, title, expiresAt } = request;
+    const { id, conversationId: target, expectedTitle, accountKey, title, expiresAt } = request;
     const samePage = () => alive && conversationId === target && CLF_DOM.conversationId() === target;
     const current = () => samePage() && Date.now() < expiresAt;
     if (!current() || typeof title !== 'string' || !title.trim() || title.length > 120 ||
         typeof expectedTitle !== 'string' || !expectedTitle || typeof id !== 'string') return { reason: 'rename-canceled' };
+    const accountFailure = async () => {
+      const proof = await CLF_DOM.readRenameAccount(target);
+      if (!proof.accountKey || typeof accountKey !== 'string') return proof.reason ?? 'account-unconfirmed';
+      return proof.accountKey === accountKey ? null : 'account-mismatch';
+    };
+    const invalidAccount = await accountFailure();
+    if (invalidAccount) return { reason: invalidAccount };
+    if (!current()) return { reason: 'rename-canceled' };
     const observed = CLF_DOM.confirmedConversationTitle(target);
     if (observed === title) return { title };
     if (observed !== expectedTitle) return { reason: observed ? 'title-changed' : 'title-unconfirmed' };
@@ -14592,9 +14600,10 @@
     const input = await waitPageView(editor, current, 1000);
     if (!input) return { reason: 'native-editor-unavailable' };
     const accepted = await ask({ type: 'web_chat_rename_commit', id }, current);
-    if (!current() || editor() !== input || accepted?.ok !== true) {
+    const invalidAtSave = accepted?.ok === true && current() ? await accountFailure() : null;
+    if (invalidAtSave || !current() || editor() !== input || accepted?.ok !== true) {
       if (samePage() && editor() === input) input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
-      return { reason: 'rename-canceled' };
+      return { reason: invalidAtSave ?? 'rename-canceled' };
     }
     if (!CLF_DOM.fillNativeTextInput(input, title) || !current() || !input.isConnected || document.activeElement !== input) {
       return { reason: 'native-input-rejected' };
@@ -15051,8 +15060,16 @@
         return true;
       }
       if (message.type === 'clf-check-web-chat-title') {
-        sendResponse({ title: alive && conversationId === message.conversationId
-          ? CLF_DOM.confirmedConversationTitle(message.conversationId) : null });
+        const title = () => alive && conversationId === message.conversationId
+          ? CLF_DOM.confirmedConversationTitle(message.conversationId) : null;
+        if (message.accountProof === true) {
+          void CLF_DOM.readRenameAccount(message.conversationId).then(proof => {
+            const confirmed = proof.accountKey ? title() : null;
+            sendResponse(confirmed ? { title: confirmed, accountKey: proof.accountKey } : { title: null, reason: proof.reason });
+          }).catch(() => sendResponse({ title: null, reason: 'account-unconfirmed' }));
+          return true;
+        }
+        sendResponse({ title: title() });
         return false;
       }
       if (message.type === 'clf-rename-web-chat') {

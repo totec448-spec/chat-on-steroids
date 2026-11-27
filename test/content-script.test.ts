@@ -486,7 +486,7 @@ function announcement(document: Document, options: { field?: boolean; heading?: 
 }
 
 describe('native Web chat rename', () => {
-  it.each(['saved', 'sibling-editor', 'unrelated-editor', 'web-edited', 'app-canceled', 'navigated'])('uses only the exact native editor (%s)', async scenario => {
+  it.each(['saved', 'sibling-editor', 'unrelated-editor', 'web-edited', 'app-canceled', 'navigated', 'other-account', 'account-switched'])('uses only the exact native editor (%s)', async scenario => {
     const id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
     const destination = '11111111-2222-3333-4444-555555555555';
     const nativeSave = vi.fn();
@@ -562,18 +562,33 @@ describe('native Web chat rename', () => {
       });
       expect(dom.window.location.pathname).toBe('/c/' + id);
     });
+    const accountKey = 'a'.repeat(64);
+    let checks = 0;
+    const page = live.window;
+    const originalPost = page.postMessage.bind(page);
+    page.postMessage = ((message: { source?: string; nonce?: string }, origin: string) => {
+      if (message?.source !== 'clf-rename-account-ask') return originalPost(message, origin);
+      checks++;
+      const different = scenario === 'other-account' || scenario === 'account-switched' && checks > 1;
+      page.dispatchEvent(new page.MessageEvent('message', { source: page as unknown as Window, origin: 'https://chatgpt.com',
+        data: { source: 'clf-rename-account-reply', nonce: message.nonce,
+          proof: { accountKey: different ? 'b'.repeat(64) : accountKey } } }));
+    }) as typeof page.postMessage;
+    expect(await live.runtimeMessage({ type: 'clf-page-checks' })).toMatchObject({ renameControl: true });
+    expect(live.document.querySelector('#options')).toBeNull();
     const result = await live.runtimeMessage({ type: 'clf-rename-web-chat', id, conversationId: id,
-      expectedTitle: 'Before', title: 'trash to empire', expiresAt: live.window.Date.now() + 15_000 });
+      expectedTitle: 'Before', accountKey, title: 'trash to empire', expiresAt: live.window.Date.now() + 15_000 });
     if (scenario === 'saved' || scenario === 'sibling-editor') {
       expect(result).toEqual({ title: 'trash to empire' });
       expect(nativeSave).toHaveBeenCalledExactlyOnceWith('trash to empire');
     } else {
       const reason = scenario === 'web-edited' ? 'title-changed'
-        : scenario === 'unrelated-editor' ? 'native-editor-unavailable' : 'rename-canceled';
+        : scenario === 'unrelated-editor' ? 'native-editor-unavailable'
+        : ['other-account', 'account-switched'].includes(scenario) ? 'account-mismatch' : 'rename-canceled';
       expect(result).toMatchObject({ reason });
       expect(nativeSave).not.toHaveBeenCalled();
     }
-    expect(authorize).toHaveBeenCalledTimes(['web-edited', 'unrelated-editor'].includes(scenario) ? 0 : 1);
+    expect(authorize).toHaveBeenCalledTimes(['web-edited', 'unrelated-editor', 'other-account'].includes(scenario) ? 0 : 1);
   });
 });
 

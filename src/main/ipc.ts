@@ -691,7 +691,7 @@ type WebRenameEdit = {
   id: string;
   editId: string;
   expiresAt: number;
-  baseline: { conversationId: string; title: string; browser: Config['ui']['chatBrowser'] } | null;
+  baseline: { conversationId: string; title: string; accountKey: string; browser: Config['ui']['chatBrowser'] } | null;
 };
 let webRenameEdit: WebRenameEdit | null = null;
 let webRenameSettingsRevision = 0;
@@ -2614,9 +2614,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     void (async () => {
       const chat = await getSession(id);
       if (!chat?.conversationId || webRenameEdit !== edit || revision !== webRenameSettingsRevision) return;
-      const title = await captureWebChatTitleForRename(chat.conversationId);
-      if (title && webRenameEdit === edit && revision === webRenameSettingsRevision) {
-        edit.baseline = { conversationId: chat.conversationId, title, browser };
+      const proof = await captureWebChatTitleForRename(chat.conversationId);
+      if (proof && webRenameEdit === edit && revision === webRenameSettingsRevision) {
+        edit.baseline = { conversationId: chat.conversationId, ...proof, browser };
       }
     })().catch(() => logInfo('web chat title: native rename baseline unavailable'));
     return true;
@@ -2638,7 +2638,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
             revision !== webRenameSettingsRevision || baseline.browser !== getConfig().ui.chatBrowser) {
         logInfo('web chat title: native rename skipped (no current edit baseline)');
       } else {
-        void renameWebChatTitle(baseline.conversationId, baseline.title, name, async () => {
+        void renameWebChatTitle(baseline.conversationId, baseline.title, baseline.accountKey, name, async () => {
           const current = await getSession(id);
           return revision === webRenameSettingsRevision && current?.conversationId === baseline.conversationId &&
             current.titleSource === 'manual' && current.title === name;

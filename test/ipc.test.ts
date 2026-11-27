@@ -3508,12 +3508,15 @@ it('bases an opted-in native rename on the Web title confirmed when editing bega
     expect(await prepare()).toMatchObject({ ok: true, data: true });
     const snapshot = await offer();
     expect(snapshot.rename).toBeUndefined();
-    expect(webTitle.acceptWebChatTitle('browser', { id: snapshot.id, conversationId, title: 'Actual Web title' })).toBe(true);
+    const accountKey = 'a'.repeat(64);
+    expect(snapshot.accountProof).toBe(true);
+    expect(webTitle.acceptWebChatTitle('browser', { id: snapshot.id, conversationId, title: 'Actual Web title', accountKey })).toBe(true);
+    await Promise.resolve();
     await Promise.resolve();
     expect(await rename('New manual title')).toMatchObject({ ok: true });
     expect(await store.getSession(session.id)).toMatchObject({ title: 'New manual title' });
     const job = await offer();
-    expect(job).toMatchObject({ conversationId, rename: { expectedTitle: 'Actual Web title', title: 'New manual title' } });
+    expect(job).toMatchObject({ conversationId, rename: { expectedTitle: 'Actual Web title', title: 'New manual title', accountKey } });
     expect(await rename(null)).toMatchObject({ ok: true });
     await expect(webTitle.authorizeWebChatRename('browser', { id: job.id, conversationId, commit: true })).resolves.toBe(false);
     expect(webTitle.acceptWebChatTitle('browser', { id: job.id, conversationId, title: null })).toBe(true);
@@ -3521,7 +3524,7 @@ it('bases an opted-in native rename on the Web title confirmed when editing bega
     expect(await prepare()).toMatchObject({ ok: true, data: true });
     const lateSnapshot = await offer();
     expect(await rename('Saved before Web confirmed')).toMatchObject({ ok: true });
-    expect(webTitle.acceptWebChatTitle('browser', { id: lateSnapshot.id, conversationId, title: 'Late Web title' })).toBe(true);
+    expect(webTitle.acceptWebChatTitle('browser', { id: lateSnapshot.id, conversationId, title: 'Late Web title', accountKey })).toBe(true);
     await Promise.resolve();
     expect(webTitle.offerWebChatTitleCheck('browser')).toBeUndefined();
     expect(await store.getSession(session.id)).toMatchObject({ title: 'Saved before Web confirmed' });

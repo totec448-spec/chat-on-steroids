@@ -759,7 +759,7 @@ export interface CompanionEnvironment {
   /** ChatGPT tabs by state. */
   tabs: { open: number; discarded: number; frozen: number; loading: number; grouped: number; inBackgroundWindow: number };
   /** Which of ChatGPT's controls the most recently used awake ChatGPT tab still has. */
-  page: { composer: boolean; sendArea: boolean; modelMenu: boolean; plusMenu: boolean; language: string | null } | null;
+  page: { composer: boolean; sendArea: boolean; modelMenu: boolean; plusMenu: boolean; renameControl?: boolean; language: string | null } | null;
 }
 
 export interface CompanionTraceEntry {
