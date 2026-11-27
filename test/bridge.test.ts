@@ -3142,6 +3142,58 @@ describe('automatic compaction', () => {
     } finally { const closed = once(socket, 'close'); socket.close(); await closed; }
   });
 
+  // #2284 (2026-11-25, 09:29:56): "no browser took <chat> to show it". The show waits four seconds for a browser to
+  // poll; a busy app or a sleeping service worker misses that, nothing was shown, and the one show the chat gets
+  // was spent. A show no browser took is not a show: it is tried once more, like a show the browser reported failed.
+  it('shows a Loop chat again when no browser took the first show within its wait', async () => {
+    const { setSessionAutomation } = await import('../src/main/bridge.js');
+    await pair();
+    const browser = 'eeeeeeeeeeeeeeee5555';
+    const socket = new WebSocket(base.replace('http:', 'ws:') + '/wake', { origin: EXTENSION_ORIGIN });
+    await once(socket, 'open');
+    const authenticated = once(socket, 'message'); socket.send(token!); await authenticated;
+    try {
+      const conversationId = randomUUID();
+      await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'user_message', time: Date.now(), text: 'Continue this task', messageId: 'show-missed' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'show-missed-turn' }
+      ] } });
+      const session = (await findSessionByConversation(conversationId))!;
+      await setSessionAutomation(session.id, 'loop');
+      await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'chat_error', time: Date.now(), turnId: 'show-missed-turn', recoverable: true,
+          text: 'Connection interrupted. Waiting for the complete answer' }
+      ] } });
+      await settled();
+      const reveals: string[] = [];
+      // A poll that can show chats takes a waiting show; one that says nothing about it leaves the show waiting.
+      const poll = async (canReveal: boolean): Promise<boolean> => {
+        const body = (await request('POST', '/status', { browser, body: { openConversations: [], canReveal } })).body;
+        reveals.push(...(body.reveals ?? []));
+        return (body.repairs as Array<{ conversationId: string }>).some(row => row.conversationId === conversationId);
+      };
+      const logged = (text: string) => getLog().filter(entry => entry.message.includes(text)).length;
+      const shows = () => getLog().filter(entry => entry.message.includes(conversationId) && entry.message.includes('showing its tab once before giving up')).length;
+      const missed = () => logged(`no browser took ${conversationId} to show it`);
+      // The browser has shown it can show chats, then stays away while the offers run out and the show goes out.
+      await poll(true);
+      for (let pass = 0; pass < 40 && shows() < 1; pass++) await poll(false);
+      expect(shows(), 'the chat was never shown').toBe(1);
+      await vi.waitFor(() => expect(missed(), 'the first show was never given up on').toBe(1), { timeout: 8_000 });
+      // Nobody took it: the show is tried once more, and the second one is again left alone.
+      for (let pass = 0; pass < 40 && shows() < 2; pass++) await poll(false);
+      expect(shows(), 'a show no browser took was not tried again').toBe(2);
+      expect(logged(`the browser could not show ${conversationId}; it is shown again`), 'a missed show writes one line that says it is tried again').toBe(1);
+      await vi.waitFor(() => expect(missed()).toBe(2), { timeout: 8_000 });
+      // Missed twice: no third show, and the chat ends page-less as before.
+      let offered = true;
+      for (let pass = 0; pass < 60 && offered; pass++) offered = await poll(false) || (await poll(false));
+      expect(shows()).toBe(2);
+      expect(reveals).toEqual([]);
+      expect((await sessionControlsFor(session.id)).pageless).toBe(true);
+    } finally { const closed = once(socket, 'close'); socket.close(); await closed; }
+  }, 40_000);
+
   it('stops offering a repair the browser never claims, and says the chat has no page', async () => {
     await pair();
     const conversationId = randomUUID();
