@@ -9542,7 +9542,8 @@ const UNCLAIMED_REPAIR_OFFERS = 10;
 /** Stuck repairs whose chat was already shown once (session and episode), so it is shown only once. */
 const unclaimedChatShown = new Set<string>();
 /** Which of those a chat's last show belongs to, and when it went out, so a failed show is given back. */
-const unclaimedChatShownFor = new Map<string, { key: string; at: number }>();
+interface ChatShow { key: string; at: number; givenBack?: boolean }
+const unclaimedChatShownFor = new Map<string, ChatShow>();
 /** Shows of one stuck repair the browser could not carry out: one more try, then the page-less verdict. */
 const unclaimedChatShowFailures = new Map<string, number>();
 /** A browser that cannot show a chat says so within seconds; a report later than this is not about that show. */
@@ -9558,7 +9559,18 @@ const SHOW_RETRIES_PER_REPAIR = 1;
 export function unclaimedChatShowFailed(conversationId: string, now = Date.now()): void {
   const shown = unclaimedChatShownFor.get(conversationId);
   if (!shown || now - shown.at > SHOW_FAILURE_REPORT_MS) return;
-  unclaimedChatShownFor.delete(conversationId);
+  giveBackShow(conversationId, shown);
+}
+
+/**
+ * One show that did not happen is given back: the episode it belonged to may show once more. It acts on the
+ * show it was handed, never on whichever show the chat has now, so a late miss of an older episode cannot
+ * release or charge a newer one (CodeRabbit on #2304).
+ */
+function giveBackShow(conversationId: string, shown: ChatShow): void {
+  if (shown.givenBack) return;
+  shown.givenBack = true;
+  if (unclaimedChatShownFor.get(conversationId) === shown) unclaimedChatShownFor.delete(conversationId);
   const failures = (unclaimedChatShowFailures.get(shown.key) ?? 0) + 1;
   unclaimedChatShowFailures.set(shown.key, failures);
   if (unclaimedChatShowFailures.size > 500) unclaimedChatShowFailures.delete(unclaimedChatShowFailures.keys().next().value!);
@@ -9583,7 +9595,8 @@ function showUnclaimedChatOnce(conversationId: string, repair: Repair): boolean 
       stopRequestedFor(conversationId) || getConfig().ui.browserOnly === true ||
       !browserWakeConnected() || !revealCapable()) return false;
   unclaimedChatShown.add(key);
-  unclaimedChatShownFor.set(conversationId, { key, at: Date.now() });
+  const show: ChatShow = { key, at: Date.now() };
+  unclaimedChatShownFor.set(conversationId, show);
   if (unclaimedChatShown.size > 500) unclaimedChatShown.delete(unclaimedChatShown.values().next().value!);
   if (unclaimedChatShownFor.size > 500) unclaimedChatShownFor.delete(unclaimedChatShownFor.keys().next().value!);
   repair.offers = 1;
@@ -9591,7 +9604,12 @@ function showUnclaimedChatOnce(conversationId: string, repair: Repair): boolean 
   void recordNote(repair.sessionId, 'The browser did not pick up this chat\'s recovery, so the app is showing its tab to go on.')
     .catch(() => undefined);
   void revealChatInBrowser(conversationId).then(shown => {
-    if (!shown) logWarn(`bridge: no browser took ${conversationId} to show it; its recovery is offered ${UNCLAIMED_REPAIR_OFFERS} more times`);
+    if (shown) return;
+    logWarn(`bridge: no browser took ${conversationId} to show it; its recovery is offered ${UNCLAIMED_REPAIR_OFFERS} more times`);
+    // A show nobody took shows nothing (#2284: the app was too busy for the browser's poll to land in the four
+    // seconds the show waits). It counts as a failed show: tried once more when the offers run out again. This
+    // is the app's own timeout, so the age limit of a browser's late report does not apply to it.
+    giveBackShow(conversationId, show);
   });
   return true;
 }
