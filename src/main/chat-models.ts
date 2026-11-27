@@ -69,6 +69,27 @@ function expire(): void {
 export function getChatModels(): ChatModelCatalog {
   expire(); return structuredClone(catalog);
 }
+/** A fresh-chat Send may reuse catalog evidence its native selection already read. */
+export function wantsSelectionCatalog(): boolean {
+  expire();
+  if (request || catalog.observedAt === null || !catalog.models.length) return false;
+  const age = Date.now() - catalog.observedAt;
+  return age < 0 || age >= 60 * 60_000;
+}
+/** Called only after the exact fresh-chat input claim authorizes Send. No discovery request is created. */
+export function observeSelectionCatalog(raw: unknown): boolean {
+  if (!wantsSelectionCatalog()) { logInfo('model discovery selection observation skipped reason=catalog_not_stale_or_request_pending'); return false; }
+  const parsed = observation.shape.models.safeParse(raw);
+  const models = parsed.success ? parsed.data : null;
+  if (!models || new Set(models.map(model => model.id)).size !== models.length ||
+      models.some(model => !model.efforts.length || new Set(model.efforts).size !== model.efforts.length)) {
+    logInfo('model discovery selection observation skipped reason=invalid_catalog'); return false;
+  }
+  catalog = { ...catalog, state: 'ready', models, observedAt: Date.now(), waiting: undefined, error: undefined };
+  writeDurableSoon('chat-models', { observedAt: catalog.observedAt, models });
+  logInfo(`model discovery observed models=${models.length} reason=fresh chat selection`);
+  changed(); return true;
+}
 export function requestChatModels(allowOpen = true): ChatModelCatalog {
   expire();
   if (!request) {

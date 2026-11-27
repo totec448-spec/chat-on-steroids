@@ -3418,6 +3418,34 @@ describe('desktop input delivery and helper ownership', () => {
     expect(live.sent.filter(message => message.type === 'desktop_input' && message.ack)).toHaveLength(confirmed ? 1 : 0);
   });
 
+  it.each(['fresh', 'existing', 'unrequested', 'failed', 'skipped'])('forwards catalog evidence only with its owned fresh Send (%s)', async kind => {
+    const fresh = kind !== 'existing';
+    const models = [{ id: 'gpt-example', label: 'GPT Example', efforts: ['high'] }];
+    live = await harness(fresh ? `https://chatgpt.com/?cos-input=${inputId}` : `https://chatgpt.com/c/${chatA}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack || message.fail ? { ok: true }
+        : { input: claimed({ model: 'gpt-example', reasoningEffort: 'high' }), collectSelectionCatalog: kind !== 'unrequested' } })
+    });
+    const selection = vi.fn(async (_model: string, _effort: string, _current: unknown, diagnostic?: (trace: unknown) => void, collect?: (models: unknown) => void) => {
+      if (kind === 'skipped') {
+        diagnostic?.({ phase: 'enumerate-version', outcome: 'pending' });
+        diagnostic?.({ phase: 'close', outcome: 'confirmed', skippedVersions: ['older'] });
+      } else collect?.(models);
+      return kind !== 'failed';
+    });
+    (live.window as any).CLF_DOM.selectModelSettings = selection;
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      if (fresh) live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatA}` });
+      userTurn(live!.document, 'catalog-selection-user', text);
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+      live!.hook.observe();
+    });
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: fresh ? null : chatA })).toEqual({ ok: kind !== 'failed' });
+    const authorization = live.sent.find(message => message.type === 'desktop_input' && message.authorize);
+    expect(authorization?.selectionCatalog).toEqual(kind === 'fresh' ? models : undefined);
+    if (kind === 'skipped') expect(authorization?.selectionCatalogStatus).toBe('incomplete');
+    expect(selection.mock.calls[0]?.[4] !== undefined).toBe(fresh && kind !== 'unrequested');
+  });
+
   it('preserves an attachment-only user draft and fails its owned input promptly without sending', async () => {
     live = await harness(`https://chatgpt.com/c/${chatA}`, {
       desktop_input: () => ({ ok: true, data: { input: claimed() } })

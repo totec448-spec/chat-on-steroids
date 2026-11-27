@@ -3840,7 +3840,7 @@ var CLF_DOM = (() => {
     }
     return [...byFamily].slice(0, 6).map(([key, efforts]) => `${String(key).slice(0, 24)}:${[...efforts].join('/')}`).join(' ').slice(0, 160);
   }, '');
-  async function selectModelSettings(model, effort, stillCurrent = () => true, diagnostic) {
+  async function selectModelSettings(model, effort, stillCurrent = () => true, diagnostic, onCatalog) {
     modelSelectionWhy = '';
     const started = Date.now(), pair = choice => choice ? { model: choice.id, effort: choice.effort } : null;
     const trace = { attempt: 1, phase: 'passive', outcome: 'pending', failure: null, failedPhase: null, failedVersion: null,
@@ -3898,7 +3898,7 @@ var CLF_DOM = (() => {
         current.effort === expected.effort && nativeReasoningMatches(current.effort, nativeOwned || nativeReasoningOwned()) ||
         selectionFailed('the model or reasoning effort changed after closing the picker', 'changed');
     };
-    let result = false;
+    let result = false, discovered = null;
     const choose = async () => {
       if (!model && !effort) return true;
       let nativeOwned = nativeReasoningOwned();
@@ -3967,16 +3967,25 @@ var CLF_DOM = (() => {
         // Every available choice of the requested model, read once across versions, so the effort
         // can be resolved against what the account actually offers before anything is moved.
         const offered = [], seen = [], skipped = [];
+        const catalog = typeof onCatalog === 'function' ? new Map() : null;
+        const versions = original.versions.map(v => v.id).sort().join('\u0000');
+        let complete = true;
         for (const version of [original.versions.find(v => v.id === original.version), ...original.versions.filter(v => v.id !== original.version)]) {
           phase('enumerate-version', version.id);
           // A version with no row to open (#2305: older models sit in a submenu) is skipped and named, not fatal.
           const state = await ui.version(version.id); if (!state) { skipped.push(version.id); continue; }
+          if (catalog) {
+            complete = complete && state.versions.map(v => v.id).sort().join('\u0000') === versions;
+            collectModelChoices(catalog, state);
+          }
           for (const choice of state.choices) {
             seen.push(choice);
             const rank = choice.available ? modelRank(choice) : 0;
             if (rank) offered.push({ version: version.id, choice, rank });
           }
         }
+        // A successful selection can still have read only part of the account catalog (#2305).
+        if (catalog && complete && !skipped.length && catalog.size) discovered = [...catalog.values()];
         /*
          * An effort the account no longer offers resolves to the nearest one it does.
          *
@@ -4055,7 +4064,11 @@ var CLF_DOM = (() => {
       if (selected && !closed) return selectionFailed('the picker did not close', 'close-failed');
       return selected && closed && confirmAfterClose(expectedChoice, expectedVersion, nativeOwned);
     };
-    try { result = await choose(); return result; }
+    try {
+      result = await choose();
+      if (result && discovered && stillCurrent()) try { onCatalog(discovered); } catch { /* Catalog collection never controls Send. */ }
+      return result;
+    }
     finally {
       if (!result && !modelSelectionWhy) selectionFailed(!stillCurrent() ? 'the chat changed meanwhile' : 'the selection was not confirmed', !stillCurrent() ? 'owner-lost' : 'unknown');
       trace.outcome = result ? 'confirmed' : 'failed';

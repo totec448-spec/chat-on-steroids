@@ -2846,6 +2846,23 @@ each with its source and age; `src/main/usage-tool.ts` writes that text. Its ans
 **Intent:** make native ChatGPT observable and controllable for an exact authorized operation,
 while leaving ChatGPT's messages, model execution and account permissions with the provider.
 
+An existing account catalog at least one hour old (or future-dated) may be replaced by evidence
+already collected during the normal model selection for a fresh app-owned chat. No status poll,
+timer, tab opening, additional picker action or provider message is introduced. The optional
+`collectSelectionCatalog` flag on `/input/claim` enables the selection routine's observation
+callback only for an eligible fresh input. It collects available choices only when normal selection
+already enumerates all versions, never for an already-confirmed pair or an incomplete enumeration.
+A non-empty model-selection diagnostic `skippedVersions` means the enumeration is incomplete:
+selection may succeed on a readable version, but no opportunistic catalog observation is published.
+This does not change explicit discovery's `versions_skipped` behavior (#2305).
+The optional `selectionCatalog` on the existing `desktop_input` Send authorization and `/input/claim`
+request carries that evidence only from the same owned document. The bridge accepts it only on a
+successful fresh-chat Send authorization by the chosen current companion, and rechecks catalog age
+and pending explicit discovery before replacing the last successful observation. Invalid evidence
+does not affect Send. Old companions ignore the optional flag. Saved data format is unchanged.
+An optional `selectionCatalogStatus` (`passive`, `picker_without_enumeration`, `incomplete`)
+on authorization records why an offered observation produced no complete catalog, without page text.
+
 A claimed message whose model or reasoning the native picker could not confirm fails as `desktop_input`
 `fail` with `error` in the page's language (`content_delivery_model_unconfirmed`) and `detail:
 'model-unconfirmed'`; `/input/fail` reads the code, not the words, to ask for the model list again

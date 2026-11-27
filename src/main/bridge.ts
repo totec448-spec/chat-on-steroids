@@ -17,7 +17,7 @@ import { MAX_CHATGPT_MESSAGE_CHARS, userPromptText } from '../shared/user-prompt
 import { CONVERSATION_DELETED } from '../shared/chat-error.js';
 import { prepareSessionPrompt } from './session/prompt.js';
 import { NEW_CHAT, noteAutomaticReply } from './session/automatic-replies.js';
-import { pendingChatModelRequest, observeChatModels, requestChatModels } from './chat-models.js';
+import { pendingChatModelRequest, observeChatModels, requestChatModels, wantsSelectionCatalog, observeSelectionCatalog } from './chat-models.js';
 import { resumeModelSelection, wakeModelSelection } from './resume-model.js';
 import { isDeliberateEffort, isProModel } from '../shared/chat-models.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
@@ -3866,7 +3866,18 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       if (deferred) changed();
       return json(res, 200, { ok: deferred }, origin);
     }
-    if (body.authorize === true) return json(res, 200, { ok: await authorizeBrowserInput(body.id, body.owner, target) }, origin);
+    if (body.authorize === true) {
+      const catalogStatus = ['passive', 'picker_without_enumeration', 'incomplete'].find(status => status === body.selectionCatalogStatus);
+      const candidate = (body.selectionCatalog !== undefined || catalogStatus) && !target && !staleCompanion(req) && !notChosenBrowser(req)
+        ? (await listInputs()).find(row => row.id === body.id && row.owner === body.owner && row.state === 'browser' &&
+          row.conversationId === null && row.sendAuthorizedAt === undefined && row.requiresAuthorization === true &&
+          !row.branch && !row.lifetime && row.purpose !== 'decision' && !row.recovery) : undefined;
+      const ok = await authorizeBrowserInput(body.id, body.owner, target);
+      if (ok && candidate && body.selectionCatalog !== undefined) observeSelectionCatalog(body.selectionCatalog);
+      else if (ok && candidate && catalogStatus) logInfo(`model discovery selection observation skipped reason=${catalogStatus}`);
+      else if (body.selectionCatalog !== undefined) logInfo('model discovery selection observation skipped reason=input_not_owned_or_ineligible');
+      return json(res, 200, { ok }, origin);
+    }
     // A message for the running turn may go in while a call runs, exactly as /status offers it;
     // claimBrowserInput still requires that same turn. Everything else waits for the call.
     if (target && runningToolCalls(target) > 0 &&
@@ -3923,7 +3934,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       if (input && target) noteRouteExistingChatSend(target);
       // The app's own unsent messages for this chat, so the page can replace one left in the composer (#1922).
       const ownUnsent = input && target ? await ownUnsentTexts(target, input.id) : [];
-      return json(res, 200, { input, ...(ownUnsent.length ? { ownUnsent } : {}) }, origin);
+      const collectSelectionCatalog = input && !target && input.requiresAuthorization === true && !input.branch && !input.lifetime &&
+        input.purpose !== 'decision' && !input.recovery && (input.model || input.reasoningEffort) && wantsSelectionCatalog();
+      if (collectSelectionCatalog) logInfo('model discovery selection observation offered reason=stale catalog');
+      return json(res, 200, { input, ...(ownUnsent.length ? { ownUnsent } : {}), ...(collectSelectionCatalog ? { collectSelectionCatalog: true } : {}) }, origin);
     } finally {
       claimsInProgress--;
     }
