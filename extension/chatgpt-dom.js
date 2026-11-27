@@ -3683,7 +3683,10 @@ var CLF_DOM = (() => {
         if (!label) return null;
         // The picker may already show the version list (including a checked row).
         // Select that row to return to its effort view; never assume the slider is open.
-        if (!versionRows().length) {
+        // A list that is already on screen has every row it will have: a version with none is not waited for
+        // as long as a list still opening (#2305: older models sit in a submenu and have no row here).
+        const listWasOpen = versionRows().length > 0;
+        if (!listWasOpen) {
           const toggle = [...picker().querySelectorAll('[role="menuitem"][aria-expanded], [role="menuitem"][data-model-picker-view-toggle]')].filter(shown);
           if (toggle.length !== 1) return null;
           toggle[0].click();
@@ -3691,7 +3694,7 @@ var CLF_DOM = (() => {
         const option = await wait(() => {
           const rows = versionRows().filter(node => pickerVersionNamed(node, label) && node.getAttribute('aria-disabled') !== 'true');
           return rows.length === 1 ? rows[0] : null;
-        });
+        }, listWasOpen ? 600 : 3000);
         if (!key(option, 'Enter')) return null;
         return state(next => next.version === version && !versionRows().length);
       },
@@ -3788,11 +3791,16 @@ var CLF_DOM = (() => {
     try {
       // One observation per version, not one mutation per effort. Computed choices
       // include account/workspace denials which the raw global preset list does not prove.
+      // A version that cannot be read (#2305: ChatGPT's older models sit in a submenu with no row in the
+      // version list) is skipped and named; one such version used to fail the whole catalog.
+      let skipped = 0;
       for (const version of original.versions) {
         const state = await ui.version(version.id);
-        if (!state) throw new Error('model_unconfirmed');
+        if (!state) { skipped += 1; continue; }
         collectModelChoices(result, state);
       }
+      if (!result.size) throw new Error('model_unconfirmed');
+      if (skipped) failure('versions_skipped');
     } catch { failure('model_unconfirmed'); result.clear(); }
     finally {
       if (stillCurrent() && await ui.version(original.version)) {
@@ -3948,10 +3956,11 @@ var CLF_DOM = (() => {
           : name && normalizeModelLabel(choice.familyLabel) === name ? 1 : 0;
         // Every available choice of the requested model, read once across versions, so the effort
         // can be resolved against what the account actually offers before anything is moved.
-        const offered = [], seen = [];
+        const offered = [], seen = [], skipped = [];
         for (const version of [original.versions.find(v => v.id === original.version), ...original.versions.filter(v => v.id !== original.version)]) {
           phase('enumerate-version', version.id);
-          const state = await ui.version(version.id); if (!state) return selectionFailed('a model version could not be read', 'unreadable');
+          // A version with no row to open (#2305: older models sit in a submenu) is skipped and named, not fatal.
+          const state = await ui.version(version.id); if (!state) { skipped.push(version.id); continue; }
           for (const choice of state.choices) {
             seen.push(choice);
             const rank = choice.available ? modelRank(choice) : 0;
@@ -3973,9 +3982,15 @@ var CLF_DOM = (() => {
          * requested model — a missing model still refuses, because picking a different model is not a
          * rounding decision.
          */
+        // What a version that could not be read holds is unknown: a model found nowhere may be in it, and an
+        // effort missing from the readable ones may be in it, so neither is refused as absent or rounded.
+        const unreadable = () => { phase('enumerate-version', skipped[0]); return selectionFailed('a model version could not be read', 'unreadable'); };
+        if (skipped.length) trace.skippedVersions = skipped.slice(0, 16);
+        if (skipped.length && !offered.length) return unreadable();
         phase('resolve');
         let wantedEffort = effort;
         if (effort && offered.length && !offered.some(entry => entry.choice.effort === effort)) {
+          if (skipped.length) return unreadable();
           const ladder = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
           const target = ladder.indexOf(effort);
           const efforts = [...new Set(offered.map(entry => entry.choice.effort))].filter(value => ladder.includes(value));

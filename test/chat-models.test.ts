@@ -50,6 +50,15 @@ describe('durable observed ChatGPT model catalog', () => {
     await startChatModelDiscovery(false);
     expect(wake).not.toHaveBeenCalled();
   });
+  // #2305: the extension skips a version it cannot open and says so next to the models it did read.
+  it('accepts the models of the readable versions together with the skipped-versions note, and logs it', async () => {
+    const { getLog } = await import('../src/main/logger.js');
+    requestChatModels(); const nonce = pendingChatModelRequest()!.nonce;
+    expect(observeChatModels({ nonce, models, error: 'versions_skipped' })).toBe(true);
+    expect(getChatModels()).toMatchObject({ state: 'ready', models });
+    expect(getChatModels().error).toBeUndefined();
+    expect(getLog().some(entry => entry.message.includes(`model discovery observed id=${nonce} models=1`) && entry.message.includes('error=versions_skipped'))).toBe(true);
+  });
   it('keeps usable choices through refresh and a failed refresh', () => {
     requestChatModels(); observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models });
     requestChatModels();

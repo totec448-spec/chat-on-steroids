@@ -58,6 +58,7 @@ function fixture(versionCaption = '', closeDelay: number | null = 0) {
   (trigger as any).__reactFiber$test = { memoizedProps: props, return: null };
   const actions = vi.fn();
   let frozen = false;
+  const unreachable = new Set<string>();
   const render = () => {
     let panel = doc.querySelector('[data-testid="composer-intelligence-picker-content"]') as HTMLElement;
     if (!panel) { panel = doc.createElement('div'); panel.dataset.testid = 'composer-intelligence-picker-content'; doc.body.append(panel); }
@@ -66,6 +67,7 @@ function fixture(versionCaption = '', closeDelay: number | null = 0) {
     panel.querySelector('[aria-expanded]')!.addEventListener('click', () => {
       panel.innerHTML = '';
       for (const version of versions) {
+        if (unreachable.has(version.id)) continue;
         const row = doc.createElement('div'); row.setAttribute('role', 'menuitemradio');
         const content = doc.createElement('div'), heading = doc.createElement('div'), name = doc.createElement('div');
         name.textContent = version.displayTextForIntelligence; heading.append(name); content.append(heading); row.append(content);
@@ -91,7 +93,7 @@ function fixture(versionCaption = '', closeDelay: number | null = 0) {
     if (closeDelay) win.setTimeout(close, closeDelay); else close();
   });
   win.eval(fiberSource); win.eval(domSource);
-  return { api: (win as any).CLF_DOM, state, props, selections, versions, actions, freeze: () => { frozen = true; } };
+  return { api: (win as any).CLF_DOM, state, props, selections, versions, actions, unreachable, freeze: () => { frozen = true; } };
 }
 it('confirms the exact selected pair without moving through other model versions', async () => {
   const f = fixture('', 30);
@@ -896,6 +898,65 @@ it('confirms a picker of exactly 48 versions or lanes and refuses one of 49 (#19
       expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'high'), `${count} ${part}`).toBe(readable);
     }
   }
+});
+
+// #2305 (2026-11-27, Windows 11, Pro): ChatGPT moved its older models into an "Older models" submenu. Their
+// versions are still in the page's state but have no row in the version list, so reading one failed, and that one
+// unreadable version made every selection and the whole catalog fail ("a model version could not be read"; the
+// log named "6.1 Sol"). A version that cannot be read is skipped and named; the others still decide.
+const withOlderVersion = () => {
+  const f = fixture();
+  f.versions.push({ id: 'older', displayTextForIntelligence: '6.1 Sol', enabled: true });
+  f.selections.push([]);
+  f.unreachable.add('older');
+  return f;
+};
+it('selects on a readable version when another version has no row in the list (#2305)', async () => {
+  vi.useFakeTimers();
+  const f = withOlderVersion(), reports: unknown[] = [];
+  const result = f.api.selectModelSettings('future-model', 'ultra', () => true, (value: unknown) => reports.push(value));
+  await vi.runAllTimersAsync();
+  expect(await result).toBe(true);
+  expect(f.state.currentSelection).toMatchObject({ modelSlug: 'future-model', thinkingEffort: 'ultra' });
+  expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({ outcome: 'confirmed', skippedVersions: ['older'] });
+});
+it('refuses, rather than substitutes, an effort the readable versions lack while a version could not be read (#2305)', async () => {
+  vi.useFakeTimers();
+  const f = withOlderVersion(), reports: unknown[] = [];
+  const result = f.api.selectModelSettings('future-model', 'high', () => true, (value: unknown) => reports.push(value));
+  await vi.runAllTimersAsync();
+  expect(await result).toBe(false);
+  expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({ outcome: 'failed', failure: 'unreadable', failedPhase: 'enumerate-version', failedVersion: 'older' });
+  expect(f.state.currentSelection).toMatchObject({ modelSlug: 'gpt-5-6-thinking' });
+});
+it('says a model may be in the version it could not read, not that the account lacks it (#2305)', async () => {
+  vi.useFakeTimers();
+  const f = withOlderVersion(), reports: unknown[] = [];
+  const result = f.api.selectModelSettings('missing-model', 'high', () => true, (value: unknown) => reports.push(value));
+  await vi.runAllTimersAsync();
+  expect(await result).toBe(false);
+  expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({ failure: 'unreadable', failedVersion: 'older' });
+});
+it('discovers the models of the readable versions and names the version it skipped (#2305)', async () => {
+  vi.useFakeTimers();
+  const f = withOlderVersion(), failures: string[] = [];
+  const result = f.api.inspectModelSettings(() => true, (reason: string) => failures.push(reason));
+  await vi.runAllTimersAsync();
+  expect(await result).toEqual([
+    { id: 'gpt-5-6-thinking', label: 'GPT-5.6 Sol', efforts: ['medium', 'high'], aliases: ['gpt-5-6-thinking'] },
+    { id: 'future-model', label: 'Neues Modell', efforts: ['low', 'ultra'], aliases: ['future-model'] }
+  ]);
+  expect(failures).toEqual(['versions_skipped']);
+  expect(f.state.selectedVersionEntry.id).toBe('latest'); expect(f.state.currentBucket).toBe(2);
+});
+it('keeps the current version\'s models when every other version has no row (#2305)', async () => {
+  vi.useFakeTimers();
+  const f = fixture(), failures: string[] = [];
+  f.unreachable.add('future');
+  const result = f.api.inspectModelSettings(() => true, (reason: string) => failures.push(reason));
+  await vi.runAllTimersAsync();
+  expect(await result).toEqual([{ id: 'gpt-5-6-thinking', label: 'GPT-5.6 Sol', efforts: ['medium', 'high'], aliases: ['gpt-5-6-thinking'] }]);
+  expect(failures).toEqual(['versions_skipped']);
 });
 
 // #2085: diagnostic callbacks observe the real selector, including early returns and cleanup.
