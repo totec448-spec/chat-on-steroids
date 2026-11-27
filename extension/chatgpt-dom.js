@@ -3697,7 +3697,9 @@ var CLF_DOM = (() => {
         if (home && home !== version && !homeLabel) return null;
         const option = await wait(() => {
           const rows = versionRows().filter(node => pickerVersionNamed(node, label) && node.getAttribute('aria-disabled') !== 'true');
-          return rows.length === 1 && (!homeLabel || versionRows().some(node => pickerVersionNamed(node, homeLabel))) ? rows[0] : null;
+          // The way back must be as usable as the way out: exactly one enabled row, as restoring requires.
+          const back = homeLabel ? versionRows().filter(node => pickerVersionNamed(node, homeLabel) && node.getAttribute('aria-disabled') !== 'true') : [];
+          return rows.length === 1 && (!homeLabel || back.length === 1) ? rows[0] : null;
         }, listWasOpen ? 600 : 3000);
         if (!key(option, 'Enter')) return null;
         return state(next => next.version === version && !versionRows().length);

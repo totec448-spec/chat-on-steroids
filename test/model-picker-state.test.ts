@@ -58,7 +58,7 @@ function fixture(versionCaption = '', closeDelay: number | null = 0) {
   (trigger as any).__reactFiber$test = { memoizedProps: props, return: null };
   const actions = vi.fn();
   let frozen = false;
-  const unreachable = new Set<string>();
+  const unreachable = new Set<string>(), disabled = new Set<string>();
   const render = () => {
     let panel = doc.querySelector('[data-testid="composer-intelligence-picker-content"]') as HTMLElement;
     if (!panel) { panel = doc.createElement('div'); panel.dataset.testid = 'composer-intelligence-picker-content'; doc.body.append(panel); }
@@ -69,6 +69,7 @@ function fixture(versionCaption = '', closeDelay: number | null = 0) {
       for (const version of versions) {
         if (unreachable.has(version.id)) continue;
         const row = doc.createElement('div'); row.setAttribute('role', 'menuitemradio');
+        if (disabled.has(version.id)) row.setAttribute('aria-disabled', 'true');
         const content = doc.createElement('div'), heading = doc.createElement('div'), name = doc.createElement('div');
         name.textContent = version.displayTextForIntelligence; heading.append(name); content.append(heading); row.append(content);
         if (versionCaption) { const caption = doc.createElement('div'); caption.textContent = versionCaption; content.append(caption); }
@@ -93,7 +94,7 @@ function fixture(versionCaption = '', closeDelay: number | null = 0) {
     if (closeDelay) win.setTimeout(close, closeDelay); else close();
   });
   win.eval(fiberSource); win.eval(domSource);
-  return { api: (win as any).CLF_DOM, state, props, selections, versions, actions, unreachable, freeze: () => { frozen = true; } };
+  return { api: (win as any).CLF_DOM, state, props, selections, versions, actions, unreachable, disabled, freeze: () => { frozen = true; } };
 }
 it('confirms the exact selected pair without moving through other model versions', async () => {
   const f = fixture('', 30);
@@ -962,6 +963,16 @@ it('never leaves the picker on another version when the current version has no r
   vi.useFakeTimers();
   const f = fixture(), failures: string[] = [];
   f.unreachable.add('latest');
+  const result = f.api.inspectModelSettings(() => true, (reason: string) => failures.push(reason));
+  await vi.runAllTimersAsync();
+  expect(await result).toEqual([{ id: 'gpt-5-6-thinking', label: 'GPT-5.6 Sol', efforts: ['medium', 'high'], aliases: ['gpt-5-6-thinking'] }]);
+  expect(failures).toEqual(['versions_skipped']);
+  expect(f.state.selectedVersionEntry.id).toBe('latest'); expect(f.state.currentBucket).toBe(2);
+});
+it('does not leave a current version whose only row is disabled, since that row cannot be used to return (#2305)', async () => {
+  vi.useFakeTimers();
+  const f = fixture(), failures: string[] = [];
+  f.disabled.add('latest');
   const result = f.api.inspectModelSettings(() => true, (reason: string) => failures.push(reason));
   await vi.runAllTimersAsync();
   expect(await result).toEqual([{ id: 'gpt-5-6-thinking', label: 'GPT-5.6 Sol', efforts: ['medium', 'high'], aliases: ['gpt-5-6-thinking'] }]);
