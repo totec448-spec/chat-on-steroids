@@ -19,7 +19,9 @@
 html[dir="rtl"] body { direction: rtl; font-family: "Segoe UI", Tahoma, Arial, sans-serif; }
 html[dir="rtl"] :is(pre, code, kbd, .xterm, .cm-editor, .cm-content) { direction: ltr; unicode-bidi: isolate; text-align: left; }
 html[dir="rtl"] :is(input, textarea) { unicode-bidi: plaintext; }
-html[dir="rtl"] :is(.path, .file-path, .terminal-output, .terminal-input) { direction: ltr; unicode-bidi: isolate; text-align: left; }
+/* Isolate technical paths in either language, including mixed-script filenames. */
+.file-path { direction: ltr; unicode-bidi: isolate; }
+html[dir="rtl"] :is(.path, .terminal-output, .terminal-input) { direction: ltr; unicode-bidi: isolate; text-align: left; }
 html[dir="rtl"] :is(input[type="email"], input[type="url"], .row-menu-shortcut) {
   direction: ltr;
   unicode-bidi: isolate;

@@ -848,6 +848,45 @@ it('uses the file name as the title and its relative path as metadata in file an
   expect(host.querySelector('.file-preview-meta')?.textContent).toContain('src/main.ts');
 });
 
+it('isolates mixed-script file paths throughout preview, editing and renamed Git diffs without changing identity', async () => {
+  const path = 'report-تقرير-2026.ts', previousPath = 'old-قديم.ts';
+  const mixed = { ...preview, path, name: path, text: 'export {}' };
+  (window.api.listProjectFiles as any).mockImplementation(() => ok({ ...rootListing(), entries: [
+    { name: path, path, kind: 'file', bytes: mixed.bytes }
+  ] }));
+  (window.api.previewProjectFile as any).mockImplementation(() => ok(mixed));
+  const change = { status: 'R' as const, path, previousPath, additions: 1, deletions: 1, binary: false };
+  (window.api.getProjectGitSnapshot as any).mockImplementation(() => ok({ ...cleanGit(), changes: [change] }));
+  (window.api.getProjectGitDiff as any).mockImplementation(() => ok({ ...change, projectId: projectA.id,
+    tooLarge: false, baseText: 'old', currentText: 'new' } satisfies ProjectGitDiff));
+  const panel = createFilePanel({ host, toggle });
+  panel.update(projectA); toggle.click(); await tick(); await tick();
+  const row = host.querySelector<HTMLButtonElement>('.file-tree-row')!;
+  row.click(); await tick();
+  try {
+    for (const language of ['ar', 'en', 'ar'] as const) {
+      setLanguage(language);
+      const current = host.querySelector<HTMLElement>('.file-tree-row.is-selected')!;
+      expect(current.dataset.path).toBe(path);
+      expect(current.querySelector('.file-tree-name')?.getAttribute('dir')).toBe('ltr');
+      expect(host.querySelector('.file-preview-title > strong')?.getAttribute('dir')).toBe('ltr');
+      expect(host.querySelector('.file-preview-meta bdi[dir=ltr]')?.textContent).toBe(path);
+    }
+    setLanguage('en');
+    host.querySelector<HTMLButtonElement>('.file-preview [title="Edit"]')!.click(); await tick();
+    expect(host.querySelector('.file-editor-meta bdi[dir=ltr]')?.textContent).toBe(path);
+    host.querySelector<HTMLButtonElement>('.file-panel-changes-toggle')!.click(); await tick(); await tick();
+    const changed = host.querySelector<HTMLButtonElement>('.file-change-row')!;
+    expect(changed.dataset.path).toBe(path);
+    expect(changed.querySelector('.file-change-names')?.getAttribute('dir')).toBe('ltr');
+    expect([...changed.querySelectorAll('.file-path[dir=ltr]')].map(n => n.textContent)).toEqual([previousPath, path]);
+    changed.click(); await tick(); await tick();
+    setLanguage('ar');
+    expect([...host.querySelectorAll('.file-preview-meta bdi[dir=ltr]')].map(n => n.textContent)).toEqual([previousPath, path]);
+    expect(window.api.getProjectGitDiff).toHaveBeenCalledWith(projectA.id, path, undefined, undefined);
+  } finally { setLanguage('en'); }
+});
+
 it('lets the user close only the file preview without closing Files or changing the selection', async () => {
   const panel = createFilePanel({ host, toggle, onAttach: () => undefined });
   panel.update(projectA); toggle.click(); await tick();

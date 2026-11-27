@@ -55,6 +55,20 @@ it('starts from the chat’s task, every file chosen, and asks whether to push w
   expect($('commitBranchField').hidden).toBe(true);
 });
 
+it('isolates both filenames in a rename without adding bidi controls to the chosen path', async () => {
+  const path = 'src/report-تقرير.ts', previousPath = 'src/old-قديم.ts';
+  const api = await open({ commitState: vi.fn(() => ok(state({ changes: [{ ...change(path, 'R'), previousPath }] }))) }, 'commit');
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('ar');
+  const label = document.querySelector('.commit-file-path')!;
+  expect(label.getAttribute('dir')).toBe('ltr');
+  expect([...label.querySelectorAll('bdi[dir=ltr]')].map(n => n.textContent)).toEqual([previousPath, path]);
+  expect(label.textContent).toBe(`${previousPath} → ${path}`);
+  await submit();
+  expect(api.commitProject).toHaveBeenCalledWith(expect.objectContaining({ paths: [path] }));
+  setLanguage('en');
+});
+
 it('commits only the chosen files, then asks before pushing, and pushes on request', async () => {
   const api = await open();
   (document.querySelectorAll<HTMLInputElement>('.commit-file input')[1]!).click();
