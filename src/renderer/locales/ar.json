@@ -1,4 +1,11 @@
 {
+  "Chat On Steroids (dev)": "Chat On Steroids (dev)",
+  "About Chat On Steroids (dev)": "حول Chat On Steroids (dev)",
+  "Another Git operation is in progress. Try again when it finishes.": "هناك عملية Git أخرى قيد التنفيذ. أعد المحاولة بعد انتهائها.",
+  "Git state needs recovery. Check this branch before retrying; index.lock was kept.": "تحتاج حالة Git إلى الاستعادة. تحقق من هذا الفرع قبل إعادة المحاولة؛ تم الاحتفاظ بملف index.lock.",
+  "Git committed, but a later step failed. Check the commit before trying again.": "أنشأ Git الالتزام، لكن خطوة لاحقة فشلت. تحقق من الالتزام قبل إعادة المحاولة.",
+  "Saved {0}. Refresh the file before saving again.": "تم حفظ {0}. حدّث الملف قبل حفظه مجددًا.",
+  "Too many file operations are in progress. Try again when they finish.": "هناك عدد كبير من عمليات الملفات قيد التنفيذ. أعد المحاولة بعد انتهائها.",
   "Save here and replace any existing file?": "هل تريد الحفظ هنا واستبدال أي ملف موجود؟",
   "Replace this CSV file?": "هل تريد استبدال ملف CSV هذا؟",
   "Replace file": "استبدال الملف",

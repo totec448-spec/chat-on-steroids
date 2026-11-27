@@ -19,14 +19,16 @@ vi.mock('../src/main/logger.js', async original => {
 });
 
 // Lets a test make one Git command reject (a timeout, a spawn failure) instead of exiting non-zero.
-const gitFault = vi.hoisted(() => ({ reject: null as null | ((args: string[]) => boolean), rejectAfter: null as null | ((args: string[]) => boolean) }));
+const gitFault = vi.hoisted(() => ({ signal: false, stopped: true, reject: null as null | ((args: string[]) => boolean), rejectAfter: null as null | ((args: string[]) => boolean), before: null as null | ((cwd: string, args: string[]) => Promise<void>) }));
 vi.mock('../src/main/project-git.js', async original => {
   const real = await original<typeof import('../src/main/project-git.js')>();
-  return { ...real, runGit: (cwd: string, args: string[], ...rest: unknown[]) =>
-    gitFault.reject?.(args) ? Promise.reject(new Error('Git took too long to respond'))
-      // Git did its work but the app stopped waiting (a timeout after the fact).
-      : gitFault.rejectAfter?.(args) ? Promise.resolve((real.runGit as (...all: unknown[]) => Promise<unknown>)(cwd, args, ...rest)).then(() => { throw new Error('Git took too long to respond'); })
-      : (real.runGit as (...all: unknown[]) => unknown)(cwd, args, ...rest) };
+  return { ...real, runGit: async (cwd: string, args: string[], ...rest: unknown[]) => {
+    await gitFault.before?.(cwd, args);
+    if (gitFault.reject?.(args)) throw Object.assign(new Error('Git took too long to respond'), { gitStopped: gitFault.stopped });
+    const result = await (real.runGit as (...all: unknown[]) => Promise<unknown>)(cwd, args, ...rest);
+    if (gitFault.rejectAfter?.(args)) throw Object.assign(new Error('Git took too long to respond'), { gitStopped: gitFault.stopped });
+    return gitFault.signal && args[0] === 'commit' ? { ...(result as object), code: -1 } : result;
+  } };
 });
 
 const exec = promisify(execFile);
@@ -50,6 +52,9 @@ beforeEach(async () => {
   setGhRunnerForTests(null);
   gitFault.reject = null;
   gitFault.rejectAfter = null;
+  gitFault.before = null;
+  gitFault.stopped = true;
+  gitFault.signal = false;
 });
 
 afterEach(async () => {
@@ -59,7 +64,7 @@ afterEach(async () => {
 });
 
 /** A project with one commit on main, pushed to a bare "origin" whose HEAD is main. */
-async function project(options: { identity?: boolean; origin?: boolean } = {}): Promise<{ root: string; id: string; origin: string }> {
+async function project(options: { identity?: boolean; origin?: boolean; initial?: boolean } = {}): Promise<{ root: string; id: string; origin: string }> {
   const root = path.join(approved, 'project');
   const origin = path.join(directory, 'origin.git');
   await fs.mkdir(root, { recursive: true });
@@ -72,7 +77,7 @@ async function project(options: { identity?: boolean; origin?: boolean } = {}): 
   await fs.writeFile(path.join(root, 'gone.txt'), 'delete me\n');
   await fs.writeFile(path.join(root, 'other.ts'), 'export const other = 1;\n');
   await git(root, 'add', '.');
-  await git(root, '-c', 'user.email=t@example.com', '-c', 'user.name=T', 'commit', '-m', 'baseline');
+  if (options.initial !== false) await git(root, '-c', 'user.email=t@example.com', '-c', 'user.name=T', 'commit', '-m', 'baseline');
   if (options.origin !== false) {
     await git(directory, 'init', '--bare', '-b', 'main', origin);
     await git(root, 'remote', 'add', 'origin', origin);
@@ -92,6 +97,28 @@ async function change(root: string): Promise<void> {
 
 const revision = async (id: string) => (await readCommitState(id)).token;
 
+/** A separate native plain commit, gated after Git's final pre-commit index re-read. */
+async function gatedPlainCommit(root: string): Promise<{ reached: boolean; finish(): Promise<boolean> }> {
+  const hooks = await fs.mkdtemp(path.join(directory, 'external-hooks-')), ready = path.join(hooks, 'ready'), release = path.join(hooks, 'release');
+  const script = path.join(hooks, 'gate.cjs');
+  await fs.writeFile(script, `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(ready)}, 'ready');
+    const deadline = Date.now() + 20000; const check = () => {
+      if (fs.existsSync(${JSON.stringify(release)})) process.exit(0);
+      if (Date.now() > deadline) process.exit(1); setTimeout(check, 10);
+    }; check();`);
+  await fs.writeFile(path.join(hooks, 'commit-msg'), `#!/bin/sh\nexec "${process.execPath}" "${script}"\n`, { mode: 0o755 });
+  let exited = false;
+  const result = git(root, '-c', `core.hooksPath=${hooks}`, 'commit', '-m', 'Prepared plain commit')
+    .then(() => true, () => false).finally(() => { exited = true; });
+  const deadline = Date.now() + 10000;
+  while (!exited && !await fs.access(ready).then(() => true, () => false)) {
+    if (Date.now() > deadline) { await fs.writeFile(release, 'release'); await result; throw new Error('external commit did not prepare or exit'); }
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  return { reached: await fs.access(ready).then(() => true, () => false),
+    finish: async () => { await fs.writeFile(release, 'release'); return result; } };
+}
+
 describe('commit', () => {
   it('commits exactly the chosen changes with the message as written, and leaves the others', async () => {
     const { root, id } = await project();
@@ -108,6 +135,18 @@ describe('commit', () => {
     expect(await git(root, 'status', '--porcelain')).toBe('M other.ts');
   });
 
+  it('still reads same-tick changed bytes when copying the index for a commit', async () => {
+    const { root, id } = await project();
+    const file = path.join(root, 'kept.ts'), stamp = new Date(1_700_000_000_000);
+    await fs.utimes(file, stamp, stamp);
+    await git(root, 'add', 'kept.ts');
+    await fs.utimes(path.join(root, '.git', 'index'), stamp, stamp);
+    await fs.writeFile(file, 'export const kept = 2;\n');
+    await fs.utimes(file, stamp, stamp);
+    await commitProjectChanges(id, { message: 'Same tick', paths: ['kept.ts'], expectedToken: await revision(id) });
+    expect(await git(root, 'show', 'HEAD:kept.ts')).toBe('export const kept = 2;');
+  });
+
   it('leaves what the person staged by hand for other files alone', async () => {
     const { root, id } = await project();
     await change(root);
@@ -115,6 +154,85 @@ describe('commit', () => {
     await commitProjectChanges(id, { message: 'Only kept', paths: ['kept.ts'], expectedToken: await revision(id) });
     expect(await git(root, 'show', '--name-only', '--format=', 'HEAD')).toBe('kept.ts');
     expect(await git(root, 'diff', '--cached', '--name-only')).toBe('other.ts');
+  });
+
+  it.skipIf(process.platform === 'win32')('commits hook-formatted chosen bytes and preserves unrelated partial staging', async () => {
+    const { root, id } = await project();
+    await change(root);
+    await git(root, 'add', 'other.ts');
+    await fs.writeFile(path.join(root, 'other.ts'), 'export const other = 3;\n');
+    await fs.writeFile(path.join(root, '.git', 'hooks', 'pre-commit'),
+      '#!/bin/sh\nprintf "export const kept = 20;\\n" > kept.ts\ngit add -- kept.ts\n', { mode: 0o755 });
+    await commitProjectChanges(id, { message: 'Formatted chosen file', paths: ['kept.ts'], expectedToken: await revision(id) });
+    expect(await git(root, 'show', 'HEAD:kept.ts')).toBe('export const kept = 20;');
+    expect(await git(root, 'show', ':kept.ts')).toBe('export const kept = 20;');
+    expect(await fs.readFile(path.join(root, 'kept.ts'), 'utf8')).toBe('export const kept = 20;\n');
+    expect(await git(root, 'diff', '--cached', '--name-only')).toBe('other.ts');
+    expect(await git(root, 'show', ':other.ts')).toBe('export const other = 2;');
+    expect(await fs.readFile(path.join(root, 'other.ts'), 'utf8')).toBe('export const other = 3;\n');
+    await expect(fs.stat(path.join(root, '.git', 'index.lock'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('preserves the sparse index and excluded directory when committing an included path', async () => {
+    const { root, id } = await project();
+    await fs.mkdir(path.join(root, 'included')); await fs.mkdir(path.join(root, 'excluded'));
+    await fs.writeFile(path.join(root, 'included', 'a.txt'), 'one\n');
+    await fs.writeFile(path.join(root, 'excluded', 'b.txt'), 'hidden\n');
+    await git(root, 'add', '.'); await git(root, 'commit', '-m', 'Sparse fixture');
+    await git(root, 'sparse-checkout', 'set', '--cone', '--sparse-index', 'included');
+    expect(await git(root, 'config', '--bool', 'index.sparse')).toBe('true');
+    expect(await git(root, 'ls-files', '--sparse')).toContain('excluded/');
+    await fs.writeFile(path.join(root, 'included', 'a.txt'), 'two\n');
+    await fs.writeFile(path.join(root, 'other.ts'), 'export const other = 2;\n');
+    await git(root, 'add', 'other.ts');
+    await fs.writeFile(path.join(root, 'other.ts'), 'export const other = 3;\n');
+    await commitProjectChanges(id, { message: 'Sparse selected path', paths: ['included/a.txt'], expectedToken: await revision(id) });
+    expect(await git(root, 'show', 'HEAD:included/a.txt')).toBe('two');
+    expect(await git(root, 'config', '--bool', 'index.sparse')).toBe('true');
+    expect(await git(root, 'ls-files', '--sparse')).toContain('excluded/');
+    await expect(fs.stat(path.join(root, 'excluded'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await git(root, 'show', ':other.ts')).toBe('export const other = 2;');
+    expect(await fs.readFile(path.join(root, 'other.ts'), 'utf8')).toBe('export const other = 3;\n');
+    await expect(fs.stat(path.join(root, '.git', 'index.lock'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('preserves split-index storage and unrelated partial staging after commit', async () => {
+    const { root, id } = await project();
+    await git(root, 'config', 'core.splitIndex', 'true');
+    await git(root, 'update-index', '--split-index');
+    expect(await git(root, 'rev-parse', '--shared-index-path')).not.toBe('');
+    await change(root);
+    await git(root, 'add', 'other.ts');
+    await fs.writeFile(path.join(root, 'other.ts'), 'export const other = 3;\n');
+    await commitProjectChanges(id, { message: 'Split selected path', paths: ['kept.ts'], expectedToken: await revision(id) });
+    expect(await git(root, 'show', 'HEAD:kept.ts')).toBe('export const kept = 2;');
+    expect(await git(root, 'config', '--bool', 'core.splitIndex')).toBe('true');
+    const shared = await git(root, 'rev-parse', '--shared-index-path');
+    expect(shared).not.toBe('');
+    expect((await fs.stat(path.resolve(root, shared))).size).toBeGreaterThan(0);
+    expect(await git(root, 'show', ':other.ts')).toBe('export const other = 2;');
+    expect(await fs.readFile(path.join(root, 'other.ts'), 'utf8')).toBe('export const other = 3;\n');
+    await expect(fs.stat(path.join(root, '.git', 'index.lock'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it.skipIf(process.platform === 'win32')('keeps a refusing split index byte-identical with shared-base expiry enabled', async () => {
+    const { root, id } = await project();
+    await change(root);
+    await git(root, 'add', 'other.ts');
+    await git(root, 'config', 'core.splitIndex', 'true');
+    await git(root, 'config', 'splitIndex.sharedIndexExpire', 'now');
+    await git(root, 'update-index', '--split-index');
+    const shared = path.resolve(root, await git(root, 'rev-parse', '--shared-index-path'));
+    await fs.utimes(shared, new Date(1000), new Date(1000));
+    const original = await fs.readFile(path.join(root, '.git', 'index'));
+    await fs.writeFile(path.join(root, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    await expect(commitProjectChanges(id, { message: 'Refused split', paths: ['kept.ts'], expectedToken: await revision(id) }))
+      .rejects.toThrow('Git did not commit');
+    expect(await fs.readFile(path.join(root, '.git', 'index'))).toEqual(original);
+    expect((await fs.stat(shared)).size).toBeGreaterThan(0);
+    expect(await git(root, 'config', 'splitIndex.sharedIndexExpire')).toBe('now');
+    expect(await git(root, 'show', ':other.ts')).toBe('export const other = 2;');
+    await expect(fs.stat(path.join(root, '.git', 'index.lock'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('refuses when the changes moved on since they were shown', async () => {
@@ -170,22 +288,29 @@ describe('commit', () => {
     await git(root, 'add', 'kept.ts');
     // Staged: one version; in the folder: a newer one. Only the staged one was the person's choice.
     await fs.writeFile(path.join(root, 'kept.ts'), 'export const kept = 3;\n');
+    const original = await fs.readFile(path.join(root, '.git', 'index'));
     await fs.writeFile(path.join(root, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
     await expect(commitProjectChanges(id, { message: 'x', paths: ['kept.ts'], expectedToken: await revision(id) })).rejects.toThrow('Git did not commit');
+    expect(await fs.readFile(path.join(root, '.git', 'index'))).toEqual(original);
+    await expect(fs.stat(path.join(root, '.git', 'index.lock'))).rejects.toMatchObject({ code: 'ENOENT' });
     expect(await git(root, 'show', ':kept.ts')).toBe('export const kept = 2;');
     expect(await fs.readFile(path.join(root, 'kept.ts'), 'utf8')).toBe('export const kept = 3;\n');
   });
 
-  it('puts everything back, the branch too, when Git cannot even stage the files', async () => {
+  it('keeps a busy Git index and the attempt branch until the competing operation releases its lock', async () => {
     const { root, id } = await project();
     await change(root);
     const token = await revision(id);
     // Another Git program holds the index.
     await fs.writeFile(path.join(root, '.git', 'index.lock'), '');
-    await expect(commitProjectChanges(id, { message: 'x', paths: ['kept.ts'], newBranch: 'stuck', expectedToken: token })).rejects.toThrow('Git did not commit');
+    await expect(commitProjectChanges(id, { message: 'x', paths: ['kept.ts'], newBranch: 'stuck', expectedToken: token })).rejects.toThrow('Another Git operation');
+    expect(await fs.readFile(path.join(root, '.git', 'index.lock'), 'utf8')).toBe('');
     await fs.rm(path.join(root, '.git', 'index.lock'));
-    expect(await git(root, 'branch', '--show-current')).toBe('main');
-    expect(await git(root, 'branch', '--list', 'stuck')).toBe('');
+    expect(await git(root, 'branch', '--show-current')).toBe('stuck');
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('baseline');
+    expect(await git(root, 'diff', '--cached', '--name-only')).toBe('');
+    await commitProjectChanges(id, { message: 'Retry after lock', paths: ['kept.ts'], expectedToken: await revision(id) });
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('Retry after lock');
   });
 
   it.skipIf(process.platform === 'win32')('shows what a pre-commit hook printed when it stops the commit', async () => {
@@ -253,6 +378,417 @@ describe('commit', () => {
     expect(await git(root, 'branch', '--list', 'try-it')).toBe('');
   });
 
+  it.each(['branch', 'detached'] as const)('keeps a committed new branch after a late Git failure (started on %s)', async start => {
+    const { root, id } = await project();
+    if (start === 'detached') await git(root, 'checkout', '--detach');
+    await change(root);
+    gitFault.rejectAfter = args => args[0] === 'commit';
+    await expect(commitProjectChanges(id, { message: 'Already committed', paths: ['kept.ts'], newBranch: 'keep-commit', expectedToken: await revision(id) }))
+      .rejects.toThrow('Git took too long to respond');
+    gitFault.rejectAfter = null;
+    expect(await git(root, 'branch', '--show-current')).toBe('keep-commit');
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('Already committed');
+    expect(await git(root, 'show', 'HEAD:kept.ts')).toBe('export const kept = 2;');
+    expect(await git(root, 'diff', '--cached', '--name-only')).toBe('');
+    expect(logged).toContain('git commit: kept the accepted commit and published its private index after a late failure');
+  });
+
+  it('retains a same-commit branch selected by another writer when our branch launch fails', async () => {
+    const { root, id } = await project();
+    await change(root);
+    gitFault.before = async (_cwd, args) => {
+      if (args[0] !== 'switch' || args[1] !== '-c') return;
+      await git(root, 'switch', '-c', 'foreign-creation');
+      throw Object.assign(new Error('Git could not launch'), { code: 'ENOENT', gitStopped: true });
+    };
+    await expect(commitProjectChanges(id, { message: 'Not launched', paths: ['kept.ts'], newBranch: 'foreign-creation', expectedToken: await revision(id) }))
+      .rejects.toThrow('Git could not launch');
+    gitFault.before = null;
+    expect(await git(root, 'branch', '--show-current')).toBe('foreign-creation');
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('baseline');
+  });
+
+  it('refuses a changed branch identity observed when admitting the private index', async () => {
+    const { root, id } = await project();
+    await change(root);
+    await git(root, 'branch', 'feature');
+    const open = fs.open.bind(fs), lock = path.join(root, '.git', 'index.lock');
+    let changed = false;
+    const fault = vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+      if (!changed && String(args[0]) === lock && args[1] === 'wx') { changed = true; await git(root, 'switch', 'feature'); }
+      return open(...args);
+    });
+    try {
+      await expect(commitProjectChanges(id, { message: 'Wrong branch refused', paths: ['kept.ts'], expectedToken: await revision(id) }))
+        .rejects.toThrow('The changes changed');
+    } finally { fault.mockRestore(); }
+    expect(changed).toBe(true);
+    expect(await git(root, 'branch', '--show-current')).toBe('feature');
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('baseline');
+    await fs.unlink(lock); // No commit was attempted; preserve the original index.
+  });
+
+  it.each([true, false])('does not substitute a later tip for its reported commit (reflogs: %s)', async reflogs => {
+    const { root, id } = await project();
+    if (!reflogs) { await git(root, 'config', 'core.logAllRefUpdates', 'false'); await fs.rm(path.join(root, '.git', 'logs'), { recursive: true }); }
+    const tree = await git(root, 'rev-parse', 'HEAD^{tree}');
+    await change(root);
+    let completed = false;
+    gitFault.rejectAfter = args => { if (args[0] === 'commit') completed = true; return false; };
+    gitFault.before = async (_cwd, args) => {
+      if (!completed || args[0] !== 'symbolic-ref') return;
+      gitFault.before = null;
+      const own = await git(root, 'rev-parse', 'HEAD');
+      const other = await git(root, 'commit-tree', tree, '-p', own, '-m', 'Later tip');
+      await git(root, 'update-ref', 'refs/heads/main', other, own);
+    };
+    await expect(commitProjectChanges(id, { message: 'Own commit', paths: ['kept.ts'], expectedToken: await revision(id) }))
+      .rejects.toThrow('Git state needs recovery');
+    gitFault.rejectAfter = null;
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('Later tip');
+    expect(await git(root, 'log', '-1', '--format=%s', 'HEAD^')).toBe('Own commit');
+    expect((await fs.stat(path.join(root, '.git', 'index.lock'))).size).toBeGreaterThan(0);
+  });
+
+  it.skipIf(process.platform === 'win32')('reports directory-sync failure after publication without claiming index.lock remains', async () => {
+    const { root, id } = await project();
+    await change(root);
+    const open = fs.open.bind(fs);
+    let synced = false;
+    const fault = vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+      const handle = await open(...args);
+      if (String(args[0]) === path.join(root, '.git')) {
+        handle.sync = async () => { synced = true; throw Object.assign(new Error('directory sync refused'), { code: 'EIO' }); };
+      }
+      return handle;
+    });
+    try {
+      await expect(commitProjectChanges(id, { message: 'Published before sync', paths: ['kept.ts'], expectedToken: await revision(id) }))
+        .rejects.toThrow('Git committed, but a later step failed');
+    } finally { fault.mockRestore(); }
+    expect(synced).toBe(true);
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('Published before sync');
+    expect(await git(root, 'diff', '--cached', '--name-only')).toBe('');
+    await expect(fs.stat(path.join(root, '.git', 'index.lock'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('does not undo a successful commit when an external soft reset returns HEAD to its starting position', async () => {
+    const { root, id } = await project();
+    const start = await git(root, 'rev-parse', 'HEAD');
+    await change(root);
+    let completed = false;
+    gitFault.rejectAfter = args => { if (args[0] === 'commit') completed = true; return false; };
+    gitFault.before = async (_cwd, args) => {
+      if (!completed || args[0] !== 'symbolic-ref') return;
+      gitFault.before = null;
+      await git(root, 'reset', '--soft', start);
+    };
+    await expect(commitProjectChanges(id, { message: 'Accepted before reset', paths: ['kept.ts'], newBranch: 'keep-reset', expectedToken: await revision(id) }))
+      .rejects.toThrow('Git state needs recovery');
+    gitFault.rejectAfter = null;
+    expect(await git(root, 'branch', '--show-current')).toBe('keep-reset');
+    expect(await git(root, 'reflog', '--format=%gs')).toContain('Accepted before reset');
+    expect((await fs.stat(path.join(root, '.git', 'index.lock'))).size).toBeGreaterThan(0);
+  });
+
+  it('does not rewind the index after a committed existing-branch operation reports a late failure', async () => {
+    const { root, id } = await project();
+    await change(root);
+    await git(root, 'add', 'other.ts');
+    await fs.writeFile(path.join(root, 'other.ts'), 'export const other = 3;\n');
+    gitFault.rejectAfter = args => args[0] === 'commit';
+    await expect(commitProjectChanges(id, { message: 'Already committed', paths: ['kept.ts'], expectedToken: await revision(id) }))
+      .rejects.toThrow('Git took too long to respond');
+    gitFault.rejectAfter = null;
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('Already committed');
+    expect(await git(root, 'diff', '--cached', '--name-only')).toBe('other.ts');
+    expect(await git(root, 'show', ':other.ts')).toBe('export const other = 2;');
+    expect(await fs.readFile(path.join(root, 'other.ts'), 'utf8')).toBe('export const other = 3;\n');
+  });
+
+  it('keeps the branch and index when the failed operation outcome cannot be verified', async () => {
+    const { root, id } = await project();
+    await change(root);
+    gitFault.rejectAfter = args => {
+      if (args[0] !== 'commit') return false;
+      gitFault.reject = read => read[0] === 'rev-parse' || read[0] === 'symbolic-ref';
+      return true;
+    };
+    await expect(commitProjectChanges(id, { message: 'Unverified outcome', paths: ['kept.ts'], newBranch: 'keep-unknown', expectedToken: await revision(id) }))
+      .rejects.toThrow('Git state needs recovery');
+    gitFault.reject = null; gitFault.rejectAfter = null;
+    expect(await git(root, 'branch', '--show-current')).toBe('keep-unknown');
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('Unverified outcome');
+    expect(await git(root, 'show', ':kept.ts')).toBe('export const kept = 1;');
+    // Both native indexes survive for explicit recovery; do not guess and replace one.
+    expect(await fs.stat(path.join(root, '.git', 'index.lock'))).toMatchObject({ size: expect.any(Number) });
+    await fs.rename(path.join(root, '.git', 'index.lock'), path.join(root, '.git', 'index'));
+    expect(await git(root, 'diff', '--cached', '--name-only')).toBe('');
+  });
+
+  it('distinguishes an unborn branch from an unreadable HEAD when rolling back or retaining its first commit', async () => {
+    const { root, id } = await project({ initial: false, origin: false });
+    const before = await git(root, 'diff', '--cached', '--name-only');
+    gitFault.reject = args => args[0] === 'commit';
+    await expect(commitProjectChanges(id, { message: 'First commit', paths: ['kept.ts'], expectedToken: await revision(id) }))
+      .rejects.toThrow('Git took too long to respond');
+    gitFault.reject = null;
+    expect(await git(root, 'branch', '--show-current')).toBe('main');
+    await expect(git(root, 'rev-parse', '--verify', 'HEAD')).rejects.toThrow();
+    expect(await git(root, 'diff', '--cached', '--name-only')).toBe(before);
+    gitFault.rejectAfter = args => args[0] === 'commit';
+    await expect(commitProjectChanges(id, { message: 'First commit', paths: ['kept.ts'], expectedToken: await revision(id) }))
+      .rejects.toThrow('Git took too long to respond');
+    gitFault.rejectAfter = null;
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('First commit');
+    expect(await git(root, 'diff', '--cached', '--name-only')).toBe('gone.txt\nother.ts');
+  });
+
+  it('does not delete a new branch that advanced after the rollback position check', async () => {
+    const { root, id } = await project();
+    await change(root);
+    const initial = await git(root, 'rev-parse', 'HEAD');
+    const tree = await git(root, 'rev-parse', 'HEAD^{tree}');
+    gitFault.reject = args => args[0] === 'commit';
+    gitFault.before = async (_cwd, args) => {
+      if (!args.includes('branch') || !args.includes('-d')) return;
+      const advanced = await git(root, 'commit-tree', tree, '-p', initial, '-m', 'Concurrent commit');
+      await git(root, 'update-ref', 'refs/heads/keep-race', advanced, initial);
+    };
+    await expect(commitProjectChanges(id, { message: 'Refused', paths: ['kept.ts'], newBranch: 'keep-race', expectedToken: await revision(id) }))
+      .rejects.toThrow('Git took too long to respond');
+    gitFault.reject = null; gitFault.before = null;
+    expect(await git(root, 'log', '-1', '--format=%s', 'keep-race')).toBe('Concurrent commit');
+    expect(await git(root, 'branch', '--show-current')).toBe('main');
+  });
+
+  it('removes the refused new branch and inherited tracking config even when its upstream is behind', async () => {
+    const { root, id } = await project();
+    await git(root, 'config', 'branch.autoSetupMerge', 'inherit');
+    await fs.writeFile(path.join(root, 'kept.ts'), 'export const kept = 2;\n');
+    await git(root, 'commit', '-am', 'Local ahead');
+    await change(root);
+    await fs.writeFile(path.join(root, 'kept.ts'), 'export const kept = 3;\n');
+    gitFault.reject = args => args[0] === 'commit';
+    await expect(commitProjectChanges(id, { message: 'Refused', paths: ['kept.ts'], newBranch: 'discard-attempt', expectedToken: await revision(id) }))
+      .rejects.toThrow('Git took too long to respond');
+    gitFault.reject = null;
+    expect(await git(root, 'branch', '--list', 'discard-attempt')).toBe('');
+    await expect(git(root, 'config', '--get', 'branch.discard-attempt.remote')).rejects.toThrow();
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('Local ahead');
+  });
+
+  it('keeps a committed branch that appeared while Git was creating the requested branch', async () => {
+    const { root, id } = await project();
+    await change(root);
+    const initial = await git(root, 'rev-parse', 'HEAD');
+    const tree = await git(root, 'rev-parse', 'HEAD^{tree}');
+    gitFault.before = async (_cwd, args) => {
+      if (args[0] !== 'switch') return;
+      const advanced = await git(root, 'commit-tree', tree, '-p', initial, '-m', 'Concurrent creation');
+      await git(root, 'update-ref', 'refs/heads/keep-created', advanced);
+    };
+    await expect(commitProjectChanges(id, { message: 'Refused', paths: ['kept.ts'], newBranch: 'keep-created', expectedToken: await revision(id) }))
+      .rejects.toThrow('Git could not create the branch');
+    gitFault.before = null;
+    expect(await git(root, 'log', '-1', '--format=%s', 'keep-created')).toBe('Concurrent creation');
+    expect(await git(root, 'branch', '--show-current')).toBe('main');
+  });
+
+  it.skipIf(process.platform === 'win32')('does not undo a plain commit started during the failed app attempt', async () => {
+    const { root, id } = await project();
+    await fs.writeFile(path.join(root, 'kept.ts'), 'export const kept = 2;\n');
+    await git(root, 'add', 'kept.ts');
+    await fs.writeFile(path.join(root, 'kept.ts'), 'export const kept = 3;\n');
+    let external: Awaited<ReturnType<typeof gatedPlainCommit>> | undefined, externalWon: boolean | undefined;
+    gitFault.before = async (_cwd, args) => { if (args[0] === 'commit') external = await gatedPlainCommit(root); };
+    gitFault.reject = args => args[0] === 'commit';
+    try {
+      await expect(commitProjectChanges(id, { message: 'Refused', paths: ['kept.ts'], expectedToken: await revision(id) }))
+        .rejects.toThrow('Git took too long to respond');
+    } finally {
+      gitFault.reject = null; gitFault.before = null;
+      externalWon = await external?.finish();
+    }
+    expect(external).toBeDefined();
+    // Old rollback restored v2 while this commit accepted v3. The private-index
+    // design instead excludes a new writer here; the next test covers a prior one.
+    expect(await git(root, 'show', ':kept.ts')).toBe(externalWon
+      ? await git(root, 'show', 'HEAD:kept.ts') : 'export const kept = 2;');
+    expect(await fs.readFile(path.join(root, 'kept.ts'), 'utf8')).toBe('export const kept = 3;\n');
+    await expect(fs.stat(path.join(root, '.git', 'index.lock'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it.skipIf(process.platform === 'win32')('keeps the index consistent when a plain commit was prepared before the app acquires its lock', async () => {
+    const { root, id } = await project();
+    await fs.writeFile(path.join(root, 'kept.ts'), 'export const kept = 2;\n');
+    await git(root, 'add', 'kept.ts');
+    await fs.writeFile(path.join(root, 'kept.ts'), 'export const kept = 3;\n');
+    const token = await revision(id), external = await gatedPlainCommit(root);
+    let externalWon = false;
+    try {
+      expect(external.reached).toBe(true); // A rejected/ungated child cannot pass.
+      await expect(fs.stat(path.join(root, '.git', 'index.lock'))).rejects.toMatchObject({ code: 'ENOENT' });
+      gitFault.reject = args => args[0] === 'commit';
+      await expect(commitProjectChanges(id, { message: 'Refused', paths: ['kept.ts'], expectedToken: token }))
+        .rejects.toThrow('Git took too long to respond');
+    } finally { gitFault.reject = null; externalWon = await external.finish(); }
+    expect(externalWon).toBe(true); // Require the already-prepared commit to advance HEAD.
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('Prepared plain commit');
+    expect(await git(root, 'show', ':kept.ts')).toBe(await git(root, 'show', 'HEAD:kept.ts'));
+    expect(await git(root, 'show', 'HEAD:kept.ts')).toBe('export const kept = 2;');
+    expect(await fs.readFile(path.join(root, 'kept.ts'), 'utf8')).toBe('export const kept = 3;\n');
+  });
+
+  it('does not dereference a symbolic replacement during branch cleanup', async () => {
+    const { root, id } = await project();
+    await change(root);
+    const initial = await git(root, 'rev-parse', 'main');
+    gitFault.reject = args => args[0] === 'commit';
+    gitFault.before = async (_cwd, args) => {
+      if (!(args[0] === 'update-ref' && args[1] === '-d') && !(args.includes('branch') && args.includes('-d'))) return;
+      await git(root, 'symbolic-ref', 'refs/heads/keep-symbolic', 'refs/heads/main');
+    };
+    await expect(commitProjectChanges(id, { message: 'Refused', paths: ['kept.ts'], newBranch: 'keep-symbolic', expectedToken: await revision(id) }))
+      .rejects.toThrow('Git took too long to respond');
+    gitFault.reject = null; gitFault.before = null;
+    expect(await git(root, 'rev-parse', '--verify', 'refs/heads/main')).toBe(initial);
+  });
+
+  it('keeps a same-commit branch owned by a worktree that wins branch creation', async () => {
+    const { root, id } = await project();
+    await change(root);
+    const other = path.join(approved, 'other-worktree');
+    gitFault.before = async (_cwd, args) => {
+      if (args[0] !== 'switch') return;
+      await git(root, 'worktree', 'add', '-b', 'keep-worktree', other, 'HEAD');
+    };
+    await expect(commitProjectChanges(id, { message: 'Refused', paths: ['kept.ts'], newBranch: 'keep-worktree', expectedToken: await revision(id) }))
+      .rejects.toThrow('Git could not create the branch');
+    gitFault.before = null;
+    expect(await git(root, 'rev-parse', '--verify', 'refs/heads/keep-worktree')).toBe(await git(root, 'rev-parse', 'HEAD'));
+    expect(await git(root, 'worktree', 'list', '--porcelain')).toContain('branch refs/heads/keep-worktree');
+  });
+
+  it('keeps both indexes after accepted-commit publication fails, then permits explicit recovery and retry', async () => {
+    const { root, id } = await project();
+    await change(root);
+    const rename = fs.rename.bind(fs), lockPath = path.join(root, '.git', 'index.lock');
+    const fault = vi.spyOn(fs, 'rename').mockImplementation(async (...args) => {
+      if (String(args[0]) === lockPath) throw Object.assign(new Error('publication refused'), { code: 'EIO' });
+      return rename(...args);
+    });
+    try {
+      await expect(commitProjectChanges(id, { message: 'Accepted', paths: ['kept.ts'], expectedToken: await revision(id) }))
+        .rejects.toThrow('Git state needs recovery');
+    } finally { fault.mockRestore(); }
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('Accepted');
+    expect(await git(root, 'show', ':kept.ts')).toBe('export const kept = 1;');
+    await fs.rename(lockPath, path.join(root, '.git', 'index'));
+    expect(await git(root, 'diff', '--cached', '--name-only')).toBe('');
+    await fs.writeFile(path.join(root, 'kept.ts'), 'export const kept = 3;\n');
+    await commitProjectChanges(id, { message: 'Retry', paths: ['kept.ts'], expectedToken: await revision(id) });
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('Retry');
+  });
+
+  it('keeps both indexes and permits recovery when private-index discard is refused', async () => {
+    const { root, id } = await project();
+    await change(root);
+    const index = path.join(root, '.git', 'index'), lock = `${index}.lock`, original = await fs.readFile(index);
+    const unlink = fs.unlink.bind(fs), fault = vi.spyOn(fs, 'unlink').mockImplementation(async file => {
+      if (String(file) === lock) throw Object.assign(new Error('discard refused'), { code: 'EACCES' });
+      return unlink(file);
+    });
+    gitFault.reject = args => args[0] === 'commit';
+    try {
+      await expect(commitProjectChanges(id, { message: 'Refused', paths: ['kept.ts'], expectedToken: await revision(id) }))
+        .rejects.toThrow('Git state needs recovery');
+    } finally { fault.mockRestore(); gitFault.reject = null; }
+    expect(await fs.readFile(index)).toEqual(original);
+    expect((await fs.stat(lock)).size).toBeGreaterThan(0);
+    await fs.unlink(lock); // This attempt was definitely unaccepted; keep the original staging.
+    await commitProjectChanges(id, { message: 'Retry', paths: ['kept.ts'], expectedToken: await revision(id) });
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('Retry');
+  });
+
+  it('respects disabled reflogs, succeeding normally but retaining both indexes on an unverified late error', async () => {
+    const { root, id } = await project();
+    await git(root, 'config', 'core.logAllRefUpdates', 'false');
+    await fs.rm(path.join(root, '.git', 'logs'), { recursive: true });
+    await change(root);
+    await commitProjectChanges(id, { message: 'No receipt needed', paths: ['kept.ts'], expectedToken: await revision(id) });
+    await fs.writeFile(path.join(root, 'kept.ts'), 'export const kept = 3;\n');
+    gitFault.rejectAfter = args => args[0] === 'commit';
+    await expect(commitProjectChanges(id, { message: 'No receipt available', paths: ['kept.ts'], expectedToken: await revision(id) }))
+      .rejects.toThrow('Git state needs recovery');
+    gitFault.rejectAfter = null;
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('No receipt available');
+    expect(await git(root, 'show', ':kept.ts')).toBe('export const kept = 2;');
+    await expect(fs.stat(path.join(root, '.git', 'logs'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await fs.rename(path.join(root, '.git', 'index.lock'), path.join(root, '.git', 'index'));
+    expect(await git(root, 'diff', '--cached', '--name-only')).toBe('');
+  });
+
+  it('keeps recovery state when Git closes with a signal instead of an exit status', async () => {
+    const { root, id } = await project();
+    await change(root);
+    gitFault.signal = true;
+    await expect(commitProjectChanges(id, { message: 'Accepted before signal', paths: ['kept.ts'], expectedToken: await revision(id) }))
+      .rejects.toThrow('Git state needs recovery');
+    gitFault.signal = false;
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('Accepted before signal');
+    expect(await git(root, 'show', ':kept.ts')).toBe('export const kept = 1;');
+    await fs.rename(path.join(root, '.git', 'index.lock'), path.join(root, '.git', 'index'));
+    expect(await git(root, 'diff', '--cached', '--name-only')).toBe('');
+  });
+
+  it('retains the prepared index and branch when Git has not confirmed it stopped', async () => {
+    const { root, id } = await project();
+    await change(root);
+    gitFault.stopped = false;
+    gitFault.reject = args => args[0] === 'commit';
+    await expect(commitProjectChanges(id, { message: 'Unknown stop', paths: ['kept.ts'], newBranch: 'keep-active', expectedToken: await revision(id) }))
+      .rejects.toThrow('Git state needs recovery');
+    gitFault.reject = null; gitFault.stopped = true;
+    expect(await git(root, 'branch', '--show-current')).toBe('keep-active');
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('baseline');
+    expect(await git(root, 'show', ':kept.ts')).toBe('export const kept = 1;');
+    expect((await fs.stat(path.join(root, '.git', 'index.lock'))).size).toBeGreaterThan(0);
+    // The synthetic writer never started. Explicitly discard its prepared copy.
+    await fs.unlink(path.join(root, '.git', 'index.lock'));
+    await commitProjectChanges(id, { message: 'Retry', paths: ['kept.ts'], expectedToken: await revision(id) });
+    expect(await git(root, 'log', '-1', '--format=%s')).toBe('Retry');
+  });
+
+  it.each([false, true])('initializes a missing real index privately and leaves it absent on refusal (split: %s)', async split => {
+    const { root, id } = await project({ initial: false, origin: false });
+    if (split) await git(root, 'config', 'core.splitIndex', 'true');
+    await fs.rm(path.join(root, '.git', 'index'));
+    gitFault.reject = args => args[0] === 'commit';
+    await expect(commitProjectChanges(id, { message: 'Refused', paths: ['kept.ts'], expectedToken: await revision(id) }))
+      .rejects.toThrow('Git took too long to respond');
+    gitFault.reject = null;
+    await expect(fs.stat(path.join(root, '.git', 'index'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await commitProjectChanges(id, { message: 'First', paths: ['kept.ts'], expectedToken: await revision(id) });
+    expect(await git(root, 'show', '--name-only', '--format=', 'HEAD')).toBe('kept.ts');
+    if (split) expect(await git(root, 'rev-parse', '--shared-index-path')).not.toBe('');
+  });
+
+  it('locks and restores the linked worktree index without changing the main worktree index', async () => {
+    const { root } = await project();
+    const linked = path.join(approved, 'linked-worktree');
+    await git(root, 'worktree', 'add', '-b', 'linked', linked, 'HEAD');
+    const id = (await addProject(linked)).id;
+    await fs.writeFile(path.join(linked, 'kept.ts'), 'export const kept = 2;\n');
+    gitFault.reject = args => args[0] === 'commit';
+    await expect(commitProjectChanges(id, { message: 'Refused', paths: ['kept.ts'], expectedToken: await revision(id) }))
+      .rejects.toThrow('Git took too long to respond');
+    gitFault.reject = null;
+    expect(await git(linked, 'diff', '--cached', '--name-only')).toBe('');
+    expect(await git(root, 'diff', '--cached', '--name-only')).toBe('');
+    expect(await fs.readFile(path.join(linked, 'kept.ts'), 'utf8')).toBe('export const kept = 2;\n');
+  });
+
   it('puts everything back when a Git command fails to finish, not only when it says no', async () => {
     const { root, id } = await project();
     await change(root);
@@ -265,19 +801,21 @@ describe('commit', () => {
     expect(await git(root, 'diff', '--cached', '--name-only')).toBe('');
   });
 
-  it('puts the branch back when creating it did not finish but Git had switched, and never removes a branch that was there before', async () => {
+  it('retains an unconfirmed branch creation, permits retry, and never removes a pre-existing branch', async () => {
     const { root, id } = await project();
     await change(root);
-    gitFault.rejectAfter = args => args[0] === 'switch';
+    gitFault.rejectAfter = args => args[0] === 'switch' && args[1] === '-c';
     await expect(commitProjectChanges(id, { message: 'x', paths: ['kept.ts'], newBranch: 'half-made', expectedToken: await revision(id) })).rejects.toThrow('Git took too long to respond');
     gitFault.rejectAfter = null;
-    expect(await git(root, 'branch', '--show-current')).toBe('main');
-    expect(await git(root, 'branch', '--list', 'half-made')).toBe('');
+    expect(await git(root, 'branch', '--show-current')).toBe('half-made');
+    expect(await git(root, 'branch', '--list', 'half-made')).toContain('half-made');
+    await commitProjectChanges(id, { message: 'Retry unconfirmed branch', paths: ['kept.ts'], expectedToken: await revision(id) });
     // A branch that already existed is refused and left alone.
+    await fs.writeFile(path.join(root, 'kept.ts'), 'export const kept = 3;\n');
     await git(root, 'branch', 'mine');
     await expect(commitProjectChanges(id, { message: 'x', paths: ['kept.ts'], newBranch: 'mine', expectedToken: await revision(id) })).rejects.toThrow('A branch with that name already exist');
     expect(await git(root, 'branch', '--list', 'mine')).toContain('mine');
-    expect(await git(root, 'branch', '--show-current')).toBe('main');
+    expect(await git(root, 'branch', '--show-current')).toBe('half-made');
   });
 
   it('refuses before reading when the changed files are too large to check', async () => {
