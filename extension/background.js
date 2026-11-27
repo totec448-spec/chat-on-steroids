@@ -1596,6 +1596,16 @@ function commandReasoningEffort(value) {
   const effort = typeof value === 'string' ? value.trim().toLowerCase() : '';
   return effort && COMMAND_REASONING_EFFORTS.includes(effort) ? effort : null;
 }
+/**
+ * The query parameters that choose a chat's model and reasoning level at open. A reasoning level
+ * rides alone: when the opening address also names a model, ChatGPT puts the level back to the
+ * default as the picker closes (#2085, #2287). The page selects and verifies the model itself in
+ * the picker, so the address only has to carry the level. With no level, the model rides as before.
+ */
+function openingModelParams(model, effort) {
+  if (effort) return [`reasoning_effort=${encodeURIComponent(effort)}`];
+  return model ? [`model=${encodeURIComponent(model)}`] : [];
+}
 
 function deferredRevivalId(value) {
   return commandMarkerId(value);
@@ -6007,8 +6017,7 @@ async function placeSuccessorChat(raw, tabId) {
     const model = commandModelSlug(raw.model);
     const effort = commandReasoningEffort(raw.reasoningEffort);
     const query = [marker];
-    if (model) query.push(`model=${encodeURIComponent(model)}`);
-    if (effort) query.push(`reasoning_effort=${encodeURIComponent(effort)}`);
+    query.push(...openingModelParams(model, effort));
     let created;
     try {
       created = await createChatTab(`https://chatgpt.com/?${query.join('&')}#${marker}`, true);
@@ -6055,8 +6064,7 @@ async function placeSuccessorChat(raw, tabId) {
       const model = commandModelSlug(raw && raw.model);
       const reasoningEffort = commandReasoningEffort(raw && raw.reasoningEffort);
       const query = [marker];
-      if (model) query.push(`model=${encodeURIComponent(model)}`);
-      if (reasoningEffort) query.push(`reasoning_effort=${encodeURIComponent(reasoningEffort)}`);
+      query.push(...openingModelParams(model, reasoningEffort));
       let created;
       try {
         created = await createChatTab(`${base}?${query.join('&')}#${marker}`, false, raw.active !== false);
@@ -6090,8 +6098,7 @@ async function placeSuccessorChat(raw, tabId) {
   const model = commandModelSlug(raw && raw.model);
   const reasoningEffort = commandReasoningEffort(raw && raw.reasoningEffort);
   const query = [marker];
-  if (model) query.push(`model=${encodeURIComponent(model)}`);
-  if (reasoningEffort) query.push(`reasoning_effort=${encodeURIComponent(reasoningEffort)}`);
+  query.push(...openingModelParams(model, reasoningEffort));
   // A chat in the app's own tab group sits in the user's window (#128): its successor joins that
   // group without being selected, since selecting it would switch what the user is looking at.
   const grouped = await inAppGroup(home).catch(() => false);
