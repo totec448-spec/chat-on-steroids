@@ -9591,7 +9591,11 @@ function showUnclaimedChatOnce(conversationId: string, repair: Repair): boolean 
   void recordNote(repair.sessionId, 'The browser did not pick up this chat\'s recovery, so the app is showing its tab to go on.')
     .catch(() => undefined);
   void revealChatInBrowser(conversationId).then(shown => {
-    if (!shown) logWarn(`bridge: no browser took ${conversationId} to show it; its recovery is offered ${UNCLAIMED_REPAIR_OFFERS} more times`);
+    if (shown) return;
+    logWarn(`bridge: no browser took ${conversationId} to show it; its recovery is offered ${UNCLAIMED_REPAIR_OFFERS} more times`);
+    // A show nobody took shows nothing (#2284: the app was too busy for the browser's poll to land in the four
+    // seconds the show waits). It counts as a failed show: tried once more when the offers run out again.
+    unclaimedChatShowFailed(conversationId);
   });
   return true;
 }
