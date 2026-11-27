@@ -3179,7 +3179,12 @@ describe('automatic compaction', () => {
       await poll(true);
       for (let pass = 0; pass < 40 && shows() < 1; pass++) await poll(false);
       expect(shows(), 'the chat was never shown').toBe(1);
-      await vi.waitFor(() => expect(missed(), 'the first show was never given up on').toBe(1), { timeout: 8_000 });
+      // CodeRabbit on #2304: the wait ends late on a loaded or sleeping computer. The app's own timeout is not a
+      // browser's late report, so a clock a minute and more ahead must not spend the retry.
+      const realNow = Date.now.bind(Date);
+      const ahead = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + 70_000);
+      try { await vi.waitFor(() => expect(missed(), 'the first show was never given up on').toBe(1), { timeout: 8_000 }); }
+      finally { ahead.mockRestore(); }
       // Nobody took it: the show is tried once more, and the second one is again left alone.
       for (let pass = 0; pass < 40 && shows() < 2; pass++) await poll(false);
       expect(shows(), 'a show no browser took was not tried again').toBe(2);
