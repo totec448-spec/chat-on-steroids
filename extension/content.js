@@ -14577,7 +14577,7 @@
     const invalidAccount = await accountFailure();
     if (invalidAccount) return { reason: invalidAccount };
     if (!current()) return { reason: 'rename-canceled' };
-    const observed = CLF_DOM.confirmedConversationTitle(target);
+    const observed = CLF_DOM.nativeConversationTitle(target);
     if (observed === title) return { title };
     if (observed !== expectedTitle) return { reason: observed ? 'title-changed' : 'title-unconfirmed' };
     const control = CLF_DOM.nativeChatRenameControl(target, expectedTitle);
@@ -14593,10 +14593,15 @@
       trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, pointerType: 'mouse' }));
       item = await waitPageView(menuItem, current, 700);
     }
-    if (!item || CLF_DOM.conversationTitle() !== expectedTitle) return { reason: 'native-menu-unavailable' };
+    if (!item) return { reason: 'native-menu-unavailable' };
+    if (!current()) return { reason: 'rename-canceled' };
+    // A modal menu can hide the sidebar from accessibility queries. The editor
+    // still has to appear within the same row and contain the expected title.
+    const menuTitle = CLF_DOM.nativeConversationTitle(target);
+    if (menuTitle && menuTitle !== expectedTitle) return { reason: 'title-changed' };
     const previousInputs = new Set(row.querySelectorAll('input'));
     item.click();
-    const editor = () => CLF_DOM.nativeChatRenameInput(row, expectedTitle, previousInputs);
+    const editor = () => CLF_DOM.nativeChatRenameInput(row, target, expectedTitle, previousInputs);
     const input = await waitPageView(editor, current, 1000);
     if (!input) return { reason: 'native-editor-unavailable' };
     const accepted = await ask({ type: 'web_chat_rename_commit', id }, current);
@@ -14609,7 +14614,7 @@
       return { reason: 'native-input-rejected' };
     }
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
-    const confirmed = await waitPageView(() => CLF_DOM.confirmedConversationTitle(target) === title, current, 2000);
+    const confirmed = await waitPageView(() => CLF_DOM.nativeConversationTitle(target) === title, current, 2000);
     return confirmed ? { title } : { reason: 'native-rename-unconfirmed' };
   }
   /**
@@ -15060,16 +15065,15 @@
         return true;
       }
       if (message.type === 'clf-check-web-chat-title') {
-        const title = () => alive && conversationId === message.conversationId
-          ? CLF_DOM.confirmedConversationTitle(message.conversationId) : null;
+        const current = () => alive && conversationId === message.conversationId;
         if (message.accountProof === true) {
           void CLF_DOM.readRenameAccount(message.conversationId).then(proof => {
-            const confirmed = proof.accountKey ? title() : null;
+            const confirmed = proof.accountKey && current() ? CLF_DOM.nativeConversationTitle(message.conversationId) : null;
             sendResponse(confirmed ? { title: confirmed, accountKey: proof.accountKey } : { title: null, reason: proof.reason });
           }).catch(() => sendResponse({ title: null, reason: 'account-unconfirmed' }));
           return true;
         }
-        sendResponse({ title: title() });
+        sendResponse({ title: current() ? CLF_DOM.confirmedConversationTitle(message.conversationId) : null });
         return false;
       }
       if (message.type === 'clf-rename-web-chat') {

@@ -5516,8 +5516,10 @@ operation without opening or retrying the chat. Workspace membership alone canno
 the chat belongs to the signed-in person. The checks make no provider requests.
 A separate commit request on `/browser/web-chat-title`
 checks that the setting, browser, session binding and saved manual title still match. The
-companion checks the previous title against the page and navigation label, then uses the
-same native title editor as a browser user. It acknowledges only a confirmed title and
+companion checks the previous title against the marked, selected sidebar row and its exact
+conversation link. On older sidebar markup it requires the tab title and navigation label
+to agree. The native editor must belong to the same row and still show the previous title.
+The companion acknowledges only a confirmed title and
 logs the outcome without title text. It neither calls a provider endpoint directly nor
 stores or retries the work. Clearing a name or Compact & Resume never causes a Web rename.
 The diagnostics report passively checks the sidebar row and options control on the most

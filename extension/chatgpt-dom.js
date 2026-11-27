@@ -480,6 +480,15 @@ var CLF_DOM = (() => {
     return node.getClientRects().length > 0 && !node.closest('[hidden],[aria-hidden="true"],[inert]');
   }
 
+  function sidebarLinkTitle(link) {
+    if (link.querySelector('input,textarea,[contenteditable="true"]')) return null;
+    const label = link.querySelector('[dir="auto"]') ?? link;
+    const visibleTitle = label.textContent?.trim();
+    const attributeTitle = link.getAttribute('title')?.trim();
+    if (visibleTitle && attributeTitle && visibleTitle !== attributeTitle) return null;
+    return visibleTitle || attributeTitle || null;
+  }
+
   /** Confirm the current page title against the sidebar link for this exact chat. */
   function confirmedConversationTitle(expected) {
     return safe(() => {
@@ -490,15 +499,30 @@ var CLF_DOM = (() => {
       if (!title) return null;
       const rows = [...document.querySelectorAll(CHAT_TITLE_LINK)].filter(link =>
         chatTitleLinkId(link) === expected && chatTitleVisible(link));
-      if (!rows.length || !rows.every(link => {
-        if (link.querySelector('input,textarea,[contenteditable="true"]')) return false;
-        const label = link.querySelector('[dir="auto"]') ?? link;
-        const visibleTitle = label.textContent?.trim();
-        const attributeTitle = link.getAttribute('title')?.trim();
-        if (visibleTitle && attributeTitle && visibleTitle !== attributeTitle) return false;
-        return (visibleTitle || attributeTitle) === title;
-      })) return null;
+      if (!rows.length || !rows.every(link => sidebarLinkTitle(link) === title)) return null;
       return title;
+    }, null);
+  }
+
+  /** undefined for older sidebar markup, null for an ambiguous or inactive marked row. */
+  function nativeRenameSidebarLink(expected) {
+    const rows = [...document.querySelectorAll('[role="group"][data-sidebar-archive-chatgpt-id]')]
+      .filter(row => row.getAttribute('data-sidebar-archive-chatgpt-id') === expected && chatTitleVisible(row));
+    if (!rows.length) return undefined;
+    if (rows.length !== 1) return null;
+    const links = [...rows[0].querySelectorAll('a[href]')].filter(chatTitleVisible);
+    return links.length === 1 && links[0].getAttribute('aria-current') === 'page' &&
+      chatTitleLinkId(links[0]) === expected ? links[0] : null;
+  }
+
+  /** Read the active native row's title even when the tab caption still describes another chat. */
+  function nativeConversationTitle(expected) {
+    return safe(() => {
+      if (conversationId() !== expected) return null;
+      const link = nativeRenameSidebarLink(expected);
+      if (link === undefined) return confirmedConversationTitle(expected);
+      const title = link && sidebarLinkTitle(link);
+      return title && title.length <= 200 ? title : null;
     }, null);
   }
 
@@ -508,9 +532,11 @@ var CLF_DOM = (() => {
   ]);
 
   function nativeChatRenameControl(expected, oldTitle) {
-    if (confirmedConversationTitle(expected) !== oldTitle) return null;
+    if (nativeConversationTitle(expected) !== oldTitle) return null;
+    const nativeLink = nativeRenameSidebarLink(expected);
+    const links = nativeLink ? [nativeLink] : document.querySelectorAll(CHAT_TITLE_LINK);
     const eligible = new Map();
-    for (const link of document.querySelectorAll(CHAT_TITLE_LINK)) {
+    for (const link of links) {
       if (!chatTitleVisible(link) || chatTitleLinkId(link) !== expected) continue;
       // Some sidebars put the options inside the link. Others put it next to the link in
       // the row wrapper, which can also outlive the link when the editor replaces it.
@@ -547,8 +573,10 @@ var CLF_DOM = (() => {
     return items.length === 1 ? items[0] : null;
   }
 
-  function nativeChatRenameInput(row, oldTitle, previousInputs) {
-    if (!row.isConnected || conversationTitle() !== oldTitle) return null;
+  function nativeChatRenameInput(row, expected, oldTitle, previousInputs) {
+    if (!row.isConnected || conversationId() !== expected) return null;
+    const marked = row.getAttribute('data-sidebar-archive-chatgpt-id');
+    if (marked === null ? conversationTitle() !== oldTitle : marked !== expected) return null;
     const inputs = [...row.querySelectorAll('input:not([type]),input[type="text"]')].filter(input =>
       !previousInputs.has(input) && !input.disabled && !input.readOnly && chatTitleVisible(input));
     const active = document.activeElement;
@@ -3604,14 +3632,14 @@ var CLF_DOM = (() => {
   function pageChecks() {
     return safe(() => {
       const language = document.documentElement.getAttribute('lang') || '';
-      const chat = conversationId(), title = chat && conversationTitle();
+      const chat = conversationId(), title = chat && nativeConversationTitle(chat);
       return {
         composer: Boolean(composer()),
         sendArea: Boolean(composerActions()),
         modelMenu: Boolean(modelPickerTrigger()),
         // The October 2026 composer marks it only as its add-context navigation target.
         plusMenu: Boolean(document.querySelector('[data-composer-navigation-target="add-context"],#composer-plus-btn,[data-testid="composer-plus-btn"]')),
-        ...(title ? { renameControl: Boolean(nativeChatRenameControl(chat, title)) } : {}),
+        ...(chat ? { renameControl: Boolean(title && nativeChatRenameControl(chat, title)) } : {}),
         language: /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(language) ? language : null
       };
     }, { composer: false, sendArea: false, modelMenu: false, plusMenu: false, language: null });
@@ -4551,6 +4579,7 @@ var CLF_DOM = (() => {
     conversationFromPath,
     conversationTitle,
     confirmedConversationTitle,
+    nativeConversationTitle,
     nativeChatRenameControl,
     nativeChatRenameItem,
     nativeChatRenameInput,

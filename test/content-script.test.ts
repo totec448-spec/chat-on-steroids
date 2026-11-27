@@ -486,7 +486,7 @@ function announcement(document: Document, options: { field?: boolean; heading?: 
 }
 
 describe('native Web chat rename', () => {
-  it.each(['saved', 'sibling-editor', 'unrelated-editor', 'web-edited', 'app-canceled', 'navigated', 'other-account', 'account-switched'])('uses only the exact native editor (%s)', async scenario => {
+  it.each(['saved', 'sibling-editor', 'stale-tab-title', 'marked-web-edited', 'unrelated-editor', 'web-edited', 'app-canceled', 'navigated', 'other-account', 'account-switched'])('uses only the exact native editor (%s)', async scenario => {
     const id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
     const destination = '11111111-2222-3333-4444-555555555555';
     const nativeSave = vi.fn();
@@ -495,9 +495,10 @@ describe('native Web chat rename', () => {
       return { ok: scenario !== 'app-canceled' };
     });
     live = await harness(undefined, { web_chat_rename_commit: authorize }, (document, dom) => {
-      const previous = scenario === 'web-edited' ? 'Web edit' : 'Before';
-      const usesSiblingEditor = scenario === 'sibling-editor' || scenario === 'unrelated-editor';
-      document.title = previous + ' - ChatGPT';
+      const previous = ['web-edited', 'marked-web-edited'].includes(scenario) ? 'Web edit' : 'Before';
+      const staleTabTitle = ['stale-tab-title', 'marked-web-edited'].includes(scenario);
+      const usesSiblingEditor = staleTabTitle || scenario === 'sibling-editor' || scenario === 'unrelated-editor';
+      document.title = staleTabTitle ? 'An earlier conversation - ChatGPT' : previous + ' - ChatGPT';
       document.body.insertAdjacentHTML('beforeend',
         `<nav><div class="chat-row"><a data-sidebar-item="true" href="/c/${id}"><span dir="auto">${previous}</span>
         <button data-testid="history-item-0-options" aria-expanded="false" aria-controls="options" aria-haspopup="menu"></button>
@@ -521,6 +522,11 @@ describe('native Web chat rename', () => {
         trigger.removeAttribute('data-testid');
         trigger.removeAttribute('aria-controls');
         trigger.id = 'chat-options-trigger';
+      }
+      if (staleTabTitle) {
+        wrapper.setAttribute('data-sidebar-archive-chatgpt-id', id);
+        wrapper.getClientRects = shown;
+        row.setAttribute('aria-current', 'page');
       }
       if (scenario === 'unrelated-editor') {
         const unrelated = document.createElement('input');
@@ -555,7 +561,7 @@ describe('native Web chat rename', () => {
             if (event.key !== 'Enter') return;
             nativeSave(input.value);
             label.textContent = input.value;
-            document.title = input.value + ' - ChatGPT';
+            if (!staleTabTitle) document.title = input.value + ' - ChatGPT';
             input.replaceWith(displaced);
           });
         });
@@ -576,19 +582,23 @@ describe('native Web chat rename', () => {
     }) as typeof page.postMessage;
     expect(await live.runtimeMessage({ type: 'clf-page-checks' })).toMatchObject({ renameControl: true });
     expect(live.document.querySelector('#options')).toBeNull();
+    if (scenario === 'stale-tab-title') {
+      expect(await live.runtimeMessage({ type: 'clf-check-web-chat-title', conversationId: id, accountProof: true }))
+        .toEqual({ title: 'Before', accountKey });
+    }
     const result = await live.runtimeMessage({ type: 'clf-rename-web-chat', id, conversationId: id,
       expectedTitle: 'Before', accountKey, title: 'trash to empire', expiresAt: live.window.Date.now() + 15_000 });
-    if (scenario === 'saved' || scenario === 'sibling-editor') {
+    if (['saved', 'sibling-editor', 'stale-tab-title'].includes(scenario)) {
       expect(result).toEqual({ title: 'trash to empire' });
       expect(nativeSave).toHaveBeenCalledExactlyOnceWith('trash to empire');
     } else {
-      const reason = scenario === 'web-edited' ? 'title-changed'
+      const reason = ['web-edited', 'marked-web-edited'].includes(scenario) ? 'title-changed'
         : scenario === 'unrelated-editor' ? 'native-editor-unavailable'
         : ['other-account', 'account-switched'].includes(scenario) ? 'account-mismatch' : 'rename-canceled';
       expect(result).toMatchObject({ reason });
       expect(nativeSave).not.toHaveBeenCalled();
     }
-    expect(authorize).toHaveBeenCalledTimes(['web-edited', 'unrelated-editor', 'other-account'].includes(scenario) ? 0 : 1);
+    expect(authorize).toHaveBeenCalledTimes(['web-edited', 'marked-web-edited', 'unrelated-editor', 'other-account'].includes(scenario) ? 0 : 1);
   });
 });
 
@@ -4672,9 +4682,10 @@ describe('page checks for the diagnostics report', () => {
     live = await harness();
     live.document.documentElement.lang = 'es';
     const answer = await live.runtimeMessage({ type: 'clf-page-checks' }) as Record<string, unknown>;
-    expect(Object.keys(answer).sort()).toEqual(['composer', 'language', 'modelMenu', 'plusMenu', 'sendArea']);
+    expect(Object.keys(answer).sort()).toEqual(['composer', 'language', 'modelMenu', 'plusMenu', 'renameControl', 'sendArea']);
     expect(answer.language).toBe('es');
     for (const key of ['composer', 'sendArea', 'modelMenu', 'plusMenu']) expect(typeof answer[key]).toBe('boolean');
+    expect(answer.renameControl).toBe(false);
   });
 });
 
