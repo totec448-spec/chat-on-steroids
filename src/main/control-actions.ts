@@ -205,7 +205,8 @@ async function send(rawBody: unknown): Promise<ActionReply> {
     throw new RequestError(409, 'would_interrupt', 'the chat began answering while the message was being admitted; it was withdrawn');
   }
   logInfo('control API: message ' + row.id + (body.sessionId === undefined ? ' admitted as a new chat' : ' admitted for session ' + body.sessionId));
-  // Admitted, not delivered: the row is durable, and delivery is read from GET /v1/inputs.
+  // Admitted, not delivered: the row is durable; exact receipt readback is
+  // GET /v1/inputs/{id}, which never runs delivery or history maintenance.
   const reply: ControlApiSendResult = { input: projectInput(row), replayed: false };
   return { status: 202, body: reply };
 }

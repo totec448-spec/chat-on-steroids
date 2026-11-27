@@ -1038,7 +1038,11 @@ describe('what a message row proves', () => {
       offeredAt: started, requiresAuthorization: true, sendAuthorizedAt: started + 1000 });
     await seed([ambiguous]);
 
-    // Reading the outbox retires a send that never got a receipt; the row is then unknown, not failed.
+    // A read only reports committed state. The delivery owner performs
+    // expiry/reconciliation independently; the API must never trigger it.
+    const beforeReconcile = await call('GET', `/v1/inputs/${ambiguous.id}`);
+    expect(beforeReconcile.body.input).toMatchObject({ state: 'browser', delivery: 'unconfirmed' });
+    await input.listInputs();
     const listed = await call('GET', '/v1/inputs');
     expect(listed.body.inputs[0]).toMatchObject({ id: ambiguous.id, state: 'cancelled', delivery: 'unconfirmed' });
     expect(listed.body.inputs[0].error).toContain('will not be resent');
@@ -1122,6 +1126,9 @@ describe('what a message row proves', () => {
     await appendEvent(foreign, { kind: 'assistant_message', source: 'extension', time: t0 + 5_000, messageId: 'final-other', turnId: 'turn-other', final: true, message: text('Done elsewhere.') });
     await appendEvent(foreign, { kind: 'turn_end', source: 'extension', time: t0 + 5_100, outcome: 'completed', turnId: 'turn-other' });
 
+    // Owner progression reconciles the exact linked final; a GET is only a
+    // projection of committed receipt state and cannot progress the input.
+    await input.listInputs();
     const byId = new Map((await call('GET', '/v1/inputs')).body.inputs.map((entry: { id: string }) => [entry.id, entry]));
     expect(byId.get((rowOwn as { id: string }).id)).toMatchObject({ state: 'sent', delivery: 'sent', messageId: expect.stringMatching(/^input:/) });
     expect(byId.get((rowForeign as { id: string }).id)).toMatchObject({ state: 'tool', delivery: 'unconfirmed', messageId: null, deliveredAt: null });

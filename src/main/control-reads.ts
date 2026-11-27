@@ -13,7 +13,7 @@ import type {
   ControlApiSessionList,
   ControlApiText
 } from '../shared/control-api.js';
-import { positionOf } from '../shared/chronology.js';
+import { effectiveFinalTurnId, positionOf, responseTurnId } from '../shared/chronology.js';
 import { normalizedToolOutcome, toolCallSummary } from '../shared/session.js';
 import type { SessionEvent, SessionEventKind, SessionSummary, StoredText, SwarmState } from '../shared/session.js';
 import type { LogEntry } from '../shared/types.js';
@@ -24,9 +24,10 @@ import type { SessionControlsView } from './bridge.js';
 import { getChatModels } from './chat-models.js';
 import { getLog, logWarn } from './logger.js';
 import { redactSecretText } from './redaction.js';
-import { deliveryProof, listInputs } from './session/input.js';
+import { deliveryProof, readInputReceipts } from './session/input.js';
 import type { InputEntry } from './session/input.js';
 import { readSession, readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
+import { readEvents, readOverflowText } from './session/store.js';
 
 /**
  * The read routes of the local control API: sessions, their events, the input outbox, agents
@@ -470,8 +471,64 @@ export function selectInputs(rows: readonly InputEntry[], query: { state?: reado
 
 async function inputs(params: URLSearchParams): Promise<ControlApiInputs> {
   const query = parseQuery(params, { state: csv(keysOf(INPUT_STATES)).optional(), limit: integer(1, 500).optional() });
-  const selected = selectInputs(await listInputs(), { state: query.state, limit: query.limit ?? 100 });
+  const selected = selectInputs(await readInputReceipts(), { state: query.state, limit: query.limit ?? 100 });
   return { inputs: selected.rows.map(projectInput), total: selected.total };
+}
+
+async function inputById(id: string, params: URLSearchParams): Promise<{ input: ControlApiInput } | undefined> {
+  parseQuery(params, {});
+  const row = (await readInputReceipts()).find(entry => entry.id === id && entry.purpose !== 'decision');
+  return row ? { input: projectInput(row) } : undefined;
+}
+
+/** The native recorder owns the full text; a tool-using model should not have
+ * to rewrite its answer to files just because ordinary event previews are cut.
+ * Return only an answer belonging to the exact native input and completed turn.
+ */
+async function inputAnswer(id: string, params: URLSearchParams): Promise<unknown | undefined> {
+  parseQuery(params, {});
+  const entry = (await readInputReceipts()).find(row => row.id === id && row.purpose !== 'decision');
+  if (!entry) return undefined;
+  if (entry.state === 'cancelled' || entry.state === 'failed') return { state: entry.state };
+  if (entry.state !== 'sent' || !entry.conversationId) return { state: 'pending' };
+  const sessionId = entry.deliveredSessionId ?? entry.sessionId;
+  if (!sessionId) return { state: 'pending' };
+  return heavy(async () => {
+    const session = await readSession(sessionId);
+    if (!session || session.conversationId !== entry.conversationId) return { state: 'pending' };
+    const timeline = session.timelineTurns;
+    const events = await readEvents(sessionId, { kinds: ['user_message', 'turn_start', 'assistant_message', 'turn_end'] });
+    const anchor = events.filter(event => event.kind === 'user_message' && event.inputId === id &&
+      (!event.conversationId || event.conversationId === entry.conversationId));
+    if (anchor.length !== 1) return { state: anchor.length > 1 ? 'ambiguous' : 'pending' };
+    const origin = positionOf(anchor[0]!);
+    const after = events.filter(event => positionOf(event) > origin)
+      .sort((a, b) => positionOf(a) - positionOf(b));
+    const nextUser = after.findIndex(event => event.kind === 'user_message');
+    const interval = nextUser === -1 ? after : after.slice(0, nextUser);
+    const turns = new Set(interval.filter(event => event.kind === 'turn_start' && event.turnId)
+      .map(event => responseTurnId(timeline, event.turnId!)));
+    if (turns.size !== 1) return { state: turns.size > 1 ? 'ambiguous' : 'pending' };
+    const [turn] = turns;
+    const same = (event: typeof events[number]) => {
+      const id = event.kind === 'assistant_message' ? effectiveFinalTurnId(timeline, event) : event.turnId;
+      return !!id && responseTurnId(timeline, id) === turn;
+    };
+    const ends = interval.filter(event => event.kind === 'turn_end' && same(event));
+    if (!ends.some(event => event.kind === 'turn_end' && event.outcome === 'completed'))
+      return { state: 'pending' };
+    const finals = interval.filter(event => event.kind === 'assistant_message' && event.final && !event.retracted && same(event));
+    if (finals.length !== 1) return { state: finals.length > 1 ? 'ambiguous' : 'pending' };
+    const final = finals[0]!;
+    if (final.kind !== 'assistant_message') return { state: 'pending' };
+    const message = final.message;
+    const text = message.truncated
+      ? message.assetId ? await readOverflowText(sessionId, message.assetId) : null
+      : message.text;
+    if (!text?.trim()) return { state: 'pending' };
+    return { state: 'complete', text: redactSecretText(text), messageId: final.messageId ?? null,
+      turnId: turn, inputId: id };
+  });
 }
 
 // ---------------------------------------------------------------- agents
@@ -539,6 +596,8 @@ function activityLog(params: URLSearchParams): ControlApiLog {
 // ---------------------------------------------------------------- routes
 
 const SESSION_ROUTE = /^\/v1\/sessions\/([0-9a-z-]{8,64})(\/events)?$/;
+const INPUT_ROUTE = /^\/v1\/inputs\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
+const INPUT_ANSWER_ROUTE = /^\/v1\/inputs\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/answer$/;
 
 /**
  * Undefined when the path is not one of these routes. Ids are generated lowercase, and a
@@ -548,6 +607,10 @@ const SESSION_ROUTE = /^\/v1\/sessions\/([0-9a-z-]{8,64})(\/events)?$/;
 export async function serveRead(route: string, params: URLSearchParams): Promise<unknown | undefined> {
   if (route === '/v1/sessions') return sessionList(params);
   if (route === '/v1/inputs') return inputs(params);
+  const answer = INPUT_ANSWER_ROUTE.exec(route);
+  if (answer) return inputAnswer(answer[1]!, params);
+  const input = INPUT_ROUTE.exec(route);
+  if (input) return inputById(input[1]!, params);
   if (route === '/v1/agents') {
     parseQuery(params, {});
     return projectAgents(swarmState());
