@@ -6,7 +6,8 @@ const model = z.string().regex(/^[a-zA-Z0-9._-]{1,80}$/);
 const effort = z.enum(REASONING_EFFORTS);
 const pair = z.object({ model, effort }).strict();
 // Native version IDs and legacy requested selectors may contain spaces.
-const version = z.string().max(80).regex(/^[\p{L}\p{N}._: -]+$/u).nullable();
+const versionId = z.string().max(80).regex(/^[\p{L}\p{N}._: -]+$/u);
+const version = versionId.nullable();
 const phase = z.enum(['passive', 'trigger', 'chat-surface', 'open', 'read', 'enumerate-version', 'resolve', 'select-version', 'select-effort', 'restore-version', 'restore-effort', 'close']);
 export const modelSelectionDiagnostic = z.object({
   attempt: z.number().int().min(1).max(2), phase, outcome: z.enum(['pending', 'confirmed', 'failed']),
@@ -17,6 +18,8 @@ export const modelSelectionDiagnostic = z.object({
   targetVersion: version, observedVersion: version,
   restore: z.enum(['not-needed', 'skipped', 'failed', 'confirmed']), closed: z.boolean().nullable(),
   offered: z.array(pair.extend({ available: z.boolean() }).strict()).max(16), offeredTruncated: z.boolean(),
-  elapsedMs: z.number().int().min(0).max(600000), visibility: z.enum(['visible', 'hidden'])
+  elapsedMs: z.number().int().min(0).max(600000), visibility: z.enum(['visible', 'hidden']),
+  // Versions with no row to open (#2305), absent when none: their models are unknown, not refused.
+  skippedVersions: z.array(versionId).max(16).optional()
 }).strict();
 export type ModelSelectionDiagnostic = z.infer<typeof modelSelectionDiagnostic>;
