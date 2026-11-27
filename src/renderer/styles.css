@@ -2264,6 +2264,8 @@ details.connector[open] > summary::before { rotate: 90deg; }
 .setup-rail-mark .ico { display: none; --ico: 15px; translate: 0 -1px; }
 .setup-rail-ready .setup-rail-mark::before { content: none; }
 .setup-rail-ready .setup-rail-mark .ico { display: inline-flex; }
+/* A label is shown whole or kept off screen, never cut to four letters; off screen it still names its step (setup-rail-fit.ts). */
+.setup-rail.is-compact .setup-rail-label { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); }
 .setup-rail-label { max-width: 100%; overflow: hidden; font-size: calc(12px * var(--text-scale, 1)); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
 .setup-rail button:hover .setup-rail-mark { border-color: var(--accent-edge); color: var(--ink); }
 .setup-rail button:hover .setup-rail-label { color: var(--ink); }
@@ -2311,7 +2313,6 @@ details.connector[open] > summary::before { rotate: 90deg; }
 @media (max-width: 760px) {
   .setup-track { flex-direction: column; align-items: stretch; gap: 4px; }
   .setup-track .setup-progress { margin: 0; }
-  .setup-rail-label { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .wizard > .step.is-open { animation: none; }

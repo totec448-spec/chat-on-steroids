@@ -16,6 +16,9 @@ app.whenReady().then(async () => {
   const bundle = await build({ configFile: false, logLevel: 'silent', build: { write: false,
     lib: { entry: path.join(root, 'src/renderer/usage.ts'), name: 'usageFixture', formats: ['iife'] } } });
   const code = (Array.isArray(bundle) ? bundle[0] : bundle).output.find(item => item.type === 'chunk').code;
+  const railBundle = await build({ configFile: false, logLevel: 'silent', build: { write: false,
+    lib: { entry: path.join(root, 'src/renderer/setup-rail-fit.ts'), name: 'railFit', formats: ['iife'] } } });
+  const railCode = (Array.isArray(railBundle) ? railBundle[0] : railBundle).output.find(item => item.type === 'chunk').code;
   const html = withoutScripts(fs.readFileSync(path.join(root, 'out/renderer/index.html'), 'utf8'))
     .replace('<head>', `<head><base href="${pathToFileURL(path.join(root, 'out/renderer/')).href}">`);
   const file = path.join(output, 'fixture.html'); fs.writeFileSync(file, html);
@@ -310,7 +313,42 @@ app.whenReady().then(async () => {
       if (Math.abs(health.top - health.bottom) > 2) offCenter.push({ theme, element: 'Health figures', ink: health });
     }
     assert.deepEqual(offCenter, [], 'Glyphs and figures sit optically centered: ' + JSON.stringify(offCenter));
-    console.log('Settings layout passed: six pages, two themes, two widths, two zooms, live Usage renderer and long folder paths, centered marks.');
+    // A compact window (2026-11-27 audit of 12 languages): the Setup rail's labels were cut to four letters
+    // ("Брау…", "Дост…") with eight steps in under 400 px, and below 760 px the labels were removed with display:none,
+    // which also removed the steps' names for a screen reader. A label is shown whole or kept off screen, never cut,
+    // and the settings search placeholder, which is longer than the compact sidebar in French, German, Russian and
+    // Portuguese, ends in an ellipsis instead of a half letter.
+    await js(railCode);
+    await showPage('setup');
+    await js(`window.refitRail = railFit.watchSetupRailLabels(document.querySelector('.setup-rail')); 0`);
+    const russian = ['Браузер', 'Папка', 'Доступ', 'Туннель', 'API-ключ', 'Подключение', 'ChatGPT', 'Готово'];
+    const english = ['Browser', 'Folder', 'Access', 'Tunnel', 'API key', 'Connect', 'ChatGPT', 'Ready'];
+    for (const [width, height, names, whole] of [[820, 656, russian, false], [1000, 700, russian, false], [700, 560, english, false], [1440, 950, english, true]]) {
+      win.setSize(width, height); win.webContents.setZoomFactor(1);
+      await showPage('setup');
+      // The labels and the progress line a window shows in that language, in the same markup.
+      await js(`(() => { const names = ${JSON.stringify(names)};
+        document.querySelectorAll('.setup-rail .setup-rail-label').forEach((label, index) => { label.textContent = names[index] ?? label.textContent; });
+        document.getElementById('setupProgressText').textContent = 'Выполнены все 7 шагов'; })()`);
+      await js(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 100))))`);
+      const rail = await js(`(() => [...document.querySelectorAll('.setup-rail li:not([hidden]) button')].map(button => {
+        const label = button.querySelector('.setup-rail-label'), box = label.getBoundingClientRect(), style = getComputedStyle(label);
+        return { name: label.textContent.trim(), whole: label.scrollWidth <= label.clientWidth + 1, width: Math.round(box.width), height: Math.round(box.height),
+          named: style.display !== 'none' && style.visibility !== 'hidden', compact: label.closest('.setup-rail').classList.contains('is-compact') };
+      }))()`);
+      assert.ok(rail.length >= 7, `The rail has its steps at ${width} px`);
+      for (const step of rail) {
+        const keptOffScreen = step.width <= 1 && step.height <= 1;
+        assert.ok(step.named, `At ${width} px the "${step.name}" step still has a name for a screen reader: ${JSON.stringify(step)}`);
+        assert.ok(step.whole || keptOffScreen, `At ${width} px the "${step.name}" step label is shown whole or kept off screen, not cut: ${JSON.stringify(step)}`);
+        // Labels that fit stay: the rail is not emptied of its names whenever the window is not wide.
+        if (whole) assert.ok(!step.compact && step.width > 1, `At ${width} px labels that fit are shown: ${JSON.stringify(step)}`);
+      }
+      await js(`document.getElementById('settingsFind').placeholder = 'Rechercher dans les paramètres de l\\u2019application complète…'`);
+      const find = await js(`getComputedStyle(document.getElementById('settingsFind')).textOverflow`);
+      assert.equal(find, 'ellipsis', `At ${width} px a placeholder longer than the search box ends in an ellipsis`);
+    }
+    console.log('Settings layout passed: six pages, two themes, two widths, two zooms, live Usage renderer and long folder paths, centered marks, compact Setup rail and search box.');
   } finally { win.destroy(); }
   app.exit(0);
 }).catch(error => { console.error(error); app.exit(1); });
