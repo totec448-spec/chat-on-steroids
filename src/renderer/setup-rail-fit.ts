@@ -5,7 +5,8 @@
  * page, so every step keeps its name for a screen reader.
  */
 export function watchSetupRailLabels(rail: HTMLElement | null): (() => void) | null {
-  if (!rail) return null;
+  // Test pages and older shells may lack the observers; the rail then keeps its labels as before.
+  if (!rail || typeof ResizeObserver !== 'function' || typeof MutationObserver !== 'function') return null;
   let frame = 0, width = -1;
   const fit = (): void => {
     frame = 0;
@@ -17,7 +18,7 @@ export function watchSetupRailLabels(rail: HTMLElement | null): (() => void) | n
   // Only the rail's width matters to the resize watch: showing or hiding the labels changes its height.
   new ResizeObserver(() => { if (rail.clientWidth !== width) { width = rail.clientWidth; schedule(); } }).observe(rail);
   new MutationObserver(schedule).observe(rail, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['hidden'] });
-  void document.fonts?.ready.then(schedule);
+  void rail.ownerDocument.fonts?.ready.then(schedule);
   schedule();
   return schedule;
 }

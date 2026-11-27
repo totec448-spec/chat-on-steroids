@@ -4393,11 +4393,14 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
   .composer-primary-controls { gap: 1px; }
   .composer #composerSettings > summary { gap: 4px; padding-inline: 6px; }
   .composer #createPlan { gap: 4px; padding-inline: 6px; }
-  .composer #modelMenu { max-width: 112px; }
+  /* The button takes the room its label needs; the controls to its left keep their own width (2026-11-27 audit:
+     it was held to 112 px and 84 px and read "GPT-6 · …" with hundreds of pixels free in the row). */
+  .composer { grid-template-columns: minmax(min-content, 1fr) auto minmax(0, auto) 36px; }
+  .composer #modelMenu { max-width: 100%; }
   .composer #modelMenu > summary { gap: 3px; padding-inline: 5px; }
 }
 @container chat-session (max-width: 520px) {
-  .composer { width: calc(100% - 24px); padding-inline: 8px; gap: 3px; grid-template-columns: minmax(0, 1fr) auto minmax(0, 84px) 36px; }
+  .composer { width: calc(100% - 24px); padding-inline: 8px; gap: 3px; grid-template-columns: minmax(min-content, 1fr) auto minmax(0, auto) 36px; }
   .composer-primary-controls { gap: 0; }
   .composer #attachmentMenu > summary,
   .composer #composerSettings > summary,
@@ -4407,7 +4410,7 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
   #createPlan > span,
   #contextMeterCompact { display: none; }
   .composer #contextMeterButton { width: 28px; padding: 0; }
-  .composer #modelMenu { width: 84px; max-width: 84px; }
+  .composer #modelMenu { width: auto; max-width: 100%; }
   .composer #modelMenu > summary { gap: 2px; padding-inline: 4px; }
 }
 
