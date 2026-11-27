@@ -104,6 +104,16 @@ describe('Arabic localization safety regression', () => {
       }
     }
   });
+  it('keeps restoration counts unambiguous and warns about exactly what worker clearing removes', () => {
+    const base = 'Restored {0} of {1} files';
+    for (const form of ['', '|zero', '|one', '|two', '|few', '|many']) {
+      expect(renderer[base + form]).toBe('عدد الملفات المستعادة: {0} من أصل {1}');
+    }
+    const warning = renderer['Clear all workers? Running workers stop, and their saved histories are removed for good. Their chats stay in ChatGPT.'];
+    expect(warning).toContain('تُحذف سجلاتهم المحفوظة نهائيًا');
+    expect(warning).toContain('ستبقى محادثاتهم في ChatGPT');
+    expect(renderer['Overwrite ChatGPT']).toBe(renderer['Overwrite ChatGPT tool rows']);
+  });
   it('preserves the 2.1.53 release highlights across locale catalogs without duplicate keys', () => {
     const releaseKeys = [
       'Compact & Resume in Projects, Goal chats that recover, and safer saves over SSH.',
