@@ -78,10 +78,37 @@ describe('browser RPC custody', () => {
   it('lists competing browsers instead of guessing one and rejects old tab handles', async () => {
     const {broker} = setup(); broker.poll(other,'Edge',true);
     const list = await broker.execute('browser_tabs',{action:'list'},'A',null,async () => true);
-    expect(list.value).toMatchObject({browsers:expect.arrayContaining([{id:browser,name:'Test Chrome',enabled:true},{id:other,name:'Edge',enabled:true}])});
+    expect(list.value).toMatchObject({browsers:expect.arrayContaining([{id:browser,name:'Test Chrome',enabled:true,host:'unknown'},{id:other,name:'Edge',enabled:true,host:'unknown'}])});
     expect(await broker.execute('browser_action',{tabId:'123'},'A',null,async () => true)).toMatchObject({error:expect.stringContaining('TAB_INVALID')});
   });
 
+  // #482: an external organizer needs to know which listed browser is the built-in one. Read-only discovery:
+  // the value is what the browser's own extension build reports, so it says which kind of browser, never who controls it.
+  it('says whether each listed browser is the built-in one or an ordinary browser (#482)', async () => {
+    const {broker} = setup(); broker.poll(browser,'Built-in',true,'cos'); broker.poll(other,'Edge',true,'browser');
+    const list = await broker.execute('browser_tabs',{action:'list'},'A',null,async () => true);
+    expect(list.value).toMatchObject({browsers:expect.arrayContaining([{id:browser,name:'Built-in',enabled:true,host:'cos'},{id:other,name:'Edge',enabled:true,host:'browser'}])});
+  });
+  it('calls a browser that reports no host, or an unknown one, unknown instead of guessing', async () => {
+    const {broker} = setup(); broker.poll(browser,'Old build',true); broker.poll(other,'Odd',true,'something-else' as never);
+    expect(broker.browsers().map(b => b.host)).toEqual(['unknown','unknown']);
+  });
+  it('names the browser that answered a tab list, also when only one is connected (#482)', async () => {
+    const {broker,epoch} = setup(); broker.poll(browser,'Built-in',true,'cos');
+    const work = broker.execute('browser_tabs',{action:'list'},'A',null,async () => true);
+    const [request] = broker.poll(browser,'Built-in',true,'cos').requests;
+    await broker.claim(browser,request!,epoch);
+    broker.result(browser,request!,epoch,{value:{browserId:browser,tabs:[],total:0}});
+    expect(await work).toEqual({value:{browserId:browser,tabs:[],total:0,browser:{id:browser,name:'Built-in',host:'cos'}}});
+  });
+  it('does not add the browser to results that are not a tab list, and keeps the extension\'s own fields', async () => {
+    const {broker,epoch} = setup(); broker.poll(browser,'Built-in',true,'browser');
+    const work = broker.execute('browser_tabs',{action:'attach',tabId:`${browser}:3`},'A',null,async () => true);
+    const [request] = broker.poll(browser,'Built-in',true,'browser').requests;
+    await broker.claim(browser,request!,epoch);
+    broker.result(browser,request!,epoch,{value:{attached:true}});
+    expect(await work).toEqual({value:{attached:true}});
+  });
   it('treats JavaScript, new tabs and close as writes and bounds result bytes', async () => {
     expect(browserToolWrites('browser_tabs',{action:'list'})).toBe(false);
     expect(browserToolWrites('browser_tabs',{action:'new'})).toBe(true);

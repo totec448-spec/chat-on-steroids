@@ -608,6 +608,19 @@ describe('direct browser control over the paired bridge', () => {
     } finally { browserControl.reset(); await result; }
   });
 
+  // #482: the list of browsers says which one runs inside the app. The value is the extension's own
+  // `x-extension-host` header, kept per browser by the broker; a request without it is `unknown`.
+  it('records the host each browser reports on its poll, and unknown when it reports none (#482)', async () => {
+    browserControl.reset(); await pair();
+    const built = randomUUID(), ordinary = randomUUID(), old = randomUUID();
+    for (const [browserId, host] of [[built, 'cos'], [ordinary, 'browser'], [old, undefined]] as const) {
+      const polled = await request('POST', '/browser-control', { host, body: { action: 'poll', browserId, name: 'Fixture', enabled: true } });
+      expect(polled.status, String(host)).toBe(200);
+    }
+    try {
+      expect(Object.fromEntries(browserControl.browsers().map(b => [b.id, b.host]))).toEqual({ [built]: 'cos', [ordinary]: 'browser', [old]: 'unknown' });
+    } finally { browserControl.reset(); }
+  });
   it('requires extension authentication and transfers each exact command once', async () => {
     browserControl.reset();
     const browserId = randomUUID();
