@@ -290,6 +290,27 @@ it('disambiguates duplicate account model labels by their observed lane', async 
   expect([...dom.window.document.querySelectorAll<HTMLOptionElement>('#workerModel option')].map(option => option.value)).toEqual(['', ...models.map(model => model.id)]);
 });
 
+it('tells apart two account models with one label in the Goal step reviewer, as the other model choices do', async () => {
+  // Found on a live account (2026-11-28): the catalog holds `gpt-6-pro` (Pro only) beside `gpt-6`, both labelled
+  // "GPT-6". Every other model select said "GPT-6 · Pro" and "GPT-6 · gpt-6"; the reviewer listed "GPT-6" twice.
+  dom = new JSDOM('<span id="composerModelLabel"></span><p id="chatModelStatus"></p>' +
+    ['composerModel', 'composerReasoning', 'workerModel', 'workerReasoning', 'helperModel', 'helperReasoning', 'goalReviewer'].map(id => `<select id="${id}"></select>`).join(''));
+  const observed = { state: 'ready', requestedAt: 1, observedAt: Date.now(), models: [
+    { id: 'gpt-6-2', label: 'GPT-6.2', efforts: ['none', 'medium', 'high', 'xhigh'] },
+    { id: 'gpt-6-pro', label: 'GPT-6', efforts: ['pro'] },
+    { id: 'gpt-6', label: 'GPT-6', efforts: ['none', 'medium', 'high', 'xhigh', 'pro'] }
+  ] };
+  Object.assign(dom.window, { api: { getChatModels: async () => ({ ok: true, data: observed }) } });
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  const { initChatModels, applyChatModels } = await import('../src/renderer/chat-models.js');
+  initChatModels();
+  applyChatModels({ multiAgent: {}, goal: {} } as Config);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const labels = (id: string) => [...(dom.window.document.getElementById(id) as HTMLSelectElement).options].map(row => row.textContent);
+  expect(labels('goalReviewer').slice(2)).toEqual(['GPT-6.2', 'GPT-6 · Pro', 'GPT-6 · gpt-6']);
+  expect(labels('goalReviewer').slice(2)).toEqual(labels('workerModel').slice(1));
+});
+
 it('shows a sub-agent default that was never chosen as Automatic, which is what workers then use', async () => {
   dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
