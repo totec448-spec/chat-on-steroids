@@ -299,8 +299,8 @@ async function searchWithRipgrep(
       // With a target of "." and cwd set, ripgrep reports paths as ".\README.md". Left
       // alone that becomes "/root/./README.md" and no caller can match it against the
       // path it asked about.
-      const rawPath = String(data?.path?.text ?? '')
-        .replace(/\\/g, '/')
+      // Only Windows ripgrep writes backslash separators; elsewhere a backslash is part of the file name.
+      const rawPath = (process.platform === 'win32' ? String(data?.path?.text ?? '').replace(/\\/g, '/') : String(data?.path?.text ?? ''))
         .replace(/^\.\//, '');
       const rawText = String(data?.lines?.text ?? '').replace(/\r?\n$/, '');
       const trimmed = rawText.trim();
