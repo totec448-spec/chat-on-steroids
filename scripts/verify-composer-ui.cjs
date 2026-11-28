@@ -245,6 +245,9 @@ app.whenReady().then(async () => {
   win.setContentSize(900, 960); await pause(250);
   await check('Narrow chat column with the right work panel keeps one action row', `(()=>{const nodes=['attachmentMenu','composerSettings','createPlan','contextMeter','modelMenu','chatSend'].map(id=>document.getElementById(id).getBoundingClientRect()),card=document.querySelector('.card.is-session').getBoundingClientRect();const centers=nodes.map(r=>r.top+r.height/2);return card.width<520&&nodes.every(r=>r.left>=card.left&&r.right<=card.right)&&nodes.every((r,i)=>nodes.every((s,j)=>i===j||r.right<=s.left+.5||s.right<=r.left+.5||r.bottom<=s.top+.5||s.bottom<=r.top+.5))&&Math.max(...centers)-Math.min(...centers)<1})()`);
   await check('Narrow work-dock column compacts labels by column width', `getComputedStyle(document.getElementById('composerModeLabel')).display==='none'&&getComputedStyle(document.querySelector('#createPlan > span')).display==='none'&&getComputedStyle(document.getElementById('contextMeterCompact')).display==='none'`);
+  // 2026-11-27 audit: with the work panel open the model button was held to 84 px and read "GPT-6 · …" with
+  // hundreds of pixels free in the same row, hiding the reasoning level. It takes the room it needs.
+  await check('The model button keeps its reasoning level when the row has room', `(()=>{const label=document.getElementById('composerModelLabel');label.textContent='GPT-6 · Высокий';return label.scrollWidth<=label.clientWidth+1})()`);
   await capture('dock-900');
   await click('#rightDockToggle');
   // The offer belongs to its chat: New chat must not keep the dot or the screen-reader notice (CodeRabbit on #2019).

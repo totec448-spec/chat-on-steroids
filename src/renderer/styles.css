@@ -2264,6 +2264,8 @@ details.connector[open] > summary::before { rotate: 90deg; }
 .setup-rail-mark .ico { display: none; --ico: 15px; translate: 0 -1px; }
 .setup-rail-ready .setup-rail-mark::before { content: none; }
 .setup-rail-ready .setup-rail-mark .ico { display: inline-flex; }
+/* A label is shown whole or kept off screen, never cut to four letters; off screen it still names its step (setup-rail-fit.ts). */
+.setup-rail.is-compact .setup-rail-label { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); }
 .setup-rail-label { max-width: 100%; overflow: hidden; font-size: calc(12px * var(--text-scale, 1)); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
 .setup-rail button:hover .setup-rail-mark { border-color: var(--accent-edge); color: var(--ink); }
 .setup-rail button:hover .setup-rail-label { color: var(--ink); }
@@ -2311,7 +2313,6 @@ details.connector[open] > summary::before { rotate: 90deg; }
 @media (max-width: 760px) {
   .setup-track { flex-direction: column; align-items: stretch; gap: 4px; }
   .setup-track .setup-progress { margin: 0; }
-  .setup-rail-label { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .wizard > .step.is-open { animation: none; }
@@ -4392,11 +4393,14 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
   .composer-primary-controls { gap: 1px; }
   .composer #composerSettings > summary { gap: 4px; padding-inline: 6px; }
   .composer #createPlan { gap: 4px; padding-inline: 6px; }
-  .composer #modelMenu { max-width: 112px; }
+  /* The button takes the room its label needs; the controls to its left keep their own width (2026-11-27 audit:
+     it was held to 112 px and 84 px and read "GPT-6 · …" with hundreds of pixels free in the row). */
+  .composer { grid-template-columns: minmax(min-content, 1fr) auto minmax(0, auto) 36px; }
+  .composer #modelMenu { max-width: 100%; }
   .composer #modelMenu > summary { gap: 3px; padding-inline: 5px; }
 }
 @container chat-session (max-width: 520px) {
-  .composer { width: calc(100% - 24px); padding-inline: 8px; gap: 3px; grid-template-columns: minmax(0, 1fr) auto minmax(0, 84px) 36px; }
+  .composer { width: calc(100% - 24px); padding-inline: 8px; gap: 3px; grid-template-columns: minmax(min-content, 1fr) auto minmax(0, auto) 36px; }
   .composer-primary-controls { gap: 0; }
   .composer #attachmentMenu > summary,
   .composer #composerSettings > summary,
@@ -4406,7 +4410,7 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
   #createPlan > span,
   #contextMeterCompact { display: none; }
   .composer #contextMeterButton { width: 28px; padding: 0; }
-  .composer #modelMenu { width: 84px; max-width: 84px; }
+  .composer #modelMenu { width: auto; max-width: 100%; }
   .composer #modelMenu > summary { gap: 2px; padding-inline: 4px; }
 }
 
