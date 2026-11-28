@@ -71,7 +71,8 @@ export async function readDurable<T>(name: string, options: { strict?: boolean }
     const value = JSON.parse(raw) as T;
     // writeDurableNow(null) removes the file; an on-disk null is not that reset receipt.
     if (options.strict && value === null) throw new Error('Invalid null state');
-    strictReadFailures.delete(name);
+    // A `null` file still fails strict reads, so a tolerant read of it does not end the failure.
+    if (value !== null) strictReadFailures.delete(name);
     return value;
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
