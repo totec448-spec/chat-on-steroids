@@ -34,11 +34,13 @@ const title = document.createElement('div'); title.className = 'compact-title';
 const titleText = document.getElementById('chatTitle')!;
 title.append(titleText);
 const pin = button('quickPin', 'Always on top', 'i-pin', () => {
-  void native.pin(pin.getAttribute('aria-pressed') !== 'true').then(value => pin.setAttribute('aria-pressed', String(value)));
+  void native.pin(pin.getAttribute('aria-pressed') !== 'true').then(value => pin.setAttribute('aria-pressed', String(value))).catch(failure);
 });
 pin.setAttribute('aria-pressed', 'true');
-const expand = button('quickExpand', 'Open in workspace', 'i-out', () => { void native.expand(selectedChatId()); });
-const close = button('quickClose', 'Close', 'i-x', () => { void native.hide(); });
+const expand = button('quickExpand', 'Open in workspace', 'i-out', () => {
+  void native.expand(selectedChatId()).then(opened => { if (!opened) toast(t('Quick chat is not available')); }).catch(failure);
+});
+const close = button('quickClose', 'Close', 'i-x', () => { void native.hide().catch(failure); });
 top.append(search, fresh, title, pin, expand, close);
 
 initLanguage();
@@ -72,7 +74,7 @@ document.addEventListener('keydown', event => {
   if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing ||
       document.querySelector('dialog[open], .composer-menu[open]') ||
       (event.target as Element | null)?.closest('select')) return;
-  event.preventDefault(); void native.hide();
+  event.preventDefault(); void native.hide().catch(failure);
 });
 // The native window stays hidden until the compact layout and actual user theme are applied.
 void (async () => {

@@ -1,4 +1,7 @@
 {
+  "Quick chat is not available": "Quick Chat n’est pas disponible",
+  "Invalid pin value": "Valeur d’épinglage non valide",
+  "Chat not found": "Discussion introuvable",
   "Quick Chat global shortcut": "Raccourci global de Quick Chat",
   "Open Quick Chat from any app while Chat On Steroids is running. The tray menu remains available when disabled.": "Ouvrez Quick Chat depuis toute application pendant que Chat On Steroids fonctionne. Le menu de la zone de notification reste accessible si le raccourci est désactivé.",
   "Quick Chat key combination": "Combinaison de touches de Quick Chat",

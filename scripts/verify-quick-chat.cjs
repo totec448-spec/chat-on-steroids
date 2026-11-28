@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { defaultConfig, merge } = require('./fixtures/app-defaults.cjs');
+const { resizeWindow } = require('./ui-check-window.cjs');
 const root = path.resolve(__dirname, '..');
 app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'cos-quick-chat-')));
 const ok = data => ({ ok: true, data });
@@ -120,7 +121,7 @@ app.whenReady().then(async () => {
   await until('document.querySelector("#quickPin").getAttribute("aria-pressed") === "false"');
   config.ui.theme = 'light'; win.webContents.send('state:changed', state);
   await until('document.documentElement.dataset.theme === "light"');
-  win.setContentSize(360, 380);
+  await resizeWindow(win, 360, 380, { content: true });
   await until('window.innerWidth <= 365 && window.innerHeight <= 385');
   await until('document.documentElement.scrollWidth <= window.innerWidth && document.querySelector("#chatSend").getBoundingClientRect().bottom <= window.innerHeight');
   await js('document.querySelector("#quickSearch").click()');

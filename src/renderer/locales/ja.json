@@ -1,4 +1,7 @@
 {
+  "Quick chat is not available": "Quick Chat は利用できません",
+  "Invalid pin value": "固定設定の値が無効です",
+  "Chat not found": "チャットが見つかりません",
   "Quick Chat global shortcut": "Quick Chat のグローバルショートカット",
   "Open Quick Chat from any app while Chat On Steroids is running. The tray menu remains available when disabled.": "Chat On Steroids の実行中はどのアプリからでも Quick Chat を開けます。無効にしてもトレイメニューは利用できます。",
   "Quick Chat key combination": "Quick Chat のキーの組み合わせ",

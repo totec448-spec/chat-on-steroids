@@ -1,4 +1,7 @@
 {
+  "Quick chat is not available": "O Quick Chat não está disponível",
+  "Invalid pin value": "Valor de fixação inválido",
+  "Chat not found": "Conversa não encontrada",
   "Quick Chat global shortcut": "Atalho global do Quick Chat",
   "Open Quick Chat from any app while Chat On Steroids is running. The tray menu remains available when disabled.": "Abre o Quick Chat a partir de qualquer aplicação enquanto o Chat On Steroids estiver em execução. O menu da área de notificação continua disponível quando desativado.",
   "Quick Chat key combination": "Combinação de teclas do Quick Chat",

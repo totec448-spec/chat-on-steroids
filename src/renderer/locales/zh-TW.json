@@ -1,4 +1,7 @@
 {
+  "Quick chat is not available": "Quick Chat 無法使用",
+  "Invalid pin value": "無效的置頂設定值",
+  "Chat not found": "找不到聊天",
   "Quick Chat global shortcut": "Quick Chat 全域快速鍵",
   "Open Quick Chat from any app while Chat On Steroids is running. The tray menu remains available when disabled.": "Chat On Steroids 執行時，可從任何應用程式開啟 Quick Chat。停用快速鍵後仍可使用系統匣選單。",
   "Quick Chat key combination": "Quick Chat 按鍵組合",

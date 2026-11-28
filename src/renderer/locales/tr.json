@@ -1,4 +1,7 @@
 {
+  "Quick chat is not available": "Quick Chat kullanılamıyor",
+  "Invalid pin value": "Geçersiz sabitleme değeri",
+  "Chat not found": "Sohbet bulunamadı",
   "Quick Chat global shortcut": "Quick Chat genel kısayolu",
   "Open Quick Chat from any app while Chat On Steroids is running. The tray menu remains available when disabled.": "Chat On Steroids çalışırken Quick Chat'i herhangi bir uygulamadan aç. Devre dışı bırakıldığında sistem tepsisi menüsü kullanılabilir.",
   "Quick Chat key combination": "Quick Chat tuş birleşimi",
