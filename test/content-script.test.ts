@@ -18197,13 +18197,16 @@ describe('the fresh chat the app opened', () => {
    */
   describe('a choice ChatGPT takes back when the picker closes (#2085)', () => {
     const gone = { model: 'gpt-6-thinking', effort: 'medium' }, chosen = { model: 'gpt-6-thinking', effort: 'high' };
-    const run = async (outcomes: Array<{ confirmed: boolean; failure?: string; failedPhase?: string; after?: typeof gone }>) => {
+    const run = async (outcomes: Array<{ confirmed: boolean; failure?: string; failedPhase?: string; after?: typeof gone }>,
+      kind: 'worker' | 'resume' = 'worker', model = 'gpt-6-thinking', recovered = false,
+      permit = false, proofs = [true, true], interruptFirst = false) => {
       let release!: (value: unknown) => void;
       const redeemed = new Promise(resolve => { release = resolve; });
       const workerChat = '27272727-3838-4949-8a8a-909090909090';
-      live = await harness('https://chatgpt.com/?clf=cmd-takeback', {
+      live = await harness('https://chatgpt.com/?clf=cmd-takeback&model=gpt-6&reasoning_effort=high', {
         redeem: () => redeemed,
         command_step: () => ({ ok: true }),
+        model_recovery: () => ({ ok: permit }),
         page_note: () => ({ ok: true }),
         fail: () => ({ ok: true }),
         ack: () => ({ ok: true })
@@ -18217,14 +18220,19 @@ describe('the fresh chat the app opened', () => {
       (live.window as any).CLF_DOM.selectModelSettings = vi.fn(async (_model: string, _effort: string, _current: unknown, diagnostic: (trace: unknown) => void) => {
         const outcome = outcomes[Math.min(picks, outcomes.length - 1)]!;
         picks++;
+        if (interruptFirst && picks === 1) announcement(live!.document);
         diagnostic({ outcome: outcome.confirmed ? 'confirmed' : 'failed', failure: outcome.failure ?? null, failedPhase: outcome.failedPhase ?? null,
-          selected: chosen, after: outcome.after ?? chosen });
+          closed: outcome.failedPhase === 'close', resolved: chosen, selected: chosen, after: outcome.after ?? chosen });
         return outcome.confirmed;
       });
-      release({ ok: true, command: { id: 'cmd-takeback', type: 'worker', text: 'Worker task', agent: 'worker-1', model: 'gpt-6-thinking', reasoningEffort: 'high' } });
+      const confirm = vi.fn(async () => proofs.shift() ?? false);
+      (live.window as any).CLF_DOM.confirmCurrentModelSettings = confirm;
+      release({ ok: true, command: { id: 'cmd-takeback', type: kind, text: 'Worker task', agent: kind === 'worker' ? 'worker-1' : null,
+        model, reasoningEffort: 'high', ...(recovered ? { modelRecoveryUsed: true } : {}) } });
       await settle(600);
       const steps = live.sent.filter(message => message.type === 'command_step').map(message => message.step);
-      return { picks, steps, attempts: live.sent.filter(message => message.step === 'model-diagnostic').map(message => message.modelSelection?.attempt) };
+      return { picks, steps, attempts: live.sent.filter(message => message.step === 'model-diagnostic').map(message => message.modelSelection?.attempt), sent: live.sent,
+        url: live.window.location.href, confirmations: confirm.mock.calls.length };
     };
 
     it('selects again once and goes on when the second pick holds', async () => {
@@ -18239,6 +18247,72 @@ describe('the fresh chat the app opened', () => {
       expect(seen.picks).toBe(2);
       expect(seen.attempts).toEqual([1, 2]);
       expect(seen.steps).not.toContain('sending');
+    });
+
+    it.each(['gpt-6', 'gpt-6-thinking'])('does not silently continue a resume on Instant after repeated %s High take-back', async model => {
+      const seen = await run([{ confirmed: false, failure: 'changed', failedPhase: 'close', after: { model: 'gpt-6', effort: 'none' } }], 'resume', model);
+      expect(seen.picks).toBe(2);
+      expect(seen.steps).not.toContain('model-unconfirmed');
+      expect(seen.steps).not.toContain('inserting');
+      expect(seen.sent.find(message => message.type === 'ack')).toMatchObject({ status: 'failed' });
+    });
+
+    it('does not fall back after the one clean-address recovery even when the native picker is unreadable', async () => {
+      const seen = await run([{ confirmed: false, failure: 'unreadable', failedPhase: 'open' }], 'resume', 'gpt-6', true);
+      expect(seen.picks).toBe(1);
+      expect(seen.steps).not.toContain('model-unconfirmed');
+      expect(seen.steps).not.toContain('inserting');
+    });
+
+    it('refuses an unreadable High rather than treating it as an unavailable model', async () => {
+      const seen = await run([{ confirmed: false, failure: 'unreadable', failedPhase: 'open' }], 'resume', 'gpt-6');
+      expect(seen.steps).not.toContain('model-unconfirmed');
+      expect(seen.steps).not.toContain('inserting');
+    });
+
+    it('keeps the existing resume fallback for a genuinely absent requested model', async () => {
+      const seen = await run([{ confirmed: false, failure: 'not-offered', failedPhase: 'resolve' }], 'resume', 'gpt-6');
+      expect(seen.steps).toContain('model-unconfirmed');
+      expect(seen.steps).toContain('inserting');
+    });
+
+    it('does not mistake a successful rounded choice for High', async () => {
+      const seen = await run([{ confirmed: true, after: gone }], 'resume', 'gpt-6');
+      expect(seen.steps).not.toContain('model-unconfirmed');
+      expect(seen.steps).not.toContain('inserting');
+    });
+
+    it('spends one clean-address permit without typing in the retired document', async () => {
+      const seen = await run([{ confirmed: false, failure: 'changed', failedPhase: 'close', after: gone }],
+        'worker', 'gpt-6', false, true);
+      expect(seen.sent.filter(message => message.type === 'model_recovery')).toHaveLength(1);
+      expect(seen.url).toBe('https://chatgpt.com/?clf=cmd-takeback#clf=cmd-takeback');
+      expect(seen.steps).not.toContain('inserting');
+      expect(seen.steps).not.toContain('sending');
+    });
+
+    it('does not spend recovery when the first try was only interrupted by an announcement', async () => {
+      const seen = await run([{ confirmed: false, failure: 'changed', failedPhase: 'close', after: chosen },
+        { confirmed: false, failure: 'changed', failedPhase: 'close', after: gone }],
+        'worker', 'gpt-6', false, true, [true, true], true);
+      expect(seen.picks).toBe(2);
+      expect(seen.sent.filter(message => message.type === 'model_recovery')).toHaveLength(0);
+      expect(seen.steps).not.toContain('sending');
+    });
+
+    it('re-proves recovered High immediately before sending', async () => {
+      const seen = await run([{ confirmed: true }], 'worker', 'gpt-6', true);
+      expect(seen.confirmations).toBe(2);
+      expect(seen.steps).toContain('sending');
+      expect(seen.sent.filter(message => message.type === 'model_recovery')).toHaveLength(0);
+    });
+
+    it('does not click Send if recovered High changes at the final proof', async () => {
+      const seen = await run([{ confirmed: true }], 'worker', 'gpt-6', true, false, [true, false]);
+      expect(seen.confirmations).toBe(2);
+      expect(seen.sent.find(message => message.type === 'ack')).toMatchObject({ status: 'failed' });
+      expect(seen.url).not.toContain('/c/');
+      expect(seen.sent.filter(message => message.type === 'model_recovery')).toHaveLength(0);
     });
 
     it.each([

@@ -1085,8 +1085,8 @@
   let mentionPlugins = false;
   function sendSubmittedText(stillCurrent, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null,
                              matchesUser = matchesSubmittedUser, receiptTimeoutMs = null, explain = null, mention = currentCoreMention(), sentRequest = null,
-                             whileGenerating = false, stillCurrentAfterClick = null) {
-    return CLF_DOM.send({ stillCurrent, stillCurrentAfterClick, clearAcceptedDraft, beforeSend, acceptUserReceipt, matchesUser, receiptTimeoutMs, mention, explain, sentRequest, whileGenerating,
+                             whileGenerating = false, stillCurrentAfterClick = null, beforeClick = null) {
+    return CLF_DOM.send({ stillCurrent, stillCurrentAfterClick, clearAcceptedDraft, beforeSend, beforeClick, acceptUserReceipt, matchesUser, receiptTimeoutMs, mention, explain, sentRequest, whileGenerating,
       observeEvidence: check => { pageViewChecks.add(check); return () => pageViewChecks.delete(check); } });
   }
   const GOAL_MARKER_INSTRUCTION = '\n\nFor this Goal session only: at the end of each final reply, write exactly one separate last line: [[COS_GOAL:COMPLETE]] if the entire requested task is finished, or [[COS_GOAL:CONTINUE]] if requested work remains. Do not claim completion for partial work. If user input is required, explain it and omit both markers.';
@@ -12592,9 +12592,11 @@
     if (boot.model || boot.reasoningEffort) step('model');
     // An announcement that opened over the picker refuses the choice; closing it earns one more try.
     const chooseModel = () => {
-      const attempt = ++modelAttempt;
-      return CLF_DOM.selectModelSettings(boot.model, boot.reasoningEffort, stillOnTarget, diagnostic => {
-        modelDiagnostic = { ...diagnostic, attempt };
+      const selectionAttempt = ++modelAttempt;
+      modelDiagnostic = null;
+      return CLF_DOM.selectModelSettings(boot.model, boot.reasoningEffort,
+        () => stillOnTarget() && !modelInterrupted && !attempt?.cancelled, diagnostic => {
+        modelDiagnostic = { ...diagnostic, attempt: selectionAttempt };
         step('model-diagnostic', modelDiagnostic);
       });
     };
@@ -12609,14 +12611,69 @@
       return failure === 'changed' && failedPhase === 'close' && !!selected && !!after &&
         (selected.model !== after.model || selected.effort !== after.effort);
     };
-    const modelConfirmed = !!(boot.model || boot.reasoningEffort) && (await chooseModel() ||
-      ((tookBack() || (await closeAnnouncements(stillOnTarget)).length > 0) && stillOnTarget() && await chooseModel()));
-    let mayGoOn = !(boot.model || boot.reasoningEffort) || modelConfirmed;
+    // A known High take-back is different from an unavailable model (#1952).
+    // Remember that proof even when the retry could no longer read the picker.
+    const explicitGpt6High = ['gpt-6', 'gpt-6-thinking'].includes(boot.model) && boot.reasoningEffort === 'high';
+    let knownHighTakeBack = false, modelInterrupted = false;
+    const interruptModelRecovery = event => { if (event.isTrusted) modelInterrupted = true; };
+    if (explicitGpt6High) {
+      document.addEventListener('pointerdown', interruptModelRecovery, true);
+      document.addEventListener('keydown', interruptModelRecovery, true);
+    }
+    const exactHighTakeBack = () => tookBack() && modelDiagnostic?.outcome === 'failed' &&
+      modelDiagnostic.closed === true && modelDiagnostic.resolved?.model === 'gpt-6-thinking' &&
+      modelDiagnostic.resolved.effort === 'high' && modelDiagnostic.selected?.model === 'gpt-6-thinking' &&
+      modelDiagnostic.selected.effort === 'high';
+    const rememberTakeBack = () => {
+      const taken = tookBack();
+      if (explicitGpt6High && exactHighTakeBack()) knownHighTakeBack = true;
+      return taken;
+    };
+    let modelConfirmed = false;
+    try {
+      modelConfirmed = !!(boot.model || boot.reasoningEffort) && (await chooseModel() ||
+        ((rememberTakeBack() || (await closeAnnouncements(stillOnTarget)).length > 0) && stillOnTarget() && !modelInterrupted && await chooseModel()));
+      const firstTakeBack = knownHighTakeBack;
+      if (!modelConfirmed) rememberTakeBack();
+      // A nearby effort is not the requested GPT-6 High (#2085). Neither the
+      // generic effort ladder nor a retained picker value may silently downgrade it.
+      if (explicitGpt6High && modelConfirmed &&
+          (modelDiagnostic?.resolved?.model !== 'gpt-6-thinking' || modelDiagnostic.resolved.effort !== 'high' ||
+           modelDiagnostic.after?.model !== 'gpt-6-thinking' || modelDiagnostic.after.effort !== 'high')) modelConfirmed = false;
+      const canRecover = () => stillOnTarget() && !attempt?.cancelled && !modelInterrupted &&
+        fromUrl && !target && !projectEntry && !OPENED_PROJECT_ENTRY && location.pathname === '/' &&
+        !CLF_DOM.messages().length && !CLF_DOM.generating() && !CLF_DOM.hasComposerAttachments() &&
+        !(CLF_DOM.composerText() || '').trim();
+      if (!modelConfirmed && firstTakeBack && knownHighTakeBack && modelAttempt === 2 && exactHighTakeBack() &&
+          boot.modelRecoveryUsed !== true && (boot.type === 'worker' || boot.type === 'resume') && canRecover()) {
+        const permit = await ask({ type: 'model_recovery', id: boot.id, client: RUN_ID, diagnostic: modelDiagnostic }, canRecover);
+        // Preparation revoked this document's command custody. Never resume typing
+        // here, even on a lost/refused reply or if the user changed the composer.
+        if (permit?.ok === true && canRecover()) {
+          try {
+            const clean = new URL('https://chatgpt.com/');
+            clean.searchParams.set('clf', id);
+            clean.hash = 'clf=' + encodeURIComponent(id);
+            // Force one new document even when ChatGPT already stripped model from
+            // the address; a fragment-only navigation would not reinitialize it.
+            history.replaceState(history.state, '', clean.href);
+            location.reload();
+            return;
+          } catch { /* No second navigation; settle the pre-Send failure. */ }
+        }
+        return void (await fail(t(
+          'content_bootstrap_model_unavailable',
+          'The requested model or reasoning is unavailable or could not be confirmed in ChatGPT'
+        ), 'model-recovery-cancelled'));
+      }
+    let mayGoOn = !modelInterrupted && (!(boot.model || boot.reasoningEffort) || modelConfirmed);
     // A wake or a Compact & Resume goes out on ChatGPT's current model rather than not at all: a worker
     // that never wakes stops its whole run (#1952), and an abandoned resume stops its chat for good
     // (2026-11-01, Mac). A resume tries the model again in its new chat (publishBootstrapSelection).
     // The app logs which model it could not confirm. A new worker's chat still refuses.
-    if (!mayGoOn && (boot.type === 'revive' || boot.type === 'resume') && stillOnTarget()) { step('model-unconfirmed', modelDiagnostic); mayGoOn = true; }
+    if (!mayGoOn && !modelInterrupted && !knownHighTakeBack && boot.modelRecoveryUsed !== true &&
+        (!explicitGpt6High || modelDiagnostic?.failure === 'not-offered') &&
+        (boot.type === 'revive' || boot.type === 'resume') && stillOnTarget()) { step('model-unconfirmed', modelDiagnostic); mayGoOn = true; }
     if (!mayGoOn) {
       const why = CLF_DOM.modelSelectionFailure?.();
       return void (await fail(t(
@@ -12641,6 +12698,9 @@
       ), 'transient'));
     }
     const selectionConfirmedAt = Date.now();
+    const strictBootstrapModel = modelConfirmed && explicitGpt6High;
+    const confirmBootstrapModel = current => !modelInterrupted && (!strictBootstrapModel ||
+      CLF_DOM.confirmCurrentModelSettings('gpt-6-thinking', 'high', () => current() && !modelInterrupted));
     const publishBootstrapSelection = async (id) => {
       if (CLF_DOM.conversationId() !== id) return;
       if (boot.type === 'resume' && boot.model) {
@@ -12654,7 +12714,7 @@
         try {
           // Adopt the concrete destination identity without publishing its transient default.
           observe();
-          const ownsDestination = () => !attempt?.cancelled && sendingBootstrap() &&
+          const ownsDestination = () => !modelInterrupted && !attempt?.cancelled && sendingBootstrap() &&
             CLF_DOM.conversationId() === id && conversationId === id;
           if (!ownsDestination()) return;
           // Re-run the picker proof on the concrete destination route. The requested model may
@@ -12663,7 +12723,8 @@
           if (!(await CLF_DOM.selectModelSettings(boot.model, boot.reasoningEffort, ownsDestination))) return;
           if (!ownsDestination()) return;
           const selected = CLF_DOM.visibleModelSelection?.();
-          if (!selected) return;
+          if (!selected || (explicitGpt6High && modelConfirmed &&
+              (selected.model !== 'gpt-6-thinking' || selected.reasoningEffort !== 'high'))) return;
           reportedModelSelection = JSON.stringify(selected);
           emit({ kind: 'model_selection', model: selected.model,
             ...(selected.reasoningEffort ? { reasoningEffort: selected.reasoningEffort } : {}), time: Date.now() });
@@ -12680,7 +12741,8 @@
       // The picker proved this selection before the new worker had a conversation.
       // Once Send supplies its identity, journal that proof through the ordinary
       // model-selection owner. The closed picker cannot rediscover it passively.
-      if (conversationId === id) emit({ kind: 'model_selection', model: boot.model,
+      const provenModel = explicitGpt6High ? modelDiagnostic?.resolved?.model : boot.model;
+      if (conversationId === id && provenModel) emit({ kind: 'model_selection', model: provenModel,
         ...(boot.reasoningEffort ? { reasoningEffort: boot.reasoningEffort } : {}), time: selectionConfirmedAt });
     };
     if (await failIfRetargeted()) return;
@@ -12705,6 +12767,11 @@
       ), 'transient'));
     }
     let insertionFailure = '';
+    if (!await confirmBootstrapModel(stillOnTarget) || modelInterrupted ||
+        (strictBootstrapModel && (CLF_DOM.hasComposerAttachments() || (CLF_DOM.composerText() || '').trim())))
+      return void (await fail(t('content_bootstrap_model_unavailable',
+        'The requested model or reasoning is unavailable or could not be confirmed in ChatGPT')));
+    if (await failIfRetargeted()) return;
     step('inserting');
     if (!CLF_DOM.insertPrompt(boot.text, true, reason => { insertionFailure = reason; })) {
       return void (await fail(t(
@@ -12776,6 +12843,13 @@
     const exactBootstrapDraft = () => squeeze(CLF_DOM.composerText()) === expectedText;
     const rejectChangedBootstrap = async () => {
       if (await failIfRetargeted()) return true;
+      if (modelInterrupted) {
+        await bootstrapDraft.clear();
+        continuationJournalPending = false;
+        await fail(t('content_bootstrap_model_unavailable',
+          'The requested model or reasoning is unavailable or could not be confirmed in ChatGPT'));
+        return true;
+      }
       if (exactBootstrapDraft()) return false;
       if (boot.type === 'resume' && !squeeze(CLF_DOM.composerText())) {
         continuationJournalPending = false;
@@ -12814,6 +12888,7 @@
       return found;
     };
     if (boot.type === 'resume') {
+      if (await rejectChangedBootstrap()) return;
       if (!resumeMarker || resumeMarker[1] !== 'RESUME') {
         return void (await fail(t(
           'content_bootstrap_resume_marker_invalid',
@@ -12843,6 +12918,14 @@
     rememberUserSend();
     // The bootstrap's own receipt, which allows for the composer's Markdown escaping — see
     // matchesSubmittedBootstrap. Every other caller keeps the exact comparison.
+    let modelProofRefused = false;
+    const proveBootstrapClick = async current => {
+      if (!current() || !await confirmBootstrapModel(() => current() && stillOnTarget()) || !current()) {
+        modelProofRefused = true;
+        return false;
+      }
+      return true;
+    };
     const authorizeBootstrapSend = () => {
       if (attempt && boot.type === 'worker') attempt.phase = 'dispatching';
       return true;
@@ -12852,7 +12935,7 @@
     let sendRefusal = null;
     let revivalBecameBusy = false;
     const bootstrapReadyToSend = () => {
-      if (attempt?.cancelled || !sendingBootstrap()) return false;
+      if (attempt?.cancelled || modelInterrupted || !sendingBootstrap()) return false;
       if (boot.type === 'revive' && !revivalReadyButForDraft(target)) {
         revivalBecameBusy = true;
         return false;
@@ -12878,10 +12961,26 @@
                                   why => { sendRefusal = why; },
                                   currentCoreMention(), boot.type === 'resume'
                                     ? clickedAt => sentRequestSince(clickedAt, sendEpoch) : null,
-                                  false, reportingBootstrap))) {
+                                  false, reportingBootstrap, strictBootstrapModel ? proveBootstrapClick : null))) {
       // Once send() was invoked, a missing/cleared draft cannot prove that no click
       // happened. Only the exact pre-click check above may release the dispatch.
+      if (modelProofRefused) {
+        await bootstrapDraft.clear();
+        continuationJournalPending = false;
+        return void (await fail(t('content_bootstrap_model_unavailable',
+          'The requested model or reasoning is unavailable or could not be confirmed in ChatGPT')));
+      }
       if (boot.type === 'resume') {
+        // These explicit DOM refusals occur only before the native click. Keep
+        // the original source instead of an armed-but-never-dispatched destination.
+        if (strictBootstrapModel && ['send-not-ready', 'not-authorized', 'draft-changed',
+            'page-busy', 'mention-changed', 'mention-not-restored', 'editor-missing',
+            'editor-disabled', 'draft-empty'].includes(sendRefusal)) {
+          await bootstrapDraft.clear();
+          continuationJournalPending = false;
+          return void (await fail(t('content_bootstrap_send_not_accepted',
+            'ChatGPT did not accept the bootstrap send') + ' (' + sendRefusal + ')'));
+        }
         // Retain the armed ticket and journal gate for exact marker reconciliation; never
         // replay an ambiguous click or let ordinary events create its shadow session.
         return;
@@ -12954,6 +13053,12 @@
     await publishBootstrapSelection(found);
     await clearAcknowledgedBootstrap(acknowledged);
     } finally { bootstrapDraft.dispose(); }
+    } finally {
+      if (explicitGpt6High) {
+        document.removeEventListener('pointerdown', interruptModelRecovery, true);
+        document.removeEventListener('keydown', interruptModelRecovery, true);
+      }
+    }
   }
 
   // ----------------------------------------------------------------- start

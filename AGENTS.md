@@ -506,6 +506,16 @@ A bootstrap's model choice that ChatGPT takes back as the picker closes (receipt
 (receipt `attempt` 1 and 2), only for that outcome, and the picker read after the second close is still the only
 proof. Only a readable picker showing a different choice than the one selected counts: an unreadable, unavailable,
 mid-selection or unclosed picker, and a native reasoning control that disagrees with a picker that held, are not retried. Input sends keep one attempt.
+For explicit GPT-6 High bootstrap requests, a confirmed different effort is not High. A wake or
+resume falls back only if the picker actually reports the requested pair not offered, not if its
+selection cannot be read or is taken back. A fresh non-Project worker or replacement chat with
+two readable close take-backs can spend one additional document initialization before any Send.
+The original URL parameters remain on ordinary opens (#1086). Recovery removes model and effort
+parameters, retains the existing command correlation marker and hard-reloads that same empty
+tab once. It does not navigate a live conversation, a Project or a tab holding a person's draft.
+Both the initial and recovered explicit High proof must name the exact execution pair, not the
+requested alias. Recheck without opening or changing the picker after composer acquisition and
+after mention settlement at the native click boundary. A refused proof never dispatches a click.
 An effort-only request (no model) keeps ChatGPT's current model: `selectModelSettings` rounds the
 effort within that model only and never moves to another model offering the effort; with the current
 model unreadable it confirms nothing.
@@ -3266,6 +3276,26 @@ the existing wake/resume continuation policy. Older apps ignore the unknown tele
 extensions keep the existing coarse progress. Captions, conversation content, React props and
 credentials are excluded. The diagnostic snapshot is not restart or Send authority.
 
+The separate `model_recovery` message is an explicit pre-Send authorization, not telemetry.
+The service worker checks the exact registered document and marked fresh home, stores a
+random one-use nonce in browser-session storage keyed by tab, and calls
+`POST /commands/model-recovery`. The bridge validates the source document/browser, the frozen
+requested pair, the second final readable take-back and the pre-insert step; it durably retires
+that owner before granting permission. Optional `modelRecovery` in the existing v4 command
+record carries that one permit and the original absolute deadline. A clean replacement document
+redeems with `modelRecoveryNonce` from the same tab; the marker in the URL is still only
+correlation. The transferred command says `modelRecoveryUsed: true`; neither that document nor
+the old one can authorize another reset. Lost replies fail closed. Cancellation and adoption
+serialize through existing command custody; a durable cancelled permit cannot redeem again.
+On restore, a malformed or stale recovery record for a resume retires its still-unsent continuation
+durably before the command is pruned, so the ordinary pickup cannot create a fresh budget.
+A refused continuation write blocks restoration and leaves the old command for retry.
+An already-dispatched destination keeps its ambiguous-Send fence; corruption does not prove
+that nothing was sent. Legacy records without the recovery field keep their existing behavior.
+Older bridges decline the new route; older documents without a nonce cannot adopt the permit.
+No new store is needed in the app. No additional ChatGPT prompt, discovery or Send is authorized.
+Browser-session storage is not assumed to survive a whole browser shutdown.
+
 The ordinary-composer preference is a separate optional pair, `ui.defaultChatModel` and
 `ui.defaultChatReasoning`. `chat-models.ts` applies it only while the selected composer is the
 fresh New Chat scope with no per-conversation selection. Once a conversation or accepted opening
@@ -4294,6 +4324,9 @@ stays null and is never reconstructed from a later change in A.
 An expired automatic browser command durably releases only its own unattempted destination
 claim before command retirement. Redeem, destination checkpoints and retirement serialize
 through command custody; checkpoints also prove the exact document owner and WAL claimant.
+An exhausted explicit High recovery instead aborts an unattempted continuation durably,
+preserving the original session and stored brief. If the page proves its recovered brief
+was lost before Send it aborts rather than offering the brief to another fresh document.
 Attempted/ambiguous sends retain their fence. A committing transaction or failed durable
 retirement grants no immediate delivery retry. A loading destination can checkpoint only on
 its owned URL; a foreign pending route remains ineligible.

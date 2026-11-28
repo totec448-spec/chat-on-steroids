@@ -519,6 +519,35 @@ interface Command {
   progress?: { opened?: 'browser' | 'os'; step?: CommandStep; stepAt?: number; /** When a stage that moved the deadline was reported; a repeated stage leaves it alone. */ stageAt?: number };
   /** Ephemeral picker telemetry: never persisted, replayed, or used to extend a deadline. */
   modelSelection?: ModelSelectionDiagnostic;
+  /** One pre-Send clean-address handoff; the browser-session nonce is never a URL marker. */
+  modelRecovery?: ModelRecovery;
+  modelRecoverySource?: { owner: string; browser: string; model: string | null; reasoningEffort: ReasoningEffort | null };
+  /** Advisory progress may arrive out of order; crossing model selection is irreversible for recovery. */
+  modelRecoveryBlocked?: boolean;
+  modelRecoveryPreparing?: boolean;
+}
+
+interface ModelRecovery {
+  nonce: string;
+  browser: string;
+  sourceOwner: string;
+  model: 'gpt-6' | 'gpt-6-thinking';
+  expiresAt: number;
+  cancelled?: true;
+}
+
+function modelRecoveryOwner(recovery: ModelRecovery): string {
+  return 'model-reset:' + recovery.nonce;
+}
+
+function validModelRecovery(value: unknown): value is ModelRecovery {
+  if (!value || typeof value !== 'object') return false;
+  const row = value as Partial<ModelRecovery>;
+  return typeof row.nonce === 'string' && /^[a-f0-9]{32}$/.test(row.nonce) &&
+    typeof row.browser === 'string' && /^[a-z0-9]{16,64}$/.test(row.browser) &&
+    typeof row.sourceOwner === 'string' && row.sourceOwner.length > 0 && row.sourceOwner.length <= 64 &&
+    (row.model === 'gpt-6' || row.model === 'gpt-6-thinking') && Number.isFinite(row.expiresAt) &&
+    (row.cancelled === undefined || row.cancelled === true);
 }
 
 /** Why a page held a queued message back, as the log says it (see `/page-note`, 2026-10-30). */
@@ -609,6 +638,7 @@ interface DurableCommandRecord {
   claimedAt: number | null;
   owner: string | null;
   lastError: string | null;
+  modelRecovery?: ModelRecovery;
 }
 
 interface DurableCommandSnapshot {
@@ -622,6 +652,7 @@ export interface BridgeCommand {
   id: string;
   /** Absolute browser-delivery deadline for this leased command. */
   expiresAt: number;
+  modelRecoveryUsed?: true;
   /** Project entry is navigation authority only; the source composer must never receive the brief. */
   projectEntry?: { id: string; sourceConversationId: string };
   kind: 'open-chat' | 'stop-turn';
@@ -4878,19 +4909,37 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // server-authored message.
     const destinationCommand = commands.find(command => command.id === body['commandId'] &&
       command.spec.type === 'resume' && command.spec.token === checkpointToken);
-    const destinationTransition = async (transition: () => Promise<boolean>): Promise<boolean> => {
+    const destinationTransition = async (transition: () => Promise<boolean>, granting = false): Promise<boolean> => {
       if (!destinationCommand) return false;
       return writeCommandTransition(destinationCommand, async () => {
+        const lifecycle = bridgeLifecycleEpoch;
+        const recovery = destinationCommand.modelRecovery;
+        const browser = recovery?.browser ?? destinationCommand.modelRecoverySource?.browser;
+        const currentRecovery = () => !recovery || (
+          bridgeLifecycleEpoch === lifecycle && bridgeDesiredRunning && !bridgeShutdownRequested &&
+          commands.includes(destinationCommand) && destinationCommand.modelRecovery === recovery &&
+          destinationCommand.owner === body['client'] && Date.now() < recovery.expiresAt &&
+          !staleCompanion(req) && !notChosenBrowser(req));
         if (!commands.includes(destinationCommand) || !destinationCommand.owner || destinationCommand.owner !== body['client'] ||
+            (browser && browserOf(req) !== browser) ||
+            (recovery && (recovery.cancelled || destinationCommand.owner === modelRecoveryOwner(recovery))) ||
+            (granting && !currentRecovery()) ||
             !continuationClaimedBy(checkpointToken, destinationCommand.id)) return false;
-        return transition();
+        const granted = await transition();
+        if (granting && granted && !currentRecovery()) {
+          // No grant was returned for this checkpoint. Do not let a delayed
+          // durable dispatch outlive the one recovery's authority.
+          await abortContinuationNow(checkpointToken, 'The model recovery expired before Send authorization');
+          return false;
+        }
+        return granted;
       });
     };
     if (body['destinationAttempt'] === true) {
       let result: Awaited<ReturnType<typeof beginContinuationDestinationSendNow>> = null;
-      await destinationTransition(async () => { result = await beginContinuationDestinationSendNow(checkpointToken); return !!result; });
+      const available = await destinationTransition(async () => { result = await beginContinuationDestinationSendNow(checkpointToken); return result?.allowed === true; }, true);
       const accepted = result as Awaited<ReturnType<typeof beginContinuationDestinationSendNow>>;
-      return accepted
+      return accepted && (available || !accepted.allowed)
         ? json(
             res,
             200,
@@ -4900,7 +4949,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         : json(res, 409, { error: 'destination_send_not_available' }, origin);
     }
     if (body['destinationDispatch'] === true) {
-      const armed = await destinationTransition(() => dispatchContinuationDestinationSendNow(checkpointToken));
+      const armed = await destinationTransition(() => dispatchContinuationDestinationSendNow(checkpointToken), true);
       return json(
         res,
         armed ? 200 : 409,
@@ -4914,7 +4963,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       // not after the quarter-hour the lease was measured for, and for a manual Compact & Resume
       // as much as an automatic one: the ticket exists to land the brief, and Cancel is there
       // for a user who meant the Escape.
-      const released = await destinationTransition(() => releaseContinuationDestinationSendNow(checkpointToken));
+      const recoveryExhausted = !!destinationCommand?.modelRecovery;
+      const released = await destinationTransition(() => recoveryExhausted
+        ? abortContinuationNow(checkpointToken, 'Model recovery exhausted; the destination lost its unsent brief')
+        : releaseContinuationDestinationSendNow(checkpointToken));
       if (released) {
         const entry = continuationByToken(checkpointToken);
         for (const command of commands.filter(
@@ -4922,11 +4974,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         )) {
           retire(command, 'the page lost the brief before Send; nothing was sent');
         }
-        if (entry) {
+        if (entry && !recoveryExhausted) {
           queueResumeCommand(entry.sessionId, checkpointToken);
           void deliver();
         }
-        logInfo(
+        if (!recoveryExhausted) logInfo(
           `bridge: the brief for ${entry?.sessionId ?? checkpointToken.slice(0, 8)} was lost before Send — offering it to a fresh chat`
         );
       }
@@ -5782,6 +5834,87 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   // app opened it for. The id is not a credential — this route is behind the same bearer
   // token as everything else — it is a correlation marker, which is why a leaked URL or a
   // synced history entry is worth nothing on its own.
+  if (route === '/commands/model-recovery' && req.method === 'POST') {
+    const refuse = (reason: string) => {
+      logInfo('bridge: clean-address model recovery refused — ' + reason);
+      return json(res, 200, { allowed: false }, origin);
+    };
+    if (staleCompanion(req) || notChosenBrowser(req)) return refuse('incompatible companion or browser');
+    let body: Record<string, unknown>;
+    try { body = await readBody(req) as Record<string, unknown>; }
+    catch { return json(res, 400, { error: 'bad_request' }, origin); }
+    const command = commands.find(entry => entry.id === body.id);
+    const browser = browserOf(req);
+    const parsed = modelSelectionDiagnostic.safeParse(body.diagnostic);
+    const nonce = body.nonce, client = body.client;
+    if (!command || !browser || !parsed.success || typeof nonce !== 'string' || !/^[a-f0-9]{32}$/.test(nonce) ||
+        typeof client !== 'string' || !client || client.length > 64)
+      return refuse('invalid command, identity or diagnostic');
+    const trace = parsed.data;
+    let reason = 'command ownership changed';
+    const allowed = await writeCommandTransition(command, async () => {
+      if (!commands.includes(command) || command.owner !== client || command.modelRecovery || command.modelRecoveryBlocked ||
+          command.modelRecoverySource?.owner !== client || command.modelRecoverySource.browser !== browser ||
+          command.progress?.step !== 'model' || command.claimedAt === null ||
+          !bridgeDesiredRunning || bridgeShutdownRequested || staleCompanion(req) || notChosenBrowser(req)) return false;
+      reason = 'not an unattempted fresh non-Project bootstrap';
+      const spec = command.spec, continuation = spec.type === 'resume' ? continuationByToken(spec.token) : null;
+      if (spec.type !== 'worker' && !(spec.type === 'resume' && continuation && !continuation.project &&
+          continuation.destinationSend.state === 'not-attempted')) return false;
+      // The request already handed to this document is immutable even if the
+      // catalog refreshes between redeem and the failed picker read.
+      reason = 'no exact repeated High take-back';
+      const wanted = command.modelRecoverySource;
+      const model = wanted?.model;
+      if ((model !== 'gpt-6' && model !== 'gpt-6-thinking') || wanted?.reasoningEffort !== 'high' ||
+          trace.requested.model !== model || trace.requested.effort !== 'high' || trace.attempt !== 2 ||
+          trace.outcome !== 'failed' || trace.failure !== 'changed' || trace.failedPhase !== 'close' || trace.closed !== true ||
+          trace.resolved?.model !== 'gpt-6-thinking' || trace.resolved.effort !== 'high' ||
+          trace.selected?.model !== 'gpt-6-thinking' || trace.selected.effort !== 'high' ||
+          !trace.after || (trace.after.model === trace.selected.model && trace.after.effort === trace.selected.effort)) return false;
+      reason = 'original deadline expired';
+      const now = Date.now();
+      const remaining = commandDeadlineDelay(command, now);
+      if (remaining <= 0) return false;
+      const recovery: ModelRecovery = { nonce, browser, sourceOwner: client, model, expiresAt: now + remaining };
+      const owner = modelRecoveryOwner(recovery);
+      const lifecycle = bridgeLifecycleEpoch;
+      reason = 'durable transfer failed';
+      command.modelRecoveryPreparing = true;
+      try {
+        await writeDurableNow(COMMANDS_STATE, commandSnapshot({ commandOverride: {
+          command, record: { ...durableCommand(command), owner, modelRecovery: recovery }
+        } }));
+        if (!commands.includes(command)) { persistCommands(); return false; }
+        // The disk now retired the old document even if this response is lost.
+        command.owner = owner;
+        command.modelRecovery = recovery;
+        if (Date.now() >= recovery.expiresAt || lifecycle !== bridgeLifecycleEpoch ||
+            !bridgeDesiredRunning || bridgeShutdownRequested || staleCompanion(req) || notChosenBrowser(req)) {
+          // The write itself can outlast the original authority. Record a spent,
+          // revoked recovery rather than letting a later clock rollback or restart adopt it.
+          reason = 'authority expired or changed during durable transfer';
+          command.modelRecovery = { ...recovery, cancelled: true };
+          await writeDurableNow(COMMANDS_STATE, commandSnapshot());
+          if (bridgeDesiredRunning && !bridgeShutdownRequested) armDeadline(command);
+          changed();
+          return false;
+        }
+      } catch (error) {
+        persistCommands();
+        return false;
+      } finally {
+        command.modelRecoveryPreparing = false;
+      }
+      if (!commands.includes(command)) return false;
+      armDeadline(command);
+      logInfo(`bridge: ${specKey(command.spec)} will retry its requested High once on a clean address before Send`);
+      changed();
+      return true;
+    });
+    return allowed ? json(res, 200, { allowed }, origin) : refuse(reason);
+  }
+
   if (route === '/commands/redeem' && req.method === 'POST') {
     if (staleCompanion(req)) return json(res, 409, { error: 'stale_extension_build' }, origin);
     if (notChosenBrowser(req)) return json(res, 409, { error: 'not_chosen_browser' }, origin);
@@ -5849,16 +5982,26 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // it, and two replacement chats for one session is the failure the whole continuation
     // transaction exists to make impossible.
     if (!client) return json(res, 400, { error: 'bad_client' }, origin);
+    if (command.modelRecoverySource?.owner === client && browserOf(req) !== command.modelRecoverySource.browser)
+      return json(res, 409, { error: 'command_taken' }, origin);
     // The bootstrap has provably not been typed yet, so a fresh document may take the tab's
     // place — the page that held it is gone, or was never able to type at all.
-    const resumeTakeover = Boolean(resumeFence && sendUnattempted(resumeFence.destinationSend));
+    const recovery = command.modelRecovery;
+    const recoveryTakeover = !!recovery && !recovery.cancelled && command.owner === modelRecoveryOwner(recovery) &&
+      browserOf(req) === recovery.browser && body.modelRecoveryNonce === recovery.nonce &&
+      client !== recovery.sourceOwner && client !== modelRecoveryOwner(recovery) &&
+      !reportedConversation && body.projectEntry !== true && Date.now() < recovery.expiresAt;
+    if (recovery && (recovery.cancelled || browserOf(req) !== recovery.browser || Date.now() >= recovery.expiresAt ||
+        (command.owner === modelRecoveryOwner(recovery) ? !recoveryTakeover : command.owner !== client)))
+      return json(res, 409, { error: 'model_recovery_not_owned' }, origin);
+    const resumeTakeover = recoveryTakeover || Boolean(!recovery && resumeFence && sendUnattempted(resumeFence.destinationSend));
     if (command.owner && command.owner !== client && !resumeTakeover) {
       return json(res, 409, { error: 'command_taken' }, origin);
     }
     // Renew rather than count another attempt: the app already spent one opening this page,
     // and this is that same attempt arriving. The lease is durable *before* the bootstrap is
     // handed over, so an app restart cannot reopen the same command into a second tab.
-    const claimedAt = Date.now();
+    const claimedAt = recovery ? command.claimedAt! : Date.now();
     if (command.spec.type === 'revive') {
       const claimed = await persistRevivalRedeem(command, client, claimedAt);
       if (claimed === 'stale') {
@@ -5875,7 +6018,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       if (claimed === 'lease-not-durable') {
         return json(res, 503, { error: 'command_lease_not_durable', retryable: true }, origin);
       }
-    } else if (!(await persistCommandLease(command, client, claimedAt, resumeTakeover))) {
+    } else if (!(await persistCommandLease(command, client, claimedAt, resumeTakeover, recoveryTakeover ? recovery : undefined))) {
       if (command.owner && command.owner !== client && !resumeTakeover) {
         return json(res, 409, { error: 'command_taken' }, origin);
       }
@@ -5974,9 +6117,20 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       if (command.lastError?.startsWith("the person's send check")) { command.lastError = null; changed(); }
     }
     const liveResume = command.spec.type === 'resume' ? continuationByToken(command.spec.token) : null;
+    if (!commands.includes(command) || command.owner !== client ||
+        (command.modelRecovery && (command.modelRecovery.cancelled || Date.now() >= command.modelRecovery.expiresAt)))
+      return json(res, 409, { error: 'command_taken' }, origin);
     if (command.spec.type === 'resume' && (!liveResume || !sendUnattempted(liveResume.destinationSend)))
       return json(res, 409, { error: 'command_already_sent', final: true }, origin);
     if (described.text.length > MAX_CHATGPT_MESSAGE_CHARS) return json(res, 409, { error: 'command_text_too_large', message: 'The complete prompt and task exceed the browser message limit.' }, origin);
+    const redeemedBrowser = browserOf(req);
+    if (command.modelRecoverySource?.owner === client && redeemedBrowser !== command.modelRecoverySource.browser)
+      return json(res, 409, { error: 'command_taken' }, origin);
+    if (!command.modelRecovery && redeemedBrowser &&
+        (described.type === 'worker' || (described.type === 'resume' && !described.projectEntry)) &&
+        (described.model === 'gpt-6' || described.model === 'gpt-6-thinking') && described.reasoningEffort === 'high' &&
+        (!command.modelRecoverySource || command.modelRecoverySource.owner !== client))
+      command.modelRecoverySource = { owner: client, browser: redeemedBrowser, model: described.model, reasoningEffort: described.reasoningEffort };
     return json(res, 200, { command: described }, origin);
   }
 
@@ -6054,10 +6208,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // A wake reports its wait before it redeems, so it has no owner yet; every later step needs one.
     const allowed = step && REVIVAL_WAIT_STEPS.has(step) ? command?.owner === null : command?.owner != null && command.owner === body['client'];
     if ((!step && !diagnosticOnly) || !command || !allowed) return json(res, 200, { ok: false }, origin);
+    const recoveryBrowser = command.modelRecovery?.browser ?? command.modelRecoverySource?.browser;
+    if (command.modelRecoveryPreparing || (recoveryBrowser && browserOf(req) !== recoveryBrowser))
+      return json(res, 200, { ok: false }, origin);
     if (diagnosticOnly && (!command.progress?.step || REVIVAL_WAIT_STEPS.has(command.progress.step))) return json(res, 200, { ok: false }, origin);
     // Telemetry returns before execution progress can renew any deadline.
     if (diagnosticOnly) return json(res, 200, { ok: observeModelSelection(command, body.modelSelection) }, origin);
     if (!step) return json(res, 200, { ok: false }, origin);
+    if (['model-unconfirmed', 'composer-after-model', 'inserting', 'sending'].includes(step))
+      command.modelRecoveryBlocked = true;
     // Final failure details share the continuation step, so a delayed telemetry RPC cannot lose them.
     if (step === 'model-unconfirmed') observeModelSelection(command, body.modelSelection);
     const previousStep = command.progress?.step;
@@ -6114,6 +6273,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       : null;
     const client = typeof body['client'] === 'string' ? body['client'].slice(0, 64) : '';
     const conversation = conversationId(body['conversationId']);
+    // A cancellation/ACK cannot observe the old owner while its durable reset is in flight.
+    if (commands.some(command => command.id === id && command.modelRecoveryPreparing))
+      await Promise.allSettled([...commandWrites.values()]);
     const priorReceipt = receiptFor(id);
     if (priorReceipt) {
       // A receipt is the final answer to an ambiguous/lost ACK response. It is replayable only
@@ -6153,12 +6315,41 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // the command has since been superseded/released or another document owns it: accepting
     // a delayed ACK from the old page could otherwise bind a worker or commit a continuation
     // to the wrong chat after ownership had moved.
-    if (ownedCommand && client && ownedCommand.owner !== client) {
+    const recovery = ownedCommand.modelRecovery;
+    const recoveryCancelled = recovery && ownedCommand.owner === modelRecoveryOwner(recovery) &&
+      status === 'failed' && rawDetail === 'model-recovery-cancelled' && !conversation &&
+      client === recovery.sourceOwner && browserOf(req) === recovery.browser;
+    if (recoveryCancelled && recovery) {
+      const cancelled = await writeCommandTransition(ownedCommand, async () => {
+        if (!commands.includes(ownedCommand) || ownedCommand.modelRecovery !== recovery ||
+            ownedCommand.owner !== modelRecoveryOwner(recovery)) return false;
+        const stopped: ModelRecovery = { ...recovery, cancelled: true };
+        await writeDurableNow(COMMANDS_STATE, commandSnapshot({ commandOverride: {
+          command: ownedCommand, record: { ...durableCommand(ownedCommand), owner: client, modelRecovery: stopped }
+        } }));
+        ownedCommand.modelRecovery = stopped;
+        ownedCommand.owner = client;
+        return true;
+      }).catch(() => { persistCommands(); return false; });
+      if (!cancelled) return json(res, 409, { error: 'command_owner_changed' }, origin);
+    }
+    if (ownedCommand.modelRecovery?.cancelled && status !== 'failed')
+      return json(res, 409, { error: 'command_owner_changed' }, origin);
+    if (recovery && (!client || browserOf(req) !== recovery.browser ||
+        (ownedCommand.owner === modelRecoveryOwner(recovery) && !recoveryCancelled)))
+      return json(res, 409, { error: 'command_owner_changed' }, origin);
+    if (ownedCommand && client && ownedCommand.owner !== client && !recoveryCancelled) {
       return json(res, 409, { error: 'command_owner_changed' }, origin);
     }
     if (ownedCommand && client && ownedCommand.claimedAt === null) {
       return json(res, 409, { error: 'command_not_leased' }, origin);
     }
+    if (ownedCommand.modelRecoverySource?.owner === ownedCommand.owner &&
+        (!client || browserOf(req) !== ownedCommand.modelRecoverySource.browser))
+      return json(res, 409, { error: 'command_owner_changed' }, origin);
+    // An ACK is no longer a model-selection operation. Fence recovery before
+    // origin recording or another asynchronous side effect can yield.
+    ownedCommand.modelRecoveryBlocked = true;
     if (ownedCommand.spec.type === 'stop') {
       if (!client || conversation !== ownedCommand.spec.conversationId || body.turnId !== ownedCommand.spec.turnId)
         return json(res, 409, { error: 'stop_identity_changed' }, origin);
@@ -6195,6 +6386,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (client && command.owner !== client) {
       return json(res, 409, { error: 'command_owner_changed' }, origin);
     }
+    if (command.modelRecoveryPreparing) return json(res, 503, { error: 'model_recovery_preparing', retryable: true }, origin);
 
     let receipt: CommandReceipt;
     if (status === 'sent') {
@@ -7265,7 +7457,8 @@ function durableCommand(command: Command): DurableCommandRecord {
     phase: commandPhase(command),
     claimedAt: command.claimedAt,
     owner: command.owner,
-    lastError: command.lastError
+    lastError: command.lastError,
+    ...(command.modelRecovery ? { modelRecovery: command.modelRecovery } : {})
   };
 }
 
@@ -7344,10 +7537,14 @@ async function persistCommandLease(
   command: Command,
   owner: string | null,
   claimedAt: number,
-  allowOwnerTakeover = false
+  allowOwnerTakeover = false,
+  recoveryTakeover?: ModelRecovery
 ): Promise<boolean> {
   return writeCommandTransition(command, async () => {
     if (!commands.includes(command)) return false;
+    if (command.modelRecovery && (command.modelRecovery.cancelled || (recoveryTakeover
+      ? command.modelRecovery !== recoveryTakeover || command.owner !== modelRecoveryOwner(recoveryTakeover) || Date.now() >= recoveryTakeover.expiresAt
+      : command.owner !== owner || command.owner === modelRecoveryOwner(command.modelRecovery)))) return false;
     if (owner !== null && command.owner !== null && command.owner !== owner && !allowOwnerTakeover) return false;
     const record: DurableCommandRecord = {
       ...durableCommand(command),
@@ -7368,6 +7565,7 @@ async function persistCommandLease(
     if (!commands.includes(command)) return false;
     command.claimedAt = claimedAt;
     command.owner = owner;
+    if (recoveryTakeover) command.modelSelection = undefined;
     return true;
   });
 }
@@ -7486,6 +7684,9 @@ async function finalizeCommand(command: Command, receipt: CommandReceipt): Promi
     command.timer = null;
     commands = commands.filter((entry) => entry !== command);
     commandReceipts = [...commandReceipts.filter((entry) => entry.id !== receipt.id), receipt].slice(-MAX_COMMAND_RECEIPTS);
+    if (command.modelRecovery && receipt.outcome === 'terminal-failure') {
+      logWarn('bridge: clean-address model recovery exhausted — terminal failure after the one permit; no further transfer');
+    }
     // A fresh-turn Stop the page could not send protects nothing any more: no stop and no continue
     // follow, so its chat's calls run again at once (CodeRabbit on #1954). A Stop that went out keeps
     // the fence until its stopped end is processed, which files the continue.
@@ -12527,6 +12728,11 @@ function revivalDeadlineAt(command: Command): number {
 }
 
 function commandDeadlineDelay(command: Command, now = Date.now()): number {
+  if (command.modelRecovery) {
+    const destination = command.spec.type === 'resume' ? continuationByToken(command.spec.token)?.destinationSend : null;
+    if (destination ? sendUnattempted(destination) : command.progress?.step !== 'sending')
+      return command.modelRecovery.expiresAt - now;
+  }
   if (command.spec.type === 'stop') return command.createdAt + STOP_COMMAND_TIMEOUT_MS - now;
   if (command.spec.type === 'revive') return revivalDeadlineAt(command) - now;
   if (command.spec.type === 'resume' && continuationByToken(command.spec.token)?.automatic) {
@@ -12817,6 +13023,9 @@ function revivalFor(agent: string, runId: string): WorkerRevival | null {
  * ChatGPT's box held. Only the exact worker of that run counts; anything else chooses nothing.
  */
 function commandModelSelection(command: Command): { model: string | null; reasoningEffort: ReasoningEffort | null } | null {
+  if (command.modelRecovery) return { model: command.modelRecovery.model, reasoningEffort: 'high' };
+  if (command.modelRecoverySource?.owner === command.owner)
+    return { model: command.modelRecoverySource.model, reasoningEffort: command.modelRecoverySource.reasoningEffort };
   const spec = command.spec;
   if (spec.type === 'resume') return resumeModelSelection(continuationByToken(spec.token)?.requestedModel, spec.token);
   if (spec.type !== 'revive') return null;
@@ -12829,7 +13038,8 @@ function describe(command: Command, client: string | null, claimedSummary?: stri
   const spec = command.spec;
   // Only what this ChatGPT account offers: a Free plan has no picker to confirm a model with (#1766).
   const selection = commandModelSelection(command);
-  const expiresAt = Date.now() + Math.max(1, commandDeadlineDelay(command));
+  const now = Date.now();
+  const expiresAt = now + Math.max(1, commandDeadlineDelay(command, now));
   if (spec.type === 'stop') return { id: command.id, expiresAt, kind: 'stop-turn', type: 'stop', text: '', agent: null, model: null, reasoningEffort: null, conversationId: spec.conversationId, turnId: spec.turnId, ...(spec.userMessageId ? { userMessageId: spec.userMessageId } : {}), ...(spec.held ? { held: true } : {}) };
   // A resume's claim is persisted by /commands/redeem before this renderer is called. A
   // command shown to app/UI code without a browser document still carries no brief at all.
@@ -12850,6 +13060,7 @@ function describe(command: Command, client: string | null, claimedSummary?: stri
     agent: spec.type === 'resume' ? null : spec.agent,
     model: spec.type === 'worker' ? spec.model : selection?.model ?? null,
     reasoningEffort: spec.type === 'worker' ? spec.reasoningEffort : selection?.reasoningEffort ?? null,
+    ...(command.modelRecovery ? { modelRecoveryUsed: true as const } : {}),
     // The fence the page enforces before it types. Only a revival has one: the other two
     // kinds open a chat that does not exist yet, so there is nothing to compare against.
     conversationId: spec.type === 'revive' ? spec.conversationId : null
@@ -12869,13 +13080,20 @@ function drop(command: Command, why: string, options: { startTimedOut?: boolean 
       if (!commands.includes(command) || command.spec.type !== 'resume') return false;
       const entry = continuationByToken(command.spec.token);
       if (!entry?.automatic || entry.state === 'committing' || entry.state === 'committed') return false;
-      if (entry.destinationSend.state === 'not-attempted')
-        await releaseContinuationDestinationSendNow(command.spec.token, command.id);
+      if (entry.destinationSend.state === 'not-attempted' ||
+          (command.modelRecovery && sendUnattempted(entry.destinationSend))) {
+        if (command.modelRecovery) {
+          if (!await abortContinuationNow(command.spec.token, why) &&
+              continuationByToken(command.spec.token)?.state !== 'aborted') return false;
+        } else await releaseContinuationDestinationSendNow(command.spec.token, command.id);
+      }
       await writeDurableNow(COMMANDS_STATE, commandSnapshot({ removeCommandId: command.id }));
       if (command.timer) clearTimeout(command.timer);
       command.timer = null;
       commands = commands.filter(candidate => candidate !== command);
-      logWarn(`bridge: released ${specKey(command.spec)} browser attempt without closing its ticket — ${why}`);
+      logWarn(command.modelRecovery
+        ? `bridge: retired ${specKey(command.spec)} browser attempt — clean-address model recovery exhausted; ${why}`
+        : `bridge: released ${specKey(command.spec)} browser attempt without closing its ticket — ${why}`);
       changed();
       return true;
     }).then(retired => {
@@ -12916,7 +13134,7 @@ function drop(command: Command, why: string, options: { startTimedOut?: boolean 
   // chat, so it goes back to sleeping with its inbox intact and its slot released, and the
   // prime is told the message it sent is still waiting to be delivered.
   if (command.spec.type === 'revive') failWorkerRevival(command.spec.agent, why, command.spec.runId);
-  logWarn(`bridge: gave up on ${specKey(command.spec)} — ${why}`);
+  logWarn(`bridge: gave up on ${specKey(command.spec)} — ${command.modelRecovery ? 'clean-address model recovery exhausted; ' : ''}${why}`);
   changed();
   persistCommands();
   // A timeout is another last-slot transition with no future MCP epilogue guaranteed. Once the
@@ -13165,6 +13383,8 @@ interface CommandRestorePlan {
   }>;
   /** Resume tokens discovered in the durable command file, published only with the plan. */
   resumeTokens: Array<{ sessionId: string; token: string }>;
+  /** Damaged spent custody must retire its unsent WAL before command pruning. */
+  invalidRecoveryResumes: string[];
   /** Number of durable commands newly reconstructed rather than retained from this process. */
   restored: number;
 }
@@ -13344,6 +13564,7 @@ function planCommandRestore(
     { raw: Partial<DurableCommandRecord>; spec: CommandSpec; createdAt: number }
   >();
   let restored = 0;
+  const invalidRecoveryResumes: string[] = [];
 
   for (const raw of saved.commands as Array<Partial<DurableCommandRecord>>) {
     const specRaw = raw.spec as Partial<CommandSpec> | undefined;
@@ -13373,6 +13594,7 @@ function planCommandRestore(
       : now - createdAt > COMMAND_TTL_MS;
     if (stale) {
       if (spec.type === 'revive') expiredRevivals.push({ id: raw.id!, spec });
+      if (spec.type === 'resume' && raw.modelRecovery !== undefined) invalidRecoveryResumes.push(spec.token);
       continue;
     }
 
@@ -13384,6 +13606,10 @@ function planCommandRestore(
     let claimedAt = leased && typeof raw.claimedAt === 'number' && Number.isFinite(raw.claimedAt) ? raw.claimedAt : null;
     if (leased && claimedAt === null) claimedAt = now;
     if (claimedAt !== null && claimedAt > now + COMMAND_DEADLINE_MS) claimedAt = now;
+    if (raw.modelRecovery !== undefined && (!leased || !validModelRecovery(raw.modelRecovery))) {
+      if (spec.type === 'resume') invalidRecoveryResumes.push(spec.token);
+      continue;
+    }
     plannedCommands.push({
       id: raw.id!,
       spec,
@@ -13391,7 +13617,8 @@ function planCommandRestore(
       claimedAt,
         timer: null,
       lastError: typeof raw.lastError === 'string' ? raw.lastError : null,
-      owner: leased && typeof raw.owner === 'string' ? raw.owner.slice(0, 64) : null
+      owner: leased && typeof raw.owner === 'string' ? raw.owner.slice(0, 64) : null,
+      ...(raw.modelRecovery ? { modelRecovery: raw.modelRecovery } : {})
     });
     restored += 1;
   }
@@ -13414,6 +13641,7 @@ function planCommandRestore(
     receipts: plannedReceipts.slice(-MAX_COMMAND_RECEIPTS),
     expiredRevivals,
     resumeTokens,
+    invalidRecoveryResumes,
     restored
   };
 }
@@ -13437,6 +13665,20 @@ export async function restoreCommands(): Promise<void> {
   const now = Date.now();
   const plan = planCommandRestore(saved, now);
   if (!plan) return;
+
+  // Skipping a damaged command alone leaves a claimed, unattempted continuation.
+  // Its ordinary pickup would recreate a command without the spent-recovery fence.
+  // Retire that WAL first; a failed write keeps the old command on disk for retry.
+  // A dispatched destination remains ambiguous and must keep its existing fence.
+  for (const token of plan.invalidRecoveryResumes) {
+    const entry = continuationByToken(token);
+    if (entry && sendUnattempted(entry.destinationSend) &&
+        entry.state !== 'committing' && entry.state !== 'committed' && entry.state !== 'aborted') {
+      if (!await abortContinuationNow(token, 'Model recovery exhausted; the destination lost its unsent brief') &&
+          continuationByToken(token)?.state !== 'aborted')
+        throw new Error('could not durably retire invalid model recovery; bridge startup must retry before pruning it');
+    }
+  }
 
   if (plan.expiredRevivals.length > 0) {
     let brokerRelevant = false;

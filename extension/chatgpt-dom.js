@@ -2783,7 +2783,7 @@ var CLF_DOM = (() => {
     channel.port2.postMessage(null);
   }
 
-  async function send({ acceptanceTimeoutMs = 30000, stillCurrent = () => true, stillCurrentAfterClick = null, matchesUser = null, observeEvidence = null, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null, receiptTimeoutMs = null, mention = null, explain = null, sentRequest = null, whileGenerating = false } = {}) {
+  async function send({ acceptanceTimeoutMs = 30000, stillCurrent = () => true, stillCurrentAfterClick = null, matchesUser = null, observeEvidence = null, clearAcceptedDraft = true, beforeSend = null, beforeClick = null, acceptUserReceipt = null, receiptTimeoutMs = null, mention = null, explain = null, sentRequest = null, whileGenerating = false } = {}) {
     // Why a Send ended without acceptance, as one short code for the caller's diagnostics (#820).
     // It names the first refusal only and never changes what Send does.
     const refused = (why) => { try { explain?.(why); } catch { /* Diagnostics never change Send. */ } return false; };
@@ -2932,16 +2932,18 @@ var CLF_DOM = (() => {
           const button = sendButton();
           if (!sendButtonEnabled(button)) return;
           if (authorizing) return;
-          const click = (resumed = false) => {
+          const click = (resumed = false, provedControl = null) => {
             if (done) return;
             // After our own mention the editor may have drawn its Send control again.
             const control = resumed ? sendButton() : button;
+            if (provedControl && control !== provedControl) return finish(false, 'send-not-ready');
             // Authorization can await the app. The exact editor, text and native control
             // must still be the ones it authorized; a late answer cannot revive this send.
-            if (!stillCurrent() || conversationId() !== beforeConversation || composer() !== box ||
-                !box.isConnected || draftText() !== (mentionedDraft ?? submitted) || busy() || sendButton() !== control ||
-                !sendButtonEnabled(control) || box.getAttribute('aria-disabled') === 'true' ||
-                box.getAttribute('contenteditable') === 'false') return finish(false, 'send-not-ready');
+            const ready = () => !done && stillCurrent() && conversationId() === beforeConversation && composer() === box &&
+              box.isConnected && draftText() === (mentionedDraft ?? submitted) && !busy() && sendButton() === control &&
+              sendButtonEnabled(control) && box.getAttribute('aria-disabled') !== 'true' &&
+              box.getAttribute('contenteditable') !== 'false';
+            if (!ready()) return finish(false, 'send-not-ready');
             if (mention && !mentionTried) {
               mentionTried = true;
               priorMentions = new Set(box.querySelectorAll('[app-mention-path]'));
@@ -2959,6 +2961,17 @@ var CLF_DOM = (() => {
                 mentionTimers = [setTimeout(() => { mentionTicked = true; settleMention(true); }, 1500)];
                 return;
               }
+            }
+            // Some bootstraps need an independent read of the actual model after
+            // the mention has settled. Authorize exactly one click, not a second send.
+            if (beforeClick && !provedControl) {
+              authorizing = true;
+              try {
+                Promise.resolve(beforeClick(ready))
+                  .then(allowed => allowed === true ? click(resumed, control) : finish(false, 'not-authorized'),
+                    () => finish(false, 'not-authorized'));
+              } catch { finish(false, 'not-authorized'); }
+              return;
             }
             attempted = true;
             // The deadline bounds readiness, not an already-dispatched receipt.
@@ -3822,6 +3835,28 @@ var CLF_DOM = (() => {
     }
     return [...byFamily].slice(0, 6).map(([key, efforts]) => `${String(key).slice(0, 24)}:${[...efforts].join('/')}`).join(' ').slice(0, 160);
   }, '');
+  // MAIN's route-owned native control must corroborate the picker where present.
+  const nativeReasoningOwned = () => {
+    const trigger = modelPickerTrigger();
+    return trigger?.getAttribute('data-composer-navigation-target') === 'reasoning' &&
+      trigger.getAttribute('data-clf-picker-route') === location.pathname;
+  };
+  const nativeReasoningMatches = (effort, nativeOwned) => {
+    const native = nativeOwned ? modelPickerTrigger() : null;
+    return !nativeOwned || !['none', 'low', 'medium', 'high'].includes(effort) ||
+      (native?.getAttribute('data-composer-navigation-target') === 'reasoning' &&
+        native.getAttribute('data-clf-picker-route') === location.pathname &&
+        native.getAttribute('data-selected-reasoning-effort') === effort);
+  };
+  async function confirmCurrentModelSettings(model, effort, stillCurrent = () => true) {
+    if (!stillCurrent() || document.querySelector(PICKER)) return false;
+    const nativeOwned = nativeReasoningOwned();
+    const state = await readPickerState();
+    const current = state?.choices.find(choice => choice.bucket === state.currentBucket);
+    return !!(stillCurrent() && !document.querySelector(PICKER) && current?.available &&
+      current.id === model && current.effort === effort &&
+      nativeReasoningMatches(effort, nativeOwned || nativeReasoningOwned()));
+  }
   async function selectModelSettings(model, effort, stillCurrent = () => true, diagnostic) {
     modelSelectionWhy = '';
     const started = Date.now(), pair = choice => choice ? { model: choice.id, effort: choice.effort } : null;
@@ -3856,20 +3891,6 @@ var CLF_DOM = (() => {
     // A separately reported native reasoning trigger is additional proof only
     // when MAIN has stamped it as the owner of this route. Legacy pickers have
     // no such control, and do not require one.
-    const nativeReasoningOwned = () => {
-      const trigger = modelPickerTrigger();
-      return trigger?.getAttribute('data-composer-navigation-target') === 'reasoning' &&
-        trigger.getAttribute('data-clf-picker-route') === location.pathname;
-    };
-    const nativeReasoningMatches = (effort, nativeOwned) => {
-      // Fiber can retain High while the separate native control says Medium or
-      // disappears. Preserve the old layout and non-standard effort mappings.
-      const native = nativeOwned ? modelPickerTrigger() : null;
-      return !nativeOwned || !['none', 'low', 'medium', 'high'].includes(effort) ||
-        (native?.getAttribute('data-composer-navigation-target') === 'reasoning' &&
-          native.getAttribute('data-clf-picker-route') === location.pathname &&
-          native.getAttribute('data-selected-reasoning-effort') === effort);
-    };
     const confirmAfterClose = async (expected, version, nativeOwned) => {
       if (!stillCurrent()) return selectionFailed('the chat changed meanwhile', 'owner-lost');
       const after = await readPickerState(); observe(after);
@@ -4377,6 +4398,7 @@ var CLF_DOM = (() => {
     pluginInstalledButtons,
     pluginManagementIdle,
     selectModelSettings,
+    confirmCurrentModelSettings,
     modelSelectionFailure: () => modelSelectionWhy,
     temporaryChatReady: () => safe(() => {
       // The page's own state, where a mounted turn has published it. The glyph below is the only
