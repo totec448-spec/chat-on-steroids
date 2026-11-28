@@ -1563,18 +1563,31 @@ describe('settings writes from more than one UI', () => {
       expect(JSON.stringify(response)).not.toContain('synthetic-active-key');
     } finally { retired.mockRestore(); }
   });
+  it('persists unattributed notice suppression and preserves it through older settings forms', async () => {
+    const base = defaultConfig(); await saveConfig(base);
+    expect((await save({ ...base, mcp: { ...base.mcp, suppressUnattributedNotices: true } }, base)).ok).toBe(true);
+    expect(getConfig().mcp.suppressUnattributedNotices).toBe(true);
+    const { suppressUnattributedNotices: _, ...legacyMcp } = base.mcp;
+    const legacy = { ...base, mcp: legacyMcp };
+    expect((await save({ ...legacy, ui: { ...legacy.ui, minimizeToTray: !legacy.ui.minimizeToTray } }, legacy)).ok).toBe(true);
+    expect(getConfig().mcp.suppressUnattributedNotices).toBe(true);
+    const current = getConfig();
+    expect((await save({ ...current, mcp: { ...current.mcp, suppressUnattributedNotices: false } }, current)).ok).toBe(true);
+    expect(getConfig().mcp.suppressUnattributedNotices).toBe(false);
+  });
+
   it('persists connector instructions through IPC, preserves concurrent edits, and allows explicit clearing', async () => {
     const base = defaultConfig(); await saveConfig(base);
     const wanted = { ...base, mcp: { instructions: 'Use the approved project only.' }, ui: { ...base.ui, browserOnly: true } };
     expect((await save(wanted, base)).ok).toBe(true);
-    expect(JSON.parse(await fs.readFile(path.join(dir, 'config.json'), 'utf8')).mcp).toEqual({ ...wanted.mcp, persistentUrls: false });
+    expect(JSON.parse(await fs.readFile(path.join(dir, 'config.json'), 'utf8')).mcp).toEqual({ ...wanted.mcp, persistentUrls: false, suppressUnattributedNotices: false });
     expect(getConfig().ui.browserOnly).toBe(true);
     expect((await save({ ...base, ui: { ...base.ui, minimizeToTray: !base.ui.minimizeToTray } }, base)).ok).toBe(true);
-    expect(getConfig().mcp).toEqual({ ...wanted.mcp, persistentUrls: false });
+    expect(getConfig().mcp).toEqual({ ...wanted.mcp, persistentUrls: false, suppressUnattributedNotices: false });
     expect(getConfig().ui.browserOnly).toBe(true);
     const legacy = { ...base } as any; delete legacy.mcp;
     expect((await save(legacy, legacy)).ok).toBe(true);
-    expect(getConfig().mcp).toEqual({ ...wanted.mcp, persistentUrls: false });
+    expect(getConfig().mcp).toEqual({ ...wanted.mcp, persistentUrls: false, suppressUnattributedNotices: false });
     const current = getConfig();
     expect((await save({ ...current, mcp: { instructions: '' } }, current)).ok).toBe(true);
     expect(getConfig().mcp.instructions).toBe('');

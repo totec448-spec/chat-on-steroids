@@ -1019,6 +1019,10 @@ with later tool results" promise, and `status` from such a caller with no family
 instead of the empty answer that suggests spawning.
 The Identity notice is present even without a pending repair timer. It names the tools that
 remain usable, reports actual results and forbids replaying successful work to repair identity.
+For standalone MCP clients, `mcp.suppressUnattributedNotices` (Settings → General → For developers,
+off by default) omits that informational notice when unattributed calls are allowed. It does
+not change attribution, tool permissions, errors, provisional Recording context or identity
+recovery notices.
 One process/recipient refusal is never a global edit/terminal refusal. Code-mode children inherit
 caller proof and recheck current permission settings; only the outer response carries notices.
 Windows observations are isolated per request and attach to the exact session on late proof.

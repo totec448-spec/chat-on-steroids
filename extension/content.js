@@ -1259,6 +1259,11 @@
 
   /** Guards the settle watch and the send, so one finished turn produces one message. */
   let goalBusy = false;
+  /**
+   * A finished turn that `noteGoalTurn` had to refuse because the page was busy with another Goal step. Nothing
+   * else looks at that turn again, so it is kept and offered once the page is free (#2283).
+   */
+  let goalOwedTurn = null;
   /** When this tab started trying to type a ready draft, so a held composer eventually gives up. */
   let goalTypingSince = 0;
   /** Terminal Goal card the user dismissed. Keyed to its chat + finished turn across repaints. */
@@ -8777,6 +8782,7 @@
           await requestGoalDraft(forTurn, () => alive && conversationId === forId && epoch === forEpoch && goalTurnId === forTurn);
         } finally {
           goalBusy = false;
+          goalIdled();
         }
       }
     } finally {
@@ -11202,6 +11208,9 @@
    * does not change a second later, so nothing retries.
    */
   function noteGoalTurn(ended, outcome, endedTurnId) {
+    // A newer generation that ends without a continuable answer supersedes a kept turn: the conversation has moved
+    // on, exactly as the app treats a different turn (#2283).
+    if (goalOwedTurn && endedTurnId && endedTurnId !== goalOwedTurn.endedTurnId && !GOAL_CONTINUABLE.has(outcome)) goalOwedTurn = null;
     // The accepted helper user receipt and current provider terminal own its result.
     // A renderer lifecycle edge must not create a second, captured-node owner.
     if (desktopDecision && desktopDecision.onTarget()) return;
@@ -11215,7 +11224,13 @@
     // One draft per generation, and this is the near half of that rule; the app holds the
     // other half against a retried request. See /goal/draft.
     if (goalTurnId === endedTurnId) return;
-    if (goalBusy) return;
+    if (goalBusy) {
+      // The previous message of this loop is still being acknowledged, or its watch is still running. A short
+      // answer can end inside that window, and no later edge would bring this turn back (#2283).
+      goalOwedTurn = { ended, outcome, endedTurnId, forId: conversationId, forEpoch: epoch };
+      return;
+    }
+    goalOwedTurn = null;
     goalTurnId = endedTurnId;
     goalRetries = 0;
     setGoalPhase('');
@@ -11225,6 +11240,15 @@
     // change caused by focusing cannot re-enter this turn and request/focus it twice.
     void ask({ type: 'focus_tab', conversationId }).catch(() => undefined);
     void watchGoalTurn(ended, endedTurnId);
+  }
+
+  /** The page stopped being busy with a Goal step: look again at the turn that ended meanwhile, if any. */
+  function goalIdled() {
+    const owed = goalOwedTurn;
+    if (!owed || goalBusy) return;
+    goalOwedTurn = null;
+    if (!alive || conversationId !== owed.forId || epoch !== owed.forEpoch) return;
+    noteGoalTurn(owed.ended, owed.outcome, owed.endedTurnId);
   }
 
   /**
@@ -11323,7 +11347,10 @@
         await stopAutomationGeneration(safe);
       })()
         .catch(() => undefined)
-        .finally(() => { if (epoch === forEpoch && conversationId === target) goalBusy = false; });
+        .finally(() => {
+          if (epoch === forEpoch && conversationId === target) goalBusy = false;
+          goalIdled();
+        });
       return;
     }
     if (goalDraft || (generating && !goalRecoveryReady(pending)) || CLF_DOM.generating()) return;
@@ -11410,6 +11437,7 @@
       goalBusy = false;
       renderControl();
       injectStage();
+      goalIdled();
     }
   }
 
@@ -11459,6 +11487,7 @@
       goalBusy = false;
       renderControl();
       injectStage();
+      goalIdled();
     }
   }
 
@@ -11568,6 +11597,7 @@
       setGoalPhase('');
     } finally {
       if (alive && epoch === forEpoch && conversationId === target) goalBusy = wasBusy;
+      goalIdled();
     }
   }
 
@@ -11731,6 +11761,7 @@
       if (!onDocument()) return;
       if (!sendAttempted && (workResumed || sourceBusy())) await deferGoalDraftForWork(draft);
       goalBusy = false;
+      goalIdled();
       // Only once the draft is spent. This marks when *this draft* first found the composer
       // in use, and the retry path above measures its two-minute patience against it — so
       // clearing it on every pull, as this used to, restarted the window each time and the
