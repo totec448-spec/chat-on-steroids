@@ -23274,6 +23274,98 @@ describe('the goal loop', () => {
     expect(ackAttempts).toBeGreaterThanOrEqual(2);
   });
 
+  it('still drafts for a short answer that ends while the message it answers is being acknowledged (#2283)', async () => {
+    // 2026-11-25: the Continue was delivered and the answer, six seconds long and without a tool call,
+    // ended before the page had finished telling the app. The end was refused because the page was
+    // still busy with the previous draft, nothing looked at that answer again, and the chat stayed on
+    // "Answer settling" for eight hours.
+    let draft: unknown = null, release!: () => void, ackCalls = 0;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      activity: () => feed(draft)(),
+      goal_ack: () => {
+        ackCalls += 1;
+        if (ackCalls > 1) { draft = null; return { ok: true, data: { acknowledged: true } }; }
+        return held.then(() => { draft = null; return { ok: true, data: { acknowledged: true } }; });
+      }
+    }, document => {
+      document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+        document.querySelector('#prompt-textarea')!.replaceChildren();
+      });
+    });
+    draft = readyDraft('keep going');
+    const pulling = live.hook.pullActivity();
+    await settle();
+    expect(ackCalls).toBe(1);
+
+    await answerATurn(live, 'done');
+    expect(drafts(live), 'refused while the page is still acknowledging the previous draft').toHaveLength(0);
+
+    release();
+    await pulling;
+    await settle(800);
+    expect(drafts(live)).toHaveLength(1);
+  });
+
+  it.each(['a newer generation ends without an answer', 'the tab leaves the chat for a new one'])('does not replay a kept Goal turn when %s (#2283)', async change => {
+    let draft: unknown = null, release!: () => void, ackCalls = 0;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      activity: () => feed(draft)(),
+      goal_ack: () => {
+        ackCalls += 1;
+        if (ackCalls > 1) { draft = null; return { ok: true, data: { acknowledged: true } }; }
+        return held.then(() => { draft = null; return { ok: true, data: { acknowledged: true } }; });
+      }
+    }, document => {
+      document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+        document.querySelector('#prompt-textarea')!.replaceChildren();
+      });
+    });
+    draft = readyDraft('keep going');
+    const pulling = live.hook.pullActivity();
+    await settle();
+    await answerATurn(live, 'done');
+    if (change.startsWith('a newer')) await answerATurn(live, 'Something went wrong while generating the response.');
+    else live.dom.reconfigure({ url: 'https://chatgpt.com/' });
+    release();
+    await pulling;
+    await settle(800);
+    expect(drafts(live)).toHaveLength(0);
+  });
+
+  it('still drafts for an answer that ends while a continuation that work overtook is being given back (#2283)', async () => {
+    let draft: ReturnType<typeof readyDraft> | null = null, pendingTools = 0, release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      activity: () => {
+        const value = feed(draft)();
+        return { ...value, data: { ...value.data, pendingTools } };
+      },
+      goal_ack: () => held.then(() => {
+        draft = null;
+        return { ok: true, data: { acknowledged: false, deferred: true, listenUntil: Date.now() + 120_000 } };
+      })
+    }, () => undefined, false, true);
+    pendingTools = 1;
+    draft = readyDraft('This stale continuation must never be sent');
+    const pulling = live.hook.pullActivity();
+    await settle();
+    expect(acks(live)).toHaveLength(1);
+
+    pendingTools = 0;
+    await answerATurn(live, 'done');
+    expect(drafts(live), 'refused while the page is still giving the continuation back').toHaveLength(0);
+
+    release();
+    await pulling;
+    await settle(800);
+    expect(drafts(live)).toHaveLength(1);
+  });
+
   /**
    * The loop's success condition. Nothing is typed, and the panel says so — a run that ends
    * because the work is done must not look like a run that failed.
