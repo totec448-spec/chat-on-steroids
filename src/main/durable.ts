@@ -61,6 +61,9 @@ function fileFor(name: string): string {
   return path.join(root, `${name}.json`);
 }
 
+/** The cause last logged for each strict ledger that cannot be read, so a failure repeated every few seconds logs once. */
+const strictReadFailures = new Map<string, string>();
+
 export async function readDurable<T>(name: string, options: { strict?: boolean } = {}): Promise<T | null> {
   if (!root) return null;
   try {
@@ -68,10 +71,19 @@ export async function readDurable<T>(name: string, options: { strict?: boolean }
     const value = JSON.parse(raw) as T;
     // writeDurableNow(null) removes the file; an on-disk null is not that reset receipt.
     if (options.strict && value === null) throw new Error('Invalid null state');
+    // A `null` file still fails strict reads, so a tolerant read of it does not end the failure.
+    if (value !== null) strictReadFailures.delete(name);
     return value;
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (options.strict && code !== 'ENOENT') {
+      // The thrown error stays generic (callers match it). The log says which of the two causes it is:
+      // a file that is there but not valid, or one the system would not let the app read.
+      const cause = !code ? 'damaged' : SAFE_WRITE_FAILURE_CODES.has(code) ? code : 'read failed';
+      if (strictReadFailures.get(name) !== cause) {
+        strictReadFailures.set(name, cause);
+        logWarn(`could not read ${name} state (${cause === 'damaged' ? 'the file is damaged: not valid JSON, or null' : cause}); it is left as it is`);
+      }
       // JSON parser diagnostics can contain stored content. Keep the public error generic.
       const error = new Error(`Could not read ${name} state`) as Error & { damaged?: boolean };
       // Read, but not usable as state, as opposed to not readable right now.
@@ -275,6 +287,7 @@ export async function flushDurable(): Promise<void> {
 
 /** Test seam: drops queued writes without touching disk. */
 export function resetDurableForTests(): void {
+  strictReadFailures.clear();
   revisions.clear(); revision++;
   for (const timer of timers.values()) clearTimeout(timer);
   timers.clear();
