@@ -51,6 +51,7 @@ import { agentPlanSchema, agentPlanUpdateSchema, MAX_AGENT_PLAN_BYTES, type Agen
 import { turnTrace, type TurnTrace } from '../../shared/turn-trace.js';
 import { sameUserRequest, USER_REQUEST_LIMITS, userRequestSchema, userRequestsFileSchema, type UserRequest } from '../../shared/user-requests.js';
 import { getConfig } from '../config.js';
+import { cancelChatTitleSync, noteProviderChatTitle, queueChatTitleSync, resetChatTitleSyncForTests } from '../chat-title-sync.js';
 import { logError, logInfo, logWarn } from '../logger.js';
 
 /**
@@ -3077,7 +3078,16 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
     if (publicSummary.projectNotePending !== undefined && publicSummary.projectNotePending !== true) delete publicSummary.projectNotePending;
     const auto = publicSummary.autoTitle;
     if (auto !== undefined && (publicSummary.titleSource !== 'manual' || !auto || typeof auto !== 'object' ||
-        typeof auto.title !== 'string' || !['fallback', 'provider'].includes(auto.source))) delete publicSummary.autoTitle;
+        typeof auto.title !== 'string' || !['fallback', 'provider'].includes(auto.source))) {
+      delete publicSummary.autoTitle;
+    } else if (auto?.at !== undefined && (typeof auto.at !== 'number' || !Number.isFinite(auto.at) || auto.at < 0)) {
+      delete auto.at;
+    }
+    if (publicSummary.manualTitleAt !== undefined && (publicSummary.titleSource !== 'manual' ||
+        typeof publicSummary.manualTitleAt !== 'number' || !Number.isFinite(publicSummary.manualTitleAt) ||
+        publicSummary.manualTitleAt < 0)) {
+      delete publicSummary.manualTitleAt;
+    }
     const selected = publicSummary.selectedModel;
     if (selected !== undefined && (!selected || typeof selected !== 'object' ||
         typeof selected.conversationId !== 'string' || typeof selected.model !== 'string' ||
@@ -4095,26 +4105,38 @@ export async function reopenSession(id: string, pageObservedAt?: number): Promis
 export async function renameSession(id: string, title: string, source: SessionSummary['titleSource'] = 'manual', conversationId?: string): Promise<void> {
   const entry = await ensureOpen(id);
   await enqueueSessionOperation(entry, 'rename', async () => {
+    const now = Date.now();
     if (source !== 'manual' && entry.summary.titleSource === 'manual') {
       // The user's name stays; ChatGPT's newer title is kept for when the name is cleared.
       // The same rules as an unnamed chat: worker and helper chats keep their origin's title, a
       // chat this app opened is named by its request, and a project page title is never a name.
       if (source === undefined || (conversationId && entry.summary.conversationId !== conversationId)) return;
+      if (source === 'provider' && entry.summary.conversationId && !projectPageTitle(title)) {
+        noteProviderChatTitle(entry.summary.conversationId, title);
+      }
       if (entry.summary.origin && entry.summary.origin.kind !== 'desktop') return;
       const auto = entry.summary.autoTitle;
       if (source === 'fallback' && auto?.source === 'provider') return;
       if (source === 'provider' && (providerTitleIgnored(entry.summary) || projectPageTitle(title))) return;
-      const next = { title: title.slice(0, 120), source };
+      const next = { title: title.slice(0, 120), source, at: now };
       if (auto?.title === next.title && auto.source === next.source) return;
       entry.summary.autoTitle = next;
       await writeMeta(entry);
       return;
     }
+    const priorProviderTitle = entry.summary.titleSource === 'provider'
+      ? entry.summary.title
+      : entry.summary.autoTitle?.source === 'provider'
+        ? entry.summary.autoTitle.title
+        : undefined;
     if (source === 'manual' && entry.summary.titleSource !== 'manual') {
-      entry.summary.autoTitle = { title: entry.summary.title, source: entry.summary.titleSource === 'provider' ? 'provider' : 'fallback' };
+      entry.summary.autoTitle = { title: entry.summary.title, source: entry.summary.titleSource === 'provider' ? 'provider' : 'fallback', at: now };
     }
     if (source !== 'manual') {
       if (conversationId && entry.summary.conversationId !== conversationId) return;
+      if (source === 'provider' && entry.summary.conversationId && !projectPageTitle(title)) {
+        noteProviderChatTitle(entry.summary.conversationId, title);
+      }
       if (!automaticTitle(entry.summary, firstTitleMessage(entry.messages.values(), entry.summary.origin?.branchOf))) return;
       if (source === 'fallback' && entry.summary.titleSource === 'provider') return;
       if (source === 'provider' && (providerTitleIgnored(entry.summary) || projectPageTitle(title))) return;
@@ -4122,7 +4144,14 @@ export async function renameSession(id: string, title: string, source: SessionSu
     if (entry.summary.title === title.slice(0, 120) && entry.summary.titleSource === source) return;
     entry.summary.title = title.slice(0, 120);
     entry.summary.titleSource = source;
+    if (source === 'manual') entry.summary.manualTitleAt = now;
     await writeMeta(entry);
+    if (source === 'manual' && entry.summary.conversationId) {
+      queueChatTitleSync(entry.summary.conversationId, entry.summary.title, {
+        reason: 'manual-rename',
+        expectedRemoteTitle: priorProviderTitle
+      });
+    }
   });
 }
 
@@ -4139,7 +4168,9 @@ export async function clearSessionName(id: string): Promise<void> {
     entry.summary.title = auto?.title || (first ? userTitle(first.message.text, first.authoredText) : '') || 'ChatGPT session';
     entry.summary.titleSource = auto?.source ?? 'fallback';
     delete entry.summary.autoTitle;
+    delete entry.summary.manualTitleAt;
     await writeMeta(entry);
+    cancelChatTitleSync(entry.summary.conversationId);
   });
 }
 
@@ -4378,6 +4409,9 @@ export async function rebindSession(
     entry.metaDirty = false;
     missingCurrentConversations.delete(toConversationId);
     publishAttachmentSummary(entry.summary);
+    if (entry.summary.titleSource === 'manual' && entry.summary.title) {
+      queueChatTitleSync(toConversationId, entry.summary.title, { reason: 'rebind' });
+    }
     // A new chat gets its first id here; "moved from conversation null" read like a fault in Activity.
     logInfo(fromConversationId
       ? `session ${id} moved from ChatGPT conversation ${fromConversationId} to ${toConversationId}`
@@ -5220,6 +5254,7 @@ export async function deleteSession(id: string): Promise<void> {
 
 /** Test seam: forgets in-memory state without touching the files. */
 export function resetSessionStoreForTests(): void {
+  resetChatTitleSyncForTests();
   recentUnreadableWarned.clear();
   sessionOverflowQuotaWarned.clear();
   latestQuestionCache.clear();

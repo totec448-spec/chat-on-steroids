@@ -64,6 +64,7 @@
   "Leave empty to use ChatGPT's title": "空欄にすると ChatGPT のタイトルを使います",
   "Name for this chat": "このチャットの名前",
   "Rename this chat in the app. Its title in ChatGPT stays the same.": "このチャットの名前をアプリ内で変更します。ChatGPT でのタイトルは変わりません。",
+  "Rename this chat in the app. The new name may also be applied in ChatGPT.": "このチャットの名前をアプリ内で変更します。新しい名前は ChatGPT にも反映される場合があります。",
   "{0} more sources were not recorded with this reply.": "この返信では他の {0} 件のソースが記録されていません。",
   "Thinking": "考え中",
   "Copy answer": "回答をコピー",
@@ -4007,5 +4008,7 @@
   "Free space per chat": "チャットごとに容量を解放",
   "The storage dialog shows what one chat uses and frees its images or long texts.": "ストレージのダイアログに、1 つのチャットが使っている容量が表示され、その画像や長いテキストを解放できます。",
   "Safer after a crash": "クラッシュ後も安心",
-  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "保存や移動が中断されても、チャットグループ、設定のインポート、編集のチェックポイントは整合性を保ちます。"
+  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "保存や移動が中断されても、チャットグループ、設定のインポート、編集のチェックポイントは整合性を保ちます。",
+  "Sync manual chat titles to ChatGPT": "手動のチャットタイトルを ChatGPT に同期",
+  "Push titles you rename here (including across Compact & Resume) to ChatGPT, unless ChatGPT already has a newer title.": "ここで変更したタイトル（「圧縮して再開」をまたぐ場合も含む）を ChatGPT に反映します。ただし、ChatGPT にすでに新しいタイトルがある場合は上書きしません。"
 }

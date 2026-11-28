@@ -64,6 +64,7 @@
   "Leave empty to use ChatGPT's title": "留空則使用 ChatGPT 中的標題",
   "Name for this chat": "此聊天的名稱",
   "Rename this chat in the app. Its title in ChatGPT stays the same.": "在 App 中重新命名此聊天。它在 ChatGPT 中的標題維持不變。",
+  "Rename this chat in the app. The new name may also be applied in ChatGPT.": "在 App 中重新命名此聊天。新名稱也可能套用到 ChatGPT。",
   "{0} more sources were not recorded with this reply.": "此回覆未記錄另外 {0} 個來源。",
   "Thinking": "思考中",
   "Copy answer": "複製回答",
@@ -4007,5 +4008,7 @@
   "Free space per chat": "依聊天釋出空間",
   "The storage dialog shows what one chat uses and frees its images or long texts.": "儲存空間對話框會顯示單一聊天佔用的空間，並可清理其圖片或長文字。",
   "Safer after a crash": "當機後更安全",
-  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "即使儲存或移動被中斷，聊天群組、設定匯入和編輯檢查點也會保持一致。"
+  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "即使儲存或移動被中斷，聊天群組、設定匯入和編輯檢查點也會保持一致。",
+  "Sync manual chat titles to ChatGPT": "將手動聊天標題同步到 ChatGPT",
+  "Push titles you rename here (including across Compact & Resume) to ChatGPT, unless ChatGPT already has a newer title.": "將在此處重新命名的標題（包括跨「壓縮並繼續」沿用的標題）推送到 ChatGPT，除非 ChatGPT 已有更新的標題。"
 }

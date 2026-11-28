@@ -66,6 +66,7 @@
   "Leave empty to use ChatGPT's title": "Leer lassen, um den Titel aus ChatGPT zu nutzen",
   "Name for this chat": "Name für diesen Chat",
   "Rename this chat in the app. Its title in ChatGPT stays the same.": "Diesen Chat in der App umbenennen. Sein Titel in ChatGPT bleibt gleich.",
+  "Rename this chat in the app. The new name may also be applied in ChatGPT.": "Diesen Chat in der App umbenennen. Der neue Name kann auch in ChatGPT übernommen werden.",
   "{0} more sources were not recorded with this reply.": "{0} weitere Quellen wurden mit dieser Antwort nicht aufgezeichnet.",
   "{0} more sources were not recorded with this reply.|one": "{0} weitere Quelle wurde mit dieser Antwort nicht aufgezeichnet.",
   "Thinking": "Denkt nach",
@@ -4092,5 +4093,7 @@
   "Free space per chat": "Speicher pro Chat freigeben",
   "The storage dialog shows what one chat uses and frees its images or long texts.": "Der Speicherdialog zeigt, was ein Chat belegt, und gibt dessen Bilder oder lange Texte frei.",
   "Safer after a crash": "Sicherer nach einem Absturz",
-  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Chat-Gruppen, Einstellungsimporte und Bearbeitungs-Checkpoints bleiben konsistent, wenn ein Speichern oder Verschieben unterbrochen wird."
+  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Chat-Gruppen, Einstellungsimporte und Bearbeitungs-Checkpoints bleiben konsistent, wenn ein Speichern oder Verschieben unterbrochen wird.",
+  "Sync manual chat titles to ChatGPT": "Manuelle Chat-Titel mit ChatGPT synchronisieren",
+  "Push titles you rename here (including across Compact & Resume) to ChatGPT, unless ChatGPT already has a newer title.": "Hier umbenannte Titel (auch über Komprimieren & Fortsetzen hinweg) an ChatGPT übertragen, sofern ChatGPT nicht bereits einen neueren Titel hat."
 }

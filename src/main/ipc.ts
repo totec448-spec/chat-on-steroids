@@ -28,6 +28,7 @@ import { refreshAppProxy } from './app-proxy.js';
 import { committedResumeAncestorsFromSummary, DEFAULT_RECORDING_STORAGE_GIB, REASONING_EFFORTS, RECORDING_STORAGE_LIMITS_GIB, type RecordingStorageLimitGiB, type SessionChange } from '../shared/session.js';
 import { safeExternalLink } from '../shared/external-link.js';
 import { wakeBrowserWork } from './browser-wake.js';
+import { cancelAllChatTitleSync, cancelChatTitleSync } from './chat-title-sync.js';
 import { refreshKeepAwake } from './keep-awake.js';
 import { getChatModels, startChatModelDiscovery, configureChatModelDiscovery } from './chat-models.js';
 import { releaseSessionFinish, requestSessionFinishGoal } from './session/finish.js';
@@ -329,7 +330,8 @@ const settingsPatch = z.object({
     limitTokens: z.number().int().min(10_000).max(4_000_000),
     checkWebChatTitles: z.boolean().optional(),
     storageLimitGiB: z.number().refine(size => (RECORDING_STORAGE_LIMITS_GIB as readonly number[]).includes(size))
-      .transform(size => size as RecordingStorageLimitGiB).optional()
+      .transform(size => size as RecordingStorageLimitGiB).optional(),
+    syncManualChatTitles: z.boolean().optional()
   }),
   compaction: z.object({
     auto: z.boolean(),
@@ -578,7 +580,12 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         base.sessions.checkWebChatTitles ?? false,
         wanted.sessions.checkWebChatTitles ?? base.sessions.checkWebChatTitles ?? false
       ),
-      storageLimitGiB: pick(current.sessions.storageLimitGiB, base.sessions.storageLimitGiB, wanted.sessions.storageLimitGiB)
+      storageLimitGiB: pick(current.sessions.storageLimitGiB, base.sessions.storageLimitGiB, wanted.sessions.storageLimitGiB),
+      syncManualChatTitles: pick(
+        current.sessions.syncManualChatTitles ?? false,
+        base.sessions.syncManualChatTitles ?? false,
+        wanted.sessions.syncManualChatTitles ?? false
+      )
     },
     compaction: {
       auto: pick(current.compaction.auto, base.compaction.auto, wanted.compaction.auto),
@@ -962,6 +969,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // A changed Goal provider address may be one the system reaches directly.
     void refreshAppProxy();
     setRecordingStorageLimit(next.sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB);
+    if (before.sessions.syncManualChatTitles === true && next.sessions.syncManualChatTitles !== true) {
+      cancelAllChatTitleSync('setting-disabled');
+    }
     if ((before.ui.keepAwake !== false) !== (next.ui.keepAwake !== false) || (before.ui.keepScreenAwake === true) !== (next.ui.keepScreenAwake === true)) refreshKeepAwake();
     // Electron's own `system` source is what System (#1914) means; set first, so the shown theme is current.
     nativeTheme.themeSource = next.ui.theme;
@@ -2617,6 +2627,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       if (summary) await forgetOwnSent([...new Set([...(summary.conversationId ? [summary.conversationId] : []), ...(summary.chatIds ?? [])])])
         .catch((error: Error) => logWarn(`session ${id}: its own-sent record could not be removed (${error.message})`));
       await deleteSession(id);
+      if (summary?.conversationId) cancelChatTitleSync(summary.conversationId);
       // A deleted chat leaves its group too; the group itself stays.
       await forgetChatGroupMember(id);
       logInfo(

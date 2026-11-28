@@ -64,6 +64,7 @@
   "Leave empty to use ChatGPT's title": "비워 두면 ChatGPT의 제목을 사용합니다",
   "Name for this chat": "이 채팅의 이름",
   "Rename this chat in the app. Its title in ChatGPT stays the same.": "앱에서 이 채팅의 이름을 바꿉니다. ChatGPT의 제목은 그대로입니다.",
+  "Rename this chat in the app. The new name may also be applied in ChatGPT.": "앱에서 이 채팅의 이름을 바꿉니다. 새 이름은 ChatGPT에도 적용될 수 있습니다.",
   "{0} more sources were not recorded with this reply.": "이 답변에는 다른 출처 {0}개가 기록되지 않았습니다.",
   "Thinking": "생각 중",
   "Copy answer": "답변 복사",
@@ -4007,5 +4008,7 @@
   "Free space per chat": "채팅별 공간 확보",
   "The storage dialog shows what one chat uses and frees its images or long texts.": "저장 공간 대화 상자에서 채팅 하나가 사용하는 용량을 보고 그 이미지나 긴 텍스트를 비울 수 있습니다.",
   "Safer after a crash": "충돌 후에도 더 안전하게",
-  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "저장이나 이동이 중단되어도 채팅 그룹, 설정 가져오기, 편집 체크포인트가 일관되게 유지됩니다."
+  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "저장이나 이동이 중단되어도 채팅 그룹, 설정 가져오기, 편집 체크포인트가 일관되게 유지됩니다.",
+  "Sync manual chat titles to ChatGPT": "수동 채팅 제목을 ChatGPT에 동기화",
+  "Push titles you rename here (including across Compact & Resume) to ChatGPT, unless ChatGPT already has a newer title.": "여기에서 이름을 바꾼 제목(‘압축 후 계속’ 이후 포함)을 ChatGPT에 반영합니다. 단, ChatGPT에 이미 더 최신 제목이 있는 경우는 제외합니다."
 }

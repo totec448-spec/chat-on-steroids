@@ -6929,6 +6929,79 @@ describe('archiving retired worker chats (#1460)', () => {
   });
 });
 
+describe('syncing manual chat titles to ChatGPT', () => {
+  const chat = 'aaaaaaaa-1111-4222-8333-444444444444';
+  const otherChat = 'bbbbbbbb-1111-4222-8333-444444444444';
+  function titleWorker(outcome: unknown, title = 'My Work') {
+    const results: unknown[] = [];
+    let next: Record<string, unknown> | null = { conversationId: chat, title };
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }), session: new FakeStorageArea(),
+      fetch: async (input, init = {}) => {
+        const route = new URL(input).pathname;
+        if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (route === '/status') return response(200, { ok: true, ...(next ? { chatTitlePending: true } : {}) });
+        if (route === '/chat-title/next') { const body = next ?? { conversationId: null, title: null }; next = null; return response(200, body); }
+        if (route === '/chat-title/result') { results.push(JSON.parse(String(init.body))); return response(200, { ok: true }); }
+        return response(200, {});
+      },
+      tabsSendMessage: async (_tabId, message) => message.type === 'clf-rename-chat' ? outcome : { ok: true }
+    });
+    return { worker, results };
+  }
+
+  it('prefers the tab already showing that conversation when renaming, and reports synced', async () => {
+    const { worker, results } = titleWorker({ outcome: 'synced' });
+    await worker.createTab({ id: 1, url: `https://chatgpt.com/c/${otherChat}` });
+    await worker.createTab({ id: 2, url: `https://chatgpt.com/c/${chat}` });
+    await worker.registerTab(1);
+    await worker.registerTab(2);
+    await worker.fireAlarm();
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(2, { type: 'clf-rename-chat', conversationId: chat, title: 'My Work' }, expect.objectContaining({ documentId: expect.any(String) }));
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(1, { type: 'clf-apply-chat-title', conversationId: chat, title: 'My Work' }, expect.objectContaining({ documentId: expect.any(String) }));
+    expect(results).toEqual([{ conversationId: chat, title: 'My Work', outcome: 'synced' }]);
+  });
+
+  it('falls back to any registered ChatGPT tab and defers when none are open', async () => {
+    const withHomeTab = titleWorker({ outcome: 'synced' });
+    await withHomeTab.worker.createTab({ id: 1, url: 'https://chatgpt.com/' });
+    await withHomeTab.worker.registerTab(1);
+    await withHomeTab.worker.fireAlarm();
+    expect(withHomeTab.results).toEqual([{ conversationId: chat, title: 'My Work', outcome: 'synced' }]);
+
+    const noTabs = titleWorker({ outcome: 'synced' });
+    await noTabs.worker.fireAlarm();
+    expect(noTabs.results).toEqual([{ conversationId: chat, title: 'My Work', outcome: 'deferred' }]);
+  });
+
+  it('drains immediately on /status when chatTitlePending is set, and forwards conflict and 429 metadata without broadcasting stale titles', async () => {
+    const { worker, results } = titleWorker({ outcome: 'synced' }, 'Compact Target');
+    await worker.createTab({ id: 1, url: 'https://chatgpt.com/' });
+    await worker.registerTab(1);
+    await worker.startup();
+    await vi.waitFor(() => expect(results).toEqual([{ conversationId: chat, title: 'Compact Target', outcome: 'synced' }]));
+
+    const conflictWorker = titleWorker({ outcome: 'conflict', remoteTitle: 'Newer On Web' }, 'Stale CoS Title');
+    await conflictWorker.worker.createTab({ id: 1, url: `https://chatgpt.com/c/${chat}` });
+    await conflictWorker.worker.createTab({ id: 2, url: `https://chatgpt.com/c/${otherChat}` });
+    await conflictWorker.worker.registerTab(1);
+    await conflictWorker.worker.registerTab(2);
+    await conflictWorker.worker.fireAlarm();
+    expect(conflictWorker.results).toEqual([
+      { conversationId: chat, title: 'Stale CoS Title', outcome: 'conflict', remoteTitle: 'Newer On Web' }
+    ]);
+    expect(conflictWorker.worker.tabsSendMessage.mock.calls.some(call => (call[1] as { type?: string }).type === 'clf-apply-chat-title')).toBe(false);
+
+    const rateLimited = titleWorker({ outcome: 'failed', status: 429, retryAfterMs: 30_000 }, 'Rate Limited');
+    await rateLimited.worker.createTab({ id: 1, url: 'https://chatgpt.com/' });
+    await rateLimited.worker.registerTab(1);
+    await rateLimited.worker.fireAlarm();
+    expect(rateLimited.results).toEqual([
+      { conversationId: chat, title: 'Rate Limited', outcome: 'failed', status: 429, retryAfterMs: 30_000 }
+    ]);
+  });
+});
+
 describe('a ChatGPT page that moves to a new address', () => {
   const chat = 'bbbbbbbb-1111-4222-8333-444444444444';
   function routeWorker() {

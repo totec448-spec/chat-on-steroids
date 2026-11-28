@@ -64,6 +64,7 @@
   "Leave empty to use ChatGPT's title": "Để trống để dùng tiêu đề của ChatGPT",
   "Name for this chat": "Tên cho cuộc trò chuyện này",
   "Rename this chat in the app. Its title in ChatGPT stays the same.": "Đổi tên cuộc trò chuyện này trong ứng dụng. Tiêu đề trong ChatGPT vẫn giữ nguyên.",
+  "Rename this chat in the app. The new name may also be applied in ChatGPT.": "Đổi tên cuộc trò chuyện này trong ứng dụng. Tên mới cũng có thể được áp dụng trong ChatGPT.",
   "{0} more sources were not recorded with this reply.": "Còn {0} nguồn chưa được ghi lại cùng phản hồi này.",
   "Thinking": "Đang suy luận",
   "Copy answer": "Sao chép câu trả lời",
@@ -4007,5 +4008,7 @@
   "Free space per chat": "Giải phóng dung lượng theo cuộc trò chuyện",
   "The storage dialog shows what one chat uses and frees its images or long texts.": "Hộp thoại bộ nhớ cho biết một cuộc trò chuyện dùng bao nhiêu và giải phóng ảnh hoặc văn bản dài của nó.",
   "Safer after a crash": "An toàn hơn sau sự cố",
-  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Nhóm cuộc trò chuyện, nhập cài đặt và điểm kiểm tra chỉnh sửa vẫn nhất quán khi việc lưu hoặc di chuyển bị gián đoạn."
+  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Nhóm cuộc trò chuyện, nhập cài đặt và điểm kiểm tra chỉnh sửa vẫn nhất quán khi việc lưu hoặc di chuyển bị gián đoạn.",
+  "Sync manual chat titles to ChatGPT": "Đồng bộ tiêu đề chat thủ công sang ChatGPT",
+  "Push titles you rename here (including across Compact & Resume) to ChatGPT, unless ChatGPT already has a newer title.": "Đẩy các tiêu đề bạn đổi tên tại đây (kể cả qua Compact & Resume) lên ChatGPT, trừ khi ChatGPT đã có tiêu đề mới hơn."
 }

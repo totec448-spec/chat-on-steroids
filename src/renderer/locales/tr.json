@@ -66,6 +66,7 @@
   "Leave empty to use ChatGPT's title": "ChatGPT’deki başlığı kullanmak için boş bırakın",
   "Name for this chat": "Bu sohbetin adı",
   "Rename this chat in the app. Its title in ChatGPT stays the same.": "Bu sohbeti uygulamada yeniden adlandırın. ChatGPT’deki başlığı aynı kalır.",
+  "Rename this chat in the app. The new name may also be applied in ChatGPT.": "Bu sohbeti uygulamada yeniden adlandırın. Yeni ad ChatGPT’de de uygulanabilir.",
   "{0} more sources were not recorded with this reply.": "Bu yanıtla birlikte {0} kaynak daha kaydedilmedi.",
   "{0} more sources were not recorded with this reply.|one": "Bu yanıtla birlikte {0} kaynak daha kaydedilmedi.",
   "Thinking": "Düşünüyor",
@@ -4092,5 +4093,7 @@
   "Free space per chat": "Sohbet başına alan aç",
   "The storage dialog shows what one chat uses and frees its images or long texts.": "Depolama iletişim kutusu bir sohbetin ne kadar yer kapladığını gösterir ve görsellerini veya uzun metinlerini temizler.",
   "Safer after a crash": "Çökmeden sonra daha güvenli",
-  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Kayıt veya taşıma yarıda kesilse bile sohbet grupları, ayar içe aktarmaları ve düzenleme kontrol noktaları tutarlı kalır."
+  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Kayıt veya taşıma yarıda kesilse bile sohbet grupları, ayar içe aktarmaları ve düzenleme kontrol noktaları tutarlı kalır.",
+  "Sync manual chat titles to ChatGPT": "Elle değiştirilen sohbet başlıklarını ChatGPT ile eşitle",
+  "Push titles you rename here (including across Compact & Resume) to ChatGPT, unless ChatGPT already has a newer title.": "Burada yeniden adlandırdığınız başlıkları (Sıkıştır ve sürdür sonrasında da) ChatGPT’e gönderir; ancak ChatGPT’de zaten daha yeni bir başlık varsa üzerine yazmaz."
 }

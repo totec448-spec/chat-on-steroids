@@ -3818,6 +3818,7 @@ async function maintainOnce() {
   void reloadForExtensionUpdate(reply.data.extensionUpdate, liveOpenings, liveCommands, liveSending).catch(() => undefined);
   void followApp(reply.data).catch(() => undefined);
   followAppearance(reply.data.appearance);
+  if (reply.data.chatTitlePending === true) void drainChatTitleSync().catch(() => undefined);
   void revealChats(reply.data.reveals).catch(() => undefined);
   void followChat(reply.data.follow).catch(() => undefined);
   void runImageExports(reply.data.imageExports).catch(() => undefined);
@@ -6469,6 +6470,30 @@ if (chrome.runtime.onStartup && typeof chrome.runtime.onStartup.addListener === 
   });
 }
 
+async function runChatgptTabCommand(message, preferredConversationId) {
+  const tabs = await chrome.tabs.query({ url: ['https://chatgpt.com/*'] });
+  const ordered = preferredConversationId
+    ? [...tabs].sort((a, b) => Number(conversationForTab(b) === preferredConversationId) - Number(conversationForTab(a) === preferredConversationId))
+    : tabs;
+  for (const tab of ordered) {
+    const documentId = tab.id === undefined ? null : tabDocuments[String(tab.id)];
+    if (!documentId) continue;
+    let reply;
+    try { reply = await chrome.tabs.sendMessage(tab.id, message, { documentId }); }
+    catch { continue; } // that document is gone; another page may still do it
+    return { tabs, tabId: tab.id, reply };
+  }
+  return null;
+}
+
+async function runOnChatgptTab(message, preferredConversationId, doneOutcome, onDone) {
+  const ran = await runChatgptTabCommand(message, preferredConversationId);
+  if (!ran) return 'deferred';
+  const outcome = ran.reply?.outcome === doneOutcome ? doneOutcome : 'failed';
+  if (outcome === doneOutcome && onDone) onDone(ran.tabs, ran.tabId);
+  return outcome;
+}
+
 /**
  * Archives one worker chat the app has queued (#1460), or restores one before its worker is woken
  * (#1701), from any ChatGPT page of this extension: both are account-level requests, so they need
@@ -6483,17 +6508,57 @@ async function drainWorkerArchive() {
   if (!conversationId) return;
   const archive = !unarchive;
   const done = archive ? 'archived' : 'unarchived';
-  let outcome = 'deferred';
-  for (const tab of await chrome.tabs.query({ url: ['https://chatgpt.com/*'] })) {
-    const documentId = tab.id === undefined ? null : tabDocuments[String(tab.id)];
-    if (!documentId) continue;
-    let reply;
-    try { reply = await chrome.tabs.sendMessage(tab.id, { type: 'clf-archive-chat', conversationId, archive }, { documentId }); }
-    catch { continue; } // that document is gone; another page may still do it
-    outcome = reply?.outcome === done ? done : 'failed';
-    break;
-  }
+  const outcome = await runOnChatgptTab({ type: 'clf-archive-chat', conversationId, archive }, null, done);
   await call('/worker-archive/result', { method: 'POST', body: JSON.stringify({ conversationId, outcome }) });
+}
+
+let chatTitleSyncFlight = null;
+
+/** Pushes at most one due manual chat title from the app to ChatGPT Web per pass. */
+async function drainChatTitleSync() {
+  if (chatTitleSyncFlight) return chatTitleSyncFlight;
+  chatTitleSyncFlight = (async () => {
+    await load();
+    const next = await call('/chat-title/next', { method: 'POST', body: '{}' });
+    const conversationId = next.ok ? cleanConversationId(next.data?.conversationId) : null;
+    const title = next.ok && typeof next.data?.title === 'string' ? next.data.title.trim() : '';
+    const expectedRemoteTitle = next.ok && typeof next.data?.expectedRemoteTitle === 'string' && next.data.expectedRemoteTitle.trim()
+      ? next.data.expectedRemoteTitle.trim()
+      : null;
+    if (!conversationId || !title) return;
+    const ran = await runChatgptTabCommand(
+      {
+        type: 'clf-rename-chat',
+        conversationId,
+        title,
+        ...(expectedRemoteTitle ? { expectedRemoteTitle } : {})
+      },
+      conversationId
+    );
+    const reply = ran?.reply;
+    const rawOutcome = reply?.outcome;
+    const outcome = !ran
+      ? 'deferred'
+      : (rawOutcome === 'synced' || rawOutcome === 'conflict' ? rawOutcome : 'failed');
+    if (outcome === 'synced') {
+      for (const tab of ran.tabs) {
+        if (tab.id === undefined || tab.id === ran.tabId) continue;
+        const documentId = tabDocuments[String(tab.id)];
+        if (documentId) void chrome.tabs.sendMessage(tab.id, { type: 'clf-apply-chat-title', conversationId, title }, { documentId }).catch(() => undefined);
+      }
+    }
+    const resultBody = {
+      conversationId,
+      title,
+      outcome,
+      ...(reply?.alreadyMatched === true ? { alreadyMatched: true } : {}),
+      ...(typeof reply?.remoteTitle === 'string' && reply.remoteTitle ? { remoteTitle: reply.remoteTitle } : {}),
+      ...(typeof reply?.status === 'number' ? { status: reply.status } : {}),
+      ...(typeof reply?.retryAfterMs === 'number' ? { retryAfterMs: reply.retryAfterMs } : {})
+    };
+    await call('/chat-title/result', { method: 'POST', body: JSON.stringify(resultBody) });
+  })().finally(() => { chatTitleSyncFlight = null; });
+  return chatTitleSyncFlight;
 }
 
 if (chrome.alarms && chrome.alarms.onAlarm && typeof chrome.alarms.onAlarm.addListener === 'function') {
@@ -6501,6 +6566,7 @@ if (chrome.alarms && chrome.alarms.onAlarm && typeof chrome.alarms.onAlarm.addLi
     if (!alarm || alarm.name !== RETRY_ALARM) return;
     // Independent of the command passes below: a failure in either never holds up the other.
     void drainWorkerArchive().catch(() => undefined);
+    void drainChatTitleSync().catch(() => undefined);
     void drainCommandAcks()
       .then(() => drain())
       .then(() => drainCloses())

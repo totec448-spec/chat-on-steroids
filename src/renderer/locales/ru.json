@@ -70,6 +70,7 @@
   "Leave empty to use ChatGPT's title": "Оставьте пустым, чтобы использовать название из ChatGPT",
   "Name for this chat": "Название этого чата",
   "Rename this chat in the app. Its title in ChatGPT stays the same.": "Переименовать этот чат в приложении. Его название в ChatGPT не изменится.",
+  "Rename this chat in the app. The new name may also be applied in ChatGPT.": "Переименовать этот чат в приложении. Новое название также может примениться в ChatGPT.",
   "{0} more sources were not recorded with this reply.": "Ещё {0} источника не сохранено для этого ответа.",
   "{0} more sources were not recorded with this reply.|one": "Ещё {0} источник не сохранён для этого ответа.",
   "{0} more sources were not recorded with this reply.|few": "Ещё {0} источника не сохранены для этого ответа.",
@@ -4262,5 +4263,7 @@
   "Free space per chat": "Освободить место по чатам",
   "The storage dialog shows what one chat uses and frees its images or long texts.": "Диалог хранилища показывает, сколько занимает один чат, и освобождает его изображения или длинные тексты.",
   "Safer after a crash": "Надёжнее после сбоя",
-  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Группы чатов, импорт настроек и контрольные точки правок остаются согласованными, если сохранение или перемещение прервано."
+  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Группы чатов, импорт настроек и контрольные точки правок остаются согласованными, если сохранение или перемещение прервано.",
+  "Sync manual chat titles to ChatGPT": "Синхронизировать ручные названия чатов с ChatGPT",
+  "Push titles you rename here (including across Compact & Resume) to ChatGPT, unless ChatGPT already has a newer title.": "Передавать переименованные здесь названия (включая перенос через «Сжать и продолжить») в ChatGPT, если в ChatGPT уже нет более нового названия."
 }
