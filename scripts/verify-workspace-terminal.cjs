@@ -25,6 +25,7 @@ if (!output) {
   if (typeof electron === 'string') process.exit(status); else electron.app.exit(status);
 } else {
 const { withoutScripts } = require('./ui-check-page.cjs');
+const { resizeWindow } = require('./ui-check-window.cjs');
 const { app, BrowserWindow } = electron;
 const assert = require('node:assert/strict');
 // PowerShell on Windows, the login shell elsewhere. Every command prints a marker the checks wait for.
@@ -219,7 +220,7 @@ app.whenReady().then(async () => {
       const attemptEnd = Date.now() + 1_500;
       while (Date.now() < attemptEnd && !(await interrupted())) await new Promise(resolve => setTimeout(resolve, 40));
     }
-    win.setSize(830, 700); await new Promise(resolve => setTimeout(resolve, 300));
+    await resizeWindow(win, 830, 700); await new Promise(resolve => setTimeout(resolve, 300));
     const geometry = await js(`(()=>{const p=document.getElementById('workspaceTerminal').getBoundingClientRect();return {width:p.width,height:p.height,fits:p.right<=innerWidth+1&&p.bottom<=innerHeight+1}})()`);
     assert.ok(geometry.fits, JSON.stringify(geometry));
     fs.writeFileSync(path.join(artifacts, 'terminal.png'), (await win.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true })).toPNG());
