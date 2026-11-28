@@ -67,6 +67,20 @@ export function shouldQuitOnWindowAllClosed(
   return platform !== 'darwin' && !minimizeToTray;
 }
 
+export type CloseAction = 'close' | 'hide' | 'minimize';
+
+/**
+ * What closing the window does. With close-to-tray on, the window is hidden and the tray brings it back. On Linux a desktop
+ * without a tray (stock GNOME) would leave a hidden window nothing can reach, so it is minimized instead, where the taskbar
+ * or dock still lists it. `trayReachable` is null when that could not be told, which keeps the hide.
+ */
+export function closeActionForWindow(options: {
+  platform: NodeJS.Platform; minimizeToTray: boolean; quitting: boolean; trayReachable: boolean | null;
+}): CloseAction {
+  if (options.quitting || !options.minimizeToTray) return 'close';
+  return options.platform === 'linux' && options.trayReachable === false ? 'minimize' : 'hide';
+}
+
 /**
  * macOS users return to a hidden app through the Dock, which Electron reports as `activate`.
  * Windows/Linux use the tray/second-instance paths and should not gain a synthetic handler.
