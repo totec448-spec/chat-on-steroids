@@ -282,7 +282,12 @@ export function helperTimeoutMs(
     case 'cursor':
       return 5_000;
     case 'find_ui':
+    case 'quick_context_origin':
+    case 'quick_context_selection':
+    case 'quick_context_copy':
       return 8_000;
+    case 'quick_context_replace':
+      return 15_000;
     case 'capture':
     case 'snapshot':
       // macOS may spend 12s enumerating ScreenCaptureKit content, then up to 10s
@@ -974,6 +979,81 @@ export async function activeWindow(): Promise<{ window: WindowInfo | null; scree
   return { window, screen: reply['screen'] as Rect };
 }
 
+/** Opaque, helper-generation-bound identity of the app and its focused text provider. */
+export type QuickDesktopOrigin = { window: WindowInfo; generation?: number; snapshotId?: number; runtimeKey?: string };
+
+export async function rememberQuickDesktopOrigin(selection: boolean): Promise<QuickDesktopOrigin | null> {
+  if (process.platform !== 'win32') {
+    if (process.platform !== 'darwin') return null;
+    const { window } = await activeWindow();
+    return window ? { window } : null;
+  }
+  return exclusive(async () => {
+    const reply = await runHelper({ op: 'quick_context_origin', selection });
+    const window = reply.window as WindowInfo | null;
+    if (!window || !window.app || !window.processId) return null;
+    return { window, generation: generationOfReply(reply),
+      ...(typeof reply.runtimeKey === 'string' && Number.isSafeInteger(reply.snapshotId)
+        ? { runtimeKey: reply.runtimeKey, snapshotId: reply.snapshotId } : {}) };
+  });
+}
+
+function quickSelectionRequest(origin: QuickDesktopOrigin): { identity: Record<string, unknown>; expected: ExpectedHelper } {
+  if (process.platform !== 'win32' || origin.generation === undefined || origin.snapshotId === undefined || !origin.runtimeKey)
+    throw new ComputerError('Selected text is unavailable in the original window');
+  const { id, app, processId, title } = origin.window;
+  return { identity: { id, app, processId, title, snapshotId: origin.snapshotId, runtimeKey: origin.runtimeKey },
+    expected: { generation: origin.generation, code: 'STALE_REF' } };
+}
+
+export async function readQuickDesktopSelection(origin: QuickDesktopOrigin): Promise<{ text: string; editable: boolean }> {
+  const { identity, expected } = quickSelectionRequest(origin);
+  return exclusive(async () => {
+    const reply = await runHelper({ op: 'quick_context_selection', ...identity }, expected);
+    if (typeof reply.text !== 'string' || !reply.text.trim() || reply.text.length > 64000) throw new ComputerError('Selected text is unavailable');
+    return { text: reply.text, editable: reply.editable === true };
+  });
+}
+
+/** Explicit copy is a read-only selection attachment, never proof of an editable range. */
+export async function copyQuickDesktopSelection(origin: QuickDesktopOrigin, foreground: number, stillCurrent: () => boolean): Promise<string> {
+  if (process.platform !== 'win32' || origin.generation === undefined) throw new ComputerError('Selected text is unavailable in the original window');
+  const { id, app, processId, title } = origin.window;
+  return exclusive(async () => {
+    if (!stillCurrent()) throw new ComputerError('The source window changed or clipboard permission is unavailable');
+    const reply = await runHelper({ op: 'quick_context_copy', id, app, processId, title, foreground }, { generation: origin.generation!, code: 'STALE_REF' });
+    if (!stillCurrent()) throw new ComputerError('The source window changed or clipboard permission is unavailable');
+    if (typeof reply.text !== 'string' || !reply.text.trim() || reply.text.length > 64000) throw new ComputerError('Selected text is unavailable');
+    return reply.text;
+  });
+}
+
+/** Native helper verifies the original range again after focus, immediately before the input. */
+export async function replaceQuickDesktopSelection(origin: QuickDesktopOrigin, selection: string, text: string, foreground: number,
+  stillCurrent: () => boolean, clipboardAllowed: () => boolean): Promise<void> {
+  const { identity, expected } = quickSelectionRequest(origin);
+  // Long text needs a single paste gesture; never stream multiple Unicode batches into a window
+  // that may lose focus mid-replacement.
+  const paste = text.length > 100 || /[\r\n]/.test(text);
+  await exclusive(async () => {
+    if (!stillCurrent()) throw new ComputerError('The source window changed');
+    await runHelper({ op: 'quick_context_selection', ...identity, editable: true, expected: selection }, expected);
+    if (!stillCurrent()) throw new ComputerError('The source window changed');
+    if (paste) {
+      if (!clipboardAllowed()) throw new ComputerError('Long or multiline replacement needs clipboard write permission');
+      await (await electronClipboard()).writeText(text);
+      if (!stillCurrent()) throw new ComputerError('The source window changed');
+    }
+    try {
+      const reply = await runHelper({ op: 'quick_context_replace', ...identity, expected: selection, foreground, paste, text }, expected);
+      if (reply.replaced !== true) throw new ComputerError('Replacement was not confirmed');
+    } catch (error) {
+      if (paste) throw new ComputerError(`${error instanceof Error ? error.message : String(error)}. The replacement text was copied to the clipboard; insertion was not confirmed.`);
+      throw error;
+    }
+  });
+}
+
 export async function findUi(opts: {
   window?: number;
   query?: string;
@@ -1091,6 +1171,8 @@ export async function getWindowState(opts: {
   includeScreenshot?: boolean;
   includeUi?: boolean;
   includeRelated?: boolean;
+  /** Quick Chat context describes the visible surface, not the entire document. */
+  visibleTextOnly?: boolean;
 }): Promise<{
   window: WindowInfo;
   snapshotId: number | null;
@@ -1120,6 +1202,7 @@ export async function getWindowState(opts: {
         ...(opts.query === undefined ? {} : { query: opts.query }),
         ...(opts.role === undefined ? {} : { role: opts.role }),
         includeRelated: process.platform === 'win32' && opts.includeRelated === true,
+        ...(opts.visibleTextOnly && process.platform === 'win32' ? { visibleTextOnly: true } : {}),
         maxWidth: limit,
         maxResults: Math.min(100, Math.max(1, Math.floor(opts.maxElements ?? 60))),
         ...(file ? { file } : {})

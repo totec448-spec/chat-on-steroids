@@ -58,8 +58,8 @@ async function recoverFullText(sessionId: string, stored: StoredText, html?: Sto
   return providerEntitiesAsMarkdown(completedDilText(text, html));
 }
 
-/** Builds a completed turn's answer or the session transcript and copies or saves it. */
-export async function exportSessionMarkdown(request: MarkdownExportRequest, owner: BrowserWindow | null): Promise<MarkdownExportResult> {
+/** Resolve the same canonical Markdown for export and explicit Quick Chat replacement. */
+export async function buildSessionMarkdown(request: Omit<MarkdownExportRequest, 'target'>): Promise<{ markdown: string; name: string }> {
   const summary = await getSession(request.id);
   if (!summary) throw new Error('Session not found');
   const events = await readEvents(request.id);
@@ -86,6 +86,12 @@ export async function exportSessionMarkdown(request: MarkdownExportRequest, owne
     markdown = sessionMarkdown(summary.title, entries);
     name = markdownFileName(summary.title);
   }
+  return { markdown, name };
+}
+
+/** Builds a completed turn's answer or the session transcript and copies or saves it. */
+export async function exportSessionMarkdown(request: MarkdownExportRequest, owner: BrowserWindow | null): Promise<MarkdownExportResult> {
+  const { markdown, name } = await buildSessionMarkdown(request);
   if (request.target === 'clipboard') {
     await clipboard.writeText(markdown);
     return { done: 'copied' };

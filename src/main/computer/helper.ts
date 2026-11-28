@@ -84,6 +84,109 @@ public static class Clf {
   [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
   [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern uint GetClipboardSequenceNumber();
+  [DllImport("user32.dll")] static extern IntPtr GetClipboardOwner();
+  [DllImport("user32.dll", SetLastError = true)] static extern bool OpenClipboard(IntPtr owner);
+  [DllImport("user32.dll")] static extern bool CloseClipboard();
+  [DllImport("user32.dll", SetLastError = true)] static extern uint EnumClipboardFormats(uint format);
+  [DllImport("user32.dll")] static extern IntPtr GetClipboardData(uint format);
+  [DllImport("user32.dll")] static extern bool EmptyClipboard();
+  [DllImport("user32.dll")] static extern IntPtr SetClipboardData(uint format, IntPtr memory);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr CreateWindowExW(uint exStyle, string className, string name, uint style, int x, int y, int width, int height, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
+  [DllImport("user32.dll")] static extern bool DestroyWindow(IntPtr window);
+  [DllImport("kernel32.dll")] static extern IntPtr GlobalLock(IntPtr memory);
+  [DllImport("kernel32.dll")] static extern bool GlobalUnlock(IntPtr memory);
+  [DllImport("kernel32.dll")] static extern UIntPtr GlobalSize(IntPtr memory);
+  [DllImport("kernel32.dll")] static extern IntPtr GlobalAlloc(uint flags, UIntPtr size);
+  [DllImport("kernel32.dll")] static extern IntPtr GlobalFree(IntPtr memory);
+  [DllImport("kernel32.dll")] static extern void SetLastError(uint error);
+  public static uint ClipboardOwnerPid() {
+    uint pid = 0;
+    IntPtr owner = GetClipboardOwner();
+    if (owner != IntPtr.Zero) GetWindowThreadProcessId(owner, out pid);
+    return pid;
+  }
+
+  public sealed class ClipboardBackup {
+    public uint Sequence;
+    public Dictionary<uint, byte[]> Formats = new Dictionary<uint, byte[]>();
+  }
+  // Snapshot the clipboard before sending Copy. Memory-backed standard and registered
+  // formats retain their bytes (including HTML, RTF, DIB, PNG and file lists). Never
+  // overwrite a clipboard containing an unsupported handle or an unbounded payload.
+  public static ClipboardBackup BackupClipboard() {
+    if (!OpenClipboard(IntPtr.Zero)) throw new InvalidOperationException("CLIPBOARD_BUSY: clipboard is busy; try again");
+    try {
+      ClipboardBackup backup = new ClipboardBackup();
+      List<uint> formats = new List<uint>();
+      uint format = 0;
+      while (true) {
+        SetLastError(0);
+        format = EnumClipboardFormats(format);
+        if (format == 0) {
+          if (Marshal.GetLastWin32Error() != 0) throw new InvalidOperationException("CLIPBOARD_UNAVAILABLE: clipboard formats could not be enumerated");
+          break;
+        }
+        formats.Add(format);
+        if (formats.Count > 64) throw new InvalidOperationException("CLIPBOARD_UNAVAILABLE: too many clipboard formats to preserve safely");
+      }
+      long total = 0;
+      foreach (uint value in formats) {
+        // Windows can recreate the bitmap from a saved DIB. Other GDI/owner-display
+        // handles are not byte buffers and must not be treated as such.
+        if (value == 2 && (formats.Contains(8) || formats.Contains(17))) continue;
+        if (!(value >= 0xC000 || value == 1 || value == 4 || value == 5 || value == 6 || value == 7 || value == 8 || value == 10 || value == 11 || value == 12 || value == 13 || value == 15 || value == 16 || value == 17))
+          throw new InvalidOperationException("CLIPBOARD_UNAVAILABLE: clipboard contains a format that cannot be preserved; copy and paste the selection manually");
+        IntPtr memory = GetClipboardData(value);
+        ulong size = GlobalSize(memory).ToUInt64();
+        if (memory == IntPtr.Zero || size == 0 || size > 64UL * 1024 * 1024 || total + (long)size > 64L * 1024 * 1024)
+          throw new InvalidOperationException("CLIPBOARD_UNAVAILABLE: clipboard contents cannot be preserved safely");
+        IntPtr data = GlobalLock(memory);
+        if (data == IntPtr.Zero) throw new InvalidOperationException("CLIPBOARD_UNAVAILABLE: clipboard data cannot be preserved safely");
+        try {
+          byte[] bytes = new byte[(int)size];
+          Marshal.Copy(data, bytes, 0, bytes.Length);
+          backup.Formats.Add(value, bytes);
+          total += bytes.Length;
+        } finally { GlobalUnlock(memory); }
+      }
+      backup.Sequence = GetClipboardSequenceNumber();
+      return backup;
+    } finally { CloseClipboard(); }
+  }
+  public static void RestoreClipboard(ClipboardBackup backup, uint sequence, uint sourcePid) {
+    // A later user/application copy wins. Compare sequence and owner while holding
+    // the clipboard open, so restoration cannot clobber a concurrent new write.
+    if (GetClipboardSequenceNumber() != sequence || ClipboardOwnerPid() != sourcePid) return;
+    IntPtr owner = CreateWindowExW(0, "STATIC", "", 0, 0, 0, 0, 0, new IntPtr(-3), IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+    if (owner == IntPtr.Zero) throw new InvalidOperationException("CLIPBOARD_RESTORE_FAILED: the previous clipboard could not be restored");
+    Dictionary<uint, IntPtr> allocated = new Dictionary<uint, IntPtr>();
+    try {
+      foreach (KeyValuePair<uint, byte[]> entry in backup.Formats) {
+        IntPtr memory = GlobalAlloc(2, new UIntPtr((uint)entry.Value.Length));
+        if (memory == IntPtr.Zero) throw new InvalidOperationException("CLIPBOARD_RESTORE_FAILED: the previous clipboard could not be restored");
+        allocated.Add(entry.Key, memory);
+        IntPtr data = GlobalLock(memory);
+        if (data == IntPtr.Zero) throw new InvalidOperationException("CLIPBOARD_RESTORE_FAILED: the previous clipboard could not be restored");
+        try { Marshal.Copy(entry.Value, 0, data, entry.Value.Length); } finally { GlobalUnlock(memory); }
+      }
+      if (!OpenClipboard(owner)) {
+        if (GetClipboardSequenceNumber() != sequence) return;
+        throw new InvalidOperationException("CLIPBOARD_RESTORE_FAILED: the previous clipboard could not be restored");
+      }
+      try {
+        if (GetClipboardSequenceNumber() != sequence || ClipboardOwnerPid() != sourcePid) return;
+        if (!EmptyClipboard()) throw new InvalidOperationException("CLIPBOARD_RESTORE_FAILED: the previous clipboard could not be restored");
+        foreach (uint format in new List<uint>(allocated.Keys)) {
+          if (SetClipboardData(format, allocated[format]) == IntPtr.Zero) throw new InvalidOperationException("CLIPBOARD_RESTORE_FAILED: the previous clipboard could not be restored completely");
+          allocated.Remove(format); // Windows now owns this allocation.
+        }
+      } finally { CloseClipboard(); }
+    } finally {
+      foreach (IntPtr memory in allocated.Values) GlobalFree(memory);
+      DestroyWindow(owner);
+    }
+  }
   [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr window, uint command);
   [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr window, uint flags);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassNameW(IntPtr window, StringBuilder value, int count);
@@ -715,6 +818,120 @@ function Resolve-UiElement([int64]$id, [int]$snapshotId, [string]$runtimeKey) {
   }
 }
 
+# Quick Chat remembers only the exact focused text provider, without reading its content.
+function Get-QuickTextProvider([int64]$id) {
+  $root = Get-UiRoot $id
+  $rootKey = Ui-RuntimeKey $root
+  $element = [System.Windows.Automation.AutomationElement]::FocusedElement
+  $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+  $candidate = $null
+  for ($depth = 0; $depth -le 64 -and $null -ne $element; $depth++) {
+    $current = $element.Current
+    if ($current.IsPassword) { return $null }
+    if ($null -eq $candidate -and $current.IsEnabled -and -not $current.IsOffscreen) {
+      $pattern = $null
+      if ($element.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern, [ref]$pattern)) { $candidate = $element }
+    }
+    if ((Ui-RuntimeKey $element) -eq $rootKey) {
+      if ($null -eq $candidate) { return $null }
+      return @{ root = $root; element = $candidate; key = (Ui-RuntimeKey $candidate) }
+    }
+    $element = $walker.GetParent($element)
+  }
+  return $null
+}
+
+function Assert-QuickWindow($request) {
+  $row = Get-WindowRow ([int64]$request.id)
+  if ($null -eq $row -or $row.app -cne [string]$request.app -or $row.processId -ne [uint32]$request.processId -or $row.title -cne [string]$request.title -or $row.state -eq 'minimized') {
+    throw 'STALE_WINDOW: the original window changed or is unavailable'
+  }
+}
+
+function Read-QuickSelection($request, [bool]$requireEditable) {
+  Assert-QuickWindow $request
+  $element = Resolve-UiElement ([int64]$request.id) ([int]$request.snapshotId) ([string]$request.runtimeKey)
+  if ($element.Current.IsPassword) { throw 'SELECTION_UNAVAILABLE: password fields are not supported' }
+  if (-not $element.Current.IsEnabled -or $element.Current.IsOffscreen) { throw 'SELECTION_UNAVAILABLE: selected text is unavailable' }
+  $pattern = $null
+  if (-not $element.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern, [ref]$pattern)) { throw 'SELECTION_UNAVAILABLE: selected text is unavailable' }
+  $ranges = @($pattern.GetSelection())
+  if ($ranges.Count -ne 1) { throw 'SELECTION_UNAVAILABLE: select one continuous range of text' }
+  $text = $ranges[0].GetText(64001)
+  if ([string]::IsNullOrWhiteSpace($text)) { throw 'SELECTION_UNAVAILABLE: the accessibility provider returned no selected text' }
+  if ($text.Length -gt 64000) { throw 'SELECTION_UNAVAILABLE: select text of up to 64000 characters' }
+  $editable = $false
+  try {
+    $readOnly = $ranges[0].GetAttributeValue([System.Windows.Automation.TextPattern]::IsReadOnlyAttribute)
+    $editable = $readOnly -is [bool] -and -not $readOnly
+  } catch { }
+  if ($requireEditable) {
+    if (-not $editable) { throw 'SELECTION_READ_ONLY: the selected text is not editable' }
+    $snapshot = $script:UiSnapshots["s$($request.snapshotId)"]
+    $saved = $snapshot.quickSelection
+    if ($null -eq $saved -or -not $ranges[0].Compare($saved)) { throw 'SELECTION_CHANGED: the original selected range changed' }
+  } else {
+    $script:UiSnapshots["s$($request.snapshotId)"].quickSelection = if ($editable) { $ranges[0].Clone() } else { $null }
+  }
+  return @{ text = $text; editable = $editable }
+}
+
+# Explicit copy action for apps that do not expose a UIA text range. Never use
+# Ctrl+C in an unknown app: it could interrupt a running terminal command.
+function Copy-QuickSelection($request) {
+  $id = [int64]$request.id
+  $panel = [int64]$request.foreground
+  Assert-QuickWindow $request
+  if ([Clf]::ForegroundId() -ne $panel) { throw 'FOCUS_CHANGED: the Quick Chat window is no longer focused' }
+  Add-Type -AssemblyName System.Windows.Forms
+  $backup = [Clf]::BackupClipboard()
+  $copiedSequence = $null
+  Assert-Focused $id
+  try {
+    Assert-QuickWindow $request
+    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+    if ($null -ne $focused -and $focused.Current.IsPassword) { throw 'SELECTION_UNAVAILABLE: password fields are not supported' }
+    $row = Get-WindowRow $id
+    $keys = if ($row.process -match '^(herdr-app|windowsterminal|wezterm-gui|alacritty|ghostty|tabby|hyper)$') { @('ctrl','shift','c') }
+      else { @('ctrl','insert') }
+    $before = $backup.Sequence
+    if ([Clf]::ForegroundId() -ne $id) { throw 'FOCUS_CHANGED: the original window is no longer focused' }
+    if ([Clf]::GetClipboardSequenceNumber() -ne $before) { throw 'CLIPBOARD_CHANGED: the clipboard changed before selection capture; try again' }
+    [Clf]::Press([CosWindowsKeys]::Resolve([string[]]$keys, $id))
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $stableSince = $null
+    do {
+      if ([Clf]::ForegroundId() -ne $id) { throw 'FOCUS_CHANGED: the original window is no longer focused' }
+      $sequence = [Clf]::GetClipboardSequenceNumber()
+      if ($sequence -ne $before -and [Clf]::ClipboardOwnerPid() -eq [uint32]$request.processId) {
+        if ($copiedSequence -ne $sequence -or $null -eq $stableSince) { $stableSince = $timer.ElapsedMilliseconds }
+        $copiedSequence = $sequence
+        # A copy can publish multiple clipboard formats in succession. Only read
+        # after this source-owned sequence has been stable for 30 ms; a new
+        # sequence restarts the observation within the same bounded deadline.
+        if ($timer.ElapsedMilliseconds - $stableSince -ge 30) {
+          try { $text = [System.Windows.Forms.Clipboard]::GetText() } catch { $text = $null }
+          if (-not [string]::IsNullOrEmpty($text) -and [Clf]::GetClipboardSequenceNumber() -eq $sequence -and [Clf]::ClipboardOwnerPid() -eq [uint32]$request.processId) {
+            if ([string]::IsNullOrWhiteSpace($text) -or $text.Length -gt 64000) { throw 'SELECTION_UNAVAILABLE: select text of up to 64000 characters' }
+            if ([Clf]::ForegroundId() -ne $id) { throw 'FOCUS_CHANGED: the original window is no longer focused' }
+            Assert-QuickWindow $request
+            return $text
+          }
+        }
+      } else { $stableSince = $null }
+      $remaining = 900 - $timer.ElapsedMilliseconds
+      if ($remaining -gt 0) { Start-Sleep -Milliseconds ([Math]::Min(10, $remaining)) }
+    } while ($timer.ElapsedMilliseconds -lt 900)
+    throw 'SELECTION_UNAVAILABLE: the source did not copy selected text. Copy it manually and paste it into Quick Chat.'
+  } finally {
+    try {
+      if ($null -ne $copiedSequence) { [Clf]::RestoreClipboard($backup, [uint32]$copiedSequence, [uint32]$request.processId) }
+    } finally {
+      if ([Clf]::ForegroundId() -eq $id) { Assert-Focused $panel }
+    }
+  }
+}
+
 $script:UiActionNames = @('invoke','toggle','select','expand','collapse','focus','scroll_up','scroll_down','scroll_left','scroll_right','scroll_into_view')
 
 function Get-UiActions($element, $current) {
@@ -899,7 +1116,7 @@ function Find-UiElements($request) {
         if ($control.StartsWith('ControlType.')) { $control = $control.Substring(12) }
         $matches = (-not $query -or $name.ToLowerInvariant().Contains($query) -or $automationId.ToLowerInvariant().Contains($query))
         $matches = $matches -and (-not $role -or $control.ToLowerInvariant().Contains($role))
-        if ($matches) {
+        if ($matches -and (-not $request.visibleTextOnly -or (-not $current.IsOffscreen -and -not $current.IsPassword))) {
           $r = $current.BoundingRectangle
           $hasBounds = $r.Width -gt 0 -and $r.Height -gt 0 -and -not [double]::IsInfinity($r.X) -and -not [double]::IsInfinity($r.Y)
           $availableActions = @()
@@ -985,7 +1202,16 @@ function Find-UiElements($request) {
         $budget -= $part.Length
       }
       $selectedText = $selection.ToString()
-      $documentText = $textPattern.DocumentRange.GetText($budget)
+      if ($request.visibleTextOnly) {
+        $visible = New-Object System.Text.StringBuilder
+        foreach ($range in ($textPattern.GetVisibleRanges() | Select-Object -First 16)) {
+          $remaining = $budget - $visible.Length
+          if ($remaining -le 1) { break }
+          $part = $range.GetText($remaining - 1)
+          if (-not [string]::IsNullOrWhiteSpace($part)) { $null = $visible.AppendLine($part) }
+        }
+        $documentText = $visible.ToString()
+      } else { $documentText = $textPattern.DocumentRange.GetText($budget) }
     } catch { }
   }
   $snapshotId = Remember-UiSnapshot $id $root $handles
@@ -1149,6 +1375,51 @@ function Handle-Request($request) {
       $result.window = Get-WindowRow $foreground
       $result.screen = $screen.virtual
     }
+    'quick_context_origin' {
+      $id = [Clf]::ForegroundId()
+      $row = Get-WindowRow $id
+      $result.window = $row
+      if ($null -ne $row -and $request.selection) {
+        try {
+          $provider = Get-QuickTextProvider $id
+          if ($null -ne $provider -and $provider.key -and [Clf]::ForegroundId() -eq $id) {
+            $result.snapshotId = Remember-UiSnapshot $id $provider.root @($provider.element)
+            $result.runtimeKey = $provider.key
+          }
+        } catch { }
+      }
+      if ([Clf]::ForegroundId() -ne $id) { $result.window = $null; $result.snapshotId = $null; $result.runtimeKey = $null }
+    }
+    'quick_context_selection' {
+      $selection = Read-QuickSelection $request ([bool]$request.editable)
+      $result.text = $selection.text
+      $result.editable = $selection.editable
+      if ($request.editable -and $result.text -cne [string]$request.expected) { throw 'SELECTION_CHANGED: the original selection changed' }
+    }
+    'quick_context_copy' {
+      $result.text = Copy-QuickSelection $request
+    }
+    'quick_context_replace' {
+      $id = [int64]$request.id
+      $null = Read-QuickSelection $request $true
+      if ([Clf]::ForegroundId() -ne [int64]$request.foreground) { throw 'FOCUS_CHANGED: the Quick Chat window is no longer focused' }
+      Assert-Focused $id
+      Assert-QuickWindow $request
+      $focusedProvider = Get-QuickTextProvider $id
+      if ($null -eq $focusedProvider -or $focusedProvider.key -cne [string]$request.runtimeKey) { throw 'SELECTION_CHANGED: the original text field is no longer focused' }
+      $text = (Read-QuickSelection $request $true).text
+      if ($text -cne [string]$request.expected -or [Clf]::ForegroundId() -ne $id) { throw 'SELECTION_CHANGED: the original selection changed' }
+      if ($request.paste) {
+        Add-Type -AssemblyName System.Windows.Forms
+        $clip = [System.Windows.Forms.Clipboard]::GetText()
+        $crlf = [string][char]13 + [char]10
+        $lf = [string][char]10
+        if ($clip.Replace($crlf, $lf) -cne ([string]$request.text).Replace($crlf, $lf)) { throw 'CLIPBOARD_CHANGED: the replacement text is no longer on the clipboard' }
+        if ([Clf]::ForegroundId() -ne $id) { throw 'FOCUS_CHANGED: the original window is no longer focused' }
+        [Clf]::Press([CosWindowsKeys]::Resolve([string[]]@('ctrl','v'), $id))
+      } else { [Clf]::Type([string]$request.text) }
+      $result.replaced = $true
+    }
     'find_ui' {
       $ui = Find-UiElements $request
       $result.window = $ui.window
@@ -1198,6 +1469,7 @@ function Handle-Request($request) {
           role = if ($request.role) { $request.role } else { '' }
           maxResults = $request.maxResults
           maxVisited = $request.maxVisited
+          visibleTextOnly = $request.visibleTextOnly
         }
         try {
           $ui = Find-UiElements $uiRequest

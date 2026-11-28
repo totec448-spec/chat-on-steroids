@@ -19,7 +19,7 @@ vi.mock('electron', () => ({
     handle: (channel: string, handler: Handler) => handlers.set(channel, handler),
     removeHandler: (channel: string) => handlers.delete(channel)
   },
-  BrowserWindow: class {},
+  BrowserWindow: class { static fromWebContents() { return null; } },
   clipboard: { readText: () => '', writeText: () => undefined },
   dialog: { showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] as string[] })), showSaveDialog: vi.fn(async () => ({ canceled: true })), showMessageBox: vi.fn(async () => ({ response: 0 })) },
   shell: { openExternal: vi.fn(async () => undefined), openPath: vi.fn(async () => ''), showItemInFolder: vi.fn() },
@@ -4155,8 +4155,8 @@ describe('removing a new chat before its first Send is confirmed', () => {
   });
 });
 
-it.each(['text drop', 'file drop', 'picker', 'local project', 'server snapshot'] as const)('keeps an aged draft attachment across %s and prunes it after release', async source => {
-  const event = { sender: {} };
+it.each(['text drop', 'file drop', 'picker', 'local project', 'server snapshot', 'other window'] as const)('keeps an aged draft attachment across %s and prunes it after release', async source => {
+  const event = { sender: new EventEmitter() };
   const stage = async (text: string) => {
     const result = await handlers.get('sessions:attachText')!(event, { text }) as any;
     expect(result.ok).toBe(true);
@@ -4173,7 +4173,11 @@ it.each(['text drop', 'file drop', 'picker', 'local project', 'server snapshot']
   for (const file of [kept, abandoned]) await fs.utimes(stagedPath(file.id), old, old);
   try {
     const hold = await retain([kept.id]);
-    if (source === 'text drop') await stage('Another attachment');
+    if (source === 'other window') {
+      const other = { sender: new EventEmitter() };
+      expect(await handlers.get('sessions:attachText')!(other, { text: 'Other window attachment' })).toMatchObject({ ok: true });
+      other.sender.emit('destroyed');
+    } else if (source === 'text drop') await stage('Another attachment');
     else if (source === 'file drop') {
       expect(await handlers.get('sessions:dropFiles')!(event, { files: [
         { name: 'drop.txt', bytes: new Uint8Array([1, 2, 3]) }
@@ -4230,7 +4234,7 @@ it('keeps an aged attachment when Send takes ownership during project-file stagi
   const { readInputAttachmentChunk } = await import('../src/main/session/input-attachments.js');
   await writeDurableNow('session-input', []);
   outbox.resetInputForTests();
-  const event = { sender: {} };
+  const event = { sender: new EventEmitter() };
   const { projectId } = await attachmentProjectFixture('staged-send-race');
   const staged = await handlers.get('sessions:attachText')!(event, { text: 'Draft becomes queued' }) as any;
   expect(staged.ok).toBe(true);

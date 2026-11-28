@@ -44,6 +44,7 @@ export function applyAppearance(theme: AppearanceTheme, settings?: AppearanceSet
   // No native transparent window, desktop capture, or platform permission is needed.
   const sidebarBackground = value.translucentSidebar && !high ? mixColor(palette.sidebar, palette.background, .13) : palette.sidebar;
   for (const element of document.querySelectorAll<HTMLElement>('.sidebar, .app-topbar, .appearance-preview-sidebar, .connection-popover')) {
+    if (document.body.classList.contains('compact-chat') && element.classList.contains('app-topbar')) continue;
     tokens(element, paletteTokens(sidebarBackground, palette.accent, palette.contrast, high));
   }
   // Every state push applies the appearance again. The listeners re-theme terminals, which makes
