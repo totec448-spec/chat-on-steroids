@@ -9,8 +9,8 @@ afterEach(() => { vi.unstubAllGlobals(); vi.resetModules(); });
 
 const BUTTON = { left: 200, right: 230, width: 30 };
 
-async function place(height: number, box: { top: number; bottom: number }, options: { innerHeight?: number; innerWidth?: number; content?: number; button?: typeof BUTTON } = {}) {
-  const { innerHeight = 656, innerWidth = 1024, content = height, button = BUTTON } = options;
+async function place(height: number, box: { top: number; bottom: number }, options: { innerHeight?: number; innerWidth?: number; content?: number; button?: typeof BUTTON; side?: 'below' | 'left' | 'right' } = {}) {
+  const { innerHeight = 656, innerWidth = 1024, content = height, button = BUTTON, side = 'below' } = options;
   const dom = new JSDOM('<!doctype html><body></body>', { url: 'https://local.test' });
   vi.stubGlobal('window', Object.assign(dom.window, { innerHeight, innerWidth }));
   vi.stubGlobal('document', dom.window.document);
@@ -22,7 +22,7 @@ async function place(height: number, box: { top: number; bottom: number }, optio
   Object.defineProperty(menu, 'clientHeight', { value: height });
   Object.defineProperty(menu, 'scrollHeight', { value: content });
   Object.defineProperty(menu, 'offsetWidth', { value: 190 });
-  placeRowMenuBesideForTests(menu, { ...button, height: box.bottom - box.top, top: box.top, bottom: box.bottom } as DOMRect, 'below');
+  placeRowMenuBesideForTests(menu, { ...button, height: box.bottom - box.top, top: box.top, bottom: box.bottom } as DOMRect, side);
   return { top: Number.parseFloat(menu.style.top), left: Number.parseFloat(menu.style.left), maxHeight: menu.style.maxHeight };
 }
 
@@ -41,6 +41,13 @@ it('opens beside on the left when the right side has no room', async () => {
   const { left, maxHeight } = await place(330, { top: 307, bottom: 319 }, { innerWidth: 800, button });
   expect(maxHeight).toBe('');
   expect(left + 190).toBeLessThanOrEqual(button.left);
+});
+
+it('opens RTL submenus to the left and falls back to the right at the left edge', async () => {
+  const middle = await place(100, { top: 100, bottom: 130 }, { innerWidth: 800, button: { left: 450, right: 480, width: 30 }, side: 'left' });
+  expect(middle.left).toBe(258);
+  const edge = await place(100, { top: 100, bottom: 130 }, { innerWidth: 800, button: { left: 20, right: 50, width: 30 }, side: 'left' });
+  expect(edge.left).toBe(52);
 });
 
 it('still scrolls a menu taller than the window, next to its button, also when the stylesheet caps it', async () => {

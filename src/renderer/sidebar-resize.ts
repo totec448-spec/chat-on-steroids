@@ -10,6 +10,9 @@ export function initSidebarResize(): void {
   const key = 'chat-on-steroids.sidebar-width';
   const minimum = 180;
   const maximum = () => Math.max(minimum, Math.min(480, window.innerWidth / 2));
+  // In Arabic the sidebar sits on the right: dragging towards the left makes it
+  // wider, and ArrowLeft increases its width instead of decreasing it.
+  const horizontalSign = () => document.documentElement.dir === 'rtl' ? -1 : 1;
   let preferred: number | null = null;
   let collapsed = false;
   let drag: { id: number; x: number; width: number } | null = null;
@@ -48,7 +51,7 @@ export function initSidebarResize(): void {
     event.preventDefault();
   });
   handle.addEventListener('pointermove', (event) => {
-    if (drag?.id === event.pointerId) setWidth(drag.width + event.clientX - drag.x);
+    if (drag?.id === event.pointerId) setWidth(drag.width + (event.clientX - drag.x) * horizontalSign());
   });
   function finish(event: PointerEvent): void {
     if (drag?.id !== event.pointerId) return;
@@ -64,8 +67,8 @@ export function initSidebarResize(): void {
   handle.addEventListener('keydown', (event) => {
     // Steps start from the width the separator reports, not from a box that may still be gliding.
     const width = preferred === null ? sidebar.getBoundingClientRect().width : Math.min(maximum(), preferred);
-    if (event.key === 'ArrowLeft') setWidth(width - 10);
-    else if (event.key === 'ArrowRight') setWidth(width + 10);
+    if (event.key === 'ArrowLeft') setWidth(width - 10 * horizontalSign());
+    else if (event.key === 'ArrowRight') setWidth(width + 10 * horizontalSign());
     else if (event.key === 'Home') setWidth(minimum);
     else if (event.key === 'End') setWidth(maximum());
     else return;

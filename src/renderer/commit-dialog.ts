@@ -2,7 +2,7 @@ import type { AppApi } from '../preload/index.js';
 import type { CommitFlow } from '../shared/types.js';
 import type { CommitState, ProjectGitChange } from '../shared/project-git.js';
 import { branchNameFrom, commitMessageDraft } from '../shared/commit-message.js';
-import { el, icon } from './dom.js';
+import { el, filePathChangeLabel, icon } from './dom.js';
 import { onLanguageChange, t, tn } from './i18n.js';
 
 type Api = Pick<AppApi, 'commitState' | 'commitProject' | 'pushProject' | 'createPullRequest' | 'setCommitFlow' | 'openLink'>;
@@ -74,7 +74,7 @@ export function initCommitDialog(api: Api, deps: { flow: () => CommitFlow | unde
       box.addEventListener('change', () => { if (box.checked) chosen.add(change.path); else chosen.delete(change.path); paint(); });
       const status = el('span', `file-change-status is-${change.status.toLowerCase()}`, change.status);
       status.setAttribute('aria-hidden', 'true');
-      const name = el('span', 'commit-file-path', change.previousPath ? `${change.previousPath} → ${change.path}` : change.path);
+      const name = filePathChangeLabel('commit-file-path', change.path, change.previousPath);
       name.title = name.textContent ?? '';
       if (change.status === 'C') { box.disabled = true; row.title = t('Resolve the conflicts first, then commit.'); }
       row.append(box, status, name);

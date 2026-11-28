@@ -139,6 +139,24 @@ export function el(tag: string, className = '', text: string | (() => string) = 
   return node;
 }
 
+/** Filesystem paths are technical text, independent of the surrounding UI direction.
+ * Preserve their exact characters; isolate only their presentation. */
+export function filePathLabel(tag: string, className: string, value: string): HTMLElement {
+  const node = el(tag, className, value);
+  node.classList.add('file-path');
+  node.dir = 'ltr';
+  node.setAttribute('translate', 'no');
+  return node;
+}
+
+/** Keep source → destination in technical order, including Arabic filenames. */
+export function filePathChangeLabel(className: string, path: string, previousPath?: string): HTMLElement {
+  const node = filePathLabel('span', className, '');
+  if (previousPath) node.append(filePathLabel('bdi', '', previousPath), ' → ');
+  node.append(filePathLabel('bdi', '', path));
+  return node;
+}
+
 export const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
 /**

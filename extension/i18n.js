@@ -28,7 +28,7 @@
    * not said, `chrome.i18n` answers as before.
    */
   const LANGUAGE_KEY = 'appLanguage';
-  const FOLDERS = Object.freeze({ en: 'en', de: 'de', es: 'es', fr: 'fr', 'pt-BR': 'pt_BR', 'pt-PT': 'pt_PT', ru: 'ru',
+  const FOLDERS = Object.freeze({ en: 'en', ar: 'ar', de: 'de', es: 'es', fr: 'fr', 'pt-BR': 'pt_BR', 'pt-PT': 'pt_PT', ru: 'ru',
     tr: 'tr', vi: 'vi', ja: 'ja', ko: 'ko', 'zh-CN': 'zh_CN', 'zh-TW': 'zh_TW' });
   let catalog = null;
   let catalogLanguage = null;
@@ -180,7 +180,12 @@
   function localizeDocument(doc = document) {
     try {
       const language = catalogLanguage || chrome?.i18n?.getUILanguage?.();
-      if (language) doc.documentElement.lang = language.replace('_', '-');
+      if (language) {
+        doc.documentElement.lang = language.replace('_', '-');
+        // The popup is its own document. Match the app's direction, not the
+        // browser language, while leaving the ChatGPT page itself untouched.
+        doc.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
+      }
     } catch {
       // The document's English markup remains the fallback when the i18n API is unavailable.
     }

@@ -77,3 +77,37 @@ it('reports the target width through aria-valuenow while the measured width stil
   handle.dispatchEvent(new dom.window.MouseEvent('dblclick'));
   expect(handle.getAttribute('aria-valuenow')).toBe('205');
 });
+
+it('mirrors dragging and keyboard resize while the Arabic sidebar is on the right', () => {
+  dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test' });
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document); vi.stubGlobal('localStorage', dom.window.localStorage);
+  const doc = dom.window.document;
+  doc.documentElement.dir = 'rtl';
+  const app = doc.querySelector<HTMLElement>('.app')!;
+  const sidebar = doc.getElementById('sidebar')!;
+  const handle = doc.getElementById('sidebarResize')!;
+  sidebar.getBoundingClientRect = () => ({ width: parseFloat(app.style.getPropertyValue('--sidebar-width')) || 248 }) as DOMRect;
+  let captured = false;
+  handle.setPointerCapture = () => { captured = true; };
+  handle.hasPointerCapture = () => captured;
+  handle.releasePointerCapture = () => { captured = false; };
+  initSidebarResize();
+  const pointer = (type: string, x: number) => {
+    const event = new dom.window.MouseEvent(type, {clientX:x, button:0});
+    Object.defineProperty(event,'pointerId',{value:9});
+    handle.dispatchEvent(event);
+  };
+  pointer('pointerdown',400);
+  pointer('pointermove',300);
+  pointer('pointerup',300);
+  expect(app.style.getPropertyValue('--sidebar-width')).toBe('348px');
+  expect(captured).toBe(false);
+  handle.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowLeft'}));
+  expect(app.style.getPropertyValue('--sidebar-width')).toBe('358px');
+  handle.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowRight'}));
+  expect(app.style.getPropertyValue('--sidebar-width')).toBe('348px');
+  expect(localStorage.getItem('chat-on-steroids.sidebar-width')).toBe('348');
+  doc.documentElement.dir = 'ltr';
+  handle.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowRight'}));
+  expect(app.style.getPropertyValue('--sidebar-width')).toBe('358px');
+});

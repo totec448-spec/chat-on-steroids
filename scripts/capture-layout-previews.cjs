@@ -10,7 +10,8 @@ const path = require('node:path');
 const { fixtureServer, root } = require('./fixtures/readme-fixture.cjs');
 const { app, BrowserWindow } = require('electron');
 const sharp = require('sharp');
-const languages = ['en', 'de', 'es', 'fr', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'ja', 'ko', 'zh-CN', 'zh-TW'];
+const languages = process.argv.includes('--arabic-only') ? ['ar']
+  : ['en', 'ar', 'de', 'es', 'fr', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'ja', 'ko', 'zh-CN', 'zh-TW'];
 
 const output = path.join(root, 'src/renderer/layout-previews');
 app.setPath('userData', path.join(root, 'outputs/layout-previews-runtime'));
@@ -37,7 +38,7 @@ app.whenReady().then(async () => {
     await js(`for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close()`);
     for (const theme of ['light', 'dark']) for (const layout of ['projects', 'inbox']) {
       await js(`(async () => { const state = (await window.api.getState()).data;
-        const { defaultAppearance } = await import('/@fs${root}/src/shared/appearance.ts');
+        const { defaultAppearance } = await import('/@fs/${root.replace(/\\/g, '/')}/src/shared/appearance.ts');
         state.config.ui.theme = ${JSON.stringify(theme)};
         state.config.ui.appearance = { ...defaultAppearance(), sidebarLayout: ${JSON.stringify(layout)} };
         window.pushState(state); })()`);

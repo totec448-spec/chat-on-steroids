@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { JSDOM } from 'jsdom';
 
 const html = await readFile(new URL('../extension/popup.html', import.meta.url), 'utf8');
+const css = await readFile(new URL('../extension/popup.css', import.meta.url), 'utf8');
 const i18nScript = await readFile(new URL('../extension/i18n.js', import.meta.url), 'utf8');
 const script = await readFile(new URL('../extension/popup.js', import.meta.url), 'utf8');
 const manifest = JSON.parse(await readFile(new URL('../extension/manifest.json', import.meta.url), 'utf8'));
@@ -261,6 +262,33 @@ it('shows a dash for page sends the page did not report', () => {
   (popup!.window as any).paintDetails({ connected: true, paired: true, compatible: true, port: 8765 },
     { isChat: true, tab: 7, page: { events: 3, calls: 1, sends: 4, failures: 1 } });
   expect([...document.querySelectorAll('#grid dd')].map(node => node.textContent)).toContain('4 · 1 failed');
+});
+
+it('isolates Advanced conversation and session IDs in RTL without forcing translated status values LTR', () => {
+  const document = openPopup({
+    popup_detail_chat_id: 'معرّف المحادثة',
+    popup_detail_app_session: 'جلسة التطبيق',
+    popup_detail_ownership: 'الملكية',
+    popup_status_bound: 'مرتبطة'
+  }, 'ar');
+  (document.getElementById('more') as HTMLDetailsElement).open = true;
+  (popup!.window as any).paintDetails(
+    { connected: true, paired: true, compatible: true, port: 8765 },
+    { isChat: true, conversationId: 'chat-0123-abcd', tab: 7, bound: true, page: { session: 'session-4567-efgh', events: 3 } }
+  );
+
+  const valueFor = (term: string) =>
+    [...document.querySelectorAll('#grid dt')].find(node => node.textContent === term)?.nextElementSibling as HTMLElement | undefined;
+  const chat = valueFor('معرّف المحادثة');
+  const session = valueFor('جلسة التطبيق');
+  const ownership = valueFor('الملكية');
+
+  expect(document.documentElement.dir).toBe('rtl');
+  expect(chat?.classList.contains('id')).toBe(true);
+  expect(session?.classList.contains('id')).toBe(true);
+  expect(ownership?.textContent).toBe('مرتبطة');
+  expect(ownership?.classList.contains('id')).toBe(false);
+  expect(css).toMatch(/html\[dir='rtl'\] \.grid dd\.id\s*\{[^}]*direction:\s*ltr;[^}]*unicode-bidi:\s*isolate;[^}]*text-align:\s*left;/s);
 });
 
 // CodeRabbit on #2012: a failed tabStatus answers with an error and no counts; "0 held · 0 total" claimed a journal nobody read.

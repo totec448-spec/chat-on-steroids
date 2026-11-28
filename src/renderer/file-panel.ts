@@ -8,7 +8,7 @@ import { requestName } from './name-dialog.js';
 import { safeExternalLink } from '../shared/external-link.js';
 import { marked } from 'marked';
 import { currentLanguage, onLanguageChange, t, tn, ui } from './i18n.js';
-import { disclosureChevron, el, icon, run, toast } from './dom.js';
+import { disclosureChevron, el, filePathLabel, filePathChangeLabel, icon, run, toast } from './dom.js';
 import { attachWorkPanelResize } from './work-panel-resize.js';
 import { createSearchPopup } from './search-popup.js';
 import { openRowMenu, type RowMenuItem } from './row-menu.js';
@@ -690,7 +690,7 @@ export function createFilePanel(options: FilePanelOptions) {
     const disclosure = el('span', `file-tree-disclosure${entry.kind === 'directory' && expanded.has(entry.path) ? ' is-open' : ''}`);
     disclosure.setAttribute('aria-hidden', 'true');
     row.append(disclosure, icon(entry.kind === 'directory' ? 'i-folder' : entry.kind === 'file' ? 'i-file' : 'i-ban', 'ico file-tree-icon'));
-    row.append(el('span', 'file-tree-name', entry.name));
+    row.append(filePathLabel('span', 'file-tree-name', entry.name));
     const gitChange = entry.kind === 'file' ? treeGitStatus(entry.path) : undefined;
     const descendants = entry.kind === 'directory' ? directoryCounts.get(entry.path) : undefined;
     if (gitChange || descendants) {
@@ -812,7 +812,7 @@ export function createFilePanel(options: FilePanelOptions) {
   function viewerHeader(value: ProjectFilePreview): HTMLElement {
     const head = el('div', 'file-preview-head');
     const nameWrap = el('div', 'file-preview-title');
-    const name = el('strong', '', value.name); name.title = value.path;
+    const name = filePathLabel('strong', '', value.name); name.title = value.path;
     nameWrap.append(name);
     const actions = el('div', 'file-preview-actions');
     actions.append(previewTreeButton());
@@ -919,7 +919,7 @@ export function createFilePanel(options: FilePanelOptions) {
 
     const head = el('div', 'file-preview-head');
     const titleWrap = el('div', 'file-preview-title');
-    const name = el('strong', '', value.name); name.title = value.path;
+    const name = filePathLabel('strong', '', value.name); name.title = value.path;
     const dirty = el('span', 'file-editor-dirty', '●'); dirty.hidden = true;
     ui(dirty, 'aria-label', () => t('Unsaved changes'));
     editorDirtyBadge = dirty;
@@ -940,7 +940,9 @@ export function createFilePanel(options: FilePanelOptions) {
 
     const languageLabel = el('span', 'file-editor-language', () => t('Detecting language…'));
     const meta = el('div', 'file-preview-meta file-editor-meta');
-    meta.append(el('span', '', `${value.path} · ${humanBytes(value.bytes)}`), languageLabel);
+    const detail = el('span');
+    detail.append(filePathLabel('bdi', '', value.path), ` · ${humanBytes(value.bytes)}`);
+    meta.append(detail, languageLabel);
     const editorHost = el('div', 'file-code-editor-host');
     replacePreview(head, meta, editorHost);
 
@@ -1025,7 +1027,9 @@ export function createFilePanel(options: FilePanelOptions) {
     const value = previewValue;
     const head = viewerHeader(value);
     const meta = el('div', 'file-preview-meta');
-    meta.append(el('span', '', `${value.path} · ${humanBytes(value.bytes)}${value.modifiedAt ? ` · ${new Date(value.modifiedAt).toLocaleString(currentLanguage())}` : ''}`));
+    const detail = el('span');
+    detail.append(filePathLabel('bdi', '', value.path), el('span', '', () => ` · ${humanBytes(value.bytes)}${value.modifiedAt ? ` · ${new Date(value.modifiedAt).toLocaleString(currentLanguage())}` : ''}`));
+    meta.append(detail);
     let content: HTMLElement;
     let viewerHost: HTMLElement | null = null;
     let languageLabel: HTMLElement | null = null;
@@ -1167,7 +1171,7 @@ export function createFilePanel(options: FilePanelOptions) {
       mark.setAttribute('aria-hidden', 'true');
       mark.append(icon(edit.reviewable ? 'i-git-diff' : 'i-arrow-right'));
       const names = el('span', 'file-change-names');
-      names.append(el('span', 'file-change-path', edit.path));
+      names.append(filePathLabel('span', 'file-change-path', edit.path));
       row.append(mark, names, el('span', 'file-change-stats review-chat-state', status));
       row.addEventListener('click', () => {
         if (!row.isConnected || chatOwner !== owner || project?.id !== projectId) return;
@@ -1251,10 +1255,11 @@ export function createFilePanel(options: FilePanelOptions) {
         const statusMark = el('span', `file-change-status is-${status.toLowerCase()}`, status);
         statusMark.setAttribute('aria-hidden', 'true');
         const names = el('span', 'file-change-names');
+        names.dir = 'ltr';
         if (change.previousPath) {
-          names.append(el('span', 'file-change-previous', change.previousPath), icon('i-arrow-right', 'ico file-change-arrow'));
+          names.append(filePathLabel('span', 'file-change-previous', change.previousPath), icon('i-arrow-right', 'ico file-change-arrow'));
         }
-        names.append(el('span', 'file-change-path', change.path));
+        names.append(filePathLabel('span', 'file-change-path', change.path));
         const stats = changeStats(change);
         row.append(statusMark, names, stats);
         row.title = `${gitStatusLabel(change.status)} · ${change.previousPath ? `${change.previousPath} → ` : ''}${change.path} · ${stats.textContent ?? ''}`;
@@ -1453,7 +1458,7 @@ export function createFilePanel(options: FilePanelOptions) {
     const head = el('div', 'file-preview-head');
     const title = el('div', 'file-preview-title');
     const resolvedPath = value?.path ?? path;
-    const name = el('strong', '', baseName(resolvedPath)); name.title = resolvedPath;
+    const name = filePathLabel('strong', '', baseName(resolvedPath)); name.title = resolvedPath;
     title.append(name);
     const actions = el('div', 'file-preview-actions');
     if (historical && reviewSource && reviewSource.indices.length > 1) {
@@ -1500,12 +1505,16 @@ export function createFilePanel(options: FilePanelOptions) {
     }
     const language = el('span', 'file-editor-language', () => t('Detecting language…'));
     const meta = el('div', 'file-preview-meta file-editor-meta');
-    const status = historical
-      ? `${t('This edit')} · ${value.path} · +${(value as ToolEditReview).added} −${(value as ToolEditReview).removed}`
-      : 'previousPath' in value && value.previousPath
-        ? `${gitStatusLabel(value.status)} · ${value.previousPath} → ${value.path}`
-        : `${gitStatusLabel((value as ProjectGitDiff).status)} · ${value.path}`;
-    meta.append(el('span', '', status), language);
+    const detail = el('span');
+    if (historical) {
+      detail.append(el('span', '', () => t('This edit') + ' · '), filePathLabel('bdi', '', value.path),
+        ` · +${(value as ToolEditReview).added} −${(value as ToolEditReview).removed}`);
+    } else {
+      const change = value as ProjectGitDiff;
+      detail.append(el('span', '', () => gitStatusLabel(change.status) + ' · '),
+        filePathChangeLabel('', change.path, change.previousPath));
+    }
+    meta.append(detail, language);
     if (conflicted?.conflict && conflictThreeWay) {
       const sides: Array<[() => string, string | null]> = [
         [() => t('Ours (HEAD)'), conflicted.conflict.ours], [() => t('Common base'), conflicted.conflict.base],

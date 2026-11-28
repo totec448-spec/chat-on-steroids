@@ -848,6 +848,45 @@ it('uses the file name as the title and its relative path as metadata in file an
   expect(host.querySelector('.file-preview-meta')?.textContent).toContain('src/main.ts');
 });
 
+it('isolates mixed-script file paths throughout preview, editing and renamed Git diffs without changing identity', async () => {
+  const path = 'report-تقرير-2026.ts', previousPath = 'old-قديم.ts';
+  const mixed = { ...preview, path, name: path, text: 'export {}' };
+  (window.api.listProjectFiles as any).mockImplementation(() => ok({ ...rootListing(), entries: [
+    { name: path, path, kind: 'file', bytes: mixed.bytes }
+  ] }));
+  (window.api.previewProjectFile as any).mockImplementation(() => ok(mixed));
+  const change = { status: 'R' as const, path, previousPath, additions: 1, deletions: 1, binary: false };
+  (window.api.getProjectGitSnapshot as any).mockImplementation(() => ok({ ...cleanGit(), changes: [change] }));
+  (window.api.getProjectGitDiff as any).mockImplementation(() => ok({ ...change, projectId: projectA.id,
+    tooLarge: false, baseText: 'old', currentText: 'new' } satisfies ProjectGitDiff));
+  const panel = createFilePanel({ host, toggle });
+  panel.update(projectA); toggle.click(); await tick(); await tick();
+  const row = host.querySelector<HTMLButtonElement>('.file-tree-row')!;
+  row.click(); await tick();
+  try {
+    for (const language of ['ar', 'en', 'ar'] as const) {
+      setLanguage(language);
+      const current = host.querySelector<HTMLElement>('.file-tree-row.is-selected')!;
+      expect(current.dataset.path).toBe(path);
+      expect(current.querySelector('.file-tree-name')?.getAttribute('dir')).toBe('ltr');
+      expect(host.querySelector('.file-preview-title > strong')?.getAttribute('dir')).toBe('ltr');
+      expect(host.querySelector('.file-preview-meta bdi[dir=ltr]')?.textContent).toBe(path);
+    }
+    setLanguage('en');
+    host.querySelector<HTMLButtonElement>('.file-preview [title="Edit"]')!.click(); await tick();
+    expect(host.querySelector('.file-editor-meta bdi[dir=ltr]')?.textContent).toBe(path);
+    host.querySelector<HTMLButtonElement>('.file-panel-changes-toggle')!.click(); await tick(); await tick();
+    const changed = host.querySelector<HTMLButtonElement>('.file-change-row')!;
+    expect(changed.dataset.path).toBe(path);
+    expect(changed.querySelector('.file-change-names')?.getAttribute('dir')).toBe('ltr');
+    expect([...changed.querySelectorAll('.file-path[dir=ltr]')].map(n => n.textContent)).toEqual([previousPath, path]);
+    changed.click(); await tick(); await tick();
+    setLanguage('ar');
+    expect([...host.querySelectorAll('.file-preview-meta bdi[dir=ltr]')].map(n => n.textContent)).toEqual([previousPath, path]);
+    expect(window.api.getProjectGitDiff).toHaveBeenCalledWith(projectA.id, path, undefined, undefined);
+  } finally { setLanguage('en'); }
+});
+
 it('lets the user close only the file preview without closing Files or changing the selection', async () => {
   const panel = createFilePanel({ host, toggle, onAttach: () => undefined });
   panel.update(projectA); toggle.click(); await tick();
@@ -1282,6 +1321,46 @@ it('gives Files and Sub-agents the same horizontally resizable work-panel width'
   expect(agentHandle.getAttribute('aria-valuenow')).toBe(width.replace('px', ''));
   agentHandle.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
   expect(host.style.getPropertyValue('--work-panel-width')).not.toBe(width);
+});
+
+it('mirrors work-panel pointer and keyboard resize in RTL while preserving LTR', async () => {
+  Object.defineProperty(dom.window, 'innerWidth', { configurable: true, value: 1200 });
+  host.style.setProperty('--work-panel-width', '400px');
+  const files = createFilePanel({ host, toggle, onAttach: () => undefined });
+  files.update(projectA);
+  const handle = host.querySelector<HTMLElement>('.file-panel .work-panel-resize')!;
+  let captured = false;
+  Object.assign(handle, {
+    setPointerCapture: () => { captured = true; },
+    hasPointerCapture: () => captured,
+    releasePointerCapture: () => { captured = false; }
+  });
+  const pointer = (type: string, x: number) => {
+    const event = new dom.window.MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x });
+    Object.defineProperty(event, 'pointerId', { value: 17 });
+    handle.dispatchEvent(event);
+  };
+  const key = (value: 'ArrowLeft' | 'ArrowRight') =>
+    handle.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true }));
+
+  document.documentElement.dir = 'ltr';
+  key('ArrowLeft');
+  expect(host.style.getPropertyValue('--work-panel-width')).toBe('410px');
+  key('ArrowRight');
+  expect(host.style.getPropertyValue('--work-panel-width')).toBe('400px');
+  pointer('pointerdown', 400); pointer('pointermove', 350); pointer('pointerup', 350);
+  expect(host.style.getPropertyValue('--work-panel-width')).toBe('450px');
+  expect(captured).toBe(false);
+
+  host.style.setProperty('--work-panel-width', '400px');
+  document.documentElement.dir = 'rtl';
+  key('ArrowLeft');
+  expect(host.style.getPropertyValue('--work-panel-width')).toBe('390px');
+  key('ArrowRight');
+  expect(host.style.getPropertyValue('--work-panel-width')).toBe('400px');
+  pointer('pointerdown', 400); pointer('pointermove', 450); pointer('pointerup', 450);
+  expect(host.style.getPropertyValue('--work-panel-width')).toBe('450px');
+  expect(captured).toBe(false);
 });
 async function editFile(): Promise<HTMLTextAreaElement> {
   host.querySelector<HTMLButtonElement>('[data-path="README.md"]')!.click(); await tick();

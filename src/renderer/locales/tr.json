@@ -4027,6 +4027,7 @@
   "A page reload in a Project no longer makes it fail every time.": "Bir projede sayfayı yenilemek artık her seferinde hataya yol açmıyor.",
   "Skills only when wanted": "Beceriler yalnızca istenince",
   "A Skill is not chosen when you say not to use it.": "Kullanma dediğinde bir Beceri seçilmez.",
+  "Browser {0} was not found. Install it or select another browser in Settings, then retry model discovery.": "{0} tarayıcısı bulunamadı. Yükleyin veya Ayarlar'dan başka bir tarayıcı seçip modelleri yeniden arayın.",
   "Goal & Loop": "Hedef ve Döngü",
   "Models": "Modeller",
   "Workers": "Yardımcı ajanlar",
