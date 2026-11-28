@@ -173,7 +173,8 @@ function environmentLines(extension: unknown): string[] {
     `Browser: ${browser.name}${browser.version ? ` ${browser.version}` : ''}`,
     `ChatGPT tabs: ${tabs.open} open, ${tabs.discarded} discarded, ${tabs.frozen} frozen, ${tabs.loading} loading, ${tabs.grouped} in a tab group, ${tabs.inBackgroundWindow} in the app's background window`,
     page
-      ? `Page checks (most recently used ChatGPT tab): composer ${found(page.composer)}, send area ${found(page.sendArea)}, model menu ${found(page.modelMenu)}, + menu ${found(page.plusMenu)}, page language ${page.language ?? 'unknown'}`
+      ? `Page checks (most recently used ChatGPT tab): composer ${found(page.composer)}, send area ${found(page.sendArea)}, model menu ${found(page.modelMenu)}, + menu ${found(page.plusMenu)}, page language ${page.language ?? 'unknown'}` +
+        `\nNative rename: chat row and options ${typeof page.renameControl === 'boolean' ? found(page.renameControl) : 'not checked'}. Menu item and editor are checked during an opted-in rename.`
       : 'Page checks: no awake ChatGPT tab answered'
   ];
 }

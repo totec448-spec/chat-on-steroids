@@ -3485,6 +3485,55 @@ it('loads the Web title check as opt-in and preserves it when an older settings 
   }
 });
 
+it('bases an opted-in native rename on the Web title confirmed when editing began', async () => {
+  const prior = getConfig();
+  const webTitle = await import('../src/main/web-chat-title.js');
+  const store = await import('../src/main/session/store.js');
+  const conversationId = '11111111-2222-4333-8444-555555555555';
+  const session = await createSession({ conversationId, title: 'Provisional local title' });
+  const editId = 'bbbbbbbb-2222-4333-8444-555555555555';
+  const prepare = () => handlers.get('sessions:prepareWebRename')!(null, { id: session.id, editId });
+  const rename = (title: string | null) => handlers.get('sessions:rename')!(null, { id: session.id, title, editId });
+  const offer = () => vi.waitFor(() => {
+    const offered = webTitle.offerWebChatTitleCheck('browser');
+    expect(offered).toBeDefined();
+    return offered!;
+  });
+  try {
+    await saveConfig({ ...prior, sessions: { ...prior.sessions, checkWebChatTitles: true, renameWebChatTitles: false } });
+    expect(await prepare()).toMatchObject({ ok: true, data: false });
+    expect(await rename('First manual title')).toMatchObject({ ok: true });
+    expect(webTitle.offerWebChatTitleCheck('browser')).toBeUndefined();
+    await saveConfig({ ...getConfig(), sessions: { ...getConfig().sessions, renameWebChatTitles: true } });
+    expect(await prepare()).toMatchObject({ ok: true, data: true });
+    const snapshot = await offer();
+    expect(snapshot.rename).toBeUndefined();
+    const accountKey = 'a'.repeat(64);
+    expect(snapshot.accountProof).toBe(true);
+    expect(webTitle.acceptWebChatTitle('browser', { id: snapshot.id, conversationId, title: 'Actual Web title', accountKey })).toBe(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(await rename('New manual title')).toMatchObject({ ok: true });
+    expect(await store.getSession(session.id)).toMatchObject({ title: 'New manual title' });
+    const job = await offer();
+    expect(job).toMatchObject({ conversationId, rename: { expectedTitle: 'Actual Web title', title: 'New manual title', accountKey } });
+    expect(await rename(null)).toMatchObject({ ok: true });
+    await expect(webTitle.authorizeWebChatRename('browser', { id: job.id, conversationId, commit: true })).resolves.toBe(false);
+    expect(webTitle.acceptWebChatTitle('browser', { id: job.id, conversationId, title: null })).toBe(true);
+
+    expect(await prepare()).toMatchObject({ ok: true, data: true });
+    const lateSnapshot = await offer();
+    expect(await rename('Saved before Web confirmed')).toMatchObject({ ok: true });
+    expect(webTitle.acceptWebChatTitle('browser', { id: lateSnapshot.id, conversationId, title: 'Late Web title', accountKey })).toBe(true);
+    await Promise.resolve();
+    expect(webTitle.offerWebChatTitleCheck('browser')).toBeUndefined();
+    expect(await store.getSession(session.id)).toMatchObject({ title: 'Saved before Web confirmed' });
+  } finally {
+    webTitle.cancelWebChatTitleCheck();
+    await saveConfig(prior);
+  }
+});
+
 it('rejects a Web title result when the selected browser changes during the final session read', async () => {
   const prior = getConfig();
   const store = await import('../src/main/session/store.js');

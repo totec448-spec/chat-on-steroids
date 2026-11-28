@@ -5499,6 +5499,34 @@ yields an unavailable result. Turning the setting off or changing browser cancel
 and clears the open menu's notice. The check never opens, focuses or reloads a tab, and makes no
 provider API calls, title writes or title cache.
 
+`sessions.renameWebChatTitles` is a separate opt-in and defaults off. Only a saved, nonempty
+manual rename in CoS can offer a one-shot native rename to the exact already-open conversation.
+It uses the same browser/document custody as the title check. Starting the edit sends
+`sessions:prepareWebRename` with a local edit nonce and captures the exact page's confirmed title.
+The matching `sessions:rename` save consumes the nonce. A baseline confirmed before Save
+can produce one offer carrying that Web title and a 15-second deadline. A Web rename after
+the snapshot invalidates the offer.
+The MAIN-world read requires an exact personal conversation in the account-scoped sidebar history and
+agreement with the active navigation rail's committed account context. If the preloaded list lacks the
+chat, the exact visible row must carry a personal conversation record under a committed sidebar keyed
+to that same account. The row's own ID remains available when the link is replaced by the editor. Only a hashed scope
+crosses into the companion and local bridge. It stays in memory for the edit and is rechecked
+before opening the editor and before submitting. A different or unproven account stops the
+operation without opening or retrying the chat. Workspace membership alone cannot prove
+the chat belongs to the signed-in person. The checks make no provider requests.
+A separate commit request on `/browser/web-chat-title`
+checks that the setting, browser, session binding and saved manual title still match. The
+companion checks the previous title against the marked, selected sidebar row and its exact
+conversation link. On older sidebar markup it requires the tab title and navigation label
+to agree. The native editor must belong to the same row and still show the previous title.
+The companion acknowledges only a confirmed title and
+logs the outcome without title text. It neither calls a provider endpoint directly nor
+stores or retries the work. Clearing a name or Compact & Resume never causes a Web rename.
+The diagnostics report passively checks the sidebar row and options control on the most
+recently used awake ChatGPT tab. A menu item and its editor are checked only when an opted-in
+rename opens them. When any stage is unavailable, the local rename is retained and the
+Web attempt logs the specific stage. The comparison notice remains independently opt-in.
+
 Session metadata owns `titleSource` (authored fallback, provider, manual). The preview uses only
 the first authored user message, at one 80-character bound; injected instructions/AGENTS frames
 never become preview text. `session/title.ts` supplies presentation and legacy recognition;

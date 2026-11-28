@@ -3732,12 +3732,15 @@ async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands, liveS
   }
 }
 
+let webChatRenameOwner = null;
+
 async function checkWebChatTitle(request) {
   const id = request?.id;
   const conversationId = cleanConversationId(request?.conversationId);
   if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id) || !conversationId) return;
   const intent = connectionEpoch;
   let title = null;
+  let accountKey;
   let reason = 'no-matching-tab';
   try {
     const matchingTabs = async () => (await chrome.tabs.query({ url: CHATGPT_TAB_URLS })).filter(tab =>
@@ -3754,7 +3757,16 @@ async function checkWebChatTitle(request) {
       const source = { tab: tab.id, documentId, navigationEpoch: tabEpochs[String(tab.id)] };
       reason = 'document-unregistered';
       if (ownsDocument(source)) {
-        const answer = await tabReply(tab.id, { type: 'clf-check-web-chat-title', conversationId }, { documentId }, 3000);
+        if (request.rename) webChatRenameOwner = { id, conversationId, source, intent };
+        let answer;
+        try {
+          answer = await tabReply(tab.id, request.rename
+            ? { type: 'clf-rename-web-chat', id, conversationId, ...request.rename }
+            : { type: 'clf-check-web-chat-title', conversationId, ...(request.accountProof ? { accountProof: true } : {}) },
+          { documentId }, request.rename ? 9000 : 3000);
+        } finally {
+          if (request.rename && webChatRenameOwner?.id === id) webChatRenameOwner = null;
+        }
         const currentTabs = await matchingTabs();
         const [current] = currentTabs;
         reason = 'document-changed';
@@ -3762,12 +3774,24 @@ async function checkWebChatTitle(request) {
             ownsDocument(source)) {
           reason = answer ? 'title-unconfirmed' : 'page-unresponsive';
           if (typeof answer?.title === 'string' && answer.title.length <= 200) title = answer.title.trim() || null;
+          if ((request.accountProof || request.rename) && ['account-unconfirmed', 'account-mismatch'].includes(answer?.reason))
+            reason = answer.reason;
+          if (request.accountProof) {
+            if (typeof answer?.accountKey === 'string' && /^[a-f0-9]{64}$/.test(answer.accountKey)) accountKey = answer.accountKey;
+            else title = null;
+          }
+          if (request.rename && ['title-changed', 'native-rename-unavailable', 'native-rename-unconfirmed', 'rename-canceled',
+            'native-trigger-unavailable', 'native-menu-unavailable', 'native-editor-unavailable', 'native-input-rejected'].includes(answer?.reason)) {
+            reason = answer.reason;
+          }
         }
       }
     }
   } catch { reason = 'browser-error'; }
   if (intent !== connectionEpoch || !token || disconnected) return;
-  await call('/browser/web-chat-title', { method: 'POST', body: JSON.stringify({ id, conversationId, title, ...(title === null ? { reason } : {}) }) });
+  await call('/browser/web-chat-title', { method: 'POST', body: JSON.stringify({
+    id, conversationId, title, ...(title === null ? { reason } : accountKey ? { accountKey } : {})
+  }) });
 }
 
 async function maintainOnce() {
@@ -4610,6 +4634,19 @@ function approvalQuery(message) {
 }
 
 const HANDLERS = {
+  async web_chat_rename_commit(message, _sender, source) {
+    const owner = webChatRenameOwner;
+    if (!owner || owner.id !== message.id || owner.intent !== connectionEpoch ||
+        owner.source.tab !== source.tab || owner.source.documentId !== source.documentId ||
+        owner.source.navigationEpoch !== source.navigationEpoch || !ownsDocument(owner.source)) return { ok: false };
+    const tab = await chrome.tabs.get(source.tab);
+    if (webChatRenameOwner !== owner || !ownsDocument(owner.source) || tab.pendingUrl ||
+        conversationFromUrl(tab.url) !== owner.conversationId) return { ok: false };
+    const result = await call('/browser/web-chat-title', { method: 'POST',
+      body: JSON.stringify({ id: owner.id, conversationId: owner.conversationId, commit: true }) });
+    return { ok: result.ok && result.data?.ok === true && webChatRenameOwner === owner &&
+      owner.intent === connectionEpoch && ownsDocument(owner.source) };
+  },
   // Only the tab this worker opened for that exact request may report on it. Creating the Project
   // navigates that tab to the Project's own page, which drops the marker, so the owner is kept.
   async project_create(message, _sender, source) {
@@ -5578,6 +5615,7 @@ async function environmentDiagnostics() {
       if (reply && typeof reply === 'object') {
         page = {
           composer: reply.composer === true, sendArea: reply.sendArea === true, modelMenu: reply.modelMenu === true, plusMenu: reply.plusMenu === true,
+          ...(typeof reply.renameControl === 'boolean' ? { renameControl: reply.renameControl } : {}),
           language: typeof reply.language === 'string' && /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(reply.language) ? reply.language : null
         };
       }
@@ -5681,6 +5719,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'project_catalog',
     'plugin_refresh',
     'project_create',
+    'web_chat_rename_commit',
     'core_plugin',
     'load_failure',
     'conversation_deleted',

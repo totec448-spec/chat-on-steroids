@@ -275,6 +275,7 @@ export interface SessionSettings {
   /** Compatibility projection. Canonical value is 0: recordings do not expire by age. */
   retainDays: number;
   checkWebChatTitles?: boolean;
+  renameWebChatTitles?: boolean;
   /** Estimated tokens at which the app starts suggesting a compaction. */
   advisoryTokens: number;
   /** Estimated tokens at which that suggestion becomes urgent. */
@@ -758,7 +759,7 @@ export interface CompanionEnvironment {
   /** ChatGPT tabs by state. */
   tabs: { open: number; discarded: number; frozen: number; loading: number; grouped: number; inBackgroundWindow: number };
   /** Which of ChatGPT's controls the most recently used awake ChatGPT tab still has. */
-  page: { composer: boolean; sendArea: boolean; modelMenu: boolean; plusMenu: boolean; language: string | null } | null;
+  page: { composer: boolean; sendArea: boolean; modelMenu: boolean; plusMenu: boolean; renameControl?: boolean; language: string | null } | null;
 }
 
 export interface CompanionTraceEntry {

@@ -14561,6 +14561,62 @@
       void check();
     });
   }
+
+  /** The page's own editor saves the title. The companion makes no provider API calls here. */
+  async function renameWebChatFromMenu(request) {
+    const { id, conversationId: target, expectedTitle, accountKey, title, expiresAt } = request;
+    const samePage = () => alive && conversationId === target && CLF_DOM.conversationId() === target;
+    const current = () => samePage() && Date.now() < expiresAt;
+    if (!current() || typeof title !== 'string' || !title.trim() || title.length > 120 ||
+        typeof expectedTitle !== 'string' || !expectedTitle || typeof id !== 'string') return { reason: 'rename-canceled' };
+    const accountFailure = async () => {
+      const proof = await CLF_DOM.readRenameAccount(target);
+      if (!proof.accountKey || typeof accountKey !== 'string') return proof.reason ?? 'account-unconfirmed';
+      return proof.accountKey === accountKey ? null : 'account-mismatch';
+    };
+    const invalidAccount = await accountFailure();
+    if (invalidAccount) return { reason: invalidAccount };
+    if (!current()) return { reason: 'rename-canceled' };
+    const observed = CLF_DOM.nativeConversationTitle(target);
+    if (observed === title) return { title };
+    if (observed !== expectedTitle) return { reason: observed ? 'title-changed' : 'title-unconfirmed' };
+    const control = CLF_DOM.nativeChatRenameControl(target, expectedTitle);
+    if (!control) return { reason: 'native-trigger-unavailable' };
+    const { trigger, row } = control;
+    trigger.click();
+    const menuItem = () => CLF_DOM.nativeChatRenameItem(trigger);
+    let item = await waitPageView(menuItem, current, 700);
+    if (!item && current() && trigger.getAttribute('aria-expanded') === 'false' &&
+        CLF_DOM.nativeChatRenameControl(target, expectedTitle)?.trigger === trigger) {
+      // Some native triggers open on click, others on pointerdown. Only try pointerdown while
+      // the same trigger is still closed so it cannot toggle a menu that already opened.
+      trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, pointerType: 'mouse' }));
+      item = await waitPageView(menuItem, current, 700);
+    }
+    if (!item) return { reason: 'native-menu-unavailable' };
+    if (!current()) return { reason: 'rename-canceled' };
+    // A modal menu can hide the sidebar from accessibility queries. The editor
+    // still has to appear within the same row and contain the expected title.
+    const menuTitle = CLF_DOM.nativeConversationTitle(target);
+    if (menuTitle && menuTitle !== expectedTitle) return { reason: 'title-changed' };
+    const previousInputs = new Set(row.querySelectorAll('input'));
+    item.click();
+    const editor = () => CLF_DOM.nativeChatRenameInput(row, target, expectedTitle, previousInputs);
+    const input = await waitPageView(editor, current, 1000);
+    if (!input) return { reason: 'native-editor-unavailable' };
+    const accepted = await ask({ type: 'web_chat_rename_commit', id }, current);
+    const invalidAtSave = accepted?.ok === true && current() ? await accountFailure() : null;
+    if (invalidAtSave || !current() || editor() !== input || accepted?.ok !== true) {
+      if (samePage() && editor() === input) input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      return { reason: invalidAtSave ?? 'rename-canceled' };
+    }
+    if (!CLF_DOM.fillNativeTextInput(input, title) || !current() || !input.isConnected || document.activeElement !== input) {
+      return { reason: 'native-input-rejected' };
+    }
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+    const confirmed = await waitPageView(() => CLF_DOM.nativeConversationTitle(target) === title, current, 2000);
+    return confirmed ? { title } : { reason: 'native-rename-unconfirmed' };
+  }
   /**
    * Measured 2026-09-27 on ChatGPT's plugin page: the connector and its tools render about
    * 100 ms before the "Refresh tools" control, and the page keeps loading for a moment after
@@ -14642,7 +14698,7 @@
         form = await waitPageView(() => CLF_DOM.projectCreateForm(), marked, 8_000, 250);
       }
       if (!form) return fail('ChatGPT did not open its Create project dialog');
-      if (!CLF_DOM.fillProjectName(form.input, request.name)) return fail('The Project name could not be entered');
+      if (!CLF_DOM.fillNativeTextInput(form.input, request.name)) return fail('The Project name could not be entered');
       const ready = await waitPageView(() => { const now = CLF_DOM.projectCreateForm(); return now && !now.submit.disabled && now.input.value === request.name ? now : null; }, marked, 5_000, 250);
       if (!ready) return fail('ChatGPT did not accept the Project name');
       // The Projects ChatGPT already lists: the new one's id must not be among them, so another
@@ -15009,9 +15065,20 @@
         return true;
       }
       if (message.type === 'clf-check-web-chat-title') {
-        sendResponse({ title: alive && conversationId === message.conversationId
-          ? CLF_DOM.confirmedConversationTitle(message.conversationId) : null });
+        const current = () => alive && conversationId === message.conversationId;
+        if (message.accountProof === true) {
+          void CLF_DOM.readRenameAccount(message.conversationId).then(proof => {
+            const confirmed = proof.accountKey && current() ? CLF_DOM.nativeConversationTitle(message.conversationId) : null;
+            sendResponse(confirmed ? { title: confirmed, accountKey: proof.accountKey } : { title: null, reason: proof.reason });
+          }).catch(() => sendResponse({ title: null, reason: 'account-unconfirmed' }));
+          return true;
+        }
+        sendResponse({ title: current() ? CLF_DOM.confirmedConversationTitle(message.conversationId) : null });
         return false;
+      }
+      if (message.type === 'clf-rename-web-chat') {
+        void renameWebChatFromMenu(message).then(sendResponse).catch(() => sendResponse({ reason: 'native-rename-unavailable' }));
+        return true;
       }
       if (message.type === 'clf-image-export') {
         void exportNativeImage(message).then(sendResponse).catch(() => sendResponse({ error: 'fetch_failed' }));

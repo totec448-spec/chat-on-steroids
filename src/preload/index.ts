@@ -485,7 +485,8 @@ const api = {
   findInChat: (id: string, query: string) => call<SessionSearchLocation[]>('sessions:find', { id, query }),
   /** The chat's own name in the app; null clears it and ChatGPT's title shows again. */
   checkWebChatTitle: (id: string) => call<'match' | 'different' | 'unavailable'>('sessions:checkWebTitle', { id }),
-  renameSession: (id: string, title: string | null) => call<boolean>('sessions:rename', { id, title }),
+  prepareWebRename: (id: string, editId: string) => call<boolean>('sessions:prepareWebRename', { id, editId }),
+  renameSession: (id: string, title: string | null, editId?: string) => call<boolean>('sessions:rename', { id, title, editId }),
   getHandoff: (id: string, handoffId?: string) => call<Handoff | null>('handoff:get', { id, handoffId }),
 
   unpairExtension: () => call<AppState>('bridge:unpair'),

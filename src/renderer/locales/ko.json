@@ -3995,6 +3995,8 @@
   "Freed {0} MB from this chat. {1} MB of {2} MB is now used here.": "이 대화에서 {0} MB를 확보했습니다. 현재 {2} MB 중 {1} MB를 사용 중입니다.",
   "Freed {0} MB. Storage usage could not be read.": "{0} MB를 확보했습니다. 저장 공간 사용량을 확인할 수 없습니다.",
   "Last cleanup: Freed {0} MB.": "마지막 정리: {0} MB를 확보했습니다.",
+  "Rename open chats in ChatGPT": "ChatGPT에서 열린 채팅 이름 바꾸기",
+  "When you rename a chat here, also rename it in its open ChatGPT tab if the previous title still matches.": "여기에서 채팅 이름을 바꿀 때 이전 제목이 여전히 일치하면 열린 ChatGPT 탭에서도 이름을 바꿉니다.",
   "Check ChatGPT titles": "ChatGPT 제목 확인",
   "Show a notice in the chat menu when the open ChatGPT chat has a different title.": "열려 있는 ChatGPT 채팅의 제목이 다르면 채팅 메뉴에 알림을 표시합니다.",
   "ChatGPT title differs": "ChatGPT 제목이 다릅니다",

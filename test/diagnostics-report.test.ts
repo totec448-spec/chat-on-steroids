@@ -91,11 +91,12 @@ describe('the diagnostics report', () => {
     const report = renderDiagnosticsReport({ ...sources, extension: { status: {}, environment: {
       browser: { name: 'Google Chrome', version: '154.0.7400.12' },
       tabs: { open: 5, discarded: 1, frozen: 1, loading: 0, grouped: 2, inBackgroundWindow: 0 },
-      page: { composer: true, sendArea: true, modelMenu: false, plusMenu: true, language: 'de-DE' } } } });
+      page: { composer: true, sendArea: true, modelMenu: false, plusMenu: true, renameControl: false, language: 'de-DE' } } } });
     expect(report).toContain('## Browser and ChatGPT page');
     expect(report).toContain('Browser: Google Chrome 154.0.7400.12');
     expect(report).toContain('ChatGPT tabs: 5 open, 1 discarded, 1 frozen, 0 loading, 2 in a tab group, 0 in the app\'s background window');
     expect(report).toContain('Page checks (most recently used ChatGPT tab): composer found, send area found, model menu NOT found, + menu found, page language de-DE');
+    expect(report).toContain('Native rename: chat row and options NOT found. Menu item and editor are checked during an opted-in rename.');
     const none = renderDiagnosticsReport({ ...sources, extension: { status: {}, environment: { browser: { name: 'Firefox', version: '144.0' },
       tabs: { open: 0, discarded: 0, frozen: 0, loading: 0, grouped: 0, inBackgroundWindow: 0 }, page: null } } });
     expect(none).toContain('Page checks: no awake ChatGPT tab answered');

@@ -39,7 +39,7 @@ let browserWake: ReturnType<typeof attachBrowserWake> | null = null;
 import { browserWindowBounds, currentBrowserWorkArea } from './browser-window-layout.js';
 export { setBrowserWorkArea } from './browser-window-layout.js';
 import { pendingBrowserPreferenceRequest, acknowledgeBrowserPreferences } from './browser-preferences.js';
-import { acceptWebChatTitle, offerWebChatTitleCheck } from './web-chat-title.js';
+import { acceptWebChatTitle, authorizeWebChatRename, offerWebChatTitleCheck } from './web-chat-title.js';
 import { sessionFinishHeld, releaseSessionFinish, getSessionFinishDraft, sessionFinishWaiting } from './session/finish.js';
 import { observeUsage } from './session/usage.js';
 import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, lostBrowserOpening, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, queuedInputOfferBlocker, continueAsOrdinaryMessage, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, withdrawOwnContinuesAfterStop, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation, ownUnsentTexts, ownSentResidue, retireMismatchedRecoveryInput, noteInputHeld } from './session/input.js';
@@ -1145,6 +1145,7 @@ function diagnosticEnvironment(value: unknown): CompanionEnvironment | null {
       inBackgroundWindow: count('inBackgroundWindow') },
     page: page ? {
       composer: page.composer === true, sendArea: page.sendArea === true, modelMenu: page.modelMenu === true, plusMenu: page.plusMenu === true,
+      ...(typeof page.renameControl === 'boolean' ? { renameControl: page.renameControl } : {}),
       language: typeof page.language === 'string' && /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(page.language) ? page.language : null
     } : null
   };
@@ -3529,7 +3530,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   if (route === '/browser/web-chat-title' && req.method === 'POST') {
     const body = await readBody(req, 2048);
     const browser = webTitleBrowser(req);
-    const accepted = browser !== null && acceptWebChatTitle(browser, body);
+    const accepted = browser !== null && (body && typeof body === 'object' && 'commit' in body && body.commit === true
+      ? await authorizeWebChatRename(browser, body)
+      : acceptWebChatTitle(browser, body));
     return json(res, accepted ? 200 : 409, { ok: accepted }, origin);
   }
 
