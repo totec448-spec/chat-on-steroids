@@ -1,4 +1,6 @@
 import { appBrand } from './app-brand.js';
+import { applyQuickChatShortcut, getQuickChatShortcutStatus } from './quick-chat-shortcut.js';
+import { QUICK_CHAT_SHORTCUT, isQuickChatShortcut } from '../shared/quick-chat-shortcut.js';
 import { registerAgentOutputIpc } from './agent-output-ipc.js';
 import { onChatsAtOnceChange, resumeAutomaticSends } from './chats-at-once.js';
 import { MAX_CHAT_STYLE_CHARS } from '../shared/chat-style.js';
@@ -300,6 +302,9 @@ const settingsPatch = z.object({
     autoSelectSkills: z.boolean().optional(),
     tabsToKeepOpen: z.number().int().min(1).max(50).optional(),
     minimizeToTray: z.boolean(),
+    quickChatShortcutEnabled: z.boolean().optional(),
+    quickChatShortcut: z.string().refine(isQuickChatShortcut).optional(),
+    quickChatAutoCapture: z.boolean().optional(),
     autoConnect: z.boolean(),
     startAtLogin: z.boolean().optional(),
     turnNotifications: z.boolean().optional(),
@@ -544,6 +549,12 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       autoSelectSkills: pick(current.ui.autoSelectSkills, base.ui.autoSelectSkills, wanted.ui.autoSelectSkills),
       tabsToKeepOpen: pick(current.ui.tabsToKeepOpen, base.ui.tabsToKeepOpen, wanted.ui.tabsToKeepOpen),
       minimizeToTray: pick(current.ui.minimizeToTray, base.ui.minimizeToTray, wanted.ui.minimizeToTray),
+      quickChatShortcutEnabled: wanted.ui.quickChatShortcutEnabled === undefined ? current.ui.quickChatShortcutEnabled
+        : pick(current.ui.quickChatShortcutEnabled !== false, base.ui.quickChatShortcutEnabled !== false, wanted.ui.quickChatShortcutEnabled),
+      quickChatShortcut: wanted.ui.quickChatShortcut === undefined ? current.ui.quickChatShortcut
+        : pick(current.ui.quickChatShortcut ?? QUICK_CHAT_SHORTCUT, base.ui.quickChatShortcut ?? QUICK_CHAT_SHORTCUT, wanted.ui.quickChatShortcut),
+      quickChatAutoCapture: wanted.ui.quickChatAutoCapture === undefined ? current.ui.quickChatAutoCapture
+        : pick(current.ui.quickChatAutoCapture !== false, base.ui.quickChatAutoCapture !== false, wanted.ui.quickChatAutoCapture),
       autoConnect: pick(current.ui.autoConnect, base.ui.autoConnect, wanted.ui.autoConnect),
       startAtLogin: pick(current.ui.startAtLogin, base.ui.startAtLogin, wanted.ui.startAtLogin),
       turnNotifications: pick(current.ui.turnNotifications, base.ui.turnNotifications, wanted.ui.turnNotifications),
@@ -696,6 +707,7 @@ async function buildState(): Promise<AppState> {
   const config = getConfig();
   return {
     displayName: appBrand.displayName,
+    quickChatShortcutStatus: getQuickChatShortcutStatus(),
     config,
     status: getStatus(),
     connectorSchemas: Object.fromEntries(
@@ -809,23 +821,29 @@ export function personsMessage(entry: InputEntry): boolean {
     (entry.authoredSource ?? 'text') !== 'none';
 }
 
-export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
+export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void,
+  auxiliaryPush?: (channel: string, ...args: unknown[]) => void): void {
   registerWorkspaceTerminalIpc(getWindow);
   registerAgentOutputIpc(getWindow);
   registerDictationIpc(getWindow);
   // The renderer owns the live draft references; the outbox owns admitted input.
   // Look up the latest draft references at prune time, including after a native picker or SFTP wait.
-  const draftAttachments = new WeakMap<IpcMainInvokeEvent['sender'], Set<string>>();
+  // A picker in either window may prune the staging store. Protect every live draft.
+  const draftAttachments = new Map<IpcMainInvokeEvent['sender'], Set<string>>();
   handle('sessions:retainDraftAttachments', async (payload, event) => {
     const { ids } = z.object({ ids: z.array(z.string().uuid()).max(20_000) }).strict().parse(payload);
+    if (!draftAttachments.has(event.sender)) {
+      const sender = event.sender;
+      sender.once('destroyed', () => draftAttachments.delete(sender));
+    }
     draftAttachments.set(event.sender, new Set(ids));
   });
-  const attachmentRetention = async (event: IpcMainInvokeEvent) => {
+  const attachmentRetention = async () => {
     await listInputs(); // Load durable input before entering the staging lock.
-    return { has: (id: string) => outboxRetainsAttachment(id) || draftAttachments.get(event?.sender)?.has(id) === true };
+    return { has: (id: string) => outboxRetainsAttachment(id) || [...draftAttachments.values()].some(ids => ids.has(id)) };
   };
-  const stageFiles = async (sources: AttachmentSource[], event: IpcMainInvokeEvent) =>
-    stageInputAttachments(sources, await attachmentRetention(event));
+  const stageFiles = async (sources: AttachmentSource[]) =>
+    stageInputAttachments(sources, await attachmentRetention());
   let watchedWindow: BrowserWindow | null = null;
   const projectFileWatches = new ProjectFileWatchSet(event => {
     const target = getWindow();
@@ -952,6 +970,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       else if (!config.goal.impulseMinutes && (proposed.goal.impulseMinutes ?? 0) > 0) await cancelFinishInputs(true);
       return proposed;
     }, async (published, previous) => {
+      applyQuickChatShortcut(published.ui);
       if (!published.sessions.checkWebChatTitles || published.ui.chatBrowser !== previous.ui.chatBrowser) cancelWebChatTitleCheck();
       if (previous.ui.finishTool && !published.ui.finishTool) await cancelFinishInputs(false);
       else if ((previous.goal.impulseMinutes ?? 0) > 0 && !published.goal.impulseMinutes) await cancelFinishInputs(true);
@@ -1838,15 +1857,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     shell.showItemInFolder(target.real);
     return true;
   });
-  handle('projectFiles:attach', async (payload, event) => {
+  handle('projectFiles:attach', async payload => {
     const { projectId, path } = z.object({ projectId: projectFileId, path: projectRelativePath.min(1) }).strict().parse(payload);
     // A file in a project on a server (#1469) is copied over SFTP first.
     const snapshot = await serverFileSnapshot(projectId, path);
     if (snapshot) {
-      try { return (await stageFiles([snapshot.file], event))[0]!; } finally { await snapshot.cleanup(); }
+      try { return (await stageFiles([snapshot.file]))[0]!; } finally { await snapshot.cleanup(); }
     }
     const target = await projectFileTarget(projectId, path, { allowRoot: false, fileOnly: true });
-    const retained = await attachmentRetention(event);
+    const retained = await attachmentRetention();
     const checked = await projectFileTarget(projectId, path, { allowRoot: false, fileOnly: true });
     if (checked.real !== target.real) throw new Error('The project file changed location');
     return stageInputAttachment(checked.real, retained);
@@ -2200,21 +2219,23 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
 
   handle('sessions:files', async (_payload, event) => {
-    const chosen = await dialog.showOpenDialog({ ...dialogLabel('Attach files'), properties: ['openFile', 'multiSelections'] });
+    const options: Electron.OpenDialogOptions = { ...dialogLabel('Attach files'), properties: ['openFile', 'multiSelections'] };
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    const chosen = owner && !owner.isDestroyed() ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
     if (chosen.canceled) return [];
     if (chosen.filePaths.length > 20) throw new Error('Attach up to 20 files per message');
-    return stageFiles(chosen.filePaths, event);
+    return stageFiles(chosen.filePaths);
   });
-  handle('sessions:dropFiles', async (payload, event) => {
+  handle('sessions:dropFiles', async payload => {
     const { files } = z.object({ files: z.array(z.union([
       z.string().min(1).max(32768),
       z.object({ name: z.string().min(1).max(255), bytes: z.instanceof(Uint8Array).refine(bytes => bytes.byteLength > 0 && bytes.byteLength <= 12 * 1024 * 1024) }).strict()
     ])).min(1).max(20) }).strict().parse(payload);
-    return stageFiles(files, event);
+    return stageFiles(files);
   });
-  handle('sessions:attachText', async (payload, event) => {
+  handle('sessions:attachText', async payload => {
     const { text } = z.object({ text: z.string().min(1).max(4 * 1024 * 1024) }).parse(payload);
-    return (await stageFiles([{ text }], event))[0]!;
+    return (await stageFiles([{ text }]))[0]!;
   });
   handle('sessions:stopTurn', async payload => {
     const { id, expectedTurnId, expectedConversationId } = sessionIdArg.extend({ expectedTurnId: z.string().min(1).max(256),
@@ -2859,6 +2880,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
    * single-instance lock still held.
    */
   const push = (channel: string, ...args: unknown[]): void => {
+    auxiliaryPush?.(channel, ...args);
     const target = getWindow();
     if (!target || target.isDestroyed()) return;
     target.webContents.send(channel, ...args);

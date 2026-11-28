@@ -5094,6 +5094,44 @@ renderer; Linux/macOS retain their existing full click-through visual-surface co
 Projects, workers, plans, model choice, usage and plugins have focused modules (§4). The renderer
 calls a fixed `preload/index.ts` allowlist into validated `ipc.ts`/`plugins-ipc.ts` handlers.
 No arbitrary IPC invocation, Node access, filesystem path opening or renderer-side secret store.
+The global Quick chat (`CommandOrControl+Shift+E`, with a tray entry when the OS refuses the
+shortcut) is a separate sandboxed window owned by `main/quick-chat-window.ts`. It loads the same
+`renderer/index.html` and `renderer/chat.ts` as the Workspace through `renderer/entry.ts`, and
+uses the same validated preload and renderer security policy. Keep compact-only code in the shell
+and scoped CSS; do not fork the composer, transcript, search, attachments or provider executor.
+The history icon opens the shared chat-search controller in a history drawer with
+recent sessions, current-chat marking and a new-chat action; full search and draft ownership remain
+on the existing session selection path.
+Only the auxiliary window's main frame may request its hide, pin, expand or context actions.
+The shortcut is configurable in General settings; one controller owns registration and reports native
+refusal. Context remembers a source window and optional Windows accessibility provider before showing
+the panel, with a 1.5-second deadline; a completed window identity survives a late provider lookup.
+When enabled in General settings (default on), invocation requests one permission-checked snapshot
+of that source and starts an independent passive window-outline/diagonal-scan effect. Disabling this
+preference prevents automatic content capture; explicit refresh still uses the remembered source and
+replaces its prior window snapshot only after staging succeeds. First show waits for compact renderer
+readiness; the panel does not fade or animate composer height, and the scan excludes panel bounds.
+The compact composer stages a removable group of the screenshot
+and text with the source title and an expandable preview. The exact invocation and composer draft
+must still own admission; a newer invocation replaces only the prior automatic group in that draft.
+Generated attachment names are unique; no automatic Send is performed.
+Explicit window capture pairs direct pixels with bounded visible UIA text and control metadata using
+the existing desktop adapters and composer staging. Explicit text capture prefers UIA and may use a
+native copy shortcut on Windows with Control/Clipboard Read/Clipboard Write grants, exact source
+window checks, fresh clipboard sequence and owner proof, bounded clipboard format backup and guarded
+restoration. Known terminal hosts use Ctrl+Shift+C; other applications use Ctrl+Insert, never Ctrl+C.
+Clipboard-only captures and read-only ranges never authorize replacement. Replacement uses the
+canonical completed answer, an editable confirmation, and exact source/selection proof in the native
+helper before input; stale context fails closed. Long/multiline replacements require clipboard write
+permission. The Windows helper's bounded UI snapshot owns the selected range.
+Expand uses the exact durable session id and the workspace's existing `session:write` route.
+The Workspace row menu opens the exact session in Quick Chat through the verified Workspace main
+frame, reusing `session:write` after renderer readiness; direct navigation never captures desktop
+context and preserves the destination draft.
+Shared chat updates are forwarded while the panel is visible. The compact window owns its own
+selection and UI drafts, does not follow the Workspace's browser tab, and does not own the outbox.
+Closing or hiding does not cancel admitted inputs. Attachment retention covers all live windows;
+staging in one must not prune files retained by a draft in another.
 Changing the selected session synchronously retires prior data/control ownership and handoff.
 Keep the last painted transcript and images inert while the destination detail loads, then
 replace them directly; queue/status repaints must not flash the New Chat welcome screen.

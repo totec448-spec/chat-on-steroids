@@ -14,6 +14,10 @@ import {
   focusWindow,
   getWindowState,
   listWindows,
+  rememberQuickDesktopOrigin,
+  readQuickDesktopSelection,
+  copyQuickDesktopSelection,
+  replaceQuickDesktopSelection,
   screenshot,
   waitForWindow
 } from '../src/main/computer/index.js';
@@ -90,6 +94,51 @@ describe.runIf(IS_WINDOWS)('desktop helper', () => {
 
   it('reports a failed focus instead of claiming success', async () => {
     expect(await focusWindow(999_999_999)).toBe(false);
+  });
+
+  it('Quick Chat captures the owned editor selection and replaces only that range after focus changes', async () => {
+    const source = fixtureWindows[0]!, panel = fixtureWindows[1]!;
+    expect(await focusWindow(source)).toBe(true);
+    const state = await getWindowState({ window: source, includeScreenshot: false, maxElements: 40 });
+    const editor = state.elements.find(element => element.role === 'Edit' && element.name === 'Fixture text');
+    expect(editor).toBeDefined();
+    await act([{ type: 'click_ref', ref: editor!.ref }, { type: 'keypress', keys: ['ctrl', 'a'] }], { window: source });
+    const origin = await rememberQuickDesktopOrigin(true);
+    expect(origin?.window.id).toBe(source);
+    expect(origin?.runtimeKey).toBeTruthy();
+    expect(await focusWindow(panel)).toBe(true);
+    const { text, editable } = await readQuickDesktopSelection(origin!);
+    expect(text).toBe('Synthetic content only');
+    expect(editable).toBe(true);
+    expect((await activeWindow()).window?.id).toBe(panel);
+    await expect(replaceQuickDesktopSelection(origin!, 'wrong expected value', 'Never inserted', panel, () => true, () => false)).rejects.toThrow(/SELECTION_CHANGED/);
+    expect((await activeWindow()).window?.id).toBe(panel);
+    await replaceQuickDesktopSelection(origin!, text, 'Quick Chat verified', panel, () => true, () => false);
+    expect((await activeWindow()).window?.id).toBe(source);
+    await act([{ type: 'keypress', keys: ['ctrl', 'a'] }], { window: source });
+    const replaced = await rememberQuickDesktopOrigin(true);
+    expect((await readQuickDesktopSelection(replaced!)).text).toBe('Quick Chat verified');
+    await act([{ type: 'type', text: 'Synthetic content only' }], { window: source });
+  });
+
+  it('Quick Chat copies a selection without a UIA range and rejects an unchanged clipboard', async () => {
+    const source = fixtureWindows[0]!, panel = fixtureWindows[1]!;
+    expect(await focusWindow(source)).toBe(true);
+    const state = await getWindowState({ window: source, includeScreenshot: false, maxElements: 40 });
+    const editor = state.elements.find(element => element.role === 'Edit' && element.name === 'Fixture text');
+    expect(editor).toBeDefined();
+    await act([{ type: 'click_ref', ref: editor!.ref }, { type: 'keypress', keys: ['ctrl', 'a'] }], { window: source });
+    const origin = await rememberQuickDesktopOrigin(false);
+    expect(origin?.window.id).toBe(source);
+    expect(origin?.runtimeKey).toBeUndefined();
+    expect(await focusWindow(panel)).toBe(true);
+    await expect(copyQuickDesktopSelection(origin!, panel, () => false)).rejects.toThrow(/permission/);
+    expect(await copyQuickDesktopSelection(origin!, panel, () => true)).toBe('Synthetic content only');
+    expect((await activeWindow()).window?.id).toBe(panel);
+    await act([{ type: 'keypress', keys: ['right'] }], { window: source });
+    expect(await focusWindow(panel)).toBe(true);
+    await expect(copyQuickDesktopSelection(origin!, panel, () => true)).rejects.toThrow(/SELECTION_UNAVAILABLE/);
+    expect((await activeWindow()).window?.id).toBe(panel);
   });
 
   // Capturing deliberately no longer demands the foreground: looking at a window that

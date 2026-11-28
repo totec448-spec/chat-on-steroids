@@ -166,6 +166,10 @@ let agentFilter: string | null = null;
 let filterFor: string | null = null;
 
 interface Deps {
+  /** An independent compact chat must not change the Workspace's browser-tab selection. */
+  compact?: boolean;
+  /** Optional native action on an explicitly chosen completed answer. */
+  replaceAnswer?: (answer: { id: string; turnId?: string; messageId?: string }) => void;
   /** The renderer's single save path — reads every control, including ours. */
   save: () => Promise<boolean>;
   state: () => AppState | null;
@@ -609,6 +613,15 @@ const inputDrafts = createComposerDrafts({
 });
 const newChatTasks = new Map<string, { objective: string; automation: string; loopDelivery: string }>();
 const imageDrafts = new Map<string, Array<InputImage | InputAttachment>>();
+type ComposerContextPreview = { title: string; application: string; text: string; automatic?: boolean; kind: 'selection' | 'screenshot' };
+type ComposerContextGroup = ComposerContextPreview & { ids: string[] };
+// Metadata is presentation-only; the same real attachment IDs own retention and delivery.
+// Keep recent groups for drafts restored after a failed send, without retaining image bytes here.
+const contextGroups = new Map<string, ComposerContextGroup>();
+let contextPendingKey: string | null = null;
+function contextGroupFor(id: string): ComposerContextGroup | undefined {
+  for (const group of contextGroups.values()) if (group.ids.includes(id)) return group;
+}
 const startingInputs = new Map<string, InputEntry>();
 let publishedDraftAttachments: string | undefined;
 function publishDraftAttachments(): void {
@@ -978,14 +991,41 @@ function restoreDraft(): void {
 function paintComposerImages(): void {
   const key = draftKey();
   const images = imageDrafts.get(key) ?? [];
-  const box = $('composerImages'); box.hidden = !images.length; box.replaceChildren();
+  const pending = contextPendingKey === key && !images.some(file => 'id' in file && contextGroupFor(file.id)?.kind === 'screenshot');
+  const box = $('composerImages'); box.hidden = !images.length && !pending; box.replaceChildren();
+  const paintedGroups = new Set<ComposerContextGroup>();
   images.forEach((image, index) => {
+    const group = 'id' in image ? contextGroupFor(image.id) : undefined;
+    if (group) {
+      if (paintedGroups.has(group)) return;
+      paintedGroups.add(group);
+      const files = images.filter((file): file is InputAttachment => 'id' in file && group.ids.includes(file.id));
+      const tile = el('div', 'composer-context-card');
+      const details = document.createElement('details');
+      const summary = document.createElement('summary');
+      const visual = files.find(file => file.preview);
+      if (visual?.preview) {
+        const thumb = document.createElement('img'); thumb.src = visual.preview; thumb.alt = visual.name; summary.append(thumb);
+      } else { const glyph = el('span', 'composer-context-glyph'); glyph.append(icon(group.kind === 'selection' ? 'i-file-text' : 'i-monitor')); summary.append(glyph); }
+      const label = el('div', 'composer-context-label');
+      label.append(el('strong', '', group.title || group.application), el('span', '', () => `${group.application} · ${group.kind === 'selection' ? t('Selected text') : t('Window context')} · ${files.length} ${t(files.length === 1 ? 'File' : 'Files')}`));
+      summary.append(label); details.append(summary);
+      const preview = el('pre', 'composer-context-text', group.text); preview.dir = 'auto'; details.append(preview);
+      const remove = el('button', 'image-remove', '×'); remove.setAttribute('type', 'button'); ui(remove, 'aria-label', () => t('Remove {0}', [group.title || group.application]));
+      remove.onclick = () => { if (draftKey() !== key) return; setDraftAttachments(key, (imageDrafts.get(key) ?? []).filter(file => !('id' in file && group.ids.includes(file.id)))); paintComposerImages(); };
+      tile.append(details, remove); box.append(tile); return;
+    }
     const tile = 'dataUrl' in image ? el('div', 'composer-image') : attachmentCard(image, true);
     if ('dataUrl' in image) { const preview = document.createElement('img'); preview.src = image.dataUrl; preview.alt = image.name; tile.append(preview); }
     const remove = el('button', 'image-remove', '×'); remove.setAttribute('type', 'button'); ui(remove, 'aria-label', () => t("Remove {0}", [image.name]));
     remove.addEventListener('click', () => { setDraftAttachments(key, images.filter((_entry, at) => at !== index)); paintComposerImages(); });
     tile.append(remove); box.append(tile);
   });
+  if (pending) {
+    const placeholder = el('div', 'composer-context-card composer-context-pending');
+    placeholder.append(icon('i-monitor'), el('span', '', () => t('Capturing context…')));
+    box.append(placeholder);
+  }
   paintDeliveryControls();
 }
 function attachmentCard(file: InputAttachment, inComposer = false): HTMLElement {
@@ -1360,6 +1400,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   } else if (summary.conversationId === null) {
     // A new chat whose first message has not gone out yet (#1759): no ChatGPT link to open, copy or block.
     items.push({ action: 'rename', icon: 'i-pencil', label: () => t('Rename'), title: () => t("Rename this chat in the app. Its title in ChatGPT stays the same."), run: () => startRename(summary) });
+    if (!deps.compact) items.push({ action: 'open-quick-chat', icon: 'i-chat', label: () => t('Open in Quick Chat'), run: () => void run(api.openSessionQuickChat(summary.id)) });
     items.push(...moveToProjectMenuItems(summary), ...chatGroupMenuItems(summary));
   } else {
     const policyLineage = [
@@ -1385,6 +1426,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     items.push(
       { action: 'rename', icon: 'i-pencil', label: () => t('Rename'), title: () => t("Rename this chat in the app. Its title in ChatGPT stays the same."), run: () => startRename(summary) },
       { action: 'open', icon: 'i-out', label: () => t('Open in browser'), title: () => t("Open this chat in your browser"), run: () => void run(api.openSessionChat(summary.id)) },
+      ...(!deps.compact ? [{ action: 'open-quick-chat', icon: 'i-chat', label: () => t('Open in Quick Chat'), run: () => void run(api.openSessionQuickChat(summary.id)) }] : []),
       // ChatGPT opens /c/<id> wherever the chat lives, a project included (#1107).
       { action: 'copy-link', icon: 'i-copy', label: () => t('Copy link'), title: () => t("Copy this chat's ChatGPT link"),
         run: async () => { if (await run(api.writeClipboard(`https://chatgpt.com/c/${summary.conversationId}`))) toast(t('Link copied')); } },
@@ -1549,7 +1591,7 @@ function openChatSummary(): SessionSummary | null {
   return selectedId === null ? null : sessions.find(row => row.id === selectedId) ?? null;
 }
 /** Puts a request in front of what is already typed, for the user to read and send. */
-function prefillComposer(text: string): void {
+export function prefillComposer(text: string): void {
   const input = $<HTMLTextAreaElement>('chatInput');
   const rest = input.value.trim();
   input.value = rest ? `${text}\n\n${rest}` : text;
@@ -1739,6 +1781,7 @@ function mergeSessionRows(rows: SessionSummary[]): void {
 
 let selectedTabFollow: ReturnType<typeof createSelectedTabFollow> | null = null;
 function requestSelectedTabFollow(id: string | null): void {
+  if (deps?.compact) return;
   selectedTabFollow?.select(id === null ? null : sessions.find(row => row.id === id) ?? { id, conversationId: null, origin: null });
 }
 
@@ -6224,6 +6267,15 @@ function answerActions(turnId: string | null, messageId?: string, answer?: { tex
   });
   menu.addEventListener('keydown', event => { if (event.key === 'Escape') { menu.open = false; trigger.focus(); } });
   bar.append(copy, menu);
+  if (deps.replaceAnswer && sessionId && (turnId || messageId)) {
+    const replace = el('button', 'answer-action quick-replace-answer') as HTMLButtonElement;
+    replace.type = 'button'; replace.append(icon('i-swap'));
+    ui(replace, 'title', () => t('Replace selected text')); ui(replace, 'aria-label', () => t('Replace selected text'));
+    replace.addEventListener('click', () => {
+      if (selectedId === sessionId) deps.replaceAnswer?.({ id: sessionId, turnId: turnId ?? undefined, messageId: turnId ? undefined : messageId });
+    });
+    bar.append(replace);
+  }
   if (sessionId && messageId && NATIVE_ID.test(messageId) && answer) bar.append(bookmarkButton(sessionId, messageId, answer));
   const branch = branchPoint(messageId);
   if (branch) {
@@ -10141,8 +10193,57 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
 // ------------------------------------------------------------------- wiring
 
 /** Opens the search dialog, as ⌘K / Ctrl+K does (the View menu). */
-export function openChatSearch(): void {
-  chatSearch?.open();
+/** Exact selection for the compact shell's Open in workspace action. */
+export function selectedChatId(): string | null { return selectedId; }
+
+/** Reserve the compact snapshot's resting height while it is acquired, without staging a file. */
+export function setComposerContextPending(pending: boolean): void {
+  const next = pending ? draftKey() : null;
+  if (next === contextPendingKey) return;
+  contextPendingKey = next;
+  if (pending || document.querySelector('#composerImages .composer-context-pending')) paintComposerImages();
+}
+
+/** A new invocation refreshes only its previous automatic context, not manual attachments. */
+export function clearAutomaticComposerContext(): void {
+  const key = draftKey(), files = imageDrafts.get(key) ?? [];
+  const retained = files.filter(file => !('id' in file && contextGroupFor(file.id)?.automatic));
+  if (retained.length !== files.length) { setDraftAttachments(key, retained); paintComposerImages(); }
+}
+
+/** Stage an explicitly requested external attachment against the exact draft that requested it. */
+export async function attachComposerContext(load: () => Promise<{ text: string } | { files: File[]; preview?: ComposerContextPreview } | null>, stillCurrent: () => boolean = () => true): Promise<boolean> {
+  const owner = composerDraftOwner();
+  const context = await load();
+  if (!context || !stillCurrent()) return false;
+  if (!ownsComposerDraft(owner)) { toast(t('Files were not added because the draft changed.')); return false; }
+  const preview = 'files' in context ? context.preview : undefined;
+  const retained = () => (imageDrafts.get(owner.key) ?? []).filter(file => preview?.kind !== 'screenshot' || !('id' in file && contextGroupFor(file.id)?.kind === 'screenshot'));
+  const count = 'text' in context ? 1 : context.files.length;
+  if (!count || retained().length + count > 20) { toast(t('Attach up to 20 files per message')); return false; }
+  const chosen = 'text' in context ? await run(api.attachText(context.text)).then(file => file ? [file] : []) : await run(api.dropFiles(context.files));
+  if (chosen?.length !== count || !stillCurrent() || !ownsComposerDraft(owner)) return false;
+  if (preview) {
+    const combined = [...retained(), ...chosen];
+    if (combined.length > 20 || combined.reduce((sum, file) => sum + ('size' in file ? file.size : 0), 0) > 512 * 1024 * 1024) { toast(t('Attach up to 20 files and 512 MB per message')); return false; }
+    contextGroups.set(chosen[0]!.id, { ...preview, ids: chosen.map(file => file.id) });
+    while (contextGroups.size > 100) contextGroups.delete(contextGroups.keys().next().value!);
+    setDraftAttachments(owner.key, combined); paintComposerImages(); return true;
+  }
+  return appendComposerAttachments(owner, chosen);
+}
+
+function appendComposerAttachments(owner: ComposerDraftOwner, chosen: InputAttachment[] | null | undefined): boolean {
+  if (!chosen?.length) return false;
+  if (!ownsComposerDraft(owner)) { toast(t('Files were not added because the draft changed.')); return false; }
+  const combined = [...(imageDrafts.get(owner.key) ?? []), ...chosen];
+  if (combined.length > 20 || combined.reduce((sum, file) => sum + ('size' in file ? file.size : 0), 0) > 512 * 1024 * 1024) { toast(t('Attach up to 20 files and 512 MB per message')); return false; }
+  setDraftAttachments(owner.key, combined); paintComposerImages();
+  return true;
+}
+
+export function openChatSearch(recent = false): void {
+  if (recent) chatSearch?.openRecent(); else chatSearch?.open();
 }
 
 /**
@@ -10273,7 +10374,7 @@ function selectNewChat(projectId: string | null = null, branch: typeof newChatBr
   // permission to discard authored text, attachments or a prepared workflow.
   $('inputQueue').replaceChildren();
   restoreDraft(); showView('timeline'); paintSessions(); void loadDetail();
-  if (!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+  if (!deps.compact && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
     $('composer').animate?.([{ opacity: 0.45 }, { opacity: 1 }], { duration: 150, easing: 'ease-out' });
   }
   setComposerPlaceholder(() => projectId ? t("Message in {0}…", [projects.find(project => project.id === projectId)?.name ?? 'project']) : t("Ask anything…"));
@@ -10283,7 +10384,7 @@ function selectNewChat(projectId: string | null = null, branch: typeof newChatBr
 
 export function initChat(next: Deps): void {
   publishDraftAttachments();
-  selectedTabFollow = createSelectedTabFollow(id => api.followSessionTab?.(id));
+  selectedTabFollow = next.compact ? null : createSelectedTabFollow(id => api.followSessionTab?.(id));
   sidebarCompletion = createSidebarCompletionState();
   sidebarPins = createSidebarPins();
   sidebarOrder = createSidebarOrder($('sessionList'), () => [
@@ -10316,8 +10417,8 @@ export function initChat(next: Deps): void {
   void run(api.chatGroups()).then(state => { if (state) { chatGroups = state; paintSessions(); } });
   deps = next;
   initComposerDictation();
-  const stopComposerHeightMotion = installComposerHeightMotion($('composer'));
-  const stopComposerDockMotion = installComposerDockMotion($('composerDock'));
+  const stopComposerHeightMotion = next.compact ? () => {} : installComposerHeightMotion($('composer'));
+  const stopComposerDockMotion = next.compact ? () => {} : installComposerDockMotion($('composerDock'));
   window.addEventListener('beforeunload', () => {
     stopComposerHeightMotion(); stopComposerDockMotion();
   }, { once: true });
@@ -10534,14 +10635,7 @@ export function initChat(next: Deps): void {
       finally { button.disabled = false; if (selectedId === id) void refreshSessionControls(); }
     });
   }
-  const appendImages = (owner: ComposerDraftOwner, chosen: InputAttachment[] | null | undefined): boolean => {
-    if (!chosen?.length) return false;
-    if (!ownsComposerDraft(owner)) { toast(t("Files were not added because the draft changed.")); return false; }
-    const combined = [...(imageDrafts.get(owner.key) ?? []), ...chosen];
-    if (combined.length > 20 || combined.reduce((sum, file) => sum + ('size' in file ? file.size : 0), 0) > 512 * 1024 * 1024) { toast(t("Attach up to 20 files and 512 MB per message")); return false; }
-    setDraftAttachments(owner.key, combined); paintComposerImages();
-    return true;
-  };
+  const appendImages = appendComposerAttachments;
   filePanel = createFilePanel({
     host: chatHost, mount: docks.body,
     onShow: () => { agentPanel?.hide(); docks.adopt('files'); },
@@ -10684,7 +10778,7 @@ export function initChat(next: Deps): void {
     if (files.length + (imageDrafts.get(owner.key)?.length ?? 0) > 20) { toast(t('Attach up to 20 files per message')); return; }
     appendImages(owner, await run(api.dropFiles(files)));
   });
-  api.onWriteSession?.(id => { selectSession(id); $<HTMLTextAreaElement>('chatInput').focus(); });
+  api.onWriteSession?.(id => { deps.palette?.showChat?.(); if (id === null) selectNewChat(); else selectSession(id); $<HTMLTextAreaElement>('chatInput').focus(); });
   $('newChat').addEventListener('click', () => {
     selectNewChat();
   });
@@ -10931,11 +11025,12 @@ export function initChat(next: Deps): void {
       if (match) void revealSearchMatch(id, match);
     },
     selectedId: () => selectedId,
+    newChat: deps.compact ? () => $('newChat').click() : undefined,
     // The chats the sidebar lists, newest first: sub-agents, helpers and diagnostics rows stay out.
     recent: () => sessions
       .filter(entry => entry.origin?.kind !== 'worker' && entry.origin?.kind !== 'helper' && !isUnattributedSession(entry))
       .sort((a, b) => b.updatedAt - a.updatedAt)
-      .map(entry => ({ id: entry.id, title: entry.title })),
+      .map(entry => ({ id: entry.id, title: deps.compact ? shownSessionTitle(entry) : entry.title })),
     // #1884 (Haz): a curated few, named and keyed as the menus and the shortcuts dialog name them.
     actions: () => {
       const rows = shortcutGroups(() => deps.state()?.config.ui.enterSends !== false).flatMap(group => group.rows);
@@ -10946,10 +11041,10 @@ export function initChat(next: Deps): void {
       return [
         keyed(() => t('New chat'), () => $('newChat').click()),
         keyed(() => t('Find in chat'), inChat(() => chatFind?.open()), () => selectedId !== null),
-        ...(['review', 'terminal', 'files', 'agents'] as const).map(view => keyed(
+        ...(deps.compact ? [] : (['review', 'terminal', 'files', 'agents'] as const).map(view => keyed(
           () => t(view === 'review' ? 'Review' : view === 'terminal' ? 'Terminal' : view === 'files' ? 'Files' : 'Sub-agents'),
           // A terminal takes the keyboard itself; the other views put it on their tab.
-          inChat(() => docks.activate(view, { focus: view !== 'terminal' })), () => docks.canActivate(view))),
+          inChat(() => docks.activate(view, { focus: view !== 'terminal' })), () => docks.canActivate(view)))),
         ...(deps.palette?.actions() ?? [])
       ];
     },

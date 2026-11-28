@@ -1,0 +1,112 @@
+/* Layout only. The Workspace owns the composer, transcript and all their states. */
+body.compact-chat { overflow: hidden; }
+.compact-chat .app {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 44px minmax(0, 1fr);
+  background: var(--page);
+  transition: none;
+}
+.compact-chat .app > main { grid-column: 1; grid-row: 2; }
+:root .compact-chat .app[data-screen='chat'] { background: var(--page); }
+.compact-chat .app > .notices,
+.compact-chat .app > .sidebar,
+.compact-chat .app-topbar > :is(#sidebarToggle, #viewMenu, .header-dock-controls) { display: none; }
+.compact-chat .app-topbar {
+  grid-column: 1; height: 44px; gap: 3px; padding: 6px 9px;
+  border-bottom: 0;
+  background: transparent;
+}
+.compact-chat .app-topbar > .compact-action {
+  width: 30px; height: 30px; display: grid; place-items: center;
+  flex: none; border: 0; border-radius: 8px; background: transparent; color: var(--soft);
+  -webkit-app-region: no-drag;
+}
+.compact-chat .compact-action:hover,
+.compact-chat .compact-action[aria-pressed=true] { background: var(--hover); color: var(--ink); }
+.compact-chat .compact-action .ico { --ico: 17px; --glyph: 17px; }
+.compact-chat #quickRefreshContext[aria-busy=true] .ico { animation: quick-context-spin 850ms linear infinite; }
+.compact-chat #quickRefreshContext:disabled { cursor: default; opacity: .65; }
+@keyframes quick-context-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .compact-chat #quickRefreshContext[aria-busy=true] .ico { animation: none; } }
+.compact-chat .compact-title { min-width: 0; flex: 1; padding-inline: 5px; overflow: hidden; }
+.compact-chat .compact-title #chatTitle {
+  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 100%;
+  font-size: calc(13px * var(--text-scale, 1)); line-height: 1.4; font-weight: 550;
+}
+.compact-chat .quick-capture-status:not([hidden]) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.compact-chat [data-panel=chat] { grid-template-columns: minmax(0, 1fr); padding: 0; gap: 0; }
+.compact-chat [data-panel=chat] .card.is-session {
+  min-width: 0; max-width: none; width: 100%; background: var(--page);
+  border: 0; border-radius: 0;
+}
+.compact-chat .chat-head { display: none; }
+.compact-chat .card.is-session > .subhead { padding-inline: 14px; min-height: 0; }
+.compact-chat .subhead:not(:has(#chatFind:not([hidden]))) { display: none; }
+.compact-chat .card.is-session > #chatBody { padding: 14px 16px 12px; }
+.compact-chat #timelineEmpty { left: 16px; right: 16px; gap: 14px; font-size: 21px; }
+.compact-chat .welcome-mark { --ico: 34px; }
+.compact-chat .composer {
+  width: calc(100% - 20px); margin: 8px auto 10px; padding: 12px 10px 8px; border-radius: 18px;
+  grid-template-columns: minmax(0, 1fr) auto auto 34px; gap: 5px;
+}
+.compact-chat .composer textarea { font-size: calc(14px * var(--text-scale, 1)); max-height: 32vh; padding-bottom: 9px; }
+.compact-chat .composer-images { min-width: 0; max-height: min(30vh, 200px); overflow: auto; padding: 5px 5px 4px 0; margin-bottom: 2px; scrollbar-width: thin; align-items: flex-start; }
+.compact-chat .composer-context-card { position: relative; min-width: 0; width: 100%; border: 1px solid var(--line); border-radius: 10px; background: var(--page); }
+.compact-chat .composer-context-pending { min-height: 50px; display: flex; align-items: center; gap: 9px; padding: 7px; color: var(--soft); font-size: 12px; }
+.compact-chat .composer-context-pending .ico { --ico: 18px; }
+.compact-chat .composer-dock { transition: none; animation: none !important; }
+.compact-chat .composer-context-card details { min-width: 0; }
+.compact-chat .composer-context-card summary { display: flex; align-items: center; gap: 9px; padding: 7px 24px 7px 7px; cursor: pointer; list-style: none; min-width: 0; }
+.compact-chat .composer-context-card summary::-webkit-details-marker { display: none; }
+.compact-chat .composer-context-card summary::after { content: '›'; font-size: 16px; color: var(--soft); flex: none; transition: transform 140ms ease; }
+.compact-chat .composer-context-card details[open] summary::after { transform: rotate(90deg); }
+.compact-chat .composer-context-card summary img { width: 56px; height: 34px; object-fit: contain; background: var(--sunk); border-radius: 5px; flex: none; }
+.compact-chat .composer-context-glyph { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 6px; background: var(--sunk); color: var(--soft); flex: none; }
+.compact-chat .composer-context-label { flex: 1; min-width: 0; }
+.compact-chat .composer-context-label :is(strong, span) { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compact-chat .composer-context-label strong { font-size: 12px; font-weight: 550; color: var(--ink); }
+.compact-chat .composer-context-label span { font-size: 10px; color: var(--soft); margin-top: 3px; }
+.compact-chat .composer-context-text { font: 11px/1.5 var(--font-mono, monospace); white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; padding: 8px; color: var(--soft); border-top: 1px solid var(--line); max-height: 110px; overflow-y: auto; }
+.compact-chat .composer-context-card .image-remove { top: 5px; right: 5px; background: var(--sunk); color: var(--soft); }
+.compact-chat .composer-context-card .image-remove:hover { background: var(--hover); color: var(--ink); }
+.compact-chat .composer-primary-controls { gap: 2px; }
+.compact-chat .composer #modelMenu { width: auto; max-width: 150px; min-width: 100px; }
+.compact-chat .composer #createPlan > span { display: none; }
+.compact-chat .composer .send-button { width: 34px; height: 34px; }
+.compact-chat .composer-dock { width: calc(100% - 20px); max-width: none; }
+.compact-chat #composerSettings .composer-popover { max-width: calc(100vw - 24px); }
+.compact-chat .model-menu .composer-popover { max-width: calc(100vw - 24px); }
+.compact-chat #searchDialog.quick-history-drawer { width: calc(100vw - 18px); max-width: 600px; height: min(350px, calc(100dvh - 65px)); max-height: none; margin: 48px auto auto; border-radius: 12px; }
+.compact-chat .quick-history-heading { display: flex; align-items: center; gap: 6px; padding: 9px 10px 5px 14px; flex: none; }
+.compact-chat .quick-history-heading > strong { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; }
+.compact-chat .quick-history-new, .compact-chat .quick-history-close { display: flex; align-items: center; gap: 5px; border: 0; background: transparent; padding: 6px 8px; border-radius: 7px; color: var(--soft); font-size: 12px; }
+.compact-chat .quick-history-new:hover, .compact-chat .quick-history-close:hover { background: var(--hover); color: var(--ink); }
+.compact-chat .quick-history-drawer .search-dialog-field { height: 40px; margin: 3px 10px 0; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; }
+.compact-chat .quick-history-drawer .search-dialog-field input { font-size: 13px; }
+.compact-chat .quick-history-drawer .search-dialog-results { padding: 5px 8px 8px; }
+.compact-chat .quick-history-drawer .search-result { position: relative; padding-right: 30px; }
+.compact-chat .quick-history-drawer .search-result b { font-size: 13px; }
+.compact-chat .quick-history-drawer .search-result.is-sel { background: var(--accent-wash); }
+.compact-chat .quick-history-current { position: absolute; right: 9px; top: 10px; color: var(--accent); --ico: 14px; }
+.compact-chat .quick-context-menu > summary { width: 32px; height: 36px; padding: 0; justify-content: center; }
+.compact-chat .quick-context-menu[aria-busy=true] > summary { opacity: .45; }
+.compact-chat .quick-context-menu > .composer-popover { width: max-content; min-width: 220px; max-width: min(290px, calc(100vw - 78px)); max-height: 68vh; overflow-y: auto; }
+.compact-chat .quick-context-divider { height: 1px; background: var(--line); margin: 4px 3px; }
+.compact-chat:not(.quick-selection-ready) .quick-replace-answer { display: none; }
+.compact-chat .quick-replace-dialog { width: min(520px, calc(100vw - 24px)); max-height: calc(100vh - 24px); padding: 18px; color: var(--ink); background: var(--card); border: 1px solid var(--edge); border-radius: 14px; }
+.compact-chat .quick-replace-dialog::backdrop { background: #0007; }
+.compact-chat .quick-replace-dialog h2 { margin: 0 0 8px; font-size: 16px; }
+.compact-chat .quick-replace-dialog p { color: var(--soft); font-size: 13px; line-height: 1.5; margin: 0 0 12px; }
+.compact-chat .quick-replace-source { margin: 0 0 10px; padding: 8px 10px; background: var(--sunk); border-radius: 8px; color: var(--soft); font-size: 12px; }
+.compact-chat .quick-replace-source strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.compact-chat .quick-replace-source > div { max-height: 44px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.compact-chat .quick-replace-dialog textarea { display: block; width: 100%; min-height: 100px; height: min(32vh, 240px); resize: vertical; padding: 10px; color: var(--ink); background: var(--sunk); border: 1px solid var(--edge); border-radius: 8px; font: inherit; }
+.compact-chat .quick-replace-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+@media (max-width: 420px) {
+  .compact-chat #composerModeLabel { display: none; }
+  .compact-chat #contextMeterCompact { display: none; }
+  .compact-chat .composer #createPlan { display: none; }
+  .compact-chat .composer #modelMenu { min-width: 88px; max-width: 118px; }
+  .compact-chat .card.is-session > #chatBody { padding-inline: 12px; }
+}

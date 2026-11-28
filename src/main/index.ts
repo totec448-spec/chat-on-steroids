@@ -145,6 +145,8 @@ import { browserWindowIconPath } from './window-icon.js';
 import { approvedChatGptImageRequest, RENDERER_CONTENT_SECURITY_POLICY } from './renderer-csp.js';
 import { editContextMenuTemplate } from './edit-context-menu.js';
 import { connectionLossLine, showConnectionLossNotice } from './connection-loss-notice.js';
+import { createQuickChat } from './quick-chat-window.js';
+import { QUICK_CHAT_PARTITION } from '../shared/quick-chat.js';
 
 /** Durable state file holding the multi-agent run. Hashes only, never credentials. */
 const SWARM_STATE = 'swarm';
@@ -284,6 +286,7 @@ function createWindow(): void {
   // corpse. Dropping it is what makes those paths take their existing null branch.
   window.on('closed', () => {
     window = null;
+    quickChat.workspaceClosed();
     if (!quitting && process.platform !== 'darwin' && !getConfig().ui.minimizeToTray) void shutdownPetOverlay();
   });
 
@@ -393,6 +396,17 @@ setBrowserWorkArea(() => screen.getPrimaryDisplay().workArea);
 // Until CSP/permission handlers and IPC are installed below, a re-launch is only a focus request
 // for the initial window that startup is already going to show, so do not construct one early.
 const windowActivation = createWindowActivationGate(showWindow);
+const quickChat = createQuickChat({
+  hasWorkspace: () => !!window && !window.isDestroyed(),
+  workspaceContents: () => window && !window.isDestroyed() ? window.webContents : null,
+  openWorkspace: id => {
+    windowActivation.request();
+    if (!window) return;
+    const target = window.webContents;
+    const open = (): void => { if (!target.isDestroyed()) target.send('session:write', id); };
+    if (target.isLoadingMainFrame()) target.once('did-finish-load', open); else open();
+  }
+});
 
 /** Build the native tray image from encoded PNGs, never platform-dependent bitmap bytes. */
 function trayIcon(running: boolean): Electron.NativeImage {
@@ -426,6 +440,7 @@ function refreshTray(): void {
       { label, enabled: false },
       { type: 'separator' },
       { label: mainText('Open'), click: windowActivation.request },
+      { label: mainText('Quick chat'), click: quickChat.toggle },
       // The CoS browser lives in the tray: its windows never sit in a taskbar or dock. Only once
       // it is selected and loaded; the default extension path shows exactly the menu it had.
       ...(cosBrowser && getConfig().ui.chatBrowser === 'cos' ? [{
@@ -672,6 +687,7 @@ void app.whenReady().then(async () => {
     changed: () => {
       const target = window;
       if (target && !target.isDestroyed()) target.webContents.send('session:changed');
+      quickChat.notify('session:changed');
     }
   };
   const checkSchedules = () => void runDueSchedules(Date.now(), scheduleDeps).catch(error => logWarn(`scheduled runs: the check failed (${safeFailureReason(error)})`));
@@ -812,27 +828,27 @@ void app.whenReady().then(async () => {
   // Electron supports only one onBeforeRequest listener per session: registering
   // another one anywhere on defaultSession would replace this URL safety gate.
   // Keep future request checks inside this listener rather than adding a second.
-  session.defaultSession.webRequest.onBeforeRequest({ urls: ['https://images.openai.com/*'] }, (details, callback) => {
-    const allowed = approvedChatGptImageRequest(details.url, details.resourceType, details.method);
-    if (!allowed) logWarn('static ChatGPT image request refused: unapproved URL or resource type');
-    callback({ cancel: !allowed });
-  });
+  for (const rendererSession of [session.defaultSession, session.fromPartition(QUICK_CHAT_PARTITION)]) {
+    rendererSession.webRequest.onBeforeRequest({ urls: ['https://images.openai.com/*'] }, (details, callback) => {
+      const allowed = approvedChatGptImageRequest(details.url, details.resourceType, details.method);
+      if (!allowed) logWarn('static ChatGPT image request refused: unapproved URL or resource type');
+      callback({ cancel: !allowed });
+    });
 
   // Strict CSP for our own page. Only the verified first-party static image host is
   // remote; scripts, connections and all other capabilities remain app-local.
-  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    callback({
-      responseHeaders: {
-        ...details.responseHeaders,
-        'Content-Security-Policy': [
-          RENDERER_CONTENT_SECURITY_POLICY
-        ]
-      }
+    rendererSession.webRequest.onHeadersReceived((details, callback) => {
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          'Content-Security-Policy': [RENDERER_CONTENT_SECURITY_POLICY]
+        }
+      });
     });
-  });
 
   // Deny every permission request; the UI needs none of them.
-  session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+    rendererSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+  }
 
   // From here on a second launch may safely focus/recreate the window: renderer security policy
   // is installed and the renderer's fixed IPC methods already have handlers before it can load.
@@ -844,11 +860,13 @@ void app.whenReady().then(async () => {
     () => {
       quitting = true;
       app.quit();
-    }
+    },
+    quickChat.notify
   );
   // Chats are restored here; the window, once enabled, can ask for its state before the pet overlay is ready.
   markStartup('restored');
   windowActivation.enable();
+  quickChat.register();
   if (!isBackgroundLaunch(process.argv)) windowActivation.request();
   // The desktop pet overlay is independent of the main window once started; it stays hidden
   // until a pet is enabled.
@@ -904,6 +922,7 @@ void app.whenReady().then(async () => {
 app.on('before-quit', () => {
   if (!ownsAppRuntime(hasSingleInstanceLock)) return;
   quitting = true;
+  quickChat.dispose();
   // From this point `will-quit` owns a bounded teardown. A Dock click/relaunch arriving while
   // that sequence drains must not recreate or reveal a window after the tray has disappeared.
   windowActivation.disable();

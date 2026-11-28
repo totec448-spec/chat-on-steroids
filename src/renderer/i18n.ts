@@ -179,9 +179,9 @@ export function initLanguage(): void {
     }
   }
   document.documentElement.lang = language;
-  const select = document.getElementById('uiLanguage') as HTMLSelectElement;
+  const select = document.getElementById('uiLanguage') as HTMLSelectElement | null;
   syncLanguageControls();
-  select.addEventListener('change', () => setLanguage(parseLanguage(select.value)));
+  select?.addEventListener('change', () => setLanguage(parseLanguage(select.value)));
   for (const button of document.querySelectorAll<HTMLButtonElement>('[data-language]')) {
     button.addEventListener('click', () => setLanguage(parseLanguage(button.dataset.language)));
   }
