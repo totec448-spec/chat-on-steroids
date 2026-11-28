@@ -979,7 +979,7 @@ export function setGoalObjective(conversationId: string, text: string): string {
 export async function setGoalObjectiveNow(conversationId: string, text: string, stagedToken?: string): Promise<string> {
   const goal = text.trim();
   return saveGoalControl(pendingGoalObjectives, conversationId, GOAL_OBJECTIVES_STATE, snapshotGoalObjectives, (targetConversationId) => {
-    if (stagedToken ? targetConversationId !== conversationId || !namedGoalSaveCurrent(conversationId, stagedToken) : !!goalSwitches.get(targetConversationId)?.pendingObjective) throw new Error('conversation_changed');
+    if (stagedToken ? targetConversationId !== conversationId || !namedGoalSaveCurrent(conversationId, stagedToken) : goalObjectiveSavePending(targetConversationId)) throw new Error('conversation_changed');
     const next = new Map(goalObjectives);
     next.delete(targetConversationId);
     if (goal) next.set(targetConversationId, goal);
@@ -1106,9 +1106,20 @@ export interface GoalSwitchesSnapshot {
  * old conversation is retired: turning Goal off where it pops up writes `enabled: false` for
  * that chat alone, and no later app-wide change can revive it.
  */
-type GoalSwitchRow = { enabled: boolean; mode: GoalMode; afterTurn?: boolean; at: number; pendingObjective?: string; role?: 'decision'; sourceSessionId?: string;
+type GoalSwitchRow = { enabled: boolean; mode: GoalMode; afterTurn?: boolean; at: number; pendingObjective?: string | null; role?: 'decision'; sourceSessionId?: string;
   context?: { count: number; hash: string; instructions: string } };
 const goalSwitches = new Map<string, GoalSwitchRow>();
+// A string is a live named-save token. null is a revoked token whose Off fence
+// must survive master switches, capacity pruning and restart until a named retry.
+function hasObjectiveFence(row: GoalSwitchRow | undefined): boolean {
+  return row?.pendingObjective !== undefined;
+}
+function protectedGoalSwitch(row: GoalSwitchRow | undefined): boolean {
+  return row?.role === 'decision' || hasObjectiveFence(row);
+}
+export function goalObjectiveSavePending(conversationId: string): boolean {
+  return hasObjectiveFence(goalSwitches.get(conversationId));
+}
 let goalSwitchWrites: Promise<unknown> = Promise.resolve();
 function serialGoalSwitch<T>(work: () => Promise<T>): Promise<T> {
   const result = goalSwitchWrites.then(work, work);
@@ -1128,7 +1139,7 @@ const MAX_GOAL_SWITCHES = 400;
 
 function boundGoalSwitches(switches = goalSwitches): void {
   if (switches.size <= MAX_GOAL_SWITCHES) return;
-  const oldestFirst = [...switches.entries()].filter(([, row]) => row.role !== 'decision' && !row.pendingObjective).sort((a, b) => a[1].at - b[1].at);
+  const oldestFirst = [...switches.entries()].filter(([, row]) => !protectedGoalSwitch(row)).sort((a, b) => a[1].at - b[1].at);
   for (const [conversationId] of oldestFirst.slice(0, switches.size - MAX_GOAL_SWITCHES)) {
     switches.delete(conversationId);
   }
@@ -1165,11 +1176,12 @@ export function restoreGoalSwitches(snapshot: GoalSwitchesSnapshot | null): void
     const context = sourceSessionId && raw.context && Number.isSafeInteger(raw.context.count) && raw.context.count >= 0
       && /^[a-f0-9]{64}$/.test(raw.context.hash) && /^[a-f0-9]{64}$/.test(raw.context.instructions) ? raw.context : undefined;
     const interrupted = raw.role !== 'decision' && Object.prototype.hasOwnProperty.call(raw, 'pendingObjective');
-    const pendingObjective = interrupted && typeof raw.pendingObjective === 'string' && /^[a-f0-9-]{36}$/i.test(raw.pendingObjective) ? raw.pendingObjective : undefined;
+    const validMarker = raw.pendingObjective === null || (typeof raw.pendingObjective === 'string' && /^[a-f0-9-]{36}$/i.test(raw.pendingObjective));
     // A damaged marker is not permission to resume the interrupted save.
-    if (interrupted && !pendingObjective) logWarn('goal: invalid pending objective marker; restoring the chat Off');
+    if (interrupted && !validMarker) logWarn('goal: invalid pending objective marker; restoring the chat Off');
     goalSwitches.set(raw.conversationId, { enabled: raw.role === 'decision' || interrupted ? false : raw.enabled, mode: raw.mode, at,
-      ...(pendingObjective ? { pendingObjective } : {}),
+      // No pre-restart save can finish now. Keep its fence, not its authority.
+      ...(interrupted ? { pendingObjective: null } : {}),
       ...(raw.afterTurn === true && raw.role !== 'decision' ? { afterTurn: true } : {}),
       ...(raw.role === 'decision' ? { role: 'decision' as const, sourceSessionId, context } : {}) });
   }
@@ -1183,7 +1195,7 @@ function persistGoalSwitches(): void {
 /** This chat's switch: its own override when it has one, otherwise the app-wide setting. */
 export function goalSwitchFor(conversationId: string): { enabled: boolean; mode: GoalMode; own: boolean; afterTurn: boolean } {
   const own = goalSwitches.get(conversationId);
-  if (own) return { enabled: own.role !== 'decision' && own.enabled, mode: own.mode, own: true, afterTurn: own.afterTurn === true };
+  if (own) return { enabled: !protectedGoalSwitch(own) && own.enabled, mode: own.mode, own: true, afterTurn: own.afterTurn === true };
   const goal = getConfig().goal;
   return { enabled: goal.enabled, mode: goal.mode, own: false, afterTurn: false };
 }
@@ -1209,7 +1221,7 @@ export function registerGoalDecisionChat(conversationId: string, sourceSessionId
     if (sourceSessionId && before?.sourceSessionId && before.sourceSessionId !== sourceSessionId) throw new Error('goal_helper_wrong_source');
     if (sourceSessionId && [...goalSwitches].some(([id, row]) => id !== targetConversationId && row.sourceSessionId === sourceSessionId)) throw new Error('goal_helper_already_bound');
     if (before?.role === 'decision' && (!sourceSessionId || before.sourceSessionId === sourceSessionId)) return { result: undefined };
-    if (before?.role !== 'decision' && !before?.pendingObjective && [...goalSwitches.values()].filter(row => row.role === 'decision' || row.pendingObjective).length >= MAX_GOAL_SWITCHES) {
+    if (!protectedGoalSwitch(before) && [...goalSwitches.values()].filter(protectedGoalSwitch).length >= MAX_GOAL_SWITCHES) {
       throw new Error('goal_helper_capacity');
     }
     const next = new Map(goalSwitches);
@@ -1233,7 +1245,7 @@ export async function beginNamedGoalSave(conversationId: string, mode: GoalMode)
   return saveGoalControl(pendingGoalSwitches, conversationId, GOAL_SWITCHES_STATE, snapshotGoalSwitches, target => {
     const before = goalSwitches.get(target);
     if (before?.role === 'decision') throw new Error('goal_worker_chat');
-    if (!before && [...goalSwitches.values()].filter(row => row.role === 'decision' || row.pendingObjective).length >= MAX_GOAL_SWITCHES) throw new Error('goal_switch_capacity');
+    if (!protectedGoalSwitch(before) && [...goalSwitches.values()].filter(protectedGoalSwitch).length >= MAX_GOAL_SWITCHES) throw new Error('goal_switch_capacity');
     const staged = new Map(goalSwitches);
     staged.set(target, { enabled: false, mode, afterTurn: before?.afterTurn ?? false,
       at: Math.max(Date.now(), (before?.at ?? 0) + 1), pendingObjective: token });
@@ -1301,7 +1313,7 @@ export async function setGoalSwitchNow(
   /** Who changed it, for the log line an accepted change writes (#1882). */
   from?: string
 ): Promise<{ enabled: boolean; mode: GoalMode }> {
-  if (goalSwitches.get(conversationId)?.pendingObjective) {
+  if (goalObjectiveSavePending(conversationId)) {
     invalidateGoalControlWrites(pendingGoalObjectives, [conversationId]);
     invalidateGoalControlWrites(pendingGoalSwitches, [conversationId]);
   }
@@ -1316,13 +1328,15 @@ export async function setGoalSwitchNow(
     (targetConversationId) => {
       const before = goalSwitches.get(targetConversationId);
       if (before?.role === 'decision') return { result: { enabled: false, mode: before.mode } };
-      if (!before && [...goalSwitches.values()].filter(row => row.role === 'decision' || row.pendingObjective).length >= MAX_GOAL_SWITCHES) {
+      if (!before && [...goalSwitches.values()].filter(protectedGoalSwitch).length >= MAX_GOAL_SWITCHES) {
         throw new Error('goal_switch_capacity');
       }
       const was = goalSwitchFor(targetConversationId);
-      const next = applyGoalSwitch(was, which, on);
+      const fenced = hasObjectiveFence(before);
+      const next = fenced ? { enabled: false, mode: on ? which : was.mode } : applyGoalSwitch(was, which, on);
       const staged = new Map(goalSwitches);
       staged.set(targetConversationId, { enabled: next.enabled, mode: next.mode,
+        ...(fenced ? { pendingObjective: null } : {}),
         afterTurn: afterTurn ?? before?.afterTurn ?? false, at: Date.now() });
       boundGoalSwitches(staged);
       return {
@@ -1330,6 +1344,7 @@ export async function setGoalSwitchNow(
         publish: () => {
           const armedBefore = goalArmedFor(targetConversationId);
           publishGoalSwitches(staged);
+          if (fenced && on) logInfo(`goal: ${targetConversationId} remains Off until its named objective is saved again`);
           const changed = was.enabled !== next.enabled || was.mode !== next.mode;
           // Only an accepted change ends the kept "goal is met"; saving it as it was does not (CodeRabbit).
           if (changed) forgetGoalOutcome(targetConversationId);
@@ -1361,11 +1376,10 @@ export function clearAllGoalSwitches(): void {
   if (goalSwitches.size === 0) return;
   let cleared = 0;
   for (const [id, row] of goalSwitches) {
-    if (row.pendingObjective) {
+    if (hasObjectiveFence(row)) {
       // A master stop supersedes a partial named save, but deleting its Off
       // override would let the newly persisted objective arm the chat by inheritance.
-      const { pendingObjective: _pending, ...off } = row;
-      goalSwitches.set(id, { ...off, enabled: false });
+      goalSwitches.set(id, { ...row, enabled: false, pendingObjective: null });
       invalidateGoalControlWrites(pendingGoalObjectives, [id]);
       logInfo(`goal: ${id} named objective save superseded by master Off`);
     } else if (row.role !== 'decision' && goalSwitches.delete(id)) cleared++;
@@ -1391,7 +1405,7 @@ export function moveGoalSwitch(fromConversationId: string, toConversationId: str
   if (!row) return false;
   invalidateGoalControlWrites(pendingGoalSwitches, [toConversationId]);
   goalSwitches.delete(fromConversationId);
-  goalSwitches.set(toConversationId, row);
+  goalSwitches.set(toConversationId, hasObjectiveFence(row) ? { ...row, enabled: false, pendingObjective: null } : row);
   persistGoalSwitches();
   // #1882: which mode the replacement chat took over, so a page that later shows another can be compared.
   logInfo(`goal: ${fromConversationId}'s own ${row.enabled ? row.mode : 'Normal'} switch moved to ${toConversationId} (Compact & Resume)`);

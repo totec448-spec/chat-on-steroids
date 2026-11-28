@@ -4756,8 +4756,9 @@ latest eligible stable reply with a new acceptance identity; Off retires that ob
 its pending attempt. Objective text survives Off/completion for later reuse. Repeated On → Off
 → On → Off must operate on current durable authority, not an old callback's enabled snapshot.
 Master Off clears ordinary chat overrides while keeping internal helper-role records. A staged
-named objective save is instead left explicitly Off so its partially stored text cannot arm
-by inheritance; the pending save token is revoked.
+named objective save is instead left explicitly Off with a durable revoked-token marker
+so repeated master stops cannot erase its fence and arm partially stored text by inheritance.
+A plain mode switch cannot lift this fence; retry the named objective save explicitly.
 
 **Durable control publication.** `setGoalSwitchNow` and `setGoalObjectiveNow` use
 `saveGoalControl`: serialize the save, stage its snapshot outside the accepted maps, and
@@ -4770,12 +4771,16 @@ rejected renames, supersession, movement, rebasing and corrective-write failures
 per-ledger publication boundary; master/config/secret changes remain separate ledgers (§21).
 
 A named-mode objective save through either UI stages an explicit Off row with a
-\`pendingObjective\` token in the existing switch ledger. After the objective and any
+`pendingObjective` token in the existing switch ledger. After the objective and any
 eligible reply debt are durably accepted, the same token may publish the requested mode.
-A restart or superseded/failed save leaves the staged row Off; retry the named save
-explicitly. Compact & Resume moves the accepted Off row but does not commit the old
-frontend's token. Older rows without the marker keep their previous semantics, and an
-invalid marker restores Off. This is ordered publication, not cross-file rollback.
+A master stop, restart or Compact & Resume revokes the token to `null` but keeps the
+Off fence. Malformed markers also restore Off. Only a successful named retry removes
+the fence; the editor can offer that retry without first enabling automation.
+Ordinary rows without a marker retain their previous semantics. The 400-row limit
+evicts ordinary preferences first; helper identity and interrupted-save fences are
+protected. If all 400 rows are protected, a new named save is refused rather than
+evicting a fence, but an existing fenced chat can retry. This is ordered publication,
+not cross-file rollback.
 
 Deliberate On files/rearms an obligation **only when the chat is idle**: a proven eligible final
 or an exhausted model-specific silence/failure window with no current work. Generating chats,

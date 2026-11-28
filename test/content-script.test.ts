@@ -24654,6 +24654,18 @@ describe('the goal loop', () => {
      * answer, or the Off somebody just chose would leave the loop running with no control left
      * anywhere in the sheet that claimed to have stopped it.
      */
+    it('offers a safe named retry from Off only for an interrupted objective save', async () => {
+      await open();
+      const held = { enabled: false, own: true, mode: 'loop', hasKey: true, model: MODEL,
+        objective: 'Finish the report', blocked: '', objectiveSavePending: true };
+      const view = sheet(held);
+      expect(view.mode!.value).toBe('off');
+      expect(view.objective).toMatchObject({ savable: true, mode: 'loop', driving: 'loop' });
+      expect(view.objective.actions[0]).toMatchObject({ disabled: false, mode: 'loop' });
+      expect(sheet({ ...held, objectiveSavePending: false }).objective.savable).toBe(false);
+      expect(sheet({ ...held, blocked: 'worker' }).objective.available).toBe(false);
+    });
+
     it('lets a chat that answered for itself sit at Off with its task still written down', async () => {
       await open();
       const carried = {

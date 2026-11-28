@@ -3004,9 +3004,9 @@
             const stored = reply.data && typeof reply.data.objective === 'string' ? reply.data.objective : carried;
             const switched =
               reply.data && typeof reply.data.mode === 'string' && typeof reply.data.enabled === 'boolean'
-                ? { enabled: reply.data.enabled, mode: reply.data.mode, own: true }
+                ? { enabled: reply.data.enabled, configuredEnabled: reply.data.enabled, mode: reply.data.mode, own: true }
                 : null;
-            goalConfig = { ...(goalConfig || {}), ...(switched || {}), objective: stored };
+            goalConfig = { ...(goalConfig || {}), ...(switched || {}), objective: stored, objectiveSavePending: false };
           } else {
             objectiveError = replyError(reply) || t('content_goal_save_failed', 'the goal could not be saved to this chat');
           }
@@ -7888,8 +7888,8 @@
     // One setting, one control. The app sends the mode beside `enabled`, so there is a single
     // value to read and the slider can only ever be in one of its three positions.
     const mode = goal && goal.mode === 'loop' ? 'loop' : 'goal';
-    const goalOn = Boolean(goal && (goal.configuredEnabled ?? goal.enabled)) && mode === 'goal';
-    const loopOn = Boolean(goal && (goal.configuredEnabled ?? goal.enabled)) && mode === 'loop';
+    const goalOn = Boolean(goal && !goal.objectiveSavePending && (goal.configuredEnabled ?? goal.enabled)) && mode === 'goal';
+    const loopOn = Boolean(goal && !goal.objectiveSavePending && (goal.configuredEnabled ?? goal.enabled)) && mode === 'loop';
     // Whether this chat has moved its own switch, which is what tells an Off somebody chose
     // here from an Off inherited from the app-wide setting. Only the second lets a saved goal
     // speak for the chat — see goalArmedFor() in src/main/goal.ts, which this mirrors.
@@ -7903,14 +7903,15 @@
       : '';
     // Is anything driving this chat at all? A saved goal is enough on its own, but only for a
     // chat that has never moved its own switch — the same rule the app applies.
-    const armed = own ? goalOn || loopOn : goalOn || loopOn || Boolean(objective);
+    const armed = goal?.objectiveSavePending !== true && (own ? goalOn || loopOn : goalOn || loopOn || Boolean(objective));
     const running = armed && hasKey && !blocked;
     // Which instruction would actually drive this chat, which is not the same question as
     // which switch is on. A chat that runs only because it carries a goal, with the standing
     // switch off, is driven as a Goal and may therefore stop. This mirrors goalDrivingMode()
     // in src/main/goal.ts exactly, and it is what the task editor below is labelled from — a
     // sheet that named the mode differently from the app would be worse than naming none.
-    const driving = loopOn ? 'loop' : 'goal';
+    const retrySave = !fresh && !blocked && goal?.objectiveSavePending === true;
+    const driving = retrySave ? mode : loopOn ? 'loop' : 'goal';
     // The slider's position: the one word for everything above. Off is a real position and not
     // merely "neither switch", which is why `armed` and not `enabled` decides it.
     const position = blocked ? 'off' : !armed ? 'off' : loopOn ? 'loop' : 'goal';
@@ -8059,7 +8060,7 @@
          * open editor is the one way a save could otherwise reach past an Off and switch the
          * chat back on behind the slider that had just turned it off.
          */
-        savable: fresh || position !== 'off',
+        savable: fresh || position !== 'off' || retrySave,
         /** Shown instead of the links once a goal exists, so it can be read without opening it. */
         summary: objective ? clampLine(objective, 120) : '',
         /** The mode this chat is being driven in right now, so the editor saves into it. */
@@ -8095,9 +8096,9 @@
                   : t('content_task_add', 'add task'),
                 // Off is not a mode this task could be saved into, so it is not offered as one.
                 // Picking Goal or Loop first is the same order the slider reads in.
-                disabled: position === 'off',
+                disabled: position === 'off' && !retrySave,
                 hint:
-                  position === 'off'
+                  position === 'off' && !retrySave
                     ? t('content_task_pick_mode_first', 'Pick Goal or Loop above first — Off writes nothing.')
                     : objective
                       ? t(
@@ -8755,9 +8756,9 @@
       // task as the thing that speaks for it — which is what makes a clear here land on Off.
       const switched =
         reply.data && typeof reply.data.mode === 'string' && typeof reply.data.enabled === 'boolean'
-          ? { enabled: reply.data.enabled, mode: reply.data.mode, own: true }
+          ? { enabled: reply.data.enabled, configuredEnabled: reply.data.enabled, mode: reply.data.mode, own: true }
           : null;
-      goalConfig = { ...(goalConfig || {}), ...(switched || {}), objective: stored };
+      goalConfig = { ...(goalConfig || {}), ...(switched || {}), objective: stored, objectiveSavePending: false };
       menuEditing = false;
       menuDraft = '';
       if (!stored) return;

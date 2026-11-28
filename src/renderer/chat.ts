@@ -3848,7 +3848,8 @@ async function refreshSessionControls(): Promise<void> {
   const objective = $<HTMLTextAreaElement>('sessionObjective');
   if (objective.dataset.sessionId !== id || !objective.dataset.edited) {
     objective.value = controls.objective;
-    objective.dataset.saved = controls.objective;
+    if (controls.objectiveSavePending) delete objective.dataset.saved;
+    else objective.dataset.saved = controls.objective;
     objective.dataset.sessionId = id;
     delete objective.dataset.edited;
     $<HTMLSelectElement>('sessionObjectiveMode').value = controls.automation === 'loop' ? 'loop' : 'goal';

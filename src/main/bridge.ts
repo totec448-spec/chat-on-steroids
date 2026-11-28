@@ -105,6 +105,7 @@ import {
   goalReplySourceTurn,
   consumeGoalReplyForInputNow,
   goalSwitchFor,
+  goalObjectiveSavePending,
   goalViewFor, goalOutcomeFor,
   pendingGoalReplies,
   recordGoalPickupAttemptNow,
@@ -2549,6 +2550,7 @@ export type SessionControlsView = {
   loopAfterTurn?: boolean;
   proLoopDelivery?: boolean;
   objective: string;
+  objectiveSavePending?: boolean;
   activeTurnId: string | null;
   /**
    * A turn this chat's page still holds open although the app no longer counts it as work (its
@@ -2664,6 +2666,7 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
       : await goalWaitFor(id, sessionId, Date.now(), session.browserRecoveryDismissedAt !== undefined),
     stopPending: commands.some(c => c.spec.type === 'stop' && c.spec.sessionId === sessionId && c.spec.turnId === activeTurnId),
     objective: goalObjectiveFor(id),
+    ...(goalObjectiveSavePending(id) ? { objectiveSavePending: true } : {}),
     loopAfterTurn: control.afterTurn,
     proLoopDelivery: control.enabled && getConfig().ui.finishTool === true && session.selectedModel?.conversationId === id &&
       supportsFinishAutomation(control.mode, session.selectedModel.model, session.selectedModel.reasoningEffort),
@@ -3081,7 +3084,7 @@ export async function setSessionAutomation(sessionId: string, automation: Sessio
   forgetGoalWatch(id);
   notifyBrowserActivity(id);
   changed();
-  for (const listener of automationListeners) { try { listener(sessionId, automation !== 'off', from); } catch { /* a listener never fails a switch */ } }
+  for (const listener of automationListeners) { try { listener(sessionId, held.enabled && goalSwitchFor(id).enabled, from); } catch { /* a listener never fails a switch */ } }
   return sessionControlsFor(sessionId);
 }
 /** One ticket publication boundary shared by browser and app controls. */
@@ -4449,6 +4452,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       // This chat's own goal, and never a worker's: the loop is off there whatever is
       // stored, and reporting one would let the page offer to drive a chat the prime owns.
       objective: superseded || goalWorkerChat(id) ? '' : goalObjectiveFor(id),
+      ...(!superseded && !goalWorkerChat(id) && goalObjectiveSavePending(id) ? { objectiveSavePending: true } : {}),
       // Why the switch is drawn off when the user did not turn it off. Without this the
       // menu says "Goal off" in a worker chat and looks like a setting that failed to save.
       // 'blocked' is the user's own block from the app, which suspends the loop with the
@@ -5726,6 +5730,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           // on the same frame — the next poll is a second away and the Off it just chose would
           // read as an inherited one until then.
           own: chatSwitch !== null,
+          ...(scoped && goalObjectiveSavePending(settingsConversation as string) ? { objectiveSavePending: true } : {}),
           mode: chatSwitch ? chatSwitch.mode : next.goal.mode,
           ...goalProgressFor(chatSwitch ? chatSwitch.mode : next.goal.mode),
           hasKey: await goalKeyPresent(chatSwitch ? chatSwitch.mode : next.goal.mode)

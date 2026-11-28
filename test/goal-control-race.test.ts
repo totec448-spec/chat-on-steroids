@@ -474,7 +474,7 @@ it('logs turning off a Goal that only its objective armed', async () => {
     .toEqual([`goal: ${SOURCE} switched to Normal by a Stop sent by the app`]);
 });
 
-it('keeps a named save Off across restart and only arms the accepted token', async () => {
+it('keeps a named save Off across restart and requires a new explicit token', async () => {
   await goal.setGoalSwitchNow(SOURCE, 'goal', true);
   await goal.setGoalObjectiveNow(SOURCE, 'old objective');
   const token = await goal.beginNamedGoalSave(SOURCE, 'loop');
@@ -483,7 +483,10 @@ it('keeps a named save Off across restart and only arms the accepted token', asy
   const disk = await readDurable<GoalSwitchesSnapshot>(goal.GOAL_SWITCHES_STATE);
   goal.restoreGoalSwitches(disk);
   expect(goal.goalArmedFor(SOURCE)).toBe(false);
-  await goal.commitNamedGoalSave(SOURCE, token, true);
+  await expect(goal.commitNamedGoalSave(SOURCE, token, true)).rejects.toThrow('conversation_changed');
+  const retry = await goal.beginNamedGoalSave(SOURCE, 'loop');
+  await goal.setGoalObjectiveNow(SOURCE, 'new objective', retry);
+  await goal.commitNamedGoalSave(SOURCE, retry, true);
   expect(goal.goalSwitchFor(SOURCE)).toMatchObject({ enabled: true, mode: 'loop' });
   expect(goal.goalObjectiveFor(SOURCE)).toBe('new objective');
 });
@@ -527,6 +530,60 @@ it('master Stop revokes the pending token without arming the partially saved obj
   expect((await storedControls()).switches).toContainEqual(expect.objectContaining({ conversationId: SOURCE, enabled: false }));
 });
 
+it('keeps an interrupted named save Off through master Off, On, Off, restart and explicit retry', async () => {
+  const token = await goal.beginNamedGoalSave(SOURCE, 'goal');
+  await goal.setGoalObjectiveNow(SOURCE, 'Partially accepted objective', token);
+  goal.clearAllGoalSwitches();
+  expect(goal.goalArmedFor(SOURCE)).toBe(false);
+  await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: true, mode: 'goal' } });
+  expect(goal.goalArmedFor(SOURCE)).toBe(false);
+  await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false, mode: 'goal' } });
+  goal.clearAllGoalSwitches();
+  expect(goal.goalArmedFor(SOURCE)).toBe(false);
+  const disk = await storedControls();
+  expect(disk.switches).toContainEqual(expect.objectContaining({ conversationId: SOURCE, enabled: false, pendingObjective: null }));
+  goal.restoreGoalSwitches({ version: 1, savedAt: Date.now(), switches: disk.switches });
+  expect(goal.goalArmedFor(SOURCE)).toBe(false);
+  expect(goal.namedGoalSaveCurrent(SOURCE, token)).toBe(false);
+  await expect(goal.commitNamedGoalSave(SOURCE, token, true)).rejects.toThrow('conversation_changed');
+  await goal.setGoalSwitchNow(SOURCE, 'goal', true);
+  expect(goal.goalArmedFor(SOURCE)).toBe(false);
+  const retry = await goal.beginNamedGoalSave(SOURCE, 'goal');
+  await goal.setGoalObjectiveNow(SOURCE, 'Explicitly retried objective', retry);
+  await goal.commitNamedGoalSave(SOURCE, retry, true);
+  expect(goal.goalArmedFor(SOURCE)).toBe(true);
+  expect((await storedControls()).switches.find(row => row.conversationId === SOURCE)?.pendingObjective).toBeUndefined();
+});
+
+it('evicts ordinary preferences at capacity but never an interrupted named-save fence', async () => {
+  goal.restoreGoalSwitches({ version: 1, savedAt: 1, switches: Array.from({ length: 400 }, (_, index) => ({
+    conversationId: `ordinary-${index}`, enabled: false, mode: 'goal', at: index + 1
+  })) });
+  const token = await goal.beginNamedGoalSave(SOURCE, 'goal');
+  expect(goal.goalSwitchFor('ordinary-0').own).toBe(false);
+  expect(goal.snapshotGoalSwitches().switches).toHaveLength(400);
+  await goal.setGoalObjectiveNow(SOURCE, 'Finish the report', token);
+  goal.clearAllGoalSwitches();
+  const retained = goal.snapshotGoalSwitches().switches.find(row => row.conversationId === SOURCE)!;
+  goal.restoreGoalSwitches({ version: 1, savedAt: 1, switches: [
+    retained,
+    ...Array.from({ length: 398 }, (_, index) => ({
+      conversationId: `protected-${index}`, enabled: false, mode: 'goal' as const, at: index + 2, pendingObjective: null
+    })),
+    { conversationId: 'ordinary-last', enabled: false, mode: 'goal', at: 999 }
+  ] });
+  await goal.beginNamedGoalSave(TARGET, 'loop');
+  expect(goal.goalSwitchFor('ordinary-last').own).toBe(false);
+  await expect(goal.beginNamedGoalSave('overflow-chat', 'goal')).rejects.toThrow('goal_switch_capacity');
+  await expect(goal.registerGoalDecisionChat('overflow-helper')).rejects.toThrow('goal_helper_capacity');
+  expect(goal.goalArmedFor(SOURCE)).toBe(false);
+  expect(goal.snapshotGoalSwitches().switches).toHaveLength(400);
+  const retry = await goal.beginNamedGoalSave(SOURCE, 'goal');
+  await goal.setGoalObjectiveNow(SOURCE, 'Finish the report', retry);
+  await goal.commitNamedGoalSave(SOURCE, retry, true);
+  expect(goal.goalArmedFor(SOURCE)).toBe(true);
+});
+
 it('restores legacy switch rows and fails closed on a damaged pending objective marker', () => {
   goal.restoreGoalSwitches({ version: 1, savedAt: 1, switches: [
     { conversationId: SOURCE, enabled: true, mode: 'loop', at: 1 },
@@ -535,4 +592,6 @@ it('restores legacy switch rows and fails closed on a damaged pending objective 
   expect(goal.goalSwitchFor(SOURCE)).toMatchObject({ enabled: true, own: true, mode: 'loop' });
   expect(goal.goalSwitchFor(TARGET)).toMatchObject({ enabled: false, own: true, mode: 'goal' });
   expect(goal.namedGoalSaveCurrent(TARGET, 'damaged')).toBe(false);
+  goal.clearAllGoalSwitches();
+  expect(goal.snapshotGoalSwitches().switches).toContainEqual(expect.objectContaining({ conversationId: TARGET, enabled: false, pendingObjective: null }));
 });
