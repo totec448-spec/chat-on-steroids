@@ -17774,6 +17774,51 @@ describe('the goal loop over the bridge', () => {
    * hand. The mode the goal was written in is now pinned as that chat's own switch, in the
    * same request, so nothing between the save and the first draft can answer it differently.
    */
+  it.each([GOAL_OBJECTIVES_STATE, GOAL_REPLIES_STATE, GOAL_SWITCHES_STATE])('keeps named Goal Off if %s fails during the save', async state => {
+    await pair();
+    const chat = 'cafe0022-0000-4000-8000-000000000322';
+    const goal = await import('../src/main/goal.js');
+    await request('POST', '/events', { body: { conversationId: chat, events: [
+      { kind: 'user_message', time: Date.now(), text: 'finish the port', messageId: 'named-save-user' }
+    ] } });
+    await goal.setGoalSwitchNow(chat, 'goal', true);
+    await request('POST', '/events', { body: { conversationId: chat, events: [
+      { kind: 'turn_start', time: Date.now(), turnId: 'named-save-turn' },
+      { kind: 'turn_end', time: Date.now(), turnId: 'named-save-turn', outcome: 'completed' },
+      { kind: 'assistant_message', time: Date.now(), messageId: 'named-save-final', turnId: 'named-save-turn', text: 'First pass complete.', state: 'final', final: true, goalEligible: true, activeNow: true }
+    ] } });
+    expect(goal.goalPendingReplyFor(chat)).not.toBeNull();
+    await goal.setGoalObjectiveNow(chat, 'Old objective');
+    const fs = (await import('node:fs')).promises;
+    const rename = fs.rename.bind(fs);
+    let switchWrites = 0;
+    let failed = false;
+    const fault = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      const target = String(to);
+      if (target.endsWith(GOAL_SWITCHES_STATE + '.json')) switchWrites++;
+      if (!failed && target.endsWith(state + '.json') && (state !== GOAL_SWITCHES_STATE || switchWrites === 2)) {
+        failed = true;
+        expect(goal.goalArmedFor(chat)).toBe(false);
+        throw new Error('injected named-save write failure');
+      }
+      return rename(from, to);
+    });
+    try {
+      const saved = await request('POST', '/goal/objective', { body: { conversationId: chat, text: 'New objective', mode: 'goal' } });
+      expect(failed).toBe(true);
+      expect(saved.status).toBe(503);
+      expect(goal.goalArmedFor(chat)).toBe(false);
+      expect(goal.automaticFinishEnabled(chat)).toBe(false);
+      expect(await readDurable(GOAL_SWITCHES_STATE)).toMatchObject({
+        switches: expect.arrayContaining([expect.objectContaining({ conversationId: chat, enabled: false })])
+      });
+    } finally { fault.mockRestore(); }
+    const retried = await request('POST', '/goal/objective', { body: { conversationId: chat, text: 'New objective', mode: 'goal' } });
+    expect(retried.status).toBe(200);
+    expect(goal.goalArmedFor(chat)).toBe(true);
+    expect(goal.goalObjectiveFor(chat)).toBe('New objective');
+  });
+
   it('pins the mode a goal was written in as that chat’s own switch', async () => {
     await pair();
     const chat = 'cafe0022-0000-4000-8000-000000000022';

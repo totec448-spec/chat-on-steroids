@@ -473,3 +473,66 @@ it('logs turning off a Goal that only its objective armed', async () => {
   expect(info.mock.calls.map(([line]) => String(line)).filter(line => line.startsWith(`goal: ${SOURCE} `)))
     .toEqual([`goal: ${SOURCE} switched to Normal by a Stop sent by the app`]);
 });
+
+it('keeps a named save Off across restart and only arms the accepted token', async () => {
+  await goal.setGoalSwitchNow(SOURCE, 'goal', true);
+  await goal.setGoalObjectiveNow(SOURCE, 'old objective');
+  const token = await goal.beginNamedGoalSave(SOURCE, 'loop');
+  expect(goal.goalArmedFor(SOURCE)).toBe(false);
+  await goal.setGoalObjectiveNow(SOURCE, 'new objective', token);
+  const disk = await readDurable<GoalSwitchesSnapshot>(goal.GOAL_SWITCHES_STATE);
+  goal.restoreGoalSwitches(disk);
+  expect(goal.goalArmedFor(SOURCE)).toBe(false);
+  await goal.commitNamedGoalSave(SOURCE, token, true);
+  expect(goal.goalSwitchFor(SOURCE)).toMatchObject({ enabled: true, mode: 'loop' });
+  expect(goal.goalObjectiveFor(SOURCE)).toBe('new objective');
+});
+
+it('does not re-enable a named save whose control moved during resume', async () => {
+  const token = await goal.beginNamedGoalSave(SOURCE, 'goal');
+  await goal.setGoalObjectiveNow(SOURCE, 'new objective', token);
+  goal.moveGoalSwitch(SOURCE, TARGET);
+  goal.moveGoalObjective(SOURCE, TARGET);
+  await expect(goal.commitNamedGoalSave(SOURCE, token, true)).rejects.toThrow('conversation_changed');
+  expect(goal.goalArmedFor(TARGET)).toBe(false);
+  const retry = await goal.beginNamedGoalSave(TARGET, 'goal');
+  await goal.setGoalObjectiveNow(TARGET, 'new objective', retry);
+  await goal.commitNamedGoalSave(TARGET, retry, true);
+  expect(goal.goalArmedFor(TARGET)).toBe(true);
+});
+
+it('keeps automation Off when objective persistence fails after staging', async () => {
+  await goal.setGoalSwitchNow(SOURCE, 'goal', true);
+  const token = await goal.beginNamedGoalSave(SOURCE, 'loop');
+  const rename = fs.rename.bind(fs);
+  const fault = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+    if (path.basename(String(to)) === 'goal-objectives.json') throw new Error('disk failure');
+    return rename(from, to);
+  });
+  try {
+    await expect(goal.setGoalObjectiveNow(SOURCE, 'new objective', token)).rejects.toThrow('disk failure');
+    expect(goal.goalArmedFor(SOURCE)).toBe(false);
+    const disk = await readDurable<GoalSwitchesSnapshot>(goal.GOAL_SWITCHES_STATE);
+    expect(disk?.switches.find(row => row.conversationId === SOURCE)).toMatchObject({ enabled: false, pendingObjective: token });
+  } finally { fault.mockRestore(); }
+});
+
+it('master Stop revokes the pending token without arming the partially saved objective by inheritance', async () => {
+  const token = await goal.beginNamedGoalSave(SOURCE, 'goal');
+  await goal.setGoalObjectiveNow(SOURCE, 'new objective', token);
+  goal.clearAllGoalSwitches();
+  expect(goal.goalArmedFor(SOURCE)).toBe(false);
+  await expect(goal.commitNamedGoalSave(SOURCE, token, true)).rejects.toThrow('conversation_changed');
+  expect(goal.goalArmedFor(SOURCE)).toBe(false);
+  expect((await storedControls()).switches).toContainEqual(expect.objectContaining({ conversationId: SOURCE, enabled: false }));
+});
+
+it('restores legacy switch rows and fails closed on a damaged pending objective marker', () => {
+  goal.restoreGoalSwitches({ version: 1, savedAt: 1, switches: [
+    { conversationId: SOURCE, enabled: true, mode: 'loop', at: 1 },
+    { conversationId: TARGET, enabled: true, mode: 'goal', at: 2, pendingObjective: 'damaged' }
+  ] });
+  expect(goal.goalSwitchFor(SOURCE)).toMatchObject({ enabled: true, own: true, mode: 'loop' });
+  expect(goal.goalSwitchFor(TARGET)).toMatchObject({ enabled: false, own: true, mode: 'goal' });
+  expect(goal.namedGoalSaveCurrent(TARGET, 'damaged')).toBe(false);
+});
