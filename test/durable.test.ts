@@ -73,6 +73,28 @@ describe('durable state commit boundary', () => {
     await expect(readDurable('probe')).resolves.toBeNull();
   });
 
+  it('logs once why a strict read failed, naming only the safe cause, and again when the cause changes (#2308)', async () => {
+    const dir = await tempStore();
+    await writeDurableNow('probe', {});
+    const file = path.join(dir, 'state', 'probe.json');
+    await fs.writeFile(file, '{"private-diagnostic":"fixture-only"');
+    for (let i = 0; i < 3; i++) await expect(readDurable('probe', { strict: true })).rejects.toThrow();
+    const read = vi.spyOn(fs, 'readFile').mockRejectedValue(Object.assign(new Error(`read '${file}' fixture-only`), { code: 'EBUSY' }));
+    for (let i = 0; i < 3; i++) await expect(readDurable('probe', { strict: true })).rejects.toThrow();
+    read.mockRestore();
+    const lines = getLog().map(entry => entry.message).filter(line => line.includes('probe state'));
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain('damaged');
+    expect(lines[1]).toContain('EBUSY');
+    expect(lines.join('\n')).not.toMatch(/fixture-only|private-diagnostic/);
+    // A read that works again clears the memory, so a later failure is reported again.
+    await writeDurableNow('probe', {});
+    await readDurable('probe', { strict: true });
+    await fs.writeFile(file, 'null');
+    await expect(readDurable('probe', { strict: true })).rejects.toThrow();
+    expect(getLog().map(entry => entry.message).filter(line => line.includes('probe state'))).toHaveLength(3);
+  });
+
   it('starts independent pending files during flush without duplicating an active immediate write', async () => {
     await tempStore();
     let release!: () => void;
