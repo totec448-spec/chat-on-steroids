@@ -5743,3 +5743,22 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .turn-changes-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-self: start; }
 .turn-changes-review, .turn-changes-restore { justify-self: start; }
 @media (prefers-reduced-motion: reduce) { .turn-changes-chevron { transition: none; } }
+
+/* A development build's badge beside the name. The warning tokens already follow both themes.
+   `.title span` sets its own size and colour for the header's second line, so the badge restates them there. */
+:is(.app-badge, .title .app-badge, .sidebar-brand .app-badge) {
+  display: inline-block;
+  flex: none;
+  margin-left: 7px;
+  padding: 1px 6px;
+  border: 1px solid var(--warn-line);
+  border-radius: 999px;
+  background: var(--warn-wash);
+  color: var(--warn-ink);
+  font-size: calc(9.5px * var(--text-scale, 1));
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  line-height: 1.45;
+  vertical-align: middle;
+}
+.sidebar-brand .app-badge { margin-left: -4px; }

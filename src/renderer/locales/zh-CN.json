@@ -1,6 +1,7 @@
 {
   "Chat On Steroids (dev)": "Chat On Steroids (dev)",
   "About Chat On Steroids (dev)": "关于 Chat On Steroids (dev)",
+  "DEV": "DEV",
   "Suppress unattributed call notices": "隐藏未归属调用提示",
   "For standalone MCP clients: omit the informational identity notice when unattributed calls are allowed. Permissions and tool errors are unchanged.": "适用于独立 MCP 客户端：允许未归属调用时，省略身份识别提示。权限和工具错误保持不变。",
   "Another Git operation is in progress. Try again when it finishes.": "另一个 Git 操作正在进行。请在完成后重试。",
