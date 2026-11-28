@@ -28,7 +28,8 @@ import { initShortcutsDialog, shortcutGroups } from './shortcuts-dialog.js';
 import { initPlugins, applyPluginsState } from './plugins.js';
 import { initBrowserPreferences } from './browser-preferences.js';
 import { initSetupGuide } from './setup-guide.js';
-import { initAppearance } from './appearance.js';
+import { initAppearance, onAppearanceChanged } from './appearance.js';
+import { watchSetupRailLabels } from './setup-rail-fit.js';
 import { initKeychainNotice } from './keychain-notice.js';
 import { initDesktopAskNotice } from './desktop-ask-notice.js';
 import { initPet } from './pet.js';
@@ -3224,6 +3225,8 @@ const viewMenu = initViewMenu({
   zoom: { step: delta => zoom(zoomFactor + delta), reset: () => zoom(1), percent: () => zoomFactor * 100 }
 });
 initUsage();
+const refitSetupRail = watchSetupRailLabels(document.querySelector<HTMLElement>('.setup-rail'));
+if (refitSetupRail) onAppearanceChanged(refitSetupRail);
 initPlugins(apply);
 initPets(api, pet);
 openSkillsLibrary = initSkillsLibrary(api);
