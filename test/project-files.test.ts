@@ -170,6 +170,27 @@ it('creates and renames only regular entries below the explicit project root', a
   await expect(renameProjectEntry(project.id, '', 'renamed-root')).rejects.toThrow(/root/);
 });
 
+// Found by driving the Linux app: macOS and Linux allow a backslash in a file name, but every Files path was split on it
+// and creating or renaming to such a name was refused, so those files could not be previewed, saved or created.
+it.skipIf(process.platform === 'win32')('treats a backslash as part of a file name where the system allows it', async () => {
+  const projectPath = path.join(approved, 'project');
+  await fs.writeFile(path.join(projectPath, 'back\\slash.txt'), 'hello\n');
+  const project = await addProject(projectPath);
+  const listing = await listProjectDirectory(project.id, '');
+  expect(listing.entries.map(entry => entry.name)).toContain('back\\slash.txt');
+  expect(await previewProjectFile(project.id, 'back\\slash.txt')).toMatchObject({ path: 'back\\slash.txt', binary: false, text: 'hello\n' });
+  await expect(createProjectEntry(project.id, '', 'new\\name.txt', 'file')).resolves.toMatchObject({ path: 'new\\name.txt' });
+  expect(await fs.stat(path.join(projectPath, 'new\\name.txt'))).toBeTruthy();
+  await expect(renameProjectEntry(project.id, 'back\\slash.txt', 'other\\name.txt')).resolves.toMatchObject({ path: 'other\\name.txt' });
+  // A real separator and a traversal segment are still refused.
+  await expect(createProjectEntry(project.id, '', 'a/b.txt', 'file')).rejects.toThrow(/one file or folder name/);
+  await expect(previewProjectFile(project.id, 'src/../project')).rejects.toThrow(/invalid segment/);
+  // CodeRabbit on #2322: a name that merely starts with a backslash is an ordinary relative name here, so the Git panel
+  // and the Files panel agree on it instead of one listing a file the other refuses.
+  await fs.writeFile(path.join(projectPath, '\\leading.txt'), 'lead\n');
+  expect(await previewProjectFile(project.id, '\\leading.txt')).toMatchObject({ path: '\\leading.txt', text: 'lead\n' });
+  await expect(previewProjectFile(project.id, '/absolute')).rejects.toThrow(/relative/);
+});
 it('saves bounded text through the project sandbox and returns the new editor revision', async () => {
   const projectPath = path.join(approved, 'project');
   const file = path.join(projectPath, 'src', 'main.ts');
