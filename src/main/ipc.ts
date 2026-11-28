@@ -21,7 +21,7 @@ import { prepareSessionPrompt, prepareSkillFollowup } from './session/prompt.js'
 import { importSkillFile, importSkillPackage, listManagedSkills, listSkills, managedSkillDirectory, removeSkill, setManagedSkillEnabled } from './skills.js';
 import { checkGitHubSkillUpdates, importGitHubSkill, linkGitHubSkill, updateGitHubSkill } from './skill-github.js';
 import { SKILL_ID_PATTERN } from '../shared/skills.js';
-import { listSkillLibrary } from './skill-library.js';
+import { listDiscoveredUserSkills, listSkillLibrary } from './skill-library.js';
 import { installRecommendedSkill, listRecommendedSkills } from './recommended-skills.js';
 import { noteChatOrigin } from './session/recorder.js';
 import { refreshAppProxy } from './app-proxy.js';
@@ -1372,6 +1372,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('skills:list', () => listSkills());
   handle('skills:managed', () => listManagedSkills());
+  handle('skills:discovered', () => listDiscoveredUserSkills());
   handle('skills:setEnabled', async payload => {
     const { id, enabled } = z.object({ id: z.string().regex(SKILL_ID_PATTERN), enabled: z.boolean() }).strict().parse(payload);
     try {

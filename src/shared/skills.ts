@@ -24,6 +24,11 @@ export interface ManagedSkill extends SkillSummary {
   enabled?: boolean;
 }
 
+/** User-owned Skills shown for discovery only; management stays with their source application. */
+export interface DiscoveredUserSkill extends SkillSummary {
+  source: 'user-agents' | 'codex-home' | 'claude-home';
+}
+
 /** Read-only GitHub observation, scoped to the installed package revision it checked. */
 export interface GitHubSkillUpdateCheck {
   id: string;

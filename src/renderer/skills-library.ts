@@ -1,12 +1,14 @@
 import type { AppApi } from '../preload/index.js';
-import { parseGitHubSkillUrl, type GitHubSkillUpdateCheck, type ManagedSkill } from '../shared/skills.js';
+import { parseGitHubSkillUrl, type DiscoveredUserSkill, type GitHubSkillUpdateCheck, type ManagedSkill } from '../shared/skills.js';
 import { $, el, icon, initCardMenuDismissal, run, toast } from './dom.js';
 import { t, tn, ui } from './i18n.js';
 
-/** The managed CoS library only; project and user-discovered skills stay in composer discovery. */
+/** Managed packages retain their card menu; global user Skills appear as read-only cards. */
 export function initSkillsLibrary(api: AppApi): () => void {
   initCardMenuDismissal();
   let skills: ManagedSkill[] = [];
+  let discovered: DiscoveredUserSkill[] = [];
+  let discoveryEpoch = 0;
   let epoch = 0;
   // Until a list arrives the header says Loading…; a failed first load says so instead of loading for good.
   let loaded = false;
@@ -99,33 +101,45 @@ export function initSkillsLibrary(api: AppApi): () => void {
       return;
     }
     const query = $<HTMLInputElement>('skillsSearch').value.trim().toLocaleLowerCase();
-    const visible = skills.filter(skill => `${skill.id} ${skill.name} ${skill.description}`.toLocaleLowerCase().includes(query));
-    ui($('skillsCount'), 'textContent', () => tn('{0} skill', '{0} skills', skills.length));
+    const all = [...skills, ...discovered];
+    const visible = all.filter(skill => `${skill.id} ${skill.name} ${skill.description}`.toLocaleLowerCase().includes(query));
+    ui($('skillsCount'), 'textContent', () => tn('{0} skill', '{0} skills', all.length));
     host.replaceChildren();
     if (!visible.length) {
-      const empty = skills.length
+      const empty = all.length
         ? t('No skills match your search.')
         : t('No skills installed yet. Import a folder, SKILL.md, or GitHub link to get started.');
       host.append(el('p', 'plugin-no-results muted', empty));
       return;
     }
     for (const skill of visible) {
+      const external = 'source' in skill;
       const card = el('article', 'plugin-card pet-library-card skill-library-card');
       card.dataset.skillId = skill.id;
-      card.dataset.skillEnabled = String(skill.enabled !== false);
-      if (skill.enabled === false) card.classList.add('is-disabled');
+      if (!external) {
+        card.dataset.skillEnabled = String(skill.enabled !== false);
+        if (skill.enabled === false) card.classList.add('is-disabled');
+      }
       const entry = el('div', 'plugin-entry pet-library-entry');
       const artwork = el('div', 'skill-library-icon'); artwork.append(icon('i-skill'));
       const title = el('div', 'plugin-card-title');
       title.append(el('h2', '', skill.name), el('p', 'muted', skill.description || t('Reusable instructions for this workspace.')));
       const foot = el('div', 'plugin-card-foot');
       foot.append(el('span', 'skill-library-id', `/${skill.id}`));
-      if (skill.enabled === false) foot.append(el('span', 'skill-library-disabled', () => t('Disabled')));
+      if (!external && skill.enabled === false) foot.append(el('span', 'skill-library-disabled', () => t('Disabled')));
       const source = el('span', 'skill-library-source');
       source.setAttribute('aria-live', 'polite');
       foot.append(source);
       title.append(foot);
       entry.append(artwork, title);
+      if (external) {
+        // Provider names are proper nouns; no actions are offered for externally owned files.
+        const owner = skill.source === 'codex-home' ? 'Codex' : skill.source === 'claude-home' ? 'Claude' : 'Agents';
+        source.replaceChildren(icon('i-folder'), el('span', '', owner));
+        source.title = skill.path;
+        card.append(entry); host.append(card);
+        continue;
+      }
       const menu = document.createElement('details'); menu.className = 'plugin-menu';
       const summary = el('summary'); summary.append(icon('i-more'));
       ui(summary, 'aria-label', () => t('Actions for {0}', [skill.name]));
@@ -180,6 +194,16 @@ export function initSkillsLibrary(api: AppApi): () => void {
     }
   };
 
+  const refreshDiscovered = async (): Promise<void> => {
+    if (typeof api.listDiscoveredUserSkills !== 'function') return;
+    const own = ++discoveryEpoch;
+    try {
+      const response = await api.listDiscoveredUserSkills();
+      if (own !== discoveryEpoch) return;
+      if (response.ok) { discovered = response.data; render(); }
+    } catch { /* The managed library remains usable if a discovery-only read fails. */ }
+  };
+
   const setSkills = (next: ManagedSkill[]): void => {
     skills = next; loaded = true; loadFailed = false;
     for (const [id, check] of checks) {
@@ -187,6 +211,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
     }
     for (const id of checking) if (!skills.find(skill => skill.id === id)?.origin) checking.delete(id);
     render();
+    void refreshDiscovered();
   };
 
   /**

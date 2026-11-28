@@ -9,7 +9,7 @@ import { disabledManagedSkillTargets, listSkills, readSkill, readSkillTextSnapsh
 import { approvedManagedSkillLink, sameSkillLink } from './skill-links.js';
 import { parseCodexPluginManifest, parseSkillConfiguration, parseSkillFrontmatter, parseSkillInterface, type SkillConfiguration } from './skill-metadata.js';
 import { listInstalledCodexPlugins } from './codex-plugin-runtime.js';
-import type { ClaudePluginSkillProvenance, CodexPluginRuntimeEntry, CodexPluginSkillProvenance, LibrarySkill, SkillLibrary, SkillMetadata, SkillScope, SkillSource } from '../shared/skills.js';
+import type { ClaudePluginSkillProvenance, CodexPluginRuntimeEntry, CodexPluginSkillProvenance, DiscoveredUserSkill, LibrarySkill, SkillLibrary, SkillMetadata, SkillScope, SkillSource } from '../shared/skills.js';
 import type { SkillRoutingMetadata } from '../shared/skill-routing.js';
 import { discoverUserSkillPath } from './user-skills.js';
 
@@ -547,6 +547,17 @@ export async function listSkillLibrary(scope: SkillLibraryScope = {}, runtime: S
   }
   if (scope.projectPath) await approved(scope.projectPath);
   return library;
+}
+
+/** Project, system, plugin and managed packages are excluded from the read-only user cards. */
+export async function listDiscoveredUserSkills(): Promise<DiscoveredUserSkill[]> {
+  const library = await listSkillLibrary();
+  const sources: ReadonlySet<SkillSource> = new Set(['user-agents', 'codex-home', 'claude-home']);
+  return library.skills.filter(skill => skill.scope === 'user' && !skill.managed && sources.has(skill.source))
+    .map(skill => ({ id: skill.id, name: skill.displayName ?? skill.name,
+      description: skill.shortDescription ?? skill.description, path: skill.path,
+      source: skill.source as DiscoveredUserSkill['source'] }))
+    .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 }
 
 export async function readLibrarySkill(id: string, scope: SkillLibraryScope = {}, library?: SkillLibrary): Promise<SkillDocument> {
