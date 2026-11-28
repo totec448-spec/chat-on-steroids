@@ -16,6 +16,8 @@
 .appearance-panel .setting-text { flex: 1 1 180px; }
 .appearance-panel .setting > :is(select, .appearance-range, .setup-profile-controls) { min-height: 36px; }
 .appearance-panel .setting select { min-width: 130px; max-width: 100%; }
+.appearance-panel .setting > #quickChatShortcut { flex: 0 1 230px; width: 230px; max-width: 100%; min-width: 0; }
+.appearance-panel #quickChatShortcut[aria-invalid='true'] { border-color: var(--red); }
 .appearance-color { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border: 1px solid var(--edge); border-radius: 9px; background: var(--page); }
 .appearance-color input[type='color'] { appearance: none; width: 24px; height: 24px; padding: 0; border: 0; background: none; cursor: pointer; }
 .appearance-color input[type='color']::-webkit-color-swatch-wrapper { padding: 2px; }

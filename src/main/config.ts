@@ -7,6 +7,7 @@ import { appearanceSchema } from './appearance-schema.js';
 import { BROWSER_BRIDGE_PORTS } from '../shared/browser-bridge.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { CUSTOM_CONTINUE_MAX_CHARS } from '../shared/recovery.js';
+import { QUICK_CHAT_SHORTCUT, isQuickChatShortcut } from '../shared/quick-chat-shortcut.js';
 /**
  * Non-secret settings, stored as one small JSON file in the app's userData folder.
  * No database: there are at most a handful of roots and a dozen booleans.
@@ -429,6 +430,8 @@ const configSchema = z.object({
     autoSelectSkills: z.boolean().optional().default(false),
     tabsToKeepOpen: z.number().int().min(1).max(50).optional(),
     minimizeToTray: z.boolean(),
+    quickChatShortcutEnabled: z.boolean().optional().default(true),
+    quickChatShortcut: z.string().refine(isQuickChatShortcut).optional().default(QUICK_CHAT_SHORTCUT),
     autoConnect: z.boolean(),
     startAtLogin: z.boolean().optional().default(false),
     turnNotifications: z.boolean().optional().default(true),
@@ -711,7 +714,7 @@ export function defaultConfig(platform: NodeJS.Platform = process.platform, rele
     ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, keepAwake: true, keepScreenAwake: false, cosBrowserMinimize: 'taskbar', turnNotifications: true, sounds: false, rotateTurnMinutes: 30, rotateStopFallback: true, rotateStopFallbackAdopted: true, localAppUsage: true, privacyScreenshots: false, secretsShield: true, theme: 'dark', autoRefreshPlugins: true, autoSelectSkills: false, backgroundChats: true, backgroundPlacement: 'window', followUp: 'steer', enterSends: true, browserBridgePort: 'auto', autoContinue: true, followOutput: true, mentionCore: true, mentionPlugins: false, linuxDesktopEnabled: false,
       // The built-in browser is opt-in: Chrome with the companion stays the default for new and
       // existing installs alike, and the built-in one runs only once someone chooses it.
-      chatBrowser: 'chrome' },
+      chatBrowser: 'chrome', quickChatShortcutEnabled: true, quickChatShortcut: QUICK_CHAT_SHORTCUT },
     sessions: { ...DEFAULT_SESSIONS },
     compaction: { ...DEFAULT_COMPACTION },
     multiAgent: { ...FIRST_LAUNCH_MULTI_AGENT },

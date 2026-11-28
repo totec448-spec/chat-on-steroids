@@ -5110,6 +5110,25 @@ renderer; Linux/macOS retain their existing full click-through visual-surface co
 Projects, workers, plans, model choice, usage and plugins have focused modules (§4). The renderer
 calls a fixed `preload/index.ts` allowlist into validated `ipc.ts`/`plugins-ipc.ts` handlers.
 No arbitrary IPC invocation, Node access, filesystem path opening or renderer-side secret store.
+The global Quick chat (`CommandOrControl+Shift+E`, with a tray entry when the OS refuses the
+shortcut) is a separate sandboxed window owned by `main/quick-chat-window.ts`. It loads the same
+`renderer/index.html` and `renderer/chat.ts` as the Workspace through a separate page derived at build/dev time, and
+uses the same validated preload and renderer security policy. Keep compact-only code in the shell
+and scoped CSS; do not fork the composer, transcript, search, attachments or provider executor.
+The history icon opens the shared chat-search controller in a history drawer with
+recent sessions, current-chat marking and a new-chat action; full search and draft ownership remain
+on the existing session selection path.
+Only the auxiliary window's main frame may request hide, pin, expand or readiness.
+The shortcut is configurable in General settings and reports native registration refusal.
+First show waits for compact renderer readiness; the panel does not fade or animate composer height.
+This increment does not observe or capture other applications or replace selections.
+Expand uses the exact durable session id and the workspace's existing `session:write` route.
+The Workspace row menu opens the exact session in Quick Chat through the verified Workspace main
+frame, reusing `session:write` after renderer readiness and preserving the destination draft.
+Shared chat updates are forwarded while the panel is visible. The compact window owns its own
+selection and UI drafts, does not follow the Workspace's browser tab, and does not own the outbox.
+Closing or hiding does not cancel admitted inputs. Attachment retention covers all live windows;
+staging in one must not prune files retained by a draft in another.
 Changing the selected session synchronously retires prior data/control ownership and handoff.
 Keep the last painted transcript and images inert while the destination detail loads, then
 replace them directly; queue/status repaints must not flash the New Chat welcome screen.

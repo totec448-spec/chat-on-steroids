@@ -156,6 +156,16 @@ it('translates every error the Files panel, projects, pets, skills and settings 
   }
 });
 
+it('translates the Quick Chat window errors in every locale', () => {
+  const source = readFileSync('src/main/quick-chat-window.ts', 'utf8');
+  const messages = [...source.matchAll(/(?:new Error\(|error: )'([^']+)'/g)].map(match => match[1]!);
+  expect(new Set(messages).size).toBeGreaterThanOrEqual(3);
+  for (const locale of LOCALES) {
+    const catalog = JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8')) as Record<string, string>;
+    expect(messages.filter(message => !catalog[message]?.trim()), locale).toEqual([]);
+  }
+});
+
 it('translates every backend error the global Scheduled page can show', () => {
   const messages = [
     'The session exists but its metadata could not be read.',

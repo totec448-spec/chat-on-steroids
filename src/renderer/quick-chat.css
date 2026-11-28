@@ -1,0 +1,76 @@
+/* Layout only. The Workspace owns the composer, transcript and all their states. */
+body.compact-chat { overflow: hidden; }
+.compact-chat .app {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 44px minmax(0, 1fr);
+  background: var(--page);
+  transition: none;
+}
+.compact-chat .app > main { grid-column: 1; grid-row: 2; }
+:root .compact-chat .app[data-screen='chat'] { background: var(--page); }
+.compact-chat .app > .notices,
+.compact-chat .app > .sidebar,
+.compact-chat .app-topbar > :is(#sidebarToggle, #viewMenu, .header-dock-controls) { display: none; }
+.compact-chat .app-topbar {
+  grid-column: 1; height: 44px; gap: 3px; padding: 6px 9px;
+  border-bottom: 0;
+  background: transparent;
+}
+.compact-chat .app-topbar > .compact-action {
+  width: 30px; height: 30px; display: grid; place-items: center;
+  flex: none; border: 0; border-radius: 8px; background: transparent; color: var(--soft);
+  -webkit-app-region: no-drag;
+}
+.compact-chat .compact-action:hover,
+.compact-chat .compact-action[aria-pressed=true] { background: var(--hover); color: var(--ink); }
+.compact-chat .compact-action .ico { --ico: 17px; --glyph: 17px; }
+.compact-chat .compact-title { min-width: 0; flex: 1; padding-inline: 5px; overflow: hidden; }
+.compact-chat .compact-title #chatTitle {
+  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 100%;
+  font-size: calc(13px * var(--text-scale, 1)); line-height: 1.4; font-weight: 550;
+}
+.compact-chat [data-panel=chat] { grid-template-columns: minmax(0, 1fr); padding: 0; gap: 0; }
+.compact-chat [data-panel=chat] .card.is-session {
+  min-width: 0; max-width: none; width: 100%; background: var(--page);
+  border: 0; border-radius: 0;
+}
+.compact-chat .chat-head { display: none; }
+.compact-chat .card.is-session > .subhead { padding-inline: 14px; min-height: 0; }
+.compact-chat .subhead:not(:has(#chatFind:not([hidden]))) { display: none; }
+.compact-chat .card.is-session > #chatBody { padding: 14px 16px 12px; }
+.compact-chat #timelineEmpty { left: 16px; right: 16px; gap: 14px; font-size: 21px; }
+.compact-chat .welcome-mark { --ico: 34px; }
+.compact-chat .composer {
+  width: calc(100% - 20px); margin: 8px auto 10px; padding: 12px 10px 8px; border-radius: 18px;
+  grid-template-columns: minmax(0, 1fr) auto auto 34px; gap: 5px;
+}
+.compact-chat .composer textarea { font-size: calc(14px * var(--text-scale, 1)); max-height: 32vh; padding-bottom: 9px; }
+.compact-chat .composer-images { min-width: 0; max-height: min(30vh, 200px); overflow: auto; padding: 5px 5px 4px 0; margin-bottom: 2px; scrollbar-width: thin; align-items: flex-start; }
+.compact-chat .composer-dock { transition: none; animation: none !important; }
+.compact-chat .composer-primary-controls { gap: 2px; }
+.compact-chat .composer #modelMenu { width: auto; max-width: 150px; min-width: 100px; }
+.compact-chat .composer #createPlan > span { display: none; }
+.compact-chat .composer .send-button { width: 34px; height: 34px; }
+.compact-chat .composer-dock { width: calc(100% - 20px); max-width: none; }
+.compact-chat #composerSettings .composer-popover { max-width: calc(100vw - 24px); }
+.compact-chat .model-menu .composer-popover { max-width: calc(100vw - 24px); }
+.compact-chat #searchDialog.quick-history-drawer { width: calc(100vw - 18px); max-width: 600px; height: min(350px, calc(100dvh - 65px)); max-height: none; margin: 48px auto auto; border-radius: 12px; }
+.compact-chat .quick-history-heading { display: flex; align-items: center; gap: 6px; padding: 9px 10px 5px 14px; flex: none; }
+.compact-chat .quick-history-heading > strong { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; }
+.compact-chat .quick-history-new, .compact-chat .quick-history-close { display: flex; align-items: center; gap: 5px; border: 0; background: transparent; padding: 6px 8px; border-radius: 7px; color: var(--soft); font-size: 12px; }
+.compact-chat .quick-history-new:hover, .compact-chat .quick-history-close:hover { background: var(--hover); color: var(--ink); }
+.compact-chat .quick-history-drawer .search-dialog-field { height: 40px; margin: 3px 10px 0; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; }
+.compact-chat .quick-history-drawer .search-dialog-field input { font-size: 13px; }
+.compact-chat .quick-history-drawer .search-dialog-results { padding: 5px 8px 8px; }
+.compact-chat .quick-history-drawer .search-result { position: relative; padding-right: 30px; }
+.compact-chat .quick-history-drawer .search-result b { font-size: 13px; }
+.compact-chat .quick-history-drawer .search-result.is-sel { background: var(--accent-wash); }
+.compact-chat .quick-history-current { position: absolute; right: 9px; top: 10px; color: var(--accent); --ico: 14px; }
+@media (max-width: 420px) {
+  .compact-chat #composerModeLabel { display: none; }
+  .compact-chat #contextMeterCompact { display: none; }
+  .compact-chat .composer #createPlan { display: none; }
+  .compact-chat .composer #modelMenu { min-width: 88px; max-width: 118px; }
+  .compact-chat .card.is-session > #chatBody { padding-inline: 12px; }
+}

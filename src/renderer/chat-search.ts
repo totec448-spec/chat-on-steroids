@@ -24,6 +24,8 @@ const RECENT_CHATS = 30;
 export interface ChatSearch {
   /** Opens the search dialog (its button, ⌘K / Ctrl+K and the View menu). */
   open(): void;
+  /** The compact chat switcher always starts at the recent conversations. */
+  openRecent(): void;
   /** Chats changed: an open search runs again, so new words and titles are found. */
   refresh(): void;
   /** The search dialog is open with a query and its results are shown. */
@@ -36,6 +38,8 @@ export interface ChatSearchOptions {
   selectedId(): string | null;
   /** The newest chats, newest first, offered before anything is typed. */
   recent(): Array<{ id: string; title: string }>;
+  /** Compact history drawer: use the same search and selection path, with a new-chat action. */
+  newChat?(): void;
   /** #1884: the actions ⌘K can run; while typing, the few that match follow the chats. */
   actions?(): PaletteAction[];
   /** #1884: the settings that match what is typed, as Settings' own search finds them. */
@@ -120,6 +124,10 @@ export function initChatSearch(options: ChatSearchOptions): ChatSearch {
     button.dataset.searchId = id;
     button.setAttribute('role', 'listitem');
     button.append(title);
+    if (options.newChat && id === options.selectedId()) {
+      button.setAttribute('aria-current', 'true');
+      button.append(icon('i-check', 'ico quick-history-current'));
+    }
     if (snippet) button.append(snippet);
     button.addEventListener('click', () => {
       close();
@@ -167,7 +175,10 @@ export function initChatSearch(options: ChatSearchOptions): ChatSearch {
     results.replaceChildren();
     if (!query()) {
       const recent = options.recent().slice(0, RECENT_CHATS);
-      if (!recent.length) return;
+      if (!recent.length) {
+        if (options.newChat) results.append(el('p', 'empty search-status', () => t('No chats yet.')));
+        return;
+      }
       results.append(el('p', 'search-heading', () => t("Recent")),
         list(recent.map(chat => row(chat.id, marked('b', '', chat.title || t("Untitled session"))))));
       return;
@@ -229,6 +240,21 @@ export function initChatSearch(options: ChatSearchOptions): ChatSearch {
     void search();
   };
 
+  if (options.newChat) {
+    dialog.classList.add('quick-history-drawer');
+    const heading = el('header', 'quick-history-heading');
+    const title = el('strong', '', () => t('History'));
+    const create = el('button', 'btn quick-history-new') as HTMLButtonElement;
+    create.type = 'button'; create.id = 'quickHistoryNew';
+    create.append(icon('i-plus'), el('span', '', () => t('New chat')));
+    create.addEventListener('click', () => close(() => options.newChat?.()));
+    const dismiss = el('button', 'btn quick-history-close') as HTMLButtonElement;
+    dismiss.type = 'button'; dismiss.append(icon('i-x'));
+    ui(dismiss, 'aria-label', () => t('Close')); ui(dismiss, 'title', () => t('Close'));
+    dismiss.addEventListener('click', () => close());
+    heading.append(title, create, dismiss); dialog.prepend(heading);
+  }
+
   ui(field, 'placeholder', () => t("Search chats"));
   ui(field, 'aria-label', () => t("Search chats"));
   ui(dialog, 'aria-label', () => t("Search chats"));
@@ -285,9 +311,23 @@ export function initChatSearch(options: ChatSearchOptions): ChatSearch {
 
   return {
     open,
+    openRecent: () => { field.value = ''; window.clearTimeout(typingTimer); open(); },
     // Chats change many times a second while they run; a running search catches up at most every
     // few seconds instead of re-reading the busy chat on every change.
-    refresh: () => { if (dialog.open && query() && Date.now() - searchedAt > REFRESH_MS) later(); },
+    refresh: () => {
+      if (!dialog.open) return;
+      if (!query() && options.newChat) {
+        // A live turn can update sessions many times per second. Preserve the focused row and
+        // scroll position by only repainting when the actual recent projection changed.
+        const recent = options.recent().slice(0, RECENT_CHATS);
+        const rows = [...results.querySelectorAll<HTMLElement>('[data-search-id]')];
+        if (rows.length !== recent.length || recent.some((chat, i) => rows[i]?.dataset.searchId !== chat.id || rows[i]?.querySelector('b')?.textContent !== (chat.title || t('Untitled session')) || rows[i]?.classList.contains('is-sel') !== (chat.id === options.selectedId()))) {
+          const focused = (document.activeElement as HTMLElement | null)?.dataset.searchId, scroll = results.scrollTop;
+          paint(); results.scrollTop = scroll;
+          if (focused) [...results.querySelectorAll<HTMLElement>('[data-search-id]')].find(row => row.dataset.searchId === focused)?.focus({ preventScroll: true });
+        }
+      } else if (query() && Date.now() - searchedAt > REFRESH_MS) later();
+    },
     get active() { return dialog.open && Boolean(query()); }
   };
 }

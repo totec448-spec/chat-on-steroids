@@ -1345,8 +1345,7 @@ it("copies a chat's ChatGPT link from its row menu (#1107)", async () => {
   await waitFor(() => expect(row()).not.toBeNull());
   const item = rowMenuItem(row(), 'copy-link')!;
   expect(item.textContent).toContain('Copy link');
-  // It sits right after Open in browser.
-  expect(item.previousElementSibling?.getAttribute('data-row-action')).toBe('open');
+  expect(item.previousElementSibling?.getAttribute('data-row-action')).toBe('open-quick-chat');
   item.click();
   await waitFor(() => expect(writeClipboard).toHaveBeenCalledWith('https://chatgpt.com/c/linked-chat-0001'));
   await waitFor(() => expect(doc.querySelector('.toast')?.textContent).toBe('Link copied'));
@@ -1443,10 +1442,11 @@ it('offers a chat\'s actions in one menu, by kind of row, and opens it with a ri
     origin: { kind: 'desktop' as const, fromSessionId: null, agentId: null, task: '' } };
   const deleteSession = vi.fn(async () => ({ ok: true, data: true }));
   const openSessionChat = vi.fn(async () => ({ ok: true, data: true }));
+  const openSessionQuickChat = vi.fn(async () => ({ ok: true, data: true }));
   const mounted = await mountChat({}, [], {
     listProjects: async () => ({ ok: true, data: [{ id: projectId, name: 'Website', path: '/work/website', createdAt: 1 }] }),
     listSessions: async () => ({ ok: true, data: { sessions: [chat, loose, pending, renamed], activeId: null, pressure: [], blocked: [], trusted: [] } }),
-    deleteSession, openSessionChat
+    deleteSession, openSessionChat, openSessionQuickChat
   });
   const doc = mounted.window.document;
   const row = (id: string) => doc.querySelector<HTMLElement>(`[data-id="${id}"]`)!;
@@ -1456,7 +1456,7 @@ it('offers a chat\'s actions in one menu, by kind of row, and opens it with a ri
   const actions = (): Array<string | undefined> => [...doc.querySelectorAll<HTMLElement>('.row-menu .row-menu-item')].map(item => item.dataset.rowAction);
   rowMenuItem(row(chat.id), 'rename');
   // Schedule… (#1826) sits with the chat's own actions.
-  expect(actions()).toEqual(['pin', 'rename', 'open', 'copy-link', 'share', 'schedule', 'move-to-project', 'block', 'remove']);
+  expect(actions()).toEqual(['pin', 'rename', 'open', 'open-quick-chat', 'copy-link', 'share', 'schedule', 'move-to-project', 'block', 'remove']);
   expect(doc.querySelector('.row-menu [data-row-action="remove"]')!.classList.contains('is-danger')).toBe(true);
   closeRowMenus(doc);
   // A row that is not a chat offers only what applies to it.
@@ -1476,17 +1476,20 @@ it('offers a chat\'s actions in one menu, by kind of row, and opens it with a ri
   expect(row(loose.id).closest('.session-diagnostics')).not.toBeNull();
   // Groups are kept by the chat's own id, so it can be sorted into one of its project's groups already.
   rowMenuItem(row(pending.id), 'rename');
-  expect(actions()).toEqual(['rename', 'move-to-project', 'move-to-group', 'remove']);
+  expect(actions()).toEqual(['rename', 'open-quick-chat', 'move-to-project', 'move-to-group', 'remove']);
   closeRowMenus(doc);
   expect(row(renamed.id).closest('.session-diagnostics')).toBeNull();
   expect(shown(renamed.id)).not.toContain('not a chat');
   rowMenuItem(row(renamed.id), 'rename');
-  expect(actions()).toEqual(['rename', 'move-to-project', 'move-to-group', 'remove']);
+  expect(actions()).toEqual(['rename', 'open-quick-chat', 'move-to-project', 'move-to-group', 'remove']);
   closeRowMenus(doc);
   // A right click opens the same menu; its items run their action.
   row(chat.id).dispatchEvent(new mounted.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 30, clientY: 40 }));
   doc.querySelector<HTMLButtonElement>('.row-menu [data-row-action="open"]')!.click();
   await waitFor(() => expect(openSessionChat).toHaveBeenCalledWith(chat.id));
+  expect(doc.querySelector('.row-menu')).toBeNull();
+  rowMenuItem(row(chat.id), 'open-quick-chat')!.click();
+  await waitFor(() => expect(openSessionQuickChat).toHaveBeenCalledWith(chat.id));
   expect(doc.querySelector('.row-menu')).toBeNull();
 });
 

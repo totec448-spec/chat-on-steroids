@@ -166,6 +166,8 @@ let agentFilter: string | null = null;
 let filterFor: string | null = null;
 
 interface Deps {
+  /** An independent compact chat must not change the Workspace's browser-tab selection. */
+  compact?: boolean;
   /** The renderer's single save path — reads every control, including ours. */
   save: () => Promise<boolean>;
   state: () => AppState | null;
@@ -1360,6 +1362,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   } else if (summary.conversationId === null) {
     // A new chat whose first message has not gone out yet (#1759): no ChatGPT link to open, copy or block.
     items.push({ action: 'rename', icon: 'i-pencil', label: () => t('Rename'), title: () => t("Rename this chat in the app. Its title in ChatGPT stays the same."), run: () => startRename(summary) });
+    if (!deps.compact) items.push({ action: 'open-quick-chat', icon: 'i-chat', label: () => t('Open in Quick Chat'), run: () => void run(api.openSessionQuickChat(summary.id)) });
     items.push(...moveToProjectMenuItems(summary), ...chatGroupMenuItems(summary));
   } else {
     const policyLineage = [
@@ -1385,6 +1388,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     items.push(
       { action: 'rename', icon: 'i-pencil', label: () => t('Rename'), title: () => t("Rename this chat in the app. Its title in ChatGPT stays the same."), run: () => startRename(summary) },
       { action: 'open', icon: 'i-out', label: () => t('Open in browser'), title: () => t("Open this chat in your browser"), run: () => void run(api.openSessionChat(summary.id)) },
+      ...(!deps.compact ? [{ action: 'open-quick-chat', icon: 'i-chat', label: () => t('Open in Quick Chat'), run: () => void run(api.openSessionQuickChat(summary.id)) }] : []),
       // ChatGPT opens /c/<id> wherever the chat lives, a project included (#1107).
       { action: 'copy-link', icon: 'i-copy', label: () => t('Copy link'), title: () => t("Copy this chat's ChatGPT link"),
         run: async () => { if (await run(api.writeClipboard(`https://chatgpt.com/c/${summary.conversationId}`))) toast(t('Link copied')); } },
@@ -1739,6 +1743,7 @@ function mergeSessionRows(rows: SessionSummary[]): void {
 
 let selectedTabFollow: ReturnType<typeof createSelectedTabFollow> | null = null;
 function requestSelectedTabFollow(id: string | null): void {
+  if (deps?.compact) return;
   selectedTabFollow?.select(id === null ? null : sessions.find(row => row.id === id) ?? { id, conversationId: null, origin: null });
 }
 
@@ -10141,8 +10146,11 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
 // ------------------------------------------------------------------- wiring
 
 /** Opens the search dialog, as ⌘K / Ctrl+K does (the View menu). */
-export function openChatSearch(): void {
-  chatSearch?.open();
+/** Exact selection for the compact shell's Open in workspace action. */
+export function selectedChatId(): string | null { return selectedId; }
+
+export function openChatSearch(recent = false): void {
+  if (recent) chatSearch?.openRecent(); else chatSearch?.open();
 }
 
 /**
@@ -10273,7 +10281,7 @@ function selectNewChat(projectId: string | null = null, branch: typeof newChatBr
   // permission to discard authored text, attachments or a prepared workflow.
   $('inputQueue').replaceChildren();
   restoreDraft(); showView('timeline'); paintSessions(); void loadDetail();
-  if (!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+  if (!deps.compact && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
     $('composer').animate?.([{ opacity: 0.45 }, { opacity: 1 }], { duration: 150, easing: 'ease-out' });
   }
   setComposerPlaceholder(() => projectId ? t("Message in {0}…", [projects.find(project => project.id === projectId)?.name ?? 'project']) : t("Ask anything…"));
@@ -10283,7 +10291,7 @@ function selectNewChat(projectId: string | null = null, branch: typeof newChatBr
 
 export function initChat(next: Deps): void {
   publishDraftAttachments();
-  selectedTabFollow = createSelectedTabFollow(id => api.followSessionTab?.(id));
+  selectedTabFollow = next.compact ? null : createSelectedTabFollow(id => api.followSessionTab?.(id));
   sidebarCompletion = createSidebarCompletionState();
   sidebarPins = createSidebarPins();
   sidebarOrder = createSidebarOrder($('sessionList'), () => [
@@ -10316,8 +10324,8 @@ export function initChat(next: Deps): void {
   void run(api.chatGroups()).then(state => { if (state) { chatGroups = state; paintSessions(); } });
   deps = next;
   initComposerDictation();
-  const stopComposerHeightMotion = installComposerHeightMotion($('composer'));
-  const stopComposerDockMotion = installComposerDockMotion($('composerDock'));
+  const stopComposerHeightMotion = next.compact ? () => {} : installComposerHeightMotion($('composer'));
+  const stopComposerDockMotion = next.compact ? () => {} : installComposerDockMotion($('composerDock'));
   window.addEventListener('beforeunload', () => {
     stopComposerHeightMotion(); stopComposerDockMotion();
   }, { once: true });
@@ -10684,7 +10692,7 @@ export function initChat(next: Deps): void {
     if (files.length + (imageDrafts.get(owner.key)?.length ?? 0) > 20) { toast(t('Attach up to 20 files per message')); return; }
     appendImages(owner, await run(api.dropFiles(files)));
   });
-  api.onWriteSession?.(id => { selectSession(id); $<HTMLTextAreaElement>('chatInput').focus(); });
+  api.onWriteSession?.(id => { deps.palette?.showChat?.(); if (id === null) selectNewChat(); else selectSession(id); $<HTMLTextAreaElement>('chatInput').focus(); });
   $('newChat').addEventListener('click', () => {
     selectNewChat();
   });
@@ -10931,11 +10939,12 @@ export function initChat(next: Deps): void {
       if (match) void revealSearchMatch(id, match);
     },
     selectedId: () => selectedId,
+    newChat: deps.compact ? () => $('newChat').click() : undefined,
     // The chats the sidebar lists, newest first: sub-agents, helpers and diagnostics rows stay out.
     recent: () => sessions
       .filter(entry => entry.origin?.kind !== 'worker' && entry.origin?.kind !== 'helper' && !isUnattributedSession(entry))
       .sort((a, b) => b.updatedAt - a.updatedAt)
-      .map(entry => ({ id: entry.id, title: entry.title })),
+      .map(entry => ({ id: entry.id, title: deps.compact ? shownSessionTitle(entry) : entry.title })),
     // #1884 (Haz): a curated few, named and keyed as the menus and the shortcuts dialog name them.
     actions: () => {
       const rows = shortcutGroups(() => deps.state()?.config.ui.enterSends !== false).flatMap(group => group.rows);
@@ -10946,10 +10955,10 @@ export function initChat(next: Deps): void {
       return [
         keyed(() => t('New chat'), () => $('newChat').click()),
         keyed(() => t('Find in chat'), inChat(() => chatFind?.open()), () => selectedId !== null),
-        ...(['review', 'terminal', 'files', 'agents'] as const).map(view => keyed(
+        ...(deps.compact ? [] : (['review', 'terminal', 'files', 'agents'] as const).map(view => keyed(
           () => t(view === 'review' ? 'Review' : view === 'terminal' ? 'Terminal' : view === 'files' ? 'Files' : 'Sub-agents'),
           // A terminal takes the keyboard itself; the other views put it on their tab.
-          inChat(() => docks.activate(view, { focus: view !== 'terminal' })), () => docks.canActivate(view))),
+          inChat(() => docks.activate(view, { focus: view !== 'terminal' })), () => docks.canActivate(view)))),
         ...(deps.palette?.actions() ?? [])
       ];
     },

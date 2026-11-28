@@ -462,6 +462,7 @@ const api = {
   setZoom: (factor: number) => call<number>('window:zoom', { factor }),
   getZoom: () => call<number>('window:getZoom'),
   openSessionChat: (id: string) => call<boolean>('sessions:openChat', { id }),
+  openSessionQuickChat: (id: string) => call<boolean>('quick-chat:open-session', id),
   /** ChatGPT's tool approval card in this chat's page, as the app may show it (2.1.38). */
   approvalCard: (id: string) => call<ApprovalCardView | null>('sessions:approvalCard', { id }),
   /** The person's answer to that exact card; the page presses it only if the card still stands. */
@@ -531,8 +532,8 @@ const api = {
     ipcRenderer.send('sound:ready');
     return () => ipcRenderer.removeListener('sound:cue', wrapped);
   },
-  onWriteSession: (listener: (id: string) => void): (() => void) => {
-    const wrapped = (_event: unknown, id: string): void => listener(id);
+  onWriteSession: (listener: (id: string | null) => void): (() => void) => {
+    const wrapped = (_event: unknown, id: string | null): void => listener(id);
     ipcRenderer.on('session:write', wrapped);
     return () => ipcRenderer.removeListener('session:write', wrapped);
   },
@@ -554,3 +555,14 @@ const api = {
 export type AppApi = typeof api;
 
 contextBridge.exposeInMainWorld('api', api);
+
+// Native chrome actions are independently checked against the compact window's main frame.
+const quickChat = {
+  ready: (): Promise<void> => ipcRenderer.invoke('quick-chat:ready'),
+  hide: (): Promise<void> => ipcRenderer.invoke('quick-chat:hide'),
+  pin: (value: boolean): Promise<boolean> => ipcRenderer.invoke('quick-chat:pin', value),
+  expand: (id: string | null): Promise<boolean> => ipcRenderer.invoke('quick-chat:expand', id),
+  onShown: (listener: () => void): void => { ipcRenderer.on('quick-chat:shown', () => listener()); }
+};
+export type QuickChatApi = typeof quickChat;
+contextBridge.exposeInMainWorld('quickChat', quickChat);
