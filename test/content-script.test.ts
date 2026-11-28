@@ -23274,6 +23274,40 @@ describe('the goal loop', () => {
     expect(ackAttempts).toBeGreaterThanOrEqual(2);
   });
 
+  it('still drafts for a short answer that ends while the message it answers is being acknowledged (#2283)', async () => {
+    // 2026-11-25: the Continue was delivered and the answer, six seconds long and without a tool call,
+    // ended before the page had finished telling the app. The end was refused because the page was
+    // still busy with the previous draft, nothing looked at that answer again, and the chat stayed on
+    // "Answer settling" for eight hours.
+    let draft: unknown = null, release!: () => void, ackCalls = 0;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      activity: () => feed(draft)(),
+      goal_ack: () => {
+        ackCalls += 1;
+        if (ackCalls > 1) { draft = null; return { ok: true, data: { acknowledged: true } }; }
+        return held.then(() => { draft = null; return { ok: true, data: { acknowledged: true } }; });
+      }
+    }, document => {
+      document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+        document.querySelector('#prompt-textarea')!.replaceChildren();
+      });
+    });
+    draft = readyDraft('keep going');
+    const pulling = live.hook.pullActivity();
+    await settle();
+    expect(ackCalls).toBe(1);
+
+    await answerATurn(live, 'done');
+    expect(drafts(live), 'refused while the page is still acknowledging the previous draft').toHaveLength(0);
+
+    release();
+    await pulling;
+    await settle(800);
+    expect(drafts(live)).toHaveLength(1);
+  });
+
   /**
    * The loop's success condition. Nothing is typed, and the panel says so — a run that ends
    * because the work is done must not look like a run that failed.
