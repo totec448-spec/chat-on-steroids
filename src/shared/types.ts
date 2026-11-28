@@ -209,6 +209,9 @@ export interface UiPrefs {
   /** Set once the notice that the CoS browser hid to the tray, still running, was shown. */
   cosBrowserTrayHint?: boolean;
   minimizeToTray: boolean;
+  /** The global Quick Chat accelerator; disabled leaves the tray entry available. */
+  quickChatShortcutEnabled?: boolean;
+  quickChatShortcut?: string;
   autoConnect: boolean;
   startAtLogin?: boolean;
   /** A notification when a chat finishes a turn while the window is in the background. Missing means on. */
@@ -898,6 +901,8 @@ export function browserExtensionRequired(_config: Pick<Config, 'sessions' | 'mul
 }
 
 export interface AppState {
+  /** Main-owned result of the OS global shortcut registration, never inferred from the preference. */
+  quickChatShortcutStatus?: import('./quick-chat-shortcut.js').QuickChatShortcutStatus;
   /** Main-owned display key. Optional for older state snapshots; never a profile identity. */
   displayName?: 'Chat On Steroids' | 'Chat On Steroids (dev)';
   config: Config;

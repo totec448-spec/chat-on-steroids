@@ -1,4 +1,5 @@
 import { DEFAULT_CHAT_PERSONALITY, DEFAULT_CHAT_WRITING_STYLE } from '../shared/chat-style.js';
+import { configuredQuickChatShortcut, normalizeQuickChatShortcut } from '../shared/quick-chat-shortcut.js';
 import { sendCheckUrl } from '../shared/send-check.js';
 import { applyPhonePush, initPhonePushSettings, readPhonePush } from './phone-push-settings.js';
 import { initBrowserSetup } from './setup-browser.js';
@@ -944,6 +945,8 @@ function save(over: { readOnly?: boolean; theme?: ThemeChoice; appearance?: Appe
       keepAwake: $<HTMLSelectElement>('keepAwake').value !== 'off',
       keepScreenAwake: $<HTMLSelectElement>('keepAwake').value === 'screen',
       minimizeToTray: $<HTMLInputElement>('minimizeToTray').checked,
+      quickChatShortcutEnabled: $<HTMLInputElement>('quickChatShortcutEnabled').checked,
+      quickChatShortcut: normalizeQuickChatShortcut($<HTMLInputElement>('quickChatShortcut').value) ?? configuredQuickChatShortcut(previous.ui),
       developerMode: $<HTMLInputElement>('developerMode').checked,
       playfulStatus: $<HTMLInputElement>('playfulStatus').checked,
       playfulContinue: $<HTMLInputElement>('playfulContinue').checked,
@@ -2011,6 +2014,11 @@ function apply(next: AppState): void {
     config.ui.minimizeToTray,
     previousState?.config.ui.minimizeToTray
   );
+  applyChecked($<HTMLInputElement>('quickChatShortcutEnabled'), config.ui.quickChatShortcutEnabled !== false,
+    previousState ? previousState.config.ui.quickChatShortcutEnabled !== false : undefined);
+  applyValue($<HTMLInputElement>('quickChatShortcut'), configuredQuickChatShortcut(config.ui),
+    previousState ? configuredQuickChatShortcut(previousState.config.ui) : undefined);
+  paintQuickChatShortcut(next);
   applyChecked(
     $<HTMLInputElement>('privacyScreenshots'),
     config.ui.privacyScreenshots,
@@ -3152,6 +3160,31 @@ for (const id of [
 ]) {
   $(id).addEventListener('change', () => void save());
 }
+function paintQuickChatShortcut(next: AppState | null): void {
+  const enabled = $<HTMLInputElement>('quickChatShortcutEnabled');
+  const field = $<HTMLInputElement>('quickChatShortcut');
+  const normalized = normalizeQuickChatShortcut(field.value);
+  field.disabled = !enabled.checked;
+  field.setAttribute('aria-invalid', String(enabled.checked && !normalized));
+  const status = !enabled.checked ? 'Global shortcut disabled.'
+    : !normalized ? 'Enter a valid combination with Ctrl, Command, Alt or Super and a key.'
+    : !next || next.config.ui.quickChatShortcutEnabled === false || normalized !== configuredQuickChatShortcut(next.config.ui) ? 'Shortcut not yet applied.'
+    : next.quickChatShortcutStatus === 'registered' ? 'Global shortcut is active.'
+    : next.quickChatShortcutStatus === 'unavailable' ? 'Shortcut unavailable or already in use. Choose another combination or use the tray menu.'
+    : 'Global shortcut registration not confirmed.';
+  ui($('quickChatShortcutStatus'), 'textContent', () => t(status));
+}
+$('quickChatShortcutEnabled').addEventListener('change', () => { paintQuickChatShortcut(state); void save(); });
+$('quickChatShortcut').addEventListener('input', () => paintQuickChatShortcut(state));
+$('quickChatShortcut').addEventListener('change', () => {
+  const field = $<HTMLInputElement>('quickChatShortcut');
+  const normalized = normalizeQuickChatShortcut(field.value);
+  if (normalized !== null) { field.value = normalized; void save(); }
+  paintQuickChatShortcut(state);
+});
+$('quickChatShortcut').addEventListener('keydown', event => {
+  if (event.key === 'Enter') { event.preventDefault(); $<HTMLInputElement>('quickChatShortcut').blur(); }
+});
 $('sendCheckUrl').addEventListener('input', () => { sendCheckValid(); });
 $('connectorSuffix').addEventListener('input', () => { connectorSuffixValid(); });
 // #1802: turning sounds on plays one, so the person hears what they chose.

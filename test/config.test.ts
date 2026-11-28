@@ -25,6 +25,21 @@ afterAll(async () => {
   await removeTempDir(dir);
 });
 
+describe('Quick Chat shortcut config', () => {
+  it('defaults missing preferences and persists a custom combination even while disabled', async () => {
+    const legacy = defaultConfig();
+    delete legacy.ui.quickChatShortcut;
+    delete legacy.ui.quickChatShortcutEnabled;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(legacy), 'utf8');
+    const restored = await loadConfig();
+    expect(restored.ui).toMatchObject({ quickChatShortcut: 'CommandOrControl+Shift+E', quickChatShortcutEnabled: true });
+    await saveConfig({ ...restored, ui: { ...restored.ui, quickChatShortcut: 'Alt+Shift+K', quickChatShortcutEnabled: false } });
+    expect((await loadConfig()).ui).toMatchObject({ quickChatShortcut: 'Alt+Shift+K', quickChatShortcutEnabled: false });
+    await expect(saveConfig({ ...restored, ui: { ...restored.ui, quickChatShortcut: 'E' } })).rejects.toThrow();
+    expect((await loadConfig()).ui.quickChatShortcut).toBe('Alt+Shift+K');
+  });
+});
+
 describe('browser bridge port config', () => {
   it('defaults fresh and legacy configs to Auto and round-trips every supported choice', async () => {
     expect(defaultConfig().ui.browserBridgePort).toBe('auto');

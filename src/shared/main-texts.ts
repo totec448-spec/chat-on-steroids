@@ -14,6 +14,7 @@ export const MAIN_TEXTS = [
   'Chat On Steroids',
   'About Chat On Steroids (dev)',
   'Open',
+  'Quick chat',
   'Show browser',
   'Hide browser',
   'Connect',

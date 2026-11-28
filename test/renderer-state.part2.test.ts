@@ -9,6 +9,33 @@ vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTermina
 vi.mock('../src/renderer/pet.js', () => ({ initPet: () => Object.assign(() => {}, { toggle: () => {}, isVisible: () => false }) }));
 
 
+it('shows Quick Chat shortcut conflicts, validates edits and preserves the chosen key when disabled', async () => {
+  const mounted = await mountChat();
+  const w = mounted.window;
+  const field = w.document.getElementById('quickChatShortcut') as HTMLInputElement;
+  const toggle = w.document.getElementById('quickChatShortcutEnabled') as HTMLInputElement;
+  const status = w.document.getElementById('quickChatShortcutStatus')!;
+  expect(toggle.checked).toBe(true);
+  expect(field.value).toBe('CommandOrControl+Shift+E');
+  mounted.push({ ...mounted.state, quickChatShortcutStatus: 'unavailable' });
+  expect(status.textContent).toContain('unavailable');
+  field.value = 'E';
+  field.dispatchEvent(new w.Event('input', { bubbles: true }));
+  field.dispatchEvent(new w.Event('change', { bubbles: true }));
+  expect(field.getAttribute('aria-invalid')).toBe('true');
+  expect(mounted.calls).toHaveLength(0);
+  field.value = 'ctrl+alt+k';
+  field.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await waitFor(() => expect(mounted.calls.at(-1)?.ui.quickChatShortcut).toBe('Control+Alt+K'));
+  mounted.push({ ...mounted.state, quickChatShortcutStatus: 'registered', config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, quickChatShortcut: 'Control+Alt+K' } } });
+  expect(status.textContent).toContain('active');
+  toggle.checked = false;
+  toggle.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await waitFor(() => expect(mounted.calls.at(-1)?.ui.quickChatShortcutEnabled).toBe(false));
+  expect(mounted.calls.at(-1)?.ui.quickChatShortcut).toBe('Control+Alt+K');
+  expect(field.disabled).toBe(true);
+});
+
 it('saves Auto-select Skills from Settings and restores it on state push', async () => {
   const mounted = await mountChat();
   const w = mounted.window;
