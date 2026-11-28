@@ -899,20 +899,28 @@ function Copy-QuickSelection($request) {
     if ([Clf]::GetClipboardSequenceNumber() -ne $before) { throw 'CLIPBOARD_CHANGED: the clipboard changed before selection capture; try again' }
     [Clf]::Press([CosWindowsKeys]::Resolve([string[]]$keys, $id))
     $timer = [Diagnostics.Stopwatch]::StartNew()
+    $stableSince = $null
     do {
       if ([Clf]::ForegroundId() -ne $id) { throw 'FOCUS_CHANGED: the original window is no longer focused' }
       $sequence = [Clf]::GetClipboardSequenceNumber()
       if ($sequence -ne $before -and [Clf]::ClipboardOwnerPid() -eq [uint32]$request.processId) {
+        if ($copiedSequence -ne $sequence -or $null -eq $stableSince) { $stableSince = $timer.ElapsedMilliseconds }
         $copiedSequence = $sequence
-        Start-Sleep -Milliseconds 30
-        try { $text = [System.Windows.Forms.Clipboard]::GetText() } catch { $text = $null }
-        if ($null -ne $text -and [Clf]::GetClipboardSequenceNumber() -eq $sequence -and [Clf]::ClipboardOwnerPid() -eq [uint32]$request.processId) {
-          if ([string]::IsNullOrWhiteSpace($text) -or $text.Length -gt 64000) { throw 'SELECTION_UNAVAILABLE: select text of up to 64000 characters' }
-          Assert-QuickWindow $request
-          return $text
+        # A copy can publish multiple clipboard formats in succession. Only read
+        # after this source-owned sequence has been stable for 30 ms; a new
+        # sequence restarts the observation within the same bounded deadline.
+        if ($timer.ElapsedMilliseconds - $stableSince -ge 30) {
+          try { $text = [System.Windows.Forms.Clipboard]::GetText() } catch { $text = $null }
+          if (-not [string]::IsNullOrEmpty($text) -and [Clf]::GetClipboardSequenceNumber() -eq $sequence -and [Clf]::ClipboardOwnerPid() -eq [uint32]$request.processId) {
+            if ([string]::IsNullOrWhiteSpace($text) -or $text.Length -gt 64000) { throw 'SELECTION_UNAVAILABLE: select text of up to 64000 characters' }
+            if ([Clf]::ForegroundId() -ne $id) { throw 'FOCUS_CHANGED: the original window is no longer focused' }
+            Assert-QuickWindow $request
+            return $text
+          }
         }
-      }
-      Start-Sleep -Milliseconds 20
+      } else { $stableSince = $null }
+      $remaining = 900 - $timer.ElapsedMilliseconds
+      if ($remaining -gt 0) { Start-Sleep -Milliseconds ([Math]::Min(10, $remaining)) }
     } while ($timer.ElapsedMilliseconds -lt 900)
     throw 'SELECTION_UNAVAILABLE: the source did not copy selected text. Copy it manually and paste it into Quick Chat.'
   } finally {
