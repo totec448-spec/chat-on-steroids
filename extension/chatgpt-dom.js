@@ -886,6 +886,7 @@ var CLF_DOM = (() => {
     };
     return {
       attachments(nodes) { if (same()) files = [...nodes]; },
+      untouched: same,
       current: ownsAttachments,
       async clear() {
         if (!ownsAttachments() || !host) return false;
@@ -3049,6 +3050,14 @@ var CLF_DOM = (() => {
     const host = composerBox() || composerActions()?.host;
     return host ? [...host.querySelectorAll('button[aria-label]')].map(composerFileName).filter(Boolean).slice(0, 20).sort() : [];
   }
+  // The provider can publish a collision-renamed filename on the very first tile.
+  // Accept the precise numeric suffix only for an untouched, isolated upload with
+  // a unique one-to-one match. Timestamped PNGs still require the byte proof below.
+  function collisionRenamedFile(original, observed) {
+    const dot = original.lastIndexOf('.');
+    if (dot <= 0 || !observed || !observed.startsWith(original.slice(0, dot)) || !observed.endsWith(original.slice(dot))) return false;
+    return /^\([1-9]\d{0,5}\)$/.test(observed.slice(dot, observed.length - (original.length - dot)));
+  }
   /**
    * This install's connector names in ChatGPT (core, desktop, plugins), as the app reports them.
    *
@@ -3306,6 +3315,7 @@ var CLF_DOM = (() => {
       const check = () => {
         if (finished) return;
         if (!stillCurrent()) return finish(false);
+        if (draft?.untouched && !draft.untouched()) return finish(false);
         const host = composerBox() || composerActions()?.host;
         if (!host) return;
         // ChatGPT's remove control names the complete filename. Each requested image
@@ -3322,6 +3332,13 @@ var CLF_DOM = (() => {
             unmatched.splice(index, 1);
             return true;
           })) ownedTiles = tiles;
+        }
+        if (!ownedTiles && draft?.untouched?.() && tiles.length === images.length) {
+          const matches = images.map(image => tiles.filter(tile => {
+            const name = composerFileName(tile);
+            return name === image.name || collisionRenamedFile(image.name, name);
+          }));
+          if (matches.every(group => group.length === 1) && new Set(matches.map(group => group[0])).size === images.length) ownedTiles = tiles;
         }
         if (!ownedTiles && (!png || tiles.length !== 1)) return;
         const ready = !host.querySelector('[aria-busy="true"], [role="progressbar"], [data-inline-file-uploading]') &&

@@ -1521,6 +1521,27 @@ describe('native image readiness', () => {
     expect(api.hasComposerAttachments()).toBe(true);
     draft.dispose();
   });
+  it.each([['Attached text(1).txt', true], ['Attached text-other.txt', false]])('matches the first collision-renamed tile only when it belongs to the untouched upload (%s)', async (name, expected) => {
+    const input = upload(); input.accept = '';
+    const draft = api.captureComposerDraft('Exact app prompt');
+    const authorize = vi.fn(async () => true);
+    const click = vi.fn(() => user('Exact app prompt'));
+    button.addEventListener('click', click);
+    input.addEventListener('change', () => {
+      const host = document.createElement('div'); host.setAttribute('data-composer-attachments', '');
+      host.innerHTML = `<span><span><span>${name}</span><button type="button" aria-label="${name}"></button></span><button type="button" aria-label="Remover ${name}"></button></span>`;
+      input.form!.append(host);
+    });
+    const file = new dom.window.File(['exact bytes'], 'Attached text.txt', { type: 'text/plain' });
+    const delivery = api.uploadImages([], () => true, draft, [file]).then(ready => ready && draft.current() && api.send({ beforeSend: authorize }));
+    // Advance the bounded upload deadline even for the success case, so main
+    // fails an assertion rather than hanging at the real test timeout.
+    await vi.advanceTimersByTimeAsync(600000);
+    await expect(delivery).resolves.toBe(expected);
+    expect(authorize).toHaveBeenCalledTimes(expected ? 1 : 0);
+    expect(click).toHaveBeenCalledTimes(expected ? 1 : 0);
+    draft.dispose();
+  });
   it.each([['a different name repeated', 'other.zipother.zip'], ['the name and more', 'notes.zip (copy)'], ['the name three times', 'notes.zipnotes.zipnotes.zip']])(
     'still refuses an open label that is not the shown name or exactly it twice (%s)', (_case, label) => {
       const host = document.createElement('div'); host.setAttribute('data-composer-attachments', '');
