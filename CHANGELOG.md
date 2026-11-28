@@ -20,6 +20,7 @@ A Stop now ends a turn that no browser page holds, a requested reasoning level o
 - **Stop ends a turn that no browser page holds.** After a page was lost and recovery gave up, the app could not end the open turn: queued messages waited behind it and Stop answered "not running". Stop now closes that turn in the record, and the queue goes on.
 - **Goal does not stall on a short answer.** A short answer that ended while the page was still telling the app that the previous message was sent was never replied to, and the chat sat on "Answer settling". The page now looks at that answer as soon as it is free.
 - **The model choice is steadier.** A requested reasoning level now opens the chat without a model setting in the address, which made ChatGPT take the level back when the picker closed. A native Enter that had already set the level you asked for is accepted instead of refused as unreadable.
+- **The model list and model choice work again with ChatGPT's "Older models" menu.** ChatGPT Pro moved its older models into a submenu; the app could not open them, so every send with a model failed and the model list stayed empty. A version the app cannot open is now skipped and named in the log, the models it can read work, and the picker is never left on another model than the chat had.
 - **The Goal step reviewer list tells two models with one name apart**, as the other model lists do ("GPT-6 · Pro" and "GPT-6 · gpt-6").
 - **Very long recordings open fast.** Opening an 83 MB session took 94 s of processor time; it takes about 0.3 s now, and a line that straddled a read block is no longer dropped. The repair pass no longer rereads the journal of every chat that holds an unproven call each time.
 - **Workers start more reliably.** A fresh worker's page has 120 s to pick up its task (it had 45 s), and a page that redeems late gets the normal time for each step it reports. The final recovery reload reads the tab again before it acts, and the show of a stuck chat that no browser took is tried once more.
@@ -37,8 +38,9 @@ This release is a big round of fixes, and most of it started with your reports. 
 - **@R-jed** for three precise reports (#2238, #2239, #2245) that became the rotation Stop, the command duration and the compaction pickup fixes.
 - **@atsu6** for five fixes: the Files renames (#2258), the save outcome and permissions (#2262), the Git commit (#2259), the late worker archive (#2264) and the development build label (#2285).
 - **@Akilaydin** for the switch that leaves out the identity notice (#2293).
+- **@leojlsv** for #2305 with the screenshot of the new "Older models" menu and the log that named the version, and **@digitalscalvia** for #2241, the first report of the same family.
 - **@Nam17111998** for the diagnostics in #2308 that showed the log could not say why a state file was unreadable.
-- **@Haz4rdovisk** for reviewing the visible changes, and everyone who tested, reviewed and filed an issue this round.
+- **@Haz4rdovisk** for reviewing the visible changes, including the model picker fix where the review found a gap in how a selection could leave the chat's own model, and everyone who tested, reviewed and filed an issue this round.
 
 ## [2.1.55] — Restore a turn's files, manage Skills from their cards, and safer saves after a crash
 A turn's edited files can be put back from the Changed files card, installed Skills can be paused from their cards, storage can be freed for one chat, and chat groups, settings imports and edit checkpoints survive an interruption.
