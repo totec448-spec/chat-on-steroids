@@ -24,7 +24,7 @@ interface DomApi {
   send(options?: { acceptanceTimeoutMs?: number; stillCurrent?: () => boolean; beforeSend?: () => Promise<boolean>;
     mention?: { path: string; name: string } | null; explain?: (why: string) => void }): Promise<boolean>;
   selectModelSettings(model: string | null, effort: string | null, current?: () => boolean): Promise<boolean>;
-  uploadImages(images: Array<{ name: string; dataUrl: string }>, current?: () => boolean, draft?: ReturnType<DomApi['captureComposerDraft']>, files?: File[]): Promise<boolean>;
+  uploadImages(images: Array<{ name: string; dataUrl: string }>, current?: () => boolean, draft?: ReturnType<DomApi['captureComposerDraft']>, files?: File[], onFailure?: (reason: string) => void): Promise<boolean>;
   messages(): Array<{ id: string; role: 'user' | 'assistant'; text: string; turnId: string | null }>;
   turns(): Array<{ id: string | null; role: string; node: HTMLElement; nodes: HTMLElement[] }>;
   toolBlocks(turn: ReturnType<DomApi['turns']>[number]): HTMLElement[];
@@ -1521,6 +1521,30 @@ describe('native image readiness', () => {
     expect(api.hasComposerAttachments()).toBe(true);
     draft.dispose();
   });
+  it.each([['Attached text(1).txt', true], ['Attached text-other.txt', false]])('matches the first collision-renamed tile only when it belongs to the untouched upload (%s)', async (name, expected) => {
+    const input = upload(); input.accept = '';
+    const draft = api.captureComposerDraft('Exact app prompt');
+    const authorize = vi.fn(async () => true);
+    const click = vi.fn(() => user('Exact app prompt'));
+    button.addEventListener('click', click);
+    input.addEventListener('change', () => {
+      const host = document.createElement('div'); host.setAttribute('data-composer-attachments', '');
+      host.innerHTML = `<span><span><span>${name}</span><button type="button" aria-label="${name}"></button></span><button type="button" aria-label="Remover ${name}"></button></span>`;
+      input.form!.append(host);
+    });
+    const file = new dom.window.File(['exact bytes'], 'Attached text.txt', { type: 'text/plain' });
+    const refusal = vi.fn();
+    const delivery = api.uploadImages([], () => true, draft, [file], refusal).then(ready => ready && draft.current() && api.send({ beforeSend: authorize }));
+    // Advance the bounded upload deadline even for the success case, so main
+    // fails an assertion rather than hanging at the real test timeout.
+    await vi.advanceTimersByTimeAsync(600000);
+    await expect(delivery).resolves.toBe(expected);
+    expect(authorize).toHaveBeenCalledTimes(expected ? 1 : 0);
+    expect(click).toHaveBeenCalledTimes(expected ? 1 : 0);
+    if (expected) expect(refusal).not.toHaveBeenCalled();
+    else expect(refusal).toHaveBeenCalledExactlyOnceWith('attachment-tile-unconfirmed');
+    draft.dispose();
+  });
   it.each([['a different name repeated', 'other.zipother.zip'], ['the name and more', 'notes.zip (copy)'], ['the name three times', 'notes.zipnotes.zipnotes.zip']])(
     'still refuses an open label that is not the shown name or exactly it twice (%s)', (_case, label) => {
       const host = document.createElement('div'); host.setAttribute('data-composer-attachments', '');
@@ -1644,7 +1668,9 @@ describe('native image readiness', () => {
     if (reason === 'duplicate') input.after(input.cloneNode());
     if (reason === 'disabled') input.disabled = true;
     if (reason === 'foreign') document.body.append(input);
-    expect(await api.uploadImages([{ name: 'app.webp', dataUrl: 'data:image/webp;base64,YQ==' }])).toBe(false);
+    const report = vi.fn();
+    expect(await api.uploadImages([{ name: 'app.webp', dataUrl: 'data:image/webp;base64,YQ==' }], undefined, undefined, [], report)).toBe(false);
+    expect(report).toHaveBeenCalledExactlyOnceWith('attachment-input-unavailable');
     expect(changed).not.toHaveBeenCalled();
   });
   it.each(['rename', 'replacement', 'extra file', 'cancel'])('retains exact image upload nodes across %s while processing', async change => {
@@ -1656,7 +1682,8 @@ describe('native image readiness', () => {
       document.querySelector('form')!.append(tile);
       button.setAttribute('aria-disabled', 'true');
     });
-    const uploaded = api.uploadImages([{ name: 'app.webp', dataUrl: 'data:image/webp;base64,YQ==' }], () => current);
+    const report = vi.fn();
+    const uploaded = api.uploadImages([{ name: 'app.webp', dataUrl: 'data:image/webp;base64,YQ==' }], () => current, undefined, [], report);
     await vi.advanceTimersByTimeAsync(0);
     if (change === 'rename') tile.setAttribute('aria-label', 'Remove file 1: app(1).webp');
     if (change === 'replacement') tile.replaceWith(tile.cloneNode(true));
@@ -1666,6 +1693,8 @@ describe('native image readiness', () => {
     await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(60000);
     expect(await uploaded).toBe(change === 'rename');
+    if (change === 'rename') expect(report).not.toHaveBeenCalled();
+    else expect(report).toHaveBeenCalledExactlyOnceWith(change === 'replacement' ? 'attachment-tile-ownership-changed' : change === 'extra file' ? 'attachment-extra-tiles' : 'attachment-target-changed');
   });
   it('waits for ARIA-only Send readiness after an attachment tile appears', async () => {
     const input = upload();

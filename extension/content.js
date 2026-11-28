@@ -14325,10 +14325,11 @@
         }
         files.push(new File(parts, attachment.name, { type: attachment.mimeType }));
       }
-      if (!(await CLF_DOM.uploadImages(input.images, onTarget, draft, files))) return fail(t(
+      let uploadFailure = '';
+      if (!(await CLF_DOM.uploadImages(input.images, onTarget, draft, files, reason => { uploadFailure = reason; }))) return fail(t(
         'content_delivery_attachment_upload_unconfirmed',
         'Attachment upload was not confirmed. Check the unsent draft and any file error in ChatGPT before trying again.'
-      ));
+      ), uploadFailure || 'attachment-upload-unconfirmed');
       await Promise.resolve();
       if (!onTarget() || !draftCurrent() || sendText(CLF_DOM.composerText()) !== sendText(input.text)) return fail(t(
         'content_delivery_draft_preserved',

@@ -220,6 +220,21 @@ it('logs why the browser could not send a message, and refreshes the models on a
   expect(pendingChatModelRequest(), 'a rejected model choice did not ask for the model list again').not.toBeNull();
 });
 
+it('keeps a bounded attachment refusal code in the delivery log without changing the visible error', async () => {
+  const { getLog } = await import('../src/main/logger.js');
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Attachment refusal', conversationId });
+  const row = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Synthetic prompt' });
+  expect((await post('/input/claim', { id: row.id, owner: 'attachment-document', conversationId, requiresAuthorization: true })).body.input).toMatchObject({ id: row.id });
+  const error = 'Attachment upload was not confirmed. Check the unsent draft and any file error in ChatGPT before trying again.';
+  expect((await post('/input/fail', { id: row.id, owner: 'attachment-document', error, detail: 'attachment-tile-unconfirmed' })).body.ok).toBe(true);
+  expect((await input.listInputs()).find(item => item.id === row.id)).toMatchObject({ state: 'failed', error });
+  const lines = getLog().filter(entry => entry.message.includes(row.id) && entry.message.includes('could not send'));
+  expect(lines).toHaveLength(1);
+  expect(lines[0]!.message).toContain('attachment-tile-unconfirmed');
+  expect(lines[0]!.message).not.toContain('Synthetic prompt');
+});
+
 // 2.1.47 round: the extension held its self-update for hours behind a message that only waited in the queue.
 it('lists a queued message as open but not as being sent until a browser claims it', async () => {
   const conversationId = randomUUID();
