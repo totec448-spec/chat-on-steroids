@@ -23308,6 +23308,34 @@ describe('the goal loop', () => {
     expect(drafts(live)).toHaveLength(1);
   });
 
+  it.each(['a newer generation ends without an answer', 'the tab leaves the chat for a new one'])('does not replay a kept Goal turn when %s (#2283)', async change => {
+    let draft: unknown = null, release!: () => void, ackCalls = 0;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      activity: () => feed(draft)(),
+      goal_ack: () => {
+        ackCalls += 1;
+        if (ackCalls > 1) { draft = null; return { ok: true, data: { acknowledged: true } }; }
+        return held.then(() => { draft = null; return { ok: true, data: { acknowledged: true } }; });
+      }
+    }, document => {
+      document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+        document.querySelector('#prompt-textarea')!.replaceChildren();
+      });
+    });
+    draft = readyDraft('keep going');
+    const pulling = live.hook.pullActivity();
+    await settle();
+    await answerATurn(live, 'done');
+    if (change.startsWith('a newer')) await answerATurn(live, 'Something went wrong while generating the response.');
+    else live.dom.reconfigure({ url: 'https://chatgpt.com/' });
+    release();
+    await pulling;
+    await settle(800);
+    expect(drafts(live)).toHaveLength(0);
+  });
+
   it('still drafts for an answer that ends while a continuation that work overtook is being given back (#2283)', async () => {
     let draft: ReturnType<typeof readyDraft> | null = null, pendingTools = 0, release!: () => void;
     const held = new Promise<void>(resolve => { release = resolve; });

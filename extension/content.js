@@ -11208,6 +11208,9 @@
    * does not change a second later, so nothing retries.
    */
   function noteGoalTurn(ended, outcome, endedTurnId) {
+    // A newer generation that ends without a continuable answer supersedes a kept turn: the conversation has moved
+    // on, exactly as the app treats a different turn (#2283).
+    if (goalOwedTurn && endedTurnId && endedTurnId !== goalOwedTurn.endedTurnId && !GOAL_CONTINUABLE.has(outcome)) goalOwedTurn = null;
     // The accepted helper user receipt and current provider terminal own its result.
     // A renderer lifecycle edge must not create a second, captured-node owner.
     if (desktopDecision && desktopDecision.onTarget()) return;
