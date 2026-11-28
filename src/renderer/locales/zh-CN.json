@@ -4009,5 +4009,14 @@
   "Free space per chat": "按聊天释放空间",
   "The storage dialog shows what one chat uses and frees its images or long texts.": "存储对话框会显示单个聊天占用的空间，并可清理它的图片或长文本。",
   "Safer after a crash": "崩溃后更安全",
-  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "即使保存或移动被中断，聊天分组、设置导入和编辑检查点也会保持一致。"
+  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "即使保存或移动被中断，聊天分组、设置导入和编辑检查点也会保持一致。",
+  "Stuck turns you can end, Goal chats that don't stall, a steadier model choice, and long recordings that open fast.": "可结束的卡住回合、不再停下的 目标聊天、更可靠的模型选择，以及打开更快的长记录。",
+  "Stop ends a stuck turn": "停止可结束卡住的回合",
+  "A Stop for a turn no browser page holds now ends it, so queued messages go out again.": "对没有任何浏览器页面持有的回合点击停止，现在会结束该回合，排队的消息会重新发出。",
+  "Goal chats don't stall": "目标聊天不再停下",
+  "A short answer that ends while Goal is still sending its last message now gets its next message.": "在目标仍在发送上一条消息时结束的简短回答，现在也会收到下一条消息。",
+  "A steadier model choice": "更可靠的模型选择",
+  "A reasoning level you ask for opens the chat directly, and a native Enter that already set it counts.": "所请求的推理级别会直接打开聊天，已由原生 Enter 设定的级别也会被认可。",
+  "Long recordings open fast": "长记录打开更快",
+  "A very long chat's recording opens in under a second, not minutes, and no line is dropped.": "超长聊天的记录现在不到一秒即可打开，而不是几分钟，也不会丢失任何一行。"
 }

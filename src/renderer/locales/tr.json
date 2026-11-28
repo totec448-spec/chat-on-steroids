@@ -4094,5 +4094,14 @@
   "Free space per chat": "Sohbet başına alan aç",
   "The storage dialog shows what one chat uses and frees its images or long texts.": "Depolama iletişim kutusu bir sohbetin ne kadar yer kapladığını gösterir ve görsellerini veya uzun metinlerini temizler.",
   "Safer after a crash": "Çökmeden sonra daha güvenli",
-  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Kayıt veya taşıma yarıda kesilse bile sohbet grupları, ayar içe aktarmaları ve düzenleme kontrol noktaları tutarlı kalır."
+  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Kayıt veya taşıma yarıda kesilse bile sohbet grupları, ayar içe aktarmaları ve düzenleme kontrol noktaları tutarlı kalır.",
+  "Stuck turns you can end, Goal chats that don't stall, a steadier model choice, and long recordings that open fast.": "Sonlandırılabilen takılı turlar, durmayan Hedef sohbetleri, daha güvenilir model seçimi ve hızlı açılan uzun kayıtlar.",
+  "Stop ends a stuck turn": "Durdur, takılı turu sonlandırır",
+  "A Stop for a turn no browser page holds now ends it, so queued messages go out again.": "Hiçbir tarayıcı sayfasının tutmadığı bir tur için Durdur artık turu sonlandırır ve sıradaki mesajlar yeniden gider.",
+  "Goal chats don't stall": "Hedef sohbetleri durmaz",
+  "A short answer that ends while Goal is still sending its last message now gets its next message.": "Hedef son mesajı hâlâ gönderirken biten kısa bir yanıt artık bir sonraki mesajını alır.",
+  "A steadier model choice": "Daha güvenilir model seçimi",
+  "A reasoning level you ask for opens the chat directly, and a native Enter that already set it counts.": "İstenen akıl yürütme düzeyi sohbeti doğrudan açar ve bunu zaten ayarlamış yerel bir Enter kabul edilir.",
+  "Long recordings open fast": "Uzun kayıtlar hızlı açılır",
+  "A very long chat's recording opens in under a second, not minutes, and no line is dropped.": "Çok uzun bir sohbetin kaydı dakikalar yerine bir saniyeden kısa sürede açılır ve hiçbir satır kaybolmaz."
 }
