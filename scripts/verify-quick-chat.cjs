@@ -72,7 +72,7 @@ app.whenReady().then(async () => {
   } });
   win.webContents.on('console-message', (event, _level, text) => { if ((event.level ?? _level) >= 2) console.log('renderer:', event.message ?? text); });
   win.webContents.on('preload-error', (_event, file, error) => console.error('preload:', file, error));
-  await win.loadFile(path.join(root, 'out/renderer/index.html'), { query: { surface: 'quick-chat' } });
+  await win.loadFile(path.join(root, 'out/renderer/quick-chat.html'));
   const js = source => win.webContents.executeJavaScript(source);
   const until = async source => {
     for (let n = 0; n < 150; n++) {

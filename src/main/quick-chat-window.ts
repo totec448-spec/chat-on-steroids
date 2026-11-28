@@ -69,8 +69,8 @@ export function createQuickChat(options: { hasWorkspace(): boolean; workspaceCon
     owner.on('closed', () => { clearTimeout(startupDeadline); if (awaitingReady === owner) awaitingReady = null; if (win === owner) { win = null; requestedSession = null; } });
     owner.on('show', () => { if (live() === owner && owner.isVisible()) owner.webContents.send('quick-chat:shown'); });
     const load = process.env.ELECTRON_RENDERER_URL
-      ? owner.loadURL(new URL('index.html?surface=quick-chat', process.env.ELECTRON_RENDERER_URL.endsWith('/') ? process.env.ELECTRON_RENDERER_URL : process.env.ELECTRON_RENDERER_URL + '/').toString())
-      : owner.loadFile(path.join(__dirname, '../renderer/index.html'), { query: { surface: 'quick-chat' } });
+      ? owner.loadURL(new URL('quick-chat.html', process.env.ELECTRON_RENDERER_URL.endsWith('/') ? process.env.ELECTRON_RENDERER_URL : process.env.ELECTRON_RENDERER_URL + '/').toString())
+      : owner.loadFile(path.join(__dirname, '../renderer/quick-chat.html'));
     void load.catch(() => { logWarn('quick chat: renderer could not load'); if (!owner.isDestroyed()) owner.destroy(); });
     return true;
   };

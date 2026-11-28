@@ -5,7 +5,9 @@ import { applyAppearance } from './appearance.js';
 import { chatApply, chatVisible, initChat, openChatSearch, selectedChatId } from './chat.js';
 import { initLanguage, setLanguage, currentLanguage, t, ui } from './i18n.js';
 import { icon, toast } from './dom.js';
+import './quick-chat.css';
 
+document.body.classList.add('compact-chat');
 const api = window.api;
 const native = (window as unknown as { quickChat: QuickChatApi }).quickChat;
 const top = document.querySelector<HTMLElement>('.app-topbar')!;

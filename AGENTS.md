@@ -5112,7 +5112,7 @@ calls a fixed `preload/index.ts` allowlist into validated `ipc.ts`/`plugins-ipc.
 No arbitrary IPC invocation, Node access, filesystem path opening or renderer-side secret store.
 The global Quick chat (`CommandOrControl+Shift+E`, with a tray entry when the OS refuses the
 shortcut) is a separate sandboxed window owned by `main/quick-chat-window.ts`. It loads the same
-`renderer/index.html` and `renderer/chat.ts` as the Workspace through `renderer/entry.ts`, and
+`renderer/index.html` and `renderer/chat.ts` as the Workspace through a separate page derived at build/dev time, and
 uses the same validated preload and renderer security policy. Keep compact-only code in the shell
 and scoped CSS; do not fork the composer, transcript, search, attachments or provider executor.
 The history icon opens the shared chat-search controller in a history drawer with
