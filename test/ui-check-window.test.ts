@@ -44,3 +44,10 @@ it('accepts a window that is shorter than asked when the width is right', async 
   win.setSize = (width: number) => { (win as unknown as { size: [number, number] }).size = [width, 700]; };
   expect(await resizeWindow(win, 830, 900, { pollMs: 1, timeoutMs: 30 })).toEqual({ width: 830, height: 700 });
 });
+
+// CodeRabbit on #2314: a window taller than asked is not a work-area clamp, so a layout check must not pass on it.
+it('rejects a window that is taller than asked, even with the right width', async () => {
+  const win = new FakeWindow(0);
+  win.setSize = (width: number) => { (win as unknown as { size: [number, number] }).size = [width, 800]; };
+  await expect(resizeWindow(win, 830, 700, { pollMs: 1, timeoutMs: 30 })).rejects.toThrow(/did not resize.*830x700.*830x800/s);
+});
