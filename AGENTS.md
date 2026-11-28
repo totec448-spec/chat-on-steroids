@@ -3254,6 +3254,11 @@ result and three-argument callers; an optional fourth callback reports bounded p
 existing reads (no new UI operations). Bootstrap forwards them as optional `modelSelection` on
 `command_step` with the telemetry-only `step: model-diagnostic`. The bridge validates the strict
 identity/enum-only shape in `shared/model-selection-diagnostic.ts` for the redeemed command owner.
+A version of the picker that has no row to open (#2305: ChatGPT's older models sit in an "Older models"
+submenu) is skipped, not fatal: `selectModelSettings` and `inspectModelSettings` use the versions they could
+read, and name the others in the optional `skippedVersions` of the diagnostic (absent when none) and as the
+catalog observation's `error: 'versions_skipped'` beside its models. A model or effort found nowhere while a
+version was skipped is refused as `unreadable`, never as absent, and an effort is never rounded then.
 Unreadable reads retain the last observed pair/version. The service worker authorizes reports in
 the existing tab queue, but sends telemetry outside it: one HTTP flight and one coalesced successor
 per tab. It preserves attempt/final ordering and rechecks document, navigation and connection

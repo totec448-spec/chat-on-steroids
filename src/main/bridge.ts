@@ -12698,7 +12698,7 @@ function observeModelSelection(command: Command, value: unknown): boolean {
     (trace.selected && (trace.after?.model !== trace.selected.model || trace.after?.effort !== trace.selected.effort));
   const line = `bridge: model selection command=${command.id} type=${command.spec.type} owner=${specKey(command.spec)} ${JSON.stringify(trace)}`;
   if (trace.outcome === 'failed' || (trace.outcome === 'confirmed' && changed)) logWarn(line);
-  else if (trace.outcome === 'confirmed' && trace.attempt > 1) logInfo(line);
+  else if (trace.outcome === 'confirmed' && (trace.attempt > 1 || trace.skippedVersions?.length)) logInfo(line);
   return true;
 }
 
