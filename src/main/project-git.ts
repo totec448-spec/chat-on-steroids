@@ -185,7 +185,9 @@ export function decode(buffer: Buffer): string {
 }
 
 function safeRelative(value: string): string | null {
-  const normal = value.replaceAll('\\', '/');
+  // Git writes forward slashes on every system. A backslash is a separator only where a file name cannot contain one
+  // (Windows); on macOS and Linux it is part of the name, and turning it into "/" pointed at a folder that is not there.
+  const normal = process.platform === 'win32' ? value.replaceAll('\\', '/') : value;
   if (!normal || normal.length > 4096 || normal.startsWith('/') || /^[A-Za-z]:\//.test(normal)) return null;
   if (normal.split('/').some(part => !part || part === '.' || part === '..')) return null;
   return normal;

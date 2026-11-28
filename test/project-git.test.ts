@@ -95,6 +95,19 @@ it('reconciles modified, untracked, deleted, renamed, binary and large changes f
   expect(afterAdd.changes.find(change => change.path === 'added.ts')).toMatchObject({ status: 'A', additions: 1 });
 });
 
+// Found by driving the Linux app: a backslash is an ordinary character in a macOS/Linux file name, and the Git panel
+// turned `back\slash.txt` into `back/slash.txt`, a path in a folder that does not exist, so its diff failed with ENOENT.
+it.skipIf(process.platform === 'win32')('keeps a backslash in a file name as part of the name, where it is allowed', async () => {
+  const { root, id } = await committedProject();
+  await fs.writeFile(path.join(root, 'back\\slash.txt'), 'one\n');
+  await git(root, 'add', '.'); await git(root, 'commit', '-m', 'backslash');
+  await fs.appendFile(path.join(root, 'back\\slash.txt'), 'two\n');
+  await fs.writeFile(path.join(root, 'un\\tracked.txt'), 'new\n');
+  const snapshot = await readProjectGitSnapshot(id);
+  expect(snapshot.changes.map(change => [change.status, change.path]).sort()).toEqual([['M', 'back\\slash.txt'], ['U', 'un\\tracked.txt']]);
+  expect(await readProjectGitDiff(id, 'back\\slash.txt')).toMatchObject({ baseText: 'one\n', currentText: 'one\ntwo\n' });
+  expect(await readProjectGitDiff(id, 'un\\tracked.txt')).toMatchObject({ status: 'U', currentText: 'new\n' });
+});
 it('reports a clean repository and a non-repository without inventing changes', async () => {
   const clean = await committedProject();
   expect(await readProjectGitSnapshot(clean.id)).toMatchObject({ state: 'ready', changes: [], truncated: false });

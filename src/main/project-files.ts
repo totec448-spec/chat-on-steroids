@@ -175,11 +175,16 @@ export interface ProjectFileTarget {
   kind: ProjectFileKind;
 }
 
+// A backslash separates names only where a file name cannot contain one (Windows). On macOS and Linux it is an
+// ordinary character: splitting on it made `back\\slash.txt` look like a file in a folder `back` that does not exist.
+const NAME_SEPARATORS = process.platform === 'win32' ? /[\\/]/ : /\//;
+const NAME_FORBIDDEN = process.platform === 'win32' ? /[\\/\0]/ : /[/\0]/;
+
 function normaliseRelative(input: string): string {
   if (typeof input !== 'string' || input.length > 4096) throw new Error('Project path is invalid');
   if (input === '') return '';
   if (/^(?:[/\\]|[A-Za-z]:[\\/]|\\\\)/.test(input)) throw new Error('Project paths must be relative');
-  const raw = input.split(/[\\/]/);
+  const raw = input.split(NAME_SEPARATORS);
   if (raw.some(segment => segment === '' || segment === '.' || segment === '..')) {
     throw new Error('Project path contains an invalid segment');
   }
@@ -188,7 +193,7 @@ function normaliseRelative(input: string): string {
 
 function leafName(input: string): string {
   if (typeof input !== 'string' || input.length < 1 || input.length > 255) throw new Error('Name is invalid');
-  if (input === '.' || input === '..' || /[\\/\0]/.test(input)) throw new Error('Name must be one file or folder name');
+  if (input === '.' || input === '..' || NAME_FORBIDDEN.test(input)) throw new Error('Name must be one file or folder name');
   return input;
 }
 
