@@ -3972,10 +3972,14 @@ var CLF_DOM = (() => {
         // The opening version first, as it stands and without opening the version list: an exact request that it
         // already offers (a model id and effort it holds) is selected right there. Opening the list is the step that
         // can leave the picker with no row to come back by (#2305), so it is only taken when the request needs it.
-        const direct = effort ? original.choices.filter(choice => choice.available && modelRank(choice) === 2 && choice.effort === effort) : [];
-        if (direct.length === 1) {
+        // A model-only request takes the opening version's choices of that one model; the later rules still pick
+        // among them (the current lane first) and keep the ambiguity checks.
+        const exactHere = original.choices.filter(choice => choice.available && modelRank(choice) === 2);
+        const direct = effort ? exactHere.filter(choice => choice.effort === effort)
+          : model && new Set(exactHere.map(choice => choice.familyId)).size === 1 ? exactHere : [];
+        if (direct.length === 1 || (!effort && direct.length > 1)) {
           seen.push(...original.choices);
-          offered.push({ version: original.version, choice: direct[0], rank: 2 });
+          for (const choice of direct) offered.push({ version: original.version, choice, rank: 2 });
         } else
         for (const version of [original.versions.find(v => v.id === original.version), ...original.versions.filter(v => v.id !== original.version)].filter(Boolean)) {
           phase('enumerate-version', version.id);
@@ -4033,6 +4037,8 @@ var CLF_DOM = (() => {
         // Latest/version entries may describe the same pair; distinct families may not.
         const rank = Math.max(0, ...candidates.map(candidate => candidate.rank));
         const matches = candidates.filter(candidate => candidate.rank === rank);
+        // An exact match may sit in a version that could not be read, and a display-name match must not stand in for it.
+        if (model && skipped.length && rank < 2) return unreadable();
         if (!matches.length) return selectionFailed(`${model ? `model ${String(model).slice(0, 30)}` : 'the current model'}${wantedEffort ? ` with ${wantedEffort}` : ''} is not offered; the picker offers ${offeredSummary(seen) || 'nothing readable'}`, 'not-offered');
         if (model && new Set(matches.map(candidate => candidate.choice.familyId)).size !== 1) return selectionFailed('more than one model matches the request', 'ambiguous-model');
         if (model && wantedEffort && new Set(matches.map(candidate => `${candidate.choice.id}\u0000${candidate.choice.effort}`)).size !== 1) return selectionFailed('more than one choice matches the request', 'ambiguous-choice');

@@ -1005,6 +1005,29 @@ it.each(['unreachable', 'disabled'] as const)('still selects an effort of the op
   expect(f.state.currentSelection).toMatchObject({ modelSlug: 'gpt-5-6-thinking', thinkingEffort: 'standard' });
 });
 
+// CodeRabbit on #2307: a model-only request reads the opening version too, and an alias never stands in for an
+// exact match that an unreadable version may hold.
+it('selects an exact model-only request on the opening version without opening the list when its row is missing (#2305)', async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  (f.selections[0]![2] as any).availability = { status: 'available' };
+  f.unreachable.add('latest');
+  const result = f.api.selectModelSettings('gpt-6-pro', null);
+  await vi.runAllTimersAsync();
+  expect(await result).toBe(true);
+  expect(f.actions).not.toHaveBeenCalledWith('version');
+  expect(f.state.currentSelection).toMatchObject({ modelSlug: 'gpt-6-pro' });
+});
+it('refuses a display-name match as unreadable while a version that may hold the exact model could not be read (#2305)', async () => {
+  vi.useFakeTimers();
+  const f = withOlderVersion(), reports: unknown[] = [];
+  const result = f.api.selectModelSettings('GPT-5.6 Sol', 'medium', () => true, (value: unknown) => reports.push(value));
+  await vi.runAllTimersAsync();
+  expect(await result).toBe(false);
+  expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({ failure: 'unreadable', failedVersion: 'older' });
+  expect(f.state.currentSelection).toMatchObject({ modelSlug: 'gpt-5-6-thinking', thinkingEffort: 'extended' });
+});
+
 // #2085: diagnostic callbacks observe the real selector, including early returns and cleanup.
 it('reports the failed selection phase and exact restoration without leaking provider props', async () => {
   const f = fixture(), reports: unknown[] = [];
