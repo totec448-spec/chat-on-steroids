@@ -400,3 +400,37 @@ it('shows a file renamed differently on both sides as conflicts, even with no wo
   // Deleted on both sides: no working file and no HEAD version, still a readable (empty) diff.
   expect(await readProjectGitDiff(id, 'moved.txt', undefined, snapshot.revision)).toMatchObject({ status: 'C', currentText: '' });
 });
+
+// CodeRabbit on #2323.
+it.runIf(process.platform === 'linux')('keeps the next change when a renamed file\'s new name is not valid UTF-8', async () => {
+  const { root, id } = await committedProject();
+  await git(root, 'mv', 'old-name.ts', 'tmp-name.ts');
+  await fs.rename(path.join(root, 'tmp-name.ts'), Buffer.concat([Buffer.from(root + '/bad-'), Buffer.from([0xe9]), Buffer.from('.ts')]));
+  await git(root, 'add', '-A');
+  await fs.writeFile(path.join(root, 'modified.ts'), 'export const value = 2;\n');
+  const snapshot = await readProjectGitSnapshot(id);
+  expect(snapshot.state).toBe('ready');
+  expect(snapshot.changes.map(change => `${change.status}:${change.path}`)).toEqual(['M:modified.ts']);
+});
+it.runIf(process.platform === 'linux')('reports omitted names once per snapshot, and not again for a clean one', async () => {
+  const { root, id } = await committedProject();
+  const bad = Buffer.concat([Buffer.from(root + '/bad-'), Buffer.from([0xe9]), Buffer.from('.txt')]);
+  await fs.writeFile(bad, 'x\n'); await git(root, 'add', '-A'); await git(root, 'commit', '-m', 'bad');
+  await fs.appendFile(bad, 'more\n');
+  const count = () => getLog().filter(entry => /not valid UTF-8/.test(entry.message)).length;
+  const before = count();
+  await readProjectGitSnapshot(id);
+  expect(count() - before).toBe(1);
+  await fs.writeFile(bad, 'x\n'); await readProjectGitSnapshot(id);
+  expect(count() - before, 'a snapshot with no changes in the bad file says nothing').toBe(1);
+});
+it('keeps a leading byte-order mark in a file name of a branch comparison', async () => {
+  const { root, id } = await committedProject();
+  await git(root, 'branch', '-M', 'main');
+  await git(root, 'checkout', '-qb', 'topic');
+  await fs.writeFile(path.join(root, '\uFEFFnotes.txt'), 'x\n');
+  await git(root, 'add', '-A'); await git(root, 'commit', '-m', 'bom');
+  const snapshot = await readProjectGitSnapshot(id, 'refs/heads/main');
+  expect(snapshot.state).toBe('ready');
+  expect(snapshot.changes.map(change => change.path)).toEqual(['\uFEFFnotes.txt']);
+});

@@ -226,33 +226,37 @@ export async function repositoryContext(projectId: string): Promise<RepositoryCo
   };
 }
 
+/** Names keep a leading U+FEFF: the default decoder would strip it, and a name that is only that character would become empty. */
+function decodeName(field: Buffer): string {
+  return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(field);
+}
+/** Counts the names one snapshot left out, so the next snapshot starts from zero and none is counted twice. */
+interface Omitted { count: number }
 /** Marks a field that was not valid UTF-8. A real field never holds NUL, so no genuine name can look like this. */
 const INVALID_FIELD = '\0';
-let invalidNames = 0;
 /**
  * Splits Git's NUL-separated output. One name that is not valid UTF-8 (a Latin-1 name from an old archive, which a
  * Linux file system keeps as it is) used to fail the whole decode, so the Git panel showed nothing at all. Each field
  * is decoded alone now; a bad one is marked, and `safeRelative` drops the entry that holds it.
  */
-function splitZero(buffer: Buffer): string[] {
+function splitZero(buffer: Buffer, omitted: Omitted): string[] {
   const parts: string[] = [];
   let start = 0;
   for (;;) {
     const end = buffer.indexOf(0, start);
     const field = buffer.subarray(start, end < 0 ? buffer.length : end);
     if (end < 0 && field.length === 0) break;
-    try { parts.push(decode(field)); }
-    catch { invalidNames++; parts.push(`${new TextDecoder().decode(field)}${INVALID_FIELD}`); }
+    try { parts.push(decodeName(field)); }
+    catch { omitted.count++; parts.push(`${new TextDecoder().decode(field)}${INVALID_FIELD}`); }
     if (end < 0) break;
     start = end + 1;
   }
   return parts;
 }
 /** One log line per snapshot that had to leave names out, never the names themselves. */
-function noteInvalidNames(): void {
-  if (!invalidNames) return;
+function noteOmitted(omitted: Omitted): void {
+  if (!omitted.count) return;
   logWarn('git status: some file names are not valid UTF-8 and are not shown');
-  invalidNames = 0;
 }
 
 /** Git's unmerged pairs: both modified, both added/deleted, and modify/delete in either direction. */
@@ -267,29 +271,28 @@ function statusFromXY(xy: string): ProjectGitStatus {
   return 'M';
 }
 
-function parseStatus(buffer: Buffer, prefix: string): ProjectGitChange[] {
-  const parts = splitZero(buffer);
+function parseStatus(buffer: Buffer, prefix: string, omitted: Omitted): ProjectGitChange[] {
+  const parts = splitZero(buffer, omitted);
   const changes: ProjectGitChange[] = [];
   for (let index = 0; index < parts.length;) {
     const record = parts[index++]!;
     if (record.length < 4) continue;
     const xy = record.slice(0, 2);
+    const status = statusFromXY(xy);
+    // A rename's source is the next field. Take it before any filtering, or a skipped rename leaves it behind to be read
+    // as the next record (a destination outside the project, or one that is not valid UTF-8, does exactly that).
+    const source = status === 'R' && xy !== '!!' ? parts[index++] : undefined;
     const pathValue = projectRelative(record.slice(3), prefix);
     if (!pathValue || xy === '!!') continue;
-    const status = statusFromXY(xy);
-    let previousPath: string | undefined;
-    if (status === 'R') {
-      const candidate = parts[index++];
-      previousPath = candidate ? projectRelative(candidate, prefix) ?? undefined : undefined;
-    }
+    const previousPath = source ? projectRelative(source, prefix) ?? undefined : undefined;
     changes.push({ status, path: pathValue, previousPath, additions: null, deletions: null, binary: false });
     if (changes.length >= MAX_CHANGES) break;
   }
   return changes;
 }
 
-function parseCommittedChanges(buffer: Buffer, prefix: string): ProjectGitChange[] {
-  const parts = splitZero(buffer);
+function parseCommittedChanges(buffer: Buffer, prefix: string, omitted: Omitted): ProjectGitChange[] {
+  const parts = splitZero(buffer, omitted);
   const changes: ProjectGitChange[] = [];
   for (let index = 0; index < parts.length && changes.length < MAX_CHANGES;) {
     const status = parts[index++]!;
@@ -343,9 +346,9 @@ async function branchIdentity(context: RepositoryContext): Promise<{
 
 interface Numstat { additions: number | null; deletions: number | null; binary: boolean; }
 
-function parseNumstat(buffer: Buffer, prefix: string): Map<string, Numstat> {
+function parseNumstat(buffer: Buffer, prefix: string, omitted: Omitted): Map<string, Numstat> {
   const result = new Map<string, Numstat>();
-  const parts = splitZero(buffer);
+  const parts = splitZero(buffer, omitted);
   for (let index = 0; index < parts.length;) {
     const first = parts[index++]!;
     const columns = first.split('\t');
@@ -402,15 +405,17 @@ export async function checkpointChanges(context: RepositoryContext, treeOid: str
     const status = await git(['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignore-submodules=all', '--no-renames', '--', '.']);
     const stats = await git(['diff', '--numstat', '-z', '--no-ext-diff', '--no-textconv', '--no-renames', '--', '.']);
     if (status.code !== 0 || stats.code !== 0) throw new Error(status.stderr || stats.stderr || 'Git comparison failed');
-    const measured = parseNumstat(stats.stdout, context.prefix);
+    const omitted: Omitted = { count: 0 };
+    const measured = parseNumstat(stats.stdout, context.prefix, omitted);
     const result: ProjectGitChange[] = [];
-    for (const record of splitZero(status.stdout)) {
+    for (const record of splitZero(status.stdout, omitted)) {
       const xy = record.slice(0, 2), file = projectRelative(record.slice(3), context.prefix);
       const kind: ProjectGitStatus | null = xy === '??' ? 'A' : xy[1] === 'D' ? 'D' : xy[1] === ' ' || xy === '!!' ? null : 'M';
       if (!file || !kind) continue;
       result.push({ status: kind, path: file, additions: null, deletions: null, binary: false, ...measured.get(file) });
       if (result.length >= MAX_CHANGES) break;
     }
+    noteOmitted(omitted);
     return result;
   });
   for (const change of changes.filter(entry => entry.status === 'A')) Object.assign(change, await untrackedStats(context, change.path));
@@ -495,9 +500,10 @@ export async function readProjectGitSnapshot(projectId: string, baseRef?: string
         runGit(context.projectReal, ['diff', '--numstat', '-z', '--no-ext-diff', '--no-textconv', '--find-renames=50%', ancestorOid, identity.headOid, '--', '.'])
       ]);
       if (status.code !== 0 || statsResult.code !== 0) throw new Error(status.stderr || statsResult.stderr || 'Git comparison failed');
-      const changes = parseCommittedChanges(status.stdout, context.prefix);
-      noteInvalidNames();
-      const stats = parseNumstat(statsResult.stdout, context.prefix);
+      const omitted: Omitted = { count: 0 };
+      const changes = parseCommittedChanges(status.stdout, context.prefix, omitted);
+      const stats = parseNumstat(statsResult.stdout, context.prefix, omitted);
+      noteOmitted(omitted);
       for (const change of changes) {
         const measured = stats.get(change.path);
         if (measured) Object.assign(change, measured);
@@ -513,13 +519,14 @@ export async function readProjectGitSnapshot(projectId: string, baseRef?: string
     const hasHead = await headExists(context);
     const status = await runGit(context.projectReal, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignore-submodules=dirty', '--find-renames=50%', '--', '.']);
     if (status.code !== 0) throw new Error(status.stderr || 'Git status failed');
-    const changes = parseStatus(status.stdout, context.prefix);
-    noteInvalidNames();
+    const omitted: Omitted = { count: 0 };
+    const changes = parseStatus(status.stdout, context.prefix, omitted);
     const statsResult = await runGit(context.projectReal, [
       'diff', '--numstat', '-z', '--no-ext-diff', '--no-textconv', '--find-renames=50%', ...(hasHead ? ['HEAD'] : ['--cached']), '--', '.'
     ]);
     if (statsResult.code !== 0) throw new Error(statsResult.stderr || 'Git diff statistics failed');
-    const stats = parseNumstat(statsResult.stdout, context.prefix);
+    const stats = parseNumstat(statsResult.stdout, context.prefix, omitted);
+    noteOmitted(omitted);
     const needsWorkingStats: ProjectGitChange[] = [];
     for (const change of changes) {
       const measured = stats.get(change.path);
