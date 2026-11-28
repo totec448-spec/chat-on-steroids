@@ -1,6 +1,8 @@
 {
   "Chat On Steroids (dev)": "Chat On Steroids (dev)",
   "About Chat On Steroids (dev)": "À propos de Chat On Steroids (dev)",
+  "Suppress unattributed call notices": "Masquer les avis de requêtes non attribuées",
+  "For standalone MCP clients: omit the informational identity notice when unattributed calls are allowed. Permissions and tool errors are unchanged.": "Pour les clients MCP autonomes : omettre l’avis informatif d’identité lorsque les requêtes non attribuées sont autorisées. Les autorisations et les erreurs des outils restent inchangées.",
   "Another Git operation is in progress. Try again when it finishes.": "Une autre opération Git est en cours. Réessayez une fois celle-ci terminée.",
   "Git state needs recovery. Check this branch before retrying; index.lock was kept.": "L’état Git doit être récupéré. Vérifiez cette branche avant de réessayer ; index.lock a été conservé.",
   "Git committed, but a later step failed. Check the commit before trying again.": "Git a créé le commit, mais une étape ultérieure a échoué. Vérifiez le commit avant de réessayer.",

@@ -1,6 +1,8 @@
 {
   "Chat On Steroids (dev)": "Chat On Steroids (dev)",
   "About Chat On Steroids (dev)": "Chat On Steroids (dev) Hakkında",
+  "Suppress unattributed call notices": "İlişkilendirilmemiş çağrı bildirimlerini gizle",
+  "For standalone MCP clients: omit the informational identity notice when unattributed calls are allowed. Permissions and tool errors are unchanged.": "Bağımsız MCP istemcileri için: ilişkilendirilmemiş çağrılara izin verildiğinde bilgilendirici kimlik bildirimini atla. İzinler ve araç hataları değişmez.",
   "Another Git operation is in progress. Try again when it finishes.": "Başka bir Git işlemi sürüyor. İşlem tamamlandığında yeniden deneyin.",
   "Git state needs recovery. Check this branch before retrying; index.lock was kept.": "Git durumunun kurtarılması gerekiyor. Yeniden denemeden önce bu dalı kontrol edin; index.lock korundu.",
   "Git committed, but a later step failed. Check the commit before trying again.": "Git commit oluşturdu ancak sonraki bir adım başarısız oldu. Yeniden denemeden önce commit’i kontrol edin.",

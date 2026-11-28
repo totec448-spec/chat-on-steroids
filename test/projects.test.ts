@@ -98,9 +98,12 @@ it.each(['invalid row', 'duplicate ID', 'unreadable JSON'])(
     const stop = onLog(entry => { if (entry.level === 'warn') warnings.push(entry.message); });
     try {
       await expect(listProjects()).rejects.toThrow('Project catalog is invalid');
-      expect(warnings).toEqual([reason === 'unreadable JSON'
+      // The unreadable file is also named once by the state store, with its cause and nothing from the file (#2308).
+      expect(warnings.filter(message => message.startsWith('projects:'))).toEqual([reason === 'unreadable JSON'
         ? 'projects: refused to read or change the catalog because its saved state is unreadable'
         : 'projects: refused to read or change the catalog because its saved rows are invalid or duplicated']);
+      expect(warnings.join('\n')).not.toContain('catalog-content-marker');
+      expect(warnings.filter(message => message.startsWith('could not read projects state'))).toHaveLength(reason === 'unreadable JSON' ? 1 : 0);
     } finally { stop(); }
   }
 );

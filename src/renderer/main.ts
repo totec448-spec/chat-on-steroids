@@ -965,7 +965,11 @@ function save(over: { readOnly?: boolean; theme?: ThemeChoice; appearance?: Appe
     projects: { codeCheckpoints: $<HTMLInputElement>('codeCheckpoints').checked },
     ...chatPatch,
     // After the chat patch, which still carries the stored mcp settings it no longer edits.
-    mcp: { instructions: previous.mcp?.instructions ?? '', persistentUrls: $<HTMLInputElement>('mcpPersistentUrls').checked }
+    mcp: {
+      instructions: previous.mcp?.instructions ?? '',
+      persistentUrls: $<HTMLInputElement>('mcpPersistentUrls').checked,
+      suppressUnattributedNotices: $<HTMLInputElement>('mcpSuppressUnattributedNotices').checked
+    }
   };
   requestedSettings = patch;
 
@@ -1051,6 +1055,9 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     }
     if (state && (!requestedSettings || requestedSettings.projects?.codeCheckpoints === patch.projects?.codeCheckpoints)) {
       $<HTMLInputElement>('codeCheckpoints').checked = state.config.projects?.codeCheckpoints === true;
+    }
+    if (state && (!requestedSettings || requestedSettings.mcp?.suppressUnattributedNotices === patch.mcp?.suppressUnattributedNotices)) {
+      $<HTMLInputElement>('mcpSuppressUnattributedNotices').checked = state.config.mcp?.suppressUnattributedNotices === true;
     }
     // And the secrets shield: an unticked switch left by a refused save must not turn it off later.
     if (state && (!requestedSettings || requestedSettings.ui.secretsShield === patch.ui.secretsShield)) {
@@ -1981,6 +1988,12 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('controlApiEnabled'), config.controlApi?.enabled === true, previousState?.config.controlApi?.enabled);
   applyChecked($<HTMLInputElement>('codeCheckpoints'), config.projects?.codeCheckpoints === true, previousState?.config.projects?.codeCheckpoints);
   applyChecked($<HTMLInputElement>('mcpPersistentUrls'), config.mcp?.persistentUrls === true, previousState?.config.mcp?.persistentUrls);
+  // The form owns this choice while snapshots are queued, even when a second click returns it
+  // to the previous saved value. A stale acknowledgement must not repaint it in that case.
+  // saveSnapshot restores the persisted value explicitly if a save is refused.
+  if (!requestedSettings) {
+    applyChecked($<HTMLInputElement>('mcpSuppressUnattributedNotices'), config.mcp?.suppressUnattributedNotices === true, previousState?.config.mcp?.suppressUnattributedNotices);
+  }
   // Stable URLs live only in the OS-backed secret store; without it they keep rotating.
   $<HTMLInputElement>('mcpPersistentUrls').disabled = next.secureStorage?.available === false && config.mcp?.persistentUrls !== true;
   // Another program held the kept port at this start: the tunnel must follow the new one.
@@ -3117,6 +3130,7 @@ for (const id of [
   'controlApiAllowActions',
   'codeCheckpoints',
   'mcpPersistentUrls',
+  'mcpSuppressUnattributedNotices',
   'privacyScreenshots',
   'phonePushEnabled',
   'phonePushTopic',

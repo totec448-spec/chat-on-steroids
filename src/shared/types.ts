@@ -469,6 +469,8 @@ export interface McpSettings {
    * OS-backed secret store; turning it off forgets them.
    */
   persistentUrls?: boolean;
+  /** Omit informational identity notices when unattributed calls are allowed. Off by default. */
+  suppressUnattributedNotices?: boolean;
 }
 
 /** The opt-in local control API for an agent watching this app (`src/main/control-api.ts`). */

@@ -117,11 +117,18 @@ describe('the URL the app opens when no page places the chat', () => {
     }
   });
 
-  it('carries a Project alongside a requested model and reasoning level', () => {
+  it('carries a Project alongside a requested reasoning level, without a model param', () => {
+    // ChatGPT drops the reasoning level again when the picker closes if the opening address also
+    // named a model (#2085, #2287). The page picks and verifies the model itself, in the picker.
     const url = commandUrl('cmd-4', 'gpt-5.6-sol', 'high', PROJECT, CHAT_A);
     expect(url.startsWith(`https://chatgpt.com/c/${CHAT_A}?`)).toBe(true);
-    expect(url).toContain('model=gpt-5.6-sol');
     expect(url).toContain('reasoning_effort=high');
+    expect(url).not.toContain('model=');
+  });
+  it('still names the model in the address when no reasoning level is requested', () => {
+    const url = commandUrl('cmd-5', 'gpt-5.6-sol', null, PROJECT, CHAT_A);
+    expect(url).toContain('model=gpt-5.6-sol');
+    expect(url).not.toContain('reasoning_effort=');
   });
 });
 
@@ -303,12 +310,45 @@ globalThis.probe = { placeSuccessorChat, projectFromUrl, successorChatBase };`, 
     expect(h.created[0]!.url!.startsWith('https://chatgpt.com/?')).toBe(true);
   });
 
+  it.each([
+    { label: 'effort only', model: null, reasoningEffort: 'high', params: { reasoning_effort: 'high' } },
+    { label: 'model and effort', model: 'gpt-6-thinking', reasoningEffort: 'high', params: { reasoning_effort: 'high' } },
+    { label: 'model only', model: 'gpt-6-thinking', reasoningEffort: null, params: { model: 'gpt-6-thinking' } },
+    { label: 'neither', model: null, reasoningEffort: null, params: {} }
+  ])('background URL matrix: $label', async ({ model, reasoningEffort, params }) => {
+    const h = worker(null);
+    await h.api.placeSuccessorChat(offer({ background: true, project: PROJECT, model, reasoningEffort }), null);
+    expect(h.created).toHaveLength(1);
+    const url = new URL(h.created[0]!.url!);
+    expect(url.origin).toBe('https://chatgpt.com');
+    expect(url.pathname).toBe('/');
+    expect(Object.fromEntries(url.searchParams)).toEqual({ clf: 'cmd-9', ...params });
+    expect(url.hash).toBe('#clf=cmd-9');
+  });
+
   it('leaves a chat outside any Project exactly where it was created before', async () => {
     const h = worker({ id: 7, url: `https://chatgpt.com/c/${CHAT_IN_PROJECT}`, windowId: 3, index: 0 });
     await h.api.placeSuccessorChat(offer(), 7);
     expect(h.created[0]!.url!.startsWith('https://chatgpt.com/?')).toBe(true);
   });
 
+  it('opens a placed successor without a model param when a reasoning level is requested', async () => {
+    const h = worker({ id: 7, url: chatInProject, windowId: 3, index: 1 });
+    await h.api.placeSuccessorChat(offer({ project: PROJECT, model: 'gpt-5.6-sol', reasoningEffort: 'high' }), 7);
+    expect(h.created[0]!.url).toContain('reasoning_effort=high');
+    expect(h.created[0]!.url).not.toContain('model=');
+  });
+  it('opens a placeless successor without a model param when a reasoning level is requested', async () => {
+    const h = worker(null);
+    await h.api.placeSuccessorChat(offer({ model: 'gpt-5.6-sol', reasoningEffort: 'low' }), null);
+    expect(h.created[0]!.url).toContain('reasoning_effort=low');
+    expect(h.created[0]!.url).not.toContain('model=');
+  });
+  it('keeps the model param on a successor that asks for no reasoning level', async () => {
+    const h = worker({ id: 7, url: chatInProject, windowId: 3, index: 1 });
+    await h.api.placeSuccessorChat(offer({ project: PROJECT, model: 'gpt-5.6-sol' }), 7);
+    expect(h.created[0]!.url).toContain('model=gpt-5.6-sol');
+  });
   it('refuses a named slug and an unrelated /g/ route from either source', () => {
     // A custom GPT is served from /g/ too and is not a Project.
     expect(h1(`https://chatgpt.com/g/g-abc123/c/${CHAT_IN_PROJECT}`)).toBeNull();

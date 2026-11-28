@@ -1563,18 +1563,31 @@ describe('settings writes from more than one UI', () => {
       expect(JSON.stringify(response)).not.toContain('synthetic-active-key');
     } finally { retired.mockRestore(); }
   });
+  it('persists unattributed notice suppression and preserves it through older settings forms', async () => {
+    const base = defaultConfig(); await saveConfig(base);
+    expect((await save({ ...base, mcp: { ...base.mcp, suppressUnattributedNotices: true } }, base)).ok).toBe(true);
+    expect(getConfig().mcp.suppressUnattributedNotices).toBe(true);
+    const { suppressUnattributedNotices: _, ...legacyMcp } = base.mcp;
+    const legacy = { ...base, mcp: legacyMcp };
+    expect((await save({ ...legacy, ui: { ...legacy.ui, minimizeToTray: !legacy.ui.minimizeToTray } }, legacy)).ok).toBe(true);
+    expect(getConfig().mcp.suppressUnattributedNotices).toBe(true);
+    const current = getConfig();
+    expect((await save({ ...current, mcp: { ...current.mcp, suppressUnattributedNotices: false } }, current)).ok).toBe(true);
+    expect(getConfig().mcp.suppressUnattributedNotices).toBe(false);
+  });
+
   it('persists connector instructions through IPC, preserves concurrent edits, and allows explicit clearing', async () => {
     const base = defaultConfig(); await saveConfig(base);
     const wanted = { ...base, mcp: { instructions: 'Use the approved project only.' }, ui: { ...base.ui, browserOnly: true } };
     expect((await save(wanted, base)).ok).toBe(true);
-    expect(JSON.parse(await fs.readFile(path.join(dir, 'config.json'), 'utf8')).mcp).toEqual({ ...wanted.mcp, persistentUrls: false });
+    expect(JSON.parse(await fs.readFile(path.join(dir, 'config.json'), 'utf8')).mcp).toEqual({ ...wanted.mcp, persistentUrls: false, suppressUnattributedNotices: false });
     expect(getConfig().ui.browserOnly).toBe(true);
     expect((await save({ ...base, ui: { ...base.ui, minimizeToTray: !base.ui.minimizeToTray } }, base)).ok).toBe(true);
-    expect(getConfig().mcp).toEqual({ ...wanted.mcp, persistentUrls: false });
+    expect(getConfig().mcp).toEqual({ ...wanted.mcp, persistentUrls: false, suppressUnattributedNotices: false });
     expect(getConfig().ui.browserOnly).toBe(true);
     const legacy = { ...base } as any; delete legacy.mcp;
     expect((await save(legacy, legacy)).ok).toBe(true);
-    expect(getConfig().mcp).toEqual({ ...wanted.mcp, persistentUrls: false });
+    expect(getConfig().mcp).toEqual({ ...wanted.mcp, persistentUrls: false, suppressUnattributedNotices: false });
     const current = getConfig();
     expect((await save({ ...current, mcp: { instructions: '' } }, current)).ok).toBe(true);
     expect(getConfig().mcp.instructions).toBe('');
@@ -3102,8 +3115,6 @@ describe('Stop IPC exact session and turn authority', () => {
     // The person reads what happened, never an error code (Haz on #1883).
     const nothing = 'That answer had already ended; there was nothing to stop.';
     expect(await invoke({ id: session.id, expectedTurnId: 'other-turn' })).toMatchObject({ ok: false, error: nothing });
-    // A stored historical start alone cannot authorize stopping a browser turn.
-    expect(await invoke({ id: session.id, expectedTurnId: 'ipc-stop-one' })).toMatchObject({ ok: false, error: nothing });
     // Stop shown for another chat than the session's now (a Compact & Resume moved it): nothing here changes.
     expect(await invoke({ id: session.id, expectedTurnId: 'ipc-stop-one', expectedConversationId: 'f3333333-aaaa-4bbb-8ccc-111111111111' })).toMatchObject({
       ok: false, error: 'That answer had already ended, so ChatGPT was not asked to stop. Compact & Resume was already moving this chat and goes on.' });
@@ -3118,6 +3129,17 @@ describe('Stop IPC exact session and turn authority', () => {
     expect((await invoke({ id: session.id, expectedTurnId: 'ipc-stop-one' })).ok).toBe(false);
     const missing = await createSession({ title: 'No browser ownership', conversationId: null });
     expect(await invoke({ id: missing.id, expectedTurnId: 'ipc-stop-one' })).toMatchObject({ ok: false, error: 'session_not_recorded' });
+  });
+  it('asks no browser to stop a stored start, and ends it in the record when no page holds the chat (#2284)', async () => {
+    const invoke = (payload: unknown) => handlers.get('sessions:stopTurn')!(null, payload) as Promise<any>;
+    const session = await createSession({ title: 'Stop IPC without a page', conversationId: 'f4444444-aaaa-4bbb-8ccc-111111111111' });
+    await appendEvent(session.id, { time: Date.now(), source: 'app', kind: 'turn_start', turnId: 'ipc-stop-two' });
+    // A stored start alone is no running turn, so no Stop command goes to a browser; but nothing else
+    // would ever end the record's open turn, so the person's Stop does.
+    expect(await invoke({ id: session.id, expectedTurnId: 'ipc-stop-two' })).toMatchObject({ ok: true });
+    expect((await getSession(session.id))?.activeTurnId).toBeNull();
+    expect(await invoke({ id: session.id, expectedTurnId: 'ipc-stop-two' })).toMatchObject({
+      ok: false, error: 'That answer had already ended; there was nothing to stop.' });
   });
 });
 
