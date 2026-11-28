@@ -26,9 +26,10 @@ const events = [
   { seq: 4, time: now+3, source: 'extension', kind: 'turn_end', turnId: 't-1', outcome: 'completed' }
 ];
 const attachment = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'preview.png', mimeType: 'image/png', size: 68, preview: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF5sAAAAASUVORK5CYII=' };
-let win, sent, expanded, followed = 0;
+let win, workspace, sent, expanded, followed = 0;
+const admissions = [];
 app.whenReady().then(async () => {
-  const config = merge(defaultConfig(), { ui: { theme: 'dark', language: 'en', autoConnect: false, defaultChatModel: 'gpt-6-sol', defaultChatReasoning: 'high' } });
+  const config = merge(defaultConfig(), { roots: [{ name: 'fixture', path: root }], ui: { theme: 'dark', language: 'en', autoConnect: false, lastSeenVersion: '2.1.18', defaultChatModel: 'gpt-6-sol', defaultChatReasoning: 'high' } });
   const state = { config, status: { state: 'connected', detail: 'Local preview', publicUrl: null, localUrl: null, handshakeAt: now, lastRequestAt: now, lastToolCallAt: null, health: null, surfaces: [] },
     platform: { family: 'windows', name: 'Windows', desktopAutomation: false }, hasApiKey: false, hasGoalKey: false, resolvedBinary: null, bundledTunnelVersion: null,
     bridge: { running: true, port: 0, paired: true, present: true, lastSeenAt: now }, update: { current: '2.1.18', latest: null, stage: 'idle', error: null, checkedAt: null } };
@@ -39,18 +40,30 @@ app.whenReady().then(async () => {
     'sessions:events': ({ id: key }) => { const rows = key === id ? events : [{ ...events[0], message: message('Other chat only') }]; return { summary: summaries.find(s => s.id === key), events: rows, total: rows.length, nextFrom: rows.length+1 }; },
     'sessions:controls': ({ id }) => controls(id), 'sessions:traces': () => ({}), 'sessions:turnChanges': () => [],
     'sessions:bookmarks': () => [], 'sessions:runningTools': () => [], 'sessions:runningProcesses': () => [], 'sessions:pausedHelpers': () => [],
-    'sessions:outbox': () => sent ? [sent] : [], 'sessions:retainDraftAttachments': () => null,
+    'sessions:outbox': () => admissions, 'sessions:retainDraftAttachments': () => null,
     'sessions:files': () => [attachment], 'sessions:dropFiles': () => [attachment],
-    'sessions:send': args => (sent = { ...args, sessionId: args.sessionId ?? args.id, conversationId: args.sessionId, state: 'queued', owner: null, createdAt: now }),
+    'sessions:send': args => {
+      sent = { ...args, sessionId: args.sessionId ?? args.id, conversationId: args.sessionId, state: 'queued', owner: null, createdAt: Date.now() };
+      admissions.push(sent);
+      return sent;
+    },
     'sessions:followTab': () => { followed++; return true; },
     'sessions:search': () => ({ results: [], sessions: [], total: 0 }),
     'projects:list': () => [], 'chatGroups:get': () => ({ version: 1, groups: [], members: {} }),
     'swarm:get': () => ({ running: false, runId: null, agents: [], maxWorkers: 2, pendingReports: 0 }),
-    'skills:library': () => ({ skills: [], roots: [], warnings: [] }), 'bridge:extensionPath': () => null, 'handoff:get': () => null, 'schedules:get': () => []
+    'skills:library': () => ({ skills: [], roots: [], warnings: [] }), 'bridge:extensionPath': () => null, 'handoff:get': () => null, 'schedules:get': () => [], 'log:get': () => [],
+    'desktopAsk:pending': () => null, 'ui:stopNoticeTexts': () => null, 'ui:mainTexts': () => null, 'ui:language': () => null,
+    'pets:list': () => ({ pets: [] }), 'pets:overlayState': () => ({ visible: false, ready: true, activeCount: 0, activityCount: 0 }),
+    'window:getZoom': () => 1, 'plugins:snapshot': () => ({ plugins: [], catalog: [], schemaRevision: 0 }), 'skills:managed': () => [], 'skills:recommended': () => []
   };
   for (const [channel, fn] of Object.entries(handlers)) ipcMain.handle(channel, (_, arg) => ok(fn(arg)));
   ipcMain.handle('quick-chat:pin', (_, value) => value);
-  ipcMain.handle('quick-chat:expand', (_, key) => { expanded = key; return true; });
+  ipcMain.handle('quick-chat:expand', (_, key) => { expanded = key; if (workspace) workspace.webContents.send('session:write', key); return true; });
+  ipcMain.handle('quick-chat:open-session', (event, key) => {
+    assert.equal(event.sender, workspace.webContents);
+    win.webContents.send('session:write', key);
+    return ok(true);
+  });
   ipcMain.handle('quick-chat:hide', () => {});
   let ready = false;
   ipcMain.handle('quick-chat:ready', () => { ready = true; });
@@ -137,6 +150,80 @@ app.whenReady().then(async () => {
   assert.equal(expanded, id);
   await js('document.querySelector("#quickSearch").click(); document.querySelector("#quickHistoryNew").click()');
   await until('!document.querySelector("#searchDialog").open && document.querySelector("#chatTitle").textContent === "New chat"');
+  // Two actual renderer instances, sharing only the isolated backend fixture.
+  workspace = new BrowserWindow({ show: false, width: 1100, height: 800, webPreferences: {
+    preload: path.join(root, 'out/preload/index.js'), sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false
+  } });
+  await workspace.loadFile(path.join(root, 'out/renderer/index.html'));
+  const ws = source => workspace.webContents.executeJavaScript(source);
+  const waitWs = async source => {
+    for (let n = 0; n < 150; n++) {
+      if (await ws(source)) return;
+      await new Promise(resolve => setTimeout(resolve, 35));
+    }
+    throw new Error('Workspace timed out: ' + source);
+  };
+  workspace.showInactive();
+  await waitWs('document.querySelectorAll("#sessionList [data-id]").length === 2');
+  workspace.webContents.send('session:write', id);
+  await waitWs('document.querySelector("#timeline").textContent.includes("Example answer")');
+  const type = text => 'document.querySelector("#chatInput").value=' + JSON.stringify(text) + ';document.querySelector("#chatInput").dispatchEvent(new Event("input"))';
+  await ws(type('Workspace draft only'));
+  assert.equal(await ws('window.api.openSessionQuickChat(' + JSON.stringify(id) + ').then(result => result.ok)'), true);
+  await until('document.querySelector("#timeline").textContent.includes("Example answer")');
+  await js(type('Quick Chat draft only'));
+  assert.equal(await ws('document.querySelector("#chatInput").value'), 'Workspace draft only');
+  await js('document.querySelector("#chatSend").click()');
+  await until('document.querySelector("#inputQueue").textContent.includes("Quick Chat draft only")');
+  workspace.webContents.send('session:changed');
+  await waitWs('document.querySelector("#inputQueue").textContent.includes("Quick Chat draft only")');
+  assert.equal(await ws('document.querySelector("#chatInput").value'), 'Workspace draft only');
+  await ws('document.querySelector("#chatSend").click()');
+  await waitWs('document.querySelector("#inputQueue").textContent.includes("Workspace draft only")');
+  win.webContents.send('session:changed');
+  await until('document.querySelector("#inputQueue").textContent.includes("Workspace draft only")');
+  const paired = admissions.filter(row => ['Workspace draft only', 'Quick Chat draft only'].includes(row.text));
+  assert.equal(paired.length, 2);
+  assert.equal(new Set(paired.map(row => row.id)).size, 2);
+  assert.ok(paired.every(row => row.sessionId === id));
+  for (const evalIn of [ws, js]) {
+    for (const row of paired) assert.equal(await evalIn('[...document.querySelectorAll("#timeline .said.is-user,#inputQueue .pending-message")].filter(el=>el.textContent.includes(' + JSON.stringify(row.text) + ')).length'), 1);
+  }
+  // Both panes see the same delayed provider receipt, then the same durable history.
+  // Sample the actual paints while the queued rows become recorded user messages.
+  const frameProbe = `new Promise((resolve, reject) => {
+    const frames = [], texts = ${JSON.stringify(paired.map(row => row.text))};
+    const probe = window.__quickChatDeliveryProbe = { frames, done: false };
+    const deadline = setTimeout(() => { probe.done = true; reject(new Error('Delivery frame probe timed out')); }, 12000);
+    function frame() {
+      const rows = [...document.querySelectorAll('#timeline .said.is-user,#inputQueue .pending-message')];
+      frames.push({ counts: texts.map(text => rows.filter(row => row.textContent.includes(text)).length),
+        previous: document.querySelector('#timeline').textContent.includes('Example answer'),
+        welcome: !document.querySelector('#timelineEmpty').hidden });
+      if (probe.done && frames.length >= 100) { clearTimeout(deadline); resolve(frames); } else requestAnimationFrame(frame);
+    } requestAnimationFrame(frame);
+  })`;
+  const paints = Promise.all([ws(frameProbe), js(frameProbe)]);
+  const bothReached = async count => Promise.all([waitWs, until].map(wait => wait('window.__quickChatDeliveryProbe?.frames.length >= ' + count)));
+  const pushBoth = change => { for (const owner of [workspace, win]) owner.webContents.send('session:changed', change); };
+  await bothReached(8);
+  for (const row of paired) Object.assign(row, { state: 'sent', messageId: 'fixture-' + row.id, deliveredAt: Date.now(), historyAnchored: true, historySeq: events.length + paired.indexOf(row) + 1 });
+  pushBoth();
+  await bothReached(48);
+  for (const row of paired) events.push({ seq: row.historySeq, time: row.deliveredAt, source: 'app', kind: 'user_message', messageId: row.messageId, inputId: row.id, message: message(row.text) });
+  Object.assign(summaries[0], { updatedAt: Date.now(), events: events.length, userMessages: 3 });
+  pushBoth({ sessionIds: [id] });
+  for (const wait of [waitWs, until]) await wait('document.querySelector("#timeline").textContent.includes("Quick Chat draft only") && document.querySelector("#timeline").textContent.includes("Workspace draft only") && ![...document.querySelectorAll("#inputQueue .pending-message")].some(row => /(?:Quick Chat|Workspace) draft only/.test(row.textContent))');
+  await Promise.all([ws, js].map(evalIn => evalIn('window.__quickChatDeliveryProbe.done = true')));
+  const frameSets = await paints;
+  assert.ok(frameSets.every(frames => frames.length >= 100 && frames.every(frame => frame.previous && !frame.welcome && frame.counts.every(count => count === 1))), JSON.stringify(frameSets));
+  console.log('Two renderers: ' + frameSets.map(frames => frames.length).join(' and ') + ' delivery frames retained both messages exactly once, through durable history.');
+  workspace.webContents.send('session:write', other);
+  await waitWs('document.querySelector("#timeline").textContent.includes("Other chat only")');
+  assert.ok(await js('document.querySelector("#timeline").textContent.includes("Example answer")'));
+  await js('document.querySelector("#quickExpand").click()');
+  await waitWs('document.querySelector("#timeline").textContent.includes("Example answer")');
+  console.log('Two renderers: independent drafts, exact session routing, shared queued inputs without duplicates passed.');
   console.log('Quick chat: shared transcript and tools, recent chat switching, image draft retention, exact send, pin, theme, narrow layout and expand passed.');
-  win.destroy(); app.exit(0);
-}).catch(error => { console.error(error); if (win && !win.isDestroyed()) win.destroy(); app.exit(1); });
+  workspace.destroy(); win.destroy(); app.exit(0);
+}).catch(error => { console.error(error); for (const owner of [workspace, win]) if (owner && !owner.isDestroyed()) owner.destroy(); app.exit(1); });
