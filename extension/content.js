@@ -14231,7 +14231,24 @@
       const limitation = providerLimitation();
       if (limitation) return fail(limitation);
       const choosing = Date.now();
-      if (!intoRunningTurn() && !(await CLF_DOM.selectModelSettings(input.model, input.reasoningEffort, onTarget))) {
+      let selectionCatalog;
+      let selectionCatalogStatus = 'passive';
+      // Fresh-page ownership was established before the claim. Native composer
+      // hydration can create a local turn shell while selecting or typing; that
+      // shell is not navigation away from the claimed opening. Keep checking the
+      // exact marker and document lifetime, not the absence of all turn nodes.
+      const catalogPageCurrent = () => onTarget() && freshMarker() &&
+        (project ? CLF_DOM.projectHomeId() === project : location.pathname === '/');
+      const collectSelectionCatalog = reply?.data?.collectSelectionCatalog === true && !target && !message.branch && !temporary &&
+        !input.recovery && input.purpose !== 'decision' && catalogPageCurrent();
+      const collectCatalog = models => { if (catalogPageCurrent()) selectionCatalog = models; };
+      const selectionDiagnostic = trace => {
+        if (trace.phase === 'enumerate-version') selectionCatalogStatus = 'incomplete';
+        else if (trace.phase === 'open' && selectionCatalogStatus === 'passive') selectionCatalogStatus = 'picker_without_enumeration';
+      };
+      if (!intoRunningTurn() && !(await (collectSelectionCatalog
+        ? CLF_DOM.selectModelSettings(input.model, input.reasoningEffort, onTarget, selectionDiagnostic, collectCatalog)
+        : CLF_DOM.selectModelSettings(input.model, input.reasoningEffort, onTarget)))) {
         // A limit shown meanwhile is the reason, even when its dialog was already closed.
         const limited = providerLimitation() || CLF_DOM.accessNoticeSince?.(choosing);
         const why = limited ? '' : CLF_DOM.modelSelectionFailure?.();
@@ -14338,7 +14355,9 @@
         // Preserve the outbox's revocable claim until the actual native Send is ready.
         if (input.recovery && !await recoveryPageUnfinished(() => sendCurrent() && onTarget() && draft.current(), withdrawWhy)) return false;
         authorizing = true;
-        authorization = ask({ type: 'desktop_input', id: input.id, owner: input.owner, conversationId: target, authorize: true });
+        authorization = ask({ type: 'desktop_input', id: input.id, owner: input.owner, conversationId: target, authorize: true,
+          ...(collectSelectionCatalog && catalogPageCurrent() && sendCurrent() && draft.current()
+            ? selectionCatalog ? { selectionCatalog } : { selectionCatalogStatus } : {}) });
         const authorized = await authorization;
         if (authorized?.data?.ok !== true) noteWithdraw('app-refused');
         if (!sendCurrent() || authorized?.data?.ok !== true || !onTarget() || !draft.current()) { noteWithdraw(onTarget() ? 'lease-lost' : offTarget()); return false; }

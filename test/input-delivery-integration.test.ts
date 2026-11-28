@@ -769,6 +769,49 @@ it.each([
   } finally { clock.mockRestore(); }
 });
 
+it.each(['valid', 'invalid', 'explicit pending', 'fresh', 'existing', 'no evidence', 'skipped versions'])('reuses only eligible fresh-chat selection evidence (%s)', async kind => {
+  const catalog = await import('../src/main/chat-models.js');
+    const models = [{ id: 'gpt-example', label: 'GPT Example', efforts: ['high'] }];
+  const updated = [...models, { id: 'new-model', label: 'New model', efforts: ['medium'] }];
+  const observedAt = Date.now() - (kind === 'fresh' ? 1000 : 3600_001);
+  catalog.resetChatModelsForTests();
+  try {
+    await writeDurableNow('chat-models', { observedAt, models });
+    await catalog.restoreChatModels();
+    // Even an available signed-in page must not start a separate discovery.
+    expect((await post('/status', { openConversations: [], chatGptSignedIn: true, modelCatalogPageAvailable: true })).body.modelCatalogRequest).toBeNull();
+    const conversationId = kind === 'existing' ? randomUUID() : null;
+    const session = conversationId ? await createSession({ title: 'Existing chat', conversationId }) : null;
+    const row = await input.enqueueInput({ ...message(session?.id ?? null, 'off'), mode: 'auto', model: 'gpt-example', reasoningEffort: 'high' });
+    const claim = { id: row.id, owner: 'selection-page', conversationId, requiresAuthorization: true };
+    const claimed = (await post('/input/claim', claim)).body;
+    expect(claimed.input).toBeTruthy();
+    expect(claimed.collectSelectionCatalog).toBe(kind === 'fresh' || kind === 'existing' ? undefined : true);
+    if (kind === 'explicit pending') catalog.requestChatModels(true);
+    const evidence = kind === 'invalid' ? [...models, ...models] : updated;
+    const authorize = { ...claim, authorize: true, ...(kind === 'skipped versions' ? { selectionCatalogStatus: 'incomplete' } : kind === 'no evidence' ? {} : { selectionCatalog: evidence }) };
+    expect((await post('/input/claim', { ...authorize, owner: 'wrong-page' })).body.ok).toBe(false);
+    expect(catalog.getChatModels().models).toEqual(models);
+    expect((await post('/input/claim', authorize)).body.ok).toBe(true);
+    expect(catalog.getChatModels().models).toEqual(kind === 'valid' ? updated : models);
+    if (kind === 'skipped versions') {
+      expect(catalog.getChatModels().observedAt).toBe(observedAt);
+      expect(catalog.pendingChatModelRequest()).toBeNull();
+      await flushDurable(); catalog.resetChatModelsForTests(); await catalog.restoreChatModels();
+      expect(catalog.getChatModels()).toMatchObject({ state: 'ready', models, observedAt });
+    }
+    expect((await post('/input/claim', authorize)).body.ok).toBe(false);
+    if (kind === 'valid') {
+      expect(catalog.pendingChatModelRequest()).toBeNull();
+      expect(pushed).toHaveBeenCalledWith('chatModels:changed', expect.objectContaining({ state: 'ready', models: updated }));
+      await flushDurable(); catalog.resetChatModelsForTests(); await catalog.restoreChatModels();
+      expect(catalog.getChatModels().models).toEqual(updated);
+    }
+  } finally {
+    catalog.resetChatModelsForTests(); await writeDurableNow('chat-models', null);
+  }
+});
+
 it('refreshes account models after an owned picker failure without authorizing another tab', async () => {
   const catalog = await import('../src/main/chat-models.js');
   catalog.resetChatModelsForTests();

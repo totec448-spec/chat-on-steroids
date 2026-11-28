@@ -9756,6 +9756,19 @@ describe('a command that runs out of time says how far its page got', () => {
     expect(lines[1]!.message).toContain('"outcome":"confirmed"');
   });
 
+  // #2305: a selection that confirmed on the versions it could read says which it skipped, in one log line.
+  it('logs a confirmed model selection that skipped a version it could not read', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
+    const bootstrap = await redeem(); await step(bootstrap.id, 'model');
+    const confirmed = pickerTrace({ phase: 'close', outcome: 'confirmed', closed: true, skippedVersions: ['6.1 Sol'],
+      selected: { model: 'gpt-5-6-thinking', effort: 'high' }, after: { model: 'gpt-5-6-thinking', effort: 'high' }, resolved: { model: 'gpt-5-6-thinking', effort: 'high' } });
+    expect((await request('POST', '/commands/step', { body: { id: bootstrap.id, client: 'tab-1', step: 'model-diagnostic', modelSelection: confirmed } })).body.ok).toBe(true);
+    const lines = getLog().filter(entry => entry.message.includes(`model selection command=${bootstrap.id}`));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.message).toContain('"skippedVersions":["6.1 Sol"]');
+  });
+
   // #1086 (2.1.41, Windows VM under load): pages reported "sending the task" and the app gave the workers
   // up at the ordinary deadline anyway, while their chats received the task: workers ran that the app had
   // written off. A page that says it is sending gets a bounded window for its receipt, and is told so.

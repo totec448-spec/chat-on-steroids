@@ -1,6 +1,6 @@
 import { REASONING_EFFORTS } from '../src/shared/session.js';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { getChatModels, requestChatModels, pendingChatModelRequest, observeChatModels, resetChatModelsForTests, configureChatModelDiscovery, startChatModelDiscovery, restoreChatModels, refreshForUnoffered } from '../src/main/chat-models.js';
+import { getChatModels, requestChatModels, pendingChatModelRequest, observeChatModels, resetChatModelsForTests, configureChatModelDiscovery, startChatModelDiscovery, restoreChatModels, refreshForUnoffered, wantsSelectionCatalog, observeSelectionCatalog } from '../src/main/chat-models.js';
 import { resumeModelSelection, wakeModelSelection } from '../src/main/resume-model.js';
 const saved = vi.hoisted(() => ({ value: null as unknown }));
 vi.mock('../src/main/durable.js', () => ({ readDurable: async () => saved.value, writeDurableSoon: (_name: string, value: unknown) => { saved.value = structuredClone(value); } }));
@@ -8,6 +8,25 @@ const models = [{ id: 'gpt-example', label: 'GPT Example', efforts: ['none', 'me
 beforeEach(() => { resetChatModelsForTests(); saved.value = null; vi.useFakeTimers(); });
 afterEach(() => vi.useRealTimers());
 describe('durable observed ChatGPT model catalog', () => {
+  it.each([-1, 0, 3_599_999, 3_600_000])('reuses a stored catalog at the exact freshness boundary (age %s)', async age => {
+    saved.value = { observedAt: Date.now() - age, models };
+    await restoreChatModels();
+    const eligible = age < 0 || age >= 3_600_000;
+    expect(wantsSelectionCatalog()).toBe(eligible);
+    const updated = [{ id: 'new-model', label: 'New model', efforts: ['medium'] }];
+    expect(observeSelectionCatalog(updated)).toBe(eligible);
+    expect(getChatModels().models).toEqual(eligible ? updated : models);
+    expect(pendingChatModelRequest()).toBeNull();
+  });
+  it.each([null, { observedAt: -1, models }, { observedAt: 1, models: [{ id: 'bad model', label: 'Invalid', efforts: ['high'] }] }])('does not replace a missing or damaged saved catalog through selection (%j)', async value => {
+    saved.value = value;
+    await restoreChatModels();
+    expect(wantsSelectionCatalog()).toBe(false);
+    expect(observeSelectionCatalog(models)).toBe(false);
+    expect(getChatModels()).toMatchObject({ state: 'unknown', models: [] });
+    expect(pendingChatModelRequest()).toBeNull();
+    expect(saved.value).toEqual(value);
+  });
   it('gives the first explicit promotion a fresh budget without extending repeated Refresh clicks', () => {
     requestChatModels(false); const passive = pendingChatModelRequest()!;
     vi.advanceTimersByTime(80000);
@@ -49,6 +68,15 @@ describe('durable observed ChatGPT model catalog', () => {
     const wake = vi.fn(async () => {}); configureChatModelDiscovery({ wake, changed: () => {} });
     await startChatModelDiscovery(false);
     expect(wake).not.toHaveBeenCalled();
+  });
+  // #2305: the extension skips a version it cannot open and says so next to the models it did read.
+  it('accepts the models of the readable versions together with the skipped-versions note, and logs it', async () => {
+    const { getLog } = await import('../src/main/logger.js');
+    requestChatModels(); const nonce = pendingChatModelRequest()!.nonce;
+    expect(observeChatModels({ nonce, models, error: 'versions_skipped' })).toBe(true);
+    expect(getChatModels()).toMatchObject({ state: 'ready', models });
+    expect(getChatModels().error).toBeUndefined();
+    expect(getLog().some(entry => entry.message.includes(`model discovery observed id=${nonce} models=1`) && entry.message.includes('error=versions_skipped'))).toBe(true);
   });
   it('keeps usable choices through refresh and a failed refresh', () => {
     requestChatModels(); observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models });

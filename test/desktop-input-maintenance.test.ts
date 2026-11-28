@@ -1270,6 +1270,19 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     expect(h.update).not.toHaveBeenCalled();
     expect(h.remove).not.toHaveBeenCalled();
   });
+  it.each(['owned', 'wrong owner', 'incognito', 'existing', 'oversized'])('forwards only bounded fresh-chat catalog evidence (%s)', async kind => {
+    const h = await worker([]);
+    const tab = { id: 7, url: kind === 'existing' ? `https://chatgpt.com/c/${secondId}` : `https://chatgpt.com/?cos-input=${firstId}`, incognito: kind === 'incognito' };
+    h.tabs.push(tab);
+    const sender = { tab, documentId: 'selection-page', frameId: 0, url: tab.url };
+    const source = await h.authorizeDocument(sender, { navigationEpoch: 1 });
+    const selectionCatalog = [{ id: 'example', label: kind === 'oversized' ? 'x'.repeat(12001) : 'Example', efforts: ['high'] }];
+    await h.desktopInput({ id: firstId, owner: kind === 'wrong owner' ? '7:other:1' : '7:selection-page:1',
+      conversationId: kind === 'existing' ? secondId : null, authorize: true, selectionCatalog }, sender, source);
+    const call = h.fetch.mock.calls.find(([url]) => new URL(String(url)).pathname === '/input/claim');
+    expect(call).toBeTruthy();
+    expect(JSON.parse(String(call?.[1]?.body)).selectionCatalog).toEqual(kind === 'owned' ? selectionCatalog : undefined);
+  });
   it('keeps catalog discovery minimized and unfocused even when foreground chats are preferred', async () => {
     const h = await worker([]);
     await h.inspectModels({ nonce: firstId, expiresAt: Date.now() + 30000 }, false);

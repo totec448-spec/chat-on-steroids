@@ -3675,7 +3675,9 @@ var CLF_DOM = (() => {
         return closed && stillCurrent();
         } finally { motion?.remove(); motion = null; }
       },
-      async version(version) {
+      // `home` is the version to come back to: with no row for it in the list there is no way back, so the
+      // list is not used to leave it (#2305: a version in the "Older models" submenu has no row at all).
+      async version(version, home) {
         const before = await state(); if (!before) return null;
         const versionRows = () => [...(picker()?.querySelectorAll('[role="menuitemradio"]') || [])].filter(shown);
         if (before.version === version && !versionRows().length) return before;
@@ -3683,15 +3685,20 @@ var CLF_DOM = (() => {
         if (!label) return null;
         // The picker may already show the version list (including a checked row).
         // Select that row to return to its effort view; never assume the slider is open.
-        if (!versionRows().length) {
+        // A list that is already on screen has every row it will have: a version with none is not waited for
+        // as long as a list still opening (#2305: older models sit in a submenu and have no row here).
+        const listWasOpen = versionRows().length > 0;
+        if (!listWasOpen) {
           const toggle = [...picker().querySelectorAll('[role="menuitem"][aria-expanded], [role="menuitem"][data-model-picker-view-toggle]')].filter(shown);
           if (toggle.length !== 1) return null;
           toggle[0].click();
         }
+        const homeLabel = home && home !== version ? before.versions.find(v => v.id === home)?.label : undefined;
+        if (home && home !== version && !homeLabel) return null;
         const option = await wait(() => {
           const rows = versionRows().filter(node => pickerVersionNamed(node, label) && node.getAttribute('aria-disabled') !== 'true');
-          return rows.length === 1 ? rows[0] : null;
-        });
+          return rows.length === 1 && (!homeLabel || versionRows().some(node => pickerVersionNamed(node, homeLabel))) ? rows[0] : null;
+        }, listWasOpen ? 600 : 3000);
         if (!key(option, 'Enter')) return null;
         return state(next => next.version === version && !versionRows().length);
       },
@@ -3788,14 +3795,25 @@ var CLF_DOM = (() => {
     try {
       // One observation per version, not one mutation per effort. Computed choices
       // include account/workspace denials which the raw global preset list does not prove.
+      // A version that cannot be read (#2305: ChatGPT's older models sit in a submenu with no row in the
+      // version list) is skipped and named; one such version used to fail the whole catalog.
+      // The version the picker opened on is read as it stands. Leaving it needs a row to come back to: a
+      // current version with none (also in the submenu) is never left, so the picker is not moved off it.
+      let skipped = 0;
+      collectModelChoices(result, original);
       for (const version of original.versions) {
-        const state = await ui.version(version.id);
-        if (!state) throw new Error('model_unconfirmed');
+        if (version.id === original.version) continue;
+        const state = await ui.version(version.id, original.version);
+        if (!state) { skipped += 1; continue; }
         collectModelChoices(result, state);
       }
+      if (!result.size) throw new Error('model_unconfirmed');
+      if (skipped) failure('versions_skipped');
     } catch { failure('model_unconfirmed'); result.clear(); }
     finally {
-      if (stillCurrent() && await ui.version(original.version)) {
+      // A picker that never left the opening version is already home, whichever view it shows.
+      const at = stillCurrent() ? await ui.state() : null;
+      if (stillCurrent() && (at?.version === original.version || await ui.version(original.version))) {
         const state = await ui.bucket(original.currentBucket);
         const previous = original.choices.find(c => c.bucket === original.currentBucket);
         const selected = state?.choices.find(c => c.bucket === state.currentBucket);
@@ -3822,7 +3840,7 @@ var CLF_DOM = (() => {
     }
     return [...byFamily].slice(0, 6).map(([key, efforts]) => `${String(key).slice(0, 24)}:${[...efforts].join('/')}`).join(' ').slice(0, 160);
   }, '');
-  async function selectModelSettings(model, effort, stillCurrent = () => true, diagnostic) {
+  async function selectModelSettings(model, effort, stillCurrent = () => true, diagnostic, onCatalog) {
     modelSelectionWhy = '';
     const started = Date.now(), pair = choice => choice ? { model: choice.id, effort: choice.effort } : null;
     const trace = { attempt: 1, phase: 'passive', outcome: 'pending', failure: null, failedPhase: null, failedVersion: null,
@@ -3880,7 +3898,7 @@ var CLF_DOM = (() => {
         current.effort === expected.effort && nativeReasoningMatches(current.effort, nativeOwned || nativeReasoningOwned()) ||
         selectionFailed('the model or reasoning effort changed after closing the picker', 'changed');
     };
-    let result = false;
+    let result = false, discovered = null;
     const choose = async () => {
       if (!model && !effort) return true;
       let nativeOwned = nativeReasoningOwned();
@@ -3948,16 +3966,26 @@ var CLF_DOM = (() => {
           : name && normalizeModelLabel(choice.familyLabel) === name ? 1 : 0;
         // Every available choice of the requested model, read once across versions, so the effort
         // can be resolved against what the account actually offers before anything is moved.
-        const offered = [], seen = [];
+        const offered = [], seen = [], skipped = [];
+        const catalog = typeof onCatalog === 'function' ? new Map() : null;
+        const versions = original.versions.map(v => v.id).sort().join('\u0000');
+        let complete = true;
         for (const version of [original.versions.find(v => v.id === original.version), ...original.versions.filter(v => v.id !== original.version)]) {
           phase('enumerate-version', version.id);
-          const state = await ui.version(version.id); if (!state) return selectionFailed('a model version could not be read', 'unreadable');
+          // A version with no row to open (#2305: older models sit in a submenu) is skipped and named, not fatal.
+          const state = await ui.version(version.id); if (!state) { skipped.push(version.id); continue; }
+          if (catalog) {
+            complete = complete && state.versions.map(v => v.id).sort().join('\u0000') === versions;
+            collectModelChoices(catalog, state);
+          }
           for (const choice of state.choices) {
             seen.push(choice);
             const rank = choice.available ? modelRank(choice) : 0;
             if (rank) offered.push({ version: version.id, choice, rank });
           }
         }
+        // A successful selection can still have read only part of the account catalog (#2305).
+        if (catalog && complete && !skipped.length && catalog.size) discovered = [...catalog.values()];
         /*
          * An effort the account no longer offers resolves to the nearest one it does.
          *
@@ -3973,9 +4001,15 @@ var CLF_DOM = (() => {
          * requested model — a missing model still refuses, because picking a different model is not a
          * rounding decision.
          */
+        // What a version that could not be read holds is unknown: a model found nowhere may be in it, and an
+        // effort missing from the readable ones may be in it, so neither is refused as absent or rounded.
+        const unreadable = () => { phase('enumerate-version', skipped[0]); return selectionFailed('a model version could not be read', 'unreadable'); };
+        if (skipped.length) trace.skippedVersions = skipped.slice(0, 16);
+        if (skipped.length && !offered.length) return unreadable();
         phase('resolve');
         let wantedEffort = effort;
         if (effort && offered.length && !offered.some(entry => entry.choice.effort === effort)) {
+          if (skipped.length) return unreadable();
           const ladder = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
           const target = ladder.indexOf(effort);
           const efforts = [...new Set(offered.map(entry => entry.choice.effort))].filter(value => ladder.includes(value));
@@ -4030,7 +4064,11 @@ var CLF_DOM = (() => {
       if (selected && !closed) return selectionFailed('the picker did not close', 'close-failed');
       return selected && closed && confirmAfterClose(expectedChoice, expectedVersion, nativeOwned);
     };
-    try { result = await choose(); return result; }
+    try {
+      result = await choose();
+      if (result && discovered && stillCurrent()) try { onCatalog(discovered); } catch { /* Catalog collection never controls Send. */ }
+      return result;
+    }
     finally {
       if (!result && !modelSelectionWhy) selectionFailed(!stillCurrent() ? 'the chat changed meanwhile' : 'the selection was not confirmed', !stillCurrent() ? 'owner-lost' : 'unknown');
       trace.outcome = result ? 'confirmed' : 'failed';
