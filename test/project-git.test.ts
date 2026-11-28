@@ -95,6 +95,17 @@ it('reconciles modified, untracked, deleted, renamed, binary and large changes f
   expect(afterAdd.changes.find(change => change.path === 'added.ts')).toMatchObject({ status: 'A', additions: 1 });
 });
 
+// Found by driving the Linux app: one file whose name is not valid UTF-8 (a Latin-1 name from an old archive) made the
+// whole Git panel "unavailable" with the decoder's own message. Only a Linux file system stores such a name.
+it.runIf(process.platform === 'linux')('lists the other changes when one file name is not valid UTF-8, and says it left one out', async () => {
+  const { root, id } = await committedProject();
+  await fs.writeFile(path.join(root, 'modified.ts'), 'export const value = 2;\n');
+  await fs.writeFile(Buffer.concat([Buffer.from(root + '/bad-'), Buffer.from([0xe9]), Buffer.from('-latin1.txt')]), 'x\n');
+  const snapshot = await readProjectGitSnapshot(id);
+  expect(snapshot.state).toBe('ready');
+  expect(snapshot.changes.map(change => change.path)).toEqual(['modified.ts']);
+  expect(getLog().some(entry => /not valid UTF-8/.test(entry.message))).toBe(true);
+});
 it('reports a clean repository and a non-repository without inventing changes', async () => {
   const clean = await committedProject();
   expect(await readProjectGitSnapshot(clean.id)).toMatchObject({ state: 'ready', changes: [], truncated: false });

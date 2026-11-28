@@ -185,6 +185,7 @@ export function decode(buffer: Buffer): string {
 }
 
 function safeRelative(value: string): string | null {
+  if (value.includes(INVALID_FIELD)) return null;
   const normal = value.replaceAll('\\', '/');
   if (!normal || normal.length > 4096 || normal.startsWith('/') || /^[A-Za-z]:\//.test(normal)) return null;
   if (normal.split('/').some(part => !part || part === '.' || part === '..')) return null;
@@ -225,11 +226,33 @@ export async function repositoryContext(projectId: string): Promise<RepositoryCo
   };
 }
 
+/** Marks a field that was not valid UTF-8. A real field never holds NUL, so no genuine name can look like this. */
+const INVALID_FIELD = '\0';
+let invalidNames = 0;
+/**
+ * Splits Git's NUL-separated output. One name that is not valid UTF-8 (a Latin-1 name from an old archive, which a
+ * Linux file system keeps as it is) used to fail the whole decode, so the Git panel showed nothing at all. Each field
+ * is decoded alone now; a bad one is marked, and `safeRelative` drops the entry that holds it.
+ */
 function splitZero(buffer: Buffer): string[] {
-  const decoded = decode(buffer);
-  const parts = decoded.split('\0');
-  if (parts.at(-1) === '') parts.pop();
+  const parts: string[] = [];
+  let start = 0;
+  for (;;) {
+    const end = buffer.indexOf(0, start);
+    const field = buffer.subarray(start, end < 0 ? buffer.length : end);
+    if (end < 0 && field.length === 0) break;
+    try { parts.push(decode(field)); }
+    catch { invalidNames++; parts.push(`${new TextDecoder().decode(field)}${INVALID_FIELD}`); }
+    if (end < 0) break;
+    start = end + 1;
+  }
   return parts;
+}
+/** One log line per snapshot that had to leave names out, never the names themselves. */
+function noteInvalidNames(): void {
+  if (!invalidNames) return;
+  logWarn('git status: some file names are not valid UTF-8 and are not shown');
+  invalidNames = 0;
 }
 
 /** Git's unmerged pairs: both modified, both added/deleted, and modify/delete in either direction. */
@@ -473,6 +496,7 @@ export async function readProjectGitSnapshot(projectId: string, baseRef?: string
       ]);
       if (status.code !== 0 || statsResult.code !== 0) throw new Error(status.stderr || statsResult.stderr || 'Git comparison failed');
       const changes = parseCommittedChanges(status.stdout, context.prefix);
+      noteInvalidNames();
       const stats = parseNumstat(statsResult.stdout, context.prefix);
       for (const change of changes) {
         const measured = stats.get(change.path);
@@ -490,6 +514,7 @@ export async function readProjectGitSnapshot(projectId: string, baseRef?: string
     const status = await runGit(context.projectReal, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignore-submodules=dirty', '--find-renames=50%', '--', '.']);
     if (status.code !== 0) throw new Error(status.stderr || 'Git status failed');
     const changes = parseStatus(status.stdout, context.prefix);
+    noteInvalidNames();
     const statsResult = await runGit(context.projectReal, [
       'diff', '--numstat', '-z', '--no-ext-diff', '--no-textconv', '--find-renames=50%', ...(hasHead ? ['HEAD'] : ['--cached']), '--', '.'
     ]);
