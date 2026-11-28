@@ -3275,10 +3275,14 @@ var CLF_DOM = (() => {
     return source?.startsWith(header) && source.length === header.length + Math.ceil(file.size / 3) * 4 ? source : null;
   }
 
-  async function uploadImages(images, stillCurrent = () => true, draft = null, files = []) {
+  async function uploadImages(images, stillCurrent = () => true, draft = null, files = [], onFailure = () => {}) {
+    // Only fixed reason codes leave the DOM; never file names or page content.
+    const refuse = reason => { onFailure(reason); return false; };
     if (files.length) images = [...(images || []), ...files];
     if (!images?.length) return true;
-    if (!Array.isArray(images) || images.length > 20 || !stillCurrent() || hasComposerAttachments()) return false;
+    if (!Array.isArray(images) || images.length > 20) return refuse('attachment-count-invalid');
+    if (!stillCurrent()) return refuse('attachment-target-changed');
+    if (hasComposerAttachments()) return refuse('attachment-draft-occupied');
     const png = files.length === 1 && images.length === 1 && files[0].type === 'image/png' &&
       /\.png$/i.test(files[0].name) ? files[0] : null;
     // The current shell uses React-generated ids. Elect by the native upload kind
@@ -3287,43 +3291,46 @@ var CLF_DOM = (() => {
     const candidates = [...(host?.querySelectorAll('input[type="file"]') || [])].filter(node =>
       !node.disabled && (files.length ? !node.accept : node.accept === 'image/*'));
     const input = candidates.length === 1 ? candidates[0] : null;
-    if (!input) return false;
+    if (!input) return refuse('attachment-input-unavailable');
     const priorTiles = new Set((composerBox() || composerActions()?.host)?.querySelectorAll('button[aria-label]') || []);
     const transfer = new DataTransfer();
     try {
       for (const image of images) {
         if (image instanceof File) { transfer.items.add(image); continue; }
-        if (typeof image.name !== 'string' || !/^data:image\/webp;base64,[A-Za-z0-9+/]+={0,2}$/.test(image.dataUrl) || image.dataUrl.length > 512100) return false;
+        if (typeof image.name !== 'string' || !/^data:image\/webp;base64,[A-Za-z0-9+/]+={0,2}$/.test(image.dataUrl) || image.dataUrl.length > 512100) return refuse('attachment-data-invalid');
         const raw = atob(image.dataUrl.split(',')[1]);
         const bytes = Uint8Array.from(raw, (char) => char.charCodeAt(0));
         transfer.items.add(new File([bytes], image.name, { type: 'image/webp' }));
       }
       input.files = transfer.files;
       input.dispatchEvent(new Event('change', { bubbles: true }));
-    } catch { return false; }
+    } catch { return refuse('attachment-input-rejected'); }
     return new Promise((resolve) => {
       let observer, timer, reader;
       let ownedTiles = null;
       let finished = false;
-      const finish = (ok) => {
+      let waitingFor = 'attachment-tile-unconfirmed';
+      const finish = (ok, reason) => {
+        if (finished) return;
         finished = true;
         observer?.disconnect();
         clearTimeout(timer);
         if (reader?.readyState === FileReader.LOADING) reader.abort();
-        resolve(ok);
+        resolve(ok ? true : refuse(reason));
       };
       const check = () => {
         if (finished) return;
-        if (!stillCurrent()) return finish(false);
-        if (draft?.untouched && !draft.untouched()) return finish(false);
+        if (!stillCurrent()) return finish(false, 'attachment-target-changed');
+        if (draft?.untouched && !draft.untouched()) return finish(false, 'attachment-draft-changed');
         const host = composerBox() || composerActions()?.host;
-        if (!host) return;
+        if (!host) { waitingFor = 'attachment-composer-unavailable'; return; }
+        waitingFor = 'attachment-tile-unconfirmed';
         // ChatGPT's remove control names the complete filename. Each requested image
         // needs its own new tile; a substring or an old same-name tile is no upload ACK.
         const tiles = [...host.querySelectorAll('button[aria-label]')].filter((button) => !priorTiles.has(button) && composerFileName(button));
         // Every attached file must belong to this input. A newly added user attachment
         // cannot be silently included just because the requested subset finished uploading.
-        if (tiles.length > images.length) return finish(false);
+        if (tiles.length > images.length) return finish(false, 'attachment-extra-tiles');
         if (!ownedTiles) {
           const unmatched = [...tiles];
           if (images.every((image) => {
@@ -3357,7 +3364,8 @@ var CLF_DOM = (() => {
         if (!ownedTiles) return;
         // The provider can rename report.md to report(1).md during processing.
         // Bind once by exact original names, then retain those exact remove controls.
-        if (tiles.length !== ownedTiles.length || tiles.some(node => !ownedTiles.includes(node))) return finish(false);
+        if (tiles.length !== ownedTiles.length || tiles.some(node => !ownedTiles.includes(node))) return finish(false, 'attachment-tile-ownership-changed');
+        waitingFor = 'attachment-not-ready';
         if (ready) {
           draft?.attachments(ownedTiles);
           finish(true);
@@ -3366,7 +3374,7 @@ var CLF_DOM = (() => {
       observer = new MutationObserver(check);
       // A file tile can reveal its filename by changing an existing text node.
       observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, characterData: true });
-      timer = setTimeout(() => finish(false), files.length ? 600000 : 60000);
+      timer = setTimeout(() => finish(false, waitingFor), files.length ? 600000 : 60000);
       check();
     });
   }
