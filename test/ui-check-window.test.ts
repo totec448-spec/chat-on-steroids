@@ -1,7 +1,8 @@
 import { createRequire } from 'node:module';
 import { expect, it } from 'vitest';
 
-const { resizeWindow } = createRequire(import.meta.url)('../scripts/ui-check-window.cjs') as {
+const { resizeWindow, showsTestWindow } = createRequire(import.meta.url)('../scripts/ui-check-window.cjs') as {
+  showsTestWindow: (platform: string) => boolean;
   resizeWindow: (win: FakeWindow, width: number, height: number, options?: { content?: boolean; timeoutMs?: number; pollMs?: number }) => Promise<{ width: number; height: number }>;
 };
 
@@ -50,4 +51,15 @@ it('rejects a window that is taller than asked, even with the right width', asyn
   const win = new FakeWindow(0);
   win.setSize = (width: number) => { (win as unknown as { size: [number, number] }).size = [width, 800]; };
   await expect(resizeWindow(win, 830, 700, { pollMs: 1, timeoutMs: 30 })).rejects.toThrow(/did not resize.*830x700.*830x800/s);
+});
+
+// Found on the Linux test VM, on a plain Xvfb screen with no window manager: the workspace terminal check measured a panel
+// 558 px wide and 249 px tall hanging out of the window (#2234). After `setSize`, a hidden X11 window reports the new
+// size but keeps laying out the page for the old one: the grid rows still summed to 776 px in a 676 px window, even
+// 1.5 s later, and they only followed once the window was shown (three runs in three passed). Windows already shows
+// its test windows; Linux X11 has to as well.
+it('shows the test window on the platforms whose hidden window does not follow a resize', () => {
+  expect(showsTestWindow('win32')).toBe(true);
+  expect(showsTestWindow('linux')).toBe(true);
+  expect(showsTestWindow('darwin')).toBe(false);
 });

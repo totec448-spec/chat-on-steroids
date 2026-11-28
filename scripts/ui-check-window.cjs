@@ -29,4 +29,12 @@ async function resizeWindow(win, width, height, { content = false, timeoutMs = 3
   throw new Error(`The window did not resize: asked for ${width}x${height}, still ${last.width}x${last.height} after ${timeoutMs} ms (a tiling window manager can ignore the request; float the window and run the check again).`);
 }
 
-module.exports = { resizeWindow };
+/**
+ * Whether a check shows its test window. On Linux X11 a hidden window reports a new size after `setSize` but keeps laying
+ * the page out for the old one (a grid summing to 776 px in a 676 px window, still wrong 1.5 s later), so a layout
+ * measured after a resize is stale until the window is shown. Windows already needs a shown window; macOS keeps its
+ * test windows hidden so a run does not take the person's focus.
+ */
+const showsTestWindow = platform => platform === 'win32' || platform === 'linux';
+
+module.exports = { resizeWindow, showsTestWindow };

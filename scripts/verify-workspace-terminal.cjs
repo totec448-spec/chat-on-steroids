@@ -25,7 +25,7 @@ if (!output) {
   if (typeof electron === 'string') process.exit(status); else electron.app.exit(status);
 } else {
 const { withoutScripts } = require('./ui-check-page.cjs');
-const { resizeWindow } = require('./ui-check-window.cjs');
+const { resizeWindow, showsTestWindow } = require('./ui-check-window.cjs');
 const { app, BrowserWindow } = electron;
 const assert = require('node:assert/strict');
 // PowerShell on Windows, the login shell elsewhere. Every command prints a marker the checks wait for.
@@ -83,7 +83,7 @@ app.whenReady().then(async () => {
     });`);
   // A hidden window on Windows advances no animations, so the docks' slide-in never settles there
   // and a click is measured mid-drawer. Shown, it behaves like the app itself (2026-10-06, VM 141).
-  let win = new BrowserWindow({ show: WINDOWS, width: 1100, height: 800, webPreferences: { preload, sandbox: true, contextIsolation: true, backgroundThrottling: false } });
+  let win = new BrowserWindow({ show: showsTestWindow(process.platform), width: 1100, height: 800, webPreferences: { preload, sandbox: true, contextIsolation: true, backgroundThrottling: false } });
   backend.registerWorkspaceTerminalIpc(() => win);
   const fixture = `
     window.errors=[];window.addEventListener('error',e=>window.errors.push(e.message));window.addEventListener('unhandledrejection',e=>window.errors.push(String(e.reason)));
