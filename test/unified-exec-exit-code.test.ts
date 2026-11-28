@@ -13,3 +13,17 @@ it('reports a Windows exit status as the signed number Codex shows', () => {
   expect(signedExitCode(-1)).toBe(-1);
   expect(signedExitCode(null)).toBeNull();
 });
+
+// Found by driving the Linux app: `kill -9 $$` (and an out-of-memory kill, the common real case) ended a command with no
+// exit status at all, so the model saw "Completed session" with an empty body and could not tell a crash from success.
+// A shell reports a signal as 128 plus its number; so does this now.
+it('reports a process ended by a signal as 128 plus the signal number, like a shell', async () => {
+  const { exitStatusOf } = await import('../src/main/codex/unified-exec.js');
+  expect(exitStatusOf(null, 'SIGKILL')).toBe(137);
+  expect(exitStatusOf(null, 'SIGTERM')).toBe(143);
+  expect(exitStatusOf(null, 'SIGSEGV')).toBe(139);
+  expect(exitStatusOf(3, null)).toBe(3);
+  expect(exitStatusOf(0, null)).toBe(0);
+  expect(exitStatusOf(null, null)).toBeNull();
+  expect(exitStatusOf(null, 'SIGNOTREAL' as NodeJS.Signals)).toBeNull();
+});

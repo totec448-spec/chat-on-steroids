@@ -18,6 +18,7 @@
  *     control event cannot be delivered to a child that owns no console.
  */
 
+import os from 'node:os';
 import { randomInt } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { HeadTailBuffer } from './head-tail-buffer.js';
@@ -56,6 +57,17 @@ import { prefixPowershellScriptWithUtf8, withPowershellExitStatus, type ShellTyp
  * i32). Windows hands a process's DWORD over unsigned, so a program exiting with -1 (ssh.exe on a
  * dropped connection) arrived as 4294967295.
  */
+/**
+ * The exit status of a child ended by `code` or by a signal. A signal has no code, which left the model a finished
+ * command with no status at all; a shell shows 128 plus the signal number (137 for SIGKILL, the usual out-of-memory
+ * kill), and so do we. Unknown signal names stay unreported.
+ */
+export function exitStatusOf(code: number | null, signal: NodeJS.Signals | null): number | null {
+  if (code !== null) return code;
+  const number = signal ? os.constants.signals[signal] : undefined;
+  return number ? 128 + number : null;
+}
+
 export function signedExitCode(code: number | null): number | null {
   return code !== null && code > 0x7fffffff && code <= 0xffffffff ? code - 0x100000000 : code;
 }
@@ -417,7 +429,7 @@ class UnifiedExecProcess {
     });
     void spawnFailure;
     child.once('exit', (code, signal) => {
-      managed.signalExit(code === null && signal ? null : code);
+      managed.signalExit(exitStatusOf(code, signal));
     });
 
     await managed.waitForEarlyExit();
