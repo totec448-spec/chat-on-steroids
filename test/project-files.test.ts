@@ -185,7 +185,11 @@ it.skipIf(process.platform === 'win32')('treats a backslash as part of a file na
   // A real separator and a traversal segment are still refused.
   await expect(createProjectEntry(project.id, '', 'a/b.txt', 'file')).rejects.toThrow(/one file or folder name/);
   await expect(previewProjectFile(project.id, 'src/../project')).rejects.toThrow(/invalid segment/);
-  await expect(previewProjectFile(project.id, '\\absolute')).rejects.toThrow(/relative/);
+  // CodeRabbit on #2322: a name that merely starts with a backslash is an ordinary relative name here, so the Git panel
+  // and the Files panel agree on it instead of one listing a file the other refuses.
+  await fs.writeFile(path.join(projectPath, '\\leading.txt'), 'lead\n');
+  expect(await previewProjectFile(project.id, '\\leading.txt')).toMatchObject({ path: '\\leading.txt', text: 'lead\n' });
+  await expect(previewProjectFile(project.id, '/absolute')).rejects.toThrow(/relative/);
 });
 it('saves bounded text through the project sandbox and returns the new editor revision', async () => {
   const projectPath = path.join(approved, 'project');
