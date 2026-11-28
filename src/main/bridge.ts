@@ -17,7 +17,7 @@ import { MAX_CHATGPT_MESSAGE_CHARS, userPromptText } from '../shared/user-prompt
 import { CONVERSATION_DELETED } from '../shared/chat-error.js';
 import { prepareSessionPrompt } from './session/prompt.js';
 import { NEW_CHAT, noteAutomaticReply } from './session/automatic-replies.js';
-import { pendingChatModelRequest, observeChatModels, requestChatModels } from './chat-models.js';
+import { pendingChatModelRequest, observeChatModels, requestChatModels, retryPassiveCatalogOnPageReturn } from './chat-models.js';
 import { resumeModelSelection, wakeModelSelection } from './resume-model.js';
 import { isDeliberateEffort, isProModel } from '../shared/chat-models.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
@@ -781,6 +781,23 @@ const WITHHELD_LOG_MS = 60_000;
 const withheldLoggedAt = new Map<string, number>();
 function chosenBuiltInBrowser(req: http.IncomingMessage): boolean {
   return getConfig().ui.chatBrowser === 'cos' && req.headers['x-extension-host'] === 'cos';
+}
+/**
+ * A passive catalog retry spends its only page-return opportunity. Unlike
+ * ordinary /activity recording, it needs the selected browser *kind* itself.
+ * In particular, a Chrome companion must not spend it while the chosen CoS
+ * companion has not yet connected, or while Firefox is the chosen browser.
+ * Chromium's Chrome/Edge/Brave variants cannot be distinguished by these
+ * headers, so this is a conservative kind check, not a new identity grant.
+ */
+function chosenCatalogReporter(req: http.IncomingMessage): boolean {
+  const selected = getConfig().ui.chatBrowser;
+  if (selected === 'cos') return req.headers['x-extension-host'] === 'cos';
+  return req.headers['x-extension-host'] === 'browser' &&
+    geckoExtension(req) === (selected === 'firefox');
+}
+function catalogReporterAllowed(req: http.IncomingMessage): boolean {
+  return chosenCatalogReporter(req) && !notChosenBrowser(req) && !staleCompanion(req);
 }
 /**
  * Which browser a companion request comes from. Every browser shares one pairing token, so each
@@ -3471,7 +3488,17 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     return json(res, 200, { ok: true, changed }, origin);
   }
   if (route === '/models' && req.method === 'POST') {
-    const accepted = observeChatModels(await readBody(req));
+    // The nonce proves which inspection was requested, not which account/browser
+    // produced it: installed companions share a pairing token. In particular,
+    // a still-running external Chromium must not confirm the CoS catalog while
+    // the built-in companion has not connected. Reject before consuming nonce.
+    if (!catalogReporterAllowed(req))
+      return json(res, 409, { ok: false, error: 'catalog_browser_not_selected' }, origin);
+    const observation = await readBody(req);
+    // The person may select another browser while the request body is in flight.
+    if (!catalogReporterAllowed(req))
+      return json(res, 409, { ok: false, error: 'catalog_browser_not_selected' }, origin);
+    const accepted = observeChatModels(observation);
     if (accepted) changed();
     return json(res, accepted ? 200 : 409, { ok: accepted }, origin);
   }
@@ -3667,7 +3694,6 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         ok: true,
         conversations: live,
         stopTurns: await pendingStopCommands(),
-        modelCatalogRequest: otherBrowser ? null : pendingChatModelRequest(),
         // This install's connector names, so the extension recognizes exactly its own traffic.
         connectorNames: connectorNames(getConfig().connectorSuffix),
         // Apps proven to be this install's connectors, so a renamed connector is still recognized.
@@ -3728,7 +3754,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         language: getConfig().ui.language ?? null,
         // And its popup in the app's colors and theme (extension-appearance.ts).
         appearance: extensionAppearance(),
-        browserPreferences: getConfig().ui.browserPreferences ?? null
+        browserPreferences: getConfig().ui.browserPreferences ?? null,
+        // Read current authority after the last asynchronous response field.
+        modelCatalogRequest: catalogReporterAllowed(req) ? pendingChatModelRequest() : null
       },
       origin
     );
@@ -4369,6 +4397,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // Older extensions omit it; they keep the plain three-minute silence rule.
     const pageGenerating = url.searchParams.get('generating');
     if (pageGenerating === '1' || pageGenerating === '0') notePageGenerating(id, pageGenerating === '1');
+    // The original passive discovery may have expired while no ChatGPT tab existed.
+    // Only a current selected-browser page explicitly reporting idle may trigger
+    // one passive existing-tab retry. Unknown generation state, including from an
+    // older companion, cannot spend this one-shot opportunity.
+    // No new tab, Send authority or infinite wake/reconnect retry is introduced.
+    if (pageGenerating === '0' && catalogReporterAllowed(req)) retryPassiveCatalogOnPageReturn();
     const retiredWorker = retiredWorkerForConversation(id);
     // A page in a browser that may not take new work is handed no tab to open (#1852).
     const opensWork = opensNewWork(req, '/activity', id);

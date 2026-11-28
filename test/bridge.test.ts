@@ -9921,6 +9921,196 @@ describe('a worker chat that never opens', () => {
     }
   });
 
+  it('refuses an in-flight catalog report when the chosen browser changes during its body read', async () => {
+    const catalog = await import('../src/main/chat-models.js');
+    const previous = getConfig();
+    await pair();
+    let client: http.ClientRequest | undefined;
+    let response: Promise<number> | undefined;
+    const on = http.IncomingMessage.prototype.on;
+    let entered!: () => void;
+    const reading = new Promise<void>(resolve => { entered = resolve; });
+    const probe = vi.spyOn(http.IncomingMessage.prototype, 'on').mockImplementation(function (
+      this: http.IncomingMessage, event: string | symbol, listener: (...args: any[]) => void
+    ) {
+      const result = on.call(this, event, listener);
+      if (this.url === '/models' && event === 'data') entered();
+      return result;
+    });
+    try {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'chrome' } });
+      catalog.resetChatModelsForTests();
+      catalog.requestChatModels(false);
+      const nonce = catalog.pendingChatModelRequest()!.nonce;
+      const observation = { nonce, models: [{ id: 'gpt-6-thinking', label: 'GPT-6 Thinking', efforts: ['high'] }] };
+      const payload = Buffer.from(JSON.stringify(observation));
+      response = new Promise<number>((resolve, reject) => {
+        client = http.request(`${base}/models`, { method: 'POST', headers: {
+          origin: EXTENSION_ORIGIN, authorization: `Bearer ${token}`,
+          'content-type': 'application/json', 'content-length': String(payload.length),
+          'x-extension-host': 'browser', 'x-extension-browser': 'c'.repeat(32),
+          'x-extension-version': APP_VERSION, 'x-extension-protocol': String(BRIDGE_PROTOCOL)
+        } }, res => { res.resume(); res.on('end', () => resolve(res.statusCode ?? 0)); });
+        client.on('error', reject);
+        client.write(payload.subarray(0, payload.length - 1));
+      });
+      await reading;
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'firefox' } });
+      client!.end(payload.subarray(payload.length - 1));
+      expect(await response).toBe(409);
+      expect(catalog.pendingChatModelRequest()?.nonce).toBe(nonce);
+      const chosen = { host: 'browser', browser: 'f'.repeat(32), engine: 'gecko' };
+      expect((await request('POST', '/models', { ...chosen, body: observation })).status).toBe(200);
+      expect((await request('POST', '/models', { ...chosen, body: observation })).status).toBe(409);
+      expect(catalog.getChatModels().models).toEqual(observation.models);
+    } finally {
+      probe.mockRestore();
+      client?.destroy();
+      await response?.catch(() => undefined);
+      catalog.resetChatModelsForTests();
+      await saveConfig(previous);
+    }
+  }, 15_000);
+
+  it('does not disclose a catalog nonce after the selected browser changes during an async status response', async () => {
+    const catalog = await import('../src/main/chat-models.js');
+    const plugins = await import('../src/main/plugin-refresh.js');
+    const previous = getConfig();
+    const gate = faultGate();
+    let pending: Promise<Reply> | undefined;
+    await pair();
+    const probe = vi.spyOn(plugins, 'authorizedPluginRefreshPublications').mockImplementation(async () => {
+      await gate.hold();
+      return [];
+    });
+    try {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'chrome' } });
+      catalog.resetChatModelsForTests();
+      catalog.requestChatModels(false);
+      const nonce = catalog.pendingChatModelRequest()!.nonce;
+      pending = request('GET', '/status', { host: 'browser', browser: 'c'.repeat(32) });
+      await gate.entered;
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'firefox' } });
+      gate.release();
+      expect((await pending).body.modelCatalogRequest).toBeNull();
+      expect(catalog.pendingChatModelRequest()?.nonce).toBe(nonce);
+    } finally {
+      gate.release();
+      await pending?.catch(() => undefined);
+      probe.mockRestore();
+      catalog.resetChatModelsForTests();
+      await saveConfig(previous);
+    }
+  }, 15_000);
+
+  // #1852: with the built-in browser chosen, the prime chat still open in Chrome collected one of
+  it('revives a page-unreachable catalog only on a chosen idle page report, without opening a browser', async () => {
+    const catalog = await import('../src/main/chat-models.js');
+    const previous = getConfig();
+    const builtIn = 'd'.repeat(32), foreign = 'c'.repeat(32);
+    const chat = '4b7f32d9-a1c0-42ba-824c-ab0a99b7d270';
+    await pair();
+    try {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos' } });
+      catalog.resetChatModelsForTests();
+      vi.useFakeTimers();
+      catalog.requestChatModels(false);
+      const first = catalog.pendingChatModelRequest()!;
+      expect(catalog.observeChatModels({ nonce: first.nonce, waiting: 'page_unreachable' })).toBe(true);
+      vi.setSystemTime(Date.now() + 120001);
+      expect(catalog.getChatModels().state).toBe('unavailable');
+      vi.useRealTimers();
+      expect(catalog.pendingChatModelRequest()).toBeNull();
+      // A foreign Chromium page cannot consume the one attempt before the
+      // built-in companion has even appeared on this bridge.
+      await request('GET', `/activity?conversationId=${chat}&generating=0`, { browser: foreign, host: 'browser' });
+      expect(catalog.pendingChatModelRequest()).toBeNull();
+      await request('GET', '/status', { browser: builtIn, host: 'cos' });
+      await request('GET', `/activity?conversationId=${chat}&generating=0`, { browser: foreign, host: 'browser' });
+      expect(catalog.pendingChatModelRequest()).toBeNull();
+      await request('GET', `/activity?conversationId=${chat}&generating=1`, { browser: builtIn, host: 'cos' });
+      expect(catalog.pendingChatModelRequest()).toBeNull();
+      // Old extensions that omit generation state may be busy. Do not spend
+      // the one retry until an explicit idle observation arrives.
+      await request('GET', `/activity?conversationId=${chat}`, { browser: builtIn, host: 'cos' });
+      expect(catalog.pendingChatModelRequest()).toBeNull();
+      await request('GET', `/activity?conversationId=${chat}&generating=0`, { browser: builtIn, host: 'cos' });
+      expect(catalog.pendingChatModelRequest()).toMatchObject({ allowOpen: false });
+      const second = catalog.pendingChatModelRequest()!.nonce;
+      await request('GET', `/activity?conversationId=${chat}&generating=0`, { browser: builtIn, host: 'cos' });
+      expect(catalog.pendingChatModelRequest()?.nonce).toBe(second);
+      expect(recoveryBrowserWake).not.toHaveBeenCalledWith(expect.stringContaining('cos-model-catalog='), true, true);
+    } finally {
+      vi.useRealTimers();
+      catalog.resetChatModelsForTests();
+      await saveConfig(previous);
+    }
+  });
+
+  it('does not spend the one passive catalog retry from Chromium when Firefox is chosen', async () => {
+    const catalog = await import('../src/main/chat-models.js');
+    const previous = getConfig();
+    const chat = '3e9891e1-c3b9-4378-a89f-725d06ad2714';
+    await pair();
+    try {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'firefox' } });
+      catalog.resetChatModelsForTests();
+      vi.useFakeTimers();
+      catalog.requestChatModels(false);
+      expect(catalog.observeChatModels({
+        nonce: catalog.pendingChatModelRequest()!.nonce, waiting: 'page_unreachable'
+      })).toBe(true);
+      vi.advanceTimersByTime(120000);
+      expect(catalog.getChatModels().state).toBe('unavailable');
+      vi.useRealTimers();
+      await request('GET', `/activity?conversationId=${chat}&generating=0`,
+        { browser: 'c'.repeat(32), host: 'browser' });
+      expect(catalog.pendingChatModelRequest()).toBeNull();
+      await request('GET', `/activity?conversationId=${chat}&generating=0`,
+        { browser: 'f'.repeat(32), host: 'browser', engine: 'gecko' });
+      expect(catalog.pendingChatModelRequest()).toMatchObject({ allowOpen: false });
+    } finally {
+      vi.useRealTimers();
+      catalog.resetChatModelsForTests();
+      await saveConfig(previous);
+    }
+  });
+
+  it.each([
+    { selected: 'cos', chosen: { host: 'cos', browser: 'b'.repeat(32) },
+      foreign: { host: 'browser', browser: 'c'.repeat(32) } },
+    { selected: 'firefox', chosen: { host: 'browser', browser: 'f'.repeat(32), engine: 'gecko' },
+      foreign: { host: 'browser', browser: 'c'.repeat(32) } }
+  ] as const)('offers and accepts model discovery only from the chosen %s browser kind', async ({ selected, chosen, foreign }) => {
+    const catalog = await import('../src/main/chat-models.js');
+    const previous = getConfig();
+    await pair();
+    try {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: selected } });
+      catalog.resetChatModelsForTests();
+      catalog.requestChatModels(false);
+      const pending = catalog.pendingChatModelRequest()!;
+      const observation = {
+        nonce: pending.nonce,
+        models: [{ id: 'gpt-6-thinking', label: 'GPT-6 Thinking', efforts: ['medium', 'high'] }]
+      };
+      // The selected CoS browser has not yet reported itself. A still-running
+      // external Chromium extension must not receive the request or complete it.
+      expect((await request('GET', '/status', foreign)).body.modelCatalogRequest).toBeNull();
+      expect((await request('POST', '/models', { ...foreign, body: observation })).status).toBe(409);
+      expect(catalog.pendingChatModelRequest()?.nonce).toBe(pending.nonce);
+      expect(catalog.getChatModels().models).toEqual([]);
+      expect((await request('GET', '/status', chosen)).body.modelCatalogRequest).toMatchObject({
+        nonce: pending.nonce, allowOpen: false
+      });
+      expect((await request('POST', '/models', { ...chosen, body: observation })).body.ok).toBe(true);
+      expect(catalog.getChatModels()).toMatchObject({ state: 'ready', models: observation.models });
+    } finally {
+      catalog.resetChatModelsForTests();
+      await saveConfig(previous);
+    }
+  });
+
   // #1852: with the built-in browser chosen, the prime chat still open in Chrome collected one of
   // three worker tabs through its page's /activity poll. Chrome opened it, and the redeem route then
   // refused that page as not the chosen browser, so the worker timed out.

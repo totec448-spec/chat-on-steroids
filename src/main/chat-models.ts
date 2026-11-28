@@ -42,6 +42,10 @@ let catalog: ChatModelCatalog = { state: 'unknown', requestedAt: null, observedA
 let request: { nonce: string; expiresAt: number; allowOpen: boolean } | null = null;
 let deadline: ReturnType<typeof setTimeout> | null = null;
 let launch: { nonce: string; allowOpen: boolean; work: Promise<void> } | null = null;
+// A missing-page startup may exhaust the first passive inspection before any ChatGPT
+// document exists. Once a chosen open page reports itself, allow exactly one more
+// non-opening inspection in that failure episode, not a wake/reconnect retry loop.
+let unavailablePageReturnRetried = false;
 let changed = (): void => {};
 let wake: ((nonce: string, allowOpen: boolean) => Promise<void>) | null = null;
 export async function restoreChatModels(): Promise<void> {
@@ -167,6 +171,7 @@ export function observeChatModels(raw: unknown): boolean {
     : 'ChatGPT model choices could not be confirmed. Check the native picker in the selected browser, then retry.';
   if (models) {
     catalog = { ...catalog, state: 'ready', models, observedAt: Date.now(), waiting: undefined, error: undefined };
+    unavailablePageReturnRetried = false;
     writeDurableSoon('chat-models', { observedAt: catalog.observedAt, models });
   } else failed(error);
   request = null;
@@ -175,5 +180,21 @@ export function observeChatModels(raw: unknown): boolean {
 }
 export function resetChatModelsForTests(): void {
   if (deadline) clearTimeout(deadline); deadline = null; launch = null;
-  request = null; lastProblem = null; unofferedAsked.clear(); catalog = { state: 'unknown', requestedAt: null, observedAt: null, models: [] };
+  request = null; lastProblem = null; unavailablePageReturnRetried = false; unofferedAsked.clear(); catalog = { state: 'unknown', requestedAt: null, observedAt: null, models: [] };
+}
+
+/**
+ * An authenticated /activity report proves that a previously absent ChatGPT page
+ * exists now. The failed startup request did not prove the account lacks models.
+ * Reinspect *only existing pages* once after the exact page-unreachable failure;
+ * never open another tab, grant a Send, or loop on repeated heartbeat/reconnects.
+ */
+export function retryPassiveCatalogOnPageReturn(): boolean {
+  expire();
+  if (request || unavailablePageReturnRetried || catalog.state !== 'unavailable' ||
+      catalog.models.length > 0 || lastProblem !== waitingReasons.page_unreachable) return false;
+  unavailablePageReturnRetried = true;
+  logInfo('model discovery: existing ChatGPT page returned after unreachable startup; retrying passive catalog once without opening a tab');
+  requestChatModels(false);
+  return true;
 }

@@ -5,8 +5,8 @@
  * picker at all, so carrying the source model over abandoned every resume before it was sent
  * (#1766), the same failure the Goal helper had (#1282). Like the helper, a resume then starts on
  * ChatGPT's current selection, and a model or reasoning the account does not offer is dropped.
- * Until discovery finishes, carry the source pair over as is. A refresh retains old choices for
- * display; they are not the pending observation's answer about what is unavailable.
+ * Until discovery supplies new choices, carry the source pair over as is. A pending or failed
+ * refresh retains old choices for display; they are not a fresh answer about what is unavailable.
  */
 import { getChatModels } from './chat-models.js';
 import { logInfo } from './logger.js';
@@ -48,8 +48,9 @@ function offeredSelection(requested: { model: string; reasoningEffort: Reasoning
   key = which;
   if (!requested) return { model: null, reasoningEffort: null };
   const catalog = getChatModels();
-  if (catalog.state === 'unknown' || catalog.state === 'pending') {
-    if (catalog.models.length) note(`${what}: model discovery is ${catalog.state}; retained choices do not remove the requested model or reasoning before native confirmation`);
+  const retainedAfterFailure = catalog.state === 'ready' && Boolean(catalog.error) && catalog.models.length > 0;
+  if (catalog.state === 'unknown' || catalog.state === 'pending' || retainedAfterFailure) {
+    if (catalog.models.length) note(`${what}: model discovery ${retainedAfterFailure ? 'failed' : `is ${catalog.state}`}; retained choices do not remove the requested model or reasoning before native confirmation`);
     return { model: requested.model, reasoningEffort: requested.reasoningEffort };
   }
   if (!catalog.models.length) {

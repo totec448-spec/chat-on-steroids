@@ -1,6 +1,6 @@
 import { REASONING_EFFORTS } from '../src/shared/session.js';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { getChatModels, requestChatModels, pendingChatModelRequest, observeChatModels, resetChatModelsForTests, configureChatModelDiscovery, startChatModelDiscovery, restoreChatModels, refreshForUnoffered } from '../src/main/chat-models.js';
+import { getChatModels, requestChatModels, pendingChatModelRequest, observeChatModels, resetChatModelsForTests, configureChatModelDiscovery, startChatModelDiscovery, restoreChatModels, refreshForUnoffered, retryPassiveCatalogOnPageReturn } from '../src/main/chat-models.js';
 import { resumeModelSelection, wakeModelSelection } from '../src/main/resume-model.js';
 const saved = vi.hoisted(() => ({ value: null as unknown }));
 vi.mock('../src/main/durable.js', () => ({ readDurable: async () => saved.value, writeDurableSoon: (_name: string, value: unknown) => { saved.value = structuredClone(value); } }));
@@ -8,6 +8,35 @@ const models = [{ id: 'gpt-example', label: 'GPT Example', efforts: ['none', 'me
 beforeEach(() => { resetChatModelsForTests(); saved.value = null; vi.useFakeTimers(); });
 afterEach(() => vi.useRealTimers());
 describe('durable observed ChatGPT model catalog', () => {
+  it('retries a missing-page startup once when an existing chosen page returns, without a browser-open grant', () => {
+    requestChatModels(false);
+    const first = pendingChatModelRequest()!;
+    expect(observeChatModels({ nonce: first.nonce, waiting: 'page_unreachable' })).toBe(true);
+    vi.advanceTimersByTime(120000);
+    expect(getChatModels()).toMatchObject({ state: 'unavailable', models: [], error: expect.any(String) });
+    expect(retryPassiveCatalogOnPageReturn()).toBe(true);
+    const second = pendingChatModelRequest()!;
+    expect(second).toMatchObject({ allowOpen: false });
+    expect(second.nonce).not.toBe(first.nonce);
+    expect(retryPassiveCatalogOnPageReturn()).toBe(false);
+    expect(observeChatModels({ nonce: second.nonce, waiting: 'page_unreachable' })).toBe(true);
+    vi.advanceTimersByTime(120000);
+    expect(retryPassiveCatalogOnPageReturn()).toBe(false);
+    expect(pendingChatModelRequest()).toBeNull();
+  });
+  it('never retries a genuinely unreadable picker or a retained failed refresh as if a page were missing', () => {
+    requestChatModels(false);
+    const unreadable = pendingChatModelRequest()!;
+    observeChatModels({ nonce: unreadable.nonce, models: null, error: 'picker_unavailable' });
+    expect(retryPassiveCatalogOnPageReturn()).toBe(false);
+    requestChatModels(false);
+    observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models });
+    requestChatModels(false);
+    observeChatModels({ nonce: pendingChatModelRequest()!.nonce, waiting: 'page_unreachable' });
+    vi.advanceTimersByTime(120000);
+    expect(getChatModels()).toMatchObject({ state: 'ready', models, error: expect.any(String) });
+    expect(retryPassiveCatalogOnPageReturn()).toBe(false);
+  });
   it('gives the first explicit promotion a fresh budget without extending repeated Refresh clicks', () => {
     requestChatModels(false); const passive = pendingChatModelRequest()!;
     vi.advanceTimersByTime(80000);
@@ -80,6 +109,31 @@ describe('durable observed ChatGPT model catalog', () => {
     requestChatModels();
     observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models: null, error: 'picker_unavailable' });
     expect(getChatModels()).toMatchObject({ state: 'unavailable', models: [], error: expect.stringContaining('native model picker') });
+    for (const select of [resumeModelSelection, wakeModelSelection]) {
+      expect(select({ model: 'gpt-example', reasoningEffort: 'high' })).toEqual({ model: null, reasoningEffort: null });
+    }
+  });
+  it.each([
+    ['failed observation', 'effort'],
+    ['failed observation', 'model'],
+    ['expired refresh', 'effort'],
+    ['expired refresh', 'model']
+  ] as const)('preserves the request after %s with the old %s missing', (failure, missing) => {
+    const requested = { model: 'gpt-example', reasoningEffort: 'high' as const };
+    const oldModels = [{ id: missing === 'effort' ? requested.model : 'other-model', label: 'Old', efforts: ['medium'] }];
+    const fallback = { model: missing === 'effort' ? requested.model : null, reasoningEffort: null };
+    requestChatModels(); observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models: oldModels });
+    for (const select of [resumeModelSelection, wakeModelSelection]) expect(select(requested)).toEqual(fallback);
+    requestChatModels(false);
+    const pending = pendingChatModelRequest()!;
+    for (const select of [resumeModelSelection, wakeModelSelection]) expect(select(requested)).toEqual(requested);
+    if (failure === 'expired refresh') vi.advanceTimersByTime(120000);
+    else observeChatModels({ nonce: pending.nonce, models: null, error: 'picker_close_failed' });
+    expect(getChatModels()).toMatchObject({ state: 'ready', models: oldModels, error: expect.any(String) });
+    for (const select of [resumeModelSelection, wakeModelSelection]) expect(select(requested)).toEqual(requested);
+    expect(pendingChatModelRequest()).toBeNull();
+    requestChatModels(); observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models: oldModels });
+    for (const select of [resumeModelSelection, wakeModelSelection]) expect(select(requested)).toEqual(fallback);
   });
   it('rechecks browser startup when an unfinished discovery is explicitly opened again', async () => {
     const wake = vi.fn(async () => {}); configureChatModelDiscovery({ wake, changed: () => {} });
