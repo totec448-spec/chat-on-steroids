@@ -980,6 +980,31 @@ it('does not leave a current version whose only row is disabled, since that row 
   expect(f.state.selectedVersionEntry.id).toBe('latest'); expect(f.state.currentBucket).toBe(2);
 });
 
+// Selection must not move the picker off the opening version unless that version's row can bring it back (Haz and
+// CodeRabbit on #2307): with no way back, a request that fails after leaving could not restore the chat's model.
+it.each(['unreachable', 'disabled'] as const)('does not leave an opening version whose row cannot bring the picker back, and refuses a model that is elsewhere (%s) (#2305)', async kind => {
+  vi.useFakeTimers();
+  const f = fixture(), reports: unknown[] = [];
+  f[kind].add('latest');
+  const result = f.api.selectModelSettings('future-model', 'ultra', () => true, (value: unknown) => reports.push(value));
+  await vi.runAllTimersAsync();
+  expect(await result).toBe(false);
+  expect(f.actions).not.toHaveBeenCalledWith('version');
+  expect(f.state.selectedVersionEntry.id).toBe('latest'); expect(f.state.currentBucket).toBe(2);
+  expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({ outcome: 'failed', failure: 'unreadable', restore: 'confirmed' });
+});
+it.each(['unreachable', 'disabled'] as const)('still selects an effort of the opening version when its own row cannot be used (%s) (#2305)', async kind => {
+  vi.useFakeTimers();
+  const f = fixture();
+  f[kind].add('latest');
+  const result = f.api.selectModelSettings('gpt-5-6-thinking', 'medium');
+  await vi.runAllTimersAsync();
+  expect(await result).toBe(true);
+  expect(f.actions).not.toHaveBeenCalledWith('version');
+  expect(f.state.selectedVersionEntry.id).toBe('latest');
+  expect(f.state.currentSelection).toMatchObject({ modelSlug: 'gpt-5-6-thinking', thinkingEffort: 'standard' });
+});
+
 // #2085: diagnostic callbacks observe the real selector, including early returns and cleanup.
 it('reports the failed selection phase and exact restoration without leaking provider props', async () => {
   const f = fixture(), reports: unknown[] = [];
@@ -1010,7 +1035,8 @@ it('retains the failing version separately from subsequent restore and close pha
   const result = f.api.selectModelSettings('future-model', 'ultra', () => true, (value: unknown) => reports.push(value));
   await vi.runAllTimersAsync(); expect(await result).toBe(false);
   expect(modelSelectionDiagnostic.parse(reports.at(-1))).toMatchObject({ failedPhase: 'enumerate-version',
-    failedVersion: 'future', phase: 'close', restore: 'failed', closed: true });
+    failedVersion: 'future', phase: 'close', restore: 'confirmed', closed: true });
+  // A picker that never left the opening version is already home, so there is nothing to restore (#2305).
 });
 it('distinguishes a slider failure from failed restoration and preserves the last observed pair', async () => {
   vi.useFakeTimers();

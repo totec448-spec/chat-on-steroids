@@ -3969,10 +3969,23 @@ var CLF_DOM = (() => {
         // Every available choice of the requested model, read once across versions, so the effort
         // can be resolved against what the account actually offers before anything is moved.
         const offered = [], seen = [], skipped = [];
-        for (const version of [original.versions.find(v => v.id === original.version), ...original.versions.filter(v => v.id !== original.version)]) {
+        // The opening version first, as it stands and without opening the version list: an exact request that it
+        // already offers (a model id and effort it holds) is selected right there. Opening the list is the step that
+        // can leave the picker with no row to come back by (#2305), so it is only taken when the request needs it.
+        const direct = effort ? original.choices.filter(choice => choice.available && modelRank(choice) === 2 && choice.effort === effort) : [];
+        if (direct.length === 1) {
+          seen.push(...original.choices);
+          offered.push({ version: original.version, choice: direct[0], rank: 2 });
+        } else
+        for (const version of [original.versions.find(v => v.id === original.version), ...original.versions.filter(v => v.id !== original.version)].filter(Boolean)) {
           phase('enumerate-version', version.id);
           // A version with no row to open (#2305: older models sit in a submenu) is skipped and named, not fatal.
-          const state = await ui.version(version.id); if (!state) { skipped.push(version.id); continue; }
+          // The opening version is read as it stands, never opened: with no usable row for it there would be no way
+          // back. Another version is entered only while the opening version's row can bring the picker back, so a
+          // request that fails after leaving can still restore the chat's model. When it cannot, a model that lives
+          // elsewhere is refused as unreadable instead of moving the picker (Haz and CodeRabbit on #2307).
+          const state = version.id === original.version ? original : await ui.version(version.id, original.version);
+          if (!state) { skipped.push(version.id); continue; }
           for (const choice of state.choices) {
             seen.push(choice);
             const rank = choice.available ? modelRank(choice) : 0;
@@ -4026,7 +4039,7 @@ var CLF_DOM = (() => {
         const wanted = matches.find(candidate => candidate.version === original.version && candidate.choice.bucket === original.currentBucket) || matches[0];
         const choice = wanted.choice; trace.resolved = pair(choice);
         phase('select-version', wanted.version);
-        const state = await ui.version(wanted.version);
+        const state = await ui.version(wanted.version, original.version);
         // Versions can change while traversing the UI. Revalidate before moving its slider.
         if (!state?.choices.some(next => next.bucket === choice.bucket && next.available && next.id === choice.id && next.effort === choice.effort)) return selectionFailed('the picker changed while it was read', 'changed');
         phase('select-effort', wanted.version);
@@ -4042,7 +4055,9 @@ var CLF_DOM = (() => {
           trace.restore = 'skipped';
           if (stillCurrent()) {
             trace.restore = 'failed'; phase('restore-version', original.version);
-            if (await ui.version(original.version)) {
+            // A picker that never left the opening version is already home, whichever view it shows.
+            const at = await ui.state();
+            if (at?.version === original.version || await ui.version(original.version)) {
               phase('restore-effort', original.version);
               const restored = await ui.bucket(original.currentBucket);
               const prior = original.choices.find(choice => choice.bucket === original.currentBucket);
