@@ -54,12 +54,13 @@ app.whenReady().then(async () => {
     releaseState();
     await until(`document.title === ${JSON.stringify(expected)}`);
     await js(`(() => {const s=document.getElementById('uiLanguage');s.value='en';s.dispatchEvent(new Event('change',{bubbles:true}));const back=document.getElementById('backToChat');if(back.checkVisibility())back.click()})()`);
-    await until(`document.querySelector('.sidebar-brand strong').checkVisibility() && document.querySelector('.sidebar-brand strong').textContent === ${JSON.stringify(expected)}`);
+    // The page shows the plain name; a development build adds a DEV badge beside it (title and native labels keep "(dev)").
+    await until(`document.querySelector('.sidebar-brand strong').checkVisibility() && document.querySelector('.sidebar-brand strong').textContent === 'Chat On Steroids' && !!document.querySelector('.sidebar-brand [data-app-badge]') === ${legacy ? 'false' : 'true'}`);
     await js('document.fonts.ready'); await js('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
     assert.equal(win.getTitle(), expected); assert.deepEqual(errors, []);
-    const rendererTitle = await js('document.title'), header = await js(`document.querySelector('.sidebar-brand strong').textContent`);
+    const rendererTitle = await js('document.title'), header = await js(`document.querySelector('.sidebar-brand strong').textContent`), badge = await js(`document.querySelector('.sidebar-brand [data-app-badge]')?.textContent ?? null`);
     fs.writeFileSync(path.join(output, legacy ? 'before.png' : 'after.png'), (await win.webContents.capturePage()).toPNG());
-    proof.push({ legacy, nativeTitle: win.getTitle(), rendererTitle, header, errors: [...errors] });
+    proof.push({ legacy, nativeTitle: win.getTitle(), rendererTitle, header, badge, errors: [...errors] });
   }
   fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify(proof, null, 2));
   win.destroy(); app.quit();

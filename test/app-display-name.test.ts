@@ -40,8 +40,13 @@ it.each(['en', 'ja', 'de', 'es', 'fr', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi',
   for (const displayName of [name, APP_DISPLAY_NAME] as const) {
     applyAppBrand(displayName); i18n.setLanguage(language);
     expect(document.title).toBe(displayName);
-    expect(document.querySelector('.sidebar-brand strong')?.textContent).toBe(displayName);
-    expect(document.querySelector('.chat-head .title')?.textContent).toContain(displayName);
+    // The window title (and the native menus) keep the text; the page shows the plain name with a DEV badge.
+    const shown = APP_DISPLAY_NAME;
+    expect(document.querySelector('.sidebar-brand strong')?.textContent).toBe(shown);
+    expect(document.querySelector('.chat-head .title')?.textContent).toContain(shown);
+    const badges = [...document.querySelectorAll('[data-app-badge]')];
+    expect(badges.map(node => node.textContent), displayName).toEqual(displayName === name ? ['DEV', 'DEV'] : []);
+    expect(badges.map(node => node.previousElementSibling?.hasAttribute('data-app-display-name'))).toEqual(badges.map(() => true));
     const { mainTexts } = await import('../src/renderer/main-texts.js');
     expect(mainTexts()[displayName]).toBe(displayName);
     const catalog = language === 'en' ? null : JSON.parse(read(`src/renderer/locales/${language}.json`));
@@ -118,4 +123,25 @@ it('preserves literal package identity and the display-only state projection', (
   expect(read('src/renderer/main.ts')).toContain('applyAppBrand(next.displayName ?? APP_DISPLAY_NAME)');
   expect(read('src/renderer/index.html')).not.toContain('(dev)');
   expect((main + read('src/main/app-brand.ts')).replace(/\/\/[^\n]*/g, '')).not.toMatch(/app\.setName\s*\(|app\.setPath\s*\(|app\.name\s*=/);
+});
+
+// The user's idea: a development build reads as a badge beside the name, not as "(dev)" glued to it.
+it('shows one DEV badge beside each visible name, removes it again, and never doubles it', async () => {
+  const i18n = await import('../src/renderer/i18n.js');
+  const { applyAppBrand } = await import('../src/renderer/app-brand.js');
+  i18n.initLanguage();
+  applyAppBrand(name); applyAppBrand(name);
+  expect(document.querySelectorAll('[data-app-badge]')).toHaveLength(2);
+  expect(document.querySelector('title')?.textContent).toBe(name);
+  applyAppBrand(APP_DISPLAY_NAME);
+  expect(document.querySelectorAll('[data-app-badge]')).toHaveLength(0);
+  expect(document.querySelector('.sidebar-brand strong')?.textContent).toBe(APP_DISPLAY_NAME);
+});
+it('keeps the badge after a language change, which rewrites the name', async () => {
+  const i18n = await import('../src/renderer/i18n.js');
+  const { applyAppBrand } = await import('../src/renderer/app-brand.js');
+  i18n.initLanguage(); applyAppBrand(name);
+  i18n.setLanguage('ja'); i18n.setLanguage('en');
+  expect([...document.querySelectorAll('[data-app-badge]')].map(node => node.textContent)).toEqual(['DEV', 'DEV']);
+  expect(document.querySelector('.sidebar-brand strong')?.textContent).toBe(APP_DISPLAY_NAME);
 });

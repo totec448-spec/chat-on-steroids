@@ -35,7 +35,9 @@ async function validateProof(directory) {
   for (const [index, expected] of ['Chat On Steroids', 'Chat On Steroids (dev)'].entries()) {
     const state = proof[index];
     assert.equal(state.legacy, index === 0);
-    for (const field of ['nativeTitle', 'rendererTitle', 'header']) assert.equal(state[field], expected, field);
+    for (const field of ['nativeTitle', 'rendererTitle']) assert.equal(state[field], expected, field);
+    assert.equal(state.header, 'Chat On Steroids', 'header');
+    assert.equal(state.badge, index === 0 ? null : 'DEV', 'badge');
     assert.deepEqual(state.errors, []);
   }
   return filenames.map(file => ({ file: path.join(directory, file), bytes: fs.statSync(path.join(directory, file)).size }));

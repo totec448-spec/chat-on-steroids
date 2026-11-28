@@ -15,7 +15,7 @@ const temporary = () => {
   return directory;
 };
 const states = () => ['Chat On Steroids', 'Chat On Steroids (dev)'].map((name, i) => ({
-  legacy: i === 0, nativeTitle: name, rendererTitle: name, header: name, errors: [] as string[]
+  legacy: i === 0, nativeTitle: name, rendererTitle: name, header: 'Chat On Steroids', badge: i === 0 ? null : 'DEV', errors: [] as string[]
 }));
 const files = ['before.png', 'after.png', 'result.json'];
 async function writeProof(directory: string) {
@@ -79,7 +79,7 @@ it('rejects malformed JSON, a partial result and renderer errors', async () => {
   const proof = states(); proof[1]!.errors.push('renderer failed'); writeFileSync(result, JSON.stringify(proof));
   await expect(validateProof(directory)).rejects.toThrow();
 });
-it.each(['nativeTitle', 'rendererTitle', 'header'] as const)('rejects a wrong %s even with all artifacts present', async field => {
+it.each(['nativeTitle', 'rendererTitle', 'header', 'badge'] as const)('rejects a wrong %s even with all artifacts present', async field => {
   const directory = temporary(); await writeProof(directory); const proof = states(); proof[1]![field] = 'wrong';
   writeFileSync(path.join(directory, 'result.json'), JSON.stringify(proof));
   await expect(validateProof(directory)).rejects.toThrow(field);
