@@ -4094,5 +4094,14 @@
   "Free space per chat": "Speicher pro Chat freigeben",
   "The storage dialog shows what one chat uses and frees its images or long texts.": "Der Speicherdialog zeigt, was ein Chat belegt, und gibt dessen Bilder oder lange Texte frei.",
   "Safer after a crash": "Sicherer nach einem Absturz",
-  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Chat-Gruppen, Einstellungsimporte und Bearbeitungs-Checkpoints bleiben konsistent, wenn ein Speichern oder Verschieben unterbrochen wird."
+  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Chat-Gruppen, Einstellungsimporte und Bearbeitungs-Checkpoints bleiben konsistent, wenn ein Speichern oder Verschieben unterbrochen wird.",
+  "Stuck turns you can end, Goal chats that don't stall, a steadier model choice, and long recordings that open fast.": "Festhängende Durchläufe beenden, Goal-Chats, die nicht stehen bleiben, eine verlässlichere Modellwahl und lange Aufzeichnungen, die schnell öffnen.",
+  "Stop ends a stuck turn": "Stopp beendet einen festhängenden Durchlauf",
+  "A Stop for a turn no browser page holds now ends it, so queued messages go out again.": "Ein Stopp für einen Durchlauf, den keine Browser-Seite hält, beendet ihn jetzt, damit wartende Nachrichten wieder rausgehen.",
+  "Goal chats don't stall": "Goal-Chats bleiben nicht stehen",
+  "A short answer that ends while Goal is still sending its last message now gets its next message.": "Eine kurze Antwort, die endet, während Goal noch die letzte Nachricht sendet, bekommt jetzt ihre nächste Nachricht.",
+  "A steadier model choice": "Eine verlässlichere Modellwahl",
+  "A reasoning level you ask for opens the chat directly, and a native Enter that already set it counts.": "Eine gewünschte Denkstufe öffnet den Chat direkt, und ein natives Enter, das sie schon gesetzt hat, zählt.",
+  "Long recordings open fast": "Lange Aufzeichnungen öffnen schnell",
+  "A very long chat's recording opens in under a second, not minutes, and no line is dropped.": "Die Aufzeichnung eines sehr langen Chats öffnet in unter einer Sekunde statt in Minuten, und keine Zeile geht verloren."
 }

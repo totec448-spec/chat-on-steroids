@@ -4179,5 +4179,14 @@
   "Free space per chat": "Liberar espaço por chat",
   "The storage dialog shows what one chat uses and frees its images or long texts.": "A caixa de armazenamento mostra o que um chat usa e libera suas imagens ou textos longos.",
   "Safer after a crash": "Mais seguro após uma falha",
-  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Grupos de chats, importações de configurações e checkpoints de edição continuam consistentes se um salvamento ou movimento for interrompido."
+  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Grupos de chats, importações de configurações e checkpoints de edição continuam consistentes se um salvamento ou movimento for interrompido.",
+  "Stuck turns you can end, Goal chats that don't stall, a steadier model choice, and long recordings that open fast.": "Turnos travados que podem ser encerrados, chats do Goal que não param, uma escolha de modelo mais confiável e gravações longas que abrem rápido.",
+  "Stop ends a stuck turn": "Parar encerra um turno travado",
+  "A Stop for a turn no browser page holds now ends it, so queued messages go out again.": "Parar um turno que nenhuma página do navegador mantém agora o encerra, e as mensagens na fila voltam a sair.",
+  "Goal chats don't stall": "Chats do Goal não param",
+  "A short answer that ends while Goal is still sending its last message now gets its next message.": "Uma resposta curta que termina enquanto o Goal ainda envia a última mensagem agora recebe a próxima mensagem.",
+  "A steadier model choice": "Uma escolha de modelo mais confiável",
+  "A reasoning level you ask for opens the chat directly, and a native Enter that already set it counts.": "O nível de raciocínio pedido abre o chat diretamente, e um Enter nativo que já o definiu é aceito.",
+  "Long recordings open fast": "Gravações longas abrem rápido",
+  "A very long chat's recording opens in under a second, not minutes, and no line is dropped.": "A gravação de um chat muito longo abre em menos de um segundo, não em minutos, e nenhuma linha se perde."
 }

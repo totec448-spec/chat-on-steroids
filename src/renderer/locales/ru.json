@@ -4264,5 +4264,14 @@
   "Free space per chat": "Освободить место по чатам",
   "The storage dialog shows what one chat uses and frees its images or long texts.": "Диалог хранилища показывает, сколько занимает один чат, и освобождает его изображения или длинные тексты.",
   "Safer after a crash": "Надёжнее после сбоя",
-  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Группы чатов, импорт настроек и контрольные точки правок остаются согласованными, если сохранение или перемещение прервано."
+  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Группы чатов, импорт настроек и контрольные точки правок остаются согласованными, если сохранение или перемещение прервано.",
+  "Stuck turns you can end, Goal chats that don't stall, a steadier model choice, and long recordings that open fast.": "Зависшие ходы, которые можно завершить, чаты «Цель», которые не останавливаются, более надёжный выбор модели и длинные записи, которые открываются быстро.",
+  "Stop ends a stuck turn": "Стоп завершает зависший ход",
+  "A Stop for a turn no browser page holds now ends it, so queued messages go out again.": "Стоп для хода, который не держит ни одна страница браузера, теперь завершает его, и сообщения из очереди уходят снова.",
+  "Goal chats don't stall": "Чаты «Цель» не останавливаются",
+  "A short answer that ends while Goal is still sending its last message now gets its next message.": "Короткий ответ, закончившийся, пока «Цель» ещё отправлял прошлое сообщение, теперь получает следующее сообщение.",
+  "A steadier model choice": "Более надёжный выбор модели",
+  "A reasoning level you ask for opens the chat directly, and a native Enter that already set it counts.": "Запрошенный уровень рассуждения открывает чат сразу, а нативный Enter, уже задавший его, засчитывается.",
+  "Long recordings open fast": "Длинные записи открываются быстро",
+  "A very long chat's recording opens in under a second, not minutes, and no line is dropped.": "Запись очень длинного чата открывается меньше чем за секунду, а не за минуты, и ни одна строка не теряется."
 }

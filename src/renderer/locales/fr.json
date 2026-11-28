@@ -4179,5 +4179,14 @@
   "Free space per chat": "Libérer de l'espace par chat",
   "The storage dialog shows what one chat uses and frees its images or long texts.": "La boîte de dialogue de stockage montre ce qu'un chat utilise et libère ses images ou ses textes longs.",
   "Safer after a crash": "Plus sûr après un plantage",
-  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Les groupes de chats, les imports de réglages et les points de contrôle des modifications restent cohérents si un enregistrement ou un déplacement est interrompu."
+  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Les groupes de chats, les imports de réglages et les points de contrôle des modifications restent cohérents si un enregistrement ou un déplacement est interrompu.",
+  "Stuck turns you can end, Goal chats that don't stall, a steadier model choice, and long recordings that open fast.": "Des tours bloqués qu'on peut terminer, des chats Goal qui ne s'arrêtent pas, un choix de modèle plus fiable et de longs enregistrements qui s'ouvrent vite.",
+  "Stop ends a stuck turn": "Stop termine un tour bloqué",
+  "A Stop for a turn no browser page holds now ends it, so queued messages go out again.": "Un Stop sur un tour qu'aucune page du navigateur ne tient le termine désormais, et les messages en attente repartent.",
+  "Goal chats don't stall": "Les chats Goal ne s'arrêtent pas",
+  "A short answer that ends while Goal is still sending its last message now gets its next message.": "Une réponse courte qui se termine pendant que Goal envoie encore son dernier message reçoit maintenant son message suivant.",
+  "A steadier model choice": "Un choix de modèle plus fiable",
+  "A reasoning level you ask for opens the chat directly, and a native Enter that already set it counts.": "Un niveau de raisonnement demandé ouvre directement le chat, et un Entrée natif qui l'a déjà réglé est accepté.",
+  "Long recordings open fast": "Les longs enregistrements s'ouvrent vite",
+  "A very long chat's recording opens in under a second, not minutes, and no line is dropped.": "L'enregistrement d'un très long chat s'ouvre en moins d'une seconde au lieu de plusieurs minutes, sans perdre aucune ligne."
 }

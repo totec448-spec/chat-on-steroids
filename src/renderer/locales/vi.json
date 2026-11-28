@@ -4009,5 +4009,14 @@
   "Free space per chat": "Giải phóng dung lượng theo cuộc trò chuyện",
   "The storage dialog shows what one chat uses and frees its images or long texts.": "Hộp thoại bộ nhớ cho biết một cuộc trò chuyện dùng bao nhiêu và giải phóng ảnh hoặc văn bản dài của nó.",
   "Safer after a crash": "An toàn hơn sau sự cố",
-  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Nhóm cuộc trò chuyện, nhập cài đặt và điểm kiểm tra chỉnh sửa vẫn nhất quán khi việc lưu hoặc di chuyển bị gián đoạn."
+  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "Nhóm cuộc trò chuyện, nhập cài đặt và điểm kiểm tra chỉnh sửa vẫn nhất quán khi việc lưu hoặc di chuyển bị gián đoạn.",
+  "Stuck turns you can end, Goal chats that don't stall, a steadier model choice, and long recordings that open fast.": "Lượt bị kẹt có thể kết thúc, cuộc trò chuyện Goal không bị dừng, lựa chọn mô hình đáng tin cậy hơn và bản ghi dài mở nhanh.",
+  "Stop ends a stuck turn": "Dừng kết thúc lượt bị kẹt",
+  "A Stop for a turn no browser page holds now ends it, so queued messages go out again.": "Dừng một lượt mà không trang trình duyệt nào giữ giờ sẽ kết thúc lượt đó, và các tin nhắn đang chờ được gửi lại.",
+  "Goal chats don't stall": "Cuộc trò chuyện Goal không bị dừng",
+  "A short answer that ends while Goal is still sending its last message now gets its next message.": "Một câu trả lời ngắn kết thúc khi Goal còn đang gửi tin nhắn trước giờ nhận được tin nhắn tiếp theo.",
+  "A steadier model choice": "Lựa chọn mô hình đáng tin cậy hơn",
+  "A reasoning level you ask for opens the chat directly, and a native Enter that already set it counts.": "Mức suy luận được yêu cầu mở thẳng cuộc trò chuyện, và phím Enter gốc đã đặt mức đó được chấp nhận.",
+  "Long recordings open fast": "Bản ghi dài mở nhanh",
+  "A very long chat's recording opens in under a second, not minutes, and no line is dropped.": "Bản ghi của một cuộc trò chuyện rất dài mở trong chưa đầy một giây thay vì vài phút, và không mất dòng nào."
 }
