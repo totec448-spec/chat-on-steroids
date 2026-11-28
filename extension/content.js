@@ -11344,7 +11344,10 @@
         await stopAutomationGeneration(safe);
       })()
         .catch(() => undefined)
-        .finally(() => { if (epoch === forEpoch && conversationId === target) goalBusy = false; });
+        .finally(() => {
+          if (epoch === forEpoch && conversationId === target) goalBusy = false;
+          goalIdled();
+        });
       return;
     }
     if (goalDraft || (generating && !goalRecoveryReady(pending)) || CLF_DOM.generating()) return;
@@ -11591,6 +11594,7 @@
       setGoalPhase('');
     } finally {
       if (alive && epoch === forEpoch && conversationId === target) goalBusy = wasBusy;
+      goalIdled();
     }
   }
 
