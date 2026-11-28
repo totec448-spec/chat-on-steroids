@@ -95,6 +95,17 @@ it('reconciles modified, untracked, deleted, renamed, binary and large changes f
   expect(afterAdd.changes.find(change => change.path === 'added.ts')).toMatchObject({ status: 'A', additions: 1 });
 });
 
+// Found by driving the Linux app: one file whose name is not valid UTF-8 (a Latin-1 name from an old archive) made the
+// whole Git panel "unavailable" with the decoder's own message. Only a Linux file system stores such a name.
+it.runIf(process.platform === 'linux')('lists the other changes when one file name is not valid UTF-8, and says it left one out', async () => {
+  const { root, id } = await committedProject();
+  await fs.writeFile(path.join(root, 'modified.ts'), 'export const value = 2;\n');
+  await fs.writeFile(Buffer.concat([Buffer.from(root + '/bad-'), Buffer.from([0xe9]), Buffer.from('-latin1.txt')]), 'x\n');
+  const snapshot = await readProjectGitSnapshot(id);
+  expect(snapshot.state).toBe('ready');
+  expect(snapshot.changes.map(change => change.path)).toEqual(['modified.ts']);
+  expect(getLog().some(entry => /not valid UTF-8/.test(entry.message))).toBe(true);
+});
 it('reports a clean repository and a non-repository without inventing changes', async () => {
   const clean = await committedProject();
   expect(await readProjectGitSnapshot(clean.id)).toMatchObject({ state: 'ready', changes: [], truncated: false });
@@ -388,4 +399,38 @@ it('shows a file renamed differently on both sides as conflicts, even with no wo
   expect(byPath['moved.txt']).toBe('C');
   // Deleted on both sides: no working file and no HEAD version, still a readable (empty) diff.
   expect(await readProjectGitDiff(id, 'moved.txt', undefined, snapshot.revision)).toMatchObject({ status: 'C', currentText: '' });
+});
+
+// CodeRabbit on #2323.
+it.runIf(process.platform === 'linux')('keeps the next change when a renamed file\'s new name is not valid UTF-8', async () => {
+  const { root, id } = await committedProject();
+  await git(root, 'mv', 'old-name.ts', 'tmp-name.ts');
+  await fs.rename(path.join(root, 'tmp-name.ts'), Buffer.concat([Buffer.from(root + '/bad-'), Buffer.from([0xe9]), Buffer.from('.ts')]));
+  await git(root, 'add', '-A');
+  await fs.writeFile(path.join(root, 'modified.ts'), 'export const value = 2;\n');
+  const snapshot = await readProjectGitSnapshot(id);
+  expect(snapshot.state).toBe('ready');
+  expect(snapshot.changes.map(change => `${change.status}:${change.path}`)).toEqual(['M:modified.ts']);
+});
+it.runIf(process.platform === 'linux')('reports omitted names once per snapshot, and not again for a clean one', async () => {
+  const { root, id } = await committedProject();
+  const bad = Buffer.concat([Buffer.from(root + '/bad-'), Buffer.from([0xe9]), Buffer.from('.txt')]);
+  await fs.writeFile(bad, 'x\n'); await git(root, 'add', '-A'); await git(root, 'commit', '-m', 'bad');
+  await fs.appendFile(bad, 'more\n');
+  const count = () => getLog().filter(entry => /not valid UTF-8/.test(entry.message)).length;
+  const before = count();
+  await readProjectGitSnapshot(id);
+  expect(count() - before).toBe(1);
+  await fs.writeFile(bad, 'x\n'); await readProjectGitSnapshot(id);
+  expect(count() - before, 'a snapshot with no changes in the bad file says nothing').toBe(1);
+});
+it('keeps a leading byte-order mark in a file name of a branch comparison', async () => {
+  const { root, id } = await committedProject();
+  await git(root, 'branch', '-M', 'main');
+  await git(root, 'checkout', '-qb', 'topic');
+  await fs.writeFile(path.join(root, '\uFEFFnotes.txt'), 'x\n');
+  await git(root, 'add', '-A'); await git(root, 'commit', '-m', 'bom');
+  const snapshot = await readProjectGitSnapshot(id, 'refs/heads/main');
+  expect(snapshot.state).toBe('ready');
+  expect(snapshot.changes.map(change => change.path)).toEqual(['\uFEFFnotes.txt']);
 });
