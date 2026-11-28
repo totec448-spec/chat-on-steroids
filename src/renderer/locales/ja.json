@@ -4007,5 +4007,14 @@
   "Free space per chat": "チャットごとに容量を解放",
   "The storage dialog shows what one chat uses and frees its images or long texts.": "ストレージのダイアログに、1 つのチャットが使っている容量が表示され、その画像や長いテキストを解放できます。",
   "Safer after a crash": "クラッシュ後も安心",
-  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "保存や移動が中断されても、チャットグループ、設定のインポート、編集のチェックポイントは整合性を保ちます。"
+  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "保存や移動が中断されても、チャットグループ、設定のインポート、編集のチェックポイントは整合性を保ちます。",
+  "Stuck turns you can end, Goal chats that don't stall, a steadier model choice, and long recordings that open fast.": "終了できる止まったターン、止まらないゴールのチャット、より確実なモデル選択、そして素早く開く長い記録。",
+  "Stop ends a stuck turn": "停止で止まったターンを終了",
+  "A Stop for a turn no browser page holds now ends it, so queued messages go out again.": "どのブラウザーのページも保持していないターンへの停止で、そのターンが終了し、待機中のメッセージが再び送信されます。",
+  "Goal chats don't stall": "ゴールのチャットが止まらない",
+  "A short answer that ends while Goal is still sending its last message now gets its next message.": "ゴールが直前のメッセージを送信している最中に終わった短い回答にも、次のメッセージが送られます。",
+  "A steadier model choice": "より確実なモデル選択",
+  "A reasoning level you ask for opens the chat directly, and a native Enter that already set it counts.": "指定した推論レベルでチャットが直接開き、ネイティブの Enter ですでに設定された場合も認識されます。",
+  "Long recordings open fast": "長い記録が素早く開く",
+  "A very long chat's recording opens in under a second, not minutes, and no line is dropped.": "非常に長いチャットの記録が数分ではなく1秒未満で開き、行も失われません。"
 }

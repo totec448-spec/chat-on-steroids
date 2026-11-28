@@ -14,6 +14,15 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.56': {
+    lead: () => t("Stuck turns you can end, Goal chats that don't stall, a steadier model choice, and long recordings that open fast."),
+    highlights: [
+      { icon: 'i-stop', title: () => t("Stop ends a stuck turn"), text: () => t("A Stop for a turn no browser page holds now ends it, so queued messages go out again.") },
+      { icon: 'i-agents', title: () => t("Goal chats don't stall"), text: () => t("A short answer that ends while Goal is still sending its last message now gets its next message.") },
+      { icon: 'i-gear', title: () => t("A steadier model choice"), text: () => t("A reasoning level you ask for opens the chat directly, and a native Enter that already set it counts.") },
+      { icon: 'i-bolt', title: () => t("Long recordings open fast"), text: () => t("A very long chat's recording opens in under a second, not minutes, and no line is dropped.") }
+    ]
+  },
   '2.1.55': {
     lead: () => t("Restore a turn's edited files, manage Skills from their cards, free storage per chat, and safer saves after a crash."),
     highlights: [

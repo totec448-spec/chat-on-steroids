@@ -4007,5 +4007,14 @@
   "Free space per chat": "채팅별 공간 확보",
   "The storage dialog shows what one chat uses and frees its images or long texts.": "저장 공간 대화 상자에서 채팅 하나가 사용하는 용량을 보고 그 이미지나 긴 텍스트를 비울 수 있습니다.",
   "Safer after a crash": "충돌 후에도 더 안전하게",
-  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "저장이나 이동이 중단되어도 채팅 그룹, 설정 가져오기, 편집 체크포인트가 일관되게 유지됩니다."
+  "Chat groups, settings imports and edit checkpoints stay consistent when a save or move is interrupted.": "저장이나 이동이 중단되어도 채팅 그룹, 설정 가져오기, 편집 체크포인트가 일관되게 유지됩니다.",
+  "Stuck turns you can end, Goal chats that don't stall, a steadier model choice, and long recordings that open fast.": "끝낼 수 있는 멈춘 턴, 멈추지 않는 Goal 채팅, 더 안정적인 모델 선택, 빠르게 열리는 긴 기록.",
+  "Stop ends a stuck turn": "중지로 멈춘 턴 종료",
+  "A Stop for a turn no browser page holds now ends it, so queued messages go out again.": "어느 브라우저 페이지도 잡고 있지 않은 턴을 중지하면 이제 그 턴이 끝나고 대기 중인 메시지가 다시 전송됩니다.",
+  "Goal chats don't stall": "Goal 채팅이 멈추지 않음",
+  "A short answer that ends while Goal is still sending its last message now gets its next message.": "Goal이 마지막 메시지를 보내는 중에 끝난 짧은 답변도 이제 다음 메시지를 받습니다.",
+  "A steadier model choice": "더 안정적인 모델 선택",
+  "A reasoning level you ask for opens the chat directly, and a native Enter that already set it counts.": "요청한 추론 수준으로 채팅이 바로 열리고, 네이티브 Enter가 이미 설정한 경우도 인정됩니다.",
+  "Long recordings open fast": "긴 기록이 빠르게 열림",
+  "A very long chat's recording opens in under a second, not minutes, and no line is dropped.": "아주 긴 채팅의 기록이 몇 분이 아니라 1초 안에 열리고, 줄이 사라지지 않습니다."
 }
