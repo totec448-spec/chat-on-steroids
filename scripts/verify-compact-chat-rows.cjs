@@ -5,6 +5,7 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
 const root = process.env.COS_UI_ROOT || path.resolve(__dirname, '..');
 const output = path.resolve(process.env.COS_UI_OUTPUT || path.join(root, '.tmp', 'compact-chat-rows'));
 const { fixtureConfigSource, BENIGN_RENDERER_ERRORS } = require(path.join(root, 'scripts/fixtures/app-defaults.cjs'));
+const { resizeWindow } = require(path.join(root, 'scripts/ui-check-window.cjs'));
 fs.mkdirSync(path.join(output, 'profile'), { recursive: true });
 app.setPath('userData', path.join(output, 'profile')); app.disableHardwareAcceleration();
 // A non-persistent, per-process partition prevents Chromium storage from leaking between runs.
@@ -157,7 +158,7 @@ app.whenReady().then(async () => {
   // rather than widening a row or shrinking its accessible action target.
   // Also exercise the 656px-tall hosted macOS screen rather than relying on a tall
   // local display; macOS clamps taller BrowserWindows to its visible work area.
-  win.setSize(820,656);await pause(250);
+  await resizeWindow(win,820,656);await pause(250);
   await js(`setRowMode('dark',false,14,false)`);
   await until(`document.documentElement.dataset.theme==='dark'&&document.documentElement.dataset.highContrast==='false'`);
   const narrow=await assertRows({narrow:true});
