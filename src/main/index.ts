@@ -133,6 +133,7 @@ import { loadedCosBrowser, onCosBrowserLoaded, syncCosBrowser } from './cos-brow
 import {
   applyLoginStartup,
   isBackgroundLaunch,
+  closeActionForWindow,
   createWindowActivationGate,
   ownsAppRuntime,
   registerNativeWindowActivation,
@@ -140,6 +141,7 @@ import {
   shouldBeginAppBootstrap,
   shouldQuitOnWindowAllClosed
 } from './window-lifecycle.js';
+import { linuxTrayReachable } from './linux-tray.js';
 import { trayGuidArgsForPlatform, trayImageSpec } from './tray-image.js';
 import { browserWindowIconPath } from './window-icon.js';
 import { approvedChatGptImageRequest, RENDERER_CONTENT_SECURITY_POLICY } from './renderer-csp.js';
@@ -156,6 +158,8 @@ const MAIN_TEXTS_STATE = 'main-texts';
 let window: BrowserWindow | null = null;
 let savedWindowBounds: unknown = null;
 let tray: Tray | null = null;
+/** Linux only: whether a StatusNotifier watcher owns its bus name, read once the tray exists; null until then or when unknown. */
+let linuxTrayVisible: boolean | null = null;
 let quitting = false;
 let shutdownStarted = false;
 let shutdownComplete = false;
@@ -272,9 +276,13 @@ function createWindow(): void {
   window.webContents.on('will-attach-webview', (event) => event.preventDefault());
 
   window.on('close', (event) => {
-    if (!quitting && getConfig().ui.minimizeToTray) {
+    const action = closeActionForWindow({ platform: process.platform, minimizeToTray: getConfig().ui.minimizeToTray, quitting, trayReachable: linuxTrayVisible });
+    if (action !== 'close') {
       event.preventDefault();
-      window?.hide();
+      if (action === 'minimize') {
+        logInfo('window: minimized instead of hidden, because no system tray is reachable on this desktop');
+        window?.minimize();
+      } else window?.hide();
     }
   });
 
@@ -859,6 +867,7 @@ void app.whenReady().then(async () => {
   registerNativeWindowActivation(app, windowActivation.request);
 
   tray = new Tray(trayIcon(false), ...trayGuidArgsForPlatform());
+  if (process.platform === 'linux') void linuxTrayReachable().then(reachable => { linuxTrayVisible = reachable; });
   tray.on('click', windowActivation.request);
   refreshTray();
   onStatusChange(refreshTray);
