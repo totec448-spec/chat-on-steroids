@@ -1214,7 +1214,7 @@ it('saves the stable connector URL option from For developers, and only with sec
   const instructions = mounted.state.config.mcp?.instructions ?? '';
   box.checked = true;
   box.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
-  await waitFor(() => expect(mounted.calls.at(-1)?.mcp).toEqual({ instructions, persistentUrls: true }));
+  await waitFor(() => expect(mounted.calls.at(-1)?.mcp).toEqual({ instructions, persistentUrls: true, suppressUnattributedNotices: false }));
   const unavailable = structuredClone(mounted.state) as any;
   unavailable.secureStorage = { available: false };
   unavailable.config.mcp = { instructions, persistentUrls: false };
@@ -1224,6 +1224,79 @@ it('saves the stable connector URL option from For developers, and only with sec
   unavailable.config.mcp = { instructions, persistentUrls: true };
   mounted.push(structuredClone(unavailable));
   expect(box.disabled).toBe(false);
+});
+
+it('saves unattributed notice suppression independently of the stable URL setting', async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document;
+  const box = doc.getElementById('mcpSuppressUnattributedNotices') as HTMLInputElement;
+  expect(doc.querySelector('[data-panel="general"]')!.contains(box)).toBe(true);
+  expect(box.checked).toBe(false);
+  for (const checked of [true, false]) {
+    box.checked = checked;
+    box.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+    await waitFor(() => expect(mounted.calls.at(-1)?.mcp).toEqual({
+      instructions: mounted.state.config.mcp?.instructions ?? '',
+      persistentUrls: mounted.state.config.mcp?.persistentUrls === true,
+      suppressUnattributedNotices: checked
+    }));
+  }
+});
+
+it.each([false, true])('keeps the newer queued unattributed notice choice after an older save succeeds (saved: %s)', async (saved) => {
+  const pending: Array<() => void> = [];
+  const calls: any[] = [];
+  const mounted = await mountChat({}, [], { saveSettings: (patch: any) => {
+    calls.push(structuredClone(patch));
+    return new Promise(resolve => pending.push(() => {
+      resolve({ ok: true, data: { ...mounted.state, config: { ...mounted.state.config, ...structuredClone(patch) } } });
+    }));
+  } });
+  const w = mounted.window;
+  mounted.state.config.mcp = { instructions: '', persistentUrls: false, suppressUnattributedNotices: saved };
+  mounted.push(mounted.state);
+  const box = w.document.getElementById('mcpSuppressUnattributedNotices') as HTMLInputElement;
+  expect(box.checked).toBe(saved);
+  box.checked = !saved;
+  box.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await waitFor(() => expect(calls).toHaveLength(1));
+  box.checked = saved;
+  box.dispatchEvent(new w.Event('change', { bubbles: true }));
+  pending.shift()!();
+  await waitFor(() => expect(calls).toHaveLength(2));
+  expect(calls[1].mcp.suppressUnattributedNotices).toBe(saved);
+  expect(box.checked).toBe(saved);
+  const developer = w.document.getElementById('developerMode') as HTMLInputElement;
+  developer.checked = !developer.checked;
+  developer.dispatchEvent(new w.Event('change', { bubbles: true }));
+  pending.shift()!();
+  await waitFor(() => expect(calls).toHaveLength(3));
+  expect(calls[2].mcp.suppressUnattributedNotices).toBe(saved);
+  pending.shift()!();
+  await settle();
+  expect(box.checked).toBe(saved);
+});
+
+it.each([false, true])('restores focused unattributed notice suppression after a failed save (saved: %s)', async (saved) => {
+  const saveSettings = vi.fn(async (_patch: any) => ({ ok: false, error: 'Settings could not be saved.' }));
+  const mounted = await mountChat({}, [], { saveSettings });
+  const w = mounted.window;
+  mounted.state.config.mcp = { instructions: '', persistentUrls: false, suppressUnattributedNotices: saved };
+  mounted.push(mounted.state);
+  const box = w.document.getElementById('mcpSuppressUnattributedNotices') as HTMLInputElement;
+  expect(box.checked).toBe(saved);
+  box.focus();
+  expect(w.document.activeElement).toBe(box);
+  box.checked = !saved;
+  box.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await waitFor(() => expect(saveSettings).toHaveBeenCalledTimes(1));
+  expect(saveSettings.mock.calls[0]?.[0].mcp.suppressUnattributedNotices).toBe(!saved);
+  await waitFor(() => expect(box.checked).toBe(saved));
+  const developer = w.document.getElementById('developerMode') as HTMLInputElement;
+  developer.checked = !developer.checked;
+  developer.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await waitFor(() => expect(saveSettings).toHaveBeenCalledTimes(2));
+  expect(saveSettings.mock.calls[1]?.[0].mcp.suppressUnattributedNotices).toBe(saved);
 });
 
 it('always requires the live browser because recording is an invariant', async () => {
