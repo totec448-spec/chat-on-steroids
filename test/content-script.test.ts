@@ -23308,6 +23308,36 @@ describe('the goal loop', () => {
     expect(drafts(live)).toHaveLength(1);
   });
 
+  it('still drafts for an answer that ends while a continuation that work overtook is being given back (#2283)', async () => {
+    let draft: ReturnType<typeof readyDraft> | null = null, pendingTools = 0, release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      activity: () => {
+        const value = feed(draft)();
+        return { ...value, data: { ...value.data, pendingTools } };
+      },
+      goal_ack: () => held.then(() => {
+        draft = null;
+        return { ok: true, data: { acknowledged: false, deferred: true, listenUntil: Date.now() + 120_000 } };
+      })
+    }, () => undefined, false, true);
+    pendingTools = 1;
+    draft = readyDraft('This stale continuation must never be sent');
+    const pulling = live.hook.pullActivity();
+    await settle();
+    expect(acks(live)).toHaveLength(1);
+
+    pendingTools = 0;
+    await answerATurn(live, 'done');
+    expect(drafts(live), 'refused while the page is still giving the continuation back').toHaveLength(0);
+
+    release();
+    await pulling;
+    await settle(800);
+    expect(drafts(live)).toHaveLength(1);
+  });
+
   /**
    * The loop's success condition. Nothing is typed, and the panel says so — a run that ends
    * because the work is done must not look like a run that failed.
