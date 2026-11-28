@@ -3092,7 +3092,14 @@ Controller construction remains lazy and debugger-API-gated. Verify the producti
 with `scripts/verify-browser-control-entry.mjs`; a replacement fixture worker cannot prove startup.
 Its 25-second RPCs are independent of the durable chat outbox: a dispatched action without a result
 is unconfirmed, never reissued. Browser-incarnation tab handles avoid guessing between browser
-profiles; multiple browsers require explicit selection. The MV3 custodian persists leases and
+profiles; multiple browsers require explicit selection. Each entry of the `browser_tabs list` browsers
+list (`id`, `name`, `enabled`) also carries `host`: `cos` for the built-in browser, `browser` for an
+ordinary one, `unknown` when the extension build sent no usable `x-extension-host` (an older build). A
+tab list from one browser carries `browser: { id, name, host }`, also when it is the only one connected;
+the broker writes it from its own poll record, never from the extension's reply. `host` is discovery
+information on the same trust as the header the app already routes by (the extension reports it itself): it says
+which kind of browser an id belongs to, not who controls it, and it is not proof of ownership or a host
+generation (#482). The MV3 custodian persists leases and
 one pending result receipt in session storage. After worker reconstruction it renews debugger
 subscriptions; it does not auto-attach a debugger Chrome has cancelled. Detach/unpair/restart
 revoke custody. In-flight work cannot borrow a replacement lease.

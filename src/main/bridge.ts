@@ -3428,7 +3428,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       return json(res, 400, { error: 'invalid_browser_request' }, origin);
     if (body.action === 'poll' && typeof body.enabled === 'boolean' && typeof body.name === 'string') {
       const caps = effectiveCapabilities(getConfig());
-      return json(res, 200, { ...browserControl.poll(body.browserId, body.name, body.enabled), policy: { read: caps.screen, write: caps.control } }, origin);
+      return json(res, 200, { ...browserControl.poll(body.browserId, body.name, body.enabled, req.headers['x-extension-host']), policy: { read: caps.screen, write: caps.control } }, origin);
     }
     if (typeof body.id !== 'string' || typeof body.epoch !== 'string' || body.id.length > 100 || body.epoch.length > 100)
       return json(res, 400, { error: 'invalid_browser_request' }, origin);

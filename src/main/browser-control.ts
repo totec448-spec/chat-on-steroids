@@ -11,27 +11,30 @@ interface Pending {
   allowed: () => Promise<boolean>;
   finish: (result: BrowserResult) => void;
 }
+/** What a browser's own extension build says it runs in (the `x-extension-host` header); `unknown` when it says nothing usable. */
+export type BrowserHost = 'cos' | 'browser' | 'unknown';
+export const browserHost = (value: unknown): BrowserHost => value === 'cos' || value === 'browser' ? value : 'unknown';
 const uuid = /^[a-f\d-]{36}$/i;
 const tabHandle = /^([a-f\d-]{36}):(\d+)$/i;
 
 export class BrowserControlBroker {
   private epoch = randomUUID();
-  private clients = new Map<string, { name: string; seen: number; enabled: boolean }>();
+  private clients = new Map<string, { name: string; seen: number; enabled: boolean; host: BrowserHost }>();
   private pending = new Map<string, Pending>();
 
   constructor(private wake = () => wakeBrowserWork('browser-control')) {}
 
-  browsers(): Array<{ id: string; name: string; enabled: boolean }> {
+  browsers(): Array<{ id: string; name: string; enabled: boolean; host: BrowserHost }> {
     const now = Date.now();
     return [...this.clients].filter(([, client]) => now - client.seen < BROWSER_LIMITS.presenceMs)
-      .map(([id, { name, enabled }]) => ({ id, name, enabled }));
+      .map(([id, { name, enabled, host }]) => ({ id, name, enabled, host }));
   }
 
-  poll(browserId: string, name: string, enabled: boolean): { epoch: string; requests: string[] } {
+  poll(browserId: string, name: string, enabled: boolean, host?: unknown): { epoch: string; requests: string[] } {
     if (!uuid.test(browserId)) throw new Error('Invalid browser identity');
     for (const [id, client] of this.clients) if (Date.now() - client.seen >= BROWSER_LIMITS.presenceMs) this.clients.delete(id);
     if (!this.clients.has(browserId) && this.clients.size >= BROWSER_LIMITS.clients) throw new Error('Too many browser connections');
-    this.clients.set(browserId, { name: name.slice(0, 80), seen: Date.now(), enabled });
+    this.clients.set(browserId, { name: name.slice(0, 80), seen: Date.now(), enabled, host: browserHost(host) });
     return { epoch: this.epoch, requests: enabled ? [...this.pending].filter(([, p]) => p.browserId === browserId && !p.claimed && !p.claiming)
       .map(([id]) => id) : [] };
   }
@@ -95,7 +98,8 @@ export class BrowserControlBroker {
     delete args.browserId;
     const id = randomUUID();
     const command: BrowserCommand = { id, epoch: this.epoch, owner, conversationId, tool, args, expiresAt: Date.now() + BROWSER_LIMITS.timeoutMs };
-    return new Promise(resolve => {
+    const answered = { id: client.id, name: client.name, host: client.host };
+    const result = await new Promise<BrowserResult>(resolve => {
       const timer = setTimeout(() => p.finish({ error: p.claimed
         ? 'BROWSER_RESULT_UNCONFIRMED: the operation was dispatched but its result was not received. Inspect the tab before repeating any action.'
         : 'BROWSER_NOT_DISPATCHED: the extension did not claim this request before its deadline.' }), BROWSER_LIMITS.timeoutMs);
@@ -108,6 +112,13 @@ export class BrowserControlBroker {
       this.pending.set(id, p);
       this.wake();
     });
+    // A tab list says which browser answered, whether or not others are connected. The broker states it from
+    // its own record of the poll, so the extension's reply cannot name another browser.
+    const value = result.value;
+    if (tool === 'browser_tabs' && args.action === 'list' && value && typeof value === 'object' && !Array.isArray(value)) {
+      return { ...result, value: { ...value, browser: answered } };
+    }
+    return result;
   }
 
   reset(): void {
