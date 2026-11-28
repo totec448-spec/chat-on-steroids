@@ -2,7 +2,7 @@
  * The Setup rail shows every step side by side, so in a compact window or a language with long step names its
  * labels were cut to four letters ("Брау…", "Дост…"). A label is useful whole or not at all: when any label of the
  * steps shown does not fit, the rail marks itself `is-compact` and the labels move off screen. They stay in the
- * page, so every step keeps its name for a screen reader.
+ * page, so every step keeps its name for a screen reader, and each step's tooltip carries it while they are away.
  */
 export function watchSetupRailLabels(rail: HTMLElement | null): (() => void) | null {
   // Test pages and older shells may lack the observers; the rail then keeps its labels as before.
@@ -12,7 +12,15 @@ export function watchSetupRailLabels(rail: HTMLElement | null): (() => void) | n
     frame = 0;
     rail.classList.remove('is-compact');
     const labels = [...rail.querySelectorAll<HTMLElement>('li:not([hidden]) .setup-rail-label')];
-    if (labels.some(label => label.scrollWidth > label.clientWidth + 1)) rail.classList.add('is-compact');
+    const compact = labels.some(label => label.scrollWidth > label.clientWidth + 1);
+    if (compact) rail.classList.add('is-compact');
+    // With the labels off screen only a number or a check mark is left: hovering a step names it.
+    for (const label of rail.querySelectorAll<HTMLElement>('.setup-rail-label')) {
+      const button = label.closest('button');
+      if (!button) continue;
+      if (compact && label.textContent?.trim()) button.title = label.textContent.trim();
+      else button.removeAttribute('title');
+    }
   };
   const schedule = (): void => { if (!frame) frame = requestAnimationFrame(fit); };
   // Only the rail's width matters to the resize watch: showing or hiding the labels changes its height.
