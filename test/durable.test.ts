@@ -95,6 +95,16 @@ describe('durable state commit boundary', () => {
     expect(getLog().map(entry => entry.message).filter(line => line.includes('probe state'))).toHaveLength(3);
   });
 
+  it('keeps the strict failure memory across a tolerant read of a file that still fails strictly (#2308)', async () => {
+    const dir = await tempStore();
+    await writeDurableNow('probe', {});
+    await fs.writeFile(path.join(dir, 'state', 'probe.json'), 'null');
+    await expect(readDurable('probe', { strict: true })).rejects.toThrow();
+    await expect(readDurable('probe')).resolves.toBeNull();
+    await expect(readDurable('probe', { strict: true })).rejects.toThrow();
+    expect(getLog().map(entry => entry.message).filter(line => line.includes('probe state'))).toHaveLength(1);
+  });
+
   it('starts independent pending files during flush without duplicating an active immediate write', async () => {
     await tempStore();
     let release!: () => void;
