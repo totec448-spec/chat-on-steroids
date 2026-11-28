@@ -354,7 +354,11 @@ const settingsPatch = z.object({
     endSleepingWorkerProcesses: z.boolean().optional(),
     archiveWorkerChats: z.boolean().optional()
   }),
-  mcp: z.object({ instructions: z.string().trim().max(MAX_MCP_INSTRUCTIONS_CHARS), persistentUrls: z.boolean().optional() }).strict().optional(),
+  mcp: z.object({
+    instructions: z.string().trim().max(MAX_MCP_INSTRUCTIONS_CHARS),
+    persistentUrls: z.boolean().optional(),
+    suppressUnattributedNotices: z.boolean().optional()
+  }).strict().optional(),
   controlApi: z.object({ enabled: z.boolean(), allowActions: z.boolean().optional() }).strict().optional(),
   projects: z.object({ codeCheckpoints: z.boolean() }).strict().optional(),
   goal: z.object({
@@ -462,8 +466,13 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
     ...(wanted.connectorSuffix === undefined ? {} : {
       connectorSuffix: pick(current.connectorSuffix ?? '', base.connectorSuffix ?? '', wanted.connectorSuffix)
     }),
-    mcp: wanted.mcp ? { instructions: pick(current.mcp.instructions, base.mcp?.instructions ?? '', wanted.mcp.instructions),
-      persistentUrls: pick(current.mcp.persistentUrls === true, base.mcp?.persistentUrls === true, wanted.mcp.persistentUrls ?? current.mcp.persistentUrls === true) } : current.mcp,
+    mcp: wanted.mcp ? {
+      instructions: pick(current.mcp.instructions, base.mcp?.instructions ?? '', wanted.mcp.instructions),
+      persistentUrls: pick(current.mcp.persistentUrls === true, base.mcp?.persistentUrls === true, wanted.mcp.persistentUrls ?? current.mcp.persistentUrls === true),
+      suppressUnattributedNotices: wanted.mcp.suppressUnattributedNotices === undefined
+        ? current.mcp.suppressUnattributedNotices === true
+        : pick(current.mcp.suppressUnattributedNotices === true, base.mcp?.suppressUnattributedNotices === true, wanted.mcp.suppressUnattributedNotices)
+    } : current.mcp,
     controlApi,
     projects,
     capabilities,

@@ -588,6 +588,7 @@ function withUnattributedNotice(
     'Continue using enabled self-contained tools with their existing permissions. Do not repeat a completed operation to repair attribution. ' +
     requestOwnershipNotice
   }] };
+  if (allowUnattributed && getConfig().mcp.suppressUnattributedNotices === true) return result;
   const eta = unattributedRepairEta(Date.now(), requestId);
   const recovery = eta === null ? '' : `The next attribution recovery check is in about ${eta}s. `;
   return {

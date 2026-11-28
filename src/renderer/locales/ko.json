@@ -1,6 +1,8 @@
 {
   "Chat On Steroids (dev)": "Chat On Steroids (dev)",
   "About Chat On Steroids (dev)": "Chat On Steroids (dev) 정보",
+  "Suppress unattributed call notices": "귀속되지 않은 호출 알림 생략",
+  "For standalone MCP clients: omit the informational identity notice when unattributed calls are allowed. Permissions and tool errors are unchanged.": "독립형 MCP 클라이언트용: 귀속되지 않은 호출이 허용되면 식별 관련 안내를 생략합니다. 권한과 도구 오류는 변경되지 않습니다.",
   "Another Git operation is in progress. Try again when it finishes.": "다른 Git 작업이 진행 중입니다. 완료된 후 다시 시도하세요.",
   "Git state needs recovery. Check this branch before retrying; index.lock was kept.": "Git 상태를 복구해야 합니다. 다시 시도하기 전에 이 브랜치를 확인하세요. index.lock은 보존되었습니다.",
   "Git committed, but a later step failed. Check the commit before trying again.": "Git 커밋은 생성되었지만 이후 단계에서 실패했습니다. 다시 시도하기 전에 커밋을 확인하세요.",
