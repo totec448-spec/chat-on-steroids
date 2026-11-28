@@ -401,10 +401,17 @@ const quickChat = createQuickChat({
   workspaceContents: () => window && !window.isDestroyed() ? window.webContents : null,
   openWorkspace: id => {
     windowActivation.request();
-    if (!window) return;
+    if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return false;
     const target = window.webContents;
-    const open = (): void => { if (!target.isDestroyed()) target.send('session:write', id); };
-    if (target.isLoadingMainFrame()) target.once('did-finish-load', open); else open();
+    const open = (): void => {
+      if (target.isDestroyed()) { logWarn('quick chat: Workspace navigation skipped because its renderer was destroyed'); return; }
+      target.send('session:write', id);
+    };
+    if (target.isLoadingMainFrame()) {
+      logInfo('quick chat: waiting for Workspace renderer before opening the selected chat');
+      target.once('did-finish-load', open);
+    } else open();
+    return true;
   }
 });
 

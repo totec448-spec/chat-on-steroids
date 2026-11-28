@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createQuickChat } from '../src/main/quick-chat-window.js';
+import { logInfo, logWarn } from '../src/main/logger.js';
 
 type Handler = (event: unknown, ...args: unknown[]) => unknown;
 const native = vi.hoisted(() => ({
@@ -32,7 +33,7 @@ vi.mock('electron', async () => {
 vi.mock('../src/main/config.js', () => ({ getConfig: () => native.config }));
 vi.mock('../src/main/quick-chat-shortcut.js', () => ({ initializeQuickChatShortcut: vi.fn(), disposeQuickChatShortcut: vi.fn() }));
 vi.mock('../src/main/theme.js', () => ({ shownTheme: () => 'dark' }));
-vi.mock('../src/main/logger.js', () => ({ logWarn: vi.fn() }));
+vi.mock('../src/main/logger.js', () => ({ logInfo: vi.fn(), logWarn: vi.fn() }));
 vi.mock('../src/main/session/store.js', () => ({ getSession: native.getSession }));
 
 describe('Quick Chat window lifecycle', () => {
@@ -40,7 +41,7 @@ describe('Quick Chat window lifecycle', () => {
   beforeEach(() => {
     vi.clearAllMocks(); native.window = null; native.handlers.clear();
     native.getSession.mockImplementation(async id => ({ id, conversationId: id, title: 'Test chat' }));
-    controller = createQuickChat({ hasWorkspace: () => true, workspaceContents: () => native.workspace as never, openWorkspace: vi.fn() }); controller.register();
+    controller = createQuickChat({ hasWorkspace: () => true, workspaceContents: () => native.workspace as never, openWorkspace: vi.fn(() => false) }); controller.register();
   });
   afterEach(() => controller.dispose());
   async function open() {
@@ -58,9 +59,16 @@ describe('Quick Chat window lifecycle', () => {
     expect(native.window.isVisible()).toBe(true);
     expect(native.handlers.has('quick-chat:capture')).toBe(false);
     expect(native.handlers.has('quick-chat:replace')).toBe(false);
+    expect(logInfo).toHaveBeenCalledExactlyOnceWith('quick chat: waiting for compact renderer readiness before showing the panel');
     controller.toggle();
     expect(native.window.isVisible()).toBe(false);
     await expect(Promise.resolve().then(() => native.handlers.get('quick-chat:ready')!({ ...event, senderFrame: {} }))).rejects.toThrow();
+  });
+  it('keeps the compact conversation visible if Workspace cannot open', async () => {
+    const { event } = await open();
+    expect(await native.handlers.get('quick-chat:expand')!(event, 'session-one')).toBe(false);
+    expect(native.window.isVisible()).toBe(true);
+    expect(logWarn).toHaveBeenCalledExactlyOnceWith('quick chat: expand refused because Workspace could not be opened');
   });
   it('opens the exact workspace chat on cold start and reuses the panel', async () => {
     const openSession = native.handlers.get('quick-chat:open-session')!;

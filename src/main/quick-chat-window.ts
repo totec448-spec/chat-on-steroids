@@ -3,14 +3,14 @@ import { BrowserWindow, globalShortcut, ipcMain, screen } from 'electron';
 import { getConfig } from './config.js';
 import { getSession } from './session/store.js';
 import { shownTheme } from './theme.js';
-import { logWarn } from './logger.js';
+import { logInfo, logWarn } from './logger.js';
 import { quickChatBounds, QUICK_CHAT_PARTITION } from '../shared/quick-chat.js';
 import { initializeQuickChatShortcut, disposeQuickChatShortcut } from './quick-chat-shortcut.js';
 import { defaultAppearance, effectivePalette } from '../shared/appearance.js';
 import { isUnattributedSession } from '../shared/session.js';
 
 /** One auxiliary window; the outbox and session store remain the only execution owners. */
-export function createQuickChat(options: { hasWorkspace(): boolean; workspaceContents?(): Electron.WebContents | null; openWorkspace(id: string | null): void }) {
+export function createQuickChat(options: { hasWorkspace(): boolean; workspaceContents?(): Electron.WebContents | null; openWorkspace(id: string | null): boolean }) {
   let win: BrowserWindow | null = null;
   let active = false;
   let lastBounds: Electron.Rectangle | null = null;
@@ -56,13 +56,14 @@ export function createQuickChat(options: { hasWorkspace(): boolean; workspaceCon
         nodeIntegration: false, sandbox: true, webSecurity: true, webviewTag: false } });
     win = owner;
     awaitingReady = owner;
+    logInfo('quick chat: waiting for compact renderer readiness before showing the panel');
     const startupDeadline = setTimeout(() => {
       if (awaitingReady === owner && !owner.isDestroyed()) { logWarn('quick chat: renderer initialization timed out'); owner.destroy(); }
     }, 10000);
-    owner.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-    owner.webContents.on('will-navigate', event => event.preventDefault());
-    owner.webContents.on('will-redirect', event => event.preventDefault());
-    owner.webContents.on('will-attach-webview', event => event.preventDefault());
+    owner.webContents.setWindowOpenHandler(() => { logWarn('quick chat: new renderer window refused'); return { action: 'deny' }; });
+    owner.webContents.on('will-navigate', event => { event.preventDefault(); logWarn('quick chat: renderer navigation refused'); });
+    owner.webContents.on('will-redirect', event => { event.preventDefault(); logWarn('quick chat: renderer redirect refused'); });
+    owner.webContents.on('will-attach-webview', event => { event.preventDefault(); logWarn('quick chat: renderer webview refused'); });
     owner.on('close', event => { if (active && keepResident()) { event.preventDefault(); hide(owner); } });
     owner.on('hide', () => { if (!owner.isDestroyed()) lastBounds = owner.getBounds(); requestedSession = null; });
     owner.on('closed', () => { clearTimeout(startupDeadline); if (awaitingReady === owner) awaitingReady = null; if (win === owner) { win = null; requestedSession = null; } });
@@ -90,13 +91,17 @@ export function createQuickChat(options: { hasWorkspace(): boolean; workspaceCon
     ipcMain.handle('quick-chat:pin', (event, pinned: unknown) => {
       const owner = owns(event);
       if (typeof pinned !== 'boolean') { logWarn('quick chat: pin refused because the value is invalid'); throw new Error('Invalid pin value'); }
-      owner.setAlwaysOnTop(pinned); return owner.isAlwaysOnTop();
+      owner.setAlwaysOnTop(pinned);
+      const actual = owner.isAlwaysOnTop();
+      if (actual !== pinned) logWarn('quick chat: the window manager did not accept the pin preference');
+      return actual;
     });
     ipcMain.handle('quick-chat:expand', async (event, id: unknown) => {
       const owner = owns(event);
       if (id !== null && (typeof id !== 'string' || !/^[0-9a-z-]{8,64}$/i.test(id) || !await getSession(id))) { logWarn('quick chat: expand refused because the chat is unavailable'); return false; }
       if (live() !== owner || !active || event.senderFrame !== owner.webContents.mainFrame) { logWarn('quick chat: expand refused because window ownership changed'); return false; }
-      options.openWorkspace(id as string | null); owner.hide(); return true;
+      if (!options.openWorkspace(id as string | null)) { logWarn('quick chat: expand refused because Workspace could not be opened'); return false; }
+      owner.hide(); return true;
     });
     ipcMain.handle('quick-chat:ready', event => {
       const owner = owns(event);
