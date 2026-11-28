@@ -496,7 +496,7 @@ function paintReviewer(value = reviewerChoice): void {
   options(select, [
     { id: '', label: () => t('Off') },
     { id: 'same', label: () => t('Same model as the Goal chat') },
-    ...catalog.models.map(model => ({ id: model.id, label: model.label }))
+    ...distinctModelChoices(catalog.models)
   ], resolveChatModel(catalog.models, value)?.id ?? value);
 }
 

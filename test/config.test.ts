@@ -44,6 +44,22 @@ describe('browser bridge port config', () => {
 });
 
 describe('settings migration', () => {
+  it('defaults unattributed notice suppression to off and preserves an explicit choice', async () => {
+    const fresh = defaultConfig();
+    expect(fresh.mcp.suppressUnattributedNotices).toBe(false);
+    const { suppressUnattributedNotices: _, ...legacyMcp } = fresh.mcp;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...fresh, mcp: legacyMcp }), 'utf8');
+    expect((await loadConfig()).mcp.suppressUnattributedNotices).toBe(false);
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({
+      ...fresh, mcp: { ...fresh.mcp, suppressUnattributedNotices: 'yes' }
+    }), 'utf8');
+    expect((await loadConfig()).mcp.suppressUnattributedNotices).toBe(false);
+    for (const suppressUnattributedNotices of [true, false]) {
+      await saveConfig({ ...fresh, mcp: { ...fresh.mcp, suppressUnattributedNotices } });
+      expect((await loadConfig()).mcp.suppressUnattributedNotices).toBe(suppressUnattributedNotices);
+    }
+  });
+
   it('defaults missing or damaged Linux Desktop opt-in to off, but retains an explicit true across reload', async () => {
     const fresh = defaultConfig();
     expect(fresh.ui.linuxDesktopEnabled).toBe(false);
